@@ -22,6 +22,7 @@ Valute gives you both. Your data never leaves your machine. The AI runs through 
 ## Features
 
 - **AI Assistant (Val)** -- Natural language interface for adding transactions, querying spending, and getting financial insights. Powered by tool-calling, not just chat.
+- **Persistent Memory** -- Val remembers your preferences, financial goals, and context across conversations using a MemGPT-inspired memory system with automatic conversation compaction.
 - **Local-First** -- All data stored in a local SQLite database. No account required. No cloud dependency.
 - **Transaction Management** -- Track expenses, income, and transfers across multiple accounts with categories, subcategories, and tags.
 - **Budget Tracking** -- Create weekly, monthly, or yearly budgets tied to categories and monitor spending against them.
@@ -45,7 +46,7 @@ Valute gives you both. Your data never leaves your machine. The AI runs through 
 | State | Zustand 5 | Lightweight global state management |
 | Database | SQLite via tauri-plugin-sql | Local data persistence with migrations |
 | AI | AI SDK v6 (@ai-sdk/react) | Chat interface with tool calling |
-| AI Providers | OpenAI, Anthropic, Ollama | User-configurable LLM backend |
+| AI Providers | OpenAI, Anthropic, OpenRouter, Ollama | User-configurable LLM backend |
 | Forms | React Hook Form + Zod 4 | Form state and validation |
 | Charts | Recharts 3 | Data visualizations |
 | i18n | i18next + react-i18next | Internationalization |
@@ -70,7 +71,7 @@ Valute gives you both. Your data never leaves your machine. The AI runs through 
 
 ```bash
 # Clone the repository
-git clone https://github.com/ASF/Valute.git
+git clone https://github.com/g0dxn4/Valute.git
 cd Valute
 
 # Install dependencies
@@ -101,7 +102,7 @@ pnpm start
 ### AI Provider Setup
 
 1. Open the app and navigate to **Settings**.
-2. Select your AI provider (OpenAI, Anthropic, or Ollama).
+2. Select your AI provider (OpenAI, Anthropic, OpenRouter, or Ollama).
 3. Enter your API key (not needed for Ollama).
 4. Select a model or leave blank for the default.
 
@@ -119,8 +120,11 @@ ollama pull llama3.2
 Valute/
 ├── src/                      # Frontend source code
 │   ├── ai/                   # AI agent, transport, and tool definitions
-│   │   ├── tools/            # Individual AI tool implementations
+│   │   ├── tools/            # Individual AI tool implementations (13 tools)
 │   │   ├── agent.ts          # ToolLoopAgent configuration
+│   │   ├── memory-loader.ts  # System prompt memory injection
+│   │   ├── compaction.ts     # Conversation compaction/summarization
+│   │   ├── conversation-persistence.ts  # DB persistence for chat
 │   │   └── transport.ts      # DirectChatTransport setup
 │   ├── components/           # React components
 │   │   ├── layout/           # AppShell, Sidebar, AIPanel

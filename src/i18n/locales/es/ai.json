@@ -1,0 +1,23 @@
+{
+  "panel": {
+    "title": "Val",
+    "subtitle": "Tu asistente financiero",
+    "placeholder": "Preg\u00fantale a Val sobre tus finanzas...",
+    "send": "Enviar",
+    "thinking": "Pensando...",
+    "empty": {
+      "title": "\u00a1Hola! Soy Val",
+      "description": "Puedo ayudarte a manejar tus finanzas. Intenta pedirme que agregue una transacci\u00f3n, revise tus gastos o cree un presupuesto.",
+      "suggestions": [
+        "\u00bfCu\u00e1nto gast\u00e9 este mes?",
+        "Agrega un gasto de $50 en comida",
+        "\u00bfC\u00f3mo va mi presupuesto?"
+      ]
+    }
+  },
+  "errors": {
+    "noProvider": "No hay proveedor de IA configurado. Ve a Configuraci\u00f3n para configurar uno.",
+    "connectionFailed": "Error al conectar con el proveedor de IA.",
+    "rateLimited": "Demasiadas solicitudes. Espera un momento."
+  }
+}

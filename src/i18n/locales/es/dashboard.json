@@ -1,0 +1,16 @@
+{
+  "title": "Inicio",
+  "welcome": "Bienvenido a Valute",
+  "empty": {
+    "title": "Tus finanzas, a tu manera",
+    "description": "Comienza agregando una cuenta y tu primera transacci\u00f3n. O p\u00eddele ayuda a Val, tu asistente de IA.",
+    "addAccount": "Agregar Cuenta",
+    "askAI": "Preguntar a Val"
+  },
+  "cards": {
+    "totalBalance": "Balance Total",
+    "monthlyIncome": "Ingresos Mensuales",
+    "monthlyExpenses": "Gastos Mensuales",
+    "savings": "Tasa de Ahorro"
+  }
+}

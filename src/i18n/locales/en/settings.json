@@ -1,0 +1,32 @@
+{
+  "title": "Settings",
+  "sections": {
+    "general": "General",
+    "ai": "AI Provider",
+    "data": "Data",
+    "about": "About"
+  },
+  "language": {
+    "label": "Language",
+    "description": "Choose your preferred language"
+  },
+  "currency": {
+    "label": "Default Currency",
+    "description": "Currency used for new transactions"
+  },
+  "ai": {
+    "provider": "Provider",
+    "apiKey": "API Key",
+    "apiKeyPlaceholder": "Enter your API key",
+    "model": "Model",
+    "testConnection": "Test Connection",
+    "connected": "Connected",
+    "notConfigured": "Not configured"
+  },
+  "data": {
+    "export": "Export Data",
+    "import": "Import Data",
+    "reset": "Reset All Data",
+    "resetWarning": "This will permanently delete all your data. This action cannot be undone."
+  }
+}

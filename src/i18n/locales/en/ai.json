@@ -1,0 +1,23 @@
+{
+  "panel": {
+    "title": "Val",
+    "subtitle": "Your financial assistant",
+    "placeholder": "Ask Val anything about your finances...",
+    "send": "Send",
+    "thinking": "Thinking...",
+    "empty": {
+      "title": "Hey! I'm Val",
+      "description": "I can help you manage your finances. Try asking me to add a transaction, check your spending, or create a budget.",
+      "suggestions": [
+        "How much did I spend this month?",
+        "Add a $50 grocery expense",
+        "What's my budget status?"
+      ]
+    }
+  },
+  "errors": {
+    "noProvider": "No AI provider configured. Go to Settings to set one up.",
+    "connectionFailed": "Failed to connect to AI provider.",
+    "rateLimited": "Too many requests. Please wait a moment."
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "title": "Dashboard",
+  "welcome": "Welcome to Valute",
+  "empty": {
+    "title": "Your finances, your way",
+    "description": "Start by adding an account and your first transaction. Or ask Val, your AI assistant, for help.",
+    "addAccount": "Add Account",
+    "askAI": "Ask Val"
+  },
+  "cards": {
+    "totalBalance": "Total Balance",
+    "monthlyIncome": "Monthly Income",
+    "monthlyExpenses": "Monthly Expenses",
+    "savings": "Savings Rate"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "title": "Configuraci\u00f3n",
+  "sections": {
+    "general": "General",
+    "ai": "Proveedor de IA",
+    "data": "Datos",
+    "about": "Acerca de"
+  },
+  "language": {
+    "label": "Idioma",
+    "description": "Elige tu idioma preferido"
+  },
+  "currency": {
+    "label": "Moneda Predeterminada",
+    "description": "Moneda usada para nuevas transacciones"
+  },
+  "ai": {
+    "provider": "Proveedor",
+    "apiKey": "Clave API",
+    "apiKeyPlaceholder": "Ingresa tu clave API",
+    "model": "Modelo",
+    "testConnection": "Probar Conexi\u00f3n",
+    "connected": "Conectado",
+    "notConfigured": "No configurado"
+  },
+  "data": {
+    "export": "Exportar Datos",
+    "import": "Importar Datos",
+    "reset": "Restablecer Datos",
+    "resetWarning": "Esto eliminar\u00e1 permanentemente todos tus datos. Esta acci\u00f3n no se puede deshacer."
+  }
+}

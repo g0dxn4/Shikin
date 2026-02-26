@@ -1,0 +1,16 @@
+import { useTranslation } from 'react-i18next'
+import { Landmark } from 'lucide-react'
+
+export function Accounts() {
+  const { t } = useTranslation()
+
+  return (
+    <div className="animate-fade-in-up space-y-6">
+      <h1 className="font-heading text-2xl font-bold">{t('nav.accounts')}</h1>
+      <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
+        <Landmark size={32} className="mb-4 text-muted-foreground" />
+        <p className="text-muted-foreground">{t('status.empty')}</p>
+      </div>
+    </div>
+  )
+}

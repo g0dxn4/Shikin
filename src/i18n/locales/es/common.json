@@ -1,0 +1,32 @@
+{
+  "app": {
+    "name": "Valute"
+  },
+  "nav": {
+    "dashboard": "Inicio",
+    "transactions": "Transacciones",
+    "accounts": "Cuentas",
+    "budgets": "Presupuestos",
+    "investments": "Inversiones",
+    "settings": "Configuraci\u00f3n",
+    "ai": "Asistente IA"
+  },
+  "actions": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "edit": "Editar",
+    "add": "Agregar",
+    "close": "Cerrar",
+    "search": "Buscar",
+    "filter": "Filtrar",
+    "export": "Exportar",
+    "import": "Importar"
+  },
+  "status": {
+    "loading": "Cargando...",
+    "error": "Algo sali\u00f3 mal",
+    "empty": "Sin datos a\u00fan",
+    "success": "\u00c9xito"
+  }
+}

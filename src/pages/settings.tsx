@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -26,6 +26,9 @@ export function SettingsPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [models, setModels] = useState<ModelInfo[]>([])
   const [isLoadingModels, setIsLoadingModels] = useState(false)
+  const [modelSearch, setModelSearch] = useState('')
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false)
+  const modelDropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     loadSettings()
@@ -67,6 +70,31 @@ export function SettingsPage() {
       setLocalModel(models[0].id)
     }
   }, [models, localModel])
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
+        setIsModelDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const filteredModels = useMemo(
+    () =>
+      modelSearch
+        ? models.filter(
+            (m) =>
+              m.name.toLowerCase().includes(modelSearch.toLowerCase()) ||
+              m.id.toLowerCase().includes(modelSearch.toLowerCase())
+          )
+        : models,
+    [models, modelSearch]
+  )
+
+  const selectedModelName = models.find((m) => m.id === localModel)?.name || localModel
 
   const handleSave = async () => {
     setIsSaving(true)
@@ -149,18 +177,42 @@ export function SettingsPage() {
           {isLoadingModels ? (
             <p className="text-muted-foreground text-sm">Loading models...</p>
           ) : models.length > 0 ? (
-            <Select value={localModel} onValueChange={setLocalModel}>
-              <SelectTrigger className="max-w-xs">
-                <SelectValue placeholder="Select a model" />
-              </SelectTrigger>
-              <SelectContent>
-                {models.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="relative max-w-xs" ref={modelDropdownRef}>
+              <Input
+                placeholder="Search models..."
+                value={isModelDropdownOpen ? modelSearch : selectedModelName}
+                onChange={(e) => {
+                  setModelSearch(e.target.value)
+                  setIsModelDropdownOpen(true)
+                }}
+                onFocus={() => {
+                  setIsModelDropdownOpen(true)
+                  setModelSearch('')
+                }}
+              />
+              {isModelDropdownOpen && (
+                <div className="border-border bg-popover absolute z-50 mt-1 max-h-60 w-full overflow-y-auto rounded-md border shadow-lg">
+                  {filteredModels.length === 0 ? (
+                    <p className="text-muted-foreground p-3 text-sm">No models found</p>
+                  ) : (
+                    filteredModels.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        className={`hover:bg-accent/20 w-full px-3 py-2 text-left text-sm ${m.id === localModel ? 'bg-accent/10 text-accent' : ''}`}
+                        onClick={() => {
+                          setLocalModel(m.id)
+                          setModelSearch('')
+                          setIsModelDropdownOpen(false)
+                        }}
+                      >
+                        {m.name}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
           ) : (
             <Input
               placeholder="Enter model ID"

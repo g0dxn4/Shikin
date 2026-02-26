@@ -25,6 +25,12 @@ export async function fetchModels(provider: AIProvider, apiKey: string): Promise
   }
 }
 
+interface OpenRouterModel {
+  id: string
+  name: string
+  supported_parameters?: string[]
+}
+
 async function fetchOpenRouterModels(apiKey: string): Promise<ModelInfo[]> {
   const res = await fetch('https://openrouter.ai/api/v1/models', {
     headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
@@ -32,7 +38,8 @@ async function fetchOpenRouterModels(apiKey: string): Promise<ModelInfo[]> {
   if (!res.ok) throw new Error(`OpenRouter API error: ${res.status}`)
   const data = await res.json()
 
-  return (data.data as Array<{ id: string; name: string }>)
+  return (data.data as OpenRouterModel[])
+    .filter((m) => m.supported_parameters?.includes('tools'))
     .map((m) => ({ id: m.id, name: m.name || m.id }))
     .sort((a, b) => a.name.localeCompare(b.name))
 }

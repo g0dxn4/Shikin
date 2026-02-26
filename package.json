@@ -21,7 +21,8 @@
     "check": "pnpm lint && pnpm typecheck && pnpm format:check",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:ai": "tsx scripts/test-ai.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.47",
@@ -82,6 +83,7 @@
     "prettier": "^3.8.1",
     "prettier-plugin-tailwindcss": "^0.7.2",
     "tailwindcss": "^4.2.1",
+    "tsx": "^4.21.0",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.56.1",
     "vite": "^6.4.1",

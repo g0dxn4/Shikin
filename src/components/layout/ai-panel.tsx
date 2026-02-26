@@ -18,7 +18,7 @@ export function AIPanel() {
   const transport = useMemo(() => {
     if (!isConfigured) return null
     return createTransport(
-      provider as 'openai' | 'anthropic' | 'ollama',
+      provider as 'openai' | 'anthropic' | 'ollama' | 'openrouter',
       apiKey,
       model || undefined
     )

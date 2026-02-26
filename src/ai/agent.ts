@@ -50,7 +50,7 @@ export function createAgent(provider: AIProvider, apiKey: string, model?: string
         baseURL: 'https://openrouter.ai/api/v1',
         apiKey,
       })
-      languageModel = openrouter(model || 'anthropic/claude-sonnet-4')
+      languageModel = openrouter.chat(model || 'anthropic/claude-sonnet-4')
       break
     }
     case 'openai': {
@@ -68,7 +68,7 @@ export function createAgent(provider: AIProvider, apiKey: string, model?: string
         baseURL: 'http://localhost:11434/v1',
         apiKey: 'ollama',
       })
-      languageModel = ollama(model || 'llama3.2')
+      languageModel = ollama.chat(model || 'llama3.2')
       break
     }
   }

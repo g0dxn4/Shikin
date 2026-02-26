@@ -24,8 +24,11 @@ export function AIPanel() {
     )
   }, [provider, apiKey, model, isConfigured])
 
-  const { messages, sendMessage, status } = useChat({
+  const { messages, sendMessage, status, error } = useChat({
     transport: transport ?? undefined,
+    onError: (err) => {
+      console.error('[Val AI Error]', err)
+    },
   })
 
   const isLoading = status === 'submitted' || status === 'streaming'
@@ -133,6 +136,11 @@ export function AIPanel() {
               <div className="text-muted-foreground flex items-center gap-2 text-xs">
                 <Loader2 size={14} className="animate-spin" />
                 {t('panel.thinking')}
+              </div>
+            )}
+            {error && (
+              <div className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                Error: {error.message}
               </div>
             )}
             <div ref={messagesEndRef} />

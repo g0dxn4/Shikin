@@ -16,42 +16,60 @@ describe('loadCoreMemories', () => {
   })
 
   it('returns empty string when no memories exist', async () => {
-    mockQuery.mockResolvedValueOnce([])
+    mockQuery.mockResolvedValueOnce([]) // counts query
 
     const result = await loadCoreMemories()
     expect(result).toBe('')
   })
 
-  it('formats memories grouped by category', async () => {
+  it('returns memory index with counts and pinned items', async () => {
+    // First call: category counts
     mockQuery.mockResolvedValueOnce([
-      { category: 'preference', content: 'Prefers MXN' },
-      { category: 'preference', content: 'Likes concise responses' },
-      { category: 'goal', content: 'Saving $5000 by December' },
-      { category: 'fact', content: 'Lives in Mexico' },
+      { category: 'preference', count: 3 },
+      { category: 'goal', count: 2 },
+      { category: 'fact', count: 1 },
+    ])
+    // Second call: pinned high-importance memories
+    mockQuery.mockResolvedValueOnce([
+      { category: 'preference', content: 'Prefers MXN', importance: 9 },
+      { category: 'goal', content: 'Saving $5000 by December', importance: 8 },
     ])
 
     const result = await loadCoreMemories()
 
-    expect(result).toContain('## Your Memories About This User')
-    expect(result).toContain('### User Preferences')
-    expect(result).toContain('- Prefers MXN')
-    expect(result).toContain('- Likes concise responses')
-    expect(result).toContain('### Financial Goals')
-    expect(result).toContain('- Saving $5000 by December')
-    expect(result).toContain('### Known Facts')
-    expect(result).toContain('- Lives in Mexico')
+    expect(result).toContain('## Memory Index')
+    expect(result).toContain('6 saved memories')
+    expect(result).toContain('3 Preferences')
+    expect(result).toContain('2 Goals')
+    expect(result).toContain('1 Facts')
+    expect(result).toContain('Use recallMemories to look up details')
+    expect(result).toContain('### Pinned')
+    expect(result).toContain('[Preferences] Prefers MXN')
+    expect(result).toContain('[Goals] Saving $5000 by December')
   })
 
-  it('queries with correct ORDER BY and LIMIT', async () => {
+  it('shows index without pinned section when no high-importance memories', async () => {
+    mockQuery.mockResolvedValueOnce([
+      { category: 'context', count: 4 },
+    ])
+    mockQuery.mockResolvedValueOnce([]) // no pinned
+
+    const result = await loadCoreMemories()
+
+    expect(result).toContain('## Memory Index')
+    expect(result).toContain('4 saved memories')
+    expect(result).not.toContain('### Pinned')
+  })
+
+  it('fetches pinned memories with importance >= 7', async () => {
+    mockQuery.mockResolvedValueOnce([{ category: 'fact', count: 1 }])
     mockQuery.mockResolvedValueOnce([])
 
     await loadCoreMemories()
 
-    expect(mockQuery).toHaveBeenCalledWith(
-      expect.stringContaining('ORDER BY importance DESC, updated_at DESC')
-    )
-    expect(mockQuery).toHaveBeenCalledWith(
-      expect.stringContaining('LIMIT 50')
+    expect(mockQuery).toHaveBeenCalledTimes(2)
+    expect(mockQuery).toHaveBeenLastCalledWith(
+      expect.stringContaining('importance >= 7')
     )
   })
 })

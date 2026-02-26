@@ -20,12 +20,15 @@ Be concise but capture all important context. Write in third person.`
 export async function compactMessages(
   conversationId: string,
   messages: UIMessage[],
-  model: LanguageModel
+  model: LanguageModel,
+  force = false
 ): Promise<UIMessage[]> {
-  if (messages.length < COMPACTION_THRESHOLD) return messages
+  if (!force && messages.length < COMPACTION_THRESHOLD) return messages
+  if (messages.length < 4) return messages
 
-  const olderMessages = messages.slice(0, -KEEP_RECENT)
-  const recentMessages = messages.slice(-KEEP_RECENT)
+  const keepRecent = Math.min(KEEP_RECENT, Math.floor(messages.length / 2))
+  const olderMessages = messages.slice(0, -keepRecent)
+  const recentMessages = messages.slice(-keepRecent)
 
   // Build text transcript from older messages
   const transcript = olderMessages

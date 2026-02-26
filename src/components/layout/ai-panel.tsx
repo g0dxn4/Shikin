@@ -2,14 +2,14 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useChat } from '@ai-sdk/react'
 import type { UIMessage } from 'ai'
-import { X, Sparkles, Send, Loader2, Plus, MessageSquare, Trash2, ChevronDown } from 'lucide-react'
+import { X, Sparkles, Send, Loader2, Plus, MessageSquare, Trash2, ChevronDown, Minimize2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/ui-store'
 import { useAIStore } from '@/stores/ai-store'
 import { useConversationStore } from '@/stores/conversation-store'
 import { createTransport } from '@/ai/transport'
 import { createLanguageModel, type AIProvider } from '@/ai/agent'
-import { shouldCompact, compactMessages } from '@/ai/compaction'
+import { shouldCompact, compactMessages, COMPACTION_THRESHOLD } from '@/ai/compaction'
 import { AI_PANEL_WIDTH } from '@/lib/constants'
 
 export function AIPanel() {
@@ -29,6 +29,7 @@ export function AIPanel() {
 
   const [inputValue, setInputValue] = useState('')
   const [showConversations, setShowConversations] = useState(false)
+  const [isCompacting, setIsCompacting] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const hasAutoTitled = useRef(false)
   const conversationsLoaded = useRef(false)
@@ -136,6 +137,30 @@ export function AIPanel() {
       hasAutoTitled.current = false
     }
   }, [removeConversation, currentConversationId, setMessages])
+
+  const handleCompact = useCallback(async () => {
+    if (!currentConversationId || !isConfigured || messages.length < 4) return
+    setIsCompacting(true)
+    try {
+      const languageModel = createLanguageModel(
+        provider as AIProvider,
+        apiKey,
+        model || undefined
+      )
+      const compacted = await compactMessages(
+        currentConversationId,
+        messages,
+        languageModel,
+        true // force — manual trigger
+      )
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setMessages(compacted as any)
+    } catch (err) {
+      console.error('[Val] Compaction failed:', err)
+    } finally {
+      setIsCompacting(false)
+    }
+  }, [currentConversationId, isConfigured, messages, provider, apiKey, model, setMessages])
 
   if (!aiPanelOpen) return null
 
@@ -328,6 +353,22 @@ export function AIPanel() {
 
       {/* Input */}
       <div className="border-border border-t p-4">
+        {messages.length >= 4 && (
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-muted-foreground text-xs">
+              {messages.length} messages{messages.length >= COMPACTION_THRESHOLD && ' — auto-compact soon'}
+            </span>
+            <button
+              onClick={handleCompact}
+              disabled={isCompacting || isLoading || messages.length < 4}
+              className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs hover:bg-white/5 rounded px-2 py-1 disabled:opacity-30"
+              title="Summarize older messages to free up context"
+            >
+              {isCompacting ? <Loader2 size={12} className="animate-spin" /> : <Minimize2 size={12} />}
+              Compact
+            </button>
+          </div>
+        )}
         <div className="flex gap-2">
           <input
             type="text"

@@ -1,9 +1,10 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router'
 import { Toaster } from 'sonner'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { AppShell } from '@/components/layout/app-shell'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
+import { useAIStore } from '@/stores/ai-store'
 import '@/i18n'
 import '@/styles/globals.css'
 
@@ -21,6 +22,12 @@ const SettingsPage = lazy(() =>
 )
 
 export default function App() {
+  const loadSettings = useAIStore((s) => s.loadSettings)
+
+  useEffect(() => {
+    loadSettings()
+  }, [loadSettings])
+
   return (
     <ErrorBoundary>
       <BrowserRouter>

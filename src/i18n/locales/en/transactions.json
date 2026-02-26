@@ -1,0 +1,39 @@
+{
+  "title": "Transactions",
+  "addTransaction": "Add Transaction",
+  "editTransaction": "Edit Transaction",
+  "deleteTransaction": "Delete Transaction",
+  "deleteConfirm": "Are you sure you want to delete this transaction? The account balance will be adjusted accordingly. This action cannot be undone.",
+  "form": {
+    "amount": "Amount",
+    "amountPlaceholder": "0.00",
+    "type": "Type",
+    "description": "Description",
+    "descriptionPlaceholder": "e.g. Grocery shopping",
+    "category": "Category",
+    "categoryNone": "No category",
+    "account": "Account",
+    "accountPlaceholder": "Select an account",
+    "date": "Date",
+    "notes": "Notes",
+    "notesPlaceholder": "Optional notes..."
+  },
+  "types": {
+    "expense": "Expense",
+    "income": "Income",
+    "transfer": "Transfer"
+  },
+  "toast": {
+    "created": "Transaction created successfully",
+    "updated": "Transaction updated successfully",
+    "deleted": "Transaction deleted successfully",
+    "error": "Something went wrong"
+  },
+  "empty": {
+    "title": "No transactions yet",
+    "description": "Add your first transaction to start tracking your spending."
+  },
+  "viewAll": "View All",
+  "recentTransactions": "Recent Transactions",
+  "addQuick": "Add Transaction"
+}

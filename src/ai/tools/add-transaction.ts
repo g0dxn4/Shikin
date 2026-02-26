@@ -11,11 +11,22 @@ export const addTransaction = tool({
     'Add a new financial transaction (expense, income, or transfer). Use this when the user wants to record spending, earnings, or money movement between accounts.',
   inputSchema: zodSchema(
     z.object({
-      amount: z.number().positive().describe('The transaction amount in the main currency unit (e.g. 12.50, not cents)'),
+      amount: z
+        .number()
+        .positive()
+        .describe('The transaction amount in the main currency unit (e.g. 12.50, not cents)'),
       type: z.enum(['expense', 'income', 'transfer']).describe('The type of transaction'),
       description: z.string().describe('A short description of the transaction'),
-      category: z.string().optional().describe('Category name (e.g. "Food & Dining", "Salary"). Will match the closest existing category.'),
-      date: z.string().optional().describe('Transaction date in YYYY-MM-DD format. Defaults to today.'),
+      category: z
+        .string()
+        .optional()
+        .describe(
+          'Category name (e.g. "Food & Dining", "Salary"). Will match the closest existing category.'
+        ),
+      date: z
+        .string()
+        .optional()
+        .describe('Transaction date in YYYY-MM-DD format. Defaults to today.'),
       notes: z.string().optional().describe('Additional notes about the transaction'),
     })
   ),
@@ -55,10 +66,10 @@ export const addTransaction = tool({
 
     // Update account balance
     const balanceChange = type === 'income' ? amountCentavos : -amountCentavos
-    await execute('UPDATE accounts SET balance = balance + $1, updated_at = strftime(\'%Y-%m-%dT%H:%M:%fZ\', \'now\') WHERE id = $2', [
-      balanceChange,
-      accountId,
-    ])
+    await execute(
+      "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
+      [balanceChange, accountId]
+    )
 
     return {
       success: true,

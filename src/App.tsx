@@ -7,18 +7,12 @@ import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import '@/i18n'
 import '@/styles/globals.css'
 
-const Dashboard = lazy(() =>
-  import('@/pages/dashboard').then((m) => ({ default: m.Dashboard }))
-)
+const Dashboard = lazy(() => import('@/pages/dashboard').then((m) => ({ default: m.Dashboard })))
 const Transactions = lazy(() =>
   import('@/pages/transactions').then((m) => ({ default: m.Transactions }))
 )
-const Accounts = lazy(() =>
-  import('@/pages/accounts').then((m) => ({ default: m.Accounts }))
-)
-const Budgets = lazy(() =>
-  import('@/pages/budgets').then((m) => ({ default: m.Budgets }))
-)
+const Accounts = lazy(() => import('@/pages/accounts').then((m) => ({ default: m.Accounts })))
+const Budgets = lazy(() => import('@/pages/budgets').then((m) => ({ default: m.Budgets })))
 const Investments = lazy(() =>
   import('@/pages/investments').then((m) => ({ default: m.Investments }))
 )

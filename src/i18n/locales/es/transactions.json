@@ -1,0 +1,39 @@
+{
+  "title": "Transacciones",
+  "addTransaction": "Agregar Transacción",
+  "editTransaction": "Editar Transacción",
+  "deleteTransaction": "Eliminar Transacción",
+  "deleteConfirm": "¿Estás seguro de que deseas eliminar esta transacción? El saldo de la cuenta se ajustará. Esta acción no se puede deshacer.",
+  "form": {
+    "amount": "Monto",
+    "amountPlaceholder": "0.00",
+    "type": "Tipo",
+    "description": "Descripción",
+    "descriptionPlaceholder": "ej. Compra de supermercado",
+    "category": "Categoría",
+    "categoryNone": "Sin categoría",
+    "account": "Cuenta",
+    "accountPlaceholder": "Selecciona una cuenta",
+    "date": "Fecha",
+    "notes": "Notas",
+    "notesPlaceholder": "Notas opcionales..."
+  },
+  "types": {
+    "expense": "Gasto",
+    "income": "Ingreso",
+    "transfer": "Transferencia"
+  },
+  "toast": {
+    "created": "Transacción creada exitosamente",
+    "updated": "Transacción actualizada exitosamente",
+    "deleted": "Transacción eliminada exitosamente",
+    "error": "Algo salió mal"
+  },
+  "empty": {
+    "title": "Sin transacciones aún",
+    "description": "Agrega tu primera transacción para comenzar a rastrear tus gastos."
+  },
+  "viewAll": "Ver Todas",
+  "recentTransactions": "Transacciones Recientes",
+  "addQuick": "Agregar Transacción"
+}

@@ -6,6 +6,16 @@ interface UIState {
   toggleSidebar: () => void
   toggleAIPanel: () => void
   setAIPanelOpen: (open: boolean) => void
+
+  accountDialogOpen: boolean
+  editingAccountId: string | null
+  openAccountDialog: (id?: string) => void
+  closeAccountDialog: () => void
+
+  transactionDialogOpen: boolean
+  editingTransactionId: string | null
+  openTransactionDialog: (id?: string) => void
+  closeTransactionDialog: () => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -14,4 +24,15 @@ export const useUIStore = create<UIState>((set) => ({
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   toggleAIPanel: () => set((s) => ({ aiPanelOpen: !s.aiPanelOpen })),
   setAIPanelOpen: (open) => set({ aiPanelOpen: open }),
+
+  accountDialogOpen: false,
+  editingAccountId: null,
+  openAccountDialog: (id) => set({ accountDialogOpen: true, editingAccountId: id ?? null }),
+  closeAccountDialog: () => set({ accountDialogOpen: false, editingAccountId: null }),
+
+  transactionDialogOpen: false,
+  editingTransactionId: null,
+  openTransactionDialog: (id) =>
+    set({ transactionDialogOpen: true, editingTransactionId: id ?? null }),
+  closeTransactionDialog: () => set({ transactionDialogOpen: false, editingTransactionId: null }),
 }))

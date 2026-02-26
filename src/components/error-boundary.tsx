@@ -31,13 +31,13 @@ export class ErrorBoundary extends Component<Props, State> {
       }
 
       return (
-        <div className="flex h-screen flex-col items-center justify-center gap-4 bg-background text-foreground">
+        <div className="bg-background text-foreground flex h-screen flex-col items-center justify-center gap-4">
           <div className="glass-card p-8 text-center">
-            <h1 className="mb-2 font-heading text-2xl font-bold">Something went wrong</h1>
-            <p className="mb-4 text-muted-foreground">{this.state.error?.message}</p>
+            <h1 className="font-heading mb-2 text-2xl font-bold">Something went wrong</h1>
+            <p className="text-muted-foreground mb-4">{this.state.error?.message}</p>
             <button
               onClick={() => this.setState({ hasError: false, error: null })}
-              className="bg-primary px-4 py-2 text-primary-foreground hover:bg-accent-hover"
+              className="bg-primary text-primary-foreground hover:bg-accent-hover px-4 py-2"
             >
               Try Again
             </button>

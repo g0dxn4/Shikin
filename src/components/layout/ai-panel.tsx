@@ -50,21 +50,21 @@ export function AIPanel() {
 
   return (
     <aside
-      className="glass-panel flex h-screen flex-col animate-slide-in-right"
+      className="glass-panel animate-slide-in-right flex h-screen flex-col"
       style={{ width: AI_PANEL_WIDTH }}
     >
       {/* Header */}
-      <div className="flex h-14 items-center justify-between border-b border-border px-4">
+      <div className="border-border flex h-14 items-center justify-between border-b px-4">
         <div className="flex items-center gap-2">
           <Sparkles size={18} className="text-primary" />
           <div>
             <h2 className="font-heading text-sm font-semibold">{t('panel.title')}</h2>
-            <p className="text-xs text-muted-foreground">{t('panel.subtitle')}</p>
+            <p className="text-muted-foreground text-xs">{t('panel.subtitle')}</p>
           </div>
         </div>
         <button
           onClick={() => setAIPanelOpen(false)}
-          className="rounded-lg p-1.5 text-muted-foreground hover:bg-white/5 hover:text-foreground"
+          className="text-muted-foreground hover:text-foreground rounded-lg p-1.5 hover:bg-white/5"
         >
           <X size={18} />
         </button>
@@ -75,22 +75,22 @@ export function AIPanel() {
         {!isConfigured ? (
           <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
             <Sparkles size={24} className="text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">{t('errors.noProvider')}</p>
+            <p className="text-muted-foreground text-sm">{t('errors.noProvider')}</p>
           </div>
         ) : messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-accent-muted">
+            <div className="bg-accent-muted flex h-12 w-12 items-center justify-center rounded-full">
               <Sparkles size={24} className="text-primary" />
             </div>
             <h3 className="font-heading text-lg font-semibold">{t('panel.empty.title')}</h3>
-            <p className="text-sm text-muted-foreground">{t('panel.empty.description')}</p>
+            <p className="text-muted-foreground text-sm">{t('panel.empty.description')}</p>
             <div className="mt-2 flex flex-col gap-2">
               {(t('panel.empty.suggestions', { returnObjects: true }) as string[]).map(
                 (suggestion) => (
                   <button
                     key={suggestion}
                     onClick={() => handleSuggestion(suggestion)}
-                    className="glass-card px-3 py-2 text-left text-xs text-muted-foreground hover:border-border-hover hover:text-foreground"
+                    className="glass-card text-muted-foreground hover:border-border-hover hover:text-foreground px-3 py-2 text-left text-xs"
                   >
                     {suggestion}
                   </button>
@@ -106,7 +106,7 @@ export function AIPanel() {
                 className={cn(
                   'max-w-[90%] rounded-lg px-3 py-2 text-sm',
                   msg.role === 'user'
-                    ? 'ml-auto bg-primary text-primary-foreground'
+                    ? 'bg-primary text-primary-foreground ml-auto'
                     : 'bg-surface text-foreground'
                 )}
               >
@@ -120,7 +120,7 @@ export function AIPanel() {
                   }
                   if (part.type.startsWith('tool-')) {
                     return (
-                      <p key={i} className="font-mono text-xs text-muted-foreground">
+                      <p key={i} className="text-muted-foreground font-mono text-xs">
                         Using tool...
                       </p>
                     )
@@ -130,7 +130,7 @@ export function AIPanel() {
               </div>
             ))}
             {isLoading && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <div className="text-muted-foreground flex items-center gap-2 text-xs">
                 <Loader2 size={14} className="animate-spin" />
                 {t('panel.thinking')}
               </div>
@@ -141,7 +141,7 @@ export function AIPanel() {
       </div>
 
       {/* Input */}
-      <div className="border-t border-border p-4">
+      <div className="border-border border-t p-4">
         <div className="flex gap-2">
           <input
             type="text"

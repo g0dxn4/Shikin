@@ -1,0 +1,33 @@
+{
+  "title": "Cuentas",
+  "addAccount": "Agregar Cuenta",
+  "editAccount": "Editar Cuenta",
+  "deleteAccount": "Eliminar Cuenta",
+  "deleteConfirm": "¿Estás seguro de que deseas eliminar esta cuenta? Todas las transacciones asociadas también serán eliminadas. Esta acción no se puede deshacer.",
+  "form": {
+    "name": "Nombre de la Cuenta",
+    "namePlaceholder": "ej. Cuenta Corriente",
+    "type": "Tipo de Cuenta",
+    "currency": "Moneda",
+    "balance": "Saldo Actual"
+  },
+  "types": {
+    "checking": "Corriente",
+    "savings": "Ahorros",
+    "credit_card": "Tarjeta de Crédito",
+    "cash": "Efectivo",
+    "investment": "Inversión",
+    "crypto": "Cripto",
+    "other": "Otro"
+  },
+  "toast": {
+    "created": "Cuenta creada exitosamente",
+    "updated": "Cuenta actualizada exitosamente",
+    "deleted": "Cuenta eliminada exitosamente",
+    "error": "Algo salió mal"
+  },
+  "empty": {
+    "title": "Sin cuentas aún",
+    "description": "Agrega tu primera cuenta para comenzar a rastrear tus finanzas."
+  }
+}

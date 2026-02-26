@@ -6,9 +6,9 @@ import { LoadingSpinner } from '@/components/ui/loading-spinner'
 
 export function AppShell() {
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="bg-background flex h-screen overflow-hidden">
       <Sidebar />
-      <main className="flex-1 overflow-y-auto grid-bg">
+      <main className="grid-bg flex-1 overflow-y-auto">
         <div className="mx-auto max-w-7xl p-6">
           <Suspense fallback={<LoadingSpinner className="h-full" />}>
             <Outlet />

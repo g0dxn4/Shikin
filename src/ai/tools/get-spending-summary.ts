@@ -20,14 +20,8 @@ export const getSpendingSummary = tool({
         .optional()
         .default('month')
         .describe('The time period to summarize'),
-      startDate: z
-        .string()
-        .optional()
-        .describe('Start date (YYYY-MM-DD) for custom period'),
-      endDate: z
-        .string()
-        .optional()
-        .describe('End date (YYYY-MM-DD) for custom period'),
+      startDate: z.string().optional().describe('Start date (YYYY-MM-DD) for custom period'),
+      endDate: z.string().optional().describe('End date (YYYY-MM-DD) for custom period'),
     })
   ),
   execute: async ({ period, startDate, endDate }) => {

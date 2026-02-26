@@ -41,7 +41,7 @@ export function Sidebar() {
         )}
         <button
           onClick={toggleSidebar}
-          className="rounded-lg p-1.5 text-muted-foreground hover:bg-white/5 hover:text-foreground"
+          className="text-muted-foreground hover:text-foreground rounded-lg p-1.5 hover:bg-white/5"
         >
           {sidebarCollapsed ? <PanelLeft size={18} /> : <PanelLeftClose size={18} />}
         </button>
@@ -53,9 +53,7 @@ export function Sidebar() {
           <NavLink
             key={path}
             to={path}
-            className={({ isActive }) =>
-              cn('sidebar-link', isActive && 'sidebar-link-active')
-            }
+            className={({ isActive }) => cn('sidebar-link', isActive && 'sidebar-link-active')}
           >
             <Icon size={18} />
             {!sidebarCollapsed && <span>{t(labelKey)}</span>}
@@ -64,19 +62,14 @@ export function Sidebar() {
       </nav>
 
       {/* Bottom actions */}
-      <div className="space-y-0.5 border-t border-border px-2 py-2">
-        <button
-          onClick={toggleAIPanel}
-          className="sidebar-link w-full text-left"
-        >
+      <div className="border-border space-y-0.5 border-t px-2 py-2">
+        <button onClick={toggleAIPanel} className="sidebar-link w-full text-left">
           <Sparkles size={18} />
           {!sidebarCollapsed && <span>{t('nav.ai')}</span>}
         </button>
         <NavLink
           to="/settings"
-          className={({ isActive }) =>
-            cn('sidebar-link', isActive && 'sidebar-link-active')
-          }
+          className={({ isActive }) => cn('sidebar-link', isActive && 'sidebar-link-active')}
         >
           <Settings size={18} />
           {!sidebarCollapsed && <span>{t('nav.settings')}</span>}

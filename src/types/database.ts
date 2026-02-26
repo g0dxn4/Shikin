@@ -10,6 +10,7 @@ import type {
   BudgetPeriod,
   InvestmentType,
   MessageRole,
+  MemoryCategory,
 } from './common'
 
 export interface Account {
@@ -127,6 +128,7 @@ export interface AIConversation {
   id: ULID
   title: string
   model: string | null
+  summary: string | null
   created_at: DateTimeStr
   updated_at: DateTimeStr
 }
@@ -139,6 +141,16 @@ export interface AIMessage {
   tool_calls: string | null
   tool_result: string | null
   created_at: DateTimeStr
+}
+
+export interface AIMemory {
+  id: ULID
+  category: MemoryCategory
+  content: string
+  importance: number
+  last_accessed_at: DateTimeStr
+  created_at: DateTimeStr
+  updated_at: DateTimeStr
 }
 
 export interface ExchangeRate {

@@ -1,7 +1,5 @@
 import { DirectChatTransport } from 'ai'
-import { createAgent } from './agent'
-
-type AIProvider = 'openai' | 'anthropic' | 'ollama' | 'openrouter'
+import { createAgent, type AIProvider } from './agent'
 
 export function createTransport(provider: AIProvider, apiKey: string, model?: string) {
   const agent = createAgent(provider, apiKey, model)

@@ -68,37 +68,42 @@ export function Accounts() {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {accounts.map((account) => (
-            <div key={account.id} className="glass-card p-4">
+            <div
+              key={account.id}
+              className="glass-card group p-5 transition-transform duration-200 hover:translate-y-[-2px]"
+            >
               <div className="mb-3 flex items-start justify-between">
                 <div>
-                  <h3 className="font-heading font-semibold">{account.name}</h3>
-                  <Badge variant="secondary" className="mt-1">
+                  <h3 className="font-heading text-base font-semibold">{account.name}</h3>
+                  <Badge variant="secondary" className="mt-1 text-[10px]">
                     {t(`types.${account.type}`)}
                   </Badge>
                 </div>
-                <div className="flex gap-1">
+                <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8"
+                    className="h-7 w-7"
                     onClick={() => openAccountDialog(account.id)}
                   >
-                    <Pencil size={14} />
+                    <Pencil size={12} />
                   </Button>
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="text-destructive hover:text-destructive h-8 w-8"
+                    className="text-destructive hover:text-destructive h-7 w-7"
                     onClick={() => setDeleteId(account.id)}
                   >
-                    <Trash2 size={14} />
+                    <Trash2 size={12} />
                   </Button>
                 </div>
               </div>
-              <p className="font-heading text-2xl font-bold">
+              <p className="font-heading text-3xl font-bold tracking-tight">
                 {formatMoney(account.balance, account.currency)}
               </p>
-              <p className="text-muted-foreground mt-1 font-mono text-xs">{account.currency}</p>
+              <p className="text-muted-foreground mt-1 font-mono text-[10px] tracking-wider">
+                {account.currency}
+              </p>
             </div>
           ))}
         </div>

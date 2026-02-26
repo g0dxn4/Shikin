@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { ArrowLeftRight, Plus, Pencil, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import dayjs from 'dayjs'
+import isToday from 'dayjs/plugin/isToday'
+import isYesterday from 'dayjs/plugin/isYesterday'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useUIStore } from '@/stores/ui-store'
@@ -10,11 +12,21 @@ import { useTransactionStore } from '@/stores/transaction-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import { formatMoney } from '@/lib/money'
 
+dayjs.extend(isToday)
+dayjs.extend(isYesterday)
+
 const ConfirmDialog = lazy(() =>
   import('@/components/shared/confirm-dialog').then((m) => ({
     default: m.ConfirmDialog,
   }))
 )
+
+function formatDateHeader(date: string): string {
+  const d = dayjs(date)
+  if (d.isToday()) return 'Today'
+  if (d.isYesterday()) return 'Yesterday'
+  return d.format('ddd, MMM D')
+}
 
 export function Transactions() {
   const { t } = useTranslation('transactions')
@@ -78,13 +90,13 @@ export function Transactions() {
           </Button>
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-5">
           {Array.from(groupedByDate.entries()).map(([date, txns]) => (
             <div key={date}>
-              <h2 className="text-muted-foreground mb-3 font-mono text-xs tracking-wider uppercase">
-                {dayjs(date).format('dddd, MMMM D, YYYY')}
+              <h2 className="text-muted-foreground mb-2 font-mono text-xs tracking-wider uppercase">
+                {formatDateHeader(date)}
               </h2>
-              <div className="space-y-2">
+              <div className="space-y-1">
                 {txns.map((tx) => (
                   <TransactionRow
                     key={tx.id}
@@ -126,33 +138,33 @@ function TransactionRow({
   onDelete: () => void
 }) {
   return (
-    <div className="glass-card flex items-center gap-3 p-3">
+    <div className="glass-card group flex items-center gap-3 px-4 py-2.5">
       {tx.category_color && (
         <span
-          className="h-3 w-3 shrink-0 rounded-full"
+          className="h-2.5 w-2.5 shrink-0 rounded-full"
           style={{ backgroundColor: tx.category_color }}
         />
       )}
       <div className="min-w-0 flex-1">
-        <p className="truncate font-medium">{tx.description}</p>
+        <p className="truncate text-sm font-medium">{tx.description}</p>
         <div className="text-muted-foreground flex items-center gap-2 text-xs">
           {tx.category_name && <span>{tx.category_name}</span>}
           {tx.account_name && (
-            <Badge variant="secondary" className="text-xs">
+            <Badge variant="secondary" className="text-[10px]">
               {tx.account_name}
             </Badge>
           )}
         </div>
       </div>
       <span
-        className={`font-heading font-semibold ${
+        className={`font-heading text-sm font-semibold ${
           tx.type === 'income' ? 'text-success' : 'text-destructive'
         }`}
       >
         {tx.type === 'income' ? '+' : '-'}
         {formatMoney(tx.amount, tx.currency)}
       </span>
-      <div className="flex shrink-0 gap-1">
+      <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit}>
           <Pencil size={12} />
         </Button>

@@ -2,12 +2,12 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { TransactionForm, type TransactionFormValues } from './transaction-form'
 import { useUIStore } from '@/stores/ui-store'
 import { useTransactionStore } from '@/stores/transaction-store'
@@ -40,23 +40,21 @@ export function TransactionDialog() {
   }
 
   return (
-    <Sheet open={transactionDialogOpen} onOpenChange={(open) => !open && closeTransactionDialog()}>
-      <SheetContent className="overflow-y-auto">
-        <SheetHeader>
-          <SheetTitle>{isEditing ? t('editTransaction') : t('addTransaction')}</SheetTitle>
-          <SheetDescription>
+    <Dialog open={transactionDialogOpen} onOpenChange={(open) => !open && closeTransactionDialog()}>
+      <DialogContent className="max-w-lg overflow-y-auto max-h-[85vh]">
+        <DialogHeader>
+          <DialogTitle>{isEditing ? t('editTransaction') : t('addTransaction')}</DialogTitle>
+          <DialogDescription>
             {isEditing ? t('editTransaction') : t('addTransaction')}
-          </SheetDescription>
-        </SheetHeader>
-        <div className="mt-6">
-          <TransactionForm
-            key={editingTransactionId || 'new'}
-            transaction={transaction}
-            onSubmit={handleSubmit}
-            isLoading={isLoading}
-          />
-        </div>
-      </SheetContent>
-    </Sheet>
+          </DialogDescription>
+        </DialogHeader>
+        <TransactionForm
+          key={editingTransactionId || 'new'}
+          transaction={transaction}
+          onSubmit={handleSubmit}
+          isLoading={isLoading}
+        />
+      </DialogContent>
+    </Dialog>
   )
 }

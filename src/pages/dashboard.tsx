@@ -1,7 +1,14 @@
 import { useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
-import { Wallet, TrendingUp, TrendingDown, PiggyBank, Plus, ArrowRight } from 'lucide-react'
+import {
+  Wallet,
+  TrendingUp,
+  TrendingDown,
+  PiggyBank,
+  Plus,
+  ArrowRight,
+} from 'lucide-react'
 import dayjs from 'dayjs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -14,6 +21,7 @@ import { formatMoney } from '@/lib/money'
 export function Dashboard() {
   const { t } = useTranslation('dashboard')
   const { t: tTx } = useTranslation('transactions')
+  const { t: tAcc } = useTranslation('accounts')
   const { setAIPanelOpen } = useUIStore()
   const { openAccountDialog, openTransactionDialog } = useUIStore()
   const { accounts, fetch: fetchAccounts } = useAccountStore()
@@ -53,38 +61,56 @@ export function Dashboard() {
     <div className="animate-fade-in-up space-y-6">
       <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
 
-      {/* Stats cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          {
-            label: t('cards.totalBalance'),
-            icon: Wallet,
-            value: formatMoney(totalBalance),
-          },
-          {
-            label: t('cards.monthlyIncome'),
-            icon: TrendingUp,
-            value: formatMoney(monthlyIncome),
-          },
-          {
-            label: t('cards.monthlyExpenses'),
-            icon: TrendingDown,
-            value: formatMoney(monthlyExpenses),
-          },
-          {
-            label: t('cards.savings'),
-            icon: PiggyBank,
-            value: `${savingsRate}%`,
-          },
-        ].map(({ label, icon: Icon, value }) => (
-          <div key={label} className="glass-card p-4">
-            <div className="text-muted-foreground mb-2 flex items-center gap-2">
-              <Icon size={16} />
-              <span className="font-mono text-xs tracking-wider uppercase">{label}</span>
-            </div>
-            <p className="font-heading text-2xl font-bold">{value}</p>
+      {/* Hero balance card */}
+      <div className="glass-card bg-gradient-to-br from-[#BF5AF218] to-transparent p-8">
+        <p className="text-muted-foreground mb-2 font-mono text-xs tracking-wider uppercase">
+          {t('cards.totalBalance')}
+        </p>
+        <p className="font-heading text-4xl font-bold tracking-tight">
+          {formatMoney(totalBalance)}
+        </p>
+        {hasAccounts && (
+          <p className="text-muted-foreground mt-2 text-sm">
+            across {accounts.length} {accounts.length === 1 ? 'account' : 'accounts'}
+          </p>
+        )}
+      </div>
+
+      {/* 3-column metrics */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="glass-card p-5">
+          <div className="text-muted-foreground mb-2 flex items-center gap-2">
+            <TrendingUp size={16} className="text-success" />
+            <span className="font-mono text-[10px] tracking-wider uppercase">
+              {t('cards.monthlyIncome')}
+            </span>
           </div>
-        ))}
+          <p className="font-heading text-2xl font-bold tracking-tight text-success">
+            {formatMoney(monthlyIncome)}
+          </p>
+        </div>
+        <div className="glass-card p-5">
+          <div className="text-muted-foreground mb-2 flex items-center gap-2">
+            <TrendingDown size={16} className="text-destructive" />
+            <span className="font-mono text-[10px] tracking-wider uppercase">
+              {t('cards.monthlyExpenses')}
+            </span>
+          </div>
+          <p className="font-heading text-2xl font-bold tracking-tight text-destructive">
+            {formatMoney(monthlyExpenses)}
+          </p>
+        </div>
+        <div className="glass-card p-5">
+          <div className="text-muted-foreground mb-2 flex items-center gap-2">
+            <PiggyBank size={16} className="text-primary" />
+            <span className="font-mono text-[10px] tracking-wider uppercase">
+              {t('cards.savings')}
+            </span>
+          </div>
+          <p className="font-heading text-primary text-2xl font-bold tracking-tight">
+            {savingsRate}%
+          </p>
+        </div>
       </div>
 
       {!hasAccounts ? (
@@ -106,40 +132,73 @@ export function Dashboard() {
           </div>
         </div>
       ) : (
-        /* Recent transactions + quick actions */
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-heading text-lg font-semibold">{tTx('recentTransactions')}</h2>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => openTransactionDialog()}>
-                <Plus size={14} />
-                {tTx('addQuick')}
-              </Button>
+        <>
+          {/* Accounts section */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="font-heading text-lg font-semibold">{tAcc('title')}</h2>
               <Button variant="ghost" size="sm" asChild>
-                <Link to="/transactions">
+                <Link to="/accounts">
                   {tTx('viewAll')}
                   <ArrowRight size={14} />
                 </Link>
               </Button>
             </div>
-          </div>
-
-          {recentTransactions.length === 0 ? (
-            <div className="glass-card flex flex-col items-center justify-center py-8 text-center">
-              <p className="text-muted-foreground text-sm">{tTx('empty.description')}</p>
-              <Button className="mt-3" size="sm" onClick={() => openTransactionDialog()}>
-                <Plus size={14} />
-                {tTx('addTransaction')}
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {recentTransactions.map((tx) => (
-                <RecentTransactionRow key={tx.id} transaction={tx} />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {accounts.slice(0, 3).map((account) => (
+                <div key={account.id} className="glass-card p-4">
+                  <div className="mb-1 flex items-center justify-between">
+                    <h3 className="font-heading text-sm font-semibold">{account.name}</h3>
+                    <Badge variant="secondary" className="text-[10px]">
+                      {tAcc(`types.${account.type}`)}
+                    </Badge>
+                  </div>
+                  <p className="font-heading text-xl font-bold tracking-tight">
+                    {formatMoney(account.balance, account.currency)}
+                  </p>
+                  <p className="text-muted-foreground mt-1 font-mono text-[10px]">
+                    {account.currency}
+                  </p>
+                </div>
               ))}
             </div>
-          )}
-        </div>
+          </div>
+
+          {/* Recent transactions */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="font-heading text-lg font-semibold">{tTx('recentTransactions')}</h2>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => openTransactionDialog()}>
+                  <Plus size={14} />
+                  {tTx('addQuick')}
+                </Button>
+                <Button variant="ghost" size="sm" asChild>
+                  <Link to="/transactions">
+                    {tTx('viewAll')}
+                    <ArrowRight size={14} />
+                  </Link>
+                </Button>
+              </div>
+            </div>
+
+            {recentTransactions.length === 0 ? (
+              <div className="glass-card flex flex-col items-center justify-center py-8 text-center">
+                <p className="text-muted-foreground text-sm">{tTx('empty.description')}</p>
+                <Button className="mt-3" size="sm" onClick={() => openTransactionDialog()}>
+                  <Plus size={14} />
+                  {tTx('addTransaction')}
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {recentTransactions.map((tx) => (
+                  <RecentTransactionRow key={tx.id} transaction={tx} />
+                ))}
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   )
@@ -147,10 +206,10 @@ export function Dashboard() {
 
 function RecentTransactionRow({ transaction: tx }: { transaction: TransactionWithDetails }) {
   return (
-    <div className="glass-card flex items-center gap-3 p-3">
+    <div className="glass-card flex items-center gap-3 px-4 py-2.5">
       {tx.category_color && (
         <span
-          className="h-3 w-3 shrink-0 rounded-full"
+          className="h-2.5 w-2.5 shrink-0 rounded-full"
           style={{ backgroundColor: tx.category_color }}
         />
       )}
@@ -159,7 +218,7 @@ function RecentTransactionRow({ transaction: tx }: { transaction: TransactionWit
         <div className="text-muted-foreground flex items-center gap-2 text-xs">
           {tx.category_name && <span>{tx.category_name}</span>}
           {tx.account_name && (
-            <Badge variant="secondary" className="text-xs">
+            <Badge variant="secondary" className="text-[10px]">
               {tx.account_name}
             </Badge>
           )}
@@ -174,7 +233,9 @@ function RecentTransactionRow({ transaction: tx }: { transaction: TransactionWit
           {tx.type === 'income' ? '+' : '-'}
           {formatMoney(tx.amount, tx.currency)}
         </span>
-        <p className="text-muted-foreground font-mono text-xs">{dayjs(tx.date).format('MMM D')}</p>
+        <p className="text-muted-foreground font-mono text-[10px]">
+          {dayjs(tx.date).format('MMM D')}
+        </p>
       </div>
     </div>
   )

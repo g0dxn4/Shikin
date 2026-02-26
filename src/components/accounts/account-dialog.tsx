@@ -2,12 +2,12 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { AccountForm, type AccountFormValues } from './account-form'
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
@@ -40,21 +40,19 @@ export function AccountDialog() {
   }
 
   return (
-    <Sheet open={accountDialogOpen} onOpenChange={(open) => !open && closeAccountDialog()}>
-      <SheetContent>
-        <SheetHeader>
-          <SheetTitle>{isEditing ? t('editAccount') : t('addAccount')}</SheetTitle>
-          <SheetDescription>{isEditing ? t('editAccount') : t('addAccount')}</SheetDescription>
-        </SheetHeader>
-        <div className="mt-6">
-          <AccountForm
-            key={editingAccountId || 'new'}
-            account={account}
-            onSubmit={handleSubmit}
-            isLoading={isLoading}
-          />
-        </div>
-      </SheetContent>
-    </Sheet>
+    <Dialog open={accountDialogOpen} onOpenChange={(open) => !open && closeAccountDialog()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{isEditing ? t('editAccount') : t('addAccount')}</DialogTitle>
+          <DialogDescription>{isEditing ? t('editAccount') : t('addAccount')}</DialogDescription>
+        </DialogHeader>
+        <AccountForm
+          key={editingAccountId || 'new'}
+          account={account}
+          onSubmit={handleSubmit}
+          isLoading={isLoading}
+        />
+      </DialogContent>
+    </Dialog>
   )
 }

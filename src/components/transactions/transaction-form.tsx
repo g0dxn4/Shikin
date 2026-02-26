@@ -87,8 +87,8 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
   }, [selectedAccount, setValue])
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-      <div className="space-y-2">
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+      <div className="space-y-1.5">
         <Label>{t('form.type')}</Label>
         <Select
           value={typeValue}
@@ -110,7 +110,7 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
         </Select>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         <Label htmlFor="amount">{t('form.amount')}</Label>
         <Input
           id="amount"
@@ -118,12 +118,14 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
           step="0.01"
           min="0.01"
           placeholder={t('form.amountPlaceholder')}
+          className="font-heading text-2xl font-semibold"
+          autoFocus
           {...register('amount', { valueAsNumber: true })}
         />
         {errors.amount && <p className="text-destructive text-xs">{errors.amount.message}</p>}
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         <Label htmlFor="description">{t('form.description')}</Label>
         <Input
           id="description"
@@ -135,52 +137,66 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
         )}
       </div>
 
-      <div className="space-y-2">
-        <Label>{t('form.account')}</Label>
-        <Select value={accountIdValue} onValueChange={(val) => setValue('accountId', val)}>
-          <SelectTrigger>
-            <SelectValue placeholder={t('form.accountPlaceholder')} />
-          </SelectTrigger>
-          <SelectContent>
-            {accounts.map((account) => (
-              <SelectItem key={account.id} value={account.id}>
-                {account.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {errors.accountId && <p className="text-destructive text-xs">{errors.accountId.message}</p>}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <Label>{t('form.account')}</Label>
+          <Select value={accountIdValue} onValueChange={(val) => setValue('accountId', val)}>
+            <SelectTrigger>
+              <SelectValue placeholder={t('form.accountPlaceholder')} />
+            </SelectTrigger>
+            <SelectContent>
+              {accounts.map((account) => (
+                <SelectItem key={account.id} value={account.id}>
+                  {account.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {errors.accountId && (
+            <p className="text-destructive text-xs">{errors.accountId.message}</p>
+          )}
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>{t('form.category')}</Label>
+          <Select
+            value={categoryIdValue ?? '__none__'}
+            onValueChange={(val) => setValue('categoryId', val === '__none__' ? null : val)}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">{t('form.categoryNone')}</SelectItem>
+              {filteredCategories.map((cat) => (
+                <SelectItem key={cat.id} value={cat.id}>
+                  <span className="flex items-center gap-2">
+                    {cat.color && (
+                      <span
+                        className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: cat.color }}
+                      />
+                    )}
+                    {cat.name}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
-      <div className="space-y-2">
-        <Label>{t('form.category')}</Label>
-        <Select
-          value={categoryIdValue ?? '__none__'}
-          onValueChange={(val) => setValue('categoryId', val === '__none__' ? null : val)}
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none__">{t('form.categoryNone')}</SelectItem>
-            {filteredCategories.map((cat) => (
-              <SelectItem key={cat.id} value={cat.id}>
-                {cat.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="date">{t('form.date')}</Label>
+          <Input id="date" type="date" {...register('date')} />
+          {errors.date && <p className="text-destructive text-xs">{errors.date.message}</p>}
+        </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="date">{t('form.date')}</Label>
-        <Input id="date" type="date" {...register('date')} />
-        {errors.date && <p className="text-destructive text-xs">{errors.date.message}</p>}
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="notes">{t('form.notes')}</Label>
-        <Input id="notes" placeholder={t('form.notesPlaceholder')} {...register('notes')} />
+        <div className="space-y-1.5">
+          <Label htmlFor="notes">{t('form.notes')}</Label>
+          <Input id="notes" placeholder={t('form.notesPlaceholder')} {...register('notes')} />
+        </div>
       </div>
 
       <Button type="submit" className="w-full" disabled={isLoading}>

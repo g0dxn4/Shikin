@@ -66,14 +66,19 @@ export function AccountForm({ account, onSubmit, isLoading }: AccountFormProps) 
   const currencyValue = watch('currency')
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-      <div className="space-y-2">
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+      <div className="space-y-1.5">
         <Label htmlFor="name">{t('form.name')}</Label>
-        <Input id="name" placeholder={t('form.namePlaceholder')} {...register('name')} />
+        <Input
+          id="name"
+          placeholder={t('form.namePlaceholder')}
+          autoFocus
+          {...register('name')}
+        />
         {errors.name && <p className="text-destructive text-xs">{errors.name.message}</p>}
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         <Label>{t('form.type')}</Label>
         <Select
           value={typeValue}
@@ -92,31 +97,35 @@ export function AccountForm({ account, onSubmit, isLoading }: AccountFormProps) 
         </Select>
       </div>
 
-      <div className="space-y-2">
-        <Label>{t('form.currency')}</Label>
-        <Select value={currencyValue} onValueChange={(val) => setValue('currency', val)}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {SUPPORTED_CURRENCIES.map((cur) => (
-              <SelectItem key={cur} value={cur}>
-                {cur}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <Label>{t('form.currency')}</Label>
+          <Select value={currencyValue} onValueChange={(val) => setValue('currency', val)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SUPPORTED_CURRENCIES.map((cur) => (
+                <SelectItem key={cur} value={cur}>
+                  {cur}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="balance">{t('form.balance')}</Label>
-        <Input
-          id="balance"
-          type="number"
-          step="0.01"
-          {...register('balance', { valueAsNumber: true })}
-        />
-        {errors.balance && <p className="text-destructive text-xs">{errors.balance.message}</p>}
+        <div className="space-y-1.5">
+          <Label htmlFor="balance">{t('form.balance')}</Label>
+          <Input
+            id="balance"
+            type="number"
+            step="0.01"
+            {...register('balance', { valueAsNumber: true })}
+          />
+          {errors.balance && (
+            <p className="text-destructive text-xs">{errors.balance.message}</p>
+          )}
+        </div>
       </div>
 
       <Button type="submit" className="w-full" disabled={isLoading}>

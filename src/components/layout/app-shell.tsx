@@ -1,8 +1,19 @@
-import { Suspense } from 'react'
+import { lazy, Suspense } from 'react'
 import { Outlet } from 'react-router'
 import { Sidebar } from './sidebar'
 import { AIPanel } from './ai-panel'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
+
+const AccountDialog = lazy(() =>
+  import('@/components/accounts/account-dialog').then((m) => ({
+    default: m.AccountDialog,
+  }))
+)
+const TransactionDialog = lazy(() =>
+  import('@/components/transactions/transaction-dialog').then((m) => ({
+    default: m.TransactionDialog,
+  }))
+)
 
 export function AppShell() {
   return (
@@ -16,6 +27,10 @@ export function AppShell() {
         </div>
       </main>
       <AIPanel />
+      <Suspense>
+        <AccountDialog />
+        <TransactionDialog />
+      </Suspense>
     </div>
   )
 }

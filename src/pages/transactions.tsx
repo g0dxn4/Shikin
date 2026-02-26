@@ -10,11 +10,6 @@ import { useTransactionStore } from '@/stores/transaction-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import { formatMoney } from '@/lib/money'
 
-const TransactionDialog = lazy(() =>
-  import('@/components/transactions/transaction-dialog').then((m) => ({
-    default: m.TransactionDialog,
-  }))
-)
 const ConfirmDialog = lazy(() =>
   import('@/components/shared/confirm-dialog').then((m) => ({
     default: m.ConfirmDialog,
@@ -105,7 +100,6 @@ export function Transactions() {
       )}
 
       <Suspense>
-        <TransactionDialog />
         <ConfirmDialog
           open={!!deleteId}
           onOpenChange={(open) => !open && setDeleteId(null)}

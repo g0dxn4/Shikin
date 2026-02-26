@@ -8,11 +8,6 @@ import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
 import { formatMoney } from '@/lib/money'
 
-const AccountDialog = lazy(() =>
-  import('@/components/accounts/account-dialog').then((m) => ({
-    default: m.AccountDialog,
-  }))
-)
 const ConfirmDialog = lazy(() =>
   import('@/components/shared/confirm-dialog').then((m) => ({
     default: m.ConfirmDialog,
@@ -110,7 +105,6 @@ export function Accounts() {
       )}
 
       <Suspense>
-        <AccountDialog />
         <ConfirmDialog
           open={!!deleteId}
           onOpenChange={(open) => !open && setDeleteId(null)}

@@ -39,12 +39,20 @@ Guidelines:
 - Always query before answering data questions — never guess
 - When deleting, confirm the item details before proceeding`
 
-type AIProvider = 'openai' | 'anthropic' | 'ollama'
+type AIProvider = 'openai' | 'anthropic' | 'ollama' | 'openrouter'
 
 export function createAgent(provider: AIProvider, apiKey: string, model?: string) {
   let languageModel
 
   switch (provider) {
+    case 'openrouter': {
+      const openrouter = createOpenAI({
+        baseURL: 'https://openrouter.ai/api/v1',
+        apiKey,
+      })
+      languageModel = openrouter(model || 'anthropic/claude-sonnet-4')
+      break
+    }
     case 'openai': {
       const openai = createOpenAI({ apiKey })
       languageModel = openai(model || 'gpt-4o-mini')

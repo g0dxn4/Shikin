@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/select'
 import { SUPPORTED_LANGUAGES, AI_PROVIDERS } from '@/lib/constants'
 import { useAIStore } from '@/stores/ai-store'
+import { fetchModels, type ModelInfo } from '@/ai/models'
 
 export function SettingsPage() {
   const { t, i18n } = useTranslation('settings')
@@ -23,6 +24,8 @@ export function SettingsPage() {
   const [localApiKey, setLocalApiKey] = useState(apiKey)
   const [localModel, setLocalModel] = useState(model)
   const [isSaving, setIsSaving] = useState(false)
+  const [models, setModels] = useState<ModelInfo[]>([])
+  const [isLoadingModels, setIsLoadingModels] = useState(false)
 
   useEffect(() => {
     loadSettings()
@@ -35,15 +38,35 @@ export function SettingsPage() {
     setLocalModel(model)
   }, [provider, apiKey, model])
 
-  const selectedProvider = AI_PROVIDERS.find((p) => p.id === localProvider)
-  const availableModels = useMemo(() => selectedProvider?.models ?? [], [selectedProvider])
-
-  // Reset model when provider changes and current model isn't available
-  useEffect(() => {
-    if (availableModels.length > 0 && !availableModels.includes(localModel as never)) {
-      setLocalModel(availableModels[0] as string)
+  const loadModels = useCallback(async (prov: string, key: string) => {
+    setIsLoadingModels(true)
+    try {
+      const result = await fetchModels(prov as Parameters<typeof fetchModels>[0], key)
+      setModels(result)
+    } catch {
+      setModels([])
+    } finally {
+      setIsLoadingModels(false)
     }
-  }, [localProvider, availableModels, localModel])
+  }, [])
+
+  // Fetch models when provider or API key changes
+  useEffect(() => {
+    // Ollama doesn't need a key, Anthropic is static — always fetch
+    const needsKey = localProvider !== 'ollama' && localProvider !== 'anthropic'
+    if (needsKey && !localApiKey) {
+      setModels([])
+      return
+    }
+    loadModels(localProvider, localApiKey)
+  }, [localProvider, localApiKey, loadModels])
+
+  // Reset model selection when available models change
+  useEffect(() => {
+    if (models.length > 0 && !models.some((m) => m.id === localModel)) {
+      setLocalModel(models[0].id)
+    }
+  }, [models, localModel])
 
   const handleSave = async () => {
     setIsSaving(true)
@@ -119,25 +142,34 @@ export function SettingsPage() {
           />
         </div>
 
-        {availableModels.length > 0 && (
-          <div className="space-y-2">
-            <Label className="text-muted-foreground font-mono text-xs tracking-wider uppercase">
-              {t('ai.model')}
-            </Label>
+        <div className="space-y-2">
+          <Label className="text-muted-foreground font-mono text-xs tracking-wider uppercase">
+            {t('ai.model')}
+          </Label>
+          {isLoadingModels ? (
+            <p className="text-muted-foreground text-sm">Loading models...</p>
+          ) : models.length > 0 ? (
             <Select value={localModel} onValueChange={setLocalModel}>
               <SelectTrigger className="max-w-xs">
-                <SelectValue />
+                <SelectValue placeholder="Select a model" />
               </SelectTrigger>
               <SelectContent>
-                {availableModels.map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {m}
+                {models.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-          </div>
-        )}
+          ) : (
+            <Input
+              placeholder="Enter model ID"
+              value={localModel}
+              onChange={(e) => setLocalModel(e.target.value)}
+              className="max-w-xs"
+            />
+          )}
+        </div>
 
         <Button onClick={handleSave} disabled={isSaving}>
           {isSaving ? '...' : tCommon('actions.save')}

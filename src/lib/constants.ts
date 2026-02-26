@@ -23,9 +23,10 @@ export const SUPPORTED_LANGUAGES = [
 ] as const
 
 export const AI_PROVIDERS = [
-  { id: 'openai', name: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini'] },
-  { id: 'anthropic', name: 'Anthropic', models: ['claude-sonnet-4-20250514'] },
-  { id: 'ollama', name: 'Ollama (Local)', models: [] },
+  { id: 'openrouter', name: 'OpenRouter' },
+  { id: 'openai', name: 'OpenAI' },
+  { id: 'anthropic', name: 'Anthropic' },
+  { id: 'ollama', name: 'Ollama (Local)' },
 ] as const
 
 export const SIDEBAR_WIDTH = 240

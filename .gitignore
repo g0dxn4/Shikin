@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-ssr/
+src-tauri/target/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
+*.bak
+*~
+
+# Database (dev)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.local
+
+# Testing
+coverage/
+
+# AI tools
+.delta9/
+.cursor/
+.aider*
+.continue/
+.claude/
+.worktrees/
+
+# Package manager
+.pnpm-store/
+.pnpm-buildinfo.json
+
+# Tauri
+src-tauri/gen/
+src-tauri/WixTools/

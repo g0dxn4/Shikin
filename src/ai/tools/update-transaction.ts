@@ -2,6 +2,8 @@ import { tool, zodSchema } from 'ai'
 import { z } from 'zod'
 import { toCentavos, fromCentavos } from '@/lib/money'
 import { execute, query } from '@/lib/database'
+import { useAccountStore } from '@/stores/account-store'
+import { useTransactionStore } from '@/stores/transaction-store'
 import type { Transaction, Category } from '@/types/database'
 
 export const updateTransaction = tool({
@@ -91,6 +93,9 @@ export const updateTransaction = tool({
         transactionId,
       ]
     )
+
+    await useTransactionStore.getState().fetch()
+    await useAccountStore.getState().fetch()
 
     const displayAmount = amount !== undefined ? amount : fromCentavos(oldAmountCentavos)
 

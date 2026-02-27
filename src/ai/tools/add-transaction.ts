@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
 import { execute, query } from '@/lib/database'
+import { useAccountStore } from '@/stores/account-store'
+import { useTransactionStore } from '@/stores/transaction-store'
 import type { Category } from '@/types/database'
 import dayjs from 'dayjs'
 
@@ -70,6 +72,9 @@ export const addTransaction = tool({
       "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
       [balanceChange, accountId]
     )
+
+    await useTransactionStore.getState().fetch()
+    await useAccountStore.getState().fetch()
 
     return {
       success: true,

@@ -9,6 +9,14 @@ vi.mock('@/lib/ulid', () => ({
   generateId: vi.fn().mockReturnValue('01TEST000000000000000000000'),
 }))
 
+vi.mock('@/stores/account-store', () => ({
+  useAccountStore: { getState: () => ({ fetch: vi.fn() }) },
+}))
+
+vi.mock('@/stores/transaction-store', () => ({
+  useTransactionStore: { getState: () => ({ fetch: vi.fn() }) },
+}))
+
 import { query, execute } from '@/lib/database'
 import { updateTransaction } from '../tools/update-transaction'
 import { deleteTransaction } from '../tools/delete-transaction'

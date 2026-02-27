@@ -15,6 +15,12 @@ pub fn run() {
             sql: include_str!("../migrations/002_ai_memories.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 3,
+            description: "credit card fields",
+            sql: include_str!("../migrations/003_credit_cards.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

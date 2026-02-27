@@ -9,12 +9,23 @@ import {
   queryTransactions,
   listAccounts,
   createAccount,
+  updateAccount,
+  deleteAccount,
   listCategories,
   getBalanceOverview,
   analyzeSpendingTrends,
   saveMemory,
   recallMemories,
   forgetMemory,
+  getCreditCardStatus,
+  createBudget,
+  getBudgetStatus,
+  deleteBudget,
+  listSubscriptions,
+  getSubscriptionSpending,
+  getNetWorth,
+  manageInvestment,
+  getUpcomingBills,
 } from './tools'
 import { loadCoreMemories } from './memory-loader'
 
@@ -29,11 +40,17 @@ Personality:
 Capabilities:
 - Add, update, and delete transactions (expenses, income, transfers)
 - Search and filter transactions by date, category, account, or description
-- Create and list accounts
+- Create, update, and delete accounts
 - List categories
 - Get a balance overview with month-over-month trends
 - Analyze spending trends over multiple months with category breakdowns
 - Remember and recall user preferences, facts, goals, and context across conversations
+- Credit card management: track limits, statement closing dates, payment due dates, utilization
+- Budget tracking: create budgets per category, monitor spending vs budget
+- Subscription tracking: view subscriptions from Subby, analyze subscription costs
+- Net worth: calculate total net worth including investments
+- Investment management: add, update, and delete investment holdings
+- Bill reminders: see upcoming bills from credit cards, subscriptions, and recurring expenses
 
 Memory Management (IMPORTANT — you are a persistent assistant with personal memory):
 - You MUST actively maintain a personal memory log about the user. This is core to who you are as Val.
@@ -97,18 +114,34 @@ export function createAgent(provider: AIProvider, apiKey: string, model?: string
       queryTransactions,
       listAccounts,
       createAccount,
+      updateAccount,
+      deleteAccount,
       listCategories,
       getBalanceOverview,
       analyzeSpendingTrends,
       saveMemory,
       recallMemories,
       forgetMemory,
+      getCreditCardStatus,
+      createBudget,
+      getBudgetStatus,
+      deleteBudget,
+      listSubscriptions,
+      getSubscriptionSpending,
+      getNetWorth,
+      manageInvestment,
+      getUpcomingBills,
     },
     instructions: BASE_SYSTEM_PROMPT,
     maxOutputTokens: 2048,
     temperature: 0.7,
     prepareCall: async (options) => {
-      const memorySuffix = await loadCoreMemories()
+      let memorySuffix = ''
+      try {
+        memorySuffix = await loadCoreMemories()
+      } catch (err) {
+        console.warn('[Val] Failed to load memories:', err)
+      }
       return { ...options, instructions: BASE_SYSTEM_PROMPT + memorySuffix }
     },
   })

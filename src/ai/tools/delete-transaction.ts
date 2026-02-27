@@ -2,6 +2,8 @@ import { tool, zodSchema } from 'ai'
 import { z } from 'zod'
 import { fromCentavos } from '@/lib/money'
 import { execute, query } from '@/lib/database'
+import { useAccountStore } from '@/stores/account-store'
+import { useTransactionStore } from '@/stores/transaction-store'
 import type { Transaction } from '@/types/database'
 
 export const deleteTransaction = tool({
@@ -37,6 +39,9 @@ export const deleteTransaction = tool({
 
     // Delete the transaction
     await execute('DELETE FROM transactions WHERE id = $1', [transactionId])
+
+    await useTransactionStore.getState().fetch()
+    await useAccountStore.getState().fetch()
 
     return {
       success: true,

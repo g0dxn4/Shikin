@@ -22,6 +22,9 @@ export interface Account {
   icon: string | null
   color: string | null
   is_archived: number
+  credit_limit?: number
+  statement_closing_day?: number
+  payment_due_day?: number
   created_at: DateTimeStr
   updated_at: DateTimeStr
 }

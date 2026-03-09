@@ -18,13 +18,11 @@ export async function shouldGenerateReview(): Promise<boolean> {
 export async function getLastReviewDate(): Promise<string | null> {
   try {
     // Check if we have any reviews at all
-    const { readDir } = await import('@tauri-apps/plugin-fs')
-    const { join } = await import('@tauri-apps/api/path')
+    const { readDir, join, exists } = await import('@/lib/virtual-fs')
     const { getNotebookPath } = await import('@/lib/notebook')
     const base = await getNotebookPath()
     const reviewsPath = await join(base, 'weekly-reviews')
 
-    const { exists } = await import('@tauri-apps/plugin-fs')
     if (!(await exists(reviewsPath))) return null
 
     const entries = await readDir(reviewsPath)

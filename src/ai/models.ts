@@ -1,4 +1,5 @@
 import type { AIProvider } from './agent'
+import { ALIBABA_MODELS } from '@/lib/oauth-providers/alibaba'
 
 export interface ModelInfo {
   id: string
@@ -62,6 +63,8 @@ export async function fetchModels(provider: AIProvider, apiKey: string): Promise
       return DEEPSEEK_MODELS
     case 'ollama':
       return fetchOllamaModels()
+    case 'alibaba':
+      return ALIBABA_MODELS
     default:
       return []
   }
@@ -74,7 +77,7 @@ export function isKeylessProvider(provider: string): boolean {
 
 /** Returns true if the provider uses a static model list (no API fetch needed) */
 export function isStaticModelList(provider: string): boolean {
-  return ['anthropic', 'google', 'mistral', 'xai', 'groq', 'deepseek'].includes(provider)
+  return ['anthropic', 'google', 'mistral', 'xai', 'groq', 'deepseek', 'alibaba'].includes(provider)
 }
 
 interface OpenRouterModel {

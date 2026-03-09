@@ -1,4 +1,4 @@
-import { load } from '@tauri-apps/plugin-store'
+import { load } from '@/lib/storage'
 import { execute, query } from '@/lib/database'
 import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'

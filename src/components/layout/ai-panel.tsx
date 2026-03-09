@@ -27,7 +27,10 @@ import { AI_PANEL_WIDTH } from '@/lib/constants'
 export function AIPanel() {
   const { t } = useTranslation('ai')
   const { aiPanelOpen, setAIPanelOpen } = useUIStore()
-  const { provider, apiKey, model, isConfigured } = useAIStore()
+  const {
+    provider, apiKey, model, isConfigured, authMode, oauthAccessToken, codexAccountId,
+    getEffectiveApiKey,
+  } = useAIStore()
   const {
     currentConversationId,
     conversations,
@@ -39,6 +42,13 @@ export function AIPanel() {
     removeConversation,
   } = useConversationStore()
 
+  // Trigger token refresh if needed (updates oauthAccessToken in store, which recreates transport)
+  useEffect(() => {
+    if (authMode === 'oauth' && isConfigured) {
+      getEffectiveApiKey()
+    }
+  }, [authMode, isConfigured, getEffectiveApiKey])
+
   const [inputValue, setInputValue] = useState('')
   const [showConversations, setShowConversations] = useState(false)
   const [isCompacting, setIsCompacting] = useState(false)
@@ -49,8 +59,12 @@ export function AIPanel() {
 
   const transport = useMemo(() => {
     if (!isConfigured) return null
-    return createTransport(provider as AIProvider, apiKey, model || undefined)
-  }, [provider, apiKey, model, isConfigured])
+    const effectiveKey = authMode === 'oauth' ? (oauthAccessToken || '') : apiKey
+    return createTransport(provider as AIProvider, effectiveKey, model || undefined, {
+      authMode,
+      codexAccountId: codexAccountId ?? undefined,
+    })
+  }, [provider, apiKey, model, isConfigured, authMode, oauthAccessToken, codexAccountId])
 
   const chatId = useMemo(
     () => `val-${provider}-${model || 'default'}`,

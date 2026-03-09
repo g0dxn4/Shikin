@@ -1,12 +1,13 @@
-import { appDataDir, join } from '@tauri-apps/api/path'
 import {
+  appDataDir,
+  join,
   readTextFile,
   writeTextFile,
   readDir,
   mkdir,
   remove,
   exists,
-} from '@tauri-apps/plugin-fs'
+} from '@/lib/virtual-fs'
 
 const NOTEBOOK_DIR = 'notebook'
 

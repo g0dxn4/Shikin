@@ -29,6 +29,7 @@ export interface ProviderInfo {
   name: string
   description: string
   category: ProviderCategory
+  oauthSupported?: boolean
 }
 
 export const AI_PROVIDERS: readonly ProviderInfo[] = [
@@ -36,14 +37,16 @@ export const AI_PROVIDERS: readonly ProviderInfo[] = [
   {
     id: 'openai',
     name: 'OpenAI',
-    description: 'GPT-4o, o3, and more — works with ChatGPT Plus API access',
+    description: 'GPT-4o, o3 — supports ChatGPT subscription login',
     category: 'subscription',
+    oauthSupported: true,
   },
   {
     id: 'google',
     name: 'Google Gemini',
-    description: 'Free tier + Google One AI Premium',
+    description: 'Gemini 2.0 Flash — supports Google OAuth login',
     category: 'subscription',
+    oauthSupported: true,
   },
   {
     id: 'anthropic',
@@ -75,6 +78,12 @@ export const AI_PROVIDERS: readonly ProviderInfo[] = [
     name: 'DeepSeek',
     description: 'DeepSeek-V3 and DeepSeek-R1 reasoning',
     category: 'api',
+  },
+  {
+    id: 'alibaba',
+    name: 'Alibaba Qwen',
+    description: 'Qwen 3 Coder Plus — DashScope Coding Plan',
+    category: 'subscription',
   },
   // Gateway
   {

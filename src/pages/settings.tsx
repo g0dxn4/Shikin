@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { Check, Loader2, Eye, EyeOff, Zap } from 'lucide-react'
+import { Check, Loader2, Eye, EyeOff, Zap, LogOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -11,12 +11,29 @@ import { useAIStore } from '@/stores/ai-store'
 import { fetchModels, isKeylessProvider, isStaticModelList, type ModelInfo } from '@/ai/models'
 import type { AIProvider } from '@/ai/agent'
 import { cn } from '@/lib/utils'
-import { load } from '@tauri-apps/plugin-store'
+import { load } from '@/lib/storage'
+import { startOAuthFlow, exchangeCodeForToken, loadPkceState } from '@/lib/oauth'
+import { createGoogleOAuthConfig, fetchGoogleUserEmail } from '@/lib/oauth-providers/google'
+import { createOpenAICodexOAuthConfig, extractAccountId } from '@/lib/oauth-providers/openai-codex'
 
 export function SettingsPage() {
   const { t, i18n } = useTranslation('settings')
   const { t: tCommon } = useTranslation('common')
-  const { provider, apiKey, model, loadSettings, saveSettings } = useAIStore()
+  const {
+    provider,
+    apiKey,
+    model,
+    authMode,
+    oauthEmail,
+    oauthAccessToken,
+    oauthClientId,
+    loadSettings,
+    saveSettings,
+    setOAuthTokens,
+    setAuthMode,
+    setOAuthClientId,
+    clearOAuth,
+  } = useAIStore()
 
   const [localProvider, setLocalProvider] = useState(provider)
   const [localApiKey, setLocalApiKey] = useState(apiKey)
@@ -35,22 +52,42 @@ export function SettingsPage() {
   const [finnhubKey, setFinnhubKey] = useState('')
   const [isSavingDataKeys, setIsSavingDataKeys] = useState(false)
 
+  // OAuth local state
+  const [localAuthMode, setLocalAuthMode] = useState<'api_key' | 'oauth'>(authMode)
+  const [localOAuthClientId, setLocalOAuthClientId] = useState(oauthClientId)
+  const [isOAuthLoading, setIsOAuthLoading] = useState(false)
+
   useEffect(() => {
     loadSettings()
-    // Load data API keys
     load('settings.json')
       .then(async (store) => {
         setAlphaVantageKey(((await store.get('alpha_vantage_key')) as string) || '')
         setFinnhubKey(((await store.get('finnhub_key')) as string) || '')
       })
       .catch(() => {})
+
+    // Check for same-window OAuth redirect fallback
+    const callbackResult = sessionStorage.getItem('oauth_callback_result')
+    if (callbackResult) {
+      sessionStorage.removeItem('oauth_callback_result')
+      try {
+        const { code, state } = JSON.parse(callbackResult)
+        if (code && state) {
+          handleOAuthCallbackResult(code, state)
+        }
+      } catch {
+        // Invalid callback data
+      }
+    }
   }, [loadSettings])
 
   useEffect(() => {
     setLocalProvider(provider)
     setLocalApiKey(apiKey)
     setLocalModel(model)
-  }, [provider, apiKey, model])
+    setLocalAuthMode(authMode)
+    setLocalOAuthClientId(oauthClientId)
+  }, [provider, apiKey, model, authMode, oauthClientId])
 
   const loadModels = useCallback(async (prov: string, key: string) => {
     setIsLoadingModels(true)
@@ -104,10 +141,20 @@ export function SettingsPage() {
 
   const selectedModelName = models.find((m) => m.id === localModel)?.name || localModel
 
+  const currentProviderInfo = AI_PROVIDERS.find((p) => p.id === localProvider)
+  const needsKey = !isKeylessProvider(localProvider)
+  const supportsOAuth = currentProviderInfo?.oauthSupported ?? false
+
   const handleSelectProvider = (p: ProviderInfo) => {
     setLocalProvider(p.id)
     setTestResult(null)
     setShowApiKey(false)
+    // Reset auth mode based on what's saved for this provider
+    if (provider === p.id) {
+      setLocalAuthMode(authMode)
+    } else {
+      setLocalAuthMode('api_key')
+    }
   }
 
   const handleTestConnection = async () => {
@@ -127,6 +174,9 @@ export function SettingsPage() {
     setIsSaving(true)
     try {
       await saveSettings(localProvider, localApiKey, localModel)
+      if (localAuthMode !== authMode) {
+        setAuthMode(localAuthMode)
+      }
       toast.success(tCommon('status.success'))
     } catch {
       toast.error(tCommon('status.error'))
@@ -135,8 +185,132 @@ export function SettingsPage() {
     }
   }
 
-  const currentProviderInfo = AI_PROVIDERS.find((p) => p.id === localProvider)
-  const needsKey = !isKeylessProvider(localProvider)
+  const handleOAuthCallbackResult = async (code: string, state: string) => {
+    // Determine which provider and validate state for CSRF protection
+    const googlePkce = loadPkceState('google')
+    const openaiPkce = loadPkceState('openai')
+
+    let config
+    let verifier: string
+
+    if (googlePkce && googlePkce.state === state) {
+      config = createGoogleOAuthConfig(localOAuthClientId || oauthClientId)
+      verifier = googlePkce.verifier
+    } else if (openaiPkce && openaiPkce.state === state) {
+      config = createOpenAICodexOAuthConfig()
+      verifier = openaiPkce.verifier
+    } else {
+      toast.error('OAuth state mismatch or session expired — please try again')
+      return
+    }
+
+    // Clear PKCE state after validation
+    sessionStorage.removeItem(`oauth_${config.providerId}`)
+
+    try {
+      const tokens = await exchangeCodeForToken(config, code, verifier)
+
+      let email: string | undefined
+      let codexAccId: string | undefined
+
+      if (config.providerId === 'google') {
+        const userEmail = await fetchGoogleUserEmail(tokens.accessToken)
+        if (userEmail) email = userEmail
+      } else if (config.providerId === 'openai') {
+        const accountId = extractAccountId(tokens.accessToken)
+        if (accountId) codexAccId = accountId
+      }
+
+      await setOAuthTokens({
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresIn: Math.floor((tokens.expiresAt - Date.now()) / 1000),
+        email,
+        codexAccountId: codexAccId,
+      })
+
+      setLocalAuthMode('oauth')
+      toast.success('Signed in successfully')
+    } catch (err) {
+      toast.error(`OAuth failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    }
+  }
+
+  const handleGoogleOAuth = async () => {
+    if (!localOAuthClientId) {
+      toast.error('Please enter your Google Cloud Client ID first')
+      return
+    }
+
+    setIsOAuthLoading(true)
+    try {
+      await setOAuthClientId(localOAuthClientId)
+      const config = createGoogleOAuthConfig(localOAuthClientId)
+      const { code, verifier } = await startOAuthFlow(config)
+      const tokens = await exchangeCodeForToken(config, code, verifier)
+
+      const email = await fetchGoogleUserEmail(tokens.accessToken)
+
+      await setOAuthTokens({
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresIn: Math.floor((tokens.expiresAt - Date.now()) / 1000),
+        email: email ?? undefined,
+      })
+
+      // Also save provider + model
+      await saveSettings(localProvider, '', localModel)
+      setLocalAuthMode('oauth')
+      toast.success(`Signed in as ${email || 'Google user'}`)
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('popup was closed')) {
+        // User cancelled — not an error
+      } else {
+        toast.error(`Google sign-in failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      }
+    } finally {
+      setIsOAuthLoading(false)
+    }
+  }
+
+  const handleOpenAIOAuth = async () => {
+    setIsOAuthLoading(true)
+    try {
+      const config = createOpenAICodexOAuthConfig()
+      const { code, verifier } = await startOAuthFlow(config)
+      const tokens = await exchangeCodeForToken(config, code, verifier)
+
+      const accountId = extractAccountId(tokens.accessToken)
+
+      await setOAuthTokens({
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresIn: Math.floor((tokens.expiresAt - Date.now()) / 1000),
+        codexAccountId: accountId ?? undefined,
+      })
+
+      // Also save provider + model
+      await saveSettings(localProvider, '', localModel)
+      setLocalAuthMode('oauth')
+      toast.success('Signed in with ChatGPT')
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('popup was closed')) {
+        // User cancelled
+      } else {
+        toast.error(`OpenAI sign-in failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      }
+    } finally {
+      setIsOAuthLoading(false)
+    }
+  }
+
+  const handleSignOut = async () => {
+    await clearOAuth()
+    setLocalAuthMode('api_key')
+    toast.success('Signed out')
+  }
+
+  const isOAuthConnected = authMode === 'oauth' && !!oauthAccessToken && provider === localProvider
 
   return (
     <div className="animate-fade-in-up page-content">
@@ -176,7 +350,7 @@ export function SettingsPage() {
             const isActive = provider === p.id
             const cat = PROVIDER_CATEGORIES[p.category]
             const isConfiguredProvider =
-              isActive && (apiKey || isKeylessProvider(p.id))
+              isActive && (apiKey || isKeylessProvider(p.id) || (authMode === 'oauth' && oauthAccessToken))
 
             return (
               <button
@@ -212,6 +386,17 @@ export function SettingsPage() {
                     >
                       {t(`ai.categories.${p.category}`)}
                     </span>
+                    {isActive && authMode === 'oauth' && oauthAccessToken && (
+                      <span
+                        className="rounded-full px-2 py-0.5 font-mono text-[10px]"
+                        style={{
+                          background: 'var(--color-accent)',
+                          color: '#fff',
+                        }}
+                      >
+                        OAuth
+                      </span>
+                    )}
                     {isConfiguredProvider && (
                       <span className="h-2 w-2 rounded-full bg-success" />
                     )}
@@ -235,8 +420,38 @@ export function SettingsPage() {
               </h3>
             </div>
 
-            {/* API Key */}
-            {needsKey && (
+            {/* Auth mode toggle for OAuth-capable providers */}
+            {supportsOAuth && (
+              <div className="flex gap-0 overflow-hidden rounded-none border border-white/[0.06]">
+                <button
+                  type="button"
+                  className={cn(
+                    'flex-1 px-4 py-2 font-mono text-xs uppercase tracking-wider transition-colors',
+                    localAuthMode === 'api_key'
+                      ? 'bg-accent text-white'
+                      : 'bg-[#0a0a0a] text-muted-foreground hover:text-foreground'
+                  )}
+                  onClick={() => setLocalAuthMode('api_key')}
+                >
+                  API Key
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    'flex-1 px-4 py-2 font-mono text-xs uppercase tracking-wider transition-colors',
+                    localAuthMode === 'oauth'
+                      ? 'bg-accent text-white'
+                      : 'bg-[#0a0a0a] text-muted-foreground hover:text-foreground'
+                  )}
+                  onClick={() => setLocalAuthMode('oauth')}
+                >
+                  Sign In
+                </button>
+              </div>
+            )}
+
+            {/* API Key section */}
+            {(localAuthMode === 'api_key' || !supportsOAuth) && needsKey && (
               <div className="space-y-2">
                 <Label className="text-muted-foreground font-mono text-xs tracking-wider uppercase">
                   {t('ai.apiKey')}
@@ -287,7 +502,100 @@ export function SettingsPage() {
               </div>
             )}
 
-            {!needsKey && (
+            {/* OAuth section — Google */}
+            {localAuthMode === 'oauth' && supportsOAuth && localProvider === 'google' && (
+              <div className="space-y-3">
+                {isOAuthConnected ? (
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm text-success">
+                      Connected as {oauthEmail || 'Google user'}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSignOut}
+                      className="gap-1"
+                    >
+                      <LogOut size={12} />
+                      Sign out
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-1">
+                      <Label className="text-muted-foreground font-mono text-xs tracking-wider uppercase">
+                        Google Cloud Client ID
+                      </Label>
+                      <p className="text-muted-foreground text-[10px]">
+                        Create at console.cloud.google.com &rarr; APIs &amp; Services &rarr; Credentials &rarr; OAuth 2.0 Client ID (Web Application). Add{' '}
+                        <code className="font-mono text-accent">
+                          {window.location.origin}/oauth/callback
+                        </code>{' '}
+                        as authorized redirect URI.
+                      </p>
+                      <Input
+                        placeholder="123456789-xxxxx.apps.googleusercontent.com"
+                        value={localOAuthClientId}
+                        onChange={(e) => setLocalOAuthClientId(e.target.value)}
+                        className="max-w-md"
+                      />
+                    </div>
+                    <Button
+                      onClick={handleGoogleOAuth}
+                      disabled={isOAuthLoading || !localOAuthClientId}
+                      className="bg-accent text-white font-mono text-xs uppercase tracking-wider"
+                    >
+                      {isOAuthLoading ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : null}
+                      Sign in with Google
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* OAuth section — OpenAI */}
+            {localAuthMode === 'oauth' && supportsOAuth && localProvider === 'openai' && (
+              <div className="space-y-3">
+                {isOAuthConnected ? (
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm text-success">Connected</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSignOut}
+                      className="gap-1"
+                    >
+                      <LogOut size={12} />
+                      Sign out
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-muted-foreground text-[10px]">
+                      Uses your ChatGPT Plus or Pro subscription
+                    </p>
+                    <Button
+                      onClick={handleOpenAIOAuth}
+                      disabled={isOAuthLoading}
+                      className="bg-accent text-white font-mono text-xs uppercase tracking-wider"
+                    >
+                      {isOAuthLoading ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : null}
+                      Sign in with ChatGPT
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {!needsKey && !supportsOAuth && (
+              <p className="text-muted-foreground text-xs">{t('ai.noKeyNeeded')}</p>
+            )}
+
+            {!needsKey && localProvider === 'ollama' && (
               <p className="text-muted-foreground text-xs">{t('ai.noKeyNeeded')}</p>
             )}
 

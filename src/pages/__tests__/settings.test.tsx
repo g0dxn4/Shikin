@@ -25,7 +25,7 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
 
-vi.mock('@tauri-apps/plugin-store', () => ({
+vi.mock('@/lib/storage', () => ({
   load: vi.fn().mockResolvedValue({
     get: vi.fn().mockResolvedValue(''),
     set: vi.fn().mockResolvedValue(undefined),
@@ -33,16 +33,44 @@ vi.mock('@tauri-apps/plugin-store', () => ({
   }),
 }))
 
+vi.mock('@/lib/oauth', () => ({
+  startOAuthFlow: vi.fn(),
+  exchangeCodeForToken: vi.fn(),
+  loadPkceState: vi.fn().mockReturnValue(null),
+}))
+
+vi.mock('@/lib/oauth-providers/google', () => ({
+  createGoogleOAuthConfig: vi.fn(),
+  fetchGoogleUserEmail: vi.fn(),
+}))
+
+vi.mock('@/lib/oauth-providers/openai-codex', () => ({
+  createOpenAICodexOAuthConfig: vi.fn(),
+  extractAccountId: vi.fn(),
+}))
+
 const mockLoadSettings = vi.fn()
 const mockSaveSettings = vi.fn()
+const mockSetOAuthTokens = vi.fn()
+const mockSetAuthMode = vi.fn()
+const mockSetOAuthClientId = vi.fn()
+const mockClearOAuth = vi.fn()
 
 vi.mock('@/stores/ai-store', () => ({
   useAIStore: () => ({
     provider: 'openai',
     apiKey: '',
     model: 'gpt-4o',
+    authMode: 'api_key',
+    oauthEmail: null,
+    oauthAccessToken: null,
+    oauthClientId: '',
     loadSettings: mockLoadSettings,
     saveSettings: mockSaveSettings,
+    setOAuthTokens: mockSetOAuthTokens,
+    setAuthMode: mockSetAuthMode,
+    setOAuthClientId: mockSetOAuthClientId,
+    clearOAuth: mockClearOAuth,
   }),
 }))
 
@@ -86,14 +114,26 @@ describe('SettingsPage', () => {
     expect(screen.getAllByText('OpenAI').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('Anthropic')).toBeInTheDocument()
     expect(screen.getByText('Ollama')).toBeInTheDocument()
+    expect(screen.getByText('Alibaba Qwen')).toBeInTheDocument()
   })
 
   it('shows config panel when provider is selected', () => {
     render(<SettingsPage />)
 
-    // OpenAI is selected by default
+    // OpenAI is selected by default — shows auth toggle for OAuth-capable providers
     expect(screen.getByText('ai.apiKey')).toBeInTheDocument()
     expect(screen.getByText('ai.model')).toBeInTheDocument()
+  })
+
+  it('shows auth mode toggle for OAuth-capable providers', () => {
+    render(<SettingsPage />)
+
+    // OpenAI supports OAuth — the config panel has the auth toggle buttons
+    // Use getAllByRole since provider cards also contain text
+    const apiKeyButtons = screen.getAllByRole('button', { name: /^API Key$/i })
+    expect(apiKeyButtons.length).toBeGreaterThanOrEqual(1)
+    const signInButtons = screen.getAllByRole('button', { name: /^Sign In$/i })
+    expect(signInButtons.length).toBeGreaterThanOrEqual(1)
   })
 
   it('save button calls saveSettings', async () => {
@@ -139,5 +179,14 @@ describe('SettingsPage', () => {
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith('status.error')
     })
+  })
+
+  it('shows Sign In tab content when clicked for OpenAI', async () => {
+    const user = userEvent.setup()
+    render(<SettingsPage />)
+
+    await user.click(screen.getByRole('button', { name: /Sign In/i }))
+
+    expect(screen.getByRole('button', { name: /Sign in with ChatGPT/i })).toBeInTheDocument()
   })
 })

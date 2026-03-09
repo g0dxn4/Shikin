@@ -103,10 +103,33 @@ export type AIProvider =
   | 'deepseek'
   | 'openrouter'
   | 'ollama'
+  | 'alibaba'
 
-export function createLanguageModel(provider: AIProvider, apiKey: string, model?: string) {
+export interface ModelOptions {
+  authMode?: 'api_key' | 'oauth'
+  codexAccountId?: string
+}
+
+export function createLanguageModel(
+  provider: AIProvider,
+  apiKey: string,
+  model?: string,
+  options?: ModelOptions
+) {
   switch (provider) {
     case 'openai': {
+      if (options?.authMode === 'oauth') {
+        const openai = createOpenAI({
+          baseURL: 'https://chatgpt.com/backend-api',
+          apiKey,
+          headers: {
+            'OpenAI-Beta': 'responses=experimental',
+            'chatgpt-account-id': options.codexAccountId || '',
+            'originator': 'codex_cli_rs',
+          },
+        })
+        return openai.chat(model || 'gpt-4o')
+      }
       const openai = createOpenAI({ apiKey })
       return openai(model || 'gpt-4o-mini')
     }
@@ -154,11 +177,23 @@ export function createLanguageModel(provider: AIProvider, apiKey: string, model?
       })
       return ollama.chat(model || 'llama3.2')
     }
+    case 'alibaba': {
+      const alibaba = createOpenAI({
+        baseURL: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+        apiKey,
+      })
+      return alibaba.chat(model || 'qwen3-coder-plus')
+    }
   }
 }
 
-export function createAgent(provider: AIProvider, apiKey: string, model?: string) {
-  const languageModel = createLanguageModel(provider, apiKey, model)
+export function createAgent(
+  provider: AIProvider,
+  apiKey: string,
+  model?: string,
+  options?: ModelOptions
+) {
+  const languageModel = createLanguageModel(provider, apiKey, model, options)
 
   return new ToolLoopAgent({
     model: languageModel,

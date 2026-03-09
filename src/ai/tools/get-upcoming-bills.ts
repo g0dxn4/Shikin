@@ -3,8 +3,6 @@ import { z } from 'zod'
 import { fromCentavos } from '@/lib/money'
 import { query } from '@/lib/database'
 import type { Account } from '@/types/database'
-import Database from '@tauri-apps/plugin-sql'
-import { homeDir } from '@tauri-apps/api/path'
 import dayjs from 'dayjs'
 
 interface UpcomingBill {
@@ -67,42 +65,8 @@ export const getUpcomingBills = tool({
       }
     }
 
-    // 2. Subscriptions from Subby
-    try {
-      const home = await homeDir()
-      const subbyDb = await Database.load(`sqlite:${home}/.local/share/com.newstella.subby/subby.db`)
-
-      const subs = await subbyDb.select<Array<{
-        name: string
-        amount: number
-        currency: string
-        next_payment_date: string | null
-      }>>(
-        `SELECT name, amount, currency, next_payment_date
-         FROM subscriptions
-         WHERE status = 'active' AND next_payment_date IS NOT NULL
-         ORDER BY next_payment_date ASC`
-      )
-
-      for (const sub of subs) {
-        if (sub.next_payment_date) {
-          const dueDate = dayjs(sub.next_payment_date)
-          if ((dueDate.isAfter(today) || dueDate.isSame(today, 'day')) &&
-              (dueDate.isBefore(cutoff) || dueDate.isSame(cutoff, 'day'))) {
-            bills.push({
-              name: sub.name,
-              amount: sub.amount,
-              currency: sub.currency,
-              dueDate: dueDate.format('YYYY-MM-DD'),
-              source: 'subscription',
-              daysUntilDue: dueDate.diff(today, 'day'),
-            })
-          }
-        }
-      }
-    } catch {
-      // Subby not available — continue without subscription data
-    }
+    // 2. Subscriptions from Subby — not available in browser mode
+    // Future: integrate via Subby MCP server or data import
 
     // 3. Recurring transactions (pattern from last 2 months)
     const recurringTx = await query<{

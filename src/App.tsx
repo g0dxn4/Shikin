@@ -25,6 +25,9 @@ const Notebook = lazy(() => import('@/pages/notebook').then((m) => ({ default: m
 const SettingsPage = lazy(() =>
   import('@/pages/settings').then((m) => ({ default: m.SettingsPage }))
 )
+const OAuthCallback = lazy(() =>
+  import('@/pages/oauth-callback').then((m) => ({ default: m.OAuthCallback }))
+)
 
 export default function App() {
   const loadSettings = useAIStore((s) => s.loadSettings)
@@ -50,6 +53,7 @@ export default function App() {
               <Route path="/notebook" element={<Notebook />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
+            <Route path="/oauth/callback" element={<OAuthCallback />} />
           </Routes>
         </Suspense>
       </BrowserRouter>

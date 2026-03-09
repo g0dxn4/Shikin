@@ -1,5 +1,5 @@
 import { getFinnhubKey } from '@/lib/price-service'
-import { load } from '@tauri-apps/plugin-store'
+import { load } from '@/lib/storage'
 
 export interface NewsArticle {
   title: string

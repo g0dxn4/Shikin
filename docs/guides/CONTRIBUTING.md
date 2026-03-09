@@ -428,10 +428,10 @@ build: upgrade AI SDK to v6.1
 
 ## Adding a New AI Tool
 
-See the detailed guide in [AI-TOOLS.md](AI-TOOLS.md#adding-a-new-tool).
+See the detailed guide in [AI-TOOLS.md](../reference/AI-TOOLS.md#adding-a-new-tool).
 
 ---
 
 ## Adding a Database Migration
 
-See the migration guide in [DATABASE.md](DATABASE.md#migration-strategy).
+See the migration guide in [DATABASE.md](../reference/DATABASE.md#migration-strategy).

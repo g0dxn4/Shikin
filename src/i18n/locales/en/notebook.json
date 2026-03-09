@@ -1,0 +1,13 @@
+{
+  "title": "Notebook",
+  "fileTree": "Files",
+  "empty": "No notes yet. Ask Val to write research notes or generate a portfolio review.",
+  "selectNote": "Select a Note",
+  "selectNoteDescription": "Choose a note from the file tree or use a quick link above.",
+  "quickLinks": {
+    "latestReview": "Latest Review",
+    "holdings": "Holdings",
+    "signals": "Signals",
+    "education": "Education"
+  }
+}

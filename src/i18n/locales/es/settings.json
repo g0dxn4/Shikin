@@ -4,6 +4,7 @@
     "general": "General",
     "ai": "Proveedor de IA",
     "data": "Datos",
+    "dataApis": "APIs de Datos del Mercado",
     "about": "Acerca de"
   },
   "language": {
@@ -20,13 +21,33 @@
     "apiKeyPlaceholder": "Ingresa tu clave API",
     "model": "Modelo",
     "testConnection": "Probar Conexi\u00f3n",
+    "testing": "Probando...",
+    "testSuccess": "Conexi\u00f3n exitosa",
+    "testFailed": "Conexi\u00f3n fallida",
     "connected": "Conectado",
-    "notConfigured": "No configurado"
+    "notConfigured": "No configurado",
+    "configured": "Configurado",
+    "noKeyNeeded": "No necesita clave API",
+    "searchModels": "Buscar modelos...",
+    "enterModelId": "Ingresa ID del modelo",
+    "noModels": "No se encontraron modelos",
+    "loadingModels": "Cargando modelos...",
+    "categories": {
+      "subscription": "Suscripci\u00f3n",
+      "api": "Clave API",
+      "gateway": "Gateway",
+      "local": "Local"
+    }
   },
   "data": {
     "export": "Exportar Datos",
     "import": "Importar Datos",
     "reset": "Restablecer Datos",
-    "resetWarning": "Esto eliminar\u00e1 permanentemente todos tus datos. Esta acci\u00f3n no se puede deshacer."
+    "resetWarning": "Esto eliminará permanentemente todos tus datos. Esta acción no se puede deshacer."
+  },
+  "dataApis": {
+    "description": "Claves API opcionales para obtener precios de acciones y noticias financieras. Niveles gratuitos disponibles.",
+    "alphaVantageHint": "Nivel gratuito: 25 solicitudes/día. Obtén una clave en alphavantage.co",
+    "finnhubHint": "Nivel gratuito: 60 solicitudes/min. Obtén una clave en finnhub.io"
   }
 }

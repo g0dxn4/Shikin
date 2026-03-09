@@ -1,0 +1,36 @@
+{
+  "title": "Budgets",
+  "addBudget": "Add Budget",
+  "editBudget": "Edit Budget",
+  "deleteBudget": "Delete Budget",
+  "deleteConfirm": "Are you sure you want to delete this budget? This action cannot be undone.",
+  "form": {
+    "name": "Budget Name",
+    "namePlaceholder": "e.g. Groceries Budget",
+    "category": "Category",
+    "categoryPlaceholder": "Select a category",
+    "amount": "Budget Amount",
+    "period": "Period"
+  },
+  "periods": {
+    "weekly": "Weekly",
+    "monthly": "Monthly",
+    "yearly": "Yearly"
+  },
+  "card": {
+    "spent": "Spent",
+    "of": "of",
+    "remaining": "remaining",
+    "overBudget": "over budget"
+  },
+  "toast": {
+    "created": "Budget created successfully",
+    "updated": "Budget updated successfully",
+    "deleted": "Budget deleted successfully",
+    "error": "Something went wrong"
+  },
+  "empty": {
+    "title": "No budgets yet",
+    "description": "Create your first budget to start tracking your spending limits."
+  }
+}

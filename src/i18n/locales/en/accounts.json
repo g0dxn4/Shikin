@@ -26,6 +26,8 @@
     "deleted": "Account deleted successfully",
     "error": "Something went wrong"
   },
+  "totalBalance": "Total Balance",
+  "accountCount": "account(s)",
   "empty": {
     "title": "No accounts yet",
     "description": "Add your first account to start tracking your finances."

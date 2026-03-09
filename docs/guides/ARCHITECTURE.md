@@ -321,7 +321,7 @@ The following extension points are designed for the future extension system:
 | `registerWidget` | At extension load time | Adds a dashboard widget |
 | `registerRoute` | At extension load time | Adds a navigation route |
 
-Extensions will have access to the database through a sandboxed API with permission-based access control. See [EXTENSIONS.md](EXTENSIONS.md) for the full design.
+Extensions will have access to the database through a sandboxed API with permission-based access control. See [EXTENSIONS.md](../reference/EXTENSIONS.md) for the full design.
 
 ---
 

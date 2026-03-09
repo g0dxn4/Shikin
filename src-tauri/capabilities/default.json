@@ -11,6 +11,23 @@
     "sql:allow-execute",
     "sql:allow-select",
     "sql:allow-close",
-    "store:default"
+    "store:default",
+    "fs:default",
+    "fs:allow-app-read",
+    "fs:allow-app-write",
+    "fs:allow-app-read-recursive",
+    "fs:allow-app-write-recursive",
+    "fs:allow-appcache-read",
+    "fs:allow-appcache-write",
+    "fs:allow-appdata-read",
+    "fs:allow-appdata-write",
+    "fs:allow-appdata-read-recursive",
+    "fs:allow-appdata-write-recursive",
+    "fs:allow-exists",
+    "fs:allow-mkdir",
+    "fs:allow-read-dir",
+    "fs:allow-read-file",
+    "fs:allow-remove",
+    "fs:allow-write-file"
   ]
 }

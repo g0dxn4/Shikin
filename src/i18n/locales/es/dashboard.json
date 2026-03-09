@@ -12,5 +12,13 @@
     "monthlyIncome": "Ingresos Mensuales",
     "monthlyExpenses": "Gastos Mensuales",
     "savings": "Tasa de Ahorro"
+  },
+  "charts": {
+    "spending": "Gastos Mensuales",
+    "categories": "Por Categor\u00eda"
+  },
+  "quickActions": {
+    "addTransaction": "Agregar Transacci\u00f3n",
+    "askVal": "Preguntar a Val"
   }
 }

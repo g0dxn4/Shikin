@@ -1,0 +1,36 @@
+{
+  "title": "Presupuestos",
+  "addBudget": "Agregar Presupuesto",
+  "editBudget": "Editar Presupuesto",
+  "deleteBudget": "Eliminar Presupuesto",
+  "deleteConfirm": "¿Estás seguro de que deseas eliminar este presupuesto? Esta acción no se puede deshacer.",
+  "form": {
+    "name": "Nombre del Presupuesto",
+    "namePlaceholder": "ej. Presupuesto de Alimentos",
+    "category": "Categoría",
+    "categoryPlaceholder": "Seleccionar una categoría",
+    "amount": "Monto del Presupuesto",
+    "period": "Período"
+  },
+  "periods": {
+    "weekly": "Semanal",
+    "monthly": "Mensual",
+    "yearly": "Anual"
+  },
+  "card": {
+    "spent": "Gastado",
+    "of": "de",
+    "remaining": "restante",
+    "overBudget": "sobre presupuesto"
+  },
+  "toast": {
+    "created": "Presupuesto creado exitosamente",
+    "updated": "Presupuesto actualizado exitosamente",
+    "deleted": "Presupuesto eliminado exitosamente",
+    "error": "Algo salió mal"
+  },
+  "empty": {
+    "title": "Sin presupuestos aún",
+    "description": "Crea tu primer presupuesto para comenzar a rastrear tus límites de gasto."
+  }
+}

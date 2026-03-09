@@ -8,6 +8,8 @@
     "accounts": "Accounts",
     "budgets": "Budgets",
     "investments": "Investments",
+    "subscriptions": "Subscriptions",
+    "notebook": "Notebook",
     "settings": "Settings",
     "ai": "AI Assistant"
   },

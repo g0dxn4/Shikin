@@ -1,0 +1,49 @@
+{
+  "title": "Subscriptions",
+  "connection": {
+    "connected": "Connected to Subby",
+    "disconnected": "Subby not connected",
+    "configure": "Configure in Settings",
+    "setupTitle": "Connect to Subby",
+    "setupDescription": "Valute integrates with Subby to track your subscriptions.",
+    "step1": "Install Subby from the ASF suite",
+    "step2": "Make sure Subby has been run at least once",
+    "step3": "Subscriptions will be loaded automatically from Subby's database"
+  },
+  "summary": {
+    "monthlyTotal": "Monthly Total",
+    "yearlyTotal": "Yearly Total",
+    "activeCount": "Active Subscriptions"
+  },
+  "status": {
+    "trial": "Trial",
+    "active": "Active",
+    "paused": "Paused",
+    "pending_cancellation": "Cancelling",
+    "grace_period": "Grace Period",
+    "cancelled": "Cancelled"
+  },
+  "actions": {
+    "markPaid": "Mark Paid",
+    "skip": "Skip"
+  },
+  "tabs": {
+    "active": "Active",
+    "inactive": "Inactive"
+  },
+  "upcoming": {
+    "title": "Upcoming Payments",
+    "next30Days": "Next 30 days"
+  },
+  "cycle": {
+    "weekly": "Weekly",
+    "monthly": "Monthly",
+    "quarterly": "Quarterly",
+    "yearly": "Yearly",
+    "custom": "Custom"
+  },
+  "empty": {
+    "title": "No subscriptions found",
+    "description": "Your subscriptions from Subby will appear here."
+  }
+}

@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://api.openai.com https://api.anthropic.com https://openrouter.ai http://localhost:11434"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://api.openai.com https://api.anthropic.com https://openrouter.ai https://generativelanguage.googleapis.com https://api.mistral.ai https://api.x.ai https://api.groq.com https://api.deepseek.com http://localhost:11434 https://www.alphavantage.co https://api.coingecko.com https://finnhub.io https://newsapi.org https://house-stock-watcher-data.s3-us-west-2.amazonaws.com https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com"
     }
   },
   "bundle": {

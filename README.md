@@ -120,7 +120,7 @@ ollama pull llama3.2
 Valute/
 ├── src/                      # Frontend source code
 │   ├── ai/                   # AI agent, transport, and tool definitions
-│   │   ├── tools/            # Individual AI tool implementations (13 tools)
+│   │   ├── tools/            # Individual AI tool implementations (24 tools)
 │   │   ├── agent.ts          # ToolLoopAgent configuration
 │   │   ├── memory-loader.ts  # System prompt memory injection
 │   │   ├── compaction.ts     # Conversation compaction/summarization
@@ -155,19 +155,19 @@ Valute/
 
 | Document | Description |
 |----------|-------------|
-| [Architecture](docs/ARCHITECTURE.md) | System architecture, component hierarchy, data flow diagrams |
-| [Database](docs/DATABASE.md) | Complete SQLite schema, conventions, migrations, example queries |
-| [AI Tools](docs/AI-TOOLS.md) | AI tool definitions, schemas, system prompt, tool loop architecture |
-| [API](docs/API.md) | Local HTTP API specification for the extension system |
-| [Extensions](docs/EXTENSIONS.md) | Extension system design, manifest format, hook points |
-| [Contributing](docs/CONTRIBUTING.md) | Setup instructions, code conventions, PR process |
-| [Roadmap](docs/ROADMAP.md) | Development roadmap with 10 epics |
+| [Architecture](docs/guides/ARCHITECTURE.md) | System architecture, component hierarchy, data flow diagrams |
+| [Database](docs/reference/DATABASE.md) | Complete SQLite schema, conventions, migrations, example queries |
+| [AI Tools](docs/reference/AI-TOOLS.md) | AI tool definitions, schemas, system prompt, tool loop architecture |
+| [API](docs/reference/API.md) | Local HTTP API specification for the extension system |
+| [Extensions](docs/reference/EXTENSIONS.md) | Extension system design, manifest format, hook points |
+| [Contributing](docs/guides/CONTRIBUTING.md) | Setup instructions, code conventions, PR process |
+| [Roadmap](docs/planning/ROADMAP.md) | Development roadmap with 10 epics |
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](docs/CONTRIBUTING.md) for detailed instructions on setting up the development environment, code conventions, and the pull request process.
+See [CONTRIBUTING.md](docs/guides/CONTRIBUTING.md) for detailed instructions on setting up the development environment, code conventions, and the pull request process.
 
 ---
 

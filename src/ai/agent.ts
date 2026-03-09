@@ -1,6 +1,9 @@
 import { ToolLoopAgent } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createAnthropic } from '@ai-sdk/anthropic'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createMistral } from '@ai-sdk/mistral'
+import { createXai } from '@ai-sdk/xai'
 import {
   addTransaction,
   getSpendingSummary,
@@ -26,6 +29,12 @@ import {
   getNetWorth,
   manageInvestment,
   getUpcomingBills,
+  writeNotebook,
+  readNotebook,
+  listNotebook,
+  getFinancialNews,
+  getCongressionalTrades,
+  generatePortfolioReview,
 } from './tools'
 import { loadCoreMemories } from './memory-loader'
 
@@ -51,6 +60,18 @@ Capabilities:
 - Net worth: calculate total net worth including investments
 - Investment management: add, update, and delete investment holdings
 - Bill reminders: see upcoming bills from credit cards, subscriptions, and recurring expenses
+- Investment research: fetch financial news, check congressional trading disclosures
+- Notebook: read, write, and organize research notes, portfolio reviews, and educational content
+- Portfolio reviews: generate weekly performance summaries saved to the notebook
+
+Investment Intelligence (IMPORTANT — you are a patient teacher, not a trader):
+- You NEVER give buy/sell advice. Instead, frame analysis as "things to consider" or "worth researching."
+- You proactively offer educational context — if a user asks "what's an ETF?", explain clearly and save to education/ in the notebook.
+- When discussing investments, always include a brief disclaimer that this is informational, not financial advice.
+- Use your notebook for research continuity: "Last week I noted that..." — reference previous findings.
+- Congressional trading data is interesting public information, not a trading strategy. Always include the disclaimer.
+- Be honest about uncertainties — markets are unpredictable and you're here to help users learn, not predict.
+- When analyzing holdings, consider fundamentals, news context, and portfolio diversification — but always as educational framing.
 
 Memory Management (IMPORTANT — you are a persistent assistant with personal memory):
 - You MUST actively maintain a personal memory log about the user. This is core to who you are as Val.
@@ -72,17 +93,19 @@ Guidelines:
 - Always query before answering data questions — never guess
 - When deleting, confirm the item details before proceeding`
 
-export type AIProvider = 'openai' | 'anthropic' | 'ollama' | 'openrouter'
+export type AIProvider =
+  | 'openai'
+  | 'anthropic'
+  | 'google'
+  | 'mistral'
+  | 'xai'
+  | 'groq'
+  | 'deepseek'
+  | 'openrouter'
+  | 'ollama'
 
 export function createLanguageModel(provider: AIProvider, apiKey: string, model?: string) {
   switch (provider) {
-    case 'openrouter': {
-      const openrouter = createOpenAI({
-        baseURL: 'https://openrouter.ai/api/v1',
-        apiKey,
-      })
-      return openrouter.chat(model || 'anthropic/claude-sonnet-4')
-    }
     case 'openai': {
       const openai = createOpenAI({ apiKey })
       return openai(model || 'gpt-4o-mini')
@@ -90,6 +113,39 @@ export function createLanguageModel(provider: AIProvider, apiKey: string, model?
     case 'anthropic': {
       const anthropic = createAnthropic({ apiKey })
       return anthropic(model || 'claude-sonnet-4-20250514')
+    }
+    case 'google': {
+      const google = createGoogleGenerativeAI({ apiKey })
+      return google(model || 'gemini-2.0-flash')
+    }
+    case 'mistral': {
+      const mistral = createMistral({ apiKey })
+      return mistral(model || 'mistral-large-latest')
+    }
+    case 'xai': {
+      const xai = createXai({ apiKey })
+      return xai(model || 'grok-2')
+    }
+    case 'groq': {
+      const groq = createOpenAI({
+        baseURL: 'https://api.groq.com/openai/v1',
+        apiKey,
+      })
+      return groq.chat(model || 'llama-3.3-70b-versatile')
+    }
+    case 'deepseek': {
+      const ds = createOpenAI({
+        baseURL: 'https://api.deepseek.com/v1',
+        apiKey,
+      })
+      return ds.chat(model || 'deepseek-chat')
+    }
+    case 'openrouter': {
+      const openrouter = createOpenAI({
+        baseURL: 'https://openrouter.ai/api/v1',
+        apiKey,
+      })
+      return openrouter.chat(model || 'anthropic/claude-sonnet-4')
     }
     case 'ollama': {
       const ollama = createOpenAI({
@@ -131,6 +187,12 @@ export function createAgent(provider: AIProvider, apiKey: string, model?: string
       getNetWorth,
       manageInvestment,
       getUpcomingBills,
+      writeNotebook,
+      readNotebook,
+      listNotebook,
+      getFinancialNews,
+      getCongressionalTrades,
+      generatePortfolioReview,
     },
     instructions: BASE_SYSTEM_PROMPT,
     maxOutputTokens: 2048,

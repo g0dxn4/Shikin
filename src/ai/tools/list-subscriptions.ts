@@ -83,7 +83,7 @@ export const listSubscriptions = tool({
         },
         message: `${subs.length} subscription(s). Estimated monthly: $${totalMonthly.toFixed(2)}.`,
       }
-    } catch (error) {
+    } catch {
       return {
         success: false,
         message: 'Could not connect to Subby. Make sure Subby is installed and has been run at least once.',

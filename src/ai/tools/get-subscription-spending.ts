@@ -88,7 +88,7 @@ export const getSubscriptionSpending = tool({
         },
         message: `${subs.length} active subscriptions across ${categories.length} categories. Monthly burn: $${totalMonthly.toFixed(2)}, yearly: $${(totalMonthly * 12).toFixed(2)}.`,
       }
-    } catch (error) {
+    } catch {
       return {
         success: false,
         message: 'Could not connect to Subby. Make sure Subby is installed and has been run at least once.',

@@ -8,6 +8,10 @@ import enSettings from './locales/en/settings.json'
 import enAi from './locales/en/ai.json'
 import enAccounts from './locales/en/accounts.json'
 import enTransactions from './locales/en/transactions.json'
+import enBudgets from './locales/en/budgets.json'
+import enSubscriptions from './locales/en/subscriptions.json'
+import enInvestments from './locales/en/investments.json'
+import enNotebook from './locales/en/notebook.json'
 
 import esCommon from './locales/es/common.json'
 import esDashboard from './locales/es/dashboard.json'
@@ -15,6 +19,10 @@ import esSettings from './locales/es/settings.json'
 import esAi from './locales/es/ai.json'
 import esAccounts from './locales/es/accounts.json'
 import esTransactions from './locales/es/transactions.json'
+import esBudgets from './locales/es/budgets.json'
+import esSubscriptions from './locales/es/subscriptions.json'
+import esInvestments from './locales/es/investments.json'
+import esNotebook from './locales/es/notebook.json'
 
 export const resources = {
   en: {
@@ -24,6 +32,10 @@ export const resources = {
     ai: enAi,
     accounts: enAccounts,
     transactions: enTransactions,
+    budgets: enBudgets,
+    subscriptions: enSubscriptions,
+    investments: enInvestments,
+    notebook: enNotebook,
   },
   es: {
     common: esCommon,
@@ -32,6 +44,10 @@ export const resources = {
     ai: esAi,
     accounts: esAccounts,
     transactions: esTransactions,
+    budgets: esBudgets,
+    subscriptions: esSubscriptions,
+    investments: esInvestments,
+    notebook: esNotebook,
   },
 } as const
 
@@ -42,7 +58,7 @@ i18n
     resources,
     fallbackLng: 'en',
     defaultNS: 'common',
-    ns: ['common', 'dashboard', 'settings', 'ai', 'accounts', 'transactions'],
+    ns: ['common', 'dashboard', 'settings', 'ai', 'accounts', 'transactions', 'budgets', 'subscriptions', 'investments', 'notebook'],
     interpolation: {
       escapeValue: false,
     },

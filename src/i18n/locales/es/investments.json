@@ -1,0 +1,72 @@
+{
+  "title": "Inversiones",
+  "addInvestment": "Agregar Inversión",
+  "editInvestment": "Editar Inversión",
+  "deleteInvestment": "Eliminar Inversión",
+  "deleteConfirm": "¿Estás seguro de que quieres eliminar esta inversión? Esta acción no se puede deshacer.",
+  "form": {
+    "symbol": "Símbolo",
+    "name": "Nombre",
+    "type": "Tipo",
+    "shares": "Acciones",
+    "avgCost": "Costo Prom / Acción",
+    "currency": "Moneda",
+    "account": "Cuenta",
+    "noAccount": "Ninguna",
+    "notes": "Notas",
+    "notesPlaceholder": "Notas opcionales sobre esta inversión..."
+  },
+  "types": {
+    "stock": "Acción",
+    "etf": "ETF",
+    "crypto": "Cripto",
+    "bond": "Bono",
+    "mutual_fund": "Fondo Mutuo",
+    "other": "Otro"
+  },
+  "summary": {
+    "portfolioValue": "Valor del Portafolio",
+    "totalGainLoss": "Ganancia/Pérdida Total",
+    "costBasis": "Base de Costo",
+    "lastUpdated": "Última Actualización",
+    "never": "Nunca",
+    "refresh": "Actualizar Precios"
+  },
+  "chart": {
+    "portfolioValue": "Valor del Portafolio",
+    "allocation": "Asignación",
+    "noData": "Sin datos de precios aún"
+  },
+  "holdings": {
+    "title": "Tenencias",
+    "stale": "Los datos de precios pueden estar desactualizados",
+    "sort": {
+      "value": "Valor",
+      "gainLoss": "Ganancia",
+      "name": "Nombre",
+      "type": "Tipo"
+    },
+    "header": {
+      "name": "Nombre",
+      "type": "Tipo",
+      "shares": "Acciones",
+      "avgCost": "Costo Prom",
+      "price": "Precio",
+      "value": "Valor",
+      "gainLoss": "Ganancia"
+    }
+  },
+  "empty": {
+    "title": "Sin Inversiones",
+    "description": "Agrega tu primera tenencia para rastrear tu portafolio."
+  },
+  "toast": {
+    "created": "Inversión agregada",
+    "updated": "Inversión actualizada",
+    "deleted": "Inversión eliminada",
+    "error": "Algo salió mal",
+    "pricesUpdated": "Precios actualizados",
+    "noPrices": "Sin precios nuevos disponibles",
+    "refreshError": "Error al actualizar precios"
+  }
+}

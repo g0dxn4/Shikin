@@ -6,6 +6,8 @@ import {
   Landmark,
   PiggyBank,
   TrendingUp,
+  Repeat,
+  BookOpen,
   Settings,
   Sparkles,
   PanelLeftClose,
@@ -21,6 +23,8 @@ const navItems = [
   { path: '/accounts', icon: Landmark, labelKey: 'nav.accounts' },
   { path: '/budgets', icon: PiggyBank, labelKey: 'nav.budgets' },
   { path: '/investments', icon: TrendingUp, labelKey: 'nav.investments' },
+  { path: '/subscriptions', icon: Repeat, labelKey: 'nav.subscriptions' },
+  { path: '/notebook', icon: BookOpen, labelKey: 'nav.notebook' },
 ] as const
 
 export function Sidebar() {
@@ -29,7 +33,7 @@ export function Sidebar() {
 
   return (
     <aside
-      className="glass-sidebar flex h-screen flex-col transition-all duration-200"
+      className="glass-sidebar hidden h-screen flex-col transition-[width] duration-200 ease-out md:flex"
       style={{ width: sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH }}
     >
       {/* Header */}
@@ -41,7 +45,7 @@ export function Sidebar() {
         )}
         <button
           onClick={toggleSidebar}
-          className="text-muted-foreground hover:text-foreground rounded-lg p-1.5 hover:bg-white/5"
+          className="text-muted-foreground hover:text-foreground rounded-lg p-1.5 transition-colors hover:bg-white/5"
         >
           {sidebarCollapsed ? <PanelLeft size={18} /> : <PanelLeftClose size={18} />}
         </button>
@@ -53,7 +57,13 @@ export function Sidebar() {
           <NavLink
             key={path}
             to={path}
-            className={({ isActive }) => cn('sidebar-link', isActive && 'sidebar-link-active')}
+            className={({ isActive }) =>
+              cn(
+                'sidebar-link',
+                isActive && 'sidebar-link-active',
+                sidebarCollapsed && 'justify-center px-0'
+              )
+            }
           >
             <Icon size={18} />
             {!sidebarCollapsed && <span>{t(labelKey)}</span>}
@@ -63,13 +73,25 @@ export function Sidebar() {
 
       {/* Bottom actions */}
       <div className="border-border space-y-0.5 border-t px-2 py-2">
-        <button onClick={toggleAIPanel} className="sidebar-link w-full text-left">
+        <button
+          onClick={toggleAIPanel}
+          className={cn(
+            'sidebar-link w-full text-left',
+            sidebarCollapsed && 'justify-center px-0'
+          )}
+        >
           <Sparkles size={18} />
           {!sidebarCollapsed && <span>{t('nav.ai')}</span>}
         </button>
         <NavLink
           to="/settings"
-          className={({ isActive }) => cn('sidebar-link', isActive && 'sidebar-link-active')}
+          className={({ isActive }) =>
+            cn(
+              'sidebar-link',
+              isActive && 'sidebar-link-active',
+              sidebarCollapsed && 'justify-center px-0'
+            )
+          }
         >
           <Settings size={18} />
           {!sidebarCollapsed && <span>{t('nav.settings')}</span>}

@@ -26,6 +26,8 @@
     "deleted": "Cuenta eliminada exitosamente",
     "error": "Algo salió mal"
   },
+  "totalBalance": "Balance Total",
+  "accountCount": "cuenta(s)",
   "empty": {
     "title": "Sin cuentas aún",
     "description": "Agrega tu primera cuenta para comenzar a rastrear tus finanzas."

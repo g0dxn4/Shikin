@@ -4,6 +4,7 @@
     "general": "General",
     "ai": "AI Provider",
     "data": "Data",
+    "dataApis": "Market Data APIs",
     "about": "About"
   },
   "language": {
@@ -20,13 +21,33 @@
     "apiKeyPlaceholder": "Enter your API key",
     "model": "Model",
     "testConnection": "Test Connection",
+    "testing": "Testing...",
+    "testSuccess": "Connection successful",
+    "testFailed": "Connection failed",
     "connected": "Connected",
-    "notConfigured": "Not configured"
+    "notConfigured": "Not configured",
+    "configured": "Configured",
+    "noKeyNeeded": "No API key needed",
+    "searchModels": "Search models...",
+    "enterModelId": "Enter model ID",
+    "noModels": "No models found",
+    "loadingModels": "Loading models...",
+    "categories": {
+      "subscription": "Subscription",
+      "api": "API Key",
+      "gateway": "Gateway",
+      "local": "Local"
+    }
   },
   "data": {
     "export": "Export Data",
     "import": "Import Data",
     "reset": "Reset All Data",
     "resetWarning": "This will permanently delete all your data. This action cannot be undone."
+  },
+  "dataApis": {
+    "description": "Optional API keys for fetching stock prices and financial news. Free tiers available.",
+    "alphaVantageHint": "Free tier: 25 requests/day. Get a key at alphavantage.co",
+    "finnhubHint": "Free tier: 60 requests/min. Get a key at finnhub.io"
   }
 }

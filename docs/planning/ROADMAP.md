@@ -26,14 +26,14 @@ This document outlines the development roadmap for Valute, organized into 10 epi
 | Install and configure shadcn/ui component library | Done | 13 components installed |
 | Set up ESLint + Prettier with zero-warning policy | Done | Tailwind plugin for class sorting |
 | Set up Vitest + Testing Library | Done | jsdom environment |
-| Create SQLite schema (migration 001) | Done | 14 tables, 12 indexes, 15 seed categories |
+| Create SQLite schema (migrations 001-003) | Done | 16 tables, 12 indexes, 15 seed categories, credit card fields |
 | Implement database access layer (`query`, `execute`) | Done | Singleton connection, typed wrappers |
 | Implement money utilities (centavo conversion) | Done | `toCentavos`, `fromCentavos`, `formatMoney` |
 | Implement ULID generation | Done | `ulidx` library |
-| Set up Zustand stores (UI, AI settings) | Done | `useUIStore`, `useAIStore` |
-| Set up i18n with English and Spanish | Done | 4 namespaces per language |
+| Set up Zustand stores (UI, AI, accounts, transactions, categories, conversations) | Done | 6 stores |
+| Set up i18n with English and Spanish | Done | 6 namespaces per language |
 | Create AppShell layout (Sidebar + Main + AI Panel) | Done | Collapsible sidebar, sliding AI panel |
-| Configure Tauri CSP for AI provider endpoints | Done | OpenAI, Anthropic, Ollama |
+| Configure Tauri CSP for AI provider endpoints | Done | OpenAI, Anthropic, OpenRouter, Ollama |
 | Set up tauri-plugin-store for encrypted settings | Done | API keys stored locally |
 | Set up code splitting with React.lazy | Done | All pages lazy-loaded |
 | Implement manual chunk splitting in Vite | Done | vendor-react, vendor-ui, vendor-forms, vendor-utils |
@@ -49,12 +49,12 @@ This document outlines the development roadmap for Valute, organized into 10 epi
 
 | Task | Status | Notes |
 |------|--------|-------|
-| Transaction list page with table/card view | Planned | Paginated, sortable |
-| Transaction creation form | Planned | React Hook Form + Zod validation |
-| Transaction editing | Planned | Inline or modal edit |
-| Transaction deletion with balance reversal | Planned | Confirmation dialog |
-| Category and subcategory selector | Planned | Searchable dropdown |
-| Date range filtering | Planned | Custom date picker |
+| Transaction list page with table/card view | Done | Paginated, sortable, date filtering |
+| Transaction creation form | Done | Dialog + form with React Hook Form + Zod validation |
+| Transaction editing | Done | Modal edit via dialog |
+| Transaction deletion with balance reversal | Done | Confirmation dialog |
+| Category and subcategory selector | Done | Dropdown in transaction form |
+| Date range filtering | Done | Date filtering on transactions page |
 | Full-text search on descriptions | Planned | SQLite FTS5 or LIKE |
 | Tag management (add, remove, filter by tag) | Planned | JSON array in tags column |
 | Transaction import from CSV | Planned | Column mapping UI |
@@ -71,16 +71,16 @@ This document outlines the development roadmap for Valute, organized into 10 epi
 
 | Task | Status | Notes |
 |------|--------|-------|
-| Account list page | Planned | Cards showing name, type, balance |
-| Account creation form | Planned | Type selector, initial balance |
-| Account editing | Planned | Name, icon, color |
-| Account archival (soft delete) | Planned | Hide from active views |
+| Account list page | Done | Cards showing name, type, balance |
+| Account creation form | Done | Type selector, initial balance, credit card fields |
+| Account editing | Done | Name, type, balance, credit card settings |
+| Account archival (soft delete) | Done | Delete with confirmation dialog |
+| Credit card balance tracking | Done | Migration 003: credit_limit, statement_closing_day, payment_due_day |
+| Net worth calculation | Done | `getNetWorth` AI tool (assets minus liabilities) |
 | Account balance history chart | Planned | Recharts line chart |
 | Transfer between accounts | Planned | Linked transaction pair |
 | Account-scoped transaction view | Planned | Filter transactions by account |
 | Multi-currency account support | Planned | Per-account currency setting |
-| Net worth calculation | Planned | Assets minus liabilities |
-| Credit card balance tracking | Planned | Negative balances, payment tracking |
 
 **Dependencies:** Epic 1.
 
@@ -92,6 +92,7 @@ This document outlines the development roadmap for Valute, organized into 10 epi
 
 | Task | Status | Notes |
 |------|--------|-------|
+| Budget AI tools (`createBudget`, `getBudgetStatus`, `deleteBudget`) | Done | Full CRUD via AI chat |
 | Budget list page | Planned | Progress bars showing spent vs. limit |
 | Budget creation form | Planned | Category, amount, period |
 | Budget editing and deletion | Planned | Adjustable limits |
@@ -114,21 +115,37 @@ This document outlines the development roadmap for Valute, organized into 10 epi
 |------|--------|-------|
 | `addTransaction` tool | Done | Full implementation with category matching |
 | `getSpendingSummary` tool | Done | Period-based spending breakdown |
-| `getAccountBalances` tool | Planned | Net worth and per-account balances |
-| `getTransactionHistory` tool | Planned | Filtered transaction search |
-| `editTransaction` tool | Planned | Modify existing transactions |
-| `deleteTransaction` tool | Planned | Delete with confirmation |
-| `createBudget` tool | Planned | Budget creation via chat |
-| `getBudgetStatus` tool | Planned | Budget progress check |
-| `searchTransactions` tool | Planned | Full-text search |
-| `getInvestmentPerformance` tool | Planned | Portfolio summary |
-| `setReminder` tool | Future | Financial task reminders |
-| Conversation persistence to SQLite | Planned | Save/load chat history |
-| Multiple conversation threads | Planned | Conversation list in AI panel |
-| Conversation title auto-generation | Planned | LLM-generated titles from first message |
+| `updateTransaction` tool | Done | Modify existing transactions |
+| `deleteTransaction` tool | Done | Delete with balance reversal |
+| `queryTransactions` tool | Done | Filtered transaction search |
+| `listAccounts` tool | Done | All accounts with balances |
+| `createAccount` tool | Done | Create accounts via chat |
+| `updateAccount` tool | Done | Modify account details |
+| `deleteAccount` tool | Done | Delete accounts via chat |
+| `listCategories` tool | Done | Expense/income category listing |
+| `getBalanceOverview` tool | Done | Balance with month-over-month trends |
+| `analyzeSpendingTrends` tool | Done | Spending by category over months |
+| `getCreditCardStatus` tool | Done | Credit card utilization and payment dates |
+| `getNetWorth` tool | Done | Total net worth across all accounts and investments |
+| `getUpcomingBills` tool | Done | Upcoming bills from credit cards, subscriptions, recurring expenses |
+| `createBudget` tool | Done | Budget creation via chat |
+| `getBudgetStatus` tool | Done | Budget progress check |
+| `deleteBudget` tool | Done | Budget deletion via chat |
+| `listSubscriptions` tool | Done | List subscriptions from Subby |
+| `getSubscriptionSpending` tool | Done | Calculate subscription costs |
+| `manageInvestment` tool | Done | Add/update/delete investment holdings |
+| `saveMemory` tool | Done | Persist user preferences and context |
+| `recallMemories` tool | Done | Retrieve stored memories by category |
+| `forgetMemory` tool | Done | Delete specific memories |
+| Memory system (MemGPT-inspired persistent memory) | Done | Categories, importance levels, auto-injection |
+| Conversation persistence to SQLite | Done | Save/load chat history |
+| Multiple conversation threads | Done | Conversation list in AI panel |
+| Conversation title auto-generation | Done | LLM-generated titles from first message |
+| Conversation compaction | Done | Auto-summarize at 30+ messages, keep recent 10 |
+| OpenRouter provider support | Done | Additional model provider option |
 | Tool call visualization in chat UI | Planned | Show what tools Val is using |
 | Streaming markdown rendering | Planned | Render tables, lists, bold text |
-| Context window management | Future | Summarize old messages to fit context |
+| Context window management | Future | Advanced context strategies beyond compaction |
 | Multi-model comparison | Future | Send same query to multiple models |
 
 **Dependencies:** Epic 1 (done). Tool implementations depend on their respective feature epics.
@@ -141,6 +158,8 @@ This document outlines the development roadmap for Valute, organized into 10 epi
 
 | Task | Status | Notes |
 |------|--------|-------|
+| `manageInvestment` AI tool | Done | Add/update/delete holdings via chat |
+| `getNetWorth` AI tool | Done | Portfolio value in net worth calculation |
 | Investments list page | Planned | Holdings with current values |
 | Investment creation form | Planned | Symbol, shares, cost basis |
 | Stock price fetching (Alpha Vantage) | Planned | Daily EOD prices |
@@ -165,7 +184,7 @@ This document outlines the development roadmap for Valute, organized into 10 epi
 
 | Task | Status | Notes |
 |------|--------|-------|
-| Dashboard overview (total balance, monthly spending, trends) | Planned | Summary cards + charts |
+| Dashboard overview (total balance, monthly spending, trends) | Done | Summary cards + quick-add button |
 | Monthly spending report | Planned | By category, with month-over-month comparison |
 | Income vs. expenses chart | Planned | Stacked bar or area chart |
 | Category spending trends over time | Planned | Multi-line chart |
@@ -186,6 +205,8 @@ This document outlines the development roadmap for Valute, organized into 10 epi
 
 | Task | Status | Notes |
 |------|--------|-------|
+| `listSubscriptions` AI tool | Done | List subscriptions from Subby integration |
+| `getSubscriptionSpending` AI tool | Done | Calculate subscription costs |
 | Subscription list page | Planned | Active and cancelled tabs |
 | Subscription creation form | Planned | Name, amount, billing cycle, next date |
 | Subscription editing and cancellation | Planned | Soft cancel (is_active = 0) |
@@ -276,6 +297,6 @@ If you want to pick up a task:
 
 1. Check the [Issues](https://github.com/ASF/Valute/issues) page for tasks tagged with the epic label.
 2. Comment on the issue to claim it.
-3. Follow the [Contributing Guide](CONTRIBUTING.md) for development workflow.
+3. Follow the [Contributing Guide](../guides/CONTRIBUTING.md) for development workflow.
 
 To propose new features or changes to the roadmap, open a Discussion or Issue with the `roadmap` label.

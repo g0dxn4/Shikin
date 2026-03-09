@@ -42,6 +42,9 @@ Thumbs.db
 # Testing
 coverage/
 
+# Development tracking (local only)
+docs/development/
+
 # AI tools
 .delta9/
 .cursor/

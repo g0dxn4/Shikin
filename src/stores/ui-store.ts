@@ -16,6 +16,16 @@ interface UIState {
   editingTransactionId: string | null
   openTransactionDialog: (id?: string) => void
   closeTransactionDialog: () => void
+
+  budgetDialogOpen: boolean
+  editingBudgetId: string | null
+  openBudgetDialog: (id?: string) => void
+  closeBudgetDialog: () => void
+
+  investmentDialogOpen: boolean
+  editingInvestmentId: string | null
+  openInvestmentDialog: (id?: string) => void
+  closeInvestmentDialog: () => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -35,4 +45,15 @@ export const useUIStore = create<UIState>((set) => ({
   openTransactionDialog: (id) =>
     set({ transactionDialogOpen: true, editingTransactionId: id ?? null }),
   closeTransactionDialog: () => set({ transactionDialogOpen: false, editingTransactionId: null }),
+
+  budgetDialogOpen: false,
+  editingBudgetId: null,
+  openBudgetDialog: (id) => set({ budgetDialogOpen: true, editingBudgetId: id ?? null }),
+  closeBudgetDialog: () => set({ budgetDialogOpen: false, editingBudgetId: null }),
+
+  investmentDialogOpen: false,
+  editingInvestmentId: null,
+  openInvestmentDialog: (id) =>
+    set({ investmentDialogOpen: true, editingInvestmentId: id ?? null }),
+  closeInvestmentDialog: () => set({ investmentDialogOpen: false, editingInvestmentId: null }),
 }))

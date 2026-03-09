@@ -2,7 +2,19 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useChat } from '@ai-sdk/react'
 import type { UIMessage } from 'ai'
-import { X, Sparkles, Send, Loader2, Plus, MessageSquare, Trash2, ChevronDown, Minimize2 } from 'lucide-react'
+import {
+  X,
+  Sparkles,
+  Send,
+  Loader2,
+  Plus,
+  MessageSquare,
+  Trash2,
+  ChevronDown,
+  Minimize2,
+  Wrench,
+  ChevronRight,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/ui-store'
 import { useAIStore } from '@/stores/ai-store'
@@ -30,26 +42,27 @@ export function AIPanel() {
   const [inputValue, setInputValue] = useState('')
   const [showConversations, setShowConversations] = useState(false)
   const [isCompacting, setIsCompacting] = useState(false)
+  const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set())
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const hasAutoTitled = useRef(false)
   const conversationsLoaded = useRef(false)
 
   const transport = useMemo(() => {
     if (!isConfigured) return null
-    return createTransport(
-      provider as AIProvider,
-      apiKey,
-      model || undefined
-    )
+    return createTransport(provider as AIProvider, apiKey, model || undefined)
   }, [provider, apiKey, model, isConfigured])
 
+  const chatId = useMemo(
+    () => `val-${provider}-${model || 'default'}`,
+    [provider, model]
+  )
+
   const { messages, setMessages, sendMessage, status, error } = useChat({
+    id: chatId,
     transport: transport ?? undefined,
     onFinish: async ({ message }) => {
-      // Persist the assistant message
       await persistMessage(message)
 
-      // Auto-title on first exchange
       if (!hasAutoTitled.current && messages.length <= 2) {
         const firstUserMsg = messages.find((m) => m.role === 'user')
         if (firstUserMsg) {
@@ -64,7 +77,6 @@ export function AIPanel() {
         }
       }
 
-      // Check for compaction
       const allMessages = [...messages, message]
       if (shouldCompact(allMessages) && currentConversationId && isConfigured) {
         try {
@@ -92,12 +104,10 @@ export function AIPanel() {
 
   const isLoading = status === 'submitted' || status === 'streaming'
 
-  // Load conversations on mount
   useEffect(() => {
     if (aiPanelOpen && !conversationsLoaded.current) {
       conversationsLoaded.current = true
       loadConversations().then(async () => {
-        // Resume the most recent conversation if one exists
         const { conversations: convos } = useConversationStore.getState()
         if (convos.length > 0 && !currentConversationId) {
           const msgs = await switchConversation(convos[0].id)
@@ -121,22 +131,28 @@ export function AIPanel() {
     setShowConversations(false)
   }, [isConfigured, startNewConversation, model, setMessages])
 
-  const handleSwitchConversation = useCallback(async (id: string) => {
-    const msgs = await switchConversation(id)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    setMessages(msgs as any)
-    hasAutoTitled.current = true
-    setShowConversations(false)
-  }, [switchConversation, setMessages])
+  const handleSwitchConversation = useCallback(
+    async (id: string) => {
+      const msgs = await switchConversation(id)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setMessages(msgs as any)
+      hasAutoTitled.current = true
+      setShowConversations(false)
+    },
+    [switchConversation, setMessages]
+  )
 
-  const handleDeleteConversation = useCallback(async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation()
-    await removeConversation(id)
-    if (id === currentConversationId) {
-      setMessages([])
-      hasAutoTitled.current = false
-    }
-  }, [removeConversation, currentConversationId, setMessages])
+  const handleDeleteConversation = useCallback(
+    async (e: React.MouseEvent, id: string) => {
+      e.stopPropagation()
+      await removeConversation(id)
+      if (id === currentConversationId) {
+        setMessages([])
+        hasAutoTitled.current = false
+      }
+    },
+    [removeConversation, currentConversationId, setMessages]
+  )
 
   const handleCompact = useCallback(async () => {
     if (!currentConversationId || !isConfigured || messages.length < 4) return
@@ -151,7 +167,7 @@ export function AIPanel() {
         currentConversationId,
         messages,
         languageModel,
-        true // force — manual trigger
+        true
       )
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setMessages(compacted as any)
@@ -162,12 +178,20 @@ export function AIPanel() {
     }
   }, [currentConversationId, isConfigured, messages, provider, apiKey, model, setMessages])
 
+  const toggleToolExpanded = useCallback((id: string) => {
+    setExpandedTools((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
   if (!aiPanelOpen) return null
 
   const handleSend = async () => {
     if (!inputValue.trim() || isLoading || !transport) return
 
-    // Create conversation if none exists
     if (!currentConversationId) {
       await startNewConversation(model || undefined)
     }
@@ -175,14 +199,12 @@ export function AIPanel() {
     const text = inputValue.trim()
     setInputValue('')
 
-    // Persist the user message
     const userMessage: UIMessage = {
       id: crypto.randomUUID(),
       role: 'user',
       parts: [{ type: 'text', text }],
     }
     await persistMessage(userMessage)
-
     sendMessage({ text })
   }
 
@@ -210,7 +232,9 @@ export function AIPanel() {
       {/* Header */}
       <div className="border-border flex h-14 items-center justify-between border-b px-4">
         <div className="flex items-center gap-2">
-          <Sparkles size={18} className="text-primary" />
+          <div className="bg-accent-muted flex h-7 w-7 items-center justify-center rounded-lg">
+            <Sparkles size={14} className="text-primary" />
+          </div>
           <div className="relative">
             <button
               onClick={() => setShowConversations(!showConversations)}
@@ -220,12 +244,13 @@ export function AIPanel() {
                 <h2 className="font-heading text-left text-sm font-semibold">
                   {currentConvo?.title || t('panel.title')}
                 </h2>
-                <p className="text-muted-foreground text-left text-xs">{t('panel.subtitle')}</p>
+                <p className="text-muted-foreground text-left text-[10px]">
+                  {t('panel.subtitle')}
+                </p>
               </div>
               <ChevronDown size={14} className="text-muted-foreground" />
             </button>
 
-            {/* Conversation dropdown */}
             {showConversations && (
               <div className="glass-panel border-border absolute top-full left-0 z-50 mt-2 w-64 border shadow-lg">
                 <div className="border-border border-b p-2">
@@ -239,7 +264,9 @@ export function AIPanel() {
                 </div>
                 <div className="max-h-64 overflow-y-auto p-1">
                   {conversations.length === 0 ? (
-                    <p className="text-muted-foreground px-3 py-2 text-xs">No conversations yet</p>
+                    <p className="text-muted-foreground px-3 py-2 text-xs">
+                      No conversations yet
+                    </p>
                   ) : (
                     conversations.map((convo) => (
                       <button
@@ -277,7 +304,10 @@ export function AIPanel() {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4" onClick={() => setShowConversations(false)}>
+      <div
+        className="flex-1 overflow-y-auto p-4"
+        onClick={() => setShowConversations(false)}
+      >
         {!isConfigured ? (
           <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
             <Sparkles size={24} className="text-muted-foreground" />
@@ -296,7 +326,7 @@ export function AIPanel() {
                   <button
                     key={suggestion}
                     onClick={() => handleSuggestion(suggestion)}
-                    className="glass-card text-muted-foreground hover:border-border-hover hover:text-foreground px-3 py-2 text-left text-xs"
+                    className="glass-card text-muted-foreground hover:border-border-hover hover:text-foreground px-3 py-2 text-left text-xs transition-colors"
                   >
                     {suggestion}
                   </button>
@@ -305,35 +335,14 @@ export function AIPanel() {
             </div>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-3">
             {messages.map((msg) => (
-              <div
+              <ChatBubble
                 key={msg.id}
-                className={cn(
-                  'max-w-[90%] rounded-lg px-3 py-2 text-sm',
-                  msg.role === 'user'
-                    ? 'bg-primary text-primary-foreground ml-auto'
-                    : 'bg-surface text-foreground'
-                )}
-              >
-                {msg.parts.map((part, i) => {
-                  if (part.type === 'text') {
-                    return (
-                      <p key={i} className="whitespace-pre-wrap">
-                        {part.text}
-                      </p>
-                    )
-                  }
-                  if (part.type.startsWith('tool-')) {
-                    return (
-                      <p key={i} className="text-muted-foreground font-mono text-xs">
-                        Using tool...
-                      </p>
-                    )
-                  }
-                  return null
-                })}
-              </div>
+                message={msg}
+                expandedTools={expandedTools}
+                onToggleTool={toggleToolExpanded}
+              />
             ))}
             {isLoading && (
               <div className="text-muted-foreground flex items-center gap-2 text-xs">
@@ -343,7 +352,7 @@ export function AIPanel() {
             )}
             {error && (
               <div className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                Error: {error.message}
+                Error: {error.message || String(error)}
               </div>
             )}
             <div ref={messagesEndRef} />
@@ -352,19 +361,24 @@ export function AIPanel() {
       </div>
 
       {/* Input */}
-      <div className="border-border border-t p-4">
+      <div className="border-border border-t p-3">
         {messages.length >= 4 && (
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-muted-foreground text-xs">
-              {messages.length} messages{messages.length >= COMPACTION_THRESHOLD && ' — auto-compact soon'}
+            <span className="text-muted-foreground text-[10px]">
+              {messages.length} messages
+              {messages.length >= COMPACTION_THRESHOLD && ' — auto-compact soon'}
             </span>
             <button
               onClick={handleCompact}
               disabled={isCompacting || isLoading || messages.length < 4}
-              className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs hover:bg-white/5 rounded px-2 py-1 disabled:opacity-30"
+              className="text-muted-foreground hover:text-foreground flex items-center gap-1 rounded px-2 py-1 text-[10px] hover:bg-white/5 disabled:opacity-30"
               title="Summarize older messages to free up context"
             >
-              {isCompacting ? <Loader2 size={12} className="animate-spin" /> : <Minimize2 size={12} />}
+              {isCompacting ? (
+                <Loader2 size={10} className="animate-spin" />
+              ) : (
+                <Minimize2 size={10} />
+              )}
               Compact
             </button>
           </div>
@@ -388,7 +402,7 @@ export function AIPanel() {
             onClick={handleSend}
             disabled={!isConfigured || isLoading || !inputValue.trim()}
             className={cn(
-              'flex items-center justify-center px-3 py-2 text-sm',
+              'flex items-center justify-center px-3 py-2 text-sm transition-colors',
               isConfigured && inputValue.trim()
                 ? 'bg-primary text-primary-foreground hover:bg-accent-hover'
                 : 'bg-muted text-muted-foreground opacity-50'
@@ -400,4 +414,128 @@ export function AIPanel() {
       </div>
     </aside>
   )
+}
+
+function ChatBubble({
+  message: msg,
+  expandedTools,
+  onToggleTool,
+}: {
+  message: UIMessage
+  expandedTools: Set<string>
+  onToggleTool: (id: string) => void
+}) {
+  const isUser = msg.role === 'user'
+
+  return (
+    <div className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
+      <div
+        className={cn(
+          'max-w-[88%] rounded-xl px-3.5 py-2.5 text-sm',
+          isUser
+            ? 'bg-primary text-primary-foreground rounded-br-sm'
+            : 'bg-surface border-border border rounded-bl-sm'
+        )}
+      >
+        {msg.parts.map((part, i) => {
+          if (part.type === 'text') {
+            return (
+              <div key={i} className="whitespace-pre-wrap break-words leading-relaxed">
+                {renderMarkdownLite(part.text)}
+              </div>
+            )
+          }
+          if (part.type.startsWith('tool-')) {
+            const toolId = `${msg.id}-${i}`
+            const isExpanded = expandedTools.has(toolId)
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const toolPart = part as any
+            const toolName = toolPart.toolName || toolPart.toolInvocation?.toolName || 'tool'
+            const state = toolPart.state || toolPart.toolInvocation?.state || ''
+            const result = toolPart.result ?? toolPart.toolInvocation?.result
+            const isRunning = state === 'call' || state === 'partial-call' || state === 'input-streaming'
+
+            return (
+              <div
+                key={i}
+                className="my-1 rounded-lg bg-white/5 px-2.5 py-1.5"
+              >
+                <button
+                  onClick={() => onToggleTool(toolId)}
+                  className="text-muted-foreground flex w-full items-center gap-1.5 text-left font-mono text-[11px]"
+                >
+                  {isRunning ? (
+                    <Loader2 size={10} className="animate-spin shrink-0" />
+                  ) : (
+                    <Wrench size={10} className="shrink-0" />
+                  )}
+                  <span className="truncate">{toolName}</span>
+                  {!isRunning && result !== undefined && (
+                    <ChevronRight
+                      size={10}
+                      className={cn(
+                        'ml-auto shrink-0 transition-transform',
+                        isExpanded && 'rotate-90'
+                      )}
+                    />
+                  )}
+                </button>
+                {isExpanded && result !== undefined && (
+                  <pre className="text-muted-foreground mt-1.5 max-h-24 overflow-auto whitespace-pre-wrap font-mono text-[10px] leading-relaxed">
+                    {typeof result === 'string'
+                      ? result
+                      : JSON.stringify(result, null, 2)}
+                  </pre>
+                )}
+              </div>
+            )
+          }
+          return null
+        })}
+      </div>
+    </div>
+  )
+}
+
+/** Minimal markdown: **bold**, *italic*, `code`, and newlines */
+function renderMarkdownLite(text: string): React.ReactNode {
+  // Split into segments for inline formatting
+  const parts: React.ReactNode[] = []
+  const regex = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index))
+    }
+    if (match[2]) {
+      parts.push(
+        <strong key={match.index} className="font-semibold">
+          {match[2]}
+        </strong>
+      )
+    } else if (match[3]) {
+      parts.push(
+        <em key={match.index} className="italic">
+          {match[3]}
+        </em>
+      )
+    } else if (match[4]) {
+      parts.push(
+        <code
+          key={match.index}
+          className="rounded bg-white/10 px-1 py-0.5 font-mono text-[0.85em]"
+        >
+          {match[4]}
+        </code>
+      )
+    }
+    lastIndex = match.index + match[0].length
+  }
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex))
+  }
+
+  return parts.length > 0 ? parts : text
 }

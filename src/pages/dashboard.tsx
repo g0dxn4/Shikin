@@ -8,24 +8,38 @@ import {
   PiggyBank,
   Plus,
   ArrowRight,
+  Sparkles,
 } from 'lucide-react'
 import dayjs from 'dayjs'
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+} from 'recharts'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
 import { useTransactionStore } from '@/stores/transaction-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import { formatMoney } from '@/lib/money'
 
+const CHART_COLORS = ['#bf5af2', '#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#8b5cf6']
+
 export function Dashboard() {
   const { t } = useTranslation('dashboard')
   const { t: tTx } = useTranslation('transactions')
   const { t: tAcc } = useTranslation('accounts')
-  const { setAIPanelOpen } = useUIStore()
-  const { openAccountDialog, openTransactionDialog } = useUIStore()
-  const { accounts, fetch: fetchAccounts } = useAccountStore()
-  const { transactions, fetch: fetchTransactions } = useTransactionStore()
+  const { setAIPanelOpen, openAccountDialog, openTransactionDialog } = useUIStore()
+  const { accounts, isLoading: accountsLoading, fetch: fetchAccounts } = useAccountStore()
+  const { transactions, isLoading: txLoading, fetch: fetchTransactions } = useTransactionStore()
 
   useEffect(() => {
     fetchAccounts()
@@ -53,68 +67,93 @@ export function Dashboard() {
     return Math.round(((monthlyIncome - monthlyExpenses) / monthlyIncome) * 100)
   }, [monthlyIncome, monthlyExpenses])
 
-  const recentTransactions = useMemo(() => transactions.slice(0, 5), [transactions])
+  const recentTransactions = useMemo(() => transactions.slice(0, 8), [transactions])
+
+  // Monthly spending chart data (last 6 months)
+  const monthlyChartData = useMemo(() => {
+    const months: { month: string; expenses: number; income: number }[] = []
+    for (let i = 5; i >= 0; i--) {
+      const m = dayjs().subtract(i, 'month')
+      const start = m.startOf('month').format('YYYY-MM-DD')
+      const end = m.endOf('month').format('YYYY-MM-DD')
+      let expenses = 0
+      let income = 0
+      for (const tx of transactions) {
+        if (tx.date >= start && tx.date <= end) {
+          if (tx.type === 'expense') expenses += tx.amount
+          else if (tx.type === 'income') income += tx.amount
+        }
+      }
+      months.push({ month: m.format('MMM'), expenses, income })
+    }
+    return months
+  }, [transactions])
+
+  // Category breakdown (this month)
+  const categoryData = useMemo(() => {
+    const startOfMonth = dayjs().startOf('month').format('YYYY-MM-DD')
+    const today = dayjs().format('YYYY-MM-DD')
+    const cats = new Map<string, { name: string; value: number; color: string }>()
+    for (const tx of transactions) {
+      if (tx.type === 'expense' && tx.date >= startOfMonth && tx.date <= today && tx.category_name) {
+        const existing = cats.get(tx.category_name)
+        if (existing) {
+          existing.value += tx.amount
+        } else {
+          cats.set(tx.category_name, {
+            name: tx.category_name,
+            value: tx.amount,
+            color: tx.category_color || '#888',
+          })
+        }
+      }
+    }
+    return Array.from(cats.values()).sort((a, b) => b.value - a.value)
+  }, [transactions])
 
   const hasAccounts = accounts.length > 0
+  const isLoading = accountsLoading || txLoading
+
+  if (isLoading) {
+    return <DashboardSkeleton />
+  }
 
   return (
-    <div className="animate-fade-in-up space-y-6">
+    <div className="animate-fade-in-up page-content">
       <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
 
-      {/* Hero balance card */}
-      <div className="glass-card bg-gradient-to-br from-[#BF5AF218] to-transparent p-8">
-        <p className="text-muted-foreground mb-2 font-mono text-xs tracking-wider uppercase">
-          {t('cards.totalBalance')}
-        </p>
-        <p className="font-heading text-4xl font-bold tracking-tight">
-          {formatMoney(totalBalance)}
-        </p>
-        {hasAccounts && (
-          <p className="text-muted-foreground mt-2 text-sm">
-            across {accounts.length} {accounts.length === 1 ? 'account' : 'accounts'}
-          </p>
-        )}
-      </div>
-
-      {/* 3-column metrics */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="glass-card p-5">
-          <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <TrendingUp size={16} className="text-success" />
-            <span className="font-mono text-[10px] tracking-wider uppercase">
-              {t('cards.monthlyIncome')}
-            </span>
-          </div>
-          <p className="font-heading text-2xl font-bold tracking-tight text-success">
-            {formatMoney(monthlyIncome)}
-          </p>
-        </div>
-        <div className="glass-card p-5">
-          <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <TrendingDown size={16} className="text-destructive" />
-            <span className="font-mono text-[10px] tracking-wider uppercase">
-              {t('cards.monthlyExpenses')}
-            </span>
-          </div>
-          <p className="font-heading text-2xl font-bold tracking-tight text-destructive">
-            {formatMoney(monthlyExpenses)}
-          </p>
-        </div>
-        <div className="glass-card p-5">
-          <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <PiggyBank size={16} className="text-primary" />
-            <span className="font-mono text-[10px] tracking-wider uppercase">
-              {t('cards.savings')}
-            </span>
-          </div>
-          <p className="font-heading text-primary text-2xl font-bold tracking-tight">
-            {savingsRate}%
-          </p>
-        </div>
+      {/* 4-column metrics */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <MetricCard
+          icon={<Wallet size={16} />}
+          iconColor="text-primary"
+          label={t('cards.totalBalance')}
+          value={formatMoney(totalBalance)}
+        />
+        <MetricCard
+          icon={<TrendingUp size={16} />}
+          iconColor="text-success"
+          label={t('cards.monthlyIncome')}
+          value={formatMoney(monthlyIncome)}
+          valueColor="text-success"
+        />
+        <MetricCard
+          icon={<TrendingDown size={16} />}
+          iconColor="text-destructive"
+          label={t('cards.monthlyExpenses')}
+          value={formatMoney(monthlyExpenses)}
+          valueColor="text-destructive"
+        />
+        <MetricCard
+          icon={<PiggyBank size={16} />}
+          iconColor="text-primary"
+          label={t('cards.savings')}
+          value={`${savingsRate}%`}
+          valueColor={savingsRate >= 0 ? 'text-primary' : 'text-destructive'}
+        />
       </div>
 
       {!hasAccounts ? (
-        /* Empty state */
         <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
           <div className="bg-accent-muted mb-4 flex h-16 w-16 items-center justify-center rounded-full">
             <Wallet size={32} className="text-primary" />
@@ -123,19 +162,132 @@ export function Dashboard() {
           <p className="text-muted-foreground mb-6 max-w-md text-sm">{t('empty.description')}</p>
           <div className="flex gap-3">
             <Button onClick={() => openAccountDialog()}>{t('empty.addAccount')}</Button>
-            <button
-              onClick={() => setAIPanelOpen(true)}
-              className="border-border text-foreground border px-4 py-2 text-sm font-medium hover:bg-white/5"
-            >
+            <Button variant="outline" onClick={() => setAIPanelOpen(true)}>
+              <Sparkles size={16} />
               {t('empty.askAI')}
-            </button>
+            </Button>
           </div>
         </div>
       ) : (
         <>
-          {/* Accounts section */}
+          {/* Charts row */}
+          {transactions.length > 0 && (
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              {/* Spending area chart */}
+              <div className="glass-card p-5">
+                <h3 className="font-heading mb-4 text-sm font-semibold">{t('charts.spending')}</h3>
+                <div className="h-48">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={monthlyChartData}>
+                      <defs>
+                        <linearGradient id="expenseGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#bf5af2" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="#bf5af2" stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="incomeGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#22c55e" stopOpacity={0.2} />
+                          <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <XAxis
+                        dataKey="month"
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fill: '#71717a', fontSize: 11 }}
+                      />
+                      <YAxis hide />
+                      <Tooltip
+                        contentStyle={{
+                          background: '#0a0a0a',
+                          border: '1px solid rgba(255,255,255,0.06)',
+                          borderRadius: 8,
+                          fontSize: 12,
+                        }}
+                        itemStyle={{ color: '#ffffff' }}
+                        labelStyle={{ color: '#a1a1aa' }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="income"
+                        stroke="#22c55e"
+                        strokeWidth={2}
+                        fill="url(#incomeGrad)"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="expenses"
+                        stroke="#bf5af2"
+                        strokeWidth={2}
+                        fill="url(#expenseGrad)"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Category donut */}
+              <div className="glass-card p-5">
+                <h3 className="font-heading mb-4 text-sm font-semibold">{t('charts.categories')}</h3>
+                {categoryData.length > 0 ? (
+                  <div className="flex items-center gap-4">
+                    <div className="h-48 w-48 shrink-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={categoryData}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={50}
+                            outerRadius={75}
+                            paddingAngle={2}
+                            dataKey="value"
+                          >
+                            {categoryData.map((entry, i) => (
+                              <Cell
+                                key={entry.name}
+                                fill={entry.color || CHART_COLORS[i % CHART_COLORS.length]}
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={{
+                              background: '#0a0a0a',
+                              border: '1px solid rgba(255,255,255,0.06)',
+                              borderRadius: 8,
+                              fontSize: 12,
+                            }}
+                            formatter={(value) => formatMoney(value as number)}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="flex flex-1 flex-col gap-1.5 overflow-hidden">
+                      {categoryData.slice(0, 5).map((cat, i) => (
+                        <div key={cat.name} className="flex items-center gap-2 text-xs">
+                          <span
+                            className="h-2.5 w-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: cat.color || CHART_COLORS[i % CHART_COLORS.length] }}
+                          />
+                          <span className="truncate">{cat.name}</span>
+                          <span className="text-muted-foreground ml-auto shrink-0">
+                            {formatMoney(cat.value)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex h-48 items-center justify-center">
+                    <p className="text-muted-foreground text-xs">No expenses this month</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Accounts preview */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="page-header">
               <h2 className="font-heading text-lg font-semibold">{tAcc('title')}</h2>
               <Button variant="ghost" size="sm" asChild>
                 <Link to="/accounts">
@@ -146,7 +298,7 @@ export function Dashboard() {
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {accounts.slice(0, 3).map((account) => (
-                <div key={account.id} className="glass-card p-4">
+                <div key={account.id} className="metric-card">
                   <div className="mb-1 flex items-center justify-between">
                     <h3 className="font-heading text-sm font-semibold">{account.name}</h3>
                     <Badge variant="secondary" className="text-[10px]">
@@ -166,7 +318,7 @@ export function Dashboard() {
 
           {/* Recent transactions */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="page-header">
               <h2 className="font-heading text-lg font-semibold">{tTx('recentTransactions')}</h2>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={() => openTransactionDialog()}>
@@ -198,8 +350,75 @@ export function Dashboard() {
               </div>
             )}
           </div>
+
+          {/* Quick actions */}
+          <div className="flex gap-3">
+            <Button onClick={() => openTransactionDialog()}>
+              <Plus size={16} />
+              {t('quickActions.addTransaction')}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setAIPanelOpen(true)}
+            >
+              <Sparkles size={16} />
+              {t('quickActions.askVal')}
+            </Button>
+          </div>
         </>
       )}
+    </div>
+  )
+}
+
+function MetricCard({
+  icon,
+  iconColor,
+  label,
+  value,
+  valueColor,
+}: {
+  icon: React.ReactNode
+  iconColor: string
+  label: string
+  value: string
+  valueColor?: string
+}) {
+  return (
+    <div className="metric-card">
+      <div className="text-muted-foreground mb-2 flex items-center gap-2">
+        <span className={iconColor}>{icon}</span>
+        <span className="font-mono text-[10px] tracking-wider uppercase">{label}</span>
+      </div>
+      <p className={`font-heading text-2xl font-bold tracking-tight ${valueColor || ''}`}>
+        {value}
+      </p>
+    </div>
+  )
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="page-content">
+      <Skeleton className="h-8 w-32" />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="glass-card space-y-3 p-5">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-8 w-32" />
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="glass-card p-5">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="mt-4 h-48 w-full" />
+        </div>
+        <div className="glass-card p-5">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="mt-4 h-48 w-full" />
+        </div>
+      </div>
     </div>
   )
 }

@@ -17,10 +17,20 @@ vi.mock('@/ai/models', () => ({
     { id: 'gpt-4o', name: 'GPT-4o' },
     { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
   ]),
+  isKeylessProvider: vi.fn().mockReturnValue(false),
+  isStaticModelList: vi.fn().mockReturnValue(false),
 }))
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
+}))
+
+vi.mock('@tauri-apps/plugin-store', () => ({
+  load: vi.fn().mockResolvedValue({
+    get: vi.fn().mockResolvedValue(''),
+    set: vi.fn().mockResolvedValue(undefined),
+    save: vi.fn().mockResolvedValue(undefined),
+  }),
 }))
 
 const mockLoadSettings = vi.fn()
@@ -35,6 +45,13 @@ vi.mock('@/stores/ai-store', () => ({
     saveSettings: mockSaveSettings,
   }),
 }))
+
+function getAISaveButton() {
+  // The AI save button is the first 'actions.save' button (inside the config panel)
+  // The second one is the data API keys save button
+  const buttons = screen.getAllByRole('button', { name: /actions\.save/ })
+  return buttons[0]
+}
 
 describe('SettingsPage', () => {
   beforeEach(() => {
@@ -63,10 +80,18 @@ describe('SettingsPage', () => {
     expect(screen.getByText('Español')).toBeInTheDocument()
   })
 
-  it('renders AI section with provider, apiKey, and model fields', () => {
+  it('renders provider cards', () => {
     render(<SettingsPage />)
 
-    expect(screen.getByText('ai.provider')).toBeInTheDocument()
+    expect(screen.getAllByText('OpenAI').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('Anthropic')).toBeInTheDocument()
+    expect(screen.getByText('Ollama')).toBeInTheDocument()
+  })
+
+  it('shows config panel when provider is selected', () => {
+    render(<SettingsPage />)
+
+    // OpenAI is selected by default
     expect(screen.getByText('ai.apiKey')).toBeInTheDocument()
     expect(screen.getByText('ai.model')).toBeInTheDocument()
   })
@@ -75,7 +100,12 @@ describe('SettingsPage', () => {
     const user = userEvent.setup()
     render(<SettingsPage />)
 
-    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+    // Wait for models to load and re-render to settle
+    await waitFor(() => {
+      expect(getAISaveButton()).toBeInTheDocument()
+    })
+
+    await user.click(getAISaveButton())
 
     await waitFor(() => {
       expect(mockSaveSettings).toHaveBeenCalled()
@@ -87,7 +117,11 @@ describe('SettingsPage', () => {
     const user = userEvent.setup()
     render(<SettingsPage />)
 
-    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+    await waitFor(() => {
+      expect(getAISaveButton()).toBeInTheDocument()
+    })
+
+    await user.click(getAISaveButton())
 
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith('status.success')
@@ -100,7 +134,7 @@ describe('SettingsPage', () => {
     mockSaveSettings.mockRejectedValueOnce(new Error('fail'))
     render(<SettingsPage />)
 
-    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+    await user.click(getAISaveButton())
 
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith('status.error')

@@ -1,16 +1,19 @@
 import { useEffect, useState, useMemo, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeftRight, Plus, Pencil, Trash2 } from 'lucide-react'
+import { ArrowLeftRight, Plus, Pencil, Trash2, Search, Filter } from 'lucide-react'
 import { toast } from 'sonner'
 import dayjs from 'dayjs'
 import isToday from 'dayjs/plugin/isToday'
 import isYesterday from 'dayjs/plugin/isYesterday'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useUIStore } from '@/stores/ui-store'
 import { useTransactionStore } from '@/stores/transaction-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import { formatMoney } from '@/lib/money'
+import { cn } from '@/lib/utils'
 
 dayjs.extend(isToday)
 dayjs.extend(isYesterday)
@@ -20,6 +23,8 @@ const ConfirmDialog = lazy(() =>
     default: m.ConfirmDialog,
   }))
 )
+
+type TypeFilter = 'all' | 'expense' | 'income' | 'transfer'
 
 function formatDateHeader(date: string): string {
   const d = dayjs(date)
@@ -36,20 +41,38 @@ export function Transactions() {
 
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
+  const [showFilters, setShowFilters] = useState(false)
 
   useEffect(() => {
     fetch()
   }, [fetch])
 
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter((tx) => {
+      if (typeFilter !== 'all' && tx.type !== typeFilter) return false
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase()
+        return (
+          tx.description.toLowerCase().includes(q) ||
+          tx.category_name?.toLowerCase().includes(q) ||
+          tx.account_name?.toLowerCase().includes(q)
+        )
+      }
+      return true
+    })
+  }, [transactions, typeFilter, searchQuery])
+
   const groupedByDate = useMemo(() => {
     const groups = new Map<string, TransactionWithDetails[]>()
-    for (const tx of transactions) {
+    for (const tx of filteredTransactions) {
       const date = tx.date
       if (!groups.has(date)) groups.set(date, [])
       groups.get(date)!.push(tx)
     }
     return groups
-  }, [transactions])
+  }, [filteredTransactions])
 
   const handleDelete = async () => {
     if (!deleteId) return
@@ -66,28 +89,75 @@ export function Transactions() {
   }
 
   return (
-    <div className="animate-fade-in-up space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="animate-fade-in-up page-content">
+      <div className="page-header">
         <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
-        <Button onClick={() => openTransactionDialog()}>
-          <Plus size={16} />
-          {t('addTransaction')}
-        </Button>
-      </div>
-
-      {isLoading ? (
-        <div className="glass-card flex items-center justify-center py-16">
-          <p className="text-muted-foreground">{tCommon('status.loading')}</p>
-        </div>
-      ) : transactions.length === 0 ? (
-        <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
-          <ArrowLeftRight size={32} className="text-muted-foreground mb-4" />
-          <h2 className="font-heading mb-2 text-lg font-semibold">{t('empty.title')}</h2>
-          <p className="text-muted-foreground mb-4 text-sm">{t('empty.description')}</p>
+        <div className="flex gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowFilters(!showFilters)}
+            className={cn(showFilters && 'bg-accent/10 text-accent')}
+          >
+            <Filter size={14} />
+            {tCommon('actions.filter')}
+          </Button>
           <Button onClick={() => openTransactionDialog()}>
             <Plus size={16} />
             {t('addTransaction')}
           </Button>
+        </div>
+      </div>
+
+      {/* Filter bar */}
+      {showFilters && (
+        <div className="glass-card animate-slide-up flex flex-wrap items-center gap-3 p-3">
+          <div className="relative flex-1">
+            <Search size={14} className="text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2" />
+            <Input
+              placeholder={`${tCommon('actions.search')}...`}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <div className="flex gap-1">
+            {(['all', 'expense', 'income', 'transfer'] as const).map((type) => (
+              <button
+                key={type}
+                onClick={() => setTypeFilter(type)}
+                className={cn(
+                  'rounded-full px-3 py-1 font-mono text-[11px] transition-colors',
+                  typeFilter === type
+                    ? 'bg-accent text-accent-foreground'
+                    : 'text-muted-foreground hover:bg-surface-elevated hover:text-foreground'
+                )}
+              >
+                {type === 'all' ? 'All' : t(`types.${type}`)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {isLoading ? (
+        <TransactionsSkeleton />
+      ) : transactions.length === 0 ? (
+        <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
+          <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
+            <ArrowLeftRight size={28} className="text-primary" />
+          </div>
+          <h2 className="font-heading mb-2 text-lg font-semibold">{t('empty.title')}</h2>
+          <p className="text-muted-foreground mb-4 max-w-sm text-sm">{t('empty.description')}</p>
+          <Button onClick={() => openTransactionDialog()}>
+            <Plus size={16} />
+            {t('addTransaction')}
+          </Button>
+        </div>
+      ) : filteredTransactions.length === 0 ? (
+        <div className="glass-card flex flex-col items-center justify-center py-12 text-center">
+          <Search size={24} className="text-muted-foreground mb-3" />
+          <p className="text-muted-foreground text-sm">No matching transactions</p>
         </div>
       ) : (
         <div className="space-y-5">
@@ -128,6 +198,30 @@ export function Transactions() {
   )
 }
 
+function TransactionsSkeleton() {
+  return (
+    <div className="space-y-5">
+      {Array.from({ length: 3 }).map((_, gi) => (
+        <div key={gi}>
+          <Skeleton className="mb-2 h-3 w-20" />
+          <div className="space-y-1">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="glass-card flex items-center gap-3 px-4 py-3">
+                <Skeleton className="h-2.5 w-2.5 rounded-full" />
+                <div className="flex-1 space-y-1.5">
+                  <Skeleton className="h-3 w-32" />
+                  <Skeleton className="h-2.5 w-20" />
+                </div>
+                <Skeleton className="h-4 w-16" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function TransactionRow({
   transaction: tx,
   onEdit,
@@ -139,11 +233,13 @@ function TransactionRow({
 }) {
   return (
     <div className="glass-card group flex items-center gap-3 px-4 py-2.5">
-      {tx.category_color && (
+      {tx.category_color ? (
         <span
           className="h-2.5 w-2.5 shrink-0 rounded-full"
           style={{ backgroundColor: tx.category_color }}
         />
+      ) : (
+        <span className="bg-muted-foreground/30 h-2.5 w-2.5 shrink-0 rounded-full" />
       )}
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{tx.description}</p>
@@ -163,6 +259,9 @@ function TransactionRow({
       >
         {tx.type === 'income' ? '+' : '-'}
         {formatMoney(tx.amount, tx.currency)}
+      </span>
+      <span className="text-muted-foreground hidden font-mono text-[10px] sm:inline">
+        {dayjs(tx.date).format('MMM D')}
       </span>
       <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit}>

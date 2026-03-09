@@ -12,5 +12,13 @@
     "monthlyIncome": "Monthly Income",
     "monthlyExpenses": "Monthly Expenses",
     "savings": "Savings Rate"
+  },
+  "charts": {
+    "spending": "Monthly Spending",
+    "categories": "By Category"
+  },
+  "quickActions": {
+    "addTransaction": "Add Transaction",
+    "askVal": "Ask Val"
   }
 }

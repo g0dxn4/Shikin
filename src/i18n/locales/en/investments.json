@@ -1,0 +1,72 @@
+{
+  "title": "Investments",
+  "addInvestment": "Add Investment",
+  "editInvestment": "Edit Investment",
+  "deleteInvestment": "Delete Investment",
+  "deleteConfirm": "Are you sure you want to delete this investment? This action cannot be undone.",
+  "form": {
+    "symbol": "Symbol",
+    "name": "Name",
+    "type": "Type",
+    "shares": "Shares",
+    "avgCost": "Avg Cost / Share",
+    "currency": "Currency",
+    "account": "Account",
+    "noAccount": "None",
+    "notes": "Notes",
+    "notesPlaceholder": "Optional notes about this investment..."
+  },
+  "types": {
+    "stock": "Stock",
+    "etf": "ETF",
+    "crypto": "Crypto",
+    "bond": "Bond",
+    "mutual_fund": "Mutual Fund",
+    "other": "Other"
+  },
+  "summary": {
+    "portfolioValue": "Portfolio Value",
+    "totalGainLoss": "Total Gain/Loss",
+    "costBasis": "Cost Basis",
+    "lastUpdated": "Last Updated",
+    "never": "Never",
+    "refresh": "Refresh Prices"
+  },
+  "chart": {
+    "portfolioValue": "Portfolio Value",
+    "allocation": "Allocation",
+    "noData": "No price data yet"
+  },
+  "holdings": {
+    "title": "Holdings",
+    "stale": "Price data may be outdated",
+    "sort": {
+      "value": "Value",
+      "gainLoss": "Gain/Loss",
+      "name": "Name",
+      "type": "Type"
+    },
+    "header": {
+      "name": "Name",
+      "type": "Type",
+      "shares": "Shares",
+      "avgCost": "Avg Cost",
+      "price": "Price",
+      "value": "Value",
+      "gainLoss": "Gain/Loss"
+    }
+  },
+  "empty": {
+    "title": "No Investments Yet",
+    "description": "Add your first holding to track your portfolio."
+  },
+  "toast": {
+    "created": "Investment added",
+    "updated": "Investment updated",
+    "deleted": "Investment deleted",
+    "error": "Something went wrong",
+    "pricesUpdated": "Prices updated",
+    "noPrices": "No new prices available",
+    "refreshError": "Failed to refresh prices"
+  }
+}

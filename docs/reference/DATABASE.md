@@ -277,6 +277,107 @@ Generic key-value storage for extensions. Each extension gets its own namespace.
 
 **Unique constraint:** `(extension_id, key)` -- one value per key per extension.
 
+### ai_memories
+
+MemGPT-inspired persistent memory for the AI assistant.
+
+| Column             | Type    | Constraints    | Description                                            |
+| ------------------ | ------- | -------------- | ------------------------------------------------------ |
+| `id`               | TEXT    | PRIMARY KEY    | ULID                                                   |
+| `category`         | TEXT    | NOT NULL, CHECK| One of: `preference`, `fact`, `goal`, `behavior`, `context` |
+| `content`          | TEXT    | NOT NULL       | Memory content                                         |
+| `importance`       | INTEGER | NOT NULL, CHECK| 1-10 importance scale                                  |
+| `last_accessed_at` | TEXT    | NOT NULL, auto | Last time this memory was accessed                     |
+| `created_at`       | TEXT    | NOT NULL, auto | ISO 8601 timestamp                                     |
+| `updated_at`       | TEXT    | NOT NULL, auto | ISO 8601 timestamp                                     |
+
+### category_rules
+
+Auto-categorization rules learned from user behavior.
+
+| Column           | Type    | Constraints                                      | Description                    |
+| ---------------- | ------- | ------------------------------------------------ | ------------------------------ |
+| `id`             | TEXT    | PRIMARY KEY                                      | ULID                           |
+| `pattern`        | TEXT    | NOT NULL                                         | Normalized merchant/description|
+| `category_id`    | TEXT    | NOT NULL, FK -> categories(id) ON DELETE CASCADE | Suggested category             |
+| `subcategory_id` | TEXT    | FK -> subcategories(id) ON DELETE SET NULL        | Suggested subcategory          |
+| `confidence`     | REAL    | NOT NULL, DEFAULT 1.0                            | Confidence score               |
+| `hit_count`      | INTEGER | NOT NULL, DEFAULT 0                              | Times this rule was applied    |
+| `created_at`     | TEXT    | NOT NULL, auto                                   | ISO 8601 timestamp             |
+| `updated_at`     | TEXT    | NOT NULL, auto                                   | ISO 8601 timestamp             |
+
+**Unique constraint:** `(pattern, category_id)`.
+
+### recurring_rules
+
+Templates for recurring transactions that auto-generate on schedule.
+
+| Column           | Type    | Constraints                              | Description                              |
+| ---------------- | ------- | ---------------------------------------- | ---------------------------------------- |
+| `id`             | TEXT    | PRIMARY KEY                              | ULID                                     |
+| `description`    | TEXT    | NOT NULL                                 | Transaction description                  |
+| `amount`         | INTEGER | NOT NULL                                 | Amount in centavos                       |
+| `type`           | TEXT    | NOT NULL, CHECK                          | expense, income, or transfer             |
+| `frequency`      | TEXT    | NOT NULL, CHECK                          | daily, weekly, biweekly, monthly, quarterly, yearly |
+| `next_date`      | TEXT    | NOT NULL                                 | Next materialization date                |
+| `end_date`       | TEXT    | nullable                                 | Optional end date                        |
+| `account_id`     | TEXT    | NOT NULL, FK -> accounts(id)             | Source account                           |
+| `to_account_id`  | TEXT    | FK -> accounts(id)                       | Destination (transfers only)             |
+| `category_id`    | TEXT    | FK -> categories(id)                     | Category                                 |
+| `subcategory_id` | TEXT    | FK -> subcategories(id)                  | Subcategory                              |
+| `tags`           | TEXT    | DEFAULT ''                               | Tags                                     |
+| `notes`          | TEXT    | nullable                                 | Notes                                    |
+| `active`         | INTEGER | DEFAULT 1                                | 0 = paused, 1 = active                  |
+| `created_at`     | TEXT    | NOT NULL, auto                           | ISO 8601 timestamp                       |
+| `updated_at`     | TEXT    | NOT NULL, auto                           | ISO 8601 timestamp                       |
+
+### goals
+
+Savings goals with targets and deadlines.
+
+| Column           | Type    | Constraints              | Description              |
+| ---------------- | ------- | ------------------------ | ------------------------ |
+| `id`             | TEXT    | PRIMARY KEY              | ULID                     |
+| `name`           | TEXT    | NOT NULL                 | Goal name                |
+| `target_amount`  | INTEGER | NOT NULL                 | Target in centavos       |
+| `current_amount` | INTEGER | NOT NULL, DEFAULT 0      | Current progress         |
+| `deadline`       | TEXT    | nullable                 | Target date              |
+| `account_id`     | TEXT    | FK -> accounts(id)       | Linked account           |
+| `icon`           | TEXT    | DEFAULT '🎯'             | Display icon             |
+| `color`          | TEXT    | DEFAULT '#bf5af2'        | Display color            |
+| `notes`          | TEXT    | nullable                 | Notes                    |
+| `created_at`     | TEXT    | NOT NULL, auto           | ISO 8601 timestamp       |
+| `updated_at`     | TEXT    | NOT NULL, auto           | ISO 8601 timestamp       |
+
+### recaps
+
+Weekly and monthly spending summaries.
+
+| Column            | Type | Constraints    | Description                    |
+| ----------------- | ---- | -------------- | ------------------------------ |
+| `id`              | TEXT | PRIMARY KEY    | ULID                           |
+| `type`            | TEXT | NOT NULL, CHECK| weekly or monthly              |
+| `period_start`    | TEXT | NOT NULL       | Period start date              |
+| `period_end`      | TEXT | NOT NULL       | Period end date                |
+| `title`           | TEXT | NOT NULL       | Recap title                    |
+| `summary`         | TEXT | NOT NULL       | Natural language summary       |
+| `highlights_json` | TEXT | NOT NULL       | JSON array of highlight objects|
+| `generated_at`    | TEXT | NOT NULL, auto | Generation timestamp           |
+
+### transaction_splits
+
+Split transactions across multiple categories.
+
+| Column           | Type    | Constraints                                        | Description          |
+| ---------------- | ------- | -------------------------------------------------- | -------------------- |
+| `id`             | TEXT    | PRIMARY KEY                                        | ULID                 |
+| `transaction_id` | TEXT    | NOT NULL, FK -> transactions(id) ON DELETE CASCADE | Parent transaction   |
+| `category_id`    | TEXT    | NOT NULL, FK -> categories(id)                     | Split category       |
+| `subcategory_id` | TEXT    | FK -> subcategories(id)                            | Split subcategory    |
+| `amount`         | INTEGER | NOT NULL                                           | Split amount (centavos)|
+| `notes`          | TEXT    | nullable                                           | Split notes          |
+| `created_at`     | TEXT    | NOT NULL, auto                                     | ISO 8601 timestamp   |
+
 ---
 
 ## Indexes
@@ -297,6 +398,15 @@ The migration creates these indexes for query performance:
 | `idx_ai_messages_conversation`  | ai_messages    | conversation_id            | List messages in a conversation   |
 | `idx_exchange_rates_currencies` | exchange_rates | from_currency, to_currency | Rate lookup by currency pair      |
 | `idx_extension_data_extension`  | extension_data | extension_id               | List data for an extension        |
+| `idx_ai_memories_category`      | ai_memories    | category                   | Filter memories by category       |
+| `idx_category_rules_pattern_category` | category_rules | pattern, category_id | Unique rule lookup              |
+| `idx_category_rules_pattern`    | category_rules | pattern                    | Pattern matching                  |
+| `idx_recurring_rules_next_date` | recurring_rules| next_date                  | Due rule materialization          |
+| `idx_recurring_rules_active`    | recurring_rules| active                     | Filter active rules               |
+| `idx_goals_deadline`            | goals          | deadline                   | Sort by deadline                  |
+| `idx_recaps_type`               | recaps         | type                       | Filter by recap type              |
+| `idx_recaps_generated`          | recaps         | generated_at               | Sort by generation date           |
+| `idx_transaction_splits_transaction` | transaction_splits | transaction_id      | List splits for a transaction     |
 
 ### Recommended Future Indexes
 

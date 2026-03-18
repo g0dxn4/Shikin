@@ -20,5 +20,31 @@
   "quickActions": {
     "addTransaction": "Agregar Transacci\u00f3n",
     "askVal": "Preguntar a Val"
+  },
+  "streak": {
+    "label": "d\u00edas seguidos",
+    "labelPlural": "d\u00edas seguidos",
+    "longest": "M\u00e1ximo: {{count}}d",
+    "noStreak": "\u00a1Empieza a registrar!"
+  },
+  "achievements": {
+    "title": "Logros",
+    "unlocked": "\u00a1Desbloqueado!",
+    "first_steps": "Primeros Pasos",
+    "first_steps_desc": "Registra tu primera transacci\u00f3n",
+    "week_warrior": "Guerrero Semanal",
+    "week_warrior_desc": "Racha de 7 d\u00edas",
+    "budget_boss": "Jefe de Presupuesto",
+    "budget_boss_desc": "Mantente dentro del presupuesto por un mes",
+    "savings_star": "Estrella del Ahorro",
+    "savings_star_desc": "Tasa de ahorro >20% por un mes",
+    "century_club": "Club del Centenario",
+    "century_club_desc": "100 transacciones registradas",
+    "diversified": "Diversificado",
+    "diversified_desc": "5+ categor\u00edas en un mes",
+    "debt_destroyer": "Destructor de Deudas",
+    "debt_destroyer_desc": "Paga una tarjeta de cr\u00e9dito",
+    "goal_getter": "Logrador de Metas",
+    "goal_getter_desc": "Alcanza una meta de ahorro"
   }
 }

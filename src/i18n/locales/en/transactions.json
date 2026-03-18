@@ -35,5 +35,29 @@
   },
   "viewAll": "View All",
   "recentTransactions": "Recent Transactions",
-  "addQuick": "Add Transaction"
+  "addQuick": "Add Transaction",
+  "import": {
+    "button": "Import Statement",
+    "title": "Import Bank Statement",
+    "description": "Import transactions from OFX, QFX, or QIF bank statement files.",
+    "selectFile": "Select File",
+    "selectAccount": "Import to Account",
+    "selectAccountPlaceholder": "Select an account",
+    "noAccounts": "Create an account first to import transactions.",
+    "preview": "Preview",
+    "previewCount": "{{count}} transactions found",
+    "previewEmpty": "No transactions found in file.",
+    "confirm": "Import Transactions",
+    "importing": "Importing...",
+    "cancel": "Cancel",
+    "date": "Date",
+    "amount": "Amount",
+    "descriptionCol": "Description",
+    "typeCol": "Type",
+    "success": "Imported {{imported}} transactions ({{skipped}} duplicates skipped)",
+    "successNoSkip": "Imported {{imported}} transactions",
+    "error": "Import failed",
+    "partialError": "Imported {{imported}} transactions with {{errorCount}} errors",
+    "fileTypes": "Supported: .ofx, .qfx, .qif"
+  }
 }

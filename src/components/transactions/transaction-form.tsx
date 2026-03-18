@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
-import { Check, X } from 'lucide-react'
+import { Check, X, Split, Plus } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
@@ -18,7 +18,7 @@ import {
 import { useAccountStore } from '@/stores/account-store'
 import { useCategoryStore } from '@/stores/category-store'
 import { useCategorizationStore } from '@/stores/categorization-store'
-import { fromCentavos } from '@/lib/money'
+import { fromCentavos, toCentavos } from '@/lib/money'
 import type { CategorySuggestion } from '@/lib/auto-categorize'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 
@@ -57,9 +57,15 @@ const transactionSchema = z
 
 export type TransactionFormValues = z.infer<typeof transactionSchema>
 
+export interface SplitRowData {
+  categoryId: string
+  amount: string // string for input control
+  notes: string
+}
+
 interface TransactionFormProps {
   transaction?: TransactionWithDetails
-  onSubmit: (data: TransactionFormValues) => void
+  onSubmit: (data: TransactionFormValues, splits?: SplitRowData[]) => void
   isLoading?: boolean
 }
 
@@ -73,6 +79,12 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
   const [suggestion, setSuggestion] = useState<CategorySuggestion | null>(null)
   const [suggestionDismissed, setSuggestionDismissed] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const [isSplitMode, setIsSplitMode] = useState(false)
+  const [splitRows, setSplitRows] = useState<SplitRowData[]>([
+    { categoryId: '', amount: '', notes: '' },
+    { categoryId: '', amount: '', notes: '' },
+  ])
 
   useEffect(() => {
     fetchAccounts()
@@ -106,6 +118,7 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
   const transferToAccountIdValue = watch('transferToAccountId')
   const categoryIdValue = watch('categoryId')
   const descriptionValue = watch('description')
+  const amountValue = watch('amount')
 
   const filteredCategories = categories.filter((c) => c.type === typeValue)
 
@@ -168,8 +181,55 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
     setSuggestionDismissed(true)
   }
 
+  // Split calculations
+  const totalCentavos = amountValue ? toCentavos(amountValue) : 0
+  const splitTotalCentavos = splitRows.reduce((sum, row) => {
+    const val = parseFloat(row.amount)
+    return sum + (isNaN(val) ? 0 : toCentavos(val))
+  }, 0)
+  const remainingCentavos = totalCentavos - splitTotalCentavos
+
+  const updateSplitRow = useCallback(
+    (index: number, field: keyof SplitRowData, value: string) => {
+      setSplitRows((prev) => {
+        const next = [...prev]
+        next[index] = { ...next[index], [field]: value }
+        return next
+      })
+    },
+    []
+  )
+
+  const addSplitRow = useCallback(() => {
+    setSplitRows((prev) => [...prev, { categoryId: '', amount: '', notes: '' }])
+  }, [])
+
+  const removeSplitRow = useCallback((index: number) => {
+    setSplitRows((prev) => {
+      if (prev.length <= 2) return prev
+      return prev.filter((_, i) => i !== index)
+    })
+  }, [])
+
+  const handleFormSubmit = (data: TransactionFormValues) => {
+    if (isSplitMode) {
+      // Validate splits
+      const validSplits = splitRows.filter((r) => r.categoryId && r.amount)
+      if (validSplits.length < 2) return
+      if (remainingCentavos !== 0) return
+      onSubmit(data, validSplits)
+    } else {
+      onSubmit(data)
+    }
+  }
+
+  const splitsValid =
+    !isSplitMode ||
+    (splitRows.filter((r) => r.categoryId && r.amount).length >= 2 && remainingCentavos === 0)
+
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+    <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-5">
       <div className="space-y-1.5">
         <Label>{t('form.type')}</Label>
         <Select
@@ -242,67 +302,90 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
           )}
         </div>
 
-        <div className="space-y-1.5">
-          <Label>{t('form.category')}</Label>
-          <Select
-            value={categoryIdValue ?? '__none__'}
-            onValueChange={(val) => setValue('categoryId', val === '__none__' ? null : val)}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">{t('form.categoryNone')}</SelectItem>
-              {filteredCategories.map((cat) => (
-                <SelectItem key={cat.id} value={cat.id}>
-                  <span className="flex items-center gap-2">
-                    {cat.color && (
-                      <span
-                        className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: cat.color }}
-                      />
-                    )}
-                    {cat.name}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        {!isSplitMode && (
+          <div className="space-y-1.5">
+            <Label>{t('form.category')}</Label>
+            <Select
+              value={categoryIdValue ?? '__none__'}
+              onValueChange={(val) => setValue('categoryId', val === '__none__' ? null : val)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">{t('form.categoryNone')}</SelectItem>
+                {filteredCategories.map((cat) => (
+                  <SelectItem key={cat.id} value={cat.id}>
+                    <span className="flex items-center gap-2">
+                      {cat.color && (
+                        <span
+                          className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: cat.color }}
+                        />
+                      )}
+                      {cat.name}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-          {/* Auto-categorization suggestion chip */}
-          {showSuggestion && (
-            <div className="animate-fade-in flex items-center gap-1.5 pt-1">
-              <span className="text-muted-foreground text-[11px]">
-                {t('form.suggested')}:
-              </span>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-white/[0.04] px-2.5 py-0.5 text-[11px]">
-                {suggestedCategory.color && (
-                  <span
-                    className="inline-block h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: suggestedCategory.color }}
-                  />
-                )}
-                <span className="text-foreground">{suggestedCategory.name}</span>
-                <button
-                  type="button"
-                  onClick={handleAcceptSuggestion}
-                  className="text-success hover:text-success/80 ml-0.5 transition-colors"
-                  title={t('form.acceptSuggestion')}
-                >
-                  <Check size={12} />
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDismissSuggestion}
-                  className="text-muted-foreground hover:text-foreground transition-colors"
-                  title={t('form.dismissSuggestion')}
-                >
-                  <X size={12} />
-                </button>
-              </span>
-            </div>
-          )}
-        </div>
+            {/* Auto-categorization suggestion chip */}
+            {showSuggestion && (
+              <div className="animate-fade-in flex items-center gap-1.5 pt-1">
+                <span className="text-muted-foreground text-[11px]">
+                  {t('form.suggested')}:
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-white/[0.04] px-2.5 py-0.5 text-[11px]">
+                  {suggestedCategory.color && (
+                    <span
+                      className="inline-block h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: suggestedCategory.color }}
+                    />
+                  )}
+                  <span className="text-foreground">{suggestedCategory.name}</span>
+                  <button
+                    type="button"
+                    onClick={handleAcceptSuggestion}
+                    className="text-success hover:text-success/80 ml-0.5 transition-colors"
+                    title={t('form.acceptSuggestion')}
+                  >
+                    <Check size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDismissSuggestion}
+                    className="text-muted-foreground hover:text-foreground transition-colors"
+                    title={t('form.dismissSuggestion')}
+                  >
+                    <X size={12} />
+                  </button>
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {isSplitMode && (
+          <div className="flex items-end">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setIsSplitMode(false)
+                setSplitRows([
+                  { categoryId: '', amount: '', notes: '' },
+                  { categoryId: '', amount: '', notes: '' },
+                ])
+              }}
+              className="text-muted-foreground text-xs"
+            >
+              <X size={12} />
+              {t('form.category')}
+            </Button>
+          </div>
+        )}
       </div>
 
       {typeValue === 'transfer' && (
@@ -334,6 +417,106 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
         </div>
       )}
 
+      {/* Split toggle */}
+      {!isSplitMode && (
+        <button
+          type="button"
+          onClick={() => setIsSplitMode(true)}
+          className="text-muted-foreground hover:text-accent flex items-center gap-1.5 text-xs transition-colors"
+        >
+          <Split size={12} />
+          {t('split.toggle')}
+        </button>
+      )}
+
+      {/* Split rows */}
+      {isSplitMode && (
+        <div className="border-border/40 space-y-3 rounded-lg border p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground flex items-center gap-1.5 font-mono text-[11px]">
+              <Split size={11} />
+              {t('split.breakdown')}
+            </span>
+            {remainingCentavos === 0 && totalCentavos > 0 ? (
+              <span className="text-success font-mono text-[11px]">{t('split.allocated')}</span>
+            ) : remainingCentavos < 0 ? (
+              <span className="text-destructive font-mono text-[11px]">
+                {t('split.overAllocated')} ${(Math.abs(remainingCentavos) / 100).toFixed(2)}
+              </span>
+            ) : totalCentavos > 0 ? (
+              <span className="text-muted-foreground font-mono text-[11px]">
+                {t('split.remaining')}: ${(remainingCentavos / 100).toFixed(2)}
+              </span>
+            ) : null}
+          </div>
+
+          {splitRows.map((row, index) => (
+            <div key={index} className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <Select
+                  value={row.categoryId || '__none__'}
+                  onValueChange={(val) =>
+                    updateSplitRow(index, 'categoryId', val === '__none__' ? '' : val)
+                  }
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder={t('split.category')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">{t('split.category')}</SelectItem>
+                    {filteredCategories.map((cat) => (
+                      <SelectItem key={cat.id} value={cat.id}>
+                        <span className="flex items-center gap-1.5">
+                          {cat.color && (
+                            <span
+                              className="inline-block h-2 w-2 shrink-0 rounded-full"
+                              style={{ backgroundColor: cat.color }}
+                            />
+                          )}
+                          {cat.name}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Input
+                type="number"
+                step="0.01"
+                min="0.01"
+                placeholder="0.00"
+                value={row.amount}
+                onChange={(e) => updateSplitRow(index, 'amount', e.target.value)}
+                className="h-8 w-24 font-mono text-xs"
+              />
+              {splitRows.length > 2 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="text-muted-foreground hover:text-destructive h-8 w-8 shrink-0"
+                  onClick={() => removeSplitRow(index)}
+                >
+                  <X size={12} />
+                </Button>
+              )}
+            </div>
+          ))}
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={addSplitRow}
+            className="text-muted-foreground h-7 text-xs"
+          >
+            <Plus size={12} />
+            {t('split.addRow')}
+          </Button>
+        </div>
+      )}
+
+
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <Label htmlFor="date">{t('form.date')}</Label>
@@ -347,7 +530,7 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
         </div>
       </div>
 
-      <Button type="submit" className="w-full" disabled={isLoading}>
+      <Button type="submit" className="w-full" disabled={isLoading || !splitsValid}>
         {isLoading ? '...' : tCommon('actions.save')}
       </Button>
     </form>

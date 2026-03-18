@@ -472,6 +472,28 @@ function runMigrations(database: SqlJsDatabase): void {
     }
     database.run("INSERT INTO _migrations (id, name) VALUES (7, '007_recaps')")
   }
+
+  if (!applied.has('010_transaction_splits')) {
+    const MIGRATION_010 = `
+CREATE TABLE IF NOT EXISTS transaction_splits (
+  id TEXT PRIMARY KEY,
+  transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+  category_id TEXT NOT NULL REFERENCES categories(id),
+  subcategory_id TEXT REFERENCES subcategories(id),
+  amount INTEGER NOT NULL,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_transaction_splits_transaction ON transaction_splits(transaction_id)
+`
+    const statements = MIGRATION_010.split(';')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+    for (const s of statements) {
+      database.run(s)
+    }
+    database.run("INSERT INTO _migrations (id, name) VALUES (10, '010_transaction_splits')")
+  }
 }
 
 async function initDb(): Promise<SqlJsDatabase> {

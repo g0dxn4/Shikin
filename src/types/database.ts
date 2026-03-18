@@ -67,6 +67,22 @@ export interface Transaction {
   updated_at: DateTimeStr
 }
 
+export interface TransactionSplit {
+  id: ULID
+  transaction_id: ULID
+  category_id: ULID
+  subcategory_id: ULID | null
+  amount: Money
+  notes: string | null
+  created_at: DateTimeStr
+}
+
+export interface TransactionSplitWithCategory extends TransactionSplit {
+  category_name: string
+  category_color: string | null
+  subcategory_name: string | null
+}
+
 export interface Subscription {
   id: ULID
   account_id: ULID | null

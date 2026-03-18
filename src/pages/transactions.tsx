@@ -13,6 +13,8 @@ import {
   Repeat,
   Pause,
   Play,
+  Split,
+  ChevronDown,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import dayjs from 'dayjs'
@@ -46,6 +48,7 @@ import { useCategoryStore } from '@/stores/category-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import { formatMoney, fromCentavos } from '@/lib/money'
 import { cn } from '@/lib/utils'
+import type { TransactionSplitWithCategory } from '@/types/database'
 
 dayjs.extend(isToday)
 dayjs.extend(isYesterday)
@@ -90,7 +93,7 @@ export function Transactions() {
   const { t: tCommon } = useTranslation('common')
   const { openTransactionDialog, recurringDialogOpen, editingRecurringId, openRecurringDialog, closeRecurringDialog } =
     useUIStore()
-  const { transactions, isLoading, fetch, remove } = useTransactionStore()
+  const { transactions, isLoading, fetch, remove, isSplit } = useTransactionStore()
   const {
     rules,
     isLoading: isLoadingRules,
@@ -309,6 +312,7 @@ export function Transactions() {
                       <TransactionRow
                         key={tx.id}
                         transaction={tx}
+                        hasSplits={isSplit(tx.id)}
                         onEdit={() => openTransactionDialog(tx.id)}
                         onDelete={() => setDeleteId(tx.id)}
                       />
@@ -840,64 +844,135 @@ function RecurringSkeleton() {
 
 function TransactionRow({
   transaction: tx,
+  hasSplits,
   onEdit,
   onDelete,
 }: {
   transaction: TransactionWithDetails
+  hasSplits: boolean
   onEdit: () => void
   onDelete: () => void
 }) {
+  const { t } = useTranslation('transactions')
+  const { getSplits } = useTransactionStore()
+  const [expanded, setExpanded] = useState(false)
+  const [splits, setSplits] = useState<TransactionSplitWithCategory[]>([])
+  const [loadingSplits, setLoadingSplits] = useState(false)
+
+  const handleToggleSplits = async () => {
+    if (expanded) {
+      setExpanded(false)
+      return
+    }
+    setLoadingSplits(true)
+    try {
+      const data = await getSplits(tx.id)
+      setSplits(data)
+      setExpanded(true)
+    } finally {
+      setLoadingSplits(false)
+    }
+  }
+
   return (
-    <div className="glass-card group flex items-center gap-3 px-4 py-2.5">
-      {tx.category_color ? (
+    <div className="glass-card overflow-hidden">
+      <div className="group flex items-center gap-3 px-4 py-2.5">
+        {tx.category_color ? (
+          <span
+            className="h-2.5 w-2.5 shrink-0 rounded-full"
+            style={{ backgroundColor: tx.category_color }}
+          />
+        ) : (
+          <span className="bg-muted-foreground/30 h-2.5 w-2.5 shrink-0 rounded-full" />
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">{tx.description}</p>
+          <div className="text-muted-foreground flex items-center gap-2 text-xs">
+            {tx.category_name && <span>{tx.category_name}</span>}
+            {tx.account_name && (
+              <Badge variant="secondary" className="text-[10px]">
+                {tx.account_name}
+              </Badge>
+            )}
+            {hasSplits && (
+              <button
+                onClick={handleToggleSplits}
+                className="text-accent/70 hover:text-accent inline-flex items-center gap-0.5 transition-colors"
+              >
+                <Split size={10} />
+                <span className="font-mono text-[10px]">{t('split.badge')}</span>
+                <ChevronDown
+                  size={10}
+                  className={cn('transition-transform', expanded && 'rotate-180')}
+                />
+              </button>
+            )}
+          </div>
+        </div>
         <span
-          className="h-2.5 w-2.5 shrink-0 rounded-full"
-          style={{ backgroundColor: tx.category_color }}
-        />
-      ) : (
-        <span className="bg-muted-foreground/30 h-2.5 w-2.5 shrink-0 rounded-full" />
-      )}
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{tx.description}</p>
-        <div className="text-muted-foreground flex items-center gap-2 text-xs">
-          {tx.category_name && <span>{tx.category_name}</span>}
-          {tx.account_name && (
-            <Badge variant="secondary" className="text-[10px]">
-              {tx.account_name}
-            </Badge>
-          )}
-          {!!tx.is_recurring && (
-            <Badge variant="secondary" className="text-[10px]">
-              <Repeat size={8} className="mr-0.5" />
-              Auto
-            </Badge>
-          )}
+          className={`font-heading text-sm font-semibold ${
+            tx.type === 'income' ? 'text-success' : 'text-destructive'
+          }`}
+        >
+          {tx.type === 'income' ? '+' : '-'}
+          {formatMoney(tx.amount, tx.currency)}
+        </span>
+        <span className="text-muted-foreground hidden font-mono text-[10px] sm:inline">
+          {dayjs(tx.date).format('MMM D')}
+        </span>
+        <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit}>
+            <Pencil size={12} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-destructive hover:text-destructive h-7 w-7"
+            onClick={onDelete}
+          >
+            <Trash2 size={12} />
+          </Button>
         </div>
       </div>
-      <span
-        className={`font-heading text-sm font-semibold ${
-          tx.type === 'income' ? 'text-success' : 'text-destructive'
-        }`}
-      >
-        {tx.type === 'income' ? '+' : '-'}
-        {formatMoney(tx.amount, tx.currency)}
-      </span>
-      <span className="text-muted-foreground hidden font-mono text-[10px] sm:inline">
-        {dayjs(tx.date).format('MMM D')}
-      </span>
-      <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit}>
-          <Pencil size={12} />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="text-destructive hover:text-destructive h-7 w-7"
-          onClick={onDelete}
-        >
-          <Trash2 size={12} />
-        </Button>
-      </div>
+
+      {/* Split breakdown */}
+      {expanded && (
+        <div className="border-border/20 animate-slide-up border-t px-4 py-2">
+          {loadingSplits ? (
+            <div className="space-y-1">
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-3/4" />
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {splits.map((split) => (
+                <div
+                  key={split.id}
+                  className="flex items-center justify-between gap-2 text-xs"
+                >
+                  <div className="flex items-center gap-1.5">
+                    {split.category_color && (
+                      <span
+                        className="inline-block h-1.5 w-1.5 rounded-full"
+                        style={{ backgroundColor: split.category_color }}
+                      />
+                    )}
+                    <span className="text-muted-foreground">{split.category_name}</span>
+                    {split.notes && (
+                      <span className="text-muted-foreground/60 truncate max-w-32">
+                        — {split.notes}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-muted-foreground font-mono">
+                    {formatMoney(split.amount, tx.currency)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

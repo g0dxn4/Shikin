@@ -1,17 +1,17 @@
 {
   "title": "Transacciones",
-  "addTransaction": "Agregar Transacción",
-  "editTransaction": "Editar Transacción",
-  "deleteTransaction": "Eliminar Transacción",
-  "deleteConfirm": "¿Estás seguro de que deseas eliminar esta transacción? El saldo de la cuenta se ajustará. Esta acción no se puede deshacer.",
+  "addTransaction": "Agregar Transaccion",
+  "editTransaction": "Editar Transaccion",
+  "deleteTransaction": "Eliminar Transaccion",
+  "deleteConfirm": "Estas seguro de que deseas eliminar esta transaccion? El saldo de la cuenta se ajustara. Esta accion no se puede deshacer.",
   "form": {
     "amount": "Monto",
     "amountPlaceholder": "0.00",
     "type": "Tipo",
-    "description": "Descripción",
+    "description": "Descripcion",
     "descriptionPlaceholder": "ej. Compra de supermercado",
-    "category": "Categoría",
-    "categoryNone": "Sin categoría",
+    "category": "Categoria",
+    "categoryNone": "Sin categoria",
     "account": "Cuenta",
     "accountPlaceholder": "Selecciona una cuenta",
     "transferToAccount": "Cuenta destino",
@@ -46,14 +46,14 @@
     "yesterday": "Ayer"
   },
   "toast": {
-    "created": "Transacción creada exitosamente",
-    "updated": "Transacción actualizada exitosamente",
-    "deleted": "Transacción eliminada exitosamente",
-    "error": "Algo salió mal"
+    "created": "Transaccion creada exitosamente",
+    "updated": "Transaccion actualizada exitosamente",
+    "deleted": "Transaccion eliminada exitosamente",
+    "error": "Algo salio mal"
   },
   "empty": {
-    "title": "Sin transacciones aún",
-    "description": "Agrega tu primera transacción para comenzar a rastrear tus gastos."
+    "title": "Sin transacciones aun",
+    "description": "Agrega tu primera transaccion para comenzar a rastrear tus gastos."
   },
   "viewAll": "Ver Todas",
   "recentTransactions": "Transacciones Recientes",
@@ -99,5 +99,19 @@
   "tabs": {
     "transactions": "Transacciones",
     "recurring": "Recurrentes"
+  },
+  "split": {
+    "toggle": "Dividir",
+    "addRow": "Agregar division",
+    "remaining": "Restante",
+    "allocated": "Totalmente asignado",
+    "overAllocated": "Excedido por",
+    "badge": "Dividida",
+    "category": "Categoria",
+    "amount": "Monto",
+    "notes": "Nota",
+    "removeRow": "Eliminar",
+    "validation": "Los montos deben sumar el total",
+    "breakdown": "Desglose de division"
   }
 }

@@ -42,5 +42,23 @@
       "subscription_price_change": "Cambio de Precio",
       "large_transaction": "Transacción Grande"
     }
+  },
+  "forecast": {
+    "title": "Proyección de Flujo de Caja",
+    "range30": "30d",
+    "range60": "60d",
+    "range90": "90d",
+    "projected": "Proyectado",
+    "optimistic": "Optimista",
+    "pessimistic": "Pesimista",
+    "viewFull": "Ver Proyección Completa",
+    "dangerWarning": "El balance puede caer por debajo de {{threshold}} el {{date}}",
+    "lowestBalance": "Balance Mínimo",
+    "lowestDate": "El",
+    "dailyBurnRate": "Gasto Diario",
+    "dailyIncome": "Ingreso Diario",
+    "projectedEnd": "Balance Proyectado Final",
+    "noData": "Agrega transacciones para ver tu proyección de flujo de caja",
+    "healthy": "El flujo de caja se ve saludable para los próximos {{days}} días"
   }
 }

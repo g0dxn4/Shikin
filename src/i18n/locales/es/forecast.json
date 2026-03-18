@@ -1,0 +1,38 @@
+{
+  "title": "Proyeccion de Flujo de Caja",
+  "description": "Proyecta tus balances futuros basados en patrones historicos de gasto",
+  "chart": {
+    "title": "Proyeccion de Balance",
+    "projected": "Proyectado",
+    "optimistic": "Optimista",
+    "pessimistic": "Pesimista"
+  },
+  "metrics": {
+    "currentBalance": "Balance Actual",
+    "lowestProjected": "Minimo Proyectado",
+    "lowestDate": "Fecha del Balance Minimo",
+    "dailyBurn": "Gasto Diario",
+    "dailyIncome": "Ingreso Diario",
+    "projectedEnd": "Balance Final"
+  },
+  "range": {
+    "label": "Rango de Proyeccion",
+    "30": "30 Dias",
+    "60": "60 Dias",
+    "90": "90 Dias"
+  },
+  "table": {
+    "title": "Costos Recurrentes Esperados",
+    "name": "Nombre",
+    "amount": "Monto",
+    "frequency": "Frecuencia",
+    "nextDate": "Proxima Fecha",
+    "noSubscriptions": "No se encontraron suscripciones activas"
+  },
+  "danger": {
+    "title": "Advertencias",
+    "balanceBelowZero": "Se proyecta que el balance sea negativo el {{date}}",
+    "lowestPoint": "Punto mas bajo: {{amount}} el {{date}}",
+    "noDanger": "Sin advertencias — el flujo de caja se ve saludable"
+  }
+}

@@ -716,7 +716,6 @@ export function SettingsPage() {
         )}
       </section>
 
-<<<<<<< Updated upstream
       {/* Category Rules */}
       <section className="glass-card space-y-4 p-6">
         <h2 className="font-heading text-lg font-semibold">{t('sections.categoryRules')}</h2>

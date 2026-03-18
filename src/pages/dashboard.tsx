@@ -36,9 +36,10 @@ import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
 import { useTransactionStore } from '@/stores/transaction-store'
 import { useAnomalyStore } from '@/stores/anomaly-store'
+import { useForecastStore } from '@/stores/forecast-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import type { AnomalyType, AnomalySeverity } from '@/lib/anomaly-service'
-import { formatMoney } from '@/lib/money'
+import { formatMoney, fromCentavos } from '@/lib/money'
 
 const CHART_COLORS = [
   '#bf5af2',
@@ -388,6 +389,10 @@ export function Dashboard() {
             t={t}
           />
 
+          {/* Cash Flow Forecast Widget */}
+          {transactions.length > 0 && <ForecastWidget />}
+
+
           {/* Accounts preview */}
           <div className="space-y-3">
             <div className="page-header">
@@ -467,6 +472,151 @@ export function Dashboard() {
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+function ForecastWidget() {
+  const { t } = useTranslation('dashboard')
+  const {
+    forecast,
+    isLoading,
+    selectedRange,
+    setRange,
+    generateForecast,
+  } = useForecastStore()
+
+  useEffect(() => {
+    generateForecast()
+  }, [generateForecast])
+
+  const chartData = useMemo(() => {
+    if (!forecast) return []
+    return forecast.points
+      .filter((_, i) => i % Math.max(1, Math.floor(forecast.points.length / 30)) === 0 || i === forecast.points.length - 1)
+      .map((p) => ({
+        date: dayjs(p.date).format('MMM D'),
+        projected: fromCentavos(p.projected),
+        optimistic: fromCentavos(p.optimistic),
+        pessimistic: fromCentavos(p.pessimistic),
+      }))
+  }, [forecast])
+
+  const ranges = [30, 60, 90] as const
+
+  if (isLoading && !forecast) {
+    return (
+      <div className="glass-card p-5">
+        <Skeleton className="h-4 w-48" />
+        <Skeleton className="mt-4 h-48 w-full" />
+      </div>
+    )
+  }
+
+  if (!forecast) return null
+
+  const firstDangerDate = forecast.dangerDates[0]
+
+  return (
+    <div className="glass-card p-5">
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="font-heading text-sm font-semibold">{t('forecast.title')}</h3>
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1">
+            {ranges.map((r) => (
+              <button
+                key={r}
+                onClick={() => setRange(r)}
+                className={`rounded-md px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                  selectedRange === r
+                    ? 'bg-primary text-white'
+                    : 'text-muted-foreground hover:text-foreground bg-white/5 hover:bg-white/10'
+                }`}
+              >
+                {t(`forecast.range${r}` as 'forecast.range30')}
+              </button>
+            ))}
+          </div>
+          <Button variant="ghost" size="sm" asChild>
+            <Link to="/forecast">
+              {t('forecast.viewFull')}
+              <ArrowRight size={14} />
+            </Link>
+          </Button>
+        </div>
+      </div>
+
+      {firstDangerDate && (
+        <div className="mb-3 flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2">
+          <AlertTriangle size={14} className="text-destructive shrink-0" />
+          <p className="text-xs text-destructive">
+            {t('forecast.dangerWarning', {
+              threshold: formatMoney(0),
+              date: dayjs(firstDangerDate).format('MMM D'),
+            })}
+          </p>
+        </div>
+      )}
+
+      <div className="h-48">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={chartData}>
+            <defs>
+              <linearGradient id="forecastGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#bf5af2" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#bf5af2" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <XAxis
+              dataKey="date"
+              axisLine={false}
+              tickLine={false}
+              tick={{ fill: '#71717a', fontSize: 11 }}
+              interval="preserveStartEnd"
+            />
+            <YAxis hide />
+            <Tooltip
+              contentStyle={{
+                background: '#0a0a0a',
+                border: '1px solid rgba(255,255,255,0.06)',
+                borderRadius: 8,
+                fontSize: 12,
+              }}
+              itemStyle={{ color: '#ffffff' }}
+              labelStyle={{ color: '#a1a1aa' }}
+              formatter={(value) =>
+                `$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              }
+            />
+            <Area
+              type="monotone"
+              dataKey="optimistic"
+              name={t('forecast.optimistic')}
+              stroke="#22c55e"
+              strokeWidth={1}
+              strokeDasharray="6 3"
+              fill="none"
+            />
+            <Area
+              type="monotone"
+              dataKey="projected"
+              name={t('forecast.projected')}
+              stroke="#bf5af2"
+              strokeWidth={2}
+              fill="url(#forecastGrad)"
+            />
+            <Area
+              type="monotone"
+              dataKey="pessimistic"
+              name={t('forecast.pessimistic')}
+              stroke="#ef4444"
+              strokeWidth={1}
+              strokeDasharray="6 3"
+              fill="none"
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   )
 }

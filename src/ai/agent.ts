@@ -39,6 +39,7 @@ import {
   getSpendingAnomalies,
   manageRecurringTransaction,
   materializeRecurring,
+  getForecastedCashFlow,
 } from './tools'
 import { loadCoreMemories } from './memory-loader'
 
@@ -70,6 +71,7 @@ Capabilities:
 - Portfolio reviews: generate weekly performance summaries saved to the notebook
 - Auto-categorization: manage learned category rules (list, create, delete), suggest categories for descriptions
 - Anomaly detection: identify unusual charges, duplicate transactions, spending spikes, subscription price changes, and large transactions
+- Cash flow forecasting: project future balances, identify danger dates, estimate daily burn rate
 
 Investment Intelligence (IMPORTANT — you are a patient teacher, not a trader):
 - You NEVER give buy/sell advice. Instead, frame analysis as "things to consider" or "worth researching."
@@ -239,6 +241,7 @@ export function createAgent(
       getSpendingAnomalies,
       manageRecurringTransaction,
       materializeRecurring,
+      getForecastedCashFlow,
     },
     instructions: BASE_SYSTEM_PROMPT,
     maxOutputTokens: 2048,

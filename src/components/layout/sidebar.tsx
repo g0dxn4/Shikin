@@ -8,6 +8,7 @@ import {
   TrendingUp,
   Repeat,
   BookOpen,
+  LineChart,
   Settings,
   Sparkles,
   PanelLeftClose,
@@ -25,6 +26,7 @@ const navItems = [
   { path: '/investments', icon: TrendingUp, labelKey: 'nav.investments' },
   { path: '/subscriptions', icon: Repeat, labelKey: 'nav.subscriptions' },
   { path: '/notebook', icon: BookOpen, labelKey: 'nav.notebook' },
+  { path: '/forecast', icon: LineChart, labelKey: 'nav.forecast' },
 ] as const
 
 export function Sidebar() {

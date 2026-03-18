@@ -57,6 +57,7 @@
   },
   "viewAll": "Ver Todas",
   "recentTransactions": "Transacciones Recientes",
+<<<<<<< HEAD
   "addQuick": "Agregar Transacción",
   "recurring": {
     "title": "Recurrentes",
@@ -113,5 +114,29 @@
     "removeRow": "Eliminar",
     "validation": "Los montos deben sumar el total",
     "breakdown": "Desglose de division"
+  },
+  "import": {
+    "button": "Importar Estado",
+    "title": "Importar Estado de Cuenta",
+    "description": "Importa transacciones desde archivos de estado de cuenta OFX, QFX o QIF.",
+    "selectFile": "Seleccionar Archivo",
+    "selectAccount": "Importar a Cuenta",
+    "selectAccountPlaceholder": "Selecciona una cuenta",
+    "noAccounts": "Crea una cuenta primero para importar transacciones.",
+    "preview": "Vista Previa",
+    "previewCount": "{{count}} transacciones encontradas",
+    "previewEmpty": "No se encontraron transacciones en el archivo.",
+    "confirm": "Importar Transacciones",
+    "importing": "Importando...",
+    "cancel": "Cancelar",
+    "date": "Fecha",
+    "amount": "Monto",
+    "descriptionCol": "Descripción",
+    "typeCol": "Tipo",
+    "success": "Se importaron {{imported}} transacciones ({{skipped}} duplicados omitidos)",
+    "successNoSkip": "Se importaron {{imported}} transacciones",
+    "error": "Error al importar",
+    "partialError": "Se importaron {{imported}} transacciones con {{errorCount}} errores",
+    "fileTypes": "Soportados: .ofx, .qfx, .qif"
   }
 }

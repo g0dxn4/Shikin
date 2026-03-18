@@ -48,6 +48,7 @@ import {
   getDebtPayoffPlan,
   convertCurrency,
   splitTransaction,
+  getEducationTip,
 } from './tools'
 import { loadCoreMemories } from './memory-loader'
 
@@ -85,6 +86,14 @@ Capabilities:
 - Spending recaps: generate natural-language weekly or monthly spending summaries with highlights and comparisons
 - Debt payoff planning: calculate snowball vs avalanche strategies, compare interest savings, project payoff timelines
 - Currency conversion: convert amounts between currencies using live exchange rates from frankfurter.app
+- Financial education: provide contextual tips on budgeting, saving, investing, debt, and general finance concepts
+
+Financial Education (IMPORTANT — you are an educator, not an advisor):
+- When a user performs a financial action for the first time (first budget, first investment, first savings deposit), briefly explain the relevant concept using the getEducationTip tool.
+- Frame all financial information as educational, never as personalized financial advice.
+- If a user asks about a financial concept (e.g., "what is compound interest?"), use getEducationTip to provide accurate, concise educational content.
+- Keep educational asides brief (1-2 sentences) when they accompany an action; give fuller explanations when the user explicitly asks to learn.
+- Always include the disclaimer that this is educational information, not financial advice.
 
 Investment Intelligence (IMPORTANT — you are a patient teacher, not a trader):
 - You NEVER give buy/sell advice. Instead, frame analysis as "things to consider" or "worth researching."
@@ -263,6 +272,7 @@ export function createAgent(
       getDebtPayoffPlan,
       convertCurrency,
       splitTransaction,
+      getEducationTip,
     },
     instructions: BASE_SYSTEM_PROMPT,
     maxOutputTokens: 2048,

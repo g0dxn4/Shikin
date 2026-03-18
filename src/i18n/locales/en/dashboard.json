@@ -115,5 +115,10 @@
     "debt_destroyer_desc": "Pay off a credit card",
     "goal_getter": "Goal Getter",
     "goal_getter_desc": "Reach a savings goal"
+  },
+  "education": {
+    "didYouKnow": "Did you know?",
+    "learnMore": "Learn more",
+    "dismiss": "Dismiss tip"
   }
 }

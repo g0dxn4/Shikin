@@ -46,6 +46,7 @@ import {
   getFinancialHealthScore,
   getSpendingRecap,
   getDebtPayoffPlan,
+  convertCurrency,
 } from './tools'
 import { loadCoreMemories } from './memory-loader'
 
@@ -82,6 +83,7 @@ Capabilities:
 - Financial health score: composite 0-100 score analyzing savings rate, budget adherence, debt-to-income, emergency fund, and spending consistency
 - Spending recaps: generate natural-language weekly or monthly spending summaries with highlights and comparisons
 - Debt payoff planning: calculate snowball vs avalanche strategies, compare interest savings, project payoff timelines
+- Currency conversion: convert amounts between currencies using live exchange rates from frankfurter.app
 
 Investment Intelligence (IMPORTANT — you are a patient teacher, not a trader):
 - You NEVER give buy/sell advice. Instead, frame analysis as "things to consider" or "worth researching."
@@ -258,6 +260,7 @@ export function createAgent(
       getFinancialHealthScore,
       getSpendingRecap,
       getDebtPayoffPlan,
+      convertCurrency,
     },
     instructions: BASE_SYSTEM_PROMPT,
     maxOutputTokens: 2048,

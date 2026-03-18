@@ -44,6 +44,7 @@ import { useAnomalyStore } from '@/stores/anomaly-store'
 import { useForecastStore } from '@/stores/forecast-store'
 import { useGoalStore } from '@/stores/goal-store'
 import { useRecapStore } from '@/stores/recap-store'
+import { useCurrencyStore } from '@/stores/currency-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import type { AnomalyType, AnomalySeverity } from '@/lib/anomaly-service'
 import { useHealthStore } from '@/stores/health-store'
@@ -79,13 +80,15 @@ export function Dashboard() {
     generateWeekly,
     loadLatestWeekly,
   } = useRecapStore()
+  const { preferredCurrency, getTotalBalanceInPreferred, loadRates } = useCurrencyStore()
 
   useEffect(() => {
     fetchAccounts()
     fetchTransactions()
     fetchGoals()
     loadLatestWeekly()
-  }, [fetchAccounts, fetchTransactions, fetchGoals, loadLatestWeekly])
+    loadRates()
+  }, [fetchAccounts, fetchTransactions, fetchGoals, loadLatestWeekly, loadRates])
 
   // Run anomaly scan after transactions are loaded
   useEffect(() => {
@@ -108,6 +111,18 @@ export function Dashboard() {
   }, [generateWeekly])
 
   const totalBalance = useMemo(() => accounts.reduce((sum, a) => sum + a.balance, 0), [accounts])
+
+  // Check if accounts have mixed currencies
+  const hasMixedCurrencies = useMemo(() => {
+    const currencies = new Set(accounts.map((a) => a.currency))
+    return currencies.size > 1
+  }, [accounts])
+
+  // Converted total balance in preferred currency
+  const convertedTotalBalance = useMemo(() => {
+    if (!hasMixedCurrencies) return totalBalance
+    return getTotalBalanceInPreferred(accounts)
+  }, [hasMixedCurrencies, totalBalance, accounts, getTotalBalanceInPreferred])
 
   const { monthlyIncome, monthlyExpenses } = useMemo(() => {
     const startOfMonth = dayjs().startOf('month').format('YYYY-MM-DD')
@@ -210,8 +225,12 @@ export function Dashboard() {
         <MetricCard
           icon={<Wallet size={16} />}
           iconColor="text-primary"
-          label={t('cards.totalBalance')}
-          value={formatMoney(totalBalance)}
+          label={hasMixedCurrencies ? t('cards.totalBalanceConverted') : t('cards.totalBalance')}
+          value={hasMixedCurrencies
+            ? formatMoney(convertedTotalBalance, preferredCurrency)
+            : formatMoney(totalBalance)
+          }
+          subtitle={hasMixedCurrencies ? preferredCurrency : undefined}
         />
         <MetricCard
           icon={<TrendingUp size={16} />}
@@ -789,12 +808,14 @@ function MetricCard({
   label,
   value,
   valueColor,
+  subtitle,
 }: {
   icon: React.ReactNode
   iconColor: string
   label: string
   value: string
   valueColor?: string
+  subtitle?: string
 }) {
   return (
     <div className="metric-card">
@@ -805,6 +826,9 @@ function MetricCard({
       <p className={`font-heading text-2xl font-bold tracking-tight ${valueColor || ''}`}>
         {value}
       </p>
+      {subtitle && (
+        <p className="text-muted-foreground mt-0.5 font-mono text-[10px]">{subtitle}</p>
+      )}
     </div>
   )
 }

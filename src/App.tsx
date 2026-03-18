@@ -6,6 +6,7 @@ import { AppShell } from '@/components/layout/app-shell'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { useAIStore } from '@/stores/ai-store'
 import { useRecurringStore } from '@/stores/recurring-store'
+import { useCurrencyStore } from '@/stores/currency-store'
 import { initPriceScheduler, stopPriceScheduler } from '@/lib/price-scheduler'
 import '@/i18n'
 import '@/styles/globals.css'
@@ -38,6 +39,7 @@ const OAuthCallback = lazy(() =>
 export default function App() {
   const loadSettings = useAIStore((s) => s.loadSettings)
   const materializeTransactions = useRecurringStore((s) => s.materializeTransactions)
+  const autoRefreshRates = useCurrencyStore((s) => s.autoRefreshIfStale)
 
   useEffect(() => {
     loadSettings()
@@ -46,8 +48,10 @@ export default function App() {
     materializeTransactions().catch((err) =>
       console.warn('[Recurring] Failed to materialize transactions:', err)
     )
+    // Auto-refresh exchange rates if stale (>24h)
+    autoRefreshRates().catch(console.warn)
     return () => stopPriceScheduler()
-  }, [loadSettings, materializeTransactions])
+  }, [loadSettings, materializeTransactions, autoRefreshRates])
 
   return (
     <ErrorBoundary>

@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeftRight, Plus, Pencil, Trash2, Search, Filter } from 'lucide-react'
+import { ArrowLeftRight, Plus, Pencil, Trash2, Search, Filter, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import dayjs from 'dayjs'
 import isToday from 'dayjs/plugin/isToday'
@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useUIStore } from '@/stores/ui-store'
 import { useTransactionStore } from '@/stores/transaction-store'
+import { useAccountStore } from '@/stores/account-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import { formatMoney } from '@/lib/money'
 import { cn } from '@/lib/utils'
@@ -21,6 +22,12 @@ dayjs.extend(isYesterday)
 const ConfirmDialog = lazy(() =>
   import('@/components/shared/confirm-dialog').then((m) => ({
     default: m.ConfirmDialog,
+  }))
+)
+
+const StatementImportDialog = lazy(() =>
+  import('@/components/transactions/statement-import-dialog').then((m) => ({
+    default: m.StatementImportDialog,
   }))
 )
 
@@ -38,16 +45,19 @@ export function Transactions() {
   const { t: tCommon } = useTranslation('common')
   const { openTransactionDialog } = useUIStore()
   const { transactions, isLoading, fetch, remove } = useTransactionStore()
+  const { fetch: fetchAccounts } = useAccountStore()
 
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
   const [showFilters, setShowFilters] = useState(false)
+  const [showImport, setShowImport] = useState(false)
 
   useEffect(() => {
     fetch()
-  }, [fetch])
+    fetchAccounts()
+  }, [fetch, fetchAccounts])
 
   const filteredTransactions = useMemo(() => {
     return transactions.filter((tx) => {
@@ -101,6 +111,10 @@ export function Transactions() {
           >
             <Filter size={14} />
             {tCommon('actions.filter')}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setShowImport(true)}>
+            <Upload size={14} />
+            {t('import.button')}
           </Button>
           <Button onClick={() => openTransactionDialog()}>
             <Plus size={16} />
@@ -193,6 +207,7 @@ export function Transactions() {
           isLoading={isDeleting}
           onConfirm={handleDelete}
         />
+        <StatementImportDialog open={showImport} onOpenChange={setShowImport} />
       </Suspense>
     </div>
   )

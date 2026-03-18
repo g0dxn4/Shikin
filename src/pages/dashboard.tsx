@@ -9,6 +9,13 @@ import {
   Plus,
   ArrowRight,
   Sparkles,
+  AlertTriangle,
+  Copy,
+  Zap,
+  Receipt,
+  DollarSign,
+  X,
+  ShieldAlert,
 } from 'lucide-react'
 import dayjs from 'dayjs'
 import {
@@ -28,7 +35,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
 import { useTransactionStore } from '@/stores/transaction-store'
+import { useAnomalyStore } from '@/stores/anomaly-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
+import type { AnomalyType, AnomalySeverity } from '@/lib/anomaly-service'
 import { formatMoney } from '@/lib/money'
 
 const CHART_COLORS = ['#bf5af2', '#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#8b5cf6']
@@ -40,11 +49,21 @@ export function Dashboard() {
   const { setAIPanelOpen, openAccountDialog, openTransactionDialog } = useUIStore()
   const { accounts, isLoading: accountsLoading, fetch: fetchAccounts } = useAccountStore()
   const { transactions, isLoading: txLoading, fetch: fetchTransactions } = useTransactionStore()
+  const { isLoading: anomalyLoading, scanForAnomalies, getActiveAnomalies, dismissAnomaly } = useAnomalyStore()
 
   useEffect(() => {
     fetchAccounts()
     fetchTransactions()
   }, [fetchAccounts, fetchTransactions])
+
+  // Run anomaly scan after transactions are loaded
+  useEffect(() => {
+    if (transactions.length > 0 && !txLoading) {
+      scanForAnomalies()
+    }
+  }, [transactions.length, txLoading, scanForAnomalies])
+
+  const activeAnomalies = getActiveAnomalies()
 
   const totalBalance = useMemo(() => accounts.reduce((sum, a) => sum + a.balance, 0), [accounts])
 
@@ -285,6 +304,14 @@ export function Dashboard() {
             </div>
           )}
 
+          {/* Alerts section */}
+          <AlertsSection
+            anomalies={activeAnomalies}
+            isLoading={anomalyLoading}
+            onDismiss={dismissAnomaly}
+            t={t}
+          />
+
           {/* Accounts preview */}
           <div className="space-y-3">
             <div className="page-header">
@@ -418,6 +445,112 @@ function DashboardSkeleton() {
           <Skeleton className="h-4 w-24" />
           <Skeleton className="mt-4 h-48 w-full" />
         </div>
+      </div>
+    </div>
+  )
+}
+
+const ANOMALY_ICONS: Record<AnomalyType, React.ReactNode> = {
+  unusual_amount: <AlertTriangle size={14} />,
+  duplicate_charge: <Copy size={14} />,
+  spending_spike: <Zap size={14} />,
+  subscription_price_change: <Receipt size={14} />,
+  large_transaction: <DollarSign size={14} />,
+}
+
+const SEVERITY_STYLES: Record<AnomalySeverity, { border: string; bg: string; text: string; badge: string }> = {
+  high: {
+    border: 'border-red-500/30',
+    bg: 'bg-red-500/10',
+    text: 'text-red-400',
+    badge: 'bg-red-500/20 text-red-400',
+  },
+  medium: {
+    border: 'border-yellow-500/30',
+    bg: 'bg-yellow-500/10',
+    text: 'text-yellow-400',
+    badge: 'bg-yellow-500/20 text-yellow-400',
+  },
+  low: {
+    border: 'border-blue-500/30',
+    bg: 'bg-blue-500/10',
+    text: 'text-blue-400',
+    badge: 'bg-blue-500/20 text-blue-400',
+  },
+}
+
+function AlertsSection({
+  anomalies,
+  isLoading,
+  onDismiss,
+  t,
+}: {
+  anomalies: Array<{
+    id: string
+    type: AnomalyType
+    severity: AnomalySeverity
+    title: string
+    description: string
+    amount?: number
+  }>
+  isLoading: boolean
+  onDismiss: (id: string) => void
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  t: (key: any) => string
+}) {
+  if (isLoading) {
+    return (
+      <div className="glass-card flex items-center gap-3 p-4">
+        <ShieldAlert size={16} className="text-primary animate-pulse" />
+        <span className="text-muted-foreground text-sm">{t('alerts.scanning')}</span>
+      </div>
+    )
+  }
+
+  if (anomalies.length === 0) return null
+
+  return (
+    <div className="space-y-3">
+      <div className="page-header">
+        <div className="flex items-center gap-2">
+          <h2 className="font-heading text-lg font-semibold">{t('alerts.title')}</h2>
+          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500/20 px-1.5 font-mono text-[10px] font-bold text-red-400">
+            {anomalies.length}
+          </span>
+        </div>
+      </div>
+      <div className="space-y-2">
+        {anomalies.map((anomaly) => {
+          const styles = SEVERITY_STYLES[anomaly.severity]
+          return (
+            <div
+              key={anomaly.id}
+              className={`glass-card flex items-start gap-3 border px-4 py-3 ${styles.border}`}
+            >
+              <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${styles.bg} ${styles.text}`}>
+                {ANOMALY_ICONS[anomaly.type]}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="truncate text-sm font-medium">{anomaly.title}</p>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${styles.badge}`}>
+                    {t(`alerts.severity.${anomaly.severity}`)}
+                  </span>
+                </div>
+                <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
+                  {anomaly.description}
+                </p>
+              </div>
+              <button
+                onClick={() => onDismiss(anomaly.id)}
+                className="text-muted-foreground hover:text-foreground mt-0.5 shrink-0 rounded-md p-1 transition-colors hover:bg-white/5"
+                title={t('alerts.dismiss')}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

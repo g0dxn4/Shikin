@@ -6,6 +6,7 @@ import {
   TrendingUp,
   TrendingDown,
   PiggyBank,
+  Target,
   Plus,
   ArrowRight,
   Sparkles,
@@ -28,6 +29,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
 import { useTransactionStore } from '@/stores/transaction-store'
+import { useGoalStore } from '@/stores/goal-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import { formatMoney } from '@/lib/money'
 
@@ -40,11 +42,13 @@ export function Dashboard() {
   const { setAIPanelOpen, openAccountDialog, openTransactionDialog } = useUIStore()
   const { accounts, isLoading: accountsLoading, fetch: fetchAccounts } = useAccountStore()
   const { transactions, isLoading: txLoading, fetch: fetchTransactions } = useTransactionStore()
+  const { goals, fetch: fetchGoals } = useGoalStore()
 
   useEffect(() => {
     fetchAccounts()
     fetchTransactions()
-  }, [fetchAccounts, fetchTransactions])
+    fetchGoals()
+  }, [fetchAccounts, fetchTransactions, fetchGoals])
 
   const totalBalance = useMemo(() => accounts.reduce((sum, a) => sum + a.balance, 0), [accounts])
 
@@ -350,6 +354,76 @@ export function Dashboard() {
               </div>
             )}
           </div>
+
+          {/* Goals preview */}
+          {goals.length > 0 && (
+            <div className="space-y-3">
+              <div className="page-header">
+                <h2 className="font-heading text-lg font-semibold">
+                  <Target size={16} className="text-primary mr-2 inline" />
+                  {t('goals.title', { ns: 'goals', defaultValue: 'Savings Goals' })}
+                </h2>
+                <Button variant="ghost" size="sm" asChild>
+                  <Link to="/goals">
+                    {t('goals.viewAll', { ns: 'goals', defaultValue: 'View All' })}
+                    <ArrowRight size={14} />
+                  </Link>
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {goals.slice(0, 3).map((goal) => {
+                  const progressColor =
+                    goal.progress >= 75 ? '#22c55e' : goal.progress >= 40 ? '#f59e0b' : '#ef4444'
+                  return (
+                    <div key={goal.id} className="metric-card">
+                      <div className="mb-2 flex items-center gap-2">
+                        <span className="text-base">{goal.icon || '🎯'}</span>
+                        <h3 className="font-heading truncate text-sm font-semibold">{goal.name}</h3>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="relative h-10 w-10 shrink-0">
+                          <svg className="h-10 w-10 -rotate-90" viewBox="0 0 40 40">
+                            <circle
+                              cx="20"
+                              cy="20"
+                              r="16"
+                              fill="none"
+                              stroke="rgba(255,255,255,0.05)"
+                              strokeWidth="4"
+                            />
+                            <circle
+                              cx="20"
+                              cy="20"
+                              r="16"
+                              fill="none"
+                              stroke={progressColor}
+                              strokeWidth="4"
+                              strokeLinecap="round"
+                              strokeDasharray={`${(goal.progress / 100) * 100.53} 100.53`}
+                            />
+                          </svg>
+                          <span
+                            className="font-heading absolute inset-0 flex items-center justify-center text-[10px] font-bold"
+                            style={{ color: progressColor }}
+                          >
+                            {goal.progress}%
+                          </span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-foreground text-sm font-medium">
+                            {formatMoney(goal.current_amount)}
+                          </p>
+                          <p className="text-muted-foreground text-xs">
+                            of {formatMoney(goal.target_amount)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Quick actions */}
           <div className="flex gap-3">

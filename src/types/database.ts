@@ -156,6 +156,20 @@ export interface AIMemory {
   updated_at: DateTimeStr
 }
 
+export interface Goal {
+  id: ULID
+  name: string
+  target_amount: Money
+  current_amount: Money
+  deadline: DateStr | null
+  account_id: ULID | null
+  icon: string | null
+  color: string | null
+  notes: string | null
+  created_at: DateTimeStr
+  updated_at: DateTimeStr
+}
+
 export interface ExchangeRate {
   id: ULID
   from_currency: CurrencyCode

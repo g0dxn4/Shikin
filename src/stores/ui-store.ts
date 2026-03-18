@@ -26,6 +26,11 @@ interface UIState {
   editingInvestmentId: string | null
   openInvestmentDialog: (id?: string) => void
   closeInvestmentDialog: () => void
+
+  goalDialogOpen: boolean
+  editingGoalId: string | null
+  openGoalDialog: (id?: string) => void
+  closeGoalDialog: () => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -56,4 +61,9 @@ export const useUIStore = create<UIState>((set) => ({
   openInvestmentDialog: (id) =>
     set({ investmentDialogOpen: true, editingInvestmentId: id ?? null }),
   closeInvestmentDialog: () => set({ investmentDialogOpen: false, editingInvestmentId: null }),
+
+  goalDialogOpen: false,
+  editingGoalId: null,
+  openGoalDialog: (id) => set({ goalDialogOpen: true, editingGoalId: id ?? null }),
+  closeGoalDialog: () => set({ goalDialogOpen: false, editingGoalId: null }),
 }))

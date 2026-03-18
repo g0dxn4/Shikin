@@ -263,6 +263,24 @@ CREATE TABLE IF NOT EXISTS ai_memories (
 CREATE INDEX IF NOT EXISTS idx_ai_memories_category ON ai_memories(category);
 `
 
+const MIGRATION_003 = `
+CREATE TABLE IF NOT EXISTS goals (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  target_amount INTEGER NOT NULL,
+  current_amount INTEGER NOT NULL DEFAULT 0,
+  deadline TEXT,
+  account_id TEXT REFERENCES accounts(id),
+  icon TEXT DEFAULT '🎯',
+  color TEXT DEFAULT '#bf5af2',
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_goals_deadline ON goals(deadline);
+`
+
 // --- Parameter conversion ---
 // The codebase uses two param styles:
 //   - $1, $2, $3 (tauri-plugin-sql positional) used in AI tools
@@ -358,6 +376,16 @@ function runMigrations(database: SqlJsDatabase): void {
       // Column may already exist
     }
     database.run("INSERT INTO _migrations (id, name) VALUES (3, '003_credit_cards')")
+  }
+
+  if (!applied.has('004_goals')) {
+    const statements = MIGRATION_003.split(';')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+    for (const s of statements) {
+      database.run(s)
+    }
+    database.run("INSERT INTO _migrations (id, name) VALUES (4, '004_goals')")
   }
 }
 

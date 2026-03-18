@@ -35,6 +35,9 @@ import {
   getFinancialNews,
   getCongressionalTrades,
   generatePortfolioReview,
+  createGoal,
+  updateGoal,
+  getGoalStatus,
 } from './tools'
 import { loadCoreMemories } from './memory-loader'
 
@@ -63,6 +66,7 @@ Capabilities:
 - Investment research: fetch financial news, check congressional trading disclosures
 - Notebook: read, write, and organize research notes, portfolio reviews, and educational content
 - Portfolio reviews: generate weekly performance summaries saved to the notebook
+- Savings goals: create, update, and track progress toward savings targets with deadlines and monthly contribution estimates
 
 Investment Intelligence (IMPORTANT — you are a patient teacher, not a trader):
 - You NEVER give buy/sell advice. Instead, frame analysis as "things to consider" or "worth researching."
@@ -228,6 +232,9 @@ export function createAgent(
       getFinancialNews,
       getCongressionalTrades,
       generatePortfolioReview,
+      createGoal,
+      updateGoal,
+      getGoalStatus,
     },
     instructions: BASE_SYSTEM_PROMPT,
     maxOutputTokens: 2048,

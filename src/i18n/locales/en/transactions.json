@@ -35,5 +35,19 @@
   },
   "viewAll": "View All",
   "recentTransactions": "Recent Transactions",
-  "addQuick": "Add Transaction"
+  "addQuick": "Add Transaction",
+  "split": {
+    "toggle": "Split",
+    "addRow": "Add split",
+    "remaining": "Remaining",
+    "allocated": "Fully allocated",
+    "overAllocated": "Over-allocated by",
+    "badge": "Split",
+    "category": "Category",
+    "amount": "Amount",
+    "notes": "Note",
+    "removeRow": "Remove",
+    "validation": "Split amounts must equal the total",
+    "breakdown": "Split breakdown"
+  }
 }

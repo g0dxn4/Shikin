@@ -3,7 +3,13 @@ import { query, execute } from '@/lib/database'
 import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
 import { useAccountStore } from './account-store'
-import type { Transaction } from '@/types/database'
+import {
+  createSplits,
+  getSplits as fetchSplits,
+  getSplitTransactionIds,
+} from '@/lib/split-service'
+import type { SplitInput } from '@/lib/split-service'
+import type { Transaction, TransactionSplitWithCategory } from '@/types/database'
 import type { TransactionType, CurrencyCode } from '@/types/common'
 
 export interface TransactionFormData {
@@ -26,29 +32,37 @@ export interface TransactionWithDetails extends Transaction {
 
 interface TransactionState {
   transactions: TransactionWithDetails[]
+  splitTransactionIds: Set<string>
   isLoading: boolean
   fetch: () => Promise<void>
   add: (data: TransactionFormData) => Promise<void>
+  addWithSplits: (data: TransactionFormData, splits: SplitInput[]) => Promise<void>
   update: (id: string, data: TransactionFormData) => Promise<void>
   remove: (id: string) => Promise<void>
   getById: (id: string) => TransactionWithDetails | undefined
+  getSplits: (id: string) => Promise<TransactionSplitWithCategory[]>
+  isSplit: (id: string) => boolean
 }
 
 export const useTransactionStore = create<TransactionState>((set, get) => ({
   transactions: [],
+  splitTransactionIds: new Set<string>(),
   isLoading: false,
 
   fetch: async () => {
     set({ isLoading: true })
     try {
-      const transactions = await query<TransactionWithDetails>(
-        `SELECT t.*, a.name as account_name, c.name as category_name, c.color as category_color
-         FROM transactions t
-         LEFT JOIN accounts a ON t.account_id = a.id
-         LEFT JOIN categories c ON t.category_id = c.id
-         ORDER BY t.date DESC, t.created_at DESC`
-      )
-      set({ transactions })
+      const [transactions, splitIds] = await Promise.all([
+        query<TransactionWithDetails>(
+          `SELECT t.*, a.name as account_name, c.name as category_name, c.color as category_color
+           FROM transactions t
+           LEFT JOIN accounts a ON t.account_id = a.id
+           LEFT JOIN categories c ON t.category_id = c.id
+           ORDER BY t.date DESC, t.created_at DESC`
+        ),
+        getSplitTransactionIds(),
+      ])
+      set({ transactions, splitTransactionIds: splitIds })
     } finally {
       set({ isLoading: false })
     }
@@ -155,6 +169,51 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
 
     await get().fetch()
     await useAccountStore.getState().fetch()
+  },
+
+  addWithSplits: async (data, splits) => {
+    const id = generateId()
+    const now = new Date().toISOString()
+    const amountCentavos = toCentavos(data.amount)
+
+    await execute(
+      `INSERT INTO transactions (id, account_id, category_id, type, amount, currency, description, notes, date, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        data.accountId,
+        data.categoryId,
+        data.type,
+        amountCentavos,
+        data.currency,
+        data.description,
+        data.notes,
+        data.date,
+        now,
+        now,
+      ]
+    )
+
+    await createSplits(id, splits, amountCentavos)
+
+    // Update account balance
+    const balanceDelta = data.type === 'income' ? amountCentavos : -amountCentavos
+    await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
+      balanceDelta,
+      now,
+      data.accountId,
+    ])
+
+    await get().fetch()
+    await useAccountStore.getState().fetch()
+  },
+
+  getSplits: async (id) => {
+    return fetchSplits(id)
+  },
+
+  isSplit: (id) => {
+    return get().splitTransactionIds.has(id)
   },
 
   getById: (id) => {

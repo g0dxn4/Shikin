@@ -1,9 +1,10 @@
-import { useEffect } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
+import { Split, Plus, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
@@ -16,7 +17,7 @@ import {
 } from '@/components/ui/select'
 import { useAccountStore } from '@/stores/account-store'
 import { useCategoryStore } from '@/stores/category-store'
-import { fromCentavos } from '@/lib/money'
+import { fromCentavos, toCentavos } from '@/lib/money'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 
 const TRANSACTION_TYPES = ['expense', 'income', 'transfer'] as const
@@ -34,9 +35,15 @@ const transactionSchema = z.object({
 
 export type TransactionFormValues = z.infer<typeof transactionSchema>
 
+export interface SplitRowData {
+  categoryId: string
+  amount: string // string for input control
+  notes: string
+}
+
 interface TransactionFormProps {
   transaction?: TransactionWithDetails
-  onSubmit: (data: TransactionFormValues) => void
+  onSubmit: (data: TransactionFormValues, splits?: SplitRowData[]) => void
   isLoading?: boolean
 }
 
@@ -45,6 +52,12 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
   const { t: tCommon } = useTranslation('common')
   const { accounts, fetch: fetchAccounts } = useAccountStore()
   const { categories, fetch: fetchCategories } = useCategoryStore()
+
+  const [isSplitMode, setIsSplitMode] = useState(false)
+  const [splitRows, setSplitRows] = useState<SplitRowData[]>([
+    { categoryId: '', amount: '', notes: '' },
+    { categoryId: '', amount: '', notes: '' },
+  ])
 
   useEffect(() => {
     fetchAccounts()
@@ -75,6 +88,7 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
   const typeValue = watch('type')
   const accountIdValue = watch('accountId')
   const categoryIdValue = watch('categoryId')
+  const amountValue = watch('amount')
 
   const filteredCategories = categories.filter((c) => c.type === typeValue)
 
@@ -86,8 +100,54 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
     }
   }, [selectedAccount, setValue])
 
+  // Split calculations
+  const totalCentavos = amountValue ? toCentavos(amountValue) : 0
+  const splitTotalCentavos = splitRows.reduce((sum, row) => {
+    const val = parseFloat(row.amount)
+    return sum + (isNaN(val) ? 0 : toCentavos(val))
+  }, 0)
+  const remainingCentavos = totalCentavos - splitTotalCentavos
+
+  const updateSplitRow = useCallback(
+    (index: number, field: keyof SplitRowData, value: string) => {
+      setSplitRows((prev) => {
+        const next = [...prev]
+        next[index] = { ...next[index], [field]: value }
+        return next
+      })
+    },
+    []
+  )
+
+  const addSplitRow = useCallback(() => {
+    setSplitRows((prev) => [...prev, { categoryId: '', amount: '', notes: '' }])
+  }, [])
+
+  const removeSplitRow = useCallback((index: number) => {
+    setSplitRows((prev) => {
+      if (prev.length <= 2) return prev
+      return prev.filter((_, i) => i !== index)
+    })
+  }, [])
+
+  const handleFormSubmit = (data: TransactionFormValues) => {
+    if (isSplitMode) {
+      // Validate splits
+      const validSplits = splitRows.filter((r) => r.categoryId && r.amount)
+      if (validSplits.length < 2) return
+      if (remainingCentavos !== 0) return
+      onSubmit(data, validSplits)
+    } else {
+      onSubmit(data)
+    }
+  }
+
+  const splitsValid =
+    !isSplitMode ||
+    (splitRows.filter((r) => r.categoryId && r.amount).length >= 2 && remainingCentavos === 0)
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+    <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-5">
       <div className="space-y-1.5">
         <Label>{t('form.type')}</Label>
         <Select
@@ -157,34 +217,156 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
           )}
         </div>
 
-        <div className="space-y-1.5">
-          <Label>{t('form.category')}</Label>
-          <Select
-            value={categoryIdValue ?? '__none__'}
-            onValueChange={(val) => setValue('categoryId', val === '__none__' ? null : val)}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">{t('form.categoryNone')}</SelectItem>
-              {filteredCategories.map((cat) => (
-                <SelectItem key={cat.id} value={cat.id}>
-                  <span className="flex items-center gap-2">
-                    {cat.color && (
-                      <span
-                        className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: cat.color }}
-                      />
-                    )}
-                    {cat.name}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {!isSplitMode && (
+          <div className="space-y-1.5">
+            <Label>{t('form.category')}</Label>
+            <Select
+              value={categoryIdValue ?? '__none__'}
+              onValueChange={(val) => setValue('categoryId', val === '__none__' ? null : val)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">{t('form.categoryNone')}</SelectItem>
+                {filteredCategories.map((cat) => (
+                  <SelectItem key={cat.id} value={cat.id}>
+                    <span className="flex items-center gap-2">
+                      {cat.color && (
+                        <span
+                          className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: cat.color }}
+                        />
+                      )}
+                      {cat.name}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        {isSplitMode && (
+          <div className="flex items-end">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setIsSplitMode(false)
+                setSplitRows([
+                  { categoryId: '', amount: '', notes: '' },
+                  { categoryId: '', amount: '', notes: '' },
+                ])
+              }}
+              className="text-muted-foreground text-xs"
+            >
+              <X size={12} />
+              {t('form.category')}
+            </Button>
+          </div>
+        )}
       </div>
+
+      {/* Split toggle */}
+      {!isSplitMode && (
+        <button
+          type="button"
+          onClick={() => setIsSplitMode(true)}
+          className="text-muted-foreground hover:text-accent flex items-center gap-1.5 text-xs transition-colors"
+        >
+          <Split size={12} />
+          {t('split.toggle')}
+        </button>
+      )}
+
+      {/* Split rows */}
+      {isSplitMode && (
+        <div className="border-border/40 space-y-3 rounded-lg border p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground flex items-center gap-1.5 font-mono text-[11px]">
+              <Split size={11} />
+              {t('split.breakdown')}
+            </span>
+            {remainingCentavos === 0 && totalCentavos > 0 ? (
+              <span className="text-success font-mono text-[11px]">{t('split.allocated')}</span>
+            ) : remainingCentavos < 0 ? (
+              <span className="text-destructive font-mono text-[11px]">
+                {t('split.overAllocated')} ${(Math.abs(remainingCentavos) / 100).toFixed(2)}
+              </span>
+            ) : totalCentavos > 0 ? (
+              <span className="text-muted-foreground font-mono text-[11px]">
+                {t('split.remaining')}: ${(remainingCentavos / 100).toFixed(2)}
+              </span>
+            ) : null}
+          </div>
+
+          {splitRows.map((row, index) => (
+            <div key={index} className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <Select
+                  value={row.categoryId || '__none__'}
+                  onValueChange={(val) =>
+                    updateSplitRow(index, 'categoryId', val === '__none__' ? '' : val)
+                  }
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder={t('split.category')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">{t('split.category')}</SelectItem>
+                    {filteredCategories.map((cat) => (
+                      <SelectItem key={cat.id} value={cat.id}>
+                        <span className="flex items-center gap-1.5">
+                          {cat.color && (
+                            <span
+                              className="inline-block h-2 w-2 shrink-0 rounded-full"
+                              style={{ backgroundColor: cat.color }}
+                            />
+                          )}
+                          {cat.name}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Input
+                type="number"
+                step="0.01"
+                min="0.01"
+                placeholder="0.00"
+                value={row.amount}
+                onChange={(e) => updateSplitRow(index, 'amount', e.target.value)}
+                className="h-8 w-24 font-mono text-xs"
+              />
+              {splitRows.length > 2 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="text-muted-foreground hover:text-destructive h-8 w-8 shrink-0"
+                  onClick={() => removeSplitRow(index)}
+                >
+                  <X size={12} />
+                </Button>
+              )}
+            </div>
+          ))}
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={addSplitRow}
+            className="text-muted-foreground h-7 text-xs"
+          >
+            <Plus size={12} />
+            {t('split.addRow')}
+          </Button>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
@@ -199,7 +381,7 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
         </div>
       </div>
 
-      <Button type="submit" className="w-full" disabled={isLoading}>
+      <Button type="submit" className="w-full" disabled={isLoading || !splitsValid}>
         {isLoading ? '...' : tCommon('actions.save')}
       </Button>
     </form>

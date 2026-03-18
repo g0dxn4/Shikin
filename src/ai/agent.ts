@@ -35,6 +35,7 @@ import {
   getFinancialNews,
   getCongressionalTrades,
   generatePortfolioReview,
+  splitTransaction,
 } from './tools'
 import { loadCoreMemories } from './memory-loader'
 
@@ -47,7 +48,7 @@ Personality:
 - When uncertain, ask clarifying questions before taking action
 
 Capabilities:
-- Add, update, and delete transactions (expenses, income, transfers)
+- Add, update, delete, and split transactions (expenses, income, transfers)
 - Search and filter transactions by date, category, account, or description
 - Create, update, and delete accounts
 - List categories
@@ -228,6 +229,7 @@ export function createAgent(
       getFinancialNews,
       getCongressionalTrades,
       generatePortfolioReview,
+      splitTransaction,
     },
     instructions: BASE_SYSTEM_PROMPT,
     maxOutputTokens: 2048,

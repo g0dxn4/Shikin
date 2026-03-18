@@ -1,0 +1,58 @@
+{
+  "title": "Plan de Pago de Deudas",
+  "strategy": {
+    "title": "Estrategia de Pago",
+    "avalanche": "Avalancha",
+    "avalancheDesc": "Mayor APR primero — ahorra m\u00e1s en intereses",
+    "snowball": "Bola de Nieve",
+    "snowballDesc": "Saldo menor primero — victorias r\u00e1pidas para motivaci\u00f3n"
+  },
+  "extraPayment": {
+    "title": "Pago Extra Mensual",
+    "perMonth": "/mes",
+    "description": "Monto extra sobre los pagos m\u00ednimos para acelerar el pago"
+  },
+  "comparison": {
+    "avalancheMonths": "Tiempo Avalancha",
+    "snowballMonths": "Tiempo Bola de Nieve",
+    "months": "meses",
+    "totalInterest": "Inter\u00e9s total",
+    "interestSaved": "Inter\u00e9s Ahorrado",
+    "fewerMonths": "menos meses con avalancha",
+    "sameTimeline": "Mismo plazo para ambas estrategias"
+  },
+  "summary": {
+    "totalDebt": "Deuda Total",
+    "monthlyMin": "M\u00ednimos Mensuales",
+    "debtFreeDate": "Fecha Libre de Deudas",
+    "totalInterest": "Inter\u00e9s Total"
+  },
+  "chart": {
+    "title": "Saldo en el Tiempo"
+  },
+  "payoffOrder": {
+    "title": "Orden de Pago"
+  },
+  "debtList": {
+    "title": "Tus Deudas"
+  },
+  "debtCard": {
+    "apr": "TAE",
+    "minPayment": "M\u00edn",
+    "manual": "Manual"
+  },
+  "addDebt": {
+    "button": "Agregar Deuda Manual",
+    "title": "Agregar una Deuda",
+    "name": "Nombre",
+    "namePlaceholder": "ej. Pr\u00e9stamo Estudiantil",
+    "balance": "Saldo ($)",
+    "apr": "TAE (%)",
+    "minPayment": "Pago M\u00ednimo ($)",
+    "submit": "Agregar Deuda"
+  },
+  "empty": {
+    "title": "No se encontraron deudas",
+    "description": "Agrega cuentas de tarjetas de cr\u00e9dito con saldos o ingresa manualmente deudas como pr\u00e9stamos estudiantiles, de auto o personales para ver tu plan de pago."
+  }
+}

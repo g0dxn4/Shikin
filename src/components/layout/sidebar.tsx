@@ -7,6 +7,7 @@ import {
   PiggyBank,
   TrendingUp,
   Repeat,
+  Target,
   BookOpen,
   Settings,
   Sparkles,
@@ -24,6 +25,7 @@ const navItems = [
   { path: '/budgets', icon: PiggyBank, labelKey: 'nav.budgets' },
   { path: '/investments', icon: TrendingUp, labelKey: 'nav.investments' },
   { path: '/subscriptions', icon: Repeat, labelKey: 'nav.subscriptions' },
+  { path: '/debt-payoff', icon: Target, labelKey: 'nav.debtPayoff' },
   { path: '/notebook', icon: BookOpen, labelKey: 'nav.notebook' },
 ] as const
 

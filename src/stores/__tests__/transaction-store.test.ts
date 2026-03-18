@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('@/lib/database', () => ({
   query: vi.fn(),
   execute: vi.fn(),
+  runInTransaction: vi.fn(async (fn: () => Promise<unknown>) => fn()),
 }))
 
 vi.mock('@/lib/ulid', () => ({
@@ -76,6 +77,7 @@ describe('transaction-store', () => {
         description: 'Groceries',
         categoryId: '01CAT001',
         accountId: '01ACC001',
+        transferToAccountId: null,
         currency: 'USD',
         date: '2024-01-15',
         notes: null,
@@ -117,6 +119,7 @@ describe('transaction-store', () => {
         description: 'Salary',
         categoryId: null,
         accountId: '01ACC001',
+        transferToAccountId: null,
         currency: 'USD',
         date: '2024-01-31',
         notes: null,
@@ -169,6 +172,7 @@ describe('transaction-store', () => {
         description: 'Updated lunch',
         categoryId: '01CAT001',
         accountId: '01ACC001',
+        transferToAccountId: null,
         currency: 'USD',
         date: '2024-01-15',
         notes: 'with tip',
@@ -205,6 +209,7 @@ describe('transaction-store', () => {
         description: 'test',
         categoryId: null,
         accountId: '01ACC001',
+        transferToAccountId: null,
         currency: 'USD',
         date: '2024-01-01',
         notes: null,

@@ -33,21 +33,21 @@ graph LR
     GSS --> DB
 ```
 
-| Component | Import | Role |
-|-----------|--------|------|
-| `useChat` | `@ai-sdk/react` | React hook managing chat state, messages, and streaming |
-| `DirectChatTransport` | `ai` | Connects the agent to `useChat` without an HTTP server |
-| `ToolLoopAgent` | `ai` | Wraps a model with tools; automatically loops tool calls until the model produces text |
-| `createAgent()` | `src/ai/agent.ts` | Factory function that creates a configured `ToolLoopAgent` |
-| `createTransport()` | `src/ai/transport.ts` | Factory function that creates a `DirectChatTransport` wrapping an agent |
+| Component             | Import                | Role                                                                                   |
+| --------------------- | --------------------- | -------------------------------------------------------------------------------------- |
+| `useChat`             | `@ai-sdk/react`       | React hook managing chat state, messages, and streaming                                |
+| `DirectChatTransport` | `ai`                  | Connects the agent to `useChat` without an HTTP server                                 |
+| `ToolLoopAgent`       | `ai`                  | Wraps a model with tools; automatically loops tool calls until the model produces text |
+| `createAgent()`       | `src/ai/agent.ts`     | Factory function that creates a configured `ToolLoopAgent`                             |
+| `createTransport()`   | `src/ai/transport.ts` | Factory function that creates a `DirectChatTransport` wrapping an agent                |
 
 ### Agent Configuration
 
 ```typescript
 new ToolLoopAgent({
-  model: languageModel,           // Provider-specific model instance
+  model: languageModel, // Provider-specific model instance
   tools: { addTransaction, getSpendingSummary },
-  instructions: SYSTEM_PROMPT,    // Val's personality and guidelines
+  instructions: SYSTEM_PROMPT, // Val's personality and guidelines
   maxOutputTokens: 2048,
   temperature: 0.7,
 })
@@ -55,13 +55,13 @@ new ToolLoopAgent({
 
 ### Provider Support
 
-| Provider | Config | Default Model | Notes |
-|----------|--------|---------------|-------|
-| OpenAI | API key required | `gpt-4o-mini` | Best balance of cost and capability |
-| Anthropic | API key required | `claude-sonnet-4-20250514` | Strong reasoning for complex queries |
-| Ollama | No key needed | `llama3.2` | Fully local, connects to `localhost:11434` |
+| Provider  | Config           | Default Model              | Notes                                      |
+| --------- | ---------------- | -------------------------- | ------------------------------------------ |
+| OpenAI    | API key required | `gpt-4o-mini`              | Best balance of cost and capability        |
+| Anthropic | API key required | `claude-sonnet-4-20250514` | Strong reasoning for complex queries       |
+| Ollama    | No key needed    | `llama3.2`                 | Fully local, connects to `localhost:11434` |
 
-The provider and model are configured in Settings and stored in `tauri-plugin-store`. The `useAIStore` Zustand store manages this state.
+The provider and model are configured in Settings and stored locally via the app storage layer (`src/lib/storage.ts`). The `useAIStore` Zustand store manages this state.
 
 ---
 
@@ -109,18 +109,20 @@ Adds a new financial transaction (expense, income, or transfer) to the database.
 
 ```typescript
 z.object({
-  amount: z.number().positive()
+  amount: z
+    .number()
+    .positive()
     .describe('The transaction amount in the main currency unit (e.g. 12.50, not cents)'),
-  type: z.enum(['expense', 'income', 'transfer'])
-    .describe('The type of transaction'),
-  description: z.string()
-    .describe('A short description of the transaction'),
-  category: z.string().optional()
-    .describe('Category name (e.g. "Food & Dining", "Salary"). Will match the closest existing category.'),
-  date: z.string().optional()
-    .describe('Transaction date in YYYY-MM-DD format. Defaults to today.'),
-  notes: z.string().optional()
-    .describe('Additional notes about the transaction'),
+  type: z.enum(['expense', 'income', 'transfer']).describe('The type of transaction'),
+  description: z.string().describe('A short description of the transaction'),
+  category: z
+    .string()
+    .optional()
+    .describe(
+      'Category name (e.g. "Food & Dining", "Salary"). Will match the closest existing category.'
+    ),
+  date: z.string().optional().describe('Transaction date in YYYY-MM-DD format. Defaults to today.'),
+  notes: z.string().optional().describe('Additional notes about the transaction'),
 })
 ```
 
@@ -181,14 +183,13 @@ Gets a breakdown of spending by category for a given time period.
 
 ```typescript
 z.object({
-  period: z.enum(['week', 'month', 'year', 'custom'])
+  period: z
+    .enum(['week', 'month', 'year', 'custom'])
     .optional()
     .default('month')
     .describe('The time period to summarize'),
-  startDate: z.string().optional()
-    .describe('Start date (YYYY-MM-DD) for custom period'),
-  endDate: z.string().optional()
-    .describe('End date (YYYY-MM-DD) for custom period'),
+  startDate: z.string().optional().describe('Start date (YYYY-MM-DD) for custom period'),
+  endDate: z.string().optional().describe('End date (YYYY-MM-DD) for custom period'),
 })
 ```
 
@@ -277,7 +278,7 @@ z.object({
   type: z.enum(['expense', 'income', 'transfer']).optional(),
   startDate: z.string().optional(),
   endDate: z.string().optional(),
-  search: z.string().optional(),  // description search
+  search: z.string().optional(), // description search
 })
 ```
 
@@ -401,8 +402,9 @@ export const getAccountBalances = tool({
   description: 'Get all account balances and net worth summary.',
   inputSchema: zodSchema(
     z.object({
-      type: z.enum(['checking', 'savings', 'credit_card', 'cash',
-                     'investment', 'crypto', 'other']).optional()
+      type: z
+        .enum(['checking', 'savings', 'credit_card', 'cash', 'investment', 'crypto', 'other'])
+        .optional()
         .describe('Filter by account type'),
     })
   ),

@@ -64,9 +64,7 @@ describe('listConversations', () => {
 
     const result = await listConversations()
     expect(result).toEqual(convos)
-    expect(mockQuery).toHaveBeenCalledWith(
-      expect.stringContaining('ORDER BY updated_at DESC')
-    )
+    expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('ORDER BY updated_at DESC'))
   })
 })
 
@@ -79,10 +77,9 @@ describe('deleteConversation', () => {
     mockExecute.mockResolvedValue({ rowsAffected: 1, lastInsertId: 0 })
 
     await deleteConversation('conv-1')
-    expect(mockExecute).toHaveBeenCalledWith(
-      'DELETE FROM ai_conversations WHERE id = $1',
-      ['conv-1']
-    )
+    expect(mockExecute).toHaveBeenCalledWith('DELETE FROM ai_conversations WHERE id = $1', [
+      'conv-1',
+    ])
   })
 })
 
@@ -103,8 +100,8 @@ describe('saveMessage', () => {
     await saveMessage('conv-1', message)
     expect(mockExecute).toHaveBeenCalledTimes(2) // insert + update timestamp
     expect(mockExecute).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT INTO ai_messages'),
-      expect.arrayContaining(['01CONV00000000000000000000', 'conv-1', 'user', 'Hello Val', null])
+      expect.stringContaining('INSERT OR IGNORE INTO ai_messages'),
+      expect.arrayContaining(['msg-1', 'conv-1', 'user', 'Hello Val', null])
     )
   })
 
@@ -186,7 +183,8 @@ describe('loadMessages', () => {
 
 describe('generateTitle', () => {
   it('truncates long messages to 60 chars', async () => {
-    const longMessage = 'This is a really long message that should be truncated because it exceeds sixty characters in length'
+    const longMessage =
+      'This is a really long message that should be truncated because it exceeds sixty characters in length'
     const title = await generateTitle(longMessage)
     expect(title.length).toBeLessThanOrEqual(64) // 60 + "..."
     expect(title).toContain('...')

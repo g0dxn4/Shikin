@@ -31,7 +31,16 @@ import { useTransactionStore } from '@/stores/transaction-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import { formatMoney } from '@/lib/money'
 
-const CHART_COLORS = ['#bf5af2', '#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#8b5cf6']
+const CHART_COLORS = [
+  '#bf5af2',
+  '#22c55e',
+  '#3b82f6',
+  '#f59e0b',
+  '#ef4444',
+  '#ec4899',
+  '#06b6d4',
+  '#8b5cf6',
+]
 
 export function Dashboard() {
   const { t } = useTranslation('dashboard')
@@ -62,10 +71,27 @@ export function Dashboard() {
     return { monthlyIncome: income, monthlyExpenses: expenses }
   }, [transactions])
 
+  const { previousIncome, previousExpenses } = useMemo(() => {
+    const start = dayjs().subtract(1, 'month').startOf('month').format('YYYY-MM-DD')
+    const end = dayjs().subtract(1, 'month').endOf('month').format('YYYY-MM-DD')
+    let income = 0
+    let expenses = 0
+    for (const tx of transactions) {
+      if (tx.date >= start && tx.date <= end) {
+        if (tx.type === 'income') income += tx.amount
+        else if (tx.type === 'expense') expenses += tx.amount
+      }
+    }
+    return { previousIncome: income, previousExpenses: expenses }
+  }, [transactions])
+
   const savingsRate = useMemo(() => {
     if (monthlyIncome <= 0) return 0
     return Math.round(((monthlyIncome - monthlyExpenses) / monthlyIncome) * 100)
   }, [monthlyIncome, monthlyExpenses])
+
+  const incomeDelta = monthlyIncome - previousIncome
+  const expenseDelta = monthlyExpenses - previousExpenses
 
   const recentTransactions = useMemo(() => transactions.slice(0, 8), [transactions])
 
@@ -95,7 +121,12 @@ export function Dashboard() {
     const today = dayjs().format('YYYY-MM-DD')
     const cats = new Map<string, { name: string; value: number; color: string }>()
     for (const tx of transactions) {
-      if (tx.type === 'expense' && tx.date >= startOfMonth && tx.date <= today && tx.category_name) {
+      if (
+        tx.type === 'expense' &&
+        tx.date >= startOfMonth &&
+        tx.date <= today &&
+        tx.category_name
+      ) {
         const existing = cats.get(tx.category_name)
         if (existing) {
           existing.value += tx.amount
@@ -153,6 +184,31 @@ export function Dashboard() {
         />
       </div>
 
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="glass-card px-4 py-3">
+          <p className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
+            {t('cards.incomeVsLastMonth')}
+          </p>
+          <p
+            className={`font-heading mt-1 text-lg font-semibold ${incomeDelta >= 0 ? 'text-success' : 'text-destructive'}`}
+          >
+            {incomeDelta >= 0 ? '+' : '-'}
+            {formatMoney(Math.abs(incomeDelta))}
+          </p>
+        </div>
+        <div className="glass-card px-4 py-3">
+          <p className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
+            {t('cards.expensesVsLastMonth')}
+          </p>
+          <p
+            className={`font-heading mt-1 text-lg font-semibold ${expenseDelta <= 0 ? 'text-success' : 'text-destructive'}`}
+          >
+            {expenseDelta >= 0 ? '+' : '-'}
+            {formatMoney(Math.abs(expenseDelta))}
+          </p>
+        </div>
+      </div>
+
       {!hasAccounts ? (
         <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
           <div className="bg-accent-muted mb-4 flex h-16 w-16 items-center justify-center rounded-full">
@@ -176,6 +232,14 @@ export function Dashboard() {
               {/* Spending area chart */}
               <div className="glass-card p-5">
                 <h3 className="font-heading mb-4 text-sm font-semibold">{t('charts.spending')}</h3>
+                <div className="mb-2 text-right">
+                  <Link
+                    to="/transactions"
+                    className="text-muted-foreground hover:text-foreground text-xs"
+                  >
+                    {t('charts.drilldownTransactions')}
+                  </Link>
+                </div>
                 <div className="h-48">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={monthlyChartData}>
@@ -227,7 +291,17 @@ export function Dashboard() {
 
               {/* Category donut */}
               <div className="glass-card p-5">
-                <h3 className="font-heading mb-4 text-sm font-semibold">{t('charts.categories')}</h3>
+                <h3 className="font-heading mb-4 text-sm font-semibold">
+                  {t('charts.categories')}
+                </h3>
+                <div className="mb-2 text-right">
+                  <Link
+                    to="/budgets"
+                    className="text-muted-foreground hover:text-foreground text-xs"
+                  >
+                    {t('charts.drilldownBudgets')}
+                  </Link>
+                </div>
                 {categoryData.length > 0 ? (
                   <div className="flex items-center gap-4">
                     <div className="h-48 w-48 shrink-0">
@@ -266,7 +340,9 @@ export function Dashboard() {
                         <div key={cat.name} className="flex items-center gap-2 text-xs">
                           <span
                             className="h-2.5 w-2.5 shrink-0 rounded-full"
-                            style={{ backgroundColor: cat.color || CHART_COLORS[i % CHART_COLORS.length] }}
+                            style={{
+                              backgroundColor: cat.color || CHART_COLORS[i % CHART_COLORS.length],
+                            }}
                           />
                           <span className="truncate">{cat.name}</span>
                           <span className="text-muted-foreground ml-auto shrink-0">
@@ -357,10 +433,7 @@ export function Dashboard() {
               <Plus size={16} />
               {t('quickActions.addTransaction')}
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => setAIPanelOpen(true)}
-            >
+            <Button variant="outline" onClick={() => setAIPanelOpen(true)}>
               <Sparkles size={16} />
               {t('quickActions.askVal')}
             </Button>
@@ -426,11 +499,13 @@ function DashboardSkeleton() {
 function RecentTransactionRow({ transaction: tx }: { transaction: TransactionWithDetails }) {
   return (
     <div className="glass-card flex items-center gap-3 px-4 py-2.5">
-      {tx.category_color && (
+      {tx.category_color ? (
         <span
           className="h-2.5 w-2.5 shrink-0 rounded-full"
           style={{ backgroundColor: tx.category_color }}
         />
+      ) : (
+        <span className="bg-muted-foreground/30 h-2.5 w-2.5 shrink-0 rounded-full" />
       )}
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{tx.description}</p>

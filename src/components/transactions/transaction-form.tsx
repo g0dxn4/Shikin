@@ -24,16 +24,36 @@ import type { TransactionWithDetails } from '@/stores/transaction-store'
 
 const TRANSACTION_TYPES = ['expense', 'income', 'transfer'] as const
 
-const transactionSchema = z.object({
-  amount: z.number().positive(),
-  type: z.enum(TRANSACTION_TYPES),
-  description: z.string().min(1),
-  categoryId: z.string().nullable(),
-  accountId: z.string().min(1),
-  currency: z.string().min(1),
-  date: z.string().min(1),
-  notes: z.string().nullable(),
-})
+const transactionSchema = z
+  .object({
+    amount: z.number().positive(),
+    type: z.enum(TRANSACTION_TYPES),
+    description: z.string().min(1),
+    categoryId: z.string().nullable(),
+    accountId: z.string().min(1),
+    transferToAccountId: z.string().nullable(),
+    currency: z.string().min(1),
+    date: z.string().min(1),
+    notes: z.string().nullable(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.type === 'transfer') {
+      if (!data.transferToAccountId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['transferToAccountId'],
+          message: 'Destination account is required for transfers',
+        })
+      }
+      if (data.transferToAccountId && data.transferToAccountId === data.accountId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['transferToAccountId'],
+          message: 'Source and destination accounts must be different',
+        })
+      }
+    }
+  })
 
 export type TransactionFormValues = z.infer<typeof transactionSchema>
 
@@ -73,6 +93,7 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
       description: transaction?.description ?? '',
       categoryId: transaction?.category_id ?? null,
       accountId: transaction?.account_id ?? '',
+      transferToAccountId: transaction?.transfer_to_account_id ?? null,
       currency: transaction?.currency ?? 'USD',
       date: transaction?.date ?? dayjs().format('YYYY-MM-DD'),
       notes: transaction?.notes ?? null,
@@ -82,6 +103,7 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
   // eslint-disable-next-line react-hooks/incompatible-library -- react-hook-form watch is inherently mutable
   const typeValue = watch('type')
   const accountIdValue = watch('accountId')
+  const transferToAccountIdValue = watch('transferToAccountId')
   const categoryIdValue = watch('categoryId')
   const descriptionValue = watch('description')
 
@@ -155,6 +177,9 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
           onValueChange={(val) => {
             setValue('type', val as TransactionFormValues['type'])
             setValue('categoryId', null)
+            if (val !== 'transfer') {
+              setValue('transferToAccountId', null)
+            }
           }}
         >
           <SelectTrigger>
@@ -279,6 +304,35 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
           )}
         </div>
       </div>
+
+      {typeValue === 'transfer' && (
+        <div className="space-y-1.5">
+          <Label>{t('form.transferToAccount')}</Label>
+          <Select
+            value={transferToAccountIdValue ?? '__none__'}
+            onValueChange={(val) =>
+              setValue('transferToAccountId', val === '__none__' ? null : val)
+            }
+          >
+            <SelectTrigger>
+              <SelectValue placeholder={t('form.transferToAccountPlaceholder')} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">{t('form.transferToAccountPlaceholder')}</SelectItem>
+              {accounts
+                .filter((account) => account.id !== accountIdValue)
+                .map((account) => (
+                  <SelectItem key={account.id} value={account.id}>
+                    {account.name}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+          {errors.transferToAccountId && (
+            <p className="text-destructive text-xs">{errors.transferToAccountId.message}</p>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">

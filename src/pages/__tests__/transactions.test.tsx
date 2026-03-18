@@ -16,7 +16,15 @@ vi.mock('sonner', () => ({
 }))
 
 vi.mock('@/components/shared/confirm-dialog', () => ({
-  ConfirmDialog: ({ open, onConfirm, title }: { open: boolean; onConfirm: () => void; title: string }) =>
+  ConfirmDialog: ({
+    open,
+    onConfirm,
+    title,
+  }: {
+    open: boolean
+    onConfirm: () => void
+    title: string
+  }) =>
     open ? (
       <div data-testid="confirm-dialog">
         <span>{title}</span>
@@ -108,8 +116,8 @@ describe('Transactions', () => {
 
     render(<Transactions />)
 
-    expect(screen.getByText('Today')).toBeInTheDocument()
-    expect(screen.getByText('Yesterday')).toBeInTheDocument()
+    expect(screen.getByText('dateHeaders.today')).toBeInTheDocument()
+    expect(screen.getByText('dateHeaders.yesterday')).toBeInTheDocument()
   })
 
   it('renders transaction rows with description and colored amount', () => {

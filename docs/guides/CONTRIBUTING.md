@@ -8,14 +8,14 @@ Thank you for your interest in contributing to Valute. This document covers the 
 
 Before you begin, make sure you have these tools installed:
 
-| Tool | Version | Install |
-|------|---------|---------|
-| Node.js | >= 18 | [nodejs.org](https://nodejs.org/) |
-| pnpm | >= 9 | `npm install -g pnpm` |
-| Rust | >= 1.77.2 | [rustup.rs](https://rustup.rs/) |
-| Tauri CLI | v2 | Installed via `pnpm` devDependencies |
+| Tool      | Version  | Install                                   |
+| --------- | -------- | ----------------------------------------- |
+| Node.js   | >= 18    | [nodejs.org](https://nodejs.org/)         |
+| pnpm      | >= 9     | `npm install -g pnpm`                     |
+| Rust      | Optional | Only needed for legacy desktop-shell work |
+| Tauri CLI | Optional | Only needed for legacy desktop-shell work |
 
-You also need the Tauri v2 system dependencies for your platform. Follow the [Tauri prerequisites guide](https://v2.tauri.app/start/prerequisites/).
+The primary workflow is browser-first. Tauri system dependencies are only required if you are actively working on legacy desktop-shell integration.
 
 ---
 
@@ -30,27 +30,24 @@ cd Valute
 pnpm install
 
 # 3. Start the development environment
-pnpm start
-```
-
-`pnpm start` runs `tauri dev`, which:
-1. Starts the Vite dev server on `http://localhost:1420` with HMR.
-2. Compiles the Rust backend.
-3. Opens the Tauri native window pointing to the Vite dev server.
-
-### Frontend-Only Development
-
-If you are working only on the frontend and do not need the Tauri shell:
-
-```bash
 pnpm dev
 ```
 
-This starts just the Vite dev server. Note that `tauri-plugin-sql` and `tauri-plugin-store` calls will fail in a browser context, so features that depend on SQLite or local settings storage will not work.
+`pnpm dev` starts the Vite dev server on `http://localhost:1420` with HMR.
+
+### Legacy Desktop-Shell Development
+
+If you need to test legacy desktop-shell behavior:
+
+```bash
+pnpm legacy:tauri:dev
+```
+
+`pnpm legacy:tauri:dev` runs `tauri dev` for compatibility testing. Core development does not require this mode.
 
 ### Rust Backend Development
 
-The Rust code lives in `src-tauri/`. Changes to Rust files trigger an automatic rebuild when `pnpm start` is running.
+The Rust code lives in `src-tauri/`. Changes to Rust files trigger an automatic rebuild when `pnpm legacy:tauri:dev` is running.
 
 To build the Rust backend independently:
 
@@ -111,9 +108,7 @@ src/
 - **Hooks rules** -- The `react-hooks` ESLint plugin enforces the Rules of Hooks.
 - **Lazy loading** -- Pages are lazy-loaded with `React.lazy()`:
   ```typescript
-  const Dashboard = lazy(() =>
-    import('@/pages/dashboard').then((m) => ({ default: m.Dashboard }))
-  )
+  const Dashboard = lazy(() => import('@/pages/dashboard').then((m) => ({ default: m.Dashboard })))
   ```
 
 ### Styling
@@ -141,6 +136,7 @@ src/
 - **Money as integers** -- All monetary amounts are stored as centavos (INTEGER). Use `toCentavos()` and `fromCentavos()` from `@/lib/money.ts`.
 - **IDs as ULIDs** -- Generate IDs with `generateId()` from `@/lib/ulid.ts`.
 - **Parameterized queries** -- Always use `$1`, `$2`, etc. for bind parameters. Never interpolate values into SQL strings.
+
   ```typescript
   // Good
   await query('SELECT * FROM transactions WHERE account_id = $1', [accountId])
@@ -151,16 +147,16 @@ src/
 
 ### File Naming
 
-| Type | Convention | Example |
-|------|-----------|---------|
-| Components | kebab-case `.tsx` | `app-shell.tsx`, `loading-spinner.tsx` |
-| Pages | kebab-case `.tsx` | `transactions.tsx`, `settings.tsx` |
-| Utilities | kebab-case `.ts` | `database.ts`, `money.ts` |
-| Stores | kebab-case with `-store` suffix | `ui-store.ts`, `ai-store.ts` |
-| Types | kebab-case `.ts` | `database.ts`, `common.ts` |
-| AI Tools | kebab-case `.ts` | `add-transaction.ts`, `get-spending-summary.ts` |
-| Tests | same name with `.test.ts(x)` | `money.test.ts`, `agent.test.ts` |
-| Migrations | numbered prefix `NNN_description.sql` | `001_core_tables.sql` |
+| Type       | Convention                            | Example                                         |
+| ---------- | ------------------------------------- | ----------------------------------------------- |
+| Components | kebab-case `.tsx`                     | `app-shell.tsx`, `loading-spinner.tsx`          |
+| Pages      | kebab-case `.tsx`                     | `transactions.tsx`, `settings.tsx`              |
+| Utilities  | kebab-case `.ts`                      | `database.ts`, `money.ts`                       |
+| Stores     | kebab-case with `-store` suffix       | `ui-store.ts`, `ai-store.ts`                    |
+| Types      | kebab-case `.ts`                      | `database.ts`, `common.ts`                      |
+| AI Tools   | kebab-case `.ts`                      | `add-transaction.ts`, `get-spending-summary.ts` |
+| Tests      | same name with `.test.ts(x)`          | `money.test.ts`, `agent.test.ts`                |
+| Migrations | numbered prefix `NNN_description.sql` | `001_core_tables.sql`                           |
 
 ---
 
@@ -184,14 +180,14 @@ pnpm format:check
 
 Configuration is in `eslint.config.js`. Key rules:
 
-| Rule | Setting | Purpose |
-|------|---------|---------|
-| `no-console` | warn (allow `warn`, `error`) | Prevent accidental console.log |
-| `eqeqeq` | error | Always use `===` |
-| `prefer-const` | warn | Use `const` when variable is not reassigned |
-| `@typescript-eslint/no-unused-vars` | warn | Catch unused variables (prefix with `_` to ignore) |
-| `@typescript-eslint/consistent-type-imports` | warn | Enforce `import type` |
-| `react-refresh/only-export-components` | warn | Ensure HMR works correctly |
+| Rule                                         | Setting                      | Purpose                                            |
+| -------------------------------------------- | ---------------------------- | -------------------------------------------------- |
+| `no-console`                                 | warn (allow `warn`, `error`) | Prevent accidental console.log                     |
+| `eqeqeq`                                     | error                        | Always use `===`                                   |
+| `prefer-const`                               | warn                         | Use `const` when variable is not reassigned        |
+| `@typescript-eslint/no-unused-vars`          | warn                         | Catch unused variables (prefix with `_` to ignore) |
+| `@typescript-eslint/consistent-type-imports` | warn                         | Enforce `import type`                              |
+| `react-refresh/only-export-components`       | warn                         | Ensure HMR works correctly                         |
 
 Run the linter:
 
@@ -218,6 +214,17 @@ pnpm check
 ```
 
 This runs `pnpm lint && pnpm typecheck && pnpm format:check`. This is the same check that runs in CI.
+
+## CI
+
+GitHub Actions workflow lives at `.github/workflows/ci.yml` and runs on pushes to `main` and pull requests.
+
+It executes:
+
+- `pnpm lint`
+- `pnpm typecheck`
+- `pnpm test:run`
+- `pnpm build`
 
 ---
 
@@ -259,7 +266,7 @@ import { toCentavos, fromCentavos, formatMoney } from '../money'
 
 describe('toCentavos', () => {
   it('converts dollars to centavos', () => {
-    expect(toCentavos(12.50)).toBe(1250)
+    expect(toCentavos(12.5)).toBe(1250)
   })
 
   it('rounds to nearest centavo', () => {
@@ -332,29 +339,29 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 ### Types
 
-| Type | Description |
-|------|-------------|
-| `feat` | New feature |
-| `fix` | Bug fix |
-| `docs` | Documentation only |
-| `style` | Formatting, no code change |
+| Type       | Description                                             |
+| ---------- | ------------------------------------------------------- |
+| `feat`     | New feature                                             |
+| `fix`      | Bug fix                                                 |
+| `docs`     | Documentation only                                      |
+| `style`    | Formatting, no code change                              |
 | `refactor` | Code change that neither fixes a bug nor adds a feature |
-| `perf` | Performance improvement |
-| `test` | Adding or fixing tests |
-| `build` | Build system or dependency changes |
-| `ci` | CI configuration changes |
-| `chore` | Other changes that don't modify src or test files |
+| `perf`     | Performance improvement                                 |
+| `test`     | Adding or fixing tests                                  |
+| `build`    | Build system or dependency changes                      |
+| `ci`       | CI configuration changes                                |
+| `chore`    | Other changes that don't modify src or test files       |
 
 ### Scopes
 
-| Scope | Description |
-|-------|-------------|
-| `ai` | AI agent, tools, transport |
-| `ui` | Components, layout, styling |
-| `db` | Database, migrations, queries |
-| `i18n` | Translations |
-| `store` | Zustand stores |
-| `tauri` | Rust backend, Tauri config |
+| Scope   | Description                   |
+| ------- | ----------------------------- |
+| `ai`    | AI agent, tools, transport    |
+| `ui`    | Components, layout, styling   |
+| `db`    | Database, migrations, queries |
+| `i18n`  | Translations                  |
+| `store` | Zustand stores                |
+| `tauri` | Rust backend, Tauri config    |
 
 ### Examples
 
@@ -372,6 +379,7 @@ build: upgrade AI SDK to v6.1
 ## Pull Request Process
 
 1. **Create a branch** from `main`:
+
    ```bash
    git checkout -b feat/account-balances-tool
    ```
@@ -379,6 +387,7 @@ build: upgrade AI SDK to v6.1
 2. **Make your changes** following the conventions above.
 
 3. **Run all checks** before pushing:
+
    ```bash
    pnpm check
    pnpm test:run
@@ -400,6 +409,7 @@ build: upgrade AI SDK to v6.1
 ## Adding a New Page
 
 1. Create the page component in `src/pages/`:
+
    ```typescript
    // src/pages/reports.tsx
    export function Reports() {
@@ -408,6 +418,7 @@ build: upgrade AI SDK to v6.1
    ```
 
 2. Add the lazy import and route in `src/App.tsx`:
+
    ```typescript
    const Reports = lazy(() =>
      import('@/pages/reports').then((m) => ({ default: m.Reports }))
@@ -418,6 +429,7 @@ build: upgrade AI SDK to v6.1
    ```
 
 3. Add the navigation link in `src/components/layout/sidebar.tsx`:
+
    ```typescript
    { path: '/reports', icon: BarChart3, labelKey: 'nav.reports' },
    ```

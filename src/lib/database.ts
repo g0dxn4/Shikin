@@ -6,6 +6,17 @@ const IDB_KEY = 'valute.db'
 
 let db: SqlJsDatabase | null = null
 let initPromise: Promise<SqlJsDatabase> | null = null
+let sqlInitPromise: ReturnType<typeof initSqlJs> | null = null
+let transactionDepth = 0
+
+function loadSqlJs() {
+  if (!sqlInitPromise) {
+    sqlInitPromise = initSqlJs({
+      locateFile: (file: string) => `https://sql.js.org/dist/${file}`,
+    })
+  }
+  return sqlInitPromise
+}
 
 // --- IndexedDB persistence helpers ---
 
@@ -328,26 +339,13 @@ function runMigrations(database: SqlJsDatabase): void {
   stmt.free()
 
   if (!applied.has('001_core_tables')) {
-    // sql.js doesn't support multiple statements in run() reliably,
-    // so we split and execute individually
-    const statements = MIGRATION_001.split(';')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
-    for (const s of statements) {
-      database.run(s)
-    }
-    // Seeds separately (multi-row INSERT)
+    database.exec(MIGRATION_001)
     database.run(MIGRATION_001_SEEDS)
     database.run("INSERT INTO _migrations (id, name) VALUES (1, '001_core_tables')")
   }
 
   if (!applied.has('002_ai_memories')) {
-    const statements = MIGRATION_002.split(';')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
-    for (const s of statements) {
-      database.run(s)
-    }
+    database.exec(MIGRATION_002)
     // ALTER TABLE for ai_conversations — add summary column if not exists
     try {
       database.run('ALTER TABLE ai_conversations ADD COLUMN summary TEXT')
@@ -388,9 +386,7 @@ function runMigrations(database: SqlJsDatabase): void {
 }
 
 async function initDb(): Promise<SqlJsDatabase> {
-  const SQL = await initSqlJs({
-    locateFile: (file: string) => `https://sql.js.org/dist/${file}`,
-  })
+  const SQL = await loadSqlJs()
 
   // Try to load existing database from IndexedDB
   const saved = await loadFromIDB()
@@ -406,6 +402,34 @@ async function initDb(): Promise<SqlJsDatabase> {
   await saveToIDB(database.export())
 
   return database
+}
+
+export async function exportDatabaseSnapshot(): Promise<Uint8Array> {
+  const database = await getDb()
+  return database.export()
+}
+
+export async function importDatabaseSnapshot(data: Uint8Array): Promise<void> {
+  const SQL = await loadSqlJs()
+  const candidate = new SQL.Database(data)
+
+  const integrity = candidate.exec('PRAGMA integrity_check')
+  const integrityResult = integrity[0]?.values?.[0]?.[0]
+
+  if (integrityResult !== 'ok') {
+    candidate.close()
+    throw new Error('Database integrity check failed')
+  }
+
+  runMigrations(candidate)
+  await saveToIDB(candidate.export())
+
+  if (db) {
+    db.close()
+  }
+
+  db = candidate
+  initPromise = Promise.resolve(candidate)
 }
 
 export async function getDb(): Promise<SqlJsDatabase> {
@@ -440,11 +464,43 @@ export async function execute(
   // sql.js doesn't directly expose lastInsertId through getRowsModified,
   // so we query it separately
   const lastIdResult = database.exec('SELECT last_insert_rowid()')
-  const lastInsertId =
-    lastIdResult.length > 0 ? (lastIdResult[0].values[0][0] as number) : 0
+  const lastInsertId = lastIdResult.length > 0 ? (lastIdResult[0].values[0][0] as number) : 0
 
-  // Persist to IndexedDB after every write
-  await persist()
+  // Persist when not inside an explicit transaction block
+  if (transactionDepth === 0) {
+    await persist()
+  }
 
   return { rowsAffected, lastInsertId }
+}
+
+export async function runInTransaction<T>(fn: () => Promise<T>): Promise<T> {
+  const database = await getDb()
+  const isRoot = transactionDepth === 0
+
+  if (isRoot) {
+    database.run('BEGIN')
+  }
+
+  transactionDepth += 1
+  try {
+    const result = await fn()
+    transactionDepth -= 1
+
+    if (isRoot) {
+      database.run('COMMIT')
+      await persist()
+    }
+
+    return result
+  } catch (error) {
+    transactionDepth = Math.max(0, transactionDepth - 1)
+
+    if (isRoot) {
+      database.run('ROLLBACK')
+      await persist()
+    }
+
+    throw error
+  }
 }

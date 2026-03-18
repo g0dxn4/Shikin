@@ -1,0 +1,135 @@
+# Feature Ideas
+
+Curated ideas for Valute's future. Ranked by impact, feasibility, and alignment with the AI-first local-first philosophy.
+
+---
+
+## Priority: High
+
+### Savings Goals
+Dedicated goal tracking with target amounts, deadlines, and visual progress. AI suggests budget adjustments to hit targets faster. Foundation for financial planning — YNAB and Monarch both center around this.
+
+- New `goals` table (id, name, target_amount, current_amount, deadline, account_id, icon, color)
+- Dashboard widget showing goal progress
+- Val tools: `createGoal`, `updateGoal`, `getGoalStatus`
+- AI nudges: "If you cut dining by 15%, you'll hit your emergency fund goal 2 months early"
+
+### Recurring Transactions
+Auto-generate expected transactions (rent, salary, utilities) on schedule. Different from subscriptions — these are general recurring entries that reduce manual data entry significantly.
+
+- New `recurring_rules` table (id, template transaction, frequency, next_date, active)
+- Background job to materialize upcoming transactions
+- Val tool: `manageRecurringTransaction`
+- Ties into cash flow forecasting
+
+### Cash Flow Forecasting
+Project future balance based on upcoming bills, recurring income, and spending patterns. One of the most requested features across all finance apps.
+
+- Leverage recurring transactions + budget data + historical patterns
+- 30/60/90 day projections with confidence intervals
+- Dashboard chart showing projected balance over time
+- Val tool: `getForecastedCashFlow`
+- AI narrative: "You'll dip below $500 on March 28 — consider deferring X"
+
+### Anomaly Detection & Alerts
+Proactive notifications for unusual spending, duplicate charges, subscription price increases, and forgotten trials. Plays directly to Val's AI strengths.
+
+- Compare transactions against historical patterns per category/merchant
+- Flag outliers (>2σ from mean for that merchant/category)
+- Detect duplicate charges (same amount + merchant within 48h)
+- Surface in AI Insights page + Val proactively mentions them
+- Val tool: `getSpendingAnomalies`
+
+### Smart Auto-Categorization
+AI learns from user corrections to auto-categorize new transactions by description. Reduces friction for the most common action in the app.
+
+- Merchant-to-category mapping table, seeded from user history
+- ML-lite: frequency-based matching, Val as fallback for ambiguous ones
+- "Suggested category" on transaction form with one-tap accept
+- Improves over time without cloud dependency (local pattern matching)
+
+---
+
+## Priority: Medium
+
+### Debt Payoff Planner
+Snowball vs avalanche strategy visualization for credit cards and loans. Show payoff timeline, total interest paid, and savings from extra payments.
+
+- New `debts` table or extend credit card fields on accounts
+- Strategy comparison view (snowball vs avalanche side-by-side)
+- Val tool: `getDebtPayoffPlan`
+- Monthly "debt check-in" in AI Insights
+
+### Spending Recaps
+Auto-generated weekly/monthly natural language summaries. "You spent 23% more on dining this month. Your savings rate improved to 28%."
+
+- Scheduled generation (weekly on Monday, monthly on 1st)
+- Store in notebook or dedicated recap table
+- Push to AI Insights page
+- Val already has all the analytics tools — this is orchestration
+
+### Financial Health Score
+Composite score (0-100) based on savings rate, debt-to-income, emergency fund coverage, budget adherence, and investment diversification. Gamification without being gimmicky.
+
+- Weighted formula with transparent breakdown
+- Dashboard widget with trend over time
+- Val tool: `getFinancialHealthScore`
+- Actionable tips per sub-score
+
+### Split Transactions
+One payment split across multiple categories (e.g., Costco run = groceries + household + electronics). Common real-world need.
+
+- `transaction_splits` table (parent_id, category_id, amount)
+- UI: split button on transaction form
+- Val handles splits naturally: "Split my $150 Costco trip: $80 groceries, $50 household, $20 electronics"
+
+### Multi-Currency with Live Rates
+Auto-fetch exchange rates and convert balances for display. The `exchange_rates` table already exists — needs a fetching service and conversion UI.
+
+- Free API (frankfurter.app or exchangerate.host)
+- Scheduled fetch (daily)
+- Display all balances in preferred currency
+- Val tool: `convertCurrency`
+
+### Reports & PDF Export
+Monthly/yearly PDF reports with spending breakdowns, income vs expenses, category trends, and net worth changes. Useful for tax prep and personal review.
+
+- Client-side PDF generation (jsPDF or react-pdf)
+- Templated reports: monthly summary, annual review, tax export
+- Val tool: `generateReport`
+
+---
+
+## Priority: Low (Nice to Have)
+
+### OFX/QFX/QIF Import
+Bank statement file import beyond CSV. Most banks export these formats. Broadens data import options.
+
+### Receipt Scanning / OCR
+Camera-based receipt capture with amount, merchant, and date extraction. Browser camera API + Tesseract.js or cloud OCR.
+
+### Shared / Household Finance
+Partner access with shared budgets and split tracking. Significant architecture change for a local-first app — would need sync layer.
+
+### Streaks & Achievements
+Gamify daily logging, staying under budget, and hitting savings goals. Fun but not core.
+
+### Financial Education via Val
+Contextual teaching — when user sets up first budget, Val explains the 50/30/20 rule. When user adds first investment, Val explains dollar-cost averaging.
+
+### Webhook / Automation Integration
+Trigger external actions on financial events. Would require a plugin/extension system.
+
+---
+
+## Rejected / Out of Scope
+
+### Bank Sync (Plaid)
+Requires cloud infrastructure, paid API ($), and ongoing maintenance. Conflicts with local-first philosophy. Users can CSV import instead.
+
+### Crypto DeFi Tracking
+Too niche and rapidly changing. Basic crypto price tracking via CoinGecko is sufficient.
+
+---
+
+*Last updated: 2026-03-17*

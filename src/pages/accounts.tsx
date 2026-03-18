@@ -28,10 +28,7 @@ export function Accounts() {
     fetch()
   }, [fetch])
 
-  const totalBalance = useMemo(
-    () => accounts.reduce((sum, a) => sum + a.balance, 0),
-    [accounts]
-  )
+  const totalBalance = useMemo(() => accounts.reduce((sum, a) => sum + a.balance, 0), [accounts])
 
   const handleDelete = async () => {
     if (!deleteId) return
@@ -93,7 +90,10 @@ export function Accounts() {
               const isCreditCard = account.type === 'credit_card'
               const utilization =
                 isCreditCard && account.credit_limit
-                  ? Math.min(100, Math.round((Math.abs(account.balance) / account.credit_limit) * 100))
+                  ? Math.min(
+                      100,
+                      Math.round((Math.abs(account.balance) / account.credit_limit) * 100)
+                    )
                   : null
 
               return (
@@ -115,6 +115,7 @@ export function Accounts() {
                         size="icon"
                         className="h-7 w-7"
                         onClick={() => openAccountDialog(account.id)}
+                        aria-label={`Edit ${account.name}`}
                       >
                         <Pencil size={12} />
                       </Button>
@@ -123,6 +124,7 @@ export function Accounts() {
                         size="icon"
                         className="text-destructive hover:text-destructive h-7 w-7"
                         onClick={() => setDeleteId(account.id)}
+                        aria-label={`Delete ${account.name}`}
                       >
                         <Trash2 size={12} />
                       </Button>

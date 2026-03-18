@@ -63,12 +63,12 @@ For single-entity responses, `meta` is omitted:
 
 ### Error Codes
 
-| Code | HTTP Status | Description |
-|------|-------------|-------------|
-| `VALIDATION_ERROR` | 400 | Request body failed validation |
-| `NOT_FOUND` | 404 | Entity does not exist |
-| `CONFLICT` | 409 | Duplicate or constraint violation |
-| `INTERNAL_ERROR` | 500 | Unexpected server error |
+| Code               | HTTP Status | Description                       |
+| ------------------ | ----------- | --------------------------------- |
+| `VALIDATION_ERROR` | 400         | Request body failed validation    |
+| `NOT_FOUND`        | 404         | Entity does not exist             |
+| `CONFLICT`         | 409         | Duplicate or constraint violation |
+| `INTERNAL_ERROR`   | 500         | Unexpected server error           |
 
 ---
 
@@ -84,10 +84,10 @@ GET /api/v1/accounts
 
 **Query parameters:**
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `type` | string | all | Filter by account type |
-| `include_archived` | boolean | false | Include archived accounts |
+| Param              | Type    | Default | Description               |
+| ------------------ | ------- | ------- | ------------------------- |
+| `type`             | string  | all     | Filter by account type    |
+| `include_archived` | boolean | false   | Include archived accounts |
 
 **Response:**
 
@@ -136,14 +136,14 @@ POST /api/v1/accounts
 }
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | yes | Account display name |
-| `type` | string | yes | One of: `checking`, `savings`, `credit_card`, `cash`, `investment`, `crypto`, `other` |
-| `currency` | string | no | ISO 4217 code. Default: `USD` |
-| `balance` | integer | no | Initial balance in centavos. Default: `0` |
-| `icon` | string | no | Lucide icon name |
-| `color` | string | no | Hex color code |
+| Field      | Type    | Required | Description                                                                           |
+| ---------- | ------- | -------- | ------------------------------------------------------------------------------------- |
+| `name`     | string  | yes      | Account display name                                                                  |
+| `type`     | string  | yes      | One of: `checking`, `savings`, `credit_card`, `cash`, `investment`, `crypto`, `other` |
+| `currency` | string  | no       | ISO 4217 code. Default: `USD`                                                         |
+| `balance`  | integer | no       | Initial balance in centavos. Default: `0`                                             |
+| `icon`     | string  | no       | Lucide icon name                                                                      |
+| `color`    | string  | no       | Hex color code                                                                        |
 
 #### Update account
 
@@ -177,18 +177,18 @@ GET /api/v1/transactions
 
 **Query parameters:**
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `account_id` | string | all | Filter by account |
-| `category_id` | string | all | Filter by category |
-| `type` | string | all | Filter by `expense`, `income`, or `transfer` |
-| `start_date` | string | none | Start of date range (YYYY-MM-DD) |
-| `end_date` | string | none | End of date range (YYYY-MM-DD) |
-| `search` | string | none | Search description and notes |
-| `tags` | string | none | Comma-separated tag filter |
-| `page` | integer | 1 | Page number |
-| `per_page` | integer | 20 | Results per page (max 100) |
-| `sort` | string | `-date` | Sort field. Prefix `-` for descending |
+| Param         | Type    | Default | Description                                  |
+| ------------- | ------- | ------- | -------------------------------------------- |
+| `account_id`  | string  | all     | Filter by account                            |
+| `category_id` | string  | all     | Filter by category                           |
+| `type`        | string  | all     | Filter by `expense`, `income`, or `transfer` |
+| `start_date`  | string  | none    | Start of date range (YYYY-MM-DD)             |
+| `end_date`    | string  | none    | End of date range (YYYY-MM-DD)               |
+| `search`      | string  | none    | Search description and notes                 |
+| `tags`        | string  | none    | Comma-separated tag filter                   |
+| `page`        | integer | 1       | Page number                                  |
+| `per_page`    | integer | 20      | Results per page (max 100)                   |
+| `sort`        | string  | `-date` | Sort field. Prefix `-` for descending        |
 
 **Response:**
 
@@ -250,20 +250,20 @@ POST /api/v1/transactions
 }
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `account_id` | string | yes | Source account ULID |
-| `type` | string | yes | One of: `expense`, `income`, `transfer` |
-| `amount` | integer | yes | Amount in centavos (positive) |
-| `description` | string | yes | Transaction description |
-| `currency` | string | no | ISO 4217 code. Default: account currency |
-| `category_id` | string | no | Category ULID |
-| `subcategory_id` | string | no | Subcategory ULID |
-| `date` | string | no | YYYY-MM-DD. Default: today |
-| `tags` | string[] | no | Array of tag strings |
-| `notes` | string | no | Additional notes |
-| `is_recurring` | boolean | no | Default: false |
-| `transfer_to_account_id` | string | no | Required if type is `transfer` |
+| Field                    | Type     | Required | Description                              |
+| ------------------------ | -------- | -------- | ---------------------------------------- |
+| `account_id`             | string   | yes      | Source account ULID                      |
+| `type`                   | string   | yes      | One of: `expense`, `income`, `transfer`  |
+| `amount`                 | integer  | yes      | Amount in centavos (positive)            |
+| `description`            | string   | yes      | Transaction description                  |
+| `currency`               | string   | no       | ISO 4217 code. Default: account currency |
+| `category_id`            | string   | no       | Category ULID                            |
+| `subcategory_id`         | string   | no       | Subcategory ULID                         |
+| `date`                   | string   | no       | YYYY-MM-DD. Default: today               |
+| `tags`                   | string[] | no       | Array of tag strings                     |
+| `notes`                  | string   | no       | Additional notes                         |
+| `is_recurring`           | boolean  | no       | Default: false                           |
+| `transfer_to_account_id` | string   | no       | Required if type is `transfer`           |
 
 The API automatically updates the account balance after creating a transaction.
 
@@ -293,9 +293,9 @@ GET /api/v1/categories
 
 **Query parameters:**
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `type` | string | all | Filter by `expense`, `income`, or `transfer` |
+| Param  | Type   | Default | Description                                  |
+| ------ | ------ | ------- | -------------------------------------------- |
+| `type` | string | all     | Filter by `expense`, `income`, or `transfer` |
 
 #### Get category with subcategories
 
@@ -344,10 +344,10 @@ GET /api/v1/budgets
 
 **Query parameters:**
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `is_active` | boolean | true | Filter by active status |
-| `include_status` | boolean | false | Include current period spending data |
+| Param            | Type    | Default | Description                          |
+| ---------------- | ------- | ------- | ------------------------------------ |
+| `is_active`      | boolean | true    | Filter by active status              |
+| `include_status` | boolean | false   | Include current period spending data |
 
 When `include_status=true`, each budget includes a `current_period` object:
 
@@ -412,10 +412,10 @@ GET /api/v1/subscriptions
 
 **Query parameters:**
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `is_active` | boolean | true | Filter by active status |
-| `upcoming_days` | integer | none | Only show subscriptions billing within N days |
+| Param           | Type    | Default | Description                                   |
+| --------------- | ------- | ------- | --------------------------------------------- |
+| `is_active`     | boolean | true    | Filter by active status                       |
+| `upcoming_days` | integer | none    | Only show subscriptions billing within N days |
 
 #### Create subscription
 
@@ -462,11 +462,11 @@ GET /api/v1/investments
 
 **Query parameters:**
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `account_id` | string | all | Filter by investment account |
-| `type` | string | all | Filter by `stock`, `etf`, `crypto`, etc. |
-| `include_prices` | boolean | false | Include latest price data |
+| Param            | Type    | Default | Description                              |
+| ---------------- | ------- | ------- | ---------------------------------------- |
+| `account_id`     | string  | all     | Filter by investment account             |
+| `type`           | string  | all     | Filter by `stock`, `etf`, `crypto`, etc. |
+| `include_prices` | boolean | false   | Include latest price data                |
 
 #### Create investment
 
@@ -559,11 +559,11 @@ GET /api/v1/summary/spending
 
 **Query parameters:**
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `period` | string | `month` | One of: `week`, `month`, `year`, `custom` |
-| `start_date` | string | auto | Required for `custom` period |
-| `end_date` | string | auto | Required for `custom` period |
+| Param        | Type   | Default | Description                               |
+| ------------ | ------ | ------- | ----------------------------------------- |
+| `period`     | string | `month` | One of: `week`, `month`, `year`, `custom` |
+| `start_date` | string | auto    | Required for `custom` period              |
+| `end_date`   | string | auto    | Required for `custom` period              |
 
 Returns the same data shape as the `getSpendingSummary` AI tool.
 
@@ -639,10 +639,10 @@ PUT /api/v1/settings/:key
 
 List endpoints support cursor-based pagination:
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `page` | integer | 1 | Page number (1-indexed) |
-| `per_page` | integer | 20 | Items per page (max 100) |
+| Param      | Type    | Default | Description              |
+| ---------- | ------- | ------- | ------------------------ |
+| `page`     | integer | 1       | Page number (1-indexed)  |
+| `per_page` | integer | 20      | Items per page (max 100) |
 
 The `meta` object in the response includes `total`, `page`, and `per_page`.
 
@@ -654,7 +654,7 @@ The `meta` object in the response includes `total`, `page`, and `per_page`.
 
 For multi-user machines or remote access scenarios, a future version may add:
 
-- A locally-generated bearer token stored in the Tauri app data directory.
+- A locally-generated bearer token stored in browser-local app storage.
 - Token passed via `Authorization: Bearer <token>` header.
 - Token rotation through the Settings UI.
 

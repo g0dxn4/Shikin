@@ -5,6 +5,10 @@
     "placeholder": "Preg\u00fantale a Val sobre tus finanzas...",
     "send": "Enviar",
     "thinking": "Pensando...",
+    "compact": "Compactar",
+    "compactTooltip": "Resume mensajes anteriores para liberar contexto",
+    "messageCount": "{{count}} mensajes",
+    "autoCompactSoon": "compactaci\u00f3n autom\u00e1tica pronto",
     "empty": {
       "title": "\u00a1Hola! Soy Val",
       "description": "Puedo ayudarte a manejar tus finanzas. Intenta pedirme que agregue una transacci\u00f3n, revise tus gastos o cree un presupuesto.",

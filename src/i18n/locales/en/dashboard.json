@@ -11,11 +11,15 @@
     "totalBalance": "Total Balance",
     "monthlyIncome": "Monthly Income",
     "monthlyExpenses": "Monthly Expenses",
-    "savings": "Savings Rate"
+    "savings": "Savings Rate",
+    "incomeVsLastMonth": "Income vs last month",
+    "expensesVsLastMonth": "Expenses vs last month"
   },
   "charts": {
     "spending": "Monthly Spending",
-    "categories": "By Category"
+    "categories": "By Category",
+    "drilldownTransactions": "View transactions",
+    "drilldownBudgets": "View budgets"
   },
   "quickActions": {
     "addTransaction": "Add Transaction",

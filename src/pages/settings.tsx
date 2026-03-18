@@ -13,9 +13,11 @@ import { fetchModels, isKeylessProvider, isStaticModelList, type ModelInfo } fro
 import type { AIProvider } from '@/ai/agent'
 import { cn } from '@/lib/utils'
 import { load } from '@/lib/storage'
+import { exportDatabaseSnapshot, importDatabaseSnapshot } from '@/lib/database'
 import { startOAuthFlow, exchangeCodeForToken, loadPkceState } from '@/lib/oauth'
 import { createGoogleOAuthConfig, fetchGoogleUserEmail } from '@/lib/oauth-providers/google'
 import { createOpenAICodexOAuthConfig, extractAccountId } from '@/lib/oauth-providers/openai-codex'
+import { ThemeSettings } from '@/components/ThemeSettings'
 
 export function SettingsPage() {
   const { t, i18n } = useTranslation('settings')
@@ -55,6 +57,9 @@ export function SettingsPage() {
   const [alphaVantageKey, setAlphaVantageKey] = useState('')
   const [finnhubKey, setFinnhubKey] = useState('')
   const [isSavingDataKeys, setIsSavingDataKeys] = useState(false)
+  const [isExportingData, setIsExportingData] = useState(false)
+  const [isImportingData, setIsImportingData] = useState(false)
+  const importDbInputRef = useRef<HTMLInputElement>(null)
 
   // OAuth local state
   const [localAuthMode, setLocalAuthMode] = useState<'api_key' | 'oauth'>(authMode)
@@ -190,56 +195,118 @@ export function SettingsPage() {
     }
   }
 
-  const handleOAuthCallbackResult = async (code: string, state: string) => {
-    // Determine which provider and validate state for CSRF protection
-    const googlePkce = loadPkceState('google')
-    const openaiPkce = loadPkceState('openai')
-
-    let config
-    let verifier: string
-
-    if (googlePkce && googlePkce.state === state) {
-      config = createGoogleOAuthConfig(localOAuthClientId || oauthClientId)
-      verifier = googlePkce.verifier
-    } else if (openaiPkce && openaiPkce.state === state) {
-      config = createOpenAICodexOAuthConfig()
-      verifier = openaiPkce.verifier
-    } else {
-      toast.error('OAuth state mismatch or session expired — please try again')
-      return
-    }
-
-    // Clear PKCE state after validation
-    sessionStorage.removeItem(`oauth_${config.providerId}`)
-
+  const handleExportData = async () => {
+    setIsExportingData(true)
     try {
-      const tokens = await exchangeCodeForToken(config, code, verifier)
-
-      let email: string | undefined
-      let codexAccId: string | undefined
-
-      if (config.providerId === 'google') {
-        const userEmail = await fetchGoogleUserEmail(tokens.accessToken)
-        if (userEmail) email = userEmail
-      } else if (config.providerId === 'openai') {
-        const accountId = extractAccountId(tokens.accessToken)
-        if (accountId) codexAccId = accountId
-      }
-
-      await setOAuthTokens({
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        expiresIn: Math.floor((tokens.expiresAt - Date.now()) / 1000),
-        email,
-        codexAccountId: codexAccId,
-      })
-
-      setLocalAuthMode('oauth')
-      toast.success('Signed in successfully')
-    } catch (err) {
-      toast.error(`OAuth failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      const bytes = await exportDatabaseSnapshot()
+      const blob = new Blob([bytes], { type: 'application/octet-stream' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `valute-backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.db`
+      a.click()
+      URL.revokeObjectURL(url)
+      toast.success(t('data.exportSuccess'))
+    } catch {
+      toast.error(t('data.exportError'))
+    } finally {
+      setIsExportingData(false)
     }
   }
+
+  const handleImportData = async (file: File) => {
+    setIsImportingData(true)
+    try {
+      const buffer = await file.arrayBuffer()
+      await importDatabaseSnapshot(new Uint8Array(buffer))
+      toast.success(t('data.importSuccess'))
+      window.location.reload()
+    } catch {
+      toast.error(t('data.importError'))
+    } finally {
+      setIsImportingData(false)
+      if (importDbInputRef.current) {
+        importDbInputRef.current.value = ''
+      }
+    }
+  }
+
+  const handleOAuthCallbackResult = useCallback(
+    async (code: string, state: string) => {
+      // Determine which provider and validate state for CSRF protection
+      const googlePkce = loadPkceState('google')
+      const openaiPkce = loadPkceState('openai')
+
+      let config
+      let verifier: string
+
+      if (googlePkce && googlePkce.state === state) {
+        config = createGoogleOAuthConfig(localOAuthClientId || oauthClientId)
+        verifier = googlePkce.verifier
+      } else if (openaiPkce && openaiPkce.state === state) {
+        config = createOpenAICodexOAuthConfig()
+        verifier = openaiPkce.verifier
+      } else {
+        toast.error('OAuth state mismatch or session expired — please try again')
+        return
+      }
+
+      // Clear PKCE state after validation
+      sessionStorage.removeItem(`oauth_${config.providerId}`)
+
+      try {
+        const tokens = await exchangeCodeForToken(config, code, verifier)
+
+        let email: string | undefined
+        let codexAccId: string | undefined
+
+        if (config.providerId === 'google') {
+          const userEmail = await fetchGoogleUserEmail(tokens.accessToken)
+          if (userEmail) email = userEmail
+        } else if (config.providerId === 'openai') {
+          const accountId = extractAccountId(tokens.accessToken)
+          if (accountId) codexAccId = accountId
+        }
+
+        await setOAuthTokens({
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          expiresIn: Math.floor((tokens.expiresAt - Date.now()) / 1000),
+          email,
+          codexAccountId: codexAccId,
+        })
+
+        setLocalAuthMode('oauth')
+        toast.success('Signed in successfully')
+      } catch (err) {
+        toast.error(`OAuth failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      }
+    },
+    [localOAuthClientId, oauthClientId, setOAuthTokens]
+  )
+
+  useEffect(() => {
+    loadSettings()
+    load('settings.json')
+      .then(async (store) => {
+        setAlphaVantageKey(((await store.get('alpha_vantage_key')) as string) || '')
+        setFinnhubKey(((await store.get('finnhub_key')) as string) || '')
+      })
+      .catch(() => {})
+
+    const callbackResult = sessionStorage.getItem('oauth_callback_result')
+    if (callbackResult) {
+      sessionStorage.removeItem('oauth_callback_result')
+      try {
+        const { code, state } = JSON.parse(callbackResult)
+        if (code && state) {
+          void handleOAuthCallbackResult(code, state)
+        }
+      } catch {
+        // Invalid callback data
+      }
+    }
+  }, [loadSettings, handleOAuthCallbackResult])
 
   const handleGoogleOAuth = async () => {
     if (!localOAuthClientId) {
@@ -271,7 +338,9 @@ export function SettingsPage() {
       if (err instanceof Error && err.message.includes('popup was closed')) {
         // User cancelled — not an error
       } else {
-        toast.error(`Google sign-in failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+        toast.error(
+          `Google sign-in failed: ${err instanceof Error ? err.message : 'Unknown error'}`
+        )
       }
     } finally {
       setIsOAuthLoading(false)
@@ -302,7 +371,9 @@ export function SettingsPage() {
       if (err instanceof Error && err.message.includes('popup was closed')) {
         // User cancelled
       } else {
-        toast.error(`OpenAI sign-in failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+        toast.error(
+          `OpenAI sign-in failed: ${err instanceof Error ? err.message : 'Unknown error'}`
+        )
       }
     } finally {
       setIsOAuthLoading(false)
@@ -355,7 +426,8 @@ export function SettingsPage() {
             const isActive = provider === p.id
             const cat = PROVIDER_CATEGORIES[p.category]
             const isConfiguredProvider =
-              isActive && (apiKey || isKeylessProvider(p.id) || (authMode === 'oauth' && oauthAccessToken))
+              isActive &&
+              (apiKey || isKeylessProvider(p.id) || (authMode === 'oauth' && oauthAccessToken))
 
             return (
               <button
@@ -363,9 +435,7 @@ export function SettingsPage() {
                 onClick={() => handleSelectProvider(p)}
                 className={cn(
                   'glass-card relative flex flex-col items-start p-4 text-left transition-all duration-150',
-                  isSelected
-                    ? 'border-accent ring-accent/20 ring-2'
-                    : 'hover:border-border-hover',
+                  isSelected ? 'border-accent ring-accent/20 ring-2' : 'hover:border-border-hover'
                 )}
               >
                 <div className="mb-2 flex w-full items-center justify-between">
@@ -402,14 +472,10 @@ export function SettingsPage() {
                         OAuth
                       </span>
                     )}
-                    {isConfiguredProvider && (
-                      <span className="h-2 w-2 rounded-full bg-success" />
-                    )}
+                    {isConfiguredProvider && <span className="bg-success h-2 w-2 rounded-full" />}
                   </div>
                 </div>
-                <p className="text-muted-foreground text-xs leading-relaxed">
-                  {p.description}
-                </p>
+                <p className="text-muted-foreground text-xs leading-relaxed">{p.description}</p>
               </button>
             )
           })}
@@ -420,9 +486,7 @@ export function SettingsPage() {
           <div className="glass-card animate-fade-in space-y-4 p-6">
             <div className="flex items-center gap-2">
               <Zap size={16} className="text-accent" />
-              <h3 className="font-heading text-sm font-semibold">
-                {currentProviderInfo.name}
-              </h3>
+              <h3 className="font-heading text-sm font-semibold">{currentProviderInfo.name}</h3>
             </div>
 
             {/* Auth mode toggle for OAuth-capable providers */}
@@ -431,10 +495,10 @@ export function SettingsPage() {
                 <button
                   type="button"
                   className={cn(
-                    'flex-1 px-4 py-2 font-mono text-xs uppercase tracking-wider transition-colors',
+                    'flex-1 px-4 py-2 font-mono text-xs tracking-wider uppercase transition-colors',
                     localAuthMode === 'api_key'
                       ? 'bg-accent text-white'
-                      : 'bg-[#0a0a0a] text-muted-foreground hover:text-foreground'
+                      : 'text-muted-foreground hover:text-foreground bg-[#0a0a0a]'
                   )}
                   onClick={() => setLocalAuthMode('api_key')}
                 >
@@ -443,10 +507,10 @@ export function SettingsPage() {
                 <button
                   type="button"
                   className={cn(
-                    'flex-1 px-4 py-2 font-mono text-xs uppercase tracking-wider transition-colors',
+                    'flex-1 px-4 py-2 font-mono text-xs tracking-wider uppercase transition-colors',
                     localAuthMode === 'oauth'
                       ? 'bg-accent text-white'
-                      : 'bg-[#0a0a0a] text-muted-foreground hover:text-foreground'
+                      : 'text-muted-foreground hover:text-foreground bg-[#0a0a0a]'
                   )}
                   onClick={() => setLocalAuthMode('oauth')}
                 >
@@ -512,15 +576,10 @@ export function SettingsPage() {
               <div className="space-y-3">
                 {isOAuthConnected ? (
                   <div className="flex items-center gap-3">
-                    <span className="text-sm text-success">
+                    <span className="text-success text-sm">
                       Connected as {oauthEmail || 'Google user'}
                     </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleSignOut}
-                      className="gap-1"
-                    >
+                    <Button variant="outline" size="sm" onClick={handleSignOut} className="gap-1">
                       <LogOut size={12} />
                       Sign out
                     </Button>
@@ -532,8 +591,9 @@ export function SettingsPage() {
                         Google Cloud Client ID
                       </Label>
                       <p className="text-muted-foreground text-[10px]">
-                        Create at console.cloud.google.com &rarr; APIs &amp; Services &rarr; Credentials &rarr; OAuth 2.0 Client ID (Web Application). Add{' '}
-                        <code className="font-mono text-accent">
+                        Create at console.cloud.google.com &rarr; APIs &amp; Services &rarr;
+                        Credentials &rarr; OAuth 2.0 Client ID (Web Application). Add{' '}
+                        <code className="text-accent font-mono">
                           {window.location.origin}/oauth/callback
                         </code>{' '}
                         as authorized redirect URI.
@@ -548,11 +608,9 @@ export function SettingsPage() {
                     <Button
                       onClick={handleGoogleOAuth}
                       disabled={isOAuthLoading || !localOAuthClientId}
-                      className="bg-accent text-white font-mono text-xs uppercase tracking-wider"
+                      className="bg-accent font-mono text-xs tracking-wider text-white uppercase"
                     >
-                      {isOAuthLoading ? (
-                        <Loader2 size={14} className="animate-spin" />
-                      ) : null}
+                      {isOAuthLoading ? <Loader2 size={14} className="animate-spin" /> : null}
                       Sign in with Google
                     </Button>
                   </>
@@ -565,13 +623,8 @@ export function SettingsPage() {
               <div className="space-y-3">
                 {isOAuthConnected ? (
                   <div className="flex items-center gap-3">
-                    <span className="text-sm text-success">Connected</span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleSignOut}
-                      className="gap-1"
-                    >
+                    <span className="text-success text-sm">Connected</span>
+                    <Button variant="outline" size="sm" onClick={handleSignOut} className="gap-1">
                       <LogOut size={12} />
                       Sign out
                     </Button>
@@ -584,11 +637,9 @@ export function SettingsPage() {
                     <Button
                       onClick={handleOpenAIOAuth}
                       disabled={isOAuthLoading}
-                      className="bg-accent text-white font-mono text-xs uppercase tracking-wider"
+                      className="bg-accent font-mono text-xs tracking-wider text-white uppercase"
                     >
-                      {isOAuthLoading ? (
-                        <Loader2 size={14} className="animate-spin" />
-                      ) : null}
+                      {isOAuthLoading ? <Loader2 size={14} className="animate-spin" /> : null}
                       Sign in with ChatGPT
                     </Button>
                   </>
@@ -597,10 +648,6 @@ export function SettingsPage() {
             )}
 
             {!needsKey && !supportsOAuth && (
-              <p className="text-muted-foreground text-xs">{t('ai.noKeyNeeded')}</p>
-            )}
-
-            {!needsKey && localProvider === 'ollama' && (
               <p className="text-muted-foreground text-xs">{t('ai.noKeyNeeded')}</p>
             )}
 
@@ -669,6 +716,7 @@ export function SettingsPage() {
         )}
       </section>
 
+<<<<<<< Updated upstream
       {/* Category Rules */}
       <section className="glass-card space-y-4 p-6">
         <h2 className="font-heading text-lg font-semibold">{t('sections.categoryRules')}</h2>
@@ -735,20 +783,60 @@ export function SettingsPage() {
         )}
       </section>
 
+      <section className="glass-card space-y-4 p-6">
+        <h2 className="font-heading text-lg font-semibold">
+          {t('sections.theme', 'Theme & Appearance')}
+        </h2>
+        <p className="text-muted-foreground text-xs">
+          {t('theme.description', 'Customize the visual appearance of Valute')}
+        </p>
+        <ThemeSettings />
+      </section>
+
+      <section className="glass-card space-y-4 p-6">
+        <h2 className="font-heading text-lg font-semibold">{t('sections.data')}</h2>
+        <p className="text-muted-foreground text-xs">{t('data.resetWarning')}</p>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={handleExportData}
+            disabled={isExportingData || isImportingData}
+          >
+            {isExportingData ? '...' : t('data.export')}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => importDbInputRef.current?.click()}
+            disabled={isExportingData || isImportingData}
+          >
+            {isImportingData ? '...' : t('data.import')}
+          </Button>
+          <input
+            ref={importDbInputRef}
+            type="file"
+            accept=".db,.sqlite,application/octet-stream"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) {
+                void handleImportData(file)
+              }
+            }}
+          />
+        </div>
+      </section>
+
+>>>>>>> Stashed changes
       {/* Data API Keys */}
       <section className="glass-card space-y-4 p-6">
         <h2 className="font-heading text-lg font-semibold">{t('sections.dataApis')}</h2>
-        <p className="text-muted-foreground text-xs">
-          {t('dataApis.description')}
-        </p>
+        <p className="text-muted-foreground text-xs">{t('dataApis.description')}</p>
 
         <div className="space-y-2">
           <Label className="text-muted-foreground font-mono text-xs tracking-wider uppercase">
             Alpha Vantage
           </Label>
-          <p className="text-muted-foreground text-[10px]">
-            {t('dataApis.alphaVantageHint')}
-          </p>
+          <p className="text-muted-foreground text-[10px]">{t('dataApis.alphaVantageHint')}</p>
           <Input
             type="password"
             placeholder="Alpha Vantage API key"
@@ -762,9 +850,7 @@ export function SettingsPage() {
           <Label className="text-muted-foreground font-mono text-xs tracking-wider uppercase">
             Finnhub
           </Label>
-          <p className="text-muted-foreground text-[10px]">
-            {t('dataApis.finnhubHint')}
-          </p>
+          <p className="text-muted-foreground text-[10px]">{t('dataApis.finnhubHint')}</p>
           <Input
             type="password"
             placeholder="Finnhub API key"

@@ -14,6 +14,8 @@
     "categoryNone": "No category",
     "account": "Account",
     "accountPlaceholder": "Select an account",
+    "transferToAccount": "To Account",
+    "transferToAccountPlaceholder": "Select destination account",
     "date": "Date",
     "notes": "Notes",
     "notesPlaceholder": "Optional notes...",
@@ -34,9 +36,14 @@
     "confidence": "Confidence"
   },
   "types": {
+    "all": "All",
     "expense": "Expense",
     "income": "Income",
     "transfer": "Transfer"
+  },
+  "dateHeaders": {
+    "today": "Today",
+    "yesterday": "Yesterday"
   },
   "toast": {
     "created": "Transaction created successfully",

@@ -2,11 +2,95 @@
   "title": "Configuraci\u00f3n",
   "sections": {
     "general": "General",
+    "theme": "Tema y Apariencia",
     "ai": "Proveedor de IA",
     "data": "Datos",
     "categoryRules": "Reglas de Categoría",
     "dataApis": "APIs de Datos del Mercado",
     "about": "Acerca de"
+  },
+  "theme": {
+    "description": "Personaliza la apariencia visual de Valute",
+    "aiPrompt": "Generador de Temas con IA",
+    "promptPlaceholder": "ej. Neón cyberpunk, otoño acogedor, brisa del mar...",
+    "generate": "Generar",
+    "generateSuccess": "¡Tema generado! Haz clic en Guardar para conservarlo.",
+    "generateError": "No se pudo generar el tema",
+    "save": "Guardar Tema",
+    "saveSuccess": "Tema guardado exitosamente",
+    "reset": "Restablecer por Defecto",
+    "resetSuccess": "Tema restablecido por defecto",
+    "revert": "Revertir",
+    "revertSuccess": "Revertido al tema guardado",
+    "fields": {
+      "background": "Fondo",
+      "surface": "Superficie",
+      "accent": "Acento",
+      "radius": "Radio de borde",
+      "fontPreset": "Preajuste de fuente"
+    },
+    "presets": {
+      "default": "Predeterminado",
+      "midnight": "Medianoche",
+      "forest": "Bosque",
+      "rose": "Rosa",
+      "aurora": "Aurora",
+      "ember": "Ascua",
+      "slate": "Pizarra",
+      "paper": "Papel",
+      "nord": "Nord",
+      "mono": "Mono",
+      "sunset": "Atardecer",
+      "ocean": "Océano",
+      "matcha": "Matcha",
+      "terracotta": "Terracota",
+      "violetGlass": "Violeta Cristal",
+      "latte": "Latte"
+    },
+    "presetDescriptions": {
+      "default": "Estilo original de Valute",
+      "midnight": "Azul oscuro profesional",
+      "forest": "Verde calmado y enfocado",
+      "rose": "Tono editorial claro y suave",
+      "aurora": "Modo nocturno neón turquesa",
+      "ember": "Tema oscuro cálido naranja",
+      "slate": "Productividad moderna neutral",
+      "paper": "Editorial claro y limpio",
+      "nord": "Minimalismo nórdico azul-gris",
+      "mono": "Monocromo alto contraste",
+      "sunset": "Vibra creativa rosa-magenta",
+      "ocean": "Estilo costero cian fresco",
+      "matcha": "Equilibrio verde natural",
+      "terracotta": "Estudio premium cálido",
+      "violetGlass": "Estética violeta tipo vidrio",
+      "latte": "Espacio beige acogedor"
+    },
+    "filters": {
+      "all": "Todos",
+      "dark": "Oscuro",
+      "light": "Claro",
+      "editorial": "Editorial",
+      "bold": "Intenso"
+    },
+    "featured": {
+      "title": "Selecciones Destacadas",
+      "description": "Temas recomendados según la apariencia de tu sistema.",
+      "darkMode": "Modo oscuro",
+      "lightMode": "Modo claro"
+    },
+    "options": {
+      "radius": {
+        "brutalist": "Brutalista (0px)",
+        "subtle": "Sutil (8px)",
+        "rounded": "Redondeado (12px)",
+        "pill": "Píldora (16px)"
+      },
+      "font": {
+        "current": "Actual",
+        "modern": "Moderno",
+        "editorial": "Editorial"
+      }
+    }
   },
   "language": {
     "label": "Idioma",
@@ -43,6 +127,10 @@
   "data": {
     "export": "Exportar Datos",
     "import": "Importar Datos",
+    "exportSuccess": "Respaldo exportado",
+    "exportError": "No se pudo exportar el respaldo",
+    "importSuccess": "Respaldo importado",
+    "importError": "No se pudo importar el respaldo",
     "reset": "Restablecer Datos",
     "resetWarning": "Esto eliminará permanentemente todos tus datos. Esta acción no se puede deshacer."
   },

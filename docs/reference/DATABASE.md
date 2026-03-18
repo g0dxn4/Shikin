@@ -2,7 +2,7 @@
 
 This document describes the complete SQLite schema for Valute, including all tables, columns, indexes, conventions, migration strategy, and example queries.
 
-The database file is `valute.db`, stored in the Tauri application data directory and accessed through `tauri-plugin-sql`.
+The database is maintained via `sql.js` in the browser and persisted to IndexedDB as `valute.db` snapshot bytes.
 
 ---
 
@@ -10,26 +10,26 @@ The database file is `valute.db`, stored in the Tauri application data directory
 
 All tables follow these conventions consistently:
 
-| Convention | Rule | Rationale |
-|-----------|------|-----------|
-| **Money** | `INTEGER` (centavos/cents) | Avoids floating-point precision errors. `$12.50` is stored as `1250`. |
-| **IDs** | `TEXT` (ULIDs) | Sortable, unique, no auto-increment conflicts. Generated with `ulidx`. |
-| **Dates** | `TEXT` (ISO 8601) | `YYYY-MM-DD` for dates, `YYYY-MM-DDTHH:MM:SS.sssZ` for timestamps. SQLite has no native date type; text is portable and sortable. |
-| **Booleans** | `INTEGER` (0/1) | SQLite has no boolean type. `0` = false, `1` = true. |
-| **Tags** | `TEXT` (JSON array) | `'["groceries", "weekly"]'`. Flexible, queryable with `json_each()`. |
-| **Currency** | `TEXT` (ISO 4217) | Three-letter currency codes: `USD`, `EUR`, `MXN`, etc. |
-| **Timestamps** | `created_at` / `updated_at` | Auto-populated with `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`. |
-| **Soft deletes** | `is_archived` | Accounts use archival rather than deletion to preserve referential integrity. |
-| **Foreign keys** | `ON DELETE CASCADE` or `SET NULL` | Cascades for owned relationships, null for optional references. |
+| Convention       | Rule                              | Rationale                                                                                                                         |
+| ---------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| **Money**        | `INTEGER` (centavos/cents)        | Avoids floating-point precision errors. `$12.50` is stored as `1250`.                                                             |
+| **IDs**          | `TEXT` (ULIDs)                    | Sortable, unique, no auto-increment conflicts. Generated with `ulidx`.                                                            |
+| **Dates**        | `TEXT` (ISO 8601)                 | `YYYY-MM-DD` for dates, `YYYY-MM-DDTHH:MM:SS.sssZ` for timestamps. SQLite has no native date type; text is portable and sortable. |
+| **Booleans**     | `INTEGER` (0/1)                   | SQLite has no boolean type. `0` = false, `1` = true.                                                                              |
+| **Tags**         | `TEXT` (JSON array)               | `'["groceries", "weekly"]'`. Flexible, queryable with `json_each()`.                                                              |
+| **Currency**     | `TEXT` (ISO 4217)                 | Three-letter currency codes: `USD`, `EUR`, `MXN`, etc.                                                                            |
+| **Timestamps**   | `created_at` / `updated_at`       | Auto-populated with `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`.                                                                      |
+| **Soft deletes** | `is_archived`                     | Accounts use archival rather than deletion to preserve referential integrity.                                                     |
+| **Foreign keys** | `ON DELETE CASCADE` or `SET NULL` | Cascades for owned relationships, null for optional references.                                                                   |
 
 ### Money Conversion
 
 The frontend provides helpers in `src/lib/money.ts`:
 
 ```typescript
-toCentavos(12.50)    // -> 1250
-fromCentavos(1250)   // -> 12.50
-formatMoney(1250, 'USD', 'en-US')  // -> "$12.50"
+toCentavos(12.5) // -> 1250
+fromCentavos(1250) // -> 12.50
+formatMoney(1250, 'USD', 'en-US') // -> "$12.50"
 ```
 
 ---
@@ -40,65 +40,65 @@ formatMoney(1250, 'USD', 'en-US')  // -> "$12.50"
 
 Bank accounts, wallets, credit cards, and investment accounts.
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | ULID |
-| `name` | TEXT | NOT NULL | Display name (e.g., "Chase Checking") |
-| `type` | TEXT | NOT NULL, CHECK | One of: `checking`, `savings`, `credit_card`, `cash`, `investment`, `crypto`, `other` |
-| `currency` | TEXT | NOT NULL, DEFAULT 'USD' | ISO 4217 currency code |
-| `balance` | INTEGER | NOT NULL, DEFAULT 0 | Current balance in centavos |
-| `icon` | TEXT | nullable | Lucide icon name |
-| `color` | TEXT | nullable | Hex color code |
-| `is_archived` | INTEGER | NOT NULL, DEFAULT 0 | 0 = active, 1 = archived |
-| `created_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
-| `updated_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
+| Column        | Type    | Constraints             | Description                                                                           |
+| ------------- | ------- | ----------------------- | ------------------------------------------------------------------------------------- |
+| `id`          | TEXT    | PRIMARY KEY             | ULID                                                                                  |
+| `name`        | TEXT    | NOT NULL                | Display name (e.g., "Chase Checking")                                                 |
+| `type`        | TEXT    | NOT NULL, CHECK         | One of: `checking`, `savings`, `credit_card`, `cash`, `investment`, `crypto`, `other` |
+| `currency`    | TEXT    | NOT NULL, DEFAULT 'USD' | ISO 4217 currency code                                                                |
+| `balance`     | INTEGER | NOT NULL, DEFAULT 0     | Current balance in centavos                                                           |
+| `icon`        | TEXT    | nullable                | Lucide icon name                                                                      |
+| `color`       | TEXT    | nullable                | Hex color code                                                                        |
+| `is_archived` | INTEGER | NOT NULL, DEFAULT 0     | 0 = active, 1 = archived                                                              |
+| `created_at`  | TEXT    | NOT NULL, auto          | ISO 8601 timestamp                                                                    |
+| `updated_at`  | TEXT    | NOT NULL, auto          | ISO 8601 timestamp                                                                    |
 
 ### categories
 
 Transaction categories. Seeded with 15 default categories.
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | ULID |
-| `name` | TEXT | NOT NULL, UNIQUE | Category name (e.g., "Food & Dining") |
-| `icon` | TEXT | nullable | Lucide icon name |
-| `color` | TEXT | nullable | Hex color code |
-| `type` | TEXT | NOT NULL, CHECK | One of: `expense`, `income`, `transfer` |
-| `sort_order` | INTEGER | NOT NULL, DEFAULT 0 | Display order |
-| `created_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
+| Column       | Type    | Constraints         | Description                             |
+| ------------ | ------- | ------------------- | --------------------------------------- |
+| `id`         | TEXT    | PRIMARY KEY         | ULID                                    |
+| `name`       | TEXT    | NOT NULL, UNIQUE    | Category name (e.g., "Food & Dining")   |
+| `icon`       | TEXT    | nullable            | Lucide icon name                        |
+| `color`      | TEXT    | nullable            | Hex color code                          |
+| `type`       | TEXT    | NOT NULL, CHECK     | One of: `expense`, `income`, `transfer` |
+| `sort_order` | INTEGER | NOT NULL, DEFAULT 0 | Display order                           |
+| `created_at` | TEXT    | NOT NULL, auto      | ISO 8601 timestamp                      |
 
 **Default categories:**
 
-| Name | Type | Icon | Color |
-|------|------|------|-------|
-| Food & Dining | expense | utensils | #f97316 |
-| Transportation | expense | car | #3b82f6 |
-| Housing | expense | home | #8b5cf6 |
-| Entertainment | expense | tv | #ec4899 |
-| Health | expense | heart-pulse | #ef4444 |
-| Shopping | expense | shopping-bag | #f59e0b |
-| Education | expense | graduation-cap | #06b6d4 |
-| Utilities | expense | zap | #64748b |
-| Subscriptions | expense | repeat | #a855f7 |
-| Other Expenses | expense | more-horizontal | #6b7280 |
-| Salary | income | banknote | #22c55e |
-| Freelance | income | briefcase | #10b981 |
-| Investment Income | income | trending-up | #14b8a6 |
-| Other Income | income | plus-circle | #059669 |
-| Transfer | transfer | arrow-right-left | #6366f1 |
+| Name              | Type     | Icon             | Color   |
+| ----------------- | -------- | ---------------- | ------- |
+| Food & Dining     | expense  | utensils         | #f97316 |
+| Transportation    | expense  | car              | #3b82f6 |
+| Housing           | expense  | home             | #8b5cf6 |
+| Entertainment     | expense  | tv               | #ec4899 |
+| Health            | expense  | heart-pulse      | #ef4444 |
+| Shopping          | expense  | shopping-bag     | #f59e0b |
+| Education         | expense  | graduation-cap   | #06b6d4 |
+| Utilities         | expense  | zap              | #64748b |
+| Subscriptions     | expense  | repeat           | #a855f7 |
+| Other Expenses    | expense  | more-horizontal  | #6b7280 |
+| Salary            | income   | banknote         | #22c55e |
+| Freelance         | income   | briefcase        | #10b981 |
+| Investment Income | income   | trending-up      | #14b8a6 |
+| Other Income      | income   | plus-circle      | #059669 |
+| Transfer          | transfer | arrow-right-left | #6366f1 |
 
 ### subcategories
 
 Nested categories under a parent category.
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | ULID |
-| `category_id` | TEXT | NOT NULL, FK -> categories(id) ON DELETE CASCADE | Parent category |
-| `name` | TEXT | NOT NULL | Subcategory name |
-| `icon` | TEXT | nullable | Lucide icon name |
-| `sort_order` | INTEGER | NOT NULL, DEFAULT 0 | Display order |
-| `created_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
+| Column        | Type    | Constraints                                      | Description        |
+| ------------- | ------- | ------------------------------------------------ | ------------------ |
+| `id`          | TEXT    | PRIMARY KEY                                      | ULID               |
+| `category_id` | TEXT    | NOT NULL, FK -> categories(id) ON DELETE CASCADE | Parent category    |
+| `name`        | TEXT    | NOT NULL                                         | Subcategory name   |
+| `icon`        | TEXT    | nullable                                         | Lucide icon name   |
+| `sort_order`  | INTEGER | NOT NULL, DEFAULT 0                              | Display order      |
+| `created_at`  | TEXT    | NOT NULL, auto                                   | ISO 8601 timestamp |
 
 **Unique constraint:** `(category_id, name)` -- no duplicate names within a category.
 
@@ -106,23 +106,23 @@ Nested categories under a parent category.
 
 The core table. Every expense, income, and transfer is a transaction.
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | ULID |
-| `account_id` | TEXT | NOT NULL, FK -> accounts(id) ON DELETE CASCADE | Source account |
-| `category_id` | TEXT | FK -> categories(id) ON DELETE SET NULL | Category (nullable) |
-| `subcategory_id` | TEXT | FK -> subcategories(id) ON DELETE SET NULL | Subcategory (nullable) |
-| `type` | TEXT | NOT NULL, CHECK | One of: `expense`, `income`, `transfer` |
-| `amount` | INTEGER | NOT NULL | Amount in centavos (always positive) |
-| `currency` | TEXT | NOT NULL, DEFAULT 'USD' | ISO 4217 currency code |
-| `description` | TEXT | NOT NULL | What was this transaction for |
-| `notes` | TEXT | nullable | Additional details |
-| `date` | TEXT | NOT NULL | Transaction date (YYYY-MM-DD) |
-| `tags` | TEXT | DEFAULT '[]' | JSON array of tag strings |
-| `is_recurring` | INTEGER | NOT NULL, DEFAULT 0 | Whether this is a recurring transaction |
-| `transfer_to_account_id` | TEXT | FK -> accounts(id) ON DELETE SET NULL | Destination account for transfers |
-| `created_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
-| `updated_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
+| Column                   | Type    | Constraints                                    | Description                             |
+| ------------------------ | ------- | ---------------------------------------------- | --------------------------------------- |
+| `id`                     | TEXT    | PRIMARY KEY                                    | ULID                                    |
+| `account_id`             | TEXT    | NOT NULL, FK -> accounts(id) ON DELETE CASCADE | Source account                          |
+| `category_id`            | TEXT    | FK -> categories(id) ON DELETE SET NULL        | Category (nullable)                     |
+| `subcategory_id`         | TEXT    | FK -> subcategories(id) ON DELETE SET NULL     | Subcategory (nullable)                  |
+| `type`                   | TEXT    | NOT NULL, CHECK                                | One of: `expense`, `income`, `transfer` |
+| `amount`                 | INTEGER | NOT NULL                                       | Amount in centavos (always positive)    |
+| `currency`               | TEXT    | NOT NULL, DEFAULT 'USD'                        | ISO 4217 currency code                  |
+| `description`            | TEXT    | NOT NULL                                       | What was this transaction for           |
+| `notes`                  | TEXT    | nullable                                       | Additional details                      |
+| `date`                   | TEXT    | NOT NULL                                       | Transaction date (YYYY-MM-DD)           |
+| `tags`                   | TEXT    | DEFAULT '[]'                                   | JSON array of tag strings               |
+| `is_recurring`           | INTEGER | NOT NULL, DEFAULT 0                            | Whether this is a recurring transaction |
+| `transfer_to_account_id` | TEXT    | FK -> accounts(id) ON DELETE SET NULL          | Destination account for transfers       |
+| `created_at`             | TEXT    | NOT NULL, auto                                 | ISO 8601 timestamp                      |
+| `updated_at`             | TEXT    | NOT NULL, auto                                 | ISO 8601 timestamp                      |
 
 **Design note:** The `amount` field is always positive. The `type` field determines the sign: `expense` subtracts from the account balance, `income` adds to it, and `transfer` subtracts from the source and adds to the destination.
 
@@ -130,69 +130,69 @@ The core table. Every expense, income, and transfer is a transaction.
 
 Recurring payments (Netflix, Spotify, gym, etc.).
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | ULID |
-| `account_id` | TEXT | FK -> accounts(id) ON DELETE SET NULL | Payment account |
-| `category_id` | TEXT | FK -> categories(id) ON DELETE SET NULL | Category |
-| `name` | TEXT | NOT NULL | Service name |
-| `amount` | INTEGER | NOT NULL | Amount per billing cycle in centavos |
-| `currency` | TEXT | NOT NULL, DEFAULT 'USD' | ISO 4217 currency code |
-| `billing_cycle` | TEXT | NOT NULL, CHECK | One of: `weekly`, `monthly`, `quarterly`, `yearly` |
-| `next_billing_date` | TEXT | NOT NULL | Next payment date (YYYY-MM-DD) |
-| `icon` | TEXT | nullable | Lucide icon name or URL |
-| `color` | TEXT | nullable | Hex color code |
-| `url` | TEXT | nullable | Service website |
-| `notes` | TEXT | nullable | Additional details |
-| `is_active` | INTEGER | NOT NULL, DEFAULT 1 | 0 = cancelled, 1 = active |
-| `created_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
-| `updated_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
+| Column              | Type    | Constraints                             | Description                                        |
+| ------------------- | ------- | --------------------------------------- | -------------------------------------------------- |
+| `id`                | TEXT    | PRIMARY KEY                             | ULID                                               |
+| `account_id`        | TEXT    | FK -> accounts(id) ON DELETE SET NULL   | Payment account                                    |
+| `category_id`       | TEXT    | FK -> categories(id) ON DELETE SET NULL | Category                                           |
+| `name`              | TEXT    | NOT NULL                                | Service name                                       |
+| `amount`            | INTEGER | NOT NULL                                | Amount per billing cycle in centavos               |
+| `currency`          | TEXT    | NOT NULL, DEFAULT 'USD'                 | ISO 4217 currency code                             |
+| `billing_cycle`     | TEXT    | NOT NULL, CHECK                         | One of: `weekly`, `monthly`, `quarterly`, `yearly` |
+| `next_billing_date` | TEXT    | NOT NULL                                | Next payment date (YYYY-MM-DD)                     |
+| `icon`              | TEXT    | nullable                                | Lucide icon name or URL                            |
+| `color`             | TEXT    | nullable                                | Hex color code                                     |
+| `url`               | TEXT    | nullable                                | Service website                                    |
+| `notes`             | TEXT    | nullable                                | Additional details                                 |
+| `is_active`         | INTEGER | NOT NULL, DEFAULT 1                     | 0 = cancelled, 1 = active                          |
+| `created_at`        | TEXT    | NOT NULL, auto                          | ISO 8601 timestamp                                 |
+| `updated_at`        | TEXT    | NOT NULL, auto                          | ISO 8601 timestamp                                 |
 
 ### budgets
 
 Budget limits for categories over a time period.
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | ULID |
-| `category_id` | TEXT | FK -> categories(id) ON DELETE CASCADE | Budget category |
-| `name` | TEXT | NOT NULL | Budget name |
-| `amount` | INTEGER | NOT NULL | Budget limit in centavos |
-| `period` | TEXT | NOT NULL, CHECK | One of: `weekly`, `monthly`, `yearly` |
-| `is_active` | INTEGER | NOT NULL, DEFAULT 1 | 0 = disabled, 1 = active |
-| `created_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
-| `updated_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
+| Column        | Type    | Constraints                            | Description                           |
+| ------------- | ------- | -------------------------------------- | ------------------------------------- |
+| `id`          | TEXT    | PRIMARY KEY                            | ULID                                  |
+| `category_id` | TEXT    | FK -> categories(id) ON DELETE CASCADE | Budget category                       |
+| `name`        | TEXT    | NOT NULL                               | Budget name                           |
+| `amount`      | INTEGER | NOT NULL                               | Budget limit in centavos              |
+| `period`      | TEXT    | NOT NULL, CHECK                        | One of: `weekly`, `monthly`, `yearly` |
+| `is_active`   | INTEGER | NOT NULL, DEFAULT 1                    | 0 = disabled, 1 = active              |
+| `created_at`  | TEXT    | NOT NULL, auto                         | ISO 8601 timestamp                    |
+| `updated_at`  | TEXT    | NOT NULL, auto                         | ISO 8601 timestamp                    |
 
 ### budget_periods
 
 Tracks actual spending against a budget for each time window.
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | ULID |
-| `budget_id` | TEXT | NOT NULL, FK -> budgets(id) ON DELETE CASCADE | Parent budget |
-| `start_date` | TEXT | NOT NULL | Period start (YYYY-MM-DD) |
-| `end_date` | TEXT | NOT NULL | Period end (YYYY-MM-DD) |
-| `spent` | INTEGER | NOT NULL, DEFAULT 0 | Amount spent in centavos |
-| `created_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
+| Column       | Type    | Constraints                                   | Description               |
+| ------------ | ------- | --------------------------------------------- | ------------------------- |
+| `id`         | TEXT    | PRIMARY KEY                                   | ULID                      |
+| `budget_id`  | TEXT    | NOT NULL, FK -> budgets(id) ON DELETE CASCADE | Parent budget             |
+| `start_date` | TEXT    | NOT NULL                                      | Period start (YYYY-MM-DD) |
+| `end_date`   | TEXT    | NOT NULL                                      | Period end (YYYY-MM-DD)   |
+| `spent`      | INTEGER | NOT NULL, DEFAULT 0                           | Amount spent in centavos  |
+| `created_at` | TEXT    | NOT NULL, auto                                | ISO 8601 timestamp        |
 
 ### investments
 
 Individual investment holdings.
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | ULID |
-| `account_id` | TEXT | FK -> accounts(id) ON DELETE SET NULL | Investment account |
-| `symbol` | TEXT | NOT NULL | Ticker symbol (e.g., AAPL, BTC) |
-| `name` | TEXT | NOT NULL | Full name (e.g., "Apple Inc.") |
-| `type` | TEXT | NOT NULL, CHECK | One of: `stock`, `etf`, `crypto`, `bond`, `mutual_fund`, `other` |
-| `shares` | REAL | NOT NULL, DEFAULT 0 | Number of shares/units held |
-| `avg_cost_basis` | INTEGER | NOT NULL, DEFAULT 0 | Average purchase price per share in centavos |
-| `currency` | TEXT | NOT NULL, DEFAULT 'USD' | ISO 4217 currency code |
-| `notes` | TEXT | nullable | Additional details |
-| `created_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
-| `updated_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
+| Column           | Type    | Constraints                           | Description                                                      |
+| ---------------- | ------- | ------------------------------------- | ---------------------------------------------------------------- |
+| `id`             | TEXT    | PRIMARY KEY                           | ULID                                                             |
+| `account_id`     | TEXT    | FK -> accounts(id) ON DELETE SET NULL | Investment account                                               |
+| `symbol`         | TEXT    | NOT NULL                              | Ticker symbol (e.g., AAPL, BTC)                                  |
+| `name`           | TEXT    | NOT NULL                              | Full name (e.g., "Apple Inc.")                                   |
+| `type`           | TEXT    | NOT NULL, CHECK                       | One of: `stock`, `etf`, `crypto`, `bond`, `mutual_fund`, `other` |
+| `shares`         | REAL    | NOT NULL, DEFAULT 0                   | Number of shares/units held                                      |
+| `avg_cost_basis` | INTEGER | NOT NULL, DEFAULT 0                   | Average purchase price per share in centavos                     |
+| `currency`       | TEXT    | NOT NULL, DEFAULT 'USD'               | ISO 4217 currency code                                           |
+| `notes`          | TEXT    | nullable                              | Additional details                                               |
+| `created_at`     | TEXT    | NOT NULL, auto                        | ISO 8601 timestamp                                               |
+| `updated_at`     | TEXT    | NOT NULL, auto                        | ISO 8601 timestamp                                               |
 
 **Design note:** `shares` uses REAL because fractional shares are common (e.g., 0.5 BTC, 2.3 shares of VOO).
 
@@ -200,14 +200,14 @@ Individual investment holdings.
 
 Historical price data for investment tracking.
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | ULID |
-| `symbol` | TEXT | NOT NULL | Ticker symbol |
-| `price` | INTEGER | NOT NULL | Price in centavos |
-| `currency` | TEXT | NOT NULL, DEFAULT 'USD' | ISO 4217 currency code |
-| `date` | TEXT | NOT NULL | Price date (YYYY-MM-DD) |
-| `created_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
+| Column       | Type    | Constraints             | Description             |
+| ------------ | ------- | ----------------------- | ----------------------- |
+| `id`         | TEXT    | PRIMARY KEY             | ULID                    |
+| `symbol`     | TEXT    | NOT NULL                | Ticker symbol           |
+| `price`      | INTEGER | NOT NULL                | Price in centavos       |
+| `currency`   | TEXT    | NOT NULL, DEFAULT 'USD' | ISO 4217 currency code  |
+| `date`       | TEXT    | NOT NULL                | Price date (YYYY-MM-DD) |
+| `created_at` | TEXT    | NOT NULL, auto          | ISO 8601 timestamp      |
 
 **Unique constraint:** `(symbol, date)` -- one price per symbol per day.
 
@@ -215,65 +215,65 @@ Historical price data for investment tracking.
 
 Chat conversation threads with the AI assistant.
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | ULID |
-| `title` | TEXT | NOT NULL, DEFAULT 'New Conversation' | Conversation title |
-| `model` | TEXT | nullable | Model used (e.g., "gpt-4o-mini") |
-| `created_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
-| `updated_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
+| Column       | Type | Constraints                          | Description                      |
+| ------------ | ---- | ------------------------------------ | -------------------------------- |
+| `id`         | TEXT | PRIMARY KEY                          | ULID                             |
+| `title`      | TEXT | NOT NULL, DEFAULT 'New Conversation' | Conversation title               |
+| `model`      | TEXT | nullable                             | Model used (e.g., "gpt-4o-mini") |
+| `created_at` | TEXT | NOT NULL, auto                       | ISO 8601 timestamp               |
+| `updated_at` | TEXT | NOT NULL, auto                       | ISO 8601 timestamp               |
 
 ### ai_messages
 
 Individual messages within a conversation.
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | ULID |
-| `conversation_id` | TEXT | NOT NULL, FK -> ai_conversations(id) ON DELETE CASCADE | Parent conversation |
-| `role` | TEXT | NOT NULL, CHECK | One of: `user`, `assistant`, `system`, `tool` |
-| `content` | TEXT | NOT NULL | Message text |
-| `tool_calls` | TEXT | nullable | JSON-serialized tool call data |
-| `tool_result` | TEXT | nullable | JSON-serialized tool result |
-| `created_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
+| Column            | Type | Constraints                                            | Description                                   |
+| ----------------- | ---- | ------------------------------------------------------ | --------------------------------------------- |
+| `id`              | TEXT | PRIMARY KEY                                            | ULID                                          |
+| `conversation_id` | TEXT | NOT NULL, FK -> ai_conversations(id) ON DELETE CASCADE | Parent conversation                           |
+| `role`            | TEXT | NOT NULL, CHECK                                        | One of: `user`, `assistant`, `system`, `tool` |
+| `content`         | TEXT | NOT NULL                                               | Message text                                  |
+| `tool_calls`      | TEXT | nullable                                               | JSON-serialized tool call data                |
+| `tool_result`     | TEXT | nullable                                               | JSON-serialized tool result                   |
+| `created_at`      | TEXT | NOT NULL, auto                                         | ISO 8601 timestamp                            |
 
 ### exchange_rates
 
 Currency exchange rates for multi-currency support.
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | ULID |
-| `from_currency` | TEXT | NOT NULL | Source currency code |
-| `to_currency` | TEXT | NOT NULL | Target currency code |
-| `rate` | REAL | NOT NULL | Exchange rate (multiply source by this) |
-| `date` | TEXT | NOT NULL | Rate date (YYYY-MM-DD) |
-| `created_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
+| Column          | Type | Constraints    | Description                             |
+| --------------- | ---- | -------------- | --------------------------------------- |
+| `id`            | TEXT | PRIMARY KEY    | ULID                                    |
+| `from_currency` | TEXT | NOT NULL       | Source currency code                    |
+| `to_currency`   | TEXT | NOT NULL       | Target currency code                    |
+| `rate`          | REAL | NOT NULL       | Exchange rate (multiply source by this) |
+| `date`          | TEXT | NOT NULL       | Rate date (YYYY-MM-DD)                  |
+| `created_at`    | TEXT | NOT NULL, auto | ISO 8601 timestamp                      |
 
 **Unique constraint:** `(from_currency, to_currency, date)` -- one rate per currency pair per day.
 
 ### settings
 
-Key-value store for application preferences stored in SQLite (separate from the encrypted tauri-plugin-store used for API keys).
+Key-value store for application preferences stored in SQLite (separate from browser-local settings storage used for AI/API configuration).
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `key` | TEXT | PRIMARY KEY | Setting key |
-| `value` | TEXT | NOT NULL | Setting value (may be JSON) |
-| `updated_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
+| Column       | Type | Constraints    | Description                 |
+| ------------ | ---- | -------------- | --------------------------- |
+| `key`        | TEXT | PRIMARY KEY    | Setting key                 |
+| `value`      | TEXT | NOT NULL       | Setting value (may be JSON) |
+| `updated_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp          |
 
 ### extension_data
 
 Generic key-value storage for extensions. Each extension gets its own namespace.
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | ULID |
-| `extension_id` | TEXT | NOT NULL | Extension identifier |
-| `key` | TEXT | NOT NULL | Data key |
-| `value` | TEXT | NOT NULL | Data value (typically JSON) |
-| `created_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
-| `updated_at` | TEXT | NOT NULL, auto | ISO 8601 timestamp |
+| Column         | Type | Constraints    | Description                 |
+| -------------- | ---- | -------------- | --------------------------- |
+| `id`           | TEXT | PRIMARY KEY    | ULID                        |
+| `extension_id` | TEXT | NOT NULL       | Extension identifier        |
+| `key`          | TEXT | NOT NULL       | Data key                    |
+| `value`        | TEXT | NOT NULL       | Data value (typically JSON) |
+| `created_at`   | TEXT | NOT NULL, auto | ISO 8601 timestamp          |
+| `updated_at`   | TEXT | NOT NULL, auto | ISO 8601 timestamp          |
 
 **Unique constraint:** `(extension_id, key)` -- one value per key per extension.
 
@@ -283,20 +283,20 @@ Generic key-value storage for extensions. Each extension gets its own namespace.
 
 The migration creates these indexes for query performance:
 
-| Index | Table | Columns | Purpose |
-|-------|-------|---------|---------|
-| `idx_transactions_account` | transactions | account_id | Filter transactions by account |
-| `idx_transactions_category` | transactions | category_id | Filter transactions by category |
-| `idx_transactions_date` | transactions | date | Date range queries, sorting |
-| `idx_transactions_type` | transactions | type | Filter by expense/income/transfer |
-| `idx_subcategories_category` | subcategories | category_id | List subcategories for a category |
-| `idx_budget_periods_budget` | budget_periods | budget_id | List periods for a budget |
-| `idx_investments_account` | investments | account_id | Filter investments by account |
-| `idx_investments_symbol` | investments | symbol | Look up holdings by ticker |
-| `idx_stock_prices_symbol_date` | stock_prices | symbol, date | Price lookup by symbol and date |
-| `idx_ai_messages_conversation` | ai_messages | conversation_id | List messages in a conversation |
-| `idx_exchange_rates_currencies` | exchange_rates | from_currency, to_currency | Rate lookup by currency pair |
-| `idx_extension_data_extension` | extension_data | extension_id | List data for an extension |
+| Index                           | Table          | Columns                    | Purpose                           |
+| ------------------------------- | -------------- | -------------------------- | --------------------------------- |
+| `idx_transactions_account`      | transactions   | account_id                 | Filter transactions by account    |
+| `idx_transactions_category`     | transactions   | category_id                | Filter transactions by category   |
+| `idx_transactions_date`         | transactions   | date                       | Date range queries, sorting       |
+| `idx_transactions_type`         | transactions   | type                       | Filter by expense/income/transfer |
+| `idx_subcategories_category`    | subcategories  | category_id                | List subcategories for a category |
+| `idx_budget_periods_budget`     | budget_periods | budget_id                  | List periods for a budget         |
+| `idx_investments_account`       | investments    | account_id                 | Filter investments by account     |
+| `idx_investments_symbol`        | investments    | symbol                     | Look up holdings by ticker        |
+| `idx_stock_prices_symbol_date`  | stock_prices   | symbol, date               | Price lookup by symbol and date   |
+| `idx_ai_messages_conversation`  | ai_messages    | conversation_id            | List messages in a conversation   |
+| `idx_exchange_rates_currencies` | exchange_rates | from_currency, to_currency | Rate lookup by currency pair      |
+| `idx_extension_data_extension`  | extension_data | extension_id               | List data for an extension        |
 
 ### Recommended Future Indexes
 
@@ -328,47 +328,32 @@ CREATE INDEX idx_budgets_category
 
 ## Migration Strategy
 
-Migrations are managed by `tauri-plugin-sql` and executed automatically at application startup.
+Migrations are managed in `src/lib/database.ts` and executed automatically at startup.
 
 ### How It Works
 
-1. Migration SQL files live in `src-tauri/migrations/`.
-2. Each migration is registered in `src-tauri/src/lib.rs` as a `Migration` struct with a version number, description, and SQL content.
-3. On startup, `tauri-plugin-sql` checks which migrations have been applied and runs any pending ones in order.
+1. Migration SQL strings are versioned in `src/lib/database.ts`.
+2. Applied migration names are tracked in a local `_migrations` table.
+3. On startup, `runMigrations()` applies pending migrations in sequence.
 
-```rust
-let migrations = vec![Migration {
-    version: 1,
-    description: "create core tables",
-    sql: include_str!("../migrations/001_core_tables.sql"),
-    kind: MigrationKind::Up,
-}];
-
-tauri_plugin_sql::Builder::default()
-    .add_migrations("sqlite:valute.db", migrations)
-    .build()
+```typescript
+if (!applied.has('001_core_tables')) {
+  // split SQL statements and execute them
+  // seed default categories
+  database.run("INSERT INTO _migrations (id, name) VALUES (1, '001_core_tables')")
+}
 ```
 
 ### Adding a New Migration
 
-1. Create a new file: `src-tauri/migrations/002_description.sql`
-2. Add the migration to the vector in `lib.rs`:
+1. Add a new migration string block in `src/lib/database.ts`.
+2. Apply it from `runMigrations()` when its name is not in `_migrations`:
 
-```rust
-let migrations = vec![
-    Migration {
-        version: 1,
-        description: "create core tables",
-        sql: include_str!("../migrations/001_core_tables.sql"),
-        kind: MigrationKind::Up,
-    },
-    Migration {
-        version: 2,
-        description: "add recurring transactions",
-        sql: include_str!("../migrations/002_add_recurring.sql"),
-        kind: MigrationKind::Up,
-    },
-];
+```typescript
+if (!applied.has('004_new_feature')) {
+  database.run('ALTER TABLE ...')
+  database.run("INSERT INTO _migrations (id, name) VALUES (4, '004_new_feature')")
+}
 ```
 
 ### Rules

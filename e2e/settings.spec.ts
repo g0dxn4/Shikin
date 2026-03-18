@@ -51,4 +51,9 @@ test.describe('Settings', () => {
     await expect(page.getByText('Alpha Vantage')).toBeVisible()
     await expect(page.getByText('Finnhub').first()).toBeVisible()
   })
+
+  test('data backup controls are present', async ({ page }) => {
+    await expect(page.getByRole('button', { name: /Export Data/i })).toBeVisible()
+    await expect(page.getByRole('button', { name: /Import Data/i })).toBeVisible()
+  })
 })

@@ -2,16 +2,18 @@
 
 This document outlines the development roadmap for Valute, organized into 10 epics. Each epic represents a major feature area with a clear scope, deliverables, and dependencies.
 
+Current baseline (Mar 2026): Valute has moved to a browser-first runtime using `sql.js` + IndexedDB + localStorage while preserving local-first behavior.
+
 ---
 
 ## Status Legend
 
-| Symbol | Meaning |
-|--------|---------|
-| Done | Completed and merged |
-| In Progress | Currently being worked on |
-| Planned | Scoped and ready to start |
-| Future | Designed but not yet scoped |
+| Symbol      | Meaning                     |
+| ----------- | --------------------------- |
+| Done        | Completed and merged        |
+| In Progress | Currently being worked on   |
+| Planned     | Scoped and ready to start   |
+| Future      | Designed but not yet scoped |
 
 ---
 
@@ -19,25 +21,25 @@ This document outlines the development roadmap for Valute, organized into 10 epi
 
 **Goal:** Establish the foundation -- build system, database, component library, and development workflow.
 
-| Task | Status | Notes |
-|------|--------|-------|
-| Initialize Tauri v2 + React 19 + TypeScript project | Done | Vite 6 with HMR |
-| Configure Tailwind CSS v4 with custom dark theme | Done | Glassmorphism design |
-| Install and configure shadcn/ui component library | Done | 13 components installed |
-| Set up ESLint + Prettier with zero-warning policy | Done | Tailwind plugin for class sorting |
-| Set up Vitest + Testing Library | Done | jsdom environment |
-| Create SQLite schema (migrations 001-003) | Done | 16 tables, 12 indexes, 15 seed categories, credit card fields |
-| Implement database access layer (`query`, `execute`) | Done | Singleton connection, typed wrappers |
-| Implement money utilities (centavo conversion) | Done | `toCentavos`, `fromCentavos`, `formatMoney` |
-| Implement ULID generation | Done | `ulidx` library |
-| Set up Zustand stores (UI, AI, accounts, transactions, categories, conversations) | Done | 6 stores |
-| Set up i18n with English and Spanish | Done | 6 namespaces per language |
-| Create AppShell layout (Sidebar + Main + AI Panel) | Done | Collapsible sidebar, sliding AI panel |
-| Configure Tauri CSP for AI provider endpoints | Done | OpenAI, Anthropic, OpenRouter, Ollama |
-| Set up tauri-plugin-store for encrypted settings | Done | API keys stored locally |
-| Set up code splitting with React.lazy | Done | All pages lazy-loaded |
-| Implement manual chunk splitting in Vite | Done | vendor-react, vendor-ui, vendor-forms, vendor-utils |
-| Set up CI pipeline | Planned | GitHub Actions: lint, typecheck, format, test |
+| Task                                                                              | Status  | Notes                                                         |
+| --------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------- |
+| Initialize React 19 + TypeScript project foundation                               | Done    | Vite 6 with HMR                                               |
+| Configure Tailwind CSS v4 with custom dark theme                                  | Done    | Glassmorphism design                                          |
+| Install and configure shadcn/ui component library                                 | Done    | 13 components installed                                       |
+| Set up ESLint + Prettier with zero-warning policy                                 | Done    | Tailwind plugin for class sorting                             |
+| Set up Vitest + Testing Library                                                   | Done    | jsdom environment                                             |
+| Create SQLite schema (migrations 001-003)                                         | Done    | 16 tables, 12 indexes, 15 seed categories, credit card fields |
+| Implement database access layer (`query`, `execute`)                              | Done    | Singleton connection, typed wrappers                          |
+| Implement money utilities (centavo conversion)                                    | Done    | `toCentavos`, `fromCentavos`, `formatMoney`                   |
+| Implement ULID generation                                                         | Done    | `ulidx` library                                               |
+| Set up Zustand stores (UI, AI, accounts, transactions, categories, conversations) | Done    | 6 stores                                                      |
+| Set up i18n with English and Spanish                                              | Done    | 6 namespaces per language                                     |
+| Create AppShell layout (Sidebar + Main + AI Panel)                                | Done    | Collapsible sidebar, sliding AI panel                         |
+| Configure provider-safe outbound AI configuration                                 | Done    | OpenAI, Anthropic, OpenRouter, Ollama and others              |
+| Set up local settings persistence                                                 | Done    | Stored locally through browser storage layer                  |
+| Set up code splitting with React.lazy                                             | Done    | All pages lazy-loaded                                         |
+| Implement manual chunk splitting in Vite                                          | Done    | vendor-react, vendor-ui, vendor-forms, vendor-utils           |
+| Set up CI pipeline                                                                | Planned | GitHub Actions: lint, typecheck, format, test                 |
 
 **Dependencies:** None -- this is the foundation.
 
@@ -47,19 +49,19 @@ This document outlines the development roadmap for Valute, organized into 10 epi
 
 **Goal:** Full CRUD for transactions with filtering, sorting, search, and category management.
 
-| Task | Status | Notes |
-|------|--------|-------|
-| Transaction list page with table/card view | Done | Paginated, sortable, date filtering |
-| Transaction creation form | Done | Dialog + form with React Hook Form + Zod validation |
-| Transaction editing | Done | Modal edit via dialog |
-| Transaction deletion with balance reversal | Done | Confirmation dialog |
-| Category and subcategory selector | Done | Dropdown in transaction form |
-| Date range filtering | Done | Date filtering on transactions page |
-| Full-text search on descriptions | Planned | SQLite FTS5 or LIKE |
-| Tag management (add, remove, filter by tag) | Planned | JSON array in tags column |
-| Transaction import from CSV | Planned | Column mapping UI |
-| Transaction export to CSV | Planned | Filtered export |
-| Recurring transaction detection | Future | Pattern matching on similar transactions |
+| Task                                        | Status  | Notes                                               |
+| ------------------------------------------- | ------- | --------------------------------------------------- |
+| Transaction list page with table/card view  | Done    | Paginated, sortable, date filtering                 |
+| Transaction creation form                   | Done    | Dialog + form with React Hook Form + Zod validation |
+| Transaction editing                         | Done    | Modal edit via dialog                               |
+| Transaction deletion with balance reversal  | Done    | Confirmation dialog                                 |
+| Category and subcategory selector           | Done    | Dropdown in transaction form                        |
+| Date range filtering                        | Done    | Date filtering on transactions page                 |
+| Full-text search on descriptions            | Planned | SQLite FTS5 or LIKE                                 |
+| Tag management (add, remove, filter by tag) | Planned | JSON array in tags column                           |
+| Transaction import from CSV                 | Planned | Column mapping UI                                   |
+| Transaction export to CSV                   | Planned | Filtered export                                     |
+| Recurring transaction detection             | Future  | Pattern matching on similar transactions            |
 
 **Dependencies:** Epic 1.
 
@@ -69,18 +71,18 @@ This document outlines the development roadmap for Valute, organized into 10 epi
 
 **Goal:** Multi-account support with balance tracking, transfers, and account-level views.
 
-| Task | Status | Notes |
-|------|--------|-------|
-| Account list page | Done | Cards showing name, type, balance |
-| Account creation form | Done | Type selector, initial balance, credit card fields |
-| Account editing | Done | Name, type, balance, credit card settings |
-| Account archival (soft delete) | Done | Delete with confirmation dialog |
-| Credit card balance tracking | Done | Migration 003: credit_limit, statement_closing_day, payment_due_day |
-| Net worth calculation | Done | `getNetWorth` AI tool (assets minus liabilities) |
-| Account balance history chart | Planned | Recharts line chart |
-| Transfer between accounts | Planned | Linked transaction pair |
-| Account-scoped transaction view | Planned | Filter transactions by account |
-| Multi-currency account support | Planned | Per-account currency setting |
+| Task                            | Status  | Notes                                                               |
+| ------------------------------- | ------- | ------------------------------------------------------------------- |
+| Account list page               | Done    | Cards showing name, type, balance                                   |
+| Account creation form           | Done    | Type selector, initial balance, credit card fields                  |
+| Account editing                 | Done    | Name, type, balance, credit card settings                           |
+| Account archival (soft delete)  | Done    | Delete with confirmation dialog                                     |
+| Credit card balance tracking    | Done    | Migration 003: credit_limit, statement_closing_day, payment_due_day |
+| Net worth calculation           | Done    | `getNetWorth` AI tool (assets minus liabilities)                    |
+| Account balance history chart   | Planned | Recharts line chart                                                 |
+| Transfer between accounts       | Planned | Linked transaction pair                                             |
+| Account-scoped transaction view | Planned | Filter transactions by account                                      |
+| Multi-currency account support  | Planned | Per-account currency setting                                        |
 
 **Dependencies:** Epic 1.
 
@@ -90,18 +92,18 @@ This document outlines the development roadmap for Valute, organized into 10 epi
 
 **Goal:** Create and track budgets by category with period-based spending monitoring.
 
-| Task | Status | Notes |
-|------|--------|-------|
-| Budget AI tools (`createBudget`, `getBudgetStatus`, `deleteBudget`) | Done | Full CRUD via AI chat |
-| Budget list page | Planned | Progress bars showing spent vs. limit |
-| Budget creation form | Planned | Category, amount, period |
-| Budget editing and deletion | Planned | Adjustable limits |
-| Automatic period tracking | Planned | Create budget_period records per week/month/year |
-| Budget status calculations | Planned | Spent, remaining, percentage |
-| Budget alerts at 80% and 100% thresholds | Planned | Toast notifications |
-| Budget vs. actual comparison chart | Planned | Recharts bar chart |
-| Rollover budgets | Future | Carry unused amount to next period |
-| Budget templates | Future | Quick-create common budget sets |
+| Task                                                                | Status  | Notes                                            |
+| ------------------------------------------------------------------- | ------- | ------------------------------------------------ |
+| Budget AI tools (`createBudget`, `getBudgetStatus`, `deleteBudget`) | Done    | Full CRUD via AI chat                            |
+| Budget list page                                                    | Planned | Progress bars showing spent vs. limit            |
+| Budget creation form                                                | Planned | Category, amount, period                         |
+| Budget editing and deletion                                         | Planned | Adjustable limits                                |
+| Automatic period tracking                                           | Planned | Create budget_period records per week/month/year |
+| Budget status calculations                                          | Planned | Spent, remaining, percentage                     |
+| Budget alerts at 80% and 100% thresholds                            | Planned | Toast notifications                              |
+| Budget vs. actual comparison chart                                  | Planned | Recharts bar chart                               |
+| Rollover budgets                                                    | Future  | Carry unused amount to next period               |
+| Budget templates                                                    | Future  | Quick-create common budget sets                  |
 
 **Dependencies:** Epic 2 (needs transaction data to calculate spending).
 
@@ -111,42 +113,42 @@ This document outlines the development roadmap for Valute, organized into 10 epi
 
 **Goal:** Expand Val's capabilities beyond basic transaction management to comprehensive financial intelligence.
 
-| Task | Status | Notes |
-|------|--------|-------|
-| `addTransaction` tool | Done | Full implementation with category matching |
-| `getSpendingSummary` tool | Done | Period-based spending breakdown |
-| `updateTransaction` tool | Done | Modify existing transactions |
-| `deleteTransaction` tool | Done | Delete with balance reversal |
-| `queryTransactions` tool | Done | Filtered transaction search |
-| `listAccounts` tool | Done | All accounts with balances |
-| `createAccount` tool | Done | Create accounts via chat |
-| `updateAccount` tool | Done | Modify account details |
-| `deleteAccount` tool | Done | Delete accounts via chat |
-| `listCategories` tool | Done | Expense/income category listing |
-| `getBalanceOverview` tool | Done | Balance with month-over-month trends |
-| `analyzeSpendingTrends` tool | Done | Spending by category over months |
-| `getCreditCardStatus` tool | Done | Credit card utilization and payment dates |
-| `getNetWorth` tool | Done | Total net worth across all accounts and investments |
-| `getUpcomingBills` tool | Done | Upcoming bills from credit cards, subscriptions, recurring expenses |
-| `createBudget` tool | Done | Budget creation via chat |
-| `getBudgetStatus` tool | Done | Budget progress check |
-| `deleteBudget` tool | Done | Budget deletion via chat |
-| `listSubscriptions` tool | Done | List subscriptions from Subby |
-| `getSubscriptionSpending` tool | Done | Calculate subscription costs |
-| `manageInvestment` tool | Done | Add/update/delete investment holdings |
-| `saveMemory` tool | Done | Persist user preferences and context |
-| `recallMemories` tool | Done | Retrieve stored memories by category |
-| `forgetMemory` tool | Done | Delete specific memories |
-| Memory system (MemGPT-inspired persistent memory) | Done | Categories, importance levels, auto-injection |
-| Conversation persistence to SQLite | Done | Save/load chat history |
-| Multiple conversation threads | Done | Conversation list in AI panel |
-| Conversation title auto-generation | Done | LLM-generated titles from first message |
-| Conversation compaction | Done | Auto-summarize at 30+ messages, keep recent 10 |
-| OpenRouter provider support | Done | Additional model provider option |
-| Tool call visualization in chat UI | Planned | Show what tools Val is using |
-| Streaming markdown rendering | Planned | Render tables, lists, bold text |
-| Context window management | Future | Advanced context strategies beyond compaction |
-| Multi-model comparison | Future | Send same query to multiple models |
+| Task                                              | Status  | Notes                                                               |
+| ------------------------------------------------- | ------- | ------------------------------------------------------------------- |
+| `addTransaction` tool                             | Done    | Full implementation with category matching                          |
+| `getSpendingSummary` tool                         | Done    | Period-based spending breakdown                                     |
+| `updateTransaction` tool                          | Done    | Modify existing transactions                                        |
+| `deleteTransaction` tool                          | Done    | Delete with balance reversal                                        |
+| `queryTransactions` tool                          | Done    | Filtered transaction search                                         |
+| `listAccounts` tool                               | Done    | All accounts with balances                                          |
+| `createAccount` tool                              | Done    | Create accounts via chat                                            |
+| `updateAccount` tool                              | Done    | Modify account details                                              |
+| `deleteAccount` tool                              | Done    | Delete accounts via chat                                            |
+| `listCategories` tool                             | Done    | Expense/income category listing                                     |
+| `getBalanceOverview` tool                         | Done    | Balance with month-over-month trends                                |
+| `analyzeSpendingTrends` tool                      | Done    | Spending by category over months                                    |
+| `getCreditCardStatus` tool                        | Done    | Credit card utilization and payment dates                           |
+| `getNetWorth` tool                                | Done    | Total net worth across all accounts and investments                 |
+| `getUpcomingBills` tool                           | Done    | Upcoming bills from credit cards, subscriptions, recurring expenses |
+| `createBudget` tool                               | Done    | Budget creation via chat                                            |
+| `getBudgetStatus` tool                            | Done    | Budget progress check                                               |
+| `deleteBudget` tool                               | Done    | Budget deletion via chat                                            |
+| `listSubscriptions` tool                          | Done    | List subscriptions from Subby                                       |
+| `getSubscriptionSpending` tool                    | Done    | Calculate subscription costs                                        |
+| `manageInvestment` tool                           | Done    | Add/update/delete investment holdings                               |
+| `saveMemory` tool                                 | Done    | Persist user preferences and context                                |
+| `recallMemories` tool                             | Done    | Retrieve stored memories by category                                |
+| `forgetMemory` tool                               | Done    | Delete specific memories                                            |
+| Memory system (MemGPT-inspired persistent memory) | Done    | Categories, importance levels, auto-injection                       |
+| Conversation persistence to SQLite                | Done    | Save/load chat history                                              |
+| Multiple conversation threads                     | Done    | Conversation list in AI panel                                       |
+| Conversation title auto-generation                | Done    | LLM-generated titles from first message                             |
+| Conversation compaction                           | Done    | Auto-summarize at 30+ messages, keep recent 10                      |
+| OpenRouter provider support                       | Done    | Additional model provider option                                    |
+| Tool call visualization in chat UI                | Planned | Show what tools Val is using                                        |
+| Streaming markdown rendering                      | Planned | Render tables, lists, bold text                                     |
+| Context window management                         | Future  | Advanced context strategies beyond compaction                       |
+| Multi-model comparison                            | Future  | Send same query to multiple models                                  |
 
 **Dependencies:** Epic 1 (done). Tool implementations depend on their respective feature epics.
 
@@ -156,23 +158,23 @@ This document outlines the development roadmap for Valute, organized into 10 epi
 
 **Goal:** Track stock, ETF, crypto, and bond holdings with price fetching and performance analytics.
 
-| Task | Status | Notes |
-|------|--------|-------|
-| `manageInvestment` AI tool | Done | Add/update/delete holdings via chat |
-| `getNetWorth` AI tool | Done | Portfolio value in net worth calculation |
-| Investments list page | Planned | Holdings with current values |
-| Investment creation form | Planned | Symbol, shares, cost basis |
-| Stock price fetching (Alpha Vantage) | Planned | Daily EOD prices |
-| Price caching in stock_prices table | Planned | One record per symbol per day |
-| Portfolio value calculation | Planned | Shares * current price |
-| Gain/loss calculation (unrealized) | Planned | Market value minus cost basis |
-| Portfolio allocation pie chart | Planned | By type, by holding |
-| Portfolio performance line chart | Planned | Historical value over time |
-| Dividend tracking | Future | Income from holdings |
-| Multiple price provider support | Future | Finnhub, Twelve Data, Yahoo Finance |
-| Mexican market support (BMV) | Future | `.MX` suffix tickers |
-| Crypto price integration (CoinGecko) | Future | Extension or built-in |
-| Rebalancing suggestions | Future | AI-powered allocation advice |
+| Task                                 | Status  | Notes                                    |
+| ------------------------------------ | ------- | ---------------------------------------- |
+| `manageInvestment` AI tool           | Done    | Add/update/delete holdings via chat      |
+| `getNetWorth` AI tool                | Done    | Portfolio value in net worth calculation |
+| Investments list page                | Planned | Holdings with current values             |
+| Investment creation form             | Planned | Symbol, shares, cost basis               |
+| Stock price fetching (Alpha Vantage) | Planned | Daily EOD prices                         |
+| Price caching in stock_prices table  | Planned | One record per symbol per day            |
+| Portfolio value calculation          | Planned | Shares \* current price                  |
+| Gain/loss calculation (unrealized)   | Planned | Market value minus cost basis            |
+| Portfolio allocation pie chart       | Planned | By type, by holding                      |
+| Portfolio performance line chart     | Planned | Historical value over time               |
+| Dividend tracking                    | Future  | Income from holdings                     |
+| Multiple price provider support      | Future  | Finnhub, Twelve Data, Yahoo Finance      |
+| Mexican market support (BMV)         | Future  | `.MX` suffix tickers                     |
+| Crypto price integration (CoinGecko) | Future  | Extension or built-in                    |
+| Rebalancing suggestions              | Future  | AI-powered allocation advice             |
 
 **Dependencies:** Epic 3 (investment accounts).
 
@@ -182,18 +184,18 @@ This document outlines the development roadmap for Valute, organized into 10 epi
 
 **Goal:** Comprehensive financial reports with interactive charts and data export.
 
-| Task | Status | Notes |
-|------|--------|-------|
-| Dashboard overview (total balance, monthly spending, trends) | Done | Summary cards + quick-add button |
-| Monthly spending report | Planned | By category, with month-over-month comparison |
-| Income vs. expenses chart | Planned | Stacked bar or area chart |
-| Category spending trends over time | Planned | Multi-line chart |
-| Cash flow analysis | Planned | Net income/expense per period |
-| Top spending categories widget | Planned | Pie or donut chart |
-| Spending heatmap (daily view) | Future | Calendar heatmap |
-| Custom date range reports | Planned | Date picker + dynamic queries |
-| PDF report export | Future | Generate downloadable reports |
-| Year-end financial summary | Future | Annual report with key metrics |
+| Task                                                         | Status  | Notes                                         |
+| ------------------------------------------------------------ | ------- | --------------------------------------------- |
+| Dashboard overview (total balance, monthly spending, trends) | Done    | Summary cards + quick-add button              |
+| Monthly spending report                                      | Planned | By category, with month-over-month comparison |
+| Income vs. expenses chart                                    | Planned | Stacked bar or area chart                     |
+| Category spending trends over time                           | Planned | Multi-line chart                              |
+| Cash flow analysis                                           | Planned | Net income/expense per period                 |
+| Top spending categories widget                               | Planned | Pie or donut chart                            |
+| Spending heatmap (daily view)                                | Future  | Calendar heatmap                              |
+| Custom date range reports                                    | Planned | Date picker + dynamic queries                 |
+| PDF report export                                            | Future  | Generate downloadable reports                 |
+| Year-end financial summary                                   | Future  | Annual report with key metrics                |
 
 **Dependencies:** Epic 2, Epic 3.
 
@@ -203,19 +205,19 @@ This document outlines the development roadmap for Valute, organized into 10 epi
 
 **Goal:** Track recurring payments, predict upcoming bills, and monitor subscription costs.
 
-| Task | Status | Notes |
-|------|--------|-------|
-| `listSubscriptions` AI tool | Done | List subscriptions from Subby integration |
-| `getSubscriptionSpending` AI tool | Done | Calculate subscription costs |
-| Subscription list page | Planned | Active and cancelled tabs |
-| Subscription creation form | Planned | Name, amount, billing cycle, next date |
-| Subscription editing and cancellation | Planned | Soft cancel (is_active = 0) |
-| Upcoming payments calendar | Planned | Next 30 days view |
-| Monthly subscription cost calculation | Planned | Normalize all cycles to monthly |
-| Automatic next billing date advancement | Planned | After billing date passes |
-| Subscription-to-transaction linking | Future | Auto-create transactions on billing dates |
-| Subscription price change detection | Future | Alert when amount differs from expected |
-| Subscription cost trends | Future | Monthly cost over time chart |
+| Task                                    | Status  | Notes                                     |
+| --------------------------------------- | ------- | ----------------------------------------- |
+| `listSubscriptions` AI tool             | Done    | List subscriptions from Subby integration |
+| `getSubscriptionSpending` AI tool       | Done    | Calculate subscription costs              |
+| Subscription list page                  | Planned | Active and cancelled tabs                 |
+| Subscription creation form              | Planned | Name, amount, billing cycle, next date    |
+| Subscription editing and cancellation   | Planned | Soft cancel (is_active = 0)               |
+| Upcoming payments calendar              | Planned | Next 30 days view                         |
+| Monthly subscription cost calculation   | Planned | Normalize all cycles to monthly           |
+| Automatic next billing date advancement | Planned | After billing date passes                 |
+| Subscription-to-transaction linking     | Future  | Auto-create transactions on billing dates |
+| Subscription price change detection     | Future  | Alert when amount differs from expected   |
+| Subscription cost trends                | Future  | Monthly cost over time chart              |
 
 **Dependencies:** Epic 1.
 
@@ -225,23 +227,23 @@ This document outlines the development roadmap for Valute, organized into 10 epi
 
 **Goal:** A plugin architecture allowing community developers to extend Valute with new features, AI tools, and UI components.
 
-| Task | Status | Notes |
-|------|--------|-------|
-| Extension manifest format specification | Done | Documented in EXTENSIONS.md |
-| Extension directory scanning and loading | Planned | `~/.valute/extensions/` |
-| Manifest validation | Planned | Required fields, version checks |
-| Permission model and user approval flow | Planned | Low/medium/high risk levels |
-| ExtensionContext API implementation | Planned | data, db, hooks, ai, ui, http |
-| Sandboxed database access (`ctx.db`) | Planned | Permission-gated structured queries |
-| Sandboxed HTTP access (`ctx.http`) | Planned | Domain-restricted fetch |
-| Hook registry and event dispatch | Planned | beforeTransaction, afterTransaction, etc. |
-| AI tool registration from extensions | Planned | Dynamic tool registry |
-| Dashboard widget rendering | Planned | Extension-provided React components |
-| Settings panel rendering | Planned | Extension configuration UI |
-| Extension settings page in Valute | Planned | List, enable, disable, remove extensions |
-| Extension marketplace (community catalog) | Future | Browse and install from a registry |
-| Extension development CLI | Future | Scaffold, validate, package extensions |
-| Extension auto-updates | Future | Version checking and upgrade flow |
+| Task                                      | Status  | Notes                                     |
+| ----------------------------------------- | ------- | ----------------------------------------- |
+| Extension manifest format specification   | Done    | Documented in EXTENSIONS.md               |
+| Extension directory scanning and loading  | Planned | `~/.valute/extensions/`                   |
+| Manifest validation                       | Planned | Required fields, version checks           |
+| Permission model and user approval flow   | Planned | Low/medium/high risk levels               |
+| ExtensionContext API implementation       | Planned | data, db, hooks, ai, ui, http             |
+| Sandboxed database access (`ctx.db`)      | Planned | Permission-gated structured queries       |
+| Sandboxed HTTP access (`ctx.http`)        | Planned | Domain-restricted fetch                   |
+| Hook registry and event dispatch          | Planned | beforeTransaction, afterTransaction, etc. |
+| AI tool registration from extensions      | Planned | Dynamic tool registry                     |
+| Dashboard widget rendering                | Planned | Extension-provided React components       |
+| Settings panel rendering                  | Planned | Extension configuration UI                |
+| Extension settings page in Valute         | Planned | List, enable, disable, remove extensions  |
+| Extension marketplace (community catalog) | Future  | Browse and install from a registry        |
+| Extension development CLI                 | Future  | Scaffold, validate, package extensions    |
+| Extension auto-updates                    | Future  | Version checking and upgrade flow         |
 
 **Dependencies:** Most of the core features (Epics 1-8) should be stable before shipping the extension API.
 
@@ -251,26 +253,26 @@ This document outlines the development roadmap for Valute, organized into 10 epi
 
 **Goal:** Production-quality UX, performance optimization, accessibility, and release distribution.
 
-| Task | Status | Notes |
-|------|--------|-------|
-| Keyboard shortcuts | Planned | Global shortcuts for common actions |
-| Keyboard navigation (full app) | Planned | Tab, arrow keys, Enter |
-| ARIA attributes and screen reader support | Planned | shadcn/ui provides a good base |
-| Loading states and skeletons | Planned | Suspense boundaries, skeleton components |
-| Error states and empty states | Planned | Per-page error/empty illustrations |
-| Onboarding flow (first-run wizard) | Planned | Create first account, set currency, configure AI |
-| Animation and transitions | Planned | Page transitions, panel animations |
-| Performance profiling | Planned | React DevTools, Lighthouse |
-| Database query optimization | Planned | Add indexes as needed, batch queries |
-| Bundle size optimization | Planned | Tree-shaking audit, lazy imports |
-| Automated E2E tests | Future | Tauri WebDriver |
-| macOS notarization | Planned | Code signing for distribution |
-| Windows code signing | Planned | Certificate for installer |
-| Linux packaging (.deb, .AppImage, Flatpak) | Planned | Multiple distribution formats |
-| Auto-update system | Future | Tauri updater plugin |
-| Crash reporting (opt-in) | Future | Local error logs with optional telemetry |
-| User documentation / help pages | Future | In-app help or external docs site |
-| Marketing site | Future | Landing page with features and download links |
+| Task                                       | Status  | Notes                                            |
+| ------------------------------------------ | ------- | ------------------------------------------------ |
+| Keyboard shortcuts                         | Planned | Global shortcuts for common actions              |
+| Keyboard navigation (full app)             | Planned | Tab, arrow keys, Enter                           |
+| ARIA attributes and screen reader support  | Planned | shadcn/ui provides a good base                   |
+| Loading states and skeletons               | Planned | Suspense boundaries, skeleton components         |
+| Error states and empty states              | Planned | Per-page error/empty illustrations               |
+| Onboarding flow (first-run wizard)         | Planned | Create first account, set currency, configure AI |
+| Animation and transitions                  | Planned | Page transitions, panel animations               |
+| Performance profiling                      | Planned | React DevTools, Lighthouse                       |
+| Database query optimization                | Planned | Add indexes as needed, batch queries             |
+| Bundle size optimization                   | Planned | Tree-shaking audit, lazy imports                 |
+| Automated E2E tests                        | Future  | Playwright browser flows                         |
+| macOS notarization                         | Planned | Code signing for distribution                    |
+| Windows code signing                       | Planned | Certificate for installer                        |
+| Linux packaging (.deb, .AppImage, Flatpak) | Planned | Multiple distribution formats                    |
+| Auto-update system                         | Future  | Web/PWA update strategy                          |
+| Crash reporting (opt-in)                   | Future  | Local error logs with optional telemetry         |
+| User documentation / help pages            | Future  | In-app help or external docs site                |
+| Marketing site                             | Future  | Landing page with features and download links    |
 
 **Dependencies:** All previous epics.
 
@@ -278,16 +280,16 @@ This document outlines the development roadmap for Valute, organized into 10 epi
 
 ## Release Plan
 
-| Version | Target Epics | Milestone |
-|---------|-------------|-----------|
-| **v0.1.0** | Epic 1 (done) | Project foundation, scaffolding, AI chat |
-| **v0.2.0** | Epic 2, Epic 3 | Transaction and account management |
-| **v0.3.0** | Epic 4, Epic 5 | Budgets and expanded AI tools |
-| **v0.4.0** | Epic 7 | Dashboard, reporting, and analytics |
-| **v0.5.0** | Epic 6 | Investment portfolio tracking |
-| **v0.6.0** | Epic 8 | Subscription management |
-| **v0.7.0** | Epic 9 | Extension system |
-| **v1.0.0** | Epic 10 | Polish, performance, public release |
+| Version    | Target Epics   | Milestone                                |
+| ---------- | -------------- | ---------------------------------------- |
+| **v0.1.0** | Epic 1 (done)  | Project foundation, scaffolding, AI chat |
+| **v0.2.0** | Epic 2, Epic 3 | Transaction and account management       |
+| **v0.3.0** | Epic 4, Epic 5 | Budgets and expanded AI tools            |
+| **v0.4.0** | Epic 7         | Dashboard, reporting, and analytics      |
+| **v0.5.0** | Epic 6         | Investment portfolio tracking            |
+| **v0.6.0** | Epic 8         | Subscription management                  |
+| **v0.7.0** | Epic 9         | Extension system                         |
+| **v1.0.0** | Epic 10        | Polish, performance, public release      |
 
 ---
 

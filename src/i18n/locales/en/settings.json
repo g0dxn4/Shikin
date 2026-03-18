@@ -2,11 +2,95 @@
   "title": "Settings",
   "sections": {
     "general": "General",
+    "theme": "Theme & Appearance",
     "ai": "AI Provider",
     "data": "Data",
     "categoryRules": "Category Rules",
     "dataApis": "Market Data APIs",
     "about": "About"
+  },
+  "theme": {
+    "description": "Customize the visual appearance of Valute",
+    "aiPrompt": "AI Theme Generator",
+    "promptPlaceholder": "e.g. Cyberpunk neon, cozy autumn, ocean breeze...",
+    "generate": "Generate",
+    "generateSuccess": "Theme generated! Click Save to keep it.",
+    "generateError": "Failed to generate theme",
+    "save": "Save Theme",
+    "saveSuccess": "Theme saved successfully",
+    "reset": "Reset Default",
+    "resetSuccess": "Theme reset to default",
+    "revert": "Revert",
+    "revertSuccess": "Reverted to saved theme",
+    "fields": {
+      "background": "Background",
+      "surface": "Surface",
+      "accent": "Accent",
+      "radius": "Border Radius",
+      "fontPreset": "Font Preset"
+    },
+    "presets": {
+      "default": "Default",
+      "midnight": "Midnight",
+      "forest": "Forest",
+      "rose": "Rose",
+      "aurora": "Aurora",
+      "ember": "Ember",
+      "slate": "Slate",
+      "paper": "Paper",
+      "nord": "Nord",
+      "mono": "Mono",
+      "sunset": "Sunset",
+      "ocean": "Ocean",
+      "matcha": "Matcha",
+      "terracotta": "Terracotta",
+      "violetGlass": "Violet Glass",
+      "latte": "Latte"
+    },
+    "presetDescriptions": {
+      "default": "Original Valute look",
+      "midnight": "Cool dark blue professional",
+      "forest": "Green focus and calm",
+      "rose": "Soft light editorial tone",
+      "aurora": "Teal neon night mode",
+      "ember": "Warm orange dark theme",
+      "slate": "Neutral modern productivity",
+      "paper": "Clean editorial daylight",
+      "nord": "Nordic blue-gray minimal",
+      "mono": "High-contrast monochrome",
+      "sunset": "Pink-magenta creative vibe",
+      "ocean": "Fresh cyan coastal style",
+      "matcha": "Earthy green balance",
+      "terracotta": "Warm premium studio",
+      "violetGlass": "Soft purple glass aesthetic",
+      "latte": "Cozy beige workspace"
+    },
+    "filters": {
+      "all": "All",
+      "dark": "Dark",
+      "light": "Light",
+      "editorial": "Editorial",
+      "bold": "Bold"
+    },
+    "featured": {
+      "title": "Featured Picks",
+      "description": "Quick-start themes based on your system appearance preference.",
+      "darkMode": "Dark mode",
+      "lightMode": "Light mode"
+    },
+    "options": {
+      "radius": {
+        "brutalist": "Brutalist (0px)",
+        "subtle": "Subtle (8px)",
+        "rounded": "Rounded (12px)",
+        "pill": "Pill (16px)"
+      },
+      "font": {
+        "current": "Current",
+        "modern": "Modern",
+        "editorial": "Editorial"
+      }
+    }
   },
   "language": {
     "label": "Language",
@@ -43,6 +127,10 @@
   "data": {
     "export": "Export Data",
     "import": "Import Data",
+    "exportSuccess": "Backup exported",
+    "exportError": "Failed to export backup",
+    "importSuccess": "Backup imported",
+    "importError": "Failed to import backup",
     "reset": "Reset All Data",
     "resetWarning": "This will permanently delete all your data. This action cannot be undone."
   },

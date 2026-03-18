@@ -56,7 +56,10 @@ function BudgetCard({ budget }: { budget: BudgetWithStatus }) {
         className="glass-card group relative overflow-hidden p-5 transition-transform duration-200 hover:translate-y-[-2px]"
         style={
           isOverBudget
-            ? { boxShadow: '0 0 24px rgba(239, 68, 68, 0.15), inset 0 0 0 1px rgba(239, 68, 68, 0.2)' }
+            ? {
+                boxShadow:
+                  '0 0 24px rgba(239, 68, 68, 0.15), inset 0 0 0 1px rgba(239, 68, 68, 0.2)',
+              }
             : undefined
         }
       >
@@ -82,6 +85,7 @@ function BudgetCard({ budget }: { budget: BudgetWithStatus }) {
               size="icon"
               className="h-7 w-7"
               onClick={() => openBudgetDialog(budget.id)}
+              aria-label={`Edit ${budget.name}`}
             >
               <Pencil size={12} />
             </Button>
@@ -90,6 +94,7 @@ function BudgetCard({ budget }: { budget: BudgetWithStatus }) {
               size="icon"
               className="text-destructive hover:text-destructive h-7 w-7"
               onClick={() => setDeleteId(budget.id)}
+              aria-label={`Delete ${budget.name}`}
             >
               <Trash2 size={12} />
             </Button>
@@ -118,11 +123,8 @@ function BudgetCard({ budget }: { budget: BudgetWithStatus }) {
         {/* Amounts */}
         <div className="mt-3 flex items-baseline justify-between">
           <p className="text-muted-foreground text-sm">
-            <span className="text-foreground font-medium">
-              {formatMoney(budget.spent)}
-            </span>
-            {' '}{t('card.of')}{' '}
-            {formatMoney(budget.amount)}
+            <span className="text-foreground font-medium">{formatMoney(budget.spent)}</span>{' '}
+            {t('card.of')} {formatMoney(budget.amount)}
           </p>
           <p className="text-muted-foreground text-xs">
             {isOverBudget
@@ -132,7 +134,7 @@ function BudgetCard({ budget }: { budget: BudgetWithStatus }) {
         </div>
 
         {/* Period */}
-        <p className="text-muted-foreground mt-2 font-mono text-[10px] uppercase tracking-wider">
+        <p className="text-muted-foreground mt-2 font-mono text-[10px] tracking-wider uppercase">
           {t(`periods.${budget.period}`)}
         </p>
       </div>

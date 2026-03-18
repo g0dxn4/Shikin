@@ -29,6 +29,10 @@ vi.mock('@/stores/ai-store', () => ({
     apiKey: 'sk-test',
     model: 'gpt-4o',
     isConfigured: mockIsConfigured,
+    authMode: 'api_key',
+    oauthAccessToken: null,
+    codexAccountId: null,
+    getEffectiveApiKey: vi.fn().mockResolvedValue('sk-test'),
   }),
 }))
 
@@ -42,9 +46,12 @@ vi.mock('@/stores/conversation-store', () => ({
       currentConversationId: null,
       conversations: [],
       isLoading: false,
+      hasOlderMessages: false,
+      loadedMessageCount: 0,
       loadConversations: mockLoadConversations,
       startNewConversation: mockStartNewConversation,
       switchConversation: vi.fn().mockResolvedValue([]),
+      prependOlderMessages: vi.fn().mockResolvedValue([]),
       persistMessage: mockPersistMessage,
       autoTitle: vi.fn().mockResolvedValue(undefined),
       removeConversation: vi.fn().mockResolvedValue(undefined),
@@ -129,7 +136,8 @@ describe('AIPanel', () => {
     const closeButtons = screen.getAllByRole('button')
     // The close button has the X icon - find it by looking for buttons that aren't in conversation area
     const closeButton = closeButtons.find(
-      (btn) => btn.querySelector('svg') && btn.closest('.flex.h-14') && !btn.querySelector('.font-heading')
+      (btn) =>
+        btn.querySelector('svg') && btn.closest('.flex.h-14') && !btn.querySelector('.font-heading')
     )
     if (closeButton) {
       await user.click(closeButton)

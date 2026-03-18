@@ -6,7 +6,8 @@ import {
   listConversations,
   deleteConversation,
   saveMessage,
-  loadMessages,
+  loadRecentMessages,
+  loadOlderMessages,
   generateTitle,
   updateConversationTitle,
 } from '@/ai/conversation-persistence'
@@ -14,11 +15,14 @@ import {
 interface ConversationState {
   currentConversationId: string | null
   conversations: AIConversation[]
+  loadedMessageCount: number
+  hasOlderMessages: boolean
   isLoading: boolean
   loadConversations: () => Promise<void>
   startNewConversation: (model?: string) => Promise<string>
   switchConversation: (id: string) => Promise<UIMessage[]>
-  persistMessage: (message: UIMessage) => Promise<void>
+  prependOlderMessages: () => Promise<UIMessage[]>
+  persistMessage: (message: UIMessage, conversationId?: string) => Promise<void>
   autoTitle: (firstMessage: string) => Promise<void>
   removeConversation: (id: string) => Promise<void>
 }
@@ -26,6 +30,8 @@ interface ConversationState {
 export const useConversationStore = create<ConversationState>((set, get) => ({
   currentConversationId: null,
   conversations: [],
+  loadedMessageCount: 0,
+  hasOlderMessages: false,
   isLoading: false,
 
   loadConversations: async () => {
@@ -43,20 +49,51 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   startNewConversation: async (model?: string) => {
     const id = await createConversation(model)
     const conversations = await listConversations()
-    set({ currentConversationId: id, conversations })
+    set({
+      currentConversationId: id,
+      conversations,
+      loadedMessageCount: 0,
+      hasOlderMessages: false,
+    })
     return id
   },
 
   switchConversation: async (id: string) => {
-    set({ currentConversationId: id })
-    const messages = await loadMessages(id)
+    set({ currentConversationId: id, isLoading: true })
+    try {
+      const { messages, hasMore, loadedCount } = await loadRecentMessages(id)
+      set({
+        loadedMessageCount: loadedCount,
+        hasOlderMessages: hasMore,
+      })
+      return messages
+    } finally {
+      set({ isLoading: false })
+    }
+  },
+
+  prependOlderMessages: async () => {
+    const { currentConversationId, loadedMessageCount } = get()
+    if (!currentConversationId) return []
+
+    const { messages, hasMore, loadedCount } = await loadOlderMessages(
+      currentConversationId,
+      loadedMessageCount
+    )
+
+    set({
+      loadedMessageCount: loadedCount,
+      hasOlderMessages: hasMore,
+    })
+
     return messages
   },
 
-  persistMessage: async (message: UIMessage) => {
-    const { currentConversationId } = get()
-    if (!currentConversationId) return
-    await saveMessage(currentConversationId, message)
+  persistMessage: async (message: UIMessage, conversationId) => {
+    const targetConversationId = conversationId || get().currentConversationId
+    if (!targetConversationId) return
+    await saveMessage(targetConversationId, message)
+    set((state) => ({ loadedMessageCount: state.loadedMessageCount + 1 }))
   },
 
   autoTitle: async (firstMessage: string) => {

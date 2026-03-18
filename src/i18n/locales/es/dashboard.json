@@ -11,11 +11,15 @@
     "totalBalance": "Balance Total",
     "monthlyIncome": "Ingresos Mensuales",
     "monthlyExpenses": "Gastos Mensuales",
-    "savings": "Tasa de Ahorro"
+    "savings": "Tasa de Ahorro",
+    "incomeVsLastMonth": "Ingresos vs mes anterior",
+    "expensesVsLastMonth": "Gastos vs mes anterior"
   },
   "charts": {
     "spending": "Gastos Mensuales",
-    "categories": "Por Categor\u00eda"
+    "categories": "Por Categor\u00eda",
+    "drilldownTransactions": "Ver transacciones",
+    "drilldownBudgets": "Ver presupuestos"
   },
   "quickActions": {
     "addTransaction": "Agregar Transacci\u00f3n",

@@ -67,23 +67,15 @@ export const useAIStore = create<AIState>((set, get) => ({
       const provider = ((await store.get('ai_provider')) as string) || 'openai'
       const apiKey = ((await store.get('ai_api_key')) as string) || ''
       const model = ((await store.get('ai_model')) as string) || ''
-      const authMode =
-        ((await store.get('ai_auth_mode')) as 'api_key' | 'oauth') || 'api_key'
-      const oauthAccessToken =
-        ((await store.get('ai_oauth_access_token')) as string) || null
-      const oauthRefreshToken =
-        ((await store.get('ai_oauth_refresh_token')) as string) || null
-      const oauthExpiresAt =
-        ((await store.get('ai_oauth_expires_at')) as number) || null
-      const oauthClientId =
-        ((await store.get('ai_oauth_client_id')) as string) || ''
-      const oauthEmail =
-        ((await store.get('ai_oauth_email')) as string) || null
-      const codexAccountId =
-        ((await store.get('ai_codex_account_id')) as string) || null
+      const authMode = ((await store.get('ai_auth_mode')) as 'api_key' | 'oauth') || 'api_key'
+      const oauthAccessToken = ((await store.get('ai_oauth_access_token')) as string) || null
+      const oauthRefreshToken = ((await store.get('ai_oauth_refresh_token')) as string) || null
+      const oauthExpiresAt = ((await store.get('ai_oauth_expires_at')) as number) || null
+      const oauthClientId = ((await store.get('ai_oauth_client_id')) as string) || ''
+      const oauthEmail = ((await store.get('ai_oauth_email')) as string) || null
+      const codexAccountId = ((await store.get('ai_codex_account_id')) as string) || null
 
-      const isConfigured =
-        authMode === 'oauth' ? !!oauthAccessToken : !!apiKey
+      const isConfigured = authMode === 'oauth' ? !!oauthAccessToken : !!apiKey
 
       set({
         provider,
@@ -105,12 +97,14 @@ export const useAIStore = create<AIState>((set, get) => ({
 
   saveSettings: async (provider, apiKey, model) => {
     try {
+      const state = get()
       const store = await load('settings.json')
       await store.set('ai_provider', provider)
       await store.set('ai_api_key', apiKey)
       await store.set('ai_model', model)
       await store.save()
-      set({ provider, apiKey, model, isConfigured: !!apiKey })
+      const isConfigured = state.authMode === 'oauth' ? !!state.oauthAccessToken : !!apiKey
+      set({ provider, apiKey, model, isConfigured })
     } catch {
       // Store not available
     }
@@ -125,8 +119,7 @@ export const useAIStore = create<AIState>((set, get) => ({
       await store.set('ai_oauth_refresh_token', tokens.refreshToken ?? null)
       await store.set('ai_oauth_expires_at', expiresAt)
       if (tokens.email) await store.set('ai_oauth_email', tokens.email)
-      if (tokens.codexAccountId)
-        await store.set('ai_codex_account_id', tokens.codexAccountId)
+      if (tokens.codexAccountId) await store.set('ai_codex_account_id', tokens.codexAccountId)
       await store.save()
     } catch {
       // Store not available

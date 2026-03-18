@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import {
@@ -9,8 +9,11 @@ import {
   Plus,
   ArrowRight,
   Sparkles,
+  RefreshCw,
+  FileText,
 } from 'lucide-react'
 import dayjs from 'dayjs'
+import relativeTime from 'dayjs/plugin/relativeTime'
 import {
   AreaChart,
   Area,
@@ -28,8 +31,11 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
 import { useTransactionStore } from '@/stores/transaction-store'
+import { useRecapStore } from '@/stores/recap-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import { formatMoney } from '@/lib/money'
+
+dayjs.extend(relativeTime)
 
 const CHART_COLORS = ['#bf5af2', '#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#8b5cf6']
 
@@ -40,11 +46,22 @@ export function Dashboard() {
   const { setAIPanelOpen, openAccountDialog, openTransactionDialog } = useUIStore()
   const { accounts, isLoading: accountsLoading, fetch: fetchAccounts } = useAccountStore()
   const { transactions, isLoading: txLoading, fetch: fetchTransactions } = useTransactionStore()
+  const {
+    currentRecap,
+    isLoading: recapLoading,
+    generateWeekly,
+    loadLatestWeekly,
+  } = useRecapStore()
 
   useEffect(() => {
     fetchAccounts()
     fetchTransactions()
-  }, [fetchAccounts, fetchTransactions])
+    loadLatestWeekly()
+  }, [fetchAccounts, fetchTransactions, loadLatestWeekly])
+
+  const handleGenerateRecap = useCallback(() => {
+    generateWeekly()
+  }, [generateWeekly])
 
   const totalBalance = useMemo(() => accounts.reduce((sum, a) => sum + a.balance, 0), [accounts])
 
@@ -284,6 +301,61 @@ export function Dashboard() {
               </div>
             </div>
           )}
+
+          {/* Weekly Recap */}
+          <div className="glass-card p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileText size={16} className="text-primary" />
+                <h3 className="font-heading text-sm font-semibold">{t('recap.title')}</h3>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleGenerateRecap}
+                disabled={recapLoading}
+              >
+                <RefreshCw size={14} className={recapLoading ? 'animate-spin' : ''} />
+                {recapLoading ? t('recap.generating') : t('recap.generate')}
+              </Button>
+            </div>
+
+            {currentRecap ? (
+              <div className="space-y-3">
+                <p className="text-muted-foreground text-sm leading-relaxed">
+                  {currentRecap.summary}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {currentRecap.highlights.map((h) => (
+                    <span
+                      key={h.label}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-white/6 bg-white/4 px-3 py-1 text-xs"
+                    >
+                      <span className="text-muted-foreground">{h.label}:</span>
+                      <span className="font-semibold">{h.value}</span>
+                      {h.change && (
+                        <span
+                          className={`font-mono text-[10px] ${
+                            h.change.startsWith('+') ? 'text-destructive' : 'text-success'
+                          }`}
+                        >
+                          {h.change}
+                        </span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+                <p className="text-muted-foreground font-mono text-[10px]">
+                  {t('recap.generatedAt', { time: dayjs(currentRecap.generated_at).fromNow() })}
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-6 text-center">
+                <p className="text-muted-foreground text-sm">{t('recap.noRecap')}</p>
+                <p className="text-muted-foreground mt-1 text-xs">{t('recap.noRecapHint')}</p>
+              </div>
+            )}
+          </div>
 
           {/* Accounts preview */}
           <div className="space-y-3">

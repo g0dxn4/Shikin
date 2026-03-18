@@ -9,6 +9,7 @@ type ForecastRange = 30 | 60 | 90
 interface ForecastState {
   forecast: CashFlowForecast | null
   isLoading: boolean
+  error: string | null
   selectedRange: ForecastRange
   dangerThreshold: number
 
@@ -22,6 +23,7 @@ interface ForecastState {
 export const useForecastStore = create<ForecastState>((set, get) => ({
   forecast: null,
   isLoading: false,
+  error: null,
   selectedRange: 30,
   dangerThreshold: 0,
 
@@ -36,10 +38,12 @@ export const useForecastStore = create<ForecastState>((set, get) => ({
 
   generateForecast: async (days) => {
     const range = days ?? get().selectedRange
-    set({ isLoading: true })
+    set({ isLoading: true, error: null })
     try {
       const forecast = await generateCashFlowForecast(range, get().dangerThreshold)
       set({ forecast })
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : 'Unknown error' })
     } finally {
       set({ isLoading: false })
     }

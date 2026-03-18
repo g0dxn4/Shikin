@@ -55,6 +55,7 @@
     "title": "No transactions yet",
     "description": "Add your first transaction to start tracking your spending."
   },
+  "noMatching": "No matching transactions",
   "viewAll": "View All",
   "recentTransactions": "Recent Transactions",
   "addQuick": "Add Transaction",

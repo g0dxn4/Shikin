@@ -20,7 +20,6 @@ import {
   Heart,
   RefreshCw,
   FileText,
-  X,
 } from 'lucide-react'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'

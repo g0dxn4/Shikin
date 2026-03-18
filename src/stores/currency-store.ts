@@ -13,6 +13,7 @@ interface CurrencyState {
   preferredCurrency: string
   lastFetched: string | null
   isLoading: boolean
+  error: string | null
 
   /** Load cached rates from DB and preferred currency from settings */
   loadRates: () => Promise<void>
@@ -44,9 +45,10 @@ export const useCurrencyStore = create<CurrencyState>((set, get) => ({
   preferredCurrency: 'USD',
   lastFetched: null,
   isLoading: false,
+  error: null,
 
   loadRates: async () => {
-    set({ isLoading: true })
+    set({ isLoading: true, error: null })
     try {
       // Load preferred currency from localStorage settings
       const store = await load('settings.json')
@@ -66,13 +68,15 @@ export const useCurrencyStore = create<CurrencyState>((set, get) => ({
       // Load last fetch date
       const lastDate = await getLastFetchDate()
       set({ lastFetched: lastDate })
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : 'Unknown error' })
     } finally {
       set({ isLoading: false })
     }
   },
 
   refreshRates: async () => {
-    set({ isLoading: true })
+    set({ isLoading: true, error: null })
     try {
       await refreshRates()
 
@@ -85,6 +89,8 @@ export const useCurrencyStore = create<CurrencyState>((set, get) => ({
 
       const today = new Date().toISOString().split('T')[0]
       set({ rates: ratesMap, lastFetched: today })
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : 'Unknown error' })
     } finally {
       set({ isLoading: false })
     }

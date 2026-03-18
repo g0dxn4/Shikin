@@ -13,6 +13,7 @@ interface DebtState {
   strategy: DebtStrategy
   extraPayment: number // centavos
   isLoading: boolean
+  error: string | null
 
   // Computed
   payoffPlan: PayoffPlan | null
@@ -59,13 +60,14 @@ export const useDebtStore = create<DebtState>((set, get) => ({
   strategy: 'avalanche',
   extraPayment: 0,
   isLoading: false,
+  error: null,
   payoffPlan: null,
   comparison: null,
   totalDebt: 0,
   totalMinPayment: 0,
 
   loadDebts: async () => {
-    set({ isLoading: true })
+    set({ isLoading: true, error: null })
     try {
       // Pull credit card accounts with balances (negative balance = debt)
       const accounts = await query<Account>(
@@ -89,8 +91,8 @@ export const useDebtStore = create<DebtState>((set, get) => ({
       })
 
       set({ debts, isLoading: false, ...computed })
-    } catch {
-      set({ isLoading: false })
+    } catch (err) {
+      set({ isLoading: false, error: err instanceof Error ? err.message : 'Unknown error' })
     }
   },
 

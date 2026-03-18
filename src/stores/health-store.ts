@@ -11,6 +11,7 @@ export interface HealthScoreSnapshot {
 interface HealthState {
   score: HealthScore | null
   isLoading: boolean
+  error: string | null
   history: HealthScoreSnapshot[]
   calculateScore: () => Promise<void>
   getScoreHistory: () => HealthScoreSnapshot[]
@@ -32,10 +33,11 @@ function saveHistory(history: HealthScoreSnapshot[]): void {
 export const useHealthStore = create<HealthState>((set, get) => ({
   score: null,
   isLoading: false,
+  error: null,
   history: loadHistory(),
 
   calculateScore: async () => {
-    set({ isLoading: true })
+    set({ isLoading: true, error: null })
     try {
       const score = await calculateHealthScore()
       set({ score })
@@ -60,6 +62,8 @@ export const useHealthStore = create<HealthState>((set, get) => ({
       const trimmed = history.slice(-12)
       saveHistory(trimmed)
       set({ history: trimmed })
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : 'Unknown error' })
     } finally {
       set({ isLoading: false })
     }

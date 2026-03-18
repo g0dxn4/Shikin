@@ -25,6 +25,8 @@ export interface Anomaly {
   dismissed: boolean
 }
 
+const UNCATEGORIZED = 'Uncategorized'
+
 // --- Helpers ---
 
 interface TransactionRow {
@@ -61,7 +63,7 @@ export async function getMerchantHistory(
   const since = dayjs().subtract(days, 'day').format('YYYY-MM-DD')
   return query<TransactionRow>(
     `SELECT t.id, t.description, t.amount, t.date, t.category_id,
-            COALESCE(c.name, 'Uncategorized') as category_name, t.type
+            COALESCE(c.name, '${UNCATEGORIZED}') as category_name, t.type
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.description = $1 AND t.type = 'expense' AND t.date >= $2
@@ -80,7 +82,7 @@ async function detectUnusualAmounts(recentDays: number = 30): Promise<Anomaly[]>
   // Get recent expense transactions
   const recentTx = await query<TransactionRow>(
     `SELECT t.id, t.description, t.amount, t.date, t.category_id,
-            COALESCE(c.name, 'Uncategorized') as category_name, t.type
+            COALESCE(c.name, '${UNCATEGORIZED}') as category_name, t.type
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1
@@ -137,7 +139,7 @@ async function detectDuplicateCharges(): Promise<Anomaly[]> {
   // Find transactions with same amount and similar description within 48 hours
   const recentTx = await query<TransactionRow>(
     `SELECT t.id, t.description, t.amount, t.date, t.category_id,
-            COALESCE(c.name, 'Uncategorized') as category_name, t.type
+            COALESCE(c.name, '${UNCATEGORIZED}') as category_name, t.type
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1
@@ -200,7 +202,7 @@ async function detectSpendingSpikes(): Promise<Anomaly[]> {
   const projectionFactor = daysInMonth / daysElapsed
 
   const currentSpending = await query<CategorySpendRow>(
-    `SELECT t.category_id, COALESCE(c.name, 'Uncategorized') as category_name,
+    `SELECT t.category_id, COALESCE(c.name, '${UNCATEGORIZED}') as category_name,
             SUM(t.amount) as total, COUNT(*) as count
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
@@ -210,7 +212,7 @@ async function detectSpendingSpikes(): Promise<Anomaly[]> {
   )
 
   const historicalSpending = await query<CategorySpendRow>(
-    `SELECT t.category_id, COALESCE(c.name, 'Uncategorized') as category_name,
+    `SELECT t.category_id, COALESCE(c.name, '${UNCATEGORIZED}') as category_name,
             SUM(t.amount) as total, COUNT(*) as count
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
@@ -303,7 +305,7 @@ async function detectLargeTransactions(thresholdCentavos: number): Promise<Anoma
 
   const largeTx = await query<TransactionRow>(
     `SELECT t.id, t.description, t.amount, t.date, t.category_id,
-            COALESCE(c.name, 'Uncategorized') as category_name, t.type
+            COALESCE(c.name, '${UNCATEGORIZED}') as category_name, t.type
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.amount >= $1 AND t.date >= $2

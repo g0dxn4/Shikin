@@ -11,6 +11,7 @@ interface RecapState {
   currentRecap: Recap | null
   recapHistory: Recap[]
   isLoading: boolean
+  error: string | null
 
   /** Generate a new weekly recap for the past 7 days */
   generateWeekly: () => Promise<void>
@@ -29,38 +30,45 @@ export const useRecapStore = create<RecapState>((set) => ({
   currentRecap: null,
   recapHistory: [],
   isLoading: false,
+  error: null,
 
   generateWeekly: async () => {
-    set({ isLoading: true })
+    set({ isLoading: true, error: null })
     try {
       const recap = await generateWeeklyRecap()
       set((state) => ({
         currentRecap: recap,
         recapHistory: [recap, ...state.recapHistory],
       }))
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : 'Unknown error' })
     } finally {
       set({ isLoading: false })
     }
   },
 
   generateMonthly: async (month?: string) => {
-    set({ isLoading: true })
+    set({ isLoading: true, error: null })
     try {
       const recap = await generateMonthlyRecap(month)
       set((state) => ({
         currentRecap: recap,
         recapHistory: [recap, ...state.recapHistory],
       }))
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : 'Unknown error' })
     } finally {
       set({ isLoading: false })
     }
   },
 
   loadHistory: async () => {
-    set({ isLoading: true })
+    set({ isLoading: true, error: null })
     try {
       const history = await loadRecapHistory()
       set({ recapHistory: history })
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : 'Unknown error' })
     } finally {
       set({ isLoading: false })
     }

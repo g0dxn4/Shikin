@@ -3,6 +3,8 @@ import { generateId } from '@/lib/ulid'
 import { formatMoney } from '@/lib/money'
 import dayjs from 'dayjs'
 
+const UNCATEGORIZED = 'Uncategorized'
+
 export interface RecapHighlight {
   label: string
   value: string
@@ -63,7 +65,7 @@ async function getTotalIncome(start: string, end: string): Promise<number> {
 /** Fetch spending by category, sorted descending */
 async function getSpendingByCategory(start: string, end: string): Promise<SpendingRow[]> {
   return query<SpendingRow>(
-    `SELECT COALESCE(c.name, 'Uncategorized') as category_name, SUM(t.amount) as total, COUNT(*) as count
+    `SELECT COALESCE(c.name, '${UNCATEGORIZED}') as category_name, SUM(t.amount) as total, COUNT(*) as count
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= ? AND t.date <= ?
@@ -76,7 +78,7 @@ async function getSpendingByCategory(start: string, end: string): Promise<Spendi
 /** Fetch the biggest single expense */
 async function getBiggestExpense(start: string, end: string): Promise<BiggestRow | null> {
   const rows = await query<BiggestRow>(
-    `SELECT t.description, t.amount, COALESCE(c.name, 'Uncategorized') as category_name
+    `SELECT t.description, t.amount, COALESCE(c.name, '${UNCATEGORIZED}') as category_name
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= ? AND t.date <= ?

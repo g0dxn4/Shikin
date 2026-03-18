@@ -55,6 +55,7 @@
     "title": "Sin transacciones aun",
     "description": "Agrega tu primera transaccion para comenzar a rastrear tus gastos."
   },
+  "noMatching": "No se encontraron transacciones",
   "viewAll": "Ver Todas",
   "recentTransactions": "Transacciones Recientes",
   "addQuick": "Agregar Transacción",

@@ -8,7 +8,6 @@ import {
   Target,
   TrendingUp,
   Repeat,
-  Target,
   BookOpen,
   LineChart,
   Settings,

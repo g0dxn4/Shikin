@@ -298,7 +298,7 @@ export function Transactions() {
           ) : filteredTransactions.length === 0 ? (
             <div className="glass-card flex flex-col items-center justify-center py-12 text-center">
               <Search size={24} className="text-muted-foreground mb-3" />
-              <p className="text-muted-foreground text-sm">No matching transactions</p>
+              <p className="text-muted-foreground text-sm">{t('noMatching')}</p>
             </div>
           ) : (
             <div className="space-y-5">

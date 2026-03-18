@@ -20,6 +20,7 @@ import {
   Heart,
   RefreshCw,
   FileText,
+  X,
 } from 'lucide-react'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
@@ -45,6 +46,8 @@ import { useForecastStore } from '@/stores/forecast-store'
 import { useGoalStore } from '@/stores/goal-store'
 import { useRecapStore } from '@/stores/recap-store'
 import { useCurrencyStore } from '@/stores/currency-store'
+import { useAchievementStore } from '@/stores/achievement-store'
+import { ACHIEVEMENTS } from '@/lib/achievement-service'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import type { AnomalyType, AnomalySeverity } from '@/lib/anomaly-service'
 import { useHealthStore } from '@/stores/health-store'
@@ -81,6 +84,13 @@ export function Dashboard() {
     loadLatestWeekly,
   } = useRecapStore()
   const { preferredCurrency, getTotalBalanceInPreferred, loadRates } = useCurrencyStore()
+  const {
+    currentStreak,
+    longestStreak,
+    newlyUnlocked,
+    checkForNew: checkAchievements,
+    dismissNew,
+  } = useAchievementStore()
 
   useEffect(() => {
     fetchAccounts()
@@ -109,6 +119,13 @@ export function Dashboard() {
   const handleGenerateRecap = useCallback(() => {
     generateWeekly()
   }, [generateWeekly])
+
+  // Check achievements after transactions load
+  useEffect(() => {
+    if (!txLoading && transactions.length >= 0) {
+      checkAchievements()
+    }
+  }, [txLoading, transactions.length, checkAchievements])
 
   const totalBalance = useMemo(() => accounts.reduce((sum, a) => sum + a.balance, 0), [accounts])
 
@@ -218,7 +235,67 @@ export function Dashboard() {
 
   return (
     <div className="animate-fade-in-up page-content">
-      <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
+      <div className="flex items-center gap-3">
+        <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
+        {currentStreak > 0 && (
+          <div
+            className="flex items-center gap-1.5 rounded-full px-3 py-1"
+            style={{
+              background: 'rgba(191, 90, 242, 0.15)',
+              border: '1px solid rgba(191, 90, 242, 0.3)',
+            }}
+            title={t('streak.longest', { count: longestStreak })}
+          >
+            <span className="text-sm">{'\uD83D\uDD25'}</span>
+            <span className="font-heading text-sm font-bold" style={{ color: '#bf5af2' }}>
+              {currentStreak}
+            </span>
+            <span className="text-muted-foreground text-xs">{t('streak.label')}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Achievement unlock notifications */}
+      {newlyUnlocked.length > 0 && (
+        <div className="space-y-2">
+          {newlyUnlocked.map((a) => {
+            const def = ACHIEVEMENTS[a.id]
+            return (
+              <div
+                key={a.id}
+                className="flex items-center gap-3 rounded-xl px-4 py-3 animate-fade-in-up"
+                style={{
+                  background: 'rgba(191, 90, 242, 0.1)',
+                  border: '1px solid rgba(191, 90, 242, 0.2)',
+                }}
+              >
+                <span className="text-xl">{def.icon}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-heading text-sm font-semibold">
+                    {t(`achievements.${a.id}`)}
+                  </p>
+                  <p className="text-muted-foreground text-xs">
+                    {t(`achievements.${a.id}_desc`)}
+                  </p>
+                </div>
+                <Badge
+                  variant="secondary"
+                  className="shrink-0 text-[10px]"
+                  style={{ color: '#bf5af2' }}
+                >
+                  {t('achievements.unlocked')}
+                </Badge>
+                <button
+                  onClick={() => dismissNew(a.id)}
+                  className="text-muted-foreground hover:text-foreground shrink-0 p-1"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {/* 4-column metrics */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">

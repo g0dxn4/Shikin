@@ -89,5 +89,31 @@
     "noRecapHint": "Generate one to see a summary of your recent spending.",
     "viewMonthly": "View Monthly",
     "generatedAt": "Generated {{time}}"
+  },
+  "streak": {
+    "label": "day streak",
+    "labelPlural": "day streak",
+    "longest": "Longest: {{count}}d",
+    "noStreak": "Start logging!"
+  },
+  "achievements": {
+    "title": "Achievements",
+    "unlocked": "Unlocked!",
+    "first_steps": "First Steps",
+    "first_steps_desc": "Log your first transaction",
+    "week_warrior": "Week Warrior",
+    "week_warrior_desc": "7-day logging streak",
+    "budget_boss": "Budget Boss",
+    "budget_boss_desc": "Stay under all budgets for a month",
+    "savings_star": "Savings Star",
+    "savings_star_desc": "20%+ savings rate for a month",
+    "century_club": "Century Club",
+    "century_club_desc": "100 transactions logged",
+    "diversified": "Diversified",
+    "diversified_desc": "5+ categories in a month",
+    "debt_destroyer": "Debt Destroyer",
+    "debt_destroyer_desc": "Pay off a credit card",
+    "goal_getter": "Goal Getter",
+    "goal_getter_desc": "Reach a savings goal"
   }
 }

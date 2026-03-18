@@ -20,5 +20,23 @@
   "quickActions": {
     "addTransaction": "Add Transaction",
     "askVal": "Ask Val"
+  },
+  "forecast": {
+    "title": "Cash Flow Forecast",
+    "range30": "30d",
+    "range60": "60d",
+    "range90": "90d",
+    "projected": "Projected",
+    "optimistic": "Optimistic",
+    "pessimistic": "Pessimistic",
+    "viewFull": "View Full Forecast",
+    "dangerWarning": "Balance may dip below {{threshold}} on {{date}}",
+    "lowestBalance": "Lowest Balance",
+    "lowestDate": "On",
+    "dailyBurnRate": "Daily Burn Rate",
+    "dailyIncome": "Daily Income",
+    "projectedEnd": "Projected End Balance",
+    "noData": "Add transactions to see your cash flow forecast",
+    "healthy": "Cash flow looks healthy for the next {{days}} days"
   }
 }

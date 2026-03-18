@@ -48,6 +48,18 @@ vi.mock('@/stores/transaction-store', () => ({
   }),
 }))
 
+vi.mock('@/stores/forecast-store', () => ({
+  useForecastStore: () => ({
+    forecast: null,
+    isLoading: false,
+    selectedRange: 30,
+    setRange: vi.fn(),
+    generateForecast: vi.fn(),
+    getMinBalanceDate: () => null,
+    getDangerDates: () => [],
+  }),
+}))
+
 describe('Dashboard', () => {
   beforeEach(() => {
     vi.clearAllMocks()

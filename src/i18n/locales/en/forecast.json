@@ -1,0 +1,38 @@
+{
+  "title": "Cash Flow Forecast",
+  "description": "Project your future balances based on historical spending patterns",
+  "chart": {
+    "title": "Balance Projection",
+    "projected": "Projected",
+    "optimistic": "Optimistic",
+    "pessimistic": "Pessimistic"
+  },
+  "metrics": {
+    "currentBalance": "Current Balance",
+    "lowestProjected": "Lowest Projected",
+    "lowestDate": "Lowest Balance Date",
+    "dailyBurn": "Daily Burn Rate",
+    "dailyIncome": "Daily Income",
+    "projectedEnd": "End Balance"
+  },
+  "range": {
+    "label": "Forecast Range",
+    "30": "30 Days",
+    "60": "60 Days",
+    "90": "90 Days"
+  },
+  "table": {
+    "title": "Expected Recurring Costs",
+    "name": "Name",
+    "amount": "Amount",
+    "frequency": "Frequency",
+    "nextDate": "Next Date",
+    "noSubscriptions": "No active subscriptions found"
+  },
+  "danger": {
+    "title": "Warnings",
+    "balanceBelowZero": "Balance projected to go negative on {{date}}",
+    "lowestPoint": "Lowest point: {{amount}} on {{date}}",
+    "noDanger": "No warnings — cash flow looks healthy"
+  }
+}

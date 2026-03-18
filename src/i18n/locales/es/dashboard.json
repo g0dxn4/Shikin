@@ -3,7 +3,7 @@
   "welcome": "Bienvenido a Valute",
   "empty": {
     "title": "Tus finanzas, a tu manera",
-    "description": "Comienza agregando una cuenta y tu primera transacci\u00f3n. O p\u00eddele ayuda a Val, tu asistente de IA.",
+    "description": "Comienza agregando una cuenta y tu primera transaccion. O pidele ayuda a Val, tu asistente de IA.",
     "addAccount": "Agregar Cuenta",
     "askAI": "Preguntar a Val"
   },
@@ -15,10 +15,28 @@
   },
   "charts": {
     "spending": "Gastos Mensuales",
-    "categories": "Por Categor\u00eda"
+    "categories": "Por Categoria"
   },
   "quickActions": {
-    "addTransaction": "Agregar Transacci\u00f3n",
+    "addTransaction": "Agregar Transaccion",
     "askVal": "Preguntar a Val"
+  },
+  "forecast": {
+    "title": "Proyeccion de Flujo de Caja",
+    "range30": "30d",
+    "range60": "60d",
+    "range90": "90d",
+    "projected": "Proyectado",
+    "optimistic": "Optimista",
+    "pessimistic": "Pesimista",
+    "viewFull": "Ver Proyeccion Completa",
+    "dangerWarning": "El balance puede caer por debajo de {{threshold}} el {{date}}",
+    "lowestBalance": "Balance Minimo",
+    "lowestDate": "El",
+    "dailyBurnRate": "Gasto Diario",
+    "dailyIncome": "Ingreso Diario",
+    "projectedEnd": "Balance Proyectado Final",
+    "noData": "Agrega transacciones para ver tu proyeccion de flujo de caja",
+    "healthy": "El flujo de caja se ve saludable para los proximos {{days}} dias"
   }
 }

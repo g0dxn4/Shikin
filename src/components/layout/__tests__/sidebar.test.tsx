@@ -57,12 +57,12 @@ describe('Sidebar', () => {
     expect(screen.queryByText('nav.dashboard')).not.toBeInTheDocument()
   })
 
-  it('renders 7 nav links + Settings link', () => {
+  it('renders 8 nav links + Settings link', () => {
     render(<Sidebar />)
 
     const links = screen.getAllByRole('link')
-    // 7 nav items + 1 settings
-    expect(links.length).toBe(8)
+    // 8 nav items + 1 settings
+    expect(links.length).toBe(9)
   })
 
   it('collapse button calls toggleSidebar', async () => {

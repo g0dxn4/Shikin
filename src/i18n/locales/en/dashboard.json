@@ -9,6 +9,7 @@
   },
   "cards": {
     "totalBalance": "Total Balance",
+    "totalBalanceConverted": "Total Balance (converted)",
     "monthlyIncome": "Monthly Income",
     "monthlyExpenses": "Monthly Expenses",
     "savings": "Savings Rate"

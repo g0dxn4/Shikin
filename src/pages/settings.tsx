@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { Check, Loader2, Eye, EyeOff, Zap, LogOut } from 'lucide-react'
+import { Check, Loader2, Eye, EyeOff, Zap, LogOut, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SUPPORTED_LANGUAGES, AI_PROVIDERS, PROVIDER_CATEGORIES } from '@/lib/constants'
 import type { ProviderInfo } from '@/lib/constants'
 import { useAIStore } from '@/stores/ai-store'
+import { useCurrencyStore } from '@/stores/currency-store'
+import { useAccountStore } from '@/stores/account-store'
+import { COMMON_CURRENCIES } from '@/lib/exchange-rate-service'
 import { fetchModels, isKeylessProvider, isStaticModelList, type ModelInfo } from '@/ai/models'
 import type { AIProvider } from '@/ai/agent'
 import { cn } from '@/lib/utils'
@@ -52,6 +55,18 @@ export function SettingsPage() {
   const [finnhubKey, setFinnhubKey] = useState('')
   const [isSavingDataKeys, setIsSavingDataKeys] = useState(false)
 
+  // Currency state
+  const {
+    preferredCurrency,
+    lastFetched: ratesLastFetched,
+    isLoading: ratesLoading,
+    rates,
+    loadRates,
+    refreshRates: doRefreshRates,
+    setPreferredCurrency,
+  } = useCurrencyStore()
+  const { accounts, fetch: fetchAccounts } = useAccountStore()
+
   // OAuth local state
   const [localAuthMode, setLocalAuthMode] = useState<'api_key' | 'oauth'>(authMode)
   const [localOAuthClientId, setLocalOAuthClientId] = useState(oauthClientId)
@@ -59,6 +74,8 @@ export function SettingsPage() {
 
   useEffect(() => {
     loadSettings()
+    loadRates()
+    fetchAccounts()
     load('settings.json')
       .then(async (store) => {
         setAlphaVantageKey(((await store.get('alpha_vantage_key')) as string) || '')
@@ -337,6 +354,95 @@ export function SettingsPage() {
             ))}
           </select>
         </div>
+      </section>
+
+      {/* Currency Settings */}
+      <section className="glass-card space-y-4 p-6">
+        <h2 className="font-heading text-lg font-semibold">{t('sections.currency')}</h2>
+
+        <div className="space-y-1">
+          <Label className="text-muted-foreground font-mono text-xs tracking-wider uppercase">
+            {t('currency.preferred')}
+          </Label>
+          <p className="text-muted-foreground text-xs">{t('currency.preferredDescription')}</p>
+          <select
+            value={preferredCurrency}
+            onChange={(e) => {
+              setPreferredCurrency(e.target.value)
+              toast.success(tCommon('status.success'))
+            }}
+            className="glass-input text-foreground mt-1 w-full max-w-xs px-3 py-2 text-sm"
+          >
+            {COMMON_CURRENCIES.map((code) => (
+              <option key={code} value={code}>
+                {code}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              try {
+                await doRefreshRates()
+                toast.success(tCommon('status.success'))
+              } catch {
+                toast.error(tCommon('status.error'))
+              }
+            }}
+            disabled={ratesLoading}
+          >
+            {ratesLoading ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <RefreshCw size={14} />
+            )}
+            {ratesLoading ? t('currency.refreshing') : t('currency.refreshRates')}
+          </Button>
+          <span className="text-muted-foreground font-mono text-[10px]">
+            {t('currency.lastUpdated')}: {ratesLastFetched || t('currency.never')}
+          </span>
+        </div>
+
+        {/* Show rates for user's account currencies */}
+        {(() => {
+          const accountCurrencies = [...new Set(accounts.map((a) => a.currency))]
+          const relevantRates = accountCurrencies
+            .filter((c) => c !== preferredCurrency)
+            .map((c) => {
+              const key = `${c}:${preferredCurrency}`
+              return { from: c, rate: rates[key] }
+            })
+            .filter((r) => r.rate != null)
+
+          if (relevantRates.length === 0) return null
+
+          return (
+            <div className="space-y-2">
+              <Label className="text-muted-foreground font-mono text-xs tracking-wider uppercase">
+                {t('currency.currentRates')}
+              </Label>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {relevantRates.map(({ from, rate }) => (
+                  <div
+                    key={from}
+                    className="flex items-center justify-between rounded-lg border border-white/[0.06] bg-[#0a0a0a] px-3 py-2"
+                  >
+                    <span className="font-mono text-xs">
+                      1 {from}
+                    </span>
+                    <span className="font-heading text-sm font-semibold text-primary">
+                      {rate!.toFixed(4)} {preferredCurrency}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
       </section>
 
       {/* AI Provider Section */}

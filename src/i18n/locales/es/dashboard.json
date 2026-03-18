@@ -9,6 +9,7 @@
   },
   "cards": {
     "totalBalance": "Balance Total",
+    "totalBalanceConverted": "Balance Total (convertido)",
     "monthlyIncome": "Ingresos Mensuales",
     "monthlyExpenses": "Gastos Mensuales",
     "savings": "Tasa de Ahorro"

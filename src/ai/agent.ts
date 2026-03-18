@@ -35,6 +35,7 @@ import {
   getFinancialNews,
   getCongressionalTrades,
   generatePortfolioReview,
+  convertCurrency,
 } from './tools'
 import { loadCoreMemories } from './memory-loader'
 
@@ -63,6 +64,7 @@ Capabilities:
 - Investment research: fetch financial news, check congressional trading disclosures
 - Notebook: read, write, and organize research notes, portfolio reviews, and educational content
 - Portfolio reviews: generate weekly performance summaries saved to the notebook
+- Currency conversion: convert amounts between currencies using live exchange rates from frankfurter.app
 
 Investment Intelligence (IMPORTANT — you are a patient teacher, not a trader):
 - You NEVER give buy/sell advice. Instead, frame analysis as "things to consider" or "worth researching."
@@ -228,6 +230,7 @@ export function createAgent(
       getFinancialNews,
       getCongressionalTrades,
       generatePortfolioReview,
+      convertCurrency,
     },
     instructions: BASE_SYSTEM_PROMPT,
     maxOutputTokens: 2048,

@@ -5,6 +5,7 @@
     "ai": "Proveedor de IA",
     "data": "Datos",
     "dataApis": "APIs de Datos del Mercado",
+    "currency": "Moneda",
     "about": "Acerca de"
   },
   "language": {
@@ -13,7 +14,17 @@
   },
   "currency": {
     "label": "Moneda Predeterminada",
-    "description": "Moneda usada para nuevas transacciones"
+    "description": "Moneda usada para nuevas transacciones",
+    "preferred": "Moneda Preferida",
+    "preferredDescription": "Todos los saldos y totales se mostrar\u00e1n en esta moneda",
+    "refreshRates": "Actualizar Tasas",
+    "refreshing": "Actualizando...",
+    "lastUpdated": "\u00daltima actualizaci\u00f3n",
+    "never": "Nunca",
+    "currentRates": "Tasas Actuales",
+    "noRates": "Sin tasas en cach\u00e9. Haz clic en actualizar.",
+    "rateFrom": "De",
+    "rateTo": "Tasa"
   },
   "ai": {
     "provider": "Proveedor",

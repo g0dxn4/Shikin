@@ -5,6 +5,7 @@ import { ErrorBoundary } from '@/components/error-boundary'
 import { AppShell } from '@/components/layout/app-shell'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { useAIStore } from '@/stores/ai-store'
+import { useCurrencyStore } from '@/stores/currency-store'
 import { initPriceScheduler, stopPriceScheduler } from '@/lib/price-scheduler'
 import '@/i18n'
 import '@/styles/globals.css'
@@ -31,12 +32,15 @@ const OAuthCallback = lazy(() =>
 
 export default function App() {
   const loadSettings = useAIStore((s) => s.loadSettings)
+  const autoRefreshRates = useCurrencyStore((s) => s.autoRefreshIfStale)
 
   useEffect(() => {
     loadSettings()
     initPriceScheduler()
+    // Auto-refresh exchange rates if stale (>24h)
+    autoRefreshRates().catch(console.warn)
     return () => stopPriceScheduler()
-  }, [loadSettings])
+  }, [loadSettings, autoRefreshRates])
 
   return (
     <ErrorBoundary>

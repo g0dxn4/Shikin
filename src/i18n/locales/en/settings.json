@@ -5,6 +5,7 @@
     "ai": "AI Provider",
     "data": "Data",
     "dataApis": "Market Data APIs",
+    "currency": "Currency",
     "about": "About"
   },
   "language": {
@@ -13,7 +14,17 @@
   },
   "currency": {
     "label": "Default Currency",
-    "description": "Currency used for new transactions"
+    "description": "Currency used for new transactions",
+    "preferred": "Preferred Currency",
+    "preferredDescription": "All balances and totals will be displayed in this currency",
+    "refreshRates": "Refresh Rates",
+    "refreshing": "Refreshing...",
+    "lastUpdated": "Last updated",
+    "never": "Never",
+    "currentRates": "Current Rates",
+    "noRates": "No rates cached. Click refresh to fetch.",
+    "rateFrom": "From",
+    "rateTo": "Rate"
   },
   "ai": {
     "provider": "Provider",

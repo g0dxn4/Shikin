@@ -263,6 +263,22 @@ CREATE TABLE IF NOT EXISTS ai_memories (
 CREATE INDEX IF NOT EXISTS idx_ai_memories_category ON ai_memories(category);
 `
 
+const MIGRATION_004 = `
+CREATE TABLE IF NOT EXISTS category_rules (
+  id TEXT PRIMARY KEY,
+  pattern TEXT NOT NULL,
+  category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+  subcategory_id TEXT REFERENCES subcategories(id) ON DELETE SET NULL,
+  confidence REAL NOT NULL DEFAULT 1.0,
+  hit_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_category_rules_pattern_category ON category_rules(pattern, category_id);
+CREATE INDEX IF NOT EXISTS idx_category_rules_pattern ON category_rules(pattern);
+`
+
 // --- Parameter conversion ---
 // The codebase uses two param styles:
 //   - $1, $2, $3 (tauri-plugin-sql positional) used in AI tools
@@ -358,6 +374,16 @@ function runMigrations(database: SqlJsDatabase): void {
       // Column may already exist
     }
     database.run("INSERT INTO _migrations (id, name) VALUES (3, '003_credit_cards')")
+  }
+
+  if (!applied.has('004_category_rules')) {
+    const statements = MIGRATION_004.split(';')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+    for (const s of statements) {
+      database.run(s)
+    }
+    database.run("INSERT INTO _migrations (id, name) VALUES (4, '004_category_rules')")
   }
 }
 

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { query, execute } from '@/lib/database'
 import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
+import { learnFromTransaction } from '@/lib/auto-categorize'
 import { useAccountStore } from './account-store'
 import type { Transaction } from '@/types/database'
 import type { TransactionType, CurrencyCode } from '@/types/common'
@@ -84,6 +85,11 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       now,
       data.accountId,
     ])
+
+    // Learn categorization from this transaction
+    if (data.categoryId && data.description) {
+      learnFromTransaction(data.description, data.categoryId).catch(() => {})
+    }
 
     await get().fetch()
     await useAccountStore.getState().fetch()

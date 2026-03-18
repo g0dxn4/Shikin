@@ -1,9 +1,10 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
+import { Check, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
@@ -16,7 +17,9 @@ import {
 } from '@/components/ui/select'
 import { useAccountStore } from '@/stores/account-store'
 import { useCategoryStore } from '@/stores/category-store'
+import { useCategorizationStore } from '@/stores/categorization-store'
 import { fromCentavos } from '@/lib/money'
+import type { CategorySuggestion } from '@/lib/auto-categorize'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 
 const TRANSACTION_TYPES = ['expense', 'income', 'transfer'] as const
@@ -45,6 +48,11 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
   const { t: tCommon } = useTranslation('common')
   const { accounts, fetch: fetchAccounts } = useAccountStore()
   const { categories, fetch: fetchCategories } = useCategoryStore()
+  const { suggestCategory } = useCategorizationStore()
+
+  const [suggestion, setSuggestion] = useState<CategorySuggestion | null>(null)
+  const [suggestionDismissed, setSuggestionDismissed] = useState(false)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     fetchAccounts()
@@ -75,6 +83,7 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
   const typeValue = watch('type')
   const accountIdValue = watch('accountId')
   const categoryIdValue = watch('categoryId')
+  const descriptionValue = watch('description')
 
   const filteredCategories = categories.filter((c) => c.type === typeValue)
 
@@ -85,6 +94,57 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
       setValue('currency', selectedAccount.currency)
     }
   }, [selectedAccount, setValue])
+
+  // Debounced auto-categorization suggestion
+  const fetchSuggestion = useCallback(
+    async (desc: string) => {
+      if (!desc || desc.length < 2) {
+        setSuggestion(null)
+        return
+      }
+      try {
+        const result = await suggestCategory(desc)
+        setSuggestion(result)
+        setSuggestionDismissed(false)
+      } catch {
+        setSuggestion(null)
+      }
+    },
+    [suggestCategory]
+  )
+
+  useEffect(() => {
+    // Don't suggest when editing an existing transaction
+    if (transaction) return
+
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      fetchSuggestion(descriptionValue)
+    }, 300)
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [descriptionValue, fetchSuggestion, transaction])
+
+  // Find suggested category name for display
+  const suggestedCategory =
+    suggestion && !suggestionDismissed
+      ? categories.find((c) => c.id === suggestion.category_id)
+      : null
+
+  // Don't show suggestion if category is already set to the suggested one
+  const showSuggestion = suggestedCategory && categoryIdValue !== suggestion?.category_id
+
+  const handleAcceptSuggestion = () => {
+    if (!suggestion) return
+    setValue('categoryId', suggestion.category_id)
+    setSuggestion(null)
+  }
+
+  const handleDismissSuggestion = () => {
+    setSuggestionDismissed(true)
+  }
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
@@ -183,6 +243,40 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
               ))}
             </SelectContent>
           </Select>
+
+          {/* Auto-categorization suggestion chip */}
+          {showSuggestion && (
+            <div className="animate-fade-in flex items-center gap-1.5 pt-1">
+              <span className="text-muted-foreground text-[11px]">
+                {t('form.suggested')}:
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-white/[0.04] px-2.5 py-0.5 text-[11px]">
+                {suggestedCategory.color && (
+                  <span
+                    className="inline-block h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: suggestedCategory.color }}
+                  />
+                )}
+                <span className="text-foreground">{suggestedCategory.name}</span>
+                <button
+                  type="button"
+                  onClick={handleAcceptSuggestion}
+                  className="text-success hover:text-success/80 ml-0.5 transition-colors"
+                  title={t('form.acceptSuggestion')}
+                >
+                  <Check size={12} />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDismissSuggestion}
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                  title={t('form.dismissSuggestion')}
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            </div>
+          )}
         </div>
       </div>
 

@@ -16,7 +16,22 @@
     "accountPlaceholder": "Selecciona una cuenta",
     "date": "Fecha",
     "notes": "Notas",
-    "notesPlaceholder": "Notas opcionales..."
+    "notesPlaceholder": "Notas opcionales...",
+    "suggested": "Sugerido",
+    "acceptSuggestion": "Aceptar sugerencia",
+    "dismissSuggestion": "Descartar sugerencia"
+  },
+  "rules": {
+    "title": "Reglas de Categoría",
+    "description": "Reglas de auto-categorización aprendidas de tus transacciones. Estas ayudan a sugerir categorías para nuevas transacciones.",
+    "pattern": "Patrón",
+    "category": "Categoría",
+    "hits": "Usos",
+    "actions": "Acciones",
+    "delete": "Eliminar",
+    "deleteConfirm": "¿Eliminar esta regla?",
+    "empty": "Aún no hay reglas aprendidas. Las reglas se crean automáticamente al categorizar transacciones.",
+    "confidence": "Confianza"
   },
   "types": {
     "expense": "Gasto",

@@ -16,7 +16,22 @@
     "accountPlaceholder": "Select an account",
     "date": "Date",
     "notes": "Notes",
-    "notesPlaceholder": "Optional notes..."
+    "notesPlaceholder": "Optional notes...",
+    "suggested": "Suggested",
+    "acceptSuggestion": "Accept suggestion",
+    "dismissSuggestion": "Dismiss suggestion"
+  },
+  "rules": {
+    "title": "Category Rules",
+    "description": "Auto-categorization rules learned from your transactions. These help suggest categories for new transactions.",
+    "pattern": "Pattern",
+    "category": "Category",
+    "hits": "Hits",
+    "actions": "Actions",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this rule?",
+    "empty": "No rules learned yet. Rules are created automatically as you categorize transactions.",
+    "confidence": "Confidence"
   },
   "types": {
     "expense": "Expense",

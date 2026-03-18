@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { Check, Loader2, Eye, EyeOff, Zap, LogOut } from 'lucide-react'
+import { Check, Loader2, Eye, EyeOff, Zap, LogOut, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SUPPORTED_LANGUAGES, AI_PROVIDERS, PROVIDER_CATEGORIES } from '@/lib/constants'
 import type { ProviderInfo } from '@/lib/constants'
 import { useAIStore } from '@/stores/ai-store'
+import { useCategorizationStore } from '@/stores/categorization-store'
 import { fetchModels, isKeylessProvider, isStaticModelList, type ModelInfo } from '@/ai/models'
 import type { AIProvider } from '@/ai/agent'
 import { cn } from '@/lib/utils'
@@ -19,6 +20,7 @@ import { createOpenAICodexOAuthConfig, extractAccountId } from '@/lib/oauth-prov
 export function SettingsPage() {
   const { t, i18n } = useTranslation('settings')
   const { t: tCommon } = useTranslation('common')
+  const { t: tTransactions } = useTranslation('transactions')
   const {
     provider,
     apiKey,
@@ -48,6 +50,8 @@ export function SettingsPage() {
   const [testResult, setTestResult] = useState<'success' | 'failed' | null>(null)
   const modelDropdownRef = useRef<HTMLDivElement>(null)
 
+  const { rules, isLoading: isLoadingRules, loadRules, deleteRule } = useCategorizationStore()
+
   const [alphaVantageKey, setAlphaVantageKey] = useState('')
   const [finnhubKey, setFinnhubKey] = useState('')
   const [isSavingDataKeys, setIsSavingDataKeys] = useState(false)
@@ -59,6 +63,7 @@ export function SettingsPage() {
 
   useEffect(() => {
     loadSettings()
+    loadRules()
     load('settings.json')
       .then(async (store) => {
         setAlphaVantageKey(((await store.get('alpha_vantage_key')) as string) || '')
@@ -660,6 +665,72 @@ export function SettingsPage() {
               {isSaving ? <Loader2 size={14} className="animate-spin" /> : null}
               {isSaving ? '...' : tCommon('actions.save')}
             </Button>
+          </div>
+        )}
+      </section>
+
+      {/* Category Rules */}
+      <section className="glass-card space-y-4 p-6">
+        <h2 className="font-heading text-lg font-semibold">{t('sections.categoryRules')}</h2>
+        <p className="text-muted-foreground text-xs">
+          {tTransactions('rules.description')}
+        </p>
+
+        {isLoadingRules ? (
+          <div className="flex items-center gap-2 py-4">
+            <Loader2 size={14} className="animate-spin" />
+            <span className="text-muted-foreground text-sm">Loading...</span>
+          </div>
+        ) : rules.length === 0 ? (
+          <p className="text-muted-foreground py-4 text-sm">
+            {tTransactions('rules.empty')}
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-muted-foreground border-b border-white/[0.06] text-left font-mono text-xs uppercase tracking-wider">
+                  <th className="pb-2 pr-4">{tTransactions('rules.pattern')}</th>
+                  <th className="pb-2 pr-4">{tTransactions('rules.category')}</th>
+                  <th className="pb-2 pr-4">{tTransactions('rules.hits')}</th>
+                  <th className="pb-2">{tTransactions('rules.actions')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rules.map((rule) => (
+                  <tr key={rule.id} className="border-b border-white/[0.03]">
+                    <td className="py-2 pr-4 font-mono text-xs">{rule.pattern}</td>
+                    <td className="py-2 pr-4">
+                      <span className="inline-flex items-center gap-1.5">
+                        {rule.category_color && (
+                          <span
+                            className="inline-block h-2 w-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: rule.category_color }}
+                          />
+                        )}
+                        <span className="text-xs">{rule.category_name ?? rule.category_id}</span>
+                      </span>
+                    </td>
+                    <td className="text-muted-foreground py-2 pr-4 font-mono text-xs">
+                      {rule.hit_count}
+                    </td>
+                    <td className="py-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          deleteRule(rule.id)
+                          toast.success(tTransactions('rules.delete'))
+                        }}
+                        className="text-muted-foreground hover:text-destructive transition-colors"
+                        title={tTransactions('rules.delete')}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </section>

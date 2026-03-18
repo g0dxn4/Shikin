@@ -179,3 +179,14 @@ export interface ExtensionData {
   created_at: DateTimeStr
   updated_at: DateTimeStr
 }
+
+export interface CategoryRule {
+  id: ULID
+  pattern: string
+  category_id: ULID
+  subcategory_id: ULID | null
+  confidence: number
+  hit_count: number
+  created_at: DateTimeStr
+  updated_at: DateTimeStr
+}

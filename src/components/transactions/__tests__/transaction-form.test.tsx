@@ -35,6 +35,16 @@ vi.mock('@/stores/category-store', () => ({
   }),
 }))
 
+vi.mock('@/stores/categorization-store', () => ({
+  useCategorizationStore: () => ({
+    suggestCategory: vi.fn().mockResolvedValue(null),
+    rules: [],
+    isLoading: false,
+    loadRules: vi.fn(),
+    deleteRule: vi.fn(),
+  }),
+}))
+
 describe('TransactionForm', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -153,8 +163,7 @@ describe('TransactionForm', () => {
           amount: 25.5,
           description: 'Groceries',
           type: 'expense',
-        }),
-        expect.anything()
+        })
       )
     })
   })

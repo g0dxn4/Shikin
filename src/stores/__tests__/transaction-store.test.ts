@@ -10,6 +10,16 @@ vi.mock('@/lib/ulid', () => ({
   generateId: vi.fn().mockReturnValue('01TESTTX000000000000000000'),
 }))
 
+vi.mock('@/lib/split-service', () => ({
+  getSplitTransactionIds: vi.fn().mockResolvedValue(new Set()),
+  getSplits: vi.fn().mockResolvedValue([]),
+  createSplits: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock('@/lib/auto-categorize', () => ({
+  learnFromTransaction: vi.fn().mockResolvedValue(undefined),
+}))
+
 // Mock account store to prevent cross-store fetch issues
 const mockAccountFetch = vi.fn()
 vi.mock('../account-store', () => ({

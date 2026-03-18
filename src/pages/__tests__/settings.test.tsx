@@ -25,6 +25,50 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
 
+vi.mock('@/stores/currency-store', () => ({
+  useCurrencyStore: () => ({
+    preferredCurrency: 'USD',
+    lastFetched: null,
+    isLoading: false,
+    rates: {},
+    loadRates: vi.fn(),
+    refreshRates: vi.fn(),
+    setPreferredCurrency: vi.fn(),
+  }),
+}))
+
+vi.mock('@/stores/account-store', () => ({
+  useAccountStore: () => ({
+    accounts: [],
+    fetch: vi.fn(),
+  }),
+}))
+
+vi.mock('@/stores/categorization-store', () => ({
+  useCategorizationStore: () => ({
+    rules: [],
+    isLoading: false,
+    loadRules: vi.fn(),
+    deleteRule: vi.fn(),
+  }),
+}))
+
+vi.mock('@/lib/exchange-rate-service', () => ({
+  COMMON_CURRENCIES: ['USD', 'EUR', 'GBP'],
+}))
+
+vi.mock('@/lib/database', () => ({
+  query: vi.fn(),
+  execute: vi.fn(),
+  runInTransaction: vi.fn(),
+  exportDatabaseSnapshot: vi.fn(),
+  importDatabaseSnapshot: vi.fn(),
+}))
+
+vi.mock('@/components/ThemeSettings', () => ({
+  ThemeSettings: () => <div data-testid="theme-settings">Theme Settings</div>,
+}))
+
 vi.mock('@/lib/storage', () => ({
   load: vi.fn().mockResolvedValue({
     get: vi.fn().mockResolvedValue(''),

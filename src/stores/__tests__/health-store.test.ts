@@ -129,8 +129,9 @@ describe('health-store', () => {
     it('resets isLoading on error', async () => {
       mockCalculateHealthScore.mockRejectedValueOnce(new Error('fail'))
 
-      await expect(useHealthStore.getState().calculateScore()).rejects.toThrow('fail')
+      await useHealthStore.getState().calculateScore()
       expect(useHealthStore.getState().isLoading).toBe(false)
+      expect(useHealthStore.getState().error).toBe('fail')
     })
   })
 

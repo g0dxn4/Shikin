@@ -68,6 +68,7 @@ vi.mock('@/stores/account-store', () => ({
   useAccountStore: () => ({
     accounts: [],
     fetch: vi.fn(),
+    fetchAccounts: vi.fn(),
   }),
 }))
 
@@ -84,6 +85,9 @@ vi.mock('@/stores/transaction-store', () => ({
     isLoading: mockIsLoading,
     fetch: mockFetch,
     remove: mockRemove,
+    isSplit: vi.fn().mockReturnValue(false),
+    splitTransactionIds: new Set(),
+    getSplits: vi.fn().mockResolvedValue([]),
   }),
 }))
 
@@ -148,8 +152,8 @@ describe('Transactions', () => {
 
     render(<Transactions />)
 
-    expect(screen.getByText('dateHeaders.today')).toBeInTheDocument()
-    expect(screen.getByText('dateHeaders.yesterday')).toBeInTheDocument()
+    expect(screen.getByText('Today')).toBeInTheDocument()
+    expect(screen.getByText('Yesterday')).toBeInTheDocument()
   })
 
   it('renders transaction rows with description and colored amount', () => {

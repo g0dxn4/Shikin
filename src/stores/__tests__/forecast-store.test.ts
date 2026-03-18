@@ -16,6 +16,7 @@ describe('forecast-store', () => {
     useForecastStore.setState({
       forecast: null,
       isLoading: false,
+      error: null,
       selectedRange: 30,
       dangerThreshold: 0,
     })
@@ -62,8 +63,9 @@ describe('forecast-store', () => {
     it('resets isLoading on error', async () => {
       mockGenerateForecast.mockRejectedValueOnce(new Error('Service error'))
 
-      await expect(useForecastStore.getState().generateForecast()).rejects.toThrow('Service error')
+      await useForecastStore.getState().generateForecast()
       expect(useForecastStore.getState().isLoading).toBe(false)
+      expect(useForecastStore.getState().error).toBe('Service error')
     })
   })
 

@@ -43,6 +43,38 @@ let mockIsLoading = false
 vi.mock('@/stores/ui-store', () => ({
   useUIStore: () => ({
     openTransactionDialog: mockOpenTransactionDialog,
+    recurringDialogOpen: false,
+    editingRecurringId: null,
+    openRecurringDialog: vi.fn(),
+    closeRecurringDialog: vi.fn(),
+  }),
+}))
+
+vi.mock('@/stores/recurring-store', () => ({
+  useRecurringStore: () => ({
+    rules: [],
+    isLoading: false,
+    fetch: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    remove: vi.fn(),
+    toggleActive: vi.fn(),
+    getById: vi.fn(),
+    materializeTransactions: vi.fn(),
+  }),
+}))
+
+vi.mock('@/stores/account-store', () => ({
+  useAccountStore: () => ({
+    accounts: [],
+    fetch: vi.fn(),
+  }),
+}))
+
+vi.mock('@/stores/category-store', () => ({
+  useCategoryStore: () => ({
+    categories: [],
+    fetch: vi.fn(),
   }),
 }))
 

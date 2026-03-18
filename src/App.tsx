@@ -5,6 +5,7 @@ import { ErrorBoundary } from '@/components/error-boundary'
 import { AppShell } from '@/components/layout/app-shell'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { useAIStore } from '@/stores/ai-store'
+import { useRecurringStore } from '@/stores/recurring-store'
 import { initPriceScheduler, stopPriceScheduler } from '@/lib/price-scheduler'
 import '@/i18n'
 import '@/styles/globals.css'
@@ -31,12 +32,17 @@ const OAuthCallback = lazy(() =>
 
 export default function App() {
   const loadSettings = useAIStore((s) => s.loadSettings)
+  const materializeTransactions = useRecurringStore((s) => s.materializeTransactions)
 
   useEffect(() => {
     loadSettings()
     initPriceScheduler()
+    // Auto-materialize due recurring transactions on startup
+    materializeTransactions().catch((err) =>
+      console.warn('[Recurring] Failed to materialize transactions:', err)
+    )
     return () => stopPriceScheduler()
-  }, [loadSettings])
+  }, [loadSettings, materializeTransactions])
 
   return (
     <ErrorBoundary>

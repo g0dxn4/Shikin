@@ -290,6 +290,31 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_category_rules_pattern_category ON categor
 CREATE INDEX IF NOT EXISTS idx_category_rules_pattern ON category_rules(pattern);
 `
 
+const MIGRATION_005 = `
+CREATE TABLE IF NOT EXISTS recurring_rules (
+  id TEXT PRIMARY KEY,
+  description TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  type TEXT NOT NULL CHECK (type IN ('expense', 'income', 'transfer')),
+  frequency TEXT NOT NULL CHECK (frequency IN ('daily', 'weekly', 'biweekly', 'monthly', 'quarterly', 'yearly')),
+  next_date TEXT NOT NULL,
+  end_date TEXT,
+  account_id TEXT NOT NULL REFERENCES accounts(id),
+  to_account_id TEXT REFERENCES accounts(id),
+  category_id TEXT REFERENCES categories(id),
+  subcategory_id TEXT REFERENCES subcategories(id),
+  tags TEXT DEFAULT '',
+  notes TEXT,
+  active INTEGER DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_recurring_rules_next_date ON recurring_rules(next_date);
+CREATE INDEX IF NOT EXISTS idx_recurring_rules_active ON recurring_rules(active);
+`
+
+>>>>>>> worktree-agent-a73eb6aa
 // --- Parameter conversion ---
 // The codebase uses two param styles:
 //   - $1, $2, $3 (tauri-plugin-sql positional) used in AI tools
@@ -382,6 +407,16 @@ function runMigrations(database: SqlJsDatabase): void {
       database.run(s)
     }
     database.run("INSERT INTO _migrations (id, name) VALUES (4, '004_category_rules')")
+  }
+
+  if (!applied.has('005_recurring_rules')) {
+    const statements = MIGRATION_005.split(';')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+    for (const s of statements) {
+      database.run(s)
+    }
+    database.run("INSERT INTO _migrations (id, name) VALUES (5, '005_recurring_rules')")
   }
 }
 

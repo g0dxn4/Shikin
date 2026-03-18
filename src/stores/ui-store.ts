@@ -26,6 +26,11 @@ interface UIState {
   editingInvestmentId: string | null
   openInvestmentDialog: (id?: string) => void
   closeInvestmentDialog: () => void
+
+  recurringDialogOpen: boolean
+  editingRecurringId: string | null
+  openRecurringDialog: (id?: string) => void
+  closeRecurringDialog: () => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -56,4 +61,10 @@ export const useUIStore = create<UIState>((set) => ({
   openInvestmentDialog: (id) =>
     set({ investmentDialogOpen: true, editingInvestmentId: id ?? null }),
   closeInvestmentDialog: () => set({ investmentDialogOpen: false, editingInvestmentId: null }),
+
+  recurringDialogOpen: false,
+  editingRecurringId: null,
+  openRecurringDialog: (id) =>
+    set({ recurringDialogOpen: true, editingRecurringId: id ?? null }),
+  closeRecurringDialog: () => set({ recurringDialogOpen: false, editingRecurringId: null }),
 }))

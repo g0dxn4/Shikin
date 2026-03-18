@@ -37,6 +37,8 @@ import {
   generatePortfolioReview,
   manageCategoryRules,
   getSpendingAnomalies,
+  manageRecurringTransaction,
+  materializeRecurring,
 } from './tools'
 import { loadCoreMemories } from './memory-loader'
 
@@ -62,6 +64,7 @@ Capabilities:
 - Net worth: calculate total net worth including investments
 - Investment management: add, update, and delete investment holdings
 - Bill reminders: see upcoming bills from credit cards, subscriptions, and recurring expenses
+- Recurring transactions: create, manage, and auto-generate recurring expense/income rules (rent, salary, subscriptions, etc.)
 - Investment research: fetch financial news, check congressional trading disclosures
 - Notebook: read, write, and organize research notes, portfolio reviews, and educational content
 - Portfolio reviews: generate weekly performance summaries saved to the notebook
@@ -234,6 +237,8 @@ export function createAgent(
       generatePortfolioReview,
       manageCategoryRules,
       getSpendingAnomalies,
+      manageRecurringTransaction,
+      materializeRecurring,
     },
     instructions: BASE_SYSTEM_PROMPT,
     maxOutputTokens: 2048,

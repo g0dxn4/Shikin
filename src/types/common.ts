@@ -33,3 +33,5 @@ export type InvestmentType = 'stock' | 'etf' | 'crypto' | 'bond' | 'mutual_fund'
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool'
 
 export type MemoryCategory = 'preference' | 'fact' | 'goal' | 'behavior' | 'context'
+
+export type RecurringFrequency = 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly'

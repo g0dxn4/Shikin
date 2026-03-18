@@ -57,5 +57,47 @@
   },
   "viewAll": "Ver Todas",
   "recentTransactions": "Transacciones Recientes",
-  "addQuick": "Agregar Transacción"
+  "addQuick": "Agregar Transacción",
+  "recurring": {
+    "title": "Recurrentes",
+    "addRule": "Agregar Regla",
+    "editRule": "Editar Regla",
+    "deleteRule": "Eliminar Regla",
+    "deleteConfirm": "¿Estás seguro de que deseas eliminar esta regla recurrente? Las transacciones futuras ya no se generarán. Esta acción no se puede deshacer.",
+    "empty": {
+      "title": "Sin reglas recurrentes",
+      "description": "Configura transacciones recurrentes para renta, salario, suscripciones y otros pagos regulares."
+    },
+    "form": {
+      "description": "Descripción",
+      "descriptionPlaceholder": "ej. Renta mensual",
+      "amount": "Monto",
+      "frequency": "Frecuencia",
+      "nextDate": "Próxima Fecha",
+      "endDate": "Fecha Final",
+      "endDatePlaceholder": "Opcional"
+    },
+    "frequencies": {
+      "daily": "Diario",
+      "weekly": "Semanal",
+      "biweekly": "Quincenal",
+      "monthly": "Mensual",
+      "quarterly": "Trimestral",
+      "yearly": "Anual"
+    },
+    "active": "Activa",
+    "paused": "Pausada",
+    "nextOccurrence": "Próxima",
+    "toast": {
+      "created": "Regla recurrente creada",
+      "updated": "Regla recurrente actualizada",
+      "deleted": "Regla recurrente eliminada",
+      "toggled": "Regla recurrente actualizada",
+      "error": "Algo salió mal"
+    }
+  },
+  "tabs": {
+    "transactions": "Transacciones",
+    "recurring": "Recurrentes"
+  }
 }

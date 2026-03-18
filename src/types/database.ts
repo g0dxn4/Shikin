@@ -11,6 +11,7 @@ import type {
   InvestmentType,
   MessageRole,
   MemoryCategory,
+  RecurringFrequency,
 } from './common'
 
 export interface Account {
@@ -152,6 +153,25 @@ export interface AIMemory {
   content: string
   importance: number
   last_accessed_at: DateTimeStr
+  created_at: DateTimeStr
+  updated_at: DateTimeStr
+}
+
+export interface RecurringRule {
+  id: ULID
+  description: string
+  amount: Money
+  type: TransactionType
+  frequency: RecurringFrequency
+  next_date: DateStr
+  end_date: DateStr | null
+  account_id: ULID
+  to_account_id: ULID | null
+  category_id: ULID | null
+  subcategory_id: ULID | null
+  tags: string
+  notes: string | null
+  active: number
   created_at: DateTimeStr
   updated_at: DateTimeStr
 }

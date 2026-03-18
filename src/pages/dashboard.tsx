@@ -17,6 +17,7 @@ import {
   DollarSign,
   X,
   ShieldAlert,
+  Heart,
 } from 'lucide-react'
 import dayjs from 'dayjs'
 import {
@@ -41,6 +42,8 @@ import { useForecastStore } from '@/stores/forecast-store'
 import { useGoalStore } from '@/stores/goal-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import type { AnomalyType, AnomalySeverity } from '@/lib/anomaly-service'
+import { useHealthStore } from '@/stores/health-store'
+import type { SubScore } from '@/lib/health-score-service'
 import { formatMoney, fromCentavos } from '@/lib/money'
 
 const CHART_COLORS = [
@@ -63,6 +66,7 @@ export function Dashboard() {
   const { transactions, isLoading: txLoading, fetch: fetchTransactions } = useTransactionStore()
   const { isLoading: anomalyLoading, scanForAnomalies, getActiveAnomalies, dismissAnomaly } = useAnomalyStore()
   const { goals, fetch: fetchGoals } = useGoalStore()
+  const { score: healthScore, isLoading: healthLoading, calculateScore } = useHealthStore()
 
   useEffect(() => {
     fetchAccounts()
@@ -78,6 +82,13 @@ export function Dashboard() {
   }, [transactions.length, txLoading, scanForAnomalies])
 
   const activeAnomalies = getActiveAnomalies()
+
+  // Calculate health score after data loads
+  useEffect(() => {
+    if (!accountsLoading && !txLoading && accounts.length > 0) {
+      calculateScore()
+    }
+  }, [accountsLoading, txLoading, accounts.length, calculateScore])
 
   const totalBalance = useMemo(() => accounts.reduce((sum, a) => sum + a.balance, 0), [accounts])
 
@@ -395,6 +406,11 @@ export function Dashboard() {
 
           {/* Cash Flow Forecast Widget */}
           {transactions.length > 0 && <ForecastWidget />}
+
+          {/* Financial Health Score */}
+          {(healthScore || healthLoading) && (
+            <HealthScoreWidget score={healthScore} isLoading={healthLoading} />
+          )}
 
 
           {/* Accounts preview */}
@@ -849,6 +865,162 @@ function AlertsSection({
           )
         })}
       </div>
+    </div>
+  )
+}
+
+function HealthScoreGauge({ score, grade }: { score: number; grade: string }) {
+  const radius = 54
+  const circumference = 2 * Math.PI * radius
+  const strokeDashoffset = circumference - (score / 100) * circumference
+
+  const getColor = (s: number) => {
+    if (s >= 80) return '#22c55e'
+    if (s >= 60) return '#f59e0b'
+    if (s >= 40) return '#f97316'
+    return '#ef4444'
+  }
+
+  const color = getColor(score)
+
+  return (
+    <div className="relative flex h-36 w-36 items-center justify-center">
+      <svg className="h-full w-full -rotate-90" viewBox="0 0 120 120">
+        {/* Background ring */}
+        <circle
+          cx="60"
+          cy="60"
+          r={radius}
+          fill="none"
+          stroke="rgba(255,255,255,0.06)"
+          strokeWidth="8"
+        />
+        {/* Score ring */}
+        <circle
+          cx="60"
+          cy="60"
+          r={radius}
+          fill="none"
+          stroke={color}
+          strokeWidth="8"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={strokeDashoffset}
+          className="transition-all duration-1000 ease-out"
+        />
+      </svg>
+      <div className="absolute flex flex-col items-center">
+        <span className="font-heading text-3xl font-bold" style={{ color }}>
+          {score}
+        </span>
+        <span
+          className="font-mono text-xs font-semibold tracking-wider"
+          style={{ color }}
+        >
+          {grade}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function SubScoreBar({ subscore }: { subscore: SubScore }) {
+  const getColor = (s: number) => {
+    if (s >= 80) return '#22c55e'
+    if (s >= 60) return '#f59e0b'
+    if (s >= 40) return '#f97316'
+    return '#ef4444'
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-white/70">{subscore.name}</span>
+        <span className="font-mono text-xs font-semibold" style={{ color: getColor(subscore.score) }}>
+          {subscore.score}
+        </span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/[0.06]">
+        <div
+          className="h-full rounded-full transition-all duration-700 ease-out"
+          style={{
+            width: `${subscore.score}%`,
+            backgroundColor: getColor(subscore.score),
+          }}
+        />
+      </div>
+    </div>
+  )
+}
+
+function HealthScoreWidget({
+  score,
+  isLoading,
+}: {
+  score: ReturnType<typeof useHealthStore.getState>['score']
+  isLoading: boolean
+}) {
+  const { t } = useTranslation('dashboard')
+
+  if (isLoading || !score) {
+    return (
+      <div className="glass-card flex items-center justify-center p-8">
+        <div className="flex items-center gap-3">
+          <Heart size={16} className="text-primary animate-pulse" />
+          <span className="text-muted-foreground text-sm">{t('healthScore.calculating')}</span>
+        </div>
+      </div>
+    )
+  }
+
+  const trendIcon =
+    score.trend === 'improving' ? (
+      <TrendingUp size={12} className="text-success" />
+    ) : score.trend === 'declining' ? (
+      <TrendingDown size={12} className="text-destructive" />
+    ) : null
+
+  return (
+    <div className="glass-card p-5">
+      <div className="mb-4 flex items-center gap-2">
+        <Heart size={16} className="text-primary" />
+        <h3 className="font-heading text-sm font-semibold">{t('healthScore.title')}</h3>
+        {trendIcon && (
+          <Badge variant="secondary" className="ml-auto flex items-center gap-1 text-[10px]">
+            {trendIcon}
+            {t(`healthScore.trending.${score.trend}`)}
+          </Badge>
+        )}
+      </div>
+
+      <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-start">
+        {/* Gauge */}
+        <div className="shrink-0">
+          <HealthScoreGauge score={score.overall} grade={score.grade} />
+        </div>
+
+        {/* Sub-scores */}
+        <div className="flex-1 space-y-3">
+          {score.subscores.map((sub) => (
+            <SubScoreBar key={sub.name} subscore={sub} />
+          ))}
+        </div>
+      </div>
+
+      {/* Top tip */}
+      {score.tips[0] && (
+        <div className="mt-4 rounded-lg border border-white/[0.06] bg-white/[0.02] px-4 py-3">
+          <div className="flex items-start gap-2">
+            <Sparkles size={14} className="text-primary mt-0.5 shrink-0" />
+            <div>
+              <p className="text-[10px] font-semibold tracking-wider uppercase text-white/40">
+                {t('healthScore.topTip')}
+              </p>
+              <p className="mt-0.5 text-sm text-white/80">{score.tips[0]}</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

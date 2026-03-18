@@ -24,6 +24,7 @@
   "quickActions": {
     "addTransaction": "Agregar Transacción",
     "askVal": "Preguntar a Val"
+<<<<<<< HEAD
   },
   "alerts": {
     "title": "Alertas",
@@ -60,5 +61,24 @@
     "projectedEnd": "Balance Proyectado Final",
     "noData": "Agrega transacciones para ver tu proyección de flujo de caja",
     "healthy": "El flujo de caja se ve saludable para los próximos {{days}} días"
+  },
+  "healthScore": {
+    "title": "Salud Financiera",
+    "grade": "Calificación",
+    "trending": {
+      "improving": "Mejorando",
+      "declining": "Bajando",
+      "stable": "Estable"
+    },
+    "topTip": "Consejo Principal",
+    "subscores": {
+      "savingsRate": "Tasa de Ahorro",
+      "budgetAdherence": "Cumplimiento de Presupuesto",
+      "debtToIncome": "Deuda vs Ingresos",
+      "emergencyFund": "Fondo de Emergencia",
+      "spendingConsistency": "Consistencia de Gastos"
+    },
+    "calculating": "Calculando tu puntaje...",
+    "noData": "Agrega transacciones para desbloquear tu puntaje de salud"
   }
 }

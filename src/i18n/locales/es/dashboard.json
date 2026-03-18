@@ -3,7 +3,7 @@
   "welcome": "Bienvenido a Valute",
   "empty": {
     "title": "Tus finanzas, a tu manera",
-    "description": "Comienza agregando una cuenta y tu primera transacci\u00f3n. O p\u00eddele ayuda a Val, tu asistente de IA.",
+    "description": "Comienza agregando una cuenta y tu primera transacción. O pídele ayuda a Val, tu asistente de IA.",
     "addAccount": "Agregar Cuenta",
     "askAI": "Preguntar a Val"
   },
@@ -17,12 +17,30 @@
   },
   "charts": {
     "spending": "Gastos Mensuales",
-    "categories": "Por Categor\u00eda",
+    "categories": "Por Categoría",
     "drilldownTransactions": "Ver transacciones",
     "drilldownBudgets": "Ver presupuestos"
   },
   "quickActions": {
-    "addTransaction": "Agregar Transacci\u00f3n",
+    "addTransaction": "Agregar Transacción",
     "askVal": "Preguntar a Val"
+  },
+  "alerts": {
+    "title": "Alertas",
+    "noAlerts": "No se detectaron anomalías — tus gastos se ven normales.",
+    "dismiss": "Descartar",
+    "scanning": "Analizando transacciones...",
+    "severity": {
+      "high": "Alta",
+      "medium": "Media",
+      "low": "Baja"
+    },
+    "types": {
+      "unusual_amount": "Monto Inusual",
+      "duplicate_charge": "Cargo Duplicado",
+      "spending_spike": "Pico de Gastos",
+      "subscription_price_change": "Cambio de Precio",
+      "large_transaction": "Transacción Grande"
+    }
   }
 }

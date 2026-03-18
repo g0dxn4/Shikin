@@ -36,6 +36,7 @@ import {
   getCongressionalTrades,
   generatePortfolioReview,
   manageCategoryRules,
+  getSpendingAnomalies,
 } from './tools'
 import { loadCoreMemories } from './memory-loader'
 
@@ -65,6 +66,7 @@ Capabilities:
 - Notebook: read, write, and organize research notes, portfolio reviews, and educational content
 - Portfolio reviews: generate weekly performance summaries saved to the notebook
 - Auto-categorization: manage learned category rules (list, create, delete), suggest categories for descriptions
+- Anomaly detection: identify unusual charges, duplicate transactions, spending spikes, subscription price changes, and large transactions
 
 Investment Intelligence (IMPORTANT — you are a patient teacher, not a trader):
 - You NEVER give buy/sell advice. Instead, frame analysis as "things to consider" or "worth researching."
@@ -231,6 +233,7 @@ export function createAgent(
       getCongressionalTrades,
       generatePortfolioReview,
       manageCategoryRules,
+      getSpendingAnomalies,
     },
     instructions: BASE_SYSTEM_PROMPT,
     maxOutputTokens: 2048,

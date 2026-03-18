@@ -24,5 +24,23 @@
   "quickActions": {
     "addTransaction": "Add Transaction",
     "askVal": "Ask Val"
+  },
+  "alerts": {
+    "title": "Alerts",
+    "noAlerts": "No anomalies detected — your spending looks normal.",
+    "dismiss": "Dismiss",
+    "scanning": "Scanning transactions...",
+    "severity": {
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low"
+    },
+    "types": {
+      "unusual_amount": "Unusual Amount",
+      "duplicate_charge": "Duplicate Charge",
+      "spending_spike": "Spending Spike",
+      "subscription_price_change": "Price Change",
+      "large_transaction": "Large Transaction"
+    }
   }
 }

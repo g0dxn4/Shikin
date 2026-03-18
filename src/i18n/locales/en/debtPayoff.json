@@ -1,0 +1,58 @@
+{
+  "title": "Debt Payoff Planner",
+  "strategy": {
+    "title": "Payoff Strategy",
+    "avalanche": "Avalanche",
+    "avalancheDesc": "Highest APR first — saves the most interest",
+    "snowball": "Snowball",
+    "snowballDesc": "Smallest balance first — quick wins for motivation"
+  },
+  "extraPayment": {
+    "title": "Extra Monthly Payment",
+    "perMonth": "/mo",
+    "description": "Extra amount on top of minimum payments to accelerate payoff"
+  },
+  "comparison": {
+    "avalancheMonths": "Avalanche Timeline",
+    "snowballMonths": "Snowball Timeline",
+    "months": "months",
+    "totalInterest": "Total interest",
+    "interestSaved": "Interest Saved",
+    "fewerMonths": "fewer months with avalanche",
+    "sameTimeline": "Same timeline for both strategies"
+  },
+  "summary": {
+    "totalDebt": "Total Debt",
+    "monthlyMin": "Monthly Minimums",
+    "debtFreeDate": "Debt-Free Date",
+    "totalInterest": "Total Interest"
+  },
+  "chart": {
+    "title": "Balance Over Time"
+  },
+  "payoffOrder": {
+    "title": "Payoff Order"
+  },
+  "debtList": {
+    "title": "Your Debts"
+  },
+  "debtCard": {
+    "apr": "APR",
+    "minPayment": "Min",
+    "manual": "Manual"
+  },
+  "addDebt": {
+    "button": "Add Manual Debt",
+    "title": "Add a Debt",
+    "name": "Name",
+    "namePlaceholder": "e.g. Student Loan",
+    "balance": "Balance ($)",
+    "apr": "APR (%)",
+    "minPayment": "Min Payment ($)",
+    "submit": "Add Debt"
+  },
+  "empty": {
+    "title": "No debts found",
+    "description": "Add credit card accounts with balances or manually enter debts like student loans, auto loans, or personal loans to see your payoff plan."
+  }
+}

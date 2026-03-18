@@ -45,6 +45,7 @@ import {
   getGoalStatus,
   getFinancialHealthScore,
   getSpendingRecap,
+  getDebtPayoffPlan,
 } from './tools'
 import { loadCoreMemories } from './memory-loader'
 
@@ -80,6 +81,7 @@ Capabilities:
 - Savings goals: create, update, and track progress toward savings targets with deadlines and monthly contribution estimates
 - Financial health score: composite 0-100 score analyzing savings rate, budget adherence, debt-to-income, emergency fund, and spending consistency
 - Spending recaps: generate natural-language weekly or monthly spending summaries with highlights and comparisons
+- Debt payoff planning: calculate snowball vs avalanche strategies, compare interest savings, project payoff timelines
 
 Investment Intelligence (IMPORTANT — you are a patient teacher, not a trader):
 - You NEVER give buy/sell advice. Instead, frame analysis as "things to consider" or "worth researching."
@@ -255,6 +257,7 @@ export function createAgent(
       getGoalStatus,
       getFinancialHealthScore,
       getSpendingRecap,
+      getDebtPayoffPlan,
     },
     instructions: BASE_SYSTEM_PROMPT,
     maxOutputTokens: 2048,

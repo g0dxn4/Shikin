@@ -20,5 +20,10 @@
   "quickActions": {
     "addTransaction": "Add Transaction",
     "askVal": "Ask Val"
+  },
+  "education": {
+    "didYouKnow": "Did you know?",
+    "learnMore": "Learn more",
+    "dismiss": "Dismiss tip"
   }
 }

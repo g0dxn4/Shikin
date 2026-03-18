@@ -20,5 +20,10 @@
   "quickActions": {
     "addTransaction": "Agregar Transacci\u00f3n",
     "askVal": "Preguntar a Val"
+  },
+  "education": {
+    "didYouKnow": "\u00bfSab\u00edas que?",
+    "learnMore": "Saber m\u00e1s",
+    "dismiss": "Descartar consejo"
   }
 }

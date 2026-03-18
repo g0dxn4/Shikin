@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import {
@@ -9,6 +9,9 @@ import {
   Plus,
   ArrowRight,
   Sparkles,
+  Lightbulb,
+  X,
+  ExternalLink,
 } from 'lucide-react'
 import dayjs from 'dayjs'
 import {
@@ -30,6 +33,7 @@ import { useAccountStore } from '@/stores/account-store'
 import { useTransactionStore } from '@/stores/transaction-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import { formatMoney } from '@/lib/money'
+import { getDailyTip, type EducationTip } from '@/lib/education-service'
 
 const CHART_COLORS = ['#bf5af2', '#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#8b5cf6']
 
@@ -40,6 +44,27 @@ export function Dashboard() {
   const { setAIPanelOpen, openAccountDialog, openTransactionDialog } = useUIStore()
   const { accounts, isLoading: accountsLoading, fetch: fetchAccounts } = useAccountStore()
   const { transactions, isLoading: txLoading, fetch: fetchTransactions } = useTransactionStore()
+
+  // Daily education tip
+  const [dailyTip, setDailyTip] = useState<EducationTip | null>(null)
+  const [tipDismissed, setTipDismissed] = useState(false)
+
+  useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10)
+    const lastDismissed = localStorage.getItem('valute:tip-dismissed-date')
+    if (lastDismissed === today) {
+      setTipDismissed(true)
+    } else {
+      setDailyTip(getDailyTip())
+      setTipDismissed(false)
+    }
+  }, [])
+
+  const dismissTip = useCallback(() => {
+    const today = new Date().toISOString().slice(0, 10)
+    localStorage.setItem('valute:tip-dismissed-date', today)
+    setTipDismissed(true)
+  }, [])
 
   useEffect(() => {
     fetchAccounts()
@@ -285,6 +310,11 @@ export function Dashboard() {
             </div>
           )}
 
+          {/* Daily education tip */}
+          {dailyTip && !tipDismissed && (
+            <EducationTipCard tip={dailyTip} onDismiss={dismissTip} t={t} />
+          )}
+
           {/* Accounts preview */}
           <div className="space-y-3">
             <div className="page-header">
@@ -418,6 +448,63 @@ function DashboardSkeleton() {
           <Skeleton className="h-4 w-24" />
           <Skeleton className="mt-4 h-48 w-full" />
         </div>
+      </div>
+    </div>
+  )
+}
+
+const TOPIC_LABELS: Record<string, string> = {
+  budgeting: 'Budgeting',
+  saving: 'Saving',
+  investing: 'Investing',
+  debt: 'Debt',
+  general: 'Finance',
+}
+
+function EducationTipCard({
+  tip,
+  onDismiss,
+  t,
+}: {
+  tip: EducationTip
+  onDismiss: () => void
+  t: ReturnType<typeof useTranslation<'dashboard'>>['t']
+}) {
+  return (
+    <div className="glass-card relative overflow-hidden p-4">
+      <div className="absolute top-0 left-0 h-full w-1 bg-[#bf5af2]" />
+      <div className="flex items-start gap-3 pl-2">
+        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#bf5af2]/15">
+          <Lightbulb size={14} className="text-[#bf5af2]" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 flex items-center gap-2">
+            <span className="font-heading text-xs font-semibold">{t('education.didYouKnow')}</span>
+            <Badge variant="secondary" className="text-[10px]">
+              {TOPIC_LABELS[tip.topic] || tip.topic}
+            </Badge>
+          </div>
+          <p className="font-heading text-sm font-medium">{tip.title}</p>
+          <p className="text-muted-foreground mt-1 text-xs leading-relaxed">{tip.content}</p>
+          {tip.learnMore && (
+            <a
+              href={tip.learnMore}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-[#bf5af2] hover:underline"
+            >
+              {t('education.learnMore')}
+              <ExternalLink size={10} />
+            </a>
+          )}
+        </div>
+        <button
+          onClick={onDismiss}
+          className="text-muted-foreground hover:text-foreground shrink-0 rounded p-1 transition-colors"
+          aria-label={t('education.dismiss')}
+        >
+          <X size={14} />
+        </button>
       </div>
     </div>
   )

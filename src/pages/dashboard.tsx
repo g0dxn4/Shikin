@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import {
@@ -18,8 +18,11 @@ import {
   X,
   ShieldAlert,
   Heart,
+  RefreshCw,
+  FileText,
 } from 'lucide-react'
 import dayjs from 'dayjs'
+import relativeTime from 'dayjs/plugin/relativeTime'
 import {
   AreaChart,
   Area,
@@ -40,11 +43,14 @@ import { useTransactionStore } from '@/stores/transaction-store'
 import { useAnomalyStore } from '@/stores/anomaly-store'
 import { useForecastStore } from '@/stores/forecast-store'
 import { useGoalStore } from '@/stores/goal-store'
+import { useRecapStore } from '@/stores/recap-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import type { AnomalyType, AnomalySeverity } from '@/lib/anomaly-service'
 import { useHealthStore } from '@/stores/health-store'
 import type { SubScore } from '@/lib/health-score-service'
 import { formatMoney, fromCentavos } from '@/lib/money'
+
+dayjs.extend(relativeTime)
 
 const CHART_COLORS = [
   '#bf5af2',
@@ -67,12 +73,19 @@ export function Dashboard() {
   const { isLoading: anomalyLoading, scanForAnomalies, getActiveAnomalies, dismissAnomaly } = useAnomalyStore()
   const { goals, fetch: fetchGoals } = useGoalStore()
   const { score: healthScore, isLoading: healthLoading, calculateScore } = useHealthStore()
+  const {
+    currentRecap,
+    isLoading: recapLoading,
+    generateWeekly,
+    loadLatestWeekly,
+  } = useRecapStore()
 
   useEffect(() => {
     fetchAccounts()
     fetchTransactions()
     fetchGoals()
-  }, [fetchAccounts, fetchTransactions, fetchGoals])
+    loadLatestWeekly()
+  }, [fetchAccounts, fetchTransactions, fetchGoals, loadLatestWeekly])
 
   // Run anomaly scan after transactions are loaded
   useEffect(() => {
@@ -89,6 +102,10 @@ export function Dashboard() {
       calculateScore()
     }
   }, [accountsLoading, txLoading, accounts.length, calculateScore])
+
+  const handleGenerateRecap = useCallback(() => {
+    generateWeekly()
+  }, [generateWeekly])
 
   const totalBalance = useMemo(() => accounts.reduce((sum, a) => sum + a.balance, 0), [accounts])
 
@@ -411,6 +428,61 @@ export function Dashboard() {
           {(healthScore || healthLoading) && (
             <HealthScoreWidget score={healthScore} isLoading={healthLoading} />
           )}
+
+          {/* Weekly Recap */}
+          <div className="glass-card p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileText size={16} className="text-primary" />
+                <h3 className="font-heading text-sm font-semibold">{t('recap.title')}</h3>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleGenerateRecap}
+                disabled={recapLoading}
+              >
+                <RefreshCw size={14} className={recapLoading ? 'animate-spin' : ''} />
+                {recapLoading ? t('recap.generating') : t('recap.generate')}
+              </Button>
+            </div>
+
+            {currentRecap ? (
+              <div className="space-y-3">
+                <p className="text-muted-foreground text-sm leading-relaxed">
+                  {currentRecap.summary}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {currentRecap.highlights.map((h) => (
+                    <span
+                      key={h.label}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-white/6 bg-white/4 px-3 py-1 text-xs"
+                    >
+                      <span className="text-muted-foreground">{h.label}:</span>
+                      <span className="font-semibold">{h.value}</span>
+                      {h.change && (
+                        <span
+                          className={`font-mono text-[10px] ${
+                            h.change.startsWith('+') ? 'text-destructive' : 'text-success'
+                          }`}
+                        >
+                          {h.change}
+                        </span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+                <p className="text-muted-foreground font-mono text-[10px]">
+                  {t('recap.generatedAt', { time: dayjs(currentRecap.generated_at).fromNow() })}
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-6 text-center">
+                <p className="text-muted-foreground text-sm">{t('recap.noRecap')}</p>
+                <p className="text-muted-foreground mt-1 text-xs">{t('recap.noRecapHint')}</p>
+              </div>
+            )}
+          </div>
 
 
           {/* Accounts preview */}

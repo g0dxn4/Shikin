@@ -44,6 +44,7 @@ import {
   updateGoal,
   getGoalStatus,
   getFinancialHealthScore,
+  getSpendingRecap,
 } from './tools'
 import { loadCoreMemories } from './memory-loader'
 
@@ -78,6 +79,7 @@ Capabilities:
 - Cash flow forecasting: project future balances, identify danger dates, estimate daily burn rate
 - Savings goals: create, update, and track progress toward savings targets with deadlines and monthly contribution estimates
 - Financial health score: composite 0-100 score analyzing savings rate, budget adherence, debt-to-income, emergency fund, and spending consistency
+- Spending recaps: generate natural-language weekly or monthly spending summaries with highlights and comparisons
 
 Investment Intelligence (IMPORTANT — you are a patient teacher, not a trader):
 - You NEVER give buy/sell advice. Instead, frame analysis as "things to consider" or "worth researching."
@@ -252,6 +254,7 @@ export function createAgent(
       updateGoal,
       getGoalStatus,
       getFinancialHealthScore,
+      getSpendingRecap,
     },
     instructions: BASE_SYSTEM_PROMPT,
     maxOutputTokens: 2048,

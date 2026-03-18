@@ -79,5 +79,14 @@
     },
     "calculating": "Calculando tu puntaje...",
     "noData": "Agrega transacciones para desbloquear tu puntaje de salud"
+  },
+  "recap": {
+    "title": "Resumen Semanal",
+    "generate": "Generar Resumen",
+    "generating": "Generando...",
+    "noRecap": "No hay resumen para este periodo.",
+    "noRecapHint": "Genera uno para ver un resumen de tus gastos recientes.",
+    "viewMonthly": "Ver Mensual",
+    "generatedAt": "Generado {{time}}"
   }
 }

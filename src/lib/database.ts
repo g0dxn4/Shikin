@@ -260,6 +260,22 @@ INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUE
   ('01TRANSFER0000000000000000', 'Transfer', 'arrow-right-left', '#6366f1', 'transfer', 15);
 `
 
+const MIGRATION_007_RECAPS = `
+CREATE TABLE IF NOT EXISTS recaps (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL CHECK (type IN ('weekly', 'monthly')),
+  period_start TEXT NOT NULL,
+  period_end TEXT NOT NULL,
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  highlights_json TEXT NOT NULL DEFAULT '[]',
+  generated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_recaps_type ON recaps(type);
+CREATE INDEX IF NOT EXISTS idx_recaps_generated ON recaps(generated_at);
+`
+
 const MIGRATION_002 = `
 CREATE TABLE IF NOT EXISTS ai_memories (
   id TEXT PRIMARY KEY,
@@ -416,6 +432,7 @@ function runMigrations(database: SqlJsDatabase): void {
     database.run("INSERT INTO _migrations (id, name) VALUES (3, '003_credit_cards')")
   }
 
+
   if (!applied.has('004_category_rules')) {
     const statements = MIGRATION_004.split(';')
       .map((s) => s.trim())
@@ -444,6 +461,16 @@ function runMigrations(database: SqlJsDatabase): void {
       database.run(s)
     }
     database.run("INSERT INTO _migrations (id, name) VALUES (6, '006_goals')")
+  }
+
+  if (!applied.has('007_recaps')) {
+    const statements = MIGRATION_007_RECAPS.split(';')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+    for (const s of statements) {
+      database.run(s)
+    }
+    database.run("INSERT INTO _migrations (id, name) VALUES (7, '007_recaps')")
   }
 }
 

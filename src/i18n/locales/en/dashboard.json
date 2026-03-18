@@ -79,5 +79,14 @@
     },
     "calculating": "Calculating your score...",
     "noData": "Add transactions to unlock your health score"
+  },
+  "recap": {
+    "title": "Weekly Recap",
+    "generate": "Generate Recap",
+    "generating": "Generating...",
+    "noRecap": "No recap yet for this period.",
+    "noRecapHint": "Generate one to see a summary of your recent spending.",
+    "viewMonthly": "View Monthly",
+    "generatedAt": "Generated {{time}}"
   }
 }

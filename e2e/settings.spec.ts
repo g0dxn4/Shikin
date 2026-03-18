@@ -13,7 +13,7 @@ test.describe('Settings', () => {
   })
 
   test('language dropdown is present', async ({ page }) => {
-    const languageSelect = page.locator('select')
+    const languageSelect = page.locator('select').first()
     await expect(languageSelect).toBeVisible()
 
     // Should have English and Español options

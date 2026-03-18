@@ -13,15 +13,18 @@ test.describe('desktop sidebar navigation', () => {
     const sidebar = page.locator('aside').first()
 
     const links = sidebar.getByRole('link')
-    await expect(links).toHaveCount(8)
+    await expect(links).toHaveCount(11)
 
     await expect(sidebar.getByRole('link', { name: 'Dashboard' })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Transactions' })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Accounts' })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Budgets' })).toBeVisible()
+    await expect(sidebar.getByRole('link', { name: 'Goals' })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Investments' })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Subscriptions' })).toBeVisible()
+    await expect(sidebar.getByRole('link', { name: 'Debt Payoff' })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Notebook' })).toBeVisible()
+    await expect(sidebar.getByRole('link', { name: 'Forecast' })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Settings' })).toBeVisible()
   })
 

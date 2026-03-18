@@ -31,6 +31,11 @@ interface UIState {
   editingRecurringId: string | null
   openRecurringDialog: (id?: string) => void
   closeRecurringDialog: () => void
+
+  goalDialogOpen: boolean
+  editingGoalId: string | null
+  openGoalDialog: (id?: string) => void
+  closeGoalDialog: () => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -67,4 +72,9 @@ export const useUIStore = create<UIState>((set) => ({
   openRecurringDialog: (id) =>
     set({ recurringDialogOpen: true, editingRecurringId: id ?? null }),
   closeRecurringDialog: () => set({ recurringDialogOpen: false, editingRecurringId: null }),
+
+  goalDialogOpen: false,
+  editingGoalId: null,
+  openGoalDialog: (id) => set({ goalDialogOpen: true, editingGoalId: id ?? null }),
+  closeGoalDialog: () => set({ goalDialogOpen: false, editingGoalId: null }),
 }))

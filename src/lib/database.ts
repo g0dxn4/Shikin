@@ -314,7 +314,24 @@ CREATE INDEX IF NOT EXISTS idx_recurring_rules_next_date ON recurring_rules(next
 CREATE INDEX IF NOT EXISTS idx_recurring_rules_active ON recurring_rules(active);
 `
 
->>>>>>> worktree-agent-a73eb6aa
+const MIGRATION_006 = `
+CREATE TABLE IF NOT EXISTS goals (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  target_amount INTEGER NOT NULL,
+  current_amount INTEGER NOT NULL DEFAULT 0,
+  deadline TEXT,
+  account_id TEXT REFERENCES accounts(id),
+  icon TEXT DEFAULT '🎯',
+  color TEXT DEFAULT '#bf5af2',
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_goals_deadline ON goals(deadline);
+`
+
 // --- Parameter conversion ---
 // The codebase uses two param styles:
 //   - $1, $2, $3 (tauri-plugin-sql positional) used in AI tools
@@ -417,6 +434,16 @@ function runMigrations(database: SqlJsDatabase): void {
       database.run(s)
     }
     database.run("INSERT INTO _migrations (id, name) VALUES (5, '005_recurring_rules')")
+  }
+
+  if (!applied.has('006_goals')) {
+    const statements = MIGRATION_006.split(';')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+    for (const s of statements) {
+      database.run(s)
+    }
+    database.run("INSERT INTO _migrations (id, name) VALUES (6, '006_goals')")
   }
 }
 

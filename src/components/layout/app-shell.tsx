@@ -35,6 +35,11 @@ const BudgetDialog = lazy(() =>
     default: m.BudgetDialog,
   }))
 )
+const GoalDialog = lazy(() =>
+  import('@/components/goals/goal-dialog').then((m) => ({
+    default: m.GoalDialog,
+  }))
+)
 
 export function AppShell() {
   const { pathname } = useLocation()
@@ -55,6 +60,7 @@ export function AppShell() {
         <AccountDialog />
         <TransactionDialog />
         <BudgetDialog />
+        <GoalDialog />
       </Suspense>
     </div>
   )

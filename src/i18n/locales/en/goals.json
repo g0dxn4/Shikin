@@ -1,0 +1,44 @@
+{
+  "title": "Savings Goals",
+  "addGoal": "Add Goal",
+  "editGoal": "Edit Goal",
+  "deleteGoal": "Delete Goal",
+  "deleteConfirm": "Are you sure you want to delete this goal? This action cannot be undone.",
+  "form": {
+    "name": "Goal Name",
+    "namePlaceholder": "e.g. Emergency Fund",
+    "targetAmount": "Target Amount",
+    "currentAmount": "Current Amount",
+    "deadline": "Target Date",
+    "account": "Linked Account",
+    "accountPlaceholder": "Select an account (optional)",
+    "icon": "Icon",
+    "color": "Color",
+    "notes": "Notes",
+    "notesPlaceholder": "Any additional notes..."
+  },
+  "card": {
+    "of": "of",
+    "saved": "saved",
+    "remaining": "remaining",
+    "daysLeft": "days left",
+    "completed": "Completed!",
+    "noDeadline": "No deadline",
+    "monthlyNeeded": "/mo needed",
+    "overdue": "Past deadline"
+  },
+  "toast": {
+    "created": "Goal created successfully",
+    "updated": "Goal updated successfully",
+    "deleted": "Goal deleted successfully",
+    "error": "Something went wrong"
+  },
+  "empty": {
+    "title": "No savings goals yet",
+    "description": "Create your first savings goal to start tracking your progress."
+  },
+  "dashboard": {
+    "title": "Savings Goals",
+    "viewAll": "View All"
+  }
+}

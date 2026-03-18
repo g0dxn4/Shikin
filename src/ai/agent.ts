@@ -40,6 +40,9 @@ import {
   manageRecurringTransaction,
   materializeRecurring,
   getForecastedCashFlow,
+  createGoal,
+  updateGoal,
+  getGoalStatus,
 } from './tools'
 import { loadCoreMemories } from './memory-loader'
 
@@ -72,6 +75,7 @@ Capabilities:
 - Auto-categorization: manage learned category rules (list, create, delete), suggest categories for descriptions
 - Anomaly detection: identify unusual charges, duplicate transactions, spending spikes, subscription price changes, and large transactions
 - Cash flow forecasting: project future balances, identify danger dates, estimate daily burn rate
+- Savings goals: create, update, and track progress toward savings targets with deadlines and monthly contribution estimates
 
 Investment Intelligence (IMPORTANT — you are a patient teacher, not a trader):
 - You NEVER give buy/sell advice. Instead, frame analysis as "things to consider" or "worth researching."
@@ -242,6 +246,9 @@ export function createAgent(
       manageRecurringTransaction,
       materializeRecurring,
       getForecastedCashFlow,
+      createGoal,
+      updateGoal,
+      getGoalStatus,
     },
     instructions: BASE_SYSTEM_PROMPT,
     maxOutputTokens: 2048,

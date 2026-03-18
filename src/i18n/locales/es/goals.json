@@ -1,0 +1,44 @@
+{
+  "title": "Metas de Ahorro",
+  "addGoal": "Agregar Meta",
+  "editGoal": "Editar Meta",
+  "deleteGoal": "Eliminar Meta",
+  "deleteConfirm": "¿Estás seguro de que deseas eliminar esta meta? Esta acción no se puede deshacer.",
+  "form": {
+    "name": "Nombre de la Meta",
+    "namePlaceholder": "ej. Fondo de Emergencia",
+    "targetAmount": "Monto Objetivo",
+    "currentAmount": "Monto Actual",
+    "deadline": "Fecha Objetivo",
+    "account": "Cuenta Vinculada",
+    "accountPlaceholder": "Seleccionar una cuenta (opcional)",
+    "icon": "Ícono",
+    "color": "Color",
+    "notes": "Notas",
+    "notesPlaceholder": "Cualquier nota adicional..."
+  },
+  "card": {
+    "of": "de",
+    "saved": "ahorrado",
+    "remaining": "restante",
+    "daysLeft": "días restantes",
+    "completed": "¡Completado!",
+    "noDeadline": "Sin fecha límite",
+    "monthlyNeeded": "/mes necesario",
+    "overdue": "Fecha límite pasada"
+  },
+  "toast": {
+    "created": "Meta creada exitosamente",
+    "updated": "Meta actualizada exitosamente",
+    "deleted": "Meta eliminada exitosamente",
+    "error": "Algo salió mal"
+  },
+  "empty": {
+    "title": "Sin metas de ahorro aún",
+    "description": "Crea tu primera meta de ahorro para comenzar a rastrear tu progreso."
+  },
+  "dashboard": {
+    "title": "Metas de Ahorro",
+    "viewAll": "Ver Todas"
+  }
+}

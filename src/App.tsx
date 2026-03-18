@@ -22,6 +22,7 @@ const Investments = lazy(() =>
 const Subscriptions = lazy(() =>
   import('@/pages/subscriptions').then((m) => ({ default: m.Subscriptions }))
 )
+const Goals = lazy(() => import('@/pages/goals').then((m) => ({ default: m.Goals })))
 const Notebook = lazy(() => import('@/pages/notebook').then((m) => ({ default: m.Notebook })))
 const Forecast = lazy(() => import('@/pages/forecast').then((m) => ({ default: m.Forecast })))
 const SettingsPage = lazy(() =>
@@ -55,6 +56,7 @@ export default function App() {
               <Route path="/transactions" element={<Transactions />} />
               <Route path="/accounts" element={<Accounts />} />
               <Route path="/budgets" element={<Budgets />} />
+              <Route path="/goals" element={<Goals />} />
               <Route path="/investments" element={<Investments />} />
               <Route path="/subscriptions" element={<Subscriptions />} />
               <Route path="/notebook" element={<Notebook />} />

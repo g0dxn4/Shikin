@@ -60,6 +60,15 @@ vi.mock('@/stores/forecast-store', () => ({
   }),
 }))
 
+const mockFetchGoals = vi.fn()
+
+vi.mock('@/stores/goal-store', () => ({
+  useGoalStore: () => ({
+    goals: [],
+    fetch: mockFetchGoals,
+  }),
+}))
+
 describe('Dashboard', () => {
   beforeEach(() => {
     vi.clearAllMocks()

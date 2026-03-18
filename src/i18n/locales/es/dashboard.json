@@ -20,5 +20,24 @@
   "quickActions": {
     "addTransaction": "Agregar Transacci\u00f3n",
     "askVal": "Preguntar a Val"
+  },
+  "healthScore": {
+    "title": "Salud Financiera",
+    "grade": "Calificaci\u00f3n",
+    "trending": {
+      "improving": "Mejorando",
+      "declining": "Bajando",
+      "stable": "Estable"
+    },
+    "topTip": "Consejo Principal",
+    "subscores": {
+      "savingsRate": "Tasa de Ahorro",
+      "budgetAdherence": "Cumplimiento de Presupuesto",
+      "debtToIncome": "Deuda vs Ingresos",
+      "emergencyFund": "Fondo de Emergencia",
+      "spendingConsistency": "Consistencia de Gastos"
+    },
+    "calculating": "Calculando tu puntaje...",
+    "noData": "Agrega transacciones para desbloquear tu puntaje de salud"
   }
 }

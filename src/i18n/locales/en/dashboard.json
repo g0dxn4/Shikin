@@ -20,5 +20,24 @@
   "quickActions": {
     "addTransaction": "Add Transaction",
     "askVal": "Ask Val"
+  },
+  "healthScore": {
+    "title": "Financial Health",
+    "grade": "Grade",
+    "trending": {
+      "improving": "Improving",
+      "declining": "Declining",
+      "stable": "Stable"
+    },
+    "topTip": "Top Tip",
+    "subscores": {
+      "savingsRate": "Savings Rate",
+      "budgetAdherence": "Budget Adherence",
+      "debtToIncome": "Debt-to-Income",
+      "emergencyFund": "Emergency Fund",
+      "spendingConsistency": "Spending Consistency"
+    },
+    "calculating": "Calculating your score...",
+    "noData": "Add transactions to unlock your health score"
   }
 }

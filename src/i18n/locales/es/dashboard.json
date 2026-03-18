@@ -3,7 +3,7 @@
   "welcome": "Bienvenido a Valute",
   "empty": {
     "title": "Tus finanzas, a tu manera",
-    "description": "Comienza agregando una cuenta y tu primera transacci\u00f3n. O p\u00eddele ayuda a Val, tu asistente de IA.",
+    "description": "Comienza agregando una cuenta y tu primera transacción. O pídele ayuda a Val, tu asistente de IA.",
     "addAccount": "Agregar Cuenta",
     "askAI": "Preguntar a Val"
   },
@@ -15,25 +15,25 @@
   },
   "charts": {
     "spending": "Gastos Mensuales",
-    "categories": "Por Categor\u00eda"
+    "categories": "Por Categoría"
   },
   "quickActions": {
-    "addTransaction": "Agregar Transacci\u00f3n",
+    "addTransaction": "Agregar Transacción",
     "askVal": "Preguntar a Val"
   },
   "streak": {
-    "label": "d\u00edas seguidos",
-    "labelPlural": "d\u00edas seguidos",
-    "longest": "M\u00e1ximo: {{count}}d",
-    "noStreak": "\u00a1Empieza a registrar!"
+    "label": "días seguidos",
+    "labelPlural": "días seguidos",
+    "longest": "Máximo: {{count}}d",
+    "noStreak": "¡Empieza a registrar!"
   },
   "achievements": {
     "title": "Logros",
-    "unlocked": "\u00a1Desbloqueado!",
+    "unlocked": "¡Desbloqueado!",
     "first_steps": "Primeros Pasos",
-    "first_steps_desc": "Registra tu primera transacci\u00f3n",
+    "first_steps_desc": "Registra tu primera transacción",
     "week_warrior": "Guerrero Semanal",
-    "week_warrior_desc": "Racha de 7 d\u00edas",
+    "week_warrior_desc": "Racha de 7 días",
     "budget_boss": "Jefe de Presupuesto",
     "budget_boss_desc": "Mantente dentro del presupuesto por un mes",
     "savings_star": "Estrella del Ahorro",
@@ -41,10 +41,15 @@
     "century_club": "Club del Centenario",
     "century_club_desc": "100 transacciones registradas",
     "diversified": "Diversificado",
-    "diversified_desc": "5+ categor\u00edas en un mes",
+    "diversified_desc": "5+ categorías en un mes",
     "debt_destroyer": "Destructor de Deudas",
-    "debt_destroyer_desc": "Paga una tarjeta de cr\u00e9dito",
+    "debt_destroyer_desc": "Paga una tarjeta de crédito",
     "goal_getter": "Logrador de Metas",
     "goal_getter_desc": "Alcanza una meta de ahorro"
+  },
+  "education": {
+    "didYouKnow": "¿Sabías que?",
+    "learnMore": "Saber más",
+    "dismiss": "Descartar consejo"
   }
 }

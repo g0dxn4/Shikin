@@ -529,7 +529,14 @@ function ChatBubble({
             const isExpanded = expandedTools.has(toolId)
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const toolPart = part as any
-            const toolName = toolPart.toolName || toolPart.toolInvocation?.toolName || 'tool'
+            // The Responses API sets type as "tool-{toolName}" (e.g. "tool-addTransaction")
+            const typeToolName = part.type.startsWith('tool-') ? part.type.slice(5) : ''
+            const rawToolName = toolPart.toolName || toolPart.name || typeToolName || toolPart.toolInvocation?.toolName || 'tool'
+            // Convert camelCase tool IDs to readable labels: "addTransaction" → "Add Transaction"
+            const toolName = rawToolName
+              .replace(/([A-Z])/g, ' $1')
+              .replace(/^./, (c: string) => c.toUpperCase())
+              .trim()
             const state = toolPart.state || toolPart.toolInvocation?.state || ''
             const result = toolPart.result ?? toolPart.toolInvocation?.result
             const isRunning =

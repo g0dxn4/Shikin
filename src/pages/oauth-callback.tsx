@@ -7,14 +7,16 @@ export function OAuthCallback() {
     const state = params.get('state')
 
     if (window.opener) {
+      // Popup flow: post message back to parent window
       window.opener.postMessage(
         { type: 'oauth_callback', code, state },
         window.location.origin
       )
       window.close()
     } else {
-      // Same-window redirect fallback
-      sessionStorage.setItem('oauth_callback_result', JSON.stringify({ code, state }))
+      // New tab / same-window: store in localStorage (shared across tabs) and redirect
+      localStorage.setItem('oauth_callback_result', JSON.stringify({ code, state }))
+      // Navigate this tab to settings (or close if opened as a tab)
       window.location.href = '/settings'
     }
   }, [])

@@ -1,4 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+
+const mockStore = vi.hoisted(() => ({
+  get: vi.fn().mockResolvedValue(null),
+  set: vi.fn().mockResolvedValue(undefined),
+  save: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock('@/lib/storage', () => ({
+  load: vi.fn().mockResolvedValue(mockStore),
+}))
+
 import {
   isValidTheme,
   defaultTheme,
@@ -10,8 +21,8 @@ import {
 
 describe('Theme Engine', () => {
   beforeEach(() => {
-    localStorage.clear()
     vi.clearAllMocks()
+    mockStore.get.mockResolvedValue(null)
     document.documentElement.style.cssText = '' // clear styles
   })
 
@@ -27,25 +38,28 @@ describe('Theme Engine', () => {
     expect(isValidTheme({ ...defaultTheme, fontPreset: 'invalid' })).toBe(false)
   })
 
-  it('saves and loads a valid theme', () => {
-    saveTheme(presetThemes.midnight)
-    const loaded = loadSavedTheme()
+  it('saves and loads a valid theme', async () => {
+    await saveTheme(presetThemes.midnight)
+    expect(mockStore.set).toHaveBeenCalledWith('theme', JSON.stringify(presetThemes.midnight))
+
+    mockStore.get.mockResolvedValueOnce(JSON.stringify(presetThemes.midnight))
+    const loaded = await loadSavedTheme()
     expect(loaded).toEqual(presetThemes.midnight)
   })
 
-  it('does not save invalid theme payloads', () => {
-    saveTheme({ ...defaultTheme, accent: 'not-a-color' } as unknown as typeof defaultTheme)
-    expect(localStorage.getItem('valute_theme')).toBeNull()
+  it('does not save invalid theme payloads', async () => {
+    await saveTheme({ ...defaultTheme, accent: 'not-a-color' } as unknown as typeof defaultTheme)
+    expect(mockStore.set).not.toHaveBeenCalled()
   })
 
-  it('returns default theme when no saved theme exists or saved is invalid', () => {
-    expect(loadSavedTheme()).toEqual(defaultTheme)
+  it('returns default theme when no saved theme exists or saved is invalid', async () => {
+    expect(await loadSavedTheme()).toEqual(defaultTheme)
 
-    localStorage.setItem('valute_theme', 'invalid json')
-    expect(loadSavedTheme()).toEqual(defaultTheme)
+    mockStore.get.mockResolvedValueOnce('invalid json')
+    expect(await loadSavedTheme()).toEqual(defaultTheme)
 
-    localStorage.setItem('valute_theme', JSON.stringify({ bg: 'red' })) // invalid schema
-    expect(loadSavedTheme()).toEqual(defaultTheme)
+    mockStore.get.mockResolvedValueOnce(JSON.stringify({ bg: 'red' })) // invalid schema
+    expect(await loadSavedTheme()).toEqual(defaultTheme)
   })
 
   it('applies theme to document root', () => {

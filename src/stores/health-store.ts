@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { calculateHealthScore, type HealthScore } from '@/lib/health-score-service'
+import { load } from '@/lib/storage'
 
-const HISTORY_KEY = 'valute-health-score-history'
+const STORE_KEY_HISTORY = 'health_score_history'
 
 export interface HealthScoreSnapshot {
   date: string
@@ -13,32 +14,43 @@ interface HealthState {
   isLoading: boolean
   error: string | null
   history: HealthScoreSnapshot[]
+  _historyLoaded: boolean
   calculateScore: () => Promise<void>
   getScoreHistory: () => HealthScoreSnapshot[]
 }
 
-function loadHistory(): HealthScoreSnapshot[] {
+async function loadHistory(): Promise<HealthScoreSnapshot[]> {
   try {
-    const raw = localStorage.getItem(HISTORY_KEY)
-    return raw ? JSON.parse(raw) : []
+    const store = await load()
+    const raw = await store.get(STORE_KEY_HISTORY)
+    if (!raw) return []
+    return typeof raw === 'string' ? JSON.parse(raw) : (raw as HealthScoreSnapshot[])
   } catch {
     return []
   }
 }
 
-function saveHistory(history: HealthScoreSnapshot[]): void {
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(history))
+async function saveHistory(history: HealthScoreSnapshot[]): Promise<void> {
+  const store = await load()
+  await store.set(STORE_KEY_HISTORY, history)
 }
 
 export const useHealthStore = create<HealthState>((set, get) => ({
   score: null,
   isLoading: false,
   error: null,
-  history: loadHistory(),
+  history: [],
+  _historyLoaded: false,
 
   calculateScore: async () => {
     set({ isLoading: true, error: null })
     try {
+      // Ensure history is loaded from store before first calculation
+      if (!get()._historyLoaded) {
+        const loaded = await loadHistory()
+        set({ history: loaded, _historyLoaded: true })
+      }
+
       const score = await calculateHealthScore()
       set({ score })
 
@@ -60,7 +72,7 @@ export const useHealthStore = create<HealthState>((set, get) => ({
 
       // Keep last 12 months
       const trimmed = history.slice(-12)
-      saveHistory(trimmed)
+      await saveHistory(trimmed)
       set({ history: trimmed })
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Unknown error' })

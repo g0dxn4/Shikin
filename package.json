@@ -8,7 +8,7 @@
   "type": "module",
   "scripts": {
     "start": "vite",
-    "dev": "vite",
+    "dev": "node scripts/oauth-server.mjs & node scripts/data-server.mjs & vite",
     "build": "tsc && vite build",
     "build:tauri": "pnpm legacy:tauri:build",
     "legacy:tauri:dev": "tauri dev",
@@ -43,6 +43,9 @@
     "@radix-ui/react-separator": "^1.1.8",
     "@radix-ui/react-slot": "^1.2.4",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-opener": "^2.5.3",
+    "@tauri-apps/plugin-sql": "^2.3.2",
     "ai": "^6.0.100",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -75,12 +78,14 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.3.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@types/sql.js": "^1.4.9",
     "@vitejs/plugin-react": "^4.7.0",
     "@vitest/coverage-v8": "^4.0.18",
+    "better-sqlite3": "^12.8.0",
     "eslint": "^10.0.2",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.0.1",
@@ -95,5 +100,10 @@
     "typescript-eslint": "^8.56.1",
     "vite": "^6.4.1",
     "vitest": "^4.0.18"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
   }
 }

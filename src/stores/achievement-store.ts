@@ -15,7 +15,7 @@ interface AchievementState {
   isLoading: boolean
   newlyUnlocked: UnlockedAchievement[]
 
-  /** Load all achievements and streak from localStorage + DB scan */
+  /** Load all achievements and streak from shared store + DB scan */
   checkForNew: () => Promise<void>
 
   /** Get all unlocked achievements */
@@ -42,7 +42,7 @@ export const useAchievementStore = create<AchievementState>((set, get) => ({
       const newlyUnlocked = await checkAchievements()
 
       // Load all achievements (including ones just unlocked)
-      const achievements = getAllAchievements()
+      const achievements = await getAllAchievements()
 
       set({
         achievements,
@@ -63,7 +63,7 @@ export const useAchievementStore = create<AchievementState>((set, get) => ({
   },
 
   dismissNew: (id: AchievementId) => {
-    dismissAchievementService(id)
+    void dismissAchievementService(id)
     set((state) => ({
       newlyUnlocked: state.newlyUnlocked.filter((a) => a.id !== id),
       achievements: state.achievements.map((a) =>

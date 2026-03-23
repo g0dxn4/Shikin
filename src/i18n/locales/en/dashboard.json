@@ -1,11 +1,11 @@
 {
   "title": "Dashboard",
-  "welcome": "Welcome to Valute",
+  "welcome": "Welcome to Ivyute",
   "empty": {
     "title": "Your finances, your way",
-    "description": "Start by adding an account and your first transaction. Or ask Val, your AI assistant, for help.",
+    "description": "Start by adding an account and your first transaction. Or ask Ivy, your AI assistant, for help.",
     "addAccount": "Add Account",
-    "askAI": "Ask Val"
+    "askAI": "Ask Ivy"
   },
   "cards": {
     "totalBalance": "Total Balance",
@@ -24,7 +24,7 @@
   },
   "quickActions": {
     "addTransaction": "Add Transaction",
-    "askVal": "Ask Val"
+    "askIvy": "Ask Ivy"
   },
   "alerts": {
     "title": "Alerts",

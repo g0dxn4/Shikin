@@ -94,14 +94,14 @@ describe('saveMessage', () => {
     const message: UIMessage = {
       id: 'msg-1',
       role: 'user',
-      parts: [{ type: 'text', text: 'Hello Val' }],
+      parts: [{ type: 'text', text: 'Hello Ivy' }],
     }
 
     await saveMessage('conv-1', message)
     expect(mockExecute).toHaveBeenCalledTimes(2) // insert + update timestamp
     expect(mockExecute).toHaveBeenCalledWith(
       expect.stringContaining('INSERT OR IGNORE INTO ai_messages'),
-      expect.arrayContaining(['msg-1', 'conv-1', 'user', 'Hello Val', null])
+      expect.arrayContaining(['msg-1', 'conv-1', 'user', 'Hello Ivy', null])
     )
   })
 
@@ -138,7 +138,7 @@ describe('loadMessages', () => {
         id: 'msg-1',
         conversation_id: 'conv-1',
         role: 'user',
-        content: 'Hello Val',
+        content: 'Hello Ivy',
         tool_calls: null,
         tool_result: null,
         created_at: '2024-01-15T10:00:00.000Z',
@@ -157,7 +157,7 @@ describe('loadMessages', () => {
     const messages = await loadMessages('conv-1')
     expect(messages).toHaveLength(2)
     expect(messages[0].role).toBe('user')
-    expect(messages[0].parts[0]).toMatchObject({ type: 'text', text: 'Hello Val' })
+    expect(messages[0].parts[0]).toMatchObject({ type: 'text', text: 'Hello Ivy' })
     expect(messages[1].role).toBe('assistant')
     expect(messages[1].parts[0]).toMatchObject({ type: 'text', text: 'Hi there!' })
   })

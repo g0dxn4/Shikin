@@ -1,6 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import dayjs from 'dayjs'
 
+const mockStore = vi.hoisted(() => {
+  const data: Record<string, unknown> = {}
+  return {
+    get: vi.fn(async (key: string) => data[key] ?? null),
+    set: vi.fn(async (key: string, value: unknown) => { data[key] = value }),
+    save: vi.fn(async () => {}),
+    _data: data,
+    _clear: () => { Object.keys(data).forEach((k) => delete data[k]) },
+  }
+})
+
+vi.mock('@/lib/storage', () => ({
+  load: vi.fn().mockResolvedValue(mockStore),
+}))
+
 vi.mock('@/lib/database', () => ({
   query: vi.fn(),
   execute: vi.fn(),
@@ -20,7 +35,7 @@ const mockQuery = vi.mocked(query)
 describe('achievement-service', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    localStorage.clear()
+    mockStore._clear()
   })
 
   describe('ACHIEVEMENTS', () => {
@@ -102,52 +117,41 @@ describe('achievement-service', () => {
       expect(streak.longestStreak).toBe(2) // threeDaysAgo + fourDaysAgo
     })
 
-    it('saves streak data to localStorage', async () => {
+    it('saves streak data to shared store', async () => {
       mockQuery.mockResolvedValueOnce([])
       await computeStreak()
-      const stored = localStorage.getItem('valute:streak')
-      expect(stored).not.toBeNull()
-      const parsed = JSON.parse(stored!)
-      expect(parsed).toHaveProperty('currentStreak')
-      expect(parsed).toHaveProperty('longestStreak')
+      expect(mockStore.set).toHaveBeenCalledWith(
+        'streak',
+        expect.objectContaining({ currentStreak: 0, longestStreak: 0 })
+      )
     })
   })
 
   describe('checkAchievements', () => {
     it('returns newly unlocked first_steps when >= 1 transaction', async () => {
-      // checkAchievements iterates CHECKERS in order:
-      // first_steps, week_warrior, budget_boss, savings_star, century_club, diversified, debt_destroyer, goal_getter
-      // Each checker may call query multiple times
       mockQuery.mockImplementation(async (sql: string) => {
         const s = sql as string
-        // first_steps: count transactions
         if (s === 'SELECT COUNT(*) as cnt FROM transactions') {
           return [{ cnt: 5 }]
         }
-        // week_warrior -> computeStreak: distinct dates
         if (s.includes('DISTINCT date(date)')) {
           return []
         }
-        // budget_boss: budgets
         if (s.includes('FROM budgets')) {
           return []
         }
-        // savings_star: income/expenses
         if (s.includes("type = 'income'")) {
           return [{ total: 0 }]
         }
         if (s.includes("type = 'expense'")) {
           return [{ total: 0 }]
         }
-        // diversified: distinct categories
         if (s.includes('DISTINCT category_id')) {
           return [{ cnt: 0 }]
         }
-        // debt_destroyer: credit cards
         if (s.includes("type = 'credit_card'")) {
           return [{ cnt: 0 }]
         }
-        // goal_getter: savings accounts
         if (s.includes("type = 'savings'")) {
           return [{ cnt: 0 }]
         }
@@ -160,12 +164,9 @@ describe('achievement-service', () => {
     })
 
     it('skips already unlocked achievements', async () => {
-      localStorage.setItem(
-        'valute:achievements',
-        JSON.stringify([
-          { id: 'first_steps', unlockedAt: '2024-01-01T00:00:00Z', dismissed: false },
-        ])
-      )
+      mockStore._data['achievements'] = [
+        { id: 'first_steps', unlockedAt: '2024-01-01T00:00:00Z', dismissed: false },
+      ]
 
       mockQuery.mockImplementation(async (sql: string) => {
         const s = sql as string
@@ -186,7 +187,7 @@ describe('achievement-service', () => {
       expect(ids).not.toContain('first_steps')
     })
 
-    it('saves newly unlocked achievements to localStorage', async () => {
+    it('saves newly unlocked achievements to shared store', async () => {
       mockQuery.mockImplementation(async (sql: string) => {
         const s = sql as string
         if (s === 'SELECT COUNT(*) as cnt FROM transactions') {
@@ -202,9 +203,10 @@ describe('achievement-service', () => {
       })
 
       await checkAchievements()
-      const stored = JSON.parse(localStorage.getItem('valute:achievements') ?? '[]')
+      const stored = mockStore._data['achievements'] as unknown[]
+      expect(stored).toBeDefined()
       expect(stored.length).toBeGreaterThan(0)
-      expect(stored[0].id).toBe('first_steps')
+      expect((stored[0] as { id: string }).id).toBe('first_steps')
     })
 
     it('newly unlocked achievements have correct shape', async () => {
@@ -233,42 +235,36 @@ describe('achievement-service', () => {
   })
 
   describe('getAllAchievements', () => {
-    it('returns empty array when nothing unlocked', () => {
-      const result = getAllAchievements()
+    it('returns empty array when nothing unlocked', async () => {
+      const result = await getAllAchievements()
       expect(result).toEqual([])
     })
 
-    it('returns stored achievements', () => {
-      localStorage.setItem(
-        'valute:achievements',
-        JSON.stringify([
-          { id: 'first_steps', unlockedAt: '2024-01-01T00:00:00Z', dismissed: false },
-        ])
-      )
-      const result = getAllAchievements()
+    it('returns stored achievements', async () => {
+      mockStore._data['achievements'] = [
+        { id: 'first_steps', unlockedAt: '2024-01-01T00:00:00Z', dismissed: false },
+      ]
+      const result = await getAllAchievements()
       expect(result).toHaveLength(1)
       expect(result[0].id).toBe('first_steps')
     })
 
-    it('returns empty on invalid JSON', () => {
-      localStorage.setItem('valute:achievements', 'invalid json')
-      const result = getAllAchievements()
+    it('returns empty on invalid JSON', async () => {
+      mockStore._data['achievements'] = 'invalid json'
+      const result = await getAllAchievements()
       expect(result).toEqual([])
     })
   })
 
   describe('dismissAchievement', () => {
-    it('marks achievement as dismissed', () => {
-      localStorage.setItem(
-        'valute:achievements',
-        JSON.stringify([
-          { id: 'first_steps', unlockedAt: '2024-01-01T00:00:00Z', dismissed: false },
-        ])
-      )
+    it('marks achievement as dismissed', async () => {
+      mockStore._data['achievements'] = [
+        { id: 'first_steps', unlockedAt: '2024-01-01T00:00:00Z', dismissed: false },
+      ]
 
-      dismissAchievement('first_steps')
+      await dismissAchievement('first_steps')
 
-      const stored = JSON.parse(localStorage.getItem('valute:achievements')!)
+      const stored = mockStore._data['achievements'] as { id: string; dismissed: boolean }[]
       expect(stored[0].dismissed).toBe(true)
     })
   })

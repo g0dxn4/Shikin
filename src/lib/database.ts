@@ -1,387 +1,41 @@
-import initSqlJs, { type Database as SqlJsDatabase } from 'sql.js'
+import { isTauri, DATA_SERVER_URL } from '@/lib/runtime'
 
-const DB_NAME = 'valute'
-const IDB_STORE = 'databases'
-const IDB_KEY = 'valute.db'
+// ── Types ──────────────────────────────────────────────────────────────────
 
-let db: SqlJsDatabase | null = null
-let initPromise: Promise<SqlJsDatabase> | null = null
-let sqlInitPromise: ReturnType<typeof initSqlJs> | null = null
-let transactionDepth = 0
+type TauriDatabase = {
+  select<T>(sql: string, params?: unknown[]): Promise<T>
+  execute(sql: string, params?: unknown[]): Promise<{ rowsAffected: number; lastInsertId: number }>
+  close(): Promise<void>
+}
 
-function loadSqlJs() {
-  if (!sqlInitPromise) {
-    sqlInitPromise = initSqlJs({
-      locateFile: (file: string) => `https://sql.js.org/dist/${file}`,
-    })
+// ── State ──────────────────────────────────────────────────────────────────
+
+let tauriDb: TauriDatabase | null = null
+let tauriInitPromise: Promise<TauriDatabase> | null = null
+
+// ── Tauri Backend ──────────────────────────────────────────────────────────
+
+async function getTauriDb(): Promise<TauriDatabase> {
+  if (tauriDb) return tauriDb
+  if (!tauriInitPromise) {
+    tauriInitPromise = (async () => {
+      const { default: Database } = await import('@tauri-apps/plugin-sql')
+      const database = await Database.load('sqlite:valute.db')
+      tauriDb = database as unknown as TauriDatabase
+      await runTauriMigrations(tauriDb)
+      return tauriDb
+    })()
   }
-  return sqlInitPromise
+  return tauriInitPromise
 }
 
-// --- IndexedDB persistence helpers ---
+// ── Migrations (Tauri mode) ────────────────────────────────────────────────
+// Migrations 001-003 are handled by tauri-plugin-sql in lib.rs.
+// Migrations 004+ must be run from JS since they're not in the Rust code.
 
-function openIDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1)
-    req.onupgradeneeded = () => {
-      req.result.createObjectStore(IDB_STORE)
-    }
-    req.onsuccess = () => resolve(req.result)
-    req.onerror = () => reject(req.error)
-  })
-}
-
-async function loadFromIDB(): Promise<Uint8Array | null> {
-  const idb = await openIDB()
-  return new Promise((resolve, reject) => {
-    const tx = idb.transaction(IDB_STORE, 'readonly')
-    const store = tx.objectStore(IDB_STORE)
-    const req = store.get(IDB_KEY)
-    req.onsuccess = () => resolve(req.result ?? null)
-    req.onerror = () => reject(req.error)
-    tx.oncomplete = () => idb.close()
-  })
-}
-
-async function saveToIDB(data: Uint8Array): Promise<void> {
-  const idb = await openIDB()
-  return new Promise((resolve, reject) => {
-    const tx = idb.transaction(IDB_STORE, 'readwrite')
-    const store = tx.objectStore(IDB_STORE)
-    store.put(data, IDB_KEY)
-    tx.oncomplete = () => {
-      idb.close()
-      resolve()
-    }
-    tx.onerror = () => {
-      idb.close()
-      reject(tx.error)
-    }
-  })
-}
-
-async function persist(): Promise<void> {
-  if (!db) return
-  const data = db.export()
-  await saveToIDB(data)
-}
-
-// --- Migrations ---
-
-const MIGRATION_001 = `
--- Valute Migration 001: Core Tables
-CREATE TABLE IF NOT EXISTS accounts (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('checking', 'savings', 'credit_card', 'cash', 'investment', 'crypto', 'other')),
-  currency TEXT NOT NULL DEFAULT 'USD',
-  balance INTEGER NOT NULL DEFAULT 0,
-  icon TEXT,
-  color TEXT,
-  is_archived INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS categories (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
-  icon TEXT,
-  color TEXT,
-  type TEXT NOT NULL CHECK (type IN ('expense', 'income', 'transfer')),
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS subcategories (
-  id TEXT PRIMARY KEY,
-  category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  icon TEXT,
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  UNIQUE(category_id, name)
-);
-
-CREATE TABLE IF NOT EXISTS transactions (
-  id TEXT PRIMARY KEY,
-  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-  category_id TEXT REFERENCES categories(id) ON DELETE SET NULL,
-  subcategory_id TEXT REFERENCES subcategories(id) ON DELETE SET NULL,
-  type TEXT NOT NULL CHECK (type IN ('expense', 'income', 'transfer')),
-  amount INTEGER NOT NULL,
-  currency TEXT NOT NULL DEFAULT 'USD',
-  description TEXT NOT NULL,
-  notes TEXT,
-  date TEXT NOT NULL,
-  tags TEXT DEFAULT '[]',
-  is_recurring INTEGER NOT NULL DEFAULT 0,
-  transfer_to_account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS subscriptions (
-  id TEXT PRIMARY KEY,
-  account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
-  category_id TEXT REFERENCES categories(id) ON DELETE SET NULL,
-  name TEXT NOT NULL,
-  amount INTEGER NOT NULL,
-  currency TEXT NOT NULL DEFAULT 'USD',
-  billing_cycle TEXT NOT NULL CHECK (billing_cycle IN ('weekly', 'monthly', 'quarterly', 'yearly')),
-  next_billing_date TEXT NOT NULL,
-  icon TEXT,
-  color TEXT,
-  url TEXT,
-  notes TEXT,
-  is_active INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS budgets (
-  id TEXT PRIMARY KEY,
-  category_id TEXT REFERENCES categories(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  amount INTEGER NOT NULL,
-  period TEXT NOT NULL CHECK (period IN ('weekly', 'monthly', 'yearly')),
-  is_active INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS budget_periods (
-  id TEXT PRIMARY KEY,
-  budget_id TEXT NOT NULL REFERENCES budgets(id) ON DELETE CASCADE,
-  start_date TEXT NOT NULL,
-  end_date TEXT NOT NULL,
-  spent INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS investments (
-  id TEXT PRIMARY KEY,
-  account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
-  symbol TEXT NOT NULL,
-  name TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('stock', 'etf', 'crypto', 'bond', 'mutual_fund', 'other')),
-  shares REAL NOT NULL DEFAULT 0,
-  avg_cost_basis INTEGER NOT NULL DEFAULT 0,
-  currency TEXT NOT NULL DEFAULT 'USD',
-  notes TEXT,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS stock_prices (
-  id TEXT PRIMARY KEY,
-  symbol TEXT NOT NULL,
-  price INTEGER NOT NULL,
-  currency TEXT NOT NULL DEFAULT 'USD',
-  date TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  UNIQUE(symbol, date)
-);
-
-CREATE TABLE IF NOT EXISTS ai_conversations (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL DEFAULT 'New Conversation',
-  model TEXT,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS ai_messages (
-  id TEXT PRIMARY KEY,
-  conversation_id TEXT NOT NULL REFERENCES ai_conversations(id) ON DELETE CASCADE,
-  role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system', 'tool')),
-  content TEXT NOT NULL,
-  tool_calls TEXT,
-  tool_result TEXT,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS exchange_rates (
-  id TEXT PRIMARY KEY,
-  from_currency TEXT NOT NULL,
-  to_currency TEXT NOT NULL,
-  rate REAL NOT NULL,
-  date TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  UNIQUE(from_currency, to_currency, date)
-);
-
-CREATE TABLE IF NOT EXISTS settings (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL,
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS extension_data (
-  id TEXT PRIMARY KEY,
-  extension_id TEXT NOT NULL,
-  key TEXT NOT NULL,
-  value TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  UNIQUE(extension_id, key)
-);
-
-CREATE INDEX IF NOT EXISTS idx_transactions_account ON transactions(account_id);
-CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category_id);
-CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
-CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type);
-CREATE INDEX IF NOT EXISTS idx_subcategories_category ON subcategories(category_id);
-CREATE INDEX IF NOT EXISTS idx_budget_periods_budget ON budget_periods(budget_id);
-CREATE INDEX IF NOT EXISTS idx_investments_account ON investments(account_id);
-CREATE INDEX IF NOT EXISTS idx_investments_symbol ON investments(symbol);
-CREATE INDEX IF NOT EXISTS idx_stock_prices_symbol_date ON stock_prices(symbol, date);
-CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation ON ai_messages(conversation_id);
-CREATE INDEX IF NOT EXISTS idx_exchange_rates_currencies ON exchange_rates(from_currency, to_currency);
-CREATE INDEX IF NOT EXISTS idx_extension_data_extension ON extension_data(extension_id);
-`
-
-const MIGRATION_001_SEEDS = `
-INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES
-  ('01FOOD000000000000000000000', 'Food & Dining', 'utensils', '#f97316', 'expense', 1),
-  ('01TRANSPORT0000000000000000', 'Transportation', 'car', '#3b82f6', 'expense', 2),
-  ('01HOUSING00000000000000000', 'Housing', 'home', '#8b5cf6', 'expense', 3),
-  ('01ENTERTAIN000000000000000', 'Entertainment', 'tv', '#ec4899', 'expense', 4),
-  ('01HEALTH000000000000000000', 'Health', 'heart-pulse', '#ef4444', 'expense', 5),
-  ('01SHOPPING0000000000000000', 'Shopping', 'shopping-bag', '#f59e0b', 'expense', 6),
-  ('01EDUCATION000000000000000', 'Education', 'graduation-cap', '#06b6d4', 'expense', 7),
-  ('01UTILITIES000000000000000', 'Utilities', 'zap', '#64748b', 'expense', 8),
-  ('01SUBSCRIPT000000000000000', 'Subscriptions', 'repeat', '#a855f7', 'expense', 9),
-  ('01OTHER0000000000000000000', 'Other Expenses', 'more-horizontal', '#6b7280', 'expense', 10),
-  ('01SALARY000000000000000000', 'Salary', 'banknote', '#22c55e', 'income', 11),
-  ('01FREELANCE000000000000000', 'Freelance', 'briefcase', '#10b981', 'income', 12),
-  ('01INVESTINC000000000000000', 'Investment Income', 'trending-up', '#14b8a6', 'income', 13),
-  ('01OTHERINC0000000000000000', 'Other Income', 'plus-circle', '#059669', 'income', 14),
-  ('01TRANSFER0000000000000000', 'Transfer', 'arrow-right-left', '#6366f1', 'transfer', 15);
-`
-
-const MIGRATION_002 = `
-CREATE TABLE IF NOT EXISTS ai_memories (
-  id TEXT PRIMARY KEY,
-  category TEXT NOT NULL CHECK (category IN ('preference', 'fact', 'goal', 'behavior', 'context')),
-  content TEXT NOT NULL,
-  importance INTEGER NOT NULL DEFAULT 5 CHECK (importance >= 1 AND importance <= 10),
-  last_accessed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_ai_memories_category ON ai_memories(category);
-`
-
-const MIGRATION_004 = `
-CREATE TABLE IF NOT EXISTS category_rules (
-  id TEXT PRIMARY KEY,
-  pattern TEXT NOT NULL,
-  category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
-  subcategory_id TEXT REFERENCES subcategories(id) ON DELETE SET NULL,
-  confidence REAL NOT NULL DEFAULT 1.0,
-  hit_count INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_category_rules_pattern_category ON category_rules(pattern, category_id);
-CREATE INDEX IF NOT EXISTS idx_category_rules_pattern ON category_rules(pattern);
-`
-
-const MIGRATION_005 = `
-CREATE TABLE IF NOT EXISTS recurring_rules (
-  id TEXT PRIMARY KEY,
-  description TEXT NOT NULL,
-  amount INTEGER NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('expense', 'income', 'transfer')),
-  frequency TEXT NOT NULL CHECK (frequency IN ('daily', 'weekly', 'biweekly', 'monthly', 'quarterly', 'yearly')),
-  next_date TEXT NOT NULL,
-  end_date TEXT,
-  account_id TEXT NOT NULL REFERENCES accounts(id),
-  to_account_id TEXT REFERENCES accounts(id),
-  category_id TEXT REFERENCES categories(id),
-  subcategory_id TEXT REFERENCES subcategories(id),
-  tags TEXT DEFAULT '',
-  notes TEXT,
-  active INTEGER DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_recurring_rules_next_date ON recurring_rules(next_date);
-CREATE INDEX IF NOT EXISTS idx_recurring_rules_active ON recurring_rules(active);
-`
-
-const MIGRATION_006 = `
-CREATE TABLE IF NOT EXISTS goals (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  target_amount INTEGER NOT NULL,
-  current_amount INTEGER NOT NULL DEFAULT 0,
-  deadline TEXT,
-  account_id TEXT REFERENCES accounts(id),
-  icon TEXT DEFAULT '🎯',
-  color TEXT DEFAULT '#bf5af2',
-  notes TEXT,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_goals_deadline ON goals(deadline);
-`
-
-const MIGRATION_007_RECAPS = `
-CREATE TABLE IF NOT EXISTS recaps (
-  id TEXT PRIMARY KEY,
-  type TEXT NOT NULL CHECK (type IN ('weekly', 'monthly')),
-  period_start TEXT NOT NULL,
-  period_end TEXT NOT NULL,
-  title TEXT NOT NULL,
-  summary TEXT NOT NULL,
-  highlights_json TEXT NOT NULL DEFAULT '[]',
-  generated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_recaps_type ON recaps(type);
-CREATE INDEX IF NOT EXISTS idx_recaps_generated ON recaps(generated_at);
-`
-
-// --- Parameter conversion ---
-// The codebase uses two param styles:
-//   - $1, $2, $3 (tauri-plugin-sql positional) used in AI tools
-//   - ? (positional) used in stores
-// sql.js supports both ? and $1 natively, so no conversion needed.
-// However, sql.js $-params are named (dict-based), while the codebase passes arrays.
-// We convert $N params to ? so sql.js can bind positionally from an array.
-
-function convertParams(sql: string): string {
-  return sql.replace(/\$(\d+)/g, '?')
-}
-
-// --- Helpers to convert sql.js results to objects ---
-
-function rowsToObjects<T>(stmt: ReturnType<SqlJsDatabase['prepare']>): T[] {
-  const results: T[] = []
-  const columns = stmt.getColumnNames()
-  while (stmt.step()) {
-    const values = stmt.get()
-    const row: Record<string, unknown> = {}
-    for (let i = 0; i < columns.length; i++) {
-      row[columns[i]] = values[i]
-    }
-    results.push(row as T)
-  }
-  stmt.free()
-  return results
-}
-
-// --- Initialization ---
-
-function runMigrations(database: SqlJsDatabase): void {
-  // Create migrations tracking table
-  database.run(`
+async function runTauriMigrations(db: TauriDatabase): Promise<void> {
+  // Ensure _migrations table exists (created by earlier JS code or first run)
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS _migrations (
       id INTEGER PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
@@ -389,229 +43,319 @@ function runMigrations(database: SqlJsDatabase): void {
     )
   `)
 
-  const applied = new Set<string>()
-  const stmt = database.prepare('SELECT name FROM _migrations')
-  while (stmt.step()) {
-    applied.add(stmt.get()[0] as string)
-  }
-  stmt.free()
+  const rows = await db.select<{ name: string }[]>('SELECT name FROM _migrations')
+  const applied = new Set(rows.map((r) => r.name))
 
+  // Migration 001-003 are applied by the Rust plugin, but may not be in _migrations table.
+  // Mark them as applied if the tables already exist to keep tracking consistent.
   if (!applied.has('001_core_tables')) {
-    database.exec(MIGRATION_001)
-    database.run(MIGRATION_001_SEEDS)
-    database.run("INSERT INTO _migrations (id, name) VALUES (1, '001_core_tables')")
+    // Check if core tables exist (the Rust side creates them)
+    const tables = await db.select<{ name: string }[]>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='accounts'"
+    )
+    if (tables.length > 0) {
+      await db.execute("INSERT OR IGNORE INTO _migrations (id, name) VALUES (1, '001_core_tables')")
+      applied.add('001_core_tables')
+    }
   }
-
   if (!applied.has('002_ai_memories')) {
-    database.exec(MIGRATION_002)
-    // ALTER TABLE for ai_conversations — add summary column if not exists
-    try {
-      database.run('ALTER TABLE ai_conversations ADD COLUMN summary TEXT')
-    } catch {
-      // Column may already exist
+    const tables = await db.select<{ name: string }[]>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='ai_memories'"
+    )
+    if (tables.length > 0) {
+      await db.execute("INSERT OR IGNORE INTO _migrations (id, name) VALUES (2, '002_ai_memories')")
+      applied.add('002_ai_memories')
     }
-    database.run("INSERT INTO _migrations (id, name) VALUES (2, '002_ai_memories')")
   }
-
   if (!applied.has('003_credit_cards')) {
-    try {
-      database.run('ALTER TABLE accounts ADD COLUMN credit_limit INTEGER')
-    } catch {
-      // Column may already exist
-    }
-    try {
-      database.run('ALTER TABLE accounts ADD COLUMN statement_closing_day INTEGER')
-    } catch {
-      // Column may already exist
-    }
-    try {
-      database.run('ALTER TABLE accounts ADD COLUMN payment_due_day INTEGER')
-    } catch {
-      // Column may already exist
-    }
-    database.run("INSERT INTO _migrations (id, name) VALUES (3, '003_credit_cards')")
+    // Credit cards migration adds columns, not tables. Mark as done if accounts exists
+    // (the Rust side handles it)
+    await db.execute("INSERT OR IGNORE INTO _migrations (id, name) VALUES (3, '003_credit_cards')")
+    applied.add('003_credit_cards')
   }
 
+  // Seed categories if 001 was just marked (Rust migrations don't seed)
+  // Use OR IGNORE so it's safe to run multiple times
+  if (applied.has('001_core_tables')) {
+    await db.execute(`
+      INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES
+        ('01FOOD000000000000000000000', 'Food & Dining', 'utensils', '#f97316', 'expense', 1)
+    `)
+    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01TRANSPORT0000000000000000', 'Transportation', 'car', '#3b82f6', 'expense', 2)`)
+    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01HOUSING00000000000000000', 'Housing', 'home', '#8b5cf6', 'expense', 3)`)
+    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01ENTERTAIN000000000000000', 'Entertainment', 'tv', '#ec4899', 'expense', 4)`)
+    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01HEALTH000000000000000000', 'Health', 'heart-pulse', '#ef4444', 'expense', 5)`)
+    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01SHOPPING0000000000000000', 'Shopping', 'shopping-bag', '#f59e0b', 'expense', 6)`)
+    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01EDUCATION000000000000000', 'Education', 'graduation-cap', '#06b6d4', 'expense', 7)`)
+    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01UTILITIES000000000000000', 'Utilities', 'zap', '#64748b', 'expense', 8)`)
+    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01SUBSCRIPT000000000000000', 'Subscriptions', 'repeat', '#a855f7', 'expense', 9)`)
+    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01OTHER0000000000000000000', 'Other Expenses', 'more-horizontal', '#6b7280', 'expense', 10)`)
+    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01SALARY000000000000000000', 'Salary', 'banknote', '#22c55e', 'income', 11)`)
+    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01FREELANCE000000000000000', 'Freelance', 'briefcase', '#10b981', 'income', 12)`)
+    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01INVESTINC000000000000000', 'Investment Income', 'trending-up', '#14b8a6', 'income', 13)`)
+    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01OTHERINC0000000000000000', 'Other Income', 'plus-circle', '#059669', 'income', 14)`)
+    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01TRANSFER0000000000000000', 'Transfer', 'arrow-right-left', '#6366f1', 'transfer', 15)`)
+  }
 
+  // --- Migration 004: Category Rules ---
   if (!applied.has('004_category_rules')) {
-    const statements = MIGRATION_004.split(';')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
-    for (const s of statements) {
-      database.run(s)
-    }
-    database.run("INSERT INTO _migrations (id, name) VALUES (4, '004_category_rules')")
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS category_rules (
+        id TEXT PRIMARY KEY,
+        pattern TEXT NOT NULL,
+        category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+        subcategory_id TEXT REFERENCES subcategories(id) ON DELETE SET NULL,
+        confidence REAL NOT NULL DEFAULT 1.0,
+        hit_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      )
+    `)
+    await db.execute(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_category_rules_pattern_category ON category_rules(pattern, category_id)`
+    )
+    await db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_category_rules_pattern ON category_rules(pattern)`
+    )
+    await db.execute("INSERT INTO _migrations (id, name) VALUES (4, '004_category_rules')")
   }
 
+  // --- Migration 005: Recurring Rules ---
   if (!applied.has('005_recurring_rules')) {
-    const statements = MIGRATION_005.split(';')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
-    for (const s of statements) {
-      database.run(s)
-    }
-    database.run("INSERT INTO _migrations (id, name) VALUES (5, '005_recurring_rules')")
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS recurring_rules (
+        id TEXT PRIMARY KEY,
+        description TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('expense', 'income', 'transfer')),
+        frequency TEXT NOT NULL CHECK (frequency IN ('daily', 'weekly', 'biweekly', 'monthly', 'quarterly', 'yearly')),
+        next_date TEXT NOT NULL,
+        end_date TEXT,
+        account_id TEXT NOT NULL REFERENCES accounts(id),
+        to_account_id TEXT REFERENCES accounts(id),
+        category_id TEXT REFERENCES categories(id),
+        subcategory_id TEXT REFERENCES subcategories(id),
+        tags TEXT DEFAULT '',
+        notes TEXT,
+        active INTEGER DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      )
+    `)
+    await db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_recurring_rules_next_date ON recurring_rules(next_date)`
+    )
+    await db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_recurring_rules_active ON recurring_rules(active)`
+    )
+    await db.execute("INSERT INTO _migrations (id, name) VALUES (5, '005_recurring_rules')")
   }
 
+  // --- Migration 006: Goals ---
   if (!applied.has('006_goals')) {
-    const statements = MIGRATION_006.split(';')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
-    for (const s of statements) {
-      database.run(s)
-    }
-    database.run("INSERT INTO _migrations (id, name) VALUES (6, '006_goals')")
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS goals (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        target_amount INTEGER NOT NULL,
+        current_amount INTEGER NOT NULL DEFAULT 0,
+        deadline TEXT,
+        account_id TEXT REFERENCES accounts(id),
+        icon TEXT DEFAULT '🎯',
+        color TEXT DEFAULT '#bf5af2',
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      )
+    `)
+    await db.execute(`CREATE INDEX IF NOT EXISTS idx_goals_deadline ON goals(deadline)`)
+    await db.execute("INSERT INTO _migrations (id, name) VALUES (6, '006_goals')")
   }
 
+  // --- Migration 007: Recaps ---
   if (!applied.has('007_recaps')) {
-    const statements = MIGRATION_007_RECAPS.split(';')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
-    for (const s of statements) {
-      database.run(s)
-    }
-    database.run("INSERT INTO _migrations (id, name) VALUES (7, '007_recaps')")
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS recaps (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL CHECK (type IN ('weekly', 'monthly')),
+        period_start TEXT NOT NULL,
+        period_end TEXT NOT NULL,
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        highlights_json TEXT NOT NULL DEFAULT '[]',
+        generated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      )
+    `)
+    await db.execute(`CREATE INDEX IF NOT EXISTS idx_recaps_type ON recaps(type)`)
+    await db.execute(`CREATE INDEX IF NOT EXISTS idx_recaps_generated ON recaps(generated_at)`)
+    await db.execute("INSERT INTO _migrations (id, name) VALUES (7, '007_recaps')")
   }
 
+  // --- Migration 010: Transaction Splits ---
   if (!applied.has('010_transaction_splits')) {
-    const MIGRATION_010 = `
-CREATE TABLE IF NOT EXISTS transaction_splits (
-  id TEXT PRIMARY KEY,
-  transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
-  category_id TEXT NOT NULL REFERENCES categories(id),
-  subcategory_id TEXT REFERENCES subcategories(id),
-  amount INTEGER NOT NULL,
-  notes TEXT,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-CREATE INDEX IF NOT EXISTS idx_transaction_splits_transaction ON transaction_splits(transaction_id)
-`
-    const statements = MIGRATION_010.split(';')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
-    for (const s of statements) {
-      database.run(s)
-    }
-    database.run("INSERT INTO _migrations (id, name) VALUES (10, '010_transaction_splits')")
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS transaction_splits (
+        id TEXT PRIMARY KEY,
+        transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+        category_id TEXT NOT NULL REFERENCES categories(id),
+        subcategory_id TEXT REFERENCES subcategories(id),
+        amount INTEGER NOT NULL,
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      )
+    `)
+    await db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_transaction_splits_transaction ON transaction_splits(transaction_id)`
+    )
+    await db.execute("INSERT INTO _migrations (id, name) VALUES (10, '010_transaction_splits')")
   }
 }
 
-async function initDb(): Promise<SqlJsDatabase> {
-  const SQL = await loadSqlJs()
+// ── Browser Backend ────────────────────────────────────────────────────────
 
-  // Try to load existing database from IndexedDB
-  const saved = await loadFromIDB()
-  const database = saved ? new SQL.Database(saved) : new SQL.Database()
-
-  // Enable WAL mode equivalent and foreign keys
-  database.run('PRAGMA foreign_keys = ON')
-
-  // Run migrations
-  runMigrations(database)
-
-  // Persist after migrations
-  await saveToIDB(database.export())
-
-  return database
-}
-
-export async function exportDatabaseSnapshot(): Promise<Uint8Array> {
-  const database = await getDb()
-  return database.export()
-}
-
-export async function importDatabaseSnapshot(data: Uint8Array): Promise<void> {
-  const SQL = await loadSqlJs()
-  const candidate = new SQL.Database(data)
-
-  const integrity = candidate.exec('PRAGMA integrity_check')
-  const integrityResult = integrity[0]?.values?.[0]?.[0]
-
-  if (integrityResult !== 'ok') {
-    candidate.close()
-    throw new Error('Database integrity check failed')
-  }
-
-  runMigrations(candidate)
-  await saveToIDB(candidate.export())
-
-  if (db) {
-    db.close()
-  }
-
-  db = candidate
-  initPromise = Promise.resolve(candidate)
-}
-
-export async function getDb(): Promise<SqlJsDatabase> {
-  if (db) return db
-  if (!initPromise) {
-    initPromise = initDb().then((database) => {
-      db = database
-      return database
+async function browserFetch<T>(endpoint: string, body: Record<string, unknown>): Promise<T> {
+  let res: Response
+  try {
+    res = await fetch(`${DATA_SERVER_URL}${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     })
+  } catch (err) {
+    throw new Error(
+      `Cannot reach data server at ${DATA_SERVER_URL}. ` +
+        `Make sure it is running (npm run data-server). ` +
+        `Original error: ${err instanceof Error ? err.message : err}`
+    )
   }
-  return initPromise
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`DB request failed (${res.status}): ${text}`)
+  }
+  return res.json()
+}
+
+async function verifyBrowserServer(): Promise<void> {
+  // Run a lightweight test query to verify the data server is up and the DB is ready
+  try {
+    await browserFetch<unknown[]>('/api/db/query', {
+      sql: "SELECT 1 AS ok",
+      params: [],
+    })
+  } catch (err) {
+    throw new Error(
+      `Data server health check failed. ` +
+        `Ensure the data server is running: npm run data-server\n` +
+        `${err instanceof Error ? err.message : err}`
+    )
+  }
+}
+
+// ── Public API ─────────────────────────────────────────────────────────────
+// These signatures are consumed by 74+ files — do NOT change them.
+
+export async function getDb(): Promise<TauriDatabase> {
+  if (isTauri) {
+    return getTauriDb()
+  }
+  // In browser mode, return a shim that delegates to the HTTP API.
+  // getDb() is only used internally, but we expose it for compatibility.
+  await verifyBrowserServer()
+  return {
+    select: async <T>(sql: string, params?: unknown[]): Promise<T> => {
+      return browserFetch<T>('/api/db/query', { sql, params: params || [] })
+    },
+    execute: async (sql: string, params?: unknown[]) => {
+      return browserFetch<{ rowsAffected: number; lastInsertId: number }>('/api/db/execute', {
+        sql,
+        params: params || [],
+      })
+    },
+    close: async () => {
+      // No-op for browser mode
+    },
+  }
 }
 
 export async function query<T>(sql: string, bindValues?: unknown[]): Promise<T[]> {
-  const database = await getDb()
-  const converted = convertParams(sql)
-  const stmt = database.prepare(converted)
-  if (bindValues && bindValues.length > 0) {
-    stmt.bind(bindValues as (string | number | Uint8Array | null)[])
+  if (isTauri) {
+    const database = await getTauriDb()
+    return database.select<T[]>(sql, bindValues || [])
   }
-  return rowsToObjects<T>(stmt)
+  return browserFetch<T[]>('/api/db/query', { sql, params: bindValues || [] })
 }
 
 export async function execute(
   sql: string,
   bindValues?: unknown[]
 ): Promise<{ rowsAffected: number; lastInsertId: number }> {
-  const database = await getDb()
-  const converted = convertParams(sql)
-  database.run(converted, bindValues as (string | number | Uint8Array | null)[] | undefined)
-  const rowsAffected = database.getRowsModified()
-  // sql.js doesn't directly expose lastInsertId through getRowsModified,
-  // so we query it separately
-  const lastIdResult = database.exec('SELECT last_insert_rowid()')
-  const lastInsertId = lastIdResult.length > 0 ? (lastIdResult[0].values[0][0] as number) : 0
-
-  // Persist when not inside an explicit transaction block
-  if (transactionDepth === 0) {
-    await persist()
+  if (isTauri) {
+    const database = await getTauriDb()
+    return database.execute(sql, bindValues || [])
   }
-
-  return { rowsAffected, lastInsertId }
+  return browserFetch<{ rowsAffected: number; lastInsertId: number }>('/api/db/execute', {
+    sql,
+    params: bindValues || [],
+  })
 }
 
 export async function runInTransaction<T>(fn: () => Promise<T>): Promise<T> {
-  const database = await getDb()
-  const isRoot = transactionDepth === 0
-
-  if (isRoot) {
-    database.run('BEGIN')
+  if (isTauri) {
+    const database = await getTauriDb()
+    await database.execute('BEGIN')
+    try {
+      const result = await fn()
+      await database.execute('COMMIT')
+      return result
+    } catch (error) {
+      await database.execute('ROLLBACK')
+      throw error
+    }
   }
 
-  transactionDepth += 1
+  // Browser mode: the data server uses better-sqlite3 which is synchronous
+  // and single-threaded, so we just execute the statements sequentially.
+  // Wrap in BEGIN/COMMIT for atomicity on the server side.
+  await browserFetch('/api/db/execute', { sql: 'BEGIN', params: [] })
   try {
     const result = await fn()
-    transactionDepth -= 1
-
-    if (isRoot) {
-      database.run('COMMIT')
-      await persist()
-    }
-
+    await browserFetch('/api/db/execute', { sql: 'COMMIT', params: [] })
     return result
   } catch (error) {
-    transactionDepth = Math.max(0, transactionDepth - 1)
-
-    if (isRoot) {
-      database.run('ROLLBACK')
-      await persist()
-    }
-
+    await browserFetch('/api/db/execute', { sql: 'ROLLBACK', params: [] })
     throw error
   }
+}
+
+// ── Import / Export ────────────────────────────────────────────────────────
+// TODO: Phase 3 — implement proper import/export for both backends.
+// For now these are stubbed to throw a clear error in browser mode,
+// and use a query-based approach in Tauri mode.
+
+export async function exportDatabaseSnapshot(): Promise<Uint8Array> {
+  if (!isTauri) {
+    throw new Error(
+      'Database export is not yet supported in browser mode. ' +
+        'Use the Tauri desktop app to export your database.'
+    )
+  }
+  // In Tauri mode, we can't easily get a raw binary dump through plugin-sql.
+  // For now, throw with guidance. A future phase can use a Tauri command.
+  throw new Error(
+    'Database export in Tauri mode requires a dedicated Tauri command. ' +
+      'This will be implemented in a future phase.'
+  )
+}
+
+export async function importDatabaseSnapshot(_data: Uint8Array): Promise<void> {
+  if (!isTauri) {
+    throw new Error(
+      'Database import is not yet supported in browser mode. ' +
+        'Use the Tauri desktop app to import your database.'
+    )
+  }
+  throw new Error(
+    'Database import in Tauri mode requires a dedicated Tauri command. ' +
+      'This will be implemented in a future phase.'
+  )
 }

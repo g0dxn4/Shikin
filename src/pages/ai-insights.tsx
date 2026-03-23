@@ -115,10 +115,10 @@ export function AIInsights() {
       <div className="glass-card p-5">
         <div className="mb-4 flex items-center gap-3">
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent font-heading text-sm font-bold text-white">
-            V
+            I
           </div>
           <div>
-            <h3 className="font-heading text-sm font-semibold">Chat with Val</h3>
+            <h3 className="font-heading text-sm font-semibold">Chat with Ivy</h3>
             <p className="text-muted-foreground text-[10px]">Your AI financial assistant</p>
           </div>
         </div>

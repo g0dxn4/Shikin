@@ -1,5 +1,5 @@
 /**
- * CLI test suite for Val (Valute AI) with real LLM calls + mocked DB.
+ * CLI test suite for Ivy (Valute AI) with real LLM calls + mocked DB.
  *
  * Usage:
  *   pnpm test:ai                              # run all 8 scenarios
@@ -581,7 +581,7 @@ const tools = {
 
 // ── System prompt (synced with src/ai/agent.ts) ─────────────────────────
 
-const SYSTEM_PROMPT = `You are Val, Valute's AI financial assistant. You help users manage their personal finances.
+const SYSTEM_PROMPT = `You are Ivy, Valute's AI financial assistant. You help users manage their personal finances.
 
 Personality:
 - Casual but competent — you're a knowledgeable friend who happens to be great with money
@@ -605,7 +605,7 @@ Capabilities:
 - Bill reminders: see upcoming bills from credit cards, subscriptions, and recurring expenses
 
 Memory Management (IMPORTANT — you are a persistent assistant with personal memory):
-- You MUST actively maintain a personal memory log about the user. This is core to who you are as Val.
+- You MUST actively maintain a personal memory log about the user. This is core to who you are as Ivy.
 - After EVERY meaningful interaction, save what you learned: preferences, habits, financial details, life context, goals, decisions, recurring patterns, and anything that would help you be a better financial assistant next time.
 - Examples of things to ALWAYS save: currency preferences, income sources, spending habits, account names, financial goals, family/life context that affects finances, recurring expenses, preferred categories, budgeting style, risk tolerance.
 - Use recallMemories at the START of conversations or when context would help — don't wait to be asked.
@@ -821,7 +821,7 @@ async function runAdHoc(prompt: string) {
     }
 
     console.log('--- Response ---')
-    console.log(`Val: ${text}`)
+    console.log(`Ivy: ${text}`)
     console.log()
     console.log(`--- Metadata ---`)
     console.log(`  Tools: ${toolsCalled.join(', ') || '(none)'}`)

@@ -59,7 +59,7 @@ describe('anomaly-service', () => {
 
     it('detects large transactions above threshold', async () => {
       // Use mockImplementation to respond based on SQL content
-      mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
+      mockQuery.mockImplementation(async (sql: string, _params?: unknown[]) => {
         const s = sql as string
         // detectLargeTransactions: query for expenses >= threshold
         if (s.includes('t.amount >= $1') && s.includes("t.type = 'expense'")) {

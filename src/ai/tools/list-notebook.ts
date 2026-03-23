@@ -4,7 +4,7 @@ import { listNotes } from '@/lib/notebook'
 
 export const listNotebook = tool({
   description:
-    'List notes and directories in Val\'s notebook. Use to discover available research, reviews, and educational content.',
+    'List notes and directories in Ivy\'s notebook. Use to discover available research, reviews, and educational content.',
   inputSchema: zodSchema(
     z.object({
       directory: z

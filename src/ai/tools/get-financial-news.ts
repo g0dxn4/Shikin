@@ -6,7 +6,7 @@ import type { Investment } from '@/types/database'
 
 export const getFinancialNews = tool({
   description:
-    'Fetch financial news for a specific symbol or the entire portfolio. Val uses this to stay informed about holdings and save insights to the notebook.',
+    'Fetch financial news for a specific symbol or the entire portfolio. Ivy uses this to stay informed about holdings and save insights to the notebook.',
   inputSchema: zodSchema(
     z.object({
       symbol: z

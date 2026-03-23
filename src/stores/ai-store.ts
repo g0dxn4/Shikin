@@ -3,7 +3,7 @@ import { load } from '@/lib/storage'
 import { refreshAccessToken } from '@/lib/oauth'
 import type { OAuthConfig } from '@/lib/oauth'
 import { createGoogleOAuthConfig } from '@/lib/oauth-providers/google'
-import { createOpenAICodexOAuthConfig } from '@/lib/oauth-providers/openai-codex'
+import { refreshOpenAIToken } from '@/lib/oauth-providers/openai-codex'
 
 interface AIState {
   provider: string
@@ -36,15 +36,8 @@ interface AIState {
   clearOAuth: () => Promise<void>
 }
 
-function getOAuthConfig(provider: string, clientId: string): OAuthConfig | null {
-  switch (provider) {
-    case 'google':
-      return clientId ? createGoogleOAuthConfig(clientId) : null
-    case 'openai':
-      return createOpenAICodexOAuthConfig()
-    default:
-      return null
-  }
+function getGoogleOAuthConfig(clientId: string): OAuthConfig | null {
+  return clientId ? createGoogleOAuthConfig(clientId) : null
 }
 
 export const useAIStore = create<AIState>((set, get) => ({
@@ -164,29 +157,43 @@ export const useAIStore = create<AIState>((set, get) => ({
       state.oauthRefreshToken &&
       Date.now() > state.oauthExpiresAt - REFRESH_BUFFER
     ) {
-      const config = getOAuthConfig(state.provider, state.oauthClientId)
-      if (config) {
-        try {
+      try {
+        let accessToken: string
+        let refreshToken: string | undefined
+        let expiresAt: number
+
+        if (state.provider === 'openai') {
+          const tokens = await refreshOpenAIToken(state.oauthRefreshToken)
+          accessToken = tokens.access_token
+          refreshToken = tokens.refresh_token
+          expiresAt = Date.now() + (tokens.expires_in ?? 3600) * 1000
+        } else {
+          const config = getGoogleOAuthConfig(state.oauthClientId)
+          if (!config) return state.oauthAccessToken || ''
           const tokens = await refreshAccessToken(config, state.oauthRefreshToken)
-          // Persist refreshed tokens
-          const store = await load('settings.json')
-          await store.set('ai_oauth_access_token', tokens.accessToken)
-          await store.set('ai_oauth_refresh_token', tokens.refreshToken ?? state.oauthRefreshToken)
-          await store.set('ai_oauth_expires_at', tokens.expiresAt)
-          await store.save()
-
-          set({
-            oauthAccessToken: tokens.accessToken,
-            oauthRefreshToken: tokens.refreshToken ?? state.oauthRefreshToken,
-            oauthExpiresAt: tokens.expiresAt,
-          })
-
-          return tokens.accessToken
-        } catch {
-          // Refresh failed — clear OAuth state
-          await get().clearOAuth()
-          return ''
+          accessToken = tokens.accessToken
+          refreshToken = tokens.refreshToken
+          expiresAt = tokens.expiresAt
         }
+
+        // Persist refreshed tokens
+        const store = await load('settings.json')
+        await store.set('ai_oauth_access_token', accessToken)
+        await store.set('ai_oauth_refresh_token', refreshToken ?? state.oauthRefreshToken)
+        await store.set('ai_oauth_expires_at', expiresAt)
+        await store.save()
+
+        set({
+          oauthAccessToken: accessToken,
+          oauthRefreshToken: refreshToken ?? state.oauthRefreshToken,
+          oauthExpiresAt: expiresAt,
+        })
+
+        return accessToken
+      } catch {
+        // Refresh failed — clear OAuth state
+        await get().clearOAuth()
+        return ''
       }
     }
 

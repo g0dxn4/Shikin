@@ -83,7 +83,7 @@ export function AIPanel() {
     })
   }, [provider, apiKey, model, isConfigured, authMode, oauthAccessToken, codexAccountId])
 
-  const chatId = useMemo(() => `val-${provider}-${model || 'default'}`, [provider, model])
+  const chatId = useMemo(() => `ivy-${provider}-${model || 'default'}`, [provider, model])
 
   const { messages, setMessages, sendMessage, status, error } = useChat({
     id: chatId,
@@ -117,12 +117,12 @@ export function AIPanel() {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           setMessages(compacted as any)
         } catch (err) {
-          console.error('[Val] Compaction failed:', err)
+          console.error('[Ivy] Compaction failed:', err)
         }
       }
     },
     onError: (err) => {
-      console.error('[Val AI Error]', err)
+      console.error('[Ivy AI Error]', err)
     },
   })
 
@@ -226,7 +226,7 @@ export function AIPanel() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setMessages(compacted as any)
     } catch (err) {
-      console.error('[Val] Compaction failed:', err)
+      console.error('[Ivy] Compaction failed:', err)
     } finally {
       setIsCompacting(false)
     }

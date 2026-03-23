@@ -72,6 +72,7 @@ export default function App() {
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
             <Route path="/oauth/callback" element={<OAuthCallback />} />
+            <Route path="/auth/callback" element={<OAuthCallback />} />
           </Routes>
         </Suspense>
       </BrowserRouter>

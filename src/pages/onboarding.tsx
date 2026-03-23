@@ -7,7 +7,7 @@ const FEATURES = [
     icon: Brain,
     title: 'AI Assistant',
     description:
-      'Val, your personal finance AI, helps you track spending, manage budgets, and discover insights through natural conversation.',
+      'Ivy, your personal finance AI, helps you track spending, manage budgets, and discover insights through natural conversation.',
   },
   {
     icon: Shield,
@@ -106,7 +106,7 @@ export function Onboarding() {
             <div>
               <h3 className="font-heading text-lg font-semibold">You're All Set</h3>
               <p className="text-muted-foreground mt-2 text-sm">
-                Start tracking your finances, chat with Val, and take control of your money.
+                Start tracking your finances, chat with Ivy, and take control of your money.
               </p>
             </div>
           </div>

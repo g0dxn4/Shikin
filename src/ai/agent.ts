@@ -52,7 +52,7 @@ import {
 } from './tools'
 import { loadCoreMemories } from './memory-loader'
 
-const BASE_SYSTEM_PROMPT = `You are Val, Valute's AI financial assistant. You help users manage their personal finances.
+const BASE_SYSTEM_PROMPT = `You are Ivy, Valute's AI financial assistant. You help users manage their personal finances.
 
 Personality:
 - Casual but competent — you're a knowledgeable friend who happens to be great with money
@@ -105,7 +105,7 @@ Investment Intelligence (IMPORTANT — you are a patient teacher, not a trader):
 - When analyzing holdings, consider fundamentals, news context, and portfolio diversification — but always as educational framing.
 
 Memory Management (IMPORTANT — you are a persistent assistant with personal memory):
-- You MUST actively maintain a personal memory log about the user. This is core to who you are as Val.
+- You MUST actively maintain a personal memory log about the user. This is core to who you are as Ivy.
 - After EVERY meaningful interaction, save what you learned: preferences, habits, financial details, life context, goals, decisions, recurring patterns, and anything that would help you be a better financial assistant next time.
 - Examples of things to ALWAYS save: currency preferences, income sources, spending habits, account names, financial goals, family/life context that affects finances, recurring expenses, preferred categories, budgeting style, risk tolerance.
 - Your Memory Index below only shows a summary and high-importance pinned items. For ANYTHING not pinned, use recallMemories to look up details before answering — never guess from the index alone.
@@ -156,7 +156,7 @@ export function createLanguageModel(
           headers: {
             'OpenAI-Beta': 'responses=experimental',
             'chatgpt-account-id': options.codexAccountId || '',
-            'originator': 'codex_cli_rs',
+            'originator': 'valute',
           },
         })
         return openai.chat(model || 'gpt-4o')
@@ -282,7 +282,7 @@ export function createAgent(
       try {
         memorySuffix = await loadCoreMemories()
       } catch (err) {
-        console.warn('[Val] Failed to load memories:', err)
+        console.warn('[Ivy] Failed to load memories:', err)
       }
       return { ...options, instructions: BASE_SYSTEM_PROMPT + memorySuffix }
     },

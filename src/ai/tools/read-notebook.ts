@@ -4,7 +4,7 @@ import { readNote, noteExists } from '@/lib/notebook'
 
 export const readNotebook = tool({
   description:
-    'Read a note from Val\'s notebook. Use to reference previous research, reviews, or educational content.',
+    'Read a note from Ivy\'s notebook. Use to reference previous research, reviews, or educational content.',
   inputSchema: zodSchema(
     z.object({
       path: z

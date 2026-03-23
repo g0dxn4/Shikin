@@ -724,7 +724,7 @@ export function Dashboard() {
             </Button>
             <Button variant="outline" onClick={() => setAIPanelOpen(true)}>
               <Sparkles size={16} />
-              {t('quickActions.askVal')}
+              {t('quickActions.askIvy')}
             </Button>
           </div>
         </>

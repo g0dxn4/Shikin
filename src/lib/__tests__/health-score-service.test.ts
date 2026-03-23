@@ -1,5 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+const mockStore = vi.hoisted(() => ({
+  get: vi.fn(async () => null),
+  set: vi.fn(async () => {}),
+  save: vi.fn(async () => {}),
+}))
+
+vi.mock('@/lib/storage', () => ({
+  load: vi.fn().mockResolvedValue(mockStore),
+}))
+
 vi.mock('@/lib/database', () => ({
   query: vi.fn(),
   execute: vi.fn(),
@@ -17,7 +27,7 @@ const mockQuery = vi.mocked(query)
 describe('health-score-service', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    localStorage.clear()
+    mockStore.get.mockResolvedValue(null)
   })
 
   /**

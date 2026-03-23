@@ -1,5 +1,6 @@
 import { query } from '@/lib/database'
 import { fromCentavos } from '@/lib/money'
+import { load } from '@/lib/storage'
 import dayjs from 'dayjs'
 
 export interface SubScore {
@@ -186,7 +187,7 @@ async function calculateDebtToIncome(): Promise<SubScore> {
       description: debt === 0 ? 'No credit card debt' : 'Track income to measure debt ratio',
       tip: debt === 0
         ? 'No credit card debt — well done'
-        : 'Start tracking your income so Val can monitor your debt ratio',
+        : 'Start tracking your income so Ivy can monitor your debt ratio',
     }
   }
 
@@ -334,10 +335,11 @@ export async function calculateHealthScore(): Promise<HealthScore> {
     subscores.reduce((sum, s) => sum + s.score * s.weight, 0)
   )
 
-  // Get historical scores from localStorage for trend
-  const historyRaw = localStorage.getItem('valute-health-score-history')
+  // Get historical scores from shared store for trend
+  const store = await load()
+  const historyRaw = await store.get('health_score_history')
   const history: { date: string; score: number }[] = historyRaw
-    ? JSON.parse(historyRaw)
+    ? (typeof historyRaw === 'string' ? JSON.parse(historyRaw) : (historyRaw as { date: string; score: number }[]))
     : []
 
   const trend = determineTrend(history)

@@ -49,7 +49,7 @@ export async function initNotebook(): Promise<void> {
   if (!(await exists(indexPath))) {
     await writeTextFile(
       indexPath,
-      `# Val's Notebook\n\nThis is Val's research notebook for tracking investment insights, portfolio reviews, and educational notes.\n\n## Sections\n\n- **weekly-reviews/** — Automated portfolio performance reviews\n- **holdings/** — Per-symbol research and analysis notes\n- **signals/** — Congressional trades and market signals\n- **education/** — Financial concepts and explanations\n`
+      `# Ivy's Notebook\n\nThis is Ivy's research notebook for tracking investment insights, portfolio reviews, and educational notes.\n\n## Sections\n\n- **weekly-reviews/** — Automated portfolio performance reviews\n- **holdings/** — Per-symbol research and analysis notes\n- **signals/** — Congressional trades and market signals\n- **education/** — Financial concepts and explanations\n`
     )
   }
 }

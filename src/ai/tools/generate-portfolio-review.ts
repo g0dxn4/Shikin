@@ -4,7 +4,7 @@ import { writeWeeklyReview, gatherReviewData, shouldGenerateReview } from '@/lib
 
 export const generatePortfolioReview = tool({
   description:
-    'Generate a portfolio review and save it to the notebook. Reviews include performance summary, top/worst performers, and a holdings table. Val can then add commentary and news analysis.',
+    'Generate a portfolio review and save it to the notebook. Reviews include performance summary, top/worst performers, and a holdings table. Ivy can then add commentary and news analysis.',
   inputSchema: zodSchema(
     z.object({
       force: z

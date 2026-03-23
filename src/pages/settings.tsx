@@ -19,7 +19,12 @@ import { load } from '@/lib/storage'
 import { exportDatabaseSnapshot, importDatabaseSnapshot } from '@/lib/database'
 import { startOAuthFlow, exchangeCodeForToken, loadPkceState } from '@/lib/oauth'
 import { createGoogleOAuthConfig, fetchGoogleUserEmail } from '@/lib/oauth-providers/google'
-import { createOpenAICodexOAuthConfig, extractAccountId } from '@/lib/oauth-providers/openai-codex'
+import {
+  generatePKCE,
+  buildAuthorizeUrl,
+  exchangeCodeForTokens,
+  extractAccountId,
+} from '@/lib/oauth-providers/openai-codex'
 import { ThemeSettings } from '@/components/ThemeSettings'
 
 export function SettingsPage() {
@@ -92,20 +97,6 @@ export function SettingsPage() {
         setFinnhubKey(((await store.get('finnhub_key')) as string) || '')
       })
       .catch(() => {})
-
-    // Check for same-window OAuth redirect fallback
-    const callbackResult = sessionStorage.getItem('oauth_callback_result')
-    if (callbackResult) {
-      sessionStorage.removeItem('oauth_callback_result')
-      try {
-        const { code, state } = JSON.parse(callbackResult)
-        if (code && state) {
-          handleOAuthCallbackResult(code, state)
-        }
-      } catch {
-        // Invalid callback data
-      }
-    }
   }, [loadSettings])
 
   useEffect(() => {
@@ -143,6 +134,7 @@ export function SettingsPage() {
       setLocalModel(models[0].id)
     }
   }, [models, localModel])
+
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -250,47 +242,27 @@ export function SettingsPage() {
 
   const handleOAuthCallbackResult = useCallback(
     async (code: string, state: string) => {
-      // Determine which provider and validate state for CSRF protection
+      // Google OAuth callback (popup/redirect flow)
       const googlePkce = loadPkceState('google')
-      const openaiPkce = loadPkceState('openai')
 
-      let config
-      let verifier: string
-
-      if (googlePkce && googlePkce.state === state) {
-        config = createGoogleOAuthConfig(localOAuthClientId || oauthClientId)
-        verifier = googlePkce.verifier
-      } else if (openaiPkce && openaiPkce.state === state) {
-        config = createOpenAICodexOAuthConfig()
-        verifier = openaiPkce.verifier
-      } else {
+      if (!googlePkce || googlePkce.state !== state) {
         toast.error('OAuth state mismatch or session expired — please try again')
         return
       }
 
-      // Clear PKCE state after validation
+      const config = createGoogleOAuthConfig(localOAuthClientId || oauthClientId)
       sessionStorage.removeItem(`oauth_${config.providerId}`)
 
       try {
-        const tokens = await exchangeCodeForToken(config, code, verifier)
+        const tokens = await exchangeCodeForToken(config, code, googlePkce.verifier)
 
-        let email: string | undefined
-        let codexAccId: string | undefined
-
-        if (config.providerId === 'google') {
-          const userEmail = await fetchGoogleUserEmail(tokens.accessToken)
-          if (userEmail) email = userEmail
-        } else if (config.providerId === 'openai') {
-          const accountId = extractAccountId(tokens.accessToken)
-          if (accountId) codexAccId = accountId
-        }
+        const email = await fetchGoogleUserEmail(tokens.accessToken)
 
         await setOAuthTokens({
           accessToken: tokens.accessToken,
           refreshToken: tokens.refreshToken,
           expiresIn: Math.floor((tokens.expiresAt - Date.now()) / 1000),
-          email,
-          codexAccountId: codexAccId,
+          email: email ?? undefined,
         })
 
         setLocalAuthMode('oauth')
@@ -303,27 +275,91 @@ export function SettingsPage() {
   )
 
   useEffect(() => {
-    loadSettings()
-    load('settings.json')
-      .then(async (store) => {
-        setAlphaVantageKey(((await store.get('alpha_vantage_key')) as string) || '')
-        setFinnhubKey(((await store.get('finnhub_key')) as string) || '')
-      })
-      .catch(() => {})
-
-    const callbackResult = sessionStorage.getItem('oauth_callback_result')
+    // Check for OAuth redirect result (from new tab via localStorage, or same-window via sessionStorage)
+    const callbackResult = localStorage.getItem('oauth_callback_result')
+      || sessionStorage.getItem('oauth_callback_result')
     if (callbackResult) {
+      localStorage.removeItem('oauth_callback_result')
       sessionStorage.removeItem('oauth_callback_result')
       try {
         const { code, state } = JSON.parse(callbackResult)
-        if (code && state) {
-          void handleOAuthCallbackResult(code, state)
+        if (!code || !state) return
+
+        // Check if this is an OpenAI OAuth callback
+        const openaiPkce = sessionStorage.getItem('oauth_openai')
+        if (openaiPkce) {
+          sessionStorage.removeItem('oauth_openai')
+          const pkce = JSON.parse(openaiPkce) as { verifier: string; state: string; redirectUri: string }
+          if (pkce.state === state) {
+            exchangeCodeForTokens(code, pkce.redirectUri, { ...pkce, challenge: '' })
+              .then(async (tokens) => {
+                const accountId = extractAccountId(tokens.id_token || tokens.access_token)
+                await setOAuthTokens({
+                  accessToken: tokens.access_token,
+                  refreshToken: tokens.refresh_token,
+                  expiresIn: tokens.expires_in ?? 3600,
+                  codexAccountId: accountId ?? undefined,
+                })
+                await saveSettings('openai', '', '')
+                setLocalProvider('openai')
+                setLocalAuthMode('oauth')
+                toast.success('Signed in with ChatGPT')
+              })
+              .catch((err) => {
+                toast.error(`OpenAI sign-in failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+              })
+            return
+          }
         }
+
+        // Otherwise try Google callback
+        void handleOAuthCallbackResult(code, state)
       } catch {
         // Invalid callback data
       }
     }
-  }, [loadSettings, handleOAuthCallbackResult])
+  }, [handleOAuthCallbackResult, saveSettings, setOAuthTokens])
+
+  // Listen for OAuth callback from new tab (localStorage 'storage' event fires on other tabs)
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== 'oauth_callback_result' || !e.newValue) return
+      localStorage.removeItem('oauth_callback_result')
+      try {
+        const { code, state } = JSON.parse(e.newValue)
+        if (!code || !state) return
+
+        const openaiPkce = sessionStorage.getItem('oauth_openai')
+        if (openaiPkce) {
+          sessionStorage.removeItem('oauth_openai')
+          const pkce = JSON.parse(openaiPkce) as { verifier: string; state: string; redirectUri: string }
+          if (pkce.state === state) {
+            exchangeCodeForTokens(code, pkce.redirectUri, { ...pkce, challenge: '' })
+              .then(async (tokens) => {
+                const accountId = extractAccountId(tokens.id_token || tokens.access_token)
+                await setOAuthTokens({
+                  accessToken: tokens.access_token,
+                  refreshToken: tokens.refresh_token,
+                  expiresIn: tokens.expires_in ?? 3600,
+                  codexAccountId: accountId ?? undefined,
+                })
+                await saveSettings('openai', '', '')
+                setLocalProvider('openai')
+                setLocalAuthMode('oauth')
+                toast.success('Signed in with ChatGPT')
+              })
+              .catch((err) => {
+                toast.error(`OpenAI sign-in failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+              })
+            return
+          }
+        }
+        handleOAuthCallbackResult(code, state)
+      } catch { /* invalid */ }
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [handleOAuthCallbackResult, saveSettings, setOAuthTokens])
 
   const handleGoogleOAuth = async () => {
     if (!localOAuthClientId) {
@@ -367,25 +403,47 @@ export function SettingsPage() {
   const handleOpenAIOAuth = async () => {
     setIsOAuthLoading(true)
     try {
-      const config = createOpenAICodexOAuthConfig()
-      const { code, verifier } = await startOAuthFlow(config)
-      const tokens = await exchangeCodeForToken(config, code, verifier)
+      const pkce = await generatePKCE()
+      const OAUTH_PORT = 1455
+      const redirectUri = `http://localhost:${OAUTH_PORT}/auth/callback`
+      const authUrl = buildAuthorizeUrl(redirectUri, pkce)
 
-      const accountId = extractAccountId(tokens.accessToken)
+      const isTauri = '__TAURI_INTERNALS__' in window
 
-      await setOAuthTokens({
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        expiresIn: Math.floor((tokens.expiresAt - Date.now()) / 1000),
-        codexAccountId: accountId ?? undefined,
-      })
-
-      // Also save provider + model
-      await saveSettings(localProvider, '', localModel)
-      setLocalAuthMode('oauth')
-      toast.success('Signed in with ChatGPT')
+      if (isTauri) {
+        // Tauri: use Rust callback server
+        const { invoke } = await import('@tauri-apps/api/core')
+        const { openUrl } = await import('@tauri-apps/plugin-opener')
+        const callbackPromise = invoke<{ code: string; state: string }>('oauth_listen', {
+          port: OAUTH_PORT,
+        })
+        await openUrl(authUrl)
+        const callback = await callbackPromise
+        if (callback.state !== pkce.state) throw new Error('OAuth state mismatch')
+        const tokens = await exchangeCodeForTokens(callback.code, redirectUri, pkce)
+        const accountId = extractAccountId(tokens.id_token || tokens.access_token)
+        await setOAuthTokens({
+          accessToken: tokens.access_token,
+          refreshToken: tokens.refresh_token,
+          expiresIn: tokens.expires_in ?? 3600,
+          codexAccountId: accountId ?? undefined,
+        })
+        await saveSettings(localProvider, '', localModel)
+        setLocalAuthMode('oauth')
+        toast.success('Signed in with ChatGPT')
+      } else {
+        // Browser: Node oauth-server.mjs handles port 1455, redirects to app
+        sessionStorage.setItem('oauth_openai', JSON.stringify({
+          verifier: pkce.verifier,
+          state: pkce.state,
+          redirectUri,
+        }))
+        // Open auth in new tab — callback server redirects back to /auth/callback
+        window.open(authUrl, '_blank')
+        setIsOAuthLoading(false)
+      }
     } catch (err) {
-      if (err instanceof Error && err.message.includes('popup was closed')) {
+      if (err instanceof Error && err.message.includes('was closed')) {
         // User cancelled
       } else {
         toast.error(
@@ -779,7 +837,7 @@ export function SettingsPage() {
                     }}
                   />
                   {isModelDropdownOpen && (
-                    <div className="border-border bg-popover absolute z-50 mt-1 max-h-60 w-full overflow-y-auto rounded-md border shadow-lg">
+                    <div className="border-border bg-popover absolute bottom-full z-50 mb-1 max-h-60 w-full overflow-y-auto rounded-md border shadow-lg">
                       {filteredModels.length === 0 ? (
                         <p className="text-muted-foreground p-3 text-sm">{t('ai.noModels')}</p>
                       ) : (

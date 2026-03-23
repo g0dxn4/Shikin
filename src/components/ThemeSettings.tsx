@@ -67,7 +67,12 @@ export function ThemeSettings() {
     violetGlass: t('theme.presetDescriptions.violetGlass'),
     latte: t('theme.presetDescriptions.latte'),
   }
-  const [theme, setTheme] = useState<ThemeTokens>(() => loadSavedTheme())
+  const [theme, setTheme] = useState<ThemeTokens>(defaultTheme)
+
+  // Load saved theme asynchronously on mount
+  useEffect(() => {
+    loadSavedTheme().then((saved) => setTheme(saved))
+  }, [])
   const [activeFilter, setActiveFilter] = useState<ThemeFilter>('all')
   const [prefersDark, setPrefersDark] = useState(true)
 
@@ -88,20 +93,20 @@ export function ThemeSettings() {
     applyTheme(newTheme)
   }
 
-  const handleSave = () => {
-    saveTheme(theme)
+  const handleSave = async () => {
+    await saveTheme(theme)
     applyTheme(theme)
     toast.success(t('theme.saveSuccess', 'Theme saved successfully'))
   }
 
-  const handleReset = () => {
+  const handleReset = async () => {
     handleApply(defaultTheme)
-    saveTheme(defaultTheme)
+    await saveTheme(defaultTheme)
     toast.success(t('theme.resetSuccess', 'Theme reset to default'))
   }
 
-  const handleRevert = () => {
-    const saved = loadSavedTheme()
+  const handleRevert = async () => {
+    const saved = await loadSavedTheme()
     handleApply(saved)
     toast.success(t('theme.revertSuccess', 'Reverted to saved theme'))
   }

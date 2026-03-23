@@ -147,9 +147,9 @@ export function generateReviewMarkdown(data: ReviewData, weekLabel: string): str
 
   lines.push(
     '',
-    '## Val\'s Notes',
+    '## Ivy\'s Notes',
     '',
-    '*Review auto-generated. Ask Val to analyze specific holdings or add commentary.*',
+    '*Review auto-generated. Ask Ivy to analyze specific holdings or add commentary.*',
     '',
     '---',
     `*Generated on ${dayjs().format('YYYY-MM-DD HH:mm')}*`,

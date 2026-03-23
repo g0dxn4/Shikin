@@ -1,3 +1,5 @@
+import { load } from './storage'
+
 export type ThemeTokens = {
   background: string
   surface: string
@@ -178,8 +180,6 @@ export const presetThemes: Record<string, ThemeTokens> = {
   },
 }
 
-const THEME_STORAGE_KEY = 'valute_theme'
-
 export function isValidTheme(theme: unknown): theme is ThemeTokens {
   if (!theme || typeof theme !== 'object') return false
 
@@ -195,11 +195,12 @@ export function isValidTheme(theme: unknown): theme is ThemeTokens {
   )
 }
 
-export function loadSavedTheme(): ThemeTokens {
+export async function loadSavedTheme(): Promise<ThemeTokens> {
   try {
-    const saved = localStorage.getItem(THEME_STORAGE_KEY)
-    if (saved) {
-      const parsed = JSON.parse(saved)
+    const store = await load()
+    const raw = await store.get('theme') as string | null
+    if (raw) {
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
       if (isValidTheme(parsed)) {
         return parsed
       }
@@ -210,9 +211,10 @@ export function loadSavedTheme(): ThemeTokens {
   return defaultTheme
 }
 
-export function saveTheme(theme: ThemeTokens) {
+export async function saveTheme(theme: ThemeTokens): Promise<void> {
   if (!isValidTheme(theme)) return
-  localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(theme))
+  const store = await load()
+  await store.set('theme', JSON.stringify(theme))
 }
 
 export function applyTheme(theme: ThemeTokens) {

@@ -4,7 +4,7 @@ import { writeNote, appendNote } from '@/lib/notebook'
 
 export const writeNotebook = tool({
   description:
-    'Write or update a markdown note in Val\'s notebook. Use for research findings, portfolio reviews, market signals, and educational content. Paths are relative to the notebook directory (e.g. "holdings/AAPL.md", "education/what-is-an-etf.md").',
+    'Write or update a markdown note in Ivy\'s notebook. Use for research findings, portfolio reviews, market signals, and educational content. Paths are relative to the notebook directory (e.g. "holdings/AAPL.md", "education/what-is-an-etf.md").',
   inputSchema: zodSchema(
     z.object({
       path: z

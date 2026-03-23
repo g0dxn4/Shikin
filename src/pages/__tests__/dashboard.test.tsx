@@ -100,7 +100,7 @@ describe('Dashboard', () => {
       expect(mockOpenAccountDialog).toHaveBeenCalled()
     })
 
-    it('setAIPanelOpen called on "Ask Val" CTA', async () => {
+    it('setAIPanelOpen called on "Ask Ivy" CTA', async () => {
       const user = userEvent.setup()
       render(<Dashboard />)
 

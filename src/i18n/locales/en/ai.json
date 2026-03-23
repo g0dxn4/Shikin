@@ -1,8 +1,8 @@
 {
   "panel": {
-    "title": "Val",
+    "title": "Ivy",
     "subtitle": "Your financial assistant",
-    "placeholder": "Ask Val anything about your finances...",
+    "placeholder": "Ask Ivy anything about your finances...",
     "send": "Send",
     "thinking": "Thinking...",
     "compact": "Compact",
@@ -10,7 +10,7 @@
     "messageCount": "{{count}} messages",
     "autoCompactSoon": "auto-compact soon",
     "empty": {
-      "title": "Hey! I'm Val",
+      "title": "Hey! I'm Ivy",
       "description": "I can help you manage your finances. Try asking me to add a transaction, check your spending, or create a budget.",
       "suggestions": [
         "How much did I spend this month?",

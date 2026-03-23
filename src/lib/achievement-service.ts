@@ -1,4 +1,5 @@
 import { query } from '@/lib/database'
+import { load } from '@/lib/storage'
 import dayjs from 'dayjs'
 
 // --- Types ---
@@ -44,37 +45,45 @@ export const ACHIEVEMENTS: Record<AchievementId, AchievementDef> = {
   goal_getter: { id: 'goal_getter', icon: '\u{1F3AF}', tier: 'silver' },
 }
 
-// --- localStorage keys ---
+// --- Storage keys ---
 
-const LS_ACHIEVEMENTS = 'valute:achievements'
-const LS_STREAK = 'valute:streak'
+const STORE_KEY_ACHIEVEMENTS = 'achievements'
+const STORE_KEY_STREAK = 'streak'
 
 // --- Persistence helpers ---
 
-function loadAchievements(): UnlockedAchievement[] {
+async function loadAchievements(): Promise<UnlockedAchievement[]> {
   try {
-    const raw = localStorage.getItem(LS_ACHIEVEMENTS)
-    return raw ? JSON.parse(raw) : []
+    const store = await load()
+    const raw = await store.get(STORE_KEY_ACHIEVEMENTS)
+    if (!raw) return []
+    return typeof raw === 'string' ? JSON.parse(raw) : (raw as UnlockedAchievement[])
   } catch {
     return []
   }
 }
 
-function saveAchievements(achievements: UnlockedAchievement[]): void {
-  localStorage.setItem(LS_ACHIEVEMENTS, JSON.stringify(achievements))
+async function saveAchievements(achievements: UnlockedAchievement[]): Promise<void> {
+  const store = await load()
+  await store.set(STORE_KEY_ACHIEVEMENTS, achievements)
 }
 
-function loadStreak(): StreakData {
+async function loadStreak(): Promise<StreakData> {
   try {
-    const raw = localStorage.getItem(LS_STREAK)
-    return raw ? JSON.parse(raw) : { currentStreak: 0, longestStreak: 0, lastLoggedDate: null }
+    const store = await load()
+    const raw = await store.get(STORE_KEY_STREAK)
+    if (!raw) return { currentStreak: 0, longestStreak: 0, lastLoggedDate: null }
+    return typeof raw === 'string'
+      ? JSON.parse(raw)
+      : (raw as StreakData)
   } catch {
     return { currentStreak: 0, longestStreak: 0, lastLoggedDate: null }
   }
 }
 
-function saveStreak(streak: StreakData): void {
-  localStorage.setItem(LS_STREAK, JSON.stringify(streak))
+async function saveStreak(streak: StreakData): Promise<void> {
+  const store = await load()
+  await store.set(STORE_KEY_STREAK, streak)
 }
 
 // --- Streak calculation ---
@@ -86,7 +95,7 @@ export async function computeStreak(): Promise<StreakData> {
 
   if (rows.length === 0) {
     const streak: StreakData = { currentStreak: 0, longestStreak: 0, lastLoggedDate: null }
-    saveStreak(streak)
+    await saveStreak(streak)
     return streak
   }
 
@@ -126,11 +135,11 @@ export async function computeStreak(): Promise<StreakData> {
     longestStreak,
     lastLoggedDate: dates[0],
   }
-  saveStreak(streak)
+  await saveStreak(streak)
   return streak
 }
 
-export function getStreak(): StreakData {
+export async function getStreak(): Promise<StreakData> {
   return loadStreak()
 }
 
@@ -242,7 +251,7 @@ const CHECKERS: Record<AchievementId, () => Promise<boolean>> = {
  * Previously unlocked achievements are not re-checked.
  */
 export async function checkAchievements(): Promise<UnlockedAchievement[]> {
-  const existing = loadAchievements()
+  const existing = await loadAchievements()
   const unlockedIds = new Set(existing.map((a) => a.id))
   const newlyUnlocked: UnlockedAchievement[] = []
 
@@ -264,24 +273,24 @@ export async function checkAchievements(): Promise<UnlockedAchievement[]> {
   }
 
   if (newlyUnlocked.length > 0) {
-    saveAchievements([...existing, ...newlyUnlocked])
+    await saveAchievements([...existing, ...newlyUnlocked])
   }
 
   return newlyUnlocked
 }
 
 /**
- * Get all unlocked achievements from localStorage.
+ * Get all unlocked achievements from the shared store.
  */
-export function getAllAchievements(): UnlockedAchievement[] {
+export async function getAllAchievements(): Promise<UnlockedAchievement[]> {
   return loadAchievements()
 }
 
 /**
  * Dismiss a newly unlocked achievement notification.
  */
-export function dismissAchievement(id: AchievementId): void {
-  const achievements = loadAchievements()
+export async function dismissAchievement(id: AchievementId): Promise<void> {
+  const achievements = await loadAchievements()
   const updated = achievements.map((a) => (a.id === id ? { ...a, dismissed: true } : a))
-  saveAchievements(updated)
+  await saveAchievements(updated)
 }

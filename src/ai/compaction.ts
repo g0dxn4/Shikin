@@ -9,7 +9,7 @@ export function shouldCompact(messages: UIMessage[]): boolean {
   return messages.length >= COMPACTION_THRESHOLD
 }
 
-const SUMMARIZATION_PROMPT = `Summarize the following conversation between a user and their AI financial assistant (Val).
+const SUMMARIZATION_PROMPT = `Summarize the following conversation between a user and their AI financial assistant (Ivy).
 Focus on:
 - Key financial actions taken (transactions added, accounts created, etc.)
 - Important user preferences or decisions mentioned

@@ -1,5 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+const mockStore = vi.hoisted(() => {
+  const data: Record<string, unknown> = {}
+  return {
+    get: vi.fn(async (key: string) => data[key] ?? null),
+    set: vi.fn(async (key: string, value: unknown) => { data[key] = value }),
+    save: vi.fn(async () => {}),
+    _data: data,
+    _clear: () => { Object.keys(data).forEach((k) => delete data[k]) },
+  }
+})
+
+vi.mock('@/lib/storage', () => ({
+  load: vi.fn().mockResolvedValue(mockStore),
+}))
+
 const { mockCalculateHealthScore } = vi.hoisted(() => ({
   mockCalculateHealthScore: vi.fn(),
 }))
@@ -9,25 +24,6 @@ vi.mock('@/lib/health-score-service', () => ({
 }))
 
 import { useHealthStore } from '../health-store'
-
-// Mock localStorage
-const localStorageMock = (() => {
-  let store: Record<string, string> = {}
-  return {
-    getItem: vi.fn((key: string) => store[key] ?? null),
-    setItem: vi.fn((key: string, value: string) => {
-      store[key] = value
-    }),
-    removeItem: vi.fn((key: string) => {
-      delete store[key]
-    }),
-    clear: vi.fn(() => {
-      store = {}
-    }),
-  }
-})()
-
-Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock })
 
 const mockScore = {
   overall: 78,
@@ -47,8 +43,8 @@ const mockScore = {
 describe('health-store', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    localStorageMock.clear()
-    useHealthStore.setState({ score: null, isLoading: false, history: [] })
+    mockStore._clear()
+    useHealthStore.setState({ score: null, isLoading: false, history: [], _historyLoaded: false })
   })
 
   describe('calculateScore', () => {
@@ -80,7 +76,7 @@ describe('health-store', () => {
       const existingHistory = [
         { date: new Date().toISOString(), score: 70 },
       ]
-      useHealthStore.setState({ history: existingHistory })
+      useHealthStore.setState({ history: existingHistory, _historyLoaded: true })
 
       const updatedScore = { ...mockScore, overall: 82 }
       mockCalculateHealthScore.mockResolvedValueOnce(updatedScore)
@@ -92,14 +88,14 @@ describe('health-store', () => {
       expect(history[0].score).toBe(82)
     })
 
-    it('persists history to localStorage', async () => {
+    it('persists history to shared store', async () => {
       mockCalculateHealthScore.mockResolvedValueOnce(mockScore)
 
       await useHealthStore.getState().calculateScore()
 
-      expect(localStorageMock.setItem).toHaveBeenCalledWith(
-        'valute-health-score-history',
-        expect.any(String)
+      expect(mockStore.set).toHaveBeenCalledWith(
+        'health_score_history',
+        expect.any(Array)
       )
     })
 
@@ -108,7 +104,7 @@ describe('health-store', () => {
         date: `2025-${String(i + 1).padStart(2, '0')}-01T00:00:00Z`,
         score: 70 + i,
       }))
-      useHealthStore.setState({ history: oldHistory })
+      useHealthStore.setState({ history: oldHistory, _historyLoaded: true })
 
       mockCalculateHealthScore.mockResolvedValueOnce(mockScore)
 

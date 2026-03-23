@@ -1,8 +1,8 @@
 {
   "panel": {
-    "title": "Val",
+    "title": "Ivy",
     "subtitle": "Tu asistente financiero",
-    "placeholder": "Preg\u00fantale a Val sobre tus finanzas...",
+    "placeholder": "Preg\u00fantale a Ivy sobre tus finanzas...",
     "send": "Enviar",
     "thinking": "Pensando...",
     "compact": "Compactar",
@@ -10,7 +10,7 @@
     "messageCount": "{{count}} mensajes",
     "autoCompactSoon": "compactaci\u00f3n autom\u00e1tica pronto",
     "empty": {
-      "title": "\u00a1Hola! Soy Val",
+      "title": "\u00a1Hola! Soy Ivy",
       "description": "Puedo ayudarte a manejar tus finanzas. Intenta pedirme que agregue una transacci\u00f3n, revise tus gastos o cree un presupuesto.",
       "suggestions": [
         "\u00bfCu\u00e1nto gast\u00e9 este mes?",

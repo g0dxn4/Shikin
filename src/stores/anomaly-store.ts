@@ -1,16 +1,18 @@
 import { create } from 'zustand'
 import { detectAnomalies, type Anomaly, type AnomalyDetectionOptions } from '@/lib/anomaly-service'
+import { load } from '@/lib/storage'
 
-const DISMISSED_KEY = 'valute:dismissed_anomalies'
+const STORE_KEY_DISMISSED = 'dismissed_anomalies'
 
-function getDismissedIds(): Set<string> {
+async function getDismissedIds(): Promise<Set<string>> {
   try {
-    const raw = localStorage.getItem(DISMISSED_KEY)
+    const store = await load()
+    const raw = await store.get(STORE_KEY_DISMISSED)
     if (!raw) return new Set()
-    const parsed = JSON.parse(raw) as { ids: string[]; expiry: number }
+    const parsed = (typeof raw === 'string' ? JSON.parse(raw) : raw) as { ids: string[]; expiry: number }
     // Auto-expire dismissed list after 30 days
     if (Date.now() > parsed.expiry) {
-      localStorage.removeItem(DISMISSED_KEY)
+      await store.set(STORE_KEY_DISMISSED, null)
       return new Set()
     }
     return new Set(parsed.ids)
@@ -19,12 +21,13 @@ function getDismissedIds(): Set<string> {
   }
 }
 
-function saveDismissedIds(ids: Set<string>): void {
+async function saveDismissedIds(ids: Set<string>): Promise<void> {
   const payload = {
     ids: Array.from(ids),
     expiry: Date.now() + 30 * 24 * 60 * 60 * 1000, // 30 days
   }
-  localStorage.setItem(DISMISSED_KEY, JSON.stringify(payload))
+  const store = await load()
+  await store.set(STORE_KEY_DISMISSED, payload)
 }
 
 /**
@@ -54,7 +57,7 @@ export const useAnomalyStore = create<AnomalyState>((set, get) => ({
     set({ isLoading: true })
     try {
       const raw = await detectAnomalies(options)
-      const dismissedIds = getDismissedIds()
+      const dismissedIds = await getDismissedIds()
 
       // Deduplicate
       const seen = new Set<string>()
@@ -83,9 +86,11 @@ export const useAnomalyStore = create<AnomalyState>((set, get) => ({
     if (!target) return
 
     // Persist dismissal by key (not id, since ids regenerate on scan)
-    const dismissedIds = getDismissedIds()
-    dismissedIds.add(deduplicateKey(target))
-    saveDismissedIds(dismissedIds)
+    void (async () => {
+      const dismissedIds = await getDismissedIds()
+      dismissedIds.add(deduplicateKey(target))
+      await saveDismissedIds(dismissedIds)
+    })()
 
     set({
       anomalies: anomalies.map((a) => (a.id === id ? { ...a, dismissed: true } : a)),

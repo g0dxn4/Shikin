@@ -1,5 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+const mockStore = vi.hoisted(() => {
+  const data: Record<string, unknown> = {}
+  return {
+    get: vi.fn(async (key: string) => data[key] ?? null),
+    set: vi.fn(async (key: string, value: unknown) => { data[key] = value }),
+    save: vi.fn(async () => {}),
+    _data: data,
+    _clear: () => { Object.keys(data).forEach((k) => delete data[k]) },
+  }
+})
+
+vi.mock('@/lib/storage', () => ({
+  load: vi.fn().mockResolvedValue(mockStore),
+}))
+
 const { mockDetectAnomalies } = vi.hoisted(() => ({
   mockDetectAnomalies: vi.fn(),
 }))
@@ -10,29 +25,10 @@ vi.mock('@/lib/anomaly-service', () => ({
 
 import { useAnomalyStore } from '../anomaly-store'
 
-// Mock localStorage
-const localStorageMock = (() => {
-  let store: Record<string, string> = {}
-  return {
-    getItem: vi.fn((key: string) => store[key] ?? null),
-    setItem: vi.fn((key: string, value: string) => {
-      store[key] = value
-    }),
-    removeItem: vi.fn((key: string) => {
-      delete store[key]
-    }),
-    clear: vi.fn(() => {
-      store = {}
-    }),
-  }
-})()
-
-Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock })
-
 describe('anomaly-store', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    localStorageMock.clear()
+    mockStore._clear()
     useAnomalyStore.setState({ anomalies: [], isLoading: false, lastScanAt: null })
   })
 
@@ -100,12 +96,11 @@ describe('anomaly-store', () => {
     })
 
     it('marks previously dismissed anomalies', async () => {
-      // Pre-set dismissed IDs in localStorage
-      const payload = {
+      // Pre-set dismissed IDs in shared store
+      mockStore._data['dismissed_anomalies'] = {
         ids: ['large_transaction:tx001'],
         expiry: Date.now() + 30 * 24 * 60 * 60 * 1000,
       }
-      localStorageMock.setItem('valute:dismissed_anomalies', JSON.stringify(payload))
 
       mockDetectAnomalies.mockResolvedValueOnce([
         {
@@ -135,7 +130,7 @@ describe('anomaly-store', () => {
   })
 
   describe('dismissAnomaly', () => {
-    it('marks anomaly as dismissed and persists to localStorage', () => {
+    it('marks anomaly as dismissed and persists to shared store', async () => {
       useAnomalyStore.setState({
         anomalies: [
           {
@@ -154,10 +149,14 @@ describe('anomaly-store', () => {
       useAnomalyStore.getState().dismissAnomaly('anom1')
 
       expect(useAnomalyStore.getState().anomalies[0].dismissed).toBe(true)
-      expect(localStorageMock.setItem).toHaveBeenCalledWith(
-        'valute:dismissed_anomalies',
-        expect.any(String)
-      )
+
+      // Wait for async persistence
+      await vi.waitFor(() => {
+        expect(mockStore.set).toHaveBeenCalledWith(
+          'dismissed_anomalies',
+          expect.objectContaining({ ids: expect.any(Array) })
+        )
+      })
     })
 
     it('does nothing for nonexistent anomaly id', () => {
@@ -165,7 +164,7 @@ describe('anomaly-store', () => {
 
       useAnomalyStore.getState().dismissAnomaly('nonexistent')
 
-      expect(localStorageMock.setItem).not.toHaveBeenCalled()
+      expect(mockStore.set).not.toHaveBeenCalled()
     })
   })
 

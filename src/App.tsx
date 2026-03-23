@@ -28,6 +28,7 @@ const DebtPayoff = lazy(() =>
   import('@/pages/debt-payoff').then((m) => ({ default: m.DebtPayoff }))
 )
 const Forecast = lazy(() => import('@/pages/forecast').then((m) => ({ default: m.Forecast })))
+const Memories = lazy(() => import('@/pages/memories').then((m) => ({ default: m.Memories })))
 const SettingsPage = lazy(() =>
   import('@/pages/settings').then((m) => ({ default: m.SettingsPage }))
 )
@@ -67,6 +68,7 @@ export default function App() {
               <Route path="/subscriptions" element={<Subscriptions />} />
               <Route path="/debt-payoff" element={<DebtPayoff />} />
               <Route path="/forecast" element={<Forecast />} />
+              <Route path="/memories" element={<Memories />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
             <Route path="/oauth/callback" element={<OAuthCallback />} />

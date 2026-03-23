@@ -9,6 +9,7 @@ import {
   TrendingUp,
   Repeat,
   LineChart,
+  Brain,
   Settings,
   Sparkles,
   PanelLeftClose,
@@ -28,6 +29,7 @@ const navItems = [
   { path: '/subscriptions', icon: Repeat, labelKey: 'nav.subscriptions' },
   { path: '/debt-payoff', icon: Target, labelKey: 'nav.debtPayoff' },
   { path: '/forecast', icon: LineChart, labelKey: 'nav.forecast' },
+  { path: '/memories', icon: Brain, labelKey: 'nav.memories' },
 ] as const
 
 export function Sidebar() {

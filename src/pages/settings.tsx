@@ -274,8 +274,41 @@ export function SettingsPage() {
     [localOAuthClientId, oauthClientId, setOAuthTokens]
   )
 
+  // Process an OAuth callback result (code + state) from any delivery mechanism
+  const processOAuthCallback = useCallback(
+    (code: string, state: string) => {
+      const openaiPkce = sessionStorage.getItem('oauth_openai')
+      if (openaiPkce) {
+        sessionStorage.removeItem('oauth_openai')
+        const pkce = JSON.parse(openaiPkce) as { verifier: string; state: string; redirectUri: string }
+        if (pkce.state === state) {
+          exchangeCodeForTokens(code, pkce.redirectUri, { ...pkce, challenge: '' })
+            .then(async (tokens) => {
+              const accountId = extractAccountId(tokens.id_token || tokens.access_token)
+              await setOAuthTokens({
+                accessToken: tokens.access_token,
+                refreshToken: tokens.refresh_token,
+                expiresIn: tokens.expires_in ?? 3600,
+                codexAccountId: accountId ?? undefined,
+              })
+              await saveSettings('openai', '', '')
+              setLocalProvider('openai')
+              setLocalAuthMode('oauth')
+              toast.success('Signed in with ChatGPT')
+            })
+            .catch((err) => {
+              toast.error(`OpenAI sign-in failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+            })
+          return
+        }
+      }
+      handleOAuthCallbackResult(code, state)
+    },
+    [handleOAuthCallbackResult, saveSettings, setOAuthTokens]
+  )
+
   useEffect(() => {
-    // Check for OAuth redirect result (from new tab via localStorage, or same-window via sessionStorage)
+    // Check for OAuth redirect result already in storage (e.g. tab was backgrounded during callback)
     const callbackResult = localStorage.getItem('oauth_callback_result')
       || sessionStorage.getItem('oauth_callback_result')
     if (callbackResult) {
@@ -284,43 +317,14 @@ export function SettingsPage() {
       try {
         const { code, state } = JSON.parse(callbackResult)
         if (!code || !state) return
-
-        // Check if this is an OpenAI OAuth callback
-        const openaiPkce = sessionStorage.getItem('oauth_openai')
-        if (openaiPkce) {
-          sessionStorage.removeItem('oauth_openai')
-          const pkce = JSON.parse(openaiPkce) as { verifier: string; state: string; redirectUri: string }
-          if (pkce.state === state) {
-            exchangeCodeForTokens(code, pkce.redirectUri, { ...pkce, challenge: '' })
-              .then(async (tokens) => {
-                const accountId = extractAccountId(tokens.id_token || tokens.access_token)
-                await setOAuthTokens({
-                  accessToken: tokens.access_token,
-                  refreshToken: tokens.refresh_token,
-                  expiresIn: tokens.expires_in ?? 3600,
-                  codexAccountId: accountId ?? undefined,
-                })
-                await saveSettings('openai', '', '')
-                setLocalProvider('openai')
-                setLocalAuthMode('oauth')
-                toast.success('Signed in with ChatGPT')
-              })
-              .catch((err) => {
-                toast.error(`OpenAI sign-in failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
-              })
-            return
-          }
-        }
-
-        // Otherwise try Google callback
-        void handleOAuthCallbackResult(code, state)
+        processOAuthCallback(code, state)
       } catch {
         // Invalid callback data
       }
     }
-  }, [handleOAuthCallbackResult, saveSettings, setOAuthTokens])
+  }, [processOAuthCallback])
 
-  // Listen for OAuth callback from new tab (localStorage 'storage' event fires on other tabs)
+  // Listen for OAuth callback via localStorage 'storage' event (fires when OTHER tabs write)
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key !== 'oauth_callback_result' || !e.newValue) return
@@ -328,38 +332,25 @@ export function SettingsPage() {
       try {
         const { code, state } = JSON.parse(e.newValue)
         if (!code || !state) return
-
-        const openaiPkce = sessionStorage.getItem('oauth_openai')
-        if (openaiPkce) {
-          sessionStorage.removeItem('oauth_openai')
-          const pkce = JSON.parse(openaiPkce) as { verifier: string; state: string; redirectUri: string }
-          if (pkce.state === state) {
-            exchangeCodeForTokens(code, pkce.redirectUri, { ...pkce, challenge: '' })
-              .then(async (tokens) => {
-                const accountId = extractAccountId(tokens.id_token || tokens.access_token)
-                await setOAuthTokens({
-                  accessToken: tokens.access_token,
-                  refreshToken: tokens.refresh_token,
-                  expiresIn: tokens.expires_in ?? 3600,
-                  codexAccountId: accountId ?? undefined,
-                })
-                await saveSettings('openai', '', '')
-                setLocalProvider('openai')
-                setLocalAuthMode('oauth')
-                toast.success('Signed in with ChatGPT')
-              })
-              .catch((err) => {
-                toast.error(`OpenAI sign-in failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
-              })
-            return
-          }
-        }
-        handleOAuthCallbackResult(code, state)
+        processOAuthCallback(code, state)
       } catch { /* invalid */ }
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
-  }, [handleOAuthCallbackResult, saveSettings, setOAuthTokens])
+  }, [processOAuthCallback])
+
+  // Listen for OAuth callback via postMessage (fires when popup uses window.opener.postMessage)
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin) return
+      if (e.data?.type !== 'oauth_callback') return
+      const { code, state } = e.data
+      if (!code || !state) return
+      processOAuthCallback(code, state)
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [processOAuthCallback])
 
   const handleGoogleOAuth = async () => {
     if (!localOAuthClientId) {

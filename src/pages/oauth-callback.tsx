@@ -1,6 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 
 export function OAuthCallback() {
+  const [done, setDone] = useState(false)
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const code = params.get('code')
@@ -14,16 +16,19 @@ export function OAuthCallback() {
       )
       window.close()
     } else {
-      // New tab / same-window: store in localStorage (shared across tabs) and redirect
+      // New tab: notify the original tab via localStorage, then close
       localStorage.setItem('oauth_callback_result', JSON.stringify({ code, state }))
-      // Navigate this tab to settings (or close if opened as a tab)
-      window.location.href = '/settings'
+      setDone(true)
+      // Try to close this tab (works if opened via window.open)
+      setTimeout(() => window.close(), 500)
     }
   }, [])
 
   return (
     <div className="flex h-screen items-center justify-center bg-[#020202]">
-      <p className="font-body text-muted-foreground text-sm">Completing sign-in...</p>
+      <p className="font-body text-muted-foreground text-sm">
+        {done ? 'Sign-in complete — you can close this tab.' : 'Completing sign-in...'}
+      </p>
     </div>
   )
 }

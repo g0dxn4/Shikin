@@ -13,7 +13,7 @@ test.describe('desktop sidebar navigation', () => {
     const sidebar = page.locator('aside').first()
 
     const links = sidebar.getByRole('link')
-    await expect(links).toHaveCount(11)
+    await expect(links).toHaveCount(10)
 
     await expect(sidebar.getByRole('link', { name: 'Dashboard' })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Transactions' })).toBeVisible()
@@ -23,7 +23,6 @@ test.describe('desktop sidebar navigation', () => {
     await expect(sidebar.getByRole('link', { name: 'Investments' })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Subscriptions' })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Debt Payoff' })).toBeVisible()
-    await expect(sidebar.getByRole('link', { name: 'Notebook' })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Forecast' })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Settings' })).toBeVisible()
   })
@@ -66,12 +65,6 @@ test.describe('desktop sidebar navigation', () => {
     await page.getByRole('link', { name: 'Subscriptions' }).click()
     await page.waitForURL('/subscriptions')
     expect(page.url()).toContain('/subscriptions')
-  })
-
-  test('clicking Notebook navigates to /notebook', async ({ page }) => {
-    await page.getByRole('link', { name: 'Notebook' }).click()
-    await page.waitForURL('/notebook')
-    expect(page.url()).toContain('/notebook')
   })
 
   test('clicking Settings navigates to /settings', async ({ page }) => {

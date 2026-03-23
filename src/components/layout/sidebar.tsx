@@ -8,7 +8,6 @@ import {
   Target,
   TrendingUp,
   Repeat,
-  BookOpen,
   LineChart,
   Settings,
   Sparkles,
@@ -28,7 +27,6 @@ const navItems = [
   { path: '/investments', icon: TrendingUp, labelKey: 'nav.investments' },
   { path: '/subscriptions', icon: Repeat, labelKey: 'nav.subscriptions' },
   { path: '/debt-payoff', icon: Target, labelKey: 'nav.debtPayoff' },
-  { path: '/notebook', icon: BookOpen, labelKey: 'nav.notebook' },
   { path: '/forecast', icon: LineChart, labelKey: 'nav.forecast' },
 ] as const
 

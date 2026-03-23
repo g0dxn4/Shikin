@@ -3,7 +3,7 @@ import { decodeJwtPayload } from '../oauth'
 export const OPENAI_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
 export const OPENAI_ISSUER = 'https://auth.openai.com'
 export const OPENAI_OAUTH_PORT = 1455
-export const CODEX_BASE_URL = 'https://chatgpt.com/backend-api'
+export const CODEX_BASE_URL = 'https://chatgpt.com/backend-api/codex'
 
 export interface OpenAIOAuthTokens {
   access_token: string
@@ -124,9 +124,9 @@ export function extractAccountId(token: string): string | null {
     return (orgs[0].id as string) ?? null
   }
 
-  // Legacy: auth claim in access token
+  // Auth claim in access token
   const authClaim = payload['https://api.openai.com/auth'] as Record<string, unknown> | undefined
-  return (authClaim?.account_id as string) ?? (authClaim?.org_id as string) ?? null
+  return (authClaim?.chatgpt_account_id as string) ?? (authClaim?.account_id as string) ?? null
 }
 
 /** Build headers required for ChatGPT API requests */

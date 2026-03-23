@@ -27,7 +27,6 @@ const Goals = lazy(() => import('@/pages/goals').then((m) => ({ default: m.Goals
 const DebtPayoff = lazy(() =>
   import('@/pages/debt-payoff').then((m) => ({ default: m.DebtPayoff }))
 )
-const Notebook = lazy(() => import('@/pages/notebook').then((m) => ({ default: m.Notebook })))
 const Forecast = lazy(() => import('@/pages/forecast').then((m) => ({ default: m.Forecast })))
 const SettingsPage = lazy(() =>
   import('@/pages/settings').then((m) => ({ default: m.SettingsPage }))
@@ -67,7 +66,6 @@ export default function App() {
               <Route path="/investments" element={<Investments />} />
               <Route path="/subscriptions" element={<Subscriptions />} />
               <Route path="/debt-payoff" element={<DebtPayoff />} />
-              <Route path="/notebook" element={<Notebook />} />
               <Route path="/forecast" element={<Forecast />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>

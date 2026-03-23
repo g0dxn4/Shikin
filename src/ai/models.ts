@@ -32,14 +32,25 @@ const EXCLUDE_PATTERNS = [
   /^gemini-embedding/,
   /^mistral-embed/,
   /^gpt-3\.5/,
-  /^gpt-4(?!\.)/, // gpt-4 (not gpt-4.x or gpt-4o)
+  /^gpt-4($|[^.0-9])/, // gpt-4 base (not gpt-4.x or gpt-4o)
+  /^gpt-4o/, // old gpt-4o family
+  /^gpt-4\./, // old gpt-4.1 family
+  /^o[1-4]/, // o-series reasoning models (o1, o3, o4-mini, etc.)
   /^grok-beta/,
   /^grok-vision-beta/,
-  /-\d{4}-\d{2}-\d{2}/, // date-suffixed snapshots (gpt-4o-2024-08-06)
+  /^grok-2/, // old grok-2 family
+  /^grok-code/, // code-specific
+  /-\d{4}-\d{2}-\d{2}/, // date-suffixed snapshots
   /preview/i,
-  /^o1-preview/,
   /^llama-guard/,
   /^labs-/,
+  /^llama3-/, // old llama3 (not 3.x)
+  /^open-mistral/,
+  /^open-mixtral/,
+  /^mistral-nemo/,
+  /^pixtral/, // vision-only
+  /^ministral/, // small models
+  /deep-research/, // deep research variants
 ]
 
 /** In-memory cache: provider → models (avoids re-fetching during session) */
@@ -72,9 +83,9 @@ async function fetchModelsFromModelsDev(providerDir: string): Promise<ModelInfo[
     .filter((f) => f.type === 'file' && f.name.endsWith('.toml'))
     .map((f) => f.name.slice(0, -5)) // strip .toml → model ID
 
-  // Step 2: Fetch TOMLs for display names (parallel)
+  // Step 2: Fetch TOMLs for display names + tool support (parallel)
   const models = await Promise.all(
-    tomlFiles.map(async (modelId): Promise<ModelInfo> => {
+    tomlFiles.map(async (modelId): Promise<ModelInfo & { hasTools: boolean } | null> => {
       try {
         const res = await fetch(
           `${MODELS_DEV_RAW}/${providerDir}/models/${modelId}.toml`
@@ -82,21 +93,24 @@ async function fetchModelsFromModelsDev(providerDir: string): Promise<ModelInfo[
         if (res.ok) {
           const text = await res.text()
           const nameMatch = text.match(/^name\s*=\s*"(.+?)"/m)
-          if (nameMatch) {
-            return { id: modelId, name: nameMatch[1] }
+          const toolMatch = text.match(/^tool_call\s*=\s*(true|false)/m)
+          const hasTools = toolMatch ? toolMatch[1] === 'true' : false
+          return {
+            id: modelId,
+            name: nameMatch?.[1] ?? modelId,
+            hasTools,
           }
         }
       } catch {
-        // Fall through to ID-based name
+        // Fall through
       }
-      return { id: modelId, name: modelId }
+      return null
     })
   )
 
-  // Filter out embeddings, snapshots, previews
-  const filtered = models.filter(
-    (m) => !EXCLUDE_PATTERNS.some((p) => p.test(m.id))
-  )
+  // Filter: must have tool support, exclude embeddings/snapshots/previews
+  const filtered = (models.filter(Boolean) as (ModelInfo & { hasTools: boolean })[])
+    .filter((m) => m.hasTools && !EXCLUDE_PATTERNS.some((p) => p.test(m.id)))
 
   // Sort: newest/most capable first (higher version numbers first)
   filtered.sort((a, b) => b.id.localeCompare(a.id))

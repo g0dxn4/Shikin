@@ -415,7 +415,9 @@ function saveSettings(settings) {
 // ── Path Security ──────────────────────────────────────────────────────────
 
 function safePath(base, userPath) {
-  const resolved = resolve(base, normalize(userPath))
+  // Strip leading slashes so paths are always relative to base
+  const cleaned = userPath.replace(/^\/+/, '')
+  const resolved = resolve(base, normalize(cleaned))
   if (!resolved.startsWith(base)) {
     throw new Error('Path traversal detected')
   }
@@ -453,6 +455,32 @@ function sendError(res, message, status = 500) {
   sendJson(res, { error: message }, status)
 }
 
+// ── Codex Response Item Cache ──────────────────────────────────────────────
+// Caches output items from Codex API streaming responses so the AI SDK's
+// tool loop can reference them (since store=false means they aren't persisted).
+const codexItemCache = new Map()
+
+function cacheItemsFromStream(chunk) {
+  // SSE format: "event: ...\ndata: {...}\n\n"
+  const lines = chunk.split('\n')
+  for (const line of lines) {
+    if (!line.startsWith('data: ')) continue
+    try {
+      const data = JSON.parse(line.slice(6))
+      // Cache completed response output items (function_call, message, etc.)
+      if (data.type === 'response.completed' && data.response?.output) {
+        for (const item of data.response.output) {
+          if (item.id) codexItemCache.set(item.id, item)
+        }
+      }
+      // Also cache individual output items as they arrive
+      if (data.type === 'response.output_item.done' && data.item?.id) {
+        codexItemCache.set(data.item.id, data.item)
+      }
+    } catch { /* not valid JSON line */ }
+  }
+}
+
 // ── Server ─────────────────────────────────────────────────────────────────
 
 const server = createServer(async (req, res) => {
@@ -461,7 +489,7 @@ const server = createServer(async (req, res) => {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': 'http://localhost:1420',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, OpenAI-Beta, chatgpt-account-id, originator',
     })
     return res.end()
   }
@@ -589,6 +617,103 @@ const server = createServer(async (req, res) => {
       const safe = safePath(DATA_DIR, body.path)
       mkdirSync(safe, { recursive: body.recursive !== false })
       return sendJson(res, { ok: true })
+    }
+
+    // ── Codex item cache (for store=false tool loops) ───────────────
+    // The Codex API requires store=false, meaning response items aren't
+    // persisted. But the AI SDK's tool loop references them via item_reference.
+    // We cache output items from responses so we can inline them on follow-up.
+
+    // ── Proxy: ChatGPT Codex API ────────────────────────────────────
+    // Proxies requests to chatgpt.com to avoid CORS issues in browser mode.
+    // Caches response output items so tool loops work with store=false.
+    if (path.startsWith('/api/proxy/chatgpt/')) {
+      const targetPath = path.replace('/api/proxy/chatgpt', '')
+      const targetUrl = `https://chatgpt.com/backend-api/codex${targetPath}${url.search || ''}`
+
+      // Read raw body and patch for Codex API requirements
+      const bodyChunks = []
+      for await (const chunk of req) bodyChunks.push(chunk)
+      let bodyBuffer = Buffer.concat(bodyChunks)
+
+      // Patch request body for Codex API compatibility
+      if (req.headers['content-type']?.includes('application/json') && bodyBuffer.length > 0) {
+        try {
+          const bodyJson = JSON.parse(bodyBuffer.toString())
+
+          // Codex requires store=false
+          bodyJson.store = false
+
+          // Codex doesn't support max_output_tokens
+          delete bodyJson.max_output_tokens
+
+          // With store=false, previous responses aren't persisted — remove references
+          delete bodyJson.previous_response_id
+
+          // Replace item_reference entries with cached inline items
+          if (Array.isArray(bodyJson.input)) {
+            bodyJson.input = bodyJson.input.map(item => {
+              if (item.type === 'item_reference' && item.id && codexItemCache.has(item.id)) {
+                return codexItemCache.get(item.id)
+              }
+              return item
+            })
+          }
+
+          // Codex requires top-level 'instructions' field.
+          // The AI SDK sends system/developer messages in the input array — extract them.
+          if (!bodyJson.instructions && Array.isArray(bodyJson.input)) {
+            const sysMessages = bodyJson.input.filter(m => m.role === 'developer' || m.role === 'system')
+            if (sysMessages.length > 0) {
+              bodyJson.instructions = sysMessages.map(m => m.content).join('\n\n')
+              bodyJson.input = bodyJson.input.filter(m => m.role !== 'developer' && m.role !== 'system')
+            }
+          }
+
+          bodyBuffer = Buffer.from(JSON.stringify(bodyJson))
+        } catch { /* not JSON, pass through */ }
+      }
+
+      // Forward all relevant headers
+      const proxyHeaders = {
+        'Content-Type': req.headers['content-type'] || 'application/json',
+      }
+      if (req.headers['authorization']) proxyHeaders['Authorization'] = req.headers['authorization']
+      if (req.headers['chatgpt-account-id']) proxyHeaders['chatgpt-account-id'] = req.headers['chatgpt-account-id']
+      if (req.headers['openai-beta']) proxyHeaders['OpenAI-Beta'] = req.headers['openai-beta']
+      if (req.headers['originator']) proxyHeaders['originator'] = req.headers['originator']
+
+      const proxyRes = await fetch(targetUrl, {
+        method: req.method,
+        headers: proxyHeaders,
+        body: ['GET', 'HEAD'].includes(req.method) ? undefined : bodyBuffer,
+      })
+
+      // Stream the response back with CORS headers
+      res.writeHead(proxyRes.status, {
+        'Content-Type': proxyRes.headers.get('content-type') || 'application/json',
+        'Access-Control-Allow-Origin': 'http://localhost:1420',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, OpenAI-Beta, chatgpt-account-id, originator',
+      })
+
+      if (proxyRes.body) {
+        const reader = proxyRes.body.getReader()
+        const decoder = new TextDecoder()
+        const pump = async () => {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) { res.end(); return }
+            // Cache output items from the stream for tool loop support
+            try { cacheItemsFromStream(decoder.decode(value, { stream: true })) } catch {}
+            res.write(value)
+          }
+        }
+        await pump()
+      } else {
+        const text = await proxyRes.text()
+        res.end(text)
+      }
+      return
     }
 
     // ── 404 ──────────────────────────────────────────────────────────

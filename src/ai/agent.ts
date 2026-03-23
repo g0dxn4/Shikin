@@ -1,5 +1,6 @@
 import { ToolLoopAgent } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
+import { isTauri, DATA_SERVER_URL } from '@/lib/runtime'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createMistral } from '@ai-sdk/mistral'
@@ -150,16 +151,24 @@ export function createLanguageModel(
   switch (provider) {
     case 'openai': {
       if (options?.authMode === 'oauth') {
+        // ChatGPT subscription uses the Codex Responses API (not Chat Completions).
+        // Browser mode proxies through data server to avoid CORS.
+        const baseURL = isTauri
+          ? 'https://chatgpt.com/backend-api/codex'
+          : `${DATA_SERVER_URL}/api/proxy/chatgpt`
         const openai = createOpenAI({
-          baseURL: 'https://chatgpt.com/backend-api',
+          baseURL,
           apiKey,
           headers: {
-            'OpenAI-Beta': 'responses=experimental',
             'chatgpt-account-id': options.codexAccountId || '',
             'originator': 'valute',
           },
         })
-        return openai.chat(model || 'gpt-4o')
+        return openai.responses(model || 'gpt-5.4', {
+          // store: false tells the SDK to send full conversation context
+          // in each request instead of using previous_response_id references
+          store: false,
+        })
       }
       const openai = createOpenAI({ apiKey })
       return openai(model || 'gpt-4o-mini')

@@ -191,6 +191,35 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
     await db.execute("INSERT INTO _migrations (id, name) VALUES (7, '007_recaps')")
   }
 
+  // --- Migration 008: AI Memories FTS5 ---
+  if (!applied.has('008_ai_memories_fts')) {
+    try {
+      await db.execute(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS ai_memories_fts USING fts5(content, content=ai_memories, content_rowid=rowid)
+      `)
+      await db.execute(`INSERT INTO ai_memories_fts(ai_memories_fts) VALUES('rebuild')`)
+      await db.execute(`
+        CREATE TRIGGER IF NOT EXISTS ai_memories_ai AFTER INSERT ON ai_memories BEGIN
+          INSERT INTO ai_memories_fts(rowid, content) VALUES (new.rowid, new.content);
+        END
+      `)
+      await db.execute(`
+        CREATE TRIGGER IF NOT EXISTS ai_memories_ad AFTER DELETE ON ai_memories BEGIN
+          INSERT INTO ai_memories_fts(ai_memories_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+        END
+      `)
+      await db.execute(`
+        CREATE TRIGGER IF NOT EXISTS ai_memories_au AFTER UPDATE ON ai_memories BEGIN
+          INSERT INTO ai_memories_fts(ai_memories_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+          INSERT INTO ai_memories_fts(rowid, content) VALUES (new.rowid, new.content);
+        END
+      `)
+      await db.execute("INSERT INTO _migrations (id, name) VALUES (8, '008_ai_memories_fts')")
+    } catch (err) {
+      console.warn('[database] FTS5 migration failed (may not be supported):', err)
+    }
+  }
+
   // --- Migration 010: Transaction Splits ---
   if (!applied.has('010_transaction_splits')) {
     await db.execute(`

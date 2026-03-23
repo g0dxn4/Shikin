@@ -12,6 +12,7 @@ vi.mock('@/lib/ulid', () => ({
 import { query, execute } from '@/lib/database'
 import { saveMemory } from '../tools/save-memory'
 import { recallMemories } from '../tools/recall-memories'
+import { resetFtsCache } from '../tools/recall-memories'
 import { forgetMemory } from '../tools/forget-memory'
 
 const mockQuery = vi.mocked(query)
@@ -116,6 +117,7 @@ describe('saveMemory tool', () => {
 describe('recallMemories tool', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    resetFtsCache()
   })
 
   it('has correct description', () => {
@@ -166,7 +168,10 @@ describe('recallMemories tool', () => {
     )
   })
 
-  it('filters by search term', async () => {
+  it('filters by search term (LIKE fallback when FTS unavailable)', async () => {
+    // First call: FTS availability check — return empty (no FTS table)
+    mockQuery.mockResolvedValueOnce([])
+    // Second call: the actual memory query
     mockQuery.mockResolvedValueOnce([
       { id: 'mem1', category: 'preference', content: 'Prefers MXN', importance: 8 },
     ])
@@ -178,9 +183,33 @@ describe('recallMemories tool', () => {
     )) as { count: number }
 
     expect(result.count).toBe(1)
+    // Second query call should use LIKE fallback
     expect(mockQuery).toHaveBeenCalledWith(
-      expect.stringContaining('content LIKE $1'),
+      expect.stringContaining('content LIKE'),
       expect.arrayContaining(['%MXN%'])
+    )
+  })
+
+  it('filters by search term (FTS5 when available)', async () => {
+    resetFtsCache()
+    // First call: FTS availability check — return a match (FTS table exists)
+    mockQuery.mockResolvedValueOnce([{ name: 'ai_memories_fts' }])
+    // Second call: the actual memory query
+    mockQuery.mockResolvedValueOnce([
+      { id: 'mem1', category: 'preference', content: 'Prefers MXN', importance: 8 },
+    ])
+    mockExecute.mockResolvedValue({ rowsAffected: 1, lastInsertId: 0 })
+
+    const result = (await recallMemories.execute!(
+      { search: 'MXN', limit: 20 },
+      { toolCallId: 'test', messages: [] }
+    )) as { count: number }
+
+    expect(result.count).toBe(1)
+    // Second query call should use FTS5
+    expect(mockQuery).toHaveBeenCalledWith(
+      expect.stringContaining('ai_memories_fts MATCH'),
+      expect.arrayContaining(['"MXN"'])
     )
   })
 

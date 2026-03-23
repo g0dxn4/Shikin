@@ -22,7 +22,13 @@ import { useAIStore } from '@/stores/ai-store'
 import { useConversationStore } from '@/stores/conversation-store'
 import { createTransport } from '@/ai/transport'
 import { createLanguageModel, type AIProvider } from '@/ai/agent'
-import { shouldCompact, compactMessages, COMPACTION_THRESHOLD } from '@/ai/compaction'
+import {
+  shouldCompact,
+  compactMessages,
+  COMPACTION_THRESHOLD,
+  shouldExtractMemories,
+  extractMemories,
+} from '@/ai/compaction'
 import { AI_PANEL_WIDTH } from '@/lib/constants'
 
 interface ToolTiming {
@@ -73,6 +79,7 @@ export function AIPanel() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const hasAutoTitled = useRef(false)
   const conversationsLoaded = useRef(false)
+  const lastExtractionIndex = useRef(0)
 
   const transport = useMemo(() => {
     if (!isConfigured) return null
@@ -106,6 +113,28 @@ export function AIPanel() {
       }
 
       const allMessages = [...messages, message]
+
+      // Auto-extract memories from recent messages
+      if (isConfigured) {
+        const messagesSinceExtraction = allMessages.slice(lastExtractionIndex.current)
+        if (shouldExtractMemories(messagesSinceExtraction)) {
+          try {
+            const languageModel = createLanguageModel(
+              provider as AIProvider,
+              apiKey,
+              model || undefined
+            )
+            const extracted = await extractMemories(messagesSinceExtraction, languageModel)
+            if (extracted > 0) {
+              console.log(`[Ivy] Auto-extracted ${extracted} memories`)
+            }
+            lastExtractionIndex.current = allMessages.length
+          } catch (err) {
+            console.error('[Ivy] Auto memory extraction failed:', err)
+          }
+        }
+      }
+
       if (shouldCompact(allMessages) && currentConversationId && isConfigured) {
         try {
           const languageModel = createLanguageModel(
@@ -191,6 +220,7 @@ export function AIPanel() {
     await startNewConversation(model || undefined)
     setMessages([])
     hasAutoTitled.current = false
+    lastExtractionIndex.current = 0
     setShowConversations(false)
   }, [isConfigured, startNewConversation, model, setMessages])
 
@@ -200,6 +230,7 @@ export function AIPanel() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setMessages(msgs as any)
       hasAutoTitled.current = true
+      lastExtractionIndex.current = msgs.length
       setShowConversations(false)
     },
     [switchConversation, setMessages]

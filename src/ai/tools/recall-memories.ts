@@ -9,6 +9,27 @@ interface MemoryRow {
   importance: number
 }
 
+/** Check if the FTS5 virtual table exists (cached after first check) */
+let ftsAvailable: boolean | null = null
+
+async function isFtsAvailable(): Promise<boolean> {
+  if (ftsAvailable !== null) return ftsAvailable
+  try {
+    const rows = await query<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='ai_memories_fts'"
+    )
+    ftsAvailable = rows.length > 0
+  } catch {
+    ftsAvailable = false
+  }
+  return ftsAvailable
+}
+
+/** Reset FTS availability cache (for testing) */
+export function resetFtsCache(): void {
+  ftsAvailable = null
+}
+
 export const recallMemories = tool({
   description:
     'Search and retrieve saved memories about the user. Use this to recall preferences, facts, goals, or other stored information.',
@@ -17,7 +38,7 @@ export const recallMemories = tool({
       search: z
         .string()
         .optional()
-        .describe('Search term to filter memories by content (uses LIKE matching)'),
+        .describe('Search term to filter memories by content (uses full-text search when available)'),
       category: z
         .enum(['preference', 'fact', 'goal', 'behavior', 'context'])
         .optional()
@@ -38,9 +59,27 @@ export const recallMemories = tool({
     let paramIndex = 0
 
     if (search) {
-      paramIndex++
-      conditions.push(`content LIKE $${paramIndex}`)
-      params.push(`%${search}%`)
+      const useFts = await isFtsAvailable()
+      if (useFts) {
+        // FTS5 full-text search: tokenized matching with ranking
+        paramIndex++
+        conditions.push(
+          `rowid IN (SELECT rowid FROM ai_memories_fts WHERE ai_memories_fts MATCH $${paramIndex})`
+        )
+        // Escape FTS5 special characters and wrap each token in double quotes for safe matching
+        const safeSearch = search
+          .replace(/['"]/g, '')
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((token) => `"${token}"`)
+          .join(' ')
+        params.push(safeSearch || `"${search}"`)
+      } else {
+        // Fallback to LIKE matching when FTS5 is not available
+        paramIndex++
+        conditions.push(`content LIKE $${paramIndex}`)
+        params.push(`%${search}%`)
+      }
     }
     if (category) {
       paramIndex++

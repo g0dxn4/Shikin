@@ -371,6 +371,33 @@ CREATE INDEX IF NOT EXISTS idx_recaps_generated ON recaps(generated_at);
     db.prepare("INSERT INTO _migrations (id, name) VALUES (7, '007_recaps')").run()
   }
 
+  // --- Migration 008: AI Memories FTS5 ---
+  if (!applied.has('008_ai_memories_fts')) {
+    try {
+      db.exec(`
+CREATE VIRTUAL TABLE IF NOT EXISTS ai_memories_fts USING fts5(content, content=ai_memories, content_rowid=rowid);
+
+INSERT INTO ai_memories_fts(ai_memories_fts) VALUES('rebuild');
+
+CREATE TRIGGER IF NOT EXISTS ai_memories_ai AFTER INSERT ON ai_memories BEGIN
+  INSERT INTO ai_memories_fts(rowid, content) VALUES (new.rowid, new.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS ai_memories_ad AFTER DELETE ON ai_memories BEGIN
+  INSERT INTO ai_memories_fts(ai_memories_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS ai_memories_au AFTER UPDATE ON ai_memories BEGIN
+  INSERT INTO ai_memories_fts(ai_memories_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+  INSERT INTO ai_memories_fts(rowid, content) VALUES (new.rowid, new.content);
+END;
+      `)
+      db.prepare("INSERT INTO _migrations (id, name) VALUES (8, '008_ai_memories_fts')").run()
+    } catch (err) {
+      console.warn('[data-server] FTS5 migration failed (may not be supported):', err.message)
+    }
+  }
+
   // --- Migration 010: Transaction Splits ---
   if (!applied.has('010_transaction_splits')) {
     db.exec(`

@@ -164,11 +164,7 @@ export function createLanguageModel(
             'originator': 'valute',
           },
         })
-        return openai.responses(model || 'gpt-5.4', {
-          // store: false tells the SDK to send full conversation context
-          // in each request instead of using previous_response_id references
-          store: false,
-        })
+        return openai.responses(model || 'gpt-5.4')
       }
       const openai = createOpenAI({ apiKey })
       return openai(model || 'gpt-4o-mini')

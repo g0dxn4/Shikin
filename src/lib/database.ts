@@ -81,20 +81,48 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
       INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES
         ('01FOOD000000000000000000000', 'Food & Dining', 'utensils', '#f97316', 'expense', 1)
     `)
-    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01TRANSPORT0000000000000000', 'Transportation', 'car', '#3b82f6', 'expense', 2)`)
-    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01HOUSING00000000000000000', 'Housing', 'home', '#8b5cf6', 'expense', 3)`)
-    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01ENTERTAIN000000000000000', 'Entertainment', 'tv', '#ec4899', 'expense', 4)`)
-    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01HEALTH000000000000000000', 'Health', 'heart-pulse', '#ef4444', 'expense', 5)`)
-    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01SHOPPING0000000000000000', 'Shopping', 'shopping-bag', '#f59e0b', 'expense', 6)`)
-    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01EDUCATION000000000000000', 'Education', 'graduation-cap', '#06b6d4', 'expense', 7)`)
-    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01UTILITIES000000000000000', 'Utilities', 'zap', '#64748b', 'expense', 8)`)
-    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01SUBSCRIPT000000000000000', 'Subscriptions', 'repeat', '#a855f7', 'expense', 9)`)
-    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01OTHER0000000000000000000', 'Other Expenses', 'more-horizontal', '#6b7280', 'expense', 10)`)
-    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01SALARY000000000000000000', 'Salary', 'banknote', '#22c55e', 'income', 11)`)
-    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01FREELANCE000000000000000', 'Freelance', 'briefcase', '#10b981', 'income', 12)`)
-    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01INVESTINC000000000000000', 'Investment Income', 'trending-up', '#14b8a6', 'income', 13)`)
-    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01OTHERINC0000000000000000', 'Other Income', 'plus-circle', '#059669', 'income', 14)`)
-    await db.execute(`INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01TRANSFER0000000000000000', 'Transfer', 'arrow-right-left', '#6366f1', 'transfer', 15)`)
+    await db.execute(
+      `INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01TRANSPORT0000000000000000', 'Transportation', 'car', '#3b82f6', 'expense', 2)`
+    )
+    await db.execute(
+      `INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01HOUSING00000000000000000', 'Housing', 'home', '#8b5cf6', 'expense', 3)`
+    )
+    await db.execute(
+      `INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01ENTERTAIN000000000000000', 'Entertainment', 'tv', '#ec4899', 'expense', 4)`
+    )
+    await db.execute(
+      `INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01HEALTH000000000000000000', 'Health', 'heart-pulse', '#ef4444', 'expense', 5)`
+    )
+    await db.execute(
+      `INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01SHOPPING0000000000000000', 'Shopping', 'shopping-bag', '#f59e0b', 'expense', 6)`
+    )
+    await db.execute(
+      `INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01EDUCATION000000000000000', 'Education', 'graduation-cap', '#06b6d4', 'expense', 7)`
+    )
+    await db.execute(
+      `INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01UTILITIES000000000000000', 'Utilities', 'zap', '#64748b', 'expense', 8)`
+    )
+    await db.execute(
+      `INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01SUBSCRIPT000000000000000', 'Subscriptions', 'repeat', '#a855f7', 'expense', 9)`
+    )
+    await db.execute(
+      `INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01OTHER0000000000000000000', 'Other Expenses', 'more-horizontal', '#6b7280', 'expense', 10)`
+    )
+    await db.execute(
+      `INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01SALARY000000000000000000', 'Salary', 'banknote', '#22c55e', 'income', 11)`
+    )
+    await db.execute(
+      `INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01FREELANCE000000000000000', 'Freelance', 'briefcase', '#10b981', 'income', 12)`
+    )
+    await db.execute(
+      `INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01INVESTINC000000000000000', 'Investment Income', 'trending-up', '#14b8a6', 'income', 13)`
+    )
+    await db.execute(
+      `INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01OTHERINC0000000000000000', 'Other Income', 'plus-circle', '#059669', 'income', 14)`
+    )
+    await db.execute(
+      `INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUES ('01TRANSFER0000000000000000', 'Transfer', 'arrow-right-left', '#6366f1', 'transfer', 15)`
+    )
   }
 
   // --- Migration 004: Category Rules ---
@@ -238,6 +266,48 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
     )
     await db.execute("INSERT INTO _migrations (id, name) VALUES (10, '010_transaction_splits')")
   }
+
+  // --- Migration 011: Net Worth Snapshots ---
+  if (!applied.has('011_net_worth_snapshots')) {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS net_worth_snapshots (
+        id TEXT PRIMARY KEY,
+        date TEXT NOT NULL,
+        total_assets INTEGER NOT NULL DEFAULT 0,
+        total_liabilities INTEGER NOT NULL DEFAULT 0,
+        net_worth INTEGER NOT NULL DEFAULT 0,
+        total_investments INTEGER NOT NULL DEFAULT 0,
+        breakdown_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      )
+    `)
+    await db.execute(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_net_worth_snapshots_date ON net_worth_snapshots(date)`
+    )
+    await db.execute("INSERT INTO _migrations (id, name) VALUES (11, '011_net_worth_snapshots')")
+  }
+
+  // --- Migration 012: Account Balance History ---
+  if (!applied.has('012_account_balance_history')) {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS account_balance_history (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        date TEXT NOT NULL,
+        balance INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      )
+    `)
+    await db.execute(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_account_balance_date ON account_balance_history(account_id, date)`
+    )
+    await db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_account_balance_account ON account_balance_history(account_id)`
+    )
+    await db.execute(
+      "INSERT INTO _migrations (id, name) VALUES (12, '012_account_balance_history')"
+    )
+  }
 }
 
 // ── Browser Backend ────────────────────────────────────────────────────────
@@ -251,6 +321,7 @@ async function browserFetch<T>(endpoint: string, body: Record<string, unknown>):
       body: JSON.stringify(body),
     })
   } catch (err) {
+    // eslint-disable-next-line preserve-caught-error -- original error included in message
     throw new Error(
       `Cannot reach data server at ${DATA_SERVER_URL}. ` +
         `Make sure it is running (npm run data-server). ` +
@@ -268,10 +339,11 @@ async function verifyBrowserServer(): Promise<void> {
   // Run a lightweight test query to verify the data server is up and the DB is ready
   try {
     await browserFetch<unknown[]>('/api/db/query', {
-      sql: "SELECT 1 AS ok",
+      sql: 'SELECT 1 AS ok',
       params: [],
     })
   } catch (err) {
+    // eslint-disable-next-line preserve-caught-error -- original error included in message
     throw new Error(
       `Data server health check failed. ` +
         `Ensure the data server is running: npm run data-server\n` +
@@ -357,34 +429,60 @@ export async function runInTransaction<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 // ── Import / Export ────────────────────────────────────────────────────────
-// TODO: Phase 3 — implement proper import/export for both backends.
-// For now these are stubbed to throw a clear error in browser mode,
-// and use a query-based approach in Tauri mode.
 
 export async function exportDatabaseSnapshot(): Promise<Uint8Array> {
-  if (!isTauri) {
-    throw new Error(
-      'Database export is not yet supported in browser mode. ' +
-        'Use the Tauri desktop app to export your database.'
-    )
+  if (isTauri) {
+    // In Tauri mode, read the DB file directly via the filesystem plugin
+    // Use Function() dynamic import to avoid bundler/TS issues with optional Tauri deps
+    const pathMod = await (Function('return import("@tauri-apps/api/path")')() as Promise<{
+      appDataDir: () => Promise<string>
+    }>)
+    const fsMod = await (Function('return import("@tauri-apps/plugin-fs")')() as Promise<{
+      readFile: (path: string) => Promise<Uint8Array>
+    }>)
+    const dataDir = await pathMod.appDataDir()
+    const dbPath = `${dataDir}valute.db`
+    return await fsMod.readFile(dbPath)
   }
-  // In Tauri mode, we can't easily get a raw binary dump through plugin-sql.
-  // For now, throw with guidance. A future phase can use a Tauri command.
-  throw new Error(
-    'Database export in Tauri mode requires a dedicated Tauri command. ' +
-      'This will be implemented in a future phase.'
-  )
+
+  // Browser mode: fetch raw binary from data server
+  const res = await fetch(`${DATA_SERVER_URL}/api/db/export`)
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Export failed (${res.status}): ${text}`)
+  }
+  const buffer = await res.arrayBuffer()
+  return new Uint8Array(buffer)
 }
 
-export async function importDatabaseSnapshot(_data: Uint8Array): Promise<void> {
-  if (!isTauri) {
-    throw new Error(
-      'Database import is not yet supported in browser mode. ' +
-        'Use the Tauri desktop app to import your database.'
-    )
+export async function importDatabaseSnapshot(data: Uint8Array): Promise<void> {
+  if (isTauri) {
+    // In Tauri mode, close DB connection, write file, then reload
+    if (tauriDb) {
+      await tauriDb.close()
+      tauriDb = null
+      tauriInitPromise = null
+    }
+    const pathMod = await (Function('return import("@tauri-apps/api/path")')() as Promise<{
+      appDataDir: () => Promise<string>
+    }>)
+    const fsMod = await (Function('return import("@tauri-apps/plugin-fs")')() as Promise<{
+      writeFile: (path: string, data: Uint8Array) => Promise<void>
+    }>)
+    const dataDir = await pathMod.appDataDir()
+    const dbPath = `${dataDir}valute.db`
+    await fsMod.writeFile(dbPath, data)
+    return
   }
-  throw new Error(
-    'Database import in Tauri mode requires a dedicated Tauri command. ' +
-      'This will be implemented in a future phase.'
-  )
+
+  // Browser mode: POST binary to data server
+  const res = await fetch(`${DATA_SERVER_URL}/api/db/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: data,
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Import failed (${res.status}): ${text}`)
+  }
 }

@@ -4,6 +4,7 @@ import { generateId } from '@/lib/ulid'
 import { toCentavos, fromCentavos } from '@/lib/money'
 import type { Account } from '@/types/database'
 import type { AccountType, CurrencyCode } from '@/types/common'
+import dayjs from 'dayjs'
 
 export interface AccountFormData {
   name: string
@@ -12,19 +13,30 @@ export interface AccountFormData {
   balance: number
 }
 
+export interface BalanceHistoryPoint {
+  date: string
+  balance: number // centavos
+}
+
 interface AccountState {
   accounts: Account[]
   isLoading: boolean
+  balanceHistory: Map<string, BalanceHistoryPoint[]>
   fetch: () => Promise<void>
   add: (data: AccountFormData) => Promise<void>
   update: (id: string, data: AccountFormData) => Promise<void>
   remove: (id: string) => Promise<void>
   getById: (id: string) => Account | undefined
+  /** Snapshot current balances for all active accounts (one per day, upserts) */
+  snapshotBalances: () => Promise<void>
+  /** Load balance history for a specific account */
+  loadBalanceHistory: (accountId: string, months?: number) => Promise<BalanceHistoryPoint[]>
 }
 
 export const useAccountStore = create<AccountState>((set, get) => ({
   accounts: [],
   isLoading: false,
+  balanceHistory: new Map(),
 
   fetch: async () => {
     set({ isLoading: true })
@@ -65,6 +77,43 @@ export const useAccountStore = create<AccountState>((set, get) => ({
 
   getById: (id) => {
     return get().accounts.find((a) => a.id === id)
+  },
+
+  snapshotBalances: async () => {
+    const { accounts } = get()
+    const today = dayjs().format('YYYY-MM-DD')
+
+    for (const acc of accounts) {
+      const existing = await query<{ id: string }>(
+        'SELECT id FROM account_balance_history WHERE account_id = ? AND date = ?',
+        [acc.id, today]
+      )
+      if (existing.length > 0) {
+        await execute(
+          'UPDATE account_balance_history SET balance = ? WHERE account_id = ? AND date = ?',
+          [acc.balance, acc.id, today]
+        )
+      } else {
+        await execute(
+          'INSERT INTO account_balance_history (id, account_id, date, balance) VALUES (?, ?, ?, ?)',
+          [generateId(), acc.id, today, acc.balance]
+        )
+      }
+    }
+  },
+
+  loadBalanceHistory: async (accountId, months = 6) => {
+    const startDate = dayjs().subtract(months, 'month').format('YYYY-MM-DD')
+    const rows = await query<BalanceHistoryPoint>(
+      'SELECT date, balance FROM account_balance_history WHERE account_id = ? AND date >= ? ORDER BY date ASC',
+      [accountId, startDate]
+    )
+    set((s) => {
+      const newMap = new Map(s.balanceHistory)
+      newMap.set(accountId, rows)
+      return { balanceHistory: newMap }
+    })
+    return rows
   },
 }))
 

@@ -2,16 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, TrendingDown, TrendingUp, Flame, DollarSign, Calendar } from 'lucide-react'
 import dayjs from 'dayjs'
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-  Legend,
-} from 'recharts'
+import { AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts'
+import { SafeChart } from '@/components/ui/safe-chart'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -28,13 +20,7 @@ interface SubscriptionDisplay {
 
 export function Forecast() {
   const { t } = useTranslation('forecast')
-  const {
-    forecast,
-    isLoading,
-    selectedRange,
-    setRange,
-    generateForecast,
-  } = useForecastStore()
+  const { forecast, isLoading, selectedRange, setRange, generateForecast } = useForecastStore()
 
   useEffect(() => {
     generateForecast()
@@ -128,7 +114,7 @@ export function Forecast() {
         <div className="glass-card border-destructive/30 bg-destructive/5 border p-4">
           <div className="mb-2 flex items-center gap-2">
             <AlertTriangle size={16} className="text-destructive" />
-            <h3 className="font-heading text-sm font-semibold text-destructive">
+            <h3 className="font-heading text-destructive text-sm font-semibold">
               {t('danger.title')}
             </h3>
           </div>
@@ -152,7 +138,7 @@ export function Forecast() {
         <div className="glass-card border-success/30 bg-success/5 border p-4">
           <div className="flex items-center gap-2">
             <TrendingUp size={16} className="text-success" />
-            <p className="text-sm text-success">{t('danger.noDanger')}</p>
+            <p className="text-success text-sm">{t('danger.noDanger')}</p>
           </div>
         </div>
       )}
@@ -162,7 +148,7 @@ export function Forecast() {
         <div className="glass-card p-5">
           <h3 className="font-heading mb-4 text-sm font-semibold">{t('chart.title')}</h3>
           <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
+            <SafeChart>
               <AreaChart data={chartData}>
                 <defs>
                   <linearGradient id="forecastProjectedGrad" x1="0" y1="0" x2="0" y2="1">
@@ -197,9 +183,7 @@ export function Forecast() {
                     `$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                   }
                 />
-                <Legend
-                  wrapperStyle={{ fontSize: 11, color: '#a1a1aa' }}
-                />
+                <Legend wrapperStyle={{ fontSize: 11, color: '#a1a1aa' }} />
                 <Area
                   type="monotone"
                   dataKey="optimistic"
@@ -227,7 +211,7 @@ export function Forecast() {
                   fill="none"
                 />
               </AreaChart>
-            </ResponsiveContainer>
+            </SafeChart>
           </div>
         </div>
       )}
@@ -336,9 +320,7 @@ function MetricCard({
         <span className={iconColor}>{icon}</span>
         <span className="font-mono text-[10px] tracking-wider uppercase">{label}</span>
       </div>
-      <p className={`font-heading text-lg font-bold tracking-tight ${valueColor || ''}`}>
-        {value}
-      </p>
+      <p className={`font-heading text-lg font-bold tracking-tight ${valueColor || ''}`}>{value}</p>
     </div>
   )
 }

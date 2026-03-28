@@ -14,6 +14,9 @@ import {
   Sparkles,
   PanelLeftClose,
   PanelLeft,
+  Wallet,
+  Lightbulb,
+  Flame,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/ui-store'
@@ -28,6 +31,9 @@ const navItems = [
   { path: '/investments', icon: TrendingUp, labelKey: 'nav.investments' },
   { path: '/subscriptions', icon: Repeat, labelKey: 'nav.subscriptions' },
   { path: '/debt-payoff', icon: Target, labelKey: 'nav.debtPayoff' },
+  { path: '/net-worth', icon: Wallet, labelKey: 'nav.netWorth' },
+  { path: '/spending-insights', icon: Lightbulb, labelKey: 'nav.spendingInsights' },
+  { path: '/spending-heatmap', icon: Flame, labelKey: 'nav.spendingHeatmap' },
   { path: '/forecast', icon: LineChart, labelKey: 'nav.forecast' },
   { path: '/memories', icon: Brain, labelKey: 'nav.memories' },
 ] as const
@@ -80,10 +86,7 @@ export function Sidebar() {
       <div className="border-border space-y-0.5 border-t px-2 py-2">
         <button
           onClick={toggleAIPanel}
-          className={cn(
-            'sidebar-link w-full text-left',
-            sidebarCollapsed && 'justify-center px-0'
-          )}
+          className={cn('sidebar-link w-full text-left', sidebarCollapsed && 'justify-center px-0')}
         >
           <Sparkles size={18} />
           {!sidebarCollapsed && <span>{t('nav.ai')}</span>}

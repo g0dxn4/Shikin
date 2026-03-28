@@ -11,7 +11,8 @@ import {
   Snowflake,
   ChevronDown,
 } from 'lucide-react'
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import { AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts'
+import { SafeChart } from '@/components/ui/safe-chart'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -44,7 +45,7 @@ function StrategyToggle({
 
   return (
     <div className="glass-card p-4">
-      <h3 className="font-heading mb-3 text-sm font-semibold uppercase tracking-wider text-white/60">
+      <h3 className="font-heading mb-3 text-sm font-semibold tracking-wider text-white/60 uppercase">
         {t('strategy.title')}
       </h3>
       <div className="flex gap-2">
@@ -106,7 +107,7 @@ function ComparisonCards() {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
       <div className="glass-card p-4">
-        <p className="text-xs font-medium uppercase tracking-wider text-white/40">
+        <p className="text-xs font-medium tracking-wider text-white/40 uppercase">
           {t('comparison.avalancheMonths')}
         </p>
         <p className="font-heading mt-1 text-2xl font-bold text-[#bf5af2]">
@@ -118,7 +119,7 @@ function ComparisonCards() {
         </p>
       </div>
       <div className="glass-card p-4">
-        <p className="text-xs font-medium uppercase tracking-wider text-white/40">
+        <p className="text-xs font-medium tracking-wider text-white/40 uppercase">
           {t('comparison.snowballMonths')}
         </p>
         <p className="font-heading mt-1 text-2xl font-bold text-[#3b82f6]">
@@ -130,7 +131,7 @@ function ComparisonCards() {
         </p>
       </div>
       <div className="glass-card p-4">
-        <p className="text-xs font-medium uppercase tracking-wider text-white/40">
+        <p className="text-xs font-medium tracking-wider text-white/40 uppercase">
           {t('comparison.interestSaved')}
         </p>
         <p className="font-heading mt-1 text-2xl font-bold text-[#22c55e]">
@@ -161,9 +162,7 @@ function DebtChart() {
 
   const chartData = sampled.map((snap: MonthlySnapshot) => {
     const row: Record<string, number | string> = {
-      month: dayjs()
-        .add(snap.month, 'month')
-        .format('MMM YY'),
+      month: dayjs().add(snap.month, 'month').format('MMM YY'),
     }
     for (const d of allDebts) {
       row[d.name] = fromCentavos(snap.balances[d.id] ?? 0)
@@ -174,10 +173,10 @@ function DebtChart() {
 
   return (
     <div className="glass-card p-5">
-      <h3 className="font-heading mb-4 text-sm font-semibold uppercase tracking-wider text-white/60">
+      <h3 className="font-heading mb-4 text-sm font-semibold tracking-wider text-white/60 uppercase">
         {t('chart.title')}
       </h3>
-      <ResponsiveContainer width="100%" height={300}>
+      <SafeChart height={300}>
         <AreaChart data={chartData}>
           <XAxis
             dataKey="month"
@@ -214,7 +213,7 @@ function DebtChart() {
             />
           ))}
         </AreaChart>
-      </ResponsiveContainer>
+      </SafeChart>
     </div>
   )
 }
@@ -234,10 +233,7 @@ function DebtCard({
 
   return (
     <div className="glass-card group relative overflow-hidden p-4">
-      <div
-        className="absolute left-0 top-0 h-full w-1"
-        style={{ backgroundColor: color }}
-      />
+      <div className="absolute top-0 left-0 h-full w-1" style={{ backgroundColor: color }} />
       <div className="flex items-start justify-between">
         <div className="pl-3">
           <h4 className="font-heading text-sm font-semibold">{debt.name}</h4>
@@ -273,7 +269,11 @@ function DebtCard({
   )
 }
 
-function AddDebtForm({ onAdd }: { onAdd: (debt: { name: string; balance: number; apr: number; minPayment: number }) => void }) {
+function AddDebtForm({
+  onAdd,
+}: {
+  onAdd: (debt: { name: string; balance: number; apr: number; minPayment: number }) => void
+}) {
   const { t } = useTranslation('debtPayoff')
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
@@ -381,9 +381,7 @@ function SummaryMetrics() {
   const { t } = useTranslation('debtPayoff')
   const { totalDebt, totalMinPayment, payoffPlan } = useDebtStore()
 
-  const payoffDate = payoffPlan
-    ? dayjs().add(payoffPlan.months, 'month').format('MMM YYYY')
-    : '--'
+  const payoffDate = payoffPlan ? dayjs().add(payoffPlan.months, 'month').format('MMM YYYY') : '--'
 
   return (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -391,7 +389,7 @@ function SummaryMetrics() {
         <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-[#ef4444]/10">
           <DollarSign size={16} className="text-[#ef4444]" />
         </div>
-        <p className="text-xs font-medium uppercase tracking-wider text-white/40">
+        <p className="text-xs font-medium tracking-wider text-white/40 uppercase">
           {t('summary.totalDebt')}
         </p>
         <p className="font-heading mt-1 text-xl font-bold">{formatMoney(totalDebt)}</p>
@@ -400,7 +398,7 @@ function SummaryMetrics() {
         <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-[#f59e0b]/10">
           <TrendingDown size={16} className="text-[#f59e0b]" />
         </div>
-        <p className="text-xs font-medium uppercase tracking-wider text-white/40">
+        <p className="text-xs font-medium tracking-wider text-white/40 uppercase">
           {t('summary.monthlyMin')}
         </p>
         <p className="font-heading mt-1 text-xl font-bold">{formatMoney(totalMinPayment)}</p>
@@ -409,7 +407,7 @@ function SummaryMetrics() {
         <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-[#22c55e]/10">
           <Calendar size={16} className="text-[#22c55e]" />
         </div>
-        <p className="text-xs font-medium uppercase tracking-wider text-white/40">
+        <p className="text-xs font-medium tracking-wider text-white/40 uppercase">
           {t('summary.debtFreeDate')}
         </p>
         <p className="font-heading mt-1 text-xl font-bold">{payoffDate}</p>
@@ -418,7 +416,7 @@ function SummaryMetrics() {
         <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-[#bf5af2]/10">
           <Target size={16} className="text-[#bf5af2]" />
         </div>
-        <p className="text-xs font-medium uppercase tracking-wider text-white/40">
+        <p className="text-xs font-medium tracking-wider text-white/40 uppercase">
           {t('summary.totalInterest')}
         </p>
         <p className="font-heading mt-1 text-xl font-bold">
@@ -476,9 +474,7 @@ export function DebtPayoff() {
               <Target size={28} className="text-primary" />
             </div>
             <h2 className="font-heading mb-2 text-lg font-semibold">{t('empty.title')}</h2>
-            <p className="text-muted-foreground mb-4 max-w-md text-sm">
-              {t('empty.description')}
-            </p>
+            <p className="text-muted-foreground mb-4 max-w-md text-sm">{t('empty.description')}</p>
           </div>
           <AddDebtForm
             onAdd={(debt) =>
@@ -502,7 +498,7 @@ export function DebtPayoff() {
               <StrategyToggle strategy={strategy} onToggle={setStrategy} />
             </div>
             <div className="glass-card p-4">
-              <h3 className="font-heading mb-3 text-sm font-semibold uppercase tracking-wider text-white/60">
+              <h3 className="font-heading mb-3 text-sm font-semibold tracking-wider text-white/60 uppercase">
                 {t('extraPayment.title')}
               </h3>
               <div className="flex items-center gap-2">
@@ -532,7 +528,7 @@ export function DebtPayoff() {
           {useDebtStore.getState().payoffPlan &&
             useDebtStore.getState().payoffPlan!.debtPayoffOrder.length > 0 && (
               <div className="glass-card p-5">
-                <h3 className="font-heading mb-3 text-sm font-semibold uppercase tracking-wider text-white/60">
+                <h3 className="font-heading mb-3 text-sm font-semibold tracking-wider text-white/60 uppercase">
                   {t('payoffOrder.title')}
                 </h3>
                 <div className="space-y-2">
@@ -546,9 +542,7 @@ export function DebtPayoff() {
                       </span>
                       <span className="flex-1 text-sm font-medium">{item.name}</span>
                       <span className="text-xs text-white/40">
-                        {dayjs()
-                          .add(item.paidOffMonth, 'month')
-                          .format('MMM YYYY')}
+                        {dayjs().add(item.paidOffMonth, 'month').format('MMM YYYY')}
                       </span>
                     </div>
                   ))}
@@ -558,7 +552,7 @@ export function DebtPayoff() {
 
           {/* Debt list */}
           <div>
-            <h3 className="font-heading mb-3 text-sm font-semibold uppercase tracking-wider text-white/60">
+            <h3 className="font-heading mb-3 text-sm font-semibold tracking-wider text-white/60 uppercase">
               {t('debtList.title')}
             </h3>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">

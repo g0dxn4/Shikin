@@ -4,8 +4,51 @@ import { generateId } from '@/lib/ulid'
 const FRANKFURTER_BASE = 'https://api.frankfurter.app'
 
 export const COMMON_CURRENCIES = [
-  'USD', 'EUR', 'GBP', 'MXN', 'CAD', 'JPY', 'BRL', 'COP', 'ARS',
+  'USD',
+  'EUR',
+  'GBP',
+  'MXN',
+  'CAD',
+  'JPY',
+  'BRL',
+  'COP',
+  'ARS',
 ] as const
+
+// Currencies actually supported by frankfurter.app (ECB data)
+// COP, ARS, CLP, PEN are not available — skip them silently
+const FRANKFURTER_SUPPORTED = new Set([
+  'AUD',
+  'BRL',
+  'CAD',
+  'CHF',
+  'CNY',
+  'CZK',
+  'DKK',
+  'EUR',
+  'GBP',
+  'HKD',
+  'HUF',
+  'IDR',
+  'ILS',
+  'INR',
+  'ISK',
+  'JPY',
+  'KRW',
+  'MXN',
+  'MYR',
+  'NOK',
+  'NZD',
+  'PHP',
+  'PLN',
+  'RON',
+  'SEK',
+  'SGD',
+  'THB',
+  'TRY',
+  'USD',
+  'ZAR',
+])
 
 export type CommonCurrency = (typeof COMMON_CURRENCIES)[number]
 
@@ -114,9 +157,11 @@ export async function refreshRates(): Promise<Record<string, Record<string, numb
   const allRates: Record<string, Record<string, number>> = {}
   const today = new Date().toISOString().split('T')[0]
 
-  // Fetch rates from each common currency
-  // frankfurter.app is free and doesn't require API keys
-  for (const base of COMMON_CURRENCIES) {
+  // Fetch rates from each common currency supported by frankfurter.app
+  // Unsupported currencies (COP, ARS, etc.) are silently skipped
+  const fetchable = COMMON_CURRENCIES.filter((c) => FRANKFURTER_SUPPORTED.has(c))
+
+  for (const base of fetchable) {
     try {
       const rates = await fetchRates(base)
       allRates[base] = rates
@@ -128,8 +173,7 @@ export async function refreshRates(): Promise<Record<string, Record<string, numb
         }
       }
     } catch {
-      // Skip currencies that fail (e.g., ARS may not be supported)
-      console.warn(`Failed to fetch rates for ${base}`)
+      // Network error or API issue — skip silently
     }
   }
 

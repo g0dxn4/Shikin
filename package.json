@@ -24,7 +24,8 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:ai": "tsx scripts/test-ai.ts"
+    "test:ai": "tsx scripts/test-ai.ts",
+    "prepare": "husky"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.47",
@@ -91,7 +92,9 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.3.0",
+    "husky": "^9.1.7",
     "jsdom": "^28.1.0",
+    "lint-staged": "^16.4.0",
     "prettier": "^3.8.1",
     "prettier-plugin-tailwindcss": "^0.7.2",
     "tailwindcss": "^4.2.1",
@@ -100,6 +103,15 @@
     "typescript-eslint": "^8.56.1",
     "vite": "^6.4.1",
     "vitest": "^4.0.18"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{css,json}": [
+      "prettier --write"
+    ]
   },
   "pnpm": {
     "onlyBuiltDependencies": [

@@ -417,6 +417,44 @@ CREATE INDEX IF NOT EXISTS idx_transaction_splits_transaction ON transaction_spl
     db.prepare("INSERT INTO _migrations (id, name) VALUES (10, '010_transaction_splits')").run()
   }
 
+  // --- Migration 011: Net Worth Snapshots ---
+  if (!applied.has('011_net_worth_snapshots')) {
+    db.exec(`
+CREATE TABLE IF NOT EXISTS net_worth_snapshots (
+  id TEXT PRIMARY KEY,
+  date TEXT NOT NULL,
+  total_assets INTEGER NOT NULL DEFAULT 0,
+  total_liabilities INTEGER NOT NULL DEFAULT 0,
+  net_worth INTEGER NOT NULL DEFAULT 0,
+  total_investments INTEGER NOT NULL DEFAULT 0,
+  breakdown_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_net_worth_snapshots_date ON net_worth_snapshots(date);
+    `)
+
+    db.prepare("INSERT INTO _migrations (id, name) VALUES (11, '011_net_worth_snapshots')").run()
+  }
+
+  // --- Migration 012: Account Balance History ---
+  if (!applied.has('012_account_balance_history')) {
+    db.exec(`
+CREATE TABLE IF NOT EXISTS account_balance_history (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  date TEXT NOT NULL,
+  balance INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_account_balance_date ON account_balance_history(account_id, date);
+CREATE INDEX IF NOT EXISTS idx_account_balance_account ON account_balance_history(account_id);
+    `)
+
+    db.prepare("INSERT INTO _migrations (id, name) VALUES (12, '012_account_balance_history')").run()
+  }
+
   console.log('[data-server] Migrations complete')
 }
 
@@ -741,6 +779,40 @@ const server = createServer(async (req, res) => {
         res.end(text)
       }
       return
+    }
+
+    // ── DB: Export (binary) ────────────────────────────────────────
+    if (path === '/api/db/export' && req.method === 'GET') {
+      // Checkpoint WAL to ensure all data is in main DB file
+      try { db.pragma('wal_checkpoint(TRUNCATE)') } catch { /* ignore */ }
+      const bytes = readFileSync(DB_PATH)
+      res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': bytes.length,
+        'Content-Disposition': 'attachment; filename="valute.db"',
+        'Access-Control-Allow-Origin': '*',
+      })
+      res.end(bytes)
+      return
+    }
+
+    // ── DB: Import (binary) ────────────────────────────────────────
+    if (path === '/api/db/import' && req.method === 'POST') {
+      const chunks = []
+      for await (const chunk of req) chunks.push(chunk)
+      const buffer = Buffer.concat(chunks)
+
+      // Validate: SQLite files start with "SQLite format 3\0"
+      const header = buffer.slice(0, 16).toString('ascii')
+      if (!header.startsWith('SQLite format 3')) {
+        return sendError(res, 'Invalid SQLite database file', 400)
+      }
+
+      // Close DB, write new file, reopen
+      db.close()
+      writeFileSync(DB_PATH, buffer)
+      // Reopen — the process should be restarted after import
+      return sendJson(res, { ok: true, message: 'Database imported. Restart the app to apply.' })
     }
 
     // ── 404 ──────────────────────────────────────────────────────────

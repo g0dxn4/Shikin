@@ -23,19 +23,11 @@ import {
 } from 'lucide-react'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-} from 'recharts'
+import { AreaChart, Area, XAxis, YAxis, Tooltip, PieChart, Pie, Cell } from 'recharts'
+import { SafeChart } from '@/components/ui/safe-chart'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
@@ -50,6 +42,7 @@ import { ACHIEVEMENTS } from '@/lib/achievement-service'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import type { AnomalyType, AnomalySeverity } from '@/lib/anomaly-service'
 import { useHealthStore } from '@/stores/health-store'
+import { useSpendingInsightsStore } from '@/stores/spending-insights-store'
 import type { SubScore } from '@/lib/health-score-service'
 import { formatMoney, fromCentavos } from '@/lib/money'
 
@@ -73,7 +66,12 @@ export function Dashboard() {
   const { setAIPanelOpen, openAccountDialog, openTransactionDialog } = useUIStore()
   const { accounts, isLoading: accountsLoading, fetch: fetchAccounts } = useAccountStore()
   const { transactions, isLoading: txLoading, fetch: fetchTransactions } = useTransactionStore()
-  const { isLoading: anomalyLoading, scanForAnomalies, getActiveAnomalies, dismissAnomaly } = useAnomalyStore()
+  const {
+    isLoading: anomalyLoading,
+    scanForAnomalies,
+    getActiveAnomalies,
+    dismissAnomaly,
+  } = useAnomalyStore()
   const { goals, fetch: fetchGoals } = useGoalStore()
   const { score: healthScore, isLoading: healthLoading, calculateScore } = useHealthStore()
   const {
@@ -90,6 +88,7 @@ export function Dashboard() {
     checkForNew: checkAchievements,
     dismissNew,
   } = useAchievementStore()
+  const { insights: spendingInsights, loadComparisons: loadInsights } = useSpendingInsightsStore()
 
   useEffect(() => {
     fetchAccounts()
@@ -99,12 +98,13 @@ export function Dashboard() {
     loadRates()
   }, [fetchAccounts, fetchTransactions, fetchGoals, loadLatestWeekly, loadRates])
 
-  // Run anomaly scan after transactions are loaded
+  // Run anomaly scan and load spending insights after transactions are loaded
   useEffect(() => {
     if (transactions.length > 0 && !txLoading) {
       scanForAnomalies()
+      loadInsights()
     }
-  }, [transactions.length, txLoading, scanForAnomalies])
+  }, [transactions.length, txLoading, scanForAnomalies, loadInsights])
 
   const activeAnomalies = getActiveAnomalies()
 
@@ -225,6 +225,29 @@ export function Dashboard() {
     return Array.from(cats.values()).sort((a, b) => b.value - a.value)
   }, [transactions])
 
+  // Income breakdown (this month) by category
+  const incomeData = useMemo(() => {
+    const startOfMonth = dayjs().startOf('month').format('YYYY-MM-DD')
+    const today = dayjs().format('YYYY-MM-DD')
+    const cats = new Map<string, { name: string; value: number; color: string }>()
+    for (const tx of transactions) {
+      if (tx.type === 'income' && tx.date >= startOfMonth && tx.date <= today) {
+        const catName = tx.category_name || 'Other Income'
+        const existing = cats.get(catName)
+        if (existing) {
+          existing.value += tx.amount
+        } else {
+          cats.set(catName, {
+            name: catName,
+            value: tx.amount,
+            color: tx.category_color || '#22c55e',
+          })
+        }
+      }
+    }
+    return Array.from(cats.values()).sort((a, b) => b.value - a.value)
+  }, [transactions])
+
   const hasAccounts = accounts.length > 0
   const isLoading = accountsLoading || txLoading
 
@@ -262,7 +285,7 @@ export function Dashboard() {
             return (
               <div
                 key={a.id}
-                className="flex items-center gap-3 rounded-xl px-4 py-3 animate-fade-in-up"
+                className="animate-fade-in-up flex items-center gap-3 rounded-xl px-4 py-3"
                 style={{
                   background: 'rgba(191, 90, 242, 0.1)',
                   border: '1px solid rgba(191, 90, 242, 0.2)',
@@ -270,12 +293,8 @@ export function Dashboard() {
               >
                 <span className="text-xl">{def.icon}</span>
                 <div className="min-w-0 flex-1">
-                  <p className="font-heading text-sm font-semibold">
-                    {t(`achievements.${a.id}`)}
-                  </p>
-                  <p className="text-muted-foreground text-xs">
-                    {t(`achievements.${a.id}_desc`)}
-                  </p>
+                  <p className="font-heading text-sm font-semibold">{t(`achievements.${a.id}`)}</p>
+                  <p className="text-muted-foreground text-xs">{t(`achievements.${a.id}_desc`)}</p>
                 </div>
                 <Badge
                   variant="secondary"
@@ -302,9 +321,10 @@ export function Dashboard() {
           icon={<Wallet size={16} />}
           iconColor="text-primary"
           label={hasMixedCurrencies ? t('cards.totalBalanceConverted') : t('cards.totalBalance')}
-          value={hasMixedCurrencies
-            ? formatMoney(convertedTotalBalance, preferredCurrency)
-            : formatMoney(totalBalance)
+          value={
+            hasMixedCurrencies
+              ? formatMoney(convertedTotalBalance, preferredCurrency)
+              : formatMoney(totalBalance)
           }
           subtitle={hasMixedCurrencies ? preferredCurrency : undefined}
         />
@@ -388,7 +408,7 @@ export function Dashboard() {
                   </Link>
                 </div>
                 <div className="h-48">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <SafeChart>
                     <AreaChart data={monthlyChartData}>
                       <defs>
                         <linearGradient id="expenseGrad" x1="0" y1="0" x2="0" y2="1">
@@ -432,7 +452,7 @@ export function Dashboard() {
                         fill="url(#expenseGrad)"
                       />
                     </AreaChart>
-                  </ResponsiveContainer>
+                  </SafeChart>
                 </div>
               </div>
 
@@ -452,7 +472,7 @@ export function Dashboard() {
                 {categoryData.length > 0 ? (
                   <div className="flex items-center gap-4">
                     <div className="h-48 w-48 shrink-0">
-                      <ResponsiveContainer width="100%" height="100%">
+                      <SafeChart>
                         <PieChart>
                           <Pie
                             data={categoryData}
@@ -480,7 +500,7 @@ export function Dashboard() {
                             formatter={(value) => formatMoney(value as number)}
                           />
                         </PieChart>
-                      </ResponsiveContainer>
+                      </SafeChart>
                     </div>
                     <div className="flex flex-1 flex-col gap-1.5 overflow-hidden">
                       {categoryData.slice(0, 5).map((cat, i) => (
@@ -508,6 +528,71 @@ export function Dashboard() {
             </div>
           )}
 
+          {/* Income Sources */}
+          {incomeData.length > 0 && (
+            <div className="glass-card p-5">
+              <h3 className="font-heading mb-4 text-sm font-semibold">
+                {t('charts.incomeSources', 'Income Sources')}
+              </h3>
+              <div className="flex items-center gap-4">
+                <div className="h-40 w-40 shrink-0">
+                  <SafeChart>
+                    <PieChart>
+                      <Pie
+                        data={incomeData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={40}
+                        outerRadius={65}
+                        paddingAngle={2}
+                        dataKey="value"
+                      >
+                        {incomeData.map((entry, i) => (
+                          <Cell
+                            key={entry.name}
+                            fill={entry.color || CHART_COLORS[i % CHART_COLORS.length]}
+                          />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{
+                          background: '#0a0a0a',
+                          border: '1px solid rgba(255,255,255,0.06)',
+                          borderRadius: 8,
+                          fontSize: 12,
+                        }}
+                        formatter={(value) => formatMoney(value as number)}
+                      />
+                    </PieChart>
+                  </SafeChart>
+                </div>
+                <div className="flex flex-1 flex-col gap-1.5 overflow-hidden">
+                  {incomeData.map((inc, i) => {
+                    const total = incomeData.reduce((s, d) => s + d.value, 0)
+                    const percent = total > 0 ? Math.round((inc.value / total) * 100) : 0
+                    return (
+                      <div key={inc.name} className="flex items-center gap-2 text-xs">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{
+                            backgroundColor: inc.color || CHART_COLORS[i % CHART_COLORS.length],
+                          }}
+                        />
+                        <span className="truncate">{inc.name}</span>
+                        <span className="text-muted-foreground ml-auto shrink-0">
+                          {formatMoney(inc.value)}
+                          <span className="text-muted-foreground ml-1 text-[10px]">
+                            ({percent}%)
+                          </span>
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Alerts section */}
           <AlertsSection
             anomalies={activeAnomalies}
@@ -515,6 +600,57 @@ export function Dashboard() {
             onDismiss={dismissAnomaly}
             t={t}
           />
+
+          {/* Spending Insights */}
+          {spendingInsights.length > 0 && (
+            <div className="glass-card p-5">
+              <div className="mb-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Zap size={16} className="text-accent" />
+                  <h3 className="font-heading text-sm font-semibold">
+                    {t('insights.title', 'Spending Insights')}
+                  </h3>
+                </div>
+                <Link
+                  to="/spending-insights"
+                  className="text-muted-foreground hover:text-foreground text-xs"
+                >
+                  {t('insights.viewAll', 'View all')} <ArrowRight size={12} className="inline" />
+                </Link>
+              </div>
+              <div className="space-y-2">
+                {spendingInsights.slice(0, 3).map((insight) => (
+                  <div
+                    key={insight.id}
+                    className={cn(
+                      'flex items-center gap-3 rounded-lg px-3 py-2',
+                      insight.severity === 'alert' && 'bg-destructive/5',
+                      insight.severity === 'warning' && 'bg-warning/5',
+                      insight.severity === 'info' && 'bg-accent/5'
+                    )}
+                  >
+                    <div
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: insight.categoryColor }}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-sm">{insight.message}</span>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        'shrink-0 font-mono text-[10px]',
+                        insight.type === 'increase'
+                          ? 'border-destructive/30 text-destructive'
+                          : 'border-success/30 text-success'
+                      )}
+                    >
+                      {insight.type === 'decrease' ? '-' : '+'}$
+                      {Math.abs(insight.amount).toFixed(0)}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Cash Flow Forecast Widget */}
           {transactions.length > 0 && <ForecastWidget />}
@@ -578,7 +714,6 @@ export function Dashboard() {
               </div>
             )}
           </div>
-
 
           {/* Accounts preview */}
           <div className="space-y-3">
@@ -735,13 +870,7 @@ export function Dashboard() {
 
 function ForecastWidget() {
   const { t } = useTranslation('dashboard')
-  const {
-    forecast,
-    isLoading,
-    selectedRange,
-    setRange,
-    generateForecast,
-  } = useForecastStore()
+  const { forecast, isLoading, selectedRange, setRange, generateForecast } = useForecastStore()
 
   useEffect(() => {
     generateForecast()
@@ -750,7 +879,11 @@ function ForecastWidget() {
   const chartData = useMemo(() => {
     if (!forecast) return []
     return forecast.points
-      .filter((_, i) => i % Math.max(1, Math.floor(forecast.points.length / 30)) === 0 || i === forecast.points.length - 1)
+      .filter(
+        (_, i) =>
+          i % Math.max(1, Math.floor(forecast.points.length / 30)) === 0 ||
+          i === forecast.points.length - 1
+      )
       .map((p) => ({
         date: dayjs(p.date).format('MMM D'),
         projected: fromCentavos(p.projected),
@@ -804,9 +937,9 @@ function ForecastWidget() {
       </div>
 
       {firstDangerDate && (
-        <div className="mb-3 flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2">
+        <div className="bg-destructive/10 mb-3 flex items-center gap-2 rounded-lg px-3 py-2">
           <AlertTriangle size={14} className="text-destructive shrink-0" />
-          <p className="text-xs text-destructive">
+          <p className="text-destructive text-xs">
             {t('forecast.dangerWarning', {
               threshold: formatMoney(0),
               date: dayjs(firstDangerDate).format('MMM D'),
@@ -816,7 +949,7 @@ function ForecastWidget() {
       )}
 
       <div className="h-48">
-        <ResponsiveContainer width="100%" height="100%">
+        <SafeChart>
           <AreaChart data={chartData}>
             <defs>
               <linearGradient id="forecastGrad" x1="0" y1="0" x2="0" y2="1">
@@ -872,7 +1005,7 @@ function ForecastWidget() {
               fill="none"
             />
           </AreaChart>
-        </ResponsiveContainer>
+        </SafeChart>
       </div>
     </div>
   )
@@ -902,9 +1035,7 @@ function MetricCard({
       <p className={`font-heading text-2xl font-bold tracking-tight ${valueColor || ''}`}>
         {value}
       </p>
-      {subtitle && (
-        <p className="text-muted-foreground mt-0.5 font-mono text-[10px]">{subtitle}</p>
-      )}
+      {subtitle && <p className="text-muted-foreground mt-0.5 font-mono text-[10px]">{subtitle}</p>}
     </div>
   )
 }
@@ -943,7 +1074,10 @@ const ANOMALY_ICONS: Record<AnomalyType, React.ReactNode> = {
   large_transaction: <DollarSign size={14} />,
 }
 
-const SEVERITY_STYLES: Record<AnomalySeverity, { border: string; bg: string; text: string; badge: string }> = {
+const SEVERITY_STYLES: Record<
+  AnomalySeverity,
+  { border: string; bg: string; text: string; badge: string }
+> = {
   high: {
     border: 'border-red-500/30',
     bg: 'bg-red-500/10',
@@ -1012,13 +1146,17 @@ function AlertsSection({
               key={anomaly.id}
               className={`glass-card flex items-start gap-3 border px-4 py-3 ${styles.border}`}
             >
-              <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${styles.bg} ${styles.text}`}>
+              <div
+                className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${styles.bg} ${styles.text}`}
+              >
                 {ANOMALY_ICONS[anomaly.type]}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <p className="truncate text-sm font-medium">{anomaly.title}</p>
-                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${styles.badge}`}>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${styles.badge}`}
+                  >
                     {t(`alerts.severity.${anomaly.severity}`)}
                   </span>
                 </div>
@@ -1085,10 +1223,7 @@ function HealthScoreGauge({ score, grade }: { score: number; grade: string }) {
         <span className="font-heading text-3xl font-bold" style={{ color }}>
           {score}
         </span>
-        <span
-          className="font-mono text-xs font-semibold tracking-wider"
-          style={{ color }}
-        >
+        <span className="font-mono text-xs font-semibold tracking-wider" style={{ color }}>
           {grade}
         </span>
       </div>
@@ -1108,7 +1243,10 @@ function SubScoreBar({ subscore }: { subscore: SubScore }) {
     <div className="space-y-1">
       <div className="flex items-center justify-between">
         <span className="text-xs text-white/70">{subscore.name}</span>
-        <span className="font-mono text-xs font-semibold" style={{ color: getColor(subscore.score) }}>
+        <span
+          className="font-mono text-xs font-semibold"
+          style={{ color: getColor(subscore.score) }}
+        >
           {subscore.score}
         </span>
       </div>
@@ -1185,7 +1323,7 @@ function HealthScoreWidget({
           <div className="flex items-start gap-2">
             <Sparkles size={14} className="text-primary mt-0.5 shrink-0" />
             <div>
-              <p className="text-[10px] font-semibold tracking-wider uppercase text-white/40">
+              <p className="text-[10px] font-semibold tracking-wider text-white/40 uppercase">
                 {t('healthScore.topTip')}
               </p>
               <p className="mt-0.5 text-sm text-white/80">{score.tips[0]}</p>

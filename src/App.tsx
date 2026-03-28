@@ -7,6 +7,8 @@ import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { useAIStore } from '@/stores/ai-store'
 import { useRecurringStore } from '@/stores/recurring-store'
 import { useCurrencyStore } from '@/stores/currency-store'
+import { useAccountStore } from '@/stores/account-store'
+import { useNetWorthStore } from '@/stores/net-worth-store'
 import { initPriceScheduler, stopPriceScheduler } from '@/lib/price-scheduler'
 import '@/i18n'
 import '@/styles/globals.css'
@@ -29,6 +31,13 @@ const DebtPayoff = lazy(() =>
 )
 const Forecast = lazy(() => import('@/pages/forecast').then((m) => ({ default: m.Forecast })))
 const Memories = lazy(() => import('@/pages/memories').then((m) => ({ default: m.Memories })))
+const NetWorth = lazy(() => import('@/pages/net-worth').then((m) => ({ default: m.NetWorth })))
+const SpendingHeatmap = lazy(() =>
+  import('@/pages/spending-heatmap').then((m) => ({ default: m.SpendingHeatmap }))
+)
+const SpendingInsights = lazy(() =>
+  import('@/pages/spending-insights').then((m) => ({ default: m.SpendingInsights }))
+)
 const SettingsPage = lazy(() =>
   import('@/pages/settings').then((m) => ({ default: m.SettingsPage }))
 )
@@ -40,6 +49,9 @@ export default function App() {
   const loadSettings = useAIStore((s) => s.loadSettings)
   const materializeTransactions = useRecurringStore((s) => s.materializeTransactions)
   const autoRefreshRates = useCurrencyStore((s) => s.autoRefreshIfStale)
+  const fetchAccounts = useAccountStore((s) => s.fetch)
+  const snapshotBalances = useAccountStore((s) => s.snapshotBalances)
+  const refreshNetWorth = useNetWorthStore((s) => s.refresh)
 
   useEffect(() => {
     loadSettings()
@@ -50,8 +62,22 @@ export default function App() {
     )
     // Auto-refresh exchange rates if stale (>24h)
     autoRefreshRates().catch(console.warn)
+    // Snapshot account balances and net worth on app open
+    fetchAccounts()
+      .then(() => {
+        snapshotBalances().catch(console.warn)
+        refreshNetWorth().catch(console.warn)
+      })
+      .catch(console.warn)
     return () => stopPriceScheduler()
-  }, [loadSettings, materializeTransactions, autoRefreshRates])
+  }, [
+    loadSettings,
+    materializeTransactions,
+    autoRefreshRates,
+    fetchAccounts,
+    snapshotBalances,
+    refreshNetWorth,
+  ])
 
   return (
     <ErrorBoundary>
@@ -68,6 +94,9 @@ export default function App() {
               <Route path="/subscriptions" element={<Subscriptions />} />
               <Route path="/debt-payoff" element={<DebtPayoff />} />
               <Route path="/forecast" element={<Forecast />} />
+              <Route path="/net-worth" element={<NetWorth />} />
+              <Route path="/spending-insights" element={<SpendingInsights />} />
+              <Route path="/spending-heatmap" element={<SpendingHeatmap />} />
               <Route path="/memories" element={<Memories />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>

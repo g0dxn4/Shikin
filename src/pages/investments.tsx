@@ -11,17 +11,8 @@ import {
   Wallet,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-} from 'recharts'
+import { AreaChart, Area, XAxis, YAxis, Tooltip, PieChart, Pie, Cell } from 'recharts'
+import { SafeChart } from '@/components/ui/safe-chart'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -261,8 +252,12 @@ export function Investments() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="metric-card">
           <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <span className="text-primary"><TrendingUp size={16} /></span>
-            <span className="font-mono text-[10px] tracking-wider uppercase">{t('summary.portfolioValue')}</span>
+            <span className="text-primary">
+              <TrendingUp size={16} />
+            </span>
+            <span className="font-mono text-[10px] tracking-wider uppercase">
+              {t('summary.portfolioValue')}
+            </span>
           </div>
           <p className="font-heading text-2xl font-bold tracking-tight">
             {formatMoney(portfolioSummary.totalMarketValue)}
@@ -271,10 +266,18 @@ export function Investments() {
 
         <div className="metric-card">
           <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <span className={portfolioSummary.totalGainLoss >= 0 ? 'text-success' : 'text-destructive'}>
-              {portfolioSummary.totalGainLoss >= 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
+            <span
+              className={portfolioSummary.totalGainLoss >= 0 ? 'text-success' : 'text-destructive'}
+            >
+              {portfolioSummary.totalGainLoss >= 0 ? (
+                <TrendingUp size={16} />
+              ) : (
+                <TrendingDown size={16} />
+              )}
             </span>
-            <span className="font-mono text-[10px] tracking-wider uppercase">{t('summary.totalGainLoss')}</span>
+            <span className="font-mono text-[10px] tracking-wider uppercase">
+              {t('summary.totalGainLoss')}
+            </span>
           </div>
           <p
             className={`font-heading text-2xl font-bold tracking-tight ${
@@ -292,8 +295,12 @@ export function Investments() {
 
         <div className="metric-card">
           <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <span className="text-primary"><Wallet size={16} /></span>
-            <span className="font-mono text-[10px] tracking-wider uppercase">{t('summary.costBasis')}</span>
+            <span className="text-primary">
+              <Wallet size={16} />
+            </span>
+            <span className="font-mono text-[10px] tracking-wider uppercase">
+              {t('summary.costBasis')}
+            </span>
           </div>
           <p className="font-heading text-2xl font-bold tracking-tight">
             {formatMoney(portfolioSummary.totalCostBasis)}
@@ -302,8 +309,12 @@ export function Investments() {
 
         <div className="metric-card">
           <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <span className="text-primary"><RefreshCw size={16} /></span>
-            <span className="font-mono text-[10px] tracking-wider uppercase">{t('summary.lastUpdated')}</span>
+            <span className="text-primary">
+              <RefreshCw size={16} />
+            </span>
+            <span className="font-mono text-[10px] tracking-wider uppercase">
+              {t('summary.lastUpdated')}
+            </span>
           </div>
           <p className="text-muted-foreground mt-1 text-sm">
             {lastPriceFetch ? dayjs(lastPriceFetch).fromNow() : t('summary.never')}
@@ -344,7 +355,7 @@ export function Investments() {
             </div>
           </div>
           {chartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={240}>
+            <SafeChart height={240}>
               <AreaChart data={chartData}>
                 <defs>
                   <linearGradient id="valueGradient" x1="0" y1="0" x2="0" y2="1">
@@ -383,7 +394,7 @@ export function Investments() {
                   fill="url(#valueGradient)"
                 />
               </AreaChart>
-            </ResponsiveContainer>
+            </SafeChart>
           ) : (
             <div className="flex h-[240px] items-center justify-center">
               <p className="text-muted-foreground text-sm">{t('chart.noData')}</p>
@@ -396,7 +407,7 @@ export function Investments() {
           <h2 className="font-heading mb-4 text-sm font-semibold">{t('chart.allocation')}</h2>
           {allocationData.length > 0 ? (
             <div className="flex flex-col items-center">
-              <ResponsiveContainer width="100%" height={200}>
+              <SafeChart height={200}>
                 <PieChart>
                   <Pie
                     data={allocationData}
@@ -421,14 +432,11 @@ export function Investments() {
                     formatter={(value: number | undefined) => [formatMoney(value ?? 0), '']}
                   />
                 </PieChart>
-              </ResponsiveContainer>
+              </SafeChart>
               <div className="mt-2 flex flex-wrap justify-center gap-3">
                 {allocationData.map((entry) => (
                   <div key={entry.name} className="flex items-center gap-1.5">
-                    <div
-                      className="h-2 w-2 rounded-full"
-                      style={{ background: entry.color }}
-                    />
+                    <div className="h-2 w-2 rounded-full" style={{ background: entry.color }} />
                     <span className="text-muted-foreground text-[10px] capitalize">
                       {t(`types.${entry.name}` as 'types.stock')}
                     </span>
@@ -467,7 +475,7 @@ export function Investments() {
 
         {/* Desktop table */}
         <div className="hidden md:block">
-          <div className="text-muted-foreground mb-2 grid grid-cols-8 gap-4 px-2 font-mono text-[10px] uppercase tracking-wider">
+          <div className="text-muted-foreground mb-2 grid grid-cols-8 gap-4 px-2 font-mono text-[10px] tracking-wider uppercase">
             <span className="col-span-2">{t('holdings.header.name')}</span>
             <span>{t('holdings.header.type')}</span>
             <span className="text-right">{t('holdings.header.shares')}</span>
@@ -552,11 +560,7 @@ function HoldingRow({
         )}
       </div>
       <div>
-        <Badge
-          variant="secondary"
-          className="text-[10px]"
-          style={{ color: TYPE_COLORS[inv.type] }}
-        >
+        <Badge variant="secondary" className="text-[10px]" style={{ color: TYPE_COLORS[inv.type] }}>
           {t(`types.${inv.type}`)}
         </Badge>
       </div>
@@ -565,9 +569,7 @@ function HoldingRow({
         {formatMoney(inv.avg_cost_basis, inv.currency)}
       </p>
       <p className="text-right font-mono text-sm">
-        {inv.currentPrice !== null
-          ? formatMoney(inv.currentPrice, inv.currency)
-          : '—'}
+        {inv.currentPrice !== null ? formatMoney(inv.currentPrice, inv.currency) : '—'}
       </p>
       <p className="text-right font-mono text-sm font-semibold">
         {inv.marketValue !== null ? formatMoney(inv.marketValue, inv.currency) : '—'}
@@ -636,9 +638,7 @@ function HoldingCard({
           <div>
             <p className="font-heading text-base font-semibold">
               {inv.symbol}
-              {isStale && (
-                <AlertTriangle size={12} className="ml-1 inline text-warning" />
-              )}
+              {isStale && <AlertTriangle size={12} className="text-warning ml-1 inline" />}
             </p>
             <p className="text-muted-foreground text-[10px]">{inv.name}</p>
           </div>

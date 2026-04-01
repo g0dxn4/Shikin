@@ -39,7 +39,7 @@ Current baseline (Mar 2026): Valute has moved to a browser-first runtime using `
 | Set up local settings persistence                                                 | Done    | Stored locally through browser storage layer                  |
 | Set up code splitting with React.lazy                                             | Done    | All pages lazy-loaded                                         |
 | Implement manual chunk splitting in Vite                                          | Done    | vendor-react, vendor-ui, vendor-forms, vendor-utils           |
-| Set up CI pipeline                                                                | Planned | GitHub Actions: lint, typecheck, format, test                 |
+| Set up CI pipeline                                                                | Done    | GitHub Actions: lint, typecheck, test, build, e2e (Playwright)|
 
 **Dependencies:** None -- this is the foundation.
 
@@ -111,7 +111,7 @@ Current baseline (Mar 2026): Valute has moved to a browser-first runtime using `
 
 ## Epic 5: AI Assistant Enhancement
 
-**Goal:** Expand Val's capabilities beyond basic transaction management to comprehensive financial intelligence.
+**Goal:** Expand Ivy's capabilities beyond basic transaction management to comprehensive financial intelligence.
 
 | Task                                              | Status  | Notes                                                               |
 | ------------------------------------------------- | ------- | ------------------------------------------------------------------- |
@@ -145,7 +145,7 @@ Current baseline (Mar 2026): Valute has moved to a browser-first runtime using `
 | Conversation title auto-generation                | Done    | LLM-generated titles from first message                             |
 | Conversation compaction                           | Done    | Auto-summarize at 30+ messages, keep recent 10                      |
 | OpenRouter provider support                       | Done    | Additional model provider option                                    |
-| Tool call visualization in chat UI                | Planned | Show what tools Val is using                                        |
+| Tool call visualization in chat UI                | Planned | Show what tools Ivy is using                                        |
 | Streaming markdown rendering                      | Planned | Render tables, lists, bold text                                     |
 | Context window management                         | Future  | Advanced context strategies beyond compaction                       |
 | Multi-model comparison                            | Future  | Send same query to multiple models                                  |
@@ -265,11 +265,11 @@ Current baseline (Mar 2026): Valute has moved to a browser-first runtime using `
 | Performance profiling                      | Planned | React DevTools, Lighthouse                       |
 | Database query optimization                | Planned | Add indexes as needed, batch queries             |
 | Bundle size optimization                   | Planned | Tree-shaking audit, lazy imports                 |
-| Automated E2E tests                        | Future  | Playwright browser flows                         |
+| Automated E2E tests                        | Done    | 91 Playwright e2e tests (desktop + mobile)       |
 | macOS notarization                         | Planned | Code signing for distribution                    |
 | Windows code signing                       | Planned | Certificate for installer                        |
-| Linux packaging (.deb, .AppImage, Flatpak) | Planned | Multiple distribution formats                    |
-| Auto-update system                         | Future  | Web/PWA update strategy                          |
+| Linux packaging (.deb, .AppImage)          | Done    | Built via GitHub Actions release workflow         |
+| Auto-update system                         | Done    | Tauri updater plugin, checks GitHub Releases     |
 | Crash reporting (opt-in)                   | Future  | Local error logs with optional telemetry         |
 | User documentation / help pages            | Future  | In-app help or external docs site                |
 | Marketing site                             | Future  | Landing page with features and download links    |

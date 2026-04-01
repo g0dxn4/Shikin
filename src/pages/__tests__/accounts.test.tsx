@@ -15,7 +15,15 @@ vi.mock('sonner', () => ({
 }))
 
 vi.mock('@/components/shared/confirm-dialog', () => ({
-  ConfirmDialog: ({ open, onConfirm, title }: { open: boolean; onConfirm: () => void; title: string }) =>
+  ConfirmDialog: ({
+    open,
+    onConfirm,
+    title,
+  }: {
+    open: boolean
+    onConfirm: () => void
+    title: string
+  }) =>
     open ? (
       <div data-testid="confirm-dialog">
         <span>{title}</span>
@@ -43,6 +51,8 @@ vi.mock('@/stores/account-store', () => ({
     isLoading: mockIsLoading,
     fetch: mockFetch,
     remove: mockRemove,
+    balanceHistory: new Map(),
+    loadBalanceHistory: vi.fn().mockResolvedValue([]),
   }),
 }))
 
@@ -92,9 +102,7 @@ describe('Accounts', () => {
   })
 
   it('cards have hover:translate-y-[-2px] class', () => {
-    mockAccounts = [
-      { id: 'acc-1', name: 'Test', type: 'checking', currency: 'USD', balance: 0 },
-    ]
+    mockAccounts = [{ id: 'acc-1', name: 'Test', type: 'checking', currency: 'USD', balance: 0 }]
 
     const { container } = render(<Accounts />)
 
@@ -143,9 +151,7 @@ describe('Accounts', () => {
   })
 
   it('hover-reveal actions have opacity-0 class', () => {
-    mockAccounts = [
-      { id: 'acc-1', name: 'Test', type: 'checking', currency: 'USD', balance: 0 },
-    ]
+    mockAccounts = [{ id: 'acc-1', name: 'Test', type: 'checking', currency: 'USD', balance: 0 }]
 
     const { container } = render(<Accounts />)
 

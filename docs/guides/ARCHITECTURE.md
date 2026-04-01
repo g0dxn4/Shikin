@@ -145,7 +145,7 @@ sequenceDiagram
     participant Agent as ToolLoopAgent (43 tools)
     participant Tool as Tool execute()
     participant DB as query/execute
-    participant LLM as Model API (9 providers)
+    participant LLM as Model API (10 providers)
 
     User->>Panel: Send message
     Panel->>Chat: sendMessage()
@@ -179,7 +179,7 @@ The dashboard aggregates data from 7 stores and displays:
 9. **Achievements**: Newly unlocked badge notifications
 10. **Education Tip**: Daily rotating financial concept
 11. **Accounts Preview**: Top 3 account balances
-12. **Quick Actions**: Add transaction, ask Val
+12. **Quick Actions**: Add transaction, ask Ivy
 
 ---
 

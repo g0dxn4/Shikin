@@ -15,8 +15,19 @@ const mockToggleAIPanel = vi.fn()
 let mockSidebarCollapsed = false
 
 vi.mock('react-router', () => ({
-  NavLink: ({ children, to, className }: { children: React.ReactNode; to: string; className: (args: { isActive: boolean }) => string }) => (
-    <a href={to} className={typeof className === 'function' ? className({ isActive: false }) : className}>
+  NavLink: ({
+    children,
+    to,
+    className,
+  }: {
+    children: React.ReactNode
+    to: string
+    className: (args: { isActive: boolean }) => string
+  }) => (
+    <a
+      href={to}
+      className={typeof className === 'function' ? className({ isActive: false }) : className}
+    >
       {children}
     </a>
   ),
@@ -61,8 +72,8 @@ describe('Sidebar', () => {
     render(<Sidebar />)
 
     const links = screen.getAllByRole('link')
-    // 10 nav items + 1 settings
-    expect(links.length).toBe(11)
+    // 13 nav items + 1 settings
+    expect(links.length).toBe(14)
   })
 
   it('collapse button calls toggleSidebar', async () => {

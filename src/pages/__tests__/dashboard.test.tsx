@@ -4,6 +4,13 @@ import userEvent from '@testing-library/user-event'
 import dayjs from 'dayjs'
 import { Dashboard } from '../dashboard'
 
+// ResizeObserver polyfill for jsdom
+globalThis.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
@@ -204,8 +211,12 @@ describe('Dashboard', () => {
 
       // Find the transaction amount spans (font-heading text-sm font-semibold)
       const amountSpans = container.querySelectorAll('span.font-heading.text-sm.font-semibold')
-      const successSpan = Array.from(amountSpans).find((el) => el.classList.contains('text-success'))
-      const destructiveSpan = Array.from(amountSpans).find((el) => el.classList.contains('text-destructive'))
+      const successSpan = Array.from(amountSpans).find((el) =>
+        el.classList.contains('text-success')
+      )
+      const destructiveSpan = Array.from(amountSpans).find((el) =>
+        el.classList.contains('text-destructive')
+      )
 
       expect(successSpan).toBeInTheDocument()
       expect(successSpan!.textContent).toContain('+')
@@ -260,10 +271,10 @@ describe('Dashboard', () => {
 
       render(<Dashboard />)
 
-      // Monthly income: $5,000.00
-      expect(screen.getByText('$5,000.00')).toBeInTheDocument()
+      // Monthly income: $5,000.00 (may appear in multiple places)
+      expect(screen.getAllByText('$5,000.00').length).toBeGreaterThanOrEqual(1)
       // Monthly expenses: $2,000.00
-      expect(screen.getByText('$2,000.00')).toBeInTheDocument()
+      expect(screen.getAllByText('$2,000.00').length).toBeGreaterThanOrEqual(1)
       // Savings rate: (5000-2000)/5000*100 = 60%
       expect(screen.getByText('60%')).toBeInTheDocument()
     })

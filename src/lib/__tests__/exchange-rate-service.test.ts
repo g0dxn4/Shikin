@@ -14,7 +14,48 @@ const mockFetch = vi.fn()
 vi.stubGlobal('fetch', mockFetch)
 
 import { query, execute } from '@/lib/database'
-import { fetchRates, getRate, convertAmount, refreshRates, COMMON_CURRENCIES } from '../exchange-rate-service'
+import {
+  fetchRates,
+  getRate,
+  convertAmount,
+  refreshRates,
+  COMMON_CURRENCIES,
+} from '../exchange-rate-service'
+
+// Only currencies supported by frankfurter.app are actually fetched
+const FRANKFURTER_SUPPORTED = new Set([
+  'AUD',
+  'BRL',
+  'CAD',
+  'CHF',
+  'CNY',
+  'CZK',
+  'DKK',
+  'EUR',
+  'GBP',
+  'HKD',
+  'HUF',
+  'IDR',
+  'ILS',
+  'INR',
+  'ISK',
+  'JPY',
+  'KRW',
+  'MXN',
+  'MYR',
+  'NOK',
+  'NZD',
+  'PHP',
+  'PLN',
+  'RON',
+  'SEK',
+  'SGD',
+  'THB',
+  'TRY',
+  'USD',
+  'ZAR',
+])
+const FETCHABLE = COMMON_CURRENCIES.filter((c) => FRANKFURTER_SUPPORTED.has(c))
 
 const mockQuery = vi.mocked(query)
 const mockExecute = vi.mocked(execute)
@@ -137,9 +178,9 @@ describe('exchange-rate-service', () => {
   })
 
   describe('refreshRates', () => {
-    it('fetches rates for all common currencies', async () => {
-      // Each currency fetch returns some rates
-      for (const _currency of COMMON_CURRENCIES) {
+    it('fetches rates for all fetchable currencies', async () => {
+      // Each fetchable currency returns some rates
+      for (const _currency of FETCHABLE) {
         mockFetch.mockResolvedValueOnce({
           ok: true,
           json: async () => ({
@@ -153,8 +194,8 @@ describe('exchange-rate-service', () => {
       mockExecute.mockResolvedValue({ rowsAffected: 1, lastInsertId: 0 })
 
       const allRates = await refreshRates()
-      expect(Object.keys(allRates).length).toBe(COMMON_CURRENCIES.length)
-      expect(mockFetch).toHaveBeenCalledTimes(COMMON_CURRENCIES.length)
+      expect(Object.keys(allRates).length).toBe(FETCHABLE.length)
+      expect(mockFetch).toHaveBeenCalledTimes(FETCHABLE.length)
     })
 
     it('continues when a currency fetch fails', async () => {
@@ -168,7 +209,7 @@ describe('exchange-rate-service', () => {
         }),
       })
       // Rest fail
-      for (let i = 1; i < COMMON_CURRENCIES.length; i++) {
+      for (let i = 1; i < FETCHABLE.length; i++) {
         mockFetch.mockRejectedValueOnce(new Error('Network error'))
       }
       mockExecute.mockResolvedValue({ rowsAffected: 1, lastInsertId: 0 })
@@ -179,16 +220,18 @@ describe('exchange-rate-service', () => {
     })
 
     it('stores rates in the database', async () => {
+      // First fetchable currency succeeds
+      const firstFetchable = FETCHABLE[0]
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          base: 'USD',
+          base: firstFetchable,
           date: '2024-01-15',
           rates: { EUR: 0.92 },
         }),
       })
-      // Rest of currencies fail
-      for (let i = 1; i < COMMON_CURRENCIES.length; i++) {
+      // Rest of fetchable currencies fail
+      for (let i = 1; i < FETCHABLE.length; i++) {
         mockFetch.mockRejectedValueOnce(new Error('fail'))
       }
       mockExecute.mockResolvedValue({ rowsAffected: 1, lastInsertId: 0 })
@@ -197,7 +240,7 @@ describe('exchange-rate-service', () => {
       // EUR is in COMMON_CURRENCIES, so it should be stored
       expect(mockExecute).toHaveBeenCalledWith(
         expect.stringContaining('INSERT OR REPLACE INTO exchange_rates'),
-        expect.arrayContaining(['USD', 'EUR', 0.92])
+        expect.arrayContaining([firstFetchable, 'EUR', 0.92])
       )
     })
   })

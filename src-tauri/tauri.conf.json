@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://api.openai.com https://api.anthropic.com https://openrouter.ai https://generativelanguage.googleapis.com https://api.mistral.ai https://api.x.ai https://api.groq.com https://api.deepseek.com http://localhost:11434 https://www.alphavantage.co https://api.coingecko.com https://finnhub.io https://newsapi.org https://house-stock-watcher-data.s3-us-west-2.amazonaws.com https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://api.openai.com https://api.anthropic.com https://openrouter.ai https://generativelanguage.googleapis.com https://api.mistral.ai https://api.x.ai https://api.groq.com https://api.deepseek.com http://localhost:11434 https://www.alphavantage.co https://api.coingecko.com https://finnhub.io https://newsapi.org https://house-stock-watcher-data.s3-us-west-2.amazonaws.com https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com https://github.com https://objects.githubusercontent.com"
     }
   },
   "bundle": {
@@ -39,5 +39,11 @@
     "category": "Finance",
     "shortDescription": "AI-first, local-first personal finance manager",
     "longDescription": "An AI-powered, privacy-first desktop app for managing your personal finances. Track transactions, budgets, investments, and subscriptions — all stored locally on your device."
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": ["https://github.com/g0dxn4/Valute/releases/latest/download/latest.json"],
+      "pubkey": "RWTYs/2vlDrptSWUk+dOpFeHiuAgYeoHxuvvjC68M3bQ1ETEk1UHPxnP"
+    }
   }
 }

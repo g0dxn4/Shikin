@@ -2,7 +2,7 @@
 
 **Your value. Your vault.**
 
-Valute is an open-source, AI-first, local-first personal finance manager. It runs as a browser-first web app while keeping all data local on your machine through in-browser storage.
+Valute is an open-source, AI-first, local-first personal finance manager. It runs as a Tauri v2 desktop app or browser-first web app, keeping all data local on your machine.
 
 ---
 
@@ -12,8 +12,8 @@ Most personal finance tools force a tradeoff between privacy and intelligence.
 
 Valute is built to keep both:
 
-- Your finance data stays local (SQLite via `sql.js`, persisted in IndexedDB).
-- Settings and preferences are local (`localStorage`).
+- Your finance data stays local (SQLite via shared storage at `~/.local/share/com.asf.valute/`).
+- Settings and preferences are local (settings.json in shared store).
 - AI uses your own provider keys and works through tool calls against your local database.
 
 ---
@@ -31,7 +31,7 @@ Valute is built to keep both:
 - **Investments**: Portfolio tracking with live prices (Alpha Vantage for stocks, CoinGecko for crypto).
 - **Multi-Currency**: Live exchange rates via frankfurter.app with preferred currency conversion.
 
-### AI Assistant (Val) — 43 Tools
+### AI Assistant (Ivy) — 43 Tools
 - **Natural Language Finance**: Add transactions, query data, manage accounts — all through conversation.
 - **Anomaly Detection**: Flags unusual spending, duplicate charges, subscription price changes.
 - **Cash Flow Forecasting**: 30/60/90 day projections with danger date warnings.
@@ -40,7 +40,7 @@ Valute is built to keep both:
 - **Debt Payoff Planning**: Snowball vs avalanche strategies with interest savings comparison.
 - **Smart Auto-Categorization**: Learns from your corrections to auto-suggest categories.
 - **Financial Education**: Contextual tips on budgeting, saving, investing, and debt concepts.
-- **Persistent Memory**: MemGPT-inspired system — Val remembers preferences and context across sessions.
+- **Persistent Memory**: MemGPT-inspired system — Ivy remembers preferences and context across sessions.
 - **Research Notebook**: Markdown notes for portfolio reviews, research, and education.
 
 ### Intelligence & Analytics
@@ -54,8 +54,9 @@ Valute is built to keep both:
 - **Streaks & Achievements**: 8 unlockable badges for financial habits.
 
 ### Privacy & Data
-- **9 AI Providers**: OpenAI, Anthropic, Google, Mistral, xAI, Groq, DeepSeek, OpenRouter, Ollama.
-- **Fully Local**: No mandatory backend. All data in IndexedDB + localStorage.
+- **10 AI Providers**: OpenAI, Anthropic, Google, Mistral, xAI, Groq, DeepSeek, Alibaba Qwen, OpenRouter, Ollama.
+- **Fully Local**: No mandatory backend. All data in SQLite via shared storage.
+- **Auto-Updates**: Tauri desktop app checks GitHub Releases for updates on startup.
 - **Bilingual**: English and Spanish localization (13 i18n namespaces).
 - **Database Backup/Restore**: Export and import SQLite snapshots.
 
@@ -65,13 +66,13 @@ Valute is built to keep both:
 
 | Layer      | Technology                        | Purpose                                       |
 | ---------- | --------------------------------- | --------------------------------------------- |
-| Runtime    | Browser + Vite                    | Local app runtime and bundling                |
+| Runtime    | Tauri v2 + Browser + Vite         | Desktop app and web runtime                   |
 | Frontend   | React 19 + TypeScript             | UI and application logic                      |
 | Styling    | Tailwind CSS v4 + shadcn/ui       | Design system and components                  |
 | Routing    | React Router v7                   | Client-side navigation                        |
 | State      | Zustand (19 stores)               | Global state management                       |
-| Database   | SQLite (`sql.js`) + IndexedDB     | 21 tables, migration-backed schema            |
-| Settings   | `localStorage` wrapper            | Local key-value config storage                |
+| Database   | SQLite (shared storage)           | 21 tables, migration-backed schema            |
+| Settings   | Tauri Store / data-server bridge  | Local key-value config storage                |
 | AI         | AI SDK v6 (`ai`, `@ai-sdk/react`) | Chat + tool loop runtime (43 tools)           |
 | Forms      | React Hook Form + Zod v4          | Form validation and parsing                   |
 | Charts     | Recharts                          | Financial visualizations                      |
@@ -99,17 +100,24 @@ pnpm install
 ### Run Locally
 
 ```bash
-pnpm dev
+pnpm dev          # Web mode: Vite :1420 + OAuth :1455 + data-server :1480
 ```
 
 Then open `http://localhost:1420`.
+
+### Build Desktop App (Tauri)
+
+```bash
+pnpm build:tauri  # Builds .deb + .AppImage (Linux), .dmg (macOS), .msi (Windows)
+```
 
 ### Available Scripts
 
 | Command              | Description                            |
 | -------------------- | -------------------------------------- |
-| `pnpm dev`           | Start Vite dev server                  |
+| `pnpm dev`           | Start dev servers (Vite + OAuth + data)|
 | `pnpm build`         | Type-check and build production bundle |
+| `pnpm build:tauri`   | Build Tauri desktop binary             |
 | `pnpm preview`       | Preview production build locally       |
 | `pnpm lint`          | Run ESLint                             |
 | `pnpm typecheck`     | Run TypeScript checks                  |
@@ -124,7 +132,7 @@ Then open `http://localhost:1420`.
 ## AI Provider Setup
 
 1. Open **Settings** in the app.
-2. Choose a provider (9 available).
+2. Choose a provider (10 available).
 3. Add your API key (not required for Ollama).
 4. Pick a model.
 

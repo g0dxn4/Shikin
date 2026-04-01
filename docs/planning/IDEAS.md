@@ -11,7 +11,7 @@ Dedicated goal tracking with target amounts, deadlines, and visual progress. AI 
 
 - New `goals` table (id, name, target_amount, current_amount, deadline, account_id, icon, color)
 - Dashboard widget showing goal progress
-- Val tools: `createGoal`, `updateGoal`, `getGoalStatus`
+- Ivy tools: `createGoal`, `updateGoal`, `getGoalStatus`
 - AI nudges: "If you cut dining by 15%, you'll hit your emergency fund goal 2 months early"
 
 ### Recurring Transactions
@@ -19,7 +19,7 @@ Auto-generate expected transactions (rent, salary, utilities) on schedule. Diffe
 
 - New `recurring_rules` table (id, template transaction, frequency, next_date, active)
 - Background job to materialize upcoming transactions
-- Val tool: `manageRecurringTransaction`
+- Ivy tool: `manageRecurringTransaction`
 - Ties into cash flow forecasting
 
 ### Cash Flow Forecasting
@@ -28,23 +28,23 @@ Project future balance based on upcoming bills, recurring income, and spending p
 - Leverage recurring transactions + budget data + historical patterns
 - 30/60/90 day projections with confidence intervals
 - Dashboard chart showing projected balance over time
-- Val tool: `getForecastedCashFlow`
+- Ivy tool: `getForecastedCashFlow`
 - AI narrative: "You'll dip below $500 on March 28 — consider deferring X"
 
 ### Anomaly Detection & Alerts
-Proactive notifications for unusual spending, duplicate charges, subscription price increases, and forgotten trials. Plays directly to Val's AI strengths.
+Proactive notifications for unusual spending, duplicate charges, subscription price increases, and forgotten trials. Plays directly to Ivy's AI strengths.
 
 - Compare transactions against historical patterns per category/merchant
 - Flag outliers (>2σ from mean for that merchant/category)
 - Detect duplicate charges (same amount + merchant within 48h)
-- Surface in AI Insights page + Val proactively mentions them
-- Val tool: `getSpendingAnomalies`
+- Surface in AI Insights page + Ivy proactively mentions them
+- Ivy tool: `getSpendingAnomalies`
 
 ### Smart Auto-Categorization
 AI learns from user corrections to auto-categorize new transactions by description. Reduces friction for the most common action in the app.
 
 - Merchant-to-category mapping table, seeded from user history
-- ML-lite: frequency-based matching, Val as fallback for ambiguous ones
+- ML-lite: frequency-based matching, Ivy as fallback for ambiguous ones
 - "Suggested category" on transaction form with one-tap accept
 - Improves over time without cloud dependency (local pattern matching)
 
@@ -57,7 +57,7 @@ Snowball vs avalanche strategy visualization for credit cards and loans. Show pa
 
 - New `debts` table or extend credit card fields on accounts
 - Strategy comparison view (snowball vs avalanche side-by-side)
-- Val tool: `getDebtPayoffPlan`
+- Ivy tool: `getDebtPayoffPlan`
 - Monthly "debt check-in" in AI Insights
 
 ### Spending Recaps
@@ -66,14 +66,14 @@ Auto-generated weekly/monthly natural language summaries. "You spent 23% more on
 - Scheduled generation (weekly on Monday, monthly on 1st)
 - Store in notebook or dedicated recap table
 - Push to AI Insights page
-- Val already has all the analytics tools — this is orchestration
+- Ivy already has all the analytics tools — this is orchestration
 
 ### Financial Health Score
 Composite score (0-100) based on savings rate, debt-to-income, emergency fund coverage, budget adherence, and investment diversification. Gamification without being gimmicky.
 
 - Weighted formula with transparent breakdown
 - Dashboard widget with trend over time
-- Val tool: `getFinancialHealthScore`
+- Ivy tool: `getFinancialHealthScore`
 - Actionable tips per sub-score
 
 ### Split Transactions
@@ -81,7 +81,7 @@ One payment split across multiple categories (e.g., Costco run = groceries + hou
 
 - `transaction_splits` table (parent_id, category_id, amount)
 - UI: split button on transaction form
-- Val handles splits naturally: "Split my $150 Costco trip: $80 groceries, $50 household, $20 electronics"
+- Ivy handles splits naturally: "Split my $150 Costco trip: $80 groceries, $50 household, $20 electronics"
 
 ### Multi-Currency with Live Rates
 Auto-fetch exchange rates and convert balances for display. The `exchange_rates` table already exists — needs a fetching service and conversion UI.
@@ -89,14 +89,14 @@ Auto-fetch exchange rates and convert balances for display. The `exchange_rates`
 - Free API (frankfurter.app or exchangerate.host)
 - Scheduled fetch (daily)
 - Display all balances in preferred currency
-- Val tool: `convertCurrency`
+- Ivy tool: `convertCurrency`
 
 ### Reports & PDF Export
 Monthly/yearly PDF reports with spending breakdowns, income vs expenses, category trends, and net worth changes. Useful for tax prep and personal review.
 
 - Client-side PDF generation (jsPDF or react-pdf)
 - Templated reports: monthly summary, annual review, tax export
-- Val tool: `generateReport`
+- Ivy tool: `generateReport`
 
 ---
 
@@ -114,8 +114,8 @@ Partner access with shared budgets and split tracking. Significant architecture 
 ### Streaks & Achievements
 Gamify daily logging, staying under budget, and hitting savings goals. Fun but not core.
 
-### Financial Education via Val
-Contextual teaching — when user sets up first budget, Val explains the 50/30/20 rule. When user adds first investment, Val explains dollar-cost averaging.
+### Financial Education via Ivy
+Contextual teaching — when user sets up first budget, Ivy explains the 50/30/20 rule. When user adds first investment, Ivy explains dollar-cost averaging.
 
 ### Webhook / Automation Integration
 Trigger external actions on financial events. Would require a plugin/extension system.

@@ -10,10 +10,8 @@ export interface ModelInfo {
 // Fetches model lists dynamically from the models.dev open-source database
 // via GitHub Contents API. Falls back to static lists on failure.
 
-const MODELS_DEV_BASE =
-  'https://api.github.com/repos/anomalyco/models.dev/contents/providers'
-const MODELS_DEV_RAW =
-  'https://raw.githubusercontent.com/anomalyco/models.dev/dev/providers'
+const MODELS_DEV_BASE = 'https://api.github.com/repos/anomalyco/models.dev/contents/providers'
+const MODELS_DEV_RAW = 'https://raw.githubusercontent.com/anomalyco/models.dev/dev/providers'
 
 /** Map our provider IDs to models.dev provider directory names */
 const PROVIDER_MAP: Partial<Record<AIProvider, string>> = {
@@ -32,10 +30,7 @@ const EXCLUDE_PATTERNS = [
   /^gemini-embedding/,
   /^mistral-embed/,
   /^gpt-3\.5/,
-  /^gpt-4($|[^.0-9])/, // gpt-4 base (not gpt-4.x or gpt-4o)
-  /^gpt-4o/, // old gpt-4o family
-  /^gpt-4\./, // old gpt-4.1 family
-  /^o[1-4]/, // o-series reasoning models (o1, o3, o4-mini, etc.)
+  /^gpt-4($|[^.0-9])/, // gpt-4 base (not gpt-4o or gpt-4.1)
   /^grok-beta/,
   /^grok-vision-beta/,
   /^grok-2/, // old grok-2 family
@@ -85,11 +80,9 @@ async function fetchModelsFromModelsDev(providerDir: string): Promise<ModelInfo[
 
   // Step 2: Fetch TOMLs for display names + tool support (parallel)
   const models = await Promise.all(
-    tomlFiles.map(async (modelId): Promise<ModelInfo & { hasTools: boolean } | null> => {
+    tomlFiles.map(async (modelId): Promise<(ModelInfo & { hasTools: boolean }) | null> => {
       try {
-        const res = await fetch(
-          `${MODELS_DEV_RAW}/${providerDir}/models/${modelId}.toml`
-        )
+        const res = await fetch(`${MODELS_DEV_RAW}/${providerDir}/models/${modelId}.toml`)
         if (res.ok) {
           const text = await res.text()
           const nameMatch = text.match(/^name\s*=\s*"(.+?)"/m)
@@ -109,8 +102,9 @@ async function fetchModelsFromModelsDev(providerDir: string): Promise<ModelInfo[
   )
 
   // Filter: must have tool support, exclude embeddings/snapshots/previews
-  const filtered = (models.filter(Boolean) as (ModelInfo & { hasTools: boolean })[])
-    .filter((m) => m.hasTools && !EXCLUDE_PATTERNS.some((p) => p.test(m.id)))
+  const filtered = (models.filter(Boolean) as (ModelInfo & { hasTools: boolean })[]).filter(
+    (m) => m.hasTools && !EXCLUDE_PATTERNS.some((p) => p.test(m.id))
+  )
 
   // Sort: newest/most capable first (higher version numbers first)
   filtered.sort((a, b) => b.id.localeCompare(a.id))
@@ -123,36 +117,41 @@ async function fetchModelsFromModelsDev(providerDir: string): Promise<ModelInfo[
 
 const FALLBACK: Partial<Record<AIProvider, ModelInfo[]>> = {
   openai: [
+    { id: 'gpt-5.4', name: 'GPT-5.4' },
+    { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini' },
+    { id: 'gpt-4.1', name: 'GPT-4.1' },
+    { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini' },
     { id: 'gpt-4o', name: 'GPT-4o' },
     { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
     { id: 'o3', name: 'o3' },
-    { id: 'o3-mini', name: 'o3 Mini' },
     { id: 'o4-mini', name: 'o4 Mini' },
   ],
   anthropic: [
-    { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' },
-    { id: 'claude-haiku-4-20250414', name: 'Claude Haiku 4' },
+    { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
+    { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
+    { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' },
   ],
   google: [
-    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+    { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro' },
+    { id: 'gemini-3.1-flash', name: 'Gemini 3.1 Flash' },
     { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
-    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
   ],
   mistral: [
-    { id: 'mistral-large-latest', name: 'Mistral Large' },
-    { id: 'mistral-small-latest', name: 'Mistral Small' },
+    { id: 'mistral-large-latest', name: 'Mistral Large 3' },
+    { id: 'mistral-small-latest', name: 'Mistral Small 4' },
     { id: 'codestral-latest', name: 'Codestral' },
   ],
   xai: [
-    { id: 'grok-3', name: 'Grok 3' },
-    { id: 'grok-3-mini', name: 'Grok 3 Mini' },
+    { id: 'grok-4.1', name: 'Grok-4.1' },
+    { id: 'grok-4-heavy', name: 'Grok-4 Heavy' },
   ],
   groq: [
     { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B' },
     { id: 'qwen-qwq-32b', name: 'Qwen QwQ 32B' },
   ],
   deepseek: [
-    { id: 'deepseek-chat', name: 'DeepSeek-V3' },
+    { id: 'deepseek-chat', name: 'DeepSeek-V3.2' },
     { id: 'deepseek-reasoner', name: 'DeepSeek-R1' },
   ],
 }
@@ -195,8 +194,14 @@ export function isKeylessProvider(provider: string): boolean {
 /** Returns true if the provider can show models without an API key */
 export function isStaticModelList(provider: string): boolean {
   return [
-    'openai', 'anthropic', 'google', 'mistral',
-    'xai', 'groq', 'deepseek', 'alibaba',
+    'openai',
+    'anthropic',
+    'google',
+    'mistral',
+    'xai',
+    'groq',
+    'deepseek',
+    'alibaba',
   ].includes(provider)
 }
 
@@ -228,7 +233,7 @@ async function fetchOpenAIModels(apiKey: string): Promise<ModelInfo[]> {
   if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`)
   const data = await res.json()
 
-  const chatPrefixes = ['gpt-4', 'gpt-5', 'o1', 'o3', 'o4']
+  const chatPrefixes = ['gpt-4', 'gpt-5', 'o1', 'o3', 'o4', 'o5']
   return (data.data as Array<{ id: string }>)
     .filter((m) => chatPrefixes.some((p) => m.id.startsWith(p)))
     .map((m) => ({ id: m.id, name: m.id }))

@@ -1,12 +1,12 @@
 # AI Tools
 
-Val is Valute's AI financial assistant. This document covers the tool-calling architecture, all 43 implemented tools, the system prompt, and provider support.
+Ivy is Valute's AI financial assistant. This document covers the tool-calling architecture, all 43 implemented tools, the system prompt, and provider support.
 
 ---
 
 ## Architecture
 
-Val runs in the frontend using AI SDK v6's `ToolLoopAgent`. When the user sends a message, the agent calls the LLM. If the LLM responds with tool calls, the agent executes them locally (querying SQLite) and feeds results back until a final text response is produced.
+Ivy runs in the frontend using AI SDK v6's `ToolLoopAgent`. When the user sends a message, the agent calls the LLM. If the LLM responds with tool calls, the agent executes them locally (querying SQLite) and feeds results back until a final text response is produced.
 
 ```mermaid
 graph LR
@@ -191,7 +191,7 @@ export const myNewTool = tool({
 
 ---
 
-## Val's Personality
+## Ivy's Personality
 
 - **Casual but competent** — a knowledgeable friend, not a corporate advisor.
 - **Bilingual** — responds in the user's language (English or Spanish).

@@ -10,7 +10,7 @@ This document describes the design of Valute's extension system, including the m
 
 Valute's extension system allows community developers to add features without modifying the core application. Extensions can:
 
-- Add new AI tools that Val can call during conversations.
+- Add new AI tools that Ivy can call during conversations.
 - Add dashboard widgets for custom data visualizations.
 - Add new navigation routes and pages.
 - Add settings panels for extension configuration.
@@ -187,7 +187,7 @@ Extensions must declare all required permissions in their manifest. Users are sh
 
 | Permission | Description |
 |-----------|-------------|
-| `ai:register_tool` | Register new AI tools that Val can call |
+| `ai:register_tool` | Register new AI tools that Ivy can call |
 | `ai:intercept_messages` | Read AI conversation messages (for logging or analysis) |
 
 #### Network

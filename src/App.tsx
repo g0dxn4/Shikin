@@ -10,6 +10,7 @@ import { useCurrencyStore } from '@/stores/currency-store'
 import { useAccountStore } from '@/stores/account-store'
 import { useNetWorthStore } from '@/stores/net-worth-store'
 import { initPriceScheduler, stopPriceScheduler } from '@/lib/price-scheduler'
+import { checkForUpdates } from '@/lib/updater'
 import '@/i18n'
 import '@/styles/globals.css'
 
@@ -62,6 +63,8 @@ export default function App() {
     )
     // Auto-refresh exchange rates if stale (>24h)
     autoRefreshRates().catch(console.warn)
+    // Check for app updates (Tauri only)
+    checkForUpdates()
     // Snapshot account balances and net worth on app open
     fetchAccounts()
       .then(() => {

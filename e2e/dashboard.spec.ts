@@ -19,7 +19,6 @@ test.describe('Dashboard', () => {
 
     await expect(page.getByText('Your finances, your way')).toBeVisible()
     await expect(page.getByRole('button', { name: /Add Account/i })).toBeVisible()
-    await expect(page.getByRole('button', { name: /Ask Ivy/i })).toBeVisible()
   })
 
   test('shows metric cards', async ({ page }) => {

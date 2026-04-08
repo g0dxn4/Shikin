@@ -21,35 +21,23 @@ test.describe('Settings', () => {
     await expect(languageSelect.locator('option', { hasText: 'Español' })).toBeAttached()
   })
 
-  test('AI provider grid shows providers', async ({ page }) => {
-    // Provider names should be visible in the grid
-    // Use the provider grid section to scope selectors
-    const providerGrid = page.locator('.grid').first()
-    await expect(page.getByRole('heading', { name: 'AI Provider' })).toBeVisible()
-    await expect(page.getByText('Anthropic')).toBeVisible()
-    await expect(page.getByText('Google Gemini')).toBeVisible()
-    await expect(page.getByText('Groq')).toBeVisible()
-    await expect(page.getByText('Ollama')).toBeVisible()
-    await expect(page.getByText('OpenRouter')).toBeVisible()
+  test('currency section is present', async ({ page }) => {
+    await expect(page.getByRole('heading', { name: 'Currency' })).toBeVisible()
+    await expect(page.getByText('Preferred Currency')).toBeVisible()
+    await expect(page.getByRole('button', { name: /Refresh Rates/i })).toBeVisible()
   })
 
-  test('clicking a provider shows config panel', async ({ page }) => {
-    // Click the Anthropic provider card (less ambiguous than OpenAI which is selected by default)
-    await page.getByText('Anthropic').click()
-
-    // Config panel should show the provider name and API key input
-    await expect(page.locator('input[type="password"]').first()).toBeVisible()
-  })
-
-  test('config panel has save button', async ({ page }) => {
-    // Config panel should already show (OpenAI selected by default)
-    const saveButtons = page.getByRole('button', { name: /save/i })
-    await expect(saveButtons.first()).toBeVisible()
-  })
-
-  test('data APIs section is present', async ({ page }) => {
+  test('market data API section shows provider inputs', async ({ page }) => {
+    await expect(page.getByRole('heading', { name: 'Market Data APIs' })).toBeVisible()
     await expect(page.getByText('Alpha Vantage')).toBeVisible()
     await expect(page.getByText('Finnhub').first()).toBeVisible()
+    await expect(page.getByPlaceholder('Alpha Vantage API key')).toBeVisible()
+    await expect(page.getByPlaceholder('Finnhub API key')).toBeVisible()
+  })
+
+  test('theme section is present', async ({ page }) => {
+    await expect(page.getByRole('heading', { name: 'Theme & Appearance' })).toBeVisible()
+    await expect(page.getByText('Customize the visual appearance of Shikin')).toBeVisible()
   })
 
   test('data backup controls are present', async ({ page }) => {

@@ -9,15 +9,14 @@ test.beforeEach(async ({ page }) => {
 test.describe('desktop layout', () => {
   test.skip(({ isMobile }) => isMobile, 'Sidebar layout tests require desktop viewport')
 
-  test('app shell renders sidebar, main content, and AI panel toggle', async ({ page }) => {
+  test('app shell renders sidebar and main content', async ({ page }) => {
     const sidebar = page.locator('aside').first()
     await expect(sidebar).toBeVisible()
 
     const main = page.locator('main')
     await expect(main).toBeVisible()
 
-    const aiButton = sidebar.getByText('AI Assistant')
-    await expect(aiButton).toBeVisible()
+    await expect(sidebar.getByText('Shikin')).toBeVisible()
   })
 
   test('sidebar collapse toggle works', async ({ page }) => {
@@ -43,19 +42,10 @@ test.describe('desktop layout', () => {
     await expect(sidebar.getByText('Transactions')).toBeVisible()
   })
 
-  test('AI panel can be toggled', async ({ page }) => {
+  test('settings link is available in sidebar footer', async ({ page }) => {
     const sidebar = page.locator('aside').first()
 
-    await sidebar.getByText('AI Assistant').click()
-
-    const aiPanel = page.locator('aside').nth(1)
-    await expect(aiPanel).toBeVisible()
-
-    const panelHeader = aiPanel.locator('.border-b').first()
-    const xButton = panelHeader.locator('button').last()
-    await xButton.click()
-
-    await expect(aiPanel).not.toBeVisible()
+    await expect(sidebar.getByRole('link', { name: 'Settings' })).toBeVisible()
   })
 
   test('page content renders in scrollable main area', async ({ page }) => {

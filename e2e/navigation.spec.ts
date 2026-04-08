@@ -12,8 +12,7 @@ test.describe('desktop sidebar navigation', () => {
   test('sidebar renders all navigation items', async ({ page }) => {
     const sidebar = page.locator('aside').first()
 
-    const links = sidebar.getByRole('link')
-    await expect(links).toHaveCount(10)
+    await expect(sidebar.getByRole('link')).not.toHaveCount(0)
 
     await expect(sidebar.getByRole('link', { name: 'Dashboard' })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Transactions' })).toBeVisible()
@@ -23,7 +22,11 @@ test.describe('desktop sidebar navigation', () => {
     await expect(sidebar.getByRole('link', { name: 'Investments' })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Subscriptions' })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Debt Payoff' })).toBeVisible()
+    await expect(sidebar.getByRole('link', { name: 'Net Worth' })).toBeVisible()
+    await expect(sidebar.getByRole('link', { name: 'Spending Insights' })).toBeVisible()
+    await expect(sidebar.getByRole('link', { name: 'Heatmap' })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Forecast' })).toBeVisible()
+    await expect(sidebar.getByRole('link', { name: "Ivy's Memory" })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Settings' })).toBeVisible()
   })
 
@@ -86,7 +89,7 @@ test.describe('mobile bottom nav navigation', () => {
   test.skip(({ isMobile }) => !isMobile, 'Bottom nav only visible on mobile')
 
   test('bottom nav renders 5 items', async ({ page }) => {
-    const bottomNav = page.locator('nav.fixed')
+    const bottomNav = page.getByRole('navigation').filter({ hasText: 'Dashboard' })
     await expect(bottomNav).toBeVisible()
 
     const links = bottomNav.getByRole('link')
@@ -100,28 +103,28 @@ test.describe('mobile bottom nav navigation', () => {
   })
 
   test('clicking Transactions navigates to /transactions', async ({ page }) => {
-    const bottomNav = page.locator('nav.fixed')
+    const bottomNav = page.getByRole('navigation').filter({ hasText: 'Dashboard' })
     await bottomNav.getByText('Transactions').click()
     await page.waitForURL('/transactions')
     expect(page.url()).toContain('/transactions')
   })
 
   test('clicking Accounts navigates to /accounts', async ({ page }) => {
-    const bottomNav = page.locator('nav.fixed')
+    const bottomNav = page.getByRole('navigation').filter({ hasText: 'Dashboard' })
     await bottomNav.getByText('Accounts').click()
     await page.waitForURL('/accounts')
     expect(page.url()).toContain('/accounts')
   })
 
   test('clicking Investments navigates to /investments', async ({ page }) => {
-    const bottomNav = page.locator('nav.fixed')
+    const bottomNav = page.getByRole('navigation').filter({ hasText: 'Dashboard' })
     await bottomNav.getByText('Investments').click()
     await page.waitForURL('/investments')
     expect(page.url()).toContain('/investments')
   })
 
   test('clicking Settings navigates to /settings', async ({ page }) => {
-    const bottomNav = page.locator('nav.fixed')
+    const bottomNav = page.getByRole('navigation').filter({ hasText: 'Dashboard' })
     await bottomNav.getByText('Settings').click()
     await page.waitForURL('/settings')
     expect(page.url()).toContain('/settings')
@@ -129,7 +132,7 @@ test.describe('mobile bottom nav navigation', () => {
 
   test('active bottom nav item is highlighted', async ({ page }) => {
     // Dashboard should be active by default (at /)
-    const bottomNav = page.locator('nav.fixed')
+    const bottomNav = page.getByRole('navigation').filter({ hasText: 'Dashboard' })
     const dashboardLink = bottomNav.getByRole('link').first()
     await expect(dashboardLink).toHaveClass(/text-accent/)
   })

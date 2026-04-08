@@ -1,5 +1,5 @@
 {
-  "name": "valute",
+  "name": "shikin",
   "private": true,
   "version": "0.1.0",
   "description": "AI-first, local-first personal finance manager",
@@ -28,12 +28,6 @@
     "prepare": "husky"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.47",
-    "@ai-sdk/google": "^3.0.43",
-    "@ai-sdk/mistral": "^3.0.24",
-    "@ai-sdk/openai": "^3.0.34",
-    "@ai-sdk/react": "^3.0.102",
-    "@ai-sdk/xai": "^3.0.67",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-dialog": "^1.1.15",
@@ -49,7 +43,6 @@
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-sql": "^2.3.2",
     "@tauri-apps/plugin-updater": "^2.10.0",
-    "ai": "^6.0.100",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dayjs": "^1.11.19",

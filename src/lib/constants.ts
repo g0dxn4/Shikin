@@ -1,4 +1,4 @@
-export const APP_NAME = 'Valute'
+export const APP_NAME = 'Shikin'
 
 export const DEFAULT_CURRENCY = 'USD'
 

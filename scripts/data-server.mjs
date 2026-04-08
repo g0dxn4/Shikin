@@ -1,5 +1,13 @@
 import { createServer } from 'node:http'
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, readdirSync, statSync } from 'node:fs'
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  unlinkSync,
+  readdirSync,
+  statSync,
+} from 'node:fs'
 import { join, resolve, normalize } from 'node:path'
 import { homedir } from 'node:os'
 import Database from 'better-sqlite3'
@@ -7,8 +15,8 @@ import Database from 'better-sqlite3'
 // ── Configuration ──────────────────────────────────────────────────────────
 
 const PORT = 1480
-const DATA_DIR = join(homedir(), '.local', 'share', 'com.asf.valute')
-const DB_PATH = join(DATA_DIR, 'valute.db')
+const DATA_DIR = join(homedir(), '.local', 'share', 'com.asf.shikin')
+const DB_PATH = join(DATA_DIR, 'shikin.db')
 const SETTINGS_PATH = join(DATA_DIR, 'settings.json')
 const NOTEBOOK_DIR = join(DATA_DIR, 'notebook')
 
@@ -42,7 +50,10 @@ function runMigrations() {
   `)
 
   const applied = new Set(
-    db.prepare('SELECT name FROM _migrations').all().map(r => r.name)
+    db
+      .prepare('SELECT name FROM _migrations')
+      .all()
+      .map((r) => r.name)
   )
 
   // --- Migration 001: Core Tables ---
@@ -270,9 +281,21 @@ CREATE INDEX IF NOT EXISTS idx_ai_memories_category ON ai_memories(category);
 
   // --- Migration 003: Credit Cards ---
   if (!applied.has('003_credit_cards')) {
-    try { db.exec('ALTER TABLE accounts ADD COLUMN credit_limit INTEGER') } catch { /* may exist */ }
-    try { db.exec('ALTER TABLE accounts ADD COLUMN statement_closing_day INTEGER') } catch { /* may exist */ }
-    try { db.exec('ALTER TABLE accounts ADD COLUMN payment_due_day INTEGER') } catch { /* may exist */ }
+    try {
+      db.exec('ALTER TABLE accounts ADD COLUMN credit_limit INTEGER')
+    } catch {
+      /* may exist */
+    }
+    try {
+      db.exec('ALTER TABLE accounts ADD COLUMN statement_closing_day INTEGER')
+    } catch {
+      /* may exist */
+    }
+    try {
+      db.exec('ALTER TABLE accounts ADD COLUMN payment_due_day INTEGER')
+    } catch {
+      /* may exist */
+    }
 
     db.prepare("INSERT INTO _migrations (id, name) VALUES (3, '003_credit_cards')").run()
   }
@@ -452,7 +475,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_account_balance_date ON account_balance_hi
 CREATE INDEX IF NOT EXISTS idx_account_balance_account ON account_balance_history(account_id);
     `)
 
-    db.prepare("INSERT INTO _migrations (id, name) VALUES (12, '012_account_balance_history')").run()
+    db.prepare(
+      "INSERT INTO _migrations (id, name) VALUES (12, '012_account_balance_history')"
+    ).run()
   }
 
   console.log('[data-server] Migrations complete')
@@ -494,7 +519,7 @@ function safePath(base, userPath) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = []
-    req.on('data', c => chunks.push(c))
+    req.on('data', (c) => chunks.push(c))
     req.on('end', () => {
       try {
         resolve(JSON.parse(Buffer.concat(chunks).toString()))
@@ -542,7 +567,9 @@ function cacheItemsFromStream(chunk) {
       if (data.type === 'response.output_item.done' && data.item?.id) {
         codexItemCache.set(data.item.id, data.item)
       }
-    } catch { /* not valid JSON line */ }
+    } catch {
+      /* not valid JSON line */
+    }
   }
 }
 
@@ -554,7 +581,8 @@ const server = createServer(async (req, res) => {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': 'http://localhost:1420',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, OpenAI-Beta, chatgpt-account-id, originator',
+      'Access-Control-Allow-Headers':
+        'Content-Type, Authorization, OpenAI-Beta, chatgpt-account-id, originator',
     })
     return res.end()
   }
@@ -666,10 +694,14 @@ const server = createServer(async (req, res) => {
       if (!dirPath) return sendError(res, 'Missing path parameter', 400)
       const safe = safePath(DATA_DIR, dirPath)
       if (!existsSync(safe)) return sendJson(res, { entries: [] })
-      const entries = readdirSync(safe).map(name => {
+      const entries = readdirSync(safe).map((name) => {
         const fullPath = join(safe, name)
         let isDirectory = false
-        try { isDirectory = statSync(fullPath).isDirectory() } catch { /* ignore */ }
+        try {
+          isDirectory = statSync(fullPath).isDirectory()
+        } catch {
+          /* ignore */
+        }
         return { name, isDirectory }
       })
       return sendJson(res, { entries })
@@ -717,7 +749,7 @@ const server = createServer(async (req, res) => {
 
           // Replace item_reference entries with cached inline items
           if (Array.isArray(bodyJson.input)) {
-            bodyJson.input = bodyJson.input.map(item => {
+            bodyJson.input = bodyJson.input.map((item) => {
               if (item.type === 'item_reference' && item.id && codexItemCache.has(item.id)) {
                 return codexItemCache.get(item.id)
               }
@@ -728,15 +760,21 @@ const server = createServer(async (req, res) => {
           // Codex requires top-level 'instructions' field.
           // The AI SDK sends system/developer messages in the input array — extract them.
           if (!bodyJson.instructions && Array.isArray(bodyJson.input)) {
-            const sysMessages = bodyJson.input.filter(m => m.role === 'developer' || m.role === 'system')
+            const sysMessages = bodyJson.input.filter(
+              (m) => m.role === 'developer' || m.role === 'system'
+            )
             if (sysMessages.length > 0) {
-              bodyJson.instructions = sysMessages.map(m => m.content).join('\n\n')
-              bodyJson.input = bodyJson.input.filter(m => m.role !== 'developer' && m.role !== 'system')
+              bodyJson.instructions = sysMessages.map((m) => m.content).join('\n\n')
+              bodyJson.input = bodyJson.input.filter(
+                (m) => m.role !== 'developer' && m.role !== 'system'
+              )
             }
           }
 
           bodyBuffer = Buffer.from(JSON.stringify(bodyJson))
-        } catch { /* not JSON, pass through */ }
+        } catch {
+          /* not JSON, pass through */
+        }
       }
 
       // Forward all relevant headers
@@ -744,7 +782,8 @@ const server = createServer(async (req, res) => {
         'Content-Type': req.headers['content-type'] || 'application/json',
       }
       if (req.headers['authorization']) proxyHeaders['Authorization'] = req.headers['authorization']
-      if (req.headers['chatgpt-account-id']) proxyHeaders['chatgpt-account-id'] = req.headers['chatgpt-account-id']
+      if (req.headers['chatgpt-account-id'])
+        proxyHeaders['chatgpt-account-id'] = req.headers['chatgpt-account-id']
       if (req.headers['openai-beta']) proxyHeaders['OpenAI-Beta'] = req.headers['openai-beta']
       if (req.headers['originator']) proxyHeaders['originator'] = req.headers['originator']
 
@@ -758,7 +797,8 @@ const server = createServer(async (req, res) => {
       res.writeHead(proxyRes.status, {
         'Content-Type': proxyRes.headers.get('content-type') || 'application/json',
         'Access-Control-Allow-Origin': 'http://localhost:1420',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization, OpenAI-Beta, chatgpt-account-id, originator',
+        'Access-Control-Allow-Headers':
+          'Content-Type, Authorization, OpenAI-Beta, chatgpt-account-id, originator',
       })
 
       if (proxyRes.body) {
@@ -767,9 +807,14 @@ const server = createServer(async (req, res) => {
         const pump = async () => {
           while (true) {
             const { done, value } = await reader.read()
-            if (done) { res.end(); return }
+            if (done) {
+              res.end()
+              return
+            }
             // Cache output items from the stream for tool loop support
-            try { cacheItemsFromStream(decoder.decode(value, { stream: true })) } catch {}
+            try {
+              cacheItemsFromStream(decoder.decode(value, { stream: true }))
+            } catch {}
             res.write(value)
           }
         }
@@ -784,12 +829,16 @@ const server = createServer(async (req, res) => {
     // ── DB: Export (binary) ────────────────────────────────────────
     if (path === '/api/db/export' && req.method === 'GET') {
       // Checkpoint WAL to ensure all data is in main DB file
-      try { db.pragma('wal_checkpoint(TRUNCATE)') } catch { /* ignore */ }
+      try {
+        db.pragma('wal_checkpoint(TRUNCATE)')
+      } catch {
+        /* ignore */
+      }
       const bytes = readFileSync(DB_PATH)
       res.writeHead(200, {
         'Content-Type': 'application/octet-stream',
         'Content-Length': bytes.length,
-        'Content-Disposition': 'attachment; filename="valute.db"',
+        'Content-Disposition': 'attachment; filename="shikin.db"',
         'Access-Control-Allow-Origin': '*',
       })
       res.end(bytes)

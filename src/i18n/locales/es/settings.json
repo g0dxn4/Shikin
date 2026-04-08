@@ -11,7 +11,7 @@
     "about": "Acerca de"
   },
   "theme": {
-    "description": "Personaliza la apariencia visual de Valute",
+    "description": "Personaliza la apariencia visual de Shikin",
     "aiPrompt": "Generador de Temas con IA",
     "promptPlaceholder": "ej. Neón cyberpunk, otoño acogedor, brisa del mar...",
     "generate": "Generar",
@@ -49,7 +49,7 @@
       "latte": "Latte"
     },
     "presetDescriptions": {
-      "default": "Estilo original de Valute",
+      "default": "Estilo original de Shikin",
       "midnight": "Azul oscuro profesional",
       "forest": "Verde calmado y enfocado",
       "rose": "Tono editorial claro y suave",

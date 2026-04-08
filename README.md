@@ -1,18 +1,18 @@
-# Valute
+# Shikin
 
 **Your value. Your vault.**
 
-Valute is an open-source, AI-first, local-first personal finance manager. It runs as a Tauri v2 desktop app or browser-first web app, keeping all data local on your machine.
+Shikin is an open-source, AI-first, local-first personal finance manager. It runs as a Tauri v2 desktop app or browser-first web app, keeping all data local on your machine.
 
 ---
 
-## Why Valute?
+## Why Shikin?
 
 Most personal finance tools force a tradeoff between privacy and intelligence.
 
-Valute is built to keep both:
+Shikin is built to keep both:
 
-- Your finance data stays local (SQLite via shared storage at `~/.local/share/com.asf.valute/`).
+- Your finance data stays local (SQLite via shared storage at `~/.local/share/com.asf.shikin/`).
 - Settings and preferences are local (settings.json in shared store).
 - AI uses your own provider keys and works through tool calls against your local database.
 
@@ -21,6 +21,7 @@ Valute is built to keep both:
 ## Features
 
 ### Core Finance
+
 - **Transactions**: Full CRUD with search, filtering, CSV import, and OFX/QFX/QIF bank statement import.
 - **Accounts**: 7 account types (checking, savings, credit card, cash, investment, crypto, other).
 - **Budgets**: Category-based budgets with weekly/monthly/yearly periods and progress tracking.
@@ -31,19 +32,15 @@ Valute is built to keep both:
 - **Investments**: Portfolio tracking with live prices (Alpha Vantage for stocks, CoinGecko for crypto).
 - **Multi-Currency**: Live exchange rates via frankfurter.app with preferred currency conversion.
 
-### AI Assistant (Ivy) — 43 Tools
-- **Natural Language Finance**: Add transactions, query data, manage accounts — all through conversation.
-- **Anomaly Detection**: Flags unusual spending, duplicate charges, subscription price changes.
-- **Cash Flow Forecasting**: 30/60/90 day projections with danger date warnings.
-- **Financial Health Score**: Composite 0-100 score across 5 dimensions with actionable tips.
-- **Spending Recaps**: Weekly/monthly natural language summaries with highlights.
-- **Debt Payoff Planning**: Snowball vs avalanche strategies with interest savings comparison.
-- **Smart Auto-Categorization**: Learns from your corrections to auto-suggest categories.
-- **Financial Education**: Contextual tips on budgeting, saving, investing, and debt concepts.
-- **Persistent Memory**: MemGPT-inspired system — Ivy remembers preferences and context across sessions.
-- **Research Notebook**: Markdown notes for portfolio reviews, research, and education.
+### CLI & MCP Server — 43 Tools
+
+- **CLI**: `shikin add-transaction --amount 5.50 --type expense --description "Coffee"`
+- **MCP Server**: Connect Claude Code, Claude Desktop, Cursor, or any MCP-compatible AI
+- **43 Financial Tools**: Transactions, accounts, budgets, goals, investments, analytics, debt planning, currency conversion, and more
+- **No Built-in AI**: Bring your own AI — Shikin is the finance engine, your AI platform controls it
 
 ### Intelligence & Analytics
+
 - **Dashboard**: Total balance, income/expenses, savings rate, spending trends, category breakdown.
 - **Reports & PDF Export**: Monthly/annual reports with dark-themed PDF generation via jsPDF.
 - **Spending Heatmap**: Category-based spending intensity visualization.
@@ -54,7 +51,7 @@ Valute is built to keep both:
 - **Streaks & Achievements**: 8 unlockable badges for financial habits.
 
 ### Privacy & Data
-- **10 AI Providers**: OpenAI, Anthropic, Google, Mistral, xAI, Groq, DeepSeek, Alibaba Qwen, OpenRouter, Ollama.
+
 - **Fully Local**: No mandatory backend. All data in SQLite via shared storage.
 - **Auto-Updates**: Tauri desktop app checks GitHub Releases for updates on startup.
 - **Bilingual**: English and Spanish localization (13 i18n namespaces).
@@ -64,21 +61,21 @@ Valute is built to keep both:
 
 ## Tech Stack
 
-| Layer      | Technology                        | Purpose                                       |
-| ---------- | --------------------------------- | --------------------------------------------- |
-| Runtime    | Tauri v2 + Browser + Vite         | Desktop app and web runtime                   |
-| Frontend   | React 19 + TypeScript             | UI and application logic                      |
-| Styling    | Tailwind CSS v4 + shadcn/ui       | Design system and components                  |
-| Routing    | React Router v7                   | Client-side navigation                        |
-| State      | Zustand (19 stores)               | Global state management                       |
-| Database   | SQLite (shared storage)           | 21 tables, migration-backed schema            |
-| Settings   | Tauri Store / data-server bridge  | Local key-value config storage                |
-| AI         | AI SDK v6 (`ai`, `@ai-sdk/react`) | Chat + tool loop runtime (43 tools)           |
-| Forms      | React Hook Form + Zod v4          | Form validation and parsing                   |
-| Charts     | Recharts                          | Financial visualizations                      |
-| PDF        | jsPDF                             | Report generation                             |
-| i18n       | i18next + react-i18next           | Localization (en/es)                          |
-| Build/Test | Vite + Vitest + Playwright        | Build pipeline and test tooling               |
+| Layer      | Technology                        | Purpose                             |
+| ---------- | --------------------------------- | ----------------------------------- |
+| Runtime    | Tauri v2 + Browser + Vite         | Desktop app and web runtime         |
+| Frontend   | React 19 + TypeScript             | UI and application logic            |
+| Styling    | Tailwind CSS v4 + shadcn/ui       | Design system and components        |
+| Routing    | React Router v7                   | Client-side navigation              |
+| State      | Zustand (19 stores)               | Global state management             |
+| Database   | SQLite (shared storage)           | 21 tables, migration-backed schema  |
+| Settings   | Tauri Store / data-server bridge  | Local key-value config storage      |
+| AI         | AI SDK v6 (`ai`, `@ai-sdk/react`) | Chat + tool loop runtime (43 tools) |
+| Forms      | React Hook Form + Zod v4          | Form validation and parsing         |
+| Charts     | Recharts                          | Financial visualizations            |
+| PDF        | jsPDF                             | Report generation                   |
+| i18n       | i18next + react-i18next           | Localization (en/es)                |
+| Build/Test | Vite + Vitest + Playwright        | Build pipeline and test tooling     |
 
 ---
 
@@ -92,8 +89,8 @@ Valute is built to keep both:
 ### Installation
 
 ```bash
-git clone https://github.com/g0dxn4/Valute.git
-cd Valute
+git clone https://github.com/g0dxn4/Shikin.git
+cd Shikin
 pnpm install
 ```
 
@@ -113,33 +110,49 @@ pnpm build:tauri  # Builds .deb + .AppImage (Linux), .dmg (macOS), .msi (Windows
 
 ### Available Scripts
 
-| Command              | Description                            |
-| -------------------- | -------------------------------------- |
-| `pnpm dev`           | Start dev servers (Vite + OAuth + data)|
-| `pnpm build`         | Type-check and build production bundle |
-| `pnpm build:tauri`   | Build Tauri desktop binary             |
-| `pnpm preview`       | Preview production build locally       |
-| `pnpm lint`          | Run ESLint                             |
-| `pnpm typecheck`     | Run TypeScript checks                  |
-| `pnpm test`          | Start Vitest in watch mode             |
-| `pnpm test:run`      | Run unit tests once                    |
-| `pnpm test:coverage` | Run unit tests with coverage           |
-| `pnpm test:ai`       | Run AI integration test script         |
-| `pnpm check`         | Lint + typecheck + format check        |
+| Command              | Description                             |
+| -------------------- | --------------------------------------- |
+| `pnpm dev`           | Start dev servers (Vite + OAuth + data) |
+| `pnpm build`         | Type-check and build production bundle  |
+| `pnpm build:tauri`   | Build Tauri desktop binary              |
+| `pnpm preview`       | Preview production build locally        |
+| `pnpm lint`          | Run ESLint                              |
+| `pnpm typecheck`     | Run TypeScript checks                   |
+| `pnpm test`          | Start Vitest in watch mode              |
+| `pnpm test:run`      | Run unit tests once                     |
+| `pnpm test:coverage` | Run unit tests with coverage            |
+| `pnpm test:ai`       | Run AI integration test script          |
+| `pnpm check`         | Lint + typecheck + format check         |
 
 ---
 
-## AI Provider Setup
+## CLI & MCP Server
 
-1. Open **Settings** in the app.
-2. Choose a provider (10 available).
-3. Add your API key (not required for Ollama).
-4. Pick a model.
-
-For fully local inference:
+Shikin exposes 43 financial tools via CLI and MCP server. Any AI can control your finances.
 
 ```bash
-ollama pull llama3.2
+cd cli && npm install
+
+# CLI
+npx tsx src/cli.ts list-accounts
+npx tsx src/cli.ts add-transaction --amount 12.50 --type expense --description "Lunch"
+npx tsx src/cli.ts get-spending-summary --period month
+
+# MCP server (for Claude Code, Claude Desktop, Cursor)
+npx tsx src/mcp-server.ts
+```
+
+### MCP Setup (Claude Desktop)
+
+```json
+{
+  "mcpServers": {
+    "shikin": {
+      "command": "npx",
+      "args": ["tsx", "/path/to/Shikin/cli/src/mcp-server.ts"]
+    }
+  }
+}
 ```
 
 ## Data Safety
@@ -154,7 +167,7 @@ ollama pull llama3.2
 ## Project Structure
 
 ```
-Valute/
+Shikin/
 ├── src/
 │   ├── ai/                   # Agent, transport, memory, 43 tools
 │   │   ├── agent.ts          # ToolLoopAgent configuration + system prompt

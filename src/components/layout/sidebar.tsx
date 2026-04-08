@@ -11,7 +11,6 @@ import {
   LineChart,
   Brain,
   Settings,
-  Sparkles,
   PanelLeftClose,
   PanelLeft,
   Wallet,
@@ -40,7 +39,7 @@ const navItems = [
 
 export function Sidebar() {
   const { t } = useTranslation()
-  const { sidebarCollapsed, toggleSidebar, toggleAIPanel } = useUIStore()
+  const { sidebarCollapsed, toggleSidebar } = useUIStore()
 
   return (
     <aside
@@ -51,7 +50,7 @@ export function Sidebar() {
       <div className="flex h-14 items-center justify-between px-4">
         {!sidebarCollapsed && (
           <span className="gradient-text font-heading text-lg font-bold tracking-tight">
-            Valute
+            Shikin
           </span>
         )}
         <button
@@ -84,13 +83,6 @@ export function Sidebar() {
 
       {/* Bottom actions */}
       <div className="border-border space-y-0.5 border-t px-2 py-2">
-        <button
-          onClick={toggleAIPanel}
-          className={cn('sidebar-link w-full text-left', sidebarCollapsed && 'justify-center px-0')}
-        >
-          <Sparkles size={18} />
-          {!sidebarCollapsed && <span>{t('nav.ai')}</span>}
-        </button>
         <NavLink
           to="/settings"
           className={({ isActive }) =>

@@ -1,14 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { Outlet, useLocation } from 'react-router'
-import {
-  LayoutDashboard,
-  ArrowLeftRight,
-  Landmark,
-  TrendingUp,
-  Settings,
-} from 'lucide-react'
+import { LayoutDashboard, ArrowLeftRight, Landmark, TrendingUp, Settings } from 'lucide-react'
 import { Sidebar } from './sidebar'
-import { AIPanel } from './ai-panel'
 import { BottomNav } from '@/components/layout/bottom-nav'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 
@@ -54,7 +47,6 @@ export function AppShell() {
           </Suspense>
         </div>
       </main>
-      <AIPanel />
       <BottomNav items={bottomNavItems} activeHref={pathname} />
       <Suspense>
         <AccountDialog />

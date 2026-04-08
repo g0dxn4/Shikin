@@ -2,10 +2,7 @@ import { create } from 'zustand'
 
 interface UIState {
   sidebarCollapsed: boolean
-  aiPanelOpen: boolean
   toggleSidebar: () => void
-  toggleAIPanel: () => void
-  setAIPanelOpen: (open: boolean) => void
 
   accountDialogOpen: boolean
   editingAccountId: string | null
@@ -40,10 +37,7 @@ interface UIState {
 
 export const useUIStore = create<UIState>((set) => ({
   sidebarCollapsed: false,
-  aiPanelOpen: false,
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
-  toggleAIPanel: () => set((s) => ({ aiPanelOpen: !s.aiPanelOpen })),
-  setAIPanelOpen: (open) => set({ aiPanelOpen: open }),
 
   accountDialogOpen: false,
   editingAccountId: null,
@@ -69,8 +63,7 @@ export const useUIStore = create<UIState>((set) => ({
 
   recurringDialogOpen: false,
   editingRecurringId: null,
-  openRecurringDialog: (id) =>
-    set({ recurringDialogOpen: true, editingRecurringId: id ?? null }),
+  openRecurringDialog: (id) => set({ recurringDialogOpen: true, editingRecurringId: id ?? null }),
   closeRecurringDialog: () => set({ recurringDialogOpen: false, editingRecurringId: null }),
 
   goalDialogOpen: false,

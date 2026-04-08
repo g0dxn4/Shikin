@@ -11,7 +11,6 @@ vi.mock('react-i18next', () => ({
 }))
 
 const mockToggleSidebar = vi.fn()
-const mockToggleAIPanel = vi.fn()
 let mockSidebarCollapsed = false
 
 vi.mock('react-router', () => ({
@@ -37,7 +36,6 @@ vi.mock('@/stores/ui-store', () => ({
   useUIStore: () => ({
     sidebarCollapsed: mockSidebarCollapsed,
     toggleSidebar: mockToggleSidebar,
-    toggleAIPanel: mockToggleAIPanel,
   }),
 }))
 
@@ -47,10 +45,10 @@ describe('Sidebar', () => {
     mockSidebarCollapsed = false
   })
 
-  it('expanded: shows "Valute" brand text and nav labels', () => {
+  it('expanded: shows "Shikin" brand text and nav labels', () => {
     render(<Sidebar />)
 
-    expect(screen.getByText('Valute')).toBeInTheDocument()
+    expect(screen.getByText('Shikin')).toBeInTheDocument()
     expect(screen.getByText('nav.dashboard')).toBeInTheDocument()
     expect(screen.getByText('nav.transactions')).toBeInTheDocument()
     expect(screen.getByText('nav.accounts')).toBeInTheDocument()
@@ -64,7 +62,7 @@ describe('Sidebar', () => {
 
     render(<Sidebar />)
 
-    expect(screen.queryByText('Valute')).not.toBeInTheDocument()
+    expect(screen.queryByText('Shikin')).not.toBeInTheDocument()
     expect(screen.queryByText('nav.dashboard')).not.toBeInTheDocument()
   })
 
@@ -85,16 +83,6 @@ describe('Sidebar', () => {
     await user.click(collapseBtn)
 
     expect(mockToggleSidebar).toHaveBeenCalled()
-  })
-
-  it('AI button calls toggleAIPanel', async () => {
-    const user = userEvent.setup()
-    render(<Sidebar />)
-
-    // The AI button shows "nav.ai" text
-    await user.click(screen.getByText('nav.ai'))
-
-    expect(mockToggleAIPanel).toHaveBeenCalled()
   })
 
   it('Settings link points to /settings', () => {

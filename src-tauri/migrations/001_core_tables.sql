@@ -1,4 +1,4 @@
--- Valute Migration 001: Core Tables
+-- Shikin Migration 001: Core Tables
 -- All monetary amounts stored as INTEGER (centavos/cents)
 -- IDs as TEXT (ULIDs)
 -- Dates as TEXT (ISO 8601)

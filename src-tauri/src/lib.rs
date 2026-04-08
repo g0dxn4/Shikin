@@ -16,7 +16,7 @@ const SUCCESS_HTML: &str = r#"<!DOCTYPE html>
 <html><head><title>Authorization Complete</title>
 <style>body{font-family:system-ui;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#020202;color:#e4e4e7}
 .card{text-align:center;padding:2rem}h1{font-size:1.25rem;margin-bottom:0.5rem;color:#bf5af2}p{color:#71717a;font-size:0.875rem}</style>
-</head><body><div class="card"><h1>Authorization successful</h1><p>You can close this tab and return to Valute.</p></div></body></html>"#;
+</head><body><div class="card"><h1>Authorization successful</h1><p>You can close this tab and return to Shikin.</p></div></body></html>"#;
 
 /// Start a one-shot HTTP server on localhost to catch an OAuth redirect.
 #[tauri::command]
@@ -123,7 +123,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(
             tauri_plugin_sql::Builder::default()
-                .add_migrations("sqlite:valute.db", migrations)
+                .add_migrations("sqlite:shikin.db", migrations)
                 .build(),
         )
         .plugin(tauri_plugin_store::Builder::default().build())

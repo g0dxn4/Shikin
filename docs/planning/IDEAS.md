@@ -1,12 +1,13 @@
 # Feature Ideas
 
-Curated ideas for Valute's future. Ranked by impact, feasibility, and alignment with the AI-first local-first philosophy.
+Curated ideas for Shikin's future. Ranked by impact, feasibility, and alignment with the AI-first local-first philosophy.
 
 ---
 
 ## Priority: High
 
 ### Savings Goals
+
 Dedicated goal tracking with target amounts, deadlines, and visual progress. AI suggests budget adjustments to hit targets faster. Foundation for financial planning — YNAB and Monarch both center around this.
 
 - New `goals` table (id, name, target_amount, current_amount, deadline, account_id, icon, color)
@@ -15,6 +16,7 @@ Dedicated goal tracking with target amounts, deadlines, and visual progress. AI 
 - AI nudges: "If you cut dining by 15%, you'll hit your emergency fund goal 2 months early"
 
 ### Recurring Transactions
+
 Auto-generate expected transactions (rent, salary, utilities) on schedule. Different from subscriptions — these are general recurring entries that reduce manual data entry significantly.
 
 - New `recurring_rules` table (id, template transaction, frequency, next_date, active)
@@ -23,6 +25,7 @@ Auto-generate expected transactions (rent, salary, utilities) on schedule. Diffe
 - Ties into cash flow forecasting
 
 ### Cash Flow Forecasting
+
 Project future balance based on upcoming bills, recurring income, and spending patterns. One of the most requested features across all finance apps.
 
 - Leverage recurring transactions + budget data + historical patterns
@@ -32,6 +35,7 @@ Project future balance based on upcoming bills, recurring income, and spending p
 - AI narrative: "You'll dip below $500 on March 28 — consider deferring X"
 
 ### Anomaly Detection & Alerts
+
 Proactive notifications for unusual spending, duplicate charges, subscription price increases, and forgotten trials. Plays directly to Ivy's AI strengths.
 
 - Compare transactions against historical patterns per category/merchant
@@ -41,6 +45,7 @@ Proactive notifications for unusual spending, duplicate charges, subscription pr
 - Ivy tool: `getSpendingAnomalies`
 
 ### Smart Auto-Categorization
+
 AI learns from user corrections to auto-categorize new transactions by description. Reduces friction for the most common action in the app.
 
 - Merchant-to-category mapping table, seeded from user history
@@ -53,6 +58,7 @@ AI learns from user corrections to auto-categorize new transactions by descripti
 ## Priority: Medium
 
 ### Debt Payoff Planner
+
 Snowball vs avalanche strategy visualization for credit cards and loans. Show payoff timeline, total interest paid, and savings from extra payments.
 
 - New `debts` table or extend credit card fields on accounts
@@ -61,6 +67,7 @@ Snowball vs avalanche strategy visualization for credit cards and loans. Show pa
 - Monthly "debt check-in" in AI Insights
 
 ### Spending Recaps
+
 Auto-generated weekly/monthly natural language summaries. "You spent 23% more on dining this month. Your savings rate improved to 28%."
 
 - Scheduled generation (weekly on Monday, monthly on 1st)
@@ -69,6 +76,7 @@ Auto-generated weekly/monthly natural language summaries. "You spent 23% more on
 - Ivy already has all the analytics tools — this is orchestration
 
 ### Financial Health Score
+
 Composite score (0-100) based on savings rate, debt-to-income, emergency fund coverage, budget adherence, and investment diversification. Gamification without being gimmicky.
 
 - Weighted formula with transparent breakdown
@@ -77,6 +85,7 @@ Composite score (0-100) based on savings rate, debt-to-income, emergency fund co
 - Actionable tips per sub-score
 
 ### Split Transactions
+
 One payment split across multiple categories (e.g., Costco run = groceries + household + electronics). Common real-world need.
 
 - `transaction_splits` table (parent_id, category_id, amount)
@@ -84,6 +93,7 @@ One payment split across multiple categories (e.g., Costco run = groceries + hou
 - Ivy handles splits naturally: "Split my $150 Costco trip: $80 groceries, $50 household, $20 electronics"
 
 ### Multi-Currency with Live Rates
+
 Auto-fetch exchange rates and convert balances for display. The `exchange_rates` table already exists — needs a fetching service and conversion UI.
 
 - Free API (frankfurter.app or exchangerate.host)
@@ -92,6 +102,7 @@ Auto-fetch exchange rates and convert balances for display. The `exchange_rates`
 - Ivy tool: `convertCurrency`
 
 ### Reports & PDF Export
+
 Monthly/yearly PDF reports with spending breakdowns, income vs expenses, category trends, and net worth changes. Useful for tax prep and personal review.
 
 - Client-side PDF generation (jsPDF or react-pdf)
@@ -103,21 +114,27 @@ Monthly/yearly PDF reports with spending breakdowns, income vs expenses, categor
 ## Priority: Low (Nice to Have)
 
 ### OFX/QFX/QIF Import
+
 Bank statement file import beyond CSV. Most banks export these formats. Broadens data import options.
 
 ### Receipt Scanning / OCR
+
 Camera-based receipt capture with amount, merchant, and date extraction. Browser camera API + Tesseract.js or cloud OCR.
 
 ### Shared / Household Finance
+
 Partner access with shared budgets and split tracking. Significant architecture change for a local-first app — would need sync layer.
 
 ### Streaks & Achievements
+
 Gamify daily logging, staying under budget, and hitting savings goals. Fun but not core.
 
 ### Financial Education via Ivy
+
 Contextual teaching — when user sets up first budget, Ivy explains the 50/30/20 rule. When user adds first investment, Ivy explains dollar-cost averaging.
 
 ### Webhook / Automation Integration
+
 Trigger external actions on financial events. Would require a plugin/extension system.
 
 ---
@@ -125,11 +142,13 @@ Trigger external actions on financial events. Would require a plugin/extension s
 ## Rejected / Out of Scope
 
 ### Bank Sync (Plaid)
+
 Requires cloud infrastructure, paid API ($), and ongoing maintenance. Conflicts with local-first philosophy. Users can CSV import instead.
 
 ### Crypto DeFi Tracking
+
 Too niche and rapidly changing. Basic crypto price tracking via CoinGecko is sufficient.
 
 ---
 
-*Last updated: 2026-03-17*
+_Last updated: 2026-03-17_

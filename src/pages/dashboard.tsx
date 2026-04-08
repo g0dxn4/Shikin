@@ -63,7 +63,7 @@ export function Dashboard() {
   const { t } = useTranslation('dashboard')
   const { t: tTx } = useTranslation('transactions')
   const { t: tAcc } = useTranslation('accounts')
-  const { setAIPanelOpen, openAccountDialog, openTransactionDialog } = useUIStore()
+  const { openAccountDialog, openTransactionDialog } = useUIStore()
   const { accounts, isLoading: accountsLoading, fetch: fetchAccounts } = useAccountStore()
   const { transactions, isLoading: txLoading, fetch: fetchTransactions } = useTransactionStore()
   const {
@@ -385,10 +385,6 @@ export function Dashboard() {
           <p className="text-muted-foreground mb-6 max-w-md text-sm">{t('empty.description')}</p>
           <div className="flex gap-3">
             <Button onClick={() => openAccountDialog()}>{t('empty.addAccount')}</Button>
-            <Button variant="outline" onClick={() => setAIPanelOpen(true)}>
-              <Sparkles size={16} />
-              {t('empty.askAI')}
-            </Button>
           </div>
         </div>
       ) : (
@@ -856,10 +852,6 @@ export function Dashboard() {
             <Button onClick={() => openTransactionDialog()}>
               <Plus size={16} />
               {t('quickActions.addTransaction')}
-            </Button>
-            <Button variant="outline" onClick={() => setAIPanelOpen(true)}>
-              <Sparkles size={16} />
-              {t('quickActions.askIvy')}
             </Button>
           </div>
         </>

@@ -1,4 +1,4 @@
--- Valute Migration 011: Net Worth Snapshots
+-- Shikin Migration 011: Net Worth Snapshots
 -- Stores daily snapshots of net worth for historical trend tracking
 -- All monetary amounts stored as INTEGER (centavos/cents)
 

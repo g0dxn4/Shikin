@@ -1,6 +1,6 @@
 # Local HTTP API
 
-This document specifies the local HTTP API that Valute will expose for inter-application communication. The API runs on `localhost` and is intended for local integrations, extensions, and tools like MCP servers or personal automation scripts.
+This document specifies the local HTTP API that Shikin will expose for inter-application communication. The API runs on `localhost` and is intended for local integrations, extensions, and tools like MCP servers or personal automation scripts.
 
 **Status:** Planned for a future release. Not yet implemented.
 
@@ -23,7 +23,7 @@ This document specifies the local HTTP API that Valute will expose for inter-app
 http://127.0.0.1:7878/api/v1
 ```
 
-The port `7878` is configurable in Valute settings.
+The port `7878` is configurable in Shikin settings.
 
 ---
 
@@ -676,4 +676,4 @@ Events:
 
 ### MCP Server (v2)
 
-The local API can be wrapped as an MCP (Model Context Protocol) server, allowing any MCP-compatible AI agent to interact with Valute's financial data.
+The local API can be wrapped as an MCP (Model Context Protocol) server, allowing any MCP-compatible AI agent to interact with Shikin's financial data.

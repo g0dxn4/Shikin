@@ -1,0 +1,28 @@
+{
+  "name": "@shikin/cli",
+  "version": "0.1.0",
+  "description": "Shikin CLI and MCP server — control your finances from any AI",
+  "type": "module",
+  "bin": {
+    "shikin": "./dist/cli.js",
+    "shikin-mcp": "./dist/mcp-server.js"
+  },
+  "scripts": {
+    "build": "tsup src/cli.ts src/mcp-server.ts --format esm --dts --clean",
+    "dev": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "better-sqlite3": "^12.8.0",
+    "commander": "^13.1.0",
+    "dayjs": "^1.11.13",
+    "ulidx": "^2.4.1",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "tsup": "^8.5.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

@@ -11,7 +11,7 @@
     "about": "About"
   },
   "theme": {
-    "description": "Customize the visual appearance of Valute",
+    "description": "Customize the visual appearance of Shikin",
     "aiPrompt": "AI Theme Generator",
     "promptPlaceholder": "e.g. Cyberpunk neon, cozy autumn, ocean breeze...",
     "generate": "Generate",
@@ -49,7 +49,7 @@
       "latte": "Latte"
     },
     "presetDescriptions": {
-      "default": "Original Valute look",
+      "default": "Original Shikin look",
       "midnight": "Cool dark blue professional",
       "forest": "Green focus and calm",
       "rose": "Soft light editorial tone",

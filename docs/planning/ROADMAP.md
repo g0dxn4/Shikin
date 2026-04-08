@@ -1,8 +1,8 @@
 # Roadmap
 
-This document outlines the development roadmap for Valute, organized into 10 epics. Each epic represents a major feature area with a clear scope, deliverables, and dependencies.
+This document outlines the development roadmap for Shikin, organized into 10 epics. Each epic represents a major feature area with a clear scope, deliverables, and dependencies.
 
-Current baseline (Mar 2026): Valute has moved to a browser-first runtime using `sql.js` + IndexedDB + localStorage while preserving local-first behavior.
+Current baseline (Mar 2026): Shikin has moved to a browser-first runtime using `sql.js` + IndexedDB + localStorage while preserving local-first behavior.
 
 ---
 
@@ -21,25 +21,25 @@ Current baseline (Mar 2026): Valute has moved to a browser-first runtime using `
 
 **Goal:** Establish the foundation -- build system, database, component library, and development workflow.
 
-| Task                                                                              | Status  | Notes                                                         |
-| --------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------- |
-| Initialize React 19 + TypeScript project foundation                               | Done    | Vite 6 with HMR                                               |
-| Configure Tailwind CSS v4 with custom dark theme                                  | Done    | Glassmorphism design                                          |
-| Install and configure shadcn/ui component library                                 | Done    | 13 components installed                                       |
-| Set up ESLint + Prettier with zero-warning policy                                 | Done    | Tailwind plugin for class sorting                             |
-| Set up Vitest + Testing Library                                                   | Done    | jsdom environment                                             |
-| Create SQLite schema (migrations 001-003)                                         | Done    | 16 tables, 12 indexes, 15 seed categories, credit card fields |
-| Implement database access layer (`query`, `execute`)                              | Done    | Singleton connection, typed wrappers                          |
-| Implement money utilities (centavo conversion)                                    | Done    | `toCentavos`, `fromCentavos`, `formatMoney`                   |
-| Implement ULID generation                                                         | Done    | `ulidx` library                                               |
-| Set up Zustand stores (UI, AI, accounts, transactions, categories, conversations) | Done    | 6 stores                                                      |
-| Set up i18n with English and Spanish                                              | Done    | 6 namespaces per language                                     |
-| Create AppShell layout (Sidebar + Main + AI Panel)                                | Done    | Collapsible sidebar, sliding AI panel                         |
-| Configure provider-safe outbound AI configuration                                 | Done    | OpenAI, Anthropic, OpenRouter, Ollama and others              |
-| Set up local settings persistence                                                 | Done    | Stored locally through browser storage layer                  |
-| Set up code splitting with React.lazy                                             | Done    | All pages lazy-loaded                                         |
-| Implement manual chunk splitting in Vite                                          | Done    | vendor-react, vendor-ui, vendor-forms, vendor-utils           |
-| Set up CI pipeline                                                                | Done    | GitHub Actions: lint, typecheck, test, build, e2e (Playwright)|
+| Task                                                                              | Status | Notes                                                          |
+| --------------------------------------------------------------------------------- | ------ | -------------------------------------------------------------- |
+| Initialize React 19 + TypeScript project foundation                               | Done   | Vite 6 with HMR                                                |
+| Configure Tailwind CSS v4 with custom dark theme                                  | Done   | Glassmorphism design                                           |
+| Install and configure shadcn/ui component library                                 | Done   | 13 components installed                                        |
+| Set up ESLint + Prettier with zero-warning policy                                 | Done   | Tailwind plugin for class sorting                              |
+| Set up Vitest + Testing Library                                                   | Done   | jsdom environment                                              |
+| Create SQLite schema (migrations 001-003)                                         | Done   | 16 tables, 12 indexes, 15 seed categories, credit card fields  |
+| Implement database access layer (`query`, `execute`)                              | Done   | Singleton connection, typed wrappers                           |
+| Implement money utilities (centavo conversion)                                    | Done   | `toCentavos`, `fromCentavos`, `formatMoney`                    |
+| Implement ULID generation                                                         | Done   | `ulidx` library                                                |
+| Set up Zustand stores (UI, AI, accounts, transactions, categories, conversations) | Done   | 6 stores                                                       |
+| Set up i18n with English and Spanish                                              | Done   | 6 namespaces per language                                      |
+| Create AppShell layout (Sidebar + Main + AI Panel)                                | Done   | Collapsible sidebar, sliding AI panel                          |
+| Configure provider-safe outbound AI configuration                                 | Done   | OpenAI, Anthropic, OpenRouter, Ollama and others               |
+| Set up local settings persistence                                                 | Done   | Stored locally through browser storage layer                   |
+| Set up code splitting with React.lazy                                             | Done   | All pages lazy-loaded                                          |
+| Implement manual chunk splitting in Vite                                          | Done   | vendor-react, vendor-ui, vendor-forms, vendor-utils            |
+| Set up CI pipeline                                                                | Done   | GitHub Actions: lint, typecheck, test, build, e2e (Playwright) |
 
 **Dependencies:** None -- this is the foundation.
 
@@ -225,12 +225,12 @@ Current baseline (Mar 2026): Valute has moved to a browser-first runtime using `
 
 ## Epic 9: Extension System
 
-**Goal:** A plugin architecture allowing community developers to extend Valute with new features, AI tools, and UI components.
+**Goal:** A plugin architecture allowing community developers to extend Shikin with new features, AI tools, and UI components.
 
 | Task                                      | Status  | Notes                                     |
 | ----------------------------------------- | ------- | ----------------------------------------- |
 | Extension manifest format specification   | Done    | Documented in EXTENSIONS.md               |
-| Extension directory scanning and loading  | Planned | `~/.valute/extensions/`                   |
+| Extension directory scanning and loading  | Planned | `~/.shikin/extensions/`                   |
 | Manifest validation                       | Planned | Required fields, version checks           |
 | Permission model and user approval flow   | Planned | Low/medium/high risk levels               |
 | ExtensionContext API implementation       | Planned | data, db, hooks, ai, ui, http             |
@@ -240,7 +240,7 @@ Current baseline (Mar 2026): Valute has moved to a browser-first runtime using `
 | AI tool registration from extensions      | Planned | Dynamic tool registry                     |
 | Dashboard widget rendering                | Planned | Extension-provided React components       |
 | Settings panel rendering                  | Planned | Extension configuration UI                |
-| Extension settings page in Valute         | Planned | List, enable, disable, remove extensions  |
+| Extension settings page in Shikin         | Planned | List, enable, disable, remove extensions  |
 | Extension marketplace (community catalog) | Future  | Browse and install from a registry        |
 | Extension development CLI                 | Future  | Scaffold, validate, package extensions    |
 | Extension auto-updates                    | Future  | Version checking and upgrade flow         |
@@ -253,26 +253,26 @@ Current baseline (Mar 2026): Valute has moved to a browser-first runtime using `
 
 **Goal:** Production-quality UX, performance optimization, accessibility, and release distribution.
 
-| Task                                       | Status  | Notes                                            |
-| ------------------------------------------ | ------- | ------------------------------------------------ |
-| Keyboard shortcuts                         | Planned | Global shortcuts for common actions              |
-| Keyboard navigation (full app)             | Planned | Tab, arrow keys, Enter                           |
-| ARIA attributes and screen reader support  | Planned | shadcn/ui provides a good base                   |
-| Loading states and skeletons               | Planned | Suspense boundaries, skeleton components         |
-| Error states and empty states              | Planned | Per-page error/empty illustrations               |
-| Onboarding flow (first-run wizard)         | Planned | Create first account, set currency, configure AI |
-| Animation and transitions                  | Planned | Page transitions, panel animations               |
-| Performance profiling                      | Planned | React DevTools, Lighthouse                       |
-| Database query optimization                | Planned | Add indexes as needed, batch queries             |
-| Bundle size optimization                   | Planned | Tree-shaking audit, lazy imports                 |
-| Automated E2E tests                        | Done    | 91 Playwright e2e tests (desktop + mobile)       |
-| macOS notarization                         | Planned | Code signing for distribution                    |
-| Windows code signing                       | Planned | Certificate for installer                        |
-| Linux packaging (.deb, .AppImage)          | Done    | Built via GitHub Actions release workflow         |
-| Auto-update system                         | Done    | Tauri updater plugin, checks GitHub Releases     |
-| Crash reporting (opt-in)                   | Future  | Local error logs with optional telemetry         |
-| User documentation / help pages            | Future  | In-app help or external docs site                |
-| Marketing site                             | Future  | Landing page with features and download links    |
+| Task                                      | Status  | Notes                                            |
+| ----------------------------------------- | ------- | ------------------------------------------------ |
+| Keyboard shortcuts                        | Planned | Global shortcuts for common actions              |
+| Keyboard navigation (full app)            | Planned | Tab, arrow keys, Enter                           |
+| ARIA attributes and screen reader support | Planned | shadcn/ui provides a good base                   |
+| Loading states and skeletons              | Planned | Suspense boundaries, skeleton components         |
+| Error states and empty states             | Planned | Per-page error/empty illustrations               |
+| Onboarding flow (first-run wizard)        | Planned | Create first account, set currency, configure AI |
+| Animation and transitions                 | Planned | Page transitions, panel animations               |
+| Performance profiling                     | Planned | React DevTools, Lighthouse                       |
+| Database query optimization               | Planned | Add indexes as needed, batch queries             |
+| Bundle size optimization                  | Planned | Tree-shaking audit, lazy imports                 |
+| Automated E2E tests                       | Done    | 91 Playwright e2e tests (desktop + mobile)       |
+| macOS notarization                        | Planned | Code signing for distribution                    |
+| Windows code signing                      | Planned | Certificate for installer                        |
+| Linux packaging (.deb, .AppImage)         | Done    | Built via GitHub Actions release workflow        |
+| Auto-update system                        | Done    | Tauri updater plugin, checks GitHub Releases     |
+| Crash reporting (opt-in)                  | Future  | Local error logs with optional telemetry         |
+| User documentation / help pages           | Future  | In-app help or external docs site                |
+| Marketing site                            | Future  | Landing page with features and download links    |
 
 **Dependencies:** All previous epics.
 
@@ -297,7 +297,7 @@ Current baseline (Mar 2026): Valute has moved to a browser-first runtime using `
 
 If you want to pick up a task:
 
-1. Check the [Issues](https://github.com/ASF/Valute/issues) page for tasks tagged with the epic label.
+1. Check the [Issues](https://github.com/ASF/Shikin/issues) page for tasks tagged with the epic label.
 2. Comment on the issue to claim it.
 3. Follow the [Contributing Guide](../guides/CONTRIBUTING.md) for development workflow.
 

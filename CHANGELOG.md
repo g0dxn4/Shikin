@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Valute are documented in this file.
+All notable changes to Shikin are documented in this file.
 
 ## [Unreleased] - 2026-03-17
 

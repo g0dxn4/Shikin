@@ -15,10 +15,6 @@ vi.mock('../sidebar', () => ({
   Sidebar: () => <div data-testid="sidebar">Sidebar</div>,
 }))
 
-vi.mock('../ai-panel', () => ({
-  AIPanel: () => <div data-testid="ai-panel">AI Panel</div>,
-}))
-
 vi.mock('@/components/accounts/account-dialog', () => ({
   AccountDialog: () => <div data-testid="account-dialog">Account Dialog</div>,
 }))
@@ -36,12 +32,11 @@ vi.mock('@/components/ui/loading-spinner', () => ({
 }))
 
 describe('AppShell', () => {
-  it('renders sidebar, outlet, and ai-panel', () => {
+  it('renders sidebar and outlet', () => {
     render(<AppShell />)
 
     expect(screen.getByTestId('sidebar')).toBeInTheDocument()
     expect(screen.getByTestId('outlet')).toBeInTheDocument()
-    expect(screen.getByTestId('ai-panel')).toBeInTheDocument()
   })
 
   it('renders both lazy dialogs', async () => {

@@ -3,7 +3,6 @@ import { useUIStore } from '../ui-store'
 
 const defaults = {
   sidebarCollapsed: false,
-  aiPanelOpen: false,
   accountDialogOpen: false,
   editingAccountId: null,
   transactionDialogOpen: false,
@@ -29,28 +28,6 @@ describe('ui-store', () => {
       useUIStore.getState().toggleSidebar()
       useUIStore.getState().toggleSidebar()
       expect(useUIStore.getState().sidebarCollapsed).toBe(false)
-    })
-  })
-
-  describe('AI panel', () => {
-    it('initializes closed', () => {
-      expect(useUIStore.getState().aiPanelOpen).toBe(false)
-    })
-
-    it('toggleAIPanel flips open state', () => {
-      useUIStore.getState().toggleAIPanel()
-      expect(useUIStore.getState().aiPanelOpen).toBe(true)
-    })
-
-    it('setAIPanelOpen(true) opens panel', () => {
-      useUIStore.getState().setAIPanelOpen(true)
-      expect(useUIStore.getState().aiPanelOpen).toBe(true)
-    })
-
-    it('setAIPanelOpen(false) closes panel', () => {
-      useUIStore.setState({ aiPanelOpen: true })
-      useUIStore.getState().setAIPanelOpen(false)
-      expect(useUIStore.getState().aiPanelOpen).toBe(false)
     })
   })
 

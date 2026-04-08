@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { render, screen } from '@testing-library/react'
 import { SettingsPage } from '../settings'
 
 const mockChangeLanguage = vi.fn()
@@ -10,15 +9,6 @@ vi.mock('react-i18next', () => ({
     t: (key: string) => key,
     i18n: { language: 'en', changeLanguage: mockChangeLanguage },
   }),
-}))
-
-vi.mock('@/ai/models', () => ({
-  fetchModels: vi.fn().mockResolvedValue([
-    { id: 'gpt-4o', name: 'GPT-4o' },
-    { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
-  ]),
-  isKeylessProvider: vi.fn().mockReturnValue(false),
-  isStaticModelList: vi.fn().mockReturnValue(false),
 }))
 
 vi.mock('sonner', () => ({
@@ -77,71 +67,15 @@ vi.mock('@/lib/storage', () => ({
   }),
 }))
 
-vi.mock('@/lib/oauth', () => ({
-  startOAuthFlow: vi.fn(),
-  exchangeCodeForToken: vi.fn(),
-  loadPkceState: vi.fn().mockReturnValue(null),
-}))
-
-vi.mock('@/lib/oauth-providers/google', () => ({
-  createGoogleOAuthConfig: vi.fn(),
-  fetchGoogleUserEmail: vi.fn(),
-}))
-
-vi.mock('@/lib/oauth-providers/openai-codex', () => ({
-  createOpenAICodexOAuthConfig: vi.fn(),
-  extractAccountId: vi.fn(),
-}))
-
-const mockLoadSettings = vi.fn()
-const mockSaveSettings = vi.fn()
-const mockSetOAuthTokens = vi.fn()
-const mockSetAuthMode = vi.fn()
-const mockSetOAuthClientId = vi.fn()
-const mockClearOAuth = vi.fn()
-
-vi.mock('@/stores/ai-store', () => ({
-  useAIStore: () => ({
-    provider: 'openai',
-    apiKey: '',
-    model: 'gpt-4o',
-    authMode: 'api_key',
-    oauthEmail: null,
-    oauthAccessToken: null,
-    oauthClientId: '',
-    loadSettings: mockLoadSettings,
-    saveSettings: mockSaveSettings,
-    setOAuthTokens: mockSetOAuthTokens,
-    setAuthMode: mockSetAuthMode,
-    setOAuthClientId: mockSetOAuthClientId,
-    clearOAuth: mockClearOAuth,
-  }),
-}))
-
-function getAISaveButton() {
-  // The AI save button is the first 'actions.save' button (inside the config panel)
-  // The second one is the data API keys save button
-  const buttons = screen.getAllByRole('button', { name: /actions\.save/ })
-  return buttons[0]
-}
-
 describe('SettingsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockSaveSettings.mockResolvedValue(undefined)
   })
 
-  it('calls loadSettings on mount', () => {
-    render(<SettingsPage />)
-
-    expect(mockLoadSettings).toHaveBeenCalled()
-  })
-
-  it('renders General and AI sections', () => {
+  it('renders General section', () => {
     render(<SettingsPage />)
 
     expect(screen.getByText('sections.general')).toBeInTheDocument()
-    expect(screen.getByText('sections.ai')).toBeInTheDocument()
   })
 
   it('renders language selector with SUPPORTED_LANGUAGES options', () => {
@@ -152,85 +86,9 @@ describe('SettingsPage', () => {
     expect(screen.getByText('Español')).toBeInTheDocument()
   })
 
-  it('renders provider cards', () => {
+  it('renders theme settings', () => {
     render(<SettingsPage />)
 
-    expect(screen.getAllByText('OpenAI').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText('Anthropic')).toBeInTheDocument()
-    expect(screen.getByText('Ollama')).toBeInTheDocument()
-    expect(screen.getByText('Alibaba Qwen')).toBeInTheDocument()
-  })
-
-  it('shows config panel when provider is selected', () => {
-    render(<SettingsPage />)
-
-    // OpenAI is selected by default — shows auth toggle for OAuth-capable providers
-    expect(screen.getByText('ai.apiKey')).toBeInTheDocument()
-    expect(screen.getByText('ai.model')).toBeInTheDocument()
-  })
-
-  it('shows auth mode toggle for OAuth-capable providers', () => {
-    render(<SettingsPage />)
-
-    // OpenAI supports OAuth — the config panel has the auth toggle buttons
-    // Use getAllByRole since provider cards also contain text
-    const apiKeyButtons = screen.getAllByRole('button', { name: /^API Key$/i })
-    expect(apiKeyButtons.length).toBeGreaterThanOrEqual(1)
-    const signInButtons = screen.getAllByRole('button', { name: /^Sign In$/i })
-    expect(signInButtons.length).toBeGreaterThanOrEqual(1)
-  })
-
-  it('save button calls saveSettings', async () => {
-    const user = userEvent.setup()
-    render(<SettingsPage />)
-
-    // Wait for models to load and re-render to settle
-    await waitFor(() => {
-      expect(getAISaveButton()).toBeInTheDocument()
-    })
-
-    await user.click(getAISaveButton())
-
-    await waitFor(() => {
-      expect(mockSaveSettings).toHaveBeenCalled()
-    })
-  })
-
-  it('shows success toast on save', async () => {
-    const { toast } = await import('sonner')
-    const user = userEvent.setup()
-    render(<SettingsPage />)
-
-    await waitFor(() => {
-      expect(getAISaveButton()).toBeInTheDocument()
-    })
-
-    await user.click(getAISaveButton())
-
-    await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith('status.success')
-    })
-  })
-
-  it('shows error toast when saveSettings rejects', async () => {
-    const { toast } = await import('sonner')
-    const user = userEvent.setup()
-    mockSaveSettings.mockRejectedValueOnce(new Error('fail'))
-    render(<SettingsPage />)
-
-    await user.click(getAISaveButton())
-
-    await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith('status.error')
-    })
-  })
-
-  it('shows Sign In tab content when clicked for OpenAI', async () => {
-    const user = userEvent.setup()
-    render(<SettingsPage />)
-
-    await user.click(screen.getByRole('button', { name: /Sign In/i }))
-
-    expect(screen.getByRole('button', { name: /Sign in with ChatGPT/i })).toBeInTheDocument()
+    expect(screen.getByTestId('theme-settings')).toBeInTheDocument()
   })
 })

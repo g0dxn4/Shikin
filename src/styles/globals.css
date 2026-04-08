@@ -11,7 +11,7 @@ body,
 }
 
 @theme {
-  /* ASF Design System — Valute */
+  /* ASF Design System — Shikin */
   --color-background: #020202;
   --color-foreground: #ffffff;
 
@@ -270,8 +270,12 @@ body,
 
 /* Animations */
 @keyframes skeleton-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 @keyframes fade-in {

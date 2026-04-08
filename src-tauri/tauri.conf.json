@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Valute",
+  "productName": "Shikin",
   "version": "0.1.0",
-  "identifier": "com.asf.valute",
+  "identifier": "com.asf.shikin",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Valute",
+        "title": "Shikin",
         "width": 1200,
         "height": 800,
         "minWidth": 900,
@@ -42,7 +42,7 @@
   },
   "plugins": {
     "updater": {
-      "endpoints": ["https://github.com/g0dxn4/Valute/releases/latest/download/latest.json"],
+      "endpoints": ["https://github.com/g0dxn4/Shikin/releases/latest/download/latest.json"],
       "pubkey": "RWTYs/2vlDrptSWUk+dOpFeHiuAgYeoHxuvvjC68M3bQ1ETEk1UHPxnP"
     }
   }

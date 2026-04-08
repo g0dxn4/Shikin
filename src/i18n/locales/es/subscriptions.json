@@ -5,7 +5,7 @@
     "disconnected": "Subby no conectado",
     "configure": "Configurar en Ajustes",
     "setupTitle": "Conectar a Subby",
-    "setupDescription": "Valute se integra con Subby para rastrear tus suscripciones.",
+    "setupDescription": "Shikin se integra con Subby para rastrear tus suscripciones.",
     "step1": "Instalar Subby del suite ASF",
     "step2": "Asegúrate de que Subby se haya ejecutado al menos una vez",
     "step3": "Las suscripciones se cargarán automáticamente de la base de datos de Subby"

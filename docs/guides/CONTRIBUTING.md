@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for your interest in contributing to Valute. This document covers the development environment setup, code conventions, testing, and the pull request process.
+Thank you for your interest in contributing to Shikin. This document covers the development environment setup, code conventions, testing, and the pull request process.
 
 ---
 
@@ -23,8 +23,8 @@ The primary workflow is browser-first. Tauri system dependencies are only requir
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/ASF/Valute.git
-cd Valute
+git clone https://github.com/ASF/Shikin.git
+cd Shikin
 
 # 2. Install dependencies
 pnpm install
@@ -296,7 +296,7 @@ vi.mock('@tauri-apps/plugin-sql', () => ({
 
 ## Internationalization (i18n)
 
-Valute supports English and Spanish. Translations live in `src/i18n/locales/`:
+Shikin supports English and Spanish. Translations live in `src/i18n/locales/`:
 
 ```
 src/i18n/locales/

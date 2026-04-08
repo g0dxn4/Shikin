@@ -26,13 +26,11 @@ vi.mock('react-router', () => ({
 
 const mockFetchAccounts = vi.fn()
 const mockFetchTransactions = vi.fn()
-const mockSetAIPanelOpen = vi.fn()
 const mockOpenAccountDialog = vi.fn()
 const mockOpenTransactionDialog = vi.fn()
 
 vi.mock('@/stores/ui-store', () => ({
   useUIStore: () => ({
-    setAIPanelOpen: mockSetAIPanelOpen,
     openAccountDialog: mockOpenAccountDialog,
     openTransactionDialog: mockOpenTransactionDialog,
   }),
@@ -105,15 +103,6 @@ describe('Dashboard', () => {
       await user.click(screen.getByText('empty.addAccount'))
 
       expect(mockOpenAccountDialog).toHaveBeenCalled()
-    })
-
-    it('setAIPanelOpen called on "Ask Ivy" CTA', async () => {
-      const user = userEvent.setup()
-      render(<Dashboard />)
-
-      await user.click(screen.getByText('empty.askAI'))
-
-      expect(mockSetAIPanelOpen).toHaveBeenCalledWith(true)
     })
   })
 

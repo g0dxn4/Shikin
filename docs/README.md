@@ -1,16 +1,16 @@
-# Valute Documentation
+# Shikin Documentation
 
 ## Current vs Historical Docs
 
 - **Current implementation docs**: Use Guides + Planning + Reference docs first. These reflect the browser-first runtime (`sql.js` + IndexedDB + localStorage).
-- **Historical docs**: `reference/valute-research.md` is archival context from early planning and may not match current implementation details.
+- **Historical docs**: `reference/shikin-research.md` is archival context from early planning and may not match current implementation details.
 
 ## Guides
 
-| Document                               | Description                                                                         |
-| -------------------------------------- | ----------------------------------------------------------------------------------- |
-| [Architecture](guides/ARCHITECTURE.md) | Browser runtime architecture, 5 layers, 19 stores, 27 services, AI tool flow       |
-| [Contributing](guides/CONTRIBUTING.md) | Dev setup, code conventions, testing, PR process                                    |
+| Document                               | Description                                                                  |
+| -------------------------------------- | ---------------------------------------------------------------------------- |
+| [Architecture](guides/ARCHITECTURE.md) | Browser runtime architecture, 5 layers, 19 stores, 27 services, AI tool flow |
+| [Contributing](guides/CONTRIBUTING.md) | Dev setup, code conventions, testing, PR process                             |
 
 ## Planning
 
@@ -21,14 +21,14 @@
 
 ## Reference
 
-| Document                                 | Description                                                            |
-| ---------------------------------------- | ---------------------------------------------------------------------- |
-| [Database](reference/DATABASE.md)        | 21-table SQLite schema, conventions, 10 migrations, example queries    |
-| [AI Tools](reference/AI-TOOLS.md)        | 43 tools across 14 categories, system prompt, provider support         |
-| [API](reference/API.md)                  | Local HTTP API specification (planned)                                 |
-| [Extensions](reference/EXTENSIONS.md)    | Plugin system design, manifest format, permissions, hooks              |
-| [Research](reference/valute-research.md) | Historical design research and early strategy notes                    |
-| [Changelog](../CHANGELOG.md)            | Recent shipped changes and release notes                               |
+| Document                                 | Description                                                         |
+| ---------------------------------------- | ------------------------------------------------------------------- |
+| [Database](reference/DATABASE.md)        | 21-table SQLite schema, conventions, 10 migrations, example queries |
+| [AI Tools](reference/AI-TOOLS.md)        | 43 tools across 14 categories, system prompt, provider support      |
+| [API](reference/API.md)                  | Local HTTP API specification (planned)                              |
+| [Extensions](reference/EXTENSIONS.md)    | Plugin system design, manifest format, permissions, hooks           |
+| [Research](reference/shikin-research.md) | Historical design research and early strategy notes                 |
+| [Changelog](../CHANGELOG.md)             | Recent shipped changes and release notes                            |
 
 ## Quick Stats
 

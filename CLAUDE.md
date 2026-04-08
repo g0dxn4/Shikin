@@ -1,18 +1,25 @@
-# Valute — CLAUDE.md
+# Shikin — CLAUDE.md
 
 ## Project Overview
 
-AI-first, local-first personal finance manager. Tauri v2 desktop app + browser-first React SPA.
+Local-first personal finance engine. Tauri v2 desktop app + browser-first React SPA. AI capabilities exposed via CLI and MCP server — no built-in AI chat.
 
-## Tech Stack
+## Architecture
+
+```
+shikin/
+  src/           # React frontend (dashboard, transactions, accounts, etc.)
+  src-tauri/     # Tauri v2 desktop shell (Rust)
+  cli/           # CLI + MCP server (Node.js, better-sqlite3)
+```
 
 - **Frontend**: React 19 + TypeScript + Tailwind v4 + shadcn/ui
 - **Desktop**: Tauri v2 (Rust)
-- **Database**: SQLite (sql.js in browser, tauri-plugin-sql in desktop)
-- **AI**: Vercel AI SDK v6 with ToolLoopAgent + 43 financial tools
+- **Database**: SQLite via shared storage (`~/.local/share/com.asf.shikin/`)
+- **CLI/MCP**: 43 financial tools exposed via commander CLI + MCP server
 - **State**: Zustand stores
 - **Testing**: Vitest + Testing Library + Playwright (e2e)
-- **Package Manager**: pnpm
+- **Package Manager**: pnpm (root) + npm (cli/)
 
 ## Development
 
@@ -20,61 +27,66 @@ AI-first, local-first personal finance manager. Tauri v2 desktop app + browser-f
 pnpm install
 pnpm dev              # Vite :1420 + OAuth server :1455 + data-server :1480
 pnpm build:tauri      # Build Tauri desktop binary
-pnpm test:run         # Unit tests (426 tests, 50 files)
+pnpm test:run         # Unit tests (339 tests, 40 files)
 pnpm lint && pnpm typecheck  # Lint + type check
 ```
+
+## CLI & MCP Server
+
+```bash
+cd cli && npm install
+
+# CLI usage
+npx tsx src/cli.ts list-accounts
+npx tsx src/cli.ts add-transaction --amount 5.50 --type expense --description "Coffee"
+npx tsx src/cli.ts get-balance-overview
+
+# MCP server (for Claude Code, Claude Desktop, Cursor, etc.)
+npx tsx src/mcp-server.ts
+```
+
+### MCP Configuration (Claude Desktop)
+
+```json
+{
+  "mcpServers": {
+    "shikin": {
+      "command": "npx",
+      "args": ["tsx", "/path/to/Shikin/cli/src/mcp-server.ts"]
+    }
+  }
+}
+```
+
+### 43 Tools Available
+
+Transaction, Account, Category, Analytics, Budget, Goal, Subscription, Investment, Recurring, Memory, Notebook, Intelligence, Debt, Currency tools — all accessible via CLI commands or MCP tool calls.
 
 ## Building & Installing
 
 ```bash
 pnpm build:tauri
-# Outputs:
-#   src-tauri/target/release/bundle/deb/Valute_X.X.X_amd64.deb
-#   src-tauri/target/release/bundle/appimage/Valute_X.X.X_amd64.AppImage
-sudo dpkg -i src-tauri/target/release/bundle/deb/Valute_*.deb
+# Outputs .deb + .AppImage (Linux), .dmg (macOS), .msi (Windows)
+sudo dpkg -i src-tauri/target/release/bundle/deb/Shikin_*.deb
 ```
 
 ## Releasing & Auto-Updates
 
-Tauri updater plugin is configured for automatic update detection via GitHub Releases.
-
-### How to push an update
-
-1. Bump `version` in both `src-tauri/tauri.conf.json` and `package.json`
-2. Commit the version bump
-3. Tag and push:
-   ```bash
-   git tag vX.X.X
-   git push && git push --tags
-   ```
-4. GitHub Actions (`.github/workflows/release.yml`) builds for Linux, macOS (arm64 + x86_64), and Windows
-5. `tauri-apps/tauri-action` signs the binaries and generates `latest.json` manifest
-6. Release is auto-published (not draft)
-
-### How users receive updates
-
-- On app startup, the updater checks `https://github.com/g0dxn4/Valute/releases/latest/download/latest.json`
-- If a newer version exists, a toast notification appears with "Restart" button
-- Update downloads and installs in the background
+1. Bump `version` in `src-tauri/tauri.conf.json` and `package.json`
+2. Tag and push: `git tag vX.X.X && git push --tags`
+3. GitHub Actions builds, signs, publishes to GitHub Releases
+4. Installed apps detect updates on startup via toast notification
 
 ### Signing keys
 
-- Private key: `~/.tauri/valute.key` (never commit this)
-- Public key: embedded in `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`
+- Private key: `~/.tauri/shikin.key` (never commit)
+- Public key: in `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`
 - GitHub secrets: `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 
 ## CI/CD
 
-- **CI** (`.github/workflows/ci.yml`): lint → typecheck → unit tests → build → e2e (Playwright)
-  - Triggers: push to `main`, pull requests
+- **CI** (`.github/workflows/ci.yml`): lint → typecheck → unit tests → build → e2e
 - **Release** (`.github/workflows/release.yml`): lint → typecheck → tests → cross-platform Tauri build + sign + publish
-  - Triggers: `v*` tags
-
-## AI Providers (10)
-
-OpenAI (OAuth + API key), Anthropic, Google Gemini (OAuth + API key), Mistral, xAI, Groq, DeepSeek, Alibaba Qwen, OpenRouter, Ollama (local).
-
-Model lists fetched dynamically from models.dev with static fallbacks in `src/ai/models.ts`.
 
 ## Key Conventions
 
@@ -84,9 +96,8 @@ Model lists fetched dynamically from models.dev with static fallbacks in `src/ai
 - Imports: use `@/` path alias (maps to `src/`)
 - React Router v7: import from `'react-router'` (not `'react-router-dom'`)
 - Tailwind v4: CSS-first `@theme` config, no `tailwind.config.js`
-- AI SDK v6: `tool()` uses `inputSchema` (not `parameters`), wrap with `zodSchema()`
 - Forced dark mode (no light/dark toggle)
-- AI assistant is named **Ivy**
+- SQL uses `$1, $2` positional params (converted to `?` for better-sqlite3)
 
 ## Design System (ASF)
 
@@ -98,6 +109,5 @@ Model lists fetched dynamically from models.dev with static fallbacks in `src/ai
 ## Testing Notes
 
 - Mock `@/lib/database` with `mockReset()` before `mockImplementation()`
-- AI SDK tool `execute` returns union type with `AsyncIterable` — cast in tests
 - Use `vi.hoisted()` for mock objects referenced in `vi.mock()` factories
 - i18n mock: `useTranslation: () => ({ t: (key) => key, i18n: { language: 'en', changeLanguage: vi.fn() } })`

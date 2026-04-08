@@ -1,4 +1,4 @@
--- Valute Migration 002: AI Memories
+-- Shikin Migration 002: AI Memories
 -- Persistent memory system for Val (AI assistant)
 
 CREATE TABLE IF NOT EXISTS ai_memories (

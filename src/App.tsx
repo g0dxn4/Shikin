@@ -4,7 +4,6 @@ import { Toaster } from 'sonner'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { AppShell } from '@/components/layout/app-shell'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
-import { useAIStore } from '@/stores/ai-store'
 import { useRecurringStore } from '@/stores/recurring-store'
 import { useCurrencyStore } from '@/stores/currency-store'
 import { useAccountStore } from '@/stores/account-store'
@@ -42,12 +41,8 @@ const SpendingInsights = lazy(() =>
 const SettingsPage = lazy(() =>
   import('@/pages/settings').then((m) => ({ default: m.SettingsPage }))
 )
-const OAuthCallback = lazy(() =>
-  import('@/pages/oauth-callback').then((m) => ({ default: m.OAuthCallback }))
-)
 
 export default function App() {
-  const loadSettings = useAIStore((s) => s.loadSettings)
   const materializeTransactions = useRecurringStore((s) => s.materializeTransactions)
   const autoRefreshRates = useCurrencyStore((s) => s.autoRefreshIfStale)
   const fetchAccounts = useAccountStore((s) => s.fetch)
@@ -55,7 +50,6 @@ export default function App() {
   const refreshNetWorth = useNetWorthStore((s) => s.refresh)
 
   useEffect(() => {
-    loadSettings()
     initPriceScheduler()
     // Auto-materialize due recurring transactions on startup
     materializeTransactions().catch((err) =>
@@ -73,14 +67,7 @@ export default function App() {
       })
       .catch(console.warn)
     return () => stopPriceScheduler()
-  }, [
-    loadSettings,
-    materializeTransactions,
-    autoRefreshRates,
-    fetchAccounts,
-    snapshotBalances,
-    refreshNetWorth,
-  ])
+  }, [materializeTransactions, autoRefreshRates, fetchAccounts, snapshotBalances, refreshNetWorth])
 
   return (
     <ErrorBoundary>
@@ -103,8 +90,6 @@ export default function App() {
               <Route path="/memories" element={<Memories />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
-            <Route path="/oauth/callback" element={<OAuthCallback />} />
-            <Route path="/auth/callback" element={<OAuthCallback />} />
           </Routes>
         </Suspense>
       </BrowserRouter>

@@ -20,7 +20,7 @@ async function getTauriDb(): Promise<TauriDatabase> {
   if (!tauriInitPromise) {
     tauriInitPromise = (async () => {
       const { default: Database } = await import('@tauri-apps/plugin-sql')
-      const database = await Database.load('sqlite:valute.db')
+      const database = await Database.load('sqlite:shikin.db')
       tauriDb = database as unknown as TauriDatabase
       await runTauriMigrations(tauriDb)
       return tauriDb
@@ -441,7 +441,7 @@ export async function exportDatabaseSnapshot(): Promise<Uint8Array> {
       readFile: (path: string) => Promise<Uint8Array>
     }>)
     const dataDir = await pathMod.appDataDir()
-    const dbPath = `${dataDir}valute.db`
+    const dbPath = `${dataDir}shikin.db`
     return await fsMod.readFile(dbPath)
   }
 
@@ -470,7 +470,7 @@ export async function importDatabaseSnapshot(data: Uint8Array): Promise<void> {
       writeFile: (path: string, data: Uint8Array) => Promise<void>
     }>)
     const dataDir = await pathMod.appDataDir()
-    const dbPath = `${dataDir}valute.db`
+    const dbPath = `${dataDir}shikin.db`
     await fsMod.writeFile(dbPath, data)
     return
   }

@@ -1,12 +1,12 @@
 # Architecture
 
-This document describes Valute's browser-first architecture: runtime layers, data flow, state boundaries, and major modules.
+This document describes Shikin's browser-first architecture: runtime layers, data flow, state boundaries, and major modules.
 
 ---
 
 ## High-Level Overview
 
-Valute runs as a React SPA in the browser. Data remains local by combining:
+Shikin runs as a React SPA in the browser. Data remains local by combining:
 
 - **SQLite in memory (`sql.js`)** for relational querying (21 tables).
 - **IndexedDB** for persistent database snapshots.
@@ -38,20 +38,20 @@ graph TB
 - `src/components/layout/` provides shared frame components (sidebar, bottom nav, AI panel).
 - `src/pages/` hosts 18 page files with 12 routed pages:
 
-| Route            | Page              | Description                                      |
-| ---------------- | ----------------- | ------------------------------------------------ |
-| `/`              | Dashboard         | Overview with charts, alerts, health score, tips |
-| `/transactions`  | Transactions      | Tabbed list (transactions + recurring), import   |
-| `/accounts`      | Accounts          | Account management with credit card tracking     |
-| `/budgets`       | Budgets           | Budget creation and progress monitoring          |
-| `/goals`         | Goals             | Savings goals with progress rings                |
-| `/investments`   | Investments       | Portfolio with price charts and allocation       |
-| `/subscriptions` | Subscriptions     | Recurring service tracking                       |
-| `/debt-payoff`   | Debt Payoff       | Snowball vs avalanche planner with charts        |
-| `/forecast`      | Forecast          | Cash flow projections (30/60/90 day)             |
-| `/notebook`      | Notebook          | Markdown notes and portfolio reviews             |
-| `/reports`       | Reports           | Monthly/annual reports with PDF export           |
-| `/settings`      | Settings          | AI provider, currency, category rules, data      |
+| Route            | Page          | Description                                      |
+| ---------------- | ------------- | ------------------------------------------------ |
+| `/`              | Dashboard     | Overview with charts, alerts, health score, tips |
+| `/transactions`  | Transactions  | Tabbed list (transactions + recurring), import   |
+| `/accounts`      | Accounts      | Account management with credit card tracking     |
+| `/budgets`       | Budgets       | Budget creation and progress monitoring          |
+| `/goals`         | Goals         | Savings goals with progress rings                |
+| `/investments`   | Investments   | Portfolio with price charts and allocation       |
+| `/subscriptions` | Subscriptions | Recurring service tracking                       |
+| `/debt-payoff`   | Debt Payoff   | Snowball vs avalanche planner with charts        |
+| `/forecast`      | Forecast      | Cash flow projections (30/60/90 day)             |
+| `/notebook`      | Notebook      | Markdown notes and portfolio reviews             |
+| `/reports`       | Reports       | Monthly/annual reports with PDF export           |
+| `/settings`      | Settings      | AI provider, currency, category rules, data      |
 
 Additional unrouted pages: onboarding, net-worth, spending-heatmap, ai-insights, category-management, bill-calendar.
 
@@ -59,54 +59,54 @@ Additional unrouted pages: onboarding, net-worth, spending-heatmap, ai-insights,
 
 19 Zustand stores under `src/stores/` isolate feature state:
 
-| Store                 | Purpose                                            |
-| --------------------- | -------------------------------------------------- |
-| `transaction-store`   | Transaction CRUD, split tracking, auto-categorize  |
-| `account-store`       | Account CRUD, balance management                   |
-| `budget-store`        | Budget tracking with period calculations           |
-| `category-store`      | Category management                                |
-| `goal-store`          | Savings goals with progress computation            |
-| `investment-store`    | Investment CRUD, portfolio summary, price history   |
-| `subscription-store`  | Subscription tracking                              |
-| `recurring-store`     | Recurring rules, materialization on startup         |
-| `debt-store`          | Debt payoff calculations                           |
-| `forecast-store`      | Cash flow forecast generation                      |
-| `anomaly-store`       | Anomaly scanning and dismissals                    |
-| `health-store`        | Financial health score with localStorage history   |
-| `recap-store`         | Spending recap generation and history              |
-| `categorization-store`| Auto-categorization rule management                |
-| `currency-store`      | Exchange rates, preferred currency                 |
-| `achievement-store`   | Streaks and badge tracking                         |
-| `report-store`        | Report generation and PDF/CSV export               |
-| `ai-store`            | Provider settings, model config, OAuth             |
-| `conversation-store`  | Chat history persistence                           |
-| `ui-store`            | Panel/dialog state, layout toggles                 |
+| Store                  | Purpose                                           |
+| ---------------------- | ------------------------------------------------- |
+| `transaction-store`    | Transaction CRUD, split tracking, auto-categorize |
+| `account-store`        | Account CRUD, balance management                  |
+| `budget-store`         | Budget tracking with period calculations          |
+| `category-store`       | Category management                               |
+| `goal-store`           | Savings goals with progress computation           |
+| `investment-store`     | Investment CRUD, portfolio summary, price history |
+| `subscription-store`   | Subscription tracking                             |
+| `recurring-store`      | Recurring rules, materialization on startup       |
+| `debt-store`           | Debt payoff calculations                          |
+| `forecast-store`       | Cash flow forecast generation                     |
+| `anomaly-store`        | Anomaly scanning and dismissals                   |
+| `health-store`         | Financial health score with localStorage history  |
+| `recap-store`          | Spending recap generation and history             |
+| `categorization-store` | Auto-categorization rule management               |
+| `currency-store`       | Exchange rates, preferred currency                |
+| `achievement-store`    | Streaks and badge tracking                        |
+| `report-store`         | Report generation and PDF/CSV export              |
+| `ai-store`             | Provider settings, model config, OAuth            |
+| `conversation-store`   | Chat history persistence                          |
+| `ui-store`             | Panel/dialog state, layout toggles                |
 
 ### Layer 3: Services and Utilities
 
 27 service files under `src/lib/` provide domain logic:
 
-| Service                  | Purpose                                              |
-| ------------------------ | ---------------------------------------------------- |
-| `database.ts`            | sql.js init, 10 migrations, query/execute, IndexedDB |
-| `anomaly-service.ts`     | 5 anomaly detection algorithms                       |
-| `forecast-service.ts`    | Cash flow projection with confidence intervals       |
-| `health-score-service.ts`| 5-dimension composite health score                   |
-| `recap-service.ts`       | Weekly/monthly natural language summaries             |
-| `debt-service.ts`        | Snowball/avalanche payoff calculations               |
-| `education-service.ts`   | 15 financial education tips across 5 topics          |
-| `auto-categorize.ts`     | 3-tier category suggestion (exact/partial/historical)|
-| `split-service.ts`       | Transaction split management                         |
-| `statement-parser.ts`    | OFX/QFX/QIF bank statement parsing                   |
-| `statement-import.ts`    | Statement import with duplicate detection            |
-| `exchange-rate-service.ts`| frankfurter.app rate fetching                       |
-| `report-service.ts`      | Monthly/annual report aggregation                    |
-| `pdf-generator.ts`       | Dark-themed PDF generation via jsPDF                 |
-| `achievement-service.ts` | 8 achievements + streak tracking                     |
-| `price-service.ts`       | Alpha Vantage (stocks) + CoinGecko (crypto)          |
-| `notebook.ts`            | Markdown note filesystem operations                  |
-| `news-service.ts`        | Finnhub + NewsAPI financial news                     |
-| `money.ts`               | toCentavos/fromCentavos/formatMoney                  |
+| Service                    | Purpose                                               |
+| -------------------------- | ----------------------------------------------------- |
+| `database.ts`              | sql.js init, 10 migrations, query/execute, IndexedDB  |
+| `anomaly-service.ts`       | 5 anomaly detection algorithms                        |
+| `forecast-service.ts`      | Cash flow projection with confidence intervals        |
+| `health-score-service.ts`  | 5-dimension composite health score                    |
+| `recap-service.ts`         | Weekly/monthly natural language summaries             |
+| `debt-service.ts`          | Snowball/avalanche payoff calculations                |
+| `education-service.ts`     | 15 financial education tips across 5 topics           |
+| `auto-categorize.ts`       | 3-tier category suggestion (exact/partial/historical) |
+| `split-service.ts`         | Transaction split management                          |
+| `statement-parser.ts`      | OFX/QFX/QIF bank statement parsing                    |
+| `statement-import.ts`      | Statement import with duplicate detection             |
+| `exchange-rate-service.ts` | frankfurter.app rate fetching                         |
+| `report-service.ts`        | Monthly/annual report aggregation                     |
+| `pdf-generator.ts`         | Dark-themed PDF generation via jsPDF                  |
+| `achievement-service.ts`   | 8 achievements + streak tracking                      |
+| `price-service.ts`         | Alpha Vantage (stocks) + CoinGecko (crypto)           |
+| `notebook.ts`              | Markdown note filesystem operations                   |
+| `news-service.ts`          | Finnhub + NewsAPI financial news                      |
+| `money.ts`                 | toCentavos/fromCentavos/formatMoney                   |
 
 ### Layer 4: Local Persistence
 
@@ -194,16 +194,16 @@ The dashboard aggregates data from 7 stores and displays:
 
 ## Design System (ASF)
 
-| Element     | Value                                  |
-| ----------- | -------------------------------------- |
-| Background  | `#020202`                              |
-| Surface     | `#0a0a0a`                              |
-| Accent      | `#bf5af2`                              |
-| Headings    | Space Grotesk                          |
-| Body        | Outfit                                 |
-| Mono        | Space Mono                             |
-| Buttons     | 0px radius (brutalist)                 |
-| Badges      | 9999px radius (pill)                   |
-| Cards       | 12px radius, glass morphism            |
-| Glass       | rgba(10,10,10,0.6) + blur(12px)       |
-| Mode        | Forced dark (no light/dark toggle)     |
+| Element    | Value                              |
+| ---------- | ---------------------------------- |
+| Background | `#020202`                          |
+| Surface    | `#0a0a0a`                          |
+| Accent     | `#bf5af2`                          |
+| Headings   | Space Grotesk                      |
+| Body       | Outfit                             |
+| Mono       | Space Mono                         |
+| Buttons    | 0px radius (brutalist)             |
+| Badges     | 9999px radius (pill)               |
+| Cards      | 12px radius, glass morphism        |
+| Glass      | rgba(10,10,10,0.6) + blur(12px)    |
+| Mode       | Forced dark (no light/dark toggle) |

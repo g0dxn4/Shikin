@@ -31,16 +31,11 @@ export function NetWorth() {
     history,
     isLoading,
     refresh,
-    loadHistory,
   } = useNetWorthStore()
 
   useEffect(() => {
     refresh(period)
-  }, [])
-
-  useEffect(() => {
-    loadHistory(period)
-  }, [period])
+  }, [period, refresh])
 
   // Calculate change from first history point
   const firstPoint = history.length > 0 ? history[0] : null

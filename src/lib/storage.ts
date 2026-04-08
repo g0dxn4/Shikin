@@ -17,9 +17,7 @@ function createBrowserStore(): Store {
   return {
     async get(key: string): Promise<unknown> {
       try {
-        const res = await fetch(
-          `${DATA_SERVER_URL}/api/store/${encodeURIComponent(key)}`,
-        )
+        const res = await fetch(`${DATA_SERVER_URL}/api/store/${encodeURIComponent(key)}`)
         if (!res.ok) return null
         const data = await res.json()
         return data.value ?? null
@@ -31,14 +29,11 @@ function createBrowserStore(): Store {
 
     async set(key: string, value: unknown): Promise<void> {
       try {
-        await fetch(
-          `${DATA_SERVER_URL}/api/store/${encodeURIComponent(key)}`,
-          {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ value }),
-          },
-        )
+        await fetch(`${DATA_SERVER_URL}/api/store/${encodeURIComponent(key)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value }),
+        })
       } catch {
         // Data server unreachable — silently drop the write
       }
@@ -52,10 +47,19 @@ function createBrowserStore(): Store {
 
 async function createTauriStore(path?: string): Promise<Store> {
   // Dynamic import via Function() to avoid TS2307 when plugin-store types aren't installed
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  interface TauriStoreModule {
+    load: (path: string, opts?: { autoSave?: boolean }) => Promise<TauriStore>
+  }
+
+  interface TauriStore {
+    get: (key: string) => Promise<unknown> | unknown
+    set: (key: string, value: unknown) => Promise<void> | void
+    save: () => Promise<void> | void
+  }
+
   const { load: loadStore } = (await Function(
-    'return import("@tauri-apps/plugin-store")',
-  )()) as { load: (path: string, opts?: { autoSave?: boolean }) => Promise<any> }
+    'return import("@tauri-apps/plugin-store")'
+  )()) as TauriStoreModule
   const store = await loadStore(path ?? 'settings.json', { autoSave: true })
   return {
     async get(key: string) {

@@ -15,18 +15,6 @@ vi.mock('../sidebar', () => ({
   Sidebar: () => <div data-testid="sidebar">Sidebar</div>,
 }))
 
-vi.mock('@/components/accounts/account-dialog', () => ({
-  AccountDialog: () => <div data-testid="account-dialog">Account Dialog</div>,
-}))
-
-vi.mock('@/components/transactions/transaction-dialog', () => ({
-  TransactionDialog: () => <div data-testid="transaction-dialog">Transaction Dialog</div>,
-}))
-
-vi.mock('@/components/budgets/budget-dialog', () => ({
-  BudgetDialog: () => <div data-testid="budget-dialog">Budget Dialog</div>,
-}))
-
 vi.mock('@/components/ui/loading-spinner', () => ({
   LoadingSpinner: () => <div data-testid="loading-spinner">Loading...</div>,
 }))
@@ -39,12 +27,10 @@ describe('AppShell', () => {
     expect(screen.getByTestId('outlet')).toBeInTheDocument()
   })
 
-  it('renders both lazy dialogs', async () => {
+  it('renders bottom navigation', () => {
     render(<AppShell />)
 
-    expect(await screen.findByTestId('account-dialog')).toBeInTheDocument()
-    expect(await screen.findByTestId('transaction-dialog')).toBeInTheDocument()
-    expect(await screen.findByTestId('budget-dialog')).toBeInTheDocument()
+    expect(screen.getByTestId('bottom-nav')).toBeInTheDocument()
   })
 
   it('has correct layout structure', () => {

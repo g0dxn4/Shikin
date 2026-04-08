@@ -65,12 +65,64 @@ vi.mock('@/stores/forecast-store', () => ({
   }),
 }))
 
+vi.mock('@/stores/anomaly-store', () => ({
+  useAnomalyStore: () => ({
+    isLoading: false,
+    scanForAnomalies: vi.fn(),
+    getActiveAnomalies: () => [],
+    dismissAnomaly: vi.fn(),
+  }),
+}))
+
 const mockFetchGoals = vi.fn()
 
 vi.mock('@/stores/goal-store', () => ({
   useGoalStore: () => ({
     goals: [],
     fetch: mockFetchGoals,
+  }),
+}))
+
+vi.mock('@/stores/recap-store', () => ({
+  useRecapStore: () => ({
+    currentRecap: null,
+    isLoading: false,
+    generateWeekly: vi.fn(),
+    loadLatestWeekly: vi.fn(),
+  }),
+}))
+
+vi.mock('@/stores/currency-store', () => ({
+  useCurrencyStore: () => ({
+    preferredCurrency: 'USD',
+    getTotalBalanceInPreferred: (accounts: Array<{ balance: number }>) =>
+      accounts.reduce((sum, account) => sum + account.balance, 0),
+    loadRates: vi.fn(),
+  }),
+}))
+
+vi.mock('@/stores/achievement-store', () => ({
+  useAchievementStore: () => ({
+    currentStreak: 0,
+    longestStreak: 0,
+    newlyUnlocked: [],
+    checkForNew: vi.fn(),
+    dismissNew: vi.fn(),
+  }),
+}))
+
+vi.mock('@/stores/health-store', () => ({
+  useHealthStore: () => ({
+    score: null,
+    isLoading: false,
+    calculateScore: vi.fn(),
+  }),
+}))
+
+vi.mock('@/stores/spending-insights-store', () => ({
+  useSpendingInsightsStore: () => ({
+    insights: [],
+    loadComparisons: vi.fn(),
   }),
 }))
 

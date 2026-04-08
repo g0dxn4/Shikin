@@ -36,7 +36,7 @@ export function SpendingInsights() {
 
   useEffect(() => {
     loadComparisons()
-  }, [])
+  }, [loadComparisons])
 
   if (isLoading) {
     return (

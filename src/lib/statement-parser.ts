@@ -19,7 +19,8 @@ export function parseOFX(content: string): ParsedTransaction[] {
 
   // OFX can be SGML (no closing tags) or XML. We handle both.
   // Split on STMTTRN blocks
-  const stmtTrnRegex = /<STMTTRN>([\s\S]*?)(?:<\/STMTTRN>|(?=<STMTTRN>|<\/BANKTRANLIST|<\/STMTRS))/gi
+  const stmtTrnRegex =
+    /<STMTTRN>([\s\S]*?)(?:<\/STMTTRN>|(?=<STMTTRN>|<\/BANKTRANLIST|<\/STMTRS))/gi
   const blocks = content.matchAll(stmtTrnRegex)
 
   for (const match of blocks) {
@@ -37,13 +38,9 @@ export function parseOFX(content: string): ParsedTransaction[] {
     if (isNaN(amount)) continue
 
     // Use NAME if available, fall back to MEMO, combine if both exist
-    let description = ''
-    if (name && memo && name !== memo) {
-      description = `${name} - ${memo}`
-    } else {
-      description = name || memo || 'Unknown'
-    }
-    description = description.trim()
+    const description = (
+      name && memo && name !== memo ? `${name} - ${memo}` : name || memo || 'Unknown'
+    ).trim()
 
     transactions.push({
       date,
@@ -184,8 +181,8 @@ function parseQIFDate(raw: string): string {
     return new Date().toISOString().substring(0, 10)
   }
 
-  let month = parseInt(parts[0], 10)
-  let day = parseInt(parts[1], 10)
+  const month = parseInt(parts[0], 10)
+  const day = parseInt(parts[1], 10)
   let year = parseInt(parts[2], 10)
 
   // Handle 2-digit years

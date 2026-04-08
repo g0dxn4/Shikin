@@ -1,8 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { Account } from '@/types/database'
 
 const {
-  mockStoreGet, mockStoreSet, mockStoreSave,
-  mockRefreshRates, mockGetCachedRates, mockGetLastFetchDate,
+  mockStoreGet,
+  mockStoreSet,
+  mockStoreSave,
+  mockRefreshRates,
+  mockGetCachedRates,
+  mockGetLastFetchDate,
 } = vi.hoisted(() => ({
   mockStoreGet: vi.fn(),
   mockStoreSet: vi.fn(),
@@ -161,10 +166,32 @@ describe('currency-store', () => {
         rates: { 'EUR:USD': 1.087 },
       })
 
-      const accounts = [
-        { id: '1', name: 'Checking', type: 'checking', balance: 100000, currency: 'USD', is_archived: 0, created_at: '', updated_at: '' },
-        { id: '2', name: 'Euro Savings', type: 'savings', balance: 50000, currency: 'EUR', is_archived: 0, created_at: '', updated_at: '' },
-      ] as any[]
+      const accounts: Account[] = [
+        {
+          id: '1',
+          name: 'Checking',
+          type: 'checking',
+          balance: 100000,
+          currency: 'USD',
+          icon: 'wallet',
+          color: '#000000',
+          is_archived: 0,
+          created_at: '',
+          updated_at: '',
+        },
+        {
+          id: '2',
+          name: 'Euro Savings',
+          type: 'savings',
+          balance: 50000,
+          currency: 'EUR',
+          icon: 'piggy-bank',
+          color: '#111111',
+          is_archived: 0,
+          created_at: '',
+          updated_at: '',
+        },
+      ]
 
       const total = useCurrencyStore.getState().getTotalBalanceInPreferred(accounts)
 

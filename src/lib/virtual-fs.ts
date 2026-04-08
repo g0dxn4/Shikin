@@ -14,9 +14,17 @@ import { isTauri, DATA_SERVER_URL } from '@/lib/runtime'
 
 const tauriPath = () => import('@tauri-apps/api/path')
 // Dynamic import to avoid type errors when plugin-fs types aren't installed
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const tauriFs = (): Promise<any> =>
-  Function('return import("@tauri-apps/plugin-fs")')() as Promise<any>
+interface TauriFsModule {
+  readTextFile: (path: string) => Promise<string>
+  writeTextFile: (path: string, content: string) => Promise<void>
+  exists: (path: string) => Promise<boolean>
+  readDir: (path: string) => Promise<DirEntry[]>
+  mkdir: (path: string, options?: { recursive?: boolean }) => Promise<void>
+  remove: (path: string, options?: { recursive?: boolean }) => Promise<void>
+}
+
+const tauriFs = (): Promise<TauriFsModule> =>
+  Function('return import("@tauri-apps/plugin-fs")')() as Promise<TauriFsModule>
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -63,19 +71,14 @@ export async function readTextFile(path: string): Promise<string> {
     return tauriRead(path)
   }
 
-  const res = await fetch(
-    `${DATA_SERVER_URL}/api/fs/read?path=${encodeURIComponent(path)}`
-  )
+  const res = await fetch(`${DATA_SERVER_URL}/api/fs/read?path=${encodeURIComponent(path)}`)
   if (!res.ok) throw new Error(`File not found: ${path}`)
   const data = await res.json()
   return data.content
 }
 
 /** Write a text file. */
-export async function writeTextFile(
-  path: string,
-  content: string
-): Promise<void> {
+export async function writeTextFile(path: string, content: string): Promise<void> {
   if (isTauri) {
     const { writeTextFile: tauriWrite } = await tauriFs()
     await tauriWrite(path, content)
@@ -96,9 +99,7 @@ export async function exists(path: string): Promise<boolean> {
     return tauriExists(path)
   }
 
-  const res = await fetch(
-    `${DATA_SERVER_URL}/api/fs/exists?path=${encodeURIComponent(path)}`
-  )
+  const res = await fetch(`${DATA_SERVER_URL}/api/fs/exists?path=${encodeURIComponent(path)}`)
   const data = await res.json()
   return data.exists
 }
@@ -116,26 +117,19 @@ export async function readDir(path: string): Promise<DirEntry[]> {
     }))
   }
 
-  const res = await fetch(
-    `${DATA_SERVER_URL}/api/fs/readdir?path=${encodeURIComponent(path)}`
-  )
+  const res = await fetch(`${DATA_SERVER_URL}/api/fs/readdir?path=${encodeURIComponent(path)}`)
   if (!res.ok) return []
   const data = await res.json()
   // Bridge returns { name, isDirectory }; derive isFile
-  return (data.entries as Array<{ name: string; isDirectory: boolean }>).map(
-    (e) => ({
-      name: e.name,
-      isDirectory: e.isDirectory,
-      isFile: !e.isDirectory,
-    })
-  )
+  return (data.entries as Array<{ name: string; isDirectory: boolean }>).map((e) => ({
+    name: e.name,
+    isDirectory: e.isDirectory,
+    isFile: !e.isDirectory,
+  }))
 }
 
 /** Create a directory. */
-export async function mkdir(
-  path: string,
-  options?: { recursive?: boolean }
-): Promise<void> {
+export async function mkdir(path: string, options?: { recursive?: boolean }): Promise<void> {
   if (isTauri) {
     const { mkdir: tauriMkdir } = await tauriFs()
     await tauriMkdir(path, { recursive: options?.recursive })
@@ -157,8 +151,7 @@ export async function remove(path: string): Promise<void> {
     return
   }
 
-  await fetch(
-    `${DATA_SERVER_URL}/api/fs/remove?path=${encodeURIComponent(path)}`,
-    { method: 'DELETE' }
-  )
+  await fetch(`${DATA_SERVER_URL}/api/fs/remove?path=${encodeURIComponent(path)}`, {
+    method: 'DELETE',
+  })
 }

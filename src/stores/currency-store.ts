@@ -1,10 +1,6 @@
 import { create } from 'zustand'
 import { load } from '@/lib/storage'
-import {
-  refreshRates,
-  getCachedRates,
-  getLastFetchDate,
-} from '@/lib/exchange-rate-service'
+import { refreshRates, getCachedRates, getLastFetchDate } from '@/lib/exchange-rate-service'
 import type { Account } from '@/types/database'
 
 interface CurrencyState {
@@ -109,7 +105,7 @@ export const useCurrencyStore = create<CurrencyState>((set, get) => ({
 
     const key = `${fromCurrency}:${preferredCurrency}`
     const rate = rates[key]
-    if (rate == null) return amountCentavos // No rate available, return as-is
+    if (rate === null || rate === undefined) return amountCentavos // No rate available, return as-is
 
     return Math.round(amountCentavos * rate)
   },

@@ -8,13 +8,24 @@ import {
   readdirSync,
   statSync,
 } from 'node:fs'
-import { join, resolve, normalize } from 'node:path'
+import { join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import Database from 'better-sqlite3'
+import { checkpointWal, importDatabaseBuffer } from './data-server-db.mjs'
+import { cacheItemsFromStream, rewriteCodexProxyBody } from './data-server-chatgpt.mjs'
+import {
+  buildBridgeCorsHeaders,
+  safePath,
+  validateBridgePreflight,
+  validateBridgeRequest,
+} from './data-server-security.mjs'
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
-const PORT = 1480
+const PORT_ENV = process.env.SHIKIN_DATA_SERVER_PORT
+const parsedPort = Number.parseInt(PORT_ENV || '', 10)
+const PORT =
+  Number.isInteger(parsedPort) && parsedPort > 0 && parsedPort <= 65535 ? parsedPort : 1480
 const DATA_DIR = join(homedir(), '.local', 'share', 'com.asf.shikin')
 const DB_PATH = join(DATA_DIR, 'shikin.db')
 const SETTINGS_PATH = join(DATA_DIR, 'settings.json')
@@ -26,9 +37,14 @@ mkdirSync(NOTEBOOK_DIR, { recursive: true })
 
 // ── Database Setup ─────────────────────────────────────────────────────────
 
-const db = new Database(DB_PATH)
-db.pragma('journal_mode = WAL')
-db.pragma('foreign_keys = ON')
+function openDatabase() {
+  const database = new Database(DB_PATH)
+  database.pragma('journal_mode = WAL')
+  database.pragma('foreign_keys = ON')
+  return database
+}
+
+let db = openDatabase()
 
 // ── SQL Parameter Conversion ───────────────────────────────────────────────
 // The codebase uses $1, $2, ... positional params; better-sqlite3 uses ?
@@ -502,18 +518,6 @@ function saveSettings(settings) {
   writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf-8')
 }
 
-// ── Path Security ──────────────────────────────────────────────────────────
-
-function safePath(base, userPath) {
-  // Strip leading slashes so paths are always relative to base
-  const cleaned = userPath.replace(/^\/+/, '')
-  const resolved = resolve(base, normalize(cleaned))
-  if (!resolved.startsWith(base)) {
-    throw new Error('Path traversal detected')
-  }
-  return resolved
-}
-
 // ── HTTP Helpers ───────────────────────────────────────────────────────────
 
 function readBody(req) {
@@ -532,12 +536,12 @@ function readBody(req) {
 }
 
 function sendJson(res, data, status = 200) {
-  res.writeHead(status, {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': 'http://localhost:1420',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-  })
+  res.writeHead(
+    status,
+    buildBridgeCorsHeaders({
+      'Content-Type': 'application/json',
+    })
+  )
   res.end(JSON.stringify(data))
 }
 
@@ -545,50 +549,36 @@ function sendError(res, message, status = 500) {
   sendJson(res, { error: message }, status)
 }
 
+function sendForbidden(res, message) {
+  res.writeHead(403, {
+    'Content-Type': 'application/json',
+    Vary: 'Origin',
+  })
+  res.end(JSON.stringify({ error: message }))
+}
+
 // ── Codex Response Item Cache ──────────────────────────────────────────────
 // Caches output items from Codex API streaming responses so the AI SDK's
 // tool loop can reference them (since store=false means they aren't persisted).
 const codexItemCache = new Map()
-
-function cacheItemsFromStream(chunk) {
-  // SSE format: "event: ...\ndata: {...}\n\n"
-  const lines = chunk.split('\n')
-  for (const line of lines) {
-    if (!line.startsWith('data: ')) continue
-    try {
-      const data = JSON.parse(line.slice(6))
-      // Cache completed response output items (function_call, message, etc.)
-      if (data.type === 'response.completed' && data.response?.output) {
-        for (const item of data.response.output) {
-          if (item.id) codexItemCache.set(item.id, item)
-        }
-      }
-      // Also cache individual output items as they arrive
-      if (data.type === 'response.output_item.done' && data.item?.id) {
-        codexItemCache.set(data.item.id, data.item)
-      }
-    } catch {
-      /* not valid JSON line */
-    }
-  }
-}
 
 // ── Server ─────────────────────────────────────────────────────────────────
 
 const server = createServer(async (req, res) => {
   // CORS preflight
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': 'http://localhost:1420',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers':
-        'Content-Type, Authorization, OpenAI-Beta, chatgpt-account-id, originator',
-    })
+    const preflightError = validateBridgePreflight(req)
+    if (preflightError) return sendForbidden(res, preflightError)
+
+    res.writeHead(204, buildBridgeCorsHeaders())
     return res.end()
   }
 
   const url = new URL(req.url, `http://localhost:${PORT}`)
   const path = url.pathname
+
+  const bridgeError = validateBridgeRequest(req)
+  if (bridgeError) return sendForbidden(res, bridgeError)
 
   try {
     // ── Database: Query ──────────────────────────────────────────────
@@ -737,41 +727,7 @@ const server = createServer(async (req, res) => {
       if (req.headers['content-type']?.includes('application/json') && bodyBuffer.length > 0) {
         try {
           const bodyJson = JSON.parse(bodyBuffer.toString())
-
-          // Codex requires store=false
-          bodyJson.store = false
-
-          // Codex doesn't support max_output_tokens
-          delete bodyJson.max_output_tokens
-
-          // With store=false, previous responses aren't persisted — remove references
-          delete bodyJson.previous_response_id
-
-          // Replace item_reference entries with cached inline items
-          if (Array.isArray(bodyJson.input)) {
-            bodyJson.input = bodyJson.input.map((item) => {
-              if (item.type === 'item_reference' && item.id && codexItemCache.has(item.id)) {
-                return codexItemCache.get(item.id)
-              }
-              return item
-            })
-          }
-
-          // Codex requires top-level 'instructions' field.
-          // The AI SDK sends system/developer messages in the input array — extract them.
-          if (!bodyJson.instructions && Array.isArray(bodyJson.input)) {
-            const sysMessages = bodyJson.input.filter(
-              (m) => m.role === 'developer' || m.role === 'system'
-            )
-            if (sysMessages.length > 0) {
-              bodyJson.instructions = sysMessages.map((m) => m.content).join('\n\n')
-              bodyJson.input = bodyJson.input.filter(
-                (m) => m.role !== 'developer' && m.role !== 'system'
-              )
-            }
-          }
-
-          bodyBuffer = Buffer.from(JSON.stringify(bodyJson))
+          bodyBuffer = Buffer.from(JSON.stringify(rewriteCodexProxyBody(bodyJson, codexItemCache)))
         } catch {
           /* not JSON, pass through */
         }
@@ -796,9 +752,7 @@ const server = createServer(async (req, res) => {
       // Stream the response back with CORS headers
       res.writeHead(proxyRes.status, {
         'Content-Type': proxyRes.headers.get('content-type') || 'application/json',
-        'Access-Control-Allow-Origin': 'http://localhost:1420',
-        'Access-Control-Allow-Headers':
-          'Content-Type, Authorization, OpenAI-Beta, chatgpt-account-id, originator',
+        ...buildBridgeCorsHeaders(),
       })
 
       if (proxyRes.body) {
@@ -813,7 +767,7 @@ const server = createServer(async (req, res) => {
             }
             // Cache output items from the stream for tool loop support
             try {
-              cacheItemsFromStream(decoder.decode(value, { stream: true }))
+              cacheItemsFromStream(decoder.decode(value, { stream: true }), codexItemCache)
             } catch {}
             res.write(value)
           }
@@ -829,17 +783,13 @@ const server = createServer(async (req, res) => {
     // ── DB: Export (binary) ────────────────────────────────────────
     if (path === '/api/db/export' && req.method === 'GET') {
       // Checkpoint WAL to ensure all data is in main DB file
-      try {
-        db.pragma('wal_checkpoint(TRUNCATE)')
-      } catch {
-        /* ignore */
-      }
+      checkpointWal(db, { requireComplete: true })
       const bytes = readFileSync(DB_PATH)
       res.writeHead(200, {
         'Content-Type': 'application/octet-stream',
         'Content-Length': bytes.length,
         'Content-Disposition': 'attachment; filename="shikin.db"',
-        'Access-Control-Allow-Origin': '*',
+        ...buildBridgeCorsHeaders(),
       })
       res.end(bytes)
       return
@@ -857,11 +807,11 @@ const server = createServer(async (req, res) => {
         return sendError(res, 'Invalid SQLite database file', 400)
       }
 
-      // Close DB, write new file, reopen
-      db.close()
-      writeFileSync(DB_PATH, buffer)
-      // Reopen — the process should be restarted after import
-      return sendJson(res, { ok: true, message: 'Database imported. Restart the app to apply.' })
+      importDatabaseBuffer({ db, dbPath: DB_PATH, buffer })
+      db = openDatabase()
+      runMigrations()
+
+      return sendJson(res, { ok: true, message: 'Database imported successfully.' })
     }
 
     // ── 404 ──────────────────────────────────────────────────────────
@@ -872,7 +822,7 @@ const server = createServer(async (req, res) => {
   }
 })
 
-server.listen(PORT, () => {
-  console.log(`[data-server] Listening on http://localhost:${PORT}`)
+server.listen(PORT, '127.0.0.1', () => {
+  console.log(`[data-server] Listening on http://127.0.0.1:${PORT}`)
   console.log(`[data-server] Data directory: ${DATA_DIR}`)
 })

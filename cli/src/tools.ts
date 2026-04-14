@@ -1,9 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, no-useless-assignment */
 import { z } from 'zod'
-import { query, execute } from './database.js'
+import { query, execute, transaction } from './database.js'
 import { generateId } from './ulid.js'
 import { toCentavos, fromCentavos } from './money.js'
 import { readNote, writeNote, appendNote, noteExists, listNotes } from './notebook.js'
+import { isSafeNotebookPathInput } from './notebook-path.js'
 import dayjs from 'dayjs'
 
 // ---------------------------------------------------------------------------
@@ -15,6 +16,7 @@ export interface ToolDefinition {
   description: string
   schema: z.ZodObject<any>
   execute: (input: any) => Promise<any>
+  mcpUnavailableMessage?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -51,6 +53,80 @@ function advanceDate(current: string, frequency: string): string {
   }
 }
 
+const MAX_ABSOLUTE_AMOUNT = 1_000_000_000
+const ISO_DATE_PATTERN = /^\d{4}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/
+const CURRENCY_CODE_PATTERN = /^[A-Z]{3}$/
+const ASSET_CODE_PATTERN = /^[A-Z0-9]{2,10}$/
+
+function boundedText(label: string, description: string, maxLength = 255) {
+  return z
+    .string()
+    .trim()
+    .min(1, `${label} is required`)
+    .max(maxLength, `${label} must be ${maxLength} characters or fewer`)
+    .describe(description)
+}
+
+function isoDate(description: string) {
+  return z
+    .string()
+    .trim()
+    .regex(ISO_DATE_PATTERN, 'Date must be in YYYY-MM-DD format')
+    .refine(isStrictIsoDate, 'Date must be a real calendar date')
+    .describe(description)
+}
+
+function currencyCode(description: string) {
+  return z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(CURRENCY_CODE_PATTERN, 'Currency code must be a 3-letter ISO code')
+    .describe(description)
+}
+
+function notebookPathSchema(description: string, options?: { allowEmpty?: boolean }) {
+  return z
+    .string()
+    .trim()
+    .refine(
+      (value) => isSafeNotebookPathInput(value, options),
+      'Path must stay within the notebook'
+    )
+    .describe(description)
+}
+
+function assetCode(description: string) {
+  return z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(ASSET_CODE_PATTERN, 'Code must be 2-10 uppercase letters or digits')
+    .describe(description)
+}
+
+function moneyAmount(
+  description: string,
+  { min = -MAX_ABSOLUTE_AMOUNT, max = MAX_ABSOLUTE_AMOUNT }: { min?: number; max?: number } = {}
+): z.ZodNumber {
+  return z.number().finite().min(min).max(max).describe(description)
+}
+
+function positiveMoneyAmount(description: string, max = MAX_ABSOLUTE_AMOUNT): z.ZodNumber {
+  return z.number().finite().positive().max(max).describe(description)
+}
+
+function nonNegativeMoneyAmount(description: string, max = MAX_ABSOLUTE_AMOUNT): z.ZodNumber {
+  return moneyAmount(description, { min: 0, max })
+}
+
+function isStrictIsoDate(value: string): boolean {
+  if (!ISO_DATE_PATTERN.test(value)) return false
+
+  const parsed = new Date(`${value}T00:00:00.000Z`)
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+}
+
 // ---------------------------------------------------------------------------
 // 1. add-transaction
 // ---------------------------------------------------------------------------
@@ -60,74 +136,100 @@ const addTransaction: ToolDefinition = {
   description:
     'Add a new financial transaction (expense, income, or transfer). Use this when the user wants to record spending, earnings, or money movement between accounts.',
   schema: z.object({
-    amount: z
-      .number()
-      .positive()
-      .describe('The transaction amount in the main currency unit (e.g. 12.50, not cents)'),
+    amount: positiveMoneyAmount(
+      'The transaction amount in the main currency unit (e.g. 12.50, not cents; max 1,000,000,000)'
+    ),
     type: z.enum(['expense', 'income', 'transfer']).describe('The type of transaction'),
-    description: z.string().describe('A short description of the transaction'),
-    category: z
-      .string()
-      .optional()
-      .describe(
-        'Category name (e.g. "Food & Dining", "Salary"). Will match the closest existing category.'
-      ),
-    date: z
-      .string()
-      .optional()
-      .describe('Transaction date in YYYY-MM-DD format. Defaults to today.'),
-    notes: z.string().optional().describe('Additional notes about the transaction'),
+    description: boundedText('Description', 'A short description of the transaction', 200),
+    category: boundedText(
+      'Category',
+      'Category name (e.g. "Food & Dining", "Salary"). Will match the closest existing category.',
+      120
+    ).optional(),
+    date: isoDate('Transaction date in YYYY-MM-DD format. Defaults to today.').optional(),
+    notes: boundedText('Notes', 'Additional notes about the transaction', 1000).optional(),
+    accountId: boundedText(
+      'Account ID',
+      'Optional account ID to apply the transaction to. Defaults to the first account when omitted.',
+      128
+    ).optional(),
   }),
-  execute: async ({ amount, type, description, category, date, notes }) => {
+  execute: async ({ amount, type, description, category, date, notes, accountId }) => {
     const id = generateId()
     const amountCentavos = toCentavos(amount)
     const txDate = date || dayjs().format('YYYY-MM-DD')
 
-    let categoryId: string | null = null
-    if (category) {
-      const categories = await query<{ id: string }>(
-        'SELECT id FROM categories WHERE LOWER(name) LIKE LOWER($1) LIMIT 1',
-        [`%${category}%`]
+    return transaction(() => {
+      let categoryId: string | null = null
+      if (category) {
+        const categories = query<{ id: string }>(
+          'SELECT id FROM categories WHERE LOWER(name) LIKE LOWER($1) LIMIT 1',
+          [`%${category}%`]
+        )
+        if (categories.length > 0) {
+          categoryId = categories[0].id
+        }
+      }
+
+      let resolvedAccountId = accountId ?? null
+      if (resolvedAccountId) {
+        const accounts = query<{ id: string }>('SELECT id FROM accounts WHERE id = $1 LIMIT 1', [
+          resolvedAccountId,
+        ])
+        if (accounts.length === 0) {
+          return {
+            success: false,
+            message: `Account ${resolvedAccountId} not found.`,
+          }
+        }
+        resolvedAccountId = accounts[0].id
+      } else {
+        const accounts = query<{ id: string }>('SELECT id FROM accounts LIMIT 1')
+        resolvedAccountId = accounts.length > 0 ? accounts[0].id : null
+      }
+
+      if (!resolvedAccountId) {
+        return {
+          success: false,
+          message: 'No accounts found. Please create an account first.',
+        }
+      }
+
+      execute(
+        `INSERT INTO transactions (id, account_id, category_id, type, amount, description, notes, date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          id,
+          resolvedAccountId,
+          categoryId,
+          type,
+          amountCentavos,
+          description,
+          notes || null,
+          txDate,
+        ]
       )
-      if (categories.length > 0) {
-        categoryId = categories[0].id
-      }
-    }
 
-    const accounts = await query<{ id: string }>('SELECT id FROM accounts LIMIT 1')
-    const accountId = accounts.length > 0 ? accounts[0].id : null
+      const balanceChange = type === 'income' ? amountCentavos : -amountCentavos
+      execute(
+        "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
+        [balanceChange, resolvedAccountId]
+      )
 
-    if (!accountId) {
       return {
-        success: false,
-        message: 'No accounts found. Please create an account first.',
+        success: true,
+        transaction: {
+          id,
+          accountId: resolvedAccountId,
+          amount,
+          type,
+          description,
+          category: category || 'Uncategorized',
+          date: txDate,
+        },
+        message: `Added ${type}: $${amount.toFixed(2)} for "${description}" on ${txDate}`,
       }
-    }
-
-    await execute(
-      `INSERT INTO transactions (id, account_id, category_id, type, amount, description, notes, date)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [id, accountId, categoryId, type, amountCentavos, description, notes || null, txDate]
-    )
-
-    const balanceChange = type === 'income' ? amountCentavos : -amountCentavos
-    await execute(
-      "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
-      [balanceChange, accountId]
-    )
-
-    return {
-      success: true,
-      transaction: {
-        id,
-        amount,
-        type,
-        description,
-        category: category || 'Uncategorized',
-        date: txDate,
-      },
-      message: `Added ${type}: $${amount.toFixed(2)} for "${description}" on ${txDate}`,
-    }
+    })
   },
 }
 
@@ -140,21 +242,22 @@ const updateTransaction: ToolDefinition = {
   description:
     'Update an existing transaction. Use this when the user wants to change the amount, description, category, date, or other details of a transaction.',
   schema: z.object({
-    transactionId: z.string().describe('The ID of the transaction to update'),
-    amount: z
-      .number()
-      .positive()
-      .optional()
-      .describe('New amount in the main currency unit (e.g. 12.50)'),
+    transactionId: boundedText('Transaction ID', 'The ID of the transaction to update', 128),
+    amount: positiveMoneyAmount('New amount in the main currency unit (e.g. 12.50)').optional(),
     type: z.enum(['expense', 'income', 'transfer']).optional().describe('New transaction type'),
-    description: z.string().optional().describe('New description'),
-    category: z
-      .string()
-      .optional()
-      .describe('New category name — will match the closest existing category'),
-    date: z.string().optional().describe('New date in YYYY-MM-DD format'),
-    notes: z.string().optional().describe('New notes'),
-    accountId: z.string().optional().describe('New account ID to move the transaction to'),
+    description: boundedText('Description', 'New description', 200).optional(),
+    category: boundedText(
+      'Category',
+      'New category name — will match the closest existing category',
+      120
+    ).optional(),
+    date: isoDate('New date in YYYY-MM-DD format').optional(),
+    notes: z.string().max(1000).optional().describe('New notes. Pass an empty string to clear.'),
+    accountId: boundedText(
+      'Account ID',
+      'New account ID to move the transaction to',
+      128
+    ).optional(),
   }),
   execute: async ({
     transactionId,
@@ -166,74 +269,89 @@ const updateTransaction: ToolDefinition = {
     notes,
     accountId,
   }) => {
-    const existing = await query<any>('SELECT * FROM transactions WHERE id = $1', [transactionId])
+    return transaction(() => {
+      const existing = query<any>('SELECT * FROM transactions WHERE id = $1', [transactionId])
 
-    if (existing.length === 0) {
-      return { success: false, message: `Transaction ${transactionId} not found.` }
-    }
+      if (existing.length === 0) {
+        return { success: false, message: `Transaction ${transactionId} not found.` }
+      }
 
-    const tx = existing[0]
-    const oldAmountCentavos = tx.amount
-    const oldType = tx.type
-    const oldAccountId = tx.account_id
+      const tx = existing[0]
+      const oldAmountCentavos = tx.amount
+      const oldType = tx.type
+      const oldAccountId = tx.account_id
 
-    const newAmount = amount !== undefined ? toCentavos(amount) : oldAmountCentavos
-    const newType = type || oldType
-    const newAccountId = accountId || oldAccountId
+      const newAmount = amount !== undefined ? toCentavos(amount) : oldAmountCentavos
+      const newType = type || oldType
+      const newAccountId = accountId || oldAccountId
 
-    let newCategoryId = tx.category_id
-    if (category !== undefined) {
-      const categories = await query<{ id: string }>(
-        'SELECT id FROM categories WHERE LOWER(name) LIKE LOWER($1) LIMIT 1',
-        [`%${category}%`]
+      if (accountId !== undefined && accountId !== oldAccountId) {
+        const accounts = query<{ id: string }>('SELECT id FROM accounts WHERE id = $1 LIMIT 1', [
+          accountId,
+        ])
+        if (accounts.length === 0) {
+          return { success: false, message: `Account ${accountId} not found.` }
+        }
+      }
+
+      let newCategoryId = tx.category_id
+      if (category !== undefined) {
+        const categories = query<{ id: string }>(
+          'SELECT id FROM categories WHERE LOWER(name) LIKE LOWER($1) LIMIT 1',
+          [`%${category}%`]
+        )
+        newCategoryId = categories.length > 0 ? categories[0].id : null
+      }
+
+      // Reverse old balance impact
+      const oldBalanceChange = oldType === 'income' ? oldAmountCentavos : -oldAmountCentavos
+      execute(
+        "UPDATE accounts SET balance = balance - $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
+        [oldBalanceChange, oldAccountId]
       )
-      newCategoryId = categories.length > 0 ? categories[0].id : null
-    }
 
-    // Reverse old balance impact
-    const oldBalanceChange = oldType === 'income' ? oldAmountCentavos : -oldAmountCentavos
-    await execute(
-      "UPDATE accounts SET balance = balance - $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
-      [oldBalanceChange, oldAccountId]
-    )
+      // Apply new balance impact
+      const newBalanceChange = newType === 'income' ? newAmount : -newAmount
+      execute(
+        "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
+        [newBalanceChange, newAccountId]
+      )
 
-    // Apply new balance impact
-    const newBalanceChange = newType === 'income' ? newAmount : -newAmount
-    await execute(
-      "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
-      [newBalanceChange, newAccountId]
-    )
+      const updateResult = execute(
+        `UPDATE transactions
+         SET amount = $1, type = $2, description = $3, category_id = $4, date = $5, notes = $6, account_id = $7,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = $8`,
+        [
+          newAmount,
+          newType,
+          description !== undefined ? description : tx.description,
+          newCategoryId,
+          date || tx.date,
+          notes !== undefined ? (notes === '' ? null : notes) : tx.notes,
+          newAccountId,
+          transactionId,
+        ]
+      )
 
-    await execute(
-      `UPDATE transactions
-       SET amount = $1, type = $2, description = $3, category_id = $4, date = $5, notes = $6, account_id = $7,
-           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = $8`,
-      [
-        newAmount,
-        newType,
-        description !== undefined ? description : tx.description,
-        newCategoryId,
-        date || tx.date,
-        notes !== undefined ? notes : tx.notes,
-        newAccountId,
-        transactionId,
-      ]
-    )
+      if (updateResult.rowsAffected !== 1) {
+        throw new Error(`Transaction ${transactionId} could not be updated safely.`)
+      }
 
-    const displayAmount = amount !== undefined ? amount : fromCentavos(oldAmountCentavos)
+      const displayAmount = amount !== undefined ? amount : fromCentavos(oldAmountCentavos)
 
-    return {
-      success: true,
-      transaction: {
-        id: transactionId,
-        amount: displayAmount,
-        type: newType,
-        description: description !== undefined ? description : tx.description,
-        date: date || tx.date,
-      },
-      message: `Updated transaction ${transactionId}: $${displayAmount.toFixed(2)} ${newType}`,
-    }
+      return {
+        success: true,
+        transaction: {
+          id: transactionId,
+          amount: displayAmount,
+          type: newType,
+          description: description !== undefined ? description : tx.description,
+          date: date || tx.date,
+        },
+        message: `Updated transaction ${transactionId}: $${displayAmount.toFixed(2)} ${newType}`,
+      }
+    })
   },
 }
 
@@ -249,26 +367,28 @@ const deleteTransaction: ToolDefinition = {
     transactionId: z.string().describe('The ID of the transaction to delete'),
   }),
   execute: async ({ transactionId }) => {
-    const existing = await query<any>('SELECT * FROM transactions WHERE id = $1', [transactionId])
+    return transaction(() => {
+      const existing = query<any>('SELECT * FROM transactions WHERE id = $1', [transactionId])
 
-    if (existing.length === 0) {
-      return { success: false, message: `Transaction ${transactionId} not found.` }
-    }
+      if (existing.length === 0) {
+        return { success: false, message: `Transaction ${transactionId} not found.` }
+      }
 
-    const tx = existing[0]
+      const tx = existing[0]
 
-    const balanceChange = tx.type === 'income' ? tx.amount : -tx.amount
-    await execute(
-      "UPDATE accounts SET balance = balance - $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
-      [balanceChange, tx.account_id]
-    )
+      const balanceChange = tx.type === 'income' ? tx.amount : -tx.amount
+      execute(
+        "UPDATE accounts SET balance = balance - $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
+        [balanceChange, tx.account_id]
+      )
 
-    await execute('DELETE FROM transactions WHERE id = $1', [transactionId])
+      execute('DELETE FROM transactions WHERE id = $1', [transactionId])
 
-    return {
-      success: true,
-      message: `Deleted ${tx.type}: $${fromCentavos(tx.amount).toFixed(2)} "${tx.description}" from ${tx.date}`,
-    }
+      return {
+        success: true,
+        message: `Deleted ${tx.type}: $${fromCentavos(tx.amount).toFixed(2)} "${tx.description}" from ${tx.date}`,
+      }
+    })
   },
 }
 
@@ -281,15 +401,19 @@ const queryTransactions: ToolDefinition = {
   description:
     'Search and filter transactions. Use this when the user asks about their transactions, wants to find specific ones, or asks questions about their financial history.',
   schema: z.object({
-    accountId: z.string().optional().describe('Filter by account ID'),
-    categoryId: z.string().optional().describe('Filter by category ID'),
+    accountId: boundedText('Account ID', 'Filter by account ID', 128).optional(),
+    categoryId: boundedText('Category ID', 'Filter by category ID', 128).optional(),
     type: z
       .enum(['expense', 'income', 'transfer'])
       .optional()
       .describe('Filter by transaction type'),
-    startDate: z.string().optional().describe('Start date (YYYY-MM-DD) inclusive'),
-    endDate: z.string().optional().describe('End date (YYYY-MM-DD) inclusive'),
-    search: z.string().optional().describe('Search term to match against transaction descriptions'),
+    startDate: isoDate('Start date (YYYY-MM-DD) inclusive').optional(),
+    endDate: isoDate('End date (YYYY-MM-DD) inclusive').optional(),
+    search: boundedText(
+      'Search term',
+      'Search term to match against transaction descriptions',
+      200
+    ).optional(),
     limit: z
       .number()
       .int()
@@ -396,8 +520,8 @@ const getSpendingSummary: ToolDefinition = {
       .optional()
       .default('month')
       .describe('The time period to summarize'),
-    startDate: z.string().optional().describe('Start date (YYYY-MM-DD) for custom period'),
-    endDate: z.string().optional().describe('End date (YYYY-MM-DD) for custom period'),
+    startDate: isoDate('Start date (YYYY-MM-DD) for custom period').optional(),
+    endDate: isoDate('End date (YYYY-MM-DD) for custom period').optional(),
   }),
   execute: async ({ period, startDate, endDate }) => {
     let start: string
@@ -517,22 +641,23 @@ const createAccount: ToolDefinition = {
   description:
     'Create a new financial account. Use this when the user wants to add a bank account, credit card, cash wallet, or other account.',
   schema: z.object({
-    name: z.string().describe('Account name (e.g. "Chase Checking", "BBVA Credit Card")'),
+    name: boundedText(
+      'Account name',
+      'Account name (e.g. "Chase Checking", "BBVA Credit Card")',
+      120
+    ),
     type: z
       .enum(['checking', 'savings', 'credit_card', 'cash', 'investment', 'crypto', 'other'])
       .optional()
       .default('checking')
       .describe('Account type (default: checking)'),
-    currency: z.string().optional().default('USD').describe('Currency code (default: USD)'),
-    balance: z
-      .number()
+    currency: assetCode('Currency or asset code (default: USD)').optional().default('USD'),
+    balance: moneyAmount('Initial balance in the main currency unit (default: 0)')
       .optional()
-      .default(0)
-      .describe('Initial balance in the main currency unit (default: 0)'),
-    creditLimit: z
-      .number()
-      .optional()
-      .describe('Credit limit in the main currency unit (only for credit_card type)'),
+      .default(0),
+    creditLimit: nonNegativeMoneyAmount(
+      'Credit limit in the main currency unit (only for credit_card type)'
+    ).optional(),
     statementClosingDay: z
       .number()
       .int()
@@ -609,15 +734,15 @@ const updateAccount: ToolDefinition = {
   description:
     'Update an existing account. Use this to change the name, type, currency, balance, credit limit, or billing dates of an account.',
   schema: z.object({
-    accountId: z.string().describe('The ID of the account to update'),
-    name: z.string().optional().describe('New account name'),
+    accountId: boundedText('Account ID', 'The ID of the account to update', 128),
+    name: boundedText('Account name', 'New account name', 120).optional(),
     type: z
       .enum(['checking', 'savings', 'credit_card', 'cash', 'investment', 'crypto', 'other'])
       .optional()
       .describe('New account type'),
-    currency: z.string().optional().describe('New currency code'),
-    balance: z.number().optional().describe('New balance in main currency unit'),
-    creditLimit: z.number().optional().describe('New credit limit in main currency unit'),
+    currency: assetCode('New currency or asset code').optional(),
+    balance: moneyAmount('New balance in main currency unit').optional(),
+    creditLimit: nonNegativeMoneyAmount('New credit limit in main currency unit').optional(),
     statementClosingDay: z
       .number()
       .int()
@@ -1866,6 +1991,8 @@ const getUpcomingBills: ToolDefinition = {
 
 const listSubscriptions: ToolDefinition = {
   name: 'list-subscriptions',
+  mcpUnavailableMessage:
+    'Subby integration is not available via the Shikin MCP server. Use the dedicated Subby integration/server or import the data first.',
   description:
     'List subscriptions from Subby (the subscription tracker app). Shows active subscriptions with their amounts, billing cycles, and next payment dates.',
   schema: z.object({
@@ -1890,6 +2017,8 @@ const listSubscriptions: ToolDefinition = {
 
 const getSubscriptionSpending: ToolDefinition = {
   name: 'get-subscription-spending',
+  mcpUnavailableMessage:
+    'Subby integration is not available via the Shikin MCP server. Use the dedicated Subby integration/server or import the data first.',
   description:
     'Analyze subscription spending from Subby. Groups subscriptions by category and shows monthly/yearly cost breakdown.',
   schema: z.object({}),
@@ -1911,7 +2040,7 @@ const writeNotebookTool: ToolDefinition = {
   description:
     'Write or update a markdown note in the notebook. Use for research findings, portfolio reviews, market signals, and educational content.',
   schema: z.object({
-    path: z.string().describe('Relative path within the notebook (e.g. "holdings/AAPL.md")'),
+    path: notebookPathSchema('Relative path within the notebook (e.g. "holdings/AAPL.md")'),
     content: z.string().describe('Markdown content to write'),
     append: z
       .boolean()
@@ -1948,7 +2077,7 @@ const readNotebookTool: ToolDefinition = {
   description:
     'Read a note from the notebook. Use to reference previous research, reviews, or educational content.',
   schema: z.object({
-    path: z.string().describe('Relative path within the notebook (e.g. "holdings/AAPL.md")'),
+    path: notebookPathSchema('Relative path within the notebook (e.g. "holdings/AAPL.md")'),
   }),
   execute: async ({ path }) => {
     try {
@@ -1976,10 +2105,10 @@ const listNotebookTool: ToolDefinition = {
   description:
     'List notes and directories in the notebook. Use to discover available research, reviews, and educational content.',
   schema: z.object({
-    directory: z
-      .string()
-      .optional()
-      .describe('Subdirectory to list (e.g. "holdings", "weekly-reviews"). Omit for root.'),
+    directory: notebookPathSchema(
+      'Subdirectory to list (e.g. "holdings", "weekly-reviews"). Omit for root.',
+      { allowEmpty: true }
+    ).optional(),
   }),
   execute: async ({ directory }) => {
     try {
@@ -2005,6 +2134,8 @@ const listNotebookTool: ToolDefinition = {
 
 const getFinancialNews: ToolDefinition = {
   name: 'get-financial-news',
+  mcpUnavailableMessage:
+    'Financial news is not available via the Shikin MCP server until the external service is configured.',
   description: 'Fetch financial news for a specific symbol or the entire portfolio.',
   schema: z.object({
     symbol: z
@@ -2028,6 +2159,8 @@ const getFinancialNews: ToolDefinition = {
 
 const getCongressionalTrades: ToolDefinition = {
   name: 'get-congressional-trades',
+  mcpUnavailableMessage:
+    'Congressional trades are not available via the Shikin MCP server until the external service is configured.',
   description:
     'Check recent congressional stock trading disclosures. This is public data that can be interesting to review alongside your own holdings.',
   schema: z.object({
@@ -2052,6 +2185,8 @@ const getCongressionalTrades: ToolDefinition = {
 
 const generatePortfolioReview: ToolDefinition = {
   name: 'generate-portfolio-review',
+  mcpUnavailableMessage:
+    'Portfolio review generation is not available via the Shikin MCP server yet.',
   description:
     'Generate a portfolio review and save it to the notebook. Reviews include performance summary, top/worst performers, and a holdings table.',
   schema: z.object({
@@ -2211,6 +2346,8 @@ const manageCategoryRules: ToolDefinition = {
 
 const getSpendingAnomalies: ToolDefinition = {
   name: 'get-spending-anomalies',
+  mcpUnavailableMessage:
+    'Spending anomaly detection is not available via the Shikin MCP server yet.',
   description:
     'Detect and return spending anomalies such as unusual charges, duplicate transactions, spending spikes, and large transactions.',
   schema: z.object({
@@ -2568,6 +2705,7 @@ const materializeRecurring: ToolDefinition = {
 
 const getForecastedCashFlow: ToolDefinition = {
   name: 'get-forecasted-cash-flow',
+  mcpUnavailableMessage: 'Cash flow forecasting is not available via the Shikin MCP server yet.',
   description: 'Get a cash flow forecast showing projected balances, burn rate, and danger dates.',
   schema: z.object({
     days: z
@@ -2873,6 +3011,7 @@ const getGoalStatus: ToolDefinition = {
 
 const getFinancialHealthScore: ToolDefinition = {
   name: 'get-financial-health-score',
+  mcpUnavailableMessage: 'Financial health scoring is not available via the Shikin MCP server yet.',
   description:
     "Calculate the user's financial health score (0-100) with a breakdown across savings rate, budget adherence, debt-to-income, emergency fund, and spending consistency.",
   schema: z.object({}),
@@ -2892,6 +3031,8 @@ const getFinancialHealthScore: ToolDefinition = {
 
 const getSpendingRecap: ToolDefinition = {
   name: 'get-spending-recap',
+  mcpUnavailableMessage:
+    'Spending recap generation is not available via the Shikin MCP server yet.',
   description: 'Generate a natural-language spending recap for a given period.',
   schema: z.object({
     type: z
@@ -2998,9 +3139,9 @@ const convertCurrency: ToolDefinition = {
   name: 'convert-currency',
   description: 'Convert an amount from one currency to another using stored exchange rates.',
   schema: z.object({
-    amount: z.number().describe('The amount to convert (in regular units, e.g. 100.50)'),
-    from: z.string().describe('Source currency code (e.g. USD, EUR, GBP)'),
-    to: z.string().describe('Target currency code (e.g. MXN, JPY, BRL)'),
+    amount: positiveMoneyAmount('The amount to convert (in regular units, e.g. 100.50)'),
+    from: currencyCode('Source currency code (e.g. USD, EUR, GBP)'),
+    to: currencyCode('Target currency code (e.g. MXN, JPY, BRL)'),
   }),
   execute: async ({ amount, from, to }) => {
     const fromUpper = from.toUpperCase()
@@ -3079,13 +3220,13 @@ const splitTransaction: ToolDefinition = {
   description:
     'Split a transaction across multiple categories. Use when a single transaction should be allocated to different spending categories.',
   schema: z.object({
-    transactionId: z.string().describe('The ID of the transaction to split'),
+    transactionId: boundedText('Transaction ID', 'The ID of the transaction to split', 128),
     splits: z
       .array(
         z.object({
-          categoryId: z.string().describe('Category ID for this split portion'),
-          amount: z.number().positive().describe('Amount for this split in main currency unit'),
-          notes: z.string().optional().describe('Optional note for this split'),
+          categoryId: boundedText('Category ID', 'Category ID for this split portion', 128),
+          amount: positiveMoneyAmount('Amount for this split in main currency unit'),
+          notes: boundedText('Notes', 'Optional note for this split', 1000).optional(),
         })
       )
       .min(2)
@@ -3148,6 +3289,7 @@ const splitTransaction: ToolDefinition = {
 
 const getEducationTip: ToolDefinition = {
   name: 'get-education-tip',
+  mcpUnavailableMessage: 'Education tips are not available via the Shikin MCP server yet.',
   description:
     'Get a contextual financial education tip. Use this when the user asks about financial concepts or when educational context would enhance the conversation.',
   schema: z.object({

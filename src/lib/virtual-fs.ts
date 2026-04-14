@@ -8,7 +8,7 @@
  * work unchanged.
  */
 
-import { isTauri, DATA_SERVER_URL } from '@/lib/runtime'
+import { isTauri, DATA_SERVER_URL, withDataServerHeaders } from '@/lib/runtime'
 
 // ── Lazy Tauri imports (avoid bundling in browser builds) ───────────
 
@@ -43,7 +43,9 @@ export async function appDataDir(): Promise<string> {
     return tauriAppDataDir()
   }
 
-  const res = await fetch(`${DATA_SERVER_URL}/api/fs/appdata`)
+  const res = await fetch(`${DATA_SERVER_URL}/api/fs/appdata`, {
+    headers: withDataServerHeaders(),
+  })
   const data = await res.json()
   return data.path
 }
@@ -57,7 +59,9 @@ export async function join(...parts: string[]): Promise<string> {
 
   const params = new URLSearchParams()
   parts.forEach((p) => params.append('parts', p))
-  const res = await fetch(`${DATA_SERVER_URL}/api/fs/join?${params}`)
+  const res = await fetch(`${DATA_SERVER_URL}/api/fs/join?${params}`, {
+    headers: withDataServerHeaders(),
+  })
   const data = await res.json()
   return data.path
 }
@@ -71,7 +75,9 @@ export async function readTextFile(path: string): Promise<string> {
     return tauriRead(path)
   }
 
-  const res = await fetch(`${DATA_SERVER_URL}/api/fs/read?path=${encodeURIComponent(path)}`)
+  const res = await fetch(`${DATA_SERVER_URL}/api/fs/read?path=${encodeURIComponent(path)}`, {
+    headers: withDataServerHeaders(),
+  })
   if (!res.ok) throw new Error(`File not found: ${path}`)
   const data = await res.json()
   return data.content
@@ -87,7 +93,7 @@ export async function writeTextFile(path: string, content: string): Promise<void
 
   await fetch(`${DATA_SERVER_URL}/api/fs/write`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withDataServerHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ path, content }),
   })
 }
@@ -99,7 +105,9 @@ export async function exists(path: string): Promise<boolean> {
     return tauriExists(path)
   }
 
-  const res = await fetch(`${DATA_SERVER_URL}/api/fs/exists?path=${encodeURIComponent(path)}`)
+  const res = await fetch(`${DATA_SERVER_URL}/api/fs/exists?path=${encodeURIComponent(path)}`, {
+    headers: withDataServerHeaders(),
+  })
   const data = await res.json()
   return data.exists
 }
@@ -117,7 +125,9 @@ export async function readDir(path: string): Promise<DirEntry[]> {
     }))
   }
 
-  const res = await fetch(`${DATA_SERVER_URL}/api/fs/readdir?path=${encodeURIComponent(path)}`)
+  const res = await fetch(`${DATA_SERVER_URL}/api/fs/readdir?path=${encodeURIComponent(path)}`, {
+    headers: withDataServerHeaders(),
+  })
   if (!res.ok) return []
   const data = await res.json()
   // Bridge returns { name, isDirectory }; derive isFile
@@ -138,7 +148,7 @@ export async function mkdir(path: string, options?: { recursive?: boolean }): Pr
 
   await fetch(`${DATA_SERVER_URL}/api/fs/mkdir`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withDataServerHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ path, recursive: options?.recursive }),
   })
 }
@@ -153,5 +163,6 @@ export async function remove(path: string): Promise<void> {
 
   await fetch(`${DATA_SERVER_URL}/api/fs/remove?path=${encodeURIComponent(path)}`, {
     method: 'DELETE',
+    headers: withDataServerHeaders(),
   })
 }

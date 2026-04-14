@@ -25,7 +25,11 @@ shikin/
 
 ```bash
 pnpm install
-pnpm dev              # Vite :1420 + OAuth server :1455 + data-server :1480
+pnpm dev              # starts scripts/dev.mjs orchestration:
+                      # - OAuth callback server on 127.0.0.1:1455
+                      # - browser data-server on 127.0.0.1:1480
+                      # - Vite on 1420
+                      # per-run bridge token is injected into SHIKIN_DATA_SERVER_BRIDGE_TOKEN / VITE_DATA_SERVER_BRIDGE_TOKEN
 pnpm build:tauri      # Build Tauri desktop binary
 pnpm test:run         # Unit tests (339 tests, 40 files)
 pnpm lint && pnpm typecheck  # Lint + type check
@@ -58,7 +62,7 @@ npx tsx src/mcp-server.ts
 }
 ```
 
-### 43 Tools Available
+### 44 Tools Available
 
 Transaction, Account, Category, Analytics, Budget, Goal, Subscription, Investment, Recurring, Memory, Notebook, Intelligence, Debt, Currency tools — all accessible via CLI commands or MCP tool calls.
 

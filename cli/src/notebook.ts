@@ -6,27 +6,24 @@ import {
   readdirSync,
   unlinkSync,
 } from 'node:fs'
-import { join, dirname } from 'node:path'
-import { homedir } from 'node:os'
-
-const DATA_DIR = join(homedir(), '.local', 'share', 'com.asf.shikin')
-const NOTEBOOK_DIR = join(DATA_DIR, 'notebook')
+import { dirname } from 'node:path'
+import { NOTEBOOK_DIR, resolveNotebookPath } from './notebook-path.js'
 
 // Ensure notebook directory exists
 mkdirSync(NOTEBOOK_DIR, { recursive: true })
 
 export async function readNote(relativePath: string): Promise<string> {
-  return readFileSync(join(NOTEBOOK_DIR, relativePath), 'utf-8')
+  return readFileSync(resolveNotebookPath(relativePath), 'utf-8')
 }
 
 export async function writeNote(relativePath: string, content: string): Promise<void> {
-  const fullPath = join(NOTEBOOK_DIR, relativePath)
+  const fullPath = resolveNotebookPath(relativePath)
   mkdirSync(dirname(fullPath), { recursive: true })
   writeFileSync(fullPath, content, 'utf-8')
 }
 
 export async function appendNote(relativePath: string, content: string): Promise<void> {
-  const fullPath = join(NOTEBOOK_DIR, relativePath)
+  const fullPath = resolveNotebookPath(relativePath)
   let existing = ''
   try {
     existing = readFileSync(fullPath, 'utf-8')
@@ -38,11 +35,11 @@ export async function appendNote(relativePath: string, content: string): Promise
 }
 
 export async function noteExists(relativePath: string): Promise<boolean> {
-  return existsSync(join(NOTEBOOK_DIR, relativePath))
+  return existsSync(resolveNotebookPath(relativePath))
 }
 
 export async function listNotes(directory?: string): Promise<string[]> {
-  const targetPath = directory ? join(NOTEBOOK_DIR, directory) : NOTEBOOK_DIR
+  const targetPath = directory ? resolveNotebookPath(directory) : NOTEBOOK_DIR
   if (!existsSync(targetPath)) return []
   const entries = readdirSync(targetPath, { withFileTypes: true })
   const results: string[] = []
@@ -58,5 +55,5 @@ export async function listNotes(directory?: string): Promise<string[]> {
 }
 
 export async function deleteNote(relativePath: string): Promise<void> {
-  unlinkSync(join(NOTEBOOK_DIR, relativePath))
+  unlinkSync(resolveNotebookPath(relativePath))
 }

@@ -1,4 +1,4 @@
-import { isTauri, DATA_SERVER_URL } from '@/lib/runtime'
+import { isTauri, DATA_SERVER_URL, withDataServerHeaders } from '@/lib/runtime'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -317,14 +317,14 @@ async function browserFetch<T>(endpoint: string, body: Record<string, unknown>):
   try {
     res = await fetch(`${DATA_SERVER_URL}${endpoint}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withDataServerHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     })
   } catch (err) {
     // eslint-disable-next-line preserve-caught-error -- original error included in message
     throw new Error(
       `Cannot reach data server at ${DATA_SERVER_URL}. ` +
-        `Make sure it is running (npm run data-server). ` +
+        `Make sure it is running (start it with pnpm dev). ` +
         `Original error: ${err instanceof Error ? err.message : err}`
     )
   }
@@ -346,7 +346,7 @@ async function verifyBrowserServer(): Promise<void> {
     // eslint-disable-next-line preserve-caught-error -- original error included in message
     throw new Error(
       `Data server health check failed. ` +
-        `Ensure the data server is running: npm run data-server\n` +
+        `Ensure the data server is running: pnpm dev\n` +
         `${err instanceof Error ? err.message : err}`
     )
   }
@@ -446,7 +446,9 @@ export async function exportDatabaseSnapshot(): Promise<Uint8Array> {
   }
 
   // Browser mode: fetch raw binary from data server
-  const res = await fetch(`${DATA_SERVER_URL}/api/db/export`)
+  const res = await fetch(`${DATA_SERVER_URL}/api/db/export`, {
+    headers: withDataServerHeaders(),
+  })
   if (!res.ok) {
     const text = await res.text()
     throw new Error(`Export failed (${res.status}): ${text}`)
@@ -478,7 +480,7 @@ export async function importDatabaseSnapshot(data: Uint8Array): Promise<void> {
   // Browser mode: POST binary to data server
   const res = await fetch(`${DATA_SERVER_URL}/api/db/import`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/octet-stream' },
+    headers: withDataServerHeaders({ 'Content-Type': 'application/octet-stream' }),
     body: data,
   })
   if (!res.ok) {

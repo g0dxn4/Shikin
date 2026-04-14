@@ -1,6 +1,6 @@
 # Local HTTP API
 
-This document specifies the local HTTP API that Shikin will expose for inter-application communication. The API runs on `localhost` and is intended for local integrations, extensions, and tools like MCP servers or personal automation scripts.
+This document defines the planned public API contract for Shikin. Current runtime local bridge traffic in browser mode uses separate internal endpoints on `127.0.0.1:1480` (not this spec).
 
 **Status:** Planned for a future release. Not yet implemented.
 
@@ -9,7 +9,7 @@ This document specifies the local HTTP API that Shikin will expose for inter-app
 ## Design Principles
 
 1. **Local-only** -- The API binds to `127.0.0.1` (localhost) only. It is never exposed to the network.
-2. **No authentication for v1** -- Since the API is local-only and accessible only from the same machine, no auth is required in the initial version. Future versions may add a local token for multi-user machines.
+2. **Local bridge authentication** -- The runtime bridge (`127.0.0.1:1480`) requires `Origin: http://localhost:1420` and `X-Shikin-Bridge` request header with the per-run bridge token (`VITE_DATA_SERVER_BRIDGE_TOKEN`).
 3. **REST + JSON** -- Standard RESTful conventions with JSON request and response bodies.
 4. **Consistent error format** -- All errors return a standard JSON shape with an error code and message.
 5. **Money in centavos** -- All monetary amounts in the API are integers representing centavos/cents, matching the database convention.
@@ -21,6 +21,12 @@ This document specifies the local HTTP API that Shikin will expose for inter-app
 
 ```
 http://127.0.0.1:7878/api/v1
+```
+
+Active bridge base URL in-browser (implemented):
+
+```
+http://127.0.0.1:1480/api/
 ```
 
 The port `7878` is configurable in Shikin settings.

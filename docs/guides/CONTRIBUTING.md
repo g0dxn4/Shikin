@@ -33,7 +33,13 @@ pnpm install
 pnpm dev
 ```
 
-`pnpm dev` starts the Vite dev server on `http://localhost:1420` with HMR.
+`pnpm dev` runs `scripts/dev.mjs`, which starts:
+
+- OAuth callback server on `http://127.0.0.1:1455`
+- Browser data-server on `http://127.0.0.1:1480`
+- Vite on `http://localhost:1420` (HMR)
+
+The same `pnpm dev` run generates and injects a per-run bridge token into `SHIKIN_DATA_SERVER_BRIDGE_TOKEN` and `VITE_DATA_SERVER_BRIDGE_TOKEN`.
 
 ## Branching Strategy
 

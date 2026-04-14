@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Contribution guide
+    url: https://github.com/g0dxn4/Shikin/blob/main/CONTRIBUTING.md
+    about: Read the branch workflow, checks, and contribution expectations before opening work.

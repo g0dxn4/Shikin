@@ -94,6 +94,18 @@ cd Shikin
 pnpm install
 ```
 
+## Contribution Flow
+
+Shikin uses a simple two-branch flow for open source work:
+
+- `main` is the stable branch.
+- `developer` is the shared testing and integration branch.
+- Create feature and fix branches from `developer`.
+- Open pull requests into `developer` first.
+- After testing, promote `developer` into `main` with a follow-up pull request.
+
+See `CONTRIBUTING.md` for the contributor workflow and `docs/guides/CONTRIBUTING.md` for the full development guide.
+
 ### Run Locally
 
 ```bash

@@ -35,6 +35,22 @@ pnpm dev
 
 `pnpm dev` starts the Vite dev server on `http://localhost:1420` with HMR.
 
+## Branching Strategy
+
+- `main` is the stable branch.
+- `developer` is the integration branch where reviewed work lands first.
+- Create topic branches from `developer`.
+- Open pull requests into `developer` for normal feature and fix work.
+- After validation, open a second pull request from `developer` into `main`.
+
+Example flow:
+
+```bash
+git checkout developer
+git pull origin developer
+git checkout -b feature/transaction-import-fix
+```
+
 ### Legacy Desktop-Shell Development
 
 If you need to test legacy desktop-shell behavior:

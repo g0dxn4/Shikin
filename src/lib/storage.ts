@@ -13,6 +13,12 @@ export interface Store {
   save(): Promise<void>
 }
 
+function createErrorWithCause(message: string, cause: unknown): Error {
+  const error = new Error(message) as Error & { cause?: unknown }
+  error.cause = cause
+  return error
+}
+
 async function browserStorageRequest(
   input: RequestInfo | URL,
   init: RequestInit,
@@ -23,10 +29,10 @@ async function browserStorageRequest(
   try {
     res = await fetch(input, init)
   } catch (err) {
-    throw new Error(
+    throw createErrorWithCause(
       `Cannot reach data server at ${DATA_SERVER_URL} while ${context}. ` +
         `Original error: ${err instanceof Error ? err.message : err}`,
-      { cause: err }
+      err
     )
   }
 

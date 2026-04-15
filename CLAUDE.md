@@ -16,7 +16,7 @@ shikin/
 - **Frontend**: React 19 + TypeScript + Tailwind v4 + shadcn/ui
 - **Desktop**: Tauri v2 (Rust)
 - **Database**: SQLite via shared storage (`~/.local/share/com.asf.shikin/`)
-- **CLI/MCP**: 43 financial tools exposed via commander CLI + MCP server
+- **CLI/MCP**: 44 financial tools exposed via commander CLI + MCP server
 - **State**: Zustand stores
 - **Testing**: Vitest + Testing Library + Playwright (e2e)
 - **Package Manager**: pnpm (root) + npm (cli/)

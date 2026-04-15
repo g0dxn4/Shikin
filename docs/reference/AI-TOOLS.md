@@ -1,6 +1,9 @@
 # AI Tools
 
-Ivy is Shikin's AI financial assistant. This document covers the tool-calling architecture, all 43 implemented tools, the system prompt, and provider support.
+> Historical note: this document describes an earlier frontend AI-agent design that is no longer the current repo architecture.
+> The current codebase exposes AI capabilities through the CLI and MCP server in `cli/src/tools.ts` with 44 tools, and does not ship a built-in AI chat UI.
+
+This historical document described Ivy as a frontend AI financial assistant with 43 implemented tools, a system prompt, and provider support.
 
 ---
 
@@ -164,30 +167,7 @@ graph LR
 
 ## Adding a New Tool
 
-1. Create a file in `src/ai/tools/`:
-
-```typescript
-import { tool, zodSchema } from 'ai'
-import { z } from 'zod'
-import { query } from '@/lib/database'
-
-export const myNewTool = tool({
-  description: 'What this tool does.',
-  inputSchema: zodSchema(
-    z.object({
-      param: z.string().describe('Parameter description'),
-    })
-  ),
-  execute: async ({ param }) => {
-    const result = await query('SELECT ...')
-    return { success: true, data: result }
-  },
-})
-```
-
-2. Export from `src/ai/tools/index.ts`.
-3. Import and register in `src/ai/agent.ts` (both the import and the tools object).
-4. Update the system prompt capabilities list if user-facing.
+For the current implementation, see `docs/guides/CONTRIBUTING.md#adding-a-new-cli-or-mcp-tool` and add tools through `cli/src/tools.ts`.
 
 ---
 

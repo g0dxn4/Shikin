@@ -1,5 +1,8 @@
 # Architecture
 
+> Historical note: this document describes an earlier browser-first architecture with `sql.js` + IndexedDB and an embedded frontend AI agent.
+> For the current implementation, start with `docs/reference/BACKEND-MAP.md` and `docs/reference/FRONTEND-MAP.md`.
+
 This document describes Shikin's browser-first architecture: runtime layers, data flow, state boundaries, and major modules.
 
 ---

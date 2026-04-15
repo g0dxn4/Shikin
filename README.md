@@ -32,11 +32,11 @@ Shikin is built to keep both:
 - **Investments**: Portfolio tracking with live prices (Alpha Vantage for stocks, CoinGecko for crypto).
 - **Multi-Currency**: Live exchange rates via frankfurter.app with preferred currency conversion.
 
-### CLI & MCP Server — 43 Tools
+### CLI & MCP Server — 44 Tools
 
 - **CLI**: `shikin add-transaction --amount 5.50 --type expense --description "Coffee"`
 - **MCP Server**: Connect Claude Code, Claude Desktop, Cursor, or any MCP-compatible AI
-- **43 Financial Tools**: Transactions, accounts, budgets, goals, investments, analytics, debt planning, currency conversion, and more
+- **44 Financial Tools**: Transactions, accounts, budgets, goals, investments, analytics, debt planning, currency conversion, and more
 - **No Built-in AI**: Bring your own AI — Shikin is the finance engine, your AI platform controls it
 
 ### Intelligence & Analytics
@@ -61,21 +61,21 @@ Shikin is built to keep both:
 
 ## Tech Stack
 
-| Layer      | Technology                        | Purpose                             |
-| ---------- | --------------------------------- | ----------------------------------- |
-| Runtime    | Tauri v2 + Browser + Vite         | Desktop app and web runtime         |
-| Frontend   | React 19 + TypeScript             | UI and application logic            |
-| Styling    | Tailwind CSS v4 + shadcn/ui       | Design system and components        |
-| Routing    | React Router v7                   | Client-side navigation              |
-| State      | Zustand (19 stores)               | Global state management             |
-| Database   | SQLite (shared storage)           | 21 tables, migration-backed schema  |
-| Settings   | Tauri Store / data-server bridge  | Local key-value config storage      |
-| AI         | AI SDK v6 (`ai`, `@ai-sdk/react`) | Chat + tool loop runtime (43 tools) |
-| Forms      | React Hook Form + Zod v4          | Form validation and parsing         |
-| Charts     | Recharts                          | Financial visualizations            |
-| PDF        | jsPDF                             | Report generation                   |
-| i18n       | i18next + react-i18next           | Localization (en/es)                |
-| Build/Test | Vite + Vitest + Playwright        | Build pipeline and test tooling     |
+| Layer      | Technology                       | Purpose                             |
+| ---------- | -------------------------------- | ----------------------------------- |
+| Runtime    | Tauri v2 + Browser + Vite        | Desktop app and web runtime         |
+| Frontend   | React 19 + TypeScript            | UI and application logic            |
+| Styling    | Tailwind CSS v4 + shadcn/ui      | Design system and components        |
+| Routing    | React Router v7                  | Client-side navigation              |
+| State      | Zustand (19 stores)              | Global state management             |
+| Database   | SQLite (shared storage)          | 21 tables, migration-backed schema  |
+| Settings   | Tauri Store / data-server bridge | Local key-value config storage      |
+| AI         | CLI (`commander`) + MCP SDK      | Local automation surface (44 tools) |
+| Forms      | React Hook Form + Zod v4         | Form validation and parsing         |
+| Charts     | Recharts                         | Financial visualizations            |
+| PDF        | jsPDF                            | Report generation                   |
+| i18n       | i18next + react-i18next          | Localization (en/es)                |
+| Build/Test | Vite + Vitest + Playwright       | Build pipeline and test tooling     |
 
 ---
 
@@ -104,7 +104,7 @@ Shikin uses a simple two-branch flow for open source work:
 - Open pull requests into `developer` first.
 - After testing, promote `developer` into `main` with a follow-up pull request.
 
-See `CONTRIBUTING.md` for the contributor workflow and `docs/guides/CONTRIBUTING.md` for the full development guide.
+See `CONTRIBUTING.md` for the quick contributor workflow and `docs/guides/CONTRIBUTING.md` for the full development guide.
 
 ### Run Locally
 
@@ -140,7 +140,7 @@ pnpm build:tauri  # Builds .deb + .AppImage (Linux), .dmg (macOS), .msi (Windows
 
 ## CLI & MCP Server
 
-Shikin exposes 43 financial tools via CLI and MCP server. Any AI can control your finances.
+Shikin exposes 44 financial tools via CLI and MCP server. Any AI can control your finances.
 
 ```bash
 cd cli && npm install
@@ -181,13 +181,8 @@ npx tsx src/mcp-server.ts
 ```
 Shikin/
 ├── src/
-│   ├── ai/                   # Agent, transport, memory, 43 tools
-│   │   ├── agent.ts          # ToolLoopAgent configuration + system prompt
-│   │   ├── transport.ts      # DirectChatTransport (no HTTP backend)
-│   │   ├── tools/            # 43 AI tool implementations
-│   │   └── memory-loader.ts  # MemGPT-style memory system
 │   ├── components/
-│   │   ├── layout/           # App shell, sidebar, bottom nav, AI panel
+│   │   ├── layout/           # App shell, sidebar, bottom nav, dialogs
 │   │   ├── ui/               # shadcn/ui primitives (21 components)
 │   │   ├── transactions/     # Transaction form, dialog, split, import
 │   │   ├── goals/            # Goal form, dialog
@@ -195,7 +190,7 @@ Shikin/
 │   │   ├── investments/      # Investment form, dialog
 │   │   └── accounts/         # Account form, dialog
 │   ├── lib/                  # 27 service/utility files
-│   │   ├── database.ts       # sql.js init, migrations, query/execute
+│   │   ├── database.ts       # Dual-backend DB access + migrations
 │   │   ├── anomaly-service.ts
 │   │   ├── forecast-service.ts
 │   │   ├── health-score-service.ts
@@ -210,10 +205,11 @@ Shikin/
 │   │   ├── pdf-generator.ts
 │   │   ├── achievement-service.ts
 │   │   └── ...
-│   ├── pages/                # 18 page files, 12 routed
+│   ├── pages/                # 19 page files, 14 routed
 │   ├── stores/               # 19 Zustand stores
 │   ├── i18n/                 # 13 namespaces, 2 languages (en/es)
 │   └── types/                # TypeScript type definitions
+├── cli/                      # CLI + MCP server (44 tools)
 ├── docs/                     # Project documentation
 ├── e2e/                      # Playwright end-to-end tests
 └── public/                   # Static assets
@@ -223,15 +219,17 @@ Shikin/
 
 ## Documentation
 
-| Document                                    | Description                                          |
-| ------------------------------------------- | ---------------------------------------------------- |
-| [Architecture](docs/guides/ARCHITECTURE.md) | Runtime layers, data flow, state model, AI tool flow |
-| [Database](docs/reference/DATABASE.md)      | 21-table SQLite schema, conventions, migrations      |
-| [AI Tools](docs/reference/AI-TOOLS.md)      | 43 tool catalog, system prompt, architecture         |
-| [Ideas](docs/planning/IDEAS.md)             | Feature ideas backlog with priority tiers            |
-| [Contributing](docs/guides/CONTRIBUTING.md) | Development setup and conventions                    |
-| [Roadmap](docs/planning/ROADMAP.md)         | Current roadmap and milestone status                 |
-| [Changelog](CHANGELOG.md)                   | Recent shipped changes and release notes             |
+| Document                                       | Description                                       |
+| ---------------------------------------------- | ------------------------------------------------- |
+| [Architecture](docs/guides/ARCHITECTURE.md)    | Historical browser-first architecture notes       |
+| [Backend Map](docs/reference/BACKEND-MAP.md)   | Current CLI, MCP, bridge, and local backend map   |
+| [Frontend Map](docs/reference/FRONTEND-MAP.md) | Current routes, stores, dialogs, and frontend map |
+| [Database](docs/reference/DATABASE.md)         | 21-table SQLite schema, conventions, migrations   |
+| [AI Tools](docs/reference/AI-TOOLS.md)         | Historical frontend AI-agent planning artifact    |
+| [Ideas](docs/planning/IDEAS.md)                | Feature ideas backlog with priority tiers         |
+| [Contributing](docs/guides/CONTRIBUTING.md)    | Development setup and conventions                 |
+| [Roadmap](docs/planning/ROADMAP.md)            | Current roadmap and milestone status              |
+| [Changelog](CHANGELOG.md)                      | Recent shipped changes and release notes          |
 
 ---
 

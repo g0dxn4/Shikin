@@ -2,7 +2,7 @@
 
 This document describes the complete SQLite schema for Shikin, including all tables, columns, indexes, conventions, migration strategy, and example queries.
 
-The database is maintained via `sql.js` in the browser and persisted to IndexedDB as `shikin.db` snapshot bytes.
+The schema is shared across the current dual-backend runtime: Tauri desktop uses `@tauri-apps/plugin-sql`, while browser mode reads and writes through the local data-server bridge against the shared SQLite database.
 
 ---
 

@@ -8,14 +8,14 @@ Thank you for your interest in contributing to Shikin. This document covers the 
 
 Before you begin, make sure you have these tools installed:
 
-| Tool      | Version  | Install                                   |
-| --------- | -------- | ----------------------------------------- |
-| Node.js   | >= 18    | [nodejs.org](https://nodejs.org/)         |
-| pnpm      | >= 9     | `npm install -g pnpm`                     |
-| Rust      | Optional | Only needed for legacy desktop-shell work |
-| Tauri CLI | Optional | Only needed for legacy desktop-shell work |
+| Tool      | Version  | Install                                     |
+| --------- | -------- | ------------------------------------------- |
+| Node.js   | >= 18    | [nodejs.org](https://nodejs.org/)           |
+| pnpm      | >= 9     | `npm install -g pnpm`                       |
+| Rust      | Optional | Needed for Tauri desktop development/builds |
+| Tauri CLI | Optional | Needed for Tauri desktop development/builds |
 
-The primary workflow is browser-first. Tauri system dependencies are only required if you are actively working on legacy desktop-shell integration.
+The primary workflow is browser-first for day-to-day UI work, but Tauri desktop builds are current and supported. Install the Tauri system dependencies when you need to work on `src-tauri/` or produce desktop binaries.
 
 ---
 
@@ -57,15 +57,15 @@ git pull origin developer
 git checkout -b feature/transaction-import-fix
 ```
 
-### Legacy Desktop-Shell Development
+### Tauri Desktop Development
 
-If you need to test legacy desktop-shell behavior:
+If you need to test the desktop shell locally:
 
 ```bash
 pnpm legacy:tauri:dev
 ```
 
-`pnpm legacy:tauri:dev` runs `tauri dev` for compatibility testing. Core development does not require this mode.
+`pnpm legacy:tauri:dev` runs `tauri dev` for desktop-shell testing. Core browser-first development does not require this mode.
 
 ### Rust Backend Development
 
@@ -84,12 +84,8 @@ cargo build
 
 ```
 src/
-├── ai/                   # AI agent, transport, tool definitions
-│   ├── tools/            # One file per AI tool
-│   ├── agent.ts          # ToolLoopAgent factory
-│   └── transport.ts      # DirectChatTransport factory
 ├── components/
-│   ├── layout/           # AppShell, Sidebar, AIPanel
+│   ├── layout/           # AppShell, Sidebar, BottomNav, global dialogs
 │   └── ui/               # shadcn/ui primitives (button, dialog, etc.)
 ├── i18n/                 # Internationalization
 │   └── locales/          # en/ and es/ JSON translation files
@@ -99,12 +95,19 @@ src/
 │   ├── ulid.ts           # ID generation
 │   ├── constants.ts      # App constants
 │   └── utils.ts          # cn() helper for Tailwind
-├── pages/                # One file per route
+├── pages/                # Routed and auxiliary page components
 ├── stores/               # Zustand state stores
 ├── styles/               # Global CSS (Tailwind v4)
 ├── types/                # TypeScript type definitions
 ├── App.tsx               # Root component with routing
 └── main.tsx              # Entry point
+
+cli/
+├── src/
+│   ├── cli.ts            # Commander CLI entry point
+│   ├── mcp-server.ts     # MCP server entry point
+│   ├── tools.ts          # Shared 44-tool catalog
+│   └── database.ts       # better-sqlite3 data access
 ```
 
 ---
@@ -439,9 +442,11 @@ build: upgrade AI SDK to v6.1
 
 ## Pull Request Process
 
-1. **Create a branch** from `main`:
+1. **Create a branch** from `developer`:
 
    ```bash
+   git checkout developer
+   git pull origin developer
    git checkout -b feat/account-balances-tool
    ```
 
@@ -454,7 +459,7 @@ build: upgrade AI SDK to v6.1
    pnpm test:run
    ```
 
-4. **Push and open a pull request** against `main`.
+4. **Push and open a pull request** against `developer`.
 
 5. **PR description** should include:
    - A summary of what changed and why.
@@ -499,9 +504,9 @@ build: upgrade AI SDK to v6.1
 
 ---
 
-## Adding a New AI Tool
+## Adding a New CLI or MCP Tool
 
-See the detailed guide in [AI-TOOLS.md](../reference/AI-TOOLS.md#adding-a-new-tool).
+Add new tools to `cli/src/tools.ts`, then wire any CLI- or MCP-specific behavior through `cli/src/cli.ts` and `cli/src/mcp-server.ts` as needed. See `../reference/BACKEND-MAP.md` for the current backend entry points.
 
 ---
 

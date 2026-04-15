@@ -1,3 +1,25 @@
+const MAX_CODEX_ITEM_CACHE_SIZE = 500
+
+function cacheCodexItem(itemCache, item) {
+  if (!item?.id) {
+    return
+  }
+
+  if (itemCache.has(item.id)) {
+    itemCache.delete(item.id)
+  }
+
+  itemCache.set(item.id, item)
+
+  while (itemCache.size > MAX_CODEX_ITEM_CACHE_SIZE) {
+    const oldestKey = itemCache.keys().next().value
+    if (!oldestKey) {
+      break
+    }
+    itemCache.delete(oldestKey)
+  }
+}
+
 export function cacheItemsFromStream(chunk, itemCache) {
   // SSE format: "event: ...\ndata: {...}\n\n"
   const lines = chunk.split('\n')
@@ -7,11 +29,11 @@ export function cacheItemsFromStream(chunk, itemCache) {
       const data = JSON.parse(line.slice(6))
       if (data.type === 'response.completed' && data.response?.output) {
         for (const item of data.response.output) {
-          if (item.id) itemCache.set(item.id, item)
+          cacheCodexItem(itemCache, item)
         }
       }
       if (data.type === 'response.output_item.done' && data.item?.id) {
-        itemCache.set(data.item.id, data.item)
+        cacheCodexItem(itemCache, data.item)
       }
     } catch {
       /* ignore malformed SSE data lines */

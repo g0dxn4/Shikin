@@ -195,4 +195,29 @@ describe('MCP resource registration', () => {
       },
     ])
   })
+
+  it('returns structured execution errors for resource failures', async () => {
+    const queryMock = vi.mocked(query)
+    queryMock.mockReset()
+    queryMock.mockImplementation(() => {
+      throw new Error('database unavailable')
+    })
+
+    const registerResource = vi.fn()
+    registerMcpResources({ resource: registerResource } as never)
+
+    const accountsHandler = registerResource.mock.calls[0]?.[2] as (uri: URL) => Promise<{
+      contents: Array<{ text: string }>
+    }>
+
+    const result = await accountsHandler(new URL('shikin://accounts'))
+
+    expect(JSON.parse(result.contents[0]!.text)).toEqual({
+      success: false,
+      message: 'database unavailable',
+      error: 'database unavailable',
+      errorType: 'execution_error',
+      resource: 'accounts',
+    })
+  })
 })

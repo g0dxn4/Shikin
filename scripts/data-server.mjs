@@ -520,19 +520,61 @@ function saveSettings(settings) {
 
 // ── HTTP Helpers ───────────────────────────────────────────────────────────
 
-function readBody(req) {
+const MAX_JSON_BODY_BYTES = Number(process.env.SHIKIN_DATA_SERVER_MAX_JSON_BODY_BYTES || 1_000_000)
+const MAX_PROXY_BODY_BYTES = Number(
+  process.env.SHIKIN_DATA_SERVER_MAX_PROXY_BODY_BYTES || 5_000_000
+)
+const MAX_DB_IMPORT_BYTES = Number(process.env.SHIKIN_DATA_SERVER_MAX_DB_IMPORT_BYTES || 50_000_000)
+
+function createPayloadTooLargeError(label, maxBytes) {
+  const error = new Error(`${label} exceeds the ${maxBytes}-byte limit.`)
+  error.statusCode = 413
+  return error
+}
+
+function readBuffer(req, { maxBytes, label }) {
   return new Promise((resolve, reject) => {
     const chunks = []
-    req.on('data', (c) => chunks.push(c))
-    req.on('end', () => {
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString()))
-      } catch {
-        resolve({})
+    let totalBytes = 0
+    let tooLargeError = null
+
+    req.on('data', (chunk) => {
+      if (tooLargeError) {
+        return
       }
+
+      totalBytes += chunk.length
+
+      if (totalBytes > maxBytes) {
+        tooLargeError = createPayloadTooLargeError(label, maxBytes)
+        return
+      }
+
+      chunks.push(chunk)
+    })
+
+    req.on('end', () => {
+      if (tooLargeError) {
+        reject(tooLargeError)
+        return
+      }
+
+      resolve(Buffer.concat(chunks))
     })
     req.on('error', reject)
   })
+}
+
+function readBody(req) {
+  return readBuffer(req, { maxBytes: MAX_JSON_BODY_BYTES, label: 'JSON request body' }).then(
+    (buffer) => {
+      try {
+        return JSON.parse(buffer.toString())
+      } catch {
+        return {}
+      }
+    }
+  )
 }
 
 function sendJson(res, data, status = 200) {
@@ -719,9 +761,10 @@ const server = createServer(async (req, res) => {
       const targetUrl = `https://chatgpt.com/backend-api/codex${targetPath}${url.search || ''}`
 
       // Read raw body and patch for Codex API requirements
-      const bodyChunks = []
-      for await (const chunk of req) bodyChunks.push(chunk)
-      let bodyBuffer = Buffer.concat(bodyChunks)
+      let bodyBuffer = await readBuffer(req, {
+        maxBytes: MAX_PROXY_BODY_BYTES,
+        label: 'Proxy request body',
+      })
 
       // Patch request body for Codex API compatibility
       if (req.headers['content-type']?.includes('application/json') && bodyBuffer.length > 0) {
@@ -797,9 +840,10 @@ const server = createServer(async (req, res) => {
 
     // ── DB: Import (binary) ────────────────────────────────────────
     if (path === '/api/db/import' && req.method === 'POST') {
-      const chunks = []
-      for await (const chunk of req) chunks.push(chunk)
-      const buffer = Buffer.concat(chunks)
+      const buffer = await readBuffer(req, {
+        maxBytes: MAX_DB_IMPORT_BYTES,
+        label: 'Database import payload',
+      })
 
       // Validate: SQLite files start with "SQLite format 3\0"
       const header = buffer.slice(0, 16).toString('ascii')
@@ -818,7 +862,7 @@ const server = createServer(async (req, res) => {
     sendError(res, 'Not found', 404)
   } catch (err) {
     console.error('[data-server] Error:', err.message)
-    sendError(res, err.message, 500)
+    sendError(res, err.message, err.statusCode || 500)
   }
 })
 

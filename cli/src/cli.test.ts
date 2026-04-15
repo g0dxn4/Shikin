@@ -3,14 +3,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
 vi.mock('./tools.js', () => ({ tools: [] }))
-vi.mock('./database.js', () => ({ close: vi.fn() }))
+vi.mock('./database.js', () => ({ close: vi.fn(), query: vi.fn() }))
 
-const { close } = await import('./database.js')
+const { close, query } = await import('./database.js')
 const { coerceInput, createProgram, zodToOptions } = await import('./cli.js')
 
 afterEach(() => {
   vi.restoreAllMocks()
   vi.mocked(close).mockReset()
+  vi.mocked(query).mockReset()
   process.exitCode = undefined
 })
 
@@ -103,6 +104,41 @@ describe('CLI command execution', () => {
           success: false,
           message: 'Account missing-account not found.',
           reason: 'missing_account',
+        },
+        null,
+        2
+      )
+    )
+    expect(errorSpy).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('prints database health details for diagnose', async () => {
+    vi.mocked(query)
+      .mockReturnValueOnce([{ name: '001_core_tables' }, { name: '010_transaction_splits' }])
+      .mockReturnValueOnce([{ count: 2 }])
+      .mockReturnValueOnce([{ count: 14 }])
+      .mockReturnValueOnce([{ count: 42 }])
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const program = createProgram([])
+
+    await program.parseAsync(['node', 'shikin', 'diagnose'])
+
+    expect(logSpy).toHaveBeenCalledWith(
+      JSON.stringify(
+        {
+          success: true,
+          toolCount: 0,
+          database: {
+            ready: true,
+            migrationCount: 2,
+            latestMigration: '010_transaction_splits',
+            accountCount: 2,
+            categoryCount: 14,
+            transactionCount: 42,
+          },
         },
         null,
         2

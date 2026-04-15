@@ -3,7 +3,7 @@
 import { pathToFileURL } from 'node:url'
 import { Command } from 'commander'
 import { tools, type ToolDefinition } from './tools.js'
-import { close } from './database.js'
+import { close, query } from './database.js'
 import { z } from 'zod'
 
 function isFailureResult(value: unknown): value is Record<string, unknown> & { success: false } {
@@ -105,6 +105,54 @@ export function createProgram(toolDefinitions: ToolDefinition[] = tools): Comman
     .name('shikin')
     .description('Shikin — control your finances from the command line')
     .version('0.1.0')
+
+  program
+    .command('diagnose')
+    .description('Validate shared database connectivity and print CLI/MCP health details')
+    .action(() => {
+      try {
+        const migrations = query<{ name: string }>('SELECT name FROM _migrations ORDER BY id ASC')
+        const accountCount =
+          query<{ count: number }>('SELECT COUNT(*) as count FROM accounts')[0]?.count ?? 0
+        const categoryCount =
+          query<{ count: number }>('SELECT COUNT(*) as count FROM categories')[0]?.count ?? 0
+        const transactionCount =
+          query<{ count: number }>('SELECT COUNT(*) as count FROM transactions')[0]?.count ?? 0
+
+        console.log(
+          JSON.stringify(
+            {
+              success: true,
+              toolCount: toolDefinitions.length,
+              database: {
+                ready: true,
+                migrationCount: migrations.length,
+                latestMigration: migrations.at(-1)?.name ?? null,
+                accountCount,
+                categoryCount,
+                transactionCount,
+              },
+            },
+            null,
+            2
+          )
+        )
+      } catch (err) {
+        console.log(
+          JSON.stringify(
+            {
+              success: false,
+              message: err instanceof Error ? err.message : String(err),
+            },
+            null,
+            2
+          )
+        )
+        process.exitCode = 1
+      } finally {
+        close()
+      }
+    })
 
   // Register each tool as a CLI command
   for (const tool of toolDefinitions) {

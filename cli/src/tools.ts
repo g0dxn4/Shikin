@@ -120,6 +120,101 @@ function nonNegativeMoneyAmount(description: string, max = MAX_ABSOLUTE_AMOUNT):
   return moneyAmount(description, { min: 0, max })
 }
 
+function unsupportedTransferMessage() {
+  return (
+    'Transfer transactions are not fully supported in the CLI yet. ' +
+    'Record the withdrawal and deposit as separate entries with explicit account IDs.'
+  )
+}
+
+function resolveAccountId(accountId?: string) {
+  if (accountId) {
+    const accounts = query<{ id: string }>('SELECT id FROM accounts WHERE id = $1 LIMIT 1', [
+      accountId,
+    ])
+
+    if (accounts.length === 0) {
+      return { success: false as const, message: `Account ${accountId} not found.` }
+    }
+
+    return { success: true as const, id: accounts[0].id }
+  }
+
+  const accounts = query<{ id: string; name: string }>(
+    'SELECT id, name FROM accounts ORDER BY name ASC, id ASC LIMIT 2'
+  )
+
+  if (accounts.length === 0) {
+    return {
+      success: false as const,
+      message: 'No accounts found. Please create an account first.',
+    }
+  }
+
+  if (accounts.length > 1) {
+    return {
+      success: false as const,
+      message:
+        'Multiple accounts found. Provide accountId explicitly so Shikin does not guess the wrong account.',
+    }
+  }
+
+  return { success: true as const, id: accounts[0].id }
+}
+
+function resolveCategoryId(category?: string) {
+  if (!category) {
+    return { success: true as const, id: null, name: null }
+  }
+
+  const exactMatches = query<{ id: string; name: string }>(
+    'SELECT id, name FROM categories WHERE LOWER(name) = LOWER($1) ORDER BY name ASC LIMIT 2',
+    [category]
+  )
+
+  if (exactMatches.length === 1) {
+    return {
+      success: true as const,
+      id: exactMatches[0].id,
+      name: exactMatches[0].name,
+    }
+  }
+
+  if (exactMatches.length > 1) {
+    return {
+      success: false as const,
+      message: `Category "${category}" is ambiguous. Use a more specific existing category name.`,
+    }
+  }
+
+  const partialMatches = query<{ id: string; name: string }>(
+    'SELECT id, name FROM categories WHERE LOWER(name) LIKE LOWER($1) ORDER BY name ASC LIMIT 3',
+    [`%${category}%`]
+  )
+
+  if (partialMatches.length === 1) {
+    return {
+      success: true as const,
+      id: partialMatches[0].id,
+      name: partialMatches[0].name,
+    }
+  }
+
+  if (partialMatches.length > 1) {
+    return {
+      success: false as const,
+      message: `Category "${category}" matches multiple categories (${partialMatches
+        .map((match) => match.name)
+        .join(', ')}). Use a more specific existing category name.`,
+    }
+  }
+
+  return {
+    success: false as const,
+    message: `Category "${category}" not found. Use list-categories to pick an existing category name.`,
+  }
+}
+
 function isStrictIsoDate(value: string): boolean {
   if (!ISO_DATE_PATTERN.test(value)) return false
 
@@ -143,55 +238,43 @@ const addTransaction: ToolDefinition = {
     description: boundedText('Description', 'A short description of the transaction', 200),
     category: boundedText(
       'Category',
-      'Category name (e.g. "Food & Dining", "Salary"). Will match the closest existing category.',
+      'Category name (e.g. "Food & Dining", "Salary"). Must resolve to one existing category.',
       120
     ).optional(),
     date: isoDate('Transaction date in YYYY-MM-DD format. Defaults to today.').optional(),
     notes: boundedText('Notes', 'Additional notes about the transaction', 1000).optional(),
     accountId: boundedText(
       'Account ID',
-      'Optional account ID to apply the transaction to. Defaults to the first account when omitted.',
+      'Optional account ID to apply the transaction to. Required when multiple accounts exist.',
       128
     ).optional(),
   }),
   execute: async ({ amount, type, description, category, date, notes, accountId }) => {
+    if (type === 'transfer') {
+      return {
+        success: false,
+        message: unsupportedTransferMessage(),
+      }
+    }
+
     const id = generateId()
     const amountCentavos = toCentavos(amount)
     const txDate = date || dayjs().format('YYYY-MM-DD')
 
     return transaction(() => {
-      let categoryId: string | null = null
-      if (category) {
-        const categories = query<{ id: string }>(
-          'SELECT id FROM categories WHERE LOWER(name) LIKE LOWER($1) LIMIT 1',
-          [`%${category}%`]
-        )
-        if (categories.length > 0) {
-          categoryId = categories[0].id
-        }
-      }
-
-      let resolvedAccountId = accountId ?? null
-      if (resolvedAccountId) {
-        const accounts = query<{ id: string }>('SELECT id FROM accounts WHERE id = $1 LIMIT 1', [
-          resolvedAccountId,
-        ])
-        if (accounts.length === 0) {
-          return {
-            success: false,
-            message: `Account ${resolvedAccountId} not found.`,
-          }
-        }
-        resolvedAccountId = accounts[0].id
-      } else {
-        const accounts = query<{ id: string }>('SELECT id FROM accounts LIMIT 1')
-        resolvedAccountId = accounts.length > 0 ? accounts[0].id : null
-      }
-
-      if (!resolvedAccountId) {
+      const resolvedCategory = resolveCategoryId(category)
+      if (!resolvedCategory.success) {
         return {
           success: false,
-          message: 'No accounts found. Please create an account first.',
+          message: resolvedCategory.message,
+        }
+      }
+
+      const resolvedAccount = resolveAccountId(accountId)
+      if (!resolvedAccount.success) {
+        return {
+          success: false,
+          message: resolvedAccount.message,
         }
       }
 
@@ -200,8 +283,8 @@ const addTransaction: ToolDefinition = {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [
           id,
-          resolvedAccountId,
-          categoryId,
+          resolvedAccount.id,
+          resolvedCategory.id,
           type,
           amountCentavos,
           description,
@@ -213,18 +296,18 @@ const addTransaction: ToolDefinition = {
       const balanceChange = type === 'income' ? amountCentavos : -amountCentavos
       execute(
         "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
-        [balanceChange, resolvedAccountId]
+        [balanceChange, resolvedAccount.id]
       )
 
       return {
         success: true,
         transaction: {
           id,
-          accountId: resolvedAccountId,
+          accountId: resolvedAccount.id,
           amount,
           type,
           description,
-          category: category || 'Uncategorized',
+          category: resolvedCategory.name,
           date: txDate,
         },
         message: `Added ${type}: $${amount.toFixed(2)} for "${description}" on ${txDate}`,
@@ -281,26 +364,31 @@ const updateTransaction: ToolDefinition = {
       const oldType = tx.type
       const oldAccountId = tx.account_id
 
+      if (type === 'transfer') {
+        return {
+          success: false,
+          message: unsupportedTransferMessage(),
+        }
+      }
+
       const newAmount = amount !== undefined ? toCentavos(amount) : oldAmountCentavos
       const newType = type || oldType
       const newAccountId = accountId || oldAccountId
 
       if (accountId !== undefined && accountId !== oldAccountId) {
-        const accounts = query<{ id: string }>('SELECT id FROM accounts WHERE id = $1 LIMIT 1', [
-          accountId,
-        ])
-        if (accounts.length === 0) {
-          return { success: false, message: `Account ${accountId} not found.` }
+        const resolvedAccount = resolveAccountId(accountId)
+        if (!resolvedAccount.success) {
+          return { success: false, message: resolvedAccount.message }
         }
       }
 
       let newCategoryId = tx.category_id
       if (category !== undefined) {
-        const categories = query<{ id: string }>(
-          'SELECT id FROM categories WHERE LOWER(name) LIKE LOWER($1) LIMIT 1',
-          [`%${category}%`]
-        )
-        newCategoryId = categories.length > 0 ? categories[0].id : null
+        const resolvedCategory = resolveCategoryId(category)
+        if (!resolvedCategory.success) {
+          return { success: false, message: resolvedCategory.message }
+        }
+        newCategoryId = resolvedCategory.id
       }
 
       // Reverse old balance impact
@@ -2396,6 +2484,11 @@ const manageRecurringTransaction: ToolDefinition = {
     endDate: z.string().optional().describe('Optional end date in YYYY-MM-DD format'),
     category: z.string().optional().describe('Category name to match'),
     notes: z.string().optional().describe('Optional notes'),
+    accountId: boundedText(
+      'Account ID',
+      'Optional account ID for the recurring rule. Required when multiple accounts exist.',
+      128
+    ).optional(),
   }),
   execute: async ({
     action,
@@ -2408,6 +2501,7 @@ const manageRecurringTransaction: ToolDefinition = {
     endDate,
     category,
     notes,
+    accountId,
   }) => {
     if (action === 'list') {
       const rules = await query<any>(
@@ -2449,20 +2543,26 @@ const manageRecurringTransaction: ToolDefinition = {
         }
       }
 
-      let categoryId: string | null = null
-      if (category) {
-        const categories = await query<{ id: string }>(
-          'SELECT id FROM categories WHERE LOWER(name) LIKE LOWER($1) LIMIT 1',
-          [`%${category}%`]
-        )
-        if (categories.length > 0) categoryId = categories[0].id
-      }
-
-      const accounts = await query<{ id: string }>('SELECT id FROM accounts LIMIT 1')
-      if (accounts.length === 0) {
+      if (type === 'transfer') {
         return {
           success: false,
-          message: 'No accounts found. Please create an account first.',
+          message: unsupportedTransferMessage(),
+        }
+      }
+
+      const resolvedCategory = resolveCategoryId(category)
+      if (!resolvedCategory.success) {
+        return {
+          success: false,
+          message: resolvedCategory.message,
+        }
+      }
+
+      const resolvedAccount = resolveAccountId(accountId)
+      if (!resolvedAccount.success) {
+        return {
+          success: false,
+          message: resolvedAccount.message,
         }
       }
 
@@ -2481,8 +2581,8 @@ const manageRecurringTransaction: ToolDefinition = {
           frequency,
           resolvedNextDate,
           endDate ?? null,
-          accounts[0].id,
-          categoryId,
+          resolvedAccount.id,
+          resolvedCategory.id,
           notes ?? null,
         ]
       )
@@ -2518,6 +2618,12 @@ const manageRecurringTransaction: ToolDefinition = {
         params.push(toCentavos(amount))
       }
       if (type !== undefined) {
+        if (type === 'transfer') {
+          return {
+            success: false,
+            message: unsupportedTransferMessage(),
+          }
+        }
         setClauses.push(`type = $${paramIdx++}`)
         params.push(type)
       }
@@ -2539,16 +2645,21 @@ const manageRecurringTransaction: ToolDefinition = {
       }
 
       if (category !== undefined) {
-        let categoryId: string | null = null
-        if (category) {
-          const categories = await query<{ id: string }>(
-            'SELECT id FROM categories WHERE LOWER(name) LIKE LOWER($1) LIMIT 1',
-            [`%${category}%`]
-          )
-          if (categories.length > 0) categoryId = categories[0].id
+        const resolvedCategory = resolveCategoryId(category)
+        if (!resolvedCategory.success) {
+          return { success: false, message: resolvedCategory.message }
         }
         setClauses.push(`category_id = $${paramIdx++}`)
-        params.push(categoryId)
+        params.push(resolvedCategory.id)
+      }
+
+      if (accountId !== undefined) {
+        const resolvedAccount = resolveAccountId(accountId)
+        if (!resolvedAccount.success) {
+          return { success: false, message: resolvedAccount.message }
+        }
+        setClauses.push(`account_id = $${paramIdx++}`)
+        params.push(resolvedAccount.id)
       }
 
       if (setClauses.length === 0) {

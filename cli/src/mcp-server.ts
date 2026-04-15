@@ -29,10 +29,110 @@ type McpErrorEnvelope = {
   issues?: McpValidationIssue[]
 } & Record<string, unknown>
 
+let activeRequestCount = 0
+let shutdownStarted = false
+
 function toMcpTextResult(payload: unknown, isError = false): McpToolResult {
   return {
     content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
     ...(isError ? { isError: true } : {}),
+  }
+}
+
+function shouldLogMcpRequests(): boolean {
+  return process.env.SHIKIN_MCP_LOG === '1' || process.env.SHIKIN_MCP_LOG === 'true'
+}
+
+function logMcpEvent(event: string, details: Record<string, unknown>): void {
+  if (!shouldLogMcpRequests()) {
+    return
+  }
+
+  console.error(
+    JSON.stringify({
+      scope: 'shikin-mcp',
+      event,
+      timestamp: new Date().toISOString(),
+      ...details,
+    })
+  )
+}
+
+function beginRequest(): void {
+  activeRequestCount += 1
+}
+
+function endRequest(): void {
+  activeRequestCount = Math.max(0, activeRequestCount - 1)
+}
+
+async function waitForInFlightRequests(timeoutMs = 3000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+
+  while (activeRequestCount > 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+}
+
+async function shutdownProcess(code: number, error?: unknown): Promise<never> {
+  if (shutdownStarted) {
+    process.exit(code)
+  }
+
+  shutdownStarted = true
+
+  if (error) {
+    console.error('MCP server error:', error)
+  }
+
+  await waitForInFlightRequests()
+  close()
+  process.exit(code)
+}
+
+function createResourceResponse(uri: URL, payload: unknown) {
+  return {
+    contents: [
+      {
+        uri: uri.href,
+        mimeType: 'application/json',
+        text: JSON.stringify(payload, null, 2),
+      },
+    ],
+  }
+}
+
+function createMcpResourceHandler(
+  resourceName: string,
+  resolver: () => unknown
+): (uri: URL) => Promise<ReturnType<typeof createResourceResponse>> {
+  return async (uri: URL) => {
+    const startedAt = Date.now()
+    beginRequest()
+
+    try {
+      const payload = await resolver()
+      logMcpEvent('resource_completed', {
+        resource: resourceName,
+        durationMs: Date.now() - startedAt,
+        success: true,
+      })
+      return createResourceResponse(uri, payload)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      logMcpEvent('resource_completed', {
+        resource: resourceName,
+        durationMs: Date.now() - startedAt,
+        success: false,
+        error: message,
+      })
+      return createResourceResponse(
+        uri,
+        toMcpErrorEnvelope(message, 'execution_error', { resource: resourceName })
+      )
+    } finally {
+      endRequest()
+    }
   }
 }
 
@@ -104,19 +204,51 @@ export function formatMcpToolError(err: unknown): McpToolResult {
 
 export function createMcpToolHandler(tool: ToolDefinition) {
   return async (input: Record<string, unknown>): Promise<McpToolResult> => {
+    const startedAt = Date.now()
+    beginRequest()
+
     if (tool.mcpUnavailableMessage) {
-      return toUnavailableResult(tool.mcpUnavailableMessage)
+      const result = toUnavailableResult(tool.mcpUnavailableMessage)
+      logMcpEvent('tool_completed', {
+        tool: tool.name,
+        durationMs: Date.now() - startedAt,
+        success: false,
+        errorType: 'unavailable_error',
+      })
+      endRequest()
+      return result
     }
 
     try {
       const parsed = tool.schema.parse(input)
       const result = await tool.execute(parsed)
       if (isFailureResult(result)) {
-        return toFailureResult(result)
+        const failureResult = toFailureResult(result)
+        logMcpEvent('tool_completed', {
+          tool: tool.name,
+          durationMs: Date.now() - startedAt,
+          success: false,
+          errorType: 'execution_error',
+        })
+        return failureResult
       }
+      logMcpEvent('tool_completed', {
+        tool: tool.name,
+        durationMs: Date.now() - startedAt,
+        success: true,
+      })
       return toMcpTextResult(result)
     } catch (err) {
+      logMcpEvent('tool_completed', {
+        tool: tool.name,
+        durationMs: Date.now() - startedAt,
+        success: false,
+        errorType: err instanceof z.ZodError ? 'validation_error' : 'execution_error',
+        error: err instanceof Error ? err.message : String(err),
+      })
       return formatMcpToolError(err)
+    } finally {
+      endRequest()
     }
   }
 }
@@ -131,63 +263,48 @@ export function registerMcpTools(
 }
 
 export function registerMcpResources(server: Pick<McpServer, 'resource'>): void {
-  server.resource('accounts', 'shikin://accounts', async (uri) => {
-    const accounts = query<Record<string, unknown>>(
-      'SELECT id, name, type, currency, balance FROM accounts WHERE is_archived = 0 ORDER BY name'
-    )
-    const formatted = accounts.map((a) => ({
-      ...a,
-      balance: fromCentavos(a.balance as number),
-    }))
-    return {
-      contents: [
-        {
-          uri: uri.href,
-          mimeType: 'application/json',
-          text: JSON.stringify(formatted, null, 2),
-        },
-      ],
-    }
-  })
+  server.resource(
+    'accounts',
+    'shikin://accounts',
+    createMcpResourceHandler('accounts', () => {
+      const accounts = query<Record<string, unknown>>(
+        'SELECT id, name, type, currency, balance FROM accounts WHERE is_archived = 0 ORDER BY name'
+      )
+      return accounts.map((account) => ({
+        ...account,
+        balance: fromCentavos(account.balance as number),
+      }))
+    })
+  )
 
-  server.resource('categories', 'shikin://categories', async (uri) => {
-    const categories = query<Record<string, unknown>>(
-      'SELECT id, name, type, color FROM categories ORDER BY type, name'
+  server.resource(
+    'categories',
+    'shikin://categories',
+    createMcpResourceHandler('categories', () =>
+      query<Record<string, unknown>>(
+        'SELECT id, name, type, color FROM categories ORDER BY type, name'
+      )
     )
-    return {
-      contents: [
-        {
-          uri: uri.href,
-          mimeType: 'application/json',
-          text: JSON.stringify(categories, null, 2),
-        },
-      ],
-    }
-  })
+  )
 
-  server.resource('recent-transactions', 'shikin://recent-transactions', async (uri) => {
-    const transactions = query<Record<string, unknown>>(
-      `SELECT t.id, t.description, t.type, t.amount, t.date, c.name as category, a.name as account
-       FROM transactions t
-       LEFT JOIN categories c ON t.category_id = c.id
-       LEFT JOIN accounts a ON t.account_id = a.id
-       ORDER BY t.date DESC, t.created_at DESC
-       LIMIT 20`
-    )
-    const formatted = transactions.map((t) => ({
-      ...t,
-      amount: fromCentavos(t.amount as number),
-    }))
-    return {
-      contents: [
-        {
-          uri: uri.href,
-          mimeType: 'application/json',
-          text: JSON.stringify(formatted, null, 2),
-        },
-      ],
-    }
-  })
+  server.resource(
+    'recent-transactions',
+    'shikin://recent-transactions',
+    createMcpResourceHandler('recent-transactions', () => {
+      const transactions = query<Record<string, unknown>>(
+        `SELECT t.id, t.description, t.type, t.amount, t.date, c.name as category, a.name as account
+         FROM transactions t
+         LEFT JOIN categories c ON t.category_id = c.id
+         LEFT JOIN accounts a ON t.account_id = a.id
+         ORDER BY t.date DESC, t.created_at DESC
+         LIMIT 20`
+      )
+      return transactions.map((transaction) => ({
+        ...transaction,
+        amount: fromCentavos(transaction.amount as number),
+      }))
+    })
+  )
 }
 
 export function createMcpServer(toolDefinitions: ToolDefinition[] = tools): McpServer {
@@ -216,13 +333,14 @@ function isDirectExecution(importMetaUrl: string): boolean {
 
 if (isDirectExecution(import.meta.url)) {
   main().catch((err) => {
-    console.error('MCP server error:', err)
-    close()
-    process.exit(1)
+    void shutdownProcess(1, err)
   })
 
   process.on('SIGINT', () => {
-    close()
-    process.exit(0)
+    void shutdownProcess(0)
+  })
+
+  process.on('SIGTERM', () => {
+    void shutdownProcess(0)
   })
 }

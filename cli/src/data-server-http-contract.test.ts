@@ -276,4 +276,26 @@ describe('data-server authenticated contract', () => {
       },
     ])
   })
+
+  it('rejects oversized JSON request bodies with a 413 response', async () => {
+    const response = await fetch(`${SERVER_URL}/api/fs/write`, {
+      method: 'PUT',
+      headers: {
+        Origin: ORIGIN,
+        'X-Shikin-Bridge': TOKEN,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        path: 'contract/oversized.txt',
+        content: 'x'.repeat(1_050_000),
+      }),
+    })
+
+    const payload = await response.json()
+
+    expect(response.status).toBe(413)
+    expect(payload).toEqual({
+      error: 'JSON request body exceeds the 1000000-byte limit.',
+    })
+  })
 })

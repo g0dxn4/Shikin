@@ -63,4 +63,23 @@ describe('data-server ChatGPT Codex proxy helpers', () => {
     expect(itemCache.get('item-1')).toEqual({ id: 'item-1', type: 'message' })
     expect(itemCache.get('item-2')).toEqual({ id: 'item-2', type: 'function_call' })
   })
+
+  it('evicts the oldest cached Codex items when the cache grows past the limit', () => {
+    const itemCache = new Map()
+
+    for (let index = 0; index < 501; index += 1) {
+      cacheItemsFromStream(
+        [
+          'event: response.output_item.done',
+          `data: {"type":"response.output_item.done","item":{"id":"item-${index}","type":"message"}}`,
+          '',
+        ].join('\n'),
+        itemCache
+      )
+    }
+
+    expect(itemCache.size).toBe(500)
+    expect(itemCache.has('item-0')).toBe(false)
+    expect(itemCache.get('item-500')).toEqual({ id: 'item-500', type: 'message' })
+  })
 })

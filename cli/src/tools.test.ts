@@ -26,6 +26,9 @@ const deleteTransaction = tools.find((tool) => tool.name === 'delete-transaction
 const createAccount = tools.find((tool) => tool.name === 'create-account')!
 const writeNotebook = tools.find((tool) => tool.name === 'write-notebook')!
 const listNotebook = tools.find((tool) => tool.name === 'list-notebook')!
+const manageRecurringTransaction = tools.find(
+  (tool) => tool.name === 'manage-recurring-transaction'
+)!
 
 describe('CLI tool validation regressions', () => {
   beforeEach(() => {
@@ -92,7 +95,7 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('wraps add-transaction writes in a transaction', async () => {
-    mockQuery.mockReturnValueOnce([{ id: 'acct-1' }])
+    mockQuery.mockReturnValueOnce([{ id: 'acct-1', name: 'Primary' }])
 
     const input = addTransaction.schema.parse({
       amount: 10,
@@ -124,6 +127,68 @@ describe('CLI tool validation regressions', () => {
         description: 'Coffee',
       },
     })
+  })
+
+  it('requires accountId when multiple accounts exist for add-transaction', async () => {
+    mockQuery.mockReturnValueOnce([
+      { id: 'acct-1', name: 'Checking' },
+      { id: 'acct-2', name: 'Savings' },
+    ])
+
+    const input = addTransaction.schema.parse({
+      amount: 10,
+      type: 'expense',
+      description: 'Coffee',
+    })
+
+    const result = await addTransaction.execute(input)
+
+    expect(result).toEqual({
+      success: false,
+      message:
+        'Multiple accounts found. Provide accountId explicitly so Shikin does not guess the wrong account.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('rejects unknown categories instead of silently using Uncategorized', async () => {
+    mockQuery.mockReturnValueOnce([]).mockReturnValueOnce([])
+
+    const input = addTransaction.schema.parse({
+      amount: 10,
+      type: 'expense',
+      description: 'Coffee',
+      category: 'Missing category',
+      accountId: 'acct-1',
+    })
+
+    const result = await addTransaction.execute(input)
+
+    expect(result).toEqual({
+      success: false,
+      message:
+        'Category "Missing category" not found. Use list-categories to pick an existing category name.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('rejects unsupported transfer creation in add-transaction', async () => {
+    const input = addTransaction.schema.parse({
+      amount: 10,
+      type: 'transfer',
+      description: 'Move cash',
+      accountId: 'acct-1',
+    })
+
+    const result = await addTransaction.execute(input)
+
+    expect(result).toEqual({
+      success: false,
+      message:
+        'Transfer transactions are not fully supported in the CLI yet. Record the withdrawal and deposit as separate entries with explicit account IDs.',
+    })
+    expect(mockTransaction).not.toHaveBeenCalled()
+    expect(mockExecute).not.toHaveBeenCalled()
   })
 
   it('returns account-not-found and performs no writes for missing explicit accountId', async () => {
@@ -216,6 +281,124 @@ describe('CLI tool validation regressions', () => {
     expect(result).toEqual({
       success: false,
       message: 'Account missing-account not found.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('rejects unknown categories on update before applying writes', async () => {
+    mockQuery.mockReturnValueOnce([
+      {
+        id: 'tx-1',
+        amount: 1000,
+        type: 'expense',
+        account_id: 'acct-1',
+        category_id: null,
+        description: 'Coffee',
+        date: '2026-04-14',
+        notes: null,
+      },
+    ])
+    mockQuery.mockReturnValueOnce([]).mockReturnValueOnce([])
+
+    const input = updateTransaction.schema.parse({
+      transactionId: 'tx-1',
+      category: 'Missing category',
+    })
+
+    const result = await updateTransaction.execute(input)
+
+    expect(result).toEqual({
+      success: false,
+      message:
+        'Category "Missing category" not found. Use list-categories to pick an existing category name.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('requires explicit accountId when creating a recurring rule with multiple accounts', async () => {
+    mockQuery.mockReturnValueOnce([
+      { id: 'acct-1', name: 'Checking' },
+      { id: 'acct-2', name: 'Savings' },
+    ])
+
+    const input = manageRecurringTransaction.schema.parse({
+      action: 'create',
+      description: 'Rent',
+      amount: 1000,
+      type: 'expense',
+      frequency: 'monthly',
+    })
+
+    const result = await manageRecurringTransaction.execute(input)
+
+    expect(result).toEqual({
+      success: false,
+      message:
+        'Multiple accounts found. Provide accountId explicitly so Shikin does not guess the wrong account.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('uses the explicit accountId when creating a recurring rule', async () => {
+    mockQuery.mockReturnValueOnce([{ id: 'acct-2' }])
+
+    const input = manageRecurringTransaction.schema.parse({
+      action: 'create',
+      description: 'Rent',
+      amount: 1000,
+      type: 'expense',
+      frequency: 'monthly',
+      accountId: 'acct-2',
+    })
+
+    const result = await manageRecurringTransaction.execute(input)
+
+    expect(mockQuery).toHaveBeenCalledWith('SELECT id FROM accounts WHERE id = $1 LIMIT 1', [
+      'acct-2',
+    ])
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO recurring_rules'),
+      [
+        'tx_test_123',
+        'Rent',
+        100000,
+        'expense',
+        'monthly',
+        expect.any(String),
+        null,
+        'acct-2',
+        null,
+        null,
+      ]
+    )
+    expect(result).toMatchObject({
+      success: true,
+      rule: {
+        id: 'tx_test_123',
+        description: 'Rent',
+        amount: 1000,
+        type: 'expense',
+        frequency: 'monthly',
+      },
+    })
+  })
+
+  it('rejects unsupported transfer recurring rules', async () => {
+    const input = manageRecurringTransaction.schema.parse({
+      action: 'create',
+      description: 'Move to savings',
+      amount: 100,
+      type: 'transfer',
+      frequency: 'monthly',
+      accountId: 'acct-1',
+    })
+
+    const result = await manageRecurringTransaction.execute(input)
+
+    expect(result).toEqual({
+      success: false,
+      message:
+        'Transfer transactions are not fully supported in the CLI yet. Record the withdrawal and deposit as separate entries with explicit account IDs.',
     })
     expect(mockExecute).not.toHaveBeenCalled()
   })

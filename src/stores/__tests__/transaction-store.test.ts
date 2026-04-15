@@ -37,7 +37,12 @@ const mockExecute = vi.mocked(execute)
 describe('transaction-store', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    useTransactionStore.setState({ transactions: [], isLoading: false })
+    useTransactionStore.setState({
+      transactions: [],
+      isLoading: false,
+      fetchError: null,
+      error: null,
+    })
   })
 
   describe('fetch', () => {
@@ -69,6 +74,16 @@ describe('transaction-store', () => {
 
       expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('LEFT JOIN accounts'))
       expect(useTransactionStore.getState().transactions).toEqual(mockTxns)
+    })
+
+    it('stores an error message when fetch fails', async () => {
+      mockQuery.mockRejectedValueOnce(new Error('DB error'))
+
+      await expect(useTransactionStore.getState().fetch()).rejects.toThrow('DB error')
+
+      expect(useTransactionStore.getState().isLoading).toBe(false)
+      expect(useTransactionStore.getState().fetchError).toBe('DB error')
+      expect(useTransactionStore.getState().error).toBeNull()
     })
   })
 
@@ -115,6 +130,30 @@ describe('transaction-store', () => {
 
       // Should refresh account store
       expect(mockAccountFetch).toHaveBeenCalled()
+    })
+
+    it('does not reject when refresh fails after a committed write', async () => {
+      mockExecute
+        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockQuery.mockRejectedValue(new Error('refresh failed'))
+
+      await expect(
+        useTransactionStore.getState().add({
+          amount: 25.5,
+          type: 'expense',
+          description: 'Groceries',
+          categoryId: '01CAT001',
+          accountId: '01ACC001',
+          transferToAccountId: null,
+          currency: 'USD',
+          date: '2024-01-15',
+          notes: null,
+        })
+      ).resolves.toBeUndefined()
+
+      expect(useTransactionStore.getState().error).toBeNull()
+      expect(useTransactionStore.getState().fetchError).toBe('refresh failed')
     })
 
     it('inserts transaction and updates account balance for income', async () => {
@@ -226,6 +265,35 @@ describe('transaction-store', () => {
       })
 
       expect(mockExecute).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('addWithSplits', () => {
+    it('does not reject when refresh fails after a committed split write', async () => {
+      mockExecute
+        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockQuery.mockRejectedValue(new Error('refresh failed'))
+
+      await expect(
+        useTransactionStore.getState().addWithSplits(
+          {
+            amount: 25.5,
+            type: 'expense',
+            description: 'Groceries',
+            categoryId: '01CAT001',
+            accountId: '01ACC001',
+            transferToAccountId: null,
+            currency: 'USD',
+            date: '2024-01-15',
+            notes: null,
+          },
+          [{ categoryId: '01CAT001', amount: 25.5, notes: null }]
+        )
+      ).resolves.toBeUndefined()
+
+      expect(useTransactionStore.getState().error).toBeNull()
+      expect(useTransactionStore.getState().fetchError).toBe('refresh failed')
     })
   })
 

@@ -5,6 +5,8 @@ import { useTranslation } from 'react-i18next'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorBanner } from '@/components/ui/error-banner'
 import {
   Select,
   SelectContent,
@@ -17,17 +19,13 @@ import { fromCentavos } from '@/lib/money'
 import { useAccountStore } from '@/stores/account-store'
 import type { InvestmentWithPrice } from '@/stores/investment-store'
 
-const INVESTMENT_TYPES = [
-  'stock',
-  'etf',
-  'crypto',
-  'bond',
-  'mutual_fund',
-  'other',
-] as const
+const INVESTMENT_TYPES = ['stock', 'etf', 'crypto', 'bond', 'mutual_fund', 'other'] as const
 
 const investmentSchema = z.object({
-  symbol: z.string().min(1).transform((s) => s.toUpperCase()),
+  symbol: z
+    .string()
+    .min(1)
+    .transform((s) => s.toUpperCase()),
   name: z.string().min(1),
   type: z.enum(INVESTMENT_TYPES),
   shares: z.number().min(0),
@@ -48,11 +46,10 @@ interface InvestmentFormProps {
 export function InvestmentForm({ investment, onSubmit, isLoading }: InvestmentFormProps) {
   const { t } = useTranslation('investments')
   const { t: tCommon } = useTranslation('common')
-  const { accounts } = useAccountStore()
+  const { accounts, isLoading: accountsLoading, fetchError: accountsFetchError } = useAccountStore()
 
-  const investmentAccounts = accounts.filter(
-    (a) => a.type === 'investment' || a.type === 'crypto'
-  )
+  const investmentAccounts = accounts.filter((a) => a.type === 'investment' || a.type === 'crypto')
+  const isAccountSelectDisabled = accountsLoading || !!accountsFetchError
 
   const {
     register,
@@ -83,31 +80,47 @@ export function InvestmentForm({ investment, onSubmit, isLoading }: InvestmentFo
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label htmlFor="symbol">{t('form.symbol')}</Label>
+          <Label htmlFor="inv-symbol">{t('form.symbol')}</Label>
           <Input
-            id="symbol"
+            id="inv-symbol"
             placeholder="AAPL"
             autoFocus
             className="uppercase"
+            aria-invalid={!!errors.symbol}
+            aria-describedby={errors.symbol ? 'inv-symbol-error' : undefined}
             {...register('symbol')}
           />
-          {errors.symbol && <p className="text-destructive text-xs">{errors.symbol.message}</p>}
+          {errors.symbol && (
+            <p id="inv-symbol-error" className="text-destructive text-xs" role="alert">
+              {errors.symbol.message}
+            </p>
+          )}
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="name">{t('form.name')}</Label>
-          <Input id="name" placeholder="Apple Inc." {...register('name')} />
-          {errors.name && <p className="text-destructive text-xs">{errors.name.message}</p>}
+          <Label htmlFor="inv-name">{t('form.name')}</Label>
+          <Input
+            id="inv-name"
+            placeholder="Apple Inc."
+            aria-invalid={!!errors.name}
+            aria-describedby={errors.name ? 'inv-name-error' : undefined}
+            {...register('name')}
+          />
+          {errors.name && (
+            <p id="inv-name-error" className="text-destructive text-xs" role="alert">
+              {errors.name.message}
+            </p>
+          )}
         </div>
       </div>
 
       <div className="space-y-1.5">
-        <Label>{t('form.type')}</Label>
+        <Label htmlFor="inv-type">{t('form.type')}</Label>
         <Select
           value={typeValue}
           onValueChange={(val) => setValue('type', val as InvestmentFormValues['type'])}
         >
-          <SelectTrigger>
+          <SelectTrigger id="inv-type">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -122,33 +135,47 @@ export function InvestmentForm({ investment, onSubmit, isLoading }: InvestmentFo
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label htmlFor="shares">{t('form.shares')}</Label>
+          <Label htmlFor="inv-shares">{t('form.shares')}</Label>
           <Input
-            id="shares"
+            id="inv-shares"
             type="number"
             step="any"
+            aria-invalid={!!errors.shares}
+            aria-describedby={errors.shares ? 'inv-shares-error' : undefined}
             {...register('shares', { valueAsNumber: true })}
           />
-          {errors.shares && <p className="text-destructive text-xs">{errors.shares.message}</p>}
+          {errors.shares && (
+            <p id="inv-shares-error" className="text-destructive text-xs" role="alert">
+              {errors.shares.message}
+            </p>
+          )}
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="avgCost">{t('form.avgCost')}</Label>
+          <Label htmlFor="inv-avg-cost">{t('form.avgCost')}</Label>
           <Input
-            id="avgCost"
+            id="inv-avg-cost"
             type="number"
             step="0.01"
+            aria-invalid={!!errors.avgCost}
+            aria-describedby={errors.avgCost ? 'inv-avg-cost-error' : undefined}
             {...register('avgCost', { valueAsNumber: true })}
           />
-          {errors.avgCost && <p className="text-destructive text-xs">{errors.avgCost.message}</p>}
+          {errors.avgCost && (
+            <p id="inv-avg-cost-error" className="text-destructive text-xs" role="alert">
+              {errors.avgCost.message}
+            </p>
+          )}
         </div>
       </div>
 
+      <ErrorBanner title="Accounts couldn\'t be loaded" message={accountsFetchError} />
+
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label>{t('form.currency')}</Label>
+          <Label htmlFor="inv-currency">{t('form.currency')}</Label>
           <Select value={currencyValue} onValueChange={(val) => setValue('currency', val)}>
-            <SelectTrigger>
+            <SelectTrigger id="inv-currency">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -162,23 +189,28 @@ export function InvestmentForm({ investment, onSubmit, isLoading }: InvestmentFo
         </div>
 
         <div className="space-y-1.5">
-          <Label>{t('form.account')}</Label>
-          <Select
-            value={accountValue ?? 'none'}
-            onValueChange={(val) => setValue('accountId', val === 'none' ? undefined : val)}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">{t('form.noAccount')}</SelectItem>
-              {investmentAccounts.map((acc) => (
-                <SelectItem key={acc.id} value={acc.id}>
-                  {acc.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Label htmlFor="inv-account">{t('form.account')}</Label>
+          {accountsLoading ? (
+            <Skeleton className="h-10 w-full" />
+          ) : (
+            <Select
+              value={accountValue ?? 'none'}
+              onValueChange={(val) => setValue('accountId', val === 'none' ? undefined : val)}
+              disabled={isAccountSelectDisabled}
+            >
+              <SelectTrigger id="inv-account">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">{t('form.noAccount')}</SelectItem>
+                {investmentAccounts.map((acc) => (
+                  <SelectItem key={acc.id} value={acc.id}>
+                    {acc.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
       </div>
 

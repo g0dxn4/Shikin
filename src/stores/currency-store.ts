@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { load } from '@/lib/storage'
+import { getErrorMessage } from '@/lib/errors'
 import { refreshRates, getCachedRates, getLastFetchDate } from '@/lib/exchange-rate-service'
 import type { Account } from '@/types/database'
 
@@ -65,7 +66,8 @@ export const useCurrencyStore = create<CurrencyState>((set, get) => ({
       const lastDate = await getLastFetchDate()
       set({ lastFetched: lastDate })
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : 'Unknown error' })
+      set({ error: getErrorMessage(err) })
+      throw err
     } finally {
       set({ isLoading: false })
     }
@@ -86,7 +88,8 @@ export const useCurrencyStore = create<CurrencyState>((set, get) => ({
       const today = new Date().toISOString().split('T')[0]
       set({ rates: ratesMap, lastFetched: today })
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : 'Unknown error' })
+      set({ error: getErrorMessage(err) })
+      throw err
     } finally {
       set({ isLoading: false })
     }
@@ -124,13 +127,17 @@ export const useCurrencyStore = create<CurrencyState>((set, get) => ({
   },
 
   autoRefreshIfStale: async () => {
-    const { lastFetched, refreshRates: doRefresh, loadRates } = get()
+    const { refreshRates: doRefresh, loadRates } = get()
 
-    // Always load cached rates first
+    // Always load cached rates first (updates lastFetched and rates in state)
     await loadRates()
+
+    // Get updated state after loadRates
+    const { lastFetched } = get()
 
     if (!lastFetched) {
       // Never fetched — do initial fetch
+      // If this fails, we don't have any cached data so it's a real startup failure
       await doRefresh()
       return
     }
@@ -138,7 +145,22 @@ export const useCurrencyStore = create<CurrencyState>((set, get) => ({
     const lastDate = new Date(lastFetched)
     const now = new Date()
     if (now.getTime() - lastDate.getTime() > STALE_THRESHOLD_MS) {
-      await doRefresh()
+      // Rates are stale — attempt refresh but don't fail startup if cached data exists
+      // This prevents spurious startup failures when network is unavailable
+      // but we have usable cached rates from a previous fetch
+      try {
+        await doRefresh()
+      } catch (err) {
+        // Refresh failed - get potentially updated state
+        const { rates: updatedRates } = get()
+        // Only re-throw if we have no usable cached rates
+        const hasCachedRates = Object.keys(updatedRates).length > 0
+        if (!hasCachedRates) {
+          throw err
+        }
+        // Otherwise, silently use stale cached rates
+        // The error is already stored in state by refreshRates
+      }
     }
   },
 }))

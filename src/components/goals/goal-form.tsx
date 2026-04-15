@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+import { ErrorBanner } from '@/components/ui/error-banner'
 import {
   Select,
   SelectContent,
@@ -18,7 +19,16 @@ import type { GoalWithProgress } from '@/stores/goal-store'
 import { fromCentavos } from '@/lib/money'
 
 const GOAL_ICONS = ['🎯', '🏠', '✈️', '🚗', '🎓', '💰', '🏖️', '💍', '🏥', '📱'] as const
-const GOAL_COLORS = ['#bf5af2', '#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#8b5cf6'] as const
+const GOAL_COLORS = [
+  '#bf5af2',
+  '#22c55e',
+  '#3b82f6',
+  '#f59e0b',
+  '#ef4444',
+  '#ec4899',
+  '#06b6d4',
+  '#8b5cf6',
+] as const
 
 const goalSchema = z.object({
   name: z.string().min(1),
@@ -42,10 +52,15 @@ interface GoalFormProps {
 export function GoalForm({ goal, onSubmit, isLoading }: GoalFormProps) {
   const { t } = useTranslation('goals')
   const { t: tCommon } = useTranslation('common')
-  const { accounts, fetch: fetchAccounts } = useAccountStore()
+  const {
+    accounts,
+    isLoading: accountsLoading,
+    fetchError: accountsFetchError,
+    fetch: fetchAccounts,
+  } = useAccountStore()
 
   useEffect(() => {
-    fetchAccounts()
+    void fetchAccounts().catch(() => {})
   }, [fetchAccounts])
 
   const {
@@ -72,44 +87,104 @@ export function GoalForm({ goal, onSubmit, isLoading }: GoalFormProps) {
   const iconValue = watch('icon')
   const colorValue = watch('color')
   const accountValue = watch('accountId')
+  const isAccountSelectDisabled = accountsLoading || !!accountsFetchError
+
+  const focusGoalOption = (
+    values: readonly string[],
+    nextIndex: number,
+    setter: (value: string) => void,
+    prefix: string
+  ) => {
+    const normalizedIndex = (nextIndex + values.length) % values.length
+    const nextValue = values[normalizedIndex]
+    setter(nextValue)
+    requestAnimationFrame(() => {
+      document.getElementById(`${prefix}-${normalizedIndex}`)?.focus()
+    })
+  }
+
+  const handleGoalOptionKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    values: readonly string[],
+    currentValue: string,
+    setter: (value: string) => void,
+    prefix: string
+  ) => {
+    const currentIndex = values.indexOf(currentValue)
+    if (currentIndex === -1) return
+
+    switch (event.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        event.preventDefault()
+        focusGoalOption(values, currentIndex + 1, setter, prefix)
+        break
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        event.preventDefault()
+        focusGoalOption(values, currentIndex - 1, setter, prefix)
+        break
+      case ' ':
+      case 'Enter':
+        event.preventDefault()
+        setter(currentValue)
+        break
+    }
+  }
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+      <ErrorBanner title="Accounts couldn’t be loaded" message={accountsFetchError} />
+
       <div className="space-y-1.5">
-        <Label htmlFor="name">{t('form.name')}</Label>
+        <Label htmlFor="goal-name">{t('form.name')}</Label>
         <Input
-          id="name"
+          id="goal-name"
           placeholder={t('form.namePlaceholder')}
           autoFocus
+          aria-invalid={!!errors.name}
+          aria-describedby={errors.name ? 'goal-name-error' : undefined}
           {...register('name')}
         />
-        {errors.name && <p className="text-destructive text-xs">{errors.name.message}</p>}
+        {errors.name && (
+          <p id="goal-name-error" className="text-destructive text-xs" role="alert">
+            {errors.name.message}
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label htmlFor="targetAmount">{t('form.targetAmount')}</Label>
+          <Label htmlFor="goal-target-amount">{t('form.targetAmount')}</Label>
           <Input
-            id="targetAmount"
+            id="goal-target-amount"
             type="number"
             step="0.01"
+            aria-invalid={!!errors.targetAmount}
+            aria-describedby={errors.targetAmount ? 'goal-target-error' : undefined}
             {...register('targetAmount', { valueAsNumber: true })}
           />
           {errors.targetAmount && (
-            <p className="text-destructive text-xs">{errors.targetAmount.message}</p>
+            <p id="goal-target-error" className="text-destructive text-xs" role="alert">
+              {errors.targetAmount.message}
+            </p>
           )}
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="currentAmount">{t('form.currentAmount')}</Label>
+          <Label htmlFor="goal-current-amount">{t('form.currentAmount')}</Label>
           <Input
-            id="currentAmount"
+            id="goal-current-amount"
             type="number"
             step="0.01"
+            aria-invalid={!!errors.currentAmount}
+            aria-describedby={errors.currentAmount ? 'goal-current-error' : undefined}
             {...register('currentAmount', { valueAsNumber: true })}
           />
           {errors.currentAmount && (
-            <p className="text-destructive text-xs">{errors.currentAmount.message}</p>
+            <p id="goal-current-error" className="text-destructive text-xs" role="alert">
+              {errors.currentAmount.message}
+            </p>
           )}
         </div>
       </div>
@@ -120,12 +195,13 @@ export function GoalForm({ goal, onSubmit, isLoading }: GoalFormProps) {
       </div>
 
       <div className="space-y-1.5">
-        <Label>{t('form.account')}</Label>
+        <Label htmlFor="goal-account">{t('form.account')}</Label>
         <Select
           value={accountValue || ''}
           onValueChange={(val) => setValue('accountId', val === '__none__' ? '' : val)}
+          disabled={isAccountSelectDisabled}
         >
-          <SelectTrigger>
+          <SelectTrigger id="goal-account">
             <SelectValue placeholder={t('form.accountPlaceholder')} />
           </SelectTrigger>
           <SelectContent>
@@ -141,13 +217,31 @@ export function GoalForm({ goal, onSubmit, isLoading }: GoalFormProps) {
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label>{t('form.icon')}</Label>
-          <div className="flex flex-wrap gap-1.5">
+          <Label id="goal-icon-label">{t('form.icon')}</Label>
+          <div
+            className="flex flex-wrap gap-1.5"
+            role="radiogroup"
+            aria-labelledby="goal-icon-label"
+          >
             {GOAL_ICONS.map((ic) => (
               <button
                 key={ic}
+                id={`goal-icon-${GOAL_ICONS.indexOf(ic)}`}
                 type="button"
                 onClick={() => setValue('icon', ic)}
+                onKeyDown={(event) =>
+                  handleGoalOptionKeyDown(
+                    event,
+                    GOAL_ICONS,
+                    iconValue,
+                    (value) => setValue('icon', value),
+                    'goal-icon'
+                  )
+                }
+                role="radio"
+                aria-label={`Select icon ${ic}`}
+                aria-checked={iconValue === ic}
+                tabIndex={iconValue === ic ? 0 : -1}
                 className={`flex h-8 w-8 items-center justify-center rounded-lg text-base transition-colors ${
                   iconValue === ic
                     ? 'bg-white/10 ring-1 ring-white/20'
@@ -161,13 +255,31 @@ export function GoalForm({ goal, onSubmit, isLoading }: GoalFormProps) {
         </div>
 
         <div className="space-y-1.5">
-          <Label>{t('form.color')}</Label>
-          <div className="flex flex-wrap gap-1.5">
+          <Label id="goal-color-label">{t('form.color')}</Label>
+          <div
+            className="flex flex-wrap gap-1.5"
+            role="radiogroup"
+            aria-labelledby="goal-color-label"
+          >
             {GOAL_COLORS.map((c) => (
               <button
                 key={c}
+                id={`goal-color-${GOAL_COLORS.indexOf(c)}`}
                 type="button"
                 onClick={() => setValue('color', c)}
+                onKeyDown={(event) =>
+                  handleGoalOptionKeyDown(
+                    event,
+                    GOAL_COLORS,
+                    colorValue,
+                    (value) => setValue('color', value),
+                    'goal-color'
+                  )
+                }
+                role="radio"
+                aria-label={`Select color ${c}`}
+                aria-checked={colorValue === c}
+                tabIndex={colorValue === c ? 0 : -1}
                 className={`h-8 w-8 rounded-lg transition-transform ${
                   colorValue === c ? 'scale-110 ring-2 ring-white/30' : 'hover:scale-105'
                 }`}
@@ -180,11 +292,7 @@ export function GoalForm({ goal, onSubmit, isLoading }: GoalFormProps) {
 
       <div className="space-y-1.5">
         <Label htmlFor="notes">{t('form.notes')}</Label>
-        <Input
-          id="notes"
-          placeholder={t('form.notesPlaceholder')}
-          {...register('notes')}
-        />
+        <Input id="notes" placeholder={t('form.notesPlaceholder')} {...register('notes')} />
       </div>
 
       <Button type="submit" className="w-full" disabled={isLoading}>

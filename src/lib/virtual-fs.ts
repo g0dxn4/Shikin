@@ -10,6 +10,11 @@
 
 import { isTauri, DATA_SERVER_URL, withDataServerHeaders } from '@/lib/runtime'
 
+async function readBridgeError(response: Response, fallback: string): Promise<string> {
+  const text = await response.text().catch(() => fallback)
+  return text || fallback
+}
+
 // ── Lazy Tauri imports (avoid bundling in browser builds) ───────────
 
 const tauriPath = () => import('@tauri-apps/api/path')
@@ -46,6 +51,11 @@ export async function appDataDir(): Promise<string> {
   const res = await fetch(`${DATA_SERVER_URL}/api/fs/appdata`, {
     headers: withDataServerHeaders(),
   })
+  if (!res.ok) {
+    throw new Error(
+      `Failed to resolve app data directory: ${res.status} ${await readBridgeError(res, 'Unknown error')}`
+    )
+  }
   const data = await res.json()
   return data.path
 }
@@ -62,6 +72,11 @@ export async function join(...parts: string[]): Promise<string> {
   const res = await fetch(`${DATA_SERVER_URL}/api/fs/join?${params}`, {
     headers: withDataServerHeaders(),
   })
+  if (!res.ok) {
+    throw new Error(
+      `Failed to join path: ${res.status} ${await readBridgeError(res, 'Unknown error')}`
+    )
+  }
   const data = await res.json()
   return data.path
 }
@@ -78,7 +93,11 @@ export async function readTextFile(path: string): Promise<string> {
   const res = await fetch(`${DATA_SERVER_URL}/api/fs/read?path=${encodeURIComponent(path)}`, {
     headers: withDataServerHeaders(),
   })
-  if (!res.ok) throw new Error(`File not found: ${path}`)
+  if (!res.ok) {
+    const message = await readBridgeError(res, 'Unknown error')
+    if (res.status === 404) throw new Error(`File not found: ${path}`)
+    throw new Error(`Failed to read file: ${res.status} ${message}`)
+  }
   const data = await res.json()
   return data.content
 }
@@ -91,11 +110,16 @@ export async function writeTextFile(path: string, content: string): Promise<void
     return
   }
 
-  await fetch(`${DATA_SERVER_URL}/api/fs/write`, {
+  const res = await fetch(`${DATA_SERVER_URL}/api/fs/write`, {
     method: 'PUT',
     headers: withDataServerHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ path, content }),
   })
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => 'Unknown error')
+    throw new Error(`Failed to write file: ${res.status} ${text}`)
+  }
 }
 
 /** Check whether a path exists. */
@@ -108,6 +132,11 @@ export async function exists(path: string): Promise<boolean> {
   const res = await fetch(`${DATA_SERVER_URL}/api/fs/exists?path=${encodeURIComponent(path)}`, {
     headers: withDataServerHeaders(),
   })
+  if (!res.ok) {
+    throw new Error(
+      `Failed to check file existence: ${res.status} ${await readBridgeError(res, 'Unknown error')}`
+    )
+  }
   const data = await res.json()
   return data.exists
 }
@@ -128,7 +157,11 @@ export async function readDir(path: string): Promise<DirEntry[]> {
   const res = await fetch(`${DATA_SERVER_URL}/api/fs/readdir?path=${encodeURIComponent(path)}`, {
     headers: withDataServerHeaders(),
   })
-  if (!res.ok) return []
+  if (!res.ok) {
+    throw new Error(
+      `Failed to read directory: ${res.status} ${await readBridgeError(res, 'Unknown error')}`
+    )
+  }
   const data = await res.json()
   // Bridge returns { name, isDirectory }; derive isFile
   return (data.entries as Array<{ name: string; isDirectory: boolean }>).map((e) => ({
@@ -146,11 +179,16 @@ export async function mkdir(path: string, options?: { recursive?: boolean }): Pr
     return
   }
 
-  await fetch(`${DATA_SERVER_URL}/api/fs/mkdir`, {
+  const res = await fetch(`${DATA_SERVER_URL}/api/fs/mkdir`, {
     method: 'POST',
     headers: withDataServerHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ path, recursive: options?.recursive }),
   })
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => 'Unknown error')
+    throw new Error(`Failed to create directory: ${res.status} ${text}`)
+  }
 }
 
 /** Remove a file. */
@@ -161,8 +199,13 @@ export async function remove(path: string): Promise<void> {
     return
   }
 
-  await fetch(`${DATA_SERVER_URL}/api/fs/remove?path=${encodeURIComponent(path)}`, {
+  const res = await fetch(`${DATA_SERVER_URL}/api/fs/remove?path=${encodeURIComponent(path)}`, {
     method: 'DELETE',
     headers: withDataServerHeaders(),
   })
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => 'Unknown error')
+    throw new Error(`Failed to remove file: ${res.status} ${text}`)
+  }
 }

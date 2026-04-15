@@ -1,14 +1,11 @@
 import { create } from 'zustand'
 import { query, execute, runInTransaction } from '@/lib/database'
+import { getErrorMessage } from '@/lib/errors'
 import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
 import { learnFromTransaction } from '@/lib/auto-categorize'
 import { useAccountStore } from './account-store'
-import {
-  createSplits,
-  getSplits as fetchSplits,
-  getSplitTransactionIds,
-} from '@/lib/split-service'
+import { createSplits, getSplits as fetchSplits, getSplitTransactionIds } from '@/lib/split-service'
 import type { SplitInput } from '@/lib/split-service'
 import type { Transaction, TransactionSplitWithCategory } from '@/types/database'
 import type { TransactionType, CurrencyCode } from '@/types/common'
@@ -41,6 +38,8 @@ interface TransactionState {
   transactions: TransactionWithDetails[]
   splitTransactionIds: Set<string>
   isLoading: boolean
+  fetchError: string | null
+  error: string | null
   fetch: () => Promise<void>
   add: (data: TransactionFormData, options?: MutationOptions) => Promise<void>
   addWithSplits: (data: TransactionFormData, splits: SplitInput[]) => Promise<void>
@@ -55,9 +54,11 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   transactions: [],
   splitTransactionIds: new Set<string>(),
   isLoading: false,
+  fetchError: null,
+  error: null,
 
   fetch: async () => {
-    set({ isLoading: true })
+    set({ isLoading: true, fetchError: null })
     try {
       const [transactions, splitIds] = await Promise.all([
         query<TransactionWithDetails>(
@@ -71,216 +72,244 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         ),
         getSplitTransactionIds(),
       ])
-      set({ transactions, splitTransactionIds: splitIds })
+      set({ transactions, splitTransactionIds: splitIds, fetchError: null })
+    } catch (error) {
+      set({ fetchError: getErrorMessage(error) })
+      throw error
     } finally {
       set({ isLoading: false })
     }
   },
 
   add: async (data, options) => {
-    await runInTransaction(async () => {
-      const id = generateId()
-      const now = new Date().toISOString()
-      const amountCentavos = toCentavos(data.amount)
-      const isTransfer = data.type === 'transfer' && !!data.transferToAccountId
+    set({ error: null })
+    try {
+      await runInTransaction(async () => {
+        const id = generateId()
+        const now = new Date().toISOString()
+        const amountCentavos = toCentavos(data.amount)
+        const isTransfer = data.type === 'transfer' && !!data.transferToAccountId
 
-      await execute(
-        `INSERT INTO transactions (id, account_id, category_id, transfer_to_account_id, type, amount, currency, description, notes, date, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          id,
-          data.accountId,
-          isTransfer ? null : data.categoryId,
-          isTransfer ? data.transferToAccountId : null,
-          data.type,
-          amountCentavos,
-          data.currency,
-          data.description,
-          data.notes,
-          data.date,
-          now,
-          now,
-        ]
-      )
+        await execute(
+          `INSERT INTO transactions (id, account_id, category_id, transfer_to_account_id, type, amount, currency, description, notes, date, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            id,
+            data.accountId,
+            isTransfer ? null : data.categoryId,
+            isTransfer ? data.transferToAccountId : null,
+            data.type,
+            amountCentavos,
+            data.currency,
+            data.description,
+            data.notes,
+            data.date,
+            now,
+            now,
+          ]
+        )
 
-      if (isTransfer && data.transferToAccountId) {
-        await execute('UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?', [
-          amountCentavos,
-          now,
-          data.accountId,
-        ])
-        await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-          amountCentavos,
-          now,
-          data.transferToAccountId,
-        ])
-      } else {
-        const balanceDelta = data.type === 'income' ? amountCentavos : -amountCentavos
-        await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-          balanceDelta,
-          now,
-          data.accountId,
-        ])
+        if (isTransfer && data.transferToAccountId) {
+          await execute('UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?', [
+            amountCentavos,
+            now,
+            data.accountId,
+          ])
+          await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
+            amountCentavos,
+            now,
+            data.transferToAccountId,
+          ])
+        } else {
+          const balanceDelta = data.type === 'income' ? amountCentavos : -amountCentavos
+          await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
+            balanceDelta,
+            now,
+            data.accountId,
+          ])
+        }
+      })
+
+      // Learn categorization from this transaction
+      if (data.categoryId && data.description) {
+        learnFromTransaction(data.description, data.categoryId).catch(() => {})
       }
-    })
-
-    // Learn categorization from this transaction
-    if (data.categoryId && data.description) {
-      learnFromTransaction(data.description, data.categoryId).catch(() => {})
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
     }
 
     if (!options?.skipRefresh) {
-      await get().fetch()
-      await useAccountStore.getState().fetch()
+      await Promise.allSettled([get().fetch(), useAccountStore.getState().fetch()])
     }
   },
 
   update: async (id, data) => {
-    const existing = get().getById(id)
-    if (!existing) return
+    set({ error: null })
+    try {
+      const existing = get().getById(id)
+      if (!existing) return
 
-    await runInTransaction(async () => {
+      await runInTransaction(async () => {
+        const now = new Date().toISOString()
+        const newAmountCentavos = toCentavos(data.amount)
+        const oldIsTransfer = existing.type === 'transfer' && !!existing.transfer_to_account_id
+        const newIsTransfer = data.type === 'transfer' && !!data.transferToAccountId
+
+        if (oldIsTransfer && existing.transfer_to_account_id) {
+          await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
+            existing.amount,
+            now,
+            existing.account_id,
+          ])
+          await execute('UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?', [
+            existing.amount,
+            now,
+            existing.transfer_to_account_id,
+          ])
+        } else {
+          const oldDelta = existing.type === 'income' ? -existing.amount : existing.amount
+          await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
+            oldDelta,
+            now,
+            existing.account_id,
+          ])
+        }
+
+        await execute(
+          `UPDATE transactions SET account_id = ?, category_id = ?, transfer_to_account_id = ?, type = ?, amount = ?, currency = ?, description = ?, notes = ?, date = ?, updated_at = ?
+            WHERE id = ?`,
+          [
+            data.accountId,
+            newIsTransfer ? null : data.categoryId,
+            newIsTransfer ? data.transferToAccountId : null,
+            data.type,
+            newAmountCentavos,
+            data.currency,
+            data.description,
+            data.notes,
+            data.date,
+            now,
+            id,
+          ]
+        )
+
+        if (newIsTransfer && data.transferToAccountId) {
+          await execute('UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?', [
+            newAmountCentavos,
+            now,
+            data.accountId,
+          ])
+          await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
+            newAmountCentavos,
+            now,
+            data.transferToAccountId,
+          ])
+        } else {
+          const newDelta = data.type === 'income' ? newAmountCentavos : -newAmountCentavos
+          await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
+            newDelta,
+            now,
+            data.accountId,
+          ])
+        }
+      })
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
+
+    await Promise.allSettled([get().fetch(), useAccountStore.getState().fetch()])
+  },
+
+  remove: async (id) => {
+    set({ error: null })
+    try {
+      const existing = get().getById(id)
+      if (!existing) return
+
+      await runInTransaction(async () => {
+        const now = new Date().toISOString()
+
+        if (existing.type === 'transfer' && existing.transfer_to_account_id) {
+          await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
+            existing.amount,
+            now,
+            existing.account_id,
+          ])
+          await execute('UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?', [
+            existing.amount,
+            now,
+            existing.transfer_to_account_id,
+          ])
+        } else {
+          const reverseDelta = existing.type === 'income' ? -existing.amount : existing.amount
+          await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
+            reverseDelta,
+            now,
+            existing.account_id,
+          ])
+        }
+
+        await execute('DELETE FROM transactions WHERE id = ?', [id])
+      })
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
+
+    await Promise.allSettled([get().fetch(), useAccountStore.getState().fetch()])
+  },
+
+  addWithSplits: async (data, splits) => {
+    set({ error: null })
+    try {
+      const id = generateId()
       const now = new Date().toISOString()
-      const newAmountCentavos = toCentavos(data.amount)
-      const oldIsTransfer = existing.type === 'transfer' && !!existing.transfer_to_account_id
-      const newIsTransfer = data.type === 'transfer' && !!data.transferToAccountId
-
-      if (oldIsTransfer && existing.transfer_to_account_id) {
-        await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-          existing.amount,
-          now,
-          existing.account_id,
-        ])
-        await execute('UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?', [
-          existing.amount,
-          now,
-          existing.transfer_to_account_id,
-        ])
-      } else {
-        const oldDelta = existing.type === 'income' ? -existing.amount : existing.amount
-        await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-          oldDelta,
-          now,
-          existing.account_id,
-        ])
-      }
+      const amountCentavos = toCentavos(data.amount)
 
       await execute(
-        `UPDATE transactions SET account_id = ?, category_id = ?, transfer_to_account_id = ?, type = ?, amount = ?, currency = ?, description = ?, notes = ?, date = ?, updated_at = ?
-          WHERE id = ?`,
+        `INSERT INTO transactions (id, account_id, category_id, type, amount, currency, description, notes, date, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
+          id,
           data.accountId,
-          newIsTransfer ? null : data.categoryId,
-          newIsTransfer ? data.transferToAccountId : null,
+          data.categoryId,
           data.type,
-          newAmountCentavos,
+          amountCentavos,
           data.currency,
           data.description,
           data.notes,
           data.date,
           now,
-          id,
+          now,
         ]
       )
 
-      if (newIsTransfer && data.transferToAccountId) {
-        await execute('UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?', [
-          newAmountCentavos,
-          now,
-          data.accountId,
-        ])
-        await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-          newAmountCentavos,
-          now,
-          data.transferToAccountId,
-        ])
-      } else {
-        const newDelta = data.type === 'income' ? newAmountCentavos : -newAmountCentavos
-        await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-          newDelta,
-          now,
-          data.accountId,
-        ])
-      }
-    })
+      await createSplits(id, splits, amountCentavos)
 
-    await get().fetch()
-    await useAccountStore.getState().fetch()
-  },
-
-  remove: async (id) => {
-    const existing = get().getById(id)
-    if (!existing) return
-
-    await runInTransaction(async () => {
-      const now = new Date().toISOString()
-
-      if (existing.type === 'transfer' && existing.transfer_to_account_id) {
-        await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-          existing.amount,
-          now,
-          existing.account_id,
-        ])
-        await execute('UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?', [
-          existing.amount,
-          now,
-          existing.transfer_to_account_id,
-        ])
-      } else {
-        const reverseDelta = existing.type === 'income' ? -existing.amount : existing.amount
-        await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-          reverseDelta,
-          now,
-          existing.account_id,
-        ])
-      }
-
-      await execute('DELETE FROM transactions WHERE id = ?', [id])
-    })
-
-    await get().fetch()
-    await useAccountStore.getState().fetch()
-  },
-
-  addWithSplits: async (data, splits) => {
-    const id = generateId()
-    const now = new Date().toISOString()
-    const amountCentavos = toCentavos(data.amount)
-
-    await execute(
-      `INSERT INTO transactions (id, account_id, category_id, type, amount, currency, description, notes, date, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
+      // Update account balance
+      const balanceDelta = data.type === 'income' ? amountCentavos : -amountCentavos
+      await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
+        balanceDelta,
+        now,
         data.accountId,
-        data.categoryId,
-        data.type,
-        amountCentavos,
-        data.currency,
-        data.description,
-        data.notes,
-        data.date,
-        now,
-        now,
-      ]
-    )
+      ])
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
 
-    await createSplits(id, splits, amountCentavos)
-
-    // Update account balance
-    const balanceDelta = data.type === 'income' ? amountCentavos : -amountCentavos
-    await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-      balanceDelta,
-      now,
-      data.accountId,
-    ])
-
-    await get().fetch()
-    await useAccountStore.getState().fetch()
+    await Promise.allSettled([get().fetch(), useAccountStore.getState().fetch()])
   },
 
   getSplits: async (id) => {
-    return fetchSplits(id)
+    try {
+      return await fetchSplits(id)
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
   },
 
   isSplit: (id) => {

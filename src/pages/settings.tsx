@@ -13,6 +13,7 @@ import { COMMON_CURRENCIES } from '@/lib/exchange-rate-service'
 import { load } from '@/lib/storage'
 import { exportDatabaseSnapshot, importDatabaseSnapshot } from '@/lib/database'
 import { ThemeSettings } from '@/components/ThemeSettings'
+import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 
 export function SettingsPage() {
   const { t, i18n } = useTranslation('settings')
@@ -26,6 +27,9 @@ export function SettingsPage() {
   const [isSavingDataKeys, setIsSavingDataKeys] = useState(false)
   const [isExportingData, setIsExportingData] = useState(false)
   const [isImportingData, setIsImportingData] = useState(false)
+  const [importConfirmOpen, setImportConfirmOpen] = useState(false)
+  const [pendingImportFile, setPendingImportFile] = useState<File | null>(null)
+  const [preImportBackupBytes, setPreImportBackupBytes] = useState<Uint8Array | null>(null)
   const importDbInputRef = useRef<HTMLInputElement>(null)
 
   // Currency state
@@ -42,8 +46,8 @@ export function SettingsPage() {
 
   useEffect(() => {
     loadRules()
-    loadRates()
-    fetchAccounts()
+    void loadRates().catch(() => {})
+    void fetchAccounts().catch(() => {})
     load('settings.json')
       .then(async (store) => {
         setAlphaVantageKey(((await store.get('alpha_vantage_key')) as string) || '')
@@ -71,10 +75,26 @@ export function SettingsPage() {
     }
   }
 
-  const handleImportData = async (file: File) => {
+  const handleImportClick = async (file: File) => {
+    // Create pre-import backup before showing confirmation
+    try {
+      const backupBytes = await exportDatabaseSnapshot()
+      setPreImportBackupBytes(backupBytes)
+    } catch {
+      // Continue even if backup fails - user can still proceed
+      setPreImportBackupBytes(null)
+    }
+
+    setPendingImportFile(file)
+    setImportConfirmOpen(true)
+  }
+
+  const handleConfirmImport = async () => {
+    if (!pendingImportFile) return
+
     setIsImportingData(true)
     try {
-      const buffer = await file.arrayBuffer()
+      const buffer = await pendingImportFile.arrayBuffer()
       await importDatabaseSnapshot(new Uint8Array(buffer))
       toast.success(t('data.importSuccess'))
       window.location.reload()
@@ -82,6 +102,9 @@ export function SettingsPage() {
       toast.error(t('data.importError'))
     } finally {
       setIsImportingData(false)
+      setImportConfirmOpen(false)
+      setPendingImportFile(null)
+      setPreImportBackupBytes(null)
       if (importDbInputRef.current) {
         importDbInputRef.current.value = ''
       }
@@ -97,11 +120,15 @@ export function SettingsPage() {
         <h2 className="font-heading text-lg font-semibold">{t('sections.general')}</h2>
 
         <div className="space-y-1">
-          <Label className="text-muted-foreground font-mono text-xs tracking-wider uppercase">
+          <Label
+            htmlFor="language-select"
+            className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
+          >
             {t('language.label')}
           </Label>
           <p className="text-muted-foreground text-xs">{t('language.description')}</p>
           <select
+            id="language-select"
             value={i18n.language}
             onChange={(e) => i18n.changeLanguage(e.target.value)}
             className="glass-input text-foreground mt-1 w-full max-w-xs px-3 py-2 text-sm"
@@ -120,11 +147,15 @@ export function SettingsPage() {
         <h2 className="font-heading text-lg font-semibold">{t('sections.currency')}</h2>
 
         <div className="space-y-1">
-          <Label className="text-muted-foreground font-mono text-xs tracking-wider uppercase">
+          <Label
+            htmlFor="currency-select"
+            className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
+          >
             {t('currency.preferred')}
           </Label>
           <p className="text-muted-foreground text-xs">{t('currency.preferredDescription')}</p>
           <select
+            id="currency-select"
             value={preferredCurrency}
             onChange={(e) => {
               setPreferredCurrency(e.target.value)
@@ -250,6 +281,7 @@ export function SettingsPage() {
                           toast.success(tTransactions('rules.delete'))
                         }}
                         className="text-muted-foreground hover:text-destructive transition-colors"
+                        aria-label={`${tTransactions('rules.delete')}: ${rule.pattern}`}
                         title={tTransactions('rules.delete')}
                       >
                         <Trash2 size={14} />
@@ -299,7 +331,7 @@ export function SettingsPage() {
             onChange={(e) => {
               const file = e.target.files?.[0]
               if (file) {
-                void handleImportData(file)
+                void handleImportClick(file)
               }
             }}
           />
@@ -312,11 +344,15 @@ export function SettingsPage() {
         <p className="text-muted-foreground text-xs">{t('dataApis.description')}</p>
 
         <div className="space-y-2">
-          <Label className="text-muted-foreground font-mono text-xs tracking-wider uppercase">
+          <Label
+            htmlFor="alpha-vantage-key"
+            className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
+          >
             Alpha Vantage
           </Label>
           <p className="text-muted-foreground text-[10px]">{t('dataApis.alphaVantageHint')}</p>
           <Input
+            id="alpha-vantage-key"
             type="password"
             placeholder="Alpha Vantage API key"
             value={alphaVantageKey}
@@ -326,11 +362,15 @@ export function SettingsPage() {
         </div>
 
         <div className="space-y-2">
-          <Label className="text-muted-foreground font-mono text-xs tracking-wider uppercase">
+          <Label
+            htmlFor="finnhub-key"
+            className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
+          >
             Finnhub
           </Label>
           <p className="text-muted-foreground text-[10px]">{t('dataApis.finnhubHint')}</p>
           <Input
+            id="finnhub-key"
             type="password"
             placeholder="Finnhub API key"
             value={finnhubKey}
@@ -359,6 +399,38 @@ export function SettingsPage() {
           {isSavingDataKeys ? '...' : tCommon('actions.save')}
         </Button>
       </section>
+
+      <ConfirmDialog
+        open={importConfirmOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            // Dialog closing without confirmation - download backup if available
+            if (preImportBackupBytes) {
+              const blob = new Blob([preImportBackupBytes], { type: 'application/octet-stream' })
+              const url = URL.createObjectURL(blob)
+              const a = document.createElement('a')
+              a.href = url
+              a.download = `shikin-pre-import-backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.db`
+              a.click()
+              URL.revokeObjectURL(url)
+              toast.success('Pre-import backup downloaded')
+            }
+            setPendingImportFile(null)
+            setPreImportBackupBytes(null)
+            if (importDbInputRef.current) {
+              importDbInputRef.current.value = ''
+            }
+          }
+          setImportConfirmOpen(open)
+        }}
+        title="Destructive Import Confirmation"
+        description="Importing a database will completely replace all current data including accounts, transactions, and settings. This action cannot be undone. A backup of your current data has been prepared and will be downloaded if you cancel."
+        confirmLabel="Yes, Replace All Data"
+        cancelLabel="Cancel and Keep Current Data"
+        variant="destructive"
+        isLoading={isImportingData}
+        onConfirm={handleConfirmImport}
+      />
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect, useRef } from 'react'
 import { Outlet, useLocation } from 'react-router'
 import { LayoutDashboard, ArrowLeftRight, Landmark, TrendingUp, Settings } from 'lucide-react'
 import { Sidebar } from './sidebar'
@@ -36,11 +36,27 @@ const GoalDialog = lazy(() =>
 
 export function AppShell() {
   const { pathname } = useLocation()
+  const mainRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    mainRef.current?.focus()
+  }, [pathname])
 
   return (
     <div className="bg-background flex h-screen overflow-hidden">
+      <a
+        href="#main-content"
+        className="bg-accent text-accent-foreground sr-only fixed top-4 left-4 z-[60] rounded px-3 py-2 focus:not-sr-only"
+      >
+        Skip to main content
+      </a>
       <Sidebar />
-      <main className="grid-bg flex-1 overflow-y-auto">
+      <main
+        id="main-content"
+        ref={mainRef}
+        tabIndex={-1}
+        className="grid-bg flex-1 overflow-y-auto focus:outline-none"
+      >
         <div className="mx-auto max-w-7xl p-6 pb-16 md:pb-0">
           <Suspense fallback={<LoadingSpinner className="h-full" />}>
             <Outlet />

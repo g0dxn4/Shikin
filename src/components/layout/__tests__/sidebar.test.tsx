@@ -18,14 +18,17 @@ vi.mock('react-router', () => ({
     children,
     to,
     className,
+    'aria-label': ariaLabel,
   }: {
     children: React.ReactNode
     to: string
     className: (args: { isActive: boolean }) => string
+    'aria-label'?: string
   }) => (
     <a
       href={to}
       className={typeof className === 'function' ? className({ isActive: false }) : className}
+      aria-label={ariaLabel}
     >
       {children}
     </a>
@@ -90,5 +93,41 @@ describe('Sidebar', () => {
 
     const settingsLink = screen.getByText('nav.settings').closest('a')
     expect(settingsLink).toHaveAttribute('href', '/settings')
+  })
+
+  describe('accessibility', () => {
+    it('toggle button has aria-label and aria-expanded', () => {
+      render(<Sidebar />)
+
+      const toggleBtn = screen.getByLabelText('Collapse sidebar')
+      expect(toggleBtn).toHaveAttribute('aria-expanded', 'true')
+    })
+
+    it('collapsed toggle button has aria-label for expand', () => {
+      mockSidebarCollapsed = true
+      render(<Sidebar />)
+
+      const toggleBtn = screen.getByLabelText('Expand sidebar')
+      expect(toggleBtn).toHaveAttribute('aria-expanded', 'false')
+    })
+
+    it('navigation has aria-label', () => {
+      render(<Sidebar />)
+
+      const nav = screen.getByRole('navigation', { name: 'Main navigation' })
+      expect(nav).toBeInTheDocument()
+    })
+
+    it('collapsed nav links have aria-labels', () => {
+      mockSidebarCollapsed = true
+      render(<Sidebar />)
+
+      // When collapsed, nav links should have aria-labels for screen reader accessibility
+      // Check specific links we know should have aria-labels
+      const dashboardLink = screen.getByLabelText('nav.dashboard')
+      const settingsLink = screen.getByLabelText('nav.settings')
+      expect(dashboardLink).toHaveAttribute('href', '/')
+      expect(settingsLink).toHaveAttribute('href', '/settings')
+    })
   })
 })

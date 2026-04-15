@@ -97,4 +97,46 @@ describe('AccountForm', () => {
     const grid = container.querySelector('.grid.grid-cols-2')
     expect(grid).toBeInTheDocument()
   })
+
+  describe('accessibility', () => {
+    it('has proper label associations for all fields', () => {
+      render(<AccountForm onSubmit={vi.fn()} />)
+
+      // Check that all inputs have associated labels
+      expect(screen.getByLabelText('form.name')).toHaveAttribute('id', 'name')
+      expect(screen.getByLabelText('form.balance')).toHaveAttribute('id', 'balance')
+      expect(screen.getByLabelText('form.type')).toBeInTheDocument()
+      expect(screen.getByLabelText('form.currency')).toBeInTheDocument()
+    })
+
+    it('exposes aria-invalid and aria-describedby when validation fails', async () => {
+      const user = userEvent.setup()
+      render(<AccountForm onSubmit={vi.fn()} />)
+
+      // Submit empty form
+      await user.click(screen.getByRole('button', { name: 'actions.save' }))
+
+      await waitFor(() => {
+        // Check error semantics on name field
+        const nameInput = screen.getByLabelText('form.name')
+        expect(nameInput).toHaveAttribute('aria-invalid', 'true')
+        expect(nameInput).toHaveAttribute('aria-describedby', 'name-error')
+
+        // Check error has role="alert"
+        const nameError = document.querySelector('#name-error')
+        expect(nameError).toHaveAttribute('role', 'alert')
+      })
+    })
+
+    it('select triggers have proper id for label association', () => {
+      render(<AccountForm onSubmit={vi.fn()} />)
+
+      // Select triggers should have ids
+      const typeSelect = document.querySelector('#account-type')
+      expect(typeSelect).toBeInTheDocument()
+
+      const currencySelect = document.querySelector('#account-currency')
+      expect(currencySelect).toBeInTheDocument()
+    })
+  })
 })

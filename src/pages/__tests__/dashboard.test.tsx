@@ -24,10 +24,12 @@ vi.mock('react-router', () => ({
   ),
 }))
 
-const mockFetchAccounts = vi.fn()
-const mockFetchTransactions = vi.fn()
+const mockFetchAccounts = vi.fn().mockResolvedValue(undefined)
+const mockFetchTransactions = vi.fn().mockResolvedValue(undefined)
 const mockOpenAccountDialog = vi.fn()
 const mockOpenTransactionDialog = vi.fn()
+const mockFetchGoals = vi.fn().mockResolvedValue(undefined)
+const mockLoadRates = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('@/stores/ui-store', () => ({
   useUIStore: () => ({
@@ -38,10 +40,18 @@ vi.mock('@/stores/ui-store', () => ({
 
 let mockAccounts: unknown[] = []
 let mockTransactions: unknown[] = []
+let mockAccountError: string | null = null
+let mockTransactionError: string | null = null
+let mockGoalError: string | null = null
+let mockCurrencyError: string | null = null
+let mockHealthError: string | null = null
 
 vi.mock('@/stores/account-store', () => ({
   useAccountStore: () => ({
     accounts: mockAccounts,
+    isLoading: false,
+    fetchError: mockAccountError,
+    error: mockAccountError,
     fetch: mockFetchAccounts,
   }),
 }))
@@ -49,6 +59,9 @@ vi.mock('@/stores/account-store', () => ({
 vi.mock('@/stores/transaction-store', () => ({
   useTransactionStore: () => ({
     transactions: mockTransactions,
+    isLoading: false,
+    fetchError: mockTransactionError,
+    error: mockTransactionError,
     fetch: mockFetchTransactions,
   }),
 }))
@@ -74,11 +87,10 @@ vi.mock('@/stores/anomaly-store', () => ({
   }),
 }))
 
-const mockFetchGoals = vi.fn()
-
 vi.mock('@/stores/goal-store', () => ({
   useGoalStore: () => ({
     goals: [],
+    fetchError: mockGoalError,
     fetch: mockFetchGoals,
   }),
 }))
@@ -95,9 +107,10 @@ vi.mock('@/stores/recap-store', () => ({
 vi.mock('@/stores/currency-store', () => ({
   useCurrencyStore: () => ({
     preferredCurrency: 'USD',
+    error: mockCurrencyError,
     getTotalBalanceInPreferred: (accounts: Array<{ balance: number }>) =>
       accounts.reduce((sum, account) => sum + account.balance, 0),
-    loadRates: vi.fn(),
+    loadRates: mockLoadRates,
   }),
 }))
 
@@ -115,6 +128,7 @@ vi.mock('@/stores/health-store', () => ({
   useHealthStore: () => ({
     score: null,
     isLoading: false,
+    error: mockHealthError,
     calculateScore: vi.fn(),
   }),
 }))
@@ -131,6 +145,11 @@ describe('Dashboard', () => {
     vi.clearAllMocks()
     mockAccounts = []
     mockTransactions = []
+    mockAccountError = null
+    mockTransactionError = null
+    mockGoalError = null
+    mockCurrencyError = null
+    mockHealthError = null
   })
 
   it('calls fetchAccounts and fetchTransactions on mount', () => {
@@ -156,6 +175,58 @@ describe('Dashboard', () => {
 
       expect(mockOpenAccountDialog).toHaveBeenCalled()
     })
+  })
+
+  it('shows a visible error banner when core dashboard data fails', () => {
+    mockAccounts = [
+      { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 1000 },
+    ]
+    mockTransactions = [
+      {
+        id: 'tx-1',
+        description: 'Coffee',
+        type: 'expense',
+        amount: 500,
+        currency: 'USD',
+        date: dayjs().format('YYYY-MM-DD'),
+        category_color: null,
+        category_name: null,
+        account_name: 'Checking',
+      },
+    ]
+    mockAccountError = 'Accounts unavailable'
+    mockTransactionError = 'Transactions unavailable'
+
+    render(<Dashboard />)
+
+    expect(screen.getByText('Some dashboard data couldn’t be loaded')).toBeInTheDocument()
+    expect(screen.getByText('Accounts: Accounts unavailable')).toBeInTheDocument()
+    expect(screen.getByText('Transactions: Transactions unavailable')).toBeInTheDocument()
+  })
+
+  it('keeps goal, exchange rate, and health partial failures visible', () => {
+    mockAccounts = [
+      { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 1000 },
+    ]
+    mockGoalError = 'Goals unavailable'
+    mockCurrencyError = 'Rates unavailable'
+    mockHealthError = 'Health unavailable'
+
+    render(<Dashboard />)
+
+    expect(screen.getByText('Some dashboard data couldn’t be loaded')).toBeInTheDocument()
+    expect(screen.getByText('Goals: Goals unavailable')).toBeInTheDocument()
+    expect(screen.getByText('Exchange rates: Rates unavailable')).toBeInTheDocument()
+    expect(screen.getByText('Financial health: Health unavailable')).toBeInTheDocument()
+  })
+
+  it('shows dedicated account load error state instead of onboarding CTA', () => {
+    mockAccountError = 'Accounts unavailable'
+
+    render(<Dashboard />)
+
+    expect(screen.getByText('Couldn’t load your dashboard accounts')).toBeInTheDocument()
+    expect(screen.queryByText('empty.addAccount')).not.toBeInTheDocument()
   })
 
   describe('with accounts', () => {

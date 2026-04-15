@@ -8,6 +8,7 @@ import { Check, X, Split, Plus } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+import { ErrorBanner } from '@/components/ui/error-banner'
 import {
   Select,
   SelectContent,
@@ -72,8 +73,18 @@ interface TransactionFormProps {
 export function TransactionForm({ transaction, onSubmit, isLoading }: TransactionFormProps) {
   const { t } = useTranslation('transactions')
   const { t: tCommon } = useTranslation('common')
-  const { accounts, fetch: fetchAccounts } = useAccountStore()
-  const { categories, fetch: fetchCategories } = useCategoryStore()
+  const {
+    accounts,
+    isLoading: accountsLoading,
+    fetchError: accountsFetchError,
+    fetch: fetchAccounts,
+  } = useAccountStore()
+  const {
+    categories,
+    isLoading: categoriesLoading,
+    fetchError: categoriesFetchError,
+    fetch: fetchCategories,
+  } = useCategoryStore()
   const { suggestCategory } = useCategorizationStore()
 
   const [suggestion, setSuggestion] = useState<CategorySuggestion | null>(null)
@@ -87,8 +98,8 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
   ])
 
   useEffect(() => {
-    fetchAccounts()
-    fetchCategories()
+    void fetchAccounts().catch(() => {})
+    void fetchCategories().catch(() => {})
   }, [fetchAccounts, fetchCategories])
 
   const {
@@ -121,6 +132,14 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
   const amountValue = watch('amount')
 
   const filteredCategories = categories.filter((c) => c.type === typeValue)
+  const needsCategoriesForSubmission = isSplitMode
+  const hasPersistedAccountSelection = !!transaction?.account_id
+  const blockingPrerequisiteErrors = [
+    accountsFetchError && !hasPersistedAccountSelection ? accountsFetchError : null,
+    needsCategoriesForSubmission ? categoriesFetchError : null,
+  ].filter((value): value is string => typeof value === 'string' && value.length > 0)
+  const areAccountsUnavailable = accountsLoading || !!accountsFetchError
+  const areCategoriesUnavailable = categoriesLoading || !!categoriesFetchError
 
   // Auto-set currency from selected account
   const selectedAccount = accounts.find((a) => a.id === accountIdValue)
@@ -189,16 +208,13 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
   }, 0)
   const remainingCentavos = totalCentavos - splitTotalCentavos
 
-  const updateSplitRow = useCallback(
-    (index: number, field: keyof SplitRowData, value: string) => {
-      setSplitRows((prev) => {
-        const next = [...prev]
-        next[index] = { ...next[index], [field]: value }
-        return next
-      })
-    },
-    []
-  )
+  const updateSplitRow = useCallback((index: number, field: keyof SplitRowData, value: string) => {
+    setSplitRows((prev) => {
+      const next = [...prev]
+      next[index] = { ...next[index], [field]: value }
+      return next
+    })
+  }, [])
 
   const addSplitRow = useCallback(() => {
     setSplitRows((prev) => [...prev, { categoryId: '', amount: '', notes: '' }])
@@ -226,12 +242,24 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
   const splitsValid =
     !isSplitMode ||
     (splitRows.filter((r) => r.categoryId && r.amount).length >= 2 && remainingCentavos === 0)
-
+  const isSubmitDisabled = isLoading || !splitsValid || blockingPrerequisiteErrors.length > 0
 
   return (
     <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-5">
+      <ErrorBanner
+        title="Prerequisite data couldn’t be loaded"
+        messages={[
+          accountsFetchError ? `Accounts: ${accountsFetchError}` : null,
+          categoriesFetchError ? `Categories: ${categoriesFetchError}` : null,
+        ]}
+        onRetry={() => {
+          void fetchAccounts().catch(() => {})
+          void fetchCategories().catch(() => {})
+        }}
+      />
+
       <div className="space-y-1.5">
-        <Label>{t('form.type')}</Label>
+        <Label htmlFor="tx-type">{t('form.type')}</Label>
         <Select
           value={typeValue}
           onValueChange={(val) => {
@@ -242,7 +270,7 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
             }
           }}
         >
-          <SelectTrigger>
+          <SelectTrigger id="tx-type">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -256,37 +284,55 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="amount">{t('form.amount')}</Label>
+        <Label htmlFor="tx-amount">{t('form.amount')}</Label>
         <Input
-          id="amount"
+          id="tx-amount"
           type="number"
           step="0.01"
           min="0.01"
           placeholder={t('form.amountPlaceholder')}
           className="font-heading text-2xl font-semibold"
           autoFocus
+          aria-invalid={!!errors.amount}
+          aria-describedby={errors.amount ? 'tx-amount-error' : undefined}
           {...register('amount', { valueAsNumber: true })}
         />
-        {errors.amount && <p className="text-destructive text-xs">{errors.amount.message}</p>}
+        {errors.amount && (
+          <p id="tx-amount-error" className="text-destructive text-xs" role="alert">
+            {errors.amount.message}
+          </p>
+        )}
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="description">{t('form.description')}</Label>
+        <Label htmlFor="tx-description">{t('form.description')}</Label>
         <Input
-          id="description"
+          id="tx-description"
           placeholder={t('form.descriptionPlaceholder')}
+          aria-invalid={!!errors.description}
+          aria-describedby={errors.description ? 'tx-description-error' : undefined}
           {...register('description')}
         />
         {errors.description && (
-          <p className="text-destructive text-xs">{errors.description.message}</p>
+          <p id="tx-description-error" className="text-destructive text-xs" role="alert">
+            {errors.description.message}
+          </p>
         )}
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label>{t('form.account')}</Label>
-          <Select value={accountIdValue} onValueChange={(val) => setValue('accountId', val)}>
-            <SelectTrigger>
+          <Label htmlFor="tx-account">{t('form.account')}</Label>
+          <Select
+            value={accountIdValue}
+            onValueChange={(val) => setValue('accountId', val)}
+            disabled={areAccountsUnavailable}
+          >
+            <SelectTrigger
+              id="tx-account"
+              aria-invalid={!!errors.accountId}
+              aria-describedby={errors.accountId ? 'tx-account-error' : undefined}
+            >
               <SelectValue placeholder={t('form.accountPlaceholder')} />
             </SelectTrigger>
             <SelectContent>
@@ -298,18 +344,21 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
             </SelectContent>
           </Select>
           {errors.accountId && (
-            <p className="text-destructive text-xs">{errors.accountId.message}</p>
+            <p id="tx-account-error" className="text-destructive text-xs" role="alert">
+              {errors.accountId.message}
+            </p>
           )}
         </div>
 
         {!isSplitMode && (
           <div className="space-y-1.5">
-            <Label>{t('form.category')}</Label>
+            <Label htmlFor="tx-category">{t('form.category')}</Label>
             <Select
               value={categoryIdValue ?? '__none__'}
               onValueChange={(val) => setValue('categoryId', val === '__none__' ? null : val)}
+              disabled={areCategoriesUnavailable}
             >
-              <SelectTrigger>
+              <SelectTrigger id="tx-category">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -333,9 +382,7 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
             {/* Auto-categorization suggestion chip */}
             {showSuggestion && (
               <div className="animate-fade-in flex items-center gap-1.5 pt-1">
-                <span className="text-muted-foreground text-[11px]">
-                  {t('form.suggested')}:
-                </span>
+                <span className="text-muted-foreground text-[11px]">{t('form.suggested')}:</span>
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-white/[0.04] px-2.5 py-0.5 text-[11px]">
                   {suggestedCategory.color && (
                     <span
@@ -348,6 +395,7 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
                     type="button"
                     onClick={handleAcceptSuggestion}
                     className="text-success hover:text-success/80 ml-0.5 transition-colors"
+                    aria-label={`${t('form.acceptSuggestion')}: ${suggestedCategory.name}`}
                     title={t('form.acceptSuggestion')}
                   >
                     <Check size={12} />
@@ -356,6 +404,7 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
                     type="button"
                     onClick={handleDismissSuggestion}
                     className="text-muted-foreground hover:text-foreground transition-colors"
+                    aria-label={`${t('form.dismissSuggestion')}: ${suggestedCategory.name}`}
                     title={t('form.dismissSuggestion')}
                   >
                     <X size={12} />
@@ -390,14 +439,19 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
 
       {typeValue === 'transfer' && (
         <div className="space-y-1.5">
-          <Label>{t('form.transferToAccount')}</Label>
+          <Label htmlFor="tx-transfer-to">{t('form.transferToAccount')}</Label>
           <Select
             value={transferToAccountIdValue ?? '__none__'}
             onValueChange={(val) =>
               setValue('transferToAccountId', val === '__none__' ? null : val)
             }
+            disabled={areAccountsUnavailable}
           >
-            <SelectTrigger>
+            <SelectTrigger
+              id="tx-transfer-to"
+              aria-invalid={!!errors.transferToAccountId}
+              aria-describedby={errors.transferToAccountId ? 'tx-transfer-error' : undefined}
+            >
               <SelectValue placeholder={t('form.transferToAccountPlaceholder')} />
             </SelectTrigger>
             <SelectContent>
@@ -412,7 +466,9 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
             </SelectContent>
           </Select>
           {errors.transferToAccountId && (
-            <p className="text-destructive text-xs">{errors.transferToAccountId.message}</p>
+            <p id="tx-transfer-error" className="text-destructive text-xs" role="alert">
+              {errors.transferToAccountId.message}
+            </p>
           )}
         </div>
       )}
@@ -453,13 +509,17 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
           {splitRows.map((row, index) => (
             <div key={index} className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
+                <Label htmlFor={`tx-split-category-${index}`} className="sr-only">
+                  {t('split.category')} {index + 1}
+                </Label>
                 <Select
                   value={row.categoryId || '__none__'}
                   onValueChange={(val) =>
                     updateSplitRow(index, 'categoryId', val === '__none__' ? '' : val)
                   }
+                  disabled={areCategoriesUnavailable}
                 >
-                  <SelectTrigger className="h-8 text-xs">
+                  <SelectTrigger id={`tx-split-category-${index}`} className="h-8 text-xs">
                     <SelectValue placeholder={t('split.category')} />
                   </SelectTrigger>
                   <SelectContent>
@@ -480,7 +540,11 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
                   </SelectContent>
                 </Select>
               </div>
+              <Label htmlFor={`tx-split-amount-${index}`} className="sr-only">
+                {t('form.amount')} {index + 1}
+              </Label>
               <Input
+                id={`tx-split-amount-${index}`}
                 type="number"
                 step="0.01"
                 min="0.01"
@@ -496,6 +560,7 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
                   size="icon"
                   className="text-muted-foreground hover:text-destructive h-8 w-8 shrink-0"
                   onClick={() => removeSplitRow(index)}
+                  aria-label={`${t('split.removeRow')} ${index + 1}`}
                 >
                   <X size={12} />
                 </Button>
@@ -516,12 +581,21 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
         </div>
       )}
 
-
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label htmlFor="date">{t('form.date')}</Label>
-          <Input id="date" type="date" {...register('date')} />
-          {errors.date && <p className="text-destructive text-xs">{errors.date.message}</p>}
+          <Label htmlFor="tx-date">{t('form.date')}</Label>
+          <Input
+            id="tx-date"
+            type="date"
+            aria-invalid={!!errors.date}
+            aria-describedby={errors.date ? 'tx-date-error' : undefined}
+            {...register('date')}
+          />
+          {errors.date && (
+            <p id="tx-date-error" className="text-destructive text-xs" role="alert">
+              {errors.date.message}
+            </p>
+          )}
         </div>
 
         <div className="space-y-1.5">
@@ -530,7 +604,7 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
         </div>
       </div>
 
-      <Button type="submit" className="w-full" disabled={isLoading || !splitsValid}>
+      <Button type="submit" className="w-full" disabled={isSubmitDisabled}>
         {isLoading ? '...' : tCommon('actions.save')}
       </Button>
     </form>

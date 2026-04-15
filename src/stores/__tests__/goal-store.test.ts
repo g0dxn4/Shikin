@@ -18,7 +18,7 @@ const mockExecute = vi.mocked(execute)
 describe('goal-store', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    useGoalStore.setState({ goals: [], isLoading: false })
+    useGoalStore.setState({ goals: [], isLoading: false, fetchError: null, error: null })
   })
 
   describe('fetch', () => {
@@ -68,6 +68,8 @@ describe('goal-store', () => {
 
       await expect(useGoalStore.getState().fetch()).rejects.toThrow('DB error')
       expect(useGoalStore.getState().isLoading).toBe(false)
+      expect(useGoalStore.getState().fetchError).toBe('DB error')
+      expect(useGoalStore.getState().error).toBeNull()
     })
 
     it('computes 100% progress when current >= target', async () => {

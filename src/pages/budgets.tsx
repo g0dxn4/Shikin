@@ -5,6 +5,8 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorBanner } from '@/components/ui/error-banner'
+import { ErrorState } from '@/components/ui/error-state'
 import { useUIStore } from '@/stores/ui-store'
 import { useBudgetStore, type BudgetWithStatus } from '@/stores/budget-store'
 import { formatMoney } from '@/lib/money'
@@ -79,7 +81,7 @@ function BudgetCard({ budget }: { budget: BudgetWithStatus }) {
               {budget.categoryName}
             </Badge>
           </div>
-          <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
             <Button
               variant="ghost"
               size="icon"
@@ -159,10 +161,12 @@ function BudgetCard({ budget }: { budget: BudgetWithStatus }) {
 export function Budgets() {
   const { t } = useTranslation('budgets')
   const { openBudgetDialog } = useUIStore()
-  const { budgets, isLoading, fetch } = useBudgetStore()
+  const { budgets, isLoading, fetchError, fetch } = useBudgetStore()
+
+  const hasInitialLoadError = !!fetchError && budgets.length === 0
 
   useEffect(() => {
-    fetch()
+    void fetch().catch(() => {})
   }, [fetch])
 
   return (
@@ -174,6 +178,14 @@ export function Budgets() {
           {t('addBudget')}
         </Button>
       </div>
+
+      <ErrorBanner
+        title="Couldn’t load budgets"
+        message={!hasInitialLoadError ? fetchError : null}
+        onRetry={() => {
+          void fetch().catch(() => {})
+        }}
+      />
 
       {isLoading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -187,6 +199,14 @@ export function Budgets() {
             </div>
           ))}
         </div>
+      ) : hasInitialLoadError ? (
+        <ErrorState
+          title="Couldn’t load your budgets"
+          description={fetchError}
+          onRetry={() => {
+            void fetch().catch(() => {})
+          }}
+        />
       ) : budgets.length === 0 ? (
         <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
           <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { query, execute } from '@/lib/database'
+import { getErrorMessage } from '@/lib/errors'
 import { generateId } from '@/lib/ulid'
 import { toCentavos, fromCentavos } from '@/lib/money'
 import type { Account } from '@/types/database'
@@ -21,6 +22,8 @@ export interface BalanceHistoryPoint {
 interface AccountState {
   accounts: Account[]
   isLoading: boolean
+  fetchError: string | null
+  error: string | null
   balanceHistory: Map<string, BalanceHistoryPoint[]>
   fetch: () => Promise<void>
   add: (data: AccountFormData) => Promise<void>
@@ -36,43 +39,81 @@ interface AccountState {
 export const useAccountStore = create<AccountState>((set, get) => ({
   accounts: [],
   isLoading: false,
+  fetchError: null,
+  error: null,
   balanceHistory: new Map(),
 
   fetch: async () => {
-    set({ isLoading: true })
+    set({ isLoading: true, fetchError: null })
     try {
       const accounts = await query<Account>(
         'SELECT * FROM accounts WHERE is_archived = 0 ORDER BY created_at DESC'
       )
-      set({ accounts })
+      set({ accounts, fetchError: null })
+    } catch (error) {
+      set({ fetchError: getErrorMessage(error) })
+      throw error
     } finally {
       set({ isLoading: false })
     }
   },
 
   add: async (data) => {
-    const id = generateId()
-    const now = new Date().toISOString()
-    await execute(
-      `INSERT INTO accounts (id, name, type, currency, balance, is_archived, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
-      [id, data.name, data.type, data.currency, toCentavos(data.balance), now, now]
-    )
-    await get().fetch()
+    set({ error: null })
+    try {
+      const id = generateId()
+      const now = new Date().toISOString()
+      await execute(
+        `INSERT INTO accounts (id, name, type, currency, balance, is_archived, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
+        [id, data.name, data.type, data.currency, toCentavos(data.balance), now, now]
+      )
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
+
+    try {
+      await get().fetch()
+    } catch {
+      // The write already committed; fetchError already captures the refresh problem.
+    }
   },
 
   update: async (id, data) => {
-    const now = new Date().toISOString()
-    await execute(
-      `UPDATE accounts SET name = ?, type = ?, currency = ?, balance = ?, updated_at = ? WHERE id = ?`,
-      [data.name, data.type, data.currency, toCentavos(data.balance), now, id]
-    )
-    await get().fetch()
+    set({ error: null })
+    try {
+      const now = new Date().toISOString()
+      await execute(
+        `UPDATE accounts SET name = ?, type = ?, currency = ?, balance = ?, updated_at = ? WHERE id = ?`,
+        [data.name, data.type, data.currency, toCentavos(data.balance), now, id]
+      )
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
+
+    try {
+      await get().fetch()
+    } catch {
+      // The write already committed; fetchError already captures the refresh problem.
+    }
   },
 
   remove: async (id) => {
-    await execute('DELETE FROM accounts WHERE id = ?', [id])
-    await get().fetch()
+    set({ error: null })
+    try {
+      await execute('DELETE FROM accounts WHERE id = ?', [id])
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
+
+    try {
+      await get().fetch()
+    } catch {
+      // The write already committed; fetchError already captures the refresh problem.
+    }
   },
 
   getById: (id) => {
@@ -80,40 +121,52 @@ export const useAccountStore = create<AccountState>((set, get) => ({
   },
 
   snapshotBalances: async () => {
-    const { accounts } = get()
-    const today = dayjs().format('YYYY-MM-DD')
+    set({ error: null })
+    try {
+      const { accounts } = get()
+      const today = dayjs().format('YYYY-MM-DD')
 
-    for (const acc of accounts) {
-      const existing = await query<{ id: string }>(
-        'SELECT id FROM account_balance_history WHERE account_id = ? AND date = ?',
-        [acc.id, today]
-      )
-      if (existing.length > 0) {
-        await execute(
-          'UPDATE account_balance_history SET balance = ? WHERE account_id = ? AND date = ?',
-          [acc.balance, acc.id, today]
+      for (const acc of accounts) {
+        const existing = await query<{ id: string }>(
+          'SELECT id FROM account_balance_history WHERE account_id = ? AND date = ?',
+          [acc.id, today]
         )
-      } else {
-        await execute(
-          'INSERT INTO account_balance_history (id, account_id, date, balance) VALUES (?, ?, ?, ?)',
-          [generateId(), acc.id, today, acc.balance]
-        )
+
+        if (existing.length > 0) {
+          await execute(
+            'UPDATE account_balance_history SET balance = ? WHERE account_id = ? AND date = ?',
+            [acc.balance, acc.id, today]
+          )
+        } else {
+          await execute(
+            'INSERT INTO account_balance_history (id, account_id, date, balance) VALUES (?, ?, ?, ?)',
+            [generateId(), acc.id, today, acc.balance]
+          )
+        }
       }
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
     }
   },
 
   loadBalanceHistory: async (accountId, months = 6) => {
-    const startDate = dayjs().subtract(months, 'month').format('YYYY-MM-DD')
-    const rows = await query<BalanceHistoryPoint>(
-      'SELECT date, balance FROM account_balance_history WHERE account_id = ? AND date >= ? ORDER BY date ASC',
-      [accountId, startDate]
-    )
-    set((s) => {
-      const newMap = new Map(s.balanceHistory)
-      newMap.set(accountId, rows)
-      return { balanceHistory: newMap }
-    })
-    return rows
+    try {
+      const startDate = dayjs().subtract(months, 'month').format('YYYY-MM-DD')
+      const rows = await query<BalanceHistoryPoint>(
+        'SELECT date, balance FROM account_balance_history WHERE account_id = ? AND date >= ? ORDER BY date ASC',
+        [accountId, startDate]
+      )
+      set((s) => {
+        const newMap = new Map(s.balanceHistory)
+        newMap.set(accountId, rows)
+        return { balanceHistory: newMap }
+      })
+      return rows
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
   },
 }))
 

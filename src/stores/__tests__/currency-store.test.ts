@@ -36,11 +36,100 @@ import { useCurrencyStore } from '../currency-store'
 describe('currency-store', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // Reset mock implementations to ensure clean state
+    mockStoreGet.mockReset()
+    mockStoreSet.mockReset()
+    mockStoreSave.mockReset()
+    mockRefreshRates.mockReset()
+    mockGetCachedRates.mockReset()
+    mockGetLastFetchDate.mockReset()
+
     useCurrencyStore.setState({
       rates: {},
       preferredCurrency: 'USD',
       lastFetched: null,
       isLoading: false,
+      error: null,
+    })
+  })
+
+  describe('autoRefreshIfStale', () => {
+    it('does not fail startup when refresh fails but cached rates exist', async () => {
+      // Setup: cached rates exist but are stale
+      // First call is from loadRates
+      mockStoreGet.mockResolvedValueOnce(null)
+      mockGetCachedRates.mockResolvedValueOnce([
+        { from_currency: 'USD', to_currency: 'EUR', rate: 0.92, date: '2026-03-17' },
+      ])
+      mockGetLastFetchDate.mockResolvedValueOnce('2020-01-01') // Very old date (stale)
+
+      // Refresh fails (but should have fetched fresh rates after refresh)
+      mockRefreshRates.mockRejectedValueOnce(new Error('Network unavailable'))
+      // Second getCachedRates call from the failed refreshRates
+      mockGetCachedRates.mockResolvedValueOnce([
+        { from_currency: 'USD', to_currency: 'EUR', rate: 0.92, date: '2026-03-17' },
+      ])
+
+      // Should NOT throw because we have cached rates
+      await expect(useCurrencyStore.getState().autoRefreshIfStale()).resolves.toBeUndefined()
+
+      // Error should be stored in state
+      expect(useCurrencyStore.getState().error).toBe('Network unavailable')
+
+      // Cached rates should still be available
+      expect(useCurrencyStore.getState().rates['USD:EUR']).toBe(0.92)
+    })
+
+    it('fails startup when refresh fails and no cached rates exist', async () => {
+      // Setup: no cached rates and stale lastFetched
+      mockStoreGet.mockResolvedValueOnce(null)
+      mockGetCachedRates.mockResolvedValueOnce([])
+      mockGetLastFetchDate.mockResolvedValueOnce('2020-01-01') // Very old date (stale)
+
+      // Refresh fails and still no rates after refresh
+      mockRefreshRates.mockRejectedValueOnce(new Error('Network unavailable'))
+      mockGetCachedRates.mockResolvedValueOnce([]) // Still no rates after failed refresh
+
+      // Should throw because we have no cached rates to fall back on
+      await expect(useCurrencyStore.getState().autoRefreshIfStale()).rejects.toThrow(
+        'Network unavailable'
+      )
+
+      expect(useCurrencyStore.getState().error).toBe('Network unavailable')
+    })
+
+    it('refreshes when stale and no cached rates exist', async () => {
+      // Setup: no cached rates and stale lastFetched
+      mockStoreGet.mockResolvedValueOnce(null)
+      mockGetCachedRates.mockResolvedValueOnce([])
+      mockGetLastFetchDate.mockResolvedValueOnce('2020-01-01') // Very old date (stale)
+      mockRefreshRates.mockResolvedValueOnce({})
+      // Second getCachedRates call after refreshRates
+      mockGetCachedRates.mockResolvedValueOnce([
+        { from_currency: 'USD', to_currency: 'EUR', rate: 0.92, date: '2026-03-17' },
+      ])
+
+      await useCurrencyStore.getState().autoRefreshIfStale()
+
+      expect(mockRefreshRates).toHaveBeenCalledTimes(1)
+      expect(useCurrencyStore.getState().rates['USD:EUR']).toBe(0.92)
+    })
+
+    it('skips refresh when rates are not stale', async () => {
+      // Setup: recent lastFetched
+      mockStoreGet.mockResolvedValueOnce(null)
+      mockGetCachedRates.mockResolvedValueOnce([
+        { from_currency: 'USD', to_currency: 'EUR', rate: 0.92, date: '2026-03-17' },
+      ])
+      mockGetLastFetchDate.mockResolvedValueOnce(new Date().toISOString().split('T')[0]) // Today
+
+      await useCurrencyStore.getState().autoRefreshIfStale()
+
+      // Should not call refresh because rates are fresh
+      expect(mockRefreshRates).not.toHaveBeenCalled()
+
+      // Cached rates should still be loaded
+      expect(useCurrencyStore.getState().rates['USD:EUR']).toBe(0.92)
     })
   })
 
@@ -81,6 +170,15 @@ describe('currency-store', () => {
       expect(useCurrencyStore.getState().isLoading).toBe(true)
       await promise
       expect(useCurrencyStore.getState().isLoading).toBe(false)
+    })
+
+    it('stores an error message when loading rates fails', async () => {
+      mockStoreGet.mockRejectedValueOnce(new Error('settings unavailable'))
+
+      await expect(useCurrencyStore.getState().loadRates()).rejects.toThrow('settings unavailable')
+
+      expect(useCurrencyStore.getState().isLoading).toBe(false)
+      expect(useCurrencyStore.getState().error).toBe('settings unavailable')
     })
   })
 

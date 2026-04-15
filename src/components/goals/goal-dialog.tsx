@@ -51,7 +51,7 @@ export function GoalDialog() {
   }
 
   return (
-    <Dialog open={goalDialogOpen} onOpenChange={(open) => !open && closeGoalDialog()}>
+    <Dialog open={goalDialogOpen} onOpenChange={(open) => !open && !isLoading && closeGoalDialog()}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{isEditing ? t('editGoal') : t('addGoal')}</DialogTitle>

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import { query, execute } from '@/lib/database'
+import { query, execute, runInTransaction } from '@/lib/database'
+import { getErrorMessage } from '@/lib/errors'
 import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
 import { useAccountStore } from './account-store'
@@ -32,6 +33,8 @@ export interface RecurringRuleFormData {
 interface RecurringState {
   rules: RecurringRuleWithDetails[]
   isLoading: boolean
+  fetchError: string | null
+  error: string | null
   fetch: () => Promise<void>
   create: (data: RecurringRuleFormData) => Promise<void>
   update: (id: string, data: RecurringRuleFormData) => Promise<void>
@@ -65,9 +68,11 @@ function advanceDate(date: string, frequency: RecurringFrequency): string {
 export const useRecurringStore = create<RecurringState>((set, get) => ({
   rules: [],
   isLoading: false,
+  fetchError: null,
+  error: null,
 
   fetch: async () => {
-    set({ isLoading: true })
+    set({ isLoading: true, fetchError: null })
     try {
       const rules = await query<RecurringRuleWithDetails>(
         `SELECT r.*, a.name as account_name, c.name as category_name, c.color as category_color
@@ -76,86 +81,131 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
          LEFT JOIN categories c ON r.category_id = c.id
          ORDER BY r.active DESC, r.next_date ASC`
       )
-      set({ rules })
+      set({ rules, fetchError: null })
+    } catch (error) {
+      set({ fetchError: getErrorMessage(error) })
+      throw error
     } finally {
       set({ isLoading: false })
     }
   },
 
   create: async (data) => {
-    const id = generateId()
-    const now = new Date().toISOString()
-    const amountCentavos = toCentavos(data.amount)
+    set({ error: null })
+    try {
+      const id = generateId()
+      const now = new Date().toISOString()
+      const amountCentavos = toCentavos(data.amount)
 
-    await execute(
-      `INSERT INTO recurring_rules (id, description, amount, type, frequency, next_date, end_date, account_id, to_account_id, category_id, subcategory_id, tags, notes, active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-      [
-        id,
-        data.description,
-        amountCentavos,
-        data.type,
-        data.frequency,
-        data.nextDate,
-        data.endDate,
-        data.accountId,
-        data.toAccountId,
-        data.categoryId,
-        data.subcategoryId,
-        data.tags || '',
-        data.notes,
-        now,
-        now,
-      ]
-    )
+      await execute(
+        `INSERT INTO recurring_rules (id, description, amount, type, frequency, next_date, end_date, account_id, to_account_id, category_id, subcategory_id, tags, notes, active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+        [
+          id,
+          data.description,
+          amountCentavos,
+          data.type,
+          data.frequency,
+          data.nextDate,
+          data.endDate,
+          data.accountId,
+          data.toAccountId,
+          data.categoryId,
+          data.subcategoryId,
+          data.tags || '',
+          data.notes,
+          now,
+          now,
+        ]
+      )
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
 
-    await get().fetch()
+    try {
+      await get().fetch()
+    } catch {
+      // The write already committed; fetchError already captures the refresh problem.
+    }
   },
 
   update: async (id, data) => {
-    const now = new Date().toISOString()
-    const amountCentavos = toCentavos(data.amount)
+    set({ error: null })
+    try {
+      const now = new Date().toISOString()
+      const amountCentavos = toCentavos(data.amount)
 
-    await execute(
-      `UPDATE recurring_rules SET description = ?, amount = ?, type = ?, frequency = ?, next_date = ?, end_date = ?, account_id = ?, to_account_id = ?, category_id = ?, subcategory_id = ?, tags = ?, notes = ?, updated_at = ?
-       WHERE id = ?`,
-      [
-        data.description,
-        amountCentavos,
-        data.type,
-        data.frequency,
-        data.nextDate,
-        data.endDate,
-        data.accountId,
-        data.toAccountId,
-        data.categoryId,
-        data.subcategoryId,
-        data.tags || '',
-        data.notes,
-        now,
-        id,
-      ]
-    )
+      await execute(
+        `UPDATE recurring_rules SET description = ?, amount = ?, type = ?, frequency = ?, next_date = ?, end_date = ?, account_id = ?, to_account_id = ?, category_id = ?, subcategory_id = ?, tags = ?, notes = ?, updated_at = ?
+         WHERE id = ?`,
+        [
+          data.description,
+          amountCentavos,
+          data.type,
+          data.frequency,
+          data.nextDate,
+          data.endDate,
+          data.accountId,
+          data.toAccountId,
+          data.categoryId,
+          data.subcategoryId,
+          data.tags || '',
+          data.notes,
+          now,
+          id,
+        ]
+      )
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
 
-    await get().fetch()
+    try {
+      await get().fetch()
+    } catch {
+      // The write already committed; fetchError already captures the refresh problem.
+    }
   },
 
   remove: async (id) => {
-    await execute('DELETE FROM recurring_rules WHERE id = ?', [id])
-    await get().fetch()
+    set({ error: null })
+    try {
+      await execute('DELETE FROM recurring_rules WHERE id = ?', [id])
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
+
+    try {
+      await get().fetch()
+    } catch {
+      // The write already committed; fetchError already captures the refresh problem.
+    }
   },
 
   toggleActive: async (id) => {
-    const rule = get().getById(id)
-    if (!rule) return
-    const now = new Date().toISOString()
-    const newActive = rule.active ? 0 : 1
-    await execute('UPDATE recurring_rules SET active = ?, updated_at = ? WHERE id = ?', [
-      newActive,
-      now,
-      id,
-    ])
-    await get().fetch()
+    set({ error: null })
+    try {
+      const rule = get().getById(id)
+      if (!rule) return
+      const now = new Date().toISOString()
+      const newActive = rule.active ? 0 : 1
+      await execute('UPDATE recurring_rules SET active = ?, updated_at = ? WHERE id = ?', [
+        newActive,
+        now,
+        id,
+      ])
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
+
+    try {
+      await get().fetch()
+    } catch {
+      // The write already committed; fetchError already captures the refresh problem.
+    }
   },
 
   getById: (id) => {
@@ -163,91 +213,104 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
   },
 
   materializeTransactions: async () => {
-    const today = dayjs().format('YYYY-MM-DD')
+    set({ error: null })
+    try {
+      const today = dayjs().format('YYYY-MM-DD')
 
-    // Get all active rules where next_date <= today
-    const dueRules = await query<RecurringRule>(
-      `SELECT * FROM recurring_rules WHERE active = 1 AND next_date <= ?`,
-      [today]
-    )
+      // Get all active rules where next_date <= today
+      const dueRules = await query<RecurringRule>(
+        `SELECT * FROM recurring_rules WHERE active = 1 AND next_date <= ?`,
+        [today]
+      )
 
-    let created = 0
+      let created = 0
 
-    for (const rule of dueRules) {
-      let nextDate = rule.next_date
+      for (const rule of dueRules) {
+        const createdForRule = await runInTransaction(async () => {
+          let nextDate = rule.next_date
+          let ruleCreated = 0
 
-      // Create transactions for all due dates (handle missed dates)
-      while (nextDate <= today) {
-        // Check end_date
-        if (rule.end_date && nextDate > rule.end_date) {
-          // Deactivate the rule
-          await execute(
-            "UPDATE recurring_rules SET active = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
-            [rule.id]
-          )
-          break
-        }
+          // Create transactions for all due dates (handle missed dates)
+          while (nextDate <= today) {
+            // Check end_date
+            if (rule.end_date && nextDate > rule.end_date) {
+              // Deactivate the rule
+              await execute(
+                "UPDATE recurring_rules SET active = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+                [rule.id]
+              )
+              break
+            }
 
-        const txId = generateId()
-        await execute(
-          `INSERT INTO transactions (id, account_id, category_id, subcategory_id, type, amount, description, notes, date, tags, is_recurring, transfer_to_account_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
-          [
-            txId,
-            rule.account_id,
-            rule.category_id,
-            rule.subcategory_id,
-            rule.type,
-            rule.amount,
-            rule.description,
-            rule.notes,
-            nextDate,
-            rule.tags || '[]',
-            rule.to_account_id,
-          ]
-        )
+            const txId = generateId()
+            await execute(
+              `INSERT INTO transactions (id, account_id, category_id, subcategory_id, type, amount, description, notes, date, tags, is_recurring, transfer_to_account_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+              [
+                txId,
+                rule.account_id,
+                rule.category_id,
+                rule.subcategory_id,
+                rule.type,
+                rule.amount,
+                rule.description,
+                rule.notes,
+                nextDate,
+                rule.tags || '[]',
+                rule.to_account_id,
+              ]
+            )
 
-        // Update account balance
-        const balanceDelta = rule.type === 'income' ? rule.amount : -rule.amount
-        await execute(
-          "UPDATE accounts SET balance = balance + ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
-          [balanceDelta, rule.account_id]
-        )
+            // Update account balance
+            const balanceDelta = rule.type === 'income' ? rule.amount : -rule.amount
+            await execute(
+              "UPDATE accounts SET balance = balance + ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+              [balanceDelta, rule.account_id]
+            )
 
-        // Handle transfer: credit the destination account
-        if (rule.type === 'transfer' && rule.to_account_id) {
-          await execute(
-            "UPDATE accounts SET balance = balance + ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
-            [rule.amount, rule.to_account_id]
-          )
-        }
+            // Handle transfer: credit the destination account
+            if (rule.type === 'transfer' && rule.to_account_id) {
+              await execute(
+                "UPDATE accounts SET balance = balance + ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+                [rule.amount, rule.to_account_id]
+              )
+            }
 
-        created++
-        nextDate = advanceDate(nextDate, rule.frequency as RecurringFrequency)
+            ruleCreated++
+            nextDate = advanceDate(nextDate, rule.frequency as RecurringFrequency)
+          }
+
+          // Update the rule's next_date
+          // Check if the rule should be deactivated
+          if (rule.end_date && nextDate > rule.end_date) {
+            await execute(
+              "UPDATE recurring_rules SET active = 0, next_date = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+              [nextDate, rule.id]
+            )
+          } else {
+            await execute(
+              "UPDATE recurring_rules SET next_date = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+              [nextDate, rule.id]
+            )
+          }
+
+          return ruleCreated
+        })
+
+        created += createdForRule
       }
 
-      // Update the rule's next_date
-      // Check if the rule should be deactivated
-      if (rule.end_date && nextDate > rule.end_date) {
-        await execute(
-          "UPDATE recurring_rules SET active = 0, next_date = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
-          [nextDate, rule.id]
-        )
-      } else {
-        await execute(
-          "UPDATE recurring_rules SET next_date = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
-          [nextDate, rule.id]
-        )
+      if (created > 0) {
+        // Refresh related stores
+        await useTransactionStore.getState().fetch()
+        await useAccountStore.getState().fetch()
+        await get().fetch()
       }
-    }
 
-    if (created > 0) {
-      // Refresh related stores
-      await useTransactionStore.getState().fetch()
-      await useAccountStore.getState().fetch()
-      await get().fetch()
+      return created
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
     }
-
-    return created
   },
 }))

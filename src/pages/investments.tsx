@@ -16,6 +16,8 @@ import { SafeChart } from '@/components/ui/safe-chart'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorBanner } from '@/components/ui/error-banner'
+import { ErrorState } from '@/components/ui/error-state'
 import { useUIStore } from '@/stores/ui-store'
 import { useInvestmentStore, type InvestmentWithPrice } from '@/stores/investment-store'
 import { useAccountStore } from '@/stores/account-store'
@@ -61,6 +63,7 @@ export function Investments() {
     portfolioSummary,
     priceHistory,
     isLoading,
+    fetchError,
     lastPriceFetch,
     fetch: fetchInvestments,
     remove,
@@ -75,15 +78,17 @@ export function Investments() {
   const [sortField, setSortField] = useState<SortField>('value')
 
   useEffect(() => {
-    fetchInvestments()
-    fetchAccounts()
+    void fetchInvestments().catch(() => {})
+    void fetchAccounts().catch(() => {})
   }, [fetchInvestments, fetchAccounts])
 
   // Fetch price history for chart when investments load
   useEffect(() => {
     if (investments.length > 0) {
       const symbols = [...new Set(investments.map((i) => i.symbol))]
-      symbols.forEach((s) => fetchPriceHistory(s, 365))
+      symbols.forEach((s) => {
+        void fetchPriceHistory(s, 365).catch(() => {})
+      })
     }
   }, [investments.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -193,6 +198,8 @@ export function Investments() {
     return dayjs().diff(dayjs(lastDate), 'hour') > 24
   }
 
+  const hasInitialLoadError = !!fetchError && investments.length === 0
+
   if (isLoading) {
     return (
       <div className="animate-fade-in-up page-content">
@@ -219,17 +226,27 @@ export function Investments() {
         <div className="page-header">
           <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
         </div>
-        <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
-          <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
-            <TrendingUp size={28} className="text-primary" />
+        {hasInitialLoadError ? (
+          <ErrorState
+            title="Couldn’t load your investments"
+            description={fetchError}
+            onRetry={() => {
+              void fetchInvestments().catch(() => {})
+            }}
+          />
+        ) : (
+          <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
+            <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
+              <TrendingUp size={28} className="text-primary" />
+            </div>
+            <h2 className="font-heading mb-2 text-lg font-semibold">{t('empty.title')}</h2>
+            <p className="text-muted-foreground mb-4 text-sm">{t('empty.description')}</p>
+            <Button onClick={() => openInvestmentDialog()}>
+              <Plus size={16} />
+              {t('addInvestment')}
+            </Button>
           </div>
-          <h2 className="font-heading mb-2 text-lg font-semibold">{t('empty.title')}</h2>
-          <p className="text-muted-foreground mb-4 text-sm">{t('empty.description')}</p>
-          <Button onClick={() => openInvestmentDialog()}>
-            <Plus size={16} />
-            {t('addInvestment')}
-          </Button>
-        </div>
+        )}
         <Suspense>
           <InvestmentDialog />
         </Suspense>
@@ -247,6 +264,14 @@ export function Investments() {
           {t('addInvestment')}
         </Button>
       </div>
+
+      <ErrorBanner
+        title="Couldn’t load investments"
+        message={fetchError}
+        onRetry={() => {
+          void fetchInvestments().catch(() => {})
+        }}
+      />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -598,8 +623,14 @@ function HoldingRow({
             </p>
           )}
         </div>
-        <div className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit}>
+        <div className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={onEdit}
+            aria-label={`Edit ${inv.symbol}`}
+          >
             <Pencil size={12} />
           </Button>
           <Button
@@ -607,6 +638,7 @@ function HoldingRow({
             size="icon"
             className="text-destructive hover:text-destructive h-7 w-7"
             onClick={onDelete}
+            aria-label={`Delete ${inv.symbol}`}
           >
             <Trash2 size={12} />
           </Button>
@@ -651,7 +683,13 @@ function HoldingCard({
           </Badge>
         </div>
         <div className="flex gap-1">
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={onEdit}
+            aria-label={`Edit ${inv.symbol}`}
+          >
             <Pencil size={12} />
           </Button>
           <Button
@@ -659,6 +697,7 @@ function HoldingCard({
             size="icon"
             className="text-destructive hover:text-destructive h-7 w-7"
             onClick={onDelete}
+            aria-label={`Delete ${inv.symbol}`}
           >
             <Trash2 size={12} />
           </Button>

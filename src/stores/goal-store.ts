@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { query, execute } from '@/lib/database'
+import { getErrorMessage } from '@/lib/errors'
 import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
 import type { Goal } from '@/types/database'
@@ -26,6 +27,8 @@ export interface GoalFormData {
 interface GoalState {
   goals: GoalWithProgress[]
   isLoading: boolean
+  fetchError: string | null
+  error: string | null
   fetch: () => Promise<void>
   add: (data: GoalFormData) => Promise<void>
   update: (id: string, data: GoalFormData) => Promise<void>
@@ -56,9 +59,11 @@ function computeMonthlyNeeded(current: number, target: number, deadline: string 
 export const useGoalStore = create<GoalState>((set, get) => ({
   goals: [],
   isLoading: false,
+  fetchError: null,
+  error: null,
 
   fetch: async () => {
-    set({ isLoading: true })
+    set({ isLoading: true, fetchError: null })
     try {
       const raw = await query<Goal & { account_name: string | null }>(
         `SELECT g.*, a.name as account_name
@@ -75,58 +80,94 @@ export const useGoalStore = create<GoalState>((set, get) => ({
         monthlyNeeded: computeMonthlyNeeded(g.current_amount, g.target_amount, g.deadline),
       }))
 
-      set({ goals })
+      set({ goals, fetchError: null })
+    } catch (error) {
+      set({ fetchError: getErrorMessage(error) })
+      throw error
     } finally {
       set({ isLoading: false })
     }
   },
 
   add: async (data) => {
-    const id = generateId()
-    const now = new Date().toISOString()
-    await execute(
-      `INSERT INTO goals (id, name, target_amount, current_amount, deadline, account_id, icon, color, notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        data.name,
-        toCentavos(data.targetAmount),
-        toCentavos(data.currentAmount),
-        data.deadline,
-        data.accountId,
-        data.icon,
-        data.color,
-        data.notes,
-        now,
-        now,
-      ]
-    )
-    await get().fetch()
+    set({ error: null })
+    try {
+      const id = generateId()
+      const now = new Date().toISOString()
+      await execute(
+        `INSERT INTO goals (id, name, target_amount, current_amount, deadline, account_id, icon, color, notes, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          data.name,
+          toCentavos(data.targetAmount),
+          toCentavos(data.currentAmount),
+          data.deadline,
+          data.accountId,
+          data.icon,
+          data.color,
+          data.notes,
+          now,
+          now,
+        ]
+      )
+      // Refresh optimistically; don't fail the mutation if refresh fails
+      try {
+        await get().fetch()
+      } catch {
+        // Silent refresh failure - data was written successfully
+      }
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
   },
 
   update: async (id, data) => {
-    const now = new Date().toISOString()
-    await execute(
-      `UPDATE goals SET name = ?, target_amount = ?, current_amount = ?, deadline = ?, account_id = ?, icon = ?, color = ?, notes = ?, updated_at = ? WHERE id = ?`,
-      [
-        data.name,
-        toCentavos(data.targetAmount),
-        toCentavos(data.currentAmount),
-        data.deadline,
-        data.accountId,
-        data.icon,
-        data.color,
-        data.notes,
-        now,
-        id,
-      ]
-    )
-    await get().fetch()
+    set({ error: null })
+    try {
+      const now = new Date().toISOString()
+      await execute(
+        `UPDATE goals SET name = ?, target_amount = ?, current_amount = ?, deadline = ?, account_id = ?, icon = ?, color = ?, notes = ?, updated_at = ? WHERE id = ?`,
+        [
+          data.name,
+          toCentavos(data.targetAmount),
+          toCentavos(data.currentAmount),
+          data.deadline,
+          data.accountId,
+          data.icon,
+          data.color,
+          data.notes,
+          now,
+          id,
+        ]
+      )
+      // Refresh optimistically; don't fail the mutation if refresh fails
+      try {
+        await get().fetch()
+      } catch {
+        // Silent refresh failure - data was written successfully
+      }
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
   },
 
   remove: async (id) => {
-    await execute('DELETE FROM goals WHERE id = ?', [id])
-    await get().fetch()
+    set({ error: null })
+    try {
+      await execute('DELETE FROM goals WHERE id = ?', [id])
+      // Refresh optimistically; don't fail the mutation if refresh fails
+      try {
+        await get().fetch()
+      } catch {
+        // Silent refresh failure - data was deleted successfully
+      }
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
   },
 
   getById: (id) => {

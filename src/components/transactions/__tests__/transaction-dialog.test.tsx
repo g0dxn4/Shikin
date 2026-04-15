@@ -41,14 +41,18 @@ vi.mock('@/stores/transaction-store', () => ({
 vi.mock('@/stores/account-store', () => ({
   useAccountStore: () => ({
     accounts: [{ id: 'acc-1', name: 'Checking', currency: 'USD' }],
-    fetch: vi.fn(),
+    isLoading: false,
+    fetchError: null,
+    fetch: vi.fn().mockResolvedValue(undefined),
   }),
 }))
 
 vi.mock('@/stores/category-store', () => ({
   useCategoryStore: () => ({
     categories: [],
-    fetch: vi.fn(),
+    isLoading: false,
+    fetchError: null,
+    fetch: vi.fn().mockResolvedValue(undefined),
   }),
 }))
 
@@ -75,6 +79,29 @@ describe('TransactionDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockEditingTransactionId = null
+  })
+
+  it('prevents dialog closure while mutation is in flight', async () => {
+    // Create a delayed promise so isLoading stays true
+    mockUpdate.mockImplementation(() => new Promise(() => {}))
+
+    // Use edit mode so form is pre-filled with valid data
+    mockEditingTransactionId = 'tx-edit'
+    mockGetById.mockReturnValue(mockTransaction)
+
+    render(<TransactionDialog />)
+
+    // Submit the form
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+
+    // Verify the button shows loading state (dialog should stay open)
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '...' })).toBeInTheDocument()
+    })
+
+    // Verify close was NOT called while loading
+    expect(mockCloseTransactionDialog).not.toHaveBeenCalled()
   })
 
   it('renders dialog with create mode title', () => {

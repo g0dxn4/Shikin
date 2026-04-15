@@ -88,6 +88,8 @@
     },
     "active": "Activa",
     "paused": "Pausada",
+    "pauseRule": "Pausar regla recurrente",
+    "resumeRule": "Reanudar regla recurrente",
     "nextOccurrence": "Próxima",
     "toast": {
       "created": "Regla recurrente creada",
@@ -111,7 +113,7 @@
     "category": "Categoria",
     "amount": "Monto",
     "notes": "Nota",
-    "removeRow": "Eliminar",
+    "removeRow": "Eliminar fila de division",
     "validation": "Los montos deben sumar el total",
     "breakdown": "Desglose de division"
   },

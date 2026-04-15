@@ -73,18 +73,24 @@ export function AccountForm({ account, onSubmit, isLoading }: AccountFormProps) 
           id="name"
           placeholder={t('form.namePlaceholder')}
           autoFocus
+          aria-invalid={!!errors.name}
+          aria-describedby={errors.name ? 'name-error' : undefined}
           {...register('name')}
         />
-        {errors.name && <p className="text-destructive text-xs">{errors.name.message}</p>}
+        {errors.name && (
+          <p id="name-error" className="text-destructive text-xs" role="alert">
+            {errors.name.message}
+          </p>
+        )}
       </div>
 
       <div className="space-y-1.5">
-        <Label>{t('form.type')}</Label>
+        <Label htmlFor="account-type">{t('form.type')}</Label>
         <Select
           value={typeValue}
           onValueChange={(val) => setValue('type', val as AccountFormValues['type'])}
         >
-          <SelectTrigger>
+          <SelectTrigger id="account-type">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -99,9 +105,9 @@ export function AccountForm({ account, onSubmit, isLoading }: AccountFormProps) 
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label>{t('form.currency')}</Label>
+          <Label htmlFor="account-currency">{t('form.currency')}</Label>
           <Select value={currencyValue} onValueChange={(val) => setValue('currency', val)}>
-            <SelectTrigger>
+            <SelectTrigger id="account-currency">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -120,10 +126,14 @@ export function AccountForm({ account, onSubmit, isLoading }: AccountFormProps) 
             id="balance"
             type="number"
             step="0.01"
+            aria-invalid={!!errors.balance}
+            aria-describedby={errors.balance ? 'balance-error' : undefined}
             {...register('balance', { valueAsNumber: true })}
           />
           {errors.balance && (
-            <p className="text-destructive text-xs">{errors.balance.message}</p>
+            <p id="balance-error" className="text-destructive text-xs" role="alert">
+              {errors.balance.message}
+            </p>
           )}
         </div>
       </div>

@@ -55,6 +55,8 @@ export function Sidebar() {
         )}
         <button
           onClick={toggleSidebar}
+          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-expanded={!sidebarCollapsed}
           className="text-muted-foreground hover:text-foreground rounded-lg p-1.5 transition-colors hover:bg-white/5"
         >
           {sidebarCollapsed ? <PanelLeft size={18} /> : <PanelLeftClose size={18} />}
@@ -62,11 +64,12 @@ export function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 space-y-0.5 px-2 py-2">
+      <nav className="flex-1 space-y-0.5 px-2 py-2" aria-label="Main navigation">
         {navItems.map(({ path, icon: Icon, labelKey }) => (
           <NavLink
             key={path}
             to={path}
+            aria-label={sidebarCollapsed ? t(labelKey) : undefined}
             className={({ isActive }) =>
               cn(
                 'sidebar-link',
@@ -85,6 +88,7 @@ export function Sidebar() {
       <div className="border-border space-y-0.5 border-t px-2 py-2">
         <NavLink
           to="/settings"
+          aria-label={sidebarCollapsed ? t('nav.settings') : undefined}
           className={({ isActive }) =>
             cn(
               'sidebar-link',

@@ -42,7 +42,7 @@ export function InvestmentDialog() {
   return (
     <Dialog
       open={investmentDialogOpen}
-      onOpenChange={(open) => !open && closeInvestmentDialog()}
+      onOpenChange={(open) => !open && !isLoading && closeInvestmentDialog()}
     >
       <DialogContent className="max-w-md">
         <DialogHeader>

@@ -40,6 +40,26 @@ describe('AccountDialog', () => {
     vi.clearAllMocks()
   })
 
+  it('prevents dialog closure while mutation is in flight', async () => {
+    // Create a delayed promise so isLoading stays true
+    mockAdd.mockImplementation(() => new Promise(() => {}))
+
+    render(<AccountDialog />)
+
+    // Trigger the mutation by submitting the form
+    const user = userEvent.setup()
+    await user.type(screen.getByLabelText('form.name'), 'Test Account')
+    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+
+    // Verify button shows loading state (dialog should stay open)
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '...' })).toBeInTheDocument()
+    })
+
+    // Verify close was NOT called while loading
+    expect(mockCloseAccountDialog).not.toHaveBeenCalled()
+  })
+
   it('renders dialog with create mode title', () => {
     render(<AccountDialog />)
 

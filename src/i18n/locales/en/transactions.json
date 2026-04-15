@@ -88,6 +88,8 @@
     },
     "active": "Active",
     "paused": "Paused",
+    "pauseRule": "Pause recurring rule",
+    "resumeRule": "Resume recurring rule",
     "nextOccurrence": "Next",
     "toast": {
       "created": "Recurring rule created",
@@ -111,7 +113,7 @@
     "category": "Category",
     "amount": "Amount",
     "notes": "Note",
-    "removeRow": "Remove",
+    "removeRow": "Remove split row",
     "validation": "Split amounts must equal the total",
     "breakdown": "Split breakdown"
   },

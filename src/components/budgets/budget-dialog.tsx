@@ -27,13 +27,13 @@ export function BudgetDialog() {
       if (isEditing && editingBudgetId) {
         await update(editingBudgetId, {
           ...data,
-          categoryId: data.categoryId || null,
+          categoryId: data.categoryId,
         })
         toast.success(t('toast.updated'))
       } else {
         await add({
           ...data,
-          categoryId: data.categoryId || null,
+          categoryId: data.categoryId,
         })
         toast.success(t('toast.created'))
       }
@@ -46,7 +46,10 @@ export function BudgetDialog() {
   }
 
   return (
-    <Dialog open={budgetDialogOpen} onOpenChange={(open) => !open && closeBudgetDialog()}>
+    <Dialog
+      open={budgetDialogOpen}
+      onOpenChange={(open) => !open && !isLoading && closeBudgetDialog()}
+    >
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{isEditing ? t('editBudget') : t('addBudget')}</DialogTitle>

@@ -2,6 +2,10 @@
   "app": {
     "name": "Shikin"
   },
+  "sidebar": {
+    "expand": "Expandir barra lateral",
+    "collapse": "Colapsar barra lateral"
+  },
   "nav": {
     "dashboard": "Inicio",
     "transactions": "Transacciones",

@@ -6,6 +6,8 @@ import { useTranslation } from 'react-i18next'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorBanner } from '@/components/ui/error-banner'
 import {
   Select,
   SelectContent,
@@ -37,13 +39,20 @@ interface BudgetFormProps {
 export function BudgetForm({ budget, onSubmit, isLoading }: BudgetFormProps) {
   const { t } = useTranslation('budgets')
   const { t: tCommon } = useTranslation('common')
-  const { categories, fetch: fetchCategories } = useCategoryStore()
+  const {
+    categories,
+    isLoading: categoriesLoading,
+    fetchError: categoriesFetchError,
+    fetch: fetchCategories,
+  } = useCategoryStore()
 
   useEffect(() => {
-    fetchCategories()
+    void fetchCategories().catch(() => {})
   }, [fetchCategories])
 
   const expenseCategories = categories.filter((c) => c.type === 'expense')
+  const isCategorySelectDisabled = categoriesLoading || !!categoriesFetchError
+  const isSubmitDisabled = isLoading || categoriesLoading || !!categoriesFetchError
 
   const {
     register,
@@ -67,60 +76,90 @@ export function BudgetForm({ budget, onSubmit, isLoading }: BudgetFormProps) {
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+      <ErrorBanner
+        title="Categories couldn\'t be loaded"
+        message={categoriesFetchError}
+        onRetry={() => {
+          void fetchCategories().catch(() => {})
+        }}
+      />
+
       <div className="space-y-1.5">
-        <Label htmlFor="name">{t('form.name')}</Label>
+        <Label htmlFor="budget-name">{t('form.name')}</Label>
         <Input
-          id="name"
+          id="budget-name"
           placeholder={t('form.namePlaceholder')}
           autoFocus
+          aria-invalid={!!errors.name}
+          aria-describedby={errors.name ? 'budget-name-error' : undefined}
           {...register('name')}
         />
-        {errors.name && <p className="text-destructive text-xs">{errors.name.message}</p>}
+        {errors.name && (
+          <p id="budget-name-error" className="text-destructive text-xs" role="alert">
+            {errors.name.message}
+          </p>
+        )}
       </div>
 
       <div className="space-y-1.5">
-        <Label>{t('form.category')}</Label>
-        <Select
-          value={categoryValue}
-          onValueChange={(val) => setValue('categoryId', val)}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder={t('form.categoryPlaceholder')} />
-          </SelectTrigger>
-          <SelectContent>
-            {expenseCategories.map((cat) => (
-              <SelectItem key={cat.id} value={cat.id}>
-                {cat.icon ? `${cat.icon} ` : ''}{cat.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <Label htmlFor="budget-category">{t('form.category')}</Label>
+        {categoriesLoading ? (
+          <Skeleton className="h-10 w-full" />
+        ) : (
+          <Select
+            value={categoryValue || ''}
+            onValueChange={(val) => setValue('categoryId', val)}
+            disabled={isCategorySelectDisabled}
+          >
+            <SelectTrigger
+              id="budget-category"
+              aria-invalid={!!errors.categoryId}
+              aria-describedby={errors.categoryId ? 'budget-category-error' : undefined}
+            >
+              <SelectValue placeholder={t('form.categoryPlaceholder')} />
+            </SelectTrigger>
+            <SelectContent>
+              {expenseCategories.map((cat) => (
+                <SelectItem key={cat.id} value={cat.id}>
+                  {cat.icon ? `${cat.icon} ` : ''}
+                  {cat.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         {errors.categoryId && (
-          <p className="text-destructive text-xs">{errors.categoryId.message}</p>
+          <p id="budget-category-error" className="text-destructive text-xs" role="alert">
+            {errors.categoryId.message}
+          </p>
         )}
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label htmlFor="amount">{t('form.amount')}</Label>
+          <Label htmlFor="budget-amount">{t('form.amount')}</Label>
           <Input
-            id="amount"
+            id="budget-amount"
             type="number"
             step="0.01"
+            aria-invalid={!!errors.amount}
+            aria-describedby={errors.amount ? 'budget-amount-error' : undefined}
             {...register('amount', { valueAsNumber: true })}
           />
           {errors.amount && (
-            <p className="text-destructive text-xs">{errors.amount.message}</p>
+            <p id="budget-amount-error" className="text-destructive text-xs" role="alert">
+              {errors.amount.message}
+            </p>
           )}
         </div>
 
         <div className="space-y-1.5">
-          <Label>{t('form.period')}</Label>
+          <Label htmlFor="budget-period">{t('form.period')}</Label>
           <Select
             value={periodValue}
             onValueChange={(val) => setValue('period', val as BudgetFormValues['period'])}
           >
-            <SelectTrigger>
+            <SelectTrigger id="budget-period">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -134,7 +173,7 @@ export function BudgetForm({ budget, onSubmit, isLoading }: BudgetFormProps) {
         </div>
       </div>
 
-      <Button type="submit" className="w-full" disabled={isLoading}>
+      <Button type="submit" className="w-full" disabled={isSubmitDisabled}>
         {isLoading ? '...' : tCommon('actions.save')}
       </Button>
     </form>

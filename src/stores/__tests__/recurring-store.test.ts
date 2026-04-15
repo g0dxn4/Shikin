@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('@/lib/database', () => ({
   query: vi.fn(),
   execute: vi.fn(),
+  runInTransaction: vi.fn(async (fn: () => Promise<unknown>) => fn()),
 }))
 
 vi.mock('@/lib/ulid', () => ({
@@ -23,16 +24,20 @@ vi.mock('../account-store', () => ({
   },
 }))
 
-import { query, execute } from '@/lib/database'
+import { query, execute, runInTransaction } from '@/lib/database'
 import { useRecurringStore } from '../recurring-store'
 
 const mockQuery = vi.mocked(query)
 const mockExecute = vi.mocked(execute)
+const mockRunInTransaction = vi.mocked(runInTransaction)
 
 describe('recurring-store', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    useRecurringStore.setState({ rules: [], isLoading: false })
+    mockQuery.mockReset()
+    mockExecute.mockReset()
+    mockRunInTransaction.mockImplementation(async (fn: () => Promise<unknown>) => fn())
+    useRecurringStore.setState({ rules: [], isLoading: false, fetchError: null, error: null })
   })
 
   describe('fetch', () => {
@@ -75,6 +80,16 @@ describe('recurring-store', () => {
       await promise
       expect(useRecurringStore.getState().isLoading).toBe(false)
     })
+
+    it('stores an error message when fetch fails', async () => {
+      mockQuery.mockRejectedValueOnce(new Error('DB error'))
+
+      await expect(useRecurringStore.getState().fetch()).rejects.toThrow('DB error')
+
+      expect(useRecurringStore.getState().isLoading).toBe(false)
+      expect(useRecurringStore.getState().fetchError).toBe('DB error')
+      expect(useRecurringStore.getState().error).toBeNull()
+    })
   })
 
   describe('create', () => {
@@ -108,6 +123,31 @@ describe('recurring-store', () => {
           '2026-04-01',
         ])
       )
+    })
+
+    it('does not reject when refresh fails after a committed write', async () => {
+      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockQuery.mockRejectedValueOnce(new Error('refresh failed'))
+
+      await expect(
+        useRecurringStore.getState().create({
+          description: 'Rent',
+          amount: 1500,
+          type: 'expense',
+          frequency: 'monthly',
+          nextDate: '2026-04-01',
+          endDate: null,
+          accountId: '01ACC001',
+          toAccountId: null,
+          categoryId: '01CAT001',
+          subcategoryId: null,
+          tags: '',
+          notes: 'Monthly rent',
+        })
+      ).resolves.toBeUndefined()
+
+      expect(useRecurringStore.getState().error).toBeNull()
+      expect(useRecurringStore.getState().fetchError).toBe('refresh failed')
     })
   })
 
@@ -229,6 +269,66 @@ describe('recurring-store', () => {
 
       expect(created).toBe(0)
       expect(mockExecute).not.toHaveBeenCalled()
+    })
+
+    it('clears background materialization error after a successful retry', async () => {
+      mockQuery.mockRejectedValueOnce(new Error('materialize failed'))
+
+      await expect(useRecurringStore.getState().materializeTransactions()).rejects.toThrow(
+        'materialize failed'
+      )
+
+      expect(useRecurringStore.getState().error).toBe('materialize failed')
+      expect(useRecurringStore.getState().fetchError).toBeNull()
+
+      mockQuery.mockResolvedValueOnce([])
+
+      const created = await useRecurringStore.getState().materializeTransactions()
+
+      expect(created).toBe(0)
+      expect(useRecurringStore.getState().error).toBeNull()
+    })
+
+    it('keeps partial materialization wrapped for safe retry after a mid-rule failure', async () => {
+      mockQuery.mockResolvedValueOnce([
+        {
+          id: '01RULE001',
+          description: 'Netflix',
+          amount: 1599,
+          type: 'expense',
+          frequency: 'monthly',
+          next_date: '2026-03-01',
+          end_date: null,
+          account_id: '01ACC001',
+          to_account_id: null,
+          category_id: '01CAT001',
+          subcategory_id: null,
+          tags: '[]',
+          notes: null,
+          active: 1,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ])
+      mockExecute
+        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+        .mockRejectedValueOnce(new Error('balance update failed'))
+
+      await expect(useRecurringStore.getState().materializeTransactions()).rejects.toThrow(
+        'balance update failed'
+      )
+
+      expect(mockRunInTransaction).toHaveBeenCalledTimes(1)
+      expect(useRecurringStore.getState().error).toBe('balance update failed')
+      expect(mockTxFetch).not.toHaveBeenCalled()
+      expect(mockAccountFetch).not.toHaveBeenCalled()
+
+      mockQuery.mockResolvedValueOnce([])
+
+      const created = await useRecurringStore.getState().materializeTransactions()
+
+      expect(created).toBe(0)
+      expect(useRecurringStore.getState().error).toBeNull()
     })
   })
 

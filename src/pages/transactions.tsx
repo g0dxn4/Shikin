@@ -25,6 +25,8 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorBanner } from '@/components/ui/error-banner'
+import { ErrorState } from '@/components/ui/error-state'
 import {
   Select,
   SelectContent,
@@ -91,12 +93,25 @@ type RecurringFormValues = z.infer<typeof recurringFormSchema>
 export function Transactions() {
   const { t } = useTranslation('transactions')
   const { t: tCommon } = useTranslation('common')
-  const { openTransactionDialog, recurringDialogOpen, editingRecurringId, openRecurringDialog, closeRecurringDialog } =
-    useUIStore()
-  const { transactions, isLoading, fetch, remove, isSplit } = useTransactionStore()
+  const {
+    openTransactionDialog,
+    recurringDialogOpen,
+    editingRecurringId,
+    openRecurringDialog,
+    closeRecurringDialog,
+  } = useUIStore()
+  const {
+    transactions,
+    isLoading,
+    fetchError: transactionFetchError,
+    fetch,
+    remove,
+    isSplit,
+  } = useTransactionStore()
   const {
     rules,
     isLoading: isLoadingRules,
+    fetchError: recurringFetchError,
     fetch: fetchRules,
     create: createRule,
     update: updateRule,
@@ -117,9 +132,20 @@ export function Transactions() {
   const [isDeletingRule, setIsDeletingRule] = useState(false)
 
   useEffect(() => {
-    fetch()
-    fetchRules()
+    void fetch().catch(() => {})
+    void fetchRules().catch(() => {})
   }, [fetch, fetchRules])
+
+  const hasTransactionLoadError = !!transactionFetchError && transactions.length === 0
+  const hasRecurringLoadError = !!recurringFetchError && rules.length === 0
+  const activeErrors =
+    activeTab === 'transactions'
+      ? hasTransactionLoadError
+        ? []
+        : [transactionFetchError]
+      : hasRecurringLoadError
+        ? []
+        : [recurringFetchError]
 
   const filteredTransactions = useMemo(() => {
     return transactions.filter((tx) => {
@@ -214,6 +240,23 @@ export function Transactions() {
         </div>
       </div>
 
+      <ErrorBanner
+        title={
+          activeTab === 'transactions'
+            ? 'Couldn’t load transactions'
+            : 'Couldn’t load recurring rules'
+        }
+        messages={activeErrors}
+        onRetry={() => {
+          if (activeTab === 'transactions') {
+            void fetch().catch(() => {})
+            return
+          }
+
+          void fetchRules().catch(() => {})
+        }}
+      />
+
       {/* Tab bar */}
       <div className="mb-4 flex gap-1 border-b border-white/[0.06]">
         {(['transactions', 'recurring'] as const).map((tab) => (
@@ -222,9 +265,7 @@ export function Transactions() {
             onClick={() => setActiveTab(tab)}
             className={cn(
               'relative px-4 py-2.5 font-mono text-xs tracking-wider transition-colors',
-              activeTab === tab
-                ? 'text-accent'
-                : 'text-muted-foreground hover:text-foreground'
+              activeTab === tab ? 'text-accent' : 'text-muted-foreground hover:text-foreground'
             )}
           >
             <span className="flex items-center gap-2">
@@ -281,6 +322,14 @@ export function Transactions() {
 
           {isLoading ? (
             <TransactionsSkeleton />
+          ) : hasTransactionLoadError ? (
+            <ErrorState
+              title="Couldn’t load your transactions"
+              description={transactionFetchError}
+              onRetry={() => {
+                void fetch().catch(() => {})
+              }}
+            />
           ) : transactions.length === 0 ? (
             <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
               <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
@@ -329,6 +378,14 @@ export function Transactions() {
         <>
           {isLoadingRules ? (
             <RecurringSkeleton />
+          ) : hasRecurringLoadError ? (
+            <ErrorState
+              title="Couldn’t load recurring rules"
+              description={recurringFetchError}
+              onRetry={() => {
+                void fetchRules().catch(() => {})
+              }}
+            />
           ) : rules.length === 0 ? (
             <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
               <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
@@ -436,10 +493,7 @@ function RecurringRuleCard({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <p className="truncate text-sm font-medium">{rule.description}</p>
-          <Badge
-            variant="secondary"
-            className="text-[10px]"
-          >
+          <Badge variant="secondary" className="text-[10px]">
             {t(`recurring.frequencies.${rule.frequency}`)}
           </Badge>
         </div>
@@ -466,29 +520,39 @@ function RecurringRuleCard({
         {formatMoney(rule.amount, 'USD')}
       </span>
 
-      <Badge
-        variant={isActive ? 'default' : 'secondary'}
-        className={cn(
-          'cursor-pointer text-[10px]',
-          isActive ? 'bg-success/20 text-success' : ''
-        )}
+      <button
+        type="button"
         onClick={onToggle}
+        aria-pressed={isActive}
+        aria-label={isActive ? t('recurring.pauseRule') : t('recurring.resumeRule')}
+        className={cn(
+          'inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-mono text-[10px] transition-colors',
+          isActive
+            ? 'bg-success/20 text-success hover:bg-success/30'
+            : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+        )}
       >
         {isActive ? (
-          <span className="flex items-center gap-1">
+          <>
             <Play size={8} />
             {t('recurring.active')}
-          </span>
+          </>
         ) : (
-          <span className="flex items-center gap-1">
+          <>
             <Pause size={8} />
             {t('recurring.paused')}
-          </span>
+          </>
         )}
-      </Badge>
+      </button>
 
-      <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit}>
+      <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={onEdit}
+          aria-label={`Edit ${rule.description}`}
+        >
           <Pencil size={12} />
         </Button>
         <Button
@@ -496,6 +560,7 @@ function RecurringRuleCard({
           size="icon"
           className="text-destructive hover:text-destructive h-7 w-7"
           onClick={onDelete}
+          aria-label={`Delete ${rule.description}`}
         >
           <Trash2 size={12} />
         </Button>
@@ -560,8 +625,8 @@ function RecurringRuleDialog({
   const isEditing = !!existing
 
   useEffect(() => {
-    fetchAccounts()
-    fetchCategories()
+    void fetchAccounts().catch(() => {})
+    void fetchCategories().catch(() => {})
   }, [fetchAccounts, fetchCategories])
 
   const {
@@ -618,22 +683,18 @@ function RecurringRuleDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+    <Dialog open={open} onOpenChange={(o) => !o && !isSubmitting && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>
-            {isEditing ? t('recurring.editRule') : t('recurring.addRule')}
-          </DialogTitle>
+          <DialogTitle>{isEditing ? t('recurring.editRule') : t('recurring.addRule')}</DialogTitle>
           <DialogDescription>
-            {isEditing
-              ? t('recurring.editRule')
-              : t('recurring.empty.description')}
+            {isEditing ? t('recurring.editRule') : t('recurring.empty.description')}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
           <div className="space-y-1.5">
-            <Label>{t('form.type')}</Label>
+            <Label htmlFor="rec-type">{t('form.type')}</Label>
             <Select
               value={typeValue}
               onValueChange={(val) => {
@@ -641,7 +702,7 @@ function RecurringRuleDialog({
                 setValue('categoryId', null)
               }}
             >
-              <SelectTrigger>
+              <SelectTrigger id="rec-type">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -664,10 +725,14 @@ function RecurringRuleDialog({
               placeholder={t('form.amountPlaceholder')}
               className="font-heading text-2xl font-semibold"
               autoFocus
+              aria-invalid={!!errors.amount}
+              aria-describedby={errors.amount ? 'rec-amount-error' : undefined}
               {...register('amount', { valueAsNumber: true })}
             />
             {errors.amount && (
-              <p className="text-destructive text-xs">{errors.amount.message}</p>
+              <p id="rec-amount-error" className="text-destructive text-xs" role="alert">
+                {errors.amount.message}
+              </p>
             )}
           </div>
 
@@ -676,21 +741,26 @@ function RecurringRuleDialog({
             <Input
               id="rec-description"
               placeholder={t('recurring.form.descriptionPlaceholder')}
+              aria-invalid={!!errors.description}
+              aria-describedby={errors.description ? 'rec-description-error' : undefined}
               {...register('description')}
             />
             {errors.description && (
-              <p className="text-destructive text-xs">{errors.description.message}</p>
+              <p id="rec-description-error" className="text-destructive text-xs" role="alert">
+                {errors.description.message}
+              </p>
             )}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <Label>{t('form.account')}</Label>
-              <Select
-                value={accountIdValue}
-                onValueChange={(val) => setValue('accountId', val)}
-              >
-                <SelectTrigger>
+              <Label htmlFor="rec-account">{t('form.account')}</Label>
+              <Select value={accountIdValue} onValueChange={(val) => setValue('accountId', val)}>
+                <SelectTrigger
+                  id="rec-account"
+                  aria-invalid={!!errors.accountId}
+                  aria-describedby={errors.accountId ? 'rec-account-error' : undefined}
+                >
                   <SelectValue placeholder={t('form.accountPlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
@@ -702,19 +772,19 @@ function RecurringRuleDialog({
                 </SelectContent>
               </Select>
               {errors.accountId && (
-                <p className="text-destructive text-xs">{errors.accountId.message}</p>
+                <p id="rec-account-error" className="text-destructive text-xs" role="alert">
+                  {errors.accountId.message}
+                </p>
               )}
             </div>
 
             <div className="space-y-1.5">
-              <Label>{t('form.category')}</Label>
+              <Label htmlFor="rec-category">{t('form.category')}</Label>
               <Select
                 value={categoryIdValue ?? '__none__'}
-                onValueChange={(val) =>
-                  setValue('categoryId', val === '__none__' ? null : val)
-                }
+                onValueChange={(val) => setValue('categoryId', val === '__none__' ? null : val)}
               >
-                <SelectTrigger>
+                <SelectTrigger id="rec-category">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -739,14 +809,14 @@ function RecurringRuleDialog({
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <Label>{t('recurring.form.frequency')}</Label>
+              <Label htmlFor="rec-frequency">{t('recurring.form.frequency')}</Label>
               <Select
                 value={frequencyValue}
                 onValueChange={(val) =>
                   setValue('frequency', val as RecurringFormValues['frequency'])
                 }
               >
-                <SelectTrigger>
+                <SelectTrigger id="rec-frequency">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -761,9 +831,17 @@ function RecurringRuleDialog({
 
             <div className="space-y-1.5">
               <Label htmlFor="rec-next-date">{t('recurring.form.nextDate')}</Label>
-              <Input id="rec-next-date" type="date" {...register('nextDate')} />
+              <Input
+                id="rec-next-date"
+                type="date"
+                aria-invalid={!!errors.nextDate}
+                aria-describedby={errors.nextDate ? 'rec-next-date-error' : undefined}
+                {...register('nextDate')}
+              />
               {errors.nextDate && (
-                <p className="text-destructive text-xs">{errors.nextDate.message}</p>
+                <p id="rec-next-date-error" className="text-destructive text-xs" role="alert">
+                  {errors.nextDate.message}
+                </p>
               )}
             </div>
           </div>
@@ -920,8 +998,14 @@ function TransactionRow({
         <span className="text-muted-foreground hidden font-mono text-[10px] sm:inline">
           {dayjs(tx.date).format('MMM D')}
         </span>
-        <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit}>
+        <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={onEdit}
+            aria-label={`Edit ${tx.description}`}
+          >
             <Pencil size={12} />
           </Button>
           <Button
@@ -929,6 +1013,7 @@ function TransactionRow({
             size="icon"
             className="text-destructive hover:text-destructive h-7 w-7"
             onClick={onDelete}
+            aria-label={`Delete ${tx.description}`}
           >
             <Trash2 size={12} />
           </Button>
@@ -946,10 +1031,7 @@ function TransactionRow({
           ) : (
             <div className="space-y-1">
               {splits.map((split) => (
-                <div
-                  key={split.id}
-                  className="flex items-center justify-between gap-2 text-xs"
-                >
+                <div key={split.id} className="flex items-center justify-between gap-2 text-xs">
                   <div className="flex items-center gap-1.5">
                     {split.category_color && (
                       <span
@@ -959,7 +1041,7 @@ function TransactionRow({
                     )}
                     <span className="text-muted-foreground">{split.category_name}</span>
                     {split.notes && (
-                      <span className="text-muted-foreground/60 truncate max-w-32">
+                      <span className="text-muted-foreground/60 max-w-32 truncate">
                         — {split.notes}
                       </span>
                     )}

@@ -32,12 +32,13 @@ vi.mock('@/components/shared/confirm-dialog', () => ({
     ) : null,
 }))
 
-const mockFetch = vi.fn()
+const mockFetch = vi.fn().mockResolvedValue(undefined)
 const mockRemove = vi.fn()
 const mockOpenAccountDialog = vi.fn()
 
 let mockAccounts: unknown[] = []
 let mockIsLoading = false
+let mockFetchError: string | null = null
 
 vi.mock('@/stores/ui-store', () => ({
   useUIStore: () => ({
@@ -49,6 +50,7 @@ vi.mock('@/stores/account-store', () => ({
   useAccountStore: () => ({
     accounts: mockAccounts,
     isLoading: mockIsLoading,
+    fetchError: mockFetchError,
     fetch: mockFetch,
     remove: mockRemove,
     balanceHistory: new Map(),
@@ -61,6 +63,7 @@ describe('Accounts', () => {
     vi.clearAllMocks()
     mockAccounts = []
     mockIsLoading = false
+    mockFetchError = null
   })
 
   it('calls fetch on mount', () => {
@@ -84,6 +87,16 @@ describe('Accounts', () => {
 
     expect(screen.getByText('empty.title')).toBeInTheDocument()
     expect(screen.getByText('empty.description')).toBeInTheDocument()
+  })
+
+  it('renders dedicated load error state instead of empty CTA', () => {
+    mockFetchError = 'Accounts unavailable'
+
+    render(<Accounts />)
+
+    expect(screen.getByText('Couldn’t load your accounts')).toBeInTheDocument()
+    expect(screen.getByText('Accounts unavailable')).toBeInTheDocument()
+    expect(screen.queryByText('empty.title')).not.toBeInTheDocument()
   })
 
   it('renders account cards with name, type badge, balance, and currency', () => {

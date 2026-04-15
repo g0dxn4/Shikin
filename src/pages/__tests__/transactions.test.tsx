@@ -33,12 +33,50 @@ vi.mock('@/components/shared/confirm-dialog', () => ({
     ) : null,
 }))
 
-const mockFetch = vi.fn()
+const mockFetch = vi.fn().mockResolvedValue(undefined)
 const mockRemove = vi.fn()
 const mockOpenTransactionDialog = vi.fn()
+const mockFetchRecurring = vi.fn().mockResolvedValue(undefined)
+const mockFetchAccounts = vi.fn().mockResolvedValue(undefined)
+const mockFetchCategories = vi.fn().mockResolvedValue(undefined)
 
 let mockTransactions: unknown[] = []
 let mockIsLoading = false
+let mockTransactionFetchError: string | null = null
+let mockRecurringFetchError: string | null = null
+
+const defaultRecurringRules = [
+  {
+    id: 'rule-1',
+    description: 'Monthly Rent',
+    amount: 150000,
+    type: 'expense',
+    frequency: 'monthly',
+    next_date: dayjs().add(1, 'month').format('YYYY-MM-DD'),
+    account_id: 'acc-1',
+    account_name: 'Checking',
+    category_id: 'cat-1',
+    category_name: 'Housing',
+    category_color: '#ff0000',
+    active: 1,
+  },
+  {
+    id: 'rule-2',
+    description: 'Netflix Subscription',
+    amount: 1599,
+    type: 'expense',
+    frequency: 'monthly',
+    next_date: dayjs().add(15, 'day').format('YYYY-MM-DD'),
+    account_id: 'acc-1',
+    account_name: 'Checking',
+    category_id: 'cat-2',
+    category_name: 'Entertainment',
+    category_color: '#bf5af2',
+    active: 0,
+  },
+]
+
+let mockRules = [...defaultRecurringRules]
 
 vi.mock('@/stores/ui-store', () => ({
   useUIStore: () => ({
@@ -52,9 +90,11 @@ vi.mock('@/stores/ui-store', () => ({
 
 vi.mock('@/stores/recurring-store', () => ({
   useRecurringStore: () => ({
-    rules: [],
+    rules: mockRules,
     isLoading: false,
-    fetch: vi.fn(),
+    fetchError: mockRecurringFetchError,
+    error: null,
+    fetch: mockFetchRecurring,
     create: vi.fn(),
     update: vi.fn(),
     remove: vi.fn(),
@@ -67,7 +107,8 @@ vi.mock('@/stores/recurring-store', () => ({
 vi.mock('@/stores/account-store', () => ({
   useAccountStore: () => ({
     accounts: [],
-    fetch: vi.fn(),
+    fetchError: null,
+    fetch: mockFetchAccounts,
     fetchAccounts: vi.fn(),
   }),
 }))
@@ -75,7 +116,9 @@ vi.mock('@/stores/account-store', () => ({
 vi.mock('@/stores/category-store', () => ({
   useCategoryStore: () => ({
     categories: [],
-    fetch: vi.fn(),
+    fetchError: null,
+    isLoading: false,
+    fetch: mockFetchCategories,
   }),
 }))
 
@@ -83,6 +126,8 @@ vi.mock('@/stores/transaction-store', () => ({
   useTransactionStore: () => ({
     transactions: mockTransactions,
     isLoading: mockIsLoading,
+    fetchError: mockTransactionFetchError,
+    error: null,
     fetch: mockFetch,
     remove: mockRemove,
     isSplit: vi.fn().mockReturnValue(false),
@@ -96,6 +141,9 @@ describe('Transactions', () => {
     vi.clearAllMocks()
     mockTransactions = []
     mockIsLoading = false
+    mockTransactionFetchError = null
+    mockRecurringFetchError = null
+    mockRules = [...defaultRecurringRules]
   })
 
   it('calls fetch on mount', () => {
@@ -119,6 +167,16 @@ describe('Transactions', () => {
 
     expect(screen.getByText('empty.title')).toBeInTheDocument()
     expect(screen.getByText('empty.description')).toBeInTheDocument()
+  })
+
+  it('renders dedicated load error state instead of empty transactions CTA', () => {
+    mockTransactionFetchError = 'Transactions unavailable'
+
+    render(<Transactions />)
+
+    expect(screen.getByText('Couldn’t load your transactions')).toBeInTheDocument()
+    expect(screen.getByText('Transactions unavailable')).toBeInTheDocument()
+    expect(screen.queryByText('empty.title')).not.toBeInTheDocument()
   })
 
   it('groups transactions by date', () => {
@@ -177,7 +235,7 @@ describe('Transactions', () => {
     expect(screen.getByText('Food')).toBeInTheDocument()
   })
 
-  it('hover-reveal edit/delete buttons have opacity-0 class', () => {
+  it('hover-reveal edit/delete buttons have opacity-0 class and focus-within support', () => {
     mockTransactions = [
       {
         id: 'tx-1',
@@ -194,8 +252,34 @@ describe('Transactions', () => {
 
     const { container } = render(<Transactions />)
 
-    const hoverDiv = container.querySelector('.opacity-0.group-hover\\:opacity-100')
+    const hoverDiv = container.querySelector(
+      '.opacity-0.group-hover\\:opacity-100.focus-within\\:opacity-100'
+    )
     expect(hoverDiv).toBeInTheDocument()
+  })
+
+  it('transaction action buttons have aria-labels', () => {
+    mockTransactions = [
+      {
+        id: 'tx-1',
+        description: 'Test Transaction',
+        type: 'expense',
+        amount: 1000,
+        currency: 'USD',
+        date: dayjs().format('YYYY-MM-DD'),
+        category_color: null,
+        category_name: null,
+        account_name: 'Checking',
+      },
+    ]
+
+    render(<Transactions />)
+
+    // Check that edit and delete buttons have aria-labels with the transaction description
+    const editButton = screen.getByLabelText('Edit Test Transaction')
+    const deleteButton = screen.getByLabelText('Delete Test Transaction')
+    expect(editButton).toBeInTheDocument()
+    expect(deleteButton).toBeInTheDocument()
   })
 
   it('edit button opens transaction dialog with tx id', async () => {
@@ -258,6 +342,76 @@ describe('Transactions', () => {
     await waitFor(() => {
       expect(mockRemove).toHaveBeenCalledWith('tx-del')
       expect(toast.success).toHaveBeenCalledWith('toast.deleted')
+    })
+  })
+
+  describe('recurring rules accessibility', () => {
+    it('shows dedicated recurring load ErrorState when recurring rules fetch fails with no cache', async () => {
+      const user = userEvent.setup()
+      mockRecurringFetchError = 'Recurring rules unavailable'
+      mockRules = []
+
+      render(<Transactions />)
+      await user.click(screen.getByText('tabs.recurring'))
+
+      expect(screen.getByText('Couldn’t load recurring rules')).toBeInTheDocument()
+      expect(screen.getByText('Recurring rules unavailable')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Try again/i })).toBeInTheDocument()
+      expect(screen.queryByText('recurring.empty.title')).not.toBeInTheDocument()
+    })
+
+    it('shows recurring ErrorBanner and cached rules when refresh fails', async () => {
+      const user = userEvent.setup()
+      mockRecurringFetchError = 'Recurring refresh failed'
+
+      render(<Transactions />)
+      await user.click(screen.getByText('tabs.recurring'))
+
+      expect(screen.getByText('Couldn’t load recurring rules')).toBeInTheDocument()
+      expect(screen.getByText('Recurring refresh failed')).toBeInTheDocument()
+      expect(screen.getByText('Monthly Rent')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'Retry' }))
+
+      expect(mockFetchRecurring).toHaveBeenCalledTimes(2)
+    })
+
+    it('recurring toggle buttons have proper aria attributes', async () => {
+      const user = userEvent.setup()
+      mockTransactions = []
+
+      render(<Transactions />)
+
+      // Switch to recurring tab
+      const recurringTab = screen.getByText('tabs.recurring')
+      await user.click(recurringTab)
+
+      // Find the active toggle button with aria-pressed
+      const activeButton = screen.getByLabelText('recurring.pauseRule')
+      expect(activeButton).toHaveAttribute('aria-pressed', 'true')
+      expect(activeButton).toHaveAttribute('type', 'button')
+
+      // Find the paused toggle button
+      const pausedButton = screen.getByLabelText('recurring.resumeRule')
+      expect(pausedButton).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it('recurring rule action buttons have aria-labels', async () => {
+      const user = userEvent.setup()
+      mockTransactions = []
+
+      render(<Transactions />)
+
+      // Switch to recurring tab
+      const recurringTab = screen.getByText('tabs.recurring')
+      await user.click(recurringTab)
+
+      // Check that edit and delete buttons have aria-labels
+      const editButton = screen.getByLabelText('Edit Monthly Rent')
+      const deleteButton = screen.getByLabelText('Delete Monthly Rent')
+      expect(editButton).toBeInTheDocument()
+      expect(deleteButton).toBeInTheDocument()
     })
   })
 })

@@ -49,8 +49,11 @@ export function TransactionDialog() {
   }
 
   return (
-    <Dialog open={transactionDialogOpen} onOpenChange={(open) => !open && closeTransactionDialog()}>
-      <DialogContent className="max-w-lg overflow-y-auto max-h-[85vh]">
+    <Dialog
+      open={transactionDialogOpen}
+      onOpenChange={(open) => !open && !isLoading && closeTransactionDialog()}
+    >
+      <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEditing ? t('editTransaction') : t('addTransaction')}</DialogTitle>
           <DialogDescription>

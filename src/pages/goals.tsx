@@ -5,6 +5,8 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorBanner } from '@/components/ui/error-banner'
+import { ErrorState } from '@/components/ui/error-state'
 import { useUIStore } from '@/stores/ui-store'
 import { useGoalStore, type GoalWithProgress } from '@/stores/goal-store'
 import { formatMoney } from '@/lib/money'
@@ -51,7 +53,10 @@ function GoalCard({ goal }: { goal: GoalWithProgress }) {
         className="glass-card group relative overflow-hidden p-5 transition-transform duration-200 hover:translate-y-[-2px]"
         style={
           isCompleted
-            ? { boxShadow: '0 0 24px rgba(34, 197, 94, 0.15), inset 0 0 0 1px rgba(34, 197, 94, 0.2)' }
+            ? {
+                boxShadow:
+                  '0 0 24px rgba(34, 197, 94, 0.15), inset 0 0 0 1px rgba(34, 197, 94, 0.2)',
+              }
             : undefined
         }
       >
@@ -67,21 +72,19 @@ function GoalCard({ goal }: { goal: GoalWithProgress }) {
             <div>
               <h3 className="font-heading text-base font-semibold">{goal.name}</h3>
               {goal.accountName && (
-                <Badge
-                  variant="secondary"
-                  className="mt-0.5 text-[10px]"
-                >
+                <Badge variant="secondary" className="mt-0.5 text-[10px]">
                   {goal.accountName}
                 </Badge>
               )}
             </div>
           </div>
-          <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
             <Button
               variant="ghost"
               size="icon"
               className="h-7 w-7"
               onClick={() => openGoalDialog(goal.id)}
+              aria-label={`Edit ${goal.name}`}
             >
               <Pencil size={12} />
             </Button>
@@ -90,6 +93,7 @@ function GoalCard({ goal }: { goal: GoalWithProgress }) {
               size="icon"
               className="text-destructive hover:text-destructive h-7 w-7"
               onClick={() => setDeleteId(goal.id)}
+              aria-label={`Delete ${goal.name}`}
             >
               <Trash2 size={12} />
             </Button>
@@ -131,9 +135,8 @@ function GoalCard({ goal }: { goal: GoalWithProgress }) {
             <p className="text-muted-foreground text-sm">
               <span className="text-foreground font-medium">
                 {formatMoney(goal.current_amount)}
-              </span>
-              {' '}{t('card.of')}{' '}
-              {formatMoney(goal.target_amount)}
+              </span>{' '}
+              {t('card.of')} {formatMoney(goal.target_amount)}
             </p>
             <p className="text-muted-foreground text-xs">
               {isCompleted
@@ -156,7 +159,7 @@ function GoalCard({ goal }: { goal: GoalWithProgress }) {
 
         {/* Footer details */}
         <div className="mt-3 flex items-center justify-between">
-          <p className="text-muted-foreground font-mono text-[10px] uppercase tracking-wider">
+          <p className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
             {goal.daysRemaining !== null
               ? goal.daysRemaining > 0
                 ? `${goal.daysRemaining} ${t('card.daysLeft')}`
@@ -165,9 +168,7 @@ function GoalCard({ goal }: { goal: GoalWithProgress }) {
           </p>
           {goal.monthlyNeeded > 0 && !isCompleted && (
             <p className="text-muted-foreground text-xs">
-              <span className="text-foreground font-medium">
-                {formatMoney(goal.monthlyNeeded)}
-              </span>
+              <span className="text-foreground font-medium">{formatMoney(goal.monthlyNeeded)}</span>
               {t('card.monthlyNeeded')}
             </p>
           )}
@@ -198,10 +199,12 @@ function GoalCard({ goal }: { goal: GoalWithProgress }) {
 export function Goals() {
   const { t } = useTranslation('goals')
   const { openGoalDialog } = useUIStore()
-  const { goals, isLoading, fetch } = useGoalStore()
+  const { goals, isLoading, fetchError, fetch } = useGoalStore()
+
+  const hasInitialLoadError = !!fetchError && goals.length === 0
 
   useEffect(() => {
-    fetch()
+    void fetch().catch(() => {})
   }, [fetch])
 
   return (
@@ -213,6 +216,14 @@ export function Goals() {
           {t('addGoal')}
         </Button>
       </div>
+
+      <ErrorBanner
+        title="Couldn’t load goals"
+        message={!hasInitialLoadError ? fetchError : null}
+        onRetry={() => {
+          void fetch().catch(() => {})
+        }}
+      />
 
       {isLoading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -231,6 +242,14 @@ export function Goals() {
             </div>
           ))}
         </div>
+      ) : hasInitialLoadError ? (
+        <ErrorState
+          title="Couldn’t load your goals"
+          description={fetchError}
+          onRetry={() => {
+            void fetch().catch(() => {})
+          }}
+        />
       ) : goals.length === 0 ? (
         <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
           <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">

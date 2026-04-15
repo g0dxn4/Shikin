@@ -7,6 +7,8 @@ import { SafeChart } from '@/components/ui/safe-chart'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorBanner } from '@/components/ui/error-banner'
+import { ErrorState } from '@/components/ui/error-state'
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
 import { formatMoney, fromCentavos } from '@/lib/money'
@@ -23,14 +25,14 @@ export function Accounts() {
   const { t } = useTranslation('accounts')
   const { t: tCommon } = useTranslation('common')
   const { openAccountDialog } = useUIStore()
-  const { accounts, isLoading, fetch, remove } = useAccountStore()
+  const { accounts, isLoading, fetchError, fetch, remove } = useAccountStore()
 
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch()
+    void fetch().catch(() => {})
   }, [fetch])
 
   const totalBalance = useMemo(() => accounts.reduce((sum, a) => sum + a.balance, 0), [accounts])
@@ -53,6 +55,8 @@ export function Accounts() {
     setExpandedId((prev) => (prev === id ? null : id))
   }, [])
 
+  const hasInitialLoadError = !!fetchError && accounts.length === 0
+
   return (
     <div className="animate-fade-in-up page-content">
       <div className="page-header">
@@ -63,8 +67,24 @@ export function Accounts() {
         </Button>
       </div>
 
+      <ErrorBanner
+        title="Couldn’t load account data"
+        message={!hasInitialLoadError ? fetchError : null}
+        onRetry={() => {
+          void fetch().catch(() => {})
+        }}
+      />
+
       {isLoading ? (
         <AccountsSkeleton />
+      ) : hasInitialLoadError ? (
+        <ErrorState
+          title="Couldn’t load your accounts"
+          description={fetchError}
+          onRetry={() => {
+            void fetch().catch(() => {})
+          }}
+        />
       ) : accounts.length === 0 ? (
         <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
           <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
@@ -160,7 +180,9 @@ function AccountCard({
 
   useEffect(() => {
     if (!isExpanded || history) return
-    loadBalanceHistory(account.id, 6).finally(() => setHistoryLoading(false))
+    loadBalanceHistory(account.id, 6)
+      .catch(() => {})
+      .finally(() => setHistoryLoading(false))
   }, [isExpanded, history, account.id, loadBalanceHistory])
 
   const chartData = useMemo(() => {
@@ -184,7 +206,7 @@ function AccountCard({
               {t(`types.${account.type}`)}
             </Badge>
           </div>
-          <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
             <Button
               variant="ghost"
               size="icon"

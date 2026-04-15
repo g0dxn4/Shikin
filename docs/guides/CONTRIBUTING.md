@@ -297,6 +297,45 @@ describe('toCentavos', () => {
 })
 ```
 
+### Frontend form hardening checks
+
+For this milestone, prefer the established form accessibility + validation pattern:
+
+- `react-hook-form` with `zodResolver`
+- Explicit `Label` + `htmlFor`/`id` association for each field
+- Validation feedback with:
+  - `aria-invalid={!!errors.field}`
+  - `aria-describedby="<field>-error"`
+  - `<p id="..." role="alert">` for inline field errors
+- Disable submit action while async writes are in progress and show `...` during submit
+
+Useful examples to mirror:
+
+- `src/components/accounts/account-form.tsx`
+- `src/components/transactions/transaction-form.tsx`
+- `src/components/investments/investment-form.tsx`
+- `src/components/budgets/budget-form.tsx`
+
+### Browser bridge behavior testing
+
+Bridge hardening checks should cover both success and failure modes:
+
+- `X-Shikin-Bridge` header propagation for browser DB/store/fs calls
+- descriptive errors when bridge is unreachable or returns non-OK
+- endpoint-specific behavior in `/api/db/*`, `/api/store/*`, and `/api/fs/*`
+
+Current focused test set:
+
+- `src/lib/__tests__/bridge-headers.test.ts`
+- `src/lib/__tests__/storage.test.ts`
+- `src/lib/__tests__/virtual-fs.test.ts`
+
+Run targeted checks with:
+
+```bash
+pnpm test:run src/lib/__tests__/bridge-headers.test.ts src/lib/__tests__/storage.test.ts src/lib/__tests__/virtual-fs.test.ts
+```
+
 ### Mocking Tauri APIs
 
 Since Tauri plugins are not available in the test environment, mock them:

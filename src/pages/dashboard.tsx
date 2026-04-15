@@ -29,6 +29,8 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorBanner } from '@/components/ui/error-banner'
+import { ErrorState } from '@/components/ui/error-state'
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
 import { useTransactionStore } from '@/stores/transaction-store'
@@ -64,23 +66,43 @@ export function Dashboard() {
   const { t: tTx } = useTranslation('transactions')
   const { t: tAcc } = useTranslation('accounts')
   const { openAccountDialog, openTransactionDialog } = useUIStore()
-  const { accounts, isLoading: accountsLoading, fetch: fetchAccounts } = useAccountStore()
-  const { transactions, isLoading: txLoading, fetch: fetchTransactions } = useTransactionStore()
+  const {
+    accounts,
+    isLoading: accountsLoading,
+    fetchError: accountsFetchError,
+    fetch: fetchAccounts,
+  } = useAccountStore()
+  const {
+    transactions,
+    isLoading: txLoading,
+    fetchError: transactionsFetchError,
+    fetch: fetchTransactions,
+  } = useTransactionStore()
   const {
     isLoading: anomalyLoading,
     scanForAnomalies,
     getActiveAnomalies,
     dismissAnomaly,
   } = useAnomalyStore()
-  const { goals, fetch: fetchGoals } = useGoalStore()
-  const { score: healthScore, isLoading: healthLoading, calculateScore } = useHealthStore()
+  const { goals, fetchError: goalsFetchError, fetch: fetchGoals } = useGoalStore()
+  const {
+    score: healthScore,
+    isLoading: healthLoading,
+    error: healthError,
+    calculateScore,
+  } = useHealthStore()
   const {
     currentRecap,
     isLoading: recapLoading,
     generateWeekly,
     loadLatestWeekly,
   } = useRecapStore()
-  const { preferredCurrency, getTotalBalanceInPreferred, loadRates } = useCurrencyStore()
+  const {
+    preferredCurrency,
+    error: currencyError,
+    getTotalBalanceInPreferred,
+    loadRates,
+  } = useCurrencyStore()
   const {
     currentStreak,
     longestStreak,
@@ -91,11 +113,11 @@ export function Dashboard() {
   const { insights: spendingInsights, loadComparisons: loadInsights } = useSpendingInsightsStore()
 
   useEffect(() => {
-    fetchAccounts()
-    fetchTransactions()
-    fetchGoals()
-    loadLatestWeekly()
-    loadRates()
+    void fetchAccounts().catch(() => {})
+    void fetchTransactions().catch(() => {})
+    void fetchGoals().catch(() => {})
+    void loadLatestWeekly()
+    void loadRates().catch(() => {})
   }, [fetchAccounts, fetchTransactions, fetchGoals, loadLatestWeekly, loadRates])
 
   // Run anomaly scan and load spending insights after transactions are loaded
@@ -111,7 +133,7 @@ export function Dashboard() {
   // Calculate health score after data loads
   useEffect(() => {
     if (!accountsLoading && !txLoading && accounts.length > 0) {
-      calculateScore()
+      void calculateScore()
     }
   }, [accountsLoading, txLoading, accounts.length, calculateScore])
 
@@ -177,6 +199,15 @@ export function Dashboard() {
   const expenseDelta = monthlyExpenses - previousExpenses
 
   const recentTransactions = useMemo(() => transactions.slice(0, 8), [transactions])
+  const dashboardErrors = [
+    accountsFetchError && accounts.length > 0 ? `Accounts: ${accountsFetchError}` : null,
+    transactionsFetchError && recentTransactions.length > 0
+      ? `Transactions: ${transactionsFetchError}`
+      : null,
+    goalsFetchError ? `Goals: ${goalsFetchError}` : null,
+    currencyError ? `Exchange rates: ${currencyError}` : null,
+    healthError ? `Financial health: ${healthError}` : null,
+  ]
 
   // Monthly spending chart data (last 6 months)
   const monthlyChartData = useMemo(() => {
@@ -249,6 +280,8 @@ export function Dashboard() {
   }, [transactions])
 
   const hasAccounts = accounts.length > 0
+  const hasAccountsLoadError = !!accountsFetchError && !hasAccounts
+  const hasTransactionsLoadError = !!transactionsFetchError && recentTransactions.length === 0
   const isLoading = accountsLoading || txLoading
 
   if (isLoading) {
@@ -276,6 +309,14 @@ export function Dashboard() {
           </div>
         )}
       </div>
+
+      <ErrorBanner
+        title="Some dashboard data couldn’t be loaded"
+        messages={dashboardErrors}
+        onRetry={() => {
+          void Promise.allSettled([fetchAccounts(), fetchTransactions(), fetchGoals(), loadRates()])
+        }}
+      />
 
       {/* Achievement unlock notifications */}
       {newlyUnlocked.length > 0 && (
@@ -377,16 +418,26 @@ export function Dashboard() {
       </div>
 
       {!hasAccounts ? (
-        <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
-          <div className="bg-accent-muted mb-4 flex h-16 w-16 items-center justify-center rounded-full">
-            <Wallet size={32} className="text-primary" />
+        hasAccountsLoadError ? (
+          <ErrorState
+            title="Couldn’t load your dashboard accounts"
+            description={accountsFetchError}
+            onRetry={() => {
+              void fetchAccounts().catch(() => {})
+            }}
+          />
+        ) : (
+          <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
+            <div className="bg-accent-muted mb-4 flex h-16 w-16 items-center justify-center rounded-full">
+              <Wallet size={32} className="text-primary" />
+            </div>
+            <h2 className="font-heading mb-2 text-xl font-semibold">{t('empty.title')}</h2>
+            <p className="text-muted-foreground mb-6 max-w-md text-sm">{t('empty.description')}</p>
+            <div className="flex gap-3">
+              <Button onClick={() => openAccountDialog()}>{t('empty.addAccount')}</Button>
+            </div>
           </div>
-          <h2 className="font-heading mb-2 text-xl font-semibold">{t('empty.title')}</h2>
-          <p className="text-muted-foreground mb-6 max-w-md text-sm">{t('empty.description')}</p>
-          <div className="flex gap-3">
-            <Button onClick={() => openAccountDialog()}>{t('empty.addAccount')}</Button>
-          </div>
-        </div>
+        )
       ) : (
         <>
           {/* Charts row */}
@@ -761,13 +812,24 @@ export function Dashboard() {
             </div>
 
             {recentTransactions.length === 0 ? (
-              <div className="glass-card flex flex-col items-center justify-center py-8 text-center">
-                <p className="text-muted-foreground text-sm">{tTx('empty.description')}</p>
-                <Button className="mt-3" size="sm" onClick={() => openTransactionDialog()}>
-                  <Plus size={14} />
-                  {tTx('addTransaction')}
-                </Button>
-              </div>
+              hasTransactionsLoadError ? (
+                <ErrorState
+                  title="Couldn’t load recent transactions"
+                  description={transactionsFetchError}
+                  className="py-8"
+                  onRetry={() => {
+                    void fetchTransactions().catch(() => {})
+                  }}
+                />
+              ) : (
+                <div className="glass-card flex flex-col items-center justify-center py-8 text-center">
+                  <p className="text-muted-foreground text-sm">{tTx('empty.description')}</p>
+                  <Button className="mt-3" size="sm" onClick={() => openTransactionDialog()}>
+                    <Plus size={14} />
+                    {tTx('addTransaction')}
+                  </Button>
+                </div>
+              )
             ) : (
               <div className="space-y-1">
                 {recentTransactions.map((tx) => (

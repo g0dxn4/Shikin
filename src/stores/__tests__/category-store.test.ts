@@ -16,6 +16,15 @@ describe('category-store', () => {
   })
 
   describe('fetch', () => {
+    it('stores an error message when fetch fails', async () => {
+      mockQuery.mockRejectedValueOnce(new Error('DB error'))
+
+      await expect(useCategoryStore.getState().fetch()).rejects.toThrow('DB error')
+
+      expect(useCategoryStore.getState().isLoading).toBe(false)
+      expect(useCategoryStore.getState().fetchError).toBe('DB error')
+    })
+
     it('loads categories ordered by sort_order', async () => {
       const mockCategories = [
         {

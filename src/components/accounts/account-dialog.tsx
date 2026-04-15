@@ -40,7 +40,10 @@ export function AccountDialog() {
   }
 
   return (
-    <Dialog open={accountDialogOpen} onOpenChange={(open) => !open && closeAccountDialog()}>
+    <Dialog
+      open={accountDialogOpen}
+      onOpenChange={(open) => !open && !isLoading && closeAccountDialog()}
+    >
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{isEditing ? t('editAccount') : t('addAccount')}</DialogTitle>

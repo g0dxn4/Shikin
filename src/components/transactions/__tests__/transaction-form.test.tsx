@@ -11,8 +11,10 @@ vi.mock('react-i18next', () => ({
   }),
 }))
 
-const mockFetchAccounts = vi.fn()
-const mockFetchCategories = vi.fn()
+const mockFetchAccounts = vi.fn().mockResolvedValue(undefined)
+const mockFetchCategories = vi.fn().mockResolvedValue(undefined)
+let mockAccountsFetchError: string | null = null
+let mockCategoriesFetchError: string | null = null
 
 vi.mock('@/stores/account-store', () => ({
   useAccountStore: () => ({
@@ -20,6 +22,8 @@ vi.mock('@/stores/account-store', () => ({
       { id: 'acc-1', name: 'Checking', currency: 'USD' },
       { id: 'acc-2', name: 'Savings', currency: 'EUR' },
     ],
+    isLoading: false,
+    fetchError: mockAccountsFetchError,
     fetch: mockFetchAccounts,
   }),
 }))
@@ -31,6 +35,8 @@ vi.mock('@/stores/category-store', () => ({
       { id: 'cat-2', name: 'Salary', type: 'income', color: '#00ff00', sort_order: 2 },
       { id: 'cat-3', name: 'Transport', type: 'expense', color: null, sort_order: 3 },
     ],
+    isLoading: false,
+    fetchError: mockCategoriesFetchError,
     fetch: mockFetchCategories,
   }),
 }))
@@ -48,6 +54,8 @@ vi.mock('@/stores/categorization-store', () => ({
 describe('TransactionForm', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockAccountsFetchError = null
+    mockCategoriesFetchError = null
   })
 
   it('renders all fields', () => {
@@ -117,6 +125,93 @@ describe('TransactionForm', () => {
     expect(btn).toBeDisabled()
   })
 
+  it('shows prerequisite error and disables submit when account/category loads fail', () => {
+    mockAccountsFetchError = 'Accounts unavailable'
+    mockCategoriesFetchError = 'Categories unavailable'
+
+    render(<TransactionForm onSubmit={vi.fn()} />)
+
+    expect(screen.getByText('Prerequisite data couldn’t be loaded')).toBeInTheDocument()
+    expect(screen.getByText('Accounts: Accounts unavailable')).toBeInTheDocument()
+    expect(screen.getByText('Categories: Categories unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'actions.save' })).toBeDisabled()
+  })
+
+  it('does not block transfer submission when only categories fail', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    mockCategoriesFetchError = 'Categories unavailable'
+
+    const transaction: TransactionWithDetails = {
+      id: 'tx-transfer',
+      account_id: 'acc-1',
+      category_id: null,
+      subcategory_id: null,
+      type: 'transfer',
+      amount: 1000,
+      currency: 'USD',
+      description: 'Move money',
+      notes: null,
+      date: '2024-06-15',
+      tags: '',
+      is_recurring: 0,
+      transfer_to_account_id: 'acc-2',
+      created_at: '2024-06-15T00:00:00Z',
+      updated_at: '2024-06-15T00:00:00Z',
+      account_name: 'Checking',
+      transfer_to_account_name: 'Savings',
+    }
+
+    render(<TransactionForm transaction={transaction} onSubmit={onSubmit} />)
+
+    expect(screen.getByRole('button', { name: 'actions.save' })).not.toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'transfer', transferToAccountId: 'acc-2' })
+      )
+    })
+  })
+
+  it('does not block uncategorized submission when only categories fail', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    mockCategoriesFetchError = 'Categories unavailable'
+
+    const transaction: TransactionWithDetails = {
+      id: 'tx-expense',
+      account_id: 'acc-1',
+      category_id: null,
+      subcategory_id: null,
+      type: 'expense',
+      amount: 2550,
+      currency: 'USD',
+      description: 'Groceries',
+      notes: null,
+      date: '2024-06-15',
+      tags: '',
+      is_recurring: 0,
+      transfer_to_account_id: null,
+      created_at: '2024-06-15T00:00:00Z',
+      updated_at: '2024-06-15T00:00:00Z',
+      account_name: 'Checking',
+    }
+
+    render(<TransactionForm transaction={transaction} onSubmit={onSubmit} />)
+
+    expect(screen.getByRole('button', { name: 'actions.save' })).not.toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'expense', categoryId: null })
+      )
+    })
+  })
+
   it('shows validation error for empty required fields on submit', async () => {
     const user = userEvent.setup()
     const onSubmit = vi.fn()
@@ -174,5 +269,54 @@ describe('TransactionForm', () => {
     // The None option is always rendered (may appear in trigger and hidden select)
     const noneElements = screen.getAllByText('form.categoryNone')
     expect(noneElements.length).toBeGreaterThanOrEqual(1)
+  })
+
+  describe('accessibility', () => {
+    it('has proper label associations for all fields', () => {
+      render(<TransactionForm onSubmit={vi.fn()} />)
+
+      // Check that all inputs have associated labels
+      expect(screen.getByLabelText('form.amount')).toHaveAttribute('id', 'tx-amount')
+      expect(screen.getByLabelText('form.description')).toHaveAttribute('id', 'tx-description')
+      expect(screen.getByLabelText('form.date')).toHaveAttribute('id', 'tx-date')
+      expect(screen.getByLabelText('form.notes')).toBeInTheDocument()
+      expect(screen.getByLabelText('form.account')).toBeInTheDocument()
+    })
+
+    it('exposes aria-invalid and aria-describedby when validation fails', async () => {
+      const user = userEvent.setup()
+      render(<TransactionForm onSubmit={vi.fn()} />)
+
+      // Submit empty form
+      await user.click(screen.getByRole('button', { name: 'actions.save' }))
+
+      await waitFor(() => {
+        // Check error semantics on amount field
+        const amountInput = screen.getByLabelText('form.amount')
+        expect(amountInput).toHaveAttribute('aria-invalid', 'true')
+
+        // Check error has role="alert" if present
+        const amountError = document.querySelector('#tx-amount-error')
+        if (amountError) {
+          expect(amountError).toHaveAttribute('role', 'alert')
+        }
+      })
+    })
+
+    it('select triggers have proper id for label association', () => {
+      render(<TransactionForm onSubmit={vi.fn()} />)
+
+      // Account select should have id
+      const accountSelect = document.querySelector('#tx-account')
+      expect(accountSelect).toBeInTheDocument()
+    })
+
+    it('has accessible split toggle button', () => {
+      render(<TransactionForm onSubmit={vi.fn()} />)
+
+      // Split toggle should be a button with accessible name
+      const splitToggle = screen.getByRole('button', { name: 'split.toggle' })
+      expect(splitToggle).toBeInTheDocument()
+    })
   })
 })

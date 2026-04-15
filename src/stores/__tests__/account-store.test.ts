@@ -19,7 +19,7 @@ describe('account-store', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     // Reset zustand store between tests
-    useAccountStore.setState({ accounts: [], isLoading: false })
+    useAccountStore.setState({ accounts: [], isLoading: false, fetchError: null, error: null })
   })
 
   describe('fetch', () => {
@@ -68,6 +68,8 @@ describe('account-store', () => {
 
       await expect(useAccountStore.getState().fetch()).rejects.toThrow('DB error')
       expect(useAccountStore.getState().isLoading).toBe(false)
+      expect(useAccountStore.getState().fetchError).toBe('DB error')
+      expect(useAccountStore.getState().error).toBeNull()
     })
   })
 
@@ -95,6 +97,23 @@ describe('account-store', () => {
       )
       // Should re-fetch after insert
       expect(mockQuery).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not reject when refresh fails after a committed write', async () => {
+      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockQuery.mockRejectedValueOnce(new Error('refresh failed'))
+
+      await expect(
+        useAccountStore.getState().add({
+          name: 'Savings',
+          type: 'savings',
+          currency: 'USD',
+          balance: 1500.5,
+        })
+      ).resolves.toBeUndefined()
+
+      expect(useAccountStore.getState().error).toBeNull()
+      expect(useAccountStore.getState().fetchError).toBe('refresh failed')
     })
   })
 

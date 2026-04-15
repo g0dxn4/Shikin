@@ -29,6 +29,7 @@ const listNotebook = tools.find((tool) => tool.name === 'list-notebook')!
 const manageRecurringTransaction = tools.find(
   (tool) => tool.name === 'manage-recurring-transaction'
 )!
+const materializeRecurring = tools.find((tool) => tool.name === 'materialize-recurring')!
 
 describe('CLI tool validation regressions', () => {
   beforeEach(() => {
@@ -168,6 +169,30 @@ describe('CLI tool validation regressions', () => {
       success: false,
       message:
         'Category "Missing category" not found. Use list-categories to pick an existing category name.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('rejects ambiguous category matches instead of guessing', async () => {
+    mockQuery.mockReturnValueOnce([]).mockReturnValueOnce([
+      { id: 'cat-1', name: 'Food' },
+      { id: 'cat-2', name: 'Food & Dining' },
+    ])
+
+    const input = addTransaction.schema.parse({
+      amount: 10,
+      type: 'expense',
+      description: 'Coffee',
+      category: 'Food',
+      accountId: 'acct-1',
+    })
+
+    const result = await addTransaction.execute(input)
+
+    expect(result).toEqual({
+      success: false,
+      message:
+        'Category "Food" matches multiple categories (Food, Food & Dining). Use a more specific existing category name.',
     })
     expect(mockExecute).not.toHaveBeenCalled()
   })
@@ -383,6 +408,39 @@ describe('CLI tool validation regressions', () => {
     })
   })
 
+  it('resolves accountId and category when updating a recurring rule', async () => {
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'rule-1',
+          description: 'Rent',
+          amount: 100000,
+          type: 'expense',
+          frequency: 'monthly',
+        },
+      ])
+      .mockReturnValueOnce([{ id: 'cat-rent', name: 'Rent' }])
+      .mockReturnValueOnce([{ id: 'acct-2' }])
+
+    const input = manageRecurringTransaction.schema.parse({
+      action: 'update',
+      ruleId: 'rule-1',
+      category: 'Rent',
+      accountId: 'acct-2',
+    })
+
+    const result = await manageRecurringTransaction.execute(input)
+
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE recurring_rules SET category_id = $1, account_id = $2'),
+      ['cat-rent', 'acct-2', 'rule-1']
+    )
+    expect(result).toEqual({
+      success: true,
+      message: 'Updated recurring rule "Rent".',
+    })
+  })
+
   it('rejects unsupported transfer recurring rules', async () => {
     const input = manageRecurringTransaction.schema.parse({
       action: 'create',
@@ -401,6 +459,85 @@ describe('CLI tool validation regressions', () => {
         'Transfer transactions are not fully supported in the CLI yet. Record the withdrawal and deposit as separate entries with explicit account IDs.',
     })
     expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('materializes due recurring transactions, updates balances, and advances next_date', async () => {
+    mockQuery.mockReturnValueOnce([
+      {
+        id: 'rule-1',
+        account_id: 'acct-1',
+        category_id: 'cat-1',
+        type: 'expense',
+        amount: 1250,
+        description: 'Coffee subscription',
+        notes: 'monthly',
+        next_date: '2026-04-15',
+        frequency: 'monthly',
+        end_date: null,
+      },
+    ])
+
+    const result = await materializeRecurring.execute(materializeRecurring.schema.parse({}))
+
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('INSERT INTO transactions'),
+      [
+        'tx_test_123',
+        'acct-1',
+        'cat-1',
+        'expense',
+        1250,
+        'Coffee subscription',
+        'monthly',
+        '2026-04-15',
+      ]
+    )
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('UPDATE accounts SET balance = balance + $1'),
+      [-1250, 'acct-1']
+    )
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('UPDATE recurring_rules SET next_date = $1'),
+      ['2026-05-15', 'rule-1']
+    )
+    expect(result).toEqual({
+      success: true,
+      created: 1,
+      message: 'Created 1 transaction(s) from recurring rules.',
+    })
+  })
+
+  it('deactivates recurring rules past their end date without creating transactions', async () => {
+    mockQuery.mockReturnValueOnce([
+      {
+        id: 'rule-1',
+        account_id: 'acct-1',
+        category_id: 'cat-1',
+        type: 'expense',
+        amount: 1250,
+        description: 'Expired rule',
+        notes: null,
+        next_date: '2026-05-01',
+        frequency: 'monthly',
+        end_date: '2026-04-01',
+      },
+    ])
+
+    const result = await materializeRecurring.execute(materializeRecurring.schema.parse({}))
+
+    expect(mockExecute).toHaveBeenCalledTimes(1)
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE recurring_rules SET active = 0'),
+      ['rule-1']
+    )
+    expect(result).toEqual({
+      success: true,
+      created: 0,
+      message: 'No recurring transactions were due.',
+    })
   })
 
   it('wraps update-transaction balance and row writes in a transaction', async () => {

@@ -147,4 +147,57 @@ describe('CLI command execution', () => {
     expect(errorSpy).not.toHaveBeenCalled()
     expect(close).toHaveBeenCalledTimes(1)
   })
+
+  it('parses structured JSON through a real CLI command path', async () => {
+    const tool = {
+      name: 'split-demo',
+      description: 'Test structured CLI parsing',
+      schema: z.object({
+        splits: z.array(
+          z.object({
+            categoryId: z.string(),
+            amount: z.number(),
+          })
+        ),
+      }),
+      execute: vi.fn(async ({ splits }) => ({
+        success: true,
+        splits,
+      })),
+    }
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const program = createProgram([tool])
+
+    await program.parseAsync([
+      'node',
+      'shikin',
+      'split-demo',
+      '--splits',
+      '[{"categoryId":"cat-1","amount":"4.5"},{"categoryId":"cat-2","amount":"5.5"}]',
+    ])
+
+    expect(tool.execute).toHaveBeenCalledWith({
+      splits: [
+        { categoryId: 'cat-1', amount: 4.5 },
+        { categoryId: 'cat-2', amount: 5.5 },
+      ],
+    })
+    expect(logSpy).toHaveBeenCalledWith(
+      JSON.stringify(
+        {
+          success: true,
+          splits: [
+            { categoryId: 'cat-1', amount: 4.5 },
+            { categoryId: 'cat-2', amount: 5.5 },
+          ],
+        },
+        null,
+        2
+      )
+    )
+    expect(errorSpy).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalledTimes(1)
+  })
 })

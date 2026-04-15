@@ -2321,7 +2321,7 @@ const manageCategoryRules: ToolDefinition = {
         const rules = await query<any>(
           `SELECT r.id, r.pattern, r.category_id, r.subcategory_id, r.confidence, r.hit_count,
                   c.name as category_name
-           FROM auto_categorization_rules r
+           FROM category_rules r
            LEFT JOIN categories c ON r.category_id = c.id
            ORDER BY r.hit_count DESC`
         )
@@ -2353,13 +2353,13 @@ const manageCategoryRules: ToolDefinition = {
 
         // Check for existing rule with same pattern
         const existing = await query<any>(
-          'SELECT id FROM auto_categorization_rules WHERE LOWER(pattern) = LOWER($1)',
+          'SELECT id FROM category_rules WHERE LOWER(pattern) = LOWER($1)',
           [pattern]
         )
 
         if (existing.length > 0) {
           await execute(
-            `UPDATE auto_categorization_rules
+            `UPDATE category_rules
              SET category_id = $1, subcategory_id = $2, confidence = 1.0,
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
              WHERE id = $3`,
@@ -2368,7 +2368,7 @@ const manageCategoryRules: ToolDefinition = {
         } else {
           const id = generateId()
           await execute(
-            `INSERT INTO auto_categorization_rules (id, pattern, category_id, subcategory_id, confidence, hit_count)
+            `INSERT INTO category_rules (id, pattern, category_id, subcategory_id, confidence, hit_count)
              VALUES ($1, $2, $3, $4, 1.0, 0)`,
             [id, pattern.toLowerCase(), categoryId, subcategoryId ?? null]
           )
@@ -2384,7 +2384,7 @@ const manageCategoryRules: ToolDefinition = {
         if (!ruleId) {
           return { success: false, message: 'ruleId is required to delete a rule.' }
         }
-        await execute('DELETE FROM auto_categorization_rules WHERE id = $1', [ruleId])
+        await execute('DELETE FROM category_rules WHERE id = $1', [ruleId])
         return { success: true, message: 'Rule deleted successfully.' }
       }
 
@@ -2395,7 +2395,7 @@ const manageCategoryRules: ToolDefinition = {
 
         const rules = await query<any>(
           `SELECT r.*, c.name as category_name
-           FROM auto_categorization_rules r
+           FROM category_rules r
            LEFT JOIN categories c ON r.category_id = c.id
            WHERE LOWER($1) LIKE '%' || r.pattern || '%'
            ORDER BY r.confidence DESC, r.hit_count DESC

@@ -148,6 +148,97 @@ describe('CLI command execution', () => {
     expect(close).toHaveBeenCalledTimes(1)
   })
 
+  it('includes deep integrity details for diagnose --deep', async () => {
+    vi.mocked(query)
+      .mockReturnValueOnce([
+        { name: '001_core_tables' },
+        { name: '002_ai_memories' },
+        { name: '003_credit_cards' },
+        { name: '004_category_rules' },
+        { name: '005_recurring_rules' },
+        { name: '006_goals' },
+        { name: '007_recaps' },
+        { name: '008_ai_memories_fts' },
+        { name: '010_transaction_splits' },
+        { name: '011_net_worth_snapshots' },
+        { name: '012_account_balance_history' },
+      ])
+      .mockReturnValueOnce([{ count: 2 }])
+      .mockReturnValueOnce([{ count: 14 }])
+      .mockReturnValueOnce([{ count: 42 }])
+      .mockReturnValueOnce([{ integrity_check: 'ok' }])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([
+        {
+          accountId: 'acct-1',
+          accountName: 'Checking',
+          storedBalance: 5000,
+          computedBalance: 4800,
+        },
+        {
+          accountId: 'acct-2',
+          accountName: 'Savings',
+          storedBalance: 12000,
+          computedBalance: 12000,
+        },
+      ])
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const program = createProgram([])
+
+    await program.parseAsync(['node', 'shikin', 'diagnose', '--deep'])
+
+    expect(logSpy).toHaveBeenCalledWith(
+      JSON.stringify(
+        {
+          success: true,
+          toolCount: 0,
+          database: {
+            ready: true,
+            migrationCount: 11,
+            latestMigration: '012_account_balance_history',
+            accountCount: 2,
+            categoryCount: 14,
+            transactionCount: 42,
+            integrity: {
+              integrityCheck: {
+                ok: true,
+                result: 'ok',
+              },
+              foreignKeyCheck: {
+                ok: true,
+                violations: [],
+              },
+              migrations: {
+                expected: 11,
+                applied: 11,
+                missing: [],
+                unexpected: [],
+              },
+              balances: {
+                ok: false,
+                mismatches: [
+                  {
+                    accountId: 'acct-1',
+                    accountName: 'Checking',
+                    storedBalance: 5000,
+                    computedBalance: 4800,
+                    difference: 200,
+                  },
+                ],
+              },
+            },
+          },
+        },
+        null,
+        2
+      )
+    )
+    expect(errorSpy).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
   it('parses structured JSON through a real CLI command path', async () => {
     const tool = {
       name: 'split-demo',

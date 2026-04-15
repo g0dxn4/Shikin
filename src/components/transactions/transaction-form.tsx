@@ -68,9 +68,15 @@ interface TransactionFormProps {
   transaction?: TransactionWithDetails
   onSubmit: (data: TransactionFormValues, splits?: SplitRowData[]) => void
   isLoading?: boolean
+  onDirtyChange?: (isDirty: boolean) => void
 }
 
-export function TransactionForm({ transaction, onSubmit, isLoading }: TransactionFormProps) {
+export function TransactionForm({
+  transaction,
+  onSubmit,
+  isLoading,
+  onDirtyChange,
+}: TransactionFormProps) {
   const { t } = useTranslation('transactions')
   const { t: tCommon } = useTranslation('common')
   const {
@@ -107,7 +113,7 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
     handleSubmit,
     setValue,
     watch,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm<TransactionFormValues>({
     resolver: zodResolver(transactionSchema),
     defaultValues: {
@@ -243,6 +249,11 @@ export function TransactionForm({ transaction, onSubmit, isLoading }: Transactio
     !isSplitMode ||
     (splitRows.filter((r) => r.categoryId && r.amount).length >= 2 && remainingCentavos === 0)
   const isSubmitDisabled = isLoading || !splitsValid || blockingPrerequisiteErrors.length > 0
+
+  useEffect(() => {
+    const hasDirtySplits = splitRows.some((row) => row.categoryId || row.amount || row.notes)
+    onDirtyChange?.(isDirty || hasDirtySplits || isSplitMode)
+  }, [isDirty, isSplitMode, onDirtyChange, splitRows])
 
   return (
     <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-5">

@@ -11,10 +11,14 @@ import {
 import { GoalForm, type GoalFormValues } from './goal-form'
 import { useUIStore } from '@/stores/ui-store'
 import { useGoalStore } from '@/stores/goal-store'
+import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 
 export function GoalDialog() {
   const { t } = useTranslation('goals')
+  const { t: tCommon } = useTranslation('common')
   const [isLoading, setIsLoading] = useState(false)
+  const [isDirty, setIsDirty] = useState(false)
+  const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false)
   const { goalDialogOpen, editingGoalId, closeGoalDialog } = useUIStore()
   const { add, update, getById } = useGoalStore()
 
@@ -50,20 +54,45 @@ export function GoalDialog() {
     }
   }
 
+  const handleRequestClose = () => {
+    if (isLoading) return
+    if (isDirty) {
+      setConfirmDiscardOpen(true)
+      return
+    }
+    closeGoalDialog()
+  }
+
   return (
-    <Dialog open={goalDialogOpen} onOpenChange={(open) => !open && !isLoading && closeGoalDialog()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>{isEditing ? t('editGoal') : t('addGoal')}</DialogTitle>
-          <DialogDescription>{isEditing ? t('editGoal') : t('addGoal')}</DialogDescription>
-        </DialogHeader>
-        <GoalForm
-          key={editingGoalId || 'new'}
-          goal={goal}
-          onSubmit={handleSubmit}
-          isLoading={isLoading}
-        />
-      </DialogContent>
-    </Dialog>
+    <>
+      <Dialog open={goalDialogOpen} onOpenChange={(open) => !open && handleRequestClose()}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{isEditing ? t('editGoal') : t('addGoal')}</DialogTitle>
+            <DialogDescription>{isEditing ? t('editGoal') : t('addGoal')}</DialogDescription>
+          </DialogHeader>
+          <GoalForm
+            key={editingGoalId || 'new'}
+            goal={goal}
+            onSubmit={handleSubmit}
+            isLoading={isLoading}
+            onDirtyChange={setIsDirty}
+          />
+        </DialogContent>
+      </Dialog>
+      <ConfirmDialog
+        open={confirmDiscardOpen}
+        onOpenChange={setConfirmDiscardOpen}
+        title="Discard changes?"
+        description="You have unsaved changes. Close this form without saving?"
+        confirmLabel="Discard"
+        cancelLabel={tCommon('actions.cancel')}
+        variant="destructive"
+        onConfirm={() => {
+          setConfirmDiscardOpen(false)
+          closeGoalDialog()
+        }}
+      />
+    </>
   )
 }

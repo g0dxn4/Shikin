@@ -1,15 +1,41 @@
 import { lazy, Suspense, useEffect, useRef } from 'react'
 import { Outlet, useLocation } from 'react-router'
-import { LayoutDashboard, ArrowLeftRight, Landmark, TrendingUp, Settings } from 'lucide-react'
+import {
+  LayoutDashboard,
+  ArrowLeftRight,
+  Landmark,
+  TrendingUp,
+  Settings,
+  PiggyBank,
+  Target,
+  Repeat,
+  Wallet,
+  Lightbulb,
+  Flame,
+  LineChart,
+  Brain,
+} from 'lucide-react'
 import { Sidebar } from './sidebar'
 import { BottomNav } from '@/components/layout/bottom-nav'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 
-const bottomNavItems = [
+const mobilePrimaryNavItems = [
   { icon: <LayoutDashboard size={20} />, label: 'Dashboard', href: '/' },
   { icon: <ArrowLeftRight size={20} />, label: 'Transactions', href: '/transactions' },
   { icon: <Landmark size={20} />, label: 'Accounts', href: '/accounts' },
   { icon: <TrendingUp size={20} />, label: 'Investments', href: '/investments' },
+]
+
+const mobileMoreNavItems = [
+  { icon: <PiggyBank size={20} />, label: 'Budgets', href: '/budgets' },
+  { icon: <Target size={20} />, label: 'Goals', href: '/goals' },
+  { icon: <Repeat size={20} />, label: 'Subscriptions', href: '/subscriptions' },
+  { icon: <Target size={20} />, label: 'Debt Payoff', href: '/debt-payoff' },
+  { icon: <Wallet size={20} />, label: 'Net Worth', href: '/net-worth' },
+  { icon: <Lightbulb size={20} />, label: 'Spending Insights', href: '/spending-insights' },
+  { icon: <Flame size={20} />, label: 'Spending Heatmap', href: '/spending-heatmap' },
+  { icon: <LineChart size={20} />, label: 'Forecast', href: '/forecast' },
+  { icon: <Brain size={20} />, label: 'Memories', href: '/memories' },
   { icon: <Settings size={20} />, label: 'Settings', href: '/settings' },
 ]
 
@@ -63,7 +89,11 @@ export function AppShell() {
           </Suspense>
         </div>
       </main>
-      <BottomNav items={bottomNavItems} activeHref={pathname} />
+      <BottomNav
+        items={mobilePrimaryNavItems}
+        moreItems={mobileMoreNavItems}
+        activeHref={pathname}
+      />
       <Suspense>
         <AccountDialog />
         <TransactionDialog />

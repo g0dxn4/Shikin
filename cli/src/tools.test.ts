@@ -30,6 +30,7 @@ const manageRecurringTransaction = tools.find(
   (tool) => tool.name === 'manage-recurring-transaction'
 )!
 const materializeRecurring = tools.find((tool) => tool.name === 'materialize-recurring')!
+const manageCategoryRules = tools.find((tool) => tool.name === 'manage-category-rules')!
 
 describe('CLI tool validation regressions', () => {
   beforeEach(() => {
@@ -438,6 +439,104 @@ describe('CLI tool validation regressions', () => {
     expect(result).toEqual({
       success: true,
       message: 'Updated recurring rule "Rent".',
+    })
+  })
+
+  it('lists category rules from the migrated category_rules table', async () => {
+    mockQuery.mockReturnValueOnce([
+      {
+        id: 'rule-1',
+        pattern: 'coffee',
+        category_id: 'cat-1',
+        subcategory_id: null,
+        confidence: 0.9,
+        hit_count: 12,
+        category_name: 'Food & Dining',
+      },
+    ])
+
+    const input = manageCategoryRules.schema.parse({ action: 'list' })
+    const result = await manageCategoryRules.execute(input)
+
+    expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('FROM category_rules r'))
+    expect(result).toEqual({
+      success: true,
+      rules: [
+        {
+          id: 'rule-1',
+          pattern: 'coffee',
+          category_name: 'Food & Dining',
+          category_id: 'cat-1',
+          hit_count: 12,
+          confidence: 0.9,
+        },
+      ],
+      count: 1,
+      message: 'Found 1 auto-categorization rule(s).',
+    })
+  })
+
+  it('creates category rules in the migrated category_rules table', async () => {
+    mockQuery.mockReturnValueOnce([])
+
+    const input = manageCategoryRules.schema.parse({
+      action: 'create',
+      pattern: 'Coffee Shop',
+      categoryId: 'cat-1',
+    })
+    const result = await manageCategoryRules.execute(input)
+
+    expect(mockQuery).toHaveBeenCalledWith(
+      'SELECT id FROM category_rules WHERE LOWER(pattern) = LOWER($1)',
+      ['Coffee Shop']
+    )
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO category_rules'),
+      ['tx_test_123', 'coffee shop', 'cat-1', null]
+    )
+    expect(result).toEqual({
+      success: true,
+      message: 'Learned rule: "Coffee Shop" will be categorized automatically.',
+    })
+  })
+
+  it('deletes category rules from the migrated category_rules table', async () => {
+    const input = manageCategoryRules.schema.parse({
+      action: 'delete',
+      ruleId: 'rule-1',
+    })
+    const result = await manageCategoryRules.execute(input)
+
+    expect(mockExecute).toHaveBeenCalledWith('DELETE FROM category_rules WHERE id = $1', ['rule-1'])
+    expect(result).toEqual({ success: true, message: 'Rule deleted successfully.' })
+  })
+
+  it('suggests categories from the migrated category_rules table', async () => {
+    mockQuery.mockReturnValueOnce([
+      {
+        category_id: 'cat-1',
+        category_name: 'Food & Dining',
+        confidence: 0.91,
+      },
+    ])
+
+    const input = manageCategoryRules.schema.parse({
+      action: 'suggest',
+      pattern: 'Coffee Shop Downtown',
+    })
+    const result = await manageCategoryRules.execute(input)
+
+    expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('FROM category_rules r'), [
+      'coffee shop downtown',
+    ])
+    expect(result).toEqual({
+      success: true,
+      suggestion: {
+        categoryId: 'cat-1',
+        categoryName: 'Food & Dining',
+        confidence: 0.91,
+      },
+      message: 'Suggested category for "Coffee Shop Downtown" with 91% confidence.',
     })
   })
 

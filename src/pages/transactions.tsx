@@ -51,6 +51,7 @@ import type { TransactionWithDetails } from '@/stores/transaction-store'
 import { formatMoney, fromCentavos } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import type { TransactionSplitWithCategory } from '@/types/database'
+import { StatementImportDialog } from '@/components/transactions/statement-import-dialog'
 
 dayjs.extend(isToday)
 dayjs.extend(isYesterday)
@@ -63,6 +64,7 @@ const ConfirmDialog = lazy(() =>
 
 type TypeFilter = 'all' | 'expense' | 'income' | 'transfer'
 type Tab = 'transactions' | 'recurring'
+type ReviewFilter = 'all' | 'uncategorized'
 
 const FREQUENCIES = ['daily', 'weekly', 'biweekly', 'monthly', 'quarterly', 'yearly'] as const
 const TRANSACTION_TYPES = ['expense', 'income', 'transfer'] as const
@@ -125,7 +127,9 @@ export function Transactions() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all')
   const [showFilters, setShowFilters] = useState(false)
+  const [statementImportOpen, setStatementImportOpen] = useState(false)
 
   // Recurring delete state
   const [deleteRuleId, setDeleteRuleId] = useState<string | null>(null)
@@ -150,6 +154,7 @@ export function Transactions() {
   const filteredTransactions = useMemo(() => {
     return transactions.filter((tx) => {
       if (typeFilter !== 'all' && tx.type !== typeFilter) return false
+      if (reviewFilter === 'uncategorized' && tx.category_id !== null) return false
       if (searchQuery) {
         const q = searchQuery.toLowerCase()
         return (
@@ -160,7 +165,12 @@ export function Transactions() {
       }
       return true
     })
-  }, [transactions, typeFilter, searchQuery])
+  }, [transactions, typeFilter, reviewFilter, searchQuery])
+
+  const uncategorizedCount = useMemo(
+    () => transactions.filter((tx) => tx.category_id === null && tx.type !== 'transfer').length,
+    [transactions]
+  )
 
   const groupedByDate = useMemo(() => {
     const groups = new Map<string, TransactionWithDetails[]>()
@@ -224,6 +234,10 @@ export function Transactions() {
               >
                 <Filter size={14} />
                 {tCommon('actions.filter')}
+              </Button>
+              <Button variant="outline" onClick={() => setStatementImportOpen(true)}>
+                <Plus size={16} />
+                {t('import.button')}
               </Button>
               <Button onClick={() => openTransactionDialog()}>
                 <Plus size={16} />
@@ -314,6 +328,24 @@ export function Transactions() {
                     )}
                   >
                     {type === 'all' ? 'All' : t(`types.${type}`)}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-1">
+                {(['all', 'uncategorized'] as const).map((filter) => (
+                  <button
+                    key={filter}
+                    onClick={() => setReviewFilter(filter)}
+                    className={cn(
+                      'rounded-full px-3 py-1 font-mono text-[11px] transition-colors',
+                      reviewFilter === filter
+                        ? 'bg-accent text-accent-foreground'
+                        : 'text-muted-foreground hover:bg-surface-elevated hover:text-foreground'
+                    )}
+                  >
+                    {filter === 'all'
+                      ? t('types.all')
+                      : `${t('form.categoryNone')} (${uncategorizedCount})`}
                   </button>
                 ))}
               </div>
@@ -430,6 +462,8 @@ export function Transactions() {
         />
       )}
 
+      <StatementImportDialog open={statementImportOpen} onOpenChange={setStatementImportOpen} />
+
       <Suspense>
         <ConfirmDialog
           open={!!deleteId}
@@ -517,7 +551,7 @@ function RecurringRuleCard({
         )}
       >
         {rule.type === 'income' ? '+' : '-'}
-        {formatMoney(rule.amount, 'USD')}
+        {formatMoney(rule.amount, rule.account_currency ?? 'USD')}
       </span>
 
       <button
@@ -545,7 +579,7 @@ function RecurringRuleCard({
         )}
       </button>
 
-      <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+      <div className="flex shrink-0 gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100">
         <Button
           variant="ghost"
           size="icon"
@@ -998,7 +1032,7 @@ function TransactionRow({
         <span className="text-muted-foreground hidden font-mono text-[10px] sm:inline">
           {dayjs(tx.date).format('MMM D')}
         </span>
-        <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+        <div className="flex shrink-0 gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100">
           <Button
             variant="ghost"
             size="icon"

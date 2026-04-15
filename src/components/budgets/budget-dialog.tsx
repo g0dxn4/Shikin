@@ -11,10 +11,14 @@ import {
 import { BudgetForm, type BudgetFormValues } from './budget-form'
 import { useUIStore } from '@/stores/ui-store'
 import { useBudgetStore } from '@/stores/budget-store'
+import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 
 export function BudgetDialog() {
   const { t } = useTranslation('budgets')
+  const { t: tCommon } = useTranslation('common')
   const [isLoading, setIsLoading] = useState(false)
+  const [isDirty, setIsDirty] = useState(false)
+  const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false)
   const { budgetDialogOpen, editingBudgetId, closeBudgetDialog } = useUIStore()
   const { add, update, getById } = useBudgetStore()
 
@@ -45,23 +49,45 @@ export function BudgetDialog() {
     }
   }
 
+  const handleRequestClose = () => {
+    if (isLoading) return
+    if (isDirty) {
+      setConfirmDiscardOpen(true)
+      return
+    }
+    closeBudgetDialog()
+  }
+
   return (
-    <Dialog
-      open={budgetDialogOpen}
-      onOpenChange={(open) => !open && !isLoading && closeBudgetDialog()}
-    >
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>{isEditing ? t('editBudget') : t('addBudget')}</DialogTitle>
-          <DialogDescription>{isEditing ? t('editBudget') : t('addBudget')}</DialogDescription>
-        </DialogHeader>
-        <BudgetForm
-          key={editingBudgetId || 'new'}
-          budget={budget}
-          onSubmit={handleSubmit}
-          isLoading={isLoading}
-        />
-      </DialogContent>
-    </Dialog>
+    <>
+      <Dialog open={budgetDialogOpen} onOpenChange={(open) => !open && handleRequestClose()}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{isEditing ? t('editBudget') : t('addBudget')}</DialogTitle>
+            <DialogDescription>{isEditing ? t('editBudget') : t('addBudget')}</DialogDescription>
+          </DialogHeader>
+          <BudgetForm
+            key={editingBudgetId || 'new'}
+            budget={budget}
+            onSubmit={handleSubmit}
+            isLoading={isLoading}
+            onDirtyChange={setIsDirty}
+          />
+        </DialogContent>
+      </Dialog>
+      <ConfirmDialog
+        open={confirmDiscardOpen}
+        onOpenChange={setConfirmDiscardOpen}
+        title="Discard changes?"
+        description="You have unsaved changes. Close this form without saving?"
+        confirmLabel="Discard"
+        cancelLabel={tCommon('actions.cancel')}
+        variant="destructive"
+        onConfirm={() => {
+          setConfirmDiscardOpen(false)
+          closeBudgetDialog()
+        }}
+      />
+    </>
   )
 }

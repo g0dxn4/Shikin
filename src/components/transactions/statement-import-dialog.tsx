@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Upload, FileText, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -34,7 +34,7 @@ type ImportStep = 'select' | 'preview' | 'importing' | 'done'
 
 export function StatementImportDialog({ open, onOpenChange }: StatementImportDialogProps) {
   const { t } = useTranslation('transactions')
-  const { accounts } = useAccountStore()
+  const { accounts, fetch, fetchError } = useAccountStore()
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [step, setStep] = useState<ImportStep>('select')
@@ -134,6 +134,14 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
     }
   }, [selectedFile, accountId, t, handleOpenChange])
 
+  useEffect(() => {
+    if (!open || accounts.length > 0) {
+      return
+    }
+
+    void fetch().catch(() => {})
+  }, [open, accounts.length, fetch])
+
   const activeAccounts = accounts.filter((a) => !a.is_archived)
 
   return (
@@ -149,6 +157,7 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
             {/* Account selector */}
             <div className="space-y-2">
               <label className="text-sm font-medium">{t('import.selectAccount')}</label>
+              {fetchError && <p className="text-destructive text-sm">{fetchError}</p>}
               {activeAccounts.length === 0 ? (
                 <p className="text-muted-foreground text-sm">{t('import.noAccounts')}</p>
               ) : (
@@ -204,9 +213,7 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
                 ) : (
                   <>
                     <Upload size={24} className="text-muted-foreground" />
-                    <span className="text-muted-foreground text-sm">
-                      {t('import.selectFile')}
-                    </span>
+                    <span className="text-muted-foreground text-sm">{t('import.selectFile')}</span>
                     <span className="text-muted-foreground/60 text-xs">
                       {t('import.fileTypes')}
                     </span>
@@ -282,7 +289,7 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
 
         {step === 'importing' && (
           <div className="flex flex-col items-center gap-3 py-8">
-            <Loader2 size={32} className="text-[#bf5af2] animate-spin" />
+            <Loader2 size={32} className="animate-spin text-[#bf5af2]" />
             <span className="text-muted-foreground text-sm">{t('import.importing')}</span>
           </div>
         )}

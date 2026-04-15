@@ -56,6 +56,10 @@
     "description": "Add your first transaction to start tracking your spending."
   },
   "noMatching": "No matching transactions",
+  "filters": {
+    "allResults": "All results",
+    "uncategorized": "Uncategorized ({{count}})"
+  },
   "viewAll": "View All",
   "recentTransactions": "Recent Transactions",
   "addQuick": "Add Transaction",

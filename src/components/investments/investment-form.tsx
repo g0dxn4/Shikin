@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -41,9 +42,15 @@ interface InvestmentFormProps {
   investment?: InvestmentWithPrice
   onSubmit: (data: InvestmentFormValues) => void
   isLoading?: boolean
+  onDirtyChange?: (isDirty: boolean) => void
 }
 
-export function InvestmentForm({ investment, onSubmit, isLoading }: InvestmentFormProps) {
+export function InvestmentForm({
+  investment,
+  onSubmit,
+  isLoading,
+  onDirtyChange,
+}: InvestmentFormProps) {
   const { t } = useTranslation('investments')
   const { t: tCommon } = useTranslation('common')
   const { accounts, isLoading: accountsLoading, fetchError: accountsFetchError } = useAccountStore()
@@ -56,7 +63,7 @@ export function InvestmentForm({ investment, onSubmit, isLoading }: InvestmentFo
     handleSubmit,
     setValue,
     watch,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm<InvestmentFormValues>({
     resolver: zodResolver(investmentSchema),
     defaultValues: {
@@ -75,6 +82,10 @@ export function InvestmentForm({ investment, onSubmit, isLoading }: InvestmentFo
   const typeValue = watch('type')
   const currencyValue = watch('currency')
   const accountValue = watch('accountId')
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty)
+  }, [isDirty, onDirtyChange])
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">

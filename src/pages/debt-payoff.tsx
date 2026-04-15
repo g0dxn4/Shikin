@@ -257,7 +257,7 @@ function DebtCard({
             <Button
               variant="ghost"
               size="icon"
-              className="text-destructive hover:text-destructive h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100"
+              className="text-destructive hover:text-destructive h-7 w-7 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
               onClick={onRemove}
             >
               <Trash2 size={12} />

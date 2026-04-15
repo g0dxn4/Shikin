@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -39,9 +40,10 @@ interface AccountFormProps {
   account?: Account
   onSubmit: (data: AccountFormValues) => void
   isLoading?: boolean
+  onDirtyChange?: (isDirty: boolean) => void
 }
 
-export function AccountForm({ account, onSubmit, isLoading }: AccountFormProps) {
+export function AccountForm({ account, onSubmit, isLoading, onDirtyChange }: AccountFormProps) {
   const { t } = useTranslation('accounts')
   const { t: tCommon } = useTranslation('common')
 
@@ -50,7 +52,7 @@ export function AccountForm({ account, onSubmit, isLoading }: AccountFormProps) 
     handleSubmit,
     setValue,
     watch,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm<AccountFormValues>({
     resolver: zodResolver(accountSchema),
     defaultValues: {
@@ -64,6 +66,10 @@ export function AccountForm({ account, onSubmit, isLoading }: AccountFormProps) 
   // eslint-disable-next-line react-hooks/incompatible-library -- react-hook-form watch is inherently mutable
   const typeValue = watch('type')
   const currencyValue = watch('currency')
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty)
+  }, [isDirty, onDirtyChange])
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">

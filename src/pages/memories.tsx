@@ -34,7 +34,11 @@ type SortOption = 'importance' | 'newest' | 'oldest' | 'accessed'
 const CATEGORIES: MemoryCategory[] = ['all', 'preference', 'fact', 'goal', 'behavior', 'context']
 
 const CATEGORY_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-  preference: { bg: 'rgba(191, 90, 242, 0.15)', text: '#bf5af2', border: 'rgba(191, 90, 242, 0.3)' },
+  preference: {
+    bg: 'rgba(191, 90, 242, 0.15)',
+    text: '#bf5af2',
+    border: 'rgba(191, 90, 242, 0.3)',
+  },
   fact: { bg: 'rgba(59, 130, 246, 0.15)', text: '#3b82f6', border: 'rgba(59, 130, 246, 0.3)' },
   goal: { bg: 'rgba(34, 197, 94, 0.15)', text: '#22c55e', border: 'rgba(34, 197, 94, 0.3)' },
   behavior: { bg: 'rgba(245, 158, 11, 0.15)', text: '#f59e0b', border: 'rgba(245, 158, 11, 0.3)' },
@@ -137,7 +141,7 @@ function MemoryCard({
             {memory.importance}
           </span>
         </div>
-        <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="flex gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
           {editing ? (
             <>
               <Button
@@ -308,9 +312,7 @@ export function Memories() {
       [content, id]
     )
     setMemories((prev) =>
-      prev.map((m) =>
-        m.id === id ? { ...m, content, updated_at: new Date().toISOString() } : m
-      )
+      prev.map((m) => (m.id === id ? { ...m, content, updated_at: new Date().toISOString() } : m))
     )
     toast.success('Memory updated')
   }
@@ -342,7 +344,10 @@ export function Memories() {
       {/* Toolbar: search + sort */}
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative max-w-sm flex-1">
-          <Search size={14} className="text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2" />
+          <Search
+            size={14}
+            className="text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2"
+          />
           <Input
             placeholder="Search memories..."
             value={searchQuery}
@@ -352,7 +357,9 @@ export function Memories() {
         </div>
         <select
           value={sortBy}
-          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSortBy(e.target.value as SortOption)}
+          onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+            setSortBy(e.target.value as SortOption)
+          }
           className="h-9 rounded-md border border-white/10 bg-white/5 px-3 text-sm outline-none"
         >
           <option value="importance">Importance</option>
@@ -372,9 +379,12 @@ export function Memories() {
             style={
               category === cat
                 ? {
-                    backgroundColor: cat === 'all' ? 'rgba(255,255,255,0.1)' : (CATEGORY_COLORS[cat]?.bg || 'rgba(255,255,255,0.1)'),
-                    color: cat === 'all' ? '#f0f0f0' : (CATEGORY_COLORS[cat]?.text || '#f0f0f0'),
-                    border: `1px solid ${cat === 'all' ? 'rgba(255,255,255,0.15)' : (CATEGORY_COLORS[cat]?.border || 'rgba(255,255,255,0.15)')}`,
+                    backgroundColor:
+                      cat === 'all'
+                        ? 'rgba(255,255,255,0.1)'
+                        : CATEGORY_COLORS[cat]?.bg || 'rgba(255,255,255,0.1)',
+                    color: cat === 'all' ? '#f0f0f0' : CATEGORY_COLORS[cat]?.text || '#f0f0f0',
+                    border: `1px solid ${cat === 'all' ? 'rgba(255,255,255,0.15)' : CATEGORY_COLORS[cat]?.border || 'rgba(255,255,255,0.15)'}`,
                   }
                 : {
                     backgroundColor: 'transparent',

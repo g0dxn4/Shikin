@@ -163,12 +163,14 @@ describe('Accounts', () => {
     })
   })
 
-  it('hover-reveal actions have opacity-0 class', () => {
+  it('keeps account actions visible on mobile while preserving desktop hover reveal', () => {
     mockAccounts = [{ id: 'acc-1', name: 'Test', type: 'checking', currency: 'USD', balance: 0 }]
 
     const { container } = render(<Accounts />)
 
-    const hoverDiv = container.querySelector('.opacity-0.group-hover\\:opacity-100')
+    const hoverDiv = container.querySelector(
+      '.opacity-100.md\\:opacity-0.md\\:group-hover\\:opacity-100'
+    )
     expect(hoverDiv).toBeInTheDocument()
   })
 })

@@ -34,9 +34,10 @@ interface BudgetFormProps {
   budget?: BudgetWithStatus
   onSubmit: (data: BudgetFormValues) => void
   isLoading?: boolean
+  onDirtyChange?: (isDirty: boolean) => void
 }
 
-export function BudgetForm({ budget, onSubmit, isLoading }: BudgetFormProps) {
+export function BudgetForm({ budget, onSubmit, isLoading, onDirtyChange }: BudgetFormProps) {
   const { t } = useTranslation('budgets')
   const { t: tCommon } = useTranslation('common')
   const {
@@ -59,7 +60,7 @@ export function BudgetForm({ budget, onSubmit, isLoading }: BudgetFormProps) {
     handleSubmit,
     setValue,
     watch,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm<BudgetFormValues>({
     resolver: zodResolver(budgetSchema),
     defaultValues: {
@@ -73,6 +74,10 @@ export function BudgetForm({ budget, onSubmit, isLoading }: BudgetFormProps) {
   // eslint-disable-next-line react-hooks/incompatible-library -- react-hook-form watch
   const categoryValue = watch('categoryId')
   const periodValue = watch('period')
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty)
+  }, [isDirty, onDirtyChange])
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">

@@ -15,6 +15,24 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
 
+vi.mock('@/components/shared/confirm-dialog', () => ({
+  ConfirmDialog: ({
+    open,
+    title,
+    onConfirm,
+  }: {
+    open: boolean
+    title: string
+    onConfirm: () => void
+  }) =>
+    open ? (
+      <div data-testid="discard-confirm">
+        <span>{title}</span>
+        <button onClick={onConfirm}>Discard</button>
+      </div>
+    ) : null,
+}))
+
 const mockCloseTransactionDialog = vi.fn()
 const mockAdd = vi.fn()
 const mockUpdate = vi.fn()
@@ -102,6 +120,22 @@ describe('TransactionDialog', () => {
 
     // Verify close was NOT called while loading
     expect(mockCloseTransactionDialog).not.toHaveBeenCalled()
+  })
+
+  it('asks before closing when the form has unsaved changes', async () => {
+    const user = userEvent.setup()
+
+    render(<TransactionDialog />)
+
+    await user.type(screen.getByLabelText('form.description'), 'Dirty transaction')
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+
+    expect(screen.getByTestId('discard-confirm')).toBeInTheDocument()
+    expect(mockCloseTransactionDialog).not.toHaveBeenCalled()
+
+    screen.getByText('Discard').click()
+
+    expect(mockCloseTransactionDialog).toHaveBeenCalled()
   })
 
   it('renders dialog with create mode title', () => {

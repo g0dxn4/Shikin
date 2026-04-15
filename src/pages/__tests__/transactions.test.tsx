@@ -33,6 +33,21 @@ vi.mock('@/components/shared/confirm-dialog', () => ({
     ) : null,
 }))
 
+vi.mock('@/components/transactions/statement-import-dialog', () => ({
+  StatementImportDialog: ({
+    open,
+    onOpenChange,
+  }: {
+    open: boolean
+    onOpenChange: (open: boolean) => void
+  }) =>
+    open ? (
+      <div data-testid="statement-import-dialog">
+        <button onClick={() => onOpenChange(false)}>Close import</button>
+      </div>
+    ) : null,
+}))
+
 const mockFetch = vi.fn().mockResolvedValue(undefined)
 const mockRemove = vi.fn()
 const mockOpenTransactionDialog = vi.fn()
@@ -55,6 +70,7 @@ const defaultRecurringRules = [
     next_date: dayjs().add(1, 'month').format('YYYY-MM-DD'),
     account_id: 'acc-1',
     account_name: 'Checking',
+    account_currency: 'EUR',
     category_id: 'cat-1',
     category_name: 'Housing',
     category_color: '#ff0000',
@@ -69,6 +85,7 @@ const defaultRecurringRules = [
     next_date: dayjs().add(15, 'day').format('YYYY-MM-DD'),
     account_id: 'acc-1',
     account_name: 'Checking',
+    account_currency: 'USD',
     category_id: 'cat-2',
     category_name: 'Entertainment',
     category_color: '#bf5af2',
@@ -169,6 +186,16 @@ describe('Transactions', () => {
     expect(screen.getByText('empty.description')).toBeInTheDocument()
   })
 
+  it('opens the statement import dialog from the transactions header', async () => {
+    const user = userEvent.setup()
+
+    render(<Transactions />)
+
+    await user.click(screen.getByText('import.button'))
+
+    expect(screen.getByTestId('statement-import-dialog')).toBeInTheDocument()
+  })
+
   it('renders dedicated load error state instead of empty transactions CTA', () => {
     mockTransactionFetchError = 'Transactions unavailable'
 
@@ -214,6 +241,54 @@ describe('Transactions', () => {
     expect(screen.getByText('Yesterday')).toBeInTheDocument()
   })
 
+  it('renders recurring amounts using the rule account currency', async () => {
+    const user = userEvent.setup()
+
+    render(<Transactions />)
+
+    await user.click(screen.getByText('tabs.recurring'))
+
+    expect(screen.getByText(/1,500\.00/)).toBeInTheDocument()
+  })
+
+  it('filters to uncategorized transactions from the filter bar', async () => {
+    const user = userEvent.setup()
+    mockTransactions = [
+      {
+        id: 'tx-1',
+        description: 'Imported Coffee',
+        type: 'expense',
+        amount: 500,
+        currency: 'USD',
+        date: dayjs().format('YYYY-MM-DD'),
+        category_id: null,
+        category_color: null,
+        category_name: null,
+        account_name: 'Checking',
+      },
+      {
+        id: 'tx-2',
+        description: 'Categorized Lunch',
+        type: 'expense',
+        amount: 1200,
+        currency: 'USD',
+        date: dayjs().format('YYYY-MM-DD'),
+        category_id: 'cat-1',
+        category_color: '#ff0000',
+        category_name: 'Food',
+        account_name: 'Checking',
+      },
+    ]
+
+    render(<Transactions />)
+
+    await user.click(screen.getByText('actions.filter'))
+    await user.click(screen.getByText('form.categoryNone (1)'))
+
+    expect(screen.getByText('Imported Coffee')).toBeInTheDocument()
+    expect(screen.queryByText('Categorized Lunch')).not.toBeInTheDocument()
+  })
+
   it('renders transaction rows with description and colored amount', () => {
     mockTransactions = [
       {
@@ -235,7 +310,7 @@ describe('Transactions', () => {
     expect(screen.getByText('Food')).toBeInTheDocument()
   })
 
-  it('hover-reveal edit/delete buttons have opacity-0 class and focus-within support', () => {
+  it('keeps transaction actions visible on mobile while preserving desktop hover reveal', () => {
     mockTransactions = [
       {
         id: 'tx-1',
@@ -253,7 +328,7 @@ describe('Transactions', () => {
     const { container } = render(<Transactions />)
 
     const hoverDiv = container.querySelector(
-      '.opacity-0.group-hover\\:opacity-100.focus-within\\:opacity-100'
+      '.opacity-100.md\\:opacity-0.md\\:group-hover\\:opacity-100.md\\:focus-within\\:opacity-100'
     )
     expect(hoverDiv).toBeInTheDocument()
   })

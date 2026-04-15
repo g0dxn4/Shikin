@@ -6,6 +6,20 @@ import { tools, type ToolDefinition } from './tools.js'
 import { close, query } from './database.js'
 import { z } from 'zod'
 
+const EXPECTED_MIGRATIONS = [
+  '001_core_tables',
+  '002_ai_memories',
+  '003_credit_cards',
+  '004_category_rules',
+  '005_recurring_rules',
+  '006_goals',
+  '007_recaps',
+  '008_ai_memories_fts',
+  '010_transaction_splits',
+  '011_net_worth_snapshots',
+  '012_account_balance_history',
+] as const
+
 function isFailureResult(value: unknown): value is Record<string, unknown> & { success: false } {
   return (
     typeof value === 'object' && value !== null && 'success' in value && value.success === false
@@ -100,6 +114,135 @@ function getOptionWrapperMetadata(schema: z.ZodTypeAny): {
   return { required, defaultValue }
 }
 
+type DiagnoseSummary = {
+  success: boolean
+  toolCount: number
+  database: {
+    ready: boolean
+    migrationCount: number
+    latestMigration: string | null
+    accountCount: number
+    categoryCount: number
+    transactionCount: number
+    integrity?: {
+      integrityCheck: { ok: boolean; result: string }
+      foreignKeyCheck: { ok: boolean; violations: Array<Record<string, unknown>> }
+      migrations: {
+        expected: number
+        applied: number
+        missing: string[]
+        unexpected: string[]
+      }
+      balances: {
+        ok: boolean
+        mismatches: Array<{
+          accountId: string
+          accountName: string
+          storedBalance: number
+          computedBalance: number
+          difference: number
+        }>
+      }
+    }
+  }
+}
+
+function getDiagnoseSummary(toolCount: number, deep: boolean): DiagnoseSummary {
+  const migrations = query<{ name: string }>('SELECT name FROM _migrations ORDER BY id ASC')
+  const accountCount =
+    query<{ count: number }>('SELECT COUNT(*) as count FROM accounts')[0]?.count ?? 0
+  const categoryCount =
+    query<{ count: number }>('SELECT COUNT(*) as count FROM categories')[0]?.count ?? 0
+  const transactionCount =
+    query<{ count: number }>('SELECT COUNT(*) as count FROM transactions')[0]?.count ?? 0
+
+  const summary: DiagnoseSummary = {
+    success: true,
+    toolCount,
+    database: {
+      ready: true,
+      migrationCount: migrations.length,
+      latestMigration: migrations.at(-1)?.name ?? null,
+      accountCount,
+      categoryCount,
+      transactionCount,
+    },
+  }
+
+  if (!deep) {
+    return summary
+  }
+
+  const integrityCheckResult =
+    query<{ integrity_check?: string }>('PRAGMA integrity_check')[0]?.integrity_check ?? 'unknown'
+  const foreignKeyViolations = query<Record<string, unknown>>('PRAGMA foreign_key_check')
+  const appliedMigrationNames = migrations.map((migration) => migration.name)
+  const appliedMigrationSet = new Set(appliedMigrationNames)
+  const expectedMigrationSet = new Set(EXPECTED_MIGRATIONS)
+  const missingMigrations = EXPECTED_MIGRATIONS.filter(
+    (migration) => !appliedMigrationSet.has(migration)
+  )
+  const unexpectedMigrations = appliedMigrationNames.filter(
+    (migration) => !expectedMigrationSet.has(migration as (typeof EXPECTED_MIGRATIONS)[number])
+  )
+  const balanceRows = query<{
+    accountId: string
+    accountName: string
+    storedBalance: number
+    computedBalance: number
+  }>(
+    `SELECT
+       a.id AS accountId,
+       a.name AS accountName,
+       a.balance AS storedBalance,
+       COALESCE(
+         SUM(
+           CASE
+             WHEN t.type = 'income' AND t.account_id = a.id THEN t.amount
+             WHEN t.type = 'expense' AND t.account_id = a.id THEN -t.amount
+             WHEN t.type = 'transfer' AND t.account_id = a.id THEN -t.amount
+             WHEN t.type = 'transfer' AND t.transfer_to_account_id = a.id THEN t.amount
+             ELSE 0
+           END
+         ),
+         0
+       ) AS computedBalance
+     FROM accounts a
+     LEFT JOIN transactions t ON t.account_id = a.id OR t.transfer_to_account_id = a.id
+     GROUP BY a.id, a.name, a.balance
+     ORDER BY a.name ASC, a.id ASC`
+  )
+  const balanceMismatches = balanceRows
+    .filter((row) => row.storedBalance !== row.computedBalance)
+    .map((row) => ({
+      ...row,
+      difference: row.storedBalance - row.computedBalance,
+    }))
+
+  summary.database.integrity = {
+    integrityCheck: {
+      ok: integrityCheckResult === 'ok',
+      result: integrityCheckResult,
+    },
+    foreignKeyCheck: {
+      ok: foreignKeyViolations.length === 0,
+      violations: foreignKeyViolations,
+    },
+    migrations: {
+      expected: EXPECTED_MIGRATIONS.length,
+      applied: migrations.length,
+      missing: [...missingMigrations],
+      unexpected: unexpectedMigrations,
+    },
+    balances: {
+      ok: balanceMismatches.length === 0,
+      mismatches: balanceMismatches,
+    },
+  }
+
+  return summary
+}
+
 export function createProgram(toolDefinitions: ToolDefinition[] = tools): Command {
   const program = new Command()
     .name('shikin')
@@ -109,33 +252,11 @@ export function createProgram(toolDefinitions: ToolDefinition[] = tools): Comman
   program
     .command('diagnose')
     .description('Validate shared database connectivity and print CLI/MCP health details')
-    .action(() => {
+    .option('--deep', 'Run read-only integrity, foreign-key, migration, and balance checks')
+    .action((options: { deep?: boolean }) => {
       try {
-        const migrations = query<{ name: string }>('SELECT name FROM _migrations ORDER BY id ASC')
-        const accountCount =
-          query<{ count: number }>('SELECT COUNT(*) as count FROM accounts')[0]?.count ?? 0
-        const categoryCount =
-          query<{ count: number }>('SELECT COUNT(*) as count FROM categories')[0]?.count ?? 0
-        const transactionCount =
-          query<{ count: number }>('SELECT COUNT(*) as count FROM transactions')[0]?.count ?? 0
-
         console.log(
-          JSON.stringify(
-            {
-              success: true,
-              toolCount: toolDefinitions.length,
-              database: {
-                ready: true,
-                migrationCount: migrations.length,
-                latestMigration: migrations.at(-1)?.name ?? null,
-                accountCount,
-                categoryCount,
-                transactionCount,
-              },
-            },
-            null,
-            2
-          )
+          JSON.stringify(getDiagnoseSummary(toolDefinitions.length, Boolean(options.deep)), null, 2)
         )
       } catch (err) {
         console.log(

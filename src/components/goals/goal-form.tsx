@@ -47,9 +47,10 @@ interface GoalFormProps {
   goal?: GoalWithProgress
   onSubmit: (data: GoalFormValues) => void
   isLoading?: boolean
+  onDirtyChange?: (isDirty: boolean) => void
 }
 
-export function GoalForm({ goal, onSubmit, isLoading }: GoalFormProps) {
+export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormProps) {
   const { t } = useTranslation('goals')
   const { t: tCommon } = useTranslation('common')
   const {
@@ -68,7 +69,7 @@ export function GoalForm({ goal, onSubmit, isLoading }: GoalFormProps) {
     handleSubmit,
     setValue,
     watch,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm<GoalFormValues>({
     resolver: zodResolver(goalSchema),
     defaultValues: {
@@ -88,6 +89,10 @@ export function GoalForm({ goal, onSubmit, isLoading }: GoalFormProps) {
   const colorValue = watch('color')
   const accountValue = watch('accountId')
   const isAccountSelectDisabled = accountsLoading || !!accountsFetchError
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty)
+  }, [isDirty, onDirtyChange])
 
   const focusGoalOption = (
     values: readonly string[],

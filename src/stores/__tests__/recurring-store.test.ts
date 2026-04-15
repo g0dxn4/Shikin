@@ -61,6 +61,7 @@ describe('recurring-store', () => {
           created_at: '2026-01-01T00:00:00Z',
           updated_at: '2026-01-01T00:00:00Z',
           account_name: 'Checking',
+          account_currency: 'EUR',
           category_name: 'Entertainment',
           category_color: '#8b5cf6',
         },
@@ -230,6 +231,7 @@ describe('recurring-store', () => {
           active: 1,
           created_at: '2026-01-01T00:00:00Z',
           updated_at: '2026-01-01T00:00:00Z',
+          account_currency: 'EUR',
         },
       ])
 
@@ -245,7 +247,7 @@ describe('recurring-store', () => {
       // Should insert transaction
       expect(mockExecute).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO transactions'),
-        expect.arrayContaining(['01ACC001', '01CAT001', 'expense', 1599])
+        expect.arrayContaining(['01ACC001', '01CAT001', 'expense', 1599, 'EUR'])
       )
       // Should update account balance (expense = negative delta)
       expect(mockExecute).toHaveBeenCalledWith(

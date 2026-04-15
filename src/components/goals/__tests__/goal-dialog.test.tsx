@@ -14,6 +14,24 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
 
+vi.mock('@/components/shared/confirm-dialog', () => ({
+  ConfirmDialog: ({
+    open,
+    title,
+    onConfirm,
+  }: {
+    open: boolean
+    title: string
+    onConfirm: () => void
+  }) =>
+    open ? (
+      <div data-testid="discard-confirm">
+        <span>{title}</span>
+        <button onClick={onConfirm}>Discard</button>
+      </div>
+    ) : null,
+}))
+
 const mockCloseGoalDialog = vi.fn()
 const mockAdd = vi.fn()
 const mockUpdate = vi.fn()
@@ -70,6 +88,22 @@ describe('GoalDialog', () => {
 
     // Verify close was NOT called while loading
     expect(mockCloseGoalDialog).not.toHaveBeenCalled()
+  })
+
+  it('asks before closing when the form has unsaved changes', async () => {
+    const user = userEvent.setup()
+
+    render(<GoalDialog />)
+
+    await user.type(screen.getByLabelText('form.name'), 'Dirty Goal')
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+
+    expect(screen.getByTestId('discard-confirm')).toBeInTheDocument()
+    expect(mockCloseGoalDialog).not.toHaveBeenCalled()
+
+    screen.getByText('Discard').click()
+
+    expect(mockCloseGoalDialog).toHaveBeenCalled()
   })
 
   it('closes dialog after successful mutation', async () => {

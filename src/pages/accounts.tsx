@@ -206,7 +206,7 @@ function AccountCard({
               {t(`types.${account.type}`)}
             </Badge>
           </div>
-          <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+          <div className="flex gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100">
             <Button
               variant="ghost"
               size="icon"

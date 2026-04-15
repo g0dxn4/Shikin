@@ -6,11 +6,12 @@ import { toCentavos } from '@/lib/money'
 import { useAccountStore } from './account-store'
 import { useTransactionStore } from './transaction-store'
 import type { RecurringRule } from '@/types/database'
-import type { TransactionType, RecurringFrequency } from '@/types/common'
+import type { TransactionType, RecurringFrequency, CurrencyCode } from '@/types/common'
 import dayjs from 'dayjs'
 
 export interface RecurringRuleWithDetails extends RecurringRule {
   account_name?: string
+  account_currency?: CurrencyCode
   category_name?: string
   category_color?: string
 }
@@ -75,10 +76,10 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
     set({ isLoading: true, fetchError: null })
     try {
       const rules = await query<RecurringRuleWithDetails>(
-        `SELECT r.*, a.name as account_name, c.name as category_name, c.color as category_color
-         FROM recurring_rules r
-         LEFT JOIN accounts a ON r.account_id = a.id
-         LEFT JOIN categories c ON r.category_id = c.id
+        `SELECT r.*, a.name as account_name, a.currency as account_currency, c.name as category_name, c.color as category_color
+          FROM recurring_rules r
+          LEFT JOIN accounts a ON r.account_id = a.id
+          LEFT JOIN categories c ON r.category_id = c.id
          ORDER BY r.active DESC, r.next_date ASC`
       )
       set({ rules, fetchError: null })
@@ -218,8 +219,11 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
       const today = dayjs().format('YYYY-MM-DD')
 
       // Get all active rules where next_date <= today
-      const dueRules = await query<RecurringRule>(
-        `SELECT * FROM recurring_rules WHERE active = 1 AND next_date <= ?`,
+      const dueRules = await query<RecurringRuleWithDetails>(
+        `SELECT r.*, a.currency as account_currency
+         FROM recurring_rules r
+         LEFT JOIN accounts a ON r.account_id = a.id
+         WHERE r.active = 1 AND r.next_date <= ?`,
         [today]
       )
 
@@ -244,8 +248,8 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
 
             const txId = generateId()
             await execute(
-              `INSERT INTO transactions (id, account_id, category_id, subcategory_id, type, amount, description, notes, date, tags, is_recurring, transfer_to_account_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+              `INSERT INTO transactions (id, account_id, category_id, subcategory_id, type, amount, currency, description, notes, date, tags, is_recurring, transfer_to_account_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
               [
                 txId,
                 rule.account_id,
@@ -253,6 +257,7 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
                 rule.subcategory_id,
                 rule.type,
                 rule.amount,
+                rule.account_currency ?? 'USD',
                 rule.description,
                 rule.notes,
                 nextDate,

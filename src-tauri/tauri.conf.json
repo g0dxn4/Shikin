@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Shikin",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "identifier": "com.asf.shikin",
   "build": {
     "frontendDist": "../dist",
@@ -44,7 +44,7 @@
   "plugins": {
     "updater": {
       "endpoints": ["https://github.com/g0dxn4/Shikin/releases/latest/download/latest.json"],
-      "pubkey": "RWTYs/2vlDrptSWUk+dOpFeHiuAgYeoHxuvvjC68M3bQ1ETEk1UHPxnP"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENFREExQTkwN0VGOEFDMEQKUldRTnJQaCtrQnJhemhuekx4RkRyMVpMVTUxRUFzT1ZTN0dJQUI5UFVvSmpjS05zRWwzTERYSGIK"
     }
   }
 }

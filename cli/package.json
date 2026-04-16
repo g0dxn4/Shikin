@@ -1,6 +1,6 @@
 {
   "name": "@shikin/cli",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Shikin CLI and MCP server — control your finances from any AI",
   "type": "module",
   "bin": {

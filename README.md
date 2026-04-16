@@ -53,7 +53,7 @@ Shikin is built to keep both:
 ### Privacy & Data
 
 - **Fully Local**: No mandatory backend. All data in SQLite via shared storage.
-- **Auto-Updates**: Tauri desktop app checks GitHub Releases for updates on startup.
+- **In-App Updates**: Tauri desktop app checks GitHub Releases and lets users install signed updates from Settings.
 - **Bilingual**: English and Spanish localization (13 i18n namespaces).
 - **Database Backup/Restore**: Export and import SQLite snapshots.
 

@@ -3,7 +3,10 @@
   "addAccount": "Add Account",
   "editAccount": "Edit Account",
   "deleteAccount": "Delete Account",
+  "archiveAccount": "Archive Account",
+  "unarchiveAccount": "Restore Account",
   "deleteConfirm": "Are you sure you want to delete this account? All transactions associated with this account will also be deleted. This action cannot be undone.",
+  "archiveConfirm": "Archive this account? It will be removed from active totals but its history will be preserved.",
   "form": {
     "name": "Account Name",
     "namePlaceholder": "e.g. Checking Account",
@@ -23,6 +26,8 @@
   "toast": {
     "created": "Account created successfully",
     "updated": "Account updated successfully",
+    "archived": "Account archived successfully",
+    "restored": "Account restored successfully",
     "deleted": "Account deleted successfully",
     "error": "Something went wrong"
   },
@@ -31,5 +36,15 @@
   "empty": {
     "title": "No accounts yet",
     "description": "Add your first account to start tracking your finances."
+  },
+  "noActive": {
+    "title": "No active accounts",
+    "description": "Your active totals are clear. Restore an archived account or add a new one to start tracking again."
+  },
+  "archived": {
+    "title": "Archived Accounts",
+    "description": "Closed or retired accounts stay here without affecting active totals.",
+    "show": "Show archived",
+    "hide": "Hide archived"
   }
 }

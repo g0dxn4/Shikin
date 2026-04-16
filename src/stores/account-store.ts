@@ -21,6 +21,7 @@ export interface BalanceHistoryPoint {
 
 interface AccountState {
   accounts: Account[]
+  archivedAccounts: Account[]
   isLoading: boolean
   fetchError: string | null
   error: string | null
@@ -28,6 +29,8 @@ interface AccountState {
   fetch: () => Promise<void>
   add: (data: AccountFormData) => Promise<void>
   update: (id: string, data: AccountFormData) => Promise<void>
+  archive: (id: string) => Promise<void>
+  unarchive: (id: string) => Promise<void>
   remove: (id: string) => Promise<void>
   getById: (id: string) => Account | undefined
   /** Snapshot current balances for all active accounts (one per day, upserts) */
@@ -38,6 +41,7 @@ interface AccountState {
 
 export const useAccountStore = create<AccountState>((set, get) => ({
   accounts: [],
+  archivedAccounts: [],
   isLoading: false,
   fetchError: null,
   error: null,
@@ -46,10 +50,14 @@ export const useAccountStore = create<AccountState>((set, get) => ({
   fetch: async () => {
     set({ isLoading: true, fetchError: null })
     try {
-      const accounts = await query<Account>(
-        'SELECT * FROM accounts WHERE is_archived = 0 ORDER BY created_at DESC'
+      const allAccounts = await query<Account>(
+        'SELECT * FROM accounts ORDER BY is_archived ASC, created_at DESC'
       )
-      set({ accounts, fetchError: null })
+      set({
+        accounts: allAccounts.filter((account) => account.is_archived === 0),
+        archivedAccounts: allAccounts.filter((account) => account.is_archived === 1),
+        fetchError: null,
+      })
     } catch (error) {
       set({ fetchError: getErrorMessage(error) })
       throw error
@@ -100,6 +108,44 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     }
   },
 
+  archive: async (id) => {
+    set({ error: null })
+    try {
+      await execute('UPDATE accounts SET is_archived = 1, updated_at = ? WHERE id = ?', [
+        new Date().toISOString(),
+        id,
+      ])
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
+
+    try {
+      await get().fetch()
+    } catch {
+      // The write already committed; fetchError already captures the refresh problem.
+    }
+  },
+
+  unarchive: async (id) => {
+    set({ error: null })
+    try {
+      await execute('UPDATE accounts SET is_archived = 0, updated_at = ? WHERE id = ?', [
+        new Date().toISOString(),
+        id,
+      ])
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
+
+    try {
+      await get().fetch()
+    } catch {
+      // The write already committed; fetchError already captures the refresh problem.
+    }
+  },
+
   remove: async (id) => {
     set({ error: null })
     try {
@@ -117,7 +163,7 @@ export const useAccountStore = create<AccountState>((set, get) => ({
   },
 
   getById: (id) => {
-    return get().accounts.find((a) => a.id === id)
+    return [...get().accounts, ...get().archivedAccounts].find((a) => a.id === id)
   },
 
   snapshotBalances: async () => {

@@ -9,7 +9,25 @@ permissions:
   contents: write
 
 jobs:
+  guard-main-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure release tag commit is on main
+        run: |
+          if git merge-base --is-ancestor "$GITHUB_SHA" "origin/main"; then
+            echo "Release tag $GITHUB_REF_NAME points to a commit reachable from origin/main"
+          else
+            echo "::error::Release tag $GITHUB_REF_NAME must point to a commit on origin/main"
+            exit 1
+          fi
+
   checks:
+    needs: guard-main-tag
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -28,6 +46,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Release preflight
+        run: pnpm release:preflight
 
       - name: Lint
         run: pnpm lint
@@ -93,7 +114,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -105,3 +126,5 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+          uploadUpdaterJson: true
+          uploadUpdaterSignatures: true

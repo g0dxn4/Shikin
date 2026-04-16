@@ -1,6 +1,16 @@
 import { useEffect, useState, useMemo, lazy, Suspense, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Landmark, Plus, Pencil, Trash2, TrendingUp, ChevronDown, ChevronUp } from 'lucide-react'
+import {
+  Landmark,
+  Plus,
+  Pencil,
+  Trash2,
+  TrendingUp,
+  ChevronDown,
+  ChevronUp,
+  ArchiveRestore,
+  Archive,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts'
 import { SafeChart } from '@/components/ui/safe-chart'
@@ -25,15 +35,25 @@ export function Accounts() {
   const { t } = useTranslation('accounts')
   const { t: tCommon } = useTranslation('common')
   const { openAccountDialog } = useUIStore()
-  const { accounts, isLoading, fetchError, fetch, remove } = useAccountStore()
+  const { accounts, archivedAccounts, isLoading, fetchError, fetch, remove, archive, unarchive } =
+    useAccountStore()
 
   const [deleteId, setDeleteId] = useState<string | null>(null)
+  const [archiveId, setArchiveId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isArchiving, setIsArchiving] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [showArchived, setShowArchived] = useState(false)
 
   useEffect(() => {
     void fetch().catch(() => {})
   }, [fetch])
+
+  useEffect(() => {
+    if (archivedAccounts.length > 0 && accounts.length === 0) {
+      setShowArchived(true)
+    }
+  }, [accounts.length, archivedAccounts.length])
 
   const totalBalance = useMemo(() => accounts.reduce((sum, a) => sum + a.balance, 0), [accounts])
 
@@ -48,6 +68,29 @@ export function Accounts() {
       toast.error(t('toast.error'))
     } finally {
       setIsDeleting(false)
+    }
+  }
+
+  const handleArchive = async () => {
+    if (!archiveId) return
+    setIsArchiving(true)
+    try {
+      await archive(archiveId)
+      toast.success(t('toast.archived'))
+      setArchiveId(null)
+    } catch {
+      toast.error(t('toast.error'))
+    } finally {
+      setIsArchiving(false)
+    }
+  }
+
+  const handleRestore = async (id: string) => {
+    try {
+      await unarchive(id)
+      toast.success(t('toast.restored'))
+    } catch {
+      toast.error(t('toast.error'))
     }
   }
 
@@ -85,7 +128,7 @@ export function Accounts() {
             void fetch().catch(() => {})
           }}
         />
-      ) : accounts.length === 0 ? (
+      ) : accounts.length === 0 && archivedAccounts.length === 0 ? (
         <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
           <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
             <Landmark size={28} className="text-primary" />
@@ -99,37 +142,97 @@ export function Accounts() {
         </div>
       ) : (
         <>
-          {/* Total balance summary */}
-          <div className="glass-card bg-gradient-to-br from-[#BF5AF218] to-transparent p-6">
-            <p className="text-muted-foreground mb-1 font-mono text-[10px] tracking-wider uppercase">
-              {t('totalBalance')}
-            </p>
-            <p className="font-heading text-3xl font-bold tracking-tight">
-              {formatMoney(totalBalance)}
-            </p>
-            <p className="text-muted-foreground mt-1 text-sm">
-              {accounts.length} {t('accountCount', { count: accounts.length })}
-            </p>
-          </div>
+          {accounts.length > 0 ? (
+            <>
+              <div className="glass-card bg-gradient-to-br from-[#BF5AF218] to-transparent p-6">
+                <p className="text-muted-foreground mb-1 font-mono text-[10px] tracking-wider uppercase">
+                  {t('totalBalance')}
+                </p>
+                <p className="font-heading text-3xl font-bold tracking-tight">
+                  {formatMoney(totalBalance)}
+                </p>
+                <p className="text-muted-foreground mt-1 text-sm">
+                  {accounts.length} {t('accountCount', { count: accounts.length })}
+                </p>
+              </div>
 
-          {/* Account cards */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {accounts.map((account) => (
-              <AccountCard
-                key={account.id}
-                account={account}
-                isExpanded={expandedId === account.id}
-                onToggleExpand={() => toggleExpand(account.id)}
-                onEdit={() => openAccountDialog(account.id)}
-                onDelete={() => setDeleteId(account.id)}
-                t={t}
-              />
-            ))}
-          </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {accounts.map((account) => (
+                  <AccountCard
+                    key={account.id}
+                    account={account}
+                    isExpanded={expandedId === account.id}
+                    onToggleExpand={() => toggleExpand(account.id)}
+                    onEdit={() => openAccountDialog(account.id)}
+                    onArchive={() => setArchiveId(account.id)}
+                    onDelete={() => setDeleteId(account.id)}
+                    t={t}
+                  />
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="glass-card border-dashed p-5">
+              <h2 className="font-heading text-base font-semibold">{t('noActive.title')}</h2>
+              <p className="text-muted-foreground mt-1 text-sm">{t('noActive.description')}</p>
+            </div>
+          )}
+
+          {archivedAccounts.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 className="font-heading text-lg font-semibold">{t('archived.title')}</h2>
+                  <p className="text-muted-foreground text-sm">{t('archived.description')}</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-between sm:w-auto sm:min-w-44"
+                  onClick={() => setShowArchived((prev) => !prev)}
+                  aria-expanded={showArchived}
+                >
+                  <span>{showArchived ? t('archived.hide') : t('archived.show')}</span>
+                  <span className="text-muted-foreground ml-2 text-xs">
+                    {archivedAccounts.length}
+                  </span>
+                </Button>
+              </div>
+              {showArchived && (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {archivedAccounts.map((account) => (
+                    <AccountCard
+                      key={account.id}
+                      account={account}
+                      isExpanded={expandedId === account.id}
+                      onToggleExpand={() => toggleExpand(account.id)}
+                      onEdit={() => openAccountDialog(account.id)}
+                      onArchive={() => handleRestore(account.id)}
+                      onDelete={() => setDeleteId(account.id)}
+                      archiveLabel={t('unarchiveAccount')}
+                      archiveIcon={<ArchiveRestore size={12} />}
+                      archived
+                      t={t}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
 
       <Suspense>
+        <ConfirmDialog
+          open={!!archiveId}
+          onOpenChange={(open) => !open && setArchiveId(null)}
+          title={t('archiveAccount')}
+          description={t('archiveConfirm')}
+          confirmLabel={t('archiveAccount')}
+          cancelLabel={tCommon('actions.cancel')}
+          isLoading={isArchiving}
+          onConfirm={handleArchive}
+        />
         <ConfirmDialog
           open={!!deleteId}
           onOpenChange={(open) => !open && setDeleteId(null)}
@@ -153,14 +256,22 @@ function AccountCard({
   isExpanded,
   onToggleExpand,
   onEdit,
+  onArchive,
   onDelete,
+  archiveLabel,
+  archiveIcon,
+  archived = false,
   t,
 }: {
   account: Account
   isExpanded: boolean
   onToggleExpand: () => void
   onEdit: () => void
+  onArchive: () => void
   onDelete: () => void
+  archiveLabel?: string
+  archiveIcon?: React.ReactNode
+  archived?: boolean
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   t: any
 }) {
@@ -198,7 +309,7 @@ function AccountCard({
       className="glass-card group relative overflow-hidden transition-all duration-200 hover:translate-y-[-2px]"
       style={{ borderLeft: `3px solid ${accentColor}` }}
     >
-      <div className="p-5">
+      <div className={archived ? 'p-5 opacity-70' : 'p-5'}>
         <div className="mb-3 flex items-start justify-between">
           <div>
             <h3 className="font-heading text-base font-semibold">{account.name}</h3>
@@ -207,6 +318,15 @@ function AccountCard({
             </Badge>
           </div>
           <div className="flex gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={onArchive}
+              aria-label={`${archiveLabel ?? t('archiveAccount')} ${account.name}`}
+            >
+              {archiveIcon ?? <Archive size={12} />}
+            </Button>
             <Button
               variant="ghost"
               size="icon"

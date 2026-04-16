@@ -19,7 +19,13 @@ describe('account-store', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     // Reset zustand store between tests
-    useAccountStore.setState({ accounts: [], isLoading: false, fetchError: null, error: null })
+    useAccountStore.setState({
+      accounts: [],
+      archivedAccounts: [],
+      isLoading: false,
+      fetchError: null,
+      error: null,
+    })
   })
 
   describe('fetch', () => {
@@ -43,10 +49,45 @@ describe('account-store', () => {
       await useAccountStore.getState().fetch()
 
       expect(mockQuery).toHaveBeenCalledWith(
-        'SELECT * FROM accounts WHERE is_archived = 0 ORDER BY created_at DESC'
+        'SELECT * FROM accounts ORDER BY is_archived ASC, created_at DESC'
       )
       expect(useAccountStore.getState().accounts).toEqual(mockAccounts)
+      expect(useAccountStore.getState().archivedAccounts).toEqual([])
       expect(useAccountStore.getState().isLoading).toBe(false)
+    })
+
+    it('splits active and archived accounts', async () => {
+      mockQuery.mockResolvedValueOnce([
+        {
+          id: '01ACC001',
+          name: 'Checking',
+          type: 'checking',
+          currency: 'USD',
+          balance: 150000,
+          icon: null,
+          color: null,
+          is_archived: 0,
+          created_at: '2024-01-01T00:00:00Z',
+          updated_at: '2024-01-01T00:00:00Z',
+        },
+        {
+          id: '01ACC002',
+          name: 'Old Card',
+          type: 'credit_card',
+          currency: 'USD',
+          balance: -20000,
+          icon: null,
+          color: null,
+          is_archived: 1,
+          created_at: '2023-01-01T00:00:00Z',
+          updated_at: '2023-01-01T00:00:00Z',
+        },
+      ])
+
+      await useAccountStore.getState().fetch()
+
+      expect(useAccountStore.getState().accounts).toHaveLength(1)
+      expect(useAccountStore.getState().archivedAccounts).toHaveLength(1)
     })
 
     it('sets isLoading during fetch', async () => {
@@ -156,6 +197,36 @@ describe('account-store', () => {
     })
   })
 
+  describe('archive', () => {
+    it('archives an account and re-fetches', async () => {
+      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockQuery.mockResolvedValueOnce([])
+
+      await useAccountStore.getState().archive('01ACC001')
+
+      expect(mockExecute).toHaveBeenCalledWith(
+        'UPDATE accounts SET is_archived = 1, updated_at = ? WHERE id = ?',
+        [expect.any(String), '01ACC001']
+      )
+      expect(mockQuery).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('unarchive', () => {
+    it('unarchives an account and re-fetches', async () => {
+      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockQuery.mockResolvedValueOnce([])
+
+      await useAccountStore.getState().unarchive('01ACC001')
+
+      expect(mockExecute).toHaveBeenCalledWith(
+        'UPDATE accounts SET is_archived = 0, updated_at = ? WHERE id = ?',
+        [expect.any(String), '01ACC001']
+      )
+      expect(mockQuery).toHaveBeenCalledTimes(1)
+    })
+  })
+
   describe('getById', () => {
     it('returns account by id', () => {
       const account = {
@@ -170,10 +241,28 @@ describe('account-store', () => {
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       }
-      useAccountStore.setState({ accounts: [account] })
+      useAccountStore.setState({ accounts: [account], archivedAccounts: [] })
 
       expect(useAccountStore.getState().getById('01ACC001')).toEqual(account)
       expect(useAccountStore.getState().getById('nonexistent')).toBeUndefined()
+    })
+
+    it('returns archived accounts by id as well', () => {
+      const archivedAccount = {
+        id: '01ACC002',
+        name: 'Archived',
+        type: 'checking' as const,
+        currency: 'USD',
+        balance: 0,
+        icon: null,
+        color: null,
+        is_archived: 1,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      }
+      useAccountStore.setState({ accounts: [], archivedAccounts: [archivedAccount] })
+
+      expect(useAccountStore.getState().getById('01ACC002')).toEqual(archivedAccount)
     })
   })
 })

@@ -34,9 +34,12 @@ vi.mock('@/components/shared/confirm-dialog', () => ({
 
 const mockFetch = vi.fn().mockResolvedValue(undefined)
 const mockRemove = vi.fn()
+const mockArchive = vi.fn()
+const mockUnarchive = vi.fn()
 const mockOpenAccountDialog = vi.fn()
 
 let mockAccounts: unknown[] = []
+let mockArchivedAccounts: unknown[] = []
 let mockIsLoading = false
 let mockFetchError: string | null = null
 
@@ -52,6 +55,9 @@ vi.mock('@/stores/account-store', () => ({
     isLoading: mockIsLoading,
     fetchError: mockFetchError,
     fetch: mockFetch,
+    archivedAccounts: mockArchivedAccounts,
+    archive: mockArchive,
+    unarchive: mockUnarchive,
     remove: mockRemove,
     balanceHistory: new Map(),
     loadBalanceHistory: vi.fn().mockResolvedValue([]),
@@ -62,6 +68,7 @@ describe('Accounts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockAccounts = []
+    mockArchivedAccounts = []
     mockIsLoading = false
     mockFetchError = null
   })
@@ -129,11 +136,9 @@ describe('Accounts', () => {
       { id: 'acc-edit', name: 'Editable', type: 'checking', currency: 'USD', balance: 0 },
     ]
 
-    const { container } = render(<Accounts />)
+    render(<Accounts />)
 
-    const buttons = container.querySelectorAll('.group button')
-    // First button in the hover group is edit
-    await user.click(buttons[0])
+    await user.click(screen.getByLabelText('Edit Editable'))
 
     expect(mockOpenAccountDialog).toHaveBeenCalledWith('acc-edit')
   })
@@ -147,11 +152,9 @@ describe('Accounts', () => {
       { id: 'acc-del', name: 'Deletable', type: 'checking', currency: 'USD', balance: 0 },
     ]
 
-    const { container } = render(<Accounts />)
+    render(<Accounts />)
 
-    const buttons = container.querySelectorAll('.group button')
-    // Second button in the hover group is delete
-    await user.click(buttons[1])
+    await user.click(screen.getByLabelText('Delete Deletable'))
 
     expect(screen.getByTestId('confirm-dialog')).toBeInTheDocument()
 
@@ -161,6 +164,58 @@ describe('Accounts', () => {
       expect(mockRemove).toHaveBeenCalledWith('acc-del')
       expect(toast.success).toHaveBeenCalledWith('toast.deleted')
     })
+  })
+
+  it('archives an active account from the account card actions', async () => {
+    const { toast } = await import('sonner')
+    const user = userEvent.setup()
+    mockArchive.mockResolvedValueOnce(undefined)
+    mockAccounts = [
+      { id: 'acc-archive', name: 'Archive Me', type: 'checking', currency: 'USD', balance: 0 },
+    ]
+
+    const { container } = render(<Accounts />)
+
+    const buttons = container.querySelectorAll('.group button')
+    await user.click(buttons[0])
+
+    expect(screen.getByTestId('confirm-dialog')).toBeInTheDocument()
+
+    await user.click(screen.getByText('Confirm'))
+
+    await waitFor(() => {
+      expect(mockArchive).toHaveBeenCalledWith('acc-archive')
+      expect(toast.success).toHaveBeenCalledWith('toast.archived')
+    })
+  })
+
+  it('renders archived accounts behind a toggle', async () => {
+    const user = userEvent.setup()
+    mockAccounts = [{ id: 'acc-1', name: 'Active', type: 'checking', currency: 'USD', balance: 0 }]
+    mockArchivedAccounts = [
+      { id: 'acc-2', name: 'Old Account', type: 'checking', currency: 'USD', balance: 0 },
+    ]
+
+    render(<Accounts />)
+
+    expect(screen.getByText('archived.title')).toBeInTheDocument()
+    expect(screen.queryByText('Old Account')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /archived.show/i }))
+
+    expect(screen.getByText('Old Account')).toBeInTheDocument()
+  })
+
+  it('shows archived accounts when there are no active accounts', () => {
+    mockArchivedAccounts = [
+      { id: 'acc-archived', name: 'Archived Only', type: 'checking', currency: 'USD', balance: 0 },
+    ]
+
+    render(<Accounts />)
+
+    expect(screen.getByText('noActive.title')).toBeInTheDocument()
+    expect(screen.getByText('Archived Only')).toBeInTheDocument()
+    expect(screen.queryByText('empty.title')).not.toBeInTheDocument()
   })
 
   it('keeps account actions visible on mobile while preserving desktop hover reveal', () => {

@@ -76,10 +76,11 @@ sudo dpkg -i src-tauri/target/release/bundle/deb/Shikin_*.deb
 
 ## Releasing & Auto-Updates
 
-1. Bump `version` in `src-tauri/tauri.conf.json` and `package.json`
-2. Tag and push: `git tag vX.X.X && git push --tags`
-3. GitHub Actions builds, signs, publishes to GitHub Releases
-4. Installed apps detect updates on startup via toast notification
+1. Bump release versions in all required files: `package.json`, `cli/package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and `cli/src/mcp-server.ts`
+2. Run `pnpm release:preflight` to verify version parity + updater config assumptions
+3. Tag and push: `git tag vX.X.X && git push origin vX.X.X`
+4. GitHub Actions builds, signs, publishes to GitHub Releases
+5. Installed apps detect updates on startup via toast notification
 
 ### Signing keys
 
@@ -89,8 +90,8 @@ sudo dpkg -i src-tauri/target/release/bundle/deb/Shikin_*.deb
 
 ## CI/CD
 
-- **CI** (`.github/workflows/ci.yml`): lint → typecheck → unit tests → build → e2e
-- **Release** (`.github/workflows/release.yml`): lint → typecheck → tests → cross-platform Tauri build + sign + publish
+- **CI** (`.github/workflows/ci.yml`): release preflight → lint → typecheck → unit tests → build → e2e
+- **Release** (`.github/workflows/release.yml`): release preflight → lint → typecheck → tests → cross-platform Tauri build + sign + publish
 
 ## Key Conventions
 

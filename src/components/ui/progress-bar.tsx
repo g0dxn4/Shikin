@@ -7,6 +7,7 @@ interface ProgressBarProps {
   showLabel?: boolean
   size?: 'sm' | 'md'
   className?: string
+  ariaLabel?: string
 }
 
 const COLOR_MAP = {
@@ -23,13 +24,26 @@ export function ProgressBar({
   showLabel = false,
   size = 'md',
   className,
+  ariaLabel,
 }: ProgressBarProps) {
   const clamped = Math.min(Math.max(value, 0), 100)
   const fill = COLOR_MAP[color]
+  const ariaValueNow = max !== undefined ? Math.round(value) : Math.round(clamped)
+  const ariaValueMax = max ?? 100
 
   return (
     <div className={cn('flex items-center gap-2', className)}>
-      <div className={cn('w-full overflow-hidden rounded-full bg-white/[0.06]', size === 'sm' ? 'h-1.5' : 'h-2')}>
+      <div
+        role="progressbar"
+        aria-label={ariaLabel}
+        aria-valuenow={ariaValueNow}
+        aria-valuemin={0}
+        aria-valuemax={ariaValueMax}
+        className={cn(
+          'w-full overflow-hidden rounded-full bg-white/[0.06]',
+          size === 'sm' ? 'h-1.5' : 'h-2'
+        )}
+      >
         <div
           className="h-full rounded-full transition-all duration-500"
           style={{ width: `${clamped}%`, backgroundColor: fill }}

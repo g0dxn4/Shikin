@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { Loader2, Trash2, RefreshCw } from 'lucide-react'
+import { Download, Loader2, RefreshCw, RotateCcw, Trash2, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -10,10 +10,21 @@ import { useCategorizationStore } from '@/stores/categorization-store'
 import { useCurrencyStore } from '@/stores/currency-store'
 import { useAccountStore } from '@/stores/account-store'
 import { COMMON_CURRENCIES } from '@/lib/exchange-rate-service'
+import { getErrorMessage } from '@/lib/errors'
 import { load } from '@/lib/storage'
 import { exportDatabaseSnapshot, importDatabaseSnapshot } from '@/lib/database'
 import { ThemeSettings } from '@/components/ThemeSettings'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
+import { ProgressBar } from '@/components/ui/progress-bar'
+import { ErrorBanner } from '@/components/ui/error-banner'
+import {
+  getAvailableUpdate,
+  getCurrentAppVersion,
+  installUpdate,
+  relaunchToApplyUpdate,
+} from '@/lib/updater'
+import { isTauri } from '@/lib/runtime'
+import type { AvailableUpdate } from '@/lib/updater'
 
 export function SettingsPage() {
   const { t, i18n } = useTranslation('settings')
@@ -30,6 +41,20 @@ export function SettingsPage() {
   const [importConfirmOpen, setImportConfirmOpen] = useState(false)
   const [pendingImportFile, setPendingImportFile] = useState<File | null>(null)
   const [preImportBackupBytes, setPreImportBackupBytes] = useState<Uint8Array | null>(null)
+  const [currentVersion, setCurrentVersion] = useState<string | null>(null)
+  const [availableUpdate, setAvailableUpdate] = useState<AvailableUpdate | null>(null)
+  const [readyUpdateVersion, setReadyUpdateVersion] = useState<string | null>(null)
+  const [isCheckingUpdates, setIsCheckingUpdates] = useState(false)
+  const [isInstallingUpdate, setIsInstallingUpdate] = useState(false)
+  const [isRestartingForUpdate, setIsRestartingForUpdate] = useState(false)
+  const [updateCheckedAt, setUpdateCheckedAt] = useState<string | null>(null)
+  const [updateError, setUpdateError] = useState<string | null>(null)
+  const [downloadedBytes, setDownloadedBytes] = useState(0)
+  const [downloadTotalBytes, setDownloadTotalBytes] = useState<number | null>(null)
+  const [lastUpdateAction, setLastUpdateAction] = useState<'check' | 'install' | 'restart' | null>(
+    null
+  )
+  const [lastCheckResult, setLastCheckResult] = useState<'available' | 'none' | null>(null)
   const importDbInputRef = useRef<HTMLInputElement>(null)
 
   // Currency state
@@ -48,6 +73,11 @@ export function SettingsPage() {
     loadRules()
     void loadRates().catch(() => {})
     void fetchAccounts().catch(() => {})
+    if (isTauri) {
+      void getCurrentAppVersion()
+        .then((version) => setCurrentVersion(version))
+        .catch(() => {})
+    }
     load('settings.json')
       .then(async (store) => {
         setAlphaVantageKey(((await store.get('alpha_vantage_key')) as string) || '')
@@ -55,6 +85,83 @@ export function SettingsPage() {
       })
       .catch(() => {})
   }, [loadRules, loadRates, fetchAccounts])
+
+  const handleCheckForUpdates = async () => {
+    setIsCheckingUpdates(true)
+    setUpdateError(null)
+    setDownloadedBytes(0)
+    setDownloadTotalBytes(null)
+    setLastUpdateAction('check')
+
+    try {
+      const update = await getAvailableUpdate()
+      setAvailableUpdate(update)
+      setUpdateCheckedAt(new Date().toISOString())
+      setLastCheckResult(update ? 'available' : 'none')
+
+      if (update) {
+        toast.success(t('updates.availableToast', { version: update.version }))
+      } else {
+        toast.success(t('updates.noneToast'))
+      }
+    } catch (error) {
+      const message = getErrorMessage(error)
+      setUpdateError(message)
+      setLastCheckResult(null)
+      toast.error(t('updates.errorToast'))
+    } finally {
+      setIsCheckingUpdates(false)
+    }
+  }
+
+  const handleInstallUpdate = async () => {
+    if (!availableUpdate) return
+
+    setIsInstallingUpdate(true)
+    setUpdateError(null)
+    setDownloadedBytes(0)
+    setDownloadTotalBytes(null)
+    setLastUpdateAction('install')
+
+    try {
+      const version = availableUpdate.version
+      await installUpdate(availableUpdate, (progress) => {
+        if (progress.event === 'Started') {
+          setDownloadTotalBytes(progress.data.contentLength ?? null)
+          setDownloadedBytes(0)
+          return
+        }
+
+        if (progress.event === 'Progress') {
+          setDownloadedBytes((current) => current + progress.data.chunkLength)
+        }
+      })
+      setAvailableUpdate(null)
+      setReadyUpdateVersion(version)
+      toast.success(t('updates.installedToast', { version }))
+    } catch (error) {
+      const message = getErrorMessage(error)
+      setUpdateError(message)
+      toast.error(t('updates.installErrorToast'))
+    } finally {
+      setIsInstallingUpdate(false)
+    }
+  }
+
+  const handleRestartToApplyUpdate = async () => {
+    setIsRestartingForUpdate(true)
+    setUpdateError(null)
+    setLastUpdateAction('restart')
+
+    try {
+      await relaunchToApplyUpdate()
+    } catch (error) {
+      const message = getErrorMessage(error)
+      setUpdateError(message)
+      setIsRestartingForUpdate(false)
+      toast.error(t('updates.restartErrorToast'))
+    }
+  }
 
   const handleExportData = async () => {
     setIsExportingData(true)
@@ -140,6 +247,166 @@ export function SettingsPage() {
             ))}
           </select>
         </div>
+      </section>
+
+      <section className="glass-card space-y-4 p-6">
+        <div className="space-y-1">
+          <h2 className="font-heading text-lg font-semibold">{t('sections.updates')}</h2>
+          <p className="text-muted-foreground text-xs">{t('updates.description')}</p>
+        </div>
+
+        {isTauri ? (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-white/[0.06] bg-[#0a0a0a] px-4 py-3">
+                <p className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
+                  {t('updates.currentVersion')}
+                </p>
+                <p className="font-heading mt-1 text-base font-semibold">
+                  {currentVersion ?? t('updates.loadingVersion')}
+                </p>
+              </div>
+              <div className="rounded-xl border border-white/[0.06] bg-[#0a0a0a] px-4 py-3">
+                <p className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
+                  {t('updates.status')}
+                </p>
+                <p className="font-heading mt-1 text-base font-semibold">
+                  {readyUpdateVersion
+                    ? t('updates.readyShort')
+                    : availableUpdate
+                      ? t('updates.available', { version: availableUpdate.version })
+                      : t('updates.idle')}
+                </p>
+                {updateCheckedAt && (
+                  <p className="text-muted-foreground mt-1 text-[11px]">
+                    {t('updates.lastChecked', {
+                      timestamp: new Date(updateCheckedAt).toLocaleString(),
+                    })}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Live status announcements for screen readers */}
+            <div aria-live="polite" aria-atomic="true" className="sr-only">
+              {isCheckingUpdates && t('updates.checking')}
+              {!isCheckingUpdates &&
+                lastCheckResult === 'available' &&
+                availableUpdate &&
+                t('updates.availableToast', { version: availableUpdate.version })}
+              {!isCheckingUpdates && lastCheckResult === 'none' && t('updates.noneToast')}
+              {isInstallingUpdate &&
+                downloadTotalBytes &&
+                t('updates.downloadProgress', {
+                  downloaded: formatBytes(downloadedBytes),
+                  total: formatBytes(downloadTotalBytes),
+                })}
+              {readyUpdateVersion && t('updates.readyTitle', { version: readyUpdateVersion })}
+              {updateError && t('updates.errorTitle')}
+            </div>
+
+            {downloadTotalBytes && isInstallingUpdate && (
+              <div className="space-y-2">
+                <ProgressBar
+                  value={(downloadedBytes / downloadTotalBytes) * 100}
+                  color="accent"
+                  showLabel
+                  size="md"
+                  ariaLabel={t('updates.downloadProgressAria')}
+                />
+                <p className="text-muted-foreground text-xs">
+                  {t('updates.downloadProgress', {
+                    downloaded: formatBytes(downloadedBytes),
+                    total: formatBytes(downloadTotalBytes),
+                  })}
+                </p>
+              </div>
+            )}
+
+            {updateError && (
+              <ErrorBanner
+                title={t('updates.errorTitle')}
+                message={updateError}
+                retryLabel={t('updates.retry')}
+                onRetry={() => {
+                  // Retry the explicitly tracked last action
+                  if (lastUpdateAction === 'install') {
+                    void handleInstallUpdate()
+                  } else if (lastUpdateAction === 'restart') {
+                    void handleRestartToApplyUpdate()
+                  } else {
+                    void handleCheckForUpdates()
+                  }
+                }}
+              />
+            )}
+
+            {readyUpdateVersion && !updateError && (
+              <div className="flex items-start gap-3 rounded-xl border border-[#22c55e]/20 bg-[#22c55e]/8 px-4 py-3">
+                <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-[#22c55e]" />
+                <div className="flex-1">
+                  <p className="text-foreground text-sm font-medium">
+                    {t('updates.readyTitle', { version: readyUpdateVersion })}
+                  </p>
+                  <p className="text-muted-foreground mt-1 text-xs">
+                    {t('updates.readyDescription')}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  void handleCheckForUpdates()
+                }}
+                disabled={isCheckingUpdates || isInstallingUpdate || isRestartingForUpdate}
+              >
+                {isCheckingUpdates ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <RefreshCw size={14} />
+                )}
+                {isCheckingUpdates ? t('updates.checking') : t('updates.check')}
+              </Button>
+
+              {availableUpdate && (
+                <Button
+                  onClick={() => {
+                    void handleInstallUpdate()
+                  }}
+                  disabled={isInstallingUpdate || isRestartingForUpdate}
+                >
+                  {isInstallingUpdate ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Download size={14} />
+                  )}
+                  {isInstallingUpdate ? t('updates.installing') : t('updates.install')}
+                </Button>
+              )}
+
+              {readyUpdateVersion && (
+                <Button
+                  onClick={() => {
+                    void handleRestartToApplyUpdate()
+                  }}
+                  disabled={isRestartingForUpdate}
+                >
+                  {isRestartingForUpdate ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <RotateCcw size={14} />
+                  )}
+                  {isRestartingForUpdate ? t('updates.restarting') : t('updates.restart')}
+                </Button>
+              )}
+            </div>
+          </>
+        ) : (
+          <p className="text-muted-foreground text-sm">{t('updates.desktopOnly')}</p>
+        )}
       </section>
 
       {/* Currency Settings */}
@@ -433,4 +700,11 @@ export function SettingsPage() {
       />
     </div>
   )
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }

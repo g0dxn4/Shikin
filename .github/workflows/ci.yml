@@ -26,6 +26,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Release preflight
+        run: pnpm release:preflight
+
       - name: Lint
         run: pnpm lint
 

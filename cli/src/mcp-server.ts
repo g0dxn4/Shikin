@@ -310,7 +310,7 @@ export function registerMcpResources(server: Pick<McpServer, 'resource'>): void 
 export function createMcpServer(toolDefinitions: ToolDefinition[] = tools): McpServer {
   const server = new McpServer({
     name: 'shikin',
-    version: '0.2.2',
+    version: '0.2.3',
   })
 
   registerMcpTools(server, toolDefinitions)

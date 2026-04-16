@@ -76,11 +76,17 @@ sudo dpkg -i src-tauri/target/release/bundle/deb/Shikin_*.deb
 
 ## Releasing & Auto-Updates
 
-1. Bump release versions in all required files: `package.json`, `cli/package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and `cli/src/mcp-server.ts`
-2. Run `pnpm release:preflight` to verify version parity + updater config assumptions
-3. Tag and push: `git tag vX.X.X && git push origin vX.X.X`
+1. Bump release versions in all required files: `package.json`, `cli/package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` (`shikin` package entry), and `cli/src/mcp-server.ts`
+2. Run `pnpm release:preflight` before tagging to verify version parity + updater config assumptions (including JS/Rust Tauri plugin major/minor parity)
+3. Tag and push only after preflight passes: `git tag vX.X.X && git push origin vX.X.X`
 4. GitHub Actions builds, signs, publishes to GitHub Releases
 5. Installed apps detect updates on startup via toast notification
+
+### Failed release recovery pattern
+
+- Never rewrite or retarget a pushed release tag.
+- If a tagged release fails, fix `main`, bump to a fresh patch version (for example `0.2.2` → `0.2.3`), run `pnpm release:preflight` again, then create/push the new tag.
+- Treat preflight as the last local gate before any release tag is created.
 
 ### Signing keys
 

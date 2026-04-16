@@ -12,6 +12,7 @@ const files = {
   cliPackage: path.join(rootDir, 'cli/package.json'),
   tauriConfig: path.join(rootDir, 'src-tauri/tauri.conf.json'),
   cargoToml: path.join(rootDir, 'src-tauri/Cargo.toml'),
+  cargoLock: path.join(rootDir, 'src-tauri/Cargo.lock'),
   mcpServer: path.join(rootDir, 'cli/src/mcp-server.ts'),
 }
 
@@ -84,13 +85,97 @@ function validateUpdaterEndpoint(endpoint, index) {
   return errors
 }
 
+function parseCargoLockPackageVersions(cargoLock) {
+  const versions = new Map()
+  const packagePattern = /\[\[package\]\]\s+name\s*=\s*"([^"]+)"\s+version\s*=\s*"([^"]+)"/g
+
+  let match = packagePattern.exec(cargoLock)
+  while (match) {
+    versions.set(match[1], match[2])
+    match = packagePattern.exec(cargoLock)
+  }
+
+  return versions
+}
+
+function parseCargoLockShikinVersion(cargoLockRaw) {
+  const cargoPackages = parseCargoLockPackageVersions(cargoLockRaw)
+  const shikinVersion = cargoPackages.get('shikin')
+
+  if (!shikinVersion) {
+    throw new Error('Could not locate shikin package version in src-tauri/Cargo.lock')
+  }
+
+  return shikinVersion
+}
+
+function parseMajorMinor(version, source) {
+  const match = String(version).match(/(\d+)\.(\d+)\.\d+/)
+  if (!match) {
+    throw new Error(`Could not parse major/minor version from ${source}: "${version}"`)
+  }
+
+  return `${match[1]}.${match[2]}`
+}
+
+function validateTauriPluginParity(rootPackage, cargoLockRaw) {
+  const errors = []
+  const dependencyMap = {
+    ...(rootPackage.dependencies ?? {}),
+    ...(rootPackage.devDependencies ?? {}),
+  }
+  const cargoPackages = parseCargoLockPackageVersions(cargoLockRaw)
+
+  const sqlJs = dependencyMap['@tauri-apps/plugin-sql']
+  const sqlRust = cargoPackages.get('tauri-plugin-sql')
+
+  if (!sqlJs || !sqlRust) {
+    errors.push(
+      'Missing plugin-sql dependency on one side (package.json @tauri-apps/plugin-sql / src-tauri/Cargo.lock tauri-plugin-sql)'
+    )
+  }
+
+  for (const [jsPackage, jsVersion] of Object.entries(dependencyMap)) {
+    if (!jsPackage.startsWith('@tauri-apps/plugin-')) {
+      continue
+    }
+
+    const suffix = jsPackage.replace('@tauri-apps/plugin-', '')
+    const rustCrate = `tauri-plugin-${suffix}`
+    const rustVersion = cargoPackages.get(rustCrate)
+
+    if (!rustVersion) {
+      errors.push(
+        `Tauri plugin mismatch: ${jsPackage} is declared in package.json but ${rustCrate} is missing from src-tauri/Cargo.lock`
+      )
+      continue
+    }
+
+    try {
+      const jsMajorMinor = parseMajorMinor(jsVersion, `package.json ${jsPackage}`)
+      const rustMajorMinor = parseMajorMinor(rustVersion, `src-tauri/Cargo.lock ${rustCrate}`)
+
+      if (jsMajorMinor !== rustMajorMinor) {
+        errors.push(
+          `Tauri plugin major/minor mismatch: ${rustCrate} (v${rustVersion}) vs ${jsPackage} (v${jsVersion})`
+        )
+      }
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  return errors
+}
+
 async function main() {
-  const [rootPackageRaw, cliPackageRaw, tauriConfigRaw, cargoTomlRaw, mcpServerRaw] =
+  const [rootPackageRaw, cliPackageRaw, tauriConfigRaw, cargoTomlRaw, cargoLockRaw, mcpServerRaw] =
     await Promise.all([
       readFile(files.rootPackage, 'utf8'),
       readFile(files.cliPackage, 'utf8'),
       readFile(files.tauriConfig, 'utf8'),
       readFile(files.cargoToml, 'utf8'),
+      readFile(files.cargoLock, 'utf8'),
       readFile(files.mcpServer, 'utf8'),
     ])
 
@@ -103,6 +188,7 @@ async function main() {
     'cli/package.json': cliPackage.version,
     'src-tauri/tauri.conf.json': tauriConfig.version,
     'src-tauri/Cargo.toml': parseCargoVersion(cargoTomlRaw),
+    'src-tauri/Cargo.lock (package shikin)': parseCargoLockShikinVersion(cargoLockRaw),
     'cli/src/mcp-server.ts': parseMcpServerVersion(mcpServerRaw),
   }
 
@@ -161,6 +247,8 @@ async function main() {
     errors.push('src-tauri/tauri.conf.json bundle.createUpdaterArtifacts must be true')
   }
 
+  errors.push(...validateTauriPluginParity(rootPackage, cargoLockRaw))
+
   if (errors.length > 0) {
     for (const error of errors) {
       fail(error)
@@ -171,6 +259,7 @@ async function main() {
 
   ok(`Release versions are in sync at ${uniqueVersions[0]}`)
   ok('Updater configuration checks passed')
+  ok('Tauri JS/Rust plugin major/minor versions are aligned')
 
   if (tagVersion) {
     ok(`Git tag version matches release files (${tagVersion})`)

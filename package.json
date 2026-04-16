@@ -1,7 +1,7 @@
 {
   "name": "shikin",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "AI-first, local-first personal finance manager",
   "author": "ASF",
   "license": "MIT",

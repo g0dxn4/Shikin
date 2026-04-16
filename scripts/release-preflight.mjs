@@ -13,6 +13,7 @@ const files = {
   tauriConfig: path.join(rootDir, 'src-tauri/tauri.conf.json'),
   cargoToml: path.join(rootDir, 'src-tauri/Cargo.toml'),
   cargoLock: path.join(rootDir, 'src-tauri/Cargo.lock'),
+  cli: path.join(rootDir, 'cli/src/cli.ts'),
   mcpServer: path.join(rootDir, 'cli/src/mcp-server.ts'),
 }
 
@@ -47,6 +48,15 @@ function parseMcpServerVersion(mcpServerSource) {
   )
   if (!match) {
     throw new Error('Could not locate McpServer version in cli/src/mcp-server.ts')
+  }
+
+  return match[1]
+}
+
+function parseCliVersion(cliSource) {
+  const match = cliSource.match(/\.version\(\s*['"]([^'"]+)['"]\s*\)/)
+  if (!match) {
+    throw new Error('Could not locate CLI version in cli/src/cli.ts')
   }
 
   return match[1]
@@ -169,15 +179,23 @@ function validateTauriPluginParity(rootPackage, cargoLockRaw) {
 }
 
 async function main() {
-  const [rootPackageRaw, cliPackageRaw, tauriConfigRaw, cargoTomlRaw, cargoLockRaw, mcpServerRaw] =
-    await Promise.all([
-      readFile(files.rootPackage, 'utf8'),
-      readFile(files.cliPackage, 'utf8'),
-      readFile(files.tauriConfig, 'utf8'),
-      readFile(files.cargoToml, 'utf8'),
-      readFile(files.cargoLock, 'utf8'),
-      readFile(files.mcpServer, 'utf8'),
-    ])
+  const [
+    rootPackageRaw,
+    cliPackageRaw,
+    tauriConfigRaw,
+    cargoTomlRaw,
+    cargoLockRaw,
+    cliRaw,
+    mcpServerRaw,
+  ] = await Promise.all([
+    readFile(files.rootPackage, 'utf8'),
+    readFile(files.cliPackage, 'utf8'),
+    readFile(files.tauriConfig, 'utf8'),
+    readFile(files.cargoToml, 'utf8'),
+    readFile(files.cargoLock, 'utf8'),
+    readFile(files.cli, 'utf8'),
+    readFile(files.mcpServer, 'utf8'),
+  ])
 
   const rootPackage = JSON.parse(rootPackageRaw)
   const cliPackage = JSON.parse(cliPackageRaw)
@@ -189,6 +207,7 @@ async function main() {
     'src-tauri/tauri.conf.json': tauriConfig.version,
     'src-tauri/Cargo.toml': parseCargoVersion(cargoTomlRaw),
     'src-tauri/Cargo.lock (package shikin)': parseCargoLockShikinVersion(cargoLockRaw),
+    'cli/src/cli.ts': parseCliVersion(cliRaw),
     'cli/src/mcp-server.ts': parseMcpServerVersion(mcpServerRaw),
   }
 

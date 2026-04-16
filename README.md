@@ -122,19 +122,28 @@ pnpm build:tauri  # Builds .deb + .AppImage (Linux), .dmg (macOS), .msi (Windows
 
 ### Available Scripts
 
-| Command              | Description                             |
-| -------------------- | --------------------------------------- |
-| `pnpm dev`           | Start dev servers (Vite + OAuth + data) |
-| `pnpm build`         | Type-check and build production bundle  |
-| `pnpm build:tauri`   | Build Tauri desktop binary              |
-| `pnpm preview`       | Preview production build locally        |
-| `pnpm lint`          | Run ESLint                              |
-| `pnpm typecheck`     | Run TypeScript checks                   |
-| `pnpm test`          | Start Vitest in watch mode              |
-| `pnpm test:run`      | Run unit tests once                     |
-| `pnpm test:coverage` | Run unit tests with coverage            |
-| `pnpm test:ai`       | Run AI integration test script          |
-| `pnpm check`         | Lint + typecheck + format check         |
+| Command                  | Description                                                               |
+| ------------------------ | ------------------------------------------------------------------------- |
+| `pnpm dev`               | Start dev servers (Vite + OAuth + data)                                   |
+| `pnpm build`             | Type-check and build production bundle                                    |
+| `pnpm build:tauri`       | Build Tauri desktop binary                                                |
+| `pnpm preview`           | Preview production build locally                                          |
+| `pnpm lint`              | Run ESLint                                                                |
+| `pnpm typecheck`         | Run TypeScript checks                                                     |
+| `pnpm test`              | Start Vitest in watch mode                                                |
+| `pnpm test:run`          | Run unit tests once                                                       |
+| `pnpm test:coverage`     | Run unit tests with coverage                                              |
+| `pnpm test:ai`           | Run AI integration test script                                            |
+| `pnpm release:preflight` | Verify release version parity, updater config, and Tauri plugin alignment |
+| `pnpm check`             | Lint + typecheck + format check                                           |
+
+---
+
+## Release Hygiene
+
+- Run `pnpm release:preflight` before creating any release tag.
+- CI validates release preflight, lint, typecheck, unit tests, build, and e2e before release promotion.
+- The tag-driven release workflow creates a draft GitHub Release first, uploads signed artifacts plus `latest.json`, then publishes only after artifact generation completes.
 
 ---
 

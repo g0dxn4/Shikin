@@ -1,9 +1,9 @@
 # AI Tools
 
 > Historical note: this document describes an earlier frontend AI-agent design that is no longer the current repo architecture.
-> The current codebase exposes AI capabilities through the CLI and MCP server in `cli/src/tools.ts` with 44 tools, and does not ship a built-in AI chat UI.
+> The legacy design notes here reference the CLI/MCP surface as a 42-tool set. The current shared catalog ships 44 tool definitions, including 2 structured unavailable placeholders for external-feed news/congressional tools.
 
-This historical document described Ivy as a frontend AI financial assistant with 43 implemented tools, a system prompt, and provider support.
+This historical document described Ivy as a frontend AI financial assistant with 42 implemented tools, a system prompt, and provider support, while the current shared CLI/MCP catalog ships 44 tool definitions including 2 compatibility placeholders.
 
 ---
 
@@ -16,7 +16,7 @@ graph LR
     useChat["useChat()"] --> DCT[DirectChatTransport]
     DCT --> TLA[ToolLoopAgent]
     TLA --> Model[Language Model]
-    TLA --> Tools["43 Tools"]
+    TLA --> Tools["42 Tools"]
     Tools --> DB[(SQLite)]
 ```
 
@@ -46,7 +46,7 @@ graph LR
 
 ---
 
-## All 43 Tools
+## All 42 Tools
 
 ### Transaction Tools (5)
 
@@ -136,13 +136,11 @@ graph LR
 | `readNotebook`  | `read-notebook.ts`  | Read a note by path            |
 | `listNotebook`  | `list-notebook.ts`  | List all notes in the notebook |
 
-### Intelligence Tools (3)
+### Intelligence Tools (1)
 
-| Tool                      | File                           | Description                            |
-| ------------------------- | ------------------------------ | -------------------------------------- |
-| `getFinancialNews`        | `get-financial-news.ts`        | Market news via Finnhub/NewsAPI        |
-| `getCongressionalTrades`  | `get-congressional-trades.ts`  | House/Senate stock trading disclosures |
-| `generatePortfolioReview` | `generate-portfolio-review.ts` | Weekly portfolio performance summary   |
+| Tool                      | File                           | Description                          |
+| ------------------------- | ------------------------------ | ------------------------------------ |
+| `generatePortfolioReview` | `generate-portfolio-review.ts` | Weekly portfolio performance summary |
 
 ### Advanced Analytics Tools (7)
 

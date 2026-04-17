@@ -308,6 +308,49 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
       "INSERT INTO _migrations (id, name) VALUES (12, '012_account_balance_history')"
     )
   }
+
+  // --- Migration 013: Recurring Rules Currency ---
+  if (!applied.has('013_recurring_rules_currency')) {
+    const recurringRuleColumns = await db.select<{ name: string }[]>(
+      'PRAGMA table_info(recurring_rules)'
+    )
+    const hasCurrencyColumn = recurringRuleColumns.some((column) => column.name === 'currency')
+
+    if (!hasCurrencyColumn) {
+      await db.execute(`ALTER TABLE recurring_rules ADD COLUMN currency TEXT`)
+    }
+
+    // Pragmatic upgrade backfill for pre-013 rules so existing users keep functioning.
+    // Runtime still treats any remaining NULL currencies as unsafe.
+    await db.execute(`
+      UPDATE recurring_rules
+      SET currency = (
+        SELECT a.currency
+        FROM accounts a
+        WHERE a.id = recurring_rules.account_id
+      )
+      WHERE (currency IS NULL OR TRIM(currency) = '') AND account_id IS NOT NULL
+    `)
+    await db.execute(
+      "INSERT INTO _migrations (id, name) VALUES (13, '013_recurring_rules_currency')"
+    )
+  }
+
+  // --- Migration 014: Recurring Rules Currency Backfill Repair ---
+  if (!applied.has('014_recurring_rules_currency_backfill')) {
+    await db.execute(`
+      UPDATE recurring_rules
+      SET currency = (
+        SELECT a.currency
+        FROM accounts a
+        WHERE a.id = recurring_rules.account_id
+      )
+      WHERE (currency IS NULL OR TRIM(currency) = '') AND account_id IS NOT NULL
+    `)
+    await db.execute(
+      "INSERT INTO _migrations (id, name) VALUES (14, '014_recurring_rules_currency_backfill')"
+    )
+  }
 }
 
 // ── Browser Backend ────────────────────────────────────────────────────────
@@ -425,6 +468,29 @@ export async function runInTransaction<T>(fn: () => Promise<T>): Promise<T> {
   } catch (error) {
     await browserFetch('/api/db/execute', { sql: 'ROLLBACK', params: [] })
     throw error
+  }
+}
+
+export async function materializeRecurringTransactionsBrowser(): Promise<{
+  success: true
+  created: number
+  message: string
+}> {
+  const result = await browserFetch<{
+    success: boolean
+    created?: number
+    message?: string
+    reason?: string
+  }>('/api/recurring/materialize', {})
+
+  if (!result.success) {
+    throw new Error(result.message || 'Recurring materialization failed.')
+  }
+
+  return {
+    success: true,
+    created: result.created ?? 0,
+    message: result.message ?? 'No recurring transactions were due.',
   }
 }
 

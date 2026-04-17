@@ -177,6 +177,7 @@ export interface RecurringRule {
   id: ULID
   description: string
   amount: Money
+  currency: CurrencyCode | null
   type: TransactionType
   frequency: RecurringFrequency
   next_date: DateStr

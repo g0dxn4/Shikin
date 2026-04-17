@@ -201,6 +201,105 @@ describe('data-server authenticated contract', () => {
     expect(Buffer.from(snapshot.subarray(0, 16)).toString('ascii')).toBe('SQLite format 3\u0000')
   })
 
+  it('materializes recurring rules atomically through the dedicated server endpoint', async () => {
+    const defaultHeaders = {
+      Origin: ORIGIN,
+      'X-Shikin-Bridge': TOKEN,
+      'Content-Type': 'application/json',
+    }
+
+    const accountId = 'recurring-contract-account'
+    const ruleId = 'recurring-contract-rule'
+
+    const insertAccountResponse = await fetch(`${SERVER_URL}/api/db/execute`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: 'INSERT INTO accounts (id, name, type, currency, balance) VALUES ($1, $2, $3, $4, $5)',
+        params: [accountId, 'Recurring Contract Account', 'checking', 'USD', 10000],
+      }),
+    })
+
+    expect(insertAccountResponse.status).toBe(200)
+
+    const insertRuleResponse = await fetch(`${SERVER_URL}/api/db/execute`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: `INSERT INTO recurring_rules (id, description, amount, currency, type, frequency, next_date, end_date, account_id, to_account_id, category_id, subcategory_id, tags, notes, active)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+        params: [
+          ruleId,
+          'Contract recurring coffee',
+          250,
+          'USD',
+          'expense',
+          'monthly',
+          '2026-04-01',
+          null,
+          accountId,
+          null,
+          null,
+          null,
+          '[]',
+          null,
+          1,
+        ],
+      }),
+    })
+
+    expect(insertRuleResponse.status).toBe(200)
+
+    const materializeResponse = await fetch(`${SERVER_URL}/api/recurring/materialize`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({}),
+    })
+    const materializeJson = await materializeResponse.json()
+
+    expect(materializeResponse.status).toBe(200)
+    expect(materializeJson).toMatchObject({
+      success: true,
+      created: 1,
+      message: 'Created 1 transaction(s) from recurring rules.',
+    })
+
+    const queryRuleStateResponse = await fetch(`${SERVER_URL}/api/db/query`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: `SELECT a.balance, r.next_date
+              FROM accounts a
+              JOIN recurring_rules r ON r.account_id = a.id
+              WHERE a.id = $1 AND r.id = $2`,
+        params: [accountId, ruleId],
+      }),
+    })
+    const queryRuleStateJson = await queryRuleStateResponse.json()
+
+    const queryTransactionStateResponse = await fetch(`${SERVER_URL}/api/db/query`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: `SELECT COUNT(*) AS recurring_count
+              FROM transactions
+              WHERE account_id = $1 AND description = $2 AND is_recurring = 1`,
+        params: [accountId, 'Contract recurring coffee'],
+      }),
+    })
+    const queryTransactionStateJson = await queryTransactionStateResponse.json()
+
+    expect(queryRuleStateResponse.status).toBe(200)
+    expect(queryRuleStateJson).toEqual([
+      {
+        balance: 9750,
+        next_date: '2026-05-01',
+      },
+    ])
+    expect(queryTransactionStateResponse.status).toBe(200)
+    expect(queryTransactionStateJson).toEqual([{ recurring_count: 1 }])
+  })
+
   it('can import an exported snapshot and continue serving queries without restart', async () => {
     const defaultHeaders = {
       Origin: ORIGIN,

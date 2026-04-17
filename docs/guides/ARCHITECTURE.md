@@ -119,9 +119,9 @@ Additional unrouted pages: onboarding, net-worth, spending-heatmap, ai-insights,
 
 ### Layer 5: AI Orchestration
 
-- `src/ai/agent.ts` configures `ToolLoopAgent` with model + 43 tools + system prompt.
+- `src/ai/agent.ts` historical notes referenced a 42-tool set; the current shared CLI/MCP catalog ships 44 tool definitions, including 2 structured unavailable placeholders for external-feed features.
 - `src/ai/transport.ts` wires agent to `useChat` with `DirectChatTransport`.
-- `src/ai/tools/` contains 43 tool implementations organized across 14 categories.
+- Historical note: `src/ai/tools/` once held a 42-tool frontend agent implementation, but that directory is no longer part of the current repo layout.
 - `src/ai/memory-loader.ts` loads MemGPT-style persistent memories into the system prompt.
 
 ---

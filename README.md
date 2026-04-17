@@ -32,11 +32,11 @@ Shikin is built to keep both:
 - **Investments**: Portfolio tracking with live prices (Alpha Vantage for stocks, CoinGecko for crypto).
 - **Multi-Currency**: Live exchange rates via frankfurter.app with preferred currency conversion.
 
-### CLI & MCP Server — 44 Tools
+### CLI & MCP Server — 44 Tool Definitions
 
 - **CLI**: `shikin add-transaction --amount 5.50 --type expense --description "Coffee"`
 - **MCP Server**: Connect Claude Code, Claude Desktop, Cursor, or any MCP-compatible AI
-- **44 Financial Tools**: Transactions, accounts, budgets, goals, investments, analytics, debt planning, currency conversion, and more
+- **44 Tool Definitions**: 42 end-to-end tools plus 2 structured unavailable compatibility placeholders for external-feed features
 - **No Built-in AI**: Bring your own AI — Shikin is the finance engine, your AI platform controls it
 
 ### Intelligence & Analytics
@@ -46,8 +46,6 @@ Shikin is built to keep both:
 - **Spending Heatmap**: Category-based spending intensity visualization.
 - **Net Worth Tracking**: Assets vs liabilities with trend over time.
 - **Bill Calendar**: Upcoming payments from credit cards, subscriptions, and recurring expenses.
-- **Congressional Trades**: House/Senate stock trading disclosures.
-- **Financial News**: Market news via Finnhub and NewsAPI.
 - **Streaks & Achievements**: 8 unlockable badges for financial habits.
 
 ### Privacy & Data
@@ -61,21 +59,21 @@ Shikin is built to keep both:
 
 ## Tech Stack
 
-| Layer      | Technology                       | Purpose                             |
-| ---------- | -------------------------------- | ----------------------------------- |
-| Runtime    | Tauri v2 + Browser + Vite        | Desktop app and web runtime         |
-| Frontend   | React 19 + TypeScript            | UI and application logic            |
-| Styling    | Tailwind CSS v4 + shadcn/ui      | Design system and components        |
-| Routing    | React Router v7                  | Client-side navigation              |
-| State      | Zustand (19 stores)              | Global state management             |
-| Database   | SQLite (shared storage)          | 21 tables, migration-backed schema  |
-| Settings   | Tauri Store / data-server bridge | Local key-value config storage      |
-| AI         | CLI (`commander`) + MCP SDK      | Local automation surface (44 tools) |
-| Forms      | React Hook Form + Zod v4         | Form validation and parsing         |
-| Charts     | Recharts                         | Financial visualizations            |
-| PDF        | jsPDF                            | Report generation                   |
-| i18n       | i18next + react-i18next          | Localization (en/es)                |
-| Build/Test | Vite + Vitest + Playwright       | Build pipeline and test tooling     |
+| Layer      | Technology                       | Purpose                                                                                          |
+| ---------- | -------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Runtime    | Tauri v2 + Browser + Vite        | Desktop app and web runtime                                                                      |
+| Frontend   | React 19 + TypeScript            | UI and application logic                                                                         |
+| Styling    | Tailwind CSS v4 + shadcn/ui      | Design system and components                                                                     |
+| Routing    | React Router v7                  | Client-side navigation                                                                           |
+| State      | Zustand (19 stores)              | Global state management                                                                          |
+| Database   | SQLite (shared storage)          | 21 tables, migration-backed schema                                                               |
+| Settings   | Tauri Store / data-server bridge | Local key-value config storage                                                                   |
+| AI         | CLI (`commander`) + MCP SDK      | Local automation surface (44 shared tool definitions; 2 are structured unavailable placeholders) |
+| Forms      | React Hook Form + Zod v4         | Form validation and parsing                                                                      |
+| Charts     | Recharts                         | Financial visualizations                                                                         |
+| PDF        | jsPDF                            | Report generation                                                                                |
+| i18n       | i18next + react-i18next          | Localization (en/es)                                                                             |
+| Build/Test | Vite + Vitest + Playwright       | Build pipeline and test tooling                                                                  |
 
 ---
 
@@ -149,7 +147,7 @@ pnpm build:tauri  # Builds .deb + .AppImage (Linux), .dmg (macOS), .msi (Windows
 
 ## CLI & MCP Server
 
-Shikin exposes 44 financial tools via CLI and MCP server. Any AI can control your finances.
+Shikin exposes 44 shared CLI/MCP tool definitions. 42 are currently available end-to-end, and 2 compatibility placeholders return structured unavailable responses for external-feed features.
 
 ```bash
 cd cli && npm install
@@ -218,7 +216,7 @@ Shikin/
 │   ├── stores/               # 19 Zustand stores
 │   ├── i18n/                 # 13 namespaces, 2 languages (en/es)
 │   └── types/                # TypeScript type definitions
-├── cli/                      # CLI + MCP server (44 tools)
+├── cli/                      # CLI + MCP server (44 shared tool definitions; 2 structured unavailable placeholders)
 ├── docs/                     # Project documentation
 ├── e2e/                      # Playwright end-to-end tests
 └── public/                   # Static assets

@@ -106,7 +106,7 @@ cli/
 ├── src/
 │   ├── cli.ts            # Commander CLI entry point
 │   ├── mcp-server.ts     # MCP server entry point
-│   ├── tools.ts          # Shared 44-tool catalog
+│   ├── tools.ts          # Shared 44-definition catalog (includes 2 unavailable placeholders)
 │   └── database.ts       # better-sqlite3 data access
 ```
 

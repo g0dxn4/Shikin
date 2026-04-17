@@ -14,21 +14,35 @@ const { createMcpToolHandler, registerMcpResources, registerMcpTools } =
   await import('./mcp-server.js')
 
 describe('MCP tool registration', () => {
-  it('keeps all tools discoverable, including unavailable placeholders', () => {
+  it('registers the current shared tool catalog', () => {
     const registerTool = vi.fn()
 
     registerMcpTools({ tool: registerTool } as never, tools)
 
-    expect(registerTool.mock.calls.map(([name]) => name)).toEqual(tools.map((tool) => tool.name))
-    expect(registerTool.mock.calls.map(([name]) => name)).toEqual(
-      expect.arrayContaining(['list-subscriptions', 'get-financial-news', 'get-education-tip'])
+    const toolNames = registerTool.mock.calls.map(([name]) => name)
+
+    expect(toolNames).toEqual(tools.map((tool) => tool.name))
+    expect(toolNames).toEqual(
+      expect.arrayContaining([
+        'list-subscriptions',
+        'get-spending-summary',
+        'get-education-tip',
+        'get-financial-news',
+        'get-congressional-trades',
+      ])
     )
   })
 })
 
 describe('MCP tool error envelopes', () => {
   it('returns stable unavailable responses for placeholder tools', async () => {
-    const unavailableTool = tools.find((tool) => tool.name === 'get-financial-news')!
+    const unavailableTool = {
+      name: 'placeholder-unavailable-tool',
+      description: 'Test placeholder unavailable tool',
+      schema: z.object({}),
+      mcpUnavailableMessage: 'This tool is unavailable in this release surface.',
+      execute: vi.fn(),
+    }
     const handler = createMcpToolHandler(unavailableTool)
 
     const result = await handler({ symbol: 'AAPL' })

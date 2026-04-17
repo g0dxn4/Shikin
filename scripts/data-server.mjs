@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import dayjs from 'dayjs'
 import {
   readFileSync,
   writeFileSync,
@@ -11,6 +12,7 @@ import {
 import { join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import Database from 'better-sqlite3'
+import { ulid } from 'ulidx'
 import { checkpointWal, importDatabaseBuffer } from './data-server-db.mjs'
 import { cacheItemsFromStream, rewriteCodexProxyBody } from './data-server-chatgpt.mjs'
 import {
@@ -496,6 +498,47 @@ CREATE INDEX IF NOT EXISTS idx_account_balance_account ON account_balance_histor
     ).run()
   }
 
+  // --- Migration 013: Recurring Rules Currency ---
+  if (!applied.has('013_recurring_rules_currency')) {
+    const recurringRuleColumns = db.prepare('PRAGMA table_info(recurring_rules)').all()
+    const hasCurrencyColumn = recurringRuleColumns.some((column) => column.name === 'currency')
+
+    if (!hasCurrencyColumn) {
+      db.exec(`ALTER TABLE recurring_rules ADD COLUMN currency TEXT;`)
+    }
+
+    db.exec(`
+UPDATE recurring_rules
+SET currency = (
+  SELECT a.currency
+  FROM accounts a
+  WHERE a.id = recurring_rules.account_id
+)
+WHERE (currency IS NULL OR TRIM(currency) = '') AND account_id IS NOT NULL;
+    `)
+
+    db.prepare(
+      "INSERT INTO _migrations (id, name) VALUES (13, '013_recurring_rules_currency')"
+    ).run()
+  }
+
+  // --- Migration 014: Recurring Rules Currency Backfill Repair ---
+  if (!applied.has('014_recurring_rules_currency_backfill')) {
+    db.exec(`
+UPDATE recurring_rules
+SET currency = (
+  SELECT a.currency
+  FROM accounts a
+  WHERE a.id = recurring_rules.account_id
+)
+WHERE (currency IS NULL OR TRIM(currency) = '') AND account_id IS NOT NULL;
+    `)
+
+    db.prepare(
+      "INSERT INTO _migrations (id, name) VALUES (14, '014_recurring_rules_currency_backfill')"
+    ).run()
+  }
+
   console.log('[data-server] Migrations complete')
 }
 
@@ -591,6 +634,164 @@ function sendError(res, message, status = 500) {
   sendJson(res, { error: message }, status)
 }
 
+function advanceRecurringDate(date, frequency) {
+  const d = dayjs(date)
+  switch (frequency) {
+    case 'daily':
+      return d.add(1, 'day').format('YYYY-MM-DD')
+    case 'weekly':
+      return d.add(7, 'day').format('YYYY-MM-DD')
+    case 'biweekly':
+      return d.add(14, 'day').format('YYYY-MM-DD')
+    case 'monthly':
+      return d.add(1, 'month').format('YYYY-MM-DD')
+    case 'quarterly':
+      return d.add(3, 'month').format('YYYY-MM-DD')
+    case 'yearly':
+      return d.add(1, 'year').format('YYYY-MM-DD')
+    default:
+      return d.add(1, 'month').format('YYYY-MM-DD')
+  }
+}
+
+function unknownRecurringRuleCurrencyMessage(rule) {
+  return `${rule.description ? `Recurring rule "${rule.description}"` : `Recurring rule ${rule.id}`} has no stored currency. Repair or recreate the rule before moving or materializing it.`
+}
+
+function recurringRuleAccountCurrencyMismatchMessage(rule) {
+  return `Recurring rule "${rule.description ?? 'Unknown rule'}" has stored currency ${rule.currency ?? 'unknown'} but the linked account is now ${rule.account_currency ?? 'unknown'}. Repair or recreate the rule before materializing it.`
+}
+
+function unsupportedRecurringTransferMessage() {
+  return 'Recurring transfers are not supported yet. Create separate recurring income/expense rules until destination-account support is fully implemented.'
+}
+
+function materializeRecurringBatch() {
+  const today = dayjs().format('YYYY-MM-DD')
+  const runBatch = db.transaction(() => {
+    const dueRules = db
+      .prepare(
+        convertParams(`SELECT r.*, a.currency as account_currency
+         FROM recurring_rules r
+         LEFT JOIN accounts a ON r.account_id = a.id
+         WHERE r.active = 1 AND r.next_date <= $1`)
+      )
+      .all(today)
+
+    if (dueRules.length === 0) {
+      return {
+        success: true,
+        created: 0,
+        message: 'No recurring transactions were due.',
+      }
+    }
+
+    const unsupportedTransferRule = dueRules.find((rule) => rule.type === 'transfer')
+    if (unsupportedTransferRule) {
+      return {
+        success: false,
+        reason: 'unsupported_recurring_transfer',
+        message: unsupportedRecurringTransferMessage(),
+      }
+    }
+
+    const unknownCurrencyRule = dueRules.find((rule) => !rule.currency)
+    if (unknownCurrencyRule) {
+      return {
+        success: false,
+        reason: 'unknown_rule_currency',
+        message: unknownRecurringRuleCurrencyMessage(unknownCurrencyRule),
+      }
+    }
+
+    const accountCurrencyMismatchRule = dueRules.find(
+      (rule) => rule.account_currency && rule.currency !== rule.account_currency
+    )
+    if (accountCurrencyMismatchRule) {
+      return {
+        success: false,
+        reason: 'rule_account_currency_mismatch',
+        message: recurringRuleAccountCurrencyMismatchMessage(accountCurrencyMismatchRule),
+      }
+    }
+
+    let created = 0
+    for (const rule of dueRules) {
+      let occurrenceDate = rule.next_date
+      while (occurrenceDate <= today) {
+        if (rule.end_date && occurrenceDate > rule.end_date) {
+          const deactivateResult = db
+            .prepare(
+              convertParams(
+                "UPDATE recurring_rules SET active = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $1 AND active = 1 AND next_date = $2"
+              )
+            )
+            .run(rule.id, occurrenceDate)
+          if (deactivateResult.changes !== 1) {
+            break
+          }
+          break
+        }
+
+        const newNextDate = advanceRecurringDate(occurrenceDate, rule.frequency)
+        const shouldDeactivate = Boolean(rule.end_date && newNextDate > rule.end_date)
+        const claimResult = db
+          .prepare(
+            convertParams(
+              "UPDATE recurring_rules SET active = $1, next_date = $2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $3 AND active = 1 AND next_date = $4"
+            )
+          )
+          .run(shouldDeactivate ? 0 : 1, newNextDate, rule.id, occurrenceDate)
+        if (claimResult.changes !== 1) {
+          break
+        }
+
+        db.prepare(
+          convertParams(`INSERT INTO transactions (id, account_id, category_id, subcategory_id, type, amount, currency, description, notes, date, tags, is_recurring, transfer_to_account_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1, $12)`)
+        ).run(
+          ulid(),
+          rule.account_id,
+          rule.category_id,
+          rule.subcategory_id,
+          rule.type,
+          rule.amount,
+          rule.currency,
+          rule.description,
+          rule.notes,
+          occurrenceDate,
+          rule.tags || '[]',
+          rule.to_account_id
+        )
+
+        const balanceChange = rule.type === 'income' ? rule.amount : -rule.amount
+        db.prepare(
+          convertParams(
+            "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2"
+          )
+        ).run(balanceChange, rule.account_id)
+
+        created += 1
+        occurrenceDate = newNextDate
+        if (shouldDeactivate) {
+          break
+        }
+      }
+    }
+
+    return {
+      success: true,
+      created,
+      message:
+        created > 0
+          ? `Created ${created} transaction(s) from recurring rules.`
+          : 'No recurring transactions were due.',
+    }
+  })
+
+  return runBatch()
+}
+
 function sendForbidden(res, message) {
   res.writeHead(403, {
     'Content-Type': 'application/json',
@@ -642,6 +843,11 @@ const server = createServer(async (req, res) => {
         rowsAffected: result.changes,
         lastInsertId: Number(result.lastInsertRowid),
       })
+    }
+
+    // ── Recurring: Materialize server-side atomically ─────────────────
+    if (path === '/api/recurring/materialize' && req.method === 'POST') {
+      return sendJson(res, materializeRecurringBatch())
     }
 
     // ── Store: Get all ───────────────────────────────────────────────

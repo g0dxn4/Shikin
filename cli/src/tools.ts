@@ -5,6 +5,16 @@ import { generateId } from './ulid.js'
 import { toCentavos, fromCentavos } from './money.js'
 import { readNote, writeNote, appendNote, noteExists, listNotes } from './notebook.js'
 import { isSafeNotebookPathInput } from './notebook-path.js'
+import {
+  listSubscriptionsSummary,
+  getSubscriptionSpendingSummary,
+  generatePortfolioReview as generatePortfolioReviewSummary,
+  detectSpendingAnomaliesSummary,
+  generateCashFlowForecastSummary,
+  calculateFinancialHealthScoreSummary,
+  generateSpendingRecapSummary,
+  getEducationTipSummary,
+} from './insights.js'
 import dayjs from 'dayjs'
 
 // ---------------------------------------------------------------------------
@@ -16,6 +26,7 @@ export interface ToolDefinition {
   description: string
   schema: z.ZodObject<any>
   execute: (input: any) => Promise<any>
+  cliUnavailableMessage?: string
   mcpUnavailableMessage?: string
 }
 
@@ -129,19 +140,20 @@ function unsupportedTransferMessage() {
 
 function resolveAccountId(accountId?: string) {
   if (accountId) {
-    const accounts = query<{ id: string }>('SELECT id FROM accounts WHERE id = $1 LIMIT 1', [
-      accountId,
-    ])
+    const accounts = query<{ id: string; currency: string }>(
+      'SELECT id, currency FROM accounts WHERE id = $1 LIMIT 1',
+      [accountId]
+    )
 
     if (accounts.length === 0) {
       return { success: false as const, message: `Account ${accountId} not found.` }
     }
 
-    return { success: true as const, id: accounts[0].id }
+    return { success: true as const, id: accounts[0].id, currency: accounts[0].currency }
   }
 
-  const accounts = query<{ id: string; name: string }>(
-    'SELECT id, name FROM accounts ORDER BY name ASC, id ASC LIMIT 2'
+  const accounts = query<{ id: string; name: string; currency: string }>(
+    'SELECT id, name, currency FROM accounts ORDER BY name ASC, id ASC LIMIT 2'
   )
 
   if (accounts.length === 0) {
@@ -159,7 +171,89 @@ function resolveAccountId(accountId?: string) {
     }
   }
 
-  return { success: true as const, id: accounts[0].id }
+  return { success: true as const, id: accounts[0].id, currency: accounts[0].currency }
+}
+
+function recurringRulesHasCurrencyColumn() {
+  return query<{ name: string }>('PRAGMA table_info(recurring_rules)').some(
+    (column) => column.name === 'currency'
+  )
+}
+
+function crossCurrencyMoveMessage(
+  kind: 'transaction' | 'recurring rule',
+  from: string,
+  to: string
+) {
+  return `Cannot move this ${kind} from ${from} to ${to}. Cross-currency moves are not supported because they would change amount semantics without FX conversion.`
+}
+
+function unknownRecurringRuleCurrencyFailure(rule: { id: string; description?: string | null }) {
+  const label = rule.description
+    ? `Recurring rule "${rule.description}"`
+    : `Recurring rule ${rule.id}`
+  return {
+    success: false as const,
+    reason: 'unknown_rule_currency',
+    message: `${label} has no stored currency. Repair or recreate the rule before moving or materializing it.`,
+  }
+}
+
+function unknownTransactionCurrencyFailure(tx: { id: string; description?: string | null }) {
+  const label = tx.description ? `Transaction "${tx.description}"` : `Transaction ${tx.id}`
+  return {
+    success: false as const,
+    reason: 'unknown_transaction_currency',
+    message: `${label} has no stored currency. Repair or recreate the transaction before editing it.`,
+  }
+}
+
+function unavailableToolResult(message: string) {
+  return {
+    success: false as const,
+    message,
+    error: message,
+    errorType: 'unavailable_error' as const,
+  }
+}
+
+function unsupportedRecurringTransferFailure() {
+  return {
+    success: false as const,
+    reason: 'unsupported_recurring_transfer',
+    message:
+      'Recurring transfers are not supported yet. Create separate recurring income/expense rules until destination-account support is fully implemented.',
+  }
+}
+
+function getDistinctCurrencies(rows: Array<{ currency: string }>): string[] {
+  return [...new Set(rows.map((row) => row.currency).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b)
+  )
+}
+
+function getCategoryIdentity(categoryId: string | null, categoryName: string) {
+  return {
+    category:
+      categoryId === null
+        ? 'Uncategorized'
+        : categoryName === 'Uncategorized'
+          ? 'Uncategorized (category)'
+          : categoryName,
+    categoryKey: categoryId ?? '__uncategorized__',
+  }
+}
+
+function missingCurrencyRepairFailure(toolLabel: string) {
+  return {
+    success: false as const,
+    reason: 'repair_needed_missing_currency',
+    message: `${toolLabel} encountered rows with missing currency. Repair or recreate the affected data before using this summary.`,
+  }
+}
+
+function hasMissingCurrency(rows: Array<{ currency: string | null | undefined }>) {
+  return rows.some((row) => !row.currency)
 }
 
 function resolveCategoryId(category?: string) {
@@ -279,14 +373,15 @@ const addTransaction: ToolDefinition = {
       }
 
       execute(
-        `INSERT INTO transactions (id, account_id, category_id, type, amount, description, notes, date)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        `INSERT INTO transactions (id, account_id, category_id, type, amount, currency, description, notes, date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [
           id,
           resolvedAccount.id,
           resolvedCategory.id,
           type,
           amountCentavos,
+          resolvedAccount.currency,
           description,
           notes || null,
           txDate,
@@ -364,6 +459,10 @@ const updateTransaction: ToolDefinition = {
       const oldType = tx.type
       const oldAccountId = tx.account_id
 
+      if (!tx.currency) {
+        return unknownTransactionCurrencyFailure(tx)
+      }
+
       if (type === 'transfer') {
         return {
           success: false,
@@ -373,14 +472,33 @@ const updateTransaction: ToolDefinition = {
 
       const newAmount = amount !== undefined ? toCentavos(amount) : oldAmountCentavos
       const newType = type || oldType
-      const newAccountId = accountId || oldAccountId
+      const isMovingAccounts = accountId !== undefined && accountId !== oldAccountId
+      const sourceCurrency = tx.currency
+      let resolvedAccount:
+        | { success: true; id: string; currency: string }
+        | { success: false; message: string }
+        | null = null
 
-      if (accountId !== undefined && accountId !== oldAccountId) {
-        const resolvedAccount = resolveAccountId(accountId)
+      if (isMovingAccounts) {
+        resolvedAccount = resolveAccountId(accountId)
         if (!resolvedAccount.success) {
           return { success: false, message: resolvedAccount.message }
         }
+
+        if (sourceCurrency && resolvedAccount.currency !== sourceCurrency) {
+          return {
+            success: false,
+            message: crossCurrencyMoveMessage(
+              'transaction',
+              sourceCurrency,
+              resolvedAccount.currency
+            ),
+          }
+        }
       }
+
+      const newAccountId = resolvedAccount?.success ? resolvedAccount.id : accountId || oldAccountId
+      const newCurrency = sourceCurrency
 
       let newCategoryId = tx.category_id
       if (category !== undefined) {
@@ -407,9 +525,9 @@ const updateTransaction: ToolDefinition = {
 
       const updateResult = execute(
         `UPDATE transactions
-         SET amount = $1, type = $2, description = $3, category_id = $4, date = $5, notes = $6, account_id = $7,
+         SET amount = $1, type = $2, description = $3, category_id = $4, date = $5, notes = $6, account_id = $7, currency = $8,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE id = $8`,
+         WHERE id = $9`,
         [
           newAmount,
           newType,
@@ -418,6 +536,7 @@ const updateTransaction: ToolDefinition = {
           date || tx.date,
           notes !== undefined ? (notes === '' ? null : notes) : tx.notes,
           newAccountId,
+          newCurrency,
           transactionId,
         ]
       )
@@ -615,15 +734,28 @@ const getSpendingSummary: ToolDefinition = {
     let start: string
     let end: string
 
+    if (period === 'custom' && (!startDate || !endDate)) {
+      return {
+        success: false,
+        message: 'Custom spending summaries require both startDate and endDate.',
+      }
+    }
+
     if (period === 'custom' && startDate && endDate) {
       start = startDate
       end = endDate
+      if (dayjs(start).isAfter(dayjs(end), 'day')) {
+        return {
+          success: false,
+          message: 'Custom spending summaries require startDate to be on or before endDate.',
+        }
+      }
     } else {
       const now = dayjs()
       end = now.format('YYYY-MM-DD')
       switch (period) {
         case 'week':
-          start = now.subtract(7, 'day').format('YYYY-MM-DD')
+          start = now.subtract(6, 'day').format('YYYY-MM-DD')
           break
         case 'year':
           start = now.startOf('year').format('YYYY-MM-DD')
@@ -633,46 +765,87 @@ const getSpendingSummary: ToolDefinition = {
       }
     }
 
-    const spending = await query<{ category_name: string; total: number; count: number }>(
+    const spending = await query<{
+      currency: string
+      category_id: string | null
+      category_name: string
+      total: number
+      count: number
+    }>(
       `SELECT
+         t.currency as currency,
+         t.category_id as category_id,
          COALESCE(c.name, 'Uncategorized') as category_name,
          SUM(t.amount) as total,
          COUNT(*) as count
        FROM transactions t
        LEFT JOIN categories c ON t.category_id = c.id
-       WHERE t.type = 'expense'
-         AND t.date >= $1
-         AND t.date <= $2
-       GROUP BY c.name
-       ORDER BY total DESC`,
+        WHERE t.type = 'expense'
+          AND t.date >= $1
+          AND t.date <= $2
+        GROUP BY t.currency, t.category_id, c.name
+        ORDER BY t.currency ASC, total DESC`,
       [start, end]
     )
 
-    const totalIncome = await query<{ total: number }>(
-      `SELECT COALESCE(SUM(amount), 0) as total
+    const totals = await query<{ currency: string; type: string; total: number }>(
+      `SELECT currency, type, COALESCE(SUM(amount), 0) as total
        FROM transactions
-       WHERE type = 'income' AND date >= $1 AND date <= $2`,
+       WHERE type IN ('income', 'expense') AND date >= $1 AND date <= $2
+       GROUP BY currency, type`,
       [start, end]
     )
 
-    const totalExpenses = spending.reduce((sum, row) => sum + row.total, 0)
-    const income = totalIncome[0]?.total || 0
+    if (hasMissingCurrency([...spending, ...totals])) {
+      return missingCurrencyRepairFailure('Spending summary')
+    }
+
+    const currencies = getDistinctCurrencies([...spending, ...totals])
+    const totalsByCurrency = currencies.map((currency) => {
+      const expenses =
+        totals.find((row) => row.currency === currency && row.type === 'expense')?.total || 0
+      const income =
+        totals.find((row) => row.currency === currency && row.type === 'income')?.total || 0
+      return {
+        currency,
+        totalExpenses: fromCentavos(expenses),
+        totalIncome: fromCentavos(income),
+        netSavings: fromCentavos(income - expenses),
+      }
+    })
+    const singleCurrency = totalsByCurrency.length === 1 ? totalsByCurrency[0] : null
+    const emptyPeriodTotals =
+      totalsByCurrency.length === 0 ? { totalExpenses: 0, totalIncome: 0, netSavings: 0 } : null
 
     return {
       period: { start, end },
-      totalExpenses: fromCentavos(totalExpenses),
-      totalIncome: fromCentavos(income),
-      netSavings: fromCentavos(income - totalExpenses),
+      mixedCurrency: totalsByCurrency.length > 1,
+      totalExpenses: singleCurrency?.totalExpenses ?? emptyPeriodTotals?.totalExpenses ?? null,
+      totalIncome: singleCurrency?.totalIncome ?? emptyPeriodTotals?.totalIncome ?? null,
+      netSavings: singleCurrency?.netSavings ?? emptyPeriodTotals?.netSavings ?? null,
+      totalsByCurrency,
       byCategory: spending.map((row) => ({
-        category: row.category_name,
+        currency: row.currency,
+        ...getCategoryIdentity(row.category_id, row.category_name),
         amount: fromCentavos(row.total),
         transactionCount: row.count,
-        percentage: totalExpenses > 0 ? Math.round((row.total / totalExpenses) * 100) : 0,
+        percentage:
+          (totalsByCurrency.find((totalsRow) => totalsRow.currency === row.currency)
+            ?.totalExpenses ?? 0) > 0
+            ? Math.round(
+                (fromCentavos(row.total) /
+                  (totalsByCurrency.find((totalsRow) => totalsRow.currency === row.currency)
+                    ?.totalExpenses ?? 0)) *
+                  100
+              )
+            : 0,
       })),
       message:
         spending.length === 0
           ? `No expenses found for ${start} to ${end}.`
-          : `Total spending from ${start} to ${end}: $${fromCentavos(totalExpenses).toFixed(2)} across ${spending.length} categories.`,
+          : singleCurrency
+            ? `Total spending from ${start} to ${end}: ${singleCurrency.currency} ${singleCurrency.totalExpenses.toFixed(2)} across ${spending.length} categories.`
+            : `Found spending from ${start} to ${end} across ${totalsByCurrency.length} currencies. See totalsByCurrency and byCategory for per-currency breakdowns; no FX conversion was applied.`,
     }
   },
 }
@@ -1012,42 +1185,110 @@ const getBalanceOverview: ToolDefinition = {
   schema: z.object({}),
   execute: async () => {
     const accounts = await query<any>('SELECT * FROM accounts WHERE is_archived = 0 ORDER BY name')
-
-    const totalBalance = accounts.reduce((sum: number, a: any) => sum + a.balance, 0)
+    const balanceCurrencies = getDistinctCurrencies(accounts)
+    const totalsByCurrency = balanceCurrencies.map((currency) => ({
+      currency,
+      totalBalance: fromCentavos(
+        accounts
+          .filter((account: any) => account.currency === currency)
+          .reduce((sum: number, account: any) => sum + account.balance, 0)
+      ),
+    }))
 
     const currentMonthStart = dayjs().startOf('month').format('YYYY-MM-DD')
     const currentMonthEnd = dayjs().endOf('month').format('YYYY-MM-DD')
 
-    const currentMonth = await query<{ total_income: number; total_expenses: number }>(
+    const currentMonth = await query<{
+      currency: string
+      total_income: number
+      total_expenses: number
+    }>(
       `SELECT
-         COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as total_income,
-         COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as total_expenses
-       FROM transactions
-       WHERE date >= $1 AND date <= $2`,
+         t.currency,
+         COALESCE(SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE 0 END), 0) as total_income,
+         COALESCE(SUM(CASE WHEN t.type = 'expense' THEN t.amount ELSE 0 END), 0) as total_expenses
+       FROM transactions t
+       JOIN accounts a ON a.id = t.account_id
+       WHERE a.is_archived = 0 AND t.date >= $1 AND t.date <= $2
+       GROUP BY t.currency`,
       [currentMonthStart, currentMonthEnd]
     )
 
     const prevMonthStart = dayjs().subtract(1, 'month').startOf('month').format('YYYY-MM-DD')
     const prevMonthEnd = dayjs().subtract(1, 'month').endOf('month').format('YYYY-MM-DD')
 
-    const prevMonth = await query<{ total_income: number; total_expenses: number }>(
+    const prevMonth = await query<{
+      currency: string
+      total_income: number
+      total_expenses: number
+    }>(
       `SELECT
-         COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as total_income,
-         COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as total_expenses
-       FROM transactions
-       WHERE date >= $1 AND date <= $2`,
+         t.currency,
+         COALESCE(SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE 0 END), 0) as total_income,
+         COALESCE(SUM(CASE WHEN t.type = 'expense' THEN t.amount ELSE 0 END), 0) as total_expenses
+       FROM transactions t
+       JOIN accounts a ON a.id = t.account_id
+       WHERE a.is_archived = 0 AND t.date >= $1 AND t.date <= $2
+       GROUP BY t.currency`,
       [prevMonthStart, prevMonthEnd]
     )
 
-    const currentNet = (currentMonth[0]?.total_income || 0) - (currentMonth[0]?.total_expenses || 0)
-    const previousNet = (prevMonth[0]?.total_income || 0) - (prevMonth[0]?.total_expenses || 0)
+    if (hasMissingCurrency([...accounts, ...currentMonth, ...prevMonth])) {
+      return missingCurrencyRepairFailure('Balance overview')
+    }
 
-    let trend: 'up' | 'down' | 'stable' = 'stable'
-    if (currentNet > previousNet) trend = 'up'
-    else if (currentNet < previousNet) trend = 'down'
+    const monthCurrencies = getDistinctCurrencies([...currentMonth, ...prevMonth, ...accounts])
+    const monthlyChangeByCurrency = monthCurrencies.map((currency) => {
+      const currentNet =
+        (currentMonth.find((row) => row.currency === currency)?.total_income || 0) -
+        (currentMonth.find((row) => row.currency === currency)?.total_expenses || 0)
+      const previousNet =
+        (prevMonth.find((row) => row.currency === currency)?.total_income || 0) -
+        (prevMonth.find((row) => row.currency === currency)?.total_expenses || 0)
+
+      let trend: 'up' | 'down' | 'stable' = 'stable'
+      if (currentNet > previousNet) trend = 'up'
+      else if (currentNet < previousNet) trend = 'down'
+
+      return {
+        currency,
+        current: fromCentavos(currentNet),
+        previous: fromCentavos(previousNet),
+        trend,
+      }
+    })
+    const normalizedMonthlyChangeByCurrency =
+      totalsByCurrency.length === 1 && monthlyChangeByCurrency.length === 0
+        ? [
+            {
+              currency: totalsByCurrency[0].currency,
+              current: 0,
+              previous: 0,
+              trend: 'stable' as const,
+            },
+          ]
+        : monthlyChangeByCurrency
+    const singleBalanceCurrency = totalsByCurrency.length === 1 ? totalsByCurrency[0] : null
+    const singleMonthlyChangeCandidate =
+      normalizedMonthlyChangeByCurrency.length === 1 ? normalizedMonthlyChangeByCurrency[0] : null
+    const singleMonthlyChange =
+      singleBalanceCurrency &&
+      singleMonthlyChangeCandidate &&
+      singleBalanceCurrency.currency === singleMonthlyChangeCandidate.currency
+        ? singleMonthlyChangeCandidate
+        : null
 
     return {
-      totalBalance: fromCentavos(totalBalance),
+      mixedCurrency:
+        balanceCurrencies.length > 1 ||
+        monthCurrencies.length > 1 ||
+        Boolean(
+          singleBalanceCurrency &&
+          singleMonthlyChangeCandidate &&
+          singleBalanceCurrency.currency !== singleMonthlyChangeCandidate.currency
+        ),
+      totalBalance: singleBalanceCurrency?.totalBalance ?? null,
+      totalsByCurrency,
       accounts: accounts.map((a: any) => ({
         id: a.id,
         name: a.name,
@@ -1056,14 +1297,17 @@ const getBalanceOverview: ToolDefinition = {
         balance: fromCentavos(a.balance),
       })),
       monthlyChange: {
-        current: fromCentavos(currentNet),
-        previous: fromCentavos(previousNet),
-        trend,
+        current: singleMonthlyChange?.current ?? null,
+        previous: singleMonthlyChange?.previous ?? null,
+        trend: singleMonthlyChange?.trend ?? null,
       },
+      monthlyChangeByCurrency: normalizedMonthlyChangeByCurrency,
       message:
         accounts.length === 0
           ? 'No accounts found. Create an account to get started.'
-          : `Total balance: $${fromCentavos(totalBalance).toFixed(2)} across ${accounts.length} account${accounts.length !== 1 ? 's' : ''}. This month's net: $${fromCentavos(currentNet).toFixed(2)} (${trend} vs last month).`,
+          : singleBalanceCurrency && singleMonthlyChange
+            ? `Total balance: ${singleBalanceCurrency.currency} ${singleBalanceCurrency.totalBalance.toFixed(2)} across ${accounts.length} account${accounts.length !== 1 ? 's' : ''}. This month's net: ${singleBalanceCurrency.currency} ${singleMonthlyChange.current.toFixed(2)} (${singleMonthlyChange.trend} vs last month).`
+            : `Found ${accounts.length} account${accounts.length !== 1 ? 's' : ''} across ${Math.max(totalsByCurrency.length, monthlyChangeByCurrency.length)} currencies. See totalsByCurrency and monthlyChangeByCurrency for per-currency balances and net changes; no FX conversion was applied.`,
     }
   },
 }
@@ -1093,46 +1337,63 @@ const analyzeSpendingTrends: ToolDefinition = {
       .format('YYYY-MM-DD')
     const endDate = dayjs().endOf('month').format('YYYY-MM-DD')
 
-    const breakdown = await query<{ month: string; category_name: string; total: number }>(
+    const breakdown = await query<{
+      month: string
+      currency: string
+      category_id: string | null
+      category_name: string
+      total: number
+    }>(
       `SELECT
          strftime('%Y-%m', t.date) as month,
+         t.currency as currency,
+         t.category_id as category_id,
          COALESCE(c.name, 'Uncategorized') as category_name,
          SUM(t.amount) as total
        FROM transactions t
        LEFT JOIN categories c ON t.category_id = c.id
-       WHERE t.type = 'expense' AND t.date >= $1 AND t.date <= $2
-       GROUP BY month, category_name
-       ORDER BY month, total DESC`,
+        WHERE t.type = 'expense' AND t.date >= $1 AND t.date <= $2
+        GROUP BY month, t.currency, t.category_id, category_name
+        ORDER BY month, t.currency, total DESC`,
       [startDate, endDate]
     )
 
     const aggregates = await query<{
       month: string
+      currency: string
       total_expenses: number
       total_income: number
     }>(
       `SELECT
          strftime('%Y-%m', date) as month,
+         currency,
          COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as total_expenses,
          COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as total_income
        FROM transactions
-       WHERE date >= $1 AND date <= $2
-       GROUP BY month
-       ORDER BY month`,
+       WHERE type IN ('income', 'expense') AND date >= $1 AND date <= $2
+        GROUP BY month, currency
+        ORDER BY month, currency`,
       [startDate, endDate]
     )
 
+    if (hasMissingCurrency([...breakdown, ...aggregates])) {
+      return missingCurrencyRepairFailure('Spending trends')
+    }
+
+    const currencies = getDistinctCurrencies([...breakdown, ...aggregates])
+
     const monthlyData = aggregates.map((agg) => {
       const monthCategories = breakdown
-        .filter((b) => b.month === agg.month)
+        .filter((b) => b.month === agg.month && b.currency === agg.currency)
         .slice(0, 3)
         .map((b) => ({
-          category: b.category_name,
+          ...getCategoryIdentity(b.category_id, b.category_name),
           amount: fromCentavos(b.total),
         }))
 
       return {
         month: agg.month,
+        currency: agg.currency,
         totalExpenses: fromCentavos(agg.total_expenses),
         totalIncome: fromCentavos(agg.total_income),
         net: fromCentavos(agg.total_income - agg.total_expenses),
@@ -1140,46 +1401,109 @@ const analyzeSpendingTrends: ToolDefinition = {
       }
     })
 
-    const trends: Array<{ category: string; direction: 'up' | 'down'; changePercent: number }> = []
+    const trends: Array<{
+      currency: string
+      category: string
+      direction: 'up' | 'down'
+      changePercent: number | null
+      changeType: 'changed' | 'new' | 'disappeared'
+    }> = []
 
     if (aggregates.length >= 2) {
-      const latestMonth = aggregates[aggregates.length - 1].month
-      const prevMonth = aggregates[aggregates.length - 2].month
+      for (const currency of currencies) {
+        const aggregateMonths = aggregates
+          .filter((agg) => agg.currency === currency)
+          .map((agg) => agg.month)
+          .sort()
+        if (aggregateMonths.length < 2) continue
 
-      const latestCategories = new Map<string, number>()
-      const prevCategories = new Map<string, number>()
+        let latestMonth: string | null = null
+        let prevMonth: string | null = null
+        for (let index = aggregateMonths.length - 1; index > 0; index -= 1) {
+          const currentMonth = aggregateMonths[index]
+          const previousMonth = aggregateMonths[index - 1]
+          const isConsecutive =
+            dayjs(`${currentMonth}-01`).diff(dayjs(`${previousMonth}-01`), 'month') === 1
+          if (isConsecutive) {
+            latestMonth = currentMonth
+            prevMonth = previousMonth
+            break
+          }
+        }
+        if (!latestMonth || !prevMonth) continue
 
-      for (const b of breakdown) {
-        if (b.month === latestMonth) latestCategories.set(b.category_name, b.total)
-        if (b.month === prevMonth) prevCategories.set(b.category_name, b.total)
-      }
+        const latestCategories = new Map<string, { total: number; label: string }>()
+        const prevCategories = new Map<string, { total: number; label: string }>()
 
-      const allCategories = new Set([...latestCategories.keys(), ...prevCategories.keys()])
+        for (const b of breakdown) {
+          if (b.currency !== currency) continue
+          const identity = getCategoryIdentity(b.category_id, b.category_name)
+          if (b.month === latestMonth) {
+            latestCategories.set(identity.categoryKey, { total: b.total, label: identity.category })
+          }
+          if (b.month === prevMonth) {
+            prevCategories.set(identity.categoryKey, { total: b.total, label: identity.category })
+          }
+        }
 
-      for (const cat of allCategories) {
-        const latest = latestCategories.get(cat) || 0
-        const prev = prevCategories.get(cat) || 0
-        if (prev === 0) continue
-        const changePercent = Math.round(((latest - prev) / prev) * 100)
-        if (Math.abs(changePercent) >= 10) {
-          trends.push({
-            category: cat,
-            direction: changePercent > 0 ? 'up' : 'down',
-            changePercent: Math.abs(changePercent),
-          })
+        const allCategories = new Set([...latestCategories.keys(), ...prevCategories.keys()])
+
+        for (const cat of allCategories) {
+          const latestEntry = latestCategories.get(cat)
+          const prevEntry = prevCategories.get(cat)
+          const latest = latestEntry?.total || 0
+          const prev = prevEntry?.total || 0
+          const categoryLabel = latestEntry?.label ?? prevEntry?.label ?? cat
+          if (prev === 0 && latest > 0) {
+            trends.push({
+              currency,
+              category: categoryLabel,
+              direction: 'up',
+              changePercent: null,
+              changeType: 'new',
+            })
+            continue
+          }
+          if (latest === 0 && prev > 0) {
+            trends.push({
+              currency,
+              category: categoryLabel,
+              direction: 'down',
+              changePercent: null,
+              changeType: 'disappeared',
+            })
+            continue
+          }
+          const changePercent = Math.round(((latest - prev) / prev) * 100)
+          if (Math.abs(changePercent) >= 10) {
+            trends.push({
+              currency,
+              category: categoryLabel,
+              direction: changePercent > 0 ? 'up' : 'down',
+              changePercent: Math.abs(changePercent),
+              changeType: 'changed',
+            })
+          }
         }
       }
 
-      trends.sort((a, b) => b.changePercent - a.changePercent)
+      trends.sort((a, b) => {
+        const aValue = a.changePercent ?? 101
+        const bValue = b.changePercent ?? 101
+        return bValue - aValue
+      })
     }
 
     return {
+      mixedCurrency: currencies.length > 1,
       months: monthlyData,
       trends,
       message:
         monthlyData.length === 0
           ? 'No transaction data found for the requested period.'
-          : `Analyzed ${monthlyData.length} month${monthlyData.length !== 1 ? 's' : ''} of spending data.${trends.length > 0 ? ` Notable trends: ${trends.map((t) => `${t.category} ${t.direction} ${t.changePercent}%`).join(', ')}.` : ''}`,
+          : currencies.length === 1
+            ? `Analyzed ${monthlyData.length} month${monthlyData.length !== 1 ? 's' : ''} of spending data.${trends.length > 0 ? ` Notable trends: ${trends.map((t) => (t.changeType === 'changed' ? `${t.category} ${t.direction} ${t.changePercent}%` : t.changeType === 'new' ? `${t.category} is new this month` : `${t.category} disappeared this month`)).join(', ')}.` : ''}`
+            : `Analyzed ${monthlyData.length} month/currency buckets across ${currencies.length} currencies. See the currency field on months and trends for per-currency results; no FX conversion was applied.${trends.length > 0 ? ` Notable trends: ${trends.map((t) => (t.changeType === 'changed' ? `${t.currency} ${t.category} ${t.direction} ${t.changePercent}%` : t.changeType === 'new' ? `${t.currency} ${t.category} is new this month` : `${t.currency} ${t.category} disappeared this month`)).join(', ')}.` : ''}`,
     }
   },
 }
@@ -2079,10 +2403,8 @@ const getUpcomingBills: ToolDefinition = {
 
 const listSubscriptions: ToolDefinition = {
   name: 'list-subscriptions',
-  mcpUnavailableMessage:
-    'Subby integration is not available via the Shikin MCP server. Use the dedicated Subby integration/server or import the data first.',
   description:
-    'List subscriptions from Subby (the subscription tracker app). Shows active subscriptions with their amounts, billing cycles, and next payment dates.',
+    'List subscriptions stored in Shikin. Shows amounts, billing cycles, next payment dates, and monthly/yearly cost equivalents.',
   schema: z.object({
     activeOnly: z
       .boolean()
@@ -2090,13 +2412,7 @@ const listSubscriptions: ToolDefinition = {
       .default(true)
       .describe('Only show active subscriptions (default: true)'),
   }),
-  execute: async () => {
-    return {
-      success: false,
-      message:
-        'Subby integration is not available in CLI mode. Direct SQLite access to Subby requires additional setup. Future: integrate via Subby MCP server or data import.',
-    }
-  },
+  execute: async ({ activeOnly }) => listSubscriptionsSummary(activeOnly),
 }
 
 // ---------------------------------------------------------------------------
@@ -2105,18 +2421,10 @@ const listSubscriptions: ToolDefinition = {
 
 const getSubscriptionSpending: ToolDefinition = {
   name: 'get-subscription-spending',
-  mcpUnavailableMessage:
-    'Subby integration is not available via the Shikin MCP server. Use the dedicated Subby integration/server or import the data first.',
   description:
-    'Analyze subscription spending from Subby. Groups subscriptions by category and shows monthly/yearly cost breakdown.',
+    'Analyze subscription spending from Shikin data. Groups active subscriptions by category and billing cycle with monthly/yearly totals.',
   schema: z.object({}),
-  execute: async () => {
-    return {
-      success: false,
-      message:
-        'Subby integration is not available in CLI mode. Direct SQLite access to Subby requires additional setup. Future: integrate via Subby MCP server or data import.',
-    }
-  },
+  execute: async () => getSubscriptionSpendingSummary(),
 }
 
 // ---------------------------------------------------------------------------
@@ -2222,23 +2530,19 @@ const listNotebookTool: ToolDefinition = {
 
 const getFinancialNews: ToolDefinition = {
   name: 'get-financial-news',
-  mcpUnavailableMessage:
-    'Financial news is not available via the Shikin MCP server until the external service is configured.',
-  description: 'Fetch financial news for a specific symbol or the entire portfolio.',
+  description: 'Fetch financial news for a specific symbol or the broader portfolio.',
   schema: z.object({
-    symbol: z
-      .string()
-      .optional()
-      .describe('Stock/crypto symbol. If omitted, fetches news for the whole portfolio.'),
+    symbol: z.string().optional().describe('Optional ticker or asset symbol to filter news.'),
     days: z.number().optional().default(7).describe('Number of days to look back'),
   }),
-  execute: async () => {
-    // TODO: Wire up news service when API keys are configured
-    return {
-      success: false,
-      message: 'Financial news requires API keys. Configure via Shikin settings.',
-    }
-  },
+  cliUnavailableMessage:
+    'Financial news is not available in this release surface. External news feeds are not configured yet.',
+  mcpUnavailableMessage:
+    'Financial news is not available in this release surface. External news feeds are not configured yet.',
+  execute: async () =>
+    unavailableToolResult(
+      'Financial news is not available in this release surface. External news feeds are not configured yet.'
+    ),
 }
 
 // ---------------------------------------------------------------------------
@@ -2247,24 +2551,19 @@ const getFinancialNews: ToolDefinition = {
 
 const getCongressionalTrades: ToolDefinition = {
   name: 'get-congressional-trades',
-  mcpUnavailableMessage:
-    'Congressional trades are not available via the Shikin MCP server until the external service is configured.',
-  description:
-    'Check recent congressional stock trading disclosures. This is public data that can be interesting to review alongside your own holdings.',
+  description: 'Fetch recent congressional trading disclosures for research workflows.',
   schema: z.object({
-    symbol: z
-      .string()
-      .optional()
-      .describe('Filter trades by ticker symbol. If omitted, returns all recent trades.'),
+    symbol: z.string().optional().describe('Optional ticker symbol to filter disclosures.'),
     days: z.number().optional().default(30).describe('Number of days to look back'),
   }),
-  execute: async () => {
-    // TODO: Wire up congressional trades API when configured
-    return {
-      success: false,
-      message: 'Congressional trades requires external API access. Configure via Shikin settings.',
-    }
-  },
+  cliUnavailableMessage:
+    'Congressional trades are not available in this release surface. External data feeds are not configured yet.',
+  mcpUnavailableMessage:
+    'Congressional trades are not available in this release surface. External data feeds are not configured yet.',
+  execute: async () =>
+    unavailableToolResult(
+      'Congressional trades are not available in this release surface. External data feeds are not configured yet.'
+    ),
 }
 
 // ---------------------------------------------------------------------------
@@ -2273,8 +2572,6 @@ const getCongressionalTrades: ToolDefinition = {
 
 const generatePortfolioReview: ToolDefinition = {
   name: 'generate-portfolio-review',
-  mcpUnavailableMessage:
-    'Portfolio review generation is not available via the Shikin MCP server yet.',
   description:
     'Generate a portfolio review and save it to the notebook. Reviews include performance summary, top/worst performers, and a holdings table.',
   schema: z.object({
@@ -2284,13 +2581,7 @@ const generatePortfolioReview: ToolDefinition = {
       .default(false)
       .describe('Force generation even if a review exists for this week'),
   }),
-  execute: async () => {
-    // TODO: Wire up portfolio review service in CLI
-    return {
-      success: false,
-      message: 'Portfolio review generation is not yet available in CLI mode.',
-    }
-  },
+  execute: async ({ force }) => generatePortfolioReviewSummary(force),
 }
 
 // ---------------------------------------------------------------------------
@@ -2434,8 +2725,6 @@ const manageCategoryRules: ToolDefinition = {
 
 const getSpendingAnomalies: ToolDefinition = {
   name: 'get-spending-anomalies',
-  mcpUnavailableMessage:
-    'Spending anomaly detection is not available via the Shikin MCP server yet.',
   description:
     'Detect and return spending anomalies such as unusual charges, duplicate transactions, spending spikes, and large transactions.',
   schema: z.object({
@@ -2443,18 +2732,12 @@ const getSpendingAnomalies: ToolDefinition = {
       .number()
       .optional()
       .default(500)
-      .describe('Dollar threshold for flagging large transactions (default $500)'),
+      .describe(
+        'Threshold for flagging large transactions, interpreted independently in each transaction’s own currency (default: 500 units of that currency).'
+      ),
   }),
-  execute: async () => {
-    // TODO: Wire up anomaly detection service
-    return {
-      totalAnomalies: 0,
-      bySeverity: { high: 0, medium: 0, low: 0 },
-      anomalies: [],
-      message:
-        'Spending anomaly detection is not yet available in CLI mode. This will be wired up in a future release.',
-    }
-  },
+  execute: async ({ largeTransactionThreshold }) =>
+    detectSpendingAnomaliesSummary(largeTransactionThreshold),
 }
 
 // ---------------------------------------------------------------------------
@@ -2569,22 +2852,40 @@ const manageRecurringTransaction: ToolDefinition = {
       const id = generateId()
       const amountCentavos = toCentavos(amount)
       const resolvedNextDate = nextDate || dayjs().format('YYYY-MM-DD')
+      const hasCurrencyColumn = recurringRulesHasCurrencyColumn()
 
       await execute(
-        `INSERT INTO recurring_rules (id, description, amount, type, frequency, next_date, end_date, account_id, category_id, notes)
+        hasCurrencyColumn
+          ? `INSERT INTO recurring_rules (id, description, amount, type, frequency, next_date, end_date, account_id, category_id, notes, currency)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+          : `INSERT INTO recurring_rules (id, description, amount, type, frequency, next_date, end_date, account_id, category_id, notes)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [
-          id,
-          description,
-          amountCentavos,
-          type,
-          frequency,
-          resolvedNextDate,
-          endDate ?? null,
-          resolvedAccount.id,
-          resolvedCategory.id,
-          notes ?? null,
-        ]
+        hasCurrencyColumn
+          ? [
+              id,
+              description,
+              amountCentavos,
+              type,
+              frequency,
+              resolvedNextDate,
+              endDate ?? null,
+              resolvedAccount.id,
+              resolvedCategory.id,
+              notes ?? null,
+              resolvedAccount.currency,
+            ]
+          : [
+              id,
+              description,
+              amountCentavos,
+              type,
+              frequency,
+              resolvedNextDate,
+              endDate ?? null,
+              resolvedAccount.id,
+              resolvedCategory.id,
+              notes ?? null,
+            ]
       )
 
       return {
@@ -2605,9 +2906,18 @@ const manageRecurringTransaction: ToolDefinition = {
       }
 
       const rule = existing[0]
+      if (!rule.currency) {
+        return unknownRecurringRuleCurrencyFailure(rule)
+      }
+
       const setClauses: string[] = []
       const params: unknown[] = []
       let paramIdx = 1
+      let resolvedAccount:
+        | { success: true; id: string; currency: string }
+        | { success: false; message: string }
+        | null = null
+      const sourceCurrency = rule.currency
 
       if (description !== undefined) {
         setClauses.push(`description = $${paramIdx++}`)
@@ -2654,12 +2964,32 @@ const manageRecurringTransaction: ToolDefinition = {
       }
 
       if (accountId !== undefined) {
-        const resolvedAccount = resolveAccountId(accountId)
+        resolvedAccount = resolveAccountId(accountId)
         if (!resolvedAccount.success) {
           return { success: false, message: resolvedAccount.message }
         }
+
+        if (rule.account_id !== resolvedAccount.id && sourceCurrency !== resolvedAccount.currency) {
+          return {
+            success: false,
+            message: crossCurrencyMoveMessage(
+              'recurring rule',
+              sourceCurrency,
+              resolvedAccount.currency
+            ),
+          }
+        }
+
         setClauses.push(`account_id = $${paramIdx++}`)
         params.push(resolvedAccount.id)
+      }
+
+      if (recurringRulesHasCurrencyColumn()) {
+        const isMovingAccounts = resolvedAccount?.success && resolvedAccount.id !== rule.account_id
+        if (isMovingAccounts) {
+          setClauses.push(`currency = $${paramIdx++}`)
+          params.push(sourceCurrency)
+        }
       }
 
       if (setClauses.length === 0) {
@@ -2738,7 +3068,7 @@ const materializeRecurring: ToolDefinition = {
 
     // Find due recurring rules
     const dueRules = await query<any>(
-      `SELECT r.*, a.name as account_name
+      `SELECT r.*, a.name as account_name, a.currency as account_currency
        FROM recurring_rules r
        LEFT JOIN accounts a ON r.account_id = a.id
        WHERE r.active = 1 AND r.next_date <= $1`,
@@ -2753,50 +3083,91 @@ const materializeRecurring: ToolDefinition = {
       }
     }
 
+    const unsupportedTransferRule = dueRules.find((rule) => rule.type === 'transfer')
+    if (unsupportedTransferRule) {
+      return unsupportedRecurringTransferFailure()
+    }
+
+    const unknownCurrencyRule = dueRules.find((rule) => !rule.currency)
+    if (unknownCurrencyRule) {
+      return unknownRecurringRuleCurrencyFailure(unknownCurrencyRule)
+    }
+
+    const accountCurrencyMismatchRule = dueRules.find(
+      (rule) => rule.account_currency && rule.currency !== rule.account_currency
+    )
+    if (accountCurrencyMismatchRule) {
+      return {
+        success: false,
+        reason: 'rule_account_currency_mismatch',
+        message: `Recurring rule "${accountCurrencyMismatchRule.description}" has stored currency ${accountCurrencyMismatchRule.currency} but the linked account is now ${accountCurrencyMismatchRule.account_currency}. Repair or recreate the rule before materializing it.`,
+      }
+    }
+
     let created = 0
 
     for (const rule of dueRules) {
-      // Check if past end date
-      if (rule.end_date && rule.next_date > rule.end_date) {
-        await execute(
-          "UPDATE recurring_rules SET active = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $1",
-          [rule.id]
-        )
-        continue
-      }
+      const createdForRule = transaction(() => {
+        let occurrenceDate = rule.next_date
+        let createdWithinRule = 0
 
-      const txId = generateId()
+        while (occurrenceDate <= today) {
+          if (rule.end_date && occurrenceDate > rule.end_date) {
+            const deactivateResult = execute(
+              "UPDATE recurring_rules SET active = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $1 AND active = 1 AND next_date = $2",
+              [rule.id, occurrenceDate]
+            )
+            if (deactivateResult.rowsAffected !== 1) {
+              return createdWithinRule
+            }
+            return createdWithinRule
+          }
 
-      await execute(
-        `INSERT INTO transactions (id, account_id, category_id, type, amount, description, notes, date, is_recurring)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1)`,
-        [
-          txId,
-          rule.account_id,
-          rule.category_id,
-          rule.type,
-          rule.amount,
-          rule.description,
-          rule.notes,
-          rule.next_date,
-        ]
-      )
+          const newNextDate = advanceDate(occurrenceDate, rule.frequency)
+          const shouldDeactivate = Boolean(rule.end_date && newNextDate > rule.end_date)
+          const claimResult = execute(
+            "UPDATE recurring_rules SET active = $1, next_date = $2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $3 AND active = 1 AND next_date = $4",
+            [shouldDeactivate ? 0 : 1, newNextDate, rule.id, occurrenceDate]
+          )
+          if (claimResult.rowsAffected !== 1) {
+            return createdWithinRule
+          }
 
-      // Update account balance
-      const balanceChange = rule.type === 'income' ? rule.amount : -rule.amount
-      await execute(
-        "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
-        [balanceChange, rule.account_id]
-      )
+          const txId = generateId()
 
-      // Advance next_date
-      const newNextDate = advanceDate(rule.next_date, rule.frequency)
-      await execute(
-        "UPDATE recurring_rules SET next_date = $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
-        [newNextDate, rule.id]
-      )
+          execute(
+            `INSERT INTO transactions (id, account_id, category_id, type, amount, currency, description, notes, date, is_recurring)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1)`,
+            [
+              txId,
+              rule.account_id,
+              rule.category_id,
+              rule.type,
+              rule.amount,
+              rule.currency,
+              rule.description,
+              rule.notes,
+              occurrenceDate,
+            ]
+          )
 
-      created++
+          const balanceChange = rule.type === 'income' ? rule.amount : -rule.amount
+          execute(
+            "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
+            [balanceChange, rule.account_id]
+          )
+
+          createdWithinRule += 1
+          occurrenceDate = newNextDate
+          if (shouldDeactivate) {
+            return createdWithinRule
+          }
+        }
+
+        return createdWithinRule
+      })
+
+      created += createdForRule
     }
 
     return {
@@ -2816,7 +3187,6 @@ const materializeRecurring: ToolDefinition = {
 
 const getForecastedCashFlow: ToolDefinition = {
   name: 'get-forecasted-cash-flow',
-  mcpUnavailableMessage: 'Cash flow forecasting is not available via the Shikin MCP server yet.',
   description: 'Get a cash flow forecast showing projected balances, burn rate, and danger dates.',
   schema: z.object({
     days: z
@@ -2825,14 +3195,7 @@ const getForecastedCashFlow: ToolDefinition = {
       .default(30)
       .describe('Number of days to forecast (default 30, max 90)'),
   }),
-  execute: async () => {
-    // TODO: Wire up forecast service
-    return {
-      success: false,
-      message:
-        'Cash flow forecasting is not yet available in CLI mode. This will be wired up in a future release.',
-    }
-  },
+  execute: async ({ days }) => generateCashFlowForecastSummary(days),
 }
 
 // ---------------------------------------------------------------------------
@@ -3122,18 +3485,10 @@ const getGoalStatus: ToolDefinition = {
 
 const getFinancialHealthScore: ToolDefinition = {
   name: 'get-financial-health-score',
-  mcpUnavailableMessage: 'Financial health scoring is not available via the Shikin MCP server yet.',
   description:
     "Calculate the user's financial health score (0-100) with a breakdown across savings rate, budget adherence, debt-to-income, emergency fund, and spending consistency.",
   schema: z.object({}),
-  execute: async () => {
-    // TODO: Wire up health score service
-    return {
-      success: false,
-      message:
-        'Financial health score is not yet available in CLI mode. This will be wired up in a future release.',
-    }
-  },
+  execute: async () => calculateFinancialHealthScoreSummary(),
 }
 
 // ---------------------------------------------------------------------------
@@ -3142,8 +3497,6 @@ const getFinancialHealthScore: ToolDefinition = {
 
 const getSpendingRecap: ToolDefinition = {
   name: 'get-spending-recap',
-  mcpUnavailableMessage:
-    'Spending recap generation is not available via the Shikin MCP server yet.',
   description: 'Generate a natural-language spending recap for a given period.',
   schema: z.object({
     type: z
@@ -3151,17 +3504,13 @@ const getSpendingRecap: ToolDefinition = {
       .describe('Type of recap: weekly (past 7 days) or monthly (full month)'),
     period: z
       .string()
+      .trim()
+      .regex(ISO_DATE_PATTERN, 'Date must be in YYYY-MM-DD format')
+      .refine(isStrictIsoDate, 'Date must be a real calendar date')
       .optional()
       .describe('Optional ISO date (YYYY-MM-DD) to target a specific month.'),
   }),
-  execute: async () => {
-    // TODO: Wire up recap service
-    return {
-      success: false,
-      message:
-        'Spending recap is not yet available in CLI mode. This will be wired up in a future release.',
-    }
-  },
+  execute: async ({ type, period }) => generateSpendingRecapSummary(type, period),
 }
 
 // ---------------------------------------------------------------------------
@@ -3257,6 +3606,7 @@ const convertCurrency: ToolDefinition = {
   execute: async ({ amount, from, to }) => {
     const fromUpper = from.toUpperCase()
     const toUpper = to.toUpperCase()
+    let invalidRateFound = false
 
     if (fromUpper === toUpper) {
       return {
@@ -3272,42 +3622,61 @@ const convertCurrency: ToolDefinition = {
     // Try to find a rate in exchange_rates table
     const directRate = await query<{ rate: number }>(
       `SELECT rate FROM exchange_rates
-       WHERE base_currency = $1 AND target_currency = $2
-       ORDER BY updated_at DESC LIMIT 1`,
+       WHERE from_currency = $1 AND to_currency = $2
+       ORDER BY date DESC, created_at DESC LIMIT 1`,
       [fromUpper, toUpper]
     )
 
     if (directRate.length > 0) {
       const rate = directRate[0].rate
-      const converted = amount * rate
-      return {
-        amount,
-        from: fromUpper,
-        to: toUpper,
-        convertedAmount: Number(converted.toFixed(2)),
-        rate: Number(rate.toFixed(6)),
-        message: `${amount} ${fromUpper} = ${converted.toFixed(2)} ${toUpper} (rate: ${rate.toFixed(4)})`,
+      if (rate > 0) {
+        const converted = amount * rate
+        return {
+          amount,
+          from: fromUpper,
+          to: toUpper,
+          convertedAmount: Number(converted.toFixed(2)),
+          rate: Number(rate.toFixed(6)),
+          message: `${amount} ${fromUpper} = ${converted.toFixed(2)} ${toUpper} (rate: ${rate.toFixed(4)})`,
+        }
       }
+
+      invalidRateFound = true
     }
 
     // Try inverse rate
     const inverseRate = await query<{ rate: number }>(
       `SELECT rate FROM exchange_rates
-       WHERE base_currency = $1 AND target_currency = $2
-       ORDER BY updated_at DESC LIMIT 1`,
+       WHERE from_currency = $1 AND to_currency = $2
+       ORDER BY date DESC, created_at DESC LIMIT 1`,
       [toUpper, fromUpper]
     )
 
     if (inverseRate.length > 0) {
-      const rate = 1 / inverseRate[0].rate
-      const converted = amount * rate
+      if (inverseRate[0].rate > 0) {
+        const rate = 1 / inverseRate[0].rate
+        const converted = amount * rate
+        return {
+          amount,
+          from: fromUpper,
+          to: toUpper,
+          convertedAmount: Number(converted.toFixed(2)),
+          rate: Number(rate.toFixed(6)),
+          message: `${amount} ${fromUpper} = ${converted.toFixed(2)} ${toUpper} (rate: ${rate.toFixed(4)})`,
+        }
+      }
+
+      invalidRateFound = true
+    }
+
+    if (invalidRateFound) {
       return {
         amount,
         from: fromUpper,
         to: toUpper,
-        convertedAmount: Number(converted.toFixed(2)),
-        rate: Number(rate.toFixed(6)),
-        message: `${amount} ${fromUpper} = ${converted.toFixed(2)} ${toUpper} (rate: ${rate.toFixed(4)})`,
+        convertedAmount: null,
+        rate: null,
+        message: `Stored exchange rate for ${fromUpper} to ${toUpper} is invalid. Refresh exchange rates first.`,
       }
     }
 
@@ -3400,7 +3769,6 @@ const splitTransaction: ToolDefinition = {
 
 const getEducationTip: ToolDefinition = {
   name: 'get-education-tip',
-  mcpUnavailableMessage: 'Education tips are not available via the Shikin MCP server yet.',
   description:
     'Get a contextual financial education tip. Use this when the user asks about financial concepts or when educational context would enhance the conversation.',
   schema: z.object({
@@ -3411,16 +3779,7 @@ const getEducationTip: ToolDefinition = {
     action: z.string().optional().describe('The user action that triggered this tip'),
     query: z.string().optional().describe('A free-text query to match against tip content'),
   }),
-  execute: async () => {
-    // TODO: Wire up education service with tip database
-    return {
-      success: false,
-      message:
-        'Education tips are not yet available in CLI mode. This will be wired up in a future release.',
-      disclaimer:
-        'This is educational information, not financial advice. Consider consulting a qualified financial professional for personalized guidance.',
-    }
-  },
+  execute: async ({ topic, action, query }) => getEducationTipSummary({ topic, action, query }),
 }
 
 // ---------------------------------------------------------------------------

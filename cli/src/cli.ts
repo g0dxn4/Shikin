@@ -18,6 +18,8 @@ const EXPECTED_MIGRATIONS = [
   '010_transaction_splits',
   '011_net_worth_snapshots',
   '012_account_balance_history',
+  '013_recurring_rules_currency',
+  '014_recurring_rules_currency_backfill',
 ] as const
 
 function isFailureResult(value: unknown): value is Record<string, unknown> & { success: false } {
@@ -117,6 +119,14 @@ function getOptionWrapperMetadata(schema: z.ZodTypeAny): {
 type DiagnoseSummary = {
   success: boolean
   toolCount: number
+  toolAvailability: {
+    cliAvailable: number
+    cliUnavailable: number
+    cliUnavailableTools: string[]
+    mcpAvailable: number
+    mcpUnavailable: number
+    mcpUnavailableTools: string[]
+  }
   database: {
     ready: boolean
     migrationCount: number
@@ -147,7 +157,8 @@ type DiagnoseSummary = {
   }
 }
 
-function getDiagnoseSummary(toolCount: number, deep: boolean): DiagnoseSummary {
+function getDiagnoseSummary(toolDefinitions: ToolDefinition[], deep: boolean): DiagnoseSummary {
+  const toolCount = toolDefinitions.length
   const migrations = query<{ name: string }>('SELECT name FROM _migrations ORDER BY id ASC')
   const accountCount =
     query<{ count: number }>('SELECT COUNT(*) as count FROM accounts')[0]?.count ?? 0
@@ -156,9 +167,26 @@ function getDiagnoseSummary(toolCount: number, deep: boolean): DiagnoseSummary {
   const transactionCount =
     query<{ count: number }>('SELECT COUNT(*) as count FROM transactions')[0]?.count ?? 0
 
+  const cliUnavailableTools = toolDefinitions
+    .filter((tool) => tool.cliUnavailableMessage)
+    .map((tool) => tool.name)
+    .sort()
+  const mcpUnavailableTools = toolDefinitions
+    .filter((tool) => tool.mcpUnavailableMessage)
+    .map((tool) => tool.name)
+    .sort()
+
   const summary: DiagnoseSummary = {
     success: true,
     toolCount,
+    toolAvailability: {
+      cliAvailable: toolCount - cliUnavailableTools.length,
+      cliUnavailable: cliUnavailableTools.length,
+      cliUnavailableTools,
+      mcpAvailable: toolCount - mcpUnavailableTools.length,
+      mcpUnavailable: mcpUnavailableTools.length,
+      mcpUnavailableTools,
+    },
     database: {
       ready: true,
       migrationCount: migrations.length,
@@ -256,7 +284,7 @@ export function createProgram(toolDefinitions: ToolDefinition[] = tools): Comman
     .action((options: { deep?: boolean }) => {
       try {
         console.log(
-          JSON.stringify(getDiagnoseSummary(toolDefinitions.length, Boolean(options.deep)), null, 2)
+          JSON.stringify(getDiagnoseSummary(toolDefinitions, Boolean(options.deep)), null, 2)
         )
       } catch (err) {
         console.log(
@@ -285,7 +313,11 @@ export function createProgram(toolDefinitions: ToolDefinition[] = tools): Comman
 
       for (const opt of options) {
         const placeholder = opt.isStructured ? '<json>' : '<value>'
-        const flagStr = opt.isBoolean ? `--${opt.flag}` : `--${opt.flag} ${placeholder}`
+        const flagStr = opt.isBoolean
+          ? opt.defaultValue === true
+            ? `--no-${opt.flag}`
+            : `--${opt.flag}`
+          : `--${opt.flag} ${placeholder}`
 
         if (opt.required) {
           cmd.requiredOption(flagStr, opt.description)

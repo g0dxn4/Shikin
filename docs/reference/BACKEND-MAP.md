@@ -14,7 +14,7 @@ This is a practical backend map for the current repo layout. It is a documentati
   - Browser runtime DB/storage calls are funneled through `src/lib/database.ts`, `src/lib/storage.ts`, and `src/lib/virtual-fs.ts`.
 - **CLI mode**
   - `cli/src/cli.ts` registers every command from `cli/src/tools.ts` and runs via Commander.
-  - Current tool surface: **44 tools** (from `cli/src/tools.ts`).
+- Current shared tool surface: **44 tool definitions** (from `cli/src/tools.ts`), including **2 structured unavailable placeholders** for external-feed features.
 - **MCP mode**
   - `cli/src/mcp-server.ts` registers the same `tools` and bootstraps MCP over stdio.
 
@@ -52,7 +52,7 @@ This is a practical backend map for the current repo layout. It is a documentati
    - Calls `close()` from `cli/src/database.ts` in finally.
 
 2. `cli/src/tools.ts`:
-   - Defines 44 command tools (add/update/delete flows, analytics, notebooks, AI memory, goals, etc.).
+   - Defines 44 shared tool definitions (42 available end-to-end, plus 2 structured unavailable placeholders).
    - Each tool is self-contained: schema + business SQL + return payload.
 
 3. `cli/src/database.ts` (CLI-only data layer):
@@ -63,7 +63,7 @@ This is a practical backend map for the current repo layout. It is a documentati
 ## 3) MCP flow
 
 - `cli/src/mcp-server.ts` creates `McpServer({ name: 'shikin', version: '0.1.0' })`.
-- Registers **all 44** tools from `tools` with:
+- Registers **all 44** shared tool definitions from `tools` with:
   - tool name
   - description
   - `tool.schema.shape`

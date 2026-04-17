@@ -68,6 +68,7 @@ type ReviewFilter = 'all' | 'uncategorized'
 
 const FREQUENCIES = ['daily', 'weekly', 'biweekly', 'monthly', 'quarterly', 'yearly'] as const
 const TRANSACTION_TYPES = ['expense', 'income', 'transfer'] as const
+const RECURRING_SUPPORTED_TYPES = ['expense', 'income'] as const
 
 function formatDateHeader(date: string): string {
   const d = dayjs(date)
@@ -551,7 +552,7 @@ function RecurringRuleCard({
         )}
       >
         {rule.type === 'income' ? '+' : '-'}
-        {formatMoney(rule.amount, rule.account_currency ?? 'USD')}
+        {formatMoney(rule.amount, rule.currency ?? rule.account_currency ?? 'USD')}
       </span>
 
       <button
@@ -694,6 +695,10 @@ function RecurringRuleDialog({
   const onSubmit = async (data: RecurringFormValues) => {
     setIsSubmitting(true)
     try {
+      if (data.type === 'transfer') {
+        throw new Error('Recurring transfers are not supported yet.')
+      }
+
       const formData = {
         ...data,
         toAccountId: null,
@@ -740,7 +745,7 @@ function RecurringRuleDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {TRANSACTION_TYPES.map((type) => (
+                {RECURRING_SUPPORTED_TYPES.map((type) => (
                   <SelectItem key={type} value={type}>
                     {t(`types.${type}`)}
                   </SelectItem>

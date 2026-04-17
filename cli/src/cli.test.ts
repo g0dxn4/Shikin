@@ -6,6 +6,7 @@ vi.mock('./tools.js', () => ({ tools: [] }))
 vi.mock('./database.js', () => ({ close: vi.fn(), query: vi.fn() }))
 
 const { close, query } = await import('./database.js')
+const { tools: actualTools } = await vi.importActual<typeof import('./tools.js')>('./tools.js')
 const { coerceInput, createProgram, zodToOptions } = await import('./cli.js')
 
 afterEach(() => {
@@ -76,9 +77,31 @@ describe('CLI option registration', () => {
     expect(options[0]?.isStructured).toBe(true)
     expect(options[0]?.description).toContain('Pass as JSON')
   })
+
+  it('registers default-true booleans as --no-* flags', () => {
+    const schema = z.object({
+      activeOnly: z.boolean().optional().default(true),
+    })
+
+    const options = zodToOptions(schema)
+    expect(options[0]).toMatchObject({
+      flag: 'active-only',
+      isBoolean: true,
+      required: false,
+      defaultValue: true,
+    })
+  })
 })
 
 describe('CLI command execution', () => {
+  it('keeps all tool definitions discoverable as CLI commands', () => {
+    const program = createProgram(actualTools)
+    const commandNames = program.commands.map((command) => command.name())
+
+    expect(commandNames).toContain('diagnose')
+    expect(commandNames).toEqual(expect.arrayContaining(actualTools.map((tool) => tool.name)))
+  })
+
   it('returns a nonzero exit code for tool-level failures while preserving JSON output', async () => {
     const tool = {
       name: 'domain-failure',
@@ -115,7 +138,10 @@ describe('CLI command execution', () => {
 
   it('prints database health details for diagnose', async () => {
     vi.mocked(query)
-      .mockReturnValueOnce([{ name: '001_core_tables' }, { name: '010_transaction_splits' }])
+      .mockReturnValueOnce([
+        { name: '001_core_tables' },
+        { name: '014_recurring_rules_currency_backfill' },
+      ])
       .mockReturnValueOnce([{ count: 2 }])
       .mockReturnValueOnce([{ count: 14 }])
       .mockReturnValueOnce([{ count: 42 }])
@@ -131,10 +157,18 @@ describe('CLI command execution', () => {
         {
           success: true,
           toolCount: 0,
+          toolAvailability: {
+            cliAvailable: 0,
+            cliUnavailable: 0,
+            cliUnavailableTools: [],
+            mcpAvailable: 0,
+            mcpUnavailable: 0,
+            mcpUnavailableTools: [],
+          },
           database: {
             ready: true,
             migrationCount: 2,
-            latestMigration: '010_transaction_splits',
+            latestMigration: '014_recurring_rules_currency_backfill',
             accountCount: 2,
             categoryCount: 14,
             transactionCount: 42,
@@ -162,6 +196,8 @@ describe('CLI command execution', () => {
         { name: '010_transaction_splits' },
         { name: '011_net_worth_snapshots' },
         { name: '012_account_balance_history' },
+        { name: '013_recurring_rules_currency' },
+        { name: '014_recurring_rules_currency_backfill' },
       ])
       .mockReturnValueOnce([{ count: 2 }])
       .mockReturnValueOnce([{ count: 14 }])
@@ -194,10 +230,18 @@ describe('CLI command execution', () => {
         {
           success: true,
           toolCount: 0,
+          toolAvailability: {
+            cliAvailable: 0,
+            cliUnavailable: 0,
+            cliUnavailableTools: [],
+            mcpAvailable: 0,
+            mcpUnavailable: 0,
+            mcpUnavailableTools: [],
+          },
           database: {
             ready: true,
-            migrationCount: 11,
-            latestMigration: '012_account_balance_history',
+            migrationCount: 13,
+            latestMigration: '014_recurring_rules_currency_backfill',
             accountCount: 2,
             categoryCount: 14,
             transactionCount: 42,
@@ -211,8 +255,8 @@ describe('CLI command execution', () => {
                 violations: [],
               },
               migrations: {
-                expected: 11,
-                applied: 11,
+                expected: 13,
+                applied: 13,
                 missing: [],
                 unexpected: [],
               },
@@ -230,6 +274,87 @@ describe('CLI command execution', () => {
               },
             },
           },
+        },
+        null,
+        2
+      )
+    )
+    expect(errorSpy).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports CLI and MCP availability for the real tool catalog', async () => {
+    vi.mocked(query)
+      .mockReturnValueOnce([{ name: '001_core_tables' }])
+      .mockReturnValueOnce([{ count: 1 }])
+      .mockReturnValueOnce([{ count: 2 }])
+      .mockReturnValueOnce([{ count: 3 }])
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const program = createProgram(actualTools)
+
+    await program.parseAsync(['node', 'shikin', 'diagnose'])
+
+    const cliUnavailableTools = actualTools
+      .filter((tool) => tool.cliUnavailableMessage)
+      .map((tool) => tool.name)
+      .sort()
+    const mcpUnavailableTools = actualTools
+      .filter((tool) => tool.mcpUnavailableMessage)
+      .map((tool) => tool.name)
+      .sort()
+
+    expect(logSpy).toHaveBeenCalledWith(
+      JSON.stringify(
+        {
+          success: true,
+          toolCount: actualTools.length,
+          toolAvailability: {
+            cliAvailable: actualTools.length - cliUnavailableTools.length,
+            cliUnavailable: cliUnavailableTools.length,
+            cliUnavailableTools,
+            mcpAvailable: actualTools.length - mcpUnavailableTools.length,
+            mcpUnavailable: mcpUnavailableTools.length,
+            mcpUnavailableTools,
+          },
+          database: {
+            ready: true,
+            migrationCount: 1,
+            latestMigration: '001_core_tables',
+            accountCount: 1,
+            categoryCount: 2,
+            transactionCount: 3,
+          },
+        },
+        null,
+        2
+      )
+    )
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('supports disabling default-true boolean options with --no-* flags', async () => {
+    const tool = {
+      name: 'list-demo',
+      description: 'Test default-true booleans',
+      schema: z.object({
+        activeOnly: z.boolean().optional().default(true),
+      }),
+      execute: vi.fn(async ({ activeOnly }) => ({ success: true, activeOnly })),
+    }
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const program = createProgram([tool])
+
+    await program.parseAsync(['node', 'shikin', 'list-demo', '--no-active-only'])
+
+    expect(tool.execute).toHaveBeenCalledWith({ activeOnly: false })
+    expect(logSpy).toHaveBeenCalledWith(
+      JSON.stringify(
+        {
+          success: true,
+          activeOnly: false,
         },
         null,
         2

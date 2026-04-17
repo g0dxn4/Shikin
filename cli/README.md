@@ -60,9 +60,21 @@ npx tsx src/cli.ts diagnose
 This prints JSON with:
 
 - tool count
+- CLI/MCP available vs unavailable tool counts
+- unavailable tool names by surface
 - migration count
 - latest migration marker
 - account/category/transaction counts
+
+`diagnose` is a CLI-only preflight command. Use it before starting the MCP server when you want a quick readiness check against the shared database and current tool surface.
+
+## MCP Resources
+
+The MCP server also exposes read-only resources:
+
+- `shikin://accounts`
+- `shikin://categories`
+- `shikin://recent-transactions`
 
 ## Environment Variables
 
@@ -75,6 +87,6 @@ This prints JSON with:
 
 ## Current Scope
 
-- CLI and MCP share the same 44-tool catalog in `cli/src/tools.ts`.
-- Some tools are intentionally unavailable through MCP and return structured unavailable responses.
+- CLI and MCP share the same 44-tool definition catalog in `cli/src/tools.ts`.
+- 42 tools are currently available end-to-end; 2 compatibility placeholders (`get-financial-news`, `get-congressional-trades`) return structured unavailable responses on both CLI and MCP surfaces.
 - The app does not ship a built-in AI chat UI; AI integrations connect through MCP or call the CLI directly.

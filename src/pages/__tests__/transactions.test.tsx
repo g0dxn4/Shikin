@@ -51,7 +51,11 @@ vi.mock('@/components/transactions/statement-import-dialog', () => ({
 const mockFetch = vi.fn().mockResolvedValue(undefined)
 const mockRemove = vi.fn()
 const mockOpenTransactionDialog = vi.fn()
+const mockOpenRecurringDialog = vi.fn()
+const mockCloseRecurringDialog = vi.fn()
 const mockFetchRecurring = vi.fn().mockResolvedValue(undefined)
+const mockCreateRecurring = vi.fn()
+const mockUpdateRecurring = vi.fn()
 const mockFetchAccounts = vi.fn().mockResolvedValue(undefined)
 const mockFetchCategories = vi.fn().mockResolvedValue(undefined)
 
@@ -59,12 +63,17 @@ let mockTransactions: unknown[] = []
 let mockIsLoading = false
 let mockTransactionFetchError: string | null = null
 let mockRecurringFetchError: string | null = null
+let mockRecurringDialogOpen = false
+let mockEditingRecurringId: string | null = null
+let mockAccounts: unknown[] = []
+let mockCategories: unknown[] = []
 
 const defaultRecurringRules = [
   {
     id: 'rule-1',
     description: 'Monthly Rent',
     amount: 150000,
+    currency: 'GBP',
     type: 'expense',
     frequency: 'monthly',
     next_date: dayjs().add(1, 'month').format('YYYY-MM-DD'),
@@ -80,6 +89,7 @@ const defaultRecurringRules = [
     id: 'rule-2',
     description: 'Netflix Subscription',
     amount: 1599,
+    currency: 'USD',
     type: 'expense',
     frequency: 'monthly',
     next_date: dayjs().add(15, 'day').format('YYYY-MM-DD'),
@@ -98,10 +108,10 @@ let mockRules = [...defaultRecurringRules]
 vi.mock('@/stores/ui-store', () => ({
   useUIStore: () => ({
     openTransactionDialog: mockOpenTransactionDialog,
-    recurringDialogOpen: false,
-    editingRecurringId: null,
-    openRecurringDialog: vi.fn(),
-    closeRecurringDialog: vi.fn(),
+    recurringDialogOpen: mockRecurringDialogOpen,
+    editingRecurringId: mockEditingRecurringId,
+    openRecurringDialog: mockOpenRecurringDialog,
+    closeRecurringDialog: mockCloseRecurringDialog,
   }),
 }))
 
@@ -112,8 +122,8 @@ vi.mock('@/stores/recurring-store', () => ({
     fetchError: mockRecurringFetchError,
     error: null,
     fetch: mockFetchRecurring,
-    create: vi.fn(),
-    update: vi.fn(),
+    create: mockCreateRecurring,
+    update: mockUpdateRecurring,
     remove: vi.fn(),
     toggleActive: vi.fn(),
     getById: vi.fn(),
@@ -123,7 +133,7 @@ vi.mock('@/stores/recurring-store', () => ({
 
 vi.mock('@/stores/account-store', () => ({
   useAccountStore: () => ({
-    accounts: [],
+    accounts: mockAccounts,
     fetchError: null,
     fetch: mockFetchAccounts,
     fetchAccounts: vi.fn(),
@@ -132,7 +142,7 @@ vi.mock('@/stores/account-store', () => ({
 
 vi.mock('@/stores/category-store', () => ({
   useCategoryStore: () => ({
-    categories: [],
+    categories: mockCategories,
     fetchError: null,
     isLoading: false,
     fetch: mockFetchCategories,
@@ -160,6 +170,10 @@ describe('Transactions', () => {
     mockIsLoading = false
     mockTransactionFetchError = null
     mockRecurringFetchError = null
+    mockRecurringDialogOpen = false
+    mockEditingRecurringId = null
+    mockAccounts = []
+    mockCategories = []
     mockRules = [...defaultRecurringRules]
   })
 
@@ -241,14 +255,25 @@ describe('Transactions', () => {
     expect(screen.getByText('Yesterday')).toBeInTheDocument()
   })
 
-  it('renders recurring amounts using the rule account currency', async () => {
+  it('renders recurring amounts using the stored rule currency when present', async () => {
     const user = userEvent.setup()
 
     render(<Transactions />)
 
     await user.click(screen.getByText('tabs.recurring'))
 
-    expect(screen.getByText(/1,500\.00/)).toBeInTheDocument()
+    expect(screen.getByText(/£1,500\.00/)).toBeInTheDocument()
+  })
+
+  it('does not offer transfer as a recurring rule type', async () => {
+    mockRecurringDialogOpen = true
+    mockAccounts = [{ id: 'acc-1', name: 'Checking' }]
+    mockCategories = [{ id: 'cat-1', name: 'Housing', type: 'expense', color: '#ff0000' }]
+
+    render(<Transactions />)
+
+    expect(screen.getAllByText('types.expense').length).toBeGreaterThan(0)
+    expect(screen.queryByText('types.transfer')).not.toBeInTheDocument()
   })
 
   it('filters to uncategorized transactions from the filter bar', async () => {

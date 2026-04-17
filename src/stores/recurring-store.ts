@@ -1,6 +1,12 @@
 import { create } from 'zustand'
-import { query, execute, runInTransaction } from '@/lib/database'
+import {
+  query,
+  execute,
+  runInTransaction,
+  materializeRecurringTransactionsBrowser,
+} from '@/lib/database'
 import { getErrorMessage } from '@/lib/errors'
+import { isTauri } from '@/lib/runtime'
 import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
 import { useAccountStore } from './account-store'
@@ -66,6 +72,38 @@ function advanceDate(date: string, frequency: RecurringFrequency): string {
   }
 }
 
+async function resolveAccountCurrency(accountId: string): Promise<CurrencyCode> {
+  const accounts = await query<{ currency: CurrencyCode }>(
+    'SELECT currency FROM accounts WHERE id = ? LIMIT 1',
+    [accountId]
+  )
+  if (accounts.length === 0) {
+    throw new Error(`Account ${accountId} not found.`)
+  }
+
+  return accounts[0].currency
+}
+
+function unknownRecurringRuleCurrencyMessage(rule: { id: string; description?: string | null }) {
+  return `${rule.description ? `Recurring rule "${rule.description}"` : `Recurring rule ${rule.id}`} has no stored currency. Repair or recreate the rule before moving or materializing it.`
+}
+
+function crossCurrencyRecurringRuleMoveMessage(from: string, to: string) {
+  return `Cannot move this recurring rule from ${from} to ${to}. Cross-currency moves are not supported because they would change amount semantics without FX conversion.`
+}
+
+function recurringRuleAccountCurrencyMismatchMessage(rule: {
+  description?: string | null
+  currency: string | null
+  account_currency?: string
+}) {
+  return `Recurring rule "${rule.description ?? 'Unknown rule'}" has stored currency ${rule.currency ?? 'unknown'} but the linked account is now ${rule.account_currency ?? 'unknown'}. Repair or recreate the rule before materializing it.`
+}
+
+function unsupportedRecurringTransferMessage() {
+  return 'Recurring transfers are not supported yet. Create separate recurring income/expense rules until destination-account support is fully implemented.'
+}
+
 export const useRecurringStore = create<RecurringState>((set, get) => ({
   rules: [],
   isLoading: false,
@@ -94,17 +132,23 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
   create: async (data) => {
     set({ error: null })
     try {
+      if (data.type === 'transfer') {
+        throw new Error(unsupportedRecurringTransferMessage())
+      }
+
       const id = generateId()
       const now = new Date().toISOString()
       const amountCentavos = toCentavos(data.amount)
+      const currency = await resolveAccountCurrency(data.accountId)
 
       await execute(
-        `INSERT INTO recurring_rules (id, description, amount, type, frequency, next_date, end_date, account_id, to_account_id, category_id, subcategory_id, tags, notes, active, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+        `INSERT INTO recurring_rules (id, description, amount, currency, type, frequency, next_date, end_date, account_id, to_account_id, category_id, subcategory_id, tags, notes, active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
         [
           id,
           data.description,
           amountCentavos,
+          currency,
           data.type,
           data.frequency,
           data.nextDate,
@@ -134,15 +178,43 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
   update: async (id, data) => {
     set({ error: null })
     try {
+      if (data.type === 'transfer') {
+        throw new Error(unsupportedRecurringTransferMessage())
+      }
+
+      const existing = await query<RecurringRule>(
+        'SELECT * FROM recurring_rules WHERE id = ? LIMIT 1',
+        [id]
+      )
+      if (existing.length === 0) {
+        throw new Error(`Recurring rule ${id} not found.`)
+      }
+
+      const rule = existing[0]
+      if (!rule.currency) {
+        throw new Error(unknownRecurringRuleCurrencyMessage(rule))
+      }
+
       const now = new Date().toISOString()
       const amountCentavos = toCentavos(data.amount)
+      const isMovingAccounts = data.accountId !== rule.account_id
+      let currency = rule.currency
+
+      if (isMovingAccounts) {
+        const targetCurrency = await resolveAccountCurrency(data.accountId)
+        if (targetCurrency !== rule.currency) {
+          throw new Error(crossCurrencyRecurringRuleMoveMessage(rule.currency, targetCurrency))
+        }
+        currency = targetCurrency
+      }
 
       await execute(
-        `UPDATE recurring_rules SET description = ?, amount = ?, type = ?, frequency = ?, next_date = ?, end_date = ?, account_id = ?, to_account_id = ?, category_id = ?, subcategory_id = ?, tags = ?, notes = ?, updated_at = ?
+        `UPDATE recurring_rules SET description = ?, amount = ?, currency = ?, type = ?, frequency = ?, next_date = ?, end_date = ?, account_id = ?, to_account_id = ?, category_id = ?, subcategory_id = ?, tags = ?, notes = ?, updated_at = ?
          WHERE id = ?`,
         [
           data.description,
           amountCentavos,
+          currency,
           data.type,
           data.frequency,
           data.nextDate,
@@ -216,6 +288,18 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
   materializeTransactions: async () => {
     set({ error: null })
     try {
+      if (!isTauri) {
+        const result = await materializeRecurringTransactionsBrowser()
+
+        if (result.created > 0) {
+          await useTransactionStore.getState().fetch()
+          await useAccountStore.getState().fetch()
+          await get().fetch()
+        }
+
+        return result.created
+      }
+
       const today = dayjs().format('YYYY-MM-DD')
 
       // Get all active rules where next_date <= today
@@ -229,6 +313,23 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
 
       let created = 0
 
+      const unsupportedTransferRule = dueRules.find((rule) => rule.type === 'transfer')
+      if (unsupportedTransferRule) {
+        throw new Error(unsupportedRecurringTransferMessage())
+      }
+
+      const unknownCurrencyRule = dueRules.find((rule) => !rule.currency)
+      if (unknownCurrencyRule) {
+        throw new Error(unknownRecurringRuleCurrencyMessage(unknownCurrencyRule))
+      }
+
+      const accountCurrencyMismatchRule = dueRules.find(
+        (rule) => rule.account_currency && rule.currency !== rule.account_currency
+      )
+      if (accountCurrencyMismatchRule) {
+        throw new Error(recurringRuleAccountCurrencyMismatchMessage(accountCurrencyMismatchRule))
+      }
+
       for (const rule of dueRules) {
         const createdForRule = await runInTransaction(async () => {
           let nextDate = rule.next_date
@@ -238,12 +339,24 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
           while (nextDate <= today) {
             // Check end_date
             if (rule.end_date && nextDate > rule.end_date) {
-              // Deactivate the rule
-              await execute(
-                "UPDATE recurring_rules SET active = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
-                [rule.id]
+              const deactivateResult = await execute(
+                "UPDATE recurring_rules SET active = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND active = 1 AND next_date = ?",
+                [rule.id, nextDate]
               )
+              if (deactivateResult.rowsAffected !== 1) {
+                return ruleCreated
+              }
               break
+            }
+
+            const newNextDate = advanceDate(nextDate, rule.frequency as RecurringFrequency)
+            const shouldDeactivate = !!rule.end_date && newNextDate > rule.end_date
+            const claimResult = await execute(
+              "UPDATE recurring_rules SET active = ?, next_date = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND active = 1 AND next_date = ?",
+              [shouldDeactivate ? 0 : 1, newNextDate, rule.id, nextDate]
+            )
+            if (claimResult.rowsAffected !== 1) {
+              return ruleCreated
             }
 
             const txId = generateId()
@@ -257,7 +370,7 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
                 rule.subcategory_id,
                 rule.type,
                 rule.amount,
-                rule.account_currency ?? 'USD',
+                rule.currency,
                 rule.description,
                 rule.notes,
                 nextDate,
@@ -273,30 +386,11 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
               [balanceDelta, rule.account_id]
             )
 
-            // Handle transfer: credit the destination account
-            if (rule.type === 'transfer' && rule.to_account_id) {
-              await execute(
-                "UPDATE accounts SET balance = balance + ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
-                [rule.amount, rule.to_account_id]
-              )
-            }
-
             ruleCreated++
-            nextDate = advanceDate(nextDate, rule.frequency as RecurringFrequency)
-          }
-
-          // Update the rule's next_date
-          // Check if the rule should be deactivated
-          if (rule.end_date && nextDate > rule.end_date) {
-            await execute(
-              "UPDATE recurring_rules SET active = 0, next_date = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
-              [nextDate, rule.id]
-            )
-          } else {
-            await execute(
-              "UPDATE recurring_rules SET next_date = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
-              [nextDate, rule.id]
-            )
+            nextDate = newNextDate
+            if (shouldDeactivate) {
+              break
+            }
           }
 
           return ruleCreated

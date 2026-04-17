@@ -8,6 +8,14 @@ type TauriDatabase = {
   close(): Promise<void>
 }
 
+export type TransactionClient = {
+  query<T>(sql: string, bindValues?: unknown[]): Promise<T[]>
+  execute(
+    sql: string,
+    bindValues?: unknown[]
+  ): Promise<{ rowsAffected: number; lastInsertId: number }>
+}
+
 // ── State ──────────────────────────────────────────────────────────────────
 
 let tauriDb: TauriDatabase | null = null
@@ -321,7 +329,8 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
     }
 
     // Pragmatic upgrade backfill for pre-013 rules so existing users keep functioning.
-    // Runtime still treats any remaining NULL currencies as unsafe.
+    // Policy: keep backfill best-effort, then surface any unsafe legacy rows through
+    // runtime guards and CLI diagnose --deep observability.
     await db.execute(`
       UPDATE recurring_rules
       SET currency = (
@@ -337,6 +346,7 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
   }
 
   // --- Migration 014: Recurring Rules Currency Backfill Repair ---
+  // Maintains pragmatic backfill behavior; unresolved rows remain observable in diagnose.
   if (!applied.has('014_recurring_rules_currency_backfill')) {
     await db.execute(`
       UPDATE recurring_rules
@@ -395,6 +405,130 @@ async function verifyBrowserServer(): Promise<void> {
   }
 }
 
+async function browserQuery<T>(
+  sql: string,
+  bindValues: unknown[] = [],
+  transactionId?: string
+): Promise<T[]> {
+  return browserFetch<T[]>('/api/db/query', {
+    sql,
+    params: bindValues,
+    ...(transactionId ? { transactionId } : {}),
+  })
+}
+
+async function browserExecute(
+  sql: string,
+  bindValues: unknown[] = [],
+  transactionId?: string
+): Promise<{ rowsAffected: number; lastInsertId: number }> {
+  return browserFetch<{ rowsAffected: number; lastInsertId: number }>('/api/db/execute', {
+    sql,
+    params: bindValues,
+    ...(transactionId ? { transactionId } : {}),
+  })
+}
+
+function createBrowserTransactionClient(transactionId: string): TransactionClient {
+  return {
+    query: <T>(sql: string, bindValues?: unknown[]) =>
+      browserQuery<T>(sql, bindValues || [], transactionId),
+    execute: (sql: string, bindValues?: unknown[]) =>
+      browserExecute(sql, bindValues || [], transactionId),
+  }
+}
+
+async function beginBrowserTransaction(): Promise<string> {
+  const result = await browserFetch<{ transactionId?: string }>('/api/db/transaction', {
+    action: 'begin',
+  })
+
+  if (!result.transactionId) {
+    throw new Error('Data server did not return a transaction ID.')
+  }
+
+  return result.transactionId
+}
+
+async function finalizeBrowserTransaction(
+  action: 'commit' | 'rollback',
+  transactionId: string
+): Promise<{ ok: boolean; status?: string }> {
+  return browserFetch<{ ok: boolean; status?: string }>('/api/db/transaction', {
+    action,
+    transactionId,
+  })
+}
+
+function assertBrowserTransactionFinalStatus(
+  action: 'commit' | 'rollback',
+  result: { ok: boolean; status?: string }
+) {
+  if (!result.ok) {
+    throw new Error(`Browser transaction ${action} failed.`)
+  }
+
+  if (action === 'commit' && result.status !== 'committed') {
+    throw new Error(
+      `Browser transaction did not commit successfully (status: ${result.status ?? 'unknown'}).`
+    )
+  }
+
+  if (
+    action === 'rollback' &&
+    result.status !== 'rolled_back' &&
+    result.status !== 'expired_rolled_back'
+  ) {
+    throw new Error(
+      `Browser transaction did not roll back cleanly (status: ${result.status ?? 'unknown'}).`
+    )
+  }
+}
+
+export async function withTransaction<T>(fn: (tx: TransactionClient) => Promise<T>): Promise<T> {
+  if (isTauri) {
+    const database = await getTauriDb()
+    await database.execute('BEGIN')
+
+    const tx: TransactionClient = {
+      query: <T>(sql: string, bindValues?: unknown[]) =>
+        database.select<T[]>(sql, bindValues || []),
+      execute: (sql: string, bindValues?: unknown[]) => database.execute(sql, bindValues || []),
+    }
+
+    try {
+      const result = await fn(tx)
+      await database.execute('COMMIT')
+      return result
+    } catch (error) {
+      await database.execute('ROLLBACK')
+      throw error
+    }
+  }
+
+  const transactionId = await beginBrowserTransaction()
+  const tx = createBrowserTransactionClient(transactionId)
+
+  try {
+    const result = await fn(tx)
+    assertBrowserTransactionFinalStatus(
+      'commit',
+      await finalizeBrowserTransaction('commit', transactionId)
+    )
+    return result
+  } catch (error) {
+    try {
+      assertBrowserTransactionFinalStatus(
+        'rollback',
+        await finalizeBrowserTransaction('rollback', transactionId)
+      )
+    } catch {
+      // Preserve the original application error when rollback transport also fails.
+    }
+    throw error
+  }
+}
+
 // ── Public API ─────────────────────────────────────────────────────────────
 // These signatures are consumed by 74+ files — do NOT change them.
 
@@ -407,13 +541,10 @@ export async function getDb(): Promise<TauriDatabase> {
   await verifyBrowserServer()
   return {
     select: async <T>(sql: string, params?: unknown[]): Promise<T> => {
-      return browserFetch<T>('/api/db/query', { sql, params: params || [] })
+      return browserQuery<T>(sql, params || []) as Promise<T>
     },
     execute: async (sql: string, params?: unknown[]) => {
-      return browserFetch<{ rowsAffected: number; lastInsertId: number }>('/api/db/execute', {
-        sql,
-        params: params || [],
-      })
+      return browserExecute(sql, params || [])
     },
     close: async () => {
       // No-op for browser mode
@@ -426,7 +557,7 @@ export async function query<T>(sql: string, bindValues?: unknown[]): Promise<T[]
     const database = await getTauriDb()
     return database.select<T[]>(sql, bindValues || [])
   }
-  return browserFetch<T[]>('/api/db/query', { sql, params: bindValues || [] })
+  return browserQuery<T>(sql, bindValues || [])
 }
 
 export async function execute(
@@ -437,36 +568,24 @@ export async function execute(
     const database = await getTauriDb()
     return database.execute(sql, bindValues || [])
   }
-  return browserFetch<{ rowsAffected: number; lastInsertId: number }>('/api/db/execute', {
-    sql,
-    params: bindValues || [],
-  })
+  return browserExecute(sql, bindValues || [])
 }
 
 export async function runInTransaction<T>(fn: () => Promise<T>): Promise<T> {
-  if (isTauri) {
-    const database = await getTauriDb()
-    await database.execute('BEGIN')
-    try {
-      const result = await fn()
-      await database.execute('COMMIT')
-      return result
-    } catch (error) {
-      await database.execute('ROLLBACK')
-      throw error
-    }
+  if (!isTauri) {
+    throw new Error(
+      'runInTransaction() is only supported in Tauri mode. Use withTransaction() for generic browser transaction flows, or a dedicated server endpoint for domain-specific browser workflows.'
+    )
   }
 
-  // Browser mode: the data server uses better-sqlite3 which is synchronous
-  // and single-threaded, so we just execute the statements sequentially.
-  // Wrap in BEGIN/COMMIT for atomicity on the server side.
-  await browserFetch('/api/db/execute', { sql: 'BEGIN', params: [] })
+  const database = await getTauriDb()
+  await database.execute('BEGIN')
   try {
     const result = await fn()
-    await browserFetch('/api/db/execute', { sql: 'COMMIT', params: [] })
+    await database.execute('COMMIT')
     return result
   } catch (error) {
-    await browserFetch('/api/db/execute', { sql: 'ROLLBACK', params: [] })
+    await database.execute('ROLLBACK')
     throw error
   }
 }

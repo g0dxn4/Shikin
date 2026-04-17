@@ -160,6 +160,7 @@ describe('account-store', () => {
 
   describe('update', () => {
     it('updates account with centavo conversion and re-fetches', async () => {
+      mockQuery.mockResolvedValueOnce([{ currency: 'EUR' }])
       mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
       mockQuery.mockResolvedValueOnce([]) // re-fetch
 
@@ -181,7 +182,81 @@ describe('account-store', () => {
           '01ACC001',
         ])
       )
-      expect(mockQuery).toHaveBeenCalledTimes(1)
+      expect(mockQuery).toHaveBeenCalledTimes(2)
+    })
+
+    it('rejects account currency changes while recurring rules still point at the account', async () => {
+      mockQuery
+        .mockResolvedValueOnce([{ currency: 'USD' }])
+        .mockResolvedValueOnce([{ currency: 'BRL' }])
+
+      await expect(
+        useAccountStore.getState().update('01ACC001', {
+          name: 'Updated',
+          type: 'checking',
+          currency: 'EUR',
+          balance: 200,
+        })
+      ).rejects.toThrow(
+        'Cannot change this account currency while 1 recurring rule(s) still point at the account. Repair, move, or recreate those recurring rules first so scheduled amounts do not silently change meaning.'
+      )
+
+      expect(mockExecute).not.toHaveBeenCalled()
+      expect(useAccountStore.getState().error).toBe(
+        'Cannot change this account currency while 1 recurring rule(s) still point at the account. Repair, move, or recreate those recurring rules first so scheduled amounts do not silently change meaning.'
+      )
+    })
+
+    it('allows currency normalization-only saves when recurring rules depend on the account', async () => {
+      mockQuery.mockResolvedValueOnce([{ currency: ' usd ' }])
+      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockQuery.mockResolvedValueOnce([])
+
+      await useAccountStore.getState().update('01ACC001', {
+        name: 'Updated',
+        type: 'checking',
+        currency: 'USD',
+        balance: 200,
+      })
+
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE accounts SET'),
+        expect.arrayContaining([
+          'Updated',
+          'checking',
+          'USD',
+          20000,
+          expect.any(String),
+          '01ACC001',
+        ])
+      )
+    })
+
+    it('allows repairing account currency when dependent recurring rules already match the target', async () => {
+      mockQuery
+        .mockResolvedValueOnce([{ currency: 'EUR' }])
+        .mockResolvedValueOnce([{ currency: 'USD' }, { currency: ' usd ' }])
+      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockQuery.mockResolvedValueOnce([])
+
+      await useAccountStore.getState().update('01ACC001', {
+        name: 'Updated',
+        type: 'checking',
+        currency: 'USD',
+        balance: 200,
+      })
+
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE accounts SET'),
+        expect.arrayContaining([
+          'Updated',
+          'checking',
+          'USD',
+          20000,
+          expect.any(String),
+          '01ACC001',
+        ])
+      )
     })
   })
 

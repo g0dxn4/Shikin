@@ -43,10 +43,14 @@ function openDatabase() {
   const database = new Database(DB_PATH)
   database.pragma('journal_mode = WAL')
   database.pragma('foreign_keys = ON')
+  database.pragma('busy_timeout = 5000')
   return database
 }
 
 let db = openDatabase()
+const TRANSACTION_TTL_MS = Number(process.env.SHIKIN_SERVER_TRANSACTION_TTL_MS || 15000)
+const activeTransactions = new Map()
+const closedTransactions = new Map()
 
 // ── SQL Parameter Conversion ───────────────────────────────────────────────
 // The codebase uses $1, $2, ... positional params; better-sqlite3 uses ?
@@ -507,6 +511,9 @@ CREATE INDEX IF NOT EXISTS idx_account_balance_account ON account_balance_histor
       db.exec(`ALTER TABLE recurring_rules ADD COLUMN currency TEXT;`)
     }
 
+    // Pragmatic upgrade backfill for pre-013 rules so existing users keep functioning.
+    // Policy: keep backfill best-effort, then surface any unsafe legacy rows through
+    // runtime guards and CLI diagnose --deep observability.
     db.exec(`
 UPDATE recurring_rules
 SET currency = (
@@ -523,6 +530,7 @@ WHERE (currency IS NULL OR TRIM(currency) = '') AND account_id IS NOT NULL;
   }
 
   // --- Migration 014: Recurring Rules Currency Backfill Repair ---
+  // Maintains pragmatic backfill behavior; unresolved rows remain observable in diagnose.
   if (!applied.has('014_recurring_rules_currency_backfill')) {
     db.exec(`
 UPDATE recurring_rules
@@ -634,6 +642,129 @@ function sendError(res, message, status = 500) {
   sendJson(res, { error: message }, status)
 }
 
+function createHttpError(message, statusCode) {
+  const error = new Error(message)
+  error.statusCode = statusCode
+  return error
+}
+
+function rememberClosedTransaction(transactionId, status) {
+  const existing = closedTransactions.get(transactionId)
+  if (existing) {
+    clearTimeout(existing.timeout)
+  }
+
+  const timeout = setTimeout(() => {
+    closedTransactions.delete(transactionId)
+  }, TRANSACTION_TTL_MS)
+  closedTransactions.set(transactionId, { status, timeout })
+}
+
+function normalizeTransactionId(transactionId, { allowUndefined = false } = {}) {
+  if (transactionId === undefined) {
+    if (allowUndefined) {
+      return undefined
+    }
+    throw createHttpError('Missing transactionId', 400)
+  }
+
+  if (typeof transactionId !== 'string' || transactionId.trim() === '') {
+    throw createHttpError('Invalid transactionId', 400)
+  }
+
+  return transactionId.trim()
+}
+
+function scheduleTransactionExpiry(transactionId) {
+  const entry = activeTransactions.get(transactionId)
+  if (!entry) {
+    return
+  }
+
+  clearTimeout(entry.timeout)
+  entry.timeout = setTimeout(() => {
+    const staleEntry = activeTransactions.get(transactionId)
+    if (!staleEntry) {
+      return
+    }
+
+    try {
+      staleEntry.db.exec('ROLLBACK')
+    } catch {
+      // Best-effort cleanup for abandoned transactions.
+    } finally {
+      activeTransactions.delete(transactionId)
+      staleEntry.db.close()
+      rememberClosedTransaction(transactionId, 'expired_rolled_back')
+    }
+  }, TRANSACTION_TTL_MS)
+}
+
+function beginServerTransaction() {
+  const transactionId = ulid()
+  const transactionDb = openDatabase()
+  transactionDb.exec('BEGIN')
+  activeTransactions.set(transactionId, { db: transactionDb, timeout: null })
+  scheduleTransactionExpiry(transactionId)
+  return transactionId
+}
+
+function getDatabaseForRequest(transactionId) {
+  const normalizedTransactionId = normalizeTransactionId(transactionId, { allowUndefined: true })
+  if (!normalizedTransactionId) {
+    return db
+  }
+
+  const transactionEntry = activeTransactions.get(normalizedTransactionId)
+  if (!transactionEntry) {
+    const closedEntry = closedTransactions.get(normalizedTransactionId)
+    if (closedEntry) {
+      throw createHttpError(
+        `Transaction already ${closedEntry.status.replaceAll('_', ' ')}: ${normalizedTransactionId}`,
+        409
+      )
+    }
+
+    throw createHttpError(`Unknown transaction: ${normalizedTransactionId}`, 404)
+  }
+
+  scheduleTransactionExpiry(normalizedTransactionId)
+  return transactionEntry.db
+}
+
+function closeServerTransaction(transactionId, action) {
+  const normalizedTransactionId = normalizeTransactionId(transactionId)
+  const transactionEntry = activeTransactions.get(normalizedTransactionId)
+  if (!transactionEntry) {
+    const closedEntry = closedTransactions.get(normalizedTransactionId)
+    if (closedEntry) {
+      return { ok: true, status: closedEntry.status }
+    }
+
+    throw createHttpError(`Unknown transaction: ${normalizedTransactionId}`, 404)
+  }
+
+  try {
+    transactionEntry.db.exec(action === 'commit' ? 'COMMIT' : 'ROLLBACK')
+  } finally {
+    clearTimeout(transactionEntry.timeout)
+    activeTransactions.delete(normalizedTransactionId)
+    transactionEntry.db.close()
+    rememberClosedTransaction(
+      normalizedTransactionId,
+      action === 'commit' ? 'committed' : 'rolled_back'
+    )
+  }
+
+  return { ok: true, status: action === 'commit' ? 'committed' : 'rolled_back' }
+}
+
+function ensureNoActiveTransactions(operation) {
+  if (activeTransactions.size > 0) {
+    throw createHttpError(`Cannot ${operation} while server-side transactions are active.`, 409)
+  }
+}
+
 function advanceRecurringDate(date, frequency) {
   const d = dayjs(date)
   switch (frequency) {
@@ -656,6 +787,10 @@ function advanceRecurringDate(date, frequency) {
 
 function unknownRecurringRuleCurrencyMessage(rule) {
   return `${rule.description ? `Recurring rule "${rule.description}"` : `Recurring rule ${rule.id}`} has no stored currency. Repair or recreate the rule before moving or materializing it.`
+}
+
+function normalizeRecurringCurrency(value) {
+  return typeof value === 'string' ? value.trim().toUpperCase() : ''
 }
 
 function recurringRuleAccountCurrencyMismatchMessage(rule) {
@@ -695,7 +830,9 @@ function materializeRecurringBatch() {
       }
     }
 
-    const unknownCurrencyRule = dueRules.find((rule) => !rule.currency)
+    const unknownCurrencyRule = dueRules.find(
+      (rule) => normalizeRecurringCurrency(rule.currency) === ''
+    )
     if (unknownCurrencyRule) {
       return {
         success: false,
@@ -704,9 +841,11 @@ function materializeRecurringBatch() {
       }
     }
 
-    const accountCurrencyMismatchRule = dueRules.find(
-      (rule) => rule.account_currency && rule.currency !== rule.account_currency
-    )
+    const accountCurrencyMismatchRule = dueRules.find((rule) => {
+      const ruleCurrency = normalizeRecurringCurrency(rule.currency)
+      const accountCurrency = normalizeRecurringCurrency(rule.account_currency)
+      return ruleCurrency !== '' && (accountCurrency === '' || ruleCurrency !== accountCurrency)
+    })
     if (accountCurrencyMismatchRule) {
       return {
         success: false,
@@ -756,7 +895,7 @@ function materializeRecurringBatch() {
           rule.subcategory_id,
           rule.type,
           rule.amount,
-          rule.currency,
+          normalizeRecurringCurrency(rule.currency),
           rule.description,
           rule.notes,
           occurrenceDate,
@@ -829,7 +968,8 @@ const server = createServer(async (req, res) => {
       const body = await readBody(req)
       const sql = convertParams(body.sql || '')
       const params = body.params || []
-      const rows = db.prepare(sql).all(...params)
+      const database = getDatabaseForRequest(body.transactionId)
+      const rows = database.prepare(sql).all(...params)
       return sendJson(res, rows)
     }
 
@@ -838,11 +978,27 @@ const server = createServer(async (req, res) => {
       const body = await readBody(req)
       const sql = convertParams(body.sql || '')
       const params = body.params || []
-      const result = db.prepare(sql).run(...params)
+      const database = getDatabaseForRequest(body.transactionId)
+      const result = database.prepare(sql).run(...params)
       return sendJson(res, {
         rowsAffected: result.changes,
         lastInsertId: Number(result.lastInsertRowid),
       })
+    }
+
+    // ── Database: Transaction lifecycle ─────────────────────────────
+    if (path === '/api/db/transaction' && req.method === 'POST') {
+      const body = await readBody(req)
+
+      if (body.action === 'begin') {
+        return sendJson(res, { transactionId: beginServerTransaction() })
+      }
+
+      if (body.action === 'commit' || body.action === 'rollback') {
+        return sendJson(res, closeServerTransaction(body.transactionId, body.action))
+      }
+
+      return sendError(res, 'Unsupported transaction action', 400)
     }
 
     // ── Recurring: Materialize server-side atomically ─────────────────
@@ -1031,6 +1187,7 @@ const server = createServer(async (req, res) => {
 
     // ── DB: Export (binary) ────────────────────────────────────────
     if (path === '/api/db/export' && req.method === 'GET') {
+      ensureNoActiveTransactions('export the database')
       // Checkpoint WAL to ensure all data is in main DB file
       checkpointWal(db, { requireComplete: true })
       const bytes = readFileSync(DB_PATH)
@@ -1046,6 +1203,7 @@ const server = createServer(async (req, res) => {
 
     // ── DB: Import (binary) ────────────────────────────────────────
     if (path === '/api/db/import' && req.method === 'POST') {
+      ensureNoActiveTransactions('import a database snapshot')
       const buffer = await readBuffer(req, {
         maxBytes: MAX_DB_IMPORT_BYTES,
         label: 'Database import payload',

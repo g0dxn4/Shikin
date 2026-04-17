@@ -16,7 +16,7 @@ graph LR
     useChat["useChat()"] --> DCT[DirectChatTransport]
     DCT --> TLA[ToolLoopAgent]
     TLA --> Model[Language Model]
-    TLA --> Tools["42 Tools"]
+    TLA --> Tools["42 Historical Tools"]
     Tools --> DB[(SQLite)]
 ```
 
@@ -46,7 +46,7 @@ graph LR
 
 ---
 
-## All 42 Tools
+## All 42 Historical Tools
 
 ### Transaction Tools (5)
 
@@ -156,10 +156,10 @@ graph LR
 
 ### Utility Tools (2)
 
-| Tool              | File                   | Description                             |
-| ----------------- | ---------------------- | --------------------------------------- |
-| `convertCurrency` | `convert-currency.ts`  | Convert between currencies (live rates) |
-| `getEducationTip` | `get-education-tip.ts` | Contextual financial education tips     |
+| Tool              | File                   | Description                                      |
+| ----------------- | ---------------------- | ------------------------------------------------ |
+| `convertCurrency` | `convert-currency.ts`  | Convert between currencies (cached stored rates) |
+| `getEducationTip` | `get-education-tip.ts` | Contextual financial education tips              |
 
 ---
 

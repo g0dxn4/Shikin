@@ -1,20 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { TransactionClient } from '@/lib/database'
 
 const runtimeState = vi.hoisted(() => ({ isTauri: true }))
 
-vi.mock('@/lib/database', () => ({
+const databaseMocks = vi.hoisted(() => ({
   query: vi.fn(),
   execute: vi.fn(),
-  runInTransaction: vi.fn(async (fn: () => Promise<unknown>) => fn()),
+  withTransaction: vi.fn(),
   materializeRecurringTransactionsBrowser: vi.fn(),
+}))
+
+vi.mock('@/lib/database', () => ({
+  query: databaseMocks.query,
+  execute: databaseMocks.execute,
+  withTransaction: databaseMocks.withTransaction,
+  materializeRecurringTransactionsBrowser: databaseMocks.materializeRecurringTransactionsBrowser,
 }))
 
 vi.mock('@/lib/runtime', () => ({
   get isTauri() {
     return runtimeState.isTauri
   },
-  DATA_SERVER_URL: 'http://127.0.0.1:1480',
-  withDataServerHeaders: (headers?: HeadersInit) => new Headers(headers),
 }))
 
 vi.mock('@/lib/ulid', () => ({
@@ -38,14 +44,14 @@ vi.mock('../account-store', () => ({
 import {
   query,
   execute,
-  runInTransaction,
+  withTransaction,
   materializeRecurringTransactionsBrowser,
 } from '@/lib/database'
 import { useRecurringStore } from '../recurring-store'
 
 const mockQuery = vi.mocked(query)
 const mockExecute = vi.mocked(execute)
-const mockRunInTransaction = vi.mocked(runInTransaction)
+const mockWithTransaction = vi.mocked(withTransaction)
 const mockMaterializeRecurringTransactionsBrowser = vi.mocked(
   materializeRecurringTransactionsBrowser
 )
@@ -57,7 +63,10 @@ describe('recurring-store', () => {
     mockQuery.mockReset()
     mockExecute.mockReset()
     mockMaterializeRecurringTransactionsBrowser.mockReset()
-    mockRunInTransaction.mockImplementation(async (fn: () => Promise<unknown>) => fn())
+    mockWithTransaction.mockImplementation(
+      async (fn: (tx: TransactionClient) => Promise<unknown>) =>
+        fn({ query: databaseMocks.query, execute: databaseMocks.execute } as TransactionClient)
+    )
     useRecurringStore.setState({ rules: [], isLoading: false, fetchError: null, error: null })
   })
 
@@ -117,7 +126,7 @@ describe('recurring-store', () => {
   describe('create', () => {
     it('inserts rule with centavos and next_date', async () => {
       mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
-      mockQuery.mockResolvedValueOnce([{ currency: 'EUR' }])
+      mockQuery.mockResolvedValueOnce([{ currency: ' eur ' }])
       mockQuery.mockResolvedValueOnce([]) // re-fetch
 
       await useRecurringStore.getState().create({
@@ -173,6 +182,31 @@ describe('recurring-store', () => {
 
       expect(useRecurringStore.getState().error).toBeNull()
       expect(useRecurringStore.getState().fetchError).toBe('refresh failed')
+    })
+
+    it('rejects recurring-rule creation when the linked account currency is invalid after normalization', async () => {
+      mockQuery.mockResolvedValueOnce([{ currency: '   ' }])
+
+      await expect(
+        useRecurringStore.getState().create({
+          description: 'Rent',
+          amount: 1500,
+          type: 'expense',
+          frequency: 'monthly',
+          nextDate: '2026-04-01',
+          endDate: null,
+          accountId: '01ACC001',
+          toAccountId: null,
+          categoryId: '01CAT001',
+          subcategoryId: null,
+          tags: '',
+          notes: 'Monthly rent',
+        })
+      ).rejects.toThrow(
+        'Account 01ACC001 has no valid stored currency. Repair the account currency before creating or updating recurring rules.'
+      )
+
+      expect(mockExecute).not.toHaveBeenCalled()
     })
 
     it('rejects unsupported recurring transfers', async () => {
@@ -440,7 +474,7 @@ describe('recurring-store', () => {
 
       expect(created).toBe(2)
       expect(mockMaterializeRecurringTransactionsBrowser).toHaveBeenCalledTimes(1)
-      expect(mockRunInTransaction).not.toHaveBeenCalled()
+      expect(mockWithTransaction).not.toHaveBeenCalled()
       expect(mockExecute).not.toHaveBeenCalled()
       expect(mockTxFetch).toHaveBeenCalledTimes(1)
       expect(mockAccountFetch).toHaveBeenCalledTimes(1)
@@ -481,6 +515,7 @@ describe('recurring-store', () => {
       const created = await useRecurringStore.getState().materializeTransactions()
 
       expect(created).toBeGreaterThanOrEqual(1)
+      expect(mockWithTransaction).toHaveBeenCalledTimes(1)
       // Should insert transaction
       expect(mockExecute).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO transactions'),
@@ -497,6 +532,44 @@ describe('recurring-store', () => {
         [1, expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), '01RULE001', '2026-03-01']
       )
       // Should refresh related stores
+      expect(mockTxFetch).toHaveBeenCalled()
+      expect(mockAccountFetch).toHaveBeenCalled()
+    })
+
+    it('treats recurring rule and account currencies with casing or whitespace drift as equivalent', async () => {
+      mockQuery.mockResolvedValueOnce([
+        {
+          id: '01RULE001',
+          description: 'Netflix',
+          amount: 1599,
+          currency: ' usd ',
+          type: 'expense',
+          frequency: 'monthly',
+          next_date: '2026-03-01',
+          end_date: null,
+          account_id: '01ACC001',
+          to_account_id: null,
+          category_id: '01CAT001',
+          subcategory_id: null,
+          tags: '[]',
+          notes: null,
+          active: 1,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+          account_currency: 'USD',
+        },
+      ])
+      mockExecute.mockResolvedValue({ rowsAffected: 1, lastInsertId: 0 })
+      mockQuery.mockResolvedValueOnce([])
+      mockQuery.mockResolvedValueOnce([])
+
+      const created = await useRecurringStore.getState().materializeTransactions()
+
+      expect(created).toBeGreaterThanOrEqual(1)
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO transactions'),
+        expect.arrayContaining(['01ACC001', '01CAT001', 'expense', 1599, 'USD'])
+      )
       expect(mockTxFetch).toHaveBeenCalled()
       expect(mockAccountFetch).toHaveBeenCalled()
     })
@@ -614,6 +687,7 @@ describe('recurring-store', () => {
           description: 'Netflix',
           amount: 1599,
           currency: 'EUR',
+          account_currency: 'EUR',
           type: 'expense',
           frequency: 'monthly',
           next_date: '2026-03-01',
@@ -627,7 +701,6 @@ describe('recurring-store', () => {
           active: 1,
           created_at: '2026-01-01T00:00:00Z',
           updated_at: '2026-01-01T00:00:00Z',
-          account_currency: 'EUR',
         },
       ])
       mockExecute.mockResolvedValueOnce({ rowsAffected: 0, lastInsertId: 0 })
@@ -635,7 +708,7 @@ describe('recurring-store', () => {
       const created = await useRecurringStore.getState().materializeTransactions()
 
       expect(created).toBe(0)
-      expect(mockRunInTransaction).toHaveBeenCalledTimes(1)
+      expect(mockWithTransaction).toHaveBeenCalledTimes(1)
       expect(mockExecute).toHaveBeenCalledTimes(1)
       expect(mockExecute).toHaveBeenCalledWith(
         expect.stringContaining('WHERE id = ? AND active = 1 AND next_date = ?'),
@@ -670,6 +743,7 @@ describe('recurring-store', () => {
           description: 'Netflix',
           amount: 1599,
           currency: 'EUR',
+          account_currency: 'EUR',
           type: 'expense',
           frequency: 'monthly',
           next_date: '2026-03-01',
@@ -693,7 +767,7 @@ describe('recurring-store', () => {
         'balance update failed'
       )
 
-      expect(mockRunInTransaction).toHaveBeenCalledTimes(1)
+      expect(mockWithTransaction).toHaveBeenCalledTimes(1)
       expect(useRecurringStore.getState().error).toBe('balance update failed')
       expect(mockTxFetch).not.toHaveBeenCalled()
       expect(mockAccountFetch).not.toHaveBeenCalled()

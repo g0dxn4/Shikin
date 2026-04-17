@@ -13,7 +13,14 @@ function createCliDatabasePath(homeDir: string): string {
   return join(dataDir, 'shikin.db')
 }
 
-function seedCoreShikinSchema(dbPath: string, includeCoreMigration = true): void {
+function seedCoreShikinSchema(
+  dbPath: string,
+  migrations: string[] = [
+    '001_core_tables',
+    '013_recurring_rules_currency',
+    '014_recurring_rules_currency_backfill',
+  ]
+): void {
   const db = new Database(dbPath)
   db.exec(`
     CREATE TABLE _migrations (
@@ -39,8 +46,8 @@ function seedCoreShikinSchema(dbPath: string, includeCoreMigration = true): void
     );
   `)
 
-  if (includeCoreMigration) {
-    db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(1, '001_core_tables')
+  for (const [index, migration] of migrations.entries()) {
+    db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(index + 1, migration)
   }
 
   db.close()
@@ -99,12 +106,27 @@ describe('CLI database readiness', () => {
     const homeDir = mkdtempSync(join(tmpdir(), 'shikin-cli-db-'))
     tempHomes.add(homeDir)
 
-    seedCoreShikinSchema(createCliDatabasePath(homeDir), false)
+    seedCoreShikinSchema(createCliDatabasePath(homeDir), [])
 
     const { query, close } = await importFreshDatabaseModule(homeDir)
 
     expect(() => query('SELECT 1 AS ok')).toThrow(
       /Missing required migration metadata: 001_core_tables/i
+    )
+
+    close()
+  })
+
+  it('rejects databases that are missing recurring currency migrations before use', async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-cli-db-'))
+    tempHomes.add(homeDir)
+
+    seedCoreShikinSchema(createCliDatabasePath(homeDir), ['001_core_tables'])
+
+    const { query, close } = await importFreshDatabaseModule(homeDir)
+
+    expect(() => query('SELECT 1 AS ok')).toThrow(
+      /Missing required migration metadata: 013_recurring_rules_currency, 014_recurring_rules_currency_backfill/i
     )
 
     close()

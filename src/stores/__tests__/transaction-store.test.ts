@@ -1,9 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { TransactionClient } from '@/lib/database'
 
-vi.mock('@/lib/database', () => ({
+const databaseMocks = vi.hoisted(() => ({
   query: vi.fn(),
   execute: vi.fn(),
-  runInTransaction: vi.fn(async (fn: () => Promise<unknown>) => fn()),
+  withTransaction: vi.fn(),
+}))
+
+vi.mock('@/lib/database', () => ({
+  query: databaseMocks.query,
+  execute: databaseMocks.execute,
+  withTransaction: databaseMocks.withTransaction,
 }))
 
 vi.mock('@/lib/ulid', () => ({
@@ -28,15 +35,20 @@ vi.mock('../account-store', () => ({
   },
 }))
 
-import { query, execute } from '@/lib/database'
+import { query, execute, withTransaction } from '@/lib/database'
 import { useTransactionStore } from '../transaction-store'
 
 const mockQuery = vi.mocked(query)
 const mockExecute = vi.mocked(execute)
+const mockWithTransaction = vi.mocked(withTransaction)
 
 describe('transaction-store', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockWithTransaction.mockImplementation(
+      async (fn: (tx: TransactionClient) => Promise<unknown>) =>
+        fn({ query: databaseMocks.query, execute: databaseMocks.execute } as TransactionClient)
+    )
     useTransactionStore.setState({
       transactions: [],
       isLoading: false,

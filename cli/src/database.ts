@@ -6,6 +6,11 @@ import { mkdirSync } from 'node:fs'
 const DATA_DIR = join(homedir(), '.local', 'share', 'com.asf.shikin')
 const DB_PATH = join(DATA_DIR, 'shikin.db')
 const REQUIRED_CORE_TABLES = ['_migrations', 'accounts', 'categories', 'transactions'] as const
+const REQUIRED_MIGRATIONS = [
+  '001_core_tables',
+  '013_recurring_rules_currency',
+  '014_recurring_rules_currency_backfill',
+] as const
 
 // Ensure data directory exists
 mkdirSync(DATA_DIR, { recursive: true })
@@ -31,14 +36,19 @@ function assertShikinSchemaReady(db: Database.Database, dbPath = DB_PATH): void 
     )
   }
 
-  const coreMigration = db
-    .prepare("SELECT name FROM _migrations WHERE name = '001_core_tables' LIMIT 1")
-    .get() as { name: string } | undefined
+  const appliedMigrations = new Set(
+    (db.prepare('SELECT name FROM _migrations').all() as Array<{ name: string }>).map(
+      (row) => row.name
+    )
+  )
+  const missingMigrations = REQUIRED_MIGRATIONS.filter(
+    (migration) => !appliedMigrations.has(migration)
+  )
 
-  if (!coreMigration) {
+  if (missingMigrations.length > 0) {
     throw new Error(
       `Shikin database at ${dbPath} is not ready for CLI/MCP use. ` +
-        'Missing required migration metadata: 001_core_tables. ' +
+        `Missing required migration metadata: ${missingMigrations.join(', ')}. ` +
         'Open the Shikin app to finish initializing or migrating the shared database.'
     )
   }

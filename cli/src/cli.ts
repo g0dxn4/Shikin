@@ -153,8 +153,30 @@ type DiagnoseSummary = {
           difference: number
         }>
       }
+      recurringRuleCurrency: {
+        checked: boolean
+        ok: boolean
+        missingCurrency: Array<{
+          ruleId: string
+          description: string
+          accountId: string | null
+          accountName: string | null
+        }>
+        accountCurrencyMismatch: Array<{
+          ruleId: string
+          description: string
+          accountId: string | null
+          accountName: string | null
+          ruleCurrency: string
+          accountCurrency: string | null
+        }>
+      }
     }
   }
+}
+
+function normalizeCurrency(value: string | null | undefined): string {
+  return typeof value === 'string' ? value.trim().toUpperCase() : ''
 }
 
 function getDiagnoseSummary(toolDefinitions: ToolDefinition[], deep: boolean): DiagnoseSummary {
@@ -247,6 +269,63 @@ function getDiagnoseSummary(toolDefinitions: ToolDefinition[], deep: boolean): D
       difference: row.storedBalance - row.computedBalance,
     }))
 
+  const recurringRuleColumns = query<{ name: string }>('PRAGMA table_info(recurring_rules)')
+  const hasRecurringRuleCurrency = recurringRuleColumns.some((column) => column.name === 'currency')
+  const recurringRuleCurrencyRows = hasRecurringRuleCurrency
+    ? query<{
+        ruleId: string
+        description: string
+        accountId: string | null
+        accountName: string | null
+        ruleCurrency: string | null
+        accountCurrency: string | null
+      }>(
+        `SELECT
+           r.id AS ruleId,
+           r.description AS description,
+           r.account_id AS accountId,
+           a.name AS accountName,
+           r.currency AS ruleCurrency,
+           a.currency AS accountCurrency
+         FROM recurring_rules r
+         LEFT JOIN accounts a ON a.id = r.account_id
+         WHERE r.currency IS NULL
+            OR TRIM(r.currency) = ''
+            OR a.currency IS NULL
+            OR TRIM(a.currency) = ''
+            OR UPPER(TRIM(r.currency)) <> UPPER(TRIM(a.currency))
+         ORDER BY r.id ASC`
+      )
+    : []
+
+  const recurringMissingCurrency = recurringRuleCurrencyRows
+    .filter((row) => normalizeCurrency(row.ruleCurrency) === '')
+    .map((row) => ({
+      ruleId: row.ruleId,
+      description: row.description,
+      accountId: row.accountId,
+      accountName: row.accountName,
+    }))
+
+  const recurringAccountCurrencyMismatch = recurringRuleCurrencyRows
+    .filter((row) => normalizeCurrency(row.ruleCurrency) !== '')
+    .filter(
+      (row) =>
+        normalizeCurrency(row.accountCurrency) === '' ||
+        normalizeCurrency(row.ruleCurrency) !== normalizeCurrency(row.accountCurrency)
+    )
+    .map((row) => ({
+      ruleId: row.ruleId,
+      description: row.description,
+      accountId: row.accountId,
+      accountName: row.accountName,
+      ruleCurrency: normalizeCurrency(row.ruleCurrency),
+      accountCurrency:
+        normalizeCurrency(row.accountCurrency) === ''
+          ? null
+          : normalizeCurrency(row.accountCurrency),
+    }))
+
   summary.database.integrity = {
     integrityCheck: {
       ok: integrityCheckResult === 'ok',
@@ -265,6 +344,15 @@ function getDiagnoseSummary(toolDefinitions: ToolDefinition[], deep: boolean): D
     balances: {
       ok: balanceMismatches.length === 0,
       mismatches: balanceMismatches,
+    },
+    recurringRuleCurrency: {
+      checked: hasRecurringRuleCurrency,
+      ok:
+        hasRecurringRuleCurrency &&
+        recurringMissingCurrency.length === 0 &&
+        recurringAccountCurrencyMismatch.length === 0,
+      missingCurrency: recurringMissingCurrency,
+      accountCurrencyMismatch: recurringAccountCurrencyMismatch,
     },
   }
 

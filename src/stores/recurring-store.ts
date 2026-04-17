@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import {
   query,
   execute,
-  runInTransaction,
+  withTransaction,
   materializeRecurringTransactionsBrowser,
 } from '@/lib/database'
 import { getErrorMessage } from '@/lib/errors'
@@ -88,6 +88,14 @@ function unknownRecurringRuleCurrencyMessage(rule: { id: string; description?: s
   return `${rule.description ? `Recurring rule "${rule.description}"` : `Recurring rule ${rule.id}`} has no stored currency. Repair or recreate the rule before moving or materializing it.`
 }
 
+function normalizeRecurringCurrency(value: string | null | undefined) {
+  return typeof value === 'string' ? value.trim().toUpperCase() : ''
+}
+
+function invalidAccountCurrencyMessage(accountId: string) {
+  return `Account ${accountId} has no valid stored currency. Repair the account currency before creating or updating recurring rules.`
+}
+
 function crossCurrencyRecurringRuleMoveMessage(from: string, to: string) {
   return `Cannot move this recurring rule from ${from} to ${to}. Cross-currency moves are not supported because they would change amount semantics without FX conversion.`
 }
@@ -139,7 +147,10 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
       const id = generateId()
       const now = new Date().toISOString()
       const amountCentavos = toCentavos(data.amount)
-      const currency = await resolveAccountCurrency(data.accountId)
+      const currency = normalizeRecurringCurrency(await resolveAccountCurrency(data.accountId))
+      if (currency === '') {
+        throw new Error(invalidAccountCurrencyMessage(data.accountId))
+      }
 
       await execute(
         `INSERT INTO recurring_rules (id, description, amount, currency, type, frequency, next_date, end_date, account_id, to_account_id, category_id, subcategory_id, tags, notes, active, created_at, updated_at)
@@ -191,19 +202,21 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
       }
 
       const rule = existing[0]
-      if (!rule.currency) {
+      if (normalizeRecurringCurrency(rule.currency) === '') {
         throw new Error(unknownRecurringRuleCurrencyMessage(rule))
       }
 
       const now = new Date().toISOString()
       const amountCentavos = toCentavos(data.amount)
       const isMovingAccounts = data.accountId !== rule.account_id
-      let currency = rule.currency
+      let currency = normalizeRecurringCurrency(rule.currency)
 
       if (isMovingAccounts) {
-        const targetCurrency = await resolveAccountCurrency(data.accountId)
-        if (targetCurrency !== rule.currency) {
-          throw new Error(crossCurrencyRecurringRuleMoveMessage(rule.currency, targetCurrency))
+        const targetCurrency = normalizeRecurringCurrency(
+          await resolveAccountCurrency(data.accountId)
+        )
+        if (targetCurrency !== normalizeRecurringCurrency(rule.currency)) {
+          throw new Error(crossCurrencyRecurringRuleMoveMessage(currency, targetCurrency))
         }
         currency = targetCurrency
       }
@@ -318,20 +331,24 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
         throw new Error(unsupportedRecurringTransferMessage())
       }
 
-      const unknownCurrencyRule = dueRules.find((rule) => !rule.currency)
+      const unknownCurrencyRule = dueRules.find(
+        (rule) => normalizeRecurringCurrency(rule.currency) === ''
+      )
       if (unknownCurrencyRule) {
         throw new Error(unknownRecurringRuleCurrencyMessage(unknownCurrencyRule))
       }
 
-      const accountCurrencyMismatchRule = dueRules.find(
-        (rule) => rule.account_currency && rule.currency !== rule.account_currency
-      )
+      const accountCurrencyMismatchRule = dueRules.find((rule) => {
+        const ruleCurrency = normalizeRecurringCurrency(rule.currency)
+        const accountCurrency = normalizeRecurringCurrency(rule.account_currency)
+        return ruleCurrency !== '' && (accountCurrency === '' || ruleCurrency !== accountCurrency)
+      })
       if (accountCurrencyMismatchRule) {
         throw new Error(recurringRuleAccountCurrencyMismatchMessage(accountCurrencyMismatchRule))
       }
 
       for (const rule of dueRules) {
-        const createdForRule = await runInTransaction(async () => {
+        const createdForRule = await withTransaction(async (tx) => {
           let nextDate = rule.next_date
           let ruleCreated = 0
 
@@ -339,7 +356,7 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
           while (nextDate <= today) {
             // Check end_date
             if (rule.end_date && nextDate > rule.end_date) {
-              const deactivateResult = await execute(
+              const deactivateResult = await tx.execute(
                 "UPDATE recurring_rules SET active = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND active = 1 AND next_date = ?",
                 [rule.id, nextDate]
               )
@@ -351,7 +368,7 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
 
             const newNextDate = advanceDate(nextDate, rule.frequency as RecurringFrequency)
             const shouldDeactivate = !!rule.end_date && newNextDate > rule.end_date
-            const claimResult = await execute(
+            const claimResult = await tx.execute(
               "UPDATE recurring_rules SET active = ?, next_date = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND active = 1 AND next_date = ?",
               [shouldDeactivate ? 0 : 1, newNextDate, rule.id, nextDate]
             )
@@ -360,7 +377,7 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
             }
 
             const txId = generateId()
-            await execute(
+            await tx.execute(
               `INSERT INTO transactions (id, account_id, category_id, subcategory_id, type, amount, currency, description, notes, date, tags, is_recurring, transfer_to_account_id)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
               [
@@ -370,7 +387,7 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
                 rule.subcategory_id,
                 rule.type,
                 rule.amount,
-                rule.currency,
+                normalizeRecurringCurrency(rule.currency),
                 rule.description,
                 rule.notes,
                 nextDate,
@@ -381,7 +398,7 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
 
             // Update account balance
             const balanceDelta = rule.type === 'income' ? rule.amount : -rule.amount
-            await execute(
+            await tx.execute(
               "UPDATE accounts SET balance = balance + ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
               [balanceDelta, rule.account_id]
             )

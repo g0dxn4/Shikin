@@ -38,6 +38,7 @@ const addTransaction = tools.find((tool) => tool.name === 'add-transaction')!
 const updateTransaction = tools.find((tool) => tool.name === 'update-transaction')!
 const deleteTransaction = tools.find((tool) => tool.name === 'delete-transaction')!
 const createAccount = tools.find((tool) => tool.name === 'create-account')!
+const updateAccount = tools.find((tool) => tool.name === 'update-account')!
 const getSpendingSummary = tools.find((tool) => tool.name === 'get-spending-summary')!
 const writeNotebook = tools.find((tool) => tool.name === 'write-notebook')!
 const listNotebook = tools.find((tool) => tool.name === 'list-notebook')!
@@ -1585,7 +1586,7 @@ describe('CLI tool validation regressions', () => {
 
   it('uses the explicit accountId when creating a recurring rule', async () => {
     mockQuery
-      .mockReturnValueOnce([{ id: 'acct-2', currency: 'USD' }])
+      .mockReturnValueOnce([{ id: 'acct-2', currency: ' usd ' }])
       .mockReturnValueOnce([{ name: 'currency' }])
 
     const input = manageRecurringTransaction.schema.parse({
@@ -1933,6 +1934,112 @@ describe('CLI tool validation regressions', () => {
     })
   })
 
+  it('treats recurring rule and account currencies with casing or whitespace drift as equivalent', async () => {
+    mockQuery.mockReturnValueOnce([
+      {
+        id: 'rule-1',
+        account_id: 'acct-1',
+        currency: ' cad ',
+        account_currency: 'CAD',
+        category_id: 'cat-1',
+        type: 'expense',
+        amount: 1250,
+        description: 'Coffee subscription',
+        notes: 'monthly',
+        next_date: '2026-04-15',
+        frequency: 'monthly',
+        end_date: null,
+      },
+    ])
+
+    const result = await materializeRecurring.execute(materializeRecurring.schema.parse({}))
+
+    expect(result).toEqual({
+      success: true,
+      created: 1,
+      message: 'Created 1 transaction(s) from recurring rules.',
+    })
+    expect(mockTransaction).toHaveBeenCalledTimes(1)
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('INSERT INTO transactions'),
+      [
+        'tx_test_123',
+        'acct-1',
+        'cat-1',
+        'expense',
+        1250,
+        'CAD',
+        'Coffee subscription',
+        'monthly',
+        '2026-04-15',
+      ]
+    )
+  })
+
+  it('blocks account currency changes while recurring rules still depend on the account', async () => {
+    mockQuery
+      .mockReturnValueOnce([{ id: 'acct-1', name: 'Checking', currency: 'USD' }])
+      .mockReturnValueOnce([{ currency: 'USD' }, { currency: 'BRL' }])
+
+    const input = updateAccount.schema.parse({
+      accountId: 'acct-1',
+      currency: 'EUR',
+    })
+
+    const result = await updateAccount.execute(input)
+
+    expect(result).toEqual({
+      success: false,
+      message:
+        'Cannot change this account currency while 2 recurring rule(s) still point at the account. Repair, move, or recreate those recurring rules first so scheduled amounts do not silently change meaning.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('allows account currency repair when dependent recurring rules already match the target currency', async () => {
+    mockQuery
+      .mockReturnValueOnce([{ id: 'acct-1', name: 'Checking', currency: 'EUR' }])
+      .mockReturnValueOnce([{ currency: 'USD' }, { currency: ' usd ' }])
+
+    const input = updateAccount.schema.parse({
+      accountId: 'acct-1',
+      currency: 'USD',
+    })
+
+    const result = await updateAccount.execute(input)
+
+    expect(result).toEqual({
+      success: true,
+      message: 'Updated account "Checking".',
+    })
+    expect(mockExecute).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects recurring-rule creation when the linked account currency is invalid after normalization', async () => {
+    mockQuery
+      .mockReturnValueOnce([{ id: 'acct-2', currency: '   ' }])
+      .mockReturnValueOnce([{ name: 'currency' }])
+
+    const input = manageRecurringTransaction.schema.parse({
+      action: 'create',
+      description: 'Rent',
+      amount: 1000,
+      type: 'expense',
+      frequency: 'monthly',
+      accountId: 'acct-2',
+    })
+
+    const result = await manageRecurringTransaction.execute(input)
+
+    expect(result).toEqual({
+      success: false,
+      message:
+        'Account acct-2 has no valid stored currency. Repair the account currency before creating or updating recurring rules.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
   it('fails materialization when a due recurring rule has unknown currency', async () => {
     mockQuery.mockReturnValueOnce([
       {
@@ -2107,6 +2214,7 @@ describe('CLI tool validation regressions', () => {
         id: 'rule-1',
         account_id: 'acct-1',
         currency: 'USD',
+        account_currency: 'USD',
         category_id: 'cat-1',
         type: 'expense',
         amount: 1250,

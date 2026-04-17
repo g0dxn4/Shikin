@@ -39,6 +39,14 @@ interface AccountState {
   loadBalanceHistory: (accountId: string, months?: number) => Promise<BalanceHistoryPoint[]>
 }
 
+function normalizeAccountCurrency(value: string | null | undefined) {
+  return typeof value === 'string' ? value.trim().toUpperCase() : ''
+}
+
+function recurringRuleAccountCurrencyChangeBlockedMessage(ruleCount: number) {
+  return `Cannot change this account currency while ${ruleCount} recurring rule(s) still point at the account. Repair, move, or recreate those recurring rules first so scheduled amounts do not silently change meaning.`
+}
+
 export const useAccountStore = create<AccountState>((set, get) => ({
   accounts: [],
   archivedAccounts: [],
@@ -91,6 +99,32 @@ export const useAccountStore = create<AccountState>((set, get) => ({
   update: async (id, data) => {
     set({ error: null })
     try {
+      const existing = await query<Pick<Account, 'currency'>>(
+        'SELECT currency FROM accounts WHERE id = ? LIMIT 1',
+        [id]
+      )
+      if (existing.length === 0) {
+        throw new Error(`Account ${id} not found.`)
+      }
+
+      if (
+        normalizeAccountCurrency(existing[0].currency) !== normalizeAccountCurrency(data.currency)
+      ) {
+        const targetCurrency = normalizeAccountCurrency(data.currency)
+        const linkedRecurringRules = await query<{ currency: string | null }>(
+          'SELECT currency FROM recurring_rules WHERE account_id = ?',
+          [id]
+        )
+        const blockingRules = linkedRecurringRules.filter((rule) => {
+          const ruleCurrency = normalizeAccountCurrency(rule.currency)
+          return ruleCurrency === '' || ruleCurrency !== targetCurrency
+        })
+
+        if (blockingRules.length > 0) {
+          throw new Error(recurringRuleAccountCurrencyChangeBlockedMessage(blockingRules.length))
+        }
+      }
+
       const now = new Date().toISOString()
       await execute(
         `UPDATE accounts SET name = ?, type = ?, currency = ?, balance = ?, updated_at = ? WHERE id = ?`,

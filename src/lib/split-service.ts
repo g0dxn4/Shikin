@@ -1,4 +1,5 @@
 import { query, execute } from '@/lib/database'
+import type { TransactionClient } from '@/lib/database'
 import { generateId } from '@/lib/ulid'
 import type { TransactionSplitWithCategory } from '@/types/database'
 
@@ -16,7 +17,8 @@ export interface SplitInput {
 export async function createSplits(
   transactionId: string,
   splits: SplitInput[],
-  transactionAmountCentavos: number
+  transactionAmountCentavos: number,
+  tx?: Pick<TransactionClient, 'execute'>
 ): Promise<void> {
   const splitsTotal = splits.reduce((sum, s) => sum + s.amount, 0)
   if (splitsTotal !== transactionAmountCentavos) {
@@ -26,11 +28,11 @@ export async function createSplits(
   }
 
   // Delete any existing splits first
-  await deleteSplits(transactionId)
+  await deleteSplits(transactionId, tx)
 
   for (const split of splits) {
     const id = generateId()
-    await execute(
+    await (tx?.execute ?? execute)(
       `INSERT INTO transaction_splits (id, transaction_id, category_id, subcategory_id, amount, notes)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [
@@ -48,9 +50,7 @@ export async function createSplits(
 /**
  * Get all splits for a transaction with joined category names.
  */
-export async function getSplits(
-  transactionId: string
-): Promise<TransactionSplitWithCategory[]> {
+export async function getSplits(transactionId: string): Promise<TransactionSplitWithCategory[]> {
   return query<TransactionSplitWithCategory>(
     `SELECT ts.*, c.name as category_name, c.color as category_color, sc.name as subcategory_name
      FROM transaction_splits ts
@@ -65,8 +65,11 @@ export async function getSplits(
 /**
  * Delete all splits for a transaction.
  */
-export async function deleteSplits(transactionId: string): Promise<void> {
-  await execute('DELETE FROM transaction_splits WHERE transaction_id = ?', [
+export async function deleteSplits(
+  transactionId: string,
+  tx?: Pick<TransactionClient, 'execute'>
+): Promise<void> {
+  await (tx?.execute ?? execute)('DELETE FROM transaction_splits WHERE transaction_id = ?', [
     transactionId,
   ])
 }

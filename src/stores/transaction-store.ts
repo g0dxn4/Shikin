@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { query, execute, runInTransaction } from '@/lib/database'
+import { query, withTransaction } from '@/lib/database'
 import { getErrorMessage } from '@/lib/errors'
 import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
@@ -84,13 +84,13 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   add: async (data, options) => {
     set({ error: null })
     try {
-      await runInTransaction(async () => {
+      await withTransaction(async (tx) => {
         const id = generateId()
         const now = new Date().toISOString()
         const amountCentavos = toCentavos(data.amount)
         const isTransfer = data.type === 'transfer' && !!data.transferToAccountId
 
-        await execute(
+        await tx.execute(
           `INSERT INTO transactions (id, account_id, category_id, transfer_to_account_id, type, amount, currency, description, notes, date, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
@@ -110,23 +110,20 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         )
 
         if (isTransfer && data.transferToAccountId) {
-          await execute('UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?', [
-            amountCentavos,
-            now,
-            data.accountId,
-          ])
-          await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-            amountCentavos,
-            now,
-            data.transferToAccountId,
-          ])
+          await tx.execute(
+            'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+            [amountCentavos, now, data.accountId]
+          )
+          await tx.execute(
+            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+            [amountCentavos, now, data.transferToAccountId]
+          )
         } else {
           const balanceDelta = data.type === 'income' ? amountCentavos : -amountCentavos
-          await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-            balanceDelta,
-            now,
-            data.accountId,
-          ])
+          await tx.execute(
+            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+            [balanceDelta, now, data.accountId]
+          )
         }
       })
 
@@ -150,33 +147,30 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       const existing = get().getById(id)
       if (!existing) return
 
-      await runInTransaction(async () => {
+      await withTransaction(async (tx) => {
         const now = new Date().toISOString()
         const newAmountCentavos = toCentavos(data.amount)
         const oldIsTransfer = existing.type === 'transfer' && !!existing.transfer_to_account_id
         const newIsTransfer = data.type === 'transfer' && !!data.transferToAccountId
 
         if (oldIsTransfer && existing.transfer_to_account_id) {
-          await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-            existing.amount,
-            now,
-            existing.account_id,
-          ])
-          await execute('UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?', [
-            existing.amount,
-            now,
-            existing.transfer_to_account_id,
-          ])
+          await tx.execute(
+            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+            [existing.amount, now, existing.account_id]
+          )
+          await tx.execute(
+            'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+            [existing.amount, now, existing.transfer_to_account_id]
+          )
         } else {
           const oldDelta = existing.type === 'income' ? -existing.amount : existing.amount
-          await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-            oldDelta,
-            now,
-            existing.account_id,
-          ])
+          await tx.execute(
+            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+            [oldDelta, now, existing.account_id]
+          )
         }
 
-        await execute(
+        await tx.execute(
           `UPDATE transactions SET account_id = ?, category_id = ?, transfer_to_account_id = ?, type = ?, amount = ?, currency = ?, description = ?, notes = ?, date = ?, updated_at = ?
             WHERE id = ?`,
           [
@@ -195,23 +189,20 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         )
 
         if (newIsTransfer && data.transferToAccountId) {
-          await execute('UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?', [
-            newAmountCentavos,
-            now,
-            data.accountId,
-          ])
-          await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-            newAmountCentavos,
-            now,
-            data.transferToAccountId,
-          ])
+          await tx.execute(
+            'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+            [newAmountCentavos, now, data.accountId]
+          )
+          await tx.execute(
+            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+            [newAmountCentavos, now, data.transferToAccountId]
+          )
         } else {
           const newDelta = data.type === 'income' ? newAmountCentavos : -newAmountCentavos
-          await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-            newDelta,
-            now,
-            data.accountId,
-          ])
+          await tx.execute(
+            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+            [newDelta, now, data.accountId]
+          )
         }
       })
     } catch (error) {
@@ -228,30 +219,27 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       const existing = get().getById(id)
       if (!existing) return
 
-      await runInTransaction(async () => {
+      await withTransaction(async (tx) => {
         const now = new Date().toISOString()
 
         if (existing.type === 'transfer' && existing.transfer_to_account_id) {
-          await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-            existing.amount,
-            now,
-            existing.account_id,
-          ])
-          await execute('UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?', [
-            existing.amount,
-            now,
-            existing.transfer_to_account_id,
-          ])
+          await tx.execute(
+            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+            [existing.amount, now, existing.account_id]
+          )
+          await tx.execute(
+            'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+            [existing.amount, now, existing.transfer_to_account_id]
+          )
         } else {
           const reverseDelta = existing.type === 'income' ? -existing.amount : existing.amount
-          await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-            reverseDelta,
-            now,
-            existing.account_id,
-          ])
+          await tx.execute(
+            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+            [reverseDelta, now, existing.account_id]
+          )
         }
 
-        await execute('DELETE FROM transactions WHERE id = ?', [id])
+        await tx.execute('DELETE FROM transactions WHERE id = ?', [id])
       })
     } catch (error) {
       set({ error: getErrorMessage(error) })
@@ -264,37 +252,38 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   addWithSplits: async (data, splits) => {
     set({ error: null })
     try {
-      const id = generateId()
-      const now = new Date().toISOString()
-      const amountCentavos = toCentavos(data.amount)
+      await withTransaction(async (tx) => {
+        const id = generateId()
+        const now = new Date().toISOString()
+        const amountCentavos = toCentavos(data.amount)
 
-      await execute(
-        `INSERT INTO transactions (id, account_id, category_id, type, amount, currency, description, notes, date, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          id,
+        await tx.execute(
+          `INSERT INTO transactions (id, account_id, category_id, type, amount, currency, description, notes, date, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            id,
+            data.accountId,
+            data.categoryId,
+            data.type,
+            amountCentavos,
+            data.currency,
+            data.description,
+            data.notes,
+            data.date,
+            now,
+            now,
+          ]
+        )
+
+        await createSplits(id, splits, amountCentavos, tx)
+
+        const balanceDelta = data.type === 'income' ? amountCentavos : -amountCentavos
+        await tx.execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
+          balanceDelta,
+          now,
           data.accountId,
-          data.categoryId,
-          data.type,
-          amountCentavos,
-          data.currency,
-          data.description,
-          data.notes,
-          data.date,
-          now,
-          now,
-        ]
-      )
-
-      await createSplits(id, splits, amountCentavos)
-
-      // Update account balance
-      const balanceDelta = data.type === 'income' ? amountCentavos : -amountCentavos
-      await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-        balanceDelta,
-        now,
-        data.accountId,
-      ])
+        ])
+      })
     } catch (error) {
       set({ error: getErrorMessage(error) })
       throw error

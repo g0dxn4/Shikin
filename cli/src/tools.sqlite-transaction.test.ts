@@ -4,6 +4,8 @@ import Database from 'better-sqlite3'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import type * as DatabaseModule from './database.js'
+import type * as OsModule from 'node:os'
 
 const tempDirs = new Set<string>()
 const cleanupCallbacks = new Set<() => void>()
@@ -38,54 +40,81 @@ function seedDatabase({
   mkdirSync(join(tempHome, '.local', 'share', 'com.asf.shikin'), { recursive: true })
 
   const db = new Database(dbPath)
+  db.pragma('foreign_keys = ON')
   db.exec(`
     CREATE TABLE _migrations (
       id INTEGER PRIMARY KEY,
-      name TEXT NOT NULL UNIQUE
+      name TEXT NOT NULL UNIQUE,
+      applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
     CREATE TABLE accounts (
       id TEXT PRIMARY KEY,
-      name TEXT,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL CHECK (type IN ('checking', 'savings', 'credit_card', 'cash', 'investment', 'crypto', 'other')),
+      currency TEXT NOT NULL DEFAULT 'USD',
       balance INTEGER NOT NULL DEFAULT 0,
-      updated_at TEXT
+      is_archived INTEGER NOT NULL DEFAULT 0,
+      credit_limit INTEGER,
+      statement_closing_day INTEGER,
+      payment_due_day INTEGER,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
     CREATE TABLE categories (
       id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL DEFAULT 'expense'
+      name TEXT NOT NULL UNIQUE,
+      icon TEXT,
+      color TEXT,
+      type TEXT NOT NULL CHECK (type IN ('expense', 'income', 'transfer')),
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
     CREATE TABLE transactions (
       id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL,
-      category_id TEXT,
-      type TEXT NOT NULL,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      category_id TEXT REFERENCES categories(id) ON DELETE SET NULL,
+      subcategory_id TEXT,
+      type TEXT NOT NULL CHECK (type IN ('expense', 'income', 'transfer')),
       amount INTEGER NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'USD',
       description TEXT NOT NULL,
       notes TEXT,
       date TEXT NOT NULL,
-     updated_at TEXT
+      tags TEXT DEFAULT '[]',
+      is_recurring INTEGER NOT NULL DEFAULT 0,
+      transfer_to_account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
   `)
 
   db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(1, '001_core_tables')
-
-  db.prepare('INSERT INTO accounts (id, name, balance) VALUES (?, ?, ?)').run(
-    'acct-1',
-    'Primary',
-    accountBalance
+  db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(
+    13,
+    '013_recurring_rules_currency'
   )
+  db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(
+    14,
+    '014_recurring_rules_currency_backfill'
+  )
+
+  db.prepare(
+    `INSERT INTO accounts (id, name, type, currency, balance, is_archived)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run('acct-1', 'Primary', 'checking', 'USD', accountBalance, 0)
 
   if (transaction) {
     db.prepare(
       `INSERT INTO transactions
-         (id, account_id, category_id, type, amount, description, notes, date)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+         (id, account_id, category_id, type, amount, currency, description, notes, date)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       transaction.id,
       'acct-1',
       null,
       transaction.type,
       transaction.amount,
+      'USD',
       transaction.description,
       transaction.notes ?? null,
       transaction.date
@@ -121,6 +150,18 @@ function readDatabaseState(dbPath: string) {
   }
 }
 
+function readAccountBalances(dbPath: string) {
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true })
+  try {
+    return db.prepare('SELECT id, balance FROM accounts ORDER BY id').all() as Array<{
+      id: string
+      balance: number
+    }>
+  } finally {
+    db.close()
+  }
+}
+
 async function loadToolsWithRealDatabaseFailure({
   tempHome,
   failOnExecuteCall,
@@ -132,7 +173,7 @@ async function loadToolsWithRealDatabaseFailure({
 
   vi.resetModules()
   vi.doMock('node:os', async () => {
-    const actual = await vi.importActual<typeof import('node:os')>('node:os')
+    const actual = await vi.importActual<typeof OsModule>('node:os')
     return {
       ...actual,
       homedir: () => tempHome,
@@ -142,7 +183,7 @@ async function loadToolsWithRealDatabaseFailure({
     generateId: () => 'tx_sqlite_rollback',
   }))
   vi.doMock('./database.js', async () => {
-    const actual = await vi.importActual<typeof import('./database.js')>('./database.js')
+    const actual = await vi.importActual<typeof DatabaseModule>('./database.js')
     let executeCalls = 0
 
     return {
@@ -163,6 +204,28 @@ async function loadToolsWithRealDatabaseFailure({
 
   return {
     dbPath,
+    tools: toolsModule.tools,
+  }
+}
+
+async function loadToolsWithRealDatabase(tempHome: string) {
+  vi.resetModules()
+  vi.doMock('node:os', async () => {
+    const actual = await vi.importActual<typeof OsModule>('node:os')
+    return {
+      ...actual,
+      homedir: () => tempHome,
+    }
+  })
+  vi.doMock('./ulid.js', () => ({
+    generateId: () => 'tx_sqlite_rollback',
+  }))
+
+  const toolsModule = await import('./tools.js')
+  const databaseModule = await import('./database.js')
+  cleanupCallbacks.add(() => databaseModule.close())
+
+  return {
     tools: toolsModule.tools,
   }
 }
@@ -267,6 +330,70 @@ describe('CLI tools SQLite transaction rollback', () => {
     await expect(deleteTransaction.execute(input)).rejects.toThrow(
       'Injected execute failure on call 2'
     )
+    expect(readDatabaseState(dbPath)).toEqual({
+      balance: 9_000,
+      transactions: [
+        {
+          id: 'tx-1',
+          type: 'expense',
+          amount: 1_000,
+          description: 'Coffee',
+          date: '2026-04-14',
+        },
+      ],
+    })
+  })
+
+  it('rolls back update-transaction on a real SQLite abort while moving accounts and flipping type', async () => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({
+      tempHome,
+      accountBalance: 9_000,
+      transaction: {
+        id: 'tx-1',
+        type: 'expense',
+        amount: 1_000,
+        description: 'Coffee',
+        date: '2026-04-14',
+      },
+    })
+
+    const db = new Database(dbPath)
+    try {
+      db.prepare(
+        `INSERT INTO accounts (id, name, type, currency, balance, is_archived)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run('acct-2', 'Savings', 'savings', 'USD', 5_000, 0)
+      db.exec(`
+        CREATE TRIGGER abort_transaction_update
+        BEFORE UPDATE ON transactions
+        WHEN NEW.id = 'tx-1'
+        BEGIN
+          SELECT RAISE(ABORT, 'Injected sqlite trigger failure');
+        END;
+      `)
+    } finally {
+      db.close()
+    }
+
+    const { tools } = await loadToolsWithRealDatabase(tempHome)
+    const updateTransaction = tools.find((tool) => tool.name === 'update-transaction')!
+
+    const input = updateTransaction.schema.parse({
+      transactionId: 'tx-1',
+      type: 'income',
+      amount: 12,
+      description: 'Refund',
+      accountId: 'acct-2',
+    })
+
+    await expect(updateTransaction.execute(input)).rejects.toThrow(
+      'Injected sqlite trigger failure'
+    )
+    expect(readAccountBalances(dbPath)).toEqual([
+      { id: 'acct-1', balance: 9_000 },
+      { id: 'acct-2', balance: 5_000 },
+    ])
     expect(readDatabaseState(dbPath)).toEqual({
       balance: 9_000,
       transactions: [

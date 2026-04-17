@@ -1,6 +1,6 @@
-# Backend Mapping (Milestone 1)
+# Backend Mapping (Historical Hardening Notes)
 
-This is a practical backend map for the current repo layout. It is a documentation-only artifact for hardening planning.
+This is a practical backend map for the current repo layout. It is a documentation-only artifact that started as hardening-planning material and still contains historical milestone references.
 
 ## 1) Key backend entry points
 
@@ -78,16 +78,17 @@ This is a practical backend map for the current repo layout. It is a documentati
 
 - **Dual runtime abstraction (`src/lib/database.ts`)**
   - `isTauri` branch (`src/lib/runtime.ts`): dynamic import of `@tauri-apps/plugin-sql`, `Database.load('sqlite:shikin.db')`.
-  - Browser branch (`DATA_SERVER_URL = http://localhost:1480`): POST to `/api/db/query` and `/api/db/execute`.
+  - Browser branch (`DATA_SERVER_URL = http://localhost:1480`): POST to `/api/db/query`, `/api/db/execute`, and `/api/db/transaction`.
   - Export/import APIs:
     - `exportDatabaseSnapshot()` (`/api/db/export` in browser; direct fs read in Tauri)
     - `importDatabaseSnapshot()` (`/api/db/import` in browser; direct fs write in Tauri)
-  - `runInTransaction` maps to DB `BEGIN/COMMIT/ROLLBACK` in both modes.
+  - `withTransaction()` is the browser-safe multi-step transaction path; `runInTransaction()` is Tauri-only.
+  - Browser recurring materialization remains a dedicated endpoint wrapper: `materializeRecurringTransactionsBrowser()` → `/api/recurring/materialize`.
 
 - **Migration ownership (runtime reality)**
   - Tauri Rust registration (`src-tauri/src/lib.rs`): **001-003 only**.
-  - Browser/Tauri JS migration runner (`src/lib/database.ts`): **004-008 and 010-012**.
-  - Migration `009` is absent from the JS sequence in `src/lib/database.ts`.
+  - Browser/Tauri JS migration runner (`src/lib/database.ts`): **004-008 and 010-014**.
+  - Migration `009` is intentionally absent from the JS sequence in `src/lib/database.ts`.
   - `cli/src/database.ts` performs no schema migration.
 
 - **CLI DB (`cli/src/database.ts`)**
@@ -97,13 +98,16 @@ This is a practical backend map for the current repo layout. It is a documentati
 
 - **Browser bridge DB (`scripts/data-server.mjs`)**
   - Direct `better-sqlite3` DB at `~/.local/share/com.asf.shikin/shikin.db`.
-  - Own migration runner (`_migrations` table, ids 001-012, with no `009_*` migration defined).
+  - Own migration runner (`_migrations` table, ids 001-014, with no `009_*` migration defined).
   - Endpoints used by app:
     - `POST /api/db/query`
     - `POST /api/db/execute`
+    - `POST /api/db/transaction`
     - `GET /api/db/export`
     - `POST /api/db/import`
     - `POST /api/proxy/chatgpt/*` (ChatGPT Codex backend proxy)
+  - Server-side browser transactions use a short lease (`SHIKIN_SERVER_TRANSACTION_TTL_MS`, default `15000`) and auto-rollback on expiry.
+  - Transaction finalization is status-bearing: callers should treat `status` as authoritative (`committed`, `rolled_back`, `expired_rolled_back`).
   - AI proxy behavior includes the in-memory `codexItemCache` for stream-resolved `item_reference` follow-ups in the tool loop.
 
 - **Settings store abstraction**
@@ -166,7 +170,7 @@ This is a practical backend map for the current repo layout. It is a documentati
 
 3. **CLI/bridge error handling gaps**
    - Browser `src/lib/storage.ts` `createBrowserStore()` swallows get/set failures (reads return `null`, writes silently drop).
-   - `cli/src/tools.ts` is feature-complete but several integrations are placeholders/deferred (notably `get-education-tip` returns `success: false` intentionally).
+   - `cli/src/tools.ts` is feature-complete but several integrations are placeholders/deferred (notably external-feed placeholders return structured unavailable results).
 
 4. **Schema/API drift risk**
 
@@ -179,7 +183,7 @@ This is a practical backend map for the current repo layout. It is a documentati
 
 This doc is the mapping baseline; the local bridge hardening items below are already implemented, with verification work still useful for future regression.
 
-### Immediate (P0/P1) fixes to scope
+### Historical Immediate (P0/P1) fixes to scope
 
 1. **Constrain `scripts/data-server.mjs` to caller-local trust only**
    - File(s): `scripts/data-server.mjs`
@@ -203,7 +207,7 @@ This doc is the mapping baseline; the local bridge hardening items below are alr
 2. Add CLI runtime smoke coverage for critical commands in `cli/src/tools.ts` (CRUD + balance integrity).
 3. Add a notebook persistence matrix test across Tauri/browser/CLI note backends for directory shape and file operations.
 
-### Acceptance criteria for Milestone 2
+### Historical acceptance criteria for Milestone 2
 
 - No unauthenticated destructive write path without explicit local authorization.
 - No notebook/settings traversal bypass via relative path tricks.
@@ -212,4 +216,4 @@ This doc is the mapping baseline; the local bridge hardening items below are alr
 
 ---
 
-Status: **Milestone 1 complete** (documentation map only).
+Status: historical planning artifact, kept as a backend reference map.

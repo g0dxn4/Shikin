@@ -1,12 +1,13 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
+import type * as ToolsModule from './tools.js'
 
 vi.mock('./tools.js', () => ({ tools: [] }))
 vi.mock('./database.js', () => ({ close: vi.fn(), query: vi.fn() }))
 
 const { close, query } = await import('./database.js')
-const { tools: actualTools } = await vi.importActual<typeof import('./tools.js')>('./tools.js')
+const { tools: actualTools } = await vi.importActual<typeof ToolsModule>('./tools.js')
 const { coerceInput, createProgram, zodToOptions } = await import('./cli.js')
 
 afterEach(() => {
@@ -218,6 +219,25 @@ describe('CLI command execution', () => {
           computedBalance: 12000,
         },
       ])
+      .mockReturnValueOnce([{ name: 'id' }, { name: 'description' }, { name: 'currency' }])
+      .mockReturnValueOnce([
+        {
+          ruleId: 'rule-legacy',
+          description: 'Legacy Missing Currency',
+          accountId: 'acct-1',
+          accountName: 'Checking',
+          ruleCurrency: null,
+          accountCurrency: 'USD',
+        },
+        {
+          ruleId: 'rule-mismatch',
+          description: 'Mismatch Rule',
+          accountId: 'acct-2',
+          accountName: 'Savings',
+          ruleCurrency: 'EUR',
+          accountCurrency: 'USD',
+        },
+      ])
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -269,6 +289,28 @@ describe('CLI command execution', () => {
                     storedBalance: 5000,
                     computedBalance: 4800,
                     difference: 200,
+                  },
+                ],
+              },
+              recurringRuleCurrency: {
+                checked: true,
+                ok: false,
+                missingCurrency: [
+                  {
+                    ruleId: 'rule-legacy',
+                    description: 'Legacy Missing Currency',
+                    accountId: 'acct-1',
+                    accountName: 'Checking',
+                  },
+                ],
+                accountCurrencyMismatch: [
+                  {
+                    ruleId: 'rule-mismatch',
+                    description: 'Mismatch Rule',
+                    accountId: 'acct-2',
+                    accountName: 'Savings',
+                    ruleCurrency: 'EUR',
+                    accountCurrency: 'USD',
                   },
                 ],
               },

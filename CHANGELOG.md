@@ -2,7 +2,7 @@
 
 All notable changes to Shikin are documented in this file.
 
-## [Unreleased] - 2026-03-17
+## [Unreleased]
 
 ### Added
 
@@ -14,6 +14,7 @@ All notable changes to Shikin are documented in this file.
 - Playwright coverage for budgets and subscriptions pages.
 - Theme customization MVP in Settings (presets, token editor, apply/save/reset/revert).
 - AI prompt-to-theme generation flow using configured provider credentials.
+- CLI and MCP now expose the shipped 44-tool surface (42 available tools + 2 compatibility placeholders: `get-financial-news`, `get-congressional-trades`) from shared definitions.
 
 ### Changed
 

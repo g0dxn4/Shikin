@@ -28,6 +28,29 @@ Notes:
 - Structured options must be valid JSON.
 - The CLI reads and writes the shared Shikin database in `~/.local/share/com.asf.shikin/shikin.db`.
 
+## Tool Discovery and Reference
+
+- All CLI commands come from the shared tool definitions in `src/tools.ts` and are mirrored in MCP.
+- `npx tsx src/cli.ts --help` lists every available CLI command and the required options.
+- `npx tsx src/cli.ts diagnose` prints CLI/MCP surface counts plus available/unavailable tool names.
+- `npx tsx src/cli.ts diagnose --deep` adds migration/integrity/balance diagnostics.
+- MCP clients can discover the same tool set via the standard MCP `tools/list` flow and read resources listed below.
+
+## Currency conversion behavior
+
+`convert-currency` uses only the locally stored `exchange_rates` table:
+
+- It looks up a stored pair for `FROM -> TO`, then falls back to an inverse rate if available.
+- It uses the most recently stored matching rate in the table; it does not enforce freshness itself.
+- If a stored rate is missing or invalid, it returns explicit guidance to refresh/import rates first.
+- The CLI path does **not** fetch rates from the network.
+
+To use currency conversion from CLI successfully, ensure rates are populated before calling the tool:
+
+- run the desktop/web app once so it can refresh/cache rates, or
+- import a DB snapshot that already contains populated `exchange_rates`, or
+- insert/update rows directly in `exchange_rates` by another process/tool.
+
 ## MCP Server
 
 Start the MCP server from `cli/`:
@@ -81,6 +104,7 @@ The MCP server also exposes read-only resources:
 - `SHIKIN_MCP_LOG=1`: emit per-request MCP timing logs to stderr.
 - `SHIKIN_DATA_SERVER_PORT`: override the local browser bridge port.
 - `SHIKIN_DATA_SERVER_BRIDGE_TOKEN`: bridge token used by browser mode.
+- `SHIKIN_SERVER_TRANSACTION_TTL_MS`: override the browser data-server transaction lease timeout (default `15000`).
 - `SHIKIN_DATA_SERVER_MAX_JSON_BODY_BYTES`: override the data-server JSON request size limit.
 - `SHIKIN_DATA_SERVER_MAX_PROXY_BODY_BYTES`: override the ChatGPT proxy request size limit.
 - `SHIKIN_DATA_SERVER_MAX_DB_IMPORT_BYTES`: override the SQLite import payload size limit.

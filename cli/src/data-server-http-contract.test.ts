@@ -71,6 +71,7 @@ beforeAll(async () => {
       HOME: tempHomeDir,
       SHIKIN_DATA_SERVER_BRIDGE_TOKEN: TOKEN,
       SHIKIN_DATA_SERVER_PORT: String(port),
+      SHIKIN_SERVER_TRANSACTION_TTL_MS: '300',
     },
     stdio: 'pipe',
   })
@@ -201,6 +202,107 @@ describe('data-server authenticated contract', () => {
     expect(Buffer.from(snapshot.subarray(0, 16)).toString('ascii')).toBe('SQLite format 3\u0000')
   })
 
+  it('keeps browser-style transaction operations isolated until commit', async () => {
+    const defaultHeaders = {
+      Origin: ORIGIN,
+      'X-Shikin-Bridge': TOKEN,
+      'Content-Type': 'application/json',
+    }
+
+    const beginResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'begin' }),
+    })
+    const beginJson = await beginResponse.json()
+
+    expect(beginResponse.status).toBe(200)
+    expect(beginJson.transactionId).toEqual(expect.any(String))
+
+    const transactionId = beginJson.transactionId as string
+    const accountId = 'server-transaction-account'
+
+    const insertResponse = await fetch(`${SERVER_URL}/api/db/execute`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: 'INSERT INTO accounts (id, name, type, balance) VALUES ($1, $2, $3, $4)',
+        params: [accountId, 'Transaction Scoped Account', 'checking', 4321],
+        transactionId,
+      }),
+    })
+    const insertJson = await insertResponse.json()
+
+    expect(insertResponse.status).toBe(200)
+    expect(insertJson).toEqual(
+      expect.objectContaining({
+        rowsAffected: 1,
+      })
+    )
+
+    const insideQueryResponse = await fetch(`${SERVER_URL}/api/db/query`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: 'SELECT id, name, balance FROM accounts WHERE id = $1',
+        params: [accountId],
+        transactionId,
+      }),
+    })
+    const insideQueryJson = await insideQueryResponse.json()
+
+    expect(insideQueryResponse.status).toBe(200)
+    expect(insideQueryJson).toEqual([
+      {
+        id: accountId,
+        name: 'Transaction Scoped Account',
+        balance: 4321,
+      },
+    ])
+
+    const outsideQueryBeforeCommitResponse = await fetch(`${SERVER_URL}/api/db/query`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: 'SELECT id FROM accounts WHERE id = $1',
+        params: [accountId],
+      }),
+    })
+    const outsideQueryBeforeCommitJson = await outsideQueryBeforeCommitResponse.json()
+
+    expect(outsideQueryBeforeCommitResponse.status).toBe(200)
+    expect(outsideQueryBeforeCommitJson).toEqual([])
+
+    const commitResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'commit', transactionId }),
+    })
+    const commitJson = await commitResponse.json()
+
+    expect(commitResponse.status).toBe(200)
+    expect(commitJson).toEqual({ ok: true, status: 'committed' })
+
+    const outsideQueryAfterCommitResponse = await fetch(`${SERVER_URL}/api/db/query`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: 'SELECT id, name, balance FROM accounts WHERE id = $1',
+        params: [accountId],
+      }),
+    })
+    const outsideQueryAfterCommitJson = await outsideQueryAfterCommitResponse.json()
+
+    expect(outsideQueryAfterCommitResponse.status).toBe(200)
+    expect(outsideQueryAfterCommitJson).toEqual([
+      {
+        id: accountId,
+        name: 'Transaction Scoped Account',
+        balance: 4321,
+      },
+    ])
+  })
+
   it('materializes recurring rules atomically through the dedicated server endpoint', async () => {
     const defaultHeaders = {
       Origin: ORIGIN,
@@ -298,6 +400,205 @@ describe('data-server authenticated contract', () => {
     ])
     expect(queryTransactionStateResponse.status).toBe(200)
     expect(queryTransactionStateJson).toEqual([{ recurring_count: 1 }])
+  })
+
+  it('rolls back abandoned server-side transactions after the lease expires', async () => {
+    const defaultHeaders = {
+      Origin: ORIGIN,
+      'X-Shikin-Bridge': TOKEN,
+      'Content-Type': 'application/json',
+    }
+
+    const beginResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'begin' }),
+    })
+    const beginJson = await beginResponse.json()
+    const transactionId = beginJson.transactionId as string
+    const accountId = 'expired-transaction-account'
+
+    await fetch(`${SERVER_URL}/api/db/execute`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: 'INSERT INTO accounts (id, name, type, balance) VALUES ($1, $2, $3, $4)',
+        params: [accountId, 'Expired Transaction Account', 'checking', 999],
+        transactionId,
+      }),
+    })
+
+    await delay(350)
+
+    const expiredQueryResponse = await fetch(`${SERVER_URL}/api/db/query`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: 'SELECT id FROM accounts WHERE id = $1',
+        params: [accountId],
+        transactionId,
+      }),
+    })
+    const expiredQueryJson = await expiredQueryResponse.json()
+
+    expect(expiredQueryResponse.status).toBe(409)
+    expect(expiredQueryJson.error).toContain('expired rolled back')
+
+    const outsideQueryResponse = await fetch(`${SERVER_URL}/api/db/query`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: 'SELECT id FROM accounts WHERE id = $1',
+        params: [accountId],
+      }),
+    })
+    const outsideQueryJson = await outsideQueryResponse.json()
+
+    expect(outsideQueryResponse.status).toBe(200)
+    expect(outsideQueryJson).toEqual([])
+  })
+
+  it('rejects invalid transactionId values and reports closed/unknown transaction states', async () => {
+    const defaultHeaders = {
+      Origin: ORIGIN,
+      'X-Shikin-Bridge': TOKEN,
+      'Content-Type': 'application/json',
+    }
+
+    const beginResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'begin' }),
+    })
+    const beginJson = await beginResponse.json()
+    const transactionId = beginJson.transactionId as string
+
+    const blankIdResponse = await fetch(`${SERVER_URL}/api/db/query`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ sql: 'SELECT 1 AS ok', params: [], transactionId: '   ' }),
+    })
+    const blankIdJson = await blankIdResponse.json()
+
+    expect(blankIdResponse.status).toBe(400)
+    expect(blankIdJson.error).toBe('Invalid transactionId')
+
+    const missingIdResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'commit' }),
+    })
+    const missingIdJson = await missingIdResponse.json()
+
+    expect(missingIdResponse.status).toBe(400)
+    expect(missingIdJson.error).toBe('Missing transactionId')
+
+    const commitResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'commit', transactionId }),
+    })
+    const commitJson = await commitResponse.json()
+
+    expect(commitResponse.status).toBe(200)
+    expect(commitJson).toEqual({ ok: true, status: 'committed' })
+
+    const closedQueryResponse = await fetch(`${SERVER_URL}/api/db/query`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ sql: 'SELECT 1 AS ok', params: [], transactionId }),
+    })
+    const closedQueryJson = await closedQueryResponse.json()
+
+    expect(closedQueryResponse.status).toBe(409)
+    expect(closedQueryJson.error).toContain('already committed')
+
+    const unknownTxResponse = await fetch(`${SERVER_URL}/api/db/execute`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ sql: 'SELECT 1', params: [], transactionId: 'tx-does-not-exist' }),
+    })
+    const unknownTxJson = await unknownTxResponse.json()
+
+    expect(unknownTxResponse.status).toBe(404)
+    expect(unknownTxJson.error).toContain('Unknown transaction: tx-does-not-exist')
+  })
+
+  it('treats recurring rule and account currencies with casing or whitespace drift as equivalent', async () => {
+    const defaultHeaders = {
+      Origin: ORIGIN,
+      'X-Shikin-Bridge': TOKEN,
+      'Content-Type': 'application/json',
+    }
+
+    const accountId = 'recurring-normalized-account'
+    const ruleId = 'recurring-normalized-rule'
+
+    const insertAccountResponse = await fetch(`${SERVER_URL}/api/db/execute`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: 'INSERT INTO accounts (id, name, type, currency, balance) VALUES ($1, $2, $3, $4, $5)',
+        params: [accountId, 'Recurring Normalized Account', 'checking', 'USD', 10000],
+      }),
+    })
+
+    expect(insertAccountResponse.status).toBe(200)
+
+    const insertRuleResponse = await fetch(`${SERVER_URL}/api/db/execute`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: `INSERT INTO recurring_rules (id, description, amount, currency, type, frequency, next_date, end_date, account_id, to_account_id, category_id, subcategory_id, tags, notes, active)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+        params: [
+          ruleId,
+          'Normalized recurring coffee',
+          250,
+          ' usd ',
+          'expense',
+          'monthly',
+          '2026-04-01',
+          null,
+          accountId,
+          null,
+          null,
+          null,
+          '[]',
+          null,
+          1,
+        ],
+      }),
+    })
+
+    expect(insertRuleResponse.status).toBe(200)
+
+    const materializeResponse = await fetch(`${SERVER_URL}/api/recurring/materialize`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({}),
+    })
+    const materializeJson = await materializeResponse.json()
+
+    expect(materializeResponse.status).toBe(200)
+    expect(materializeJson).toMatchObject({
+      success: true,
+      created: 1,
+      message: 'Created 1 transaction(s) from recurring rules.',
+    })
+
+    const transactionCurrencyResponse = await fetch(`${SERVER_URL}/api/db/query`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: 'SELECT currency FROM transactions WHERE account_id = $1 AND description = $2',
+        params: [accountId, 'Normalized recurring coffee'],
+      }),
+    })
+    const transactionCurrencyJson = await transactionCurrencyResponse.json()
+
+    expect(transactionCurrencyResponse.status).toBe(200)
+    expect(transactionCurrencyJson).toEqual([{ currency: 'USD' }])
   })
 
   it('can import an exported snapshot and continue serving queries without restart', async () => {

@@ -14,18 +14,18 @@ test.describe('mobile viewport', () => {
     await expect(sidebar).not.toBeVisible()
   })
 
-  test('mobile: bottom nav is visible with 5 items', async ({ page }) => {
+  test('mobile: bottom nav is visible with primary items and More menu', async ({ page }) => {
     const bottomNav = page.locator('nav.fixed')
     await expect(bottomNav).toBeVisible()
 
     const navLinks = bottomNav.getByRole('link')
-    await expect(navLinks).toHaveCount(5)
+    await expect(navLinks).toHaveCount(4)
 
     await expect(bottomNav.getByText('Dashboard')).toBeVisible()
     await expect(bottomNav.getByText('Transactions')).toBeVisible()
     await expect(bottomNav.getByText('Accounts')).toBeVisible()
     await expect(bottomNav.getByText('Investments')).toBeVisible()
-    await expect(bottomNav.getByText('Settings')).toBeVisible()
+    await expect(bottomNav.getByRole('button', { name: 'More pages' })).toBeVisible()
   })
 
   test('mobile: bottom nav navigation works', async ({ page }) => {
@@ -43,7 +43,8 @@ test.describe('mobile viewport', () => {
     await page.waitForURL('/investments')
     expect(page.url()).toContain('/investments')
 
-    await bottomNav.getByRole('link', { name: 'Settings' }).click()
+    await bottomNav.getByRole('button', { name: 'More pages' }).click()
+    await page.getByRole('link', { name: 'Settings' }).click()
     await page.waitForURL('/settings')
     expect(page.url()).toContain('/settings')
 

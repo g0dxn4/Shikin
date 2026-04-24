@@ -88,18 +88,18 @@ test.describe('desktop sidebar navigation', () => {
 test.describe('mobile bottom nav navigation', () => {
   test.skip(({ isMobile }) => !isMobile, 'Bottom nav only visible on mobile')
 
-  test('bottom nav renders 5 items', async ({ page }) => {
+  test('bottom nav renders primary items and More menu', async ({ page }) => {
     const bottomNav = page.getByRole('navigation').filter({ hasText: 'Dashboard' })
     await expect(bottomNav).toBeVisible()
 
     const links = bottomNav.getByRole('link')
-    await expect(links).toHaveCount(5)
+    await expect(links).toHaveCount(4)
 
     await expect(bottomNav.getByText('Dashboard')).toBeVisible()
     await expect(bottomNav.getByText('Transactions')).toBeVisible()
     await expect(bottomNav.getByText('Accounts')).toBeVisible()
     await expect(bottomNav.getByText('Investments')).toBeVisible()
-    await expect(bottomNav.getByText('Settings')).toBeVisible()
+    await expect(bottomNav.getByRole('button', { name: 'More pages' })).toBeVisible()
   })
 
   test('clicking Transactions navigates to /transactions', async ({ page }) => {
@@ -125,7 +125,8 @@ test.describe('mobile bottom nav navigation', () => {
 
   test('clicking Settings navigates to /settings', async ({ page }) => {
     const bottomNav = page.getByRole('navigation').filter({ hasText: 'Dashboard' })
-    await bottomNav.getByText('Settings').click()
+    await bottomNav.getByRole('button', { name: 'More pages' }).click()
+    await page.getByRole('link', { name: 'Settings' }).click()
     await page.waitForURL('/settings')
     expect(page.url()).toContain('/settings')
   })

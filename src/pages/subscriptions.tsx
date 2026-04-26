@@ -3,10 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Repeat, AlertCircle, CheckCircle, Calendar, DollarSign } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  useSubscriptionStore,
-  type SubbySubscription,
-} from '@/stores/subscription-store'
+import { useSubscriptionStore, type SubbySubscription } from '@/stores/subscription-store'
 
 const STATUS_COLORS: Record<string, string> = {
   trial: '#a855f7',
@@ -25,11 +22,11 @@ function SubscriptionCard({ sub }: { sub: SubbySubscription }) {
   const { t } = useTranslation('subscriptions')
 
   const statusColor = STATUS_COLORS[sub.status] ?? '#6b7280'
-  const accentColor = sub.color ?? '#bf5af2'
+  const accentColor = sub.color ?? '#7C5CFF'
 
   return (
     <div
-      className="glass-card group p-5 transition-transform duration-200 hover:translate-y-[-2px]"
+      className="liquid-card group p-5 transition-transform duration-200 hover:translate-y-[-2px] motion-reduce:transform-none"
       style={{ borderLeft: `3px solid ${accentColor}` }}
     >
       <div className="mb-3 flex items-start justify-between">
@@ -80,7 +77,7 @@ function ConnectionBanner({ connected }: { connected: boolean }) {
 
   return (
     <div
-      className="glass-card flex items-center gap-2 px-4 py-2 text-sm"
+      className="liquid-card flex items-center gap-2 px-4 py-2 text-sm"
       style={{
         borderColor: connected ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)',
         backgroundColor: connected ? 'rgba(34, 197, 94, 0.05)' : 'rgba(239, 68, 68, 0.05)',
@@ -107,7 +104,7 @@ function SetupGuide() {
   const { t } = useTranslation('subscriptions')
 
   return (
-    <div className="glass-card space-y-4 p-6">
+    <div className="liquid-card space-y-4 p-6">
       <h2 className="font-heading text-lg font-semibold">{t('connection.setupTitle')}</h2>
       <p className="text-muted-foreground text-sm">{t('connection.setupDescription')}</p>
       <ol className="text-muted-foreground list-inside list-decimal space-y-2 text-sm">
@@ -121,14 +118,8 @@ function SetupGuide() {
 
 export function Subscriptions() {
   const { t } = useTranslation('subscriptions')
-  const {
-    subscriptions,
-    upcomingPayments,
-    monthlyTotal,
-    isLoading,
-    isConnected,
-    fetch,
-  } = useSubscriptionStore()
+  const { subscriptions, upcomingPayments, monthlyTotal, isLoading, isConnected, fetch } =
+    useSubscriptionStore()
 
   const [tab, setTab] = useState<'active' | 'inactive'>('active')
 
@@ -136,17 +127,13 @@ export function Subscriptions() {
     fetch()
   }, [fetch])
 
-  const activeSubs = subscriptions.filter(
-    (s) => s.status === 'active' || s.status === 'trial'
-  )
-  const inactiveSubs = subscriptions.filter(
-    (s) => s.status !== 'active' && s.status !== 'trial'
-  )
+  const activeSubs = subscriptions.filter((s) => s.status === 'active' || s.status === 'trial')
+  const inactiveSubs = subscriptions.filter((s) => s.status !== 'active' && s.status !== 'trial')
   const displaySubs = tab === 'active' ? activeSubs : inactiveSubs
 
   return (
     <div className="animate-fade-in-up page-content">
-      <div className="page-header">
+      <div className="liquid-card page-header p-5">
         <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
         <ConnectionBanner connected={isConnected} />
       </div>
@@ -159,10 +146,14 @@ export function Subscriptions() {
         <>
           {/* Summary cards */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="metric-card">
+            <div className="liquid-hero p-5">
               <div className="text-muted-foreground mb-2 flex items-center gap-2">
-                <span className="text-primary"><DollarSign size={16} /></span>
-                <span className="font-mono text-[10px] tracking-wider uppercase">{t('summary.monthlyTotal')}</span>
+                <span className="text-accent-hover">
+                  <DollarSign size={16} />
+                </span>
+                <span className="font-mono text-[10px] tracking-wider uppercase">
+                  {t('summary.monthlyTotal')}
+                </span>
               </div>
               <p className="font-heading text-2xl font-bold tracking-tight">
                 {formatCurrency(monthlyTotal)}
@@ -170,8 +161,12 @@ export function Subscriptions() {
             </div>
             <div className="metric-card">
               <div className="text-muted-foreground mb-2 flex items-center gap-2">
-                <span className="text-primary"><DollarSign size={16} /></span>
-                <span className="font-mono text-[10px] tracking-wider uppercase">{t('summary.yearlyTotal')}</span>
+                <span className="text-primary">
+                  <DollarSign size={16} />
+                </span>
+                <span className="font-mono text-[10px] tracking-wider uppercase">
+                  {t('summary.yearlyTotal')}
+                </span>
               </div>
               <p className="font-heading text-2xl font-bold tracking-tight">
                 {formatCurrency(Math.round(monthlyTotal * 12 * 100) / 100)}
@@ -179,17 +174,22 @@ export function Subscriptions() {
             </div>
             <div className="metric-card">
               <div className="text-muted-foreground mb-2 flex items-center gap-2">
-                <span className="text-primary"><Repeat size={16} /></span>
-                <span className="font-mono text-[10px] tracking-wider uppercase">{t('summary.activeCount')}</span>
+                <span className="text-primary">
+                  <Repeat size={16} />
+                </span>
+                <span className="font-mono text-[10px] tracking-wider uppercase">
+                  {t('summary.activeCount')}
+                </span>
               </div>
               <p className="font-heading text-2xl font-bold tracking-tight">{activeSubs.length}</p>
             </div>
           </div>
 
-          {/* Tabs */}
-          <div className="flex gap-2">
+          {/* Tabs as button group */}
+          <div className="flex gap-2" role="group" aria-label={t('title')}>
             <button
               onClick={() => setTab('active')}
+              aria-pressed={tab === 'active'}
               className={`rounded-full px-4 py-1.5 font-mono text-xs font-medium transition-colors ${
                 tab === 'active'
                   ? 'bg-accent text-accent-foreground'
@@ -200,6 +200,7 @@ export function Subscriptions() {
             </button>
             <button
               onClick={() => setTab('inactive')}
+              aria-pressed={tab === 'inactive'}
               className={`rounded-full px-4 py-1.5 font-mono text-xs font-medium transition-colors ${
                 tab === 'inactive'
                   ? 'bg-accent text-accent-foreground'
@@ -212,8 +213,8 @@ export function Subscriptions() {
 
           {/* Subscription grid */}
           {displaySubs.length === 0 ? (
-            <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
-              <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
+            <div className="liquid-card flex flex-col items-center justify-center py-16 text-center">
+              <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-3xl">
                 <Repeat size={28} className="text-primary" />
               </div>
               <h2 className="font-heading mb-2 text-lg font-semibold">{t('empty.title')}</h2>
@@ -229,28 +230,28 @@ export function Subscriptions() {
 
           {/* Upcoming payments */}
           {upcomingPayments.length > 0 && (
-            <div className="space-y-3">
+            <div className="liquid-card space-y-3 p-5">
               <h2 className="font-heading text-lg font-semibold">{t('upcoming.title')}</h2>
               <p className="text-muted-foreground text-xs">{t('upcoming.next30Days')}</p>
               <div className="space-y-2">
                 {upcomingPayments.map((payment, i) => (
                   <div
                     key={`${payment.name}-${i}`}
-                    className="glass-card flex items-center justify-between px-4 py-3"
+                    className="soft-divider flex items-center justify-between border-b px-2 py-3 last:border-b-0"
                   >
                     <div className="flex items-center gap-3">
                       <div
                         className="h-2 w-2 rounded-full"
-                        style={{ backgroundColor: payment.color ?? '#bf5af2' }}
+                        style={{ backgroundColor: payment.color ?? '#7C5CFF' }}
                       />
                       <span className="text-sm font-medium">{payment.name}</span>
                     </div>
                     <div className="flex items-center gap-4">
                       <span className="text-muted-foreground text-xs">
                         {payment.daysUntil === 0
-                          ? 'Today'
+                          ? t('today')
                           : payment.daysUntil === 1
-                            ? 'Tomorrow'
+                            ? t('tomorrow')
                             : `${payment.daysUntil}d`}
                       </span>
                       <span className="font-heading text-sm font-semibold">
@@ -273,7 +274,7 @@ function SubscriptionsSkeleton() {
     <>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="metric-card space-y-3">
+          <div key={i} className="liquid-card space-y-3 p-5">
             <Skeleton className="h-3 w-24" />
             <Skeleton className="h-8 w-32" />
           </div>
@@ -281,7 +282,7 @@ function SubscriptionsSkeleton() {
       </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="glass-card space-y-3 p-5">
+          <div key={i} className="liquid-card space-y-3 p-5">
             <div className="flex items-start justify-between">
               <Skeleton className="h-4 w-28" />
               <Skeleton className="h-5 w-16 rounded-full" />

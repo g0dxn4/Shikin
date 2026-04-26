@@ -48,7 +48,7 @@ describe('BudgetForm', () => {
     render(<BudgetForm onSubmit={vi.fn()} />)
 
     // The ErrorBanner title
-    expect(screen.getByText(/Categories couldn.*t be loaded/)).toBeInTheDocument()
+    expect(screen.getByText('form.categoriesError')).toBeInTheDocument()
     expect(screen.getByText('Categories unavailable')).toBeInTheDocument()
   })
 
@@ -61,7 +61,7 @@ describe('BudgetForm', () => {
     render(<BudgetForm onSubmit={vi.fn()} />)
 
     // Should render without error banner
-    expect(screen.queryByText(/Categories couldn.*t be loaded/)).not.toBeInTheDocument()
+    expect(screen.queryByText('form.categoriesError')).not.toBeInTheDocument()
   })
 
   it('requires a category before submit', async () => {
@@ -136,7 +136,15 @@ describe('BudgetForm', () => {
       render(<BudgetForm onSubmit={vi.fn()} />)
 
       // Error banner should be visible
-      expect(screen.getByText(/Categories couldn.*t be loaded/)).toBeInTheDocument()
+      expect(screen.getByText('form.categoriesError')).toBeInTheDocument()
+    })
+
+    it('announces loading state on submit button', () => {
+      render(<BudgetForm onSubmit={vi.fn()} isLoading={true} />)
+
+      const submitButton = screen.getByRole('button')
+      expect(submitButton).toHaveAttribute('aria-busy', 'true')
+      expect(submitButton).toHaveTextContent('actions.saving')
     })
   })
 })

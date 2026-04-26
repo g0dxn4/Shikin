@@ -63,7 +63,7 @@ describe('Goals', () => {
       render(<Goals />)
 
       // Should show error state, not empty state
-      expect(screen.getByText('Couldn\u2019t load your goals')).toBeInTheDocument()
+      expect(screen.getByText('error.loadDetailed')).toBeInTheDocument()
       expect(screen.getByText('Database connection failed')).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /Try again/i })).toBeInTheDocument()
 
@@ -82,7 +82,7 @@ describe('Goals', () => {
       expect(screen.getByText('empty.description')).toBeInTheDocument()
 
       // Should NOT show error state
-      expect(screen.queryByText('Couldn\u2019t load your goals')).not.toBeInTheDocument()
+      expect(screen.queryByText('error.loadDetailed')).not.toBeInTheDocument()
     })
 
     it('calls fetch when retry button is clicked', async () => {
@@ -119,13 +119,13 @@ describe('Goals', () => {
       render(<Goals />)
 
       // Should show error banner, not full error state
-      expect(screen.getByText('Couldn\u2019t load goals')).toBeInTheDocument()
+      expect(screen.getByText('error.load')).toBeInTheDocument()
 
-      // But should still show the goal
-      expect(screen.getByText('Emergency Fund')).toBeInTheDocument()
+      // But should still show the goal (may appear in hero + card)
+      expect(screen.getAllByText('Emergency Fund').length).toBeGreaterThan(0)
 
       // Should NOT show error state (full page error)
-      expect(screen.queryByText('Couldn\u2019t load your goals')).not.toBeInTheDocument()
+      expect(screen.queryByText('error.loadDetailed')).not.toBeInTheDocument()
     })
 
     it('shows loading skeleton when isLoading is true', () => {
@@ -138,6 +138,102 @@ describe('Goals', () => {
       // Should show skeleton loaders (Skeleton component uses 'skeleton' class)
       const skeletons = document.querySelectorAll('.skeleton')
       expect(skeletons.length).toBeGreaterThan(0)
+    })
+
+    it('marks loading skeleton container with aria-busy', () => {
+      mockIsLoading = true
+      mockGoals = []
+      mockFetchError = null
+
+      render(<Goals />)
+
+      const busyContainer = document.querySelector('[aria-busy="true"]')
+      expect(busyContainer).toBeInTheDocument()
+    })
+  })
+
+  describe('hero section', () => {
+    it('renders featured goal and aggregate progress', () => {
+      mockGoals = [
+        {
+          id: 'goal-1',
+          name: 'Emergency Fund',
+          target_amount: 10000,
+          current_amount: 5000,
+          progress: 50,
+          daysRemaining: 100,
+          monthlyNeeded: 500,
+          accountName: null,
+          color: null,
+          icon: null,
+          notes: null,
+        },
+        {
+          id: 'goal-2',
+          name: 'Vacation',
+          target_amount: 5000,
+          current_amount: 2500,
+          progress: 50,
+          daysRemaining: 50,
+          monthlyNeeded: 250,
+          accountName: null,
+          color: null,
+          icon: null,
+          notes: null,
+        },
+      ]
+
+      render(<Goals />)
+
+      expect(screen.getByText('hero.featuredGoal')).toBeInTheDocument()
+      expect(screen.getByText('hero.aggregateProgress')).toBeInTheDocument()
+      expect(screen.getByText('2 hero.goalCount')).toBeInTheDocument()
+    })
+  })
+
+  describe('due date states', () => {
+    it('shows due today text for goals with 0 days remaining', () => {
+      mockGoals = [
+        {
+          id: 'goal-1',
+          name: 'Urgent Goal',
+          target_amount: 10000,
+          current_amount: 5000,
+          progress: 50,
+          daysRemaining: 0,
+          monthlyNeeded: 500,
+          accountName: null,
+          color: null,
+          icon: null,
+          notes: null,
+        },
+      ]
+
+      render(<Goals />)
+
+      expect(screen.getAllByText('card.dueToday').length).toBeGreaterThan(0)
+    })
+
+    it('shows overdue text for goals with negative days remaining', () => {
+      mockGoals = [
+        {
+          id: 'goal-1',
+          name: 'Overdue Goal',
+          target_amount: 10000,
+          current_amount: 5000,
+          progress: 50,
+          daysRemaining: -5,
+          monthlyNeeded: 500,
+          accountName: null,
+          color: null,
+          icon: null,
+          notes: null,
+        },
+      ]
+
+      render(<Goals />)
+
+      expect(screen.getAllByText('card.overdue').length).toBeGreaterThan(0)
     })
   })
 })

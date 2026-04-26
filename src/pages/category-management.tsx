@@ -64,7 +64,7 @@ const MOCK_CATEGORIES: Category[] = [
     id: '4',
     name: 'Entertainment',
     icon: <Film size={14} />,
-    color: '#bf5af2',
+    color: '#7C5CFF',
     transactions: 8,
     monthlyAvg: '$120',
     budget: '$150',
@@ -99,7 +99,7 @@ const COLOR_OPTIONS = [
   '#22c55e',
   '#f59e0b',
   '#3b82f6',
-  '#bf5af2',
+  '#7C5CFF',
   '#ef4444',
   '#06b6d4',
   '#ec4899',
@@ -126,9 +126,9 @@ export function CategoryManagement() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_400px]">
         {/* Category Table */}
-        <div className="glass-card overflow-hidden p-5">
+        <div className="liquid-card overflow-hidden p-5">
           {/* Header */}
-          <div className="text-muted-foreground mb-2 hidden grid-cols-[1fr_80px_100px_80px_60px] gap-4 px-2 font-mono text-[10px] uppercase tracking-wider md:grid">
+          <div className="text-muted-foreground mb-2 hidden grid-cols-[1fr_80px_100px_80px_60px] gap-4 px-2 font-mono text-[10px] tracking-wider uppercase md:grid">
             <span>Category</span>
             <span className="text-right">Txns</span>
             <span className="text-right">Monthly Avg</span>
@@ -141,14 +141,22 @@ export function CategoryManagement() {
             {MOCK_CATEGORIES.map((cat) => {
               const isSelected = cat.id === selectedId
               return (
-                <button
+                <div
                   key={cat.id}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => {
                     setSelectedId(cat.id)
                     setSelectedColor(cat.color)
                   }}
-                  className={`grid w-full grid-cols-[1fr_auto] items-center gap-4 rounded-lg px-2 py-2.5 text-left transition-colors md:grid-cols-[1fr_80px_100px_80px_60px] ${
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      setSelectedId(cat.id)
+                      setSelectedColor(cat.color)
+                    }
+                  }}
+                  className={`focus-visible:ring-ring/50 grid w-full cursor-pointer grid-cols-[1fr_auto] items-center gap-4 rounded-lg px-2 py-2.5 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none md:grid-cols-[1fr_80px_100px_80px_60px] ${
                     isSelected ? 'bg-accent/5' : 'hover:bg-white/[0.02]'
                   }`}
                 >
@@ -180,21 +188,35 @@ export function CategoryManagement() {
 
                   {/* Actions */}
                   <div className="flex justify-end gap-0.5">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground">
+                    <button
+                      type="button"
+                      aria-label={`Edit ${cat.name}`}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setSelectedId(cat.id)
+                        setSelectedColor(cat.color)
+                      }}
+                      className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex h-7 w-7 items-center justify-center rounded-md focus-visible:ring-2 focus-visible:outline-none"
+                    >
                       <Pencil size={12} />
-                    </span>
-                    <span className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-destructive">
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Delete ${cat.name}`}
+                      onClick={(event) => event.stopPropagation()}
+                      className="text-muted-foreground hover:text-destructive focus-visible:ring-ring/50 flex h-7 w-7 items-center justify-center rounded-md focus-visible:ring-2 focus-visible:outline-none"
+                    >
                       <Trash2 size={12} />
-                    </span>
+                    </button>
                   </div>
-                </button>
+                </div>
               )
             })}
           </div>
         </div>
 
         {/* Category Details Panel */}
-        <div className="glass-card space-y-6 p-5">
+        <div className="liquid-card space-y-6 p-5">
           <div className="flex items-center gap-2">
             <div
               className="flex h-8 w-8 items-center justify-center rounded-lg"
@@ -210,17 +232,24 @@ export function CategoryManagement() {
 
           {/* Color picker */}
           <div className="space-y-2">
-            <label className="text-muted-foreground font-mono text-[10px] uppercase tracking-wider">
+            <label
+              id="category-color-label"
+              className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase"
+            >
               Color
             </label>
-            <div className="flex gap-2">
+            <div className="flex gap-2" role="group" aria-labelledby="category-color-label">
               {COLOR_OPTIONS.map((color) => (
                 <button
                   key={color}
                   type="button"
+                  aria-label={`Select color ${color}`}
+                  aria-pressed={selectedColor === color}
                   onClick={() => setSelectedColor(color)}
-                  className={`h-7 w-7 rounded-full transition-transform hover:scale-110 ${
-                    selectedColor === color ? 'ring-2 ring-white ring-offset-2 ring-offset-background' : ''
+                  className={`h-8 w-8 rounded-full transition-transform hover:scale-110 motion-reduce:transition-none motion-reduce:hover:scale-100 ${
+                    selectedColor === color
+                      ? 'ring-offset-background ring-2 ring-white ring-offset-2'
+                      : ''
                   }`}
                   style={{ backgroundColor: color }}
                 />
@@ -230,10 +259,14 @@ export function CategoryManagement() {
 
           {/* Monthly Budget */}
           <div className="space-y-2">
-            <label className="text-muted-foreground font-mono text-[10px] uppercase tracking-wider">
+            <label
+              htmlFor="category-monthly-budget"
+              className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase"
+            >
               Monthly Budget
             </label>
             <Input
+              id="category-monthly-budget"
               type="number"
               defaultValue={selected.budget.replace('$', '')}
               placeholder="Enter budget amount"
@@ -242,21 +275,18 @@ export function CategoryManagement() {
 
           {/* Subcategories */}
           <div className="space-y-2">
-            <label className="text-muted-foreground font-mono text-[10px] uppercase tracking-wider">
+            <label className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
               Subcategories
             </label>
             <div className="flex flex-wrap gap-2">
               {selected.subcategories.map((sub) => (
-                <span
-                  key={sub}
-                  className="rounded-full bg-white/[0.06] px-3 py-1 text-xs"
-                >
+                <span key={sub} className="rounded-full bg-white/[0.06] px-3 py-1 text-xs">
                   {sub}
                 </span>
               ))}
               <button
                 type="button"
-                className="rounded-full border border-dashed border-white/10 px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-white/20 hover:text-foreground"
+                className="text-muted-foreground hover:text-foreground rounded-full border border-dashed border-white/10 px-3 py-1 text-xs transition-colors hover:border-white/20"
               >
                 <Plus size={10} className="mr-1 inline" />
                 Add
@@ -266,7 +296,7 @@ export function CategoryManagement() {
 
           {/* Quick Stats */}
           <div className="space-y-2 border-t border-white/5 pt-4">
-            <label className="text-muted-foreground font-mono text-[10px] uppercase tracking-wider">
+            <label className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
               Quick Stats
             </label>
             <div className="grid grid-cols-2 gap-3">

@@ -1,0 +1,19 @@
+{
+  "title": "Bill Calendar",
+  "prevMonth": "Previous month",
+  "nextMonth": "Next month",
+  "upcomingBills": "Upcoming Bills",
+  "noBills": "No bills scheduled yet",
+  "thisMonth": "This Month",
+  "paid": "Paid",
+  "remaining": "Remaining",
+  "dayLabels": {
+    "sunday": "Sun",
+    "monday": "Mon",
+    "tuesday": "Tue",
+    "wednesday": "Wed",
+    "thursday": "Thu",
+    "friday": "Fri",
+    "saturday": "Sat"
+  }
+}

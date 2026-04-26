@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Flame } from 'lucide-react'
 import { FilterPills } from '@/components/ui/filter-pills'
-import { PageHeader } from '@/components/ui/page-header'
 import { StatRow } from '@/components/ui/stat-row'
 import { ProgressBar } from '@/components/ui/progress-bar'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -29,38 +29,39 @@ interface CategoryTotal {
   total: number // centavos
 }
 
-function getDateRange(period: string): { start: string; end: string; weeksCount: number } {
+function getDateRange(period: string): { start: string; end: string } {
   const now = dayjs()
   const end = now.format('YYYY-MM-DD')
   switch (period) {
     case 'month': {
       const start = now.startOf('month').format('YYYY-MM-DD')
-      return { start, end, weeksCount: Math.ceil(now.date() / 7) + 1 }
+      return { start, end }
     }
     case '3months': {
       const start = now.subtract(3, 'month').startOf('week').format('YYYY-MM-DD')
-      return { start, end, weeksCount: 13 }
+      return { start, end }
     }
     case '6months': {
       const start = now.subtract(6, 'month').startOf('week').format('YYYY-MM-DD')
-      return { start, end, weeksCount: 26 }
+      return { start, end }
     }
     case 'year':
     default: {
       const start = now.startOf('year').format('YYYY-MM-DD')
-      return { start, end, weeksCount: 53 }
+      return { start, end }
     }
   }
 }
 
 export function SpendingHeatmap() {
+  const { t } = useTranslation('analytics')
   const [timeRange, setTimeRange] = useState('3months')
   const [dailySpends, setDailySpends] = useState<DailySpend[]>([])
   const [categoryTotals, setCategoryTotals] = useState<CategoryTotal[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const loadCountRef = useRef(0)
 
-  const { start, end, weeksCount } = useMemo(() => getDateRange(timeRange), [timeRange])
+  const { start, end } = useMemo(() => getDateRange(timeRange), [timeRange])
 
   useEffect(() => {
     const loadId = ++loadCountRef.current
@@ -178,15 +179,19 @@ export function SpendingHeatmap() {
   }, [dailySpends, spendMap, start, end])
 
   // Build heatmap grid: 7 rows (Mon-Sun) x weeksCount columns
-  const { grid, weekLabels, maxSpend } = useMemo(() => {
-    // Find the Monday of the start week
+  const { grid, weekLabels, maxSpend, gridStartDate, computedWeeksCount } = useMemo(() => {
+    // Find the Monday of the start week (same logic used everywhere)
     let startDate = dayjs(start)
     const startDow = (startDate.day() + 6) % 7 // Monday=0
     startDate = startDate.subtract(startDow, 'day')
 
+    const today = dayjs()
+    // Compute weeksCount from actual Monday-aligned start to end
+    const daysSpan = today.diff(startDate, 'day') + 1
+    const weeksCount = Math.max(1, Math.ceil(daysSpan / 7))
+
     const grid: (number | null)[][] = []
     const weekLabels: string[] = []
-    const today = dayjs()
     let maxSpend = 0
 
     for (let w = 0; w < weeksCount; w++) {
@@ -214,8 +219,8 @@ export function SpendingHeatmap() {
       grid.push(row)
     }
 
-    return { grid, weekLabels, maxSpend }
-  }, [spendMap, start, weeksCount])
+    return { grid, weekLabels, maxSpend, gridStartDate: startDate, computedWeeksCount: weeksCount }
+  }, [spendMap, start])
 
   function intensityClass(value: number | null): string {
     if (value === null) return 'bg-white/[0.02]'
@@ -235,8 +240,16 @@ export function SpendingHeatmap() {
 
   if (isLoading) {
     return (
-      <div className="animate-fade-in-up page-content">
-        <PageHeader title="Spending Heatmap" />
+      <div className="animate-fade-in-up page-content" role="status" aria-busy="true">
+        <span className="sr-only">Loading</span>
+        <div className="liquid-card page-header p-5">
+          <div>
+            <h1 className="font-heading text-2xl font-bold tracking-tight">
+              {t('spendingHeatmap.title')}
+            </h1>
+            <p className="text-muted-foreground mt-1 text-sm">{t('spendingHeatmap.description')}</p>
+          </div>
+        </div>
         <Skeleton className="h-8 w-64" />
         <Skeleton className="mt-4 h-64 w-full" />
       </div>
@@ -245,28 +258,42 @@ export function SpendingHeatmap() {
 
   return (
     <div className="animate-fade-in-up page-content">
-      <PageHeader title="Spending Heatmap" />
+      <div className="liquid-card page-header p-5">
+        <div>
+          <h1 className="font-heading text-2xl font-bold tracking-tight">
+            {t('spendingHeatmap.title')}
+          </h1>
+          <p className="text-muted-foreground mt-1 text-sm">{t('spendingHeatmap.description')}</p>
+        </div>
+      </div>
 
-      <FilterPills options={TIME_OPTIONS} selected={timeRange} onChange={setTimeRange} />
+      <FilterPills
+        options={TIME_OPTIONS}
+        selected={timeRange}
+        onChange={setTimeRange}
+        ariaLabel="Time range"
+      />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_300px]">
         {/* Heatmap */}
-        <div className="glass-card p-5">
+        <div className="liquid-card p-5">
           <div className="mb-4 flex items-center gap-2">
-            <Flame size={16} className="text-accent" />
-            <h3 className="font-heading text-sm font-semibold">Daily Spending Activity</h3>
+            <Flame size={16} className="text-accent" aria-hidden="true" />
+            <h3 className="font-heading text-sm font-semibold">
+              {t('spendingHeatmap.dailyActivity')}
+            </h3>
           </div>
 
           {dailySpends.length === 0 ? (
             <div className="flex h-32 items-center justify-center">
-              <p className="text-muted-foreground text-sm">No spending data for this period.</p>
+              <p className="text-muted-foreground text-sm">{t('spendingHeatmap.noData')}</p>
             </div>
           ) : (
             <>
               {/* Week labels */}
               <div
                 className="mb-1 ml-8 grid gap-[3px]"
-                style={{ gridTemplateColumns: `repeat(${weeksCount}, minmax(0, 1fr))` }}
+                style={{ gridTemplateColumns: `repeat(${computedWeeksCount}, minmax(0, 1fr))` }}
               >
                 {weekLabels.map((label, i) => (
                   <span key={i} className="text-muted-foreground truncate font-mono text-[8px]">
@@ -282,6 +309,7 @@ export function SpendingHeatmap() {
                     <div
                       key={i}
                       className="text-muted-foreground flex h-[14px] items-center font-mono text-[8px]"
+                      aria-hidden="true"
                     >
                       {i % 2 === 0 ? label.slice(0, 2) : ''}
                     </div>
@@ -290,43 +318,57 @@ export function SpendingHeatmap() {
 
                 <div
                   className="grid flex-1 gap-[3px]"
-                  style={{ gridTemplateColumns: `repeat(${weeksCount}, minmax(0, 1fr))` }}
+                  style={{ gridTemplateColumns: `repeat(${computedWeeksCount}, minmax(0, 1fr))` }}
+                  role="grid"
+                  aria-label={t('spendingHeatmap.dailyActivity')}
                 >
-                  {grid.map((row, r) =>
-                    row.map((value, c) => (
-                      <div
-                        key={`${r}-${c}`}
-                        className={`aspect-square rounded-[2px] transition-colors ${intensityClass(value)}`}
-                        title={
-                          value !== null
-                            ? `${dayjs(start)
-                                .startOf('week')
-                                .add(c * 7 + r, 'day')
-                                .format('MMM D')}: ${formatMoney(value)}`
-                            : ''
-                        }
-                      />
-                    ))
-                  )}
+                  {grid.map((row, r) => (
+                    <div key={r} role="row" className="contents">
+                      {row.map((value, c) => {
+                        const cellDate = gridStartDate.add(c * 7 + r, 'day')
+                        const dateLabel = cellDate.format('YYYY-MM-DD')
+                        return (
+                          <div
+                            key={`${r}-${c}`}
+                            className={`aspect-square rounded-[2px] transition-colors ${intensityClass(value)}`}
+                            title={
+                              value !== null
+                                ? `${cellDate.format('MMM D')}: ${formatMoney(value)}`
+                                : ''
+                            }
+                            role="gridcell"
+                            aria-label={
+                              value !== null ? `${dateLabel}: ${formatMoney(value)}` : 'No data'
+                            }
+                          />
+                        )
+                      })}
+                    </div>
+                  ))}
                 </div>
               </div>
 
               {/* Legend */}
               <div className="mt-4 flex items-center justify-end gap-2">
-                <span className="text-muted-foreground font-mono text-[9px]">Less</span>
+                <span className="text-muted-foreground font-mono text-[9px]">
+                  {t('spendingHeatmap.less')}
+                </span>
                 <div className="flex gap-0.5">
                   {[
                     'bg-accent/5',
-                    'bg-accent/15',
+                    'bg-accent/10',
+                    'bg-accent/20',
                     'bg-accent/30',
                     'bg-accent/50',
-                    'bg-accent/70',
-                    'bg-accent/90',
+                    'bg-accent/65',
+                    'bg-accent/80',
                   ].map((cls, i) => (
                     <div key={i} className={`h-3 w-3 rounded-sm ${cls}`} />
                   ))}
                 </div>
-                <span className="text-muted-foreground font-mono text-[9px]">More</span>
+                <span className="text-muted-foreground font-mono text-[9px]">
+                  {t('spendingHeatmap.more')}
+                </span>
               </div>
             </>
           )}
@@ -334,9 +376,9 @@ export function SpendingHeatmap() {
 
         {/* Stats panel */}
         <div className="space-y-3">
-          <div className="glass-card space-y-1 p-4">
+          <div className="liquid-card space-y-1 p-4">
             <span className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
-              Highest Day
+              {t('spendingHeatmap.highestDay')}
             </span>
             <StatRow
               label={stats?.highestDate ?? '-'}
@@ -344,31 +386,31 @@ export function SpendingHeatmap() {
               valueColor="text-destructive"
             />
           </div>
-          <div className="glass-card space-y-1 p-4">
+          <div className="liquid-card space-y-1 p-4">
             <span className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
-              Average Daily
+              {t('spendingHeatmap.avgDaily')}
             </span>
             <StatRow
-              label={`Last ${dayjs(end).diff(dayjs(start), 'day')} days`}
+              label={t('spendingHeatmap.lastNDays', { n: dayjs(end).diff(dayjs(start), 'day') })}
               value={stats ? formatMoney(Math.round(stats.avgDaily)) : '-'}
             />
           </div>
-          <div className="glass-card space-y-1 p-4">
+          <div className="liquid-card space-y-1 p-4">
             <span className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
-              Most Active
+              {t('spendingHeatmap.mostActive')}
             </span>
             <StatRow
-              label="Day of Week"
+              label={t('spendingHeatmap.dayOfWeek')}
               value={stats?.mostActiveDay ?? '-'}
               valueColor="text-accent"
             />
           </div>
-          <div className="glass-card space-y-1 p-4">
+          <div className="liquid-card space-y-1 p-4">
             <span className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
-              Current Streak
+              {t('spendingHeatmap.currentStreak')}
             </span>
             <StatRow
-              label="Under $50/day"
+              label={t('spendingHeatmap.under50Day')}
               value={stats ? `${stats.streak} days` : '-'}
               valueColor="text-success"
             />
@@ -378,8 +420,10 @@ export function SpendingHeatmap() {
 
       {/* Top Categories */}
       {categoryTotals.length > 0 && (
-        <div className="glass-card space-y-4 p-5">
-          <h3 className="font-heading text-sm font-semibold">Top Categories</h3>
+        <div className="liquid-card space-y-4 p-5">
+          <h3 className="font-heading text-sm font-semibold">
+            {t('spendingHeatmap.topCategories')}
+          </h3>
           <div className="space-y-3">
             {categoryTotals.map((cat) => {
               const percent = catMax > 0 ? (cat.total / catMax) * 100 : 0
@@ -397,7 +441,12 @@ export function SpendingHeatmap() {
                       {formatMoney(cat.total)}
                     </span>
                   </div>
-                  <ProgressBar value={percent} color="accent" size="sm" />
+                  <ProgressBar
+                    value={percent}
+                    color="accent"
+                    size="sm"
+                    ariaLabel={`${cat.name} share of top category`}
+                  />
                 </div>
               )
             })}

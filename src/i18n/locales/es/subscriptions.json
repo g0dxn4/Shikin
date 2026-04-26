@@ -35,6 +35,8 @@
     "title": "Próximos Pagos",
     "next30Days": "Próximos 30 días"
   },
+  "today": "Hoy",
+  "tomorrow": "Mañana",
   "cycle": {
     "weekly": "Semanal",
     "monthly": "Mensual",

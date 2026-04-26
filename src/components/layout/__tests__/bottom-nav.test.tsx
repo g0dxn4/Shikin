@@ -30,6 +30,35 @@ describe('BottomNav', () => {
       </MemoryRouter>
     )
 
-    expect(screen.getByLabelText('More pages')).toHaveClass('text-accent')
+    expect(screen.getByLabelText('More pages')).toHaveClass('text-accent-hover')
+  })
+
+  it('active primary link exposes aria-current="page"', () => {
+    render(
+      <MemoryRouter>
+        <BottomNav
+          items={[{ icon: <span aria-hidden="true">D</span>, label: 'Dashboard', href: '/' }]}
+          activeHref="/"
+        />
+      </MemoryRouter>
+    )
+
+    const activeLink = screen.getByRole('link', { name: 'Dashboard' })
+    expect(activeLink).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('has mobile primary navigation aria-label', () => {
+    render(
+      <MemoryRouter>
+        <BottomNav
+          items={[{ icon: <span>D</span>, label: 'Dashboard', href: '/' }]}
+          activeHref="/"
+        />
+      </MemoryRouter>
+    )
+
+    expect(
+      screen.getByRole('navigation', { name: 'Mobile primary navigation' })
+    ).toBeInTheDocument()
   })
 })

@@ -1,0 +1,57 @@
+{
+  "netWorth": {
+    "title": "Patrimonio Neto",
+    "description": "Activos menos pasivos",
+    "currentNetWorth": "Patrimonio Neto Actual",
+    "chartTitle": "Patrimonio Neto en el Tiempo",
+    "assets": "Activos",
+    "liabilities": "Pasivos",
+    "includesInvestments": "Incluye {{amount}} en inversiones",
+    "noLiabilities": "Sin pasivos. Bien!",
+    "addAccountsPrompt": "Agrega cuentas para ver el desglose de activos y pasivos.",
+    "noHistory": "Sin historial todavia. Agrega cuentas para comenzar a rastrear tu patrimonio.",
+    "firstSnapshot": "Primer registro guardado. Vuelve manana para ver tendencias."
+  },
+  "spendingInsights": {
+    "title": "Analisis de Gastos",
+    "description": "Patrones sin analiticas en la nube",
+    "tabs": {
+      "insights": "Ideas",
+      "mom": "Mes / Mes",
+      "yoy": "Ano / Ano"
+    },
+    "insightsEmpty": "Sin cambios notables de gastos este mes. Sigue asi!",
+    "totalChange": "Cambio Total",
+    "category": "Categoria",
+    "current": "Actual",
+    "previous": "Anterior",
+    "change": "Cambio",
+    "noData": "Sin datos de gastos para esta comparacion.",
+    "vs3MonthAvg": "vs promedio 3 meses",
+    "severity": {
+      "alert": "Alerta",
+      "warning": "Advertencia",
+      "info": "Info"
+    }
+  },
+  "spendingHeatmap": {
+    "title": "Mapa de Calor de Gastos",
+    "description": "Intensidad del calendario por dia",
+    "dailyActivity": "Actividad Diaria de Gastos",
+    "noData": "Sin datos de gastos para este periodo.",
+    "highestDay": "Dia Mas Alto",
+    "avgDaily": "Promedio Diario",
+    "mostActive": "Mas Activo",
+    "currentStreak": "Racha Actual",
+    "under50Day": "Menos de $50/dia",
+    "topCategories": "Principales Categorias",
+    "less": "Menos",
+    "more": "Mas",
+    "dayOfWeek": "Dia de la Semana",
+    "lastNDays": "Ultimos {{n}} dias"
+  },
+  "reports": {
+    "title": "Informes",
+    "comingSoon": "Los informes detallados llegaran pronto. Usa el Analisis de Gastos y el Mapa de Calor por ahora."
+  }
+}

@@ -31,8 +31,21 @@
     "deleted": "Cuenta eliminada exitosamente",
     "error": "Algo salió mal"
   },
+  "subtitle": "Resumen de balance",
   "totalBalance": "Balance Total",
   "accountCount": "cuenta(s)",
+  "history": {
+    "show": "Historial de balance",
+    "hide": "Ocultar historial",
+    "empty": "Primera instantánea registrada. Vuelve mañana para ver tendencias.",
+    "none": "Sin historial aún. El balance se registra diariamente."
+  },
+  "utilization": {
+    "label": "Utilización",
+    "high": "Alta",
+    "moderate": "Moderada",
+    "low": "Baja"
+  },
   "empty": {
     "title": "Sin cuentas aún",
     "description": "Agrega tu primera cuenta para comenzar a rastrear tus finanzas."
@@ -45,6 +58,7 @@
     "title": "Cuentas Archivadas",
     "description": "Las cuentas cerradas o retiradas permanecen aquí sin afectar los totales activos.",
     "show": "Mostrar archivadas",
-    "hide": "Ocultar archivadas"
+    "hide": "Ocultar archivadas",
+    "badge": "Archivada"
   }
 }

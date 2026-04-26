@@ -1,16 +1,27 @@
 {
   "title": "Budgets",
+  "subtitle": "Spending limits",
   "addBudget": "Add Budget",
   "editBudget": "Edit Budget",
   "deleteBudget": "Delete Budget",
   "deleteConfirm": "Are you sure you want to delete this budget? This action cannot be undone.",
+  "dialog": {
+    "addDescription": "Create a new spending limit for a category.",
+    "editDescription": "Update this budget's amount, category, or period."
+  },
+  "discard": {
+    "title": "Discard changes?",
+    "description": "You have unsaved changes. Close this form without saving?",
+    "confirm": "Discard"
+  },
   "form": {
     "name": "Budget Name",
     "namePlaceholder": "e.g. Groceries Budget",
     "category": "Category",
     "categoryPlaceholder": "Select a category",
     "amount": "Budget Amount",
-    "period": "Period"
+    "period": "Period",
+    "categoriesError": "Categories couldn't be loaded"
   },
   "periods": {
     "weekly": "Weekly",
@@ -21,7 +32,24 @@
     "spent": "Spent",
     "of": "of",
     "remaining": "remaining",
-    "overBudget": "over budget"
+    "overBudget": "over budget",
+    "progressLabel": "Budget usage"
+  },
+  "status": {
+    "safe": "On track",
+    "warning": "Approaching limit",
+    "critical": "Near limit",
+    "overBudget": "Over budget"
+  },
+  "hero": {
+    "totalBudgeted": "Total Budgeted",
+    "totalSpent": "Total Spent",
+    "totalRemaining": "Total Remaining",
+    "budgetCount": "budget(s)"
+  },
+  "error": {
+    "load": "Couldn't load budgets",
+    "loadDetailed": "Couldn't load your budgets"
   },
   "toast": {
     "created": "Budget created successfully",

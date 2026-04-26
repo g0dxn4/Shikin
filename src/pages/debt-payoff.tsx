@@ -22,17 +22,20 @@ import type { MonthlySnapshot } from '@/lib/debt-service'
 import dayjs from 'dayjs'
 
 const DEBT_COLORS = [
-  '#bf5af2',
-  '#3b82f6',
-  '#f97316',
-  '#22c55e',
-  '#ef4444',
-  '#ec4899',
-  '#f59e0b',
-  '#06b6d4',
-  '#8b5cf6',
-  '#14b8a6',
+  '#7C5CFF',
+  '#5AC8FA',
+  '#F59E0B',
+  '#34D399',
+  '#F87171',
+  '#BFA4FF',
+  '#FFD60A',
+  '#06B6D4',
+  '#8B5CF6',
+  '#14B8A6',
 ]
+
+const DEBT_INPUT_CLASS =
+  'h-9 w-full rounded-lg border border-white/[0.1] bg-white/[0.05] px-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent/50 focus:outline-none'
 
 function StrategyToggle({
   strategy,
@@ -44,26 +47,24 @@ function StrategyToggle({
   const { t } = useTranslation('debtPayoff')
 
   return (
-    <div className="glass-card p-4">
+    <div className="liquid-card p-4">
       <h3 className="font-heading mb-3 text-sm font-semibold tracking-wider text-white/60 uppercase">
         {t('strategy.title')}
       </h3>
-      <div className="flex gap-2">
+      <div className="flex gap-2" role="group" aria-label={t('strategy.title')}>
         <button
           onClick={() => onToggle('avalanche')}
-          className={`flex flex-1 items-center gap-2 rounded-lg px-4 py-3 text-left transition-all ${
+          aria-pressed={strategy === 'avalanche'}
+          className={`focus:ring-accent/50 flex flex-1 items-center gap-2 rounded-lg px-4 py-3 text-left transition-all focus:ring-2 focus:outline-none ${
             strategy === 'avalanche'
-              ? 'bg-[#bf5af2]/20 ring-1 ring-[#bf5af2]/50'
-              : 'bg-white/5 hover:bg-white/8'
+              ? 'bg-accent/20 ring-accent/50 ring-1'
+              : 'bg-white/5 hover:bg-white/[0.08]'
           }`}
         >
-          <Zap
-            size={18}
-            className={strategy === 'avalanche' ? 'text-[#bf5af2]' : 'text-white/40'}
-          />
+          <Zap size={18} className={strategy === 'avalanche' ? 'text-accent' : 'text-white/40'} />
           <div>
             <p
-              className={`text-sm font-semibold ${strategy === 'avalanche' ? 'text-[#bf5af2]' : 'text-white/70'}`}
+              className={`text-sm font-semibold ${strategy === 'avalanche' ? 'text-accent' : 'text-white/70'}`}
             >
               {t('strategy.avalanche')}
             </p>
@@ -72,19 +73,20 @@ function StrategyToggle({
         </button>
         <button
           onClick={() => onToggle('snowball')}
-          className={`flex flex-1 items-center gap-2 rounded-lg px-4 py-3 text-left transition-all ${
+          aria-pressed={strategy === 'snowball'}
+          className={`focus:ring-chart-3/50 flex flex-1 items-center gap-2 rounded-lg px-4 py-3 text-left transition-all focus:ring-2 focus:outline-none ${
             strategy === 'snowball'
-              ? 'bg-[#3b82f6]/20 ring-1 ring-[#3b82f6]/50'
-              : 'bg-white/5 hover:bg-white/8'
+              ? 'bg-chart-3/20 ring-chart-3/50 ring-1'
+              : 'bg-white/5 hover:bg-white/[0.08]'
           }`}
         >
           <Snowflake
             size={18}
-            className={strategy === 'snowball' ? 'text-[#3b82f6]' : 'text-white/40'}
+            className={strategy === 'snowball' ? 'text-chart-3' : 'text-white/40'}
           />
           <div>
             <p
-              className={`text-sm font-semibold ${strategy === 'snowball' ? 'text-[#3b82f6]' : 'text-white/70'}`}
+              className={`text-sm font-semibold ${strategy === 'snowball' ? 'text-chart-3' : 'text-white/70'}`}
             >
               {t('strategy.snowball')}
             </p>
@@ -106,11 +108,11 @@ function ComparisonCards() {
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-      <div className="glass-card p-4">
+      <div className="liquid-card p-4">
         <p className="text-xs font-medium tracking-wider text-white/40 uppercase">
           {t('comparison.avalancheMonths')}
         </p>
-        <p className="font-heading mt-1 text-2xl font-bold text-[#bf5af2]">
+        <p className="font-heading text-accent mt-1 text-2xl font-bold">
           {avalanche.months}
           <span className="text-sm font-normal text-white/40"> {t('comparison.months')}</span>
         </p>
@@ -118,11 +120,11 @@ function ComparisonCards() {
           {t('comparison.totalInterest')}: {formatMoney(avalanche.totalInterestPaid)}
         </p>
       </div>
-      <div className="glass-card p-4">
+      <div className="liquid-card p-4">
         <p className="text-xs font-medium tracking-wider text-white/40 uppercase">
           {t('comparison.snowballMonths')}
         </p>
-        <p className="font-heading mt-1 text-2xl font-bold text-[#3b82f6]">
+        <p className="font-heading text-chart-3 mt-1 text-2xl font-bold">
           {snowball.months}
           <span className="text-sm font-normal text-white/40"> {t('comparison.months')}</span>
         </p>
@@ -130,11 +132,11 @@ function ComparisonCards() {
           {t('comparison.totalInterest')}: {formatMoney(snowball.totalInterestPaid)}
         </p>
       </div>
-      <div className="glass-card p-4">
+      <div className="liquid-card p-4">
         <p className="text-xs font-medium tracking-wider text-white/40 uppercase">
           {t('comparison.interestSaved')}
         </p>
-        <p className="font-heading mt-1 text-2xl font-bold text-[#22c55e]">
+        <p className="font-heading text-success mt-1 text-2xl font-bold">
           {formatMoney(Math.abs(interestSaved))}
         </p>
         <p className="mt-0.5 text-xs text-white/40">
@@ -172,48 +174,49 @@ function DebtChart() {
   })
 
   return (
-    <div className="glass-card p-5">
+    <div className="liquid-card p-5">
       <h3 className="font-heading mb-4 text-sm font-semibold tracking-wider text-white/60 uppercase">
         {t('chart.title')}
       </h3>
-      <SafeChart height={300}>
-        <AreaChart data={chartData}>
-          <XAxis
-            dataKey="month"
-            tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
-            axisLine={{ stroke: 'rgba(255,255,255,0.06)' }}
-            tickLine={false}
-          />
-          <YAxis
-            tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
-            axisLine={{ stroke: 'rgba(255,255,255,0.06)' }}
-            tickLine={false}
-            tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}k`}
-          />
-          <Tooltip
-            contentStyle={{
-              background: '#0a0a0a',
-              border: '1px solid rgba(255,255,255,0.06)',
-              borderRadius: 8,
-              color: '#f0f0f0',
-              fontSize: 12,
-            }}
-            formatter={(value: number | undefined) => [`$${(value ?? 0).toFixed(2)}`]}
-          />
-          {allDebts.map((d, i) => (
-            <Area
-              key={d.id}
-              type="monotone"
-              dataKey={d.name}
-              stackId="1"
-              fill={DEBT_COLORS[i % DEBT_COLORS.length]}
-              fillOpacity={0.3}
-              stroke={DEBT_COLORS[i % DEBT_COLORS.length]}
-              strokeWidth={1.5}
+      <div role="img" aria-label={t('chart.title')}>
+        <SafeChart height={300}>
+          <AreaChart data={chartData}>
+            <XAxis
+              dataKey="month"
+              tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
+              axisLine={{ stroke: 'rgba(255,255,255,0.06)' }}
+              tickLine={false}
             />
-          ))}
-        </AreaChart>
-      </SafeChart>
+            <YAxis
+              tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
+              axisLine={{ stroke: 'rgba(255,255,255,0.06)' }}
+              tickLine={false}
+              tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}k`}
+            />
+            <Tooltip
+              contentStyle={{
+                background: '#0a0a0a',
+                border: '1px solid rgba(255,255,255,0.06)',
+                borderRadius: 8,
+                color: '#f0f0f0',
+                fontSize: 12,
+              }}
+              formatter={(value: number | undefined) => [`$${(value ?? 0).toFixed(2)}`]}
+            />
+            {allDebts.map((d, i) => (
+              <Area
+                key={d.id}
+                type="monotone"
+                dataKey={d.name}
+                fill={DEBT_COLORS[i % DEBT_COLORS.length]}
+                fillOpacity={0.3}
+                stroke={DEBT_COLORS[i % DEBT_COLORS.length]}
+                strokeWidth={1.5}
+              />
+            ))}
+          </AreaChart>
+        </SafeChart>
+      </div>
     </div>
   )
 }
@@ -232,7 +235,7 @@ function DebtCard({
   const { t } = useTranslation('debtPayoff')
 
   return (
-    <div className="glass-card group relative overflow-hidden p-4">
+    <div className="liquid-card group relative overflow-hidden p-4">
       <div className="absolute top-0 left-0 h-full w-1" style={{ backgroundColor: color }} />
       <div className="flex items-start justify-between">
         <div className="pl-3">
@@ -259,6 +262,7 @@ function DebtCard({
               size="icon"
               className="text-destructive hover:text-destructive h-7 w-7 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
               onClick={onRemove}
+              aria-label={t('actions.delete', { ns: 'common', defaultValue: 'Delete' })}
             >
               <Trash2 size={12} />
             </Button>
@@ -307,7 +311,7 @@ function AddDebtForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="glass-card space-y-3 p-4">
+    <form onSubmit={handleSubmit} className="liquid-card space-y-3 p-4">
       <div className="flex items-center justify-between">
         <h3 className="font-heading text-sm font-semibold">{t('addDebt.title')}</h3>
         <Button
@@ -316,56 +320,69 @@ function AddDebtForm({
           size="icon"
           className="h-6 w-6"
           onClick={() => setOpen(false)}
+          aria-label={t('actions.cancel', { ns: 'common', defaultValue: 'Cancel' })}
         >
           <ChevronDown size={14} />
         </Button>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="col-span-2">
-          <label className="mb-1 block text-xs text-white/40">{t('addDebt.name')}</label>
+          <label htmlFor="add-debt-name" className="mb-1 block text-xs text-white/40">
+            {t('addDebt.name')}
+          </label>
           <input
+            id="add-debt-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={t('addDebt.namePlaceholder')}
-            className="h-9 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder:text-white/30 focus:border-[#bf5af2]/50 focus:outline-none"
+            className={DEBT_INPUT_CLASS}
             required
           />
         </div>
         <div>
-          <label className="mb-1 block text-xs text-white/40">{t('addDebt.balance')}</label>
+          <label htmlFor="add-debt-balance" className="mb-1 block text-xs text-white/40">
+            {t('addDebt.balance')}
+          </label>
           <input
+            id="add-debt-balance"
             value={balance}
             onChange={(e) => setBalance(e.target.value)}
             type="number"
             step="0.01"
             min="0"
             placeholder="5000.00"
-            className="h-9 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder:text-white/30 focus:border-[#bf5af2]/50 focus:outline-none"
+            className={DEBT_INPUT_CLASS}
             required
           />
         </div>
         <div>
-          <label className="mb-1 block text-xs text-white/40">{t('addDebt.apr')}</label>
+          <label htmlFor="add-debt-apr" className="mb-1 block text-xs text-white/40">
+            {t('addDebt.apr')}
+          </label>
           <input
+            id="add-debt-apr"
             value={apr}
             onChange={(e) => setApr(e.target.value)}
             type="number"
             step="0.01"
             min="0"
             placeholder="24.99"
-            className="h-9 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder:text-white/30 focus:border-[#bf5af2]/50 focus:outline-none"
+            className={DEBT_INPUT_CLASS}
           />
         </div>
         <div className="col-span-2">
-          <label className="mb-1 block text-xs text-white/40">{t('addDebt.minPayment')}</label>
+          <label htmlFor="add-debt-min-payment" className="mb-1 block text-xs text-white/40">
+            {t('addDebt.minPayment')}
+          </label>
           <input
+            id="add-debt-min-payment"
             value={minPayment}
             onChange={(e) => setMinPayment(e.target.value)}
             type="number"
             step="0.01"
             min="0"
             placeholder="25.00"
-            className="h-9 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder:text-white/30 focus:border-[#bf5af2]/50 focus:outline-none"
+            className={DEBT_INPUT_CLASS}
           />
         </div>
       </div>
@@ -385,42 +402,42 @@ function SummaryMetrics() {
 
   return (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-      <div className="glass-card p-4">
-        <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-[#ef4444]/10">
-          <DollarSign size={16} className="text-[#ef4444]" />
+      <div className="liquid-hero p-4">
+        <div className="bg-destructive/10 mb-2 flex h-8 w-8 items-center justify-center rounded-lg">
+          <DollarSign size={16} className="text-destructive" />
         </div>
         <p className="text-xs font-medium tracking-wider text-white/40 uppercase">
           {t('summary.totalDebt')}
         </p>
         <p className="font-heading mt-1 text-xl font-bold">{formatMoney(totalDebt)}</p>
       </div>
-      <div className="glass-card p-4">
-        <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-[#f59e0b]/10">
-          <TrendingDown size={16} className="text-[#f59e0b]" />
+      <div className="liquid-card p-4">
+        <div className="bg-warning/10 mb-2 flex h-8 w-8 items-center justify-center rounded-lg">
+          <TrendingDown size={16} className="text-warning" />
         </div>
         <p className="text-xs font-medium tracking-wider text-white/40 uppercase">
           {t('summary.monthlyMin')}
         </p>
         <p className="font-heading mt-1 text-xl font-bold">{formatMoney(totalMinPayment)}</p>
       </div>
-      <div className="glass-card p-4">
-        <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-[#22c55e]/10">
-          <Calendar size={16} className="text-[#22c55e]" />
+      <div className="liquid-card p-4">
+        <div className="bg-success/10 mb-2 flex h-8 w-8 items-center justify-center rounded-lg">
+          <Calendar size={16} className="text-success" />
         </div>
         <p className="text-xs font-medium tracking-wider text-white/40 uppercase">
           {t('summary.debtFreeDate')}
         </p>
         <p className="font-heading mt-1 text-xl font-bold">{payoffDate}</p>
       </div>
-      <div className="glass-card p-4">
-        <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-[#bf5af2]/10">
-          <Target size={16} className="text-[#bf5af2]" />
+      <div className="liquid-card p-4">
+        <div className="bg-accent/10 mb-2 flex h-8 w-8 items-center justify-center rounded-lg">
+          <Target size={16} className="text-accent" />
         </div>
         <p className="text-xs font-medium tracking-wider text-white/40 uppercase">
           {t('summary.totalInterest')}
         </p>
         <p className="font-heading mt-1 text-xl font-bold">
-          {payoffPlan ? formatMoney(payoffPlan.totalInterestPaid) : '$0.00'}
+          {formatMoney(payoffPlan?.totalInterestPaid ?? 0)}
         </p>
       </div>
     </div>
@@ -434,6 +451,7 @@ export function DebtPayoff() {
     manualDebts,
     strategy,
     extraPayment,
+    payoffPlan,
     isLoading,
     loadDebts,
     addManualDebt,
@@ -451,15 +469,16 @@ export function DebtPayoff() {
 
   return (
     <div className="animate-fade-in-up page-content">
-      <div className="page-header">
+      <div className="liquid-card page-header p-5">
         <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
       </div>
 
       {isLoading ? (
-        <div className="space-y-4">
+        <div className="space-y-4" role="status" aria-busy="true">
+          <span className="sr-only">Loading</span>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="glass-card space-y-3 p-4">
+              <div key={i} className="liquid-card space-y-3 p-4">
                 <Skeleton className="h-8 w-8" />
                 <Skeleton className="h-3 w-20" />
                 <Skeleton className="h-6 w-24" />
@@ -469,8 +488,11 @@ export function DebtPayoff() {
         </div>
       ) : !hasDebts ? (
         <div className="space-y-4">
-          <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
-            <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
+          <div className="liquid-card flex flex-col items-center justify-center py-16 text-center">
+            <div
+              className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-3xl"
+              aria-hidden="true"
+            >
               <Target size={28} className="text-primary" />
             </div>
             <h2 className="font-heading mb-2 text-lg font-semibold">{t('empty.title')}</h2>
@@ -497,7 +519,7 @@ export function DebtPayoff() {
             <div className="lg:col-span-2">
               <StrategyToggle strategy={strategy} onToggle={setStrategy} />
             </div>
-            <div className="glass-card p-4">
+            <div className="liquid-card p-4">
               <h3 className="font-heading mb-3 text-sm font-semibold tracking-wider text-white/60 uppercase">
                 {t('extraPayment.title')}
               </h3>
@@ -510,7 +532,8 @@ export function DebtPayoff() {
                   value={fromCentavos(extraPayment) || ''}
                   onChange={(e) => setExtraPayment(toCentavos(parseFloat(e.target.value) || 0))}
                   placeholder="0.00"
-                  className="h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-lg font-semibold text-white placeholder:text-white/30 focus:border-[#bf5af2]/50 focus:outline-none"
+                  aria-label={t('extraPayment.title')}
+                  className="glass-input h-10 w-full text-lg font-semibold text-white placeholder:text-white/30"
                 />
                 <span className="text-sm text-white/40">{t('extraPayment.perMonth')}</span>
               </div>
@@ -525,30 +548,29 @@ export function DebtPayoff() {
           <DebtChart />
 
           {/* Payoff order */}
-          {useDebtStore.getState().payoffPlan &&
-            useDebtStore.getState().payoffPlan!.debtPayoffOrder.length > 0 && (
-              <div className="glass-card p-5">
-                <h3 className="font-heading mb-3 text-sm font-semibold tracking-wider text-white/60 uppercase">
-                  {t('payoffOrder.title')}
-                </h3>
-                <div className="space-y-2">
-                  {useDebtStore.getState().payoffPlan!.debtPayoffOrder.map((item, i) => (
-                    <div
-                      key={item.id}
-                      className="flex items-center gap-3 rounded-lg bg-white/5 px-4 py-2"
-                    >
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#bf5af2]/20 text-xs font-bold text-[#bf5af2]">
-                        {i + 1}
-                      </span>
-                      <span className="flex-1 text-sm font-medium">{item.name}</span>
-                      <span className="text-xs text-white/40">
-                        {dayjs().add(item.paidOffMonth, 'month').format('MMM YYYY')}
-                      </span>
-                    </div>
-                  ))}
-                </div>
+          {payoffPlan && payoffPlan.debtPayoffOrder.length > 0 && (
+            <div className="liquid-card p-5">
+              <h3 className="font-heading mb-3 text-sm font-semibold tracking-wider text-white/60 uppercase">
+                {t('payoffOrder.title')}
+              </h3>
+              <div className="space-y-2">
+                {payoffPlan.debtPayoffOrder.map((item, i) => (
+                  <div
+                    key={item.id}
+                    className="soft-divider flex items-center gap-3 border-b px-4 py-2 last:border-b-0"
+                  >
+                    <span className="bg-accent/20 text-accent flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold">
+                      {i + 1}
+                    </span>
+                    <span className="flex-1 text-sm font-medium">{item.name}</span>
+                    <span className="text-xs text-white/40">
+                      {dayjs().add(item.paidOffMonth, 'month').format('MMM YYYY')}
+                    </span>
+                  </div>
+                ))}
               </div>
-            )}
+            </div>
+          )}
 
           {/* Debt list */}
           <div>

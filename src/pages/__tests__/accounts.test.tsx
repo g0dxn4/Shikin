@@ -224,7 +224,7 @@ describe('Accounts', () => {
     const { container } = render(<Accounts />)
 
     const hoverDiv = container.querySelector(
-      '.opacity-100.md\\:opacity-0.md\\:group-hover\\:opacity-100'
+      '.opacity-100.md\\:opacity-40.md\\:group-hover\\:opacity-100.md\\:group-focus-within\\:opacity-100'
     )
     expect(hoverDiv).toBeInTheDocument()
   })

@@ -27,7 +27,7 @@ test.describe('Accounts', () => {
     await page.waitForLoadState('networkidle')
 
     // There should be an add button in the empty state card
-    const emptyStateCard = page.locator('.glass-card').filter({ hasText: 'No accounts yet' })
+    const emptyStateCard = page.locator('.liquid-card').filter({ hasText: 'No accounts yet' })
     await expect(emptyStateCard).toBeVisible()
     await expect(emptyStateCard.getByRole('button', { name: /Add Account/i })).toBeVisible()
   })

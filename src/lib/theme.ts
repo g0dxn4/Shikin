@@ -16,13 +16,13 @@ const COLOR_RE =
 const ALLOWED_RADII = new Set(['0px', '8px', '12px', '16px'])
 
 export const defaultTheme: ThemeTokens = {
-  background: '#020202',
-  surface: '#0a0a0a',
-  foreground: '#ffffff',
-  accent: '#bf5af2',
-  mutedForeground: '#a1a1aa',
-  border: 'rgba(255, 255, 255, 0.06)',
-  radiusMd: '0px',
+  background: '#020203',
+  surface: '#101016',
+  foreground: '#FFFFFF',
+  accent: '#7C5CFF',
+  mutedForeground: '#A9A9B4',
+  border: '#FFFFFF14',
+  radiusMd: '16px',
   fontPreset: 'current',
 }
 
@@ -198,7 +198,7 @@ export function isValidTheme(theme: unknown): theme is ThemeTokens {
 export async function loadSavedTheme(): Promise<ThemeTokens> {
   try {
     const store = await load()
-    const raw = await store.get('theme') as string | null
+    const raw = (await store.get('theme')) as string | null
     if (raw) {
       const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
       if (isValidTheme(parsed)) {

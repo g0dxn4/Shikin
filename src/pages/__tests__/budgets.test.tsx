@@ -63,7 +63,7 @@ describe('Budgets', () => {
       render(<Budgets />)
 
       // Should show error state, not empty state
-      expect(screen.getByText('Couldn\u2019t load your budgets')).toBeInTheDocument()
+      expect(screen.getByText('error.loadDetailed')).toBeInTheDocument()
       expect(screen.getByText('Database connection failed')).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /Try again/i })).toBeInTheDocument()
 
@@ -82,7 +82,7 @@ describe('Budgets', () => {
       expect(screen.getByText('empty.description')).toBeInTheDocument()
 
       // Should NOT show error state
-      expect(screen.queryByText('Couldn\u2019t load your budgets')).not.toBeInTheDocument()
+      expect(screen.queryByText('error.loadDetailed')).not.toBeInTheDocument()
     })
 
     it('calls fetch when retry button is clicked', async () => {
@@ -116,13 +116,13 @@ describe('Budgets', () => {
       render(<Budgets />)
 
       // Should show error banner, not full error state
-      expect(screen.getByText('Couldn\u2019t load budgets')).toBeInTheDocument()
+      expect(screen.getByText('error.load')).toBeInTheDocument()
 
       // But should still show the budget
       expect(screen.getByText('Groceries')).toBeInTheDocument()
 
       // Should NOT show error state (full page error)
-      expect(screen.queryByText('Couldn\u2019t load your budgets')).not.toBeInTheDocument()
+      expect(screen.queryByText('error.loadDetailed')).not.toBeInTheDocument()
     })
 
     it('shows loading skeleton when isLoading is true', () => {
@@ -135,6 +135,53 @@ describe('Budgets', () => {
       // Should show skeleton loaders (Skeleton component uses 'skeleton' class)
       const skeletons = document.querySelectorAll('.skeleton')
       expect(skeletons.length).toBeGreaterThan(0)
+    })
+
+    it('marks loading skeleton container with aria-busy', () => {
+      mockIsLoading = true
+      mockBudgets = []
+      mockFetchError = null
+
+      render(<Budgets />)
+
+      const busyContainer = document.querySelector('[aria-busy="true"]')
+      expect(busyContainer).toBeInTheDocument()
+    })
+  })
+
+  describe('hero section', () => {
+    it('renders hero summary with budget totals', () => {
+      mockBudgets = [
+        {
+          id: 'budget-1',
+          name: 'Groceries',
+          categoryName: 'Food',
+          categoryColor: '#ff0000',
+          amount: 50000,
+          spent: 30000,
+          remaining: 20000,
+          percentUsed: 60,
+          period: 'monthly',
+        },
+        {
+          id: 'budget-2',
+          name: 'Rent',
+          categoryName: 'Housing',
+          categoryColor: '#00ff00',
+          amount: 100000,
+          spent: 100000,
+          remaining: 0,
+          percentUsed: 100,
+          period: 'monthly',
+        },
+      ]
+
+      render(<Budgets />)
+
+      expect(screen.getByText('hero.totalBudgeted')).toBeInTheDocument()
+      expect(screen.getByText('hero.totalSpent')).toBeInTheDocument()
+      expect(screen.getByText('hero.totalRemaining')).toBeInTheDocument()
+      expect(screen.getByText('2 hero.budgetCount')).toBeInTheDocument()
     })
   })
 })

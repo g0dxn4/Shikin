@@ -62,6 +62,8 @@ interface NetWorthState {
 
 // ── Store ───────────────────────────────���──────────────────────────────���───
 
+let netWorthRequestId = 0
+
 export const useNetWorthStore = create<NetWorthState>((set, get) => ({
   totalAssets: 0,
   totalLiabilities: 0,
@@ -204,13 +206,16 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
   },
 
   refresh: async (period = '1y') => {
+    const requestId = ++netWorthRequestId
     set({ isLoading: true })
     try {
       await get().calculateCurrent()
       await get().takeSnapshot()
       await get().loadHistory(period)
     } finally {
-      set({ isLoading: false })
+      if (requestId === netWorthRequestId) {
+        set({ isLoading: false })
+      }
     }
   },
 }))

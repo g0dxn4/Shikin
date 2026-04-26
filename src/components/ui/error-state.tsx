@@ -21,7 +21,7 @@ export function ErrorState({
     <div
       role="alert"
       className={cn(
-        'glass-card flex flex-col items-center justify-center py-16 text-center',
+        'liquid-card flex flex-col items-center justify-center py-16 text-center',
         className
       )}
     >

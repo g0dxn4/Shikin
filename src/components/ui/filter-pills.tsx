@@ -5,11 +5,18 @@ interface FilterPillsProps {
   selected: string
   onChange: (value: string) => void
   className?: string
+  ariaLabel?: string
 }
 
-export function FilterPills({ options, selected, onChange, className }: FilterPillsProps) {
+export function FilterPills({
+  options,
+  selected,
+  onChange,
+  className,
+  ariaLabel,
+}: FilterPillsProps) {
   return (
-    <div className={cn('flex gap-2', className)}>
+    <div className={cn('flex gap-2', className)} role="group" aria-label={ariaLabel}>
       {options.map((option) => {
         const isActive = option.value === selected
         return (
@@ -17,11 +24,12 @@ export function FilterPills({ options, selected, onChange, className }: FilterPi
             key={option.value}
             type="button"
             onClick={() => onChange(option.value)}
+            aria-pressed={isActive}
             className={cn(
               'rounded-full px-4 py-1.5 font-mono text-xs transition-colors',
               isActive
                 ? 'bg-accent text-accent-foreground'
-                : 'text-muted-foreground hover:bg-white/5 hover:text-foreground'
+                : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
             )}
           >
             {option.label}

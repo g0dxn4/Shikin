@@ -20,7 +20,7 @@ import { fromCentavos } from '@/lib/money'
 
 const GOAL_ICONS = ['🎯', '🏠', '✈️', '🚗', '🎓', '💰', '🏖️', '💍', '🏥', '📱'] as const
 const GOAL_COLORS = [
-  '#bf5af2',
+  '#7C5CFF',
   '#22c55e',
   '#3b82f6',
   '#f59e0b',
@@ -79,7 +79,7 @@ export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormP
       deadline: goal?.deadline ?? '',
       accountId: goal?.account_id ?? '',
       icon: goal?.icon ?? '🎯',
-      color: goal?.color ?? '#bf5af2',
+      color: goal?.color ?? '#7C5CFF',
       notes: goal?.notes ?? '',
     },
   })
@@ -103,9 +103,9 @@ export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormP
     const normalizedIndex = (nextIndex + values.length) % values.length
     const nextValue = values[normalizedIndex]
     setter(nextValue)
-    requestAnimationFrame(() => {
+    setTimeout(() => {
       document.getElementById(`${prefix}-${normalizedIndex}`)?.focus()
-    })
+    }, 0)
   }
 
   const handleGoalOptionKeyDown = (
@@ -139,7 +139,7 @@ export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormP
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-      <ErrorBanner title="Accounts couldn’t be loaded" message={accountsFetchError} />
+      <ErrorBanner title={t('form.accountsError')} message={accountsFetchError} />
 
       <div className="space-y-1.5">
         <Label htmlFor="goal-name">{t('form.name')}</Label>
@@ -244,10 +244,10 @@ export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormP
                   )
                 }
                 role="radio"
-                aria-label={`Select icon ${ic}`}
+                aria-label={t('form.selectIcon', { icon: ic })}
                 aria-checked={iconValue === ic}
                 tabIndex={iconValue === ic ? 0 : -1}
-                className={`flex h-8 w-8 items-center justify-center rounded-lg text-base transition-colors ${
+                className={`flex h-10 w-10 items-center justify-center rounded-lg text-base transition-colors ${
                   iconValue === ic
                     ? 'bg-white/10 ring-1 ring-white/20'
                     : 'bg-white/5 hover:bg-white/10'
@@ -282,10 +282,10 @@ export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormP
                   )
                 }
                 role="radio"
-                aria-label={`Select color ${c}`}
+                aria-label={t('form.selectColor', { color: c })}
                 aria-checked={colorValue === c}
                 tabIndex={colorValue === c ? 0 : -1}
-                className={`h-8 w-8 rounded-lg transition-transform ${
+                className={`h-10 w-10 rounded-lg transition-transform ${
                   colorValue === c ? 'scale-110 ring-2 ring-white/30' : 'hover:scale-105'
                 }`}
                 style={{ backgroundColor: c }}
@@ -300,8 +300,15 @@ export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormP
         <Input id="notes" placeholder={t('form.notesPlaceholder')} {...register('notes')} />
       </div>
 
-      <Button type="submit" className="w-full" disabled={isLoading}>
-        {isLoading ? '...' : tCommon('actions.save')}
+      <Button type="submit" className="w-full" disabled={isLoading} aria-busy={isLoading}>
+        {isLoading ? (
+          <>
+            <span className="sr-only">{tCommon('actions.saving')}</span>
+            ...
+          </>
+        ) : (
+          tCommon('actions.save')
+        )}
       </Button>
     </form>
   )

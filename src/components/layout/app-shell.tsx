@@ -4,16 +4,18 @@ import {
   LayoutDashboard,
   ArrowLeftRight,
   Landmark,
-  TrendingUp,
-  Settings,
   PiggyBank,
-  Target,
+  Receipt,
+  BarChart3,
+  Settings,
+  Puzzle,
+  TrendingUp,
   Repeat,
-  Wallet,
-  Lightbulb,
-  Flame,
+  CreditCard,
   LineChart,
   Brain,
+  Flame,
+  Sparkles,
 } from 'lucide-react'
 import { Sidebar } from './sidebar'
 import { BottomNav } from '@/components/layout/bottom-nav'
@@ -23,20 +25,22 @@ const mobilePrimaryNavItems = [
   { icon: <LayoutDashboard size={20} />, label: 'Dashboard', href: '/' },
   { icon: <ArrowLeftRight size={20} />, label: 'Transactions', href: '/transactions' },
   { icon: <Landmark size={20} />, label: 'Accounts', href: '/accounts' },
-  { icon: <TrendingUp size={20} />, label: 'Investments', href: '/investments' },
+  { icon: <PiggyBank size={20} />, label: 'Budgets', href: '/budgets' },
 ]
 
 const mobileMoreNavItems = [
-  { icon: <PiggyBank size={20} />, label: 'Budgets', href: '/budgets' },
-  { icon: <Target size={20} />, label: 'Goals', href: '/goals' },
+  { icon: <Receipt size={20} />, label: 'Bills', href: '/bills' },
+  { icon: <BarChart3 size={20} />, label: 'Reports', href: '/reports' },
+  { icon: <TrendingUp size={20} />, label: 'Investments', href: '/investments' },
   { icon: <Repeat size={20} />, label: 'Subscriptions', href: '/subscriptions' },
-  { icon: <Target size={20} />, label: 'Debt Payoff', href: '/debt-payoff' },
-  { icon: <Wallet size={20} />, label: 'Net Worth', href: '/net-worth' },
-  { icon: <Lightbulb size={20} />, label: 'Spending Insights', href: '/spending-insights' },
-  { icon: <Flame size={20} />, label: 'Spending Heatmap', href: '/spending-heatmap' },
+  { icon: <CreditCard size={20} />, label: 'Debt Payoff', href: '/debt-payoff' },
   { icon: <LineChart size={20} />, label: 'Forecast', href: '/forecast' },
+  { icon: <Landmark size={20} />, label: 'Net Worth', href: '/net-worth' },
+  { icon: <Sparkles size={20} />, label: 'Insights', href: '/spending-insights' },
+  { icon: <Flame size={20} />, label: 'Heatmap', href: '/spending-heatmap' },
   { icon: <Brain size={20} />, label: 'Memories', href: '/memories' },
   { icon: <Settings size={20} />, label: 'Settings', href: '/settings' },
+  { icon: <Puzzle size={20} />, label: 'Extensions', href: '/extensions' },
 ]
 
 const AccountDialog = lazy(() =>
@@ -69,7 +73,7 @@ export function AppShell() {
   }, [pathname])
 
   return (
-    <div className="bg-background flex h-screen overflow-hidden">
+    <div className="bg-background flex h-screen overflow-hidden p-0 md:p-6">
       <a
         href="#main-content"
         className="bg-accent text-accent-foreground sr-only fixed top-4 left-4 z-[60] rounded px-3 py-2 focus:not-sr-only"
@@ -81,9 +85,9 @@ export function AppShell() {
         id="main-content"
         ref={mainRef}
         tabIndex={-1}
-        className="grid-bg flex-1 overflow-y-auto focus:outline-none"
+        className="grid-bg flex-1 overflow-y-auto focus:outline-none md:rounded-[32px] md:border md:border-white/[0.06]"
       >
-        <div className="mx-auto max-w-7xl p-6 pb-16 md:pb-0">
+        <div className="mx-auto max-w-[1420px] p-4 pb-24 sm:p-6 md:p-8 md:pb-8">
           <Suspense fallback={<LoadingSpinner className="h-full" />}>
             <Outlet />
           </Suspense>

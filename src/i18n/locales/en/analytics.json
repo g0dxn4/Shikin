@@ -1,0 +1,57 @@
+{
+  "netWorth": {
+    "title": "Net Worth",
+    "description": "Assets minus liabilities",
+    "currentNetWorth": "Current Net Worth",
+    "chartTitle": "Net Worth Over Time",
+    "assets": "Assets",
+    "liabilities": "Liabilities",
+    "includesInvestments": "Includes {{amount}} in investments",
+    "noLiabilities": "No liabilities. Nice!",
+    "addAccountsPrompt": "Add accounts to see your asset and liability breakdown.",
+    "noHistory": "No history yet. Add accounts to start tracking net worth.",
+    "firstSnapshot": "First snapshot recorded. Come back tomorrow for trend data."
+  },
+  "spendingInsights": {
+    "title": "Spending Insights",
+    "description": "Patterns without cloud analytics",
+    "tabs": {
+      "insights": "Insights",
+      "mom": "Month / Month",
+      "yoy": "Year / Year"
+    },
+    "insightsEmpty": "No notable spending changes this month. Keep it up!",
+    "totalChange": "Total Change",
+    "category": "Category",
+    "current": "Current",
+    "previous": "Previous",
+    "change": "Change",
+    "noData": "No spending data for this comparison.",
+    "vs3MonthAvg": "vs 3-month avg",
+    "severity": {
+      "alert": "Alert",
+      "warning": "Warning",
+      "info": "Info"
+    }
+  },
+  "spendingHeatmap": {
+    "title": "Spending Heatmap",
+    "description": "Calendar intensity by day",
+    "dailyActivity": "Daily Spending Activity",
+    "noData": "No spending data for this period.",
+    "highestDay": "Highest Day",
+    "avgDaily": "Average Daily",
+    "mostActive": "Most Active",
+    "currentStreak": "Current Streak",
+    "under50Day": "Under $50/day",
+    "topCategories": "Top Categories",
+    "less": "Less",
+    "more": "More",
+    "dayOfWeek": "Day of Week",
+    "lastNDays": "Last {{n}} days"
+  },
+  "reports": {
+    "title": "Reports",
+    "comingSoon": "Detailed reports are coming soon. Use Spending Insights and the Heatmap for now."
+  }
+}

@@ -11,66 +11,73 @@ body,
 }
 
 @theme {
-  /* ASF Design System — Shikin */
-  --color-background: #020202;
+  /* Shikin Apple Liquid Finance */
+  --color-background: #020203;
   --color-foreground: #ffffff;
 
-  --color-surface: #0a0a0a;
-  --color-surface-elevated: #111111;
+  --color-surface: #101016;
+  --color-surface-elevated: #171720;
 
-  /* Accent — Purple scale */
-  --color-accent: #bf5af2;
-  --color-accent-hover: #d17df5;
-  --color-accent-muted: rgba(191, 90, 242, 0.15);
+  /* Accent — premium violet */
+  --color-accent: #7c5cff;
+  --color-accent-hover: #bfa4ff;
+  --color-accent-muted: rgba(124, 92, 255, 0.16);
   --color-accent-foreground: #ffffff;
 
-  --color-primary: #bf5af2;
+  --color-primary: #7c5cff;
   --color-primary-foreground: #ffffff;
 
-  --color-secondary: #1a1a1a;
+  --color-secondary: #ffffff0f;
   --color-secondary-foreground: #ffffff;
 
-  --color-muted: #1a1a1a;
-  --color-muted-foreground: #a1a1aa;
+  --color-muted: #ffffff0f;
+  --color-muted-foreground: #a9a9b4;
 
-  --color-card: rgba(10, 10, 10, 0.6);
+  --color-card: rgba(16, 16, 22, 0.72);
   --color-card-foreground: #ffffff;
 
-  --color-popover: #0a0a0a;
+  --color-popover: #101016;
   --color-popover-foreground: #ffffff;
 
   --color-text-muted: #71717a;
+  --color-subtle: #71717a;
+  --color-glass: #101016cc;
 
-  --color-border: rgba(255, 255, 255, 0.06);
-  --color-border-hover: rgba(255, 255, 255, 0.12);
-  --color-border-accent: rgba(191, 90, 242, 0.3);
-  --color-input: rgba(255, 255, 255, 0.06);
-  --color-ring: #bf5af2;
+  --color-border: #ffffff14;
+  --color-border-hover: #ffffff24;
+  --color-border-accent: rgba(191, 164, 255, 0.38);
+  --color-input: #ffffff0f;
+  --color-ring: #bfa4ff;
 
   --color-destructive: #ef4444;
-  --color-destructive-foreground: #ffffff;
+  --color-destructive-foreground: #fafafa;
 
-  --color-success: #22c55e;
-  --color-success-foreground: #ffffff;
+  --color-success: #34d399;
+  --color-success-foreground: #f4fff6;
   --color-warning: #f59e0b;
-  --color-warning-foreground: #ffffff;
+  --color-warning-foreground: #020203;
+
+  /* Semantic finance colors */
+  --color-income: #34d399;
+  --color-expense: #f87171;
+  --color-extension: #bfa4ff;
 
   /* Chart colors */
-  --color-chart-1: #bf5af2;
-  --color-chart-2: #22c55e;
-  --color-chart-3: #3b82f6;
+  --color-chart-1: #7c5cff;
+  --color-chart-2: #34d399;
+  --color-chart-3: #5ac8fa;
   --color-chart-4: #f59e0b;
-  --color-chart-5: #ef4444;
+  --color-chart-5: #f87171;
 
   /* Sidebar */
-  --color-sidebar: #0a0a0a;
+  --color-sidebar: #101016;
   --color-sidebar-foreground: #ffffff;
-  --color-sidebar-primary: #bf5af2;
+  --color-sidebar-primary: #7c5cff;
   --color-sidebar-primary-foreground: #ffffff;
-  --color-sidebar-accent: rgba(191, 90, 242, 0.15);
+  --color-sidebar-accent: rgba(255, 255, 255, 0.08);
   --color-sidebar-accent-foreground: #ffffff;
-  --color-sidebar-border: rgba(255, 255, 255, 0.06);
-  --color-sidebar-ring: #bf5af2;
+  --color-sidebar-border: #ffffff18;
+  --color-sidebar-ring: #bfa4ff;
 
   /* Category colors */
   --color-cat-food: #f97316;
@@ -80,16 +87,16 @@ body,
   --color-cat-health: #ef4444;
   --color-cat-shopping: #f59e0b;
   --color-cat-education: #06b6d4;
-  --color-cat-income: #22c55e;
-  --color-cat-investments: #14b8a6;
-  --color-cat-savings: #6366f1;
+  --color-cat-income: #34d399;
+  --color-cat-investments: #7c5cff;
+  --color-cat-savings: #bfa4ff;
 
-  /* Radii — ASF brutalist buttons (0px), pill badges (9999px), 12px cards */
-  --radius-sm: 0px;
-  --radius-md: 0px;
-  --radius-lg: 12px;
-  --radius-xl: 12px;
-  --radius-2xl: 12px;
+  /* Radii — Apple Liquid surfaces */
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-xl: 28px;
+  --radius-2xl: 32px;
   --radius-pill: 9999px;
 
   /* Fonts — ASF typography */
@@ -133,7 +140,10 @@ body,
   }
 
   body {
-    background: var(--color-background);
+    background:
+      radial-gradient(circle at 72% 8%, rgba(124, 92, 255, 0.16), transparent 28rem),
+      radial-gradient(circle at 16% 88%, rgba(52, 211, 153, 0.08), transparent 24rem),
+      var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
     min-height: 100vh;
@@ -151,37 +161,45 @@ body,
 
 /* Glass morphism utilities */
 @utility glass-card {
-  background: var(--color-card);
-  backdrop-filter: blur(12px);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent), var(--color-card);
+  backdrop-filter: blur(20px);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 24px 80px rgba(0, 0, 0, 0.28);
 }
 
 @utility glass-sidebar {
-  background: rgba(10, 10, 10, 0.8);
-  backdrop-filter: blur(12px);
-  border-right: 1px solid var(--color-border);
+  background: rgba(16, 16, 22, 0.82);
+  backdrop-filter: blur(24px);
+  border: 1px solid var(--color-sidebar-border);
+  border-radius: 28px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 24px 80px rgba(0, 0, 0, 0.35);
 }
 
 @utility glass-panel {
-  background: rgba(10, 10, 10, 0.6);
-  backdrop-filter: blur(12px);
-  border-left: 1px solid var(--color-border);
+  background: rgba(16, 16, 22, 0.76);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
 }
 
 @utility glass-input {
   background-color: var(--color-input);
   border: 1px solid var(--color-border);
-  border-radius: 0px;
+  border-radius: var(--radius-md);
   &:focus {
     border-color: var(--color-accent);
-    box-shadow: 0 0 0 2px rgba(191, 90, 242, 0.2);
+    box-shadow: 0 0 0 2px rgba(191, 164, 255, 0.22);
     outline: none;
   }
 }
 
 @utility gradient-text {
-  background: linear-gradient(135deg, #bf5af2, #d17ff7);
+  background: linear-gradient(135deg, #ffffff, #bfa4ff 52%, #7c5cff);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -190,9 +208,13 @@ body,
 /* Grid background pattern */
 @utility grid-bg {
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
-  background-size: 40px 40px;
+    radial-gradient(circle at 50% 0%, rgba(191, 164, 255, 0.08), transparent 34rem),
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+  background-size:
+    auto,
+    48px 48px,
+    48px 48px;
 }
 
 /* Sidebar link styles */
@@ -201,35 +223,70 @@ body,
   align-items: center;
   gap: 0.75rem;
   padding: 0.625rem 0.75rem;
-  border-radius: 0px;
+  border-radius: 14px;
   font-size: 0.875rem;
   font-weight: 500;
   color: var(--color-muted-foreground);
   transition: all 0.15s ease;
   &:hover {
     color: var(--color-foreground);
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(255, 255, 255, 0.07);
   }
 }
 
 @utility sidebar-link-active {
-  background: var(--color-accent-muted);
-  border-left: 2px solid var(--color-accent);
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
   color: var(--color-foreground);
 }
 
 /* Reusable component utilities */
 @utility metric-card {
-  background: var(--color-card);
-  backdrop-filter: blur(12px);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent), var(--color-card);
+  backdrop-filter: blur(20px);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 1.25rem;
   transition: all 0.15s ease;
   &:hover {
     border-color: rgba(255, 255, 255, 0.1);
-    box-shadow: 0 0 20px rgba(191, 90, 242, 0.05);
+    box-shadow:
+      0 18px 50px rgba(0, 0, 0, 0.25),
+      0 0 24px rgba(124, 92, 255, 0.08);
   }
+}
+
+@utility liquid-card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.028), transparent), rgba(16, 16, 22, 0.82);
+  backdrop-filter: blur(22px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.055),
+    0 24px 80px rgba(0, 0, 0, 0.3);
+}
+
+@utility liquid-hero {
+  background:
+    radial-gradient(circle at 12% 20%, rgba(191, 164, 255, 0.22), transparent 16rem),
+    linear-gradient(135deg, #191922 0%, #09090d 58%, #4c1d95 100%);
+  border: 1px solid var(--color-border-hover);
+  border-radius: var(--radius-xl);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 30px 90px rgba(0, 0, 0, 0.35);
+}
+
+@utility liquid-action {
+  background: linear-gradient(135deg, #bfa4ff 0%, #7c5cff 100%);
+  color: #ffffff;
+  border-radius: 14px;
+  box-shadow: 0 12px 34px rgba(124, 92, 255, 0.3);
+}
+
+@utility soft-divider {
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
 @utility page-header {
@@ -362,4 +419,25 @@ body,
 * {
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-fade-in-up,
+  .animate-fade-in,
+  .animate-slide-in-right,
+  .animate-slide-in-left,
+  .animate-slide-up,
+  .animate-spin,
+  .skeleton {
+    animation: none;
+  }
 }

@@ -190,8 +190,8 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
                 onClick={() => fileInputRef.current?.click()}
                 className={cn(
                   'flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed p-8 transition-colors',
-                  'border-white/10 hover:border-[#bf5af2]/40 hover:bg-[#bf5af2]/5',
-                  selectedFile && !parseError && 'border-[#bf5af2]/30 bg-[#bf5af2]/5'
+                  'hover:border-accent/40 hover:bg-accent/5 border-white/10',
+                  selectedFile && !parseError && 'border-accent/30 bg-accent/5'
                 )}
               >
                 {selectedFile ? (
@@ -199,7 +199,7 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
                     {parseError ? (
                       <AlertCircle size={24} className="text-destructive" />
                     ) : (
-                      <FileText size={24} className="text-[#bf5af2]" />
+                      <FileText size={24} className="text-accent" />
                     )}
                     <span className="text-sm font-medium">{selectedFile.name}</span>
                     {parseError ? (
@@ -289,7 +289,7 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
 
         {step === 'importing' && (
           <div className="flex flex-col items-center gap-3 py-8">
-            <Loader2 size={32} className="animate-spin text-[#bf5af2]" />
+            <Loader2 size={32} className="text-accent animate-spin" />
             <span className="text-muted-foreground text-sm">{t('import.importing')}</span>
           </div>
         )}

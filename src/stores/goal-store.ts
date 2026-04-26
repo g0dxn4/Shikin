@@ -43,8 +43,7 @@ function computeProgress(current: number, target: number): number {
 
 function computeDaysRemaining(deadline: string | null): number | null {
   if (!deadline) return null
-  const diff = dayjs(deadline).diff(dayjs(), 'day')
-  return Math.max(0, diff)
+  return dayjs(deadline).diff(dayjs(), 'day')
 }
 
 function computeMonthlyNeeded(current: number, target: number, deadline: string | null): number {

@@ -36,22 +36,13 @@ const CATEGORIES: MemoryCategory[] = ['all', 'preference', 'fact', 'goal', 'beha
 const CATEGORY_COLORS: Record<string, { bg: string; text: string; border: string }> = {
   preference: {
     bg: 'rgba(191, 90, 242, 0.15)',
-    text: '#bf5af2',
+    text: '#7C5CFF',
     border: 'rgba(191, 90, 242, 0.3)',
   },
   fact: { bg: 'rgba(59, 130, 246, 0.15)', text: '#3b82f6', border: 'rgba(59, 130, 246, 0.3)' },
   goal: { bg: 'rgba(34, 197, 94, 0.15)', text: '#22c55e', border: 'rgba(34, 197, 94, 0.3)' },
   behavior: { bg: 'rgba(245, 158, 11, 0.15)', text: '#f59e0b', border: 'rgba(245, 158, 11, 0.3)' },
   context: { bg: 'rgba(156, 163, 175, 0.15)', text: '#9ca3af', border: 'rgba(156, 163, 175, 0.3)' },
-}
-
-const CATEGORY_LABELS: Record<string, string> = {
-  all: 'All',
-  preference: 'Preferences',
-  fact: 'Facts',
-  goal: 'Goals',
-  behavior: 'Patterns',
-  context: 'Context',
 }
 
 function getImportanceColor(importance: number): { bg: string; text: string } {
@@ -76,7 +67,7 @@ function MemoryCard({
   onDelete: (id: string) => void
   onUpdate: (id: string, content: string) => Promise<void>
 }) {
-  const { t } = useTranslation()
+  const { t } = useTranslation('memories')
   const [editing, setEditing] = useState(false)
   const [editContent, setEditContent] = useState(memory.content)
   const [saving, setSaving] = useState(false)
@@ -104,7 +95,7 @@ function MemoryCard({
       await onUpdate(memory.id, trimmed)
       setEditing(false)
     } catch {
-      toast.error('Failed to update memory')
+      toast.error(t('saveError', 'Failed to update memory'))
     } finally {
       setSaving(false)
     }
@@ -116,7 +107,7 @@ function MemoryCard({
   }
 
   return (
-    <div className="glass-card group relative overflow-hidden p-5 transition-transform duration-200 hover:translate-y-[-2px]">
+    <div className="liquid-card group relative overflow-hidden p-5 transition-transform duration-200 hover:translate-y-[-2px] motion-reduce:transform-none">
       {/* Header */}
       <div className="mb-3 flex items-start justify-between">
         <div className="flex items-center gap-2">
@@ -150,7 +141,7 @@ function MemoryCard({
                 className="h-7 w-7 text-green-500 hover:text-green-400"
                 onClick={handleSave}
                 disabled={saving}
-                aria-label="Save"
+                aria-label={t('saveLabel')}
               >
                 <Check size={12} />
               </Button>
@@ -160,7 +151,7 @@ function MemoryCard({
                 className="h-7 w-7"
                 onClick={handleCancel}
                 disabled={saving}
-                aria-label="Cancel"
+                aria-label={t('cancelLabel')}
               >
                 <X size={12} />
               </Button>
@@ -172,7 +163,7 @@ function MemoryCard({
                 size="icon"
                 className="h-7 w-7"
                 onClick={() => setEditing(true)}
-                aria-label={t('actions.edit')}
+                aria-label={t('editLabel')}
               >
                 <Pencil size={12} />
               </Button>
@@ -181,7 +172,7 @@ function MemoryCard({
                 size="icon"
                 className="text-destructive hover:text-destructive h-7 w-7"
                 onClick={() => onDelete(memory.id)}
-                aria-label={t('actions.delete')}
+                aria-label={t('deleteConfirm')}
               >
                 <Trash2 size={12} />
               </Button>
@@ -213,7 +204,7 @@ function MemoryCard({
         </p>
         {memory.updated_at !== memory.created_at && (
           <p className="text-muted-foreground font-mono text-[10px] tracking-wider">
-            updated {formatDate(memory.updated_at)}
+            {t('updated')} {formatDate(memory.updated_at)}
           </p>
         )}
       </div>
@@ -224,7 +215,7 @@ function MemoryCard({
 // ── Memories Page ───────────────────────────────────────────────────────────
 
 export function Memories() {
-  const { t } = useTranslation()
+  const { t } = useTranslation('memories')
   const [memories, setMemories] = useState<Memory[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
@@ -280,11 +271,11 @@ export function Memories() {
       setMemories(rows)
     } catch (err) {
       console.error('[Memories] fetch error:', err)
-      toast.error('Failed to load memories')
+      toast.error(t('loadError', 'Failed to load memories'))
     } finally {
       setIsLoading(false)
     }
-  }, [searchQuery, category])
+  }, [searchQuery, category, t])
 
   useEffect(() => {
     fetchMemories()
@@ -314,7 +305,7 @@ export function Memories() {
     setMemories((prev) =>
       prev.map((m) => (m.id === id ? { ...m, content, updated_at: new Date().toISOString() } : m))
     )
-    toast.success('Memory updated')
+    toast.success(t('updateSuccess', 'Memory updated'))
   }
 
   const handleDelete = async () => {
@@ -323,10 +314,10 @@ export function Memories() {
     try {
       await execute('DELETE FROM ai_memories WHERE id = ?', [deleteId])
       setMemories((prev) => prev.filter((m) => m.id !== deleteId))
-      toast.success('Memory deleted')
+      toast.success(t('deleteSuccess', 'Memory deleted'))
       setDeleteId(null)
     } catch {
-      toast.error('Failed to delete memory')
+      toast.error(t('deleteError', 'Failed to delete memory'))
     } finally {
       setIsDeleting(false)
     }
@@ -334,10 +325,10 @@ export function Memories() {
 
   return (
     <div className="animate-fade-in-up page-content">
-      <div className="page-header">
-        <h1 className="font-heading text-2xl font-bold">{t('nav.memories')}</h1>
+      <div className="liquid-card page-header p-5">
+        <h1 className="font-heading text-2xl font-bold">{t('nav.memories', { ns: 'common' })}</h1>
         <p className="text-muted-foreground text-sm">
-          {memories.length} {memories.length === 1 ? 'memory' : 'memories'}
+          {t('memoryCount', { count: memories.length })}
         </p>
       </div>
 
@@ -349,10 +340,11 @@ export function Memories() {
             className="text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2"
           />
           <Input
-            placeholder="Search memories..."
+            placeholder={t('searchPlaceholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9"
+            aria-label={t('searchPlaceholder')}
           />
         </div>
         <select
@@ -361,20 +353,22 @@ export function Memories() {
             setSortBy(e.target.value as SortOption)
           }
           className="h-9 rounded-md border border-white/10 bg-white/5 px-3 text-sm outline-none"
+          aria-label={t('sortBy')}
         >
-          <option value="importance">Importance</option>
-          <option value="newest">Newest</option>
-          <option value="oldest">Oldest</option>
-          <option value="accessed">Recently Accessed</option>
+          <option value="importance">{t('sort.importance')}</option>
+          <option value="newest">{t('sort.newest')}</option>
+          <option value="oldest">{t('sort.oldest')}</option>
+          <option value="accessed">{t('sort.accessed')}</option>
         </select>
       </div>
 
       {/* Category filter tabs */}
-      <div className="mb-6 flex flex-wrap gap-1.5">
+      <div className="mb-6 flex flex-wrap gap-1.5" role="group" aria-label={t('filterByCategory')}>
         {CATEGORIES.map((cat) => (
           <button
             key={cat}
             onClick={() => setCategory(cat)}
+            aria-pressed={category === cat}
             className="rounded-full px-3 py-1 text-xs font-medium transition-colors"
             style={
               category === cat
@@ -393,16 +387,20 @@ export function Memories() {
                   }
             }
           >
-            {CATEGORY_LABELS[cat]}
+            {t(`category.${cat}`)}
           </button>
         ))}
       </div>
 
       {/* Content */}
       {isLoading ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div
+          className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+          aria-busy="true"
+          aria-label={t('loading', 'Loading memories')}
+        >
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="glass-card space-y-3 p-5">
+            <div key={i} className="liquid-card space-y-3 p-5">
               <div className="flex items-center gap-2">
                 <Skeleton className="h-5 w-16" />
                 <Skeleton className="h-5 w-5 rounded-full" />
@@ -414,17 +412,15 @@ export function Memories() {
           ))}
         </div>
       ) : sortedMemories.length === 0 ? (
-        <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
-          <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
+        <div className="liquid-card flex flex-col items-center justify-center py-16 text-center">
+          <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-3xl">
             <Brain size={28} className="text-primary" />
           </div>
           <h2 className="font-heading mb-2 text-lg font-semibold">
-            {searchQuery ? 'No memories found' : "Ivy doesn't have any memories yet"}
+            {searchQuery ? t('noResults') : t('noMemories')}
           </h2>
           <p className="text-muted-foreground mb-4 text-sm">
-            {searchQuery
-              ? 'Try a different search term or category'
-              : 'Memories are created automatically as you chat with Ivy'}
+            {searchQuery ? t('tryDifferentSearch') : t('memoriesCreatedAutomatically')}
           </p>
         </div>
       ) : (
@@ -444,10 +440,10 @@ export function Memories() {
         <ConfirmDialog
           open={!!deleteId}
           onOpenChange={(open) => !open && setDeleteId(null)}
-          title="Delete Memory"
-          description="Are you sure you want to delete this memory? Ivy will no longer remember this information."
-          confirmLabel="Delete"
-          cancelLabel="Cancel"
+          title={t('deleteTitle')}
+          description={t('deleteDescription')}
+          confirmLabel={t('deleteConfirm')}
+          cancelLabel={t('deleteCancel')}
           variant="destructive"
           isLoading={isDeleting}
           onConfirm={handleDelete}

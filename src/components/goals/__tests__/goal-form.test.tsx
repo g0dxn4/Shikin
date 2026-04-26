@@ -46,12 +46,12 @@ describe('GoalForm', () => {
     it('icon and color options expose radio semantics with accessible names', () => {
       render(<GoalForm onSubmit={vi.fn()} />)
 
-      const iconOptions = screen.getAllByRole('radio', { name: /Select icon/ })
+      const iconOptions = screen.getAllByRole('radio', { name: /form\.selectIcon/ })
       expect(iconOptions.length).toBeGreaterThan(0)
 
       expect(iconOptions[0]).toHaveAttribute('aria-checked', 'true')
 
-      const colorOptions = screen.getAllByRole('radio', { name: /Select color/ })
+      const colorOptions = screen.getAllByRole('radio', { name: /form\.selectColor/ })
       expect(colorOptions.length).toBeGreaterThan(0)
     })
 
@@ -97,8 +97,26 @@ describe('GoalForm', () => {
 
       render(<GoalForm onSubmit={vi.fn()} />)
 
-      expect(screen.getByText(/Accounts couldn.*t be loaded/)).toBeInTheDocument()
+      expect(screen.getByText('form.accountsError')).toBeInTheDocument()
       expect(screen.getByText('Accounts unavailable')).toBeInTheDocument()
+    })
+
+    it('announces loading state on submit button', () => {
+      render(<GoalForm onSubmit={vi.fn()} isLoading={true} />)
+
+      const submitButton = screen.getByRole('button')
+      expect(submitButton).toHaveAttribute('aria-busy', 'true')
+      expect(submitButton).toHaveTextContent('actions.saving')
+    })
+
+    it('renders icon and color picker targets at accessible size', () => {
+      render(<GoalForm onSubmit={vi.fn()} />)
+
+      const firstIcon = screen.getAllByRole('radio', { name: /form\.selectIcon/ })[0]
+      expect(firstIcon).toHaveClass('h-10', 'w-10')
+
+      const firstColor = screen.getAllByRole('radio', { name: /form\.selectColor/ })[0]
+      expect(firstColor).toHaveClass('h-10', 'w-10')
     })
   })
 })

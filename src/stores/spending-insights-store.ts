@@ -190,6 +190,8 @@ function generateInsights(
 
 // ── Store ─────────────────────────────────────────────────────────────────
 
+let insightsRequestId = 0
+
 export const useSpendingInsightsStore = create<SpendingInsightsState>((set) => ({
   momComparisons: [],
   momCurrentTotal: 0,
@@ -201,6 +203,7 @@ export const useSpendingInsightsStore = create<SpendingInsightsState>((set) => (
   isLoading: false,
 
   loadComparisons: async () => {
+    const requestId = ++insightsRequestId
     set({ isLoading: true })
     try {
       const now = dayjs()
@@ -242,17 +245,21 @@ export const useSpendingInsightsStore = create<SpendingInsightsState>((set) => (
 
       const insights = generateInsights(momComparisons, avg3mByCategory)
 
-      set({
-        momComparisons,
-        momCurrentTotal,
-        momPreviousTotal,
-        yoyComparisons,
-        yoyCurrentTotal,
-        yoyPreviousTotal,
-        insights,
-      })
+      if (requestId === insightsRequestId) {
+        set({
+          momComparisons,
+          momCurrentTotal,
+          momPreviousTotal,
+          yoyComparisons,
+          yoyCurrentTotal,
+          yoyPreviousTotal,
+          insights,
+        })
+      }
     } finally {
-      set({ isLoading: false })
+      if (requestId === insightsRequestId) {
+        set({ isLoading: false })
+      }
     }
   },
 }))

@@ -27,7 +27,10 @@ export function BottomNav({ items, moreItems = [], activeHref }: BottomNavProps)
   const moreActive = moreItems.some((item) => item.href === activeHref)
 
   return (
-    <nav className="bg-surface fixed right-0 bottom-0 left-0 z-50 flex h-14 items-center justify-around border-t border-white/[0.06] md:hidden">
+    <nav
+      className="bg-surface/85 fixed right-4 bottom-4 left-4 z-50 flex h-16 items-center justify-around rounded-full border border-white/[0.12] px-2 pb-[env(safe-area-inset-bottom)] shadow-2xl shadow-black/40 backdrop-blur-2xl md:hidden"
+      aria-label="Mobile primary navigation"
+    >
       {items.map((item) => {
         const isActive = item.href === activeHref
         return (
@@ -35,9 +38,12 @@ export function BottomNav({ items, moreItems = [], activeHref }: BottomNavProps)
             key={item.href}
             to={item.href}
             className={cn(
-              'flex flex-col items-center gap-0.5 px-3 py-1 text-[10px] transition-colors',
-              isActive ? 'text-accent' : 'text-muted-foreground'
+              'flex h-11 min-w-12 flex-col items-center justify-center gap-0.5 rounded-full px-2 text-[10px] font-semibold transition-colors',
+              isActive
+                ? 'text-accent-hover bg-white/[0.1]'
+                : 'text-muted-foreground hover:text-foreground'
             )}
+            {...(isActive ? { 'aria-current': 'page' } : {})}
           >
             {item.icon}
             <span>{item.label}</span>
@@ -51,23 +57,25 @@ export function BottomNav({ items, moreItems = [], activeHref }: BottomNavProps)
               type="button"
               aria-label="More pages"
               className={cn(
-                'flex flex-col items-center gap-0.5 px-3 py-1 text-[10px] transition-colors',
-                moreActive ? 'text-accent' : 'text-muted-foreground'
+                'flex h-11 min-w-12 flex-col items-center justify-center gap-0.5 rounded-full px-2 text-[10px] font-semibold transition-colors',
+                moreActive
+                  ? 'text-accent-hover bg-white/[0.1]'
+                  : 'text-muted-foreground hover:text-foreground'
               )}
             >
-              <Menu size={20} />
+              <Menu size={20} aria-hidden="true" />
               <span>More</span>
             </button>
           </SheetTrigger>
           <SheetContent
             side="bottom"
-            className="bg-surface rounded-t-2xl border-white/[0.06] px-4 pb-8"
+            className="bg-surface/95 rounded-t-[28px] border-white/[0.1] px-4 pb-8 backdrop-blur-2xl"
           >
             <SheetHeader>
               <SheetTitle>More pages</SheetTitle>
               <SheetDescription>Open the rest of Shikin&apos;s pages on mobile.</SheetDescription>
             </SheetHeader>
-            <div className="mt-4 grid grid-cols-2 gap-2">
+            <nav className="mt-4 grid grid-cols-2 gap-2" aria-label="Mobile more navigation">
               {moreItems.map((item) => {
                 const isActive = item.href === activeHref
 
@@ -76,9 +84,10 @@ export function BottomNav({ items, moreItems = [], activeHref }: BottomNavProps)
                     <Link
                       to={item.href}
                       className={cn(
-                        'glass-card flex items-center gap-3 rounded-xl px-4 py-3 text-sm transition-colors',
-                        isActive ? 'text-accent' : 'text-foreground'
+                        'liquid-card flex items-center gap-3 rounded-2xl px-4 py-3 text-sm transition-colors',
+                        isActive ? 'text-accent-hover' : 'text-foreground'
                       )}
+                      {...(isActive ? { 'aria-current': 'page' } : {})}
                     >
                       {item.icon}
                       <span>{item.label}</span>
@@ -86,7 +95,7 @@ export function BottomNav({ items, moreItems = [], activeHref }: BottomNavProps)
                   </SheetClose>
                 )
               })}
-            </div>
+            </nav>
           </SheetContent>
         </Sheet>
       )}

@@ -44,4 +44,33 @@ describe('budget-store', () => {
     expect(mockQuery).toHaveBeenCalledTimes(1)
     expect(useBudgetStore.getState().error).toBeNull()
   })
+
+  it('calculates spent, remaining and percentUsed on successful fetch', async () => {
+    mockQuery
+      .mockResolvedValueOnce([
+        {
+          id: 'budget-1',
+          name: 'Groceries',
+          category_id: 'cat-1',
+          amount: 50000,
+          period: 'monthly',
+          is_active: 1,
+          created_at: '2024-01-01T00:00:00Z',
+          updated_at: '2024-01-01T00:00:00Z',
+          category_name: 'Food',
+          category_color: '#ff0000',
+        },
+      ])
+      .mockResolvedValueOnce([{ total: 30000 }])
+
+    await useBudgetStore.getState().fetch()
+
+    const state = useBudgetStore.getState()
+    expect(state.budgets).toHaveLength(1)
+    expect(state.budgets[0].spent).toBe(30000)
+    expect(state.budgets[0].remaining).toBe(20000)
+    expect(state.budgets[0].percentUsed).toBe(60)
+    expect(state.budgets[0].categoryName).toBe('Food')
+    expect(state.fetchError).toBeNull()
+  })
 })

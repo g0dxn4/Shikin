@@ -94,7 +94,7 @@ describe('BudgetDialog', () => {
 
     // Verify the button shows loading state (dialog should stay open)
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '...' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /actions\.saving/i })).toBeInTheDocument()
     })
 
     // Verify close was NOT called while loading

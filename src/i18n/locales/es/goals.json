@@ -1,9 +1,19 @@
 {
   "title": "Metas de Ahorro",
+  "subtitle": "Seguimiento de progreso",
   "addGoal": "Agregar Meta",
   "editGoal": "Editar Meta",
   "deleteGoal": "Eliminar Meta",
   "deleteConfirm": "¿Estás seguro de que deseas eliminar esta meta? Esta acción no se puede deshacer.",
+  "dialog": {
+    "addDescription": "Establece un nuevo objetivo de ahorro con fecha límite y cuenta vinculada opcional.",
+    "editDescription": "Actualiza el objetivo, progreso, fecha límite o cuenta vinculada de esta meta."
+  },
+  "discard": {
+    "title": "¿Descartar cambios?",
+    "description": "Tienes cambios sin guardar. ¿Cerrar este formulario sin guardar?",
+    "confirm": "Descartar"
+  },
   "form": {
     "name": "Nombre de la Meta",
     "namePlaceholder": "ej. Fondo de Emergencia",
@@ -15,7 +25,16 @@
     "icon": "Ícono",
     "color": "Color",
     "notes": "Notas",
-    "notesPlaceholder": "Cualquier nota adicional..."
+    "notesPlaceholder": "Cualquier nota adicional...",
+    "accountsError": "No se pudieron cargar las cuentas",
+    "selectIcon": "Seleccionar ícono {{icon}}",
+    "selectColor": "Seleccionar color {{color}}"
+  },
+  "status": {
+    "onTrack": "En buen camino",
+    "atRisk": "En riesgo",
+    "critical": "Crítico",
+    "completed": "Completado"
   },
   "card": {
     "of": "de",
@@ -25,7 +44,18 @@
     "completed": "¡Completado!",
     "noDeadline": "Sin fecha límite",
     "monthlyNeeded": "/mes necesario",
-    "overdue": "Fecha límite pasada"
+    "overdue": "Fecha límite pasada",
+    "dueToday": "Vence hoy",
+    "progressLabel": "Progreso de la meta"
+  },
+  "hero": {
+    "featuredGoal": "Meta Destacada",
+    "aggregateProgress": "Progreso General",
+    "goalCount": "meta(s)"
+  },
+  "error": {
+    "load": "No se pudieron cargar las metas",
+    "loadDetailed": "No se pudieron cargar tus metas"
   },
   "toast": {
     "created": "Meta creada exitosamente",

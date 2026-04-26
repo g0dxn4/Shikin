@@ -8,28 +8,29 @@ import { Label } from '@/components/ui/label'
 import type { ThemeTokens } from '@/lib/theme'
 import { defaultTheme, presetThemes, loadSavedTheme, saveTheme, applyTheme } from '@/lib/theme'
 
+type ThemeFilter = 'all' | 'dark' | 'light' | 'editorial' | 'bold'
+
+const PRESET_FILTER_BY_NAME: Record<string, ThemeFilter[]> = {
+  default: ['dark'],
+  midnight: ['dark'],
+  forest: ['dark'],
+  rose: ['light', 'editorial'],
+  aurora: ['dark', 'bold'],
+  ember: ['dark', 'bold'],
+  slate: ['dark'],
+  paper: ['light', 'editorial'],
+  nord: ['dark'],
+  mono: ['dark', 'bold'],
+  sunset: ['dark', 'bold', 'editorial'],
+  ocean: ['dark', 'bold'],
+  matcha: ['dark'],
+  terracotta: ['dark', 'editorial'],
+  violetGlass: ['dark', 'bold'],
+  latte: ['light', 'editorial'],
+}
+
 export function ThemeSettings() {
   const { t } = useTranslation('settings')
-  type ThemeFilter = 'all' | 'dark' | 'light' | 'editorial' | 'bold'
-
-  const presetFilterByName: Record<string, ThemeFilter[]> = {
-    default: ['dark'],
-    midnight: ['dark'],
-    forest: ['dark'],
-    rose: ['light', 'editorial'],
-    aurora: ['dark', 'bold'],
-    ember: ['dark', 'bold'],
-    slate: ['dark'],
-    paper: ['light', 'editorial'],
-    nord: ['dark'],
-    mono: ['dark', 'bold'],
-    sunset: ['dark', 'bold', 'editorial'],
-    ocean: ['dark', 'bold'],
-    matcha: ['dark'],
-    terracotta: ['dark', 'editorial'],
-    violetGlass: ['dark', 'bold'],
-    latte: ['light', 'editorial'],
-  }
   const presetLabelByName: Record<string, string> = {
     default: t('theme.presets.default'),
     midnight: t('theme.presets.midnight'),
@@ -170,6 +171,7 @@ export function ThemeSettings() {
             key={filter}
             type="button"
             onClick={() => setActiveFilter(filter)}
+            aria-pressed={activeFilter === filter}
             className={[
               'rounded-full border px-3 py-1 font-mono text-[10px] tracking-wide uppercase transition-colors',
               activeFilter === filter
@@ -186,7 +188,7 @@ export function ThemeSettings() {
         {Object.entries(presetThemes)
           .filter(([name]) => {
             if (activeFilter === 'all') return true
-            return (presetFilterByName[name] || []).includes(activeFilter)
+            return (PRESET_FILTER_BY_NAME[name] || []).includes(activeFilter)
           })
           .map(([name, preset]) => (
             <Button
@@ -219,9 +221,10 @@ export function ThemeSettings() {
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
-          <Label>{t('theme.fields.background')}</Label>
+          <Label htmlFor="theme-background">{t('theme.fields.background')}</Label>
           <div className="flex gap-2">
             <Input
+              id="theme-background"
               type="color"
               value={theme.background}
               onChange={(e) => handleApply({ ...theme, background: e.target.value })}
@@ -231,9 +234,10 @@ export function ThemeSettings() {
           </div>
         </div>
         <div className="space-y-2">
-          <Label>{t('theme.fields.surface')}</Label>
+          <Label htmlFor="theme-surface">{t('theme.fields.surface')}</Label>
           <div className="flex gap-2">
             <Input
+              id="theme-surface"
               type="color"
               value={theme.surface}
               onChange={(e) => handleApply({ ...theme, surface: e.target.value })}
@@ -243,9 +247,10 @@ export function ThemeSettings() {
           </div>
         </div>
         <div className="space-y-2">
-          <Label>{t('theme.fields.accent')}</Label>
+          <Label htmlFor="theme-accent">{t('theme.fields.accent')}</Label>
           <div className="flex gap-2">
             <Input
+              id="theme-accent"
               type="color"
               value={theme.accent}
               onChange={(e) => handleApply({ ...theme, accent: e.target.value })}
@@ -255,8 +260,9 @@ export function ThemeSettings() {
           </div>
         </div>
         <div className="space-y-2">
-          <Label>{t('theme.fields.radius')}</Label>
+          <Label htmlFor="theme-radius">{t('theme.fields.radius')}</Label>
           <select
+            id="theme-radius"
             className="focus:ring-accent border-border h-10 w-full rounded-md border bg-transparent px-3 py-2 focus:ring-2 focus:outline-none"
             value={theme.radiusMd}
             onChange={(e) => handleApply({ ...theme, radiusMd: e.target.value })}
@@ -268,8 +274,9 @@ export function ThemeSettings() {
           </select>
         </div>
         <div className="space-y-2">
-          <Label>{t('theme.fields.fontPreset')}</Label>
+          <Label htmlFor="theme-font-preset">{t('theme.fields.fontPreset')}</Label>
           <select
+            id="theme-font-preset"
             className="focus:ring-accent border-border h-10 w-full rounded-md border bg-transparent px-3 py-2 focus:ring-2 focus:outline-none"
             value={theme.fontPreset}
             onChange={(e) =>

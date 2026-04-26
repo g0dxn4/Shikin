@@ -1,0 +1,19 @@
+{
+  "title": "Calendario de Facturas",
+  "prevMonth": "Mes anterior",
+  "nextMonth": "Mes siguiente",
+  "upcomingBills": "Próximas Facturas",
+  "noBills": "Aún no hay facturas programadas",
+  "thisMonth": "Este Mes",
+  "paid": "Pagado",
+  "remaining": "Pendiente",
+  "dayLabels": {
+    "sunday": "Dom",
+    "monday": "Lun",
+    "tuesday": "Mar",
+    "wednesday": "Mié",
+    "thursday": "Jue",
+    "friday": "Vie",
+    "saturday": "Sáb"
+  }
+}

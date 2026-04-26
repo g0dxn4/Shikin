@@ -14,6 +14,9 @@ import enInvestments from './locales/en/investments.json'
 import enDebtPayoff from './locales/en/debtPayoff.json'
 import enForecast from './locales/en/forecast.json'
 import enGoals from './locales/en/goals.json'
+import enAnalytics from './locales/en/analytics.json'
+import enMemories from './locales/en/memories.json'
+import enBillCalendar from './locales/en/billCalendar.json'
 
 import esCommon from './locales/es/common.json'
 import esDashboard from './locales/es/dashboard.json'
@@ -27,6 +30,9 @@ import esInvestments from './locales/es/investments.json'
 import esDebtPayoff from './locales/es/debtPayoff.json'
 import esForecast from './locales/es/forecast.json'
 import esGoals from './locales/es/goals.json'
+import esAnalytics from './locales/es/analytics.json'
+import esMemories from './locales/es/memories.json'
+import esBillCalendar from './locales/es/billCalendar.json'
 
 export const resources = {
   en: {
@@ -42,6 +48,9 @@ export const resources = {
     debtPayoff: enDebtPayoff,
     forecast: enForecast,
     goals: enGoals,
+    analytics: enAnalytics,
+    memories: enMemories,
+    billCalendar: enBillCalendar,
   },
   es: {
     common: esCommon,
@@ -56,6 +65,9 @@ export const resources = {
     debtPayoff: esDebtPayoff,
     forecast: esForecast,
     goals: esGoals,
+    analytics: esAnalytics,
+    memories: esMemories,
+    billCalendar: esBillCalendar,
   },
 } as const
 
@@ -66,7 +78,23 @@ i18n
     resources,
     fallbackLng: 'en',
     defaultNS: 'common',
-    ns: ['common', 'dashboard', 'settings', 'ai', 'accounts', 'transactions', 'budgets', 'subscriptions', 'investments', 'debtPayoff', 'forecast', 'goals'],
+    ns: [
+      'common',
+      'dashboard',
+      'settings',
+      'ai',
+      'accounts',
+      'transactions',
+      'budgets',
+      'subscriptions',
+      'investments',
+      'debtPayoff',
+      'forecast',
+      'goals',
+      'analytics',
+      'memories',
+      'billCalendar',
+    ],
     interpolation: {
       escapeValue: false,
     },

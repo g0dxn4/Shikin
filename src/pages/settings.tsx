@@ -220,10 +220,12 @@ export function SettingsPage() {
 
   return (
     <div className="animate-fade-in-up page-content">
-      <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
+      <div className="liquid-card page-header p-5">
+        <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
+      </div>
 
       {/* General Settings */}
-      <section className="glass-card space-y-4 p-6">
+      <section className="liquid-card space-y-4 p-6">
         <h2 className="font-heading text-lg font-semibold">{t('sections.general')}</h2>
 
         <div className="space-y-1">
@@ -249,7 +251,7 @@ export function SettingsPage() {
         </div>
       </section>
 
-      <section className="glass-card space-y-4 p-6">
+      <section className="liquid-card space-y-4 p-6">
         <div className="space-y-1">
           <h2 className="font-heading text-lg font-semibold">{t('sections.updates')}</h2>
           <p className="text-muted-foreground text-xs">{t('updates.description')}</p>
@@ -258,7 +260,7 @@ export function SettingsPage() {
         {isTauri ? (
           <>
             <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-xl border border-white/[0.06] bg-[#0a0a0a] px-4 py-3">
+              <div className="liquid-card px-4 py-3">
                 <p className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
                   {t('updates.currentVersion')}
                 </p>
@@ -266,7 +268,7 @@ export function SettingsPage() {
                   {currentVersion ?? t('updates.loadingVersion')}
                 </p>
               </div>
-              <div className="rounded-xl border border-white/[0.06] bg-[#0a0a0a] px-4 py-3">
+              <div className="liquid-card px-4 py-3">
                 <p className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
                   {t('updates.status')}
                 </p>
@@ -410,7 +412,7 @@ export function SettingsPage() {
       </section>
 
       {/* Currency Settings */}
-      <section className="glass-card space-y-4 p-6">
+      <section className="liquid-card space-y-4 p-6">
         <h2 className="font-heading text-lg font-semibold">{t('sections.currency')}</h2>
 
         <div className="space-y-1">
@@ -486,7 +488,7 @@ export function SettingsPage() {
                 {relevantRates.map(({ from, rate }) => (
                   <div
                     key={from}
-                    className="flex items-center justify-between rounded-lg border border-white/[0.06] bg-[#0a0a0a] px-3 py-2"
+                    className="liquid-card flex items-center justify-between px-3 py-2"
                   >
                     <span className="font-mono text-xs">1 {from}</span>
                     <span className="font-heading text-primary text-sm font-semibold">
@@ -500,7 +502,7 @@ export function SettingsPage() {
         })()}
       </section>
       {/* Category Rules */}
-      <section className="glass-card space-y-4 p-6">
+      <section className="liquid-card space-y-4 p-6">
         <h2 className="font-heading text-lg font-semibold">{t('sections.categoryRules')}</h2>
         <p className="text-muted-foreground text-xs">{tTransactions('rules.description')}</p>
 
@@ -516,10 +518,18 @@ export function SettingsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-muted-foreground border-b border-white/[0.06] text-left font-mono text-xs tracking-wider uppercase">
-                  <th className="pr-4 pb-2">{tTransactions('rules.pattern')}</th>
-                  <th className="pr-4 pb-2">{tTransactions('rules.category')}</th>
-                  <th className="pr-4 pb-2">{tTransactions('rules.hits')}</th>
-                  <th className="pb-2">{tTransactions('rules.actions')}</th>
+                  <th scope="col" className="pr-4 pb-2">
+                    {tTransactions('rules.pattern')}
+                  </th>
+                  <th scope="col" className="pr-4 pb-2">
+                    {tTransactions('rules.category')}
+                  </th>
+                  <th scope="col" className="pr-4 pb-2">
+                    {tTransactions('rules.hits')}
+                  </th>
+                  <th scope="col" className="pb-2">
+                    {tTransactions('rules.actions')}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -532,6 +542,7 @@ export function SettingsPage() {
                           <span
                             className="inline-block h-2 w-2 shrink-0 rounded-full"
                             style={{ backgroundColor: rule.category_color }}
+                            aria-hidden="true"
                           />
                         )}
                         <span className="text-xs">{rule.category_name ?? rule.category_id}</span>
@@ -562,7 +573,7 @@ export function SettingsPage() {
         )}
       </section>
 
-      <section className="glass-card space-y-4 p-6">
+      <section className="liquid-card space-y-4 p-6">
         <h2 className="font-heading text-lg font-semibold">
           {t('sections.theme', 'Theme & Appearance')}
         </h2>
@@ -572,7 +583,7 @@ export function SettingsPage() {
         <ThemeSettings />
       </section>
 
-      <section className="glass-card space-y-4 p-6">
+      <section className="liquid-card space-y-4 p-6">
         <h2 className="font-heading text-lg font-semibold">{t('sections.data')}</h2>
         <p className="text-muted-foreground text-xs">{t('data.resetWarning')}</p>
         <div className="flex flex-wrap gap-2">
@@ -606,7 +617,7 @@ export function SettingsPage() {
       </section>
 
       {/* Data API Keys */}
-      <section className="glass-card space-y-4 p-6">
+      <section className="liquid-card space-y-4 p-6">
         <h2 className="font-heading text-lg font-semibold">{t('sections.dataApis')}</h2>
         <p className="text-muted-foreground text-xs">{t('dataApis.description')}</p>
 

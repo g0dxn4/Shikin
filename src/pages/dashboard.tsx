@@ -41,6 +41,7 @@ import { useRecapStore } from '@/stores/recap-store'
 import { useCurrencyStore } from '@/stores/currency-store'
 import { useAchievementStore } from '@/stores/achievement-store'
 import { ACHIEVEMENTS } from '@/lib/achievement-service'
+import { CHART_ITEM_STYLE, CHART_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '@/lib/constants'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import type { AnomalyType, AnomalySeverity } from '@/lib/anomaly-service'
 import { useHealthStore } from '@/stores/health-store'
@@ -51,14 +52,14 @@ import { formatMoney, fromCentavos } from '@/lib/money'
 dayjs.extend(relativeTime)
 
 const CHART_COLORS = [
-  '#bf5af2',
-  '#22c55e',
-  '#3b82f6',
-  '#f59e0b',
-  '#ef4444',
-  '#ec4899',
-  '#06b6d4',
-  '#8b5cf6',
+  '#7C5CFF',
+  '#34D399',
+  '#5AC8FA',
+  '#F59E0B',
+  '#F87171',
+  '#BFA4FF',
+  '#06B6D4',
+  '#8B5CF6',
 ]
 
 export function Dashboard() {
@@ -271,7 +272,7 @@ export function Dashboard() {
           cats.set(catName, {
             name: catName,
             value: tx.amount,
-            color: tx.category_color || '#22c55e',
+            color: tx.category_color || '#34D399',
           })
         }
       }
@@ -290,19 +291,26 @@ export function Dashboard() {
 
   return (
     <div className="animate-fade-in-up page-content">
-      <div className="flex items-center gap-3">
-        <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
+      <div className="liquid-card page-header p-5">
+        <div>
+          <p className="text-muted-foreground font-mono text-[10px] tracking-[0.3em] uppercase">
+            Local-first finance
+          </p>
+          <h1 className="font-heading mt-1 text-2xl font-bold tracking-tight md:text-3xl">
+            {t('title')}
+          </h1>
+        </div>
         {currentStreak > 0 && (
           <div
             className="flex items-center gap-1.5 rounded-full px-3 py-1"
             style={{
-              background: 'rgba(191, 90, 242, 0.15)',
-              border: '1px solid rgba(191, 90, 242, 0.3)',
+              background: 'rgba(124, 92, 255, 0.16)',
+              border: '1px solid rgba(191, 164, 255, 0.32)',
             }}
             title={t('streak.longest', { count: longestStreak })}
           >
             <span className="text-sm">{'\uD83D\uDD25'}</span>
-            <span className="font-heading text-sm font-bold" style={{ color: '#bf5af2' }}>
+            <span className="font-heading text-accent-hover text-sm font-bold">
               {currentStreak}
             </span>
             <span className="text-muted-foreground text-xs">{t('streak.label')}</span>
@@ -326,10 +334,10 @@ export function Dashboard() {
             return (
               <div
                 key={a.id}
-                className="animate-fade-in-up flex items-center gap-3 rounded-xl px-4 py-3"
+                className="liquid-card animate-fade-in-up flex items-center gap-3 px-4 py-3"
                 style={{
-                  background: 'rgba(191, 90, 242, 0.1)',
-                  border: '1px solid rgba(191, 90, 242, 0.2)',
+                  background: 'rgba(124, 92, 255, 0.1)',
+                  border: '1px solid rgba(191, 164, 255, 0.2)',
                 }}
               >
                 <span className="text-xl">{def.icon}</span>
@@ -340,7 +348,7 @@ export function Dashboard() {
                 <Badge
                   variant="secondary"
                   className="shrink-0 text-[10px]"
-                  style={{ color: '#bf5af2' }}
+                  style={{ color: '#BFA4FF' }}
                 >
                   {t('achievements.unlocked')}
                 </Badge>
@@ -357,7 +365,7 @@ export function Dashboard() {
       )}
 
       {/* 4-column metrics */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           icon={<Wallet size={16} />}
           iconColor="text-primary"
@@ -392,8 +400,8 @@ export function Dashboard() {
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="glass-card px-4 py-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="liquid-card px-5 py-4">
           <p className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
             {t('cards.incomeVsLastMonth')}
           </p>
@@ -404,7 +412,7 @@ export function Dashboard() {
             {formatMoney(Math.abs(incomeDelta))}
           </p>
         </div>
-        <div className="glass-card px-4 py-3">
+        <div className="liquid-card px-5 py-4">
           <p className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
             {t('cards.expensesVsLastMonth')}
           </p>
@@ -427,8 +435,8 @@ export function Dashboard() {
             }}
           />
         ) : (
-          <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
-            <div className="bg-accent-muted mb-4 flex h-16 w-16 items-center justify-center rounded-full">
+          <div className="liquid-card flex flex-col items-center justify-center py-16 text-center">
+            <div className="bg-accent-muted mb-4 flex h-16 w-16 items-center justify-center rounded-3xl">
               <Wallet size={32} className="text-primary" />
             </div>
             <h2 className="font-heading mb-2 text-xl font-semibold">{t('empty.title')}</h2>
@@ -444,12 +452,12 @@ export function Dashboard() {
           {transactions.length > 0 && (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               {/* Spending area chart */}
-              <div className="glass-card p-5">
-                <h3 className="font-heading mb-4 text-sm font-semibold">{t('charts.spending')}</h3>
-                <div className="mb-2 text-right">
+              <div className="liquid-card p-6">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <h3 className="font-heading text-lg font-semibold">{t('charts.spending')}</h3>
                   <Link
                     to="/transactions"
-                    className="text-muted-foreground hover:text-foreground text-xs"
+                    className="text-muted-foreground hover:text-foreground text-xs transition-colors"
                   >
                     {t('charts.drilldownTransactions')}
                   </Link>
@@ -459,42 +467,37 @@ export function Dashboard() {
                     <AreaChart data={monthlyChartData}>
                       <defs>
                         <linearGradient id="expenseGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#bf5af2" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#bf5af2" stopOpacity={0} />
+                          <stop offset="5%" stopColor="#F87171" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="#F87171" stopOpacity={0} />
                         </linearGradient>
                         <linearGradient id="incomeGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#22c55e" stopOpacity={0.2} />
-                          <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                          <stop offset="5%" stopColor="#34D399" stopOpacity={0.25} />
+                          <stop offset="95%" stopColor="#34D399" stopOpacity={0} />
                         </linearGradient>
                       </defs>
                       <XAxis
                         dataKey="month"
                         axisLine={false}
                         tickLine={false}
-                        tick={{ fill: '#71717a', fontSize: 11 }}
+                        tick={{ fill: '#A9A9B4', fontSize: 11 }}
                       />
                       <YAxis hide />
                       <Tooltip
-                        contentStyle={{
-                          background: '#0a0a0a',
-                          border: '1px solid rgba(255,255,255,0.06)',
-                          borderRadius: 8,
-                          fontSize: 12,
-                        }}
-                        itemStyle={{ color: '#ffffff' }}
-                        labelStyle={{ color: '#a1a1aa' }}
+                        contentStyle={CHART_TOOLTIP_STYLE}
+                        itemStyle={CHART_ITEM_STYLE}
+                        labelStyle={CHART_LABEL_STYLE}
                       />
                       <Area
                         type="monotone"
                         dataKey="income"
-                        stroke="#22c55e"
+                        stroke="#34D399"
                         strokeWidth={2}
                         fill="url(#incomeGrad)"
                       />
                       <Area
                         type="monotone"
                         dataKey="expenses"
-                        stroke="#bf5af2"
+                        stroke="#F87171"
                         strokeWidth={2}
                         fill="url(#expenseGrad)"
                       />
@@ -504,14 +507,12 @@ export function Dashboard() {
               </div>
 
               {/* Category donut */}
-              <div className="glass-card p-5">
-                <h3 className="font-heading mb-4 text-sm font-semibold">
-                  {t('charts.categories')}
-                </h3>
-                <div className="mb-2 text-right">
+              <div className="liquid-card p-6">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <h3 className="font-heading text-lg font-semibold">{t('charts.categories')}</h3>
                   <Link
                     to="/budgets"
-                    className="text-muted-foreground hover:text-foreground text-xs"
+                    className="text-muted-foreground hover:text-foreground text-xs transition-colors"
                   >
                     {t('charts.drilldownBudgets')}
                   </Link>
@@ -538,12 +539,7 @@ export function Dashboard() {
                             ))}
                           </Pie>
                           <Tooltip
-                            contentStyle={{
-                              background: '#0a0a0a',
-                              border: '1px solid rgba(255,255,255,0.06)',
-                              borderRadius: 8,
-                              fontSize: 12,
-                            }}
+                            contentStyle={CHART_TOOLTIP_STYLE}
                             formatter={(value) => formatMoney(value as number)}
                           />
                         </PieChart>
@@ -577,8 +573,8 @@ export function Dashboard() {
 
           {/* Income Sources */}
           {incomeData.length > 0 && (
-            <div className="glass-card p-5">
-              <h3 className="font-heading mb-4 text-sm font-semibold">
+            <div className="liquid-card p-6">
+              <h3 className="font-heading mb-4 text-lg font-semibold">
                 {t('charts.incomeSources', 'Income Sources')}
               </h3>
               <div className="flex items-center gap-4">
@@ -602,12 +598,7 @@ export function Dashboard() {
                         ))}
                       </Pie>
                       <Tooltip
-                        contentStyle={{
-                          background: '#0a0a0a',
-                          border: '1px solid rgba(255,255,255,0.06)',
-                          borderRadius: 8,
-                          fontSize: 12,
-                        }}
+                        contentStyle={CHART_TOOLTIP_STYLE}
                         formatter={(value) => formatMoney(value as number)}
                       />
                     </PieChart>
@@ -650,11 +641,11 @@ export function Dashboard() {
 
           {/* Spending Insights */}
           {spendingInsights.length > 0 && (
-            <div className="glass-card p-5">
+            <div className="liquid-card p-6">
               <div className="mb-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Zap size={16} className="text-accent" />
-                  <h3 className="font-heading text-sm font-semibold">
+                  <h3 className="font-heading text-lg font-semibold">
                     {t('insights.title', 'Spending Insights')}
                   </h3>
                 </div>
@@ -708,11 +699,11 @@ export function Dashboard() {
           )}
 
           {/* Weekly Recap */}
-          <div className="glass-card p-5">
+          <div className="liquid-card p-6">
             <div className="mb-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <FileText size={16} className="text-primary" />
-                <h3 className="font-heading text-sm font-semibold">{t('recap.title')}</h3>
+                <h3 className="font-heading text-lg font-semibold">{t('recap.title')}</h3>
               </div>
               <Button
                 variant="outline"
@@ -734,7 +725,7 @@ export function Dashboard() {
                   {currentRecap.highlights.map((h) => (
                     <span
                       key={h.label}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-white/6 bg-white/4 px-3 py-1 text-xs"
+                      className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1 text-xs"
                     >
                       <span className="text-muted-foreground">{h.label}:</span>
                       <span className="font-semibold">{h.value}</span>
@@ -775,7 +766,7 @@ export function Dashboard() {
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {accounts.slice(0, 3).map((account) => (
-                <div key={account.id} className="metric-card">
+                <div key={account.id} className="liquid-card p-5">
                   <div className="mb-1 flex items-center justify-between">
                     <h3 className="font-heading text-sm font-semibold">{account.name}</h3>
                     <Badge variant="secondary" className="text-[10px]">
@@ -822,7 +813,7 @@ export function Dashboard() {
                   }}
                 />
               ) : (
-                <div className="glass-card flex flex-col items-center justify-center py-8 text-center">
+                <div className="liquid-card flex flex-col items-center justify-center py-8 text-center">
                   <p className="text-muted-foreground text-sm">{tTx('empty.description')}</p>
                   <Button className="mt-3" size="sm" onClick={() => openTransactionDialog()}>
                     <Plus size={14} />
@@ -831,7 +822,7 @@ export function Dashboard() {
                 </div>
               )
             ) : (
-              <div className="space-y-1">
+              <div className="liquid-card divide-y divide-white/[0.08] overflow-hidden p-1">
                 {recentTransactions.map((tx) => (
                   <RecentTransactionRow key={tx.id} transaction={tx} />
                 ))}
@@ -857,9 +848,9 @@ export function Dashboard() {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {goals.slice(0, 3).map((goal) => {
                   const progressColor =
-                    goal.progress >= 75 ? '#22c55e' : goal.progress >= 40 ? '#f59e0b' : '#ef4444'
+                    goal.progress >= 75 ? '#34D399' : goal.progress >= 40 ? '#F59E0B' : '#F87171'
                   return (
-                    <div key={goal.id} className="metric-card">
+                    <div key={goal.id} className="liquid-card p-5">
                       <div className="mb-2 flex items-center gap-2">
                         <span className="text-base">{goal.icon || '🎯'}</span>
                         <h3 className="font-heading truncate text-sm font-semibold">{goal.name}</h3>
@@ -872,7 +863,7 @@ export function Dashboard() {
                               cy="20"
                               r="16"
                               fill="none"
-                              stroke="rgba(255,255,255,0.05)"
+                              stroke="rgba(255,255,255,0.08)"
                               strokeWidth="4"
                             />
                             <circle
@@ -950,7 +941,7 @@ function ForecastWidget() {
 
   if (isLoading && !forecast) {
     return (
-      <div className="glass-card p-5">
+      <div className="liquid-card p-6">
         <Skeleton className="h-4 w-48" />
         <Skeleton className="mt-4 h-48 w-full" />
       </div>
@@ -962,19 +953,19 @@ function ForecastWidget() {
   const firstDangerDate = forecast.dangerDates[0]
 
   return (
-    <div className="glass-card p-5">
+    <div className="liquid-card p-6">
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="font-heading text-sm font-semibold">{t('forecast.title')}</h3>
+        <h3 className="font-heading text-lg font-semibold">{t('forecast.title')}</h3>
         <div className="flex items-center gap-2">
           <div className="flex gap-1">
             {ranges.map((r) => (
               <button
                 key={r}
                 onClick={() => setRange(r)}
-                className={`rounded-md px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
                   selectedRange === r
-                    ? 'bg-primary text-white'
-                    : 'text-muted-foreground hover:text-foreground bg-white/5 hover:bg-white/10'
+                    ? 'text-accent-hover bg-white/[0.1]'
+                    : 'text-muted-foreground hover:text-foreground bg-white/[0.05] hover:bg-white/[0.1]'
                 }`}
               >
                 {t(`forecast.range${r}` as 'forecast.range30')}
@@ -991,7 +982,7 @@ function ForecastWidget() {
       </div>
 
       {firstDangerDate && (
-        <div className="bg-destructive/10 mb-3 flex items-center gap-2 rounded-lg px-3 py-2">
+        <div className="bg-destructive/10 border-destructive/20 mb-3 flex items-center gap-2 rounded-2xl border px-3 py-2">
           <AlertTriangle size={14} className="text-destructive shrink-0" />
           <p className="text-destructive text-xs">
             {t('forecast.dangerWarning', {
@@ -1007,27 +998,22 @@ function ForecastWidget() {
           <AreaChart data={chartData}>
             <defs>
               <linearGradient id="forecastGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#bf5af2" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="#bf5af2" stopOpacity={0} />
+                <stop offset="5%" stopColor="#7C5CFF" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#7C5CFF" stopOpacity={0} />
               </linearGradient>
             </defs>
             <XAxis
               dataKey="date"
               axisLine={false}
               tickLine={false}
-              tick={{ fill: '#71717a', fontSize: 11 }}
+              tick={{ fill: '#A9A9B4', fontSize: 11 }}
               interval="preserveStartEnd"
             />
             <YAxis hide />
             <Tooltip
-              contentStyle={{
-                background: '#0a0a0a',
-                border: '1px solid rgba(255,255,255,0.06)',
-                borderRadius: 8,
-                fontSize: 12,
-              }}
-              itemStyle={{ color: '#ffffff' }}
-              labelStyle={{ color: '#a1a1aa' }}
+              contentStyle={CHART_TOOLTIP_STYLE}
+              itemStyle={CHART_ITEM_STYLE}
+              labelStyle={CHART_LABEL_STYLE}
               formatter={(value) =>
                 `$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
               }
@@ -1036,7 +1022,7 @@ function ForecastWidget() {
               type="monotone"
               dataKey="optimistic"
               name={t('forecast.optimistic')}
-              stroke="#22c55e"
+              stroke="#34D399"
               strokeWidth={1}
               strokeDasharray="6 3"
               fill="none"
@@ -1045,7 +1031,7 @@ function ForecastWidget() {
               type="monotone"
               dataKey="projected"
               name={t('forecast.projected')}
-              stroke="#bf5af2"
+              stroke="#7C5CFF"
               strokeWidth={2}
               fill="url(#forecastGrad)"
             />
@@ -1053,7 +1039,7 @@ function ForecastWidget() {
               type="monotone"
               dataKey="pessimistic"
               name={t('forecast.pessimistic')}
-              stroke="#ef4444"
+              stroke="#F87171"
               strokeWidth={1}
               strokeDasharray="6 3"
               fill="none"
@@ -1081,7 +1067,7 @@ function MetricCard({
   subtitle?: string
 }) {
   return (
-    <div className="metric-card">
+    <div className="metric-card p-5">
       <div className="text-muted-foreground mb-2 flex items-center gap-2">
         <span className={iconColor}>{icon}</span>
         <span className="font-mono text-[10px] tracking-wider uppercase">{label}</span>
@@ -1100,18 +1086,18 @@ function DashboardSkeleton() {
       <Skeleton className="h-8 w-32" />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="glass-card space-y-3 p-5">
+          <div key={i} className="liquid-card space-y-3 p-5">
             <Skeleton className="h-3 w-24" />
             <Skeleton className="h-8 w-32" />
           </div>
         ))}
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="glass-card p-5">
+        <div className="liquid-card p-5">
           <Skeleton className="h-4 w-32" />
           <Skeleton className="mt-4 h-48 w-full" />
         </div>
-        <div className="glass-card p-5">
+        <div className="liquid-card p-5">
           <Skeleton className="h-4 w-24" />
           <Skeleton className="mt-4 h-48 w-full" />
         </div>
@@ -1173,7 +1159,7 @@ function AlertsSection({
 }) {
   if (isLoading) {
     return (
-      <div className="glass-card flex items-center gap-3 p-4">
+      <div className="liquid-card flex items-center gap-3 p-4">
         <ShieldAlert size={16} className="text-primary animate-pulse" />
         <span className="text-muted-foreground text-sm">{t('alerts.scanning')}</span>
       </div>
@@ -1198,7 +1184,7 @@ function AlertsSection({
           return (
             <div
               key={anomaly.id}
-              className={`glass-card flex items-start gap-3 border px-4 py-3 ${styles.border}`}
+              className={`liquid-card flex items-start gap-3 border px-4 py-3 ${styles.border}`}
             >
               <div
                 className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${styles.bg} ${styles.text}`}
@@ -1220,7 +1206,7 @@ function AlertsSection({
               </div>
               <button
                 onClick={() => onDismiss(anomaly.id)}
-                className="text-muted-foreground hover:text-foreground mt-0.5 shrink-0 rounded-md p-1 transition-colors hover:bg-white/5"
+                className="text-muted-foreground hover:text-foreground mt-0.5 shrink-0 rounded-xl p-1 transition-colors hover:bg-white/[0.08]"
                 title={t('alerts.dismiss')}
               >
                 <X size={14} />
@@ -1239,10 +1225,10 @@ function HealthScoreGauge({ score, grade }: { score: number; grade: string }) {
   const strokeDashoffset = circumference - (score / 100) * circumference
 
   const getColor = (s: number) => {
-    if (s >= 80) return '#22c55e'
-    if (s >= 60) return '#f59e0b'
-    if (s >= 40) return '#f97316'
-    return '#ef4444'
+    if (s >= 80) return '#34D399'
+    if (s >= 60) return '#F59E0B'
+    if (s >= 40) return '#FB923C'
+    return '#F87171'
   }
 
   const color = getColor(score)
@@ -1256,7 +1242,7 @@ function HealthScoreGauge({ score, grade }: { score: number; grade: string }) {
           cy="60"
           r={radius}
           fill="none"
-          stroke="rgba(255,255,255,0.06)"
+          stroke="rgba(255,255,255,0.08)"
           strokeWidth="8"
         />
         {/* Score ring */}
@@ -1287,10 +1273,10 @@ function HealthScoreGauge({ score, grade }: { score: number; grade: string }) {
 
 function SubScoreBar({ subscore }: { subscore: SubScore }) {
   const getColor = (s: number) => {
-    if (s >= 80) return '#22c55e'
-    if (s >= 60) return '#f59e0b'
-    if (s >= 40) return '#f97316'
-    return '#ef4444'
+    if (s >= 80) return '#34D399'
+    if (s >= 60) return '#F59E0B'
+    if (s >= 40) return '#FB923C'
+    return '#F87171'
   }
 
   return (
@@ -1328,7 +1314,7 @@ function HealthScoreWidget({
 
   if (isLoading || !score) {
     return (
-      <div className="glass-card flex items-center justify-center p-8">
+      <div className="liquid-card flex items-center justify-center p-8">
         <div className="flex items-center gap-3">
           <Heart size={16} className="text-primary animate-pulse" />
           <span className="text-muted-foreground text-sm">{t('healthScore.calculating')}</span>
@@ -1345,10 +1331,10 @@ function HealthScoreWidget({
     ) : null
 
   return (
-    <div className="glass-card p-5">
+    <div className="liquid-card p-6">
       <div className="mb-4 flex items-center gap-2">
         <Heart size={16} className="text-primary" />
-        <h3 className="font-heading text-sm font-semibold">{t('healthScore.title')}</h3>
+        <h3 className="font-heading text-lg font-semibold">{t('healthScore.title')}</h3>
         {trendIcon && (
           <Badge variant="secondary" className="ml-auto flex items-center gap-1 text-[10px]">
             {trendIcon}
@@ -1373,7 +1359,7 @@ function HealthScoreWidget({
 
       {/* Top tip */}
       {score.tips[0] && (
-        <div className="mt-4 rounded-lg border border-white/[0.06] bg-white/[0.02] px-4 py-3">
+        <div className="mt-4 rounded-2xl border border-white/[0.08] bg-white/[0.04] px-4 py-3">
           <div className="flex items-start gap-2">
             <Sparkles size={14} className="text-primary mt-0.5 shrink-0" />
             <div>
@@ -1391,7 +1377,7 @@ function HealthScoreWidget({
 
 function RecentTransactionRow({ transaction: tx }: { transaction: TransactionWithDetails }) {
   return (
-    <div className="glass-card flex items-center gap-3 px-4 py-2.5">
+    <div className="flex items-center gap-3 rounded-[22px] px-4 py-3 transition-colors hover:bg-white/[0.04]">
       {tx.category_color ? (
         <span
           className="h-2.5 w-2.5 shrink-0 rounded-full"

@@ -82,7 +82,7 @@ export function BudgetForm({ budget, onSubmit, isLoading, onDirtyChange }: Budge
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
       <ErrorBanner
-        title="Categories couldn\'t be loaded"
+        title={t('form.categoriesError')}
         message={categoriesFetchError}
         onRetry={() => {
           void fetchCategories().catch(() => {})
@@ -178,8 +178,15 @@ export function BudgetForm({ budget, onSubmit, isLoading, onDirtyChange }: Budge
         </div>
       </div>
 
-      <Button type="submit" className="w-full" disabled={isSubmitDisabled}>
-        {isLoading ? '...' : tCommon('actions.save')}
+      <Button type="submit" className="w-full" disabled={isSubmitDisabled} aria-busy={isLoading}>
+        {isLoading ? (
+          <>
+            <span className="sr-only">{tCommon('actions.saving')}</span>
+            ...
+          </>
+        ) : (
+          tCommon('actions.save')
+        )}
       </Button>
     </form>
   )

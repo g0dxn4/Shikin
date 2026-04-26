@@ -248,8 +248,8 @@ describe('goal-store', () => {
 
       await useGoalStore.getState().fetch()
       const goal = useGoalStore.getState().goals[0]
-      // Past deadline: daysRemaining should be 0, monthlyNeeded should be the full remaining amount
-      expect(goal.daysRemaining).toBe(0)
+      // Past deadline: daysRemaining should be negative, monthlyNeeded should be the full remaining amount
+      expect(goal.daysRemaining).toBeLessThan(0)
       expect(goal.monthlyNeeded).toBe(100000) // remaining amount when months <= 0
     })
   })

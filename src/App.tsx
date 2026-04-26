@@ -43,6 +43,11 @@ const SpendingInsights = lazy(() =>
 const SettingsPage = lazy(() =>
   import('@/pages/settings').then((m) => ({ default: m.SettingsPage }))
 )
+const BillsPage = lazy(() => import('@/pages/bills').then((m) => ({ default: m.BillsPage })))
+const ReportsPage = lazy(() => import('@/pages/reports').then((m) => ({ default: m.ReportsPage })))
+const ExtensionsPage = lazy(() =>
+  import('@/pages/extensions').then((m) => ({ default: m.ExtensionsPage }))
+)
 
 export default function App() {
   const [startupErrors, setStartupErrors] = useState<Record<string, string>>({})
@@ -167,6 +172,9 @@ export default function App() {
                 <Route path="/spending-heatmap" element={<SpendingHeatmap />} />
                 <Route path="/memories" element={<Memories />} />
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/bills" element={<BillsPage />} />
+                <Route path="/reports" element={<ReportsPage />} />
+                <Route path="/extensions" element={<ExtensionsPage />} />
               </Route>
             </Routes>
           </Suspense>
@@ -176,9 +184,9 @@ export default function App() {
         position="bottom-right"
         toastOptions={{
           style: {
-            background: '#0a0a0a',
-            border: '1px solid rgba(255, 255, 255, 0.06)',
-            color: '#f0f0f0',
+            background: '#18181B',
+            border: '1px solid #FFFFFF12',
+            color: '#FAFAFA',
           },
         }}
       />

@@ -42,7 +42,7 @@ test.describe('desktop layout', () => {
     await expect(sidebar.getByText('Transactions')).toBeVisible()
   })
 
-  test('settings link is available in sidebar footer', async ({ page }) => {
+  test('settings link is available in sidebar', async ({ page }) => {
     const sidebar = page.locator('aside').first()
 
     await expect(sidebar.getByRole('link', { name: 'Settings' })).toBeVisible()
@@ -74,8 +74,8 @@ test.describe('mobile layout', () => {
   })
 
   test('content has bottom padding for nav bar', async ({ page }) => {
-    const contentWrapper = page.locator('.mx-auto.max-w-7xl')
+    const contentWrapper = page.locator('.mx-auto.max-w-[1420px]')
     await expect(contentWrapper).toBeVisible()
-    await expect(contentWrapper).toHaveClass(/pb-16/)
+    await expect(contentWrapper).toHaveClass(/pb-24/)
   })
 })

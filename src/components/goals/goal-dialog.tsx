@@ -69,7 +69,9 @@ export function GoalDialog() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>{isEditing ? t('editGoal') : t('addGoal')}</DialogTitle>
-            <DialogDescription>{isEditing ? t('editGoal') : t('addGoal')}</DialogDescription>
+            <DialogDescription>
+              {isEditing ? t('dialog.editDescription') : t('dialog.addDescription')}
+            </DialogDescription>
           </DialogHeader>
           <GoalForm
             key={editingGoalId || 'new'}
@@ -83,9 +85,9 @@ export function GoalDialog() {
       <ConfirmDialog
         open={confirmDiscardOpen}
         onOpenChange={setConfirmDiscardOpen}
-        title="Discard changes?"
-        description="You have unsaved changes. Close this form without saving?"
-        confirmLabel="Discard"
+        title={t('discard.title')}
+        description={t('discard.description')}
+        confirmLabel={t('discard.confirm')}
         cancelLabel={tCommon('actions.cancel')}
         variant="destructive"
         onConfirm={() => {

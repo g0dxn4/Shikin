@@ -10,6 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useForecastStore } from '@/stores/forecast-store'
 import { formatMoney, fromCentavos } from '@/lib/money'
 import { query } from '@/lib/database'
+import { CHART_ITEM_STYLE, CHART_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '@/lib/constants'
 
 interface SubscriptionDisplay {
   name: string
@@ -46,18 +47,20 @@ export function Forecast() {
 
   return (
     <div className="animate-fade-in-up page-content">
-      <div className="page-header">
+      {/* Page Header */}
+      <div className="liquid-card page-header p-5">
         <div>
-          <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
+          <h1 className="font-heading text-2xl font-bold tracking-tight">{t('title')}</h1>
           <p className="text-muted-foreground mt-1 text-sm">{t('description')}</p>
         </div>
-        <div className="flex gap-1">
+        <div className="flex gap-1" role="group" aria-label={t('range.label')}>
           {ranges.map((r) => (
             <Button
               key={r}
               variant={selectedRange === r ? 'default' : 'outline'}
               size="sm"
               onClick={() => setRange(r)}
+              aria-pressed={selectedRange === r}
             >
               {t(`range.${r}`)}
             </Button>
@@ -89,7 +92,7 @@ export function Forecast() {
           />
           <MetricCard
             icon={<Flame size={16} />}
-            iconColor="text-orange-400"
+            iconColor="text-warning"
             label={t('metrics.dailyBurn')}
             value={formatMoney(forecast.dailyBurnRate)}
           />
@@ -111,9 +114,9 @@ export function Forecast() {
 
       {/* Danger Warnings */}
       {forecast && forecast.dangerDates.length > 0 && (
-        <div className="glass-card border-destructive/30 bg-destructive/5 border p-4">
+        <div className="liquid-card border-destructive/30 bg-destructive/5 border p-4" role="alert">
           <div className="mb-2 flex items-center gap-2">
-            <AlertTriangle size={16} className="text-destructive" />
+            <AlertTriangle size={16} className="text-destructive" aria-hidden="true" />
             <h3 className="font-heading text-destructive text-sm font-semibold">
               {t('danger.title')}
             </h3>
@@ -135,9 +138,9 @@ export function Forecast() {
       )}
 
       {forecast && forecast.dangerDates.length === 0 && (
-        <div className="glass-card border-success/30 bg-success/5 border p-4">
+        <div className="liquid-card border-success/30 bg-success/5 border p-4" role="status">
           <div className="flex items-center gap-2">
-            <TrendingUp size={16} className="text-success" />
+            <TrendingUp size={16} className="text-success" aria-hidden="true" />
             <p className="text-success text-sm">{t('danger.noDanger')}</p>
           </div>
         </div>
@@ -145,15 +148,15 @@ export function Forecast() {
 
       {/* Main Chart */}
       {forecast && chartData.length > 0 && (
-        <div className="glass-card p-5">
+        <div className="liquid-card p-5">
           <h3 className="font-heading mb-4 text-sm font-semibold">{t('chart.title')}</h3>
-          <div className="h-80">
+          <div className="h-80" role="img" aria-label={t('chart.title')}>
             <SafeChart>
               <AreaChart data={chartData}>
                 <defs>
                   <linearGradient id="forecastProjectedGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#bf5af2" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#bf5af2" stopOpacity={0} />
+                    <stop offset="5%" stopColor="#7C5CFF" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#7C5CFF" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
@@ -161,34 +164,29 @@ export function Forecast() {
                   dataKey="date"
                   axisLine={false}
                   tickLine={false}
-                  tick={{ fill: '#71717a', fontSize: 11 }}
+                  tick={{ fill: '#A9A9B4', fontSize: 11 }}
                   interval="preserveStartEnd"
                 />
                 <YAxis
                   axisLine={false}
                   tickLine={false}
-                  tick={{ fill: '#71717a', fontSize: 11 }}
+                  tick={{ fill: '#A9A9B4', fontSize: 11 }}
                   tickFormatter={(v) => `$${(v / 1).toLocaleString()}`}
                 />
                 <Tooltip
-                  contentStyle={{
-                    background: '#0a0a0a',
-                    border: '1px solid rgba(255,255,255,0.06)',
-                    borderRadius: 8,
-                    fontSize: 12,
-                  }}
-                  itemStyle={{ color: '#ffffff' }}
-                  labelStyle={{ color: '#a1a1aa' }}
+                  contentStyle={CHART_TOOLTIP_STYLE}
+                  itemStyle={CHART_ITEM_STYLE}
+                  labelStyle={CHART_LABEL_STYLE}
                   formatter={(value) =>
                     `$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                   }
                 />
-                <Legend wrapperStyle={{ fontSize: 11, color: '#a1a1aa' }} />
+                <Legend wrapperStyle={{ fontSize: 11, color: '#A9A9B4' }} />
                 <Area
                   type="monotone"
                   dataKey="optimistic"
                   name={t('chart.optimistic')}
-                  stroke="#22c55e"
+                  stroke="#34D399"
                   strokeWidth={1.5}
                   strokeDasharray="6 3"
                   fill="none"
@@ -197,7 +195,7 @@ export function Forecast() {
                   type="monotone"
                   dataKey="projected"
                   name={t('chart.projected')}
-                  stroke="#bf5af2"
+                  stroke="#7C5CFF"
                   strokeWidth={2}
                   fill="url(#forecastProjectedGrad)"
                 />
@@ -205,7 +203,7 @@ export function Forecast() {
                   type="monotone"
                   dataKey="pessimistic"
                   name={t('chart.pessimistic')}
-                  stroke="#ef4444"
+                  stroke="#EF4444"
                   strokeWidth={1.5}
                   strokeDasharray="6 3"
                   fill="none"
@@ -229,7 +227,7 @@ function SubscriptionsTable() {
 
   if (isLoading) {
     return (
-      <div className="glass-card p-5">
+      <div className="liquid-card p-5">
         <Skeleton className="h-4 w-48" />
         <Skeleton className="mt-4 h-32 w-full" />
       </div>
@@ -237,7 +235,7 @@ function SubscriptionsTable() {
   }
 
   return (
-    <div className="glass-card p-5">
+    <div className="liquid-card p-5">
       <h3 className="font-heading mb-4 text-sm font-semibold">{t('table.title')}</h3>
       {subscriptions.length === 0 ? (
         <p className="text-muted-foreground text-sm">{t('table.noSubscriptions')}</p>
@@ -246,10 +244,18 @@ function SubscriptionsTable() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-muted-foreground border-b border-white/5 text-left text-xs">
-                <th className="pb-2 font-medium">{t('table.name')}</th>
-                <th className="pb-2 font-medium">{t('table.amount')}</th>
-                <th className="pb-2 font-medium">{t('table.frequency')}</th>
-                <th className="pb-2 font-medium">{t('table.nextDate')}</th>
+                <th scope="col" className="pb-2 font-medium">
+                  {t('table.name')}
+                </th>
+                <th scope="col" className="pb-2 font-medium">
+                  {t('table.amount')}
+                </th>
+                <th scope="col" className="pb-2 font-medium">
+                  {t('table.frequency')}
+                </th>
+                <th scope="col" className="pb-2 font-medium">
+                  {t('table.nextDate')}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -315,7 +321,7 @@ function MetricCard({
   valueColor?: string
 }) {
   return (
-    <div className="metric-card">
+    <div className="liquid-card p-5">
       <div className="text-muted-foreground mb-2 flex items-center gap-2">
         <span className={iconColor}>{icon}</span>
         <span className="font-mono text-[10px] tracking-wider uppercase">{label}</span>
@@ -328,16 +334,16 @@ function MetricCard({
 function ForecastSkeleton() {
   return (
     <div className="page-content">
-      <Skeleton className="h-8 w-48" />
+      <Skeleton className="h-20 w-full" />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="glass-card space-y-3 p-5">
+          <div key={i} className="liquid-card space-y-3 p-5">
             <Skeleton className="h-3 w-24" />
             <Skeleton className="h-6 w-32" />
           </div>
         ))}
       </div>
-      <div className="glass-card p-5">
+      <div className="liquid-card p-5">
         <Skeleton className="h-4 w-32" />
         <Skeleton className="mt-4 h-80 w-full" />
       </div>

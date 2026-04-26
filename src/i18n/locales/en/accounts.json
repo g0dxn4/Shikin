@@ -31,8 +31,21 @@
     "deleted": "Account deleted successfully",
     "error": "Something went wrong"
   },
+  "subtitle": "Balance overview",
   "totalBalance": "Total Balance",
   "accountCount": "account(s)",
+  "history": {
+    "show": "Balance history",
+    "hide": "Hide history",
+    "empty": "First snapshot recorded. Come back tomorrow for trend data.",
+    "none": "No history yet. Balance is recorded daily."
+  },
+  "utilization": {
+    "label": "Utilization",
+    "high": "High",
+    "moderate": "Moderate",
+    "low": "Low"
+  },
   "empty": {
     "title": "No accounts yet",
     "description": "Add your first account to start tracking your finances."
@@ -45,6 +58,7 @@
     "title": "Archived Accounts",
     "description": "Closed or retired accounts stay here without affecting active totals.",
     "show": "Show archived",
-    "hide": "Hide archived"
+    "hide": "Hide archived",
+    "badge": "Archived"
   }
 }

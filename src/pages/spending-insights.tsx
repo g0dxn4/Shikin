@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   TrendingUp,
   TrendingDown,
@@ -10,17 +11,18 @@ import {
   Calendar,
   CalendarRange,
 } from 'lucide-react'
-import { PageHeader } from '@/components/ui/page-header'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { useSpendingInsightsStore } from '@/stores/spending-insights-store'
 import type { SpendingComparison, SpendingInsight } from '@/stores/spending-insights-store'
+import { formatMoney } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import dayjs from 'dayjs'
 
 type Tab = 'insights' | 'mom' | 'yoy'
 
 export function SpendingInsights() {
+  const { t } = useTranslation('analytics')
   const [tab, setTab] = useState<Tab>('insights')
   const {
     momComparisons,
@@ -40,8 +42,18 @@ export function SpendingInsights() {
 
   if (isLoading) {
     return (
-      <div className="animate-fade-in-up page-content">
-        <PageHeader title="Spending Insights" />
+      <div className="animate-fade-in-up page-content" role="status" aria-busy="true">
+        <span className="sr-only">Loading</span>
+        <div className="liquid-card page-header p-5">
+          <div>
+            <h1 className="font-heading text-2xl font-bold tracking-tight">
+              {t('spendingInsights.title')}
+            </h1>
+            <p className="text-muted-foreground mt-1 text-sm">
+              {t('spendingInsights.description')}
+            </p>
+          </div>
+        </div>
         <div className="space-y-4">
           <Skeleton className="h-12 w-full" />
           <Skeleton className="h-64 w-full" />
@@ -51,54 +63,69 @@ export function SpendingInsights() {
   }
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: 'insights', label: 'Insights', icon: <Lightbulb size={14} /> },
-    { id: 'mom', label: 'Month / Month', icon: <Calendar size={14} /> },
-    { id: 'yoy', label: 'Year / Year', icon: <CalendarRange size={14} /> },
+    { id: 'insights', label: t('spendingInsights.tabs.insights'), icon: <Lightbulb size={14} /> },
+    { id: 'mom', label: t('spendingInsights.tabs.mom'), icon: <Calendar size={14} /> },
+    { id: 'yoy', label: t('spendingInsights.tabs.yoy'), icon: <CalendarRange size={14} /> },
   ]
 
   return (
     <div className="animate-fade-in-up page-content">
-      <PageHeader title="Spending Insights" />
+      <div className="liquid-card page-header p-5">
+        <div>
+          <h1 className="font-heading text-2xl font-bold tracking-tight">
+            {t('spendingInsights.title')}
+          </h1>
+          <p className="text-muted-foreground mt-1 text-sm">{t('spendingInsights.description')}</p>
+        </div>
+      </div>
 
-      {/* Tabs */}
-      <div className="mb-4 flex gap-1 rounded-xl bg-white/[0.03] p-1">
-        {tabs.map((t) => (
+      {/* Tab buttons using button group semantics */}
+      <div
+        className="mb-4 flex gap-1 rounded-xl bg-white/[0.03] p-1"
+        role="group"
+        aria-label={t('spendingInsights.title')}
+      >
+        {tabs.map((tItem) => (
           <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
+            key={tItem.id}
+            type="button"
+            aria-pressed={tab === tItem.id}
+            onClick={() => setTab(tItem.id)}
             className={cn(
               'flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 font-mono text-xs transition-colors',
-              tab === t.id
+              tab === tItem.id
                 ? 'bg-accent/15 text-accent'
                 : 'text-muted-foreground hover:text-foreground'
             )}
           >
-            {t.icon}
-            {t.label}
+            {tItem.icon}
+            {tItem.label}
           </button>
         ))}
       </div>
 
       {/* Content */}
-      {tab === 'insights' && <InsightsTab insights={insights} />}
-      {tab === 'mom' && (
-        <ComparisonTab
-          comparisons={momComparisons}
-          currentTotal={momCurrentTotal}
-          previousTotal={momPreviousTotal}
-          currentLabel={dayjs().format('MMMM YYYY')}
-          previousLabel={dayjs().subtract(1, 'month').format('MMMM YYYY')}
-        />
-      )}
-      {tab === 'yoy' && (
-        <ComparisonTab
-          comparisons={yoyComparisons}
-          currentTotal={yoyCurrentTotal}
-          previousTotal={yoyPreviousTotal}
-          currentLabel={dayjs().format('MMMM YYYY')}
-          previousLabel={dayjs().subtract(1, 'year').format('MMMM YYYY')}
-        />
-      )}
+      <div role="region" aria-label={tabs.find((t) => t.id === tab)?.label}>
+        {tab === 'insights' && <InsightsTab insights={insights} />}
+        {tab === 'mom' && (
+          <ComparisonTab
+            comparisons={momComparisons}
+            currentTotal={momCurrentTotal}
+            previousTotal={momPreviousTotal}
+            currentLabel={dayjs().format('MMMM YYYY')}
+            previousLabel={dayjs().subtract(1, 'month').format('MMMM YYYY')}
+          />
+        )}
+        {tab === 'yoy' && (
+          <ComparisonTab
+            comparisons={yoyComparisons}
+            currentTotal={yoyCurrentTotal}
+            previousTotal={yoyPreviousTotal}
+            currentLabel={dayjs().format('MMMM YYYY')}
+            previousLabel={dayjs().subtract(1, 'year').format('MMMM YYYY')}
+          />
+        )}
+      </div>
     </div>
   )
 }
@@ -106,14 +133,13 @@ export function SpendingInsights() {
 // ── Insights Tab ──────────────────────────────────────────────────────────
 
 function InsightsTab({ insights }: { insights: SpendingInsight[] }) {
+  const { t } = useTranslation('analytics')
   if (insights.length === 0) {
     return (
-      <div className="glass-card flex h-48 items-center justify-center p-5">
+      <div className="liquid-card flex h-48 items-center justify-center p-5">
         <div className="text-center">
-          <Lightbulb size={24} className="text-muted-foreground mx-auto mb-2" />
-          <p className="text-muted-foreground text-sm">
-            No notable spending changes this month. Keep it up!
-          </p>
+          <Lightbulb size={24} className="text-muted-foreground mx-auto mb-2" aria-hidden="true" />
+          <p className="text-muted-foreground text-sm">{t('spendingInsights.insightsEmpty')}</p>
         </div>
       </div>
     )
@@ -129,6 +155,7 @@ function InsightsTab({ insights }: { insights: SpendingInsight[] }) {
 }
 
 function InsightCard({ insight }: { insight: SpendingInsight }) {
+  const { t } = useTranslation('analytics')
   const severityStyles = {
     alert: 'border-destructive/20 bg-destructive/5',
     warning: 'border-warning/20 bg-warning/5',
@@ -136,22 +163,28 @@ function InsightCard({ insight }: { insight: SpendingInsight }) {
   }
 
   const severityIcon = {
-    alert: <AlertTriangle size={16} className="text-destructive" />,
-    warning: <AlertTriangle size={16} className="text-warning" />,
-    info: <Lightbulb size={16} className="text-accent" />,
+    alert: <AlertTriangle size={16} className="text-destructive" aria-hidden="true" />,
+    warning: <AlertTriangle size={16} className="text-warning" aria-hidden="true" />,
+    info: <Lightbulb size={16} className="text-accent" aria-hidden="true" />,
+  }
+
+  const severityLabel = {
+    alert: t('spendingInsights.severity.alert'),
+    warning: t('spendingInsights.severity.warning'),
+    info: t('spendingInsights.severity.info'),
   }
 
   const typeIcon = {
-    increase: <ArrowUpRight size={14} className="text-destructive" />,
-    decrease: <ArrowDownRight size={14} className="text-success" />,
-    new: <TrendingUp size={14} className="text-accent" />,
-    gone: <TrendingDown size={14} className="text-muted-foreground" />,
+    increase: <ArrowUpRight size={14} className="text-destructive" aria-hidden="true" />,
+    decrease: <ArrowDownRight size={14} className="text-success" aria-hidden="true" />,
+    new: <TrendingUp size={14} className="text-accent" aria-hidden="true" />,
+    gone: <TrendingDown size={14} className="text-muted-foreground" aria-hidden="true" />,
   }
 
   return (
     <div
       className={cn(
-        'glass-card flex items-start gap-3 border p-4',
+        'liquid-card flex items-start gap-3 border p-4',
         severityStyles[insight.severity]
       )}
     >
@@ -164,6 +197,7 @@ function InsightCard({ insight }: { insight: SpendingInsight }) {
           />
           <span className="font-heading text-sm font-semibold">{insight.categoryName}</span>
           {typeIcon[insight.type]}
+          <span className="sr-only">{severityLabel[insight.severity]}</span>
         </div>
         <p className="text-muted-foreground text-sm">{insight.message}</p>
         <div className="mt-2 flex items-center gap-2">
@@ -175,9 +209,12 @@ function InsightCard({ insight }: { insight: SpendingInsight }) {
               insight.type === 'decrease' ? 'border-success/30 text-success' : ''
             )}
           >
-            {insight.type === 'decrease' ? '-' : '+'}${Math.abs(insight.amount).toFixed(0)}
+            {insight.type === 'decrease' ? '-' : '+'}
+            {formatMoney(Math.round(Math.abs(insight.amount) * 100))}
           </Badge>
-          <span className="text-muted-foreground font-mono text-[10px]">vs 3-month avg</span>
+          <span className="text-muted-foreground font-mono text-[10px]">
+            {t('spendingInsights.vs3MonthAvg')}
+          </span>
         </div>
       </div>
     </div>
@@ -199,17 +236,18 @@ function ComparisonTab({
   currentLabel: string
   previousLabel: string
 }) {
+  const { t } = useTranslation('analytics')
   const totalChange = currentTotal - previousTotal
   const totalChangePercent = previousTotal > 0 ? (totalChange / previousTotal) * 100 : 0
 
   return (
     <div className="space-y-4">
       {/* Summary card */}
-      <div className="glass-card border-accent/10 border p-5">
+      <div className="liquid-card border-accent/10 border p-5">
         <div className="flex items-center justify-between">
           <div>
             <span className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
-              Total Change
+              {t('spendingInsights.totalChange')}
             </span>
             <div className="flex items-center gap-2">
               <span
@@ -218,7 +256,8 @@ function ComparisonTab({
                   totalChange > 0 ? 'text-destructive' : totalChange < 0 ? 'text-success' : ''
                 )}
               >
-                {totalChange > 0 ? '+' : ''}${totalChange.toFixed(0)}
+                {totalChange > 0 ? '+' : ''}
+                {formatMoney(Math.round(totalChange * 100))}
               </span>
               <Badge
                 variant="outline"
@@ -236,10 +275,12 @@ function ComparisonTab({
           </div>
           <div className="text-right">
             <div className="text-muted-foreground text-xs">{currentLabel}</div>
-            <div className="font-heading font-semibold">${currentTotal.toFixed(0)}</div>
+            <div className="font-heading font-semibold">
+              {formatMoney(Math.round(currentTotal * 100))}
+            </div>
             <div className="text-muted-foreground text-xs">{previousLabel}</div>
             <div className="text-muted-foreground font-heading text-sm">
-              ${previousTotal.toFixed(0)}
+              {formatMoney(Math.round(previousTotal * 100))}
             </div>
           </div>
         </div>
@@ -247,17 +288,17 @@ function ComparisonTab({
 
       {/* Category breakdown */}
       {comparisons.length === 0 ? (
-        <div className="glass-card flex h-32 items-center justify-center p-5">
-          <p className="text-muted-foreground text-sm">No spending data for this comparison.</p>
+        <div className="liquid-card flex h-32 items-center justify-center p-5">
+          <p className="text-muted-foreground text-sm">{t('spendingInsights.noData')}</p>
         </div>
       ) : (
-        <div className="glass-card divide-y divide-white/[0.04] p-0">
+        <div className="liquid-card divide-y divide-white/[0.04] p-0">
           {/* Header */}
           <div className="text-muted-foreground grid grid-cols-[1fr_80px_80px_90px] gap-2 px-5 py-3 font-mono text-[10px] tracking-wider uppercase">
-            <span>Category</span>
-            <span className="text-right">Current</span>
-            <span className="text-right">Previous</span>
-            <span className="text-right">Change</span>
+            <span>{t('spendingInsights.category')}</span>
+            <span className="text-right">{t('spendingInsights.current')}</span>
+            <span className="text-right">{t('spendingInsights.previous')}</span>
+            <span className="text-right">{t('spendingInsights.change')}</span>
           </div>
 
           {comparisons.map((comp) => (
@@ -283,9 +324,11 @@ function ComparisonRow({ comp }: { comp: SpendingComparison }) {
         />
         <span className="truncate text-sm">{comp.categoryName}</span>
       </div>
-      <span className="text-right font-mono text-sm">${comp.current.toFixed(0)}</span>
+      <span className="text-right font-mono text-sm">
+        {formatMoney(Math.round(comp.current * 100))}
+      </span>
       <span className="text-muted-foreground text-right font-mono text-sm">
-        ${comp.previous.toFixed(0)}
+        {formatMoney(Math.round(comp.previous * 100))}
       </span>
       <div className="flex items-center justify-end gap-1">
         {comp.change !== 0 ? (
@@ -294,11 +337,13 @@ function ComparisonRow({ comp }: { comp: SpendingComparison }) {
               <ArrowUpRight
                 size={12}
                 className={isSignificant ? 'text-destructive' : 'text-muted-foreground'}
+                aria-hidden="true"
               />
             ) : (
               <ArrowDownRight
                 size={12}
                 className={isSignificant ? 'text-success' : 'text-muted-foreground'}
+                aria-hidden="true"
               />
             )}
             <span
@@ -314,7 +359,7 @@ function ComparisonRow({ comp }: { comp: SpendingComparison }) {
             </span>
           </>
         ) : (
-          <Minus size={12} className="text-muted-foreground" />
+          <Minus size={12} className="text-muted-foreground" aria-hidden="true" />
         )}
       </div>
     </div>

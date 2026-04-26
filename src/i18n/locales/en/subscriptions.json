@@ -35,6 +35,8 @@
     "title": "Upcoming Payments",
     "next30Days": "Next 30 days"
   },
+  "today": "Today",
+  "tomorrow": "Tomorrow",
   "cycle": {
     "weekly": "Weekly",
     "monthly": "Monthly",

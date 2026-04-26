@@ -222,8 +222,15 @@ export function Transactions() {
 
   return (
     <div className="animate-fade-in-up page-content">
-      <div className="page-header">
-        <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
+      <div className="liquid-card page-header p-5">
+        <div>
+          <p className="text-muted-foreground font-mono text-[10px] tracking-[0.3em] uppercase">
+            Activity ledger
+          </p>
+          <h1 className="font-heading mt-1 text-2xl font-bold tracking-tight md:text-3xl">
+            {t('title')}
+          </h1>
+        </div>
         <div className="flex gap-2">
           {activeTab === 'transactions' && (
             <>
@@ -273,14 +280,16 @@ export function Transactions() {
       />
 
       {/* Tab bar */}
-      <div className="mb-4 flex gap-1 border-b border-white/[0.06]">
+      <div className="liquid-card mb-4 flex w-fit gap-1 p-1">
         {(['transactions', 'recurring'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={cn(
-              'relative px-4 py-2.5 font-mono text-xs tracking-wider transition-colors',
-              activeTab === tab ? 'text-accent' : 'text-muted-foreground hover:text-foreground'
+              'relative rounded-full px-4 py-2.5 font-mono text-xs tracking-wider transition-colors',
+              activeTab === tab
+                ? 'text-accent-hover bg-white/[0.1]'
+                : 'text-muted-foreground hover:text-foreground hover:bg-white/[0.06]'
             )}
           >
             <span className="flex items-center gap-2">
@@ -292,9 +301,6 @@ export function Transactions() {
                 </Badge>
               )}
             </span>
-            {activeTab === tab && (
-              <span className="bg-accent absolute bottom-0 left-0 h-0.5 w-full" />
-            )}
           </button>
         ))}
       </div>
@@ -303,7 +309,7 @@ export function Transactions() {
         <>
           {/* Filter bar */}
           {showFilters && (
-            <div className="glass-card animate-slide-up flex flex-wrap items-center gap-3 p-3">
+            <div className="liquid-card animate-slide-up flex flex-wrap items-center gap-3 p-3">
               <div className="relative flex-1">
                 <Search
                   size={14}
@@ -324,8 +330,8 @@ export function Transactions() {
                     className={cn(
                       'rounded-full px-3 py-1 font-mono text-[11px] transition-colors',
                       typeFilter === type
-                        ? 'bg-accent text-accent-foreground'
-                        : 'text-muted-foreground hover:bg-surface-elevated hover:text-foreground'
+                        ? 'text-accent-hover bg-white/[0.1]'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-white/[0.08]'
                     )}
                   >
                     {type === 'all' ? 'All' : t(`types.${type}`)}
@@ -340,8 +346,8 @@ export function Transactions() {
                     className={cn(
                       'rounded-full px-3 py-1 font-mono text-[11px] transition-colors',
                       reviewFilter === filter
-                        ? 'bg-accent text-accent-foreground'
-                        : 'text-muted-foreground hover:bg-surface-elevated hover:text-foreground'
+                        ? 'text-accent-hover bg-white/[0.1]'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-white/[0.08]'
                     )}
                   >
                     {filter === 'all'
@@ -364,8 +370,8 @@ export function Transactions() {
               }}
             />
           ) : transactions.length === 0 ? (
-            <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
-              <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
+            <div className="liquid-card flex flex-col items-center justify-center py-16 text-center">
+              <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-3xl">
                 <ArrowLeftRight size={28} className="text-primary" />
               </div>
               <h2 className="font-heading mb-2 text-lg font-semibold">{t('empty.title')}</h2>
@@ -378,7 +384,7 @@ export function Transactions() {
               </Button>
             </div>
           ) : filteredTransactions.length === 0 ? (
-            <div className="glass-card flex flex-col items-center justify-center py-12 text-center">
+            <div className="liquid-card flex flex-col items-center justify-center py-12 text-center">
               <Search size={24} className="text-muted-foreground mb-3" />
               <p className="text-muted-foreground text-sm">{t('noMatching')}</p>
             </div>
@@ -386,10 +392,10 @@ export function Transactions() {
             <div className="space-y-5">
               {Array.from(groupedByDate.entries()).map(([date, txns]) => (
                 <div key={date}>
-                  <h2 className="text-muted-foreground mb-2 font-mono text-xs tracking-wider uppercase">
+                  <h2 className="text-muted-foreground mb-2 font-mono text-xs tracking-[0.24em] uppercase">
                     {formatDateHeader(date)}
                   </h2>
-                  <div className="space-y-1">
+                  <div className="liquid-card divide-y divide-white/[0.08] overflow-hidden p-1">
                     {txns.map((tx) => (
                       <TransactionRow
                         key={tx.id}
@@ -420,8 +426,8 @@ export function Transactions() {
               }}
             />
           ) : rules.length === 0 ? (
-            <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
-              <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
+            <div className="liquid-card flex flex-col items-center justify-center py-16 text-center">
+              <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-3xl">
                 <Repeat size={28} className="text-primary" />
               </div>
               <h2 className="font-heading mb-2 text-lg font-semibold">
@@ -436,7 +442,7 @@ export function Transactions() {
               </Button>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="liquid-card divide-y divide-white/[0.08] overflow-hidden p-1">
               {rules.map((rule) => (
                 <RecurringRuleCard
                   key={rule.id}
@@ -512,7 +518,7 @@ function RecurringRuleCard({
   return (
     <div
       className={cn(
-        'glass-card group flex items-center gap-3 px-4 py-3',
+        'group flex items-center gap-3 rounded-[22px] px-4 py-3 transition-colors hover:bg-white/[0.04]',
         !isActive && 'opacity-50'
       )}
     >
@@ -925,7 +931,7 @@ function TransactionsSkeleton() {
           <Skeleton className="mb-2 h-3 w-20" />
           <div className="space-y-1">
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="glass-card flex items-center gap-3 px-4 py-3">
+              <div key={i} className="liquid-card flex items-center gap-3 px-4 py-3">
                 <Skeleton className="h-2.5 w-2.5 rounded-full" />
                 <div className="flex-1 space-y-1.5">
                   <Skeleton className="h-3 w-32" />
@@ -945,7 +951,7 @@ function RecurringSkeleton() {
   return (
     <div className="space-y-2">
       {Array.from({ length: 3 }).map((_, i) => (
-        <div key={i} className="glass-card flex items-center gap-3 px-4 py-3">
+        <div key={i} className="liquid-card flex items-center gap-3 px-4 py-3">
           <Skeleton className="h-2.5 w-2.5 rounded-full" />
           <div className="flex-1 space-y-1.5">
             <Skeleton className="h-3 w-40" />
@@ -992,8 +998,8 @@ function TransactionRow({
   }
 
   return (
-    <div className="glass-card overflow-hidden">
-      <div className="group flex items-center gap-3 px-4 py-2.5">
+    <div className="overflow-hidden rounded-[22px]">
+      <div className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.04]">
         {tx.category_color ? (
           <span
             className="h-2.5 w-2.5 shrink-0 rounded-full"
@@ -1061,7 +1067,7 @@ function TransactionRow({
 
       {/* Split breakdown */}
       {expanded && (
-        <div className="border-border/20 animate-slide-up border-t px-4 py-2">
+        <div className="animate-slide-up border-t border-white/[0.08] px-4 py-3">
           {loadingSplits ? (
             <div className="space-y-1">
               <Skeleton className="h-3 w-full" />

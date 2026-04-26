@@ -102,8 +102,15 @@ export function Accounts() {
 
   return (
     <div className="animate-fade-in-up page-content">
-      <div className="page-header">
-        <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
+      <div className="liquid-card page-header p-5">
+        <div>
+          <p className="text-muted-foreground font-mono text-[10px] tracking-[0.3em] uppercase">
+            {t('subtitle')}
+          </p>
+          <h1 className="font-heading mt-1 text-2xl font-bold tracking-tight md:text-3xl">
+            {t('title')}
+          </h1>
+        </div>
         <Button onClick={() => openAccountDialog()}>
           <Plus size={16} />
           {t('addAccount')}
@@ -129,8 +136,8 @@ export function Accounts() {
           }}
         />
       ) : accounts.length === 0 && archivedAccounts.length === 0 ? (
-        <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
-          <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
+        <div className="liquid-card flex flex-col items-center justify-center py-16 text-center">
+          <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-3xl">
             <Landmark size={28} className="text-primary" />
           </div>
           <h2 className="font-heading mb-2 text-lg font-semibold">{t('empty.title')}</h2>
@@ -144,7 +151,7 @@ export function Accounts() {
         <>
           {accounts.length > 0 ? (
             <>
-              <div className="glass-card bg-gradient-to-br from-[#BF5AF218] to-transparent p-6">
+              <div className="liquid-hero p-6">
                 <p className="text-muted-foreground mb-1 font-mono text-[10px] tracking-wider uppercase">
                   {t('totalBalance')}
                 </p>
@@ -172,7 +179,7 @@ export function Accounts() {
               </div>
             </>
           ) : (
-            <div className="glass-card border-dashed p-5">
+            <div className="liquid-card border-dashed p-5">
               <h2 className="font-heading text-base font-semibold">{t('noActive.title')}</h2>
               <p className="text-muted-foreground mt-1 text-sm">{t('noActive.description')}</p>
             </div>
@@ -280,7 +287,7 @@ function AccountCard({
     isExpanded && !balanceHistory.get(account.id)
   )
 
-  const accentColor = account.color || '#bf5af2'
+  const accentColor = account.color || '#7C5CFF'
   const isCreditCard = account.type === 'credit_card'
   const utilization =
     isCreditCard && account.credit_limit
@@ -306,22 +313,26 @@ function AccountCard({
 
   return (
     <div
-      className="glass-card group relative overflow-hidden transition-all duration-200 hover:translate-y-[-2px]"
+      className={`liquid-card group relative overflow-hidden transition-all duration-200 hover:translate-y-[-2px] motion-reduce:transition-none ${archived ? 'border-dashed border-white/[0.08]' : ''}`}
       style={{ borderLeft: `3px solid ${accentColor}` }}
     >
-      <div className={archived ? 'p-5 opacity-70' : 'p-5'}>
+      <div className="p-5">
         <div className="mb-3 flex items-start justify-between">
           <div>
             <h3 className="font-heading text-base font-semibold">{account.name}</h3>
             <Badge variant="secondary" className="mt-1 text-[10px]">
               {t(`types.${account.type}`)}
             </Badge>
+            {archived && (
+              <Badge variant="outline" className="mt-1 ml-1 border-white/10 text-[10px]">
+                {t('archived.badge')}
+              </Badge>
+            )}
           </div>
-          <div className="flex gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100">
+          <div className="flex gap-1 opacity-100 transition-opacity md:opacity-40 md:group-focus-within:opacity-100 md:group-hover:opacity-100">
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7"
               onClick={onArchive}
               aria-label={`${archiveLabel ?? t('archiveAccount')} ${account.name}`}
             >
@@ -330,7 +341,6 @@ function AccountCard({
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7"
               onClick={onEdit}
               aria-label={`Edit ${account.name}`}
             >
@@ -339,7 +349,7 @@ function AccountCard({
             <Button
               variant="ghost"
               size="icon"
-              className="text-destructive hover:text-destructive h-7 w-7"
+              className="text-destructive hover:text-destructive"
               onClick={onDelete}
               aria-label={`Delete ${account.name}`}
             >
@@ -358,17 +368,34 @@ function AccountCard({
         {utilization !== null && (
           <div className="mt-3">
             <div className="mb-1 flex items-center justify-between">
-              <span className="text-muted-foreground text-[10px]">Utilization</span>
-              <span
-                className={`font-mono text-[10px] font-medium ${
-                  utilization > 75
-                    ? 'text-destructive'
+              <span className="text-muted-foreground text-[10px]">{t('utilization.label')}</span>
+              <span className="flex items-center gap-1.5">
+                <span
+                  className={`font-mono text-[10px] font-medium ${
+                    utilization > 75
+                      ? 'text-destructive'
+                      : utilization > 50
+                        ? 'text-warning'
+                        : 'text-success'
+                  }`}
+                >
+                  {utilization}%
+                </span>
+                <span
+                  className={`rounded-full px-1.5 py-0.5 text-[9px] font-medium tracking-wider uppercase ${
+                    utilization > 75
+                      ? 'bg-destructive/10 text-destructive'
+                      : utilization > 50
+                        ? 'bg-warning/10 text-warning'
+                        : 'bg-success/10 text-success'
+                  }`}
+                >
+                  {utilization > 75
+                    ? t('utilization.high')
                     : utilization > 50
-                      ? 'text-warning'
-                      : 'text-success'
-                }`}
-              >
-                {utilization}%
+                      ? t('utilization.moderate')
+                      : t('utilization.low')}
+                </span>
               </span>
             </div>
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/5">
@@ -391,21 +418,30 @@ function AccountCard({
         {/* Expand toggle */}
         <button
           onClick={onToggleExpand}
-          className="text-muted-foreground hover:text-foreground mt-3 flex w-full items-center justify-center gap-1 py-1 text-[10px] transition-colors"
+          className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 mt-3 flex w-full items-center justify-center gap-1 rounded-md py-2 text-[10px] transition-colors focus-visible:ring-2 focus-visible:outline-none"
         >
           <TrendingUp size={10} />
-          {isExpanded ? 'Hide history' : 'Balance history'}
+          {isExpanded ? t('history.hide') : t('history.show')}
           {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
         </button>
       </div>
 
       {/* Expanded balance history chart */}
       {isExpanded && (
-        <div className="border-t border-white/[0.04] px-5 pt-3 pb-5">
+        <div className="soft-divider border-t px-5 pt-3 pb-5">
           {historyLoading ? (
             <Skeleton className="h-32 w-full" />
           ) : chartData.length > 1 ? (
-            <div className="h-32">
+            <div
+              className="h-32"
+              role="img"
+              aria-label={`${t('history.show')} for ${account.name}`}
+            >
+              <span className="sr-only">
+                {chartData
+                  .map((d) => `${dayjs(d.date).format('MMM D')}: ${formatMoney(d.balance)}`)
+                  .join(', ')}
+              </span>
               <SafeChart>
                 <AreaChart data={chartData}>
                   <defs>
@@ -418,13 +454,13 @@ function AccountCard({
                     dataKey="date"
                     axisLine={false}
                     tickLine={false}
-                    tick={{ fill: '#6b7280', fontSize: 9 }}
+                    tick={{ fill: '#A9A9B4', fontSize: 11 }}
                     tickFormatter={(d) => dayjs(d).format('M/D')}
                   />
                   <YAxis
                     axisLine={false}
                     tickLine={false}
-                    tick={{ fill: '#6b7280', fontSize: 9 }}
+                    tick={{ fill: '#A9A9B4', fontSize: 11 }}
                     tickFormatter={(v) => (v >= 1000 ? `$${(v / 1000).toFixed(0)}k` : `$${v}`)}
                     width={40}
                   />
@@ -451,9 +487,7 @@ function AccountCard({
           ) : (
             <div className="flex h-32 items-center justify-center">
               <p className="text-muted-foreground text-xs">
-                {chartData.length === 1
-                  ? 'First snapshot recorded. Come back tomorrow for trend data.'
-                  : 'No history yet. Balance is recorded daily.'}
+                {chartData.length === 1 ? t('history.empty') : t('history.none')}
               </p>
             </div>
           )}
@@ -466,14 +500,14 @@ function AccountCard({
 function AccountsSkeleton() {
   return (
     <>
-      <div className="glass-card space-y-2 p-6">
+      <div className="liquid-card space-y-2 p-6">
         <Skeleton className="h-3 w-20" />
         <Skeleton className="h-9 w-40" />
         <Skeleton className="h-3 w-24" />
       </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="glass-card space-y-3 p-5">
+          <div key={i} className="liquid-card space-y-3 p-5">
             <div className="space-y-1">
               <Skeleton className="h-4 w-28" />
               <Skeleton className="h-4 w-16" />

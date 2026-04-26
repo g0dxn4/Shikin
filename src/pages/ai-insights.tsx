@@ -98,23 +98,21 @@ export function AIInsights() {
         {INSIGHTS.map((insight) => (
           <div
             key={insight.id}
-            className={`glass-card border-l-4 p-5 ${BORDER_COLORS[insight.type]}`}
+            className={`liquid-card border-l-4 p-5 ${BORDER_COLORS[insight.type]}`}
           >
             <div className="mb-2 flex items-center gap-2">
               <span className={ICON_COLORS[insight.type]}>{insight.icon}</span>
               <h3 className="font-heading text-sm font-semibold">{insight.title}</h3>
             </div>
-            <p className="text-muted-foreground text-xs leading-relaxed">
-              {insight.description}
-            </p>
+            <p className="text-muted-foreground text-xs leading-relaxed">{insight.description}</p>
           </div>
         ))}
       </div>
 
       {/* Chat Preview */}
-      <div className="glass-card p-5">
+      <div className="liquid-card p-5">
         <div className="mb-4 flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent font-heading text-sm font-bold text-white">
+          <div className="bg-accent font-heading flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold text-white">
             I
           </div>
           <div>
@@ -141,7 +139,7 @@ export function AIInsights() {
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">Income</span>
-                <span className="font-heading font-semibold text-success">$6,240</span>
+                <span className="font-heading text-success font-semibold">$6,240</span>
               </div>
               <div className="h-6 w-full overflow-hidden rounded bg-white/[0.04]">
                 <div
@@ -153,7 +151,7 @@ export function AIInsights() {
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">Expenses</span>
-                <span className="font-heading font-semibold text-destructive">$4,250</span>
+                <span className="font-heading text-destructive font-semibold">$4,250</span>
               </div>
               <div className="h-6 w-full overflow-hidden rounded bg-white/[0.04]">
                 <div
@@ -164,7 +162,7 @@ export function AIInsights() {
             </div>
             <div className="flex items-center justify-between border-t border-white/5 pt-3 text-xs">
               <span className="text-muted-foreground">Net</span>
-              <span className="font-heading font-semibold text-success">+$1,990</span>
+              <span className="font-heading text-success font-semibold">+$1,990</span>
             </div>
           </div>
         </ChartContainer>
@@ -172,7 +170,7 @@ export function AIInsights() {
         <ChartContainer title="Savings Rate">
           <div className="relative flex h-40 items-end justify-center overflow-hidden rounded">
             {/* Gradient background simulating area chart */}
-            <div className="absolute inset-0 bg-gradient-to-t from-accent/20 via-accent/5 to-transparent" />
+            <div className="from-accent/20 via-accent/5 absolute inset-0 bg-gradient-to-t to-transparent" />
             {/* Simulated curve */}
             <svg
               className="absolute inset-0 h-full w-full"
@@ -182,17 +180,17 @@ export function AIInsights() {
               <path
                 d="M0,80 C30,75 50,60 80,55 C110,50 130,40 160,35 C180,32 200,30 200,30"
                 fill="none"
-                stroke="#bf5af2"
+                stroke="#7C5CFF"
                 strokeWidth="1.5"
               />
             </svg>
-            <Badge className="relative mb-4 bg-accent/20 text-accent">Current: 32%</Badge>
+            <Badge className="bg-accent/20 text-accent relative mb-4">Current: 32%</Badge>
           </div>
         </ChartContainer>
       </div>
 
       {/* Suggested Actions */}
-      <div className="glass-card p-5">
+      <div className="liquid-card p-5">
         <h3 className="font-heading mb-4 text-sm font-semibold">Suggested Actions</h3>
         <div className="space-y-2">
           {SUGGESTED_ACTIONS.map((action) => {
@@ -205,14 +203,12 @@ export function AIInsights() {
                 className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-white/[0.03]"
               >
                 {isChecked ? (
-                  <CheckCircle2 size={18} className="shrink-0 text-success" />
+                  <CheckCircle2 size={18} className="text-success shrink-0" />
                 ) : (
                   <Circle size={18} className="text-muted-foreground shrink-0" />
                 )}
                 <span
-                  className={`text-sm ${
-                    isChecked ? 'text-muted-foreground line-through' : ''
-                  }`}
+                  className={`text-sm ${isChecked ? 'text-muted-foreground line-through' : ''}`}
                 >
                   {action.text}
                 </span>

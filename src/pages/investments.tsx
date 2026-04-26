@@ -44,7 +44,7 @@ const TIME_RANGES = ['1W', '1M', '3M', '6M', '1Y', 'All'] as const
 type TimeRange = (typeof TIME_RANGES)[number]
 
 const TYPE_COLORS: Record<string, string> = {
-  stock: '#bf5af2',
+  stock: '#7C5CFF',
   etf: '#5ac8fa',
   crypto: '#ffd60a',
   bond: '#30d158',
@@ -203,16 +203,18 @@ export function Investments() {
   if (isLoading) {
     return (
       <div className="animate-fade-in-up page-content">
-        <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="liquid-card p-5">
+          <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="metric-card space-y-3">
+            <div key={i} className="liquid-card space-y-3 p-5">
               <Skeleton className="h-3 w-24" />
               <Skeleton className="h-8 w-32" />
             </div>
           ))}
         </div>
-        <div className="glass-card space-y-3 p-5">
+        <div className="liquid-card space-y-3 p-6">
           <Skeleton className="h-4 w-32" />
           <Skeleton className="h-60 w-full" />
         </div>
@@ -223,7 +225,7 @@ export function Investments() {
   if (investments.length === 0) {
     return (
       <div className="animate-fade-in-up page-content">
-        <div className="page-header">
+        <div className="liquid-card page-header p-5">
           <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
         </div>
         {hasInitialLoadError ? (
@@ -235,8 +237,8 @@ export function Investments() {
             }}
           />
         ) : (
-          <div className="glass-card flex flex-col items-center justify-center py-16 text-center">
-            <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
+          <div className="liquid-card flex flex-col items-center justify-center py-16 text-center">
+            <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-3xl">
               <TrendingUp size={28} className="text-primary" />
             </div>
             <h2 className="font-heading mb-2 text-lg font-semibold">{t('empty.title')}</h2>
@@ -257,12 +259,23 @@ export function Investments() {
   return (
     <div className="animate-fade-in-up page-content">
       {/* Header */}
-      <div className="page-header">
-        <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
-        <Button onClick={() => openInvestmentDialog()}>
-          <Plus size={16} />
-          {t('addInvestment')}
-        </Button>
+      <div className="liquid-card page-header p-5">
+        <div>
+          <h1 className="font-heading text-2xl font-bold tracking-tight">{t('title')}</h1>
+          <p className="text-muted-foreground mt-1 text-sm font-medium">
+            Portfolio health, holdings, and allocation
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={handleRefresh} disabled={isRefreshing}>
+            <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
+            {t('summary.refresh')}
+          </Button>
+          <Button onClick={() => openInvestmentDialog()}>
+            <Plus size={16} />
+            {t('addInvestment')}
+          </Button>
+        </div>
       </div>
 
       <ErrorBanner
@@ -274,22 +287,22 @@ export function Investments() {
       />
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="metric-card">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="liquid-hero p-5">
           <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <span className="text-primary">
+            <span className="text-accent-hover">
               <TrendingUp size={16} />
             </span>
             <span className="font-mono text-[10px] tracking-wider uppercase">
               {t('summary.portfolioValue')}
             </span>
           </div>
-          <p className="font-heading text-2xl font-bold tracking-tight">
+          <p className="font-mono text-2xl font-bold tracking-tight text-white">
             {formatMoney(portfolioSummary.totalMarketValue)}
           </p>
         </div>
 
-        <div className="metric-card">
+        <div className="liquid-card p-5">
           <div className="text-muted-foreground mb-2 flex items-center gap-2">
             <span
               className={portfolioSummary.totalGainLoss >= 0 ? 'text-success' : 'text-destructive'}
@@ -305,7 +318,7 @@ export function Investments() {
             </span>
           </div>
           <p
-            className={`font-heading text-2xl font-bold tracking-tight ${
+            className={`font-mono text-2xl font-bold tracking-tight ${
               portfolioSummary.totalGainLoss >= 0 ? 'text-success' : 'text-destructive'
             }`}
           >
@@ -318,7 +331,7 @@ export function Investments() {
           </p>
         </div>
 
-        <div className="metric-card">
+        <div className="liquid-card p-5">
           <div className="text-muted-foreground mb-2 flex items-center gap-2">
             <span className="text-primary">
               <Wallet size={16} />
@@ -327,12 +340,12 @@ export function Investments() {
               {t('summary.costBasis')}
             </span>
           </div>
-          <p className="font-heading text-2xl font-bold tracking-tight">
+          <p className="font-mono text-2xl font-bold tracking-tight">
             {formatMoney(portfolioSummary.totalCostBasis)}
           </p>
         </div>
 
-        <div className="metric-card">
+        <div className="liquid-card p-5">
           <div className="text-muted-foreground mb-2 flex items-center gap-2">
             <span className="text-primary">
               <RefreshCw size={16} />
@@ -341,36 +354,29 @@ export function Investments() {
               {t('summary.lastUpdated')}
             </span>
           </div>
-          <p className="text-muted-foreground mt-1 text-sm">
+          <p className="font-heading mt-1 text-2xl font-bold">
             {lastPriceFetch ? dayjs(lastPriceFetch).fromNow() : t('summary.never')}
           </p>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="mt-2"
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-          >
-            <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
-            {t('summary.refresh')}
-          </Button>
+          <p className="text-accent-hover mt-2 text-sm font-semibold">
+            {t('summary.pricesSynced')}
+          </p>
         </div>
       </div>
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* Portfolio Value Chart */}
-        <div className="glass-card col-span-1 p-5 lg:col-span-2">
+        <div className="liquid-card col-span-1 p-6 lg:col-span-2">
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="font-heading text-sm font-semibold">{t('chart.portfolioValue')}</h2>
+            <h2 className="font-heading text-xl font-bold">{t('chart.portfolioValue')}</h2>
             <div className="flex gap-1">
               {TIME_RANGES.map((range) => (
                 <button
                   key={range}
                   onClick={() => setTimeRange(range)}
-                  className={`rounded-full px-2.5 py-1 font-mono text-[10px] transition-colors ${
+                  className={`rounded-full px-2.5 py-1 font-mono text-[10px] font-bold transition-colors ${
                     timeRange === range
-                      ? 'bg-accent/20 text-accent'
+                      ? 'text-accent-hover bg-white/[0.1]'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
@@ -384,8 +390,8 @@ export function Investments() {
               <AreaChart data={chartData}>
                 <defs>
                   <linearGradient id="valueGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#bf5af2" stopOpacity={0.3} />
-                    <stop offset="100%" stopColor="#bf5af2" stopOpacity={0} />
+                    <stop offset="0%" stopColor="#7C5CFF" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="#7C5CFF" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <XAxis
@@ -403,9 +409,9 @@ export function Investments() {
                 />
                 <Tooltip
                   contentStyle={{
-                    background: 'rgba(10,10,10,0.9)',
-                    border: '1px solid rgba(255,255,255,0.06)',
-                    borderRadius: '8px',
+                    background: 'rgba(16,16,22,0.95)',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    borderRadius: '16px',
                     fontSize: '12px',
                   }}
                   formatter={(value: number | undefined) => [formatMoney(value ?? 0), 'Value']}
@@ -414,7 +420,7 @@ export function Investments() {
                 <Area
                   type="monotone"
                   dataKey="value"
-                  stroke="#bf5af2"
+                  stroke="#7C5CFF"
                   strokeWidth={2}
                   fill="url(#valueGradient)"
                 />
@@ -428,8 +434,8 @@ export function Investments() {
         </div>
 
         {/* Allocation Donut */}
-        <div className="glass-card p-5">
-          <h2 className="font-heading mb-4 text-sm font-semibold">{t('chart.allocation')}</h2>
+        <div className="liquid-card p-6">
+          <h2 className="font-heading mb-4 text-xl font-bold">{t('chart.allocation')}</h2>
           {allocationData.length > 0 ? (
             <div className="flex flex-col items-center">
               <SafeChart height={200}>
@@ -449,16 +455,16 @@ export function Investments() {
                   </Pie>
                   <Tooltip
                     contentStyle={{
-                      background: 'rgba(10,10,10,0.9)',
-                      border: '1px solid rgba(255,255,255,0.06)',
-                      borderRadius: '8px',
+                      background: 'rgba(16,16,22,0.95)',
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      borderRadius: '16px',
                       fontSize: '12px',
                     }}
                     formatter={(value: number | undefined) => [formatMoney(value ?? 0), '']}
                   />
                 </PieChart>
               </SafeChart>
-              <div className="mt-2 flex flex-wrap justify-center gap-3">
+              <div className="soft-divider mt-3 flex flex-wrap justify-center gap-3 border-t pt-4">
                 {allocationData.map((entry) => (
                   <div key={entry.name} className="flex items-center gap-1.5">
                     <div className="h-2 w-2 rounded-full" style={{ background: entry.color }} />
@@ -478,17 +484,17 @@ export function Investments() {
       </div>
 
       {/* Holdings */}
-      <div className="glass-card p-5">
+      <div className="liquid-card p-6">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-heading text-sm font-semibold">{t('holdings.title')}</h2>
+          <h2 className="font-heading text-xl font-bold">{t('holdings.title')}</h2>
           <div className="flex gap-1">
             {(['value', 'gainLoss', 'name', 'type'] as SortField[]).map((field) => (
               <button
                 key={field}
                 onClick={() => setSortField(field)}
-                className={`rounded-full px-2.5 py-1 font-mono text-[10px] transition-colors ${
+                className={`rounded-full px-2.5 py-1 font-mono text-[10px] font-bold transition-colors ${
                   sortField === field
-                    ? 'bg-accent/20 text-accent'
+                    ? 'text-accent-hover bg-white/[0.1]'
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
@@ -500,7 +506,7 @@ export function Investments() {
 
         {/* Desktop table */}
         <div className="hidden md:block">
-          <div className="text-muted-foreground mb-2 grid grid-cols-8 gap-4 px-2 font-mono text-[10px] tracking-wider uppercase">
+          <div className="soft-divider text-muted-foreground grid grid-cols-8 gap-4 border-y px-2 py-3 font-mono text-[10px] tracking-wider uppercase">
             <span className="col-span-2">{t('holdings.header.name')}</span>
             <span>{t('holdings.header.type')}</span>
             <span className="text-right">{t('holdings.header.shares')}</span>
@@ -509,7 +515,7 @@ export function Investments() {
             <span className="text-right">{t('holdings.header.value')}</span>
             <span className="text-right">{t('holdings.header.gainLoss')}</span>
           </div>
-          <div className="space-y-1">
+          <div>
             {sortedInvestments.map((inv) => (
               <HoldingRow
                 key={inv.id}
@@ -572,7 +578,7 @@ function HoldingRow({
   const gainPositive = (inv.gainLoss ?? 0) >= 0
 
   return (
-    <div className="group grid grid-cols-8 items-center gap-4 rounded-lg px-2 py-2.5 transition-colors hover:bg-white/[0.02]">
+    <div className="soft-divider group grid grid-cols-8 items-center gap-4 border-b px-2 py-3 transition-colors last:border-b-0 hover:bg-white/[0.03]">
       <div className="col-span-2 flex items-center gap-2">
         <div>
           <p className="font-heading text-sm font-semibold">{inv.symbol}</p>
@@ -585,7 +591,11 @@ function HoldingRow({
         )}
       </div>
       <div>
-        <Badge variant="secondary" className="text-[10px]" style={{ color: TYPE_COLORS[inv.type] }}>
+        <Badge
+          variant="secondary"
+          className="border-white/[0.08] bg-white/[0.06] text-[10px]"
+          style={{ color: TYPE_COLORS[inv.type] }}
+        >
           {t(`types.${inv.type}`)}
         </Badge>
       </div>
@@ -664,7 +674,7 @@ function HoldingCard({
   const gainPositive = (inv.gainLoss ?? 0) >= 0
 
   return (
-    <div className="glass-card p-4">
+    <div className="liquid-card p-4">
       <div className="mb-3 flex items-start justify-between">
         <div className="flex items-center gap-2">
           <div>
@@ -676,7 +686,7 @@ function HoldingCard({
           </div>
           <Badge
             variant="secondary"
-            className="text-[10px]"
+            className="border-white/[0.08] bg-white/[0.06] text-[10px]"
             style={{ color: TYPE_COLORS[inv.type] }}
           >
             {t(`types.${inv.type}`)}

@@ -51,7 +51,7 @@ export function Onboarding() {
         {step === 0 && (
           <div className="space-y-3">
             {FEATURES.map((feature) => (
-              <div key={feature.title} className="glass-card flex items-center gap-4 p-5">
+              <div key={feature.title} className="liquid-card flex items-center gap-4 p-5">
                 <div className="bg-accent/10 flex h-12 w-12 shrink-0 items-center justify-center rounded-xl">
                   <feature.icon size={24} className="text-accent" />
                 </div>
@@ -68,7 +68,7 @@ export function Onboarding() {
 
         {/* Setup Step */}
         {step === 1 && (
-          <div className="glass-card space-y-5 p-6 text-center">
+          <div className="liquid-card space-y-5 p-6 text-center">
             <div className="bg-accent/10 mx-auto flex h-14 w-14 items-center justify-center rounded-full">
               <Shield size={28} className="text-accent" />
             </div>
@@ -97,7 +97,7 @@ export function Onboarding() {
 
         {/* Ready Step */}
         {step === 2 && (
-          <div className="glass-card space-y-5 p-6 text-center">
+          <div className="liquid-card space-y-5 p-6 text-center">
             <div className="bg-accent/10 mx-auto flex h-14 w-14 items-center justify-center rounded-full">
               <Check size={28} className="text-accent" />
             </div>

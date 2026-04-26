@@ -1,9 +1,19 @@
 {
   "title": "Savings Goals",
+  "subtitle": "Track your progress",
   "addGoal": "Add Goal",
   "editGoal": "Edit Goal",
   "deleteGoal": "Delete Goal",
   "deleteConfirm": "Are you sure you want to delete this goal? This action cannot be undone.",
+  "dialog": {
+    "addDescription": "Set a new savings target with a deadline and optional linked account.",
+    "editDescription": "Update this goal's target, progress, deadline, or linked account."
+  },
+  "discard": {
+    "title": "Discard changes?",
+    "description": "You have unsaved changes. Close this form without saving?",
+    "confirm": "Discard"
+  },
   "form": {
     "name": "Goal Name",
     "namePlaceholder": "e.g. Emergency Fund",
@@ -15,7 +25,16 @@
     "icon": "Icon",
     "color": "Color",
     "notes": "Notes",
-    "notesPlaceholder": "Any additional notes..."
+    "notesPlaceholder": "Any additional notes...",
+    "accountsError": "Accounts couldn't be loaded",
+    "selectIcon": "Select icon {{icon}}",
+    "selectColor": "Select color {{color}}"
+  },
+  "status": {
+    "onTrack": "On track",
+    "atRisk": "At risk",
+    "critical": "Critical",
+    "completed": "Completed"
   },
   "card": {
     "of": "of",
@@ -25,7 +44,18 @@
     "completed": "Completed!",
     "noDeadline": "No deadline",
     "monthlyNeeded": "/mo needed",
-    "overdue": "Past deadline"
+    "overdue": "Past deadline",
+    "dueToday": "Due today",
+    "progressLabel": "Goal progress"
+  },
+  "hero": {
+    "featuredGoal": "Featured Goal",
+    "aggregateProgress": "Aggregate Progress",
+    "goalCount": "goal(s)"
+  },
+  "error": {
+    "load": "Couldn't load goals",
+    "loadDetailed": "Couldn't load your goals"
   },
   "toast": {
     "created": "Goal created successfully",

@@ -11,6 +11,10 @@
     "transactions": "Transacciones",
     "accounts": "Cuentas",
     "budgets": "Presupuestos",
+    "bills": "Facturas",
+    "reports": "Informes",
+    "extensions": "Extensiones",
+    "advanced": "Avanzado",
     "goals": "Metas",
     "investments": "Inversiones",
     "subscriptions": "Suscripciones",
@@ -25,6 +29,7 @@
   },
   "actions": {
     "save": "Guardar",
+    "saving": "Guardando...",
     "cancel": "Cancelar",
     "delete": "Eliminar",
     "edit": "Editar",

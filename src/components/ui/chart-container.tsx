@@ -18,11 +18,11 @@ export function ChartContainer({
   className,
 }: ChartContainerProps) {
   return (
-    <div className={cn('glass-card p-5', className)}>
+    <div className={cn('liquid-card p-5', className)}>
       <div className="mb-4 flex items-center justify-between">
         <h3 className="font-heading text-sm font-semibold">{title}</h3>
         {periods && periods.length > 0 && (
-          <div className="flex gap-1">
+          <div className="flex gap-1" role="group" aria-label="Period">
             {periods.map((period) => {
               const isActive = period.value === selectedPeriod
               return (
@@ -30,6 +30,7 @@ export function ChartContainer({
                   key={period.value}
                   type="button"
                   onClick={() => onPeriodChange?.(period.value)}
+                  aria-pressed={isActive}
                   className={cn(
                     'rounded-full px-3 py-1 font-mono text-[10px] transition-colors',
                     isActive

@@ -20,19 +20,23 @@ vi.mock('react-router', () => ({
     className,
     'aria-label': ariaLabel,
   }: {
-    children: React.ReactNode
+    children: React.ReactNode | ((props: { isActive: boolean }) => React.ReactNode)
     to: string
-    className: (args: { isActive: boolean }) => string
+    className: string | ((args: { isActive: boolean }) => string)
     'aria-label'?: string
-  }) => (
-    <a
-      href={to}
-      className={typeof className === 'function' ? className({ isActive: false }) : className}
-      aria-label={ariaLabel}
-    >
-      {children}
-    </a>
-  ),
+  }) => {
+    const resolvedChildren =
+      typeof children === 'function' ? children({ isActive: false }) : children
+    return (
+      <a
+        href={to}
+        className={typeof className === 'function' ? className({ isActive: false }) : className}
+        aria-label={ariaLabel}
+      >
+        {resolvedChildren}
+      </a>
+    )
+  },
 }))
 
 vi.mock('@/stores/ui-store', () => ({
@@ -56,8 +60,10 @@ describe('Sidebar', () => {
     expect(screen.getByText('nav.transactions')).toBeInTheDocument()
     expect(screen.getByText('nav.accounts')).toBeInTheDocument()
     expect(screen.getByText('nav.budgets')).toBeInTheDocument()
-    expect(screen.getByText('nav.investments')).toBeInTheDocument()
-    expect(screen.getByText('nav.subscriptions')).toBeInTheDocument()
+    expect(screen.getByText('nav.bills')).toBeInTheDocument()
+    expect(screen.getByText('nav.reports')).toBeInTheDocument()
+    expect(screen.getByText('nav.settings')).toBeInTheDocument()
+    expect(screen.getByText('nav.extensions')).toBeInTheDocument()
   })
 
   it('collapsed: hides brand text and nav labels', () => {
@@ -69,12 +75,12 @@ describe('Sidebar', () => {
     expect(screen.queryByText('nav.dashboard')).not.toBeInTheDocument()
   })
 
-  it('renders 10 nav links + Settings link', () => {
+  it('renders all nav links', () => {
     render(<Sidebar />)
 
     const links = screen.getAllByRole('link')
-    // 13 nav items + 1 settings
-    expect(links.length).toBe(14)
+    // 7 main nav items + 10 advanced nav items
+    expect(links.length).toBe(17)
   })
 
   it('collapse button calls toggleSidebar', async () => {
@@ -93,6 +99,13 @@ describe('Sidebar', () => {
 
     const settingsLink = screen.getByText('nav.settings').closest('a')
     expect(settingsLink).toHaveAttribute('href', '/settings')
+  })
+
+  it('Extensions link points to /extensions', () => {
+    render(<Sidebar />)
+
+    const extensionsLink = screen.getByText('nav.extensions').closest('a')
+    expect(extensionsLink).toHaveAttribute('href', '/extensions')
   })
 
   describe('accessibility', () => {

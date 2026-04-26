@@ -11,10 +11,10 @@ interface ProgressBarProps {
 }
 
 const COLOR_MAP = {
-  accent: '#bf5af2',
-  success: '#22c55e',
-  warning: '#f59e0b',
-  destructive: '#ef4444',
+  accent: '#7C5CFF',
+  success: '#34D399',
+  warning: '#F59E0B',
+  destructive: '#F87171',
 } as const
 
 export function ProgressBar({

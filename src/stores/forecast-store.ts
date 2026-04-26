@@ -1,8 +1,5 @@
 import { create } from 'zustand'
-import {
-  generateCashFlowForecast,
-  type CashFlowForecast,
-} from '@/lib/forecast-service'
+import { generateCashFlowForecast, type CashFlowForecast } from '@/lib/forecast-service'
 
 type ForecastRange = 30 | 60 | 90
 
@@ -19,6 +16,8 @@ interface ForecastState {
   getMinBalanceDate: () => { date: string; amount: number } | null
   getDangerDates: () => string[]
 }
+
+let forecastRequestId = 0
 
 export const useForecastStore = create<ForecastState>((set, get) => ({
   forecast: null,
@@ -38,14 +37,21 @@ export const useForecastStore = create<ForecastState>((set, get) => ({
 
   generateForecast: async (days) => {
     const range = days ?? get().selectedRange
+    const requestId = ++forecastRequestId
     set({ isLoading: true, error: null })
     try {
       const forecast = await generateCashFlowForecast(range, get().dangerThreshold)
-      set({ forecast })
+      if (requestId === forecastRequestId) {
+        set({ forecast })
+      }
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : 'Unknown error' })
+      if (requestId === forecastRequestId) {
+        set({ error: err instanceof Error ? err.message : 'Unknown error' })
+      }
     } finally {
-      set({ isLoading: false })
+      if (requestId === forecastRequestId) {
+        set({ isLoading: false })
+      }
     }
   },
 

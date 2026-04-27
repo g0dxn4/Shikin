@@ -14,7 +14,6 @@ import { homedir } from 'node:os'
 import Database from 'better-sqlite3'
 import { ulid } from 'ulidx'
 import { checkpointWal, importDatabaseBuffer } from './data-server-db.mjs'
-import { cacheItemsFromStream, rewriteCodexProxyBody } from './data-server-chatgpt.mjs'
 import {
   buildBridgeCorsHeaders,
   safePath,
@@ -194,24 +193,6 @@ CREATE TABLE IF NOT EXISTS stock_prices (
   UNIQUE(symbol, date)
 );
 
-CREATE TABLE IF NOT EXISTS ai_conversations (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL DEFAULT 'New Conversation',
-  model TEXT,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS ai_messages (
-  id TEXT PRIMARY KEY,
-  conversation_id TEXT NOT NULL REFERENCES ai_conversations(id) ON DELETE CASCADE,
-  role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system', 'tool')),
-  content TEXT NOT NULL,
-  tool_calls TEXT,
-  tool_result TEXT,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
 CREATE TABLE IF NOT EXISTS exchange_rates (
   id TEXT PRIMARY KEY,
   from_currency TEXT NOT NULL,
@@ -247,7 +228,6 @@ CREATE INDEX IF NOT EXISTS idx_budget_periods_budget ON budget_periods(budget_id
 CREATE INDEX IF NOT EXISTS idx_investments_account ON investments(account_id);
 CREATE INDEX IF NOT EXISTS idx_investments_symbol ON investments(symbol);
 CREATE INDEX IF NOT EXISTS idx_stock_prices_symbol_date ON stock_prices(symbol, date);
-CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation ON ai_messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_exchange_rates_currencies ON exchange_rates(from_currency, to_currency);
 CREATE INDEX IF NOT EXISTS idx_extension_data_extension ON extension_data(extension_id);
     `)
@@ -273,32 +253,6 @@ INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUE
     `)
 
     db.prepare("INSERT INTO _migrations (id, name) VALUES (1, '001_core_tables')").run()
-  }
-
-  // --- Migration 002: AI Memories ---
-  if (!applied.has('002_ai_memories')) {
-    db.exec(`
-CREATE TABLE IF NOT EXISTS ai_memories (
-  id TEXT PRIMARY KEY,
-  category TEXT NOT NULL CHECK (category IN ('preference', 'fact', 'goal', 'behavior', 'context')),
-  content TEXT NOT NULL,
-  importance INTEGER NOT NULL DEFAULT 5 CHECK (importance >= 1 AND importance <= 10),
-  last_accessed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_ai_memories_category ON ai_memories(category);
-    `)
-
-    // Add summary column to ai_conversations
-    try {
-      db.exec('ALTER TABLE ai_conversations ADD COLUMN summary TEXT')
-    } catch {
-      // Column may already exist
-    }
-
-    db.prepare("INSERT INTO _migrations (id, name) VALUES (2, '002_ai_memories')").run()
   }
 
   // --- Migration 003: Credit Cards ---
@@ -414,33 +368,6 @@ CREATE INDEX IF NOT EXISTS idx_recaps_generated ON recaps(generated_at);
     `)
 
     db.prepare("INSERT INTO _migrations (id, name) VALUES (7, '007_recaps')").run()
-  }
-
-  // --- Migration 008: AI Memories FTS5 ---
-  if (!applied.has('008_ai_memories_fts')) {
-    try {
-      db.exec(`
-CREATE VIRTUAL TABLE IF NOT EXISTS ai_memories_fts USING fts5(content, content=ai_memories, content_rowid=rowid);
-
-INSERT INTO ai_memories_fts(ai_memories_fts) VALUES('rebuild');
-
-CREATE TRIGGER IF NOT EXISTS ai_memories_ai AFTER INSERT ON ai_memories BEGIN
-  INSERT INTO ai_memories_fts(rowid, content) VALUES (new.rowid, new.content);
-END;
-
-CREATE TRIGGER IF NOT EXISTS ai_memories_ad AFTER DELETE ON ai_memories BEGIN
-  INSERT INTO ai_memories_fts(ai_memories_fts, rowid, content) VALUES('delete', old.rowid, old.content);
-END;
-
-CREATE TRIGGER IF NOT EXISTS ai_memories_au AFTER UPDATE ON ai_memories BEGIN
-  INSERT INTO ai_memories_fts(ai_memories_fts, rowid, content) VALUES('delete', old.rowid, old.content);
-  INSERT INTO ai_memories_fts(rowid, content) VALUES (new.rowid, new.content);
-END;
-      `)
-      db.prepare("INSERT INTO _migrations (id, name) VALUES (8, '008_ai_memories_fts')").run()
-    } catch (err) {
-      console.warn('[data-server] FTS5 migration failed (may not be supported):', err.message)
-    }
   }
 
   // --- Migration 010: Transaction Splits ---
@@ -572,9 +499,6 @@ function saveSettings(settings) {
 // ── HTTP Helpers ───────────────────────────────────────────────────────────
 
 const MAX_JSON_BODY_BYTES = Number(process.env.SHIKIN_DATA_SERVER_MAX_JSON_BODY_BYTES || 1_000_000)
-const MAX_PROXY_BODY_BYTES = Number(
-  process.env.SHIKIN_DATA_SERVER_MAX_PROXY_BODY_BYTES || 5_000_000
-)
 const MAX_DB_IMPORT_BYTES = Number(process.env.SHIKIN_DATA_SERVER_MAX_DB_IMPORT_BYTES || 50_000_000)
 
 function createPayloadTooLargeError(label, maxBytes) {
@@ -939,11 +863,6 @@ function sendForbidden(res, message) {
   res.end(JSON.stringify({ error: message }))
 }
 
-// ── Codex Response Item Cache ──────────────────────────────────────────────
-// Caches output items from Codex API streaming responses so the AI SDK's
-// tool loop can reference them (since store=false means they aren't persisted).
-const codexItemCache = new Map()
-
 // ── Server ─────────────────────────────────────────────────────────────────
 
 const server = createServer(async (req, res) => {
@@ -1108,81 +1027,6 @@ const server = createServer(async (req, res) => {
       const safe = safePath(DATA_DIR, body.path)
       mkdirSync(safe, { recursive: body.recursive !== false })
       return sendJson(res, { ok: true })
-    }
-
-    // ── Codex item cache (for store=false tool loops) ───────────────
-    // The Codex API requires store=false, meaning response items aren't
-    // persisted. But the AI SDK's tool loop references them via item_reference.
-    // We cache output items from responses so we can inline them on follow-up.
-
-    // ── Proxy: ChatGPT Codex API ────────────────────────────────────
-    // Proxies requests to chatgpt.com to avoid CORS issues in browser mode.
-    // Caches response output items so tool loops work with store=false.
-    if (path.startsWith('/api/proxy/chatgpt/')) {
-      const targetPath = path.replace('/api/proxy/chatgpt', '')
-      const targetUrl = `https://chatgpt.com/backend-api/codex${targetPath}${url.search || ''}`
-
-      // Read raw body and patch for Codex API requirements
-      let bodyBuffer = await readBuffer(req, {
-        maxBytes: MAX_PROXY_BODY_BYTES,
-        label: 'Proxy request body',
-      })
-
-      // Patch request body for Codex API compatibility
-      if (req.headers['content-type']?.includes('application/json') && bodyBuffer.length > 0) {
-        try {
-          const bodyJson = JSON.parse(bodyBuffer.toString())
-          bodyBuffer = Buffer.from(JSON.stringify(rewriteCodexProxyBody(bodyJson, codexItemCache)))
-        } catch {
-          /* not JSON, pass through */
-        }
-      }
-
-      // Forward all relevant headers
-      const proxyHeaders = {
-        'Content-Type': req.headers['content-type'] || 'application/json',
-      }
-      if (req.headers['authorization']) proxyHeaders['Authorization'] = req.headers['authorization']
-      if (req.headers['chatgpt-account-id'])
-        proxyHeaders['chatgpt-account-id'] = req.headers['chatgpt-account-id']
-      if (req.headers['openai-beta']) proxyHeaders['OpenAI-Beta'] = req.headers['openai-beta']
-      if (req.headers['originator']) proxyHeaders['originator'] = req.headers['originator']
-
-      const proxyRes = await fetch(targetUrl, {
-        method: req.method,
-        headers: proxyHeaders,
-        body: ['GET', 'HEAD'].includes(req.method) ? undefined : bodyBuffer,
-      })
-
-      // Stream the response back with CORS headers
-      res.writeHead(proxyRes.status, {
-        'Content-Type': proxyRes.headers.get('content-type') || 'application/json',
-        ...buildBridgeCorsHeaders(),
-      })
-
-      if (proxyRes.body) {
-        const reader = proxyRes.body.getReader()
-        const decoder = new TextDecoder()
-        const pump = async () => {
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) {
-              res.end()
-              return
-            }
-            // Cache output items from the stream for tool loop support
-            try {
-              cacheItemsFromStream(decoder.decode(value, { stream: true }), codexItemCache)
-            } catch {}
-            res.write(value)
-          }
-        }
-        await pump()
-      } else {
-        const text = await proxyRes.text()
-        res.end(text)
-      }
-      return
     }
 
     // ── DB: Export (binary) ────────────────────────────────────────

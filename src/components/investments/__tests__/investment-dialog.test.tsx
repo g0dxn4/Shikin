@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { InvestmentDialog } from '../investment-dialog'
 
@@ -67,8 +67,13 @@ describe('InvestmentDialog', () => {
   })
 
   it('prevents dialog closure while mutation is in flight', async () => {
-    // Create a delayed promise so isLoading stays true
-    mockAdd.mockImplementation(() => new Promise(() => {}))
+    let resolveAdd: () => void = () => {}
+    mockAdd.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveAdd = resolve
+        })
+    )
 
     render(<InvestmentDialog />)
 
@@ -86,6 +91,10 @@ describe('InvestmentDialog', () => {
 
     // Verify close was NOT called while loading
     expect(mockCloseInvestmentDialog).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveAdd()
+    })
   })
 
   it('asks before closing when the form has unsaved changes', async () => {
@@ -99,7 +108,9 @@ describe('InvestmentDialog', () => {
     expect(screen.getByTestId('discard-confirm')).toBeInTheDocument()
     expect(mockCloseInvestmentDialog).not.toHaveBeenCalled()
 
-    screen.getByText('Discard').click()
+    await act(async () => {
+      screen.getByText('Discard').click()
+    })
 
     expect(mockCloseInvestmentDialog).toHaveBeenCalled()
   })

@@ -126,26 +126,6 @@ CREATE TABLE IF NOT EXISTS stock_prices (
   UNIQUE(symbol, date)
 );
 
--- AI conversations
-CREATE TABLE IF NOT EXISTS ai_conversations (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL DEFAULT 'New Conversation',
-  model TEXT,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
--- AI messages
-CREATE TABLE IF NOT EXISTS ai_messages (
-  id TEXT PRIMARY KEY,
-  conversation_id TEXT NOT NULL REFERENCES ai_conversations(id) ON DELETE CASCADE,
-  role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system', 'tool')),
-  content TEXT NOT NULL,
-  tool_calls TEXT,
-  tool_result TEXT,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-
 -- Exchange rates
 CREATE TABLE IF NOT EXISTS exchange_rates (
   id TEXT PRIMARY KEY,
@@ -185,7 +165,6 @@ CREATE INDEX IF NOT EXISTS idx_budget_periods_budget ON budget_periods(budget_id
 CREATE INDEX IF NOT EXISTS idx_investments_account ON investments(account_id);
 CREATE INDEX IF NOT EXISTS idx_investments_symbol ON investments(symbol);
 CREATE INDEX IF NOT EXISTS idx_stock_prices_symbol_date ON stock_prices(symbol, date);
-CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation ON ai_messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_exchange_rates_currencies ON exchange_rates(from_currency, to_currency);
 CREATE INDEX IF NOT EXISTS idx_extension_data_extension ON extension_data(extension_id);
 

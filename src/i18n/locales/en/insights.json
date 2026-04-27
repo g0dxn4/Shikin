@@ -1,0 +1,31 @@
+{
+  "eyebrow": "Analysis hub",
+  "title": "Insights",
+  "description": "Reports, projections, and deeper views live here so the main navigation stays calm while the analysis stays close.",
+  "featuredLabel": "High-signal insight views",
+  "deeperLabel": "Specialized insight analysis",
+  "featuredBadge": "Featured",
+  "open": "Open {{title}}",
+  "sections": {
+    "reports": {
+      "title": "Reports",
+      "description": "Turn your ledger into month-by-month summaries, category totals, and export-ready financial views."
+    },
+    "spendingInsights": {
+      "title": "Spending Insights",
+      "description": "Find recurring patterns, category pressure, and the small habits that quietly move your budget."
+    },
+    "forecast": {
+      "title": "Forecast",
+      "description": "Project upcoming cash flow and see how expected income, bills, and spending affect the weeks ahead."
+    },
+    "netWorth": {
+      "title": "Net Worth",
+      "description": "Track assets, liabilities, and the long-term direction of your personal balance sheet."
+    },
+    "spendingHeatmap": {
+      "title": "Spending Heatmap",
+      "description": "Scan daily intensity by calendar pattern to spot clusters, spikes, and expensive routines."
+    }
+  }
+}

@@ -62,9 +62,7 @@ export interface ReviewData {
 }
 
 export async function gatherReviewData(): Promise<ReviewData> {
-  const investments = await query<Investment>(
-    'SELECT * FROM investments ORDER BY name'
-  )
+  const investments = await query<Investment>('SELECT * FROM investments ORDER BY name')
 
   let totalValue = 0
   let totalCostBasis = 0
@@ -78,9 +76,8 @@ export async function gatherReviewData(): Promise<ReviewData> {
     const currentPrice = prices.length > 0 ? prices[0].price : inv.avg_cost_basis
     const value = Math.round(inv.shares * currentPrice)
     const costBasis = Math.round(inv.shares * inv.avg_cost_basis)
-    const gainLossPercent = costBasis > 0
-      ? Math.round(((value - costBasis) / costBasis) * 10000) / 100
-      : 0
+    const gainLossPercent =
+      costBasis > 0 ? Math.round(((value - costBasis) / costBasis) * 10000) / 100 : 0
 
     totalValue += value
     totalCostBasis += costBasis
@@ -95,17 +92,19 @@ export async function gatherReviewData(): Promise<ReviewData> {
   }
 
   const totalGainLoss = totalValue - totalCostBasis
-  const totalGainLossPercent = totalCostBasis > 0
-    ? Math.round((totalGainLoss / totalCostBasis) * 10000) / 100
-    : 0
+  const totalGainLossPercent =
+    totalCostBasis > 0 ? Math.round((totalGainLoss / totalCostBasis) * 10000) / 100 : 0
 
   const sorted = [...holdings].sort((a, b) => b.gainLossPercent - a.gainLossPercent)
-  const topPerformer = sorted.length > 0
-    ? { symbol: sorted[0].symbol, percent: sorted[0].gainLossPercent }
-    : null
-  const worstPerformer = sorted.length > 0
-    ? { symbol: sorted[sorted.length - 1].symbol, percent: sorted[sorted.length - 1].gainLossPercent }
-    : null
+  const topPerformer =
+    sorted.length > 0 ? { symbol: sorted[0].symbol, percent: sorted[0].gainLossPercent } : null
+  const worstPerformer =
+    sorted.length > 0
+      ? {
+          symbol: sorted[sorted.length - 1].symbol,
+          percent: sorted[sorted.length - 1].gainLossPercent,
+        }
+      : null
 
   return {
     portfolioValue: totalValue,
@@ -129,10 +128,14 @@ export function generateReviewMarkdown(data: ReviewData, weekLabel: string): str
   ]
 
   if (data.topPerformer) {
-    lines.push(`- **Top performer:** ${data.topPerformer.symbol} (${data.topPerformer.percent >= 0 ? '+' : ''}${data.topPerformer.percent.toFixed(2)}%)`)
+    lines.push(
+      `- **Top performer:** ${data.topPerformer.symbol} (${data.topPerformer.percent >= 0 ? '+' : ''}${data.topPerformer.percent.toFixed(2)}%)`
+    )
   }
   if (data.worstPerformer && data.worstPerformer.symbol !== data.topPerformer?.symbol) {
-    lines.push(`- **Worst performer:** ${data.worstPerformer.symbol} (${data.worstPerformer.percent >= 0 ? '+' : ''}${data.worstPerformer.percent.toFixed(2)}%)`)
+    lines.push(
+      `- **Worst performer:** ${data.worstPerformer.symbol} (${data.worstPerformer.percent >= 0 ? '+' : ''}${data.worstPerformer.percent.toFixed(2)}%)`
+    )
   }
 
   lines.push('', '## Holdings', '')
@@ -147,12 +150,12 @@ export function generateReviewMarkdown(data: ReviewData, weekLabel: string): str
 
   lines.push(
     '',
-    '## Ivy\'s Notes',
+    '## Notes',
     '',
-    '*Review auto-generated. Ask Ivy to analyze specific holdings or add commentary.*',
+    '*Review auto-generated from local portfolio data.*',
     '',
     '---',
-    `*Generated on ${dayjs().format('YYYY-MM-DD HH:mm')}*`,
+    `*Generated on ${dayjs().format('YYYY-MM-DD HH:mm')}*`
   )
 
   return lines.join('\n')

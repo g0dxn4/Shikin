@@ -35,14 +35,13 @@ Practical map of the current React frontend for hardening and follow-up work.
 | `/net-worth`         | `src/pages/net-worth.tsx`         |
 | `/spending-insights` | `src/pages/spending-insights.tsx` |
 | `/spending-heatmap`  | `src/pages/spending-heatmap.tsx`  |
-| `/memories`          | `src/pages/memories.tsx`          |
 | `/settings`          | `src/pages/settings.tsx`          |
+| `/bills`             | `src/pages/bills.tsx`             |
+| `/reports`           | `src/pages/reports.tsx`           |
+| `/extensions`        | `src/pages/extensions.tsx`        |
 
 ### Present but not wired in `App.tsx`
 
-- `src/pages/onboarding.tsx`
-- `src/pages/oauth-callback.tsx`
-- `src/pages/ai-insights.tsx`
 - `src/pages/bill-calendar.tsx`
 - `src/pages/category-management.tsx`
 
@@ -51,7 +50,6 @@ Practical map of the current React frontend for hardening and follow-up work.
 | Page                             | Direct calls                                                                                 |
 | -------------------------------- | -------------------------------------------------------------------------------------------- |
 | `src/pages/settings.tsx`         | `lib/storage` (`load`) + `lib/database` (`exportDatabaseSnapshot`, `importDatabaseSnapshot`) |
-| `src/pages/memories.tsx`         | `lib/database` (`query`, `execute`) for memory CRUD/search                                   |
 | `src/pages/forecast.tsx`         | `lib/database` (`query`) inside `useSubscriptions()`                                         |
 | `src/pages/spending-heatmap.tsx` | `lib/database` (`query`) for heatmap/category aggregates                                     |
 
@@ -132,7 +130,7 @@ Practical map of the current React frontend for hardening and follow-up work.
 - **Startup consumers (`App.tsx`):**
   - `initPriceScheduler()` (background DB/service path)
   - `materializeTransactions`, `autoRefreshIfStale`, `fetchAccounts/snapshotBalances`, `refreshNetWorth` (store-driven DB/storage usage)
-- **Page consumers (direct):** `settings`, `memories`, `forecast` (`useSubscriptions`), `spending-heatmap`.
+- **Page consumers (direct):** `settings`, `forecast` (`useSubscriptions`), `spending-heatmap`.
 - **Store consumers:**
   - DB-backed: account, transaction, category, budget, goal, investment, recurring, debt, net-worth, spending-insights.
   - Storage-backed: currency, anomaly, health.
@@ -149,7 +147,6 @@ Practical map of the current React frontend for hardening and follow-up work.
 | Transactions + recurring  | `pages/transactions.tsx` | `transaction-store`, `recurring-store`, `ui-store` | recurring dialog local + stores                | same as above                                                 |
 | Investments + prices      | `pages/investments.tsx`  | `investment-store`                                 | `price-service`/`price-scheduler` + DB         | same as above + external price APIs                           |
 | Settings (backup + keys)  | `pages/settings.tsx`     | `currency-store` (+ local page state)              | **direct** `database` + `storage`              | Tauri plugin-store/fs or browser `/api/db/*` + `/api/store/*` |
-| Memories                  | `pages/memories.tsx`     | page-local state                                   | **direct** `database` CRUD/FTS                 | Tauri SQL plugin / browser bridge                             |
 | Notebook/portfolio review | library-driven           | no dedicated store                                 | `virtual-fs` via `notebook`/`portfolio-review` | Tauri fs plugin / browser bridge `/api/fs/*`                  |
 
 ## 5) High-risk frontend flows for later hardening
@@ -166,8 +163,6 @@ Practical map of the current React frontend for hardening and follow-up work.
    Catch-up loops can create many writes; requires careful duplicate protection.
 6. **Notebook virtual-fs path + persistence behavior** (`notebook.ts`, `virtual-fs.ts`, `portfolio-review.ts`)  
    Cross-runtime filesystem semantics and boundary/path assumptions.
-7. **Memories CRUD + FTS query path** (`pages/memories.tsx`)  
-   Direct SQL writes/updates/deletes and search query behavior bypass store mediation.
 
 ## 6) Test coverage overview
 
@@ -179,7 +174,7 @@ Practical map of the current React frontend for hardening and follow-up work.
 - **E2E (Playwright, `e2e/*.spec.ts`):**
   - navigation/layout/dashboard/settings/accounts/transactions/budgets/subscriptions/i18n/responsive.
 - **Notably thinner coverage (current):**
-  - No dedicated page tests for goals, debt-payoff, forecast, net-worth, spending-insights/heatmap, memories.
+  - No dedicated page tests for goals, debt-payoff, forecast, net-worth, spending-insights/heatmap.
   - No dedicated store tests for `budget-store`, `investment-store`, `net-worth-store`, `recap-store`, `spending-insights-store`, `subscription-store`.
 
 ### Browser bridge regression coverage (frontend hardening workflow)

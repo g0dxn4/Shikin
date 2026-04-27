@@ -1,0 +1,31 @@
+{
+  "eyebrow": "Centro de analisis",
+  "title": "Analisis",
+  "description": "Informes, proyecciones y vistas profundas viven aqui para mantener la navegacion principal limpia sin alejar el analisis.",
+  "featuredLabel": "Vistas clave de analisis",
+  "deeperLabel": "Analisis especializado",
+  "featuredBadge": "Destacado",
+  "open": "Abrir {{title}}",
+  "sections": {
+    "reports": {
+      "title": "Informes",
+      "description": "Convierte tu libro mayor en resumenes mensuales, totales por categoria y vistas listas para exportar."
+    },
+    "spendingInsights": {
+      "title": "Analisis de gastos",
+      "description": "Encuentra patrones recurrentes, presion por categoria y habitos pequenos que mueven tu presupuesto."
+    },
+    "forecast": {
+      "title": "Proyeccion",
+      "description": "Proyecta el flujo de caja y ve como ingresos, facturas y gastos afectan las proximas semanas."
+    },
+    "netWorth": {
+      "title": "Patrimonio neto",
+      "description": "Sigue activos, deudas y la direccion de largo plazo de tu balance personal."
+    },
+    "spendingHeatmap": {
+      "title": "Mapa de calor",
+      "description": "Revisa la intensidad diaria para detectar grupos, picos y rutinas costosas."
+    }
+  }
+}

@@ -3,9 +3,8 @@
   "welcome": "Welcome to Shikin",
   "empty": {
     "title": "Your finances, your way",
-    "description": "Start by adding an account and your first transaction. Or ask Ivy, your AI assistant, for help.",
-    "addAccount": "Add Account",
-    "askAI": "Ask Ivy"
+    "description": "Start by adding an account and your first transaction.",
+    "addAccount": "Add Account"
   },
   "cards": {
     "totalBalance": "Total Balance",
@@ -23,8 +22,7 @@
     "drilldownBudgets": "View budgets"
   },
   "quickActions": {
-    "addTransaction": "Add Transaction",
-    "askIvy": "Ask Ivy"
+    "addTransaction": "Add Transaction"
   },
   "alerts": {
     "title": "Alerts",

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AccountDialog } from '../account-dialog'
 
@@ -59,8 +59,13 @@ describe('AccountDialog', () => {
   })
 
   it('prevents dialog closure while mutation is in flight', async () => {
-    // Create a delayed promise so isLoading stays true
-    mockAdd.mockImplementation(() => new Promise(() => {}))
+    let resolveAdd: () => void = () => {}
+    mockAdd.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveAdd = resolve
+        })
+    )
 
     render(<AccountDialog />)
 
@@ -76,6 +81,10 @@ describe('AccountDialog', () => {
 
     // Verify close was NOT called while loading
     expect(mockCloseAccountDialog).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveAdd()
+    })
   })
 
   it('asks before closing when the form has unsaved changes', async () => {
@@ -89,7 +98,9 @@ describe('AccountDialog', () => {
     expect(screen.getByTestId('discard-confirm')).toBeInTheDocument()
     expect(mockCloseAccountDialog).not.toHaveBeenCalled()
 
-    screen.getByText('Discard').click()
+    await act(async () => {
+      screen.getByText('Discard').click()
+    })
 
     expect(mockCloseAccountDialog).toHaveBeenCalled()
   })

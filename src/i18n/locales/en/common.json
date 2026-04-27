@@ -13,19 +13,17 @@
     "budgets": "Budgets",
     "bills": "Bills",
     "reports": "Reports",
+    "insights": "Insights",
     "extensions": "Extensions",
     "advanced": "Advanced",
     "goals": "Goals",
     "investments": "Investments",
-    "subscriptions": "Subscriptions",
     "debtPayoff": "Debt Payoff",
     "netWorth": "Net Worth",
     "spendingInsights": "Spending Insights",
     "spendingHeatmap": "Heatmap",
     "forecast": "Forecast",
-    "memories": "Ivy's Memory",
-    "settings": "Settings",
-    "ai": "AI Assistant"
+    "settings": "Settings"
   },
   "actions": {
     "save": "Save",
@@ -64,7 +62,7 @@
       },
       "mcp": {
         "title": "CLI and MCP Server",
-        "description": "Automate the same local finance data from terminals and AI clients using the bundled command surface.",
+        "description": "Automate the same local finance data from terminals and MCP-compatible clients using the bundled command surface.",
         "action": "View setup"
       },
       "marketData": {

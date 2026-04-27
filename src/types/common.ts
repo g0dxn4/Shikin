@@ -30,8 +30,10 @@ export type BudgetPeriod = 'weekly' | 'monthly' | 'yearly'
 
 export type InvestmentType = 'stock' | 'etf' | 'crypto' | 'bond' | 'mutual_fund' | 'other'
 
-export type MessageRole = 'user' | 'assistant' | 'system' | 'tool'
-
-export type MemoryCategory = 'preference' | 'fact' | 'goal' | 'behavior' | 'context'
-
-export type RecurringFrequency = 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly'
+export type RecurringFrequency =
+  | 'daily'
+  | 'weekly'
+  | 'biweekly'
+  | 'monthly'
+  | 'quarterly'
+  | 'yearly'

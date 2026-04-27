@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { TransactionDialog } from '../transaction-dialog'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
@@ -100,8 +100,13 @@ describe('TransactionDialog', () => {
   })
 
   it('prevents dialog closure while mutation is in flight', async () => {
-    // Create a delayed promise so isLoading stays true
-    mockUpdate.mockImplementation(() => new Promise(() => {}))
+    let resolveUpdate: () => void = () => {}
+    mockUpdate.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveUpdate = resolve
+        })
+    )
 
     // Use edit mode so form is pre-filled with valid data
     mockEditingTransactionId = 'tx-edit'
@@ -120,6 +125,10 @@ describe('TransactionDialog', () => {
 
     // Verify close was NOT called while loading
     expect(mockCloseTransactionDialog).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveUpdate()
+    })
   })
 
   it('asks before closing when the form has unsaved changes', async () => {
@@ -133,7 +142,9 @@ describe('TransactionDialog', () => {
     expect(screen.getByTestId('discard-confirm')).toBeInTheDocument()
     expect(mockCloseTransactionDialog).not.toHaveBeenCalled()
 
-    screen.getByText('Discard').click()
+    await act(async () => {
+      screen.getByText('Discard').click()
+    })
 
     expect(mockCloseTransactionDialog).toHaveBeenCalled()
   })

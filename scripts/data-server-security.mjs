@@ -6,8 +6,6 @@ export const BRIDGE_TOKEN_ENV = 'SHIKIN_DATA_SERVER_BRIDGE_TOKEN'
 export const BRIDGE_ALLOW_HEADERS = [
   'Content-Type',
   'Authorization',
-  'OpenAI-Beta',
-  'chatgpt-account-id',
   'originator',
   'X-Shikin-Bridge',
 ]

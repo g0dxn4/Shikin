@@ -21,6 +21,9 @@ const Transactions = lazy(() =>
 )
 const Accounts = lazy(() => import('@/pages/accounts').then((m) => ({ default: m.Accounts })))
 const Budgets = lazy(() => import('@/pages/budgets').then((m) => ({ default: m.Budgets })))
+const InsightsPage = lazy(() =>
+  import('@/pages/insights').then((m) => ({ default: m.InsightsPage }))
+)
 const Investments = lazy(() =>
   import('@/pages/investments').then((m) => ({ default: m.Investments }))
 )
@@ -32,7 +35,6 @@ const DebtPayoff = lazy(() =>
   import('@/pages/debt-payoff').then((m) => ({ default: m.DebtPayoff }))
 )
 const Forecast = lazy(() => import('@/pages/forecast').then((m) => ({ default: m.Forecast })))
-const Memories = lazy(() => import('@/pages/memories').then((m) => ({ default: m.Memories })))
 const NetWorth = lazy(() => import('@/pages/net-worth').then((m) => ({ default: m.NetWorth })))
 const SpendingHeatmap = lazy(() =>
   import('@/pages/spending-heatmap').then((m) => ({ default: m.SpendingHeatmap }))
@@ -167,6 +169,7 @@ export default function App() {
                 <Route path="/accounts" element={<Accounts />} />
                 <Route path="/budgets" element={<Budgets />} />
                 <Route path="/goals" element={<Goals />} />
+                <Route path="/insights" element={<InsightsPage />} />
                 <Route path="/investments" element={<Investments />} />
                 <Route path="/subscriptions" element={<Subscriptions />} />
                 <Route path="/debt-payoff" element={<DebtPayoff />} />
@@ -174,7 +177,6 @@ export default function App() {
                 <Route path="/net-worth" element={<NetWorth />} />
                 <Route path="/spending-insights" element={<SpendingInsights />} />
                 <Route path="/spending-heatmap" element={<SpendingHeatmap />} />
-                <Route path="/memories" element={<Memories />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/bills" element={<BillsPage />} />
                 <Route path="/reports" element={<ReportsPage />} />

@@ -15,6 +15,7 @@ interface NavItem {
   icon: React.ReactNode
   label: string
   href: string
+  activeHrefs?: string[]
 }
 
 interface BottomNavProps {
@@ -24,7 +25,9 @@ interface BottomNavProps {
 }
 
 export function BottomNav({ items, moreItems = [], activeHref }: BottomNavProps) {
-  const moreActive = moreItems.some((item) => item.href === activeHref)
+  const isItemActive = (item: NavItem) =>
+    item.href === activeHref || item.activeHrefs?.includes(activeHref)
+  const moreActive = moreItems.some(isItemActive)
 
   return (
     <nav
@@ -32,7 +35,7 @@ export function BottomNav({ items, moreItems = [], activeHref }: BottomNavProps)
       aria-label="Mobile primary navigation"
     >
       {items.map((item) => {
-        const isActive = item.href === activeHref
+        const isActive = isItemActive(item)
         return (
           <Link
             key={item.href}
@@ -77,7 +80,7 @@ export function BottomNav({ items, moreItems = [], activeHref }: BottomNavProps)
             </SheetHeader>
             <nav className="mt-4 grid grid-cols-2 gap-2" aria-label="Mobile more navigation">
               {moreItems.map((item) => {
-                const isActive = item.href === activeHref
+                const isActive = isItemActive(item)
 
                 return (
                   <SheetClose key={item.href} asChild>

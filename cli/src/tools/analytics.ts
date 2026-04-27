@@ -350,7 +350,7 @@ const analyzeSpendingTrends: ToolDefinition = {
 }
 
 // ---------------------------------------------------------------------------
-// 13. save-memory
+// Analytics tools
 // ---------------------------------------------------------------------------
 
 export const analyticsTools: ToolDefinition[] = [getBalanceOverview, analyzeSpendingTrends]

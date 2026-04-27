@@ -13,19 +13,17 @@
     "budgets": "Presupuestos",
     "bills": "Facturas",
     "reports": "Informes",
+    "insights": "Analisis",
     "extensions": "Extensiones",
     "advanced": "Avanzado",
     "goals": "Metas",
     "investments": "Inversiones",
-    "subscriptions": "Suscripciones",
     "debtPayoff": "Pago de Deudas",
     "netWorth": "Patrimonio Neto",
     "spendingInsights": "Analisis de Gastos",
     "spendingHeatmap": "Mapa de Calor",
     "forecast": "Proyeccion",
-    "memories": "Memoria de Ivy",
-    "settings": "Configuracion",
-    "ai": "Asistente IA"
+    "settings": "Configuracion"
   },
   "actions": {
     "save": "Guardar",
@@ -64,7 +62,7 @@
       },
       "mcp": {
         "title": "CLI y servidor MCP",
-        "description": "Automatiza los mismos datos financieros locales desde terminales y clientes de IA con los comandos incluidos.",
+        "description": "Automatiza los mismos datos financieros locales desde terminales y clientes compatibles con MCP usando los comandos incluidos.",
         "action": "Ver configuracion"
       },
       "marketData": {

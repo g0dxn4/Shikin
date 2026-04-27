@@ -2,7 +2,7 @@
   "name": "shikin",
   "private": true,
   "version": "0.2.5",
-  "description": "AI-first, local-first personal finance manager",
+  "description": "Local-first personal finance manager",
   "author": "ASF",
   "license": "MIT",
   "type": "module",
@@ -24,7 +24,6 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:ai": "tsx scripts/test-ai.ts",
     "release:preflight": "node scripts/release-preflight.mjs",
     "prepare": "husky"
   },

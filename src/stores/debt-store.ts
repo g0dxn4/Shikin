@@ -78,7 +78,7 @@ export const useDebtStore = create<DebtState>((set, get) => ({
         id: a.id,
         name: a.name,
         balance: Math.abs(a.balance), // stored as negative, we want positive
-        apr: 0, // Default — users can set via manual override or AI tools
+        apr: 0, // Default; users can set this via manual override
         minPayment: Math.max(Math.round(Math.abs(a.balance) * 0.02), 2500), // 2% or $25 min
       }))
 

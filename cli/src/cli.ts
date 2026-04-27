@@ -8,13 +8,11 @@ import { z } from 'zod'
 
 const EXPECTED_MIGRATIONS = [
   '001_core_tables',
-  '002_ai_memories',
   '003_credit_cards',
   '004_category_rules',
   '005_recurring_rules',
   '006_goals',
   '007_recaps',
-  '008_ai_memories_fts',
   '010_transaction_splits',
   '011_net_worth_snapshots',
   '012_account_balance_history',

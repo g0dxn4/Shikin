@@ -83,9 +83,7 @@ async function calculateSavingsRate(): Promise<SubScore> {
     }
   }
 
-  const rateDisplay = income > 0
-    ? `${Math.round(((income - expenses) / income) * 100)}%`
-    : 'N/A'
+  const rateDisplay = income > 0 ? `${Math.round(((income - expenses) / income) * 100)}%` : 'N/A'
 
   return {
     name: 'Savings Rate',
@@ -102,9 +100,7 @@ async function calculateBudgetAdherence(): Promise<SubScore> {
     amount: number
     category_id: string
     period: string
-  }>(
-    `SELECT id, amount, category_id, period FROM budgets WHERE is_active = 1`
-  )
+  }>(`SELECT id, amount, category_id, period FROM budgets WHERE is_active = 1`)
 
   if (budgets.length === 0) {
     return {
@@ -185,9 +181,10 @@ async function calculateDebtToIncome(): Promise<SubScore> {
       score: debt === 0 ? 100 : 20,
       weight: 0.2,
       description: debt === 0 ? 'No credit card debt' : 'Track income to measure debt ratio',
-      tip: debt === 0
-        ? 'No credit card debt — well done'
-        : 'Start tracking your income so Ivy can monitor your debt ratio',
+      tip:
+        debt === 0
+          ? 'No credit card debt — well done'
+          : 'Start tracking your income to monitor your debt ratio',
     }
   }
 
@@ -241,12 +238,12 @@ async function calculateEmergencyFund(): Promise<SubScore> {
       name: 'Emergency Fund',
       score: savings > 0 ? 75 : 50,
       weight: 0.2,
-      description: savings > 0
-        ? `Savings: $${fromCentavos(savings).toFixed(0)}`
-        : 'No savings accounts found',
-      tip: savings > 0
-        ? 'Track expenses to measure your emergency fund coverage'
-        : 'Open a savings account and start building your safety net',
+      description:
+        savings > 0 ? `Savings: $${fromCentavos(savings).toFixed(0)}` : 'No savings accounts found',
+      tip:
+        savings > 0
+          ? 'Track expenses to measure your emergency fund coverage'
+          : 'Open a savings account and start building your safety net',
     }
   }
 
@@ -331,15 +328,15 @@ export async function calculateHealthScore(): Promise<HealthScore> {
     calculateSpendingConsistency(),
   ])
 
-  const overall = Math.round(
-    subscores.reduce((sum, s) => sum + s.score * s.weight, 0)
-  )
+  const overall = Math.round(subscores.reduce((sum, s) => sum + s.score * s.weight, 0))
 
   // Get historical scores from shared store for trend
   const store = await load()
   const historyRaw = await store.get('health_score_history')
   const history: { date: string; score: number }[] = historyRaw
-    ? (typeof historyRaw === 'string' ? JSON.parse(historyRaw) : (historyRaw as { date: string; score: number }[]))
+    ? typeof historyRaw === 'string'
+      ? JSON.parse(historyRaw)
+      : (historyRaw as { date: string; score: number }[])
     : []
 
   const trend = determineTrend(history)

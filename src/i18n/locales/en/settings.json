@@ -4,7 +4,6 @@
     "general": "General",
     "updates": "Updates",
     "theme": "Theme & Appearance",
-    "ai": "AI Provider",
     "data": "Data",
     "categoryRules": "Category Rules",
     "dataApis": "Market Data APIs",
@@ -13,7 +12,6 @@
   },
   "theme": {
     "description": "Customize the visual appearance of Shikin",
-    "aiPrompt": "AI Theme Generator",
     "promptPlaceholder": "e.g. Cyberpunk neon, cozy autumn, ocean breeze...",
     "generate": "Generate",
     "generateSuccess": "Theme generated! Click Save to keep it.",
@@ -142,30 +140,6 @@
     "noRates": "No rates cached. Click refresh to fetch.",
     "rateFrom": "From",
     "rateTo": "Rate"
-  },
-  "ai": {
-    "provider": "Provider",
-    "apiKey": "API Key",
-    "apiKeyPlaceholder": "Enter your API key",
-    "model": "Model",
-    "testConnection": "Test Connection",
-    "testing": "Testing...",
-    "testSuccess": "Connection successful",
-    "testFailed": "Connection failed",
-    "connected": "Connected",
-    "notConfigured": "Not configured",
-    "configured": "Configured",
-    "noKeyNeeded": "No API key needed",
-    "searchModels": "Search models...",
-    "enterModelId": "Enter model ID",
-    "noModels": "No models found",
-    "loadingModels": "Loading models...",
-    "categories": {
-      "subscription": "Subscription",
-      "api": "API Key",
-      "gateway": "Gateway",
-      "local": "Local"
-    }
   },
   "data": {
     "export": "Export Data",

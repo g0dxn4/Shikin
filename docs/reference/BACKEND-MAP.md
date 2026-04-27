@@ -7,10 +7,10 @@ This is a practical backend map for the current repo layout. It is a documentati
 - **Desktop app runtime**
   - `src/main.tsx` → app shell and routing.
   - `src-tauri/src/main.rs` → starts `shikin_lib::run()`.
-  - `src-tauri/src/lib.rs` → Rust bootstrap + plugin registration (`sql`, `store`, `fs`, `updater`, `oauth_listen`).
-  - `src-tauri/migrations/001_core_tables.sql`, `002_ai_memories.sql`, `003_credit_cards.sql` and migration list in `src-tauri/src/lib.rs` (001-003 only).
+  - `src-tauri/src/lib.rs` → Rust bootstrap + plugin registration (`sql`, `store`, `fs`, `updater`).
+  - `src-tauri/migrations/001_core_tables.sql`, `003_credit_cards.sql` and migration list in `src-tauri/src/lib.rs`.
 - **Browser mode runtime**
-  - `pnpm dev` executes `scripts/dev.mjs`, which starts `scripts/data-server.mjs`, `scripts/oauth-server.mjs`, and Vite in one process group.
+  - `pnpm dev` executes `scripts/dev.mjs`, which starts `scripts/data-server.mjs` and Vite in one process group.
   - Browser runtime DB/storage calls are funneled through `src/lib/database.ts`, `src/lib/storage.ts`, and `src/lib/virtual-fs.ts`.
 - **CLI mode**
   - `cli/src/cli.ts` registers every command from `cli/src/tools.ts` and runs via Commander.
@@ -23,24 +23,7 @@ This is a practical backend map for the current repo layout. It is a documentati
 - **`scripts/data-server.mjs`**
   - HTTP listener: `createServer(...).listen(1480, '127.0.0.1')` (loopback only).
   - Access is guarded by local bridge auth: origin must be `http://localhost:1420` and `X-Shikin-Bridge` must match `SHIKIN_DATA_SERVER_BRIDGE_TOKEN`.
-  - Public endpoints: `/api/db/*`, `/api/store/*`, `/api/fs/*`, and `/api/proxy/chatgpt/*`.
-
-- **`scripts/oauth-server.mjs`**
-  - HTTP listener: `createServer(...).listen(1455, '127.0.0.1')`.
-  - Route: `GET /auth/callback` only; forwards to SPA callback on `http://localhost:1420`.
-
-- **Tauri invoke surface (`src-tauri/src/lib.rs`)**
-  - `oauth_listen(port)` binds one-shot on `127.0.0.1:<port>`.
-  - Parses one incoming request (`GET /auth/callback?...`) and returns `{ code, state }`.
-  - Listener timeout: 120s (`tokio::time::timeout`).
-
-## 1b) AI proxy surface (`scripts/data-server.mjs`)
-
-- Route family: `/api/proxy/chatgpt/*` (handler currently forwards any incoming HTTP method; typical use is `POST`).
-- Access to proxy routes also goes through the same origin + bridge-token validation used by all data-server handlers.
-- Forwards to `https://chatgpt.com/backend-api/codex/*` and passes through relevant auth headers.
-- Rewrites Codex-incompatible request fields (`store=false`, removes `max_output_tokens`, strips `previous_response_id`).
-- Uses in-memory `codexItemCache` to resolve `item_reference` entries across stream/tool-loop follow-ups.
+  - Public endpoints: `/api/db/*`, `/api/store/*`, and `/api/fs/*`.
 
 ## 2) CLI flow
 
@@ -105,10 +88,8 @@ This is a practical backend map for the current repo layout. It is a documentati
     - `POST /api/db/transaction`
     - `GET /api/db/export`
     - `POST /api/db/import`
-    - `POST /api/proxy/chatgpt/*` (ChatGPT Codex backend proxy)
   - Server-side browser transactions use a short lease (`SHIKIN_SERVER_TRANSACTION_TTL_MS`, default `15000`) and auto-rollback on expiry.
   - Transaction finalization is status-bearing: callers should treat `status` as authoritative (`committed`, `rolled_back`, `expired_rolled_back`).
-  - AI proxy behavior includes the in-memory `codexItemCache` for stream-resolved `item_reference` follow-ups in the tool loop.
 
 - **Settings store abstraction**
   - App: `src/lib/storage.ts`
@@ -147,13 +128,12 @@ This is a practical backend map for the current repo layout. It is a documentati
 - **Practical CLI/MCP/data-server strategy:**
   - **CLI (`cli/src/tools.ts`)**: add integration tests that execute real SQL against a temp DB for one CRUD path (`add-account`/`add-transaction`/delete) plus one aggregate path (`get-balance-overview` or equivalent).
   - **MCP (`cli/src/mcp-server.ts`)**: add a transport harness that boots the server, asserts all **44** tool registrations, and executes one representative tool end-to-end.
-  - **Data server (`scripts/data-server.mjs`)**: add HTTP contract tests for `/api/db/*`, `/api/store*`, `/api/fs/*`, `/api/proxy/chatgpt/*`, including stream/item-reference behavior via `codexItemCache`.
+  - **Data server (`scripts/data-server.mjs`)**: add HTTP contract tests for `/api/db/*`, `/api/store*`, and `/api/fs/*`.
   - **Hardening checks**: add explicit `safePath` boundary cases (relative paths, separator tricks, normalization edge cases) as verification tests.
 
 ## 8) Outbound integrations
 
 - **Updater manifest**: `src-tauri/tauri.conf.json` → `plugins.updater.endpoints` (`https://github.com/g0dxn4/Shikin/releases/latest/download/latest.json`).
-- **OAuth token exchange**: `src/lib/oauth.ts` uses provider `tokenUrl` for token requests.
 - **Exchange rates**: `src/lib/exchange-rate-service.ts` → `https://api.frankfurter.app`.
 - **Prices**: `src/lib/price-service.ts` → Alpha Vantage + CoinGecko APIs.
 - **News**: `src/lib/news-service.ts` → Finnhub + NewsAPI.

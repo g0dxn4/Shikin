@@ -571,7 +571,7 @@ GET /api/v1/summary/spending
 | `start_date` | string | auto    | Required for `custom` period              |
 | `end_date`   | string | auto    | Required for `custom` period              |
 
-Returns the same data shape as the `getSpendingSummary` AI tool.
+Returns the same data shape as the `get-spending-summary` CLI/MCP tool.
 
 ---
 
@@ -682,4 +682,4 @@ Events:
 
 ### MCP Server (v2)
 
-The local API can be wrapped as an MCP (Model Context Protocol) server, allowing any MCP-compatible AI agent to interact with Shikin's financial data.
+The local API can be wrapped as an MCP (Model Context Protocol) server, allowing MCP-compatible clients to interact with Shikin's financial data.

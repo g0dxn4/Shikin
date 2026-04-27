@@ -21,20 +21,20 @@ Shikin uses a premium, Apple-like dark interface for a local-first personal fina
 
 ## Color Tokens
 
-| Token | Value | Usage |
-| --- | --- | --- |
-| Background | `#020203` | App canvas |
-| Surface | `#101016` | Cards, rails, panels |
-| Surface subtle | `#FFFFFF0F` | Inputs, segmented controls |
-| Border | `#FFFFFF14` | Default hairline border |
-| Border strong | `#FFFFFF18` | Elevated/hero border |
-| Text | `#FFFFFF` | Primary text |
-| Text muted | `#A9A9B4` | Secondary labels |
-| Text soft | `#C6C6CF` | Metadata and helper copy |
-| Accent | `#7C5CFF` | Primary actions |
-| Accent light | `#BFA4FF` | Highlights, active icons |
-| Income | `#34D399` | Positive amounts and success states |
-| Spending | `#F59E0B` | Expenses and warnings |
+| Token          | Value       | Usage                               |
+| -------------- | ----------- | ----------------------------------- |
+| Background     | `#020203`   | App canvas                          |
+| Surface        | `#101016`   | Cards, rails, panels                |
+| Surface subtle | `#FFFFFF0F` | Inputs, segmented controls          |
+| Border         | `#FFFFFF14` | Default hairline border             |
+| Border strong  | `#FFFFFF18` | Elevated/hero border                |
+| Text           | `#FFFFFF`   | Primary text                        |
+| Text muted     | `#A9A9B4`   | Secondary labels                    |
+| Text soft      | `#C6C6CF`   | Metadata and helper copy            |
+| Accent         | `#7C5CFF`   | Primary actions                     |
+| Accent light   | `#BFA4FF`   | Highlights, active icons            |
+| Income         | `#34D399`   | Positive amounts and success states |
+| Spending       | `#F59E0B`   | Expenses and warnings               |
 
 ## Typography
 
@@ -44,14 +44,14 @@ Shikin uses a premium, Apple-like dark interface for a local-first personal fina
 
 Recommended scale:
 
-| Role | Size | Weight |
-| --- | --- | --- |
-| Desktop page title | 28px | 700 |
-| Desktop hero amount | 48-54px | 700 |
-| Card title | 21-24px | 700 |
-| Body/action text | 14-16px | 600-700 |
-| Mobile title | 28px | 700 |
-| Mobile hero amount | 34-36px | 700 |
+| Role                | Size    | Weight  |
+| ------------------- | ------- | ------- |
+| Desktop page title  | 28px    | 700     |
+| Desktop hero amount | 48-54px | 700     |
+| Card title          | 21-24px | 700     |
+| Body/action text    | 14-16px | 600-700 |
+| Mobile title        | 28px    | 700     |
+| Mobile hero amount  | 34-36px | 700     |
 
 ## Layout
 
@@ -123,8 +123,7 @@ Current Pencil system includes:
 - `D-13 Net Worth`
 - `D-14 Spending Insights`
 - `D-15 Spending Heatmap`
-- `D-16 Memories`
-- `D-17 Extensions`
+- `D-16 Extensions`
 - `M-01 Premium Home`
 - `M-02 Transactions`
 - `M-03 Accounts`
@@ -140,7 +139,7 @@ The Pencil canvas is organized as:
 - Desktop screens in route order across multiple rows.
 - Mobile screens in one grouped row.
 
-Routed desktop coverage mirrors `src/App.tsx`: Dashboard, Transactions, Accounts, Budgets, Goals, Investments, Subscriptions, Debt Payoff, Forecast, Net Worth, Spending Insights, Spending Heatmap, Memories, Settings, Bills, Reports, and Extensions.
+Routed desktop coverage mirrors `src/App.tsx`: Dashboard, Transactions, Accounts, Budgets, Goals, Investments, Subscriptions, Debt Payoff, Forecast, Net Worth, Spending Insights, Spending Heatmap, Settings, Bills, Reports, and Extensions.
 
 ## Copy Voice
 

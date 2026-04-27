@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SettingsPage } from '../settings'
 
@@ -98,24 +98,27 @@ describe('SettingsPage', () => {
     vi.clearAllMocks()
   })
 
-  it('renders General section', () => {
+  it('renders General section', async () => {
     render(<SettingsPage />)
 
     expect(screen.getByText('sections.general')).toBeInTheDocument()
+    expect(await screen.findByText('0.1.0')).toBeInTheDocument()
   })
 
-  it('renders language selector with SUPPORTED_LANGUAGES options', () => {
+  it('renders language selector with SUPPORTED_LANGUAGES options', async () => {
     render(<SettingsPage />)
 
     const select = screen.getByDisplayValue('English')
     expect(select).toBeInTheDocument()
     expect(screen.getByText('Español')).toBeInTheDocument()
+    expect(await screen.findByText('0.1.0')).toBeInTheDocument()
   })
 
-  it('renders theme settings', () => {
+  it('renders theme settings', async () => {
     render(<SettingsPage />)
 
     expect(screen.getByTestId('theme-settings')).toBeInTheDocument()
+    expect(await screen.findByText('0.1.0')).toBeInTheDocument()
   })
 
   it('renders desktop updates section', async () => {
@@ -269,7 +272,9 @@ describe('SettingsPage', () => {
     expect(liveRegion?.textContent?.length).toBeGreaterThan(0)
 
     // Clean up - resolve the install promise
-    resolveInstall(undefined)
+    await act(async () => {
+      resolveInstall(undefined)
+    })
   })
 
   it('retries install action when install fails and retry is clicked', async () => {
@@ -394,6 +399,12 @@ describe('SettingsPage', () => {
 
     it('proceeds with import when user confirms', async () => {
       const user = userEvent.setup()
+      const reloadMock = vi.fn()
+      vi.stubGlobal('location', {
+        ...window.location,
+        reload: reloadMock,
+      })
+
       mockExportDatabaseSnapshot.mockResolvedValue(new Uint8Array([1, 2, 3]))
       mockImportDatabaseSnapshot.mockResolvedValue(undefined)
 
@@ -406,6 +417,8 @@ describe('SettingsPage', () => {
       await user.click(screen.getByRole('button', { name: /Yes, Replace All Data/ }))
 
       expect(mockImportDatabaseSnapshot).toHaveBeenCalledOnce()
+
+      vi.unstubAllGlobals()
     })
 
     it('triggers full page reload after successful import', async () => {

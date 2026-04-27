@@ -35,7 +35,6 @@ pnpm dev
 
 `pnpm dev` runs `scripts/dev.mjs`, which starts:
 
-- OAuth callback server on `http://127.0.0.1:1455`
 - Browser data-server on `http://127.0.0.1:1480`
 - Vite on `http://localhost:1420` (HMR)
 
@@ -177,9 +176,9 @@ cli/
 | Components | kebab-case `.tsx`                     | `app-shell.tsx`, `loading-spinner.tsx`          |
 | Pages      | kebab-case `.tsx`                     | `transactions.tsx`, `settings.tsx`              |
 | Utilities  | kebab-case `.ts`                      | `database.ts`, `money.ts`                       |
-| Stores     | kebab-case with `-store` suffix       | `ui-store.ts`, `ai-store.ts`                    |
+| Stores     | kebab-case with `-store` suffix       | `ui-store.ts`, `account-store.ts`               |
 | Types      | kebab-case `.ts`                      | `database.ts`, `common.ts`                      |
-| AI Tools   | kebab-case `.ts`                      | `add-transaction.ts`, `get-spending-summary.ts` |
+| CLI Tools  | kebab-case `.ts`                      | `add-transaction.ts`, `get-spending-summary.ts` |
 | Tests      | same name with `.test.ts(x)`          | `money.test.ts`, `agent.test.ts`                |
 | Migrations | numbered prefix `NNN_description.sql` | `001_core_tables.sql`                           |
 
@@ -368,12 +367,10 @@ src/i18n/locales/
 │   ├── common.json     # Navigation, shared strings
 │   ├── dashboard.json  # Dashboard page
 │   ├── settings.json   # Settings page
-│   └── ai.json         # AI panel
 └── es/
     ├── common.json
     ├── dashboard.json
     ├── settings.json
-    └── ai.json
 ```
 
 When adding new user-facing strings:
@@ -420,7 +417,6 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 | Scope   | Description                   |
 | ------- | ----------------------------- |
-| `ai`    | AI agent, tools, transport    |
 | `ui`    | Components, layout, styling   |
 | `db`    | Database, migrations, queries |
 | `i18n`  | Translations                  |
@@ -430,12 +426,9 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 ### Examples
 
 ```
-feat(ai): add getAccountBalances tool
 fix(db): handle null category_id in spending query
-docs: update AI tools documentation
 refactor(ui): extract transaction list into separate component
-test(ai): add unit tests for addTransaction tool
-build: upgrade AI SDK to v6.1
+test(cli): add unit tests for addTransaction tool
 ```
 
 ---

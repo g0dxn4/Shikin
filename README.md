@@ -2,19 +2,19 @@
 
 **Your value. Your vault.**
 
-Shikin is an open-source, AI-first, local-first personal finance manager. It runs as a Tauri v2 desktop app or browser-first web app, keeping all data local on your machine.
+Shikin is an open-source, local-first personal finance manager. It runs as a Tauri v2 desktop app or browser-first web app, keeping all data local on your machine.
 
 ---
 
 ## Why Shikin?
 
-Most personal finance tools force a tradeoff between privacy and intelligence.
+Most personal finance tools force a tradeoff between privacy and convenience.
 
 Shikin is built to keep both:
 
 - Your finance data stays local (SQLite via shared storage at `~/.local/share/com.asf.shikin/`).
 - Settings and preferences are local (settings.json in shared store).
-- AI uses your own provider keys and works through tool calls against your local database.
+- Automation runs through local CLI and MCP surfaces against your local database.
 
 ---
 
@@ -35,9 +35,9 @@ Shikin is built to keep both:
 ### CLI & MCP Server — 44 Tool Definitions
 
 - **CLI**: `shikin add-transaction --amount 5.50 --type expense --description "Coffee"`
-- **MCP Server**: Connect Claude Code, Claude Desktop, Cursor, or any MCP-compatible AI
+- **MCP Server**: Connect Claude Code, Claude Desktop, Cursor, or any MCP-compatible client
 - **44 Tool Definitions**: 42 end-to-end tools plus 2 structured unavailable compatibility placeholders for external-feed features
-- **No Built-in AI**: Bring your own AI — Shikin is the finance engine, your AI platform controls it
+- **No Built-in Chat Assistant**: Shikin is the local finance engine; external clients can automate it through CLI/MCP
 
 ### Intelligence & Analytics
 
@@ -68,7 +68,7 @@ Shikin is built to keep both:
 | State      | Zustand (19 stores)              | Global state management                                                                          |
 | Database   | SQLite (shared storage)          | 21 tables, migration-backed schema                                                               |
 | Settings   | Tauri Store / data-server bridge | Local key-value config storage                                                                   |
-| AI         | CLI (`commander`) + MCP SDK      | Local automation surface (44 shared tool definitions; 2 are structured unavailable placeholders) |
+| Automation | CLI (`commander`) + MCP SDK      | Local automation surface (44 shared tool definitions; 2 are structured unavailable placeholders) |
 | Forms      | React Hook Form + Zod v4         | Form validation and parsing                                                                      |
 | Charts     | Recharts                         | Financial visualizations                                                                         |
 | PDF        | jsPDF                            | Report generation                                                                                |
@@ -107,7 +107,7 @@ See `CONTRIBUTING.md` for the quick contributor workflow and `docs/guides/CONTRI
 ### Run Locally
 
 ```bash
-pnpm dev          # Web mode: Vite :1420 + OAuth :1455 + data-server :1480
+pnpm dev          # Web mode: Vite :1420 + data-server :1480
 ```
 
 Then open `http://localhost:1420`.
@@ -122,7 +122,7 @@ pnpm build:tauri  # Builds .deb + .AppImage (Linux), .dmg (macOS), .msi (Windows
 
 | Command                  | Description                                                               |
 | ------------------------ | ------------------------------------------------------------------------- |
-| `pnpm dev`               | Start dev servers (Vite + OAuth + data)                                   |
+| `pnpm dev`               | Start dev servers (Vite + data)                                           |
 | `pnpm build`             | Type-check and build production bundle                                    |
 | `pnpm build:tauri`       | Build Tauri desktop binary                                                |
 | `pnpm preview`           | Preview production build locally                                          |
@@ -131,7 +131,6 @@ pnpm build:tauri  # Builds .deb + .AppImage (Linux), .dmg (macOS), .msi (Windows
 | `pnpm test`              | Start Vitest in watch mode                                                |
 | `pnpm test:run`          | Run unit tests once                                                       |
 | `pnpm test:coverage`     | Run unit tests with coverage                                              |
-| `pnpm test:ai`           | Run AI integration test script                                            |
 | `pnpm release:preflight` | Verify release version parity, updater config, and Tauri plugin alignment |
 | `pnpm check`             | Lint + typecheck + format check                                           |
 
@@ -232,7 +231,6 @@ Shikin/
 | [Backend Map](docs/reference/BACKEND-MAP.md)   | Current CLI, MCP, bridge, and local backend map   |
 | [Frontend Map](docs/reference/FRONTEND-MAP.md) | Current routes, stores, dialogs, and frontend map |
 | [Database](docs/reference/DATABASE.md)         | 21-table SQLite schema, conventions, migrations   |
-| [AI Tools](docs/reference/AI-TOOLS.md)         | Historical frontend AI-agent planning artifact    |
 | [Ideas](docs/planning/IDEAS.md)                | Feature ideas backlog with priority tiers         |
 | [Contributing](docs/guides/CONTRIBUTING.md)    | Development setup and conventions                 |
 | [Roadmap](docs/planning/ROADMAP.md)            | Current roadmap and milestone status              |

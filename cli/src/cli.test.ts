@@ -187,13 +187,11 @@ describe('CLI command execution', () => {
     vi.mocked(query)
       .mockReturnValueOnce([
         { name: '001_core_tables' },
-        { name: '002_ai_memories' },
         { name: '003_credit_cards' },
         { name: '004_category_rules' },
         { name: '005_recurring_rules' },
         { name: '006_goals' },
         { name: '007_recaps' },
-        { name: '008_ai_memories_fts' },
         { name: '010_transaction_splits' },
         { name: '011_net_worth_snapshots' },
         { name: '012_account_balance_history' },
@@ -260,7 +258,7 @@ describe('CLI command execution', () => {
           },
           database: {
             ready: true,
-            migrationCount: 13,
+            migrationCount: 11,
             latestMigration: '014_recurring_rules_currency_backfill',
             accountCount: 2,
             categoryCount: 14,
@@ -275,8 +273,8 @@ describe('CLI command execution', () => {
                 violations: [],
               },
               migrations: {
-                expected: 13,
-                applied: 13,
+                expected: 11,
+                applied: 11,
                 missing: [],
                 unexpected: [],
               },

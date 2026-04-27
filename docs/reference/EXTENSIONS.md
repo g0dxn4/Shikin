@@ -10,7 +10,6 @@ This document describes the design of Shikin's extension system, including the m
 
 Shikin's extension system allows community developers to add features without modifying the core application. Extensions can:
 
-- Add new AI tools that Ivy can call during conversations.
 - Add dashboard widgets for custom data visualizations.
 - Add new navigation routes and pages.
 - Add settings panels for extension configuration.
@@ -128,21 +127,21 @@ Every extension requires a `manifest.json` file at its root.
 
 ### Manifest Fields
 
-| Field              | Type     | Required | Description                                                           |
-| ------------------ | -------- | -------- | --------------------------------------------------------------------- |
-| `id`               | string   | yes      | Unique identifier (kebab-case). Must match directory name.            |
-| `name`             | string   | yes      | Human-readable display name.                                          |
-| `version`          | string   | yes      | Semver version string.                                                |
-| `description`      | string   | yes      | Short description (under 200 characters).                             |
-| `author`           | object   | yes      | Author name and optional URL.                                         |
-| `license`          | string   | no       | SPDX license identifier.                                              |
-| `repository`       | string   | no       | Source code URL.                                                      |
-| `minShikinVersion` | string   | no       | Minimum Shikin version required.                                      |
-| `main`             | string   | yes      | Entry point file relative to extension directory.                     |
-| `permissions`      | string[] | yes      | Required permissions (see Permission Model below).                    |
-| `tools`            | object[] | no       | AI tools this extension registers. Each has `name` and `description`. |
-| `hooks`            | string[] | no       | Application hooks this extension subscribes to.                       |
-| `ui`               | object   | no       | UI components this extension provides.                                |
+| Field              | Type     | Required | Description                                                                   |
+| ------------------ | -------- | -------- | ----------------------------------------------------------------------------- |
+| `id`               | string   | yes      | Unique identifier (kebab-case). Must match directory name.                    |
+| `name`             | string   | yes      | Human-readable display name.                                                  |
+| `version`          | string   | yes      | Semver version string.                                                        |
+| `description`      | string   | yes      | Short description (under 200 characters).                                     |
+| `author`           | object   | yes      | Author name and optional URL.                                                 |
+| `license`          | string   | no       | SPDX license identifier.                                                      |
+| `repository`       | string   | no       | Source code URL.                                                              |
+| `minShikinVersion` | string   | no       | Minimum Shikin version required.                                              |
+| `main`             | string   | yes      | Entry point file relative to extension directory.                             |
+| `permissions`      | string[] | yes      | Required permissions (see Permission Model below).                            |
+| `tools`            | object[] | no       | Automation actions this extension exposes. Each has `name` and `description`. |
+| `hooks`            | string[] | no       | Application hooks this extension subscribes to.                               |
+| `ui`               | object   | no       | UI components this extension provides.                                        |
 
 ---
 
@@ -180,13 +179,6 @@ Extensions must declare all required permissions in their manifest. Users are sh
 | `write:extension_data`    | Write to this extension's data store |
 | `read:all_extension_data` | Read any extension's stored data     |
 
-#### AI
-
-| Permission              | Description                                             |
-| ----------------------- | ------------------------------------------------------- |
-| `ai:register_tool`      | Register new AI tools that Ivy can call                 |
-| `ai:intercept_messages` | Read AI conversation messages (for logging or analysis) |
-
 #### Network
 
 | Permission         | Description                                                        |
@@ -210,7 +202,7 @@ Extensions are categorized by their permission scope:
 | Level           | Criteria                                                       | User Experience                       |
 | --------------- | -------------------------------------------------------------- | ------------------------------------- |
 | **Low risk**    | Only `read:*` and `read:extension_data`/`write:extension_data` | Auto-approved with notice             |
-| **Medium risk** | Any `write:*` or `ai:*` permission                             | Requires user approval                |
+| **Medium risk** | Any `write:*` permission                                       | Requires user approval                |
 | **High risk**   | `network:*` or `write:settings`                                | Requires explicit opt-in with warning |
 
 ---
@@ -241,13 +233,6 @@ Extensions can subscribe to application events by declaring hooks in their manif
 | ----------------- | ------------------------------------- | ---------------------------------------------- |
 | `onDashboardLoad` | When the dashboard page mounts        | Current account summaries, recent transactions |
 | `onPageChange`    | When the user navigates to a new page | Route path                                     |
-
-#### AI Hooks
-
-| Hook           | Trigger                                | Data Provided                              |
-| -------------- | -------------------------------------- | ------------------------------------------ |
-| `onAIMessage`  | When an AI message is sent or received | Message content, role, tool calls (if any) |
-| `onAIToolCall` | When an AI tool is executed            | Tool name, parameters, result              |
 
 #### Lifecycle Hooks
 
@@ -334,17 +319,6 @@ interface ExtensionHooks {
 }
 ```
 
-### ctx.ai
-
-Register AI tools and intercept messages.
-
-```typescript
-interface ExtensionAI {
-  registerTool(tool: ToolDefinition): void
-  onMessage(handler: (message: AIMessage) => void): void
-}
-```
-
 ### ctx.ui
 
 Register UI components and show notifications.
@@ -378,7 +352,7 @@ Only domains declared in the `network:` permissions are allowed. Requests to oth
 
 ## Example Extension: Crypto Tracker
 
-This walkthrough builds a complete extension that tracks cryptocurrency prices and adds AI capabilities.
+This walkthrough builds a complete extension that tracks cryptocurrency prices and adds a dashboard widget.
 
 ### Step 1: Create the directory
 
@@ -407,17 +381,10 @@ This walkthrough builds a complete extension that tracks cryptocurrency prices a
     "read:investments",
     "write:extension_data",
     "read:extension_data",
-    "ai:register_tool",
     "network:api.coingecko.com",
     "ui:dashboard_widget",
     "ui:settings_panel",
     "ui:notification"
-  ],
-  "tools": [
-    {
-      "name": "getCryptoPrice",
-      "description": "Get the current price of a cryptocurrency by symbol"
-    }
   ],
   "hooks": ["onDashboardLoad"],
   "ui": {
@@ -439,8 +406,6 @@ This walkthrough builds a complete extension that tracks cryptocurrency prices a
 
 ```typescript
 // index.ts
-import { tool, zodSchema } from 'ai'
-import { z } from 'zod'
 import type { ExtensionContext } from '@shikin/extension-api'
 
 const COINGECKO_API = 'https://api.coingecko.com/api/v3'
@@ -455,40 +420,6 @@ const SYMBOL_MAP: Record<string, string> = {
 }
 
 export default function activate(ctx: ExtensionContext) {
-  // Register an AI tool
-  ctx.ai.registerTool(
-    tool({
-      description: 'Get the current price of a cryptocurrency by symbol (e.g., BTC, ETH).',
-      inputSchema: zodSchema(
-        z.object({
-          symbol: z.string().describe('Crypto symbol like BTC, ETH, SOL'),
-          currency: z.string().optional().default('usd').describe('Fiat currency for the price'),
-        })
-      ),
-      execute: async ({ symbol, currency }) => {
-        const coinId = SYMBOL_MAP[symbol.toUpperCase()]
-        if (!coinId) {
-          return { success: false, message: `Unknown crypto symbol: ${symbol}` }
-        }
-
-        const response = await ctx.http.fetch(
-          `${COINGECKO_API}/simple/price?ids=${coinId}&vs_currencies=${currency}&include_24hr_change=true`
-        )
-        const data = await response.json()
-        const price = data[coinId]
-
-        return {
-          success: true,
-          symbol: symbol.toUpperCase(),
-          price: price[currency],
-          change24h: price[`${currency}_24h_change`],
-          currency: currency.toUpperCase(),
-          message: `${symbol.toUpperCase()} is at ${price[currency]} ${currency.toUpperCase()} (${price[`${currency}_24h_change`]?.toFixed(2)}% 24h)`,
-        }
-      },
-    })
-  )
-
   // Cache prices on dashboard load
   ctx.hooks.on('onDashboardLoad', async () => {
     try {

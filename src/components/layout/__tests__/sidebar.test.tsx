@@ -14,6 +14,7 @@ const mockToggleSidebar = vi.fn()
 let mockSidebarCollapsed = false
 
 vi.mock('react-router', () => ({
+  useLocation: () => ({ pathname: '/' }),
   NavLink: ({
     children,
     to,
@@ -60,10 +61,9 @@ describe('Sidebar', () => {
     expect(screen.getByText('nav.transactions')).toBeInTheDocument()
     expect(screen.getByText('nav.accounts')).toBeInTheDocument()
     expect(screen.getByText('nav.budgets')).toBeInTheDocument()
-    expect(screen.getByText('nav.bills')).toBeInTheDocument()
-    expect(screen.getByText('nav.reports')).toBeInTheDocument()
+    expect(screen.getByText('nav.goals')).toBeInTheDocument()
+    expect(screen.getByText('nav.insights')).toBeInTheDocument()
     expect(screen.getByText('nav.settings')).toBeInTheDocument()
-    expect(screen.getByText('nav.extensions')).toBeInTheDocument()
   })
 
   it('collapsed: hides brand text and nav labels', () => {
@@ -79,8 +79,7 @@ describe('Sidebar', () => {
     render(<Sidebar />)
 
     const links = screen.getAllByRole('link')
-    // 7 main nav items + 10 advanced nav items
-    expect(links.length).toBe(17)
+    expect(links.length).toBe(7)
   })
 
   it('collapse button calls toggleSidebar', async () => {
@@ -101,11 +100,11 @@ describe('Sidebar', () => {
     expect(settingsLink).toHaveAttribute('href', '/settings')
   })
 
-  it('Extensions link points to /extensions', () => {
+  it('Insights link points to /insights', () => {
     render(<Sidebar />)
 
-    const extensionsLink = screen.getByText('nav.extensions').closest('a')
-    expect(extensionsLink).toHaveAttribute('href', '/extensions')
+    const insightsLink = screen.getByText('nav.insights').closest('a')
+    expect(insightsLink).toHaveAttribute('href', '/insights')
   })
 
   describe('accessibility', () => {

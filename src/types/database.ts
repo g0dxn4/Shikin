@@ -9,8 +9,6 @@ import type {
   BillingCycle,
   BudgetPeriod,
   InvestmentType,
-  MessageRole,
-  MemoryCategory,
   RecurringFrequency,
 } from './common'
 
@@ -142,35 +140,6 @@ export interface StockPrice {
   currency: CurrencyCode
   date: DateStr
   created_at: DateTimeStr
-}
-
-export interface AIConversation {
-  id: ULID
-  title: string
-  model: string | null
-  summary: string | null
-  created_at: DateTimeStr
-  updated_at: DateTimeStr
-}
-
-export interface AIMessage {
-  id: ULID
-  conversation_id: ULID
-  role: MessageRole
-  content: string
-  tool_calls: string | null
-  tool_result: string | null
-  created_at: DateTimeStr
-}
-
-export interface AIMemory {
-  id: ULID
-  category: MemoryCategory
-  content: string
-  importance: number
-  last_accessed_at: DateTimeStr
-  created_at: DateTimeStr
-  updated_at: DateTimeStr
 }
 
 export interface RecurringRule {

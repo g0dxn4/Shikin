@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { GoalDialog } from '../goal-dialog'
 
@@ -70,8 +70,13 @@ describe('GoalDialog', () => {
   })
 
   it('prevents dialog closure while mutation is in flight', async () => {
-    // Create a delayed promise so isLoading stays true
-    mockAdd.mockImplementation(() => new Promise(() => {}))
+    let resolveAdd: () => void = () => {}
+    mockAdd.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveAdd = resolve
+        })
+    )
 
     render(<GoalDialog />)
 
@@ -88,6 +93,10 @@ describe('GoalDialog', () => {
 
     // Verify close was NOT called while loading
     expect(mockCloseGoalDialog).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveAdd()
+    })
   })
 
   it('asks before closing when the form has unsaved changes', async () => {
@@ -101,7 +110,9 @@ describe('GoalDialog', () => {
     expect(screen.getByTestId('discard-confirm')).toBeInTheDocument()
     expect(mockCloseGoalDialog).not.toHaveBeenCalled()
 
-    screen.getByText('Discard').click()
+    await act(async () => {
+      screen.getByText('Discard').click()
+    })
 
     expect(mockCloseGoalDialog).toHaveBeenCalled()
   })

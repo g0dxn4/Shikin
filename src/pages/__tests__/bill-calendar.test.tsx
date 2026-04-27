@@ -55,7 +55,7 @@ describe('BillCalendar', () => {
     expect(screen.getByRole('button', { name: 'prevMonth' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'nextMonth' })).toBeInTheDocument()
     expect(screen.getByRole('grid')).toBeInTheDocument()
-    expect(screen.getByText('Rent')).toBeInTheDocument()
+    expect(screen.getAllByText('Rent').length).toBeGreaterThan(0)
   })
 
   it('navigates to previous and next months', async () => {

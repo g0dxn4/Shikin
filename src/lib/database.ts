@@ -66,15 +66,6 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
       applied.add('001_core_tables')
     }
   }
-  if (!applied.has('002_ai_memories')) {
-    const tables = await db.select<{ name: string }[]>(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='ai_memories'"
-    )
-    if (tables.length > 0) {
-      await db.execute("INSERT OR IGNORE INTO _migrations (id, name) VALUES (2, '002_ai_memories')")
-      applied.add('002_ai_memories')
-    }
-  }
   if (!applied.has('003_credit_cards')) {
     // Credit cards migration adds columns, not tables. Mark as done if accounts exists
     // (the Rust side handles it)
@@ -225,35 +216,6 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
     await db.execute(`CREATE INDEX IF NOT EXISTS idx_recaps_type ON recaps(type)`)
     await db.execute(`CREATE INDEX IF NOT EXISTS idx_recaps_generated ON recaps(generated_at)`)
     await db.execute("INSERT INTO _migrations (id, name) VALUES (7, '007_recaps')")
-  }
-
-  // --- Migration 008: AI Memories FTS5 ---
-  if (!applied.has('008_ai_memories_fts')) {
-    try {
-      await db.execute(`
-        CREATE VIRTUAL TABLE IF NOT EXISTS ai_memories_fts USING fts5(content, content=ai_memories, content_rowid=rowid)
-      `)
-      await db.execute(`INSERT INTO ai_memories_fts(ai_memories_fts) VALUES('rebuild')`)
-      await db.execute(`
-        CREATE TRIGGER IF NOT EXISTS ai_memories_ai AFTER INSERT ON ai_memories BEGIN
-          INSERT INTO ai_memories_fts(rowid, content) VALUES (new.rowid, new.content);
-        END
-      `)
-      await db.execute(`
-        CREATE TRIGGER IF NOT EXISTS ai_memories_ad AFTER DELETE ON ai_memories BEGIN
-          INSERT INTO ai_memories_fts(ai_memories_fts, rowid, content) VALUES('delete', old.rowid, old.content);
-        END
-      `)
-      await db.execute(`
-        CREATE TRIGGER IF NOT EXISTS ai_memories_au AFTER UPDATE ON ai_memories BEGIN
-          INSERT INTO ai_memories_fts(ai_memories_fts, rowid, content) VALUES('delete', old.rowid, old.content);
-          INSERT INTO ai_memories_fts(rowid, content) VALUES (new.rowid, new.content);
-        END
-      `)
-      await db.execute("INSERT INTO _migrations (id, name) VALUES (8, '008_ai_memories_fts')")
-    } catch (err) {
-      console.warn('[database] FTS5 migration failed (may not be supported):', err)
-    }
   }
 
   // --- Migration 010: Transaction Splits ---

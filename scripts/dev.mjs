@@ -40,7 +40,6 @@ const sharedEnv = {
 }
 
 const children = [
-  spawn('node', ['scripts/oauth-server.mjs'], { stdio: 'inherit', env: sharedEnv }),
   spawn('node', ['scripts/data-server.mjs'], { stdio: 'inherit', env: sharedEnv }),
   spawn('pnpm', ['exec', 'vite'], { stdio: 'inherit', env: sharedEnv }),
 ]

@@ -211,32 +211,6 @@ Historical price data for investment tracking.
 
 **Unique constraint:** `(symbol, date)` -- one price per symbol per day.
 
-### ai_conversations
-
-Chat conversation threads with the AI assistant.
-
-| Column       | Type | Constraints                          | Description                      |
-| ------------ | ---- | ------------------------------------ | -------------------------------- |
-| `id`         | TEXT | PRIMARY KEY                          | ULID                             |
-| `title`      | TEXT | NOT NULL, DEFAULT 'New Conversation' | Conversation title               |
-| `model`      | TEXT | nullable                             | Model used (e.g., "gpt-4o-mini") |
-| `created_at` | TEXT | NOT NULL, auto                       | ISO 8601 timestamp               |
-| `updated_at` | TEXT | NOT NULL, auto                       | ISO 8601 timestamp               |
-
-### ai_messages
-
-Individual messages within a conversation.
-
-| Column            | Type | Constraints                                            | Description                                   |
-| ----------------- | ---- | ------------------------------------------------------ | --------------------------------------------- |
-| `id`              | TEXT | PRIMARY KEY                                            | ULID                                          |
-| `conversation_id` | TEXT | NOT NULL, FK -> ai_conversations(id) ON DELETE CASCADE | Parent conversation                           |
-| `role`            | TEXT | NOT NULL, CHECK                                        | One of: `user`, `assistant`, `system`, `tool` |
-| `content`         | TEXT | NOT NULL                                               | Message text                                  |
-| `tool_calls`      | TEXT | nullable                                               | JSON-serialized tool call data                |
-| `tool_result`     | TEXT | nullable                                               | JSON-serialized tool result                   |
-| `created_at`      | TEXT | NOT NULL, auto                                         | ISO 8601 timestamp                            |
-
 ### exchange_rates
 
 Currency exchange rates for multi-currency support.
@@ -254,7 +228,7 @@ Currency exchange rates for multi-currency support.
 
 ### settings
 
-Key-value store for application preferences stored in SQLite (separate from browser-local settings storage used for AI/API configuration).
+Key-value store for application preferences stored in SQLite (separate from browser-local settings storage used for app and API configuration).
 
 | Column       | Type | Constraints    | Description                 |
 | ------------ | ---- | -------------- | --------------------------- |
@@ -276,20 +250,6 @@ Generic key-value storage for extensions. Each extension gets its own namespace.
 | `updated_at`   | TEXT | NOT NULL, auto | ISO 8601 timestamp          |
 
 **Unique constraint:** `(extension_id, key)` -- one value per key per extension.
-
-### ai_memories
-
-MemGPT-inspired persistent memory for the AI assistant.
-
-| Column             | Type    | Constraints     | Description                                                 |
-| ------------------ | ------- | --------------- | ----------------------------------------------------------- |
-| `id`               | TEXT    | PRIMARY KEY     | ULID                                                        |
-| `category`         | TEXT    | NOT NULL, CHECK | One of: `preference`, `fact`, `goal`, `behavior`, `context` |
-| `content`          | TEXT    | NOT NULL        | Memory content                                              |
-| `importance`       | INTEGER | NOT NULL, CHECK | 1-10 importance scale                                       |
-| `last_accessed_at` | TEXT    | NOT NULL, auto  | Last time this memory was accessed                          |
-| `created_at`       | TEXT    | NOT NULL, auto  | ISO 8601 timestamp                                          |
-| `updated_at`       | TEXT    | NOT NULL, auto  | ISO 8601 timestamp                                          |
 
 ### category_rules
 
@@ -395,10 +355,8 @@ The migration creates these indexes for query performance:
 | `idx_investments_account`             | investments        | account_id                 | Filter investments by account     |
 | `idx_investments_symbol`              | investments        | symbol                     | Look up holdings by ticker        |
 | `idx_stock_prices_symbol_date`        | stock_prices       | symbol, date               | Price lookup by symbol and date   |
-| `idx_ai_messages_conversation`        | ai_messages        | conversation_id            | List messages in a conversation   |
 | `idx_exchange_rates_currencies`       | exchange_rates     | from_currency, to_currency | Rate lookup by currency pair      |
 | `idx_extension_data_extension`        | extension_data     | extension_id               | List data for an extension        |
-| `idx_ai_memories_category`            | ai_memories        | category                   | Filter memories by category       |
 | `idx_category_rules_pattern_category` | category_rules     | pattern, category_id       | Unique rule lookup                |
 | `idx_category_rules_pattern`          | category_rules     | pattern                    | Pattern matching                  |
 | `idx_recurring_rules_next_date`       | recurring_rules    | next_date                  | Due rule materialization          |
@@ -488,7 +446,6 @@ erDiagram
     categories ||--o{ budgets : "limits"
     subcategories ||--o{ transactions : "classifies"
     budgets ||--o{ budget_periods : "tracks"
-    ai_conversations ||--o{ ai_messages : "contains"
     investments }o--|| stock_prices : "priced by"
 
     accounts {
@@ -559,19 +516,6 @@ erDiagram
         TEXT symbol
         INTEGER price
         TEXT date
-    }
-
-    ai_conversations {
-        TEXT id PK
-        TEXT title
-        TEXT model
-    }
-
-    ai_messages {
-        TEXT id PK
-        TEXT conversation_id FK
-        TEXT role
-        TEXT content
     }
 
     exchange_rates {

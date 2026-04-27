@@ -1,7 +1,7 @@
 {
   "name": "@shikin/cli",
   "version": "0.2.5",
-  "description": "Shikin CLI and MCP server — control your finances from any AI",
+  "description": "Shikin CLI and MCP server for local finance automation",
   "type": "module",
   "bin": {
     "shikin": "./dist/cli.js",

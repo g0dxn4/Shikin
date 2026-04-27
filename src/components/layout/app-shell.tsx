@@ -5,16 +5,8 @@ import {
   ArrowLeftRight,
   Landmark,
   PiggyBank,
-  Receipt,
   BarChart3,
   Settings,
-  Puzzle,
-  TrendingUp,
-  Repeat,
-  CreditCard,
-  LineChart,
-  Brain,
-  Flame,
   Sparkles,
 } from 'lucide-react'
 import { Sidebar } from './sidebar'
@@ -23,24 +15,30 @@ import { LoadingSpinner } from '@/components/ui/loading-spinner'
 
 const mobilePrimaryNavItems = [
   { icon: <LayoutDashboard size={20} />, label: 'Dashboard', href: '/' },
-  { icon: <ArrowLeftRight size={20} />, label: 'Transactions', href: '/transactions' },
-  { icon: <Landmark size={20} />, label: 'Accounts', href: '/accounts' },
-  { icon: <PiggyBank size={20} />, label: 'Budgets', href: '/budgets' },
+  {
+    icon: <ArrowLeftRight size={20} />,
+    label: 'Transactions',
+    href: '/transactions',
+    activeHrefs: ['/bills'],
+  },
+  {
+    icon: <Landmark size={20} />,
+    label: 'Accounts',
+    href: '/accounts',
+    activeHrefs: ['/investments'],
+  },
+  {
+    icon: <BarChart3 size={20} />,
+    label: 'Insights',
+    href: '/insights',
+    activeHrefs: ['/reports', '/forecast', '/net-worth', '/spending-insights', '/spending-heatmap'],
+  },
 ]
 
 const mobileMoreNavItems = [
-  { icon: <Receipt size={20} />, label: 'Bills', href: '/bills' },
-  { icon: <BarChart3 size={20} />, label: 'Reports', href: '/reports' },
-  { icon: <TrendingUp size={20} />, label: 'Investments', href: '/investments' },
-  { icon: <Repeat size={20} />, label: 'Subscriptions', href: '/subscriptions' },
-  { icon: <CreditCard size={20} />, label: 'Debt Payoff', href: '/debt-payoff' },
-  { icon: <LineChart size={20} />, label: 'Forecast', href: '/forecast' },
-  { icon: <Landmark size={20} />, label: 'Net Worth', href: '/net-worth' },
-  { icon: <Sparkles size={20} />, label: 'Insights', href: '/spending-insights' },
-  { icon: <Flame size={20} />, label: 'Heatmap', href: '/spending-heatmap' },
-  { icon: <Brain size={20} />, label: 'Memories', href: '/memories' },
+  { icon: <PiggyBank size={20} />, label: 'Budgets', href: '/budgets' },
+  { icon: <Sparkles size={20} />, label: 'Goals', href: '/goals', activeHrefs: ['/debt-payoff'] },
   { icon: <Settings size={20} />, label: 'Settings', href: '/settings' },
-  { icon: <Puzzle size={20} />, label: 'Extensions', href: '/extensions' },
 ]
 
 const AccountDialog = lazy(() =>

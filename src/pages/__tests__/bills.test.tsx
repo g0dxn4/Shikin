@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
 import { BillsPage } from '../bills'
 
 const recurringStoreMock = vi.hoisted(() => ({
@@ -49,7 +50,11 @@ vi.mock('@/stores/recurring-store', () => ({
 
 describe('BillsPage', () => {
   it('renders recurring bills from local rules', () => {
-    render(<BillsPage />)
+    render(
+      <MemoryRouter>
+        <BillsPage />
+      </MemoryRouter>
+    )
     expect(screen.getByText('bills.title')).toBeInTheDocument()
     expect(screen.getByText('Rent')).toBeInTheDocument()
     expect(screen.getByText('Housing · Checking')).toBeInTheDocument()

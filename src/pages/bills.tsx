@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router'
 import { CalendarClock, CheckCircle, Clock, Plus, Receipt, Repeat } from 'lucide-react'
 import dayjs from 'dayjs'
 import { Button } from '@/components/ui/button'
@@ -111,10 +112,10 @@ export function BillsPage() {
           </div>
         </div>
         <Button asChild className="w-full sm:w-auto">
-          <a href="/transactions">
+          <Link to="/transactions">
             <Plus size={16} aria-hidden="true" />
             {t('bills.addRecurring')}
-          </a>
+          </Link>
         </Button>
       </div>
 

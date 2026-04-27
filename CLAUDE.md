@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Local-first personal finance engine. Tauri v2 desktop app + browser-first React SPA. AI capabilities exposed via CLI and MCP server — no built-in AI chat.
+Local-first personal finance engine. Tauri v2 desktop app + browser-first React SPA. Automation capabilities exposed via CLI and MCP server — no built-in chat assistant.
 
 ## Architecture
 
@@ -26,7 +26,6 @@ shikin/
 ```bash
 pnpm install
 pnpm dev              # starts scripts/dev.mjs orchestration:
-                      # - OAuth callback server on 127.0.0.1:1455
                       # - browser data-server on 127.0.0.1:1480
                       # - Vite on 1420
                       # per-run bridge token is injected into SHIKIN_DATA_SERVER_BRIDGE_TOKEN / VITE_DATA_SERVER_BRIDGE_TOKEN
@@ -64,7 +63,7 @@ npx tsx src/mcp-server.ts
 
 ### 44 Tool Definitions
 
-Transaction, Account, Category, Analytics, Budget, Goal, Subscription, Investment, Recurring, Memory, Notebook, Intelligence, Debt, Currency tools — 42 available end-to-end, plus 2 compatibility placeholders for external-feed features.
+Transaction, Account, Category, Analytics, Budget, Goal, Subscription, Investment, Recurring, Notebook, Intelligence, Debt, Currency tools — available end-to-end, plus compatibility placeholders for external-feed features.
 
 ## Building & Installing
 

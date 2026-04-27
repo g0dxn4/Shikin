@@ -5,6 +5,12 @@ import { Button } from '@/components/ui/button'
 import { formatMoney } from '@/lib/money'
 import { useRecurringStore } from '@/stores/recurring-store'
 
+function toDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate()
+  ).padStart(2, '0')}`
+}
+
 export function BillCalendar() {
   const { t } = useTranslation('billCalendar')
   const [monthOffset, setMonthOffset] = useState(0)
@@ -21,11 +27,10 @@ export function BillCalendar() {
   const totalDays = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate()
   const today = monthOffset === 0 ? now.getDate() : null
   const monthKey = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}`
+  const todayKey = toDateKey(now)
   const scheduledBills = rules.filter((rule) => rule.active === 1 && rule.type === 'expense')
   const monthBills = scheduledBills.filter((rule) => rule.next_date.startsWith(monthKey))
-  const remainingBills = monthBills.filter(
-    (rule) => new Date(rule.next_date) >= new Date(now.toDateString())
-  )
+  const remainingBills = monthBills.filter((rule) => rule.next_date >= todayKey)
   const monthTotal = monthBills.reduce((total, rule) => total + rule.amount, 0)
 
   const dayHeaders = [
@@ -124,15 +129,16 @@ export function BillCalendar() {
                   )}
                   {billsForDay.length > 0 && (
                     <div
-                      className="mt-auto flex w-full flex-wrap gap-1"
+                      className="mt-auto flex w-full flex-col gap-1 overflow-hidden"
                       aria-label={t('scheduledCount', { count: billsForDay.length })}
                     >
                       {billsForDay.slice(0, 3).map((bill) => (
                         <span
                           key={bill.id}
-                          className="bg-accent h-1.5 w-1.5 rounded-full"
-                          style={{ backgroundColor: bill.category_color ?? 'var(--accent)' }}
-                        />
+                          className="text-foreground truncate rounded-full border border-white/[0.08] bg-white/[0.05] px-1.5 py-0.5 text-[10px] leading-none"
+                        >
+                          {bill.description}
+                        </span>
                       ))}
                     </div>
                   )}

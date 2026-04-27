@@ -21,25 +21,24 @@ Current baseline (Mar 2026): Shikin has moved to a browser-first runtime using `
 
 **Goal:** Establish the foundation -- build system, database, component library, and development workflow.
 
-| Task                                                                              | Status | Notes                                                          |
-| --------------------------------------------------------------------------------- | ------ | -------------------------------------------------------------- |
-| Initialize React 19 + TypeScript project foundation                               | Done   | Vite 6 with HMR                                                |
-| Configure Tailwind CSS v4 with custom dark theme                                  | Done   | Glassmorphism design                                           |
-| Install and configure shadcn/ui component library                                 | Done   | 13 components installed                                        |
-| Set up ESLint + Prettier with zero-warning policy                                 | Done   | Tailwind plugin for class sorting                              |
-| Set up Vitest + Testing Library                                                   | Done   | jsdom environment                                              |
-| Create SQLite schema (migrations 001-003)                                         | Done   | 16 tables, 12 indexes, 15 seed categories, credit card fields  |
-| Implement database access layer (`query`, `execute`)                              | Done   | Singleton connection, typed wrappers                           |
-| Implement money utilities (centavo conversion)                                    | Done   | `toCentavos`, `fromCentavos`, `formatMoney`                    |
-| Implement ULID generation                                                         | Done   | `ulidx` library                                                |
-| Set up Zustand stores (UI, AI, accounts, transactions, categories, conversations) | Done   | 6 stores                                                       |
-| Set up i18n with English and Spanish                                              | Done   | 6 namespaces per language                                      |
-| Create AppShell layout (Sidebar + Main + AI Panel)                                | Done   | Collapsible sidebar, sliding AI panel                          |
-| Configure provider-safe outbound AI configuration                                 | Done   | OpenAI, Anthropic, OpenRouter, Ollama and others               |
-| Set up local settings persistence                                                 | Done   | Stored locally through browser storage layer                   |
-| Set up code splitting with React.lazy                                             | Done   | All pages lazy-loaded                                          |
-| Implement manual chunk splitting in Vite                                          | Done   | vendor-react, vendor-ui, vendor-forms, vendor-utils            |
-| Set up CI pipeline                                                                | Done   | GitHub Actions: lint, typecheck, test, build, e2e (Playwright) |
+| Task                                                           | Status | Notes                                                          |
+| -------------------------------------------------------------- | ------ | -------------------------------------------------------------- |
+| Initialize React 19 + TypeScript project foundation            | Done   | Vite 6 with HMR                                                |
+| Configure Tailwind CSS v4 with custom dark theme               | Done   | Glassmorphism design                                           |
+| Install and configure shadcn/ui component library              | Done   | 13 components installed                                        |
+| Set up ESLint + Prettier with zero-warning policy              | Done   | Tailwind plugin for class sorting                              |
+| Set up Vitest + Testing Library                                | Done   | jsdom environment                                              |
+| Create SQLite schema (migrations 001-003)                      | Done   | 16 tables, 12 indexes, 15 seed categories, credit card fields  |
+| Implement database access layer (`query`, `execute`)           | Done   | Singleton connection, typed wrappers                           |
+| Implement money utilities (centavo conversion)                 | Done   | `toCentavos`, `fromCentavos`, `formatMoney`                    |
+| Implement ULID generation                                      | Done   | `ulidx` library                                                |
+| Set up Zustand stores (UI, accounts, transactions, categories) | Done   | Core stores                                                    |
+| Set up i18n with English and Spanish                           | Done   | 6 namespaces per language                                      |
+| Create AppShell layout (Sidebar + Main)                        | Done   | Collapsible sidebar and responsive bottom nav                  |
+| Set up local settings persistence                              | Done   | Stored locally through browser storage layer                   |
+| Set up code splitting with React.lazy                          | Done   | All pages lazy-loaded                                          |
+| Implement manual chunk splitting in Vite                       | Done   | vendor-react, vendor-ui, vendor-forms, vendor-utils            |
+| Set up CI pipeline                                             | Done   | GitHub Actions: lint, typecheck, test, build, e2e (Playwright) |
 
 **Dependencies:** None -- this is the foundation.
 
@@ -78,7 +77,7 @@ Current baseline (Mar 2026): Shikin has moved to a browser-first runtime using `
 | Account editing                 | Done    | Name, type, balance, credit card settings                           |
 | Account archival (soft delete)  | Done    | Delete with confirmation dialog                                     |
 | Credit card balance tracking    | Done    | Migration 003: credit_limit, statement_closing_day, payment_due_day |
-| Net worth calculation           | Done    | `getNetWorth` AI tool (assets minus liabilities)                    |
+| Net worth calculation           | Done    | Assets minus liabilities                                            |
 | Account balance history chart   | Planned | Recharts line chart                                                 |
 | Transfer between accounts       | Planned | Linked transaction pair                                             |
 | Account-scoped transaction view | Planned | Filter transactions by account                                      |
@@ -92,63 +91,36 @@ Current baseline (Mar 2026): Shikin has moved to a browser-first runtime using `
 
 **Goal:** Create and track budgets by category with period-based spending monitoring.
 
-| Task                                                                | Status  | Notes                                            |
-| ------------------------------------------------------------------- | ------- | ------------------------------------------------ |
-| Budget AI tools (`createBudget`, `getBudgetStatus`, `deleteBudget`) | Done    | Full CRUD via AI chat                            |
-| Budget list page                                                    | Planned | Progress bars showing spent vs. limit            |
-| Budget creation form                                                | Planned | Category, amount, period                         |
-| Budget editing and deletion                                         | Planned | Adjustable limits                                |
-| Automatic period tracking                                           | Planned | Create budget_period records per week/month/year |
-| Budget status calculations                                          | Planned | Spent, remaining, percentage                     |
-| Budget alerts at 80% and 100% thresholds                            | Planned | Toast notifications                              |
-| Budget vs. actual comparison chart                                  | Planned | Recharts bar chart                               |
-| Rollover budgets                                                    | Future  | Carry unused amount to next period               |
-| Budget templates                                                    | Future  | Quick-create common budget sets                  |
+| Task                                                             | Status  | Notes                                            |
+| ---------------------------------------------------------------- | ------- | ------------------------------------------------ |
+| Budget tools (`createBudget`, `getBudgetStatus`, `deleteBudget`) | Done    | Full CRUD via CLI/MCP                            |
+| Budget list page                                                 | Planned | Progress bars showing spent vs. limit            |
+| Budget creation form                                             | Planned | Category, amount, period                         |
+| Budget editing and deletion                                      | Planned | Adjustable limits                                |
+| Automatic period tracking                                        | Planned | Create budget_period records per week/month/year |
+| Budget status calculations                                       | Planned | Spent, remaining, percentage                     |
+| Budget alerts at 80% and 100% thresholds                         | Planned | Toast notifications                              |
+| Budget vs. actual comparison chart                               | Planned | Recharts bar chart                               |
+| Rollover budgets                                                 | Future  | Carry unused amount to next period               |
+| Budget templates                                                 | Future  | Quick-create common budget sets                  |
 
 **Dependencies:** Epic 2 (needs transaction data to calculate spending).
 
 ---
 
-## Epic 5: AI Assistant Enhancement
+## Epic 5: CLI and MCP Automation
 
-**Goal:** Expand Ivy's capabilities beyond basic transaction management to comprehensive financial intelligence.
+**Goal:** Keep local finance operations scriptable through the shared CLI/MCP tool catalog without an in-app assistant.
 
-| Task                                              | Status  | Notes                                                               |
-| ------------------------------------------------- | ------- | ------------------------------------------------------------------- |
-| `addTransaction` tool                             | Done    | Full implementation with category matching                          |
-| `getSpendingSummary` tool                         | Done    | Period-based spending breakdown                                     |
-| `updateTransaction` tool                          | Done    | Modify existing transactions                                        |
-| `deleteTransaction` tool                          | Done    | Delete with balance reversal                                        |
-| `queryTransactions` tool                          | Done    | Filtered transaction search                                         |
-| `listAccounts` tool                               | Done    | All accounts with balances                                          |
-| `createAccount` tool                              | Done    | Create accounts via chat                                            |
-| `updateAccount` tool                              | Done    | Modify account details                                              |
-| `deleteAccount` tool                              | Done    | Delete accounts via chat                                            |
-| `listCategories` tool                             | Done    | Expense/income category listing                                     |
-| `getBalanceOverview` tool                         | Done    | Balance with month-over-month trends                                |
-| `analyzeSpendingTrends` tool                      | Done    | Spending by category over months                                    |
-| `getCreditCardStatus` tool                        | Done    | Credit card utilization and payment dates                           |
-| `getNetWorth` tool                                | Done    | Total net worth across all accounts and investments                 |
-| `getUpcomingBills` tool                           | Done    | Upcoming bills from credit cards, subscriptions, recurring expenses |
-| `createBudget` tool                               | Done    | Budget creation via chat                                            |
-| `getBudgetStatus` tool                            | Done    | Budget progress check                                               |
-| `deleteBudget` tool                               | Done    | Budget deletion via chat                                            |
-| `listSubscriptions` tool                          | Done    | List subscriptions from Subby                                       |
-| `getSubscriptionSpending` tool                    | Done    | Calculate subscription costs                                        |
-| `manageInvestment` tool                           | Done    | Add/update/delete investment holdings                               |
-| `saveMemory` tool                                 | Done    | Persist user preferences and context                                |
-| `recallMemories` tool                             | Done    | Retrieve stored memories by category                                |
-| `forgetMemory` tool                               | Done    | Delete specific memories                                            |
-| Memory system (MemGPT-inspired persistent memory) | Done    | Categories, importance levels, auto-injection                       |
-| Conversation persistence to SQLite                | Done    | Save/load chat history                                              |
-| Multiple conversation threads                     | Done    | Conversation list in AI panel                                       |
-| Conversation title auto-generation                | Done    | LLM-generated titles from first message                             |
-| Conversation compaction                           | Done    | Auto-summarize at 30+ messages, keep recent 10                      |
-| OpenRouter provider support                       | Done    | Additional model provider option                                    |
-| Tool call visualization in chat UI                | Planned | Show what tools Ivy is using                                        |
-| Streaming markdown rendering                      | Planned | Render tables, lists, bold text                                     |
-| Context window management                         | Future  | Advanced context strategies beyond compaction                       |
-| Multi-model comparison                            | Future  | Send same query to multiple models                                  |
+| Task                           | Status | Notes                                               |
+| ------------------------------ | ------ | --------------------------------------------------- |
+| Transaction tools              | Done   | Add, update, delete, and query transactions         |
+| Account tools                  | Done   | List, create, update, and delete accounts           |
+| Analytics tools                | Done   | Spending summaries, trends, balance, net worth      |
+| Budget tools                   | Done   | Create, inspect, and delete budgets                 |
+| Investment tools               | Done   | Add/update/delete investment holdings               |
+| Recurring and subscription API | Done   | Upcoming bills and recurring payment automation     |
+| MCP server                     | Done   | Exposes the shared tool catalog to external clients |
 
 **Dependencies:** Epic 1 (done). Tool implementations depend on their respective feature epics.
 
@@ -160,8 +132,8 @@ Current baseline (Mar 2026): Shikin has moved to a browser-first runtime using `
 
 | Task                                 | Status  | Notes                                    |
 | ------------------------------------ | ------- | ---------------------------------------- |
-| `manageInvestment` AI tool           | Done    | Add/update/delete holdings via chat      |
-| `getNetWorth` AI tool                | Done    | Portfolio value in net worth calculation |
+| `manageInvestment` tool              | Done    | Add/update/delete holdings               |
+| `getNetWorth` tool                   | Done    | Portfolio value in net worth calculation |
 | Investments list page                | Planned | Holdings with current values             |
 | Investment creation form             | Planned | Symbol, shares, cost basis               |
 | Stock price fetching (Alpha Vantage) | Planned | Daily EOD prices                         |
@@ -174,7 +146,7 @@ Current baseline (Mar 2026): Shikin has moved to a browser-first runtime using `
 | Multiple price provider support      | Future  | Finnhub, Twelve Data, Yahoo Finance      |
 | Mexican market support (BMV)         | Future  | `.MX` suffix tickers                     |
 | Crypto price integration (CoinGecko) | Future  | Extension or built-in                    |
-| Rebalancing suggestions              | Future  | AI-powered allocation advice             |
+| Rebalancing suggestions              | Future  | Rule-based allocation guidance           |
 
 **Dependencies:** Epic 3 (investment accounts).
 
@@ -207,8 +179,8 @@ Current baseline (Mar 2026): Shikin has moved to a browser-first runtime using `
 
 | Task                                    | Status  | Notes                                     |
 | --------------------------------------- | ------- | ----------------------------------------- |
-| `listSubscriptions` AI tool             | Done    | List subscriptions from Subby integration |
-| `getSubscriptionSpending` AI tool       | Done    | Calculate subscription costs              |
+| `listSubscriptions` tool                | Done    | List subscriptions from Subby integration |
+| `getSubscriptionSpending` tool          | Done    | Calculate subscription costs              |
 | Subscription list page                  | Planned | Active and cancelled tabs                 |
 | Subscription creation form              | Planned | Name, amount, billing cycle, next date    |
 | Subscription editing and cancellation   | Planned | Soft cancel (is_active = 0)               |
@@ -225,7 +197,7 @@ Current baseline (Mar 2026): Shikin has moved to a browser-first runtime using `
 
 ## Epic 9: Extension System
 
-**Goal:** A plugin architecture allowing community developers to extend Shikin with new features, AI tools, and UI components.
+**Goal:** A plugin architecture allowing community developers to extend Shikin with new features, automations, and UI components.
 
 | Task                                      | Status  | Notes                                     |
 | ----------------------------------------- | ------- | ----------------------------------------- |
@@ -233,11 +205,10 @@ Current baseline (Mar 2026): Shikin has moved to a browser-first runtime using `
 | Extension directory scanning and loading  | Planned | `~/.shikin/extensions/`                   |
 | Manifest validation                       | Planned | Required fields, version checks           |
 | Permission model and user approval flow   | Planned | Low/medium/high risk levels               |
-| ExtensionContext API implementation       | Planned | data, db, hooks, ai, ui, http             |
+| ExtensionContext API implementation       | Planned | data, db, hooks, ui, http                 |
 | Sandboxed database access (`ctx.db`)      | Planned | Permission-gated structured queries       |
 | Sandboxed HTTP access (`ctx.http`)        | Planned | Domain-restricted fetch                   |
 | Hook registry and event dispatch          | Planned | beforeTransaction, afterTransaction, etc. |
-| AI tool registration from extensions      | Planned | Dynamic tool registry                     |
 | Dashboard widget rendering                | Planned | Extension-provided React components       |
 | Settings panel rendering                  | Planned | Extension configuration UI                |
 | Extension settings page in Shikin         | Planned | List, enable, disable, remove extensions  |
@@ -253,26 +224,26 @@ Current baseline (Mar 2026): Shikin has moved to a browser-first runtime using `
 
 **Goal:** Production-quality UX, performance optimization, accessibility, and release distribution.
 
-| Task                                      | Status  | Notes                                            |
-| ----------------------------------------- | ------- | ------------------------------------------------ |
-| Keyboard shortcuts                        | Planned | Global shortcuts for common actions              |
-| Keyboard navigation (full app)            | Planned | Tab, arrow keys, Enter                           |
-| ARIA attributes and screen reader support | Planned | shadcn/ui provides a good base                   |
-| Loading states and skeletons              | Planned | Suspense boundaries, skeleton components         |
-| Error states and empty states             | Planned | Per-page error/empty illustrations               |
-| Onboarding flow (first-run wizard)        | Planned | Create first account, set currency, configure AI |
-| Animation and transitions                 | Planned | Page transitions, panel animations               |
-| Performance profiling                     | Planned | React DevTools, Lighthouse                       |
-| Database query optimization               | Planned | Add indexes as needed, batch queries             |
-| Bundle size optimization                  | Planned | Tree-shaking audit, lazy imports                 |
-| Automated E2E tests                       | Done    | 91 Playwright e2e tests (desktop + mobile)       |
-| macOS notarization                        | Planned | Code signing for distribution                    |
-| Windows code signing                      | Planned | Certificate for installer                        |
-| Linux packaging (.deb, .AppImage)         | Done    | Built via GitHub Actions release workflow        |
-| Auto-update system                        | Done    | Tauri updater plugin, checks GitHub Releases     |
-| Crash reporting (opt-in)                  | Future  | Local error logs with optional telemetry         |
-| User documentation / help pages           | Future  | In-app help or external docs site                |
-| Marketing site                            | Future  | Landing page with features and download links    |
+| Task                                      | Status  | Notes                                         |
+| ----------------------------------------- | ------- | --------------------------------------------- |
+| Keyboard shortcuts                        | Planned | Global shortcuts for common actions           |
+| Keyboard navigation (full app)            | Planned | Tab, arrow keys, Enter                        |
+| ARIA attributes and screen reader support | Planned | shadcn/ui provides a good base                |
+| Loading states and skeletons              | Planned | Suspense boundaries, skeleton components      |
+| Error states and empty states             | Planned | Per-page error/empty illustrations            |
+| Onboarding flow (first-run wizard)        | Planned | Create first account and set currency         |
+| Animation and transitions                 | Planned | Page transitions, panel animations            |
+| Performance profiling                     | Planned | React DevTools, Lighthouse                    |
+| Database query optimization               | Planned | Add indexes as needed, batch queries          |
+| Bundle size optimization                  | Planned | Tree-shaking audit, lazy imports              |
+| Automated E2E tests                       | Done    | 91 Playwright e2e tests (desktop + mobile)    |
+| macOS notarization                        | Planned | Code signing for distribution                 |
+| Windows code signing                      | Planned | Certificate for installer                     |
+| Linux packaging (.deb, .AppImage)         | Done    | Built via GitHub Actions release workflow     |
+| Auto-update system                        | Done    | Tauri updater plugin, checks GitHub Releases  |
+| Crash reporting (opt-in)                  | Future  | Local error logs with optional telemetry      |
+| User documentation / help pages           | Future  | In-app help or external docs site             |
+| Marketing site                            | Future  | Landing page with features and download links |
 
 **Dependencies:** All previous epics.
 
@@ -280,16 +251,16 @@ Current baseline (Mar 2026): Shikin has moved to a browser-first runtime using `
 
 ## Release Plan
 
-| Version    | Target Epics   | Milestone                                |
-| ---------- | -------------- | ---------------------------------------- |
-| **v0.1.0** | Epic 1 (done)  | Project foundation, scaffolding, AI chat |
-| **v0.2.0** | Epic 2, Epic 3 | Transaction and account management       |
-| **v0.3.0** | Epic 4, Epic 5 | Budgets and expanded AI tools            |
-| **v0.4.0** | Epic 7         | Dashboard, reporting, and analytics      |
-| **v0.5.0** | Epic 6         | Investment portfolio tracking            |
-| **v0.6.0** | Epic 8         | Subscription management                  |
-| **v0.7.0** | Epic 9         | Extension system                         |
-| **v1.0.0** | Epic 10        | Polish, performance, public release      |
+| Version    | Target Epics   | Milestone                             |
+| ---------- | -------------- | ------------------------------------- |
+| **v0.1.0** | Epic 1 (done)  | Project foundation and scaffolding    |
+| **v0.2.0** | Epic 2, Epic 3 | Transaction and account management    |
+| **v0.3.0** | Epic 4, Epic 5 | Budgets and expanded automation tools |
+| **v0.4.0** | Epic 7         | Dashboard, reporting, and analytics   |
+| **v0.5.0** | Epic 6         | Investment portfolio tracking         |
+| **v0.6.0** | Epic 8         | Subscription management               |
+| **v0.7.0** | Epic 9         | Extension system                      |
+| **v1.0.0** | Epic 10        | Polish, performance, public release   |
 
 ---
 

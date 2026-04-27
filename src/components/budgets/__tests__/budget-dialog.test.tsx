@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { BudgetDialog } from '../budget-dialog'
 
@@ -82,8 +82,13 @@ describe('BudgetDialog', () => {
   })
 
   it('prevents dialog closure while mutation is in flight', async () => {
-    // Create a delayed promise so isLoading stays true
-    mockUpdate.mockImplementation(() => new Promise(() => {}))
+    let resolveUpdate: () => void = () => {}
+    mockUpdate.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveUpdate = resolve
+        })
+    )
 
     render(<BudgetDialog />)
 
@@ -99,6 +104,10 @@ describe('BudgetDialog', () => {
 
     // Verify close was NOT called while loading
     expect(mockCloseBudgetDialog).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveUpdate()
+    })
   })
 
   it('asks before closing when the form has unsaved changes', async () => {
@@ -112,7 +121,9 @@ describe('BudgetDialog', () => {
     expect(screen.getByTestId('discard-confirm')).toBeInTheDocument()
     expect(mockCloseBudgetDialog).not.toHaveBeenCalled()
 
-    screen.getByText('Discard').click()
+    await act(async () => {
+      screen.getByText('Discard').click()
+    })
 
     expect(mockCloseBudgetDialog).toHaveBeenCalled()
   })

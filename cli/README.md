@@ -106,11 +106,10 @@ The MCP server also exposes read-only resources:
 - `SHIKIN_DATA_SERVER_BRIDGE_TOKEN`: bridge token used by browser mode.
 - `SHIKIN_SERVER_TRANSACTION_TTL_MS`: override the browser data-server transaction lease timeout (default `15000`).
 - `SHIKIN_DATA_SERVER_MAX_JSON_BODY_BYTES`: override the data-server JSON request size limit.
-- `SHIKIN_DATA_SERVER_MAX_PROXY_BODY_BYTES`: override the ChatGPT proxy request size limit.
 - `SHIKIN_DATA_SERVER_MAX_DB_IMPORT_BYTES`: override the SQLite import payload size limit.
 
 ## Current Scope
 
 - CLI and MCP share the same 44-tool definition catalog in `cli/src/tools.ts`.
 - 42 tools are currently available end-to-end; 2 compatibility placeholders (`get-financial-news`, `get-congressional-trades`) return structured unavailable responses on both CLI and MCP surfaces.
-- The app does not ship a built-in AI chat UI; AI integrations connect through MCP or call the CLI directly.
+- The app does not ship a built-in chat assistant; external clients can connect through MCP or call the CLI directly.

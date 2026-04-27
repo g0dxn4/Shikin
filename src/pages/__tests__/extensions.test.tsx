@@ -12,7 +12,8 @@ vi.mock('react-i18next', () => ({
 describe('ExtensionsPage', () => {
   it('renders without crashing', () => {
     render(<ExtensionsPage />)
-    expect(screen.getAllByText('nav.extensions').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText('status.empty')).toBeInTheDocument()
+    expect(screen.getByText('extensions.title')).toBeInTheDocument()
+    expect(screen.getByText('extensions.items.csvImport.title')).toBeInTheDocument()
+    expect(screen.getByText('extensions.items.mcp.title')).toBeInTheDocument()
   })
 })

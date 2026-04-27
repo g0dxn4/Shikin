@@ -1,11 +1,18 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChevronLeft, ChevronRight, Calendar, CheckCircle, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { formatMoney } from '@/lib/money'
+import { useRecurringStore } from '@/stores/recurring-store'
 
 export function BillCalendar() {
   const { t } = useTranslation('billCalendar')
   const [monthOffset, setMonthOffset] = useState(0)
+  const { rules, fetch } = useRecurringStore()
+
+  useEffect(() => {
+    void fetch()
+  }, [fetch])
 
   const now = new Date()
   const currentMonth = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1)
@@ -13,6 +20,13 @@ export function BillCalendar() {
   const startDay = currentMonth.getDay()
   const totalDays = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate()
   const today = monthOffset === 0 ? now.getDate() : null
+  const monthKey = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}`
+  const scheduledBills = rules.filter((rule) => rule.active === 1 && rule.type === 'expense')
+  const monthBills = scheduledBills.filter((rule) => rule.next_date.startsWith(monthKey))
+  const remainingBills = monthBills.filter(
+    (rule) => new Date(rule.next_date) >= new Date(now.toDateString())
+  )
+  const monthTotal = monthBills.reduce((total, rule) => total + rule.amount, 0)
 
   const dayHeaders = [
     t('dayLabels.sunday'),
@@ -85,13 +99,17 @@ export function BillCalendar() {
           <div className="grid grid-cols-7 gap-1" role="grid">
             {days.map((day, i) => {
               const isToday = day === today
+              const dateKey = day ? `${monthKey}-${String(day).padStart(2, '0')}` : null
+              const billsForDay = dateKey
+                ? monthBills.filter((rule) => rule.next_date === dateKey)
+                : []
 
               return (
                 <div
                   key={i}
                   role="gridcell"
                   aria-label={day ? `${monthName} ${day}` : undefined}
-                  className={`relative flex h-16 flex-col items-start rounded-lg p-1.5 text-xs transition-colors ${
+                  className={`relative flex h-16 flex-col items-start rounded-lg p-1.5 text-xs transition-colors sm:h-20 ${
                     day ? 'hover:bg-white/[0.03]' : ''
                   } ${isToday ? 'ring-accent bg-accent/5 ring-1' : ''}`}
                 >
@@ -104,44 +122,83 @@ export function BillCalendar() {
                       {day}
                     </span>
                   )}
+                  {billsForDay.length > 0 && (
+                    <div
+                      className="mt-auto flex w-full flex-wrap gap-1"
+                      aria-label={t('scheduledCount', { count: billsForDay.length })}
+                    >
+                      {billsForDay.slice(0, 3).map((bill) => (
+                        <span
+                          key={bill.id}
+                          className="bg-accent h-1.5 w-1.5 rounded-full"
+                          style={{ backgroundColor: bill.category_color ?? 'var(--accent)' }}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
               )
             })}
           </div>
         </div>
 
-        {/* Upcoming Bills Panel - placeholder */}
-        <div className="liquid-card flex flex-col items-center justify-center p-5 text-center">
-          <div className="bg-accent-muted mb-3 flex h-12 w-12 items-center justify-center rounded-2xl">
-            <Calendar size={24} className="text-primary" />
+        <div className="liquid-card p-5">
+          <div className="mb-4 flex items-center gap-3">
+            <div className="bg-accent-muted flex h-12 w-12 items-center justify-center rounded-2xl">
+              <Calendar size={24} className="text-primary" aria-hidden="true" />
+            </div>
+            <div>
+              <h3 className="font-heading text-sm font-semibold">{t('upcomingBills')}</h3>
+              <p className="text-muted-foreground text-xs">{t('upcomingDescription')}</p>
+            </div>
           </div>
-          <h3 className="font-heading mb-1 text-sm font-semibold">{t('upcomingBills')}</h3>
-          <p className="text-muted-foreground text-xs">{t('noBills')}</p>
+          {remainingBills.length === 0 ? (
+            <p className="text-muted-foreground rounded-2xl border border-white/[0.06] bg-white/[0.03] px-4 py-6 text-center text-xs">
+              {t('noBills')}
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {remainingBills.slice(0, 6).map((bill) => (
+                <div key={bill.id} className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold">{bill.description}</p>
+                    <p className="text-muted-foreground text-xs">
+                      {new Date(bill.next_date).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <span className="font-heading text-sm font-semibold">
+                    {formatMoney(bill.amount, bill.currency ?? 'USD')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Summary metrics - placeholder */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="liquid-card p-4">
           <div className="text-muted-foreground mb-2 flex items-center gap-2">
             <Calendar size={16} className="text-accent" />
             <span className="font-mono text-[10px] tracking-wider uppercase">{t('thisMonth')}</span>
           </div>
-          <p className="font-heading text-xl font-bold">—</p>
+          <p className="font-heading text-xl font-bold">{formatMoney(monthTotal)}</p>
         </div>
         <div className="liquid-card p-4">
           <div className="text-muted-foreground mb-2 flex items-center gap-2">
             <CheckCircle size={16} className="text-success" />
             <span className="font-mono text-[10px] tracking-wider uppercase">{t('paid')}</span>
           </div>
-          <p className="font-heading text-xl font-bold">—</p>
+          <p className="font-heading text-xl font-bold">
+            {monthBills.length - remainingBills.length}
+          </p>
         </div>
         <div className="liquid-card p-4">
           <div className="text-muted-foreground mb-2 flex items-center gap-2">
             <Clock size={16} className="text-warning" />
             <span className="font-mono text-[10px] tracking-wider uppercase">{t('remaining')}</span>
           </div>
-          <p className="font-heading text-xl font-bold">—</p>
+          <p className="font-heading text-xl font-bold">{remainingBills.length}</p>
         </div>
       </div>
     </div>

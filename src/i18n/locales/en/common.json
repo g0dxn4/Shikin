@@ -45,5 +45,43 @@
     "error": "Something went wrong",
     "empty": "No data yet",
     "success": "Success"
+  },
+  "extensions": {
+    "title": "Extensions",
+    "description": "Local tools and integrations that make Shikin useful day to day.",
+    "localFirst": "Local-first toolkit",
+    "heroTitle": "Everything here works with your personal vault, not a cloud account.",
+    "heroDescription": "Use this page as the control center for imports, API keys, local database access, MCP automation, and app maintenance.",
+    "status": {
+      "ready": "Ready",
+      "configure": "Configure"
+    },
+    "items": {
+      "csvImport": {
+        "title": "Statement Import",
+        "description": "Import bank CSV files into transactions, map fields, and review rows before they touch your ledger.",
+        "action": "Open imports"
+      },
+      "mcp": {
+        "title": "CLI and MCP Server",
+        "description": "Automate the same local finance data from terminals and AI clients using the bundled command surface.",
+        "action": "View setup"
+      },
+      "marketData": {
+        "title": "Market Data Keys",
+        "description": "Connect Alpha Vantage or Finnhub keys so investment prices can refresh from your own configured providers.",
+        "action": "Configure keys"
+      },
+      "localData": {
+        "title": "Local Data Vault",
+        "description": "Inspect where Shikin stores its SQLite database and keep ownership of your account, budget, and transaction history.",
+        "action": "Open settings"
+      },
+      "updates": {
+        "title": "Signed Updates",
+        "description": "Desktop builds check signed releases on startup so your personal finance app stays current without data leaving the device.",
+        "action": "Review app settings"
+      }
+    }
   }
 }

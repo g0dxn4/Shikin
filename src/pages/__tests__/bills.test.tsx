@@ -2,17 +2,56 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { BillsPage } from '../bills'
 
+const recurringStoreMock = vi.hoisted(() => ({
+  fetch: vi.fn(),
+  rules: [
+    {
+      id: 'rule-1',
+      description: 'Rent',
+      amount: 120000,
+      currency: 'USD',
+      type: 'expense',
+      frequency: 'monthly',
+      next_date: new Date().toISOString().slice(0, 10),
+      end_date: null,
+      account_id: 'account-1',
+      to_account_id: null,
+      category_id: 'category-1',
+      subcategory_id: null,
+      tags: '',
+      notes: null,
+      active: 1,
+      created_at: '2026-01-01T00:00:00.000Z',
+      updated_at: '2026-01-01T00:00:00.000Z',
+      account_name: 'Checking',
+      account_currency: 'USD',
+      category_name: 'Housing',
+      category_color: '#0a84ff',
+    },
+  ],
+}))
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: (key: string, params?: { count?: number }) =>
+      typeof params?.count === 'number' ? `${key} ${params.count}` : key,
     i18n: { language: 'en', changeLanguage: vi.fn() },
   }),
 }))
 
+vi.mock('@/stores/recurring-store', () => ({
+  useRecurringStore: () => ({
+    rules: recurringStoreMock.rules,
+    isLoading: false,
+    fetch: recurringStoreMock.fetch,
+  }),
+}))
+
 describe('BillsPage', () => {
-  it('renders without crashing', () => {
+  it('renders recurring bills from local rules', () => {
     render(<BillsPage />)
-    expect(screen.getAllByText('nav.bills').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText('status.empty')).toBeInTheDocument()
+    expect(screen.getByText('bills.title')).toBeInTheDocument()
+    expect(screen.getByText('Rent')).toBeInTheDocument()
+    expect(screen.getByText('Housing · Checking')).toBeInTheDocument()
   })
 })

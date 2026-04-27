@@ -52,6 +52,19 @@
   },
   "reports": {
     "title": "Informes",
-    "comingSoon": "Los informes detallados llegaran pronto. Usa el Analisis de Gastos y el Mapa de Calor por ahora."
+    "description": "Una vista operativa mensual desde tus cuentas, presupuestos y transacciones locales.",
+    "cash": "Efectivo",
+    "income": "Ingresos",
+    "expenses": "Gastos",
+    "netFlow": "Flujo Neto",
+    "categoryBreakdown": "Desglose por Categoria",
+    "currentMonth": "Mes actual",
+    "noSpending": "Sin gastos registrados este mes.",
+    "budgetHealth": "Salud del Presupuesto",
+    "budgetDescription": "Cuanto de tu presupuesto activo ya se ha usado.",
+    "budgeted": "Presupuestado",
+    "spent": "Gastado",
+    "transactions": "Transacciones",
+    "uncategorized": "Sin categoria"
   }
 }

@@ -52,6 +52,19 @@
   },
   "reports": {
     "title": "Reports",
-    "comingSoon": "Detailed reports are coming soon. Use Spending Insights and the Heatmap for now."
+    "description": "A monthly operating view from your local accounts, budgets, and transactions.",
+    "cash": "Cash",
+    "income": "Income",
+    "expenses": "Expenses",
+    "netFlow": "Net Flow",
+    "categoryBreakdown": "Category Breakdown",
+    "currentMonth": "Current month",
+    "noSpending": "No spending recorded this month.",
+    "budgetHealth": "Budget Health",
+    "budgetDescription": "How much of your active budget envelope has been used.",
+    "budgeted": "Budgeted",
+    "spent": "Spent",
+    "transactions": "Transactions",
+    "uncategorized": "Uncategorized"
   }
 }

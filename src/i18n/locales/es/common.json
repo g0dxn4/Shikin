@@ -45,5 +45,43 @@
     "error": "Algo sali\u00f3 mal",
     "empty": "Sin datos a\u00fan",
     "success": "\u00c9xito"
+  },
+  "extensions": {
+    "title": "Extensiones",
+    "description": "Herramientas e integraciones locales para usar Shikin dia a dia.",
+    "localFirst": "Kit local primero",
+    "heroTitle": "Todo funciona con tu boveda personal, no con una cuenta en la nube.",
+    "heroDescription": "Usa esta pagina como centro de control para importaciones, claves API, base de datos local, automatizacion MCP y mantenimiento de la app.",
+    "status": {
+      "ready": "Listo",
+      "configure": "Configurar"
+    },
+    "items": {
+      "csvImport": {
+        "title": "Importar extractos",
+        "description": "Importa CSV bancarios a transacciones, asigna campos y revisa filas antes de tocar tu libro mayor.",
+        "action": "Abrir importaciones"
+      },
+      "mcp": {
+        "title": "CLI y servidor MCP",
+        "description": "Automatiza los mismos datos financieros locales desde terminales y clientes de IA con los comandos incluidos.",
+        "action": "Ver configuracion"
+      },
+      "marketData": {
+        "title": "Claves de mercado",
+        "description": "Conecta claves de Alpha Vantage o Finnhub para actualizar precios de inversiones desde tus proveedores configurados.",
+        "action": "Configurar claves"
+      },
+      "localData": {
+        "title": "Boveda de datos local",
+        "description": "Revisa donde Shikin guarda SQLite y conserva propiedad de tus cuentas, presupuestos e historial de transacciones.",
+        "action": "Abrir ajustes"
+      },
+      "updates": {
+        "title": "Actualizaciones firmadas",
+        "description": "Las versiones de escritorio revisan lanzamientos firmados al iniciar para mantenerse al dia sin sacar datos del dispositivo.",
+        "action": "Revisar ajustes"
+      }
+    }
   }
 }

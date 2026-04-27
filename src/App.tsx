@@ -140,20 +140,24 @@ export default function App() {
     }
   }, [runStartupTasks])
 
+  const startupMessages = Object.values(startupErrors)
+
   return (
     <ErrorBoundary>
       <BrowserRouter>
         <div className="relative min-h-screen">
-          <div className="pointer-events-none fixed inset-x-0 top-4 z-50 px-4">
-            <div className="pointer-events-auto mx-auto max-w-3xl">
-              <ErrorBanner
-                title="Startup tasks need attention"
-                messages={Object.values(startupErrors)}
-                retryLabel={startupInProgress ? 'Retrying...' : 'Retry startup'}
-                onRetry={startupInProgress ? undefined : runStartupTasks}
-              />
+          {startupMessages.length > 0 && (
+            <div className="pointer-events-none sticky top-0 z-50 px-4 pt-4 sm:fixed sm:inset-x-0 sm:top-4 sm:pt-0">
+              <div className="pointer-events-auto mx-auto max-w-3xl">
+                <ErrorBanner
+                  title="Startup tasks need attention"
+                  messages={startupMessages}
+                  retryLabel={startupInProgress ? 'Retrying...' : 'Retry startup'}
+                  onRetry={startupInProgress ? undefined : runStartupTasks}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           <Suspense fallback={<LoadingSpinner />}>
             <Routes>

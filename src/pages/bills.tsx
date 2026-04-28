@@ -111,12 +111,20 @@ export function BillsPage() {
             <p className="text-muted-foreground mt-1 text-sm">{t('bills.description')}</p>
           </div>
         </div>
-        <Button asChild className="w-full sm:w-auto">
-          <Link to="/transactions">
-            <Plus size={16} aria-hidden="true" />
-            {t('bills.addRecurring')}
-          </Link>
-        </Button>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+          <Button variant="ghost" asChild className="w-full sm:w-auto">
+            <Link to="/bill-calendar">
+              <CalendarClock size={16} aria-hidden="true" />
+              {t('bills.calendarView')}
+            </Link>
+          </Button>
+          <Button asChild className="w-full sm:w-auto">
+            <Link to="/transactions">
+              <Plus size={16} aria-hidden="true" />
+              {t('bills.addRecurring')}
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

@@ -1,0 +1,48 @@
+{
+  "title": "Categorías",
+  "subtitle": "Gestión",
+  "addCategory": "Agregar categoría",
+  "newCategory": "Nueva categoría",
+  "createCategory": "Crear categoría",
+  "saveChanges": "Guardar cambios",
+  "deleteCategory": "Eliminar categoría",
+  "deleteDescription": "¿Seguro que quieres eliminar esta categoría? Esta acción no se puede deshacer.",
+  "selectPrompt": "Selecciona una categoría para editarla o haz clic en Agregar categoría para crear una.",
+  "empty": {
+    "title": "Aún no hay categorías",
+    "description": "Crea categorías para organizar tus transacciones y presupuestos."
+  },
+  "loadError": "No se pudieron cargar las categorías",
+  "table": {
+    "category": "Categoría",
+    "type": "Tipo",
+    "actions": "Acciones"
+  },
+  "form": {
+    "name": "Nombre",
+    "namePlaceholder": "p. ej., Supermercado",
+    "nameRequired": "El nombre de la categoría es obligatorio.",
+    "type": "Tipo",
+    "color": "Color",
+    "icon": "Ícono"
+  },
+  "types": {
+    "expense": "Gasto",
+    "income": "Ingreso",
+    "transfer": "Transferencia"
+  },
+  "actions": {
+    "edit": "Editar {{name}}",
+    "delete": "Eliminar {{name}}",
+    "selectColor": "Seleccionar color {{color}}",
+    "selectIcon": "Seleccionar ícono {{icon}}"
+  },
+  "toast": {
+    "nameRequired": "El nombre de la categoría es obligatorio",
+    "created": "Categoría creada",
+    "updated": "Categoría actualizada",
+    "deleted": "Categoría eliminada",
+    "saveFailed": "No se pudo guardar la categoría",
+    "deleteFailed": "No se pudo eliminar la categoría. Elimina o reasigna los datos vinculados primero."
+  }
+}

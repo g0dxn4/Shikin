@@ -10,6 +10,7 @@ import {
   ChevronUp,
   ArchiveRestore,
   Archive,
+  Star,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts'
@@ -35,13 +36,23 @@ export function Accounts() {
   const { t } = useTranslation('accounts')
   const { t: tCommon } = useTranslation('common')
   const { openAccountDialog } = useUIStore()
-  const { accounts, archivedAccounts, isLoading, fetchError, fetch, remove, archive, unarchive } =
-    useAccountStore()
+  const {
+    accounts,
+    archivedAccounts,
+    isLoading,
+    fetchError,
+    fetch,
+    remove,
+    archive,
+    unarchive,
+    setPrimary,
+  } = useAccountStore()
 
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [archiveId, setArchiveId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isArchiving, setIsArchiving] = useState(false)
+  const [settingPrimaryId, setSettingPrimaryId] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [showArchived, setShowArchived] = useState(false)
 
@@ -49,13 +60,86 @@ export function Accounts() {
     void fetch().catch(() => {})
   }, [fetch])
 
+  const liquidAccounts = useMemo(
+    () => accounts.filter((account) => account.type !== 'investment' && account.type !== 'crypto'),
+    [accounts]
+  )
+  const archivedLiquidAccounts = useMemo(
+    () =>
+      archivedAccounts.filter(
+        (account) => account.type !== 'investment' && account.type !== 'crypto'
+      ),
+    [archivedAccounts]
+  )
+  const investmentLikeAccounts = useMemo(
+    () => accounts.filter((account) => account.type === 'investment' || account.type === 'crypto'),
+    [accounts]
+  )
+  const archivedInvestmentLikeAccounts = useMemo(
+    () =>
+      archivedAccounts.filter(
+        (account) => account.type === 'investment' || account.type === 'crypto'
+      ),
+    [archivedAccounts]
+  )
+
   useEffect(() => {
-    if (archivedAccounts.length > 0 && accounts.length === 0) {
+    if (archivedLiquidAccounts.length > 0 && liquidAccounts.length === 0) {
       setShowArchived(true)
     }
-  }, [accounts.length, archivedAccounts.length])
+  }, [archivedLiquidAccounts.length, liquidAccounts.length])
 
-  const totalBalance = useMemo(() => accounts.reduce((sum, a) => sum + a.balance, 0), [accounts])
+  const separatedInvestmentAccountCount =
+    investmentLikeAccounts.length + archivedInvestmentLikeAccounts.length
+  const depositAccounts = useMemo(
+    () => liquidAccounts.filter((account) => account.type !== 'credit_card'),
+    [liquidAccounts]
+  )
+  const creditAccounts = useMemo(
+    () => liquidAccounts.filter((account) => account.type === 'credit_card'),
+    [liquidAccounts]
+  )
+  const totalBalance = useMemo(
+    () => liquidAccounts.reduce((sum, account) => sum + account.balance, 0),
+    [liquidAccounts]
+  )
+  const depositBalance = useMemo(
+    () => depositAccounts.reduce((sum, account) => sum + account.balance, 0),
+    [depositAccounts]
+  )
+  const creditDebt = useMemo(
+    () => creditAccounts.reduce((sum, account) => sum + Math.max(0, -account.balance), 0),
+    [creditAccounts]
+  )
+  const primaryAccount = useMemo(
+    () =>
+      depositAccounts.find((account) => account.is_primary === 1) ??
+      [...depositAccounts].sort((a, b) => b.balance - a.balance)[0] ??
+      liquidAccounts[0],
+    [depositAccounts, liquidAccounts]
+  )
+
+  const accountMix = useMemo(
+    () => [
+      {
+        label: 'Checking',
+        value: liquidAccounts
+          .filter((account) => account.type === 'checking')
+          .reduce((sum, account) => sum + Math.max(0, account.balance), 0),
+      },
+      {
+        label: 'Savings',
+        value: liquidAccounts
+          .filter((account) => account.type === 'savings')
+          .reduce((sum, account) => sum + Math.max(0, account.balance), 0),
+      },
+      {
+        label: 'Credit cards',
+        value: creditDebt,
+      },
+    ],
+    [creditDebt, liquidAccounts]
+  )
 
   const handleDelete = async () => {
     if (!deleteId) return
@@ -91,6 +175,18 @@ export function Accounts() {
       toast.success(t('toast.restored'))
     } catch {
       toast.error(t('toast.error'))
+    }
+  }
+
+  const handleSetPrimary = async (id: string) => {
+    setSettingPrimaryId(id)
+    try {
+      await setPrimary(id)
+      toast.success('Primary account updated')
+    } catch {
+      toast.error(t('toast.error'))
+    } finally {
+      setSettingPrimaryId(null)
     }
   }
 
@@ -151,32 +247,136 @@ export function Accounts() {
         <>
           {accounts.length > 0 ? (
             <>
-              <div className="liquid-hero p-6">
-                <p className="text-muted-foreground mb-1 font-mono text-[10px] tracking-wider uppercase">
-                  {t('totalBalance')}
-                </p>
-                <p className="font-heading text-3xl font-bold tracking-tight">
-                  {formatMoney(totalBalance)}
-                </p>
-                <p className="text-muted-foreground mt-1 text-sm">
-                  {accounts.length} {t('accountCount', { count: accounts.length })}
-                </p>
+              <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.72fr)]">
+                <div className="liquid-hero p-6 sm:p-7">
+                  <div className="flex h-full min-h-64 flex-col justify-between">
+                    <div>
+                      <p className="text-muted-foreground mb-2 font-mono text-[10px] tracking-[0.28em] uppercase">
+                        Primary cash account
+                      </p>
+                      <h2 className="font-heading text-lg font-semibold text-white">
+                        {primaryAccount?.name ?? 'No card or cash account'}
+                      </h2>
+                    </div>
+                    <div>
+                      <p className="font-mono text-4xl font-bold tracking-tight text-white md:text-5xl">
+                        {formatMoney(
+                          primaryAccount?.balance ?? totalBalance,
+                          primaryAccount?.currency
+                        )}
+                      </p>
+                      <p className="text-muted-foreground mt-4 font-mono text-xs tracking-[0.22em] uppercase">
+                        {primaryAccount
+                          ? `${t(`types.${primaryAccount.type}`)} · ${primaryAccount.currency}`
+                          : 'Bank accounts and credit cards'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="liquid-card p-6 sm:p-7">
+                  <p className="text-muted-foreground mb-2 font-mono text-[10px] tracking-[0.28em] uppercase">
+                    Cards and cash
+                  </p>
+                  <h2 className="font-heading text-2xl font-bold tracking-tight">Account mix</h2>
+                  <div className="mt-7 space-y-4">
+                    {accountMix.map((item) => (
+                      <div key={item.label}>
+                        <div className="mb-2 flex items-center justify-between gap-4">
+                          <span className="text-sm font-semibold text-white">{item.label}</span>
+                          <span className="font-mono text-sm font-semibold text-white">
+                            {formatMoney(item.value)}
+                          </span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-white/[0.06]">
+                          <div
+                            className="h-full rounded-full bg-[#7C5CFF]"
+                            style={{
+                              width: `${Math.max(
+                                item.value > 0 ? 8 : 0,
+                                Math.min(
+                                  100,
+                                  Math.round(
+                                    (item.value / Math.max(1, depositBalance + creditDebt)) * 100
+                                  )
+                                )
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="soft-divider mt-7 grid grid-cols-2 gap-3 border-t pt-5">
+                    <div>
+                      <p className="text-muted-foreground text-xs">Spendable</p>
+                      <p className="font-mono text-lg font-bold">{formatMoney(depositBalance)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground text-xs">Card debt</p>
+                      <p className="text-warning font-mono text-lg font-bold">
+                        {formatMoney(creditDebt)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {accounts.map((account) => (
-                  <AccountCard
-                    key={account.id}
-                    account={account}
-                    isExpanded={expandedId === account.id}
-                    onToggleExpand={() => toggleExpand(account.id)}
-                    onEdit={() => openAccountDialog(account.id)}
-                    onArchive={() => setArchiveId(account.id)}
-                    onDelete={() => setDeleteId(account.id)}
-                    t={t}
-                  />
-                ))}
+              <div className="liquid-card overflow-hidden p-1">
+                <div className="flex flex-col gap-1 px-5 pt-5 pb-4 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <h2 className="font-heading text-xl font-bold tracking-tight">All accounts</h2>
+                    <p className="text-muted-foreground text-sm">
+                      Bank accounts, debit balances, cash, and credit cards.
+                    </p>
+                  </div>
+                  <p className="font-mono text-xs tracking-[0.22em] text-[#BFA4FF] uppercase">
+                    {liquidAccounts.length} active
+                  </p>
+                </div>
+                {liquidAccounts.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-2 p-2 xl:grid-cols-2">
+                    {liquidAccounts.map((account) => (
+                      <AccountCard
+                        key={account.id}
+                        account={account}
+                        isExpanded={expandedId === account.id}
+                        onToggleExpand={() => toggleExpand(account.id)}
+                        onEdit={() => openAccountDialog(account.id)}
+                        onSetPrimary={() => handleSetPrimary(account.id)}
+                        isSettingPrimary={settingPrimaryId === account.id}
+                        onArchive={() => setArchiveId(account.id)}
+                        onDelete={() => setDeleteId(account.id)}
+                        t={t}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="px-5 pb-5">
+                    <div className="rounded-[22px] border border-dashed border-white/[0.12] p-5">
+                      <h3 className="font-heading text-base font-semibold">
+                        No card or cash accounts
+                      </h3>
+                      <p className="text-muted-foreground mt-1 text-sm">
+                        Add a checking, savings, cash, or credit-card account for everyday tracking.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
+
+              {separatedInvestmentAccountCount > 0 && (
+                <div className="liquid-card border-dashed p-5">
+                  <h2 className="font-heading text-base font-semibold">
+                    Investments stay separate
+                  </h2>
+                  <p className="text-muted-foreground mt-1 text-sm">
+                    {separatedInvestmentAccountCount} investment or crypto account
+                    {separatedInvestmentAccountCount === 1 ? '' : 's'} should be managed from the
+                    Investments area, not mixed with bank and card balances.
+                  </p>
+                </div>
+              )}
             </>
           ) : (
             <div className="liquid-card border-dashed p-5">
@@ -185,7 +385,7 @@ export function Accounts() {
             </div>
           )}
 
-          {archivedAccounts.length > 0 && (
+          {archivedLiquidAccounts.length > 0 && (
             <div className="space-y-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -201,19 +401,21 @@ export function Accounts() {
                 >
                   <span>{showArchived ? t('archived.hide') : t('archived.show')}</span>
                   <span className="text-muted-foreground ml-2 text-xs">
-                    {archivedAccounts.length}
+                    {archivedLiquidAccounts.length}
                   </span>
                 </Button>
               </div>
               {showArchived && (
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {archivedAccounts.map((account) => (
+                  {archivedLiquidAccounts.map((account) => (
                     <AccountCard
                       key={account.id}
                       account={account}
                       isExpanded={expandedId === account.id}
                       onToggleExpand={() => toggleExpand(account.id)}
                       onEdit={() => openAccountDialog(account.id)}
+                      onSetPrimary={() => handleSetPrimary(account.id)}
+                      isSettingPrimary={settingPrimaryId === account.id}
                       onArchive={() => handleRestore(account.id)}
                       onDelete={() => setDeleteId(account.id)}
                       archiveLabel={t('unarchiveAccount')}
@@ -263,6 +465,8 @@ function AccountCard({
   isExpanded,
   onToggleExpand,
   onEdit,
+  onSetPrimary,
+  isSettingPrimary = false,
   onArchive,
   onDelete,
   archiveLabel,
@@ -274,6 +478,8 @@ function AccountCard({
   isExpanded: boolean
   onToggleExpand: () => void
   onEdit: () => void
+  onSetPrimary?: () => void
+  isSettingPrimary?: boolean
   onArchive: () => void
   onDelete: () => void
   archiveLabel?: string
@@ -289,9 +495,14 @@ function AccountCard({
 
   const accentColor = account.color || '#7C5CFF'
   const isCreditCard = account.type === 'credit_card'
+  const canSetPrimary =
+    !archived && !isCreditCard && account.type !== 'investment' && account.type !== 'crypto'
+  const isPrimary = account.is_primary === 1
+  const creditLimit = isCreditCard && account.credit_limit ? account.credit_limit : null
+  const availableCredit = creditLimit === null ? null : creditLimit - Math.abs(account.balance)
   const utilization =
-    isCreditCard && account.credit_limit
-      ? Math.min(100, Math.round((Math.abs(account.balance) / account.credit_limit) * 100))
+    creditLimit !== null
+      ? Math.min(100, Math.round((Math.abs(account.balance) / creditLimit) * 100))
       : null
 
   const history = balanceHistory.get(account.id)
@@ -323,6 +534,14 @@ function AccountCard({
             <Badge variant="secondary" className="mt-1 text-[10px]">
               {t(`types.${account.type}`)}
             </Badge>
+            {isPrimary && (
+              <Badge
+                variant="outline"
+                className="mt-1 ml-1 border-[#BFA4FF]/40 text-[10px] text-[#BFA4FF]"
+              >
+                Primary
+              </Badge>
+            )}
             {archived && (
               <Badge variant="outline" className="mt-1 ml-1 border-white/10 text-[10px]">
                 {t('archived.badge')}
@@ -330,6 +549,19 @@ function AccountCard({
             )}
           </div>
           <div className="flex gap-1 opacity-100 transition-opacity md:opacity-40 md:group-focus-within:opacity-100 md:group-hover:opacity-100">
+            {canSetPrimary && onSetPrimary && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onSetPrimary}
+                disabled={isPrimary || isSettingPrimary}
+                aria-label={
+                  isPrimary ? `${account.name} is primary` : `Set ${account.name} as primary`
+                }
+              >
+                <Star size={12} className={isPrimary ? 'fill-[#BFA4FF] text-[#BFA4FF]' : ''} />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"
@@ -363,6 +595,38 @@ function AccountCard({
         <p className="text-muted-foreground mt-1 font-mono text-[10px] tracking-wider">
           {account.currency}
         </p>
+
+        {isCreditCard && creditLimit !== null && (
+          <div className="mt-4 grid grid-cols-3 gap-2 rounded-2xl border border-white/[0.05] bg-white/[0.02] p-3">
+            <div>
+              <p className="text-muted-foreground text-[9px] tracking-wider uppercase">
+                {t('credit.limit')}
+              </p>
+              <p className="mt-1 font-mono text-xs font-semibold">
+                {formatMoney(creditLimit, account.currency)}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-[9px] tracking-wider uppercase">
+                {t('credit.available')}
+              </p>
+              <p
+                className={`mt-1 font-mono text-xs font-semibold ${availableCredit !== null && availableCredit < 0 ? 'text-destructive' : 'text-success'}`}
+              >
+                {formatMoney(availableCredit ?? 0, account.currency)}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-[9px] tracking-wider uppercase">
+                {t('credit.dates')}
+              </p>
+              <p className="mt-1 font-mono text-xs font-semibold">
+                {account.statement_closing_day ? `C ${account.statement_closing_day}` : 'C --'} /{' '}
+                {account.payment_due_day ? `D ${account.payment_due_day}` : 'D --'}
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Credit card utilization bar */}
         {utilization !== null && (

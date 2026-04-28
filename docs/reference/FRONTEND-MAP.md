@@ -96,7 +96,7 @@ Practical map of the current React frontend for hardening and follow-up work.
 | `budget-store.ts`            | Budgets CRUD + period spend status                              |
 | `goal-store.ts`              | Goals CRUD + progress/deadline math                             |
 | `investment-store.ts`        | Investments CRUD, latest prices, portfolio summary/history      |
-| `subscription-store.ts`      | Subby placeholder state (browser mode unsupported)              |
+| `subscription-store.ts`      | Browser subscription placeholder state (local rows are CLI/MCP-only in MVP) |
 | `recurring-store.ts`         | Recurring rules CRUD + materialization into transactions        |
 | `debt-store.ts`              | Debt strategy planner (snowball/avalanche)                      |
 | `forecast-store.ts`          | Cashflow forecast generation + range selection                  |

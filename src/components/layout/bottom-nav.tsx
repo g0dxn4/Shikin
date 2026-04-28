@@ -41,7 +41,7 @@ export function BottomNav({ items, moreItems = [], activeHref }: BottomNavProps)
             key={item.href}
             to={item.href}
             className={cn(
-              'flex h-11 min-w-12 flex-col items-center justify-center gap-0.5 rounded-full px-2 text-[10px] font-semibold transition-colors',
+              'focus-visible:ring-ring flex h-11 min-w-12 flex-col items-center justify-center gap-0.5 rounded-full px-2 text-[10px] font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none',
               isActive
                 ? 'text-accent-hover bg-white/[0.1]'
                 : 'text-muted-foreground hover:text-foreground'
@@ -60,7 +60,7 @@ export function BottomNav({ items, moreItems = [], activeHref }: BottomNavProps)
               type="button"
               aria-label="More pages"
               className={cn(
-                'flex h-11 min-w-12 flex-col items-center justify-center gap-0.5 rounded-full px-2 text-[10px] font-semibold transition-colors',
+                'focus-visible:ring-ring flex h-11 min-w-12 flex-col items-center justify-center gap-0.5 rounded-full px-2 text-[10px] font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none',
                 moreActive
                   ? 'text-accent-hover bg-white/[0.1]'
                   : 'text-muted-foreground hover:text-foreground'
@@ -87,7 +87,7 @@ export function BottomNav({ items, moreItems = [], activeHref }: BottomNavProps)
                     <Link
                       to={item.href}
                       className={cn(
-                        'liquid-card flex items-center gap-3 rounded-2xl px-4 py-3 text-sm transition-colors',
+                        'liquid-card focus-visible:ring-ring flex items-center gap-3 rounded-2xl px-4 py-3 text-sm transition-colors focus-visible:ring-2 focus-visible:outline-none',
                         isActive ? 'text-accent-hover' : 'text-foreground'
                       )}
                       {...(isActive ? { 'aria-current': 'page' } : {})}

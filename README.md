@@ -28,16 +28,23 @@ Shikin is built to keep both:
 - **Savings Goals**: Target-based goals with deadlines, progress rings, and monthly contribution estimates.
 - **Recurring Transactions**: Auto-generated transactions from recurring rules (rent, salary, utilities).
 - **Split Transactions**: Split a single payment across multiple categories.
-- **Subscriptions**: Track recurring services with billing cycles and costs.
+- **Subscriptions**: Local subscription data model and CLI/MCP analytics; browser management is an MVP placeholder.
 - **Investments**: Portfolio tracking with live prices (Alpha Vantage for stocks, CoinGecko for crypto).
 - **Multi-Currency**: Live exchange rates via frankfurter.app with preferred currency conversion.
 
-### CLI & MCP Server — 44 Tool Definitions
+### CLI & MCP Server — 41 Tool Definitions
 
 - **CLI**: `shikin add-transaction --amount 5.50 --type expense --description "Coffee"`
 - **MCP Server**: Connect Claude Code, Claude Desktop, Cursor, or any MCP-compatible client
-- **44 Tool Definitions**: 42 end-to-end tools plus 2 structured unavailable compatibility placeholders for external-feed features
+- **41 Tool Definitions**: 39 end-to-end tools plus 2 structured unavailable compatibility placeholders for external-feed features
 - **No Built-in Chat Assistant**: Shikin is the local finance engine; external clients can automate it through CLI/MCP
+
+Current MVP limitations:
+
+- Browser subscription management is a placeholder; subscription rows are available to CLI/MCP analytics but are not listed or edited in the browser UI yet.
+- CLI transaction-write tools do not create linked transfers yet; record the withdrawal and matching deposit as separate explicit-account entries as a workaround.
+- Debt payoff estimates default APR to 0% because account APR is not stored in the MVP schema, so those estimates exclude interest.
+- External-feed tools for financial news and congressional trades are compatibility placeholders and return structured unavailable responses.
 
 ### Intelligence & Analytics
 
@@ -52,7 +59,7 @@ Shikin is built to keep both:
 
 - **Fully Local**: No mandatory backend. All data in SQLite via shared storage.
 - **In-App Updates**: Tauri desktop app checks GitHub Releases and lets users install signed updates from Settings.
-- **Bilingual**: English and Spanish localization (13 i18n namespaces).
+- **Bilingual**: English and Spanish localization (15 i18n namespaces).
 - **Database Backup/Restore**: Export and import SQLite snapshots.
 
 ---
@@ -68,7 +75,7 @@ Shikin is built to keep both:
 | State      | Zustand (19 stores)              | Global state management                                                                          |
 | Database   | SQLite (shared storage)          | 21 tables, migration-backed schema                                                               |
 | Settings   | Tauri Store / data-server bridge | Local key-value config storage                                                                   |
-| Automation | CLI (`commander`) + MCP SDK      | Local automation surface (44 shared tool definitions; 2 are structured unavailable placeholders) |
+| Automation | CLI (`commander`) + MCP SDK      | Local automation surface (41 shared tool definitions; 2 are structured unavailable placeholders) |
 | Forms      | React Hook Form + Zod v4         | Form validation and parsing                                                                      |
 | Charts     | Recharts                         | Financial visualizations                                                                         |
 | PDF        | jsPDF                            | Report generation                                                                                |
@@ -146,7 +153,7 @@ pnpm build:tauri  # Builds .deb + .AppImage (Linux), .dmg (macOS), .msi (Windows
 
 ## CLI & MCP Server
 
-Shikin exposes 44 shared CLI/MCP tool definitions. 42 are currently available end-to-end, and 2 compatibility placeholders return structured unavailable responses for external-feed features.
+Shikin exposes 41 shared CLI/MCP tool definitions. 39 are currently available end-to-end, and 2 compatibility placeholders return structured unavailable responses for external-feed features.
 
 ```bash
 cd cli && npm install
@@ -213,9 +220,9 @@ Shikin/
 │   │   └── ...
 │   ├── pages/                # 19 page files, 14 routed
 │   ├── stores/               # 19 Zustand stores
-│   ├── i18n/                 # 13 namespaces, 2 languages (en/es)
+│   ├── i18n/                 # 15 namespaces, 2 languages (en/es)
 │   └── types/                # TypeScript type definitions
-├── cli/                      # CLI + MCP server (44 shared tool definitions; 2 structured unavailable placeholders)
+├── cli/                      # CLI + MCP server (41 shared tool definitions; 2 structured unavailable placeholders)
 ├── docs/                     # Project documentation
 ├── e2e/                      # Playwright end-to-end tests
 └── public/                   # Static assets

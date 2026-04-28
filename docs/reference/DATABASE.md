@@ -53,6 +53,8 @@ Bank accounts, wallets, credit cards, and investment accounts.
 | `created_at`  | TEXT    | NOT NULL, auto          | ISO 8601 timestamp                                                                    |
 | `updated_at`  | TEXT    | NOT NULL, auto          | ISO 8601 timestamp                                                                    |
 
+**MVP limitation:** Accounts do not store APR. Debt payoff tooling therefore defaults inferred credit-card APR to `0%` and excludes interest until APR storage is explicitly added in a future migration.
+
 ### categories
 
 Transaction categories. Seeded with 15 default categories.
@@ -126,9 +128,11 @@ The core table. Every expense, income, and transfer is a transaction.
 
 **Design note:** The `amount` field is always positive. The `type` field determines the sign: `expense` subtracts from the account balance, `income` adds to it, and `transfer` subtracts from the source and adds to the destination.
 
+**MVP limitation:** The schema can represent a transfer destination, and the browser transaction flow handles transfers. CLI transaction-write tools intentionally reject transfer writes for now; use separate explicit-account withdrawal/deposit entries from CLI/MCP when needed.
+
 ### subscriptions
 
-Recurring payments (Netflix, Spotify, gym, etc.).
+Recurring payments (Netflix, Spotify, gym, etc.). The local table is available to CLI/MCP analytics; browser create/edit/list flows are not wired in the MVP.
 
 | Column              | Type    | Constraints                             | Description                                        |
 | ------------------- | ------- | --------------------------------------- | -------------------------------------------------- |

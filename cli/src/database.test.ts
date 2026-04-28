@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
 
 const tempHomes = new Set<string>()
 
@@ -15,11 +16,7 @@ function createCliDatabasePath(homeDir: string): string {
 
 function seedCoreShikinSchema(
   dbPath: string,
-  migrations: string[] = [
-    '001_core_tables',
-    '013_recurring_rules_currency',
-    '014_recurring_rules_currency_backfill',
-  ]
+  migrations: readonly string[] = CLI_DATABASE_MIGRATIONS
 ): void {
   const db = new Database(dbPath)
   db.exec(`
@@ -46,10 +43,23 @@ function seedCoreShikinSchema(
     );
   `)
 
-  for (const [index, migration] of migrations.entries()) {
-    db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(index + 1, migration)
+  for (const migration of migrations) {
+    db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(
+      Number(migration.slice(0, 3)),
+      migration
+    )
   }
 
+  db.close()
+}
+
+function addCreditCardColumns(dbPath: string): void {
+  const db = new Database(dbPath)
+  db.exec(`
+    ALTER TABLE accounts ADD COLUMN credit_limit INTEGER;
+    ALTER TABLE accounts ADD COLUMN statement_closing_day INTEGER;
+    ALTER TABLE accounts ADD COLUMN payment_due_day INTEGER;
+  `)
   db.close()
 }
 
@@ -71,6 +81,17 @@ afterEach(() => {
 })
 
 describe('CLI database readiness', () => {
+  it('exports the shared migration readiness list for drift prevention', async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-cli-db-'))
+    tempHomes.add(homeDir)
+
+    const { REQUIRED_MIGRATIONS } = await importFreshDatabaseModule(homeDir)
+    const { CLI_DATABASE_MIGRATIONS: sharedMigrations } = await import('./migrations.js')
+
+    expect(REQUIRED_MIGRATIONS).toBe(sharedMigrations)
+    expect(REQUIRED_MIGRATIONS).toHaveLength(11)
+  })
+
   it('allows queries once the shared Shikin schema is ready', async () => {
     const homeDir = mkdtempSync(join(tmpdir(), 'shikin-cli-db-'))
     tempHomes.add(homeDir)
@@ -102,31 +123,74 @@ describe('CLI database readiness', () => {
     close()
   })
 
-  it('rejects databases that are missing the core migration marker before use', async () => {
+  it('repairs legacy Rust-side migration markers before use', async () => {
     const homeDir = mkdtempSync(join(tmpdir(), 'shikin-cli-db-'))
     tempHomes.add(homeDir)
 
-    seedCoreShikinSchema(createCliDatabasePath(homeDir), [])
+    const dbPath = createCliDatabasePath(homeDir)
+    seedCoreShikinSchema(
+      dbPath,
+      CLI_DATABASE_MIGRATIONS.filter(
+        (migration) => migration !== '001_core_tables' && migration !== '003_credit_cards'
+      )
+    )
+    addCreditCardColumns(dbPath)
+
+    const { query, close } = await importFreshDatabaseModule(homeDir)
+
+    expect(query<{ ok: number }>('SELECT 1 AS ok')).toEqual([{ ok: 1 }])
+
+    close()
+  })
+
+  it('does not repair the credit-card marker when credit-card columns are missing', async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-cli-db-'))
+    tempHomes.add(homeDir)
+
+    seedCoreShikinSchema(
+      createCliDatabasePath(homeDir),
+      CLI_DATABASE_MIGRATIONS.filter((migration) => migration !== '003_credit_cards')
+    )
 
     const { query, close } = await importFreshDatabaseModule(homeDir)
 
     expect(() => query('SELECT 1 AS ok')).toThrow(
-      /Missing required migration metadata: 001_core_tables/i
+      /Missing columns for 003_credit_cards: credit_limit, statement_closing_day, payment_due_day/i
     )
 
     close()
   })
 
-  it('rejects databases that are missing recurring currency migrations before use', async () => {
+  it('rejects databases that are missing non-legacy migration markers before use', async () => {
     const homeDir = mkdtempSync(join(tmpdir(), 'shikin-cli-db-'))
     tempHomes.add(homeDir)
 
-    seedCoreShikinSchema(createCliDatabasePath(homeDir), ['001_core_tables'])
+    const dbPath = createCliDatabasePath(homeDir)
+    seedCoreShikinSchema(dbPath, [])
+    addCreditCardColumns(dbPath)
 
     const { query, close } = await importFreshDatabaseModule(homeDir)
 
     expect(() => query('SELECT 1 AS ok')).toThrow(
-      /Missing required migration metadata: 013_recurring_rules_currency, 014_recurring_rules_currency_backfill/i
+      /Missing required migration metadata: 004_category_rules/i
+    )
+
+    close()
+  })
+
+  it('rejects databases that are missing any required CLI migration before use', async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-cli-db-'))
+    tempHomes.add(homeDir)
+
+    seedCoreShikinSchema(
+      createCliDatabasePath(homeDir),
+      CLI_DATABASE_MIGRATIONS.filter((migration) => migration !== '010_transaction_splits')
+    )
+
+    const { query, close } = await importFreshDatabaseModule(homeDir)
+
+    expect(() => query('SELECT 1 AS ok')).toThrow(
+      /Missing required migration metadata: 010_transaction_splits/i
     )
 
     close()

@@ -3,6 +3,24 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useTranslation } from 'react-i18next'
+import {
+  ArrowRightLeft,
+  Banknote,
+  Briefcase,
+  Car,
+  GraduationCap,
+  HeartPulse,
+  Home,
+  MoreHorizontal,
+  Repeat,
+  ShoppingBag,
+  Tag,
+  TrendingUp,
+  Tv,
+  Utensils,
+  Zap,
+  type LucideIcon,
+} from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
@@ -20,6 +38,33 @@ import type { BudgetWithStatus } from '@/stores/budget-store'
 import { fromCentavos } from '@/lib/money'
 
 const BUDGET_PERIODS = ['weekly', 'monthly', 'yearly'] as const
+
+const CATEGORY_ICON_MAP: Record<string, LucideIcon> = {
+  tag: Tag,
+  utensils: Utensils,
+  car: Car,
+  home: Home,
+  tv: Tv,
+  'heart-pulse': HeartPulse,
+  'shopping-bag': ShoppingBag,
+  'graduation-cap': GraduationCap,
+  zap: Zap,
+  repeat: Repeat,
+  'more-horizontal': MoreHorizontal,
+  banknote: Banknote,
+  briefcase: Briefcase,
+  'trending-up': TrendingUp,
+  'arrow-right-left': ArrowRightLeft,
+}
+
+function CategoryIcon({ name }: { name: string | null | undefined }) {
+  const Icon = name ? CATEGORY_ICON_MAP[name] : null
+  return (
+    <span className="inline-flex h-4 w-4 items-center justify-center">
+      {Icon && <Icon size={14} />}
+    </span>
+  )
+}
 
 const budgetSchema = z.object({
   name: z.string().min(1),
@@ -126,8 +171,10 @@ export function BudgetForm({ budget, onSubmit, isLoading, onDirtyChange }: Budge
             <SelectContent>
               {expenseCategories.map((cat) => (
                 <SelectItem key={cat.id} value={cat.id}>
-                  {cat.icon ? `${cat.icon} ` : ''}
-                  {cat.name}
+                  <span className="flex items-center gap-2">
+                    <CategoryIcon name={cat.icon} />
+                    {cat.name}
+                  </span>
                 </SelectItem>
               ))}
             </SelectContent>

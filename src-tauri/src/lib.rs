@@ -15,6 +15,12 @@ pub fn run() {
             sql: include_str!("../migrations/003_credit_cards.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 15,
+            description: "primary account",
+            sql: include_str!("../migrations/015_primary_account.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

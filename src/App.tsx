@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router'
+import { BrowserRouter, Navigate, Routes, Route } from 'react-router'
 import { Toaster } from 'sonner'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { AppShell } from '@/components/layout/app-shell'
@@ -46,9 +46,15 @@ const SettingsPage = lazy(() =>
   import('@/pages/settings').then((m) => ({ default: m.SettingsPage }))
 )
 const BillsPage = lazy(() => import('@/pages/bills').then((m) => ({ default: m.BillsPage })))
+const BillCalendar = lazy(() =>
+  import('@/pages/bill-calendar').then((m) => ({ default: m.BillCalendar }))
+)
 const ReportsPage = lazy(() => import('@/pages/reports').then((m) => ({ default: m.ReportsPage })))
 const ExtensionsPage = lazy(() =>
   import('@/pages/extensions').then((m) => ({ default: m.ExtensionsPage }))
+)
+const CategoryManagement = lazy(() =>
+  import('@/pages/category-management').then((m) => ({ default: m.CategoryManagement }))
 )
 
 export default function App() {
@@ -179,8 +185,11 @@ export default function App() {
                 <Route path="/spending-heatmap" element={<SpendingHeatmap />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/bills" element={<BillsPage />} />
+                <Route path="/bill-calendar" element={<BillCalendar />} />
                 <Route path="/reports" element={<ReportsPage />} />
                 <Route path="/extensions" element={<ExtensionsPage />} />
+                <Route path="/categories" element={<CategoryManagement />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
             </Routes>
           </Suspense>

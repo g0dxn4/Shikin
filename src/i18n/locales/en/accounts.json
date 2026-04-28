@@ -12,7 +12,12 @@
     "namePlaceholder": "e.g. Checking Account",
     "type": "Account Type",
     "currency": "Currency",
-    "balance": "Current Balance"
+    "balance": "Current Balance",
+    "creditDetails": "Credit card details",
+    "creditDetailsDescription": "Track limit, utilization, and monthly statement timing.",
+    "creditLimit": "Credit Limit",
+    "statementClosingDay": "Statement Closing Day",
+    "paymentDueDay": "Payment Due Day"
   },
   "types": {
     "checking": "Checking",
@@ -45,6 +50,11 @@
     "high": "High",
     "moderate": "Moderate",
     "low": "Low"
+  },
+  "credit": {
+    "limit": "Limit",
+    "available": "Available",
+    "dates": "Dates"
   },
   "empty": {
     "title": "No accounts yet",

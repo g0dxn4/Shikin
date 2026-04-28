@@ -10,10 +10,10 @@ test.describe('Subscriptions', () => {
 
   test('renders title and disconnected banner', async ({ page }) => {
     await expect(page.getByRole('heading', { level: 1, name: 'Subscriptions' })).toBeVisible()
-    await expect(page.getByText(/Subby not connected/i)).toBeVisible()
+    await expect(page.getByText(/Subscriptions unavailable in browser MVP/i)).toBeVisible()
   })
 
   test('shows setup guide when disconnected', async ({ page }) => {
-    await expect(page.getByText('Connect to Subby')).toBeVisible()
+    await expect(page.getByText('Browser subscription UI is limited')).toBeVisible()
   })
 })

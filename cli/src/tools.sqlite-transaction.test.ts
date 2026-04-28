@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type * as DatabaseModule from './database.js'
 import type * as OsModule from 'node:os'
+import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
 
 const tempDirs = new Set<string>()
 const cleanupCallbacks = new Set<() => void>()
@@ -69,6 +70,13 @@ function seedDatabase({
       sort_order INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
+    CREATE TABLE subcategories (
+      id TEXT PRIMARY KEY,
+      category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
     CREATE TABLE transactions (
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -86,22 +94,37 @@ function seedDatabase({
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
+    CREATE TABLE transaction_splits (
+      id TEXT PRIMARY KEY,
+      transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+      category_id TEXT NOT NULL REFERENCES categories(id),
+      subcategory_id TEXT REFERENCES subcategories(id),
+      amount INTEGER NOT NULL,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
   `)
 
-  db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(1, '001_core_tables')
-  db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(
-    13,
-    '013_recurring_rules_currency'
-  )
-  db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(
-    14,
-    '014_recurring_rules_currency_backfill'
-  )
+  for (const migration of CLI_DATABASE_MIGRATIONS) {
+    db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(
+      Number(migration.slice(0, 3)),
+      migration
+    )
+  }
 
   db.prepare(
     `INSERT INTO accounts (id, name, type, currency, balance, is_archived)
      VALUES (?, ?, ?, ?, ?, ?)`
   ).run('acct-1', 'Primary', 'checking', 'USD', accountBalance, 0)
+
+  db.prepare(
+    `INSERT INTO categories (id, name, icon, color, type, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run('cat-1', 'Food', null, null, 'expense', 1)
+  db.prepare(
+    `INSERT INTO categories (id, name, icon, color, type, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run('cat-2', 'Transport', null, null, 'expense', 2)
 
   if (transaction) {
     db.prepare(
@@ -162,6 +185,26 @@ function readAccountBalances(dbPath: string) {
   }
 }
 
+function readTransactionSplits(dbPath: string) {
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true })
+  try {
+    return db
+      .prepare(
+        `SELECT transaction_id, category_id, subcategory_id, amount, notes
+         FROM transaction_splits ORDER BY amount DESC`
+      )
+      .all() as Array<{
+      transaction_id: string
+      category_id: string
+      subcategory_id: string | null
+      amount: number
+      notes: string | null
+    }>
+  } finally {
+    db.close()
+  }
+}
+
 async function loadToolsWithRealDatabaseFailure({
   tempHome,
   failOnExecuteCall,
@@ -209,6 +252,7 @@ async function loadToolsWithRealDatabaseFailure({
 }
 
 async function loadToolsWithRealDatabase(tempHome: string) {
+  let generatedId = 0
   vi.resetModules()
   vi.doMock('node:os', async () => {
     const actual = await vi.importActual<typeof OsModule>('node:os')
@@ -218,7 +262,7 @@ async function loadToolsWithRealDatabase(tempHome: string) {
     }
   })
   vi.doMock('./ulid.js', () => ({
-    generateId: () => 'tx_sqlite_rollback',
+    generateId: () => `tx_sqlite_${++generatedId}`,
   }))
 
   const toolsModule = await import('./tools.js')
@@ -406,5 +450,102 @@ describe('CLI tools SQLite transaction rollback', () => {
         },
       ],
     })
+  })
+
+  it('creates split rows using the frontend transaction_splits schema', async () => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({
+      tempHome,
+      accountBalance: 9_000,
+      transaction: {
+        id: 'tx-1',
+        type: 'expense',
+        amount: 1_000,
+        description: 'Groceries and bus fare',
+        date: '2026-04-14',
+      },
+    })
+
+    const { tools } = await loadToolsWithRealDatabase(tempHome)
+    const splitTransaction = tools.find((tool) => tool.name === 'split-transaction')!
+
+    const input = splitTransaction.schema.parse({
+      transactionId: 'tx-1',
+      splits: [
+        { categoryId: 'cat-1', amount: 7, notes: 'groceries' },
+        { categoryId: 'cat-2', amount: 3, notes: 'bus' },
+      ],
+    })
+
+    await expect(splitTransaction.execute(input)).resolves.toMatchObject({
+      success: true,
+      transactionId: 'tx-1',
+      splitCount: 2,
+    })
+    expect(readTransactionSplits(dbPath)).toEqual([
+      {
+        transaction_id: 'tx-1',
+        category_id: 'cat-1',
+        subcategory_id: null,
+        amount: 700,
+        notes: 'groceries',
+      },
+      {
+        transaction_id: 'tx-1',
+        category_id: 'cat-2',
+        subcategory_id: null,
+        amount: 300,
+        notes: 'bus',
+      },
+    ])
+  })
+
+  it('rolls back split-transaction when an insert fails after deleting existing splits', async () => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({
+      tempHome,
+      accountBalance: 9_000,
+      transaction: {
+        id: 'tx-1',
+        type: 'expense',
+        amount: 1_000,
+        description: 'Groceries and bus fare',
+        date: '2026-04-14',
+      },
+    })
+
+    const db = new Database(dbPath)
+    try {
+      db.prepare(
+        `INSERT INTO transaction_splits (id, transaction_id, category_id, subcategory_id, amount, notes)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run('split-existing', 'tx-1', 'cat-1', null, 1_000, 'existing split')
+    } finally {
+      db.close()
+    }
+
+    const { tools } = await loadToolsWithRealDatabaseFailure({ tempHome, failOnExecuteCall: 2 })
+    const splitTransaction = tools.find((tool) => tool.name === 'split-transaction')!
+
+    const input = splitTransaction.schema.parse({
+      transactionId: 'tx-1',
+      splits: [
+        { categoryId: 'cat-1', amount: 7, notes: 'groceries' },
+        { categoryId: 'cat-2', amount: 3, notes: 'bus' },
+      ],
+    })
+
+    await expect(splitTransaction.execute(input)).rejects.toThrow(
+      'Injected execute failure on call 2'
+    )
+    expect(readTransactionSplits(dbPath)).toEqual([
+      {
+        transaction_id: 'tx-1',
+        category_id: 'cat-1',
+        subcategory_id: null,
+        amount: 1000,
+        notes: 'existing split',
+      },
+    ])
   })
 })

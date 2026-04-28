@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export interface SubbySubscription {
+export interface StoredSubscription {
   id: string
   name: string
   amount: number
@@ -31,7 +31,7 @@ export interface UpcomingPayment {
 }
 
 interface SubscriptionState {
-  subscriptions: SubbySubscription[]
+  subscriptions: StoredSubscription[]
   upcomingPayments: UpcomingPayment[]
   monthlyTotal: number
   isLoading: boolean
@@ -42,9 +42,9 @@ interface SubscriptionState {
 }
 
 /**
- * Subby integration is not available in browser mode.
- * Direct SQLite access to Subby's database requires Tauri (native filesystem).
- * Future: integrate via Subby MCP server or data import.
+ * MVP limitation: the browser subscriptions page is an explicit placeholder.
+ * Shikin can store subscription rows for CLI/MCP analytics, but the browser UI
+ * does not yet read/write those rows or connect to an external Subby source.
  */
 export const useSubscriptionStore = create<SubscriptionState>((set) => ({
   subscriptions: [],
@@ -55,7 +55,10 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
   error: null,
 
   checkConnection: async () => {
-    set({ isConnected: false, error: 'Subby integration requires the Subby MCP server (not available in browser mode)' })
+    set({
+      isConnected: false,
+      error: 'Subscription browser UI is not wired to local subscription data in this MVP.',
+    })
     return false
   },
 
@@ -64,7 +67,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
     try {
       set({
         isConnected: false,
-        error: 'Subby integration requires the Subby MCP server (not available in browser mode)',
+        error: 'Subscription browser UI is not wired to local subscription data in this MVP.',
         subscriptions: [],
         upcomingPayments: [],
         monthlyTotal: 0,

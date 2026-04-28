@@ -17,21 +17,18 @@ import { SUPPORTED_CURRENCIES } from '@/lib/constants'
 import type { Account } from '@/types/database'
 import { fromCentavos } from '@/lib/money'
 
-const ACCOUNT_TYPES = [
-  'checking',
-  'savings',
-  'credit_card',
-  'cash',
-  'investment',
-  'crypto',
-  'other',
-] as const
+const ACCOUNT_TYPES = ['checking', 'savings', 'credit_card', 'cash', 'other'] as const
+const isAccountFormType = (type: Account['type']): type is (typeof ACCOUNT_TYPES)[number] =>
+  ACCOUNT_TYPES.includes(type as (typeof ACCOUNT_TYPES)[number])
 
 const accountSchema = z.object({
   name: z.string().min(1),
   type: z.enum(ACCOUNT_TYPES),
   currency: z.string().min(1),
   balance: z.number(),
+  creditLimit: z.number().min(0).optional(),
+  statementClosingDay: z.number().int().min(1).max(31).optional(),
+  paymentDueDay: z.number().int().min(1).max(31).optional(),
 })
 
 export type AccountFormValues = z.infer<typeof accountSchema>
@@ -57,9 +54,12 @@ export function AccountForm({ account, onSubmit, isLoading, onDirtyChange }: Acc
     resolver: zodResolver(accountSchema),
     defaultValues: {
       name: account?.name ?? '',
-      type: account?.type ?? 'checking',
+      type: account && isAccountFormType(account.type) ? account.type : 'checking',
       currency: account?.currency ?? 'USD',
       balance: account ? fromCentavos(account.balance) : 0,
+      creditLimit: account?.credit_limit ? fromCentavos(account.credit_limit) : undefined,
+      statementClosingDay: account?.statement_closing_day ?? undefined,
+      paymentDueDay: account?.payment_due_day ?? undefined,
     },
   })
 
@@ -143,6 +143,87 @@ export function AccountForm({ account, onSubmit, isLoading, onDirtyChange }: Acc
           )}
         </div>
       </div>
+
+      {typeValue === 'credit_card' && (
+        <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
+          <div className="mb-3">
+            <p className="font-heading text-sm font-semibold">{t('form.creditDetails')}</p>
+            <p className="text-muted-foreground text-xs">{t('form.creditDetailsDescription')}</p>
+          </div>
+
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="credit-limit">{t('form.creditLimit')}</Label>
+              <Input
+                id="credit-limit"
+                type="number"
+                step="0.01"
+                min="0"
+                aria-invalid={!!errors.creditLimit}
+                aria-describedby={errors.creditLimit ? 'credit-limit-error' : undefined}
+                {...register('creditLimit', {
+                  setValueAs: (value) => (value === '' ? undefined : Number(value)),
+                })}
+              />
+              {errors.creditLimit && (
+                <p id="credit-limit-error" className="text-destructive text-xs" role="alert">
+                  {errors.creditLimit.message}
+                </p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="statement-closing-day">{t('form.statementClosingDay')}</Label>
+                <Input
+                  id="statement-closing-day"
+                  type="number"
+                  min="1"
+                  max="31"
+                  step="1"
+                  aria-invalid={!!errors.statementClosingDay}
+                  aria-describedby={
+                    errors.statementClosingDay ? 'statement-closing-day-error' : undefined
+                  }
+                  {...register('statementClosingDay', {
+                    setValueAs: (value) => (value === '' ? undefined : Number(value)),
+                  })}
+                />
+                {errors.statementClosingDay && (
+                  <p
+                    id="statement-closing-day-error"
+                    className="text-destructive text-xs"
+                    role="alert"
+                  >
+                    {errors.statementClosingDay.message}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="payment-due-day">{t('form.paymentDueDay')}</Label>
+                <Input
+                  id="payment-due-day"
+                  type="number"
+                  min="1"
+                  max="31"
+                  step="1"
+                  aria-invalid={!!errors.paymentDueDay}
+                  aria-describedby={errors.paymentDueDay ? 'payment-due-day-error' : undefined}
+                  {...register('paymentDueDay', {
+                    setValueAs: (value) => (value === '' ? undefined : Number(value)),
+                  })}
+                />
+                {errors.paymentDueDay && (
+                  <p id="payment-due-day-error" className="text-destructive text-xs" role="alert">
+                    {errors.paymentDueDay.message}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Button type="submit" className="w-full" disabled={isLoading}>
         {isLoading ? '...' : tCommon('actions.save')}

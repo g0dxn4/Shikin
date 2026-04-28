@@ -25,6 +25,7 @@ npx tsx src/cli.ts diagnose
 Notes:
 
 - When multiple accounts exist, pass `--account-id` explicitly for commands that write transactions or recurring rules.
+- Transfer writes are intentionally limited in the MVP: CLI transaction-write tools reject `type=transfer`. Record the withdrawal and matching deposit as separate entries with explicit account IDs until linked-transfer write support is added.
 - Structured options must be valid JSON.
 - The CLI reads and writes the shared Shikin database in `~/.local/share/com.asf.shikin/shikin.db`.
 
@@ -110,6 +111,8 @@ The MCP server also exposes read-only resources:
 
 ## Current Scope
 
-- CLI and MCP share the same 44-tool definition catalog in `cli/src/tools.ts`.
-- 42 tools are currently available end-to-end; 2 compatibility placeholders (`get-financial-news`, `get-congressional-trades`) return structured unavailable responses on both CLI and MCP surfaces.
+- CLI and MCP share the same 41-tool definition catalog in `cli/src/tools.ts`.
+- 39 tools are currently available end-to-end; 2 compatibility placeholders (`get-financial-news`, `get-congressional-trades`) return structured unavailable responses on both CLI and MCP surfaces.
+- Debt payoff projections infer debts from negative credit-card account balances. Accounts do not store APR in the MVP, so CLI payoff estimates default APR to 0% and exclude interest.
+- Subscription tools read Shikin's local `subscriptions` table for analytics. The browser subscriptions page is still a placeholder and is not wired to create, edit, or list those rows.
 - The app does not ship a built-in chat assistant; external clients can connect through MCP or call the CLI directly.

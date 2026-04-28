@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router'
 import { ChevronLeft, ChevronRight, Calendar, CheckCircle, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { formatMoney } from '@/lib/money'
@@ -12,9 +13,9 @@ function toDateKey(date: Date) {
 }
 
 export function BillCalendar() {
-  const { t } = useTranslation('billCalendar')
+  const { t } = useTranslation(['billCalendar', 'common'])
   const [monthOffset, setMonthOffset] = useState(0)
-  const { rules, fetch } = useRecurringStore()
+  const { rules, isLoading, fetch } = useRecurringStore()
 
   useEffect(() => {
     void fetch()
@@ -58,6 +59,12 @@ export function BillCalendar() {
     <div className="animate-fade-in-up page-content">
       <div className="liquid-card page-header p-5">
         <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
+        <Button variant="ghost" asChild className="w-full sm:w-auto">
+          <Link to="/bills">
+            <ChevronLeft size={16} aria-hidden="true" />
+            {t('listView')}
+          </Link>
+        </Button>
       </div>
 
       {/* Month navigation */}
@@ -65,87 +72,106 @@ export function BillCalendar() {
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8"
           aria-label={t('prevMonth')}
           onClick={() => setMonthOffset((o) => o - 1)}
         >
-          <ChevronLeft size={16} />
+          <ChevronLeft size={16} aria-hidden="true" />
         </Button>
-        <h2 className="font-heading text-lg font-semibold">{monthName}</h2>
+        <h2 className="font-heading text-lg font-semibold" aria-live="polite">
+          {monthName}
+        </h2>
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8"
           aria-label={t('nextMonth')}
           onClick={() => setMonthOffset((o) => o + 1)}
         >
-          <ChevronRight size={16} />
+          <ChevronRight size={16} aria-hidden="true" />
         </Button>
       </div>
 
       {/* Two-panel layout */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
-        {/* Calendar Grid */}
+        {/* Calendar Table */}
         <div className="liquid-card p-5">
-          {/* Day headers */}
-          <div className="mb-2 grid grid-cols-7 gap-1" role="row">
-            {dayHeaders.map((day, i) => (
-              <div
-                key={i}
-                role="columnheader"
-                className="text-muted-foreground py-2 text-center font-mono text-[10px] tracking-wider uppercase"
-              >
-                {day}
-              </div>
-            ))}
-          </div>
-
-          {/* Calendar cells */}
-          <div className="grid grid-cols-7 gap-1" role="grid">
-            {days.map((day, i) => {
-              const isToday = day === today
-              const dateKey = day ? `${monthKey}-${String(day).padStart(2, '0')}` : null
-              const billsForDay = dateKey
-                ? monthBills.filter((rule) => rule.next_date === dateKey)
-                : []
-
-              return (
-                <div
-                  key={i}
-                  role="gridcell"
-                  aria-label={day ? `${monthName} ${day}` : undefined}
-                  className={`relative flex h-16 flex-col items-start rounded-lg p-1.5 text-xs transition-colors sm:h-20 ${
-                    day ? 'hover:bg-white/[0.03]' : ''
-                  } ${isToday ? 'ring-accent bg-accent/5 ring-1' : ''}`}
-                >
-                  {day && (
-                    <span
-                      className={`font-mono text-[11px] ${
-                        isToday ? 'text-accent font-semibold' : 'text-muted-foreground'
-                      }`}
+          {isLoading && rules.length === 0 ? (
+            <div
+              className="text-muted-foreground flex h-80 items-center justify-center text-sm"
+              role="status"
+            >
+              {t('common:status.loading')}
+            </div>
+          ) : (
+            <table className="w-full table-fixed border-separate border-spacing-1">
+              <caption className="sr-only">{monthName}</caption>
+              <thead>
+                <tr>
+                  {dayHeaders.map((day, i) => (
+                    <th
+                      key={i}
+                      scope="col"
+                      className="text-muted-foreground py-2 text-center font-mono text-[10px] tracking-wider uppercase"
                     >
                       {day}
-                    </span>
-                  )}
-                  {billsForDay.length > 0 && (
-                    <div
-                      className="mt-auto flex w-full flex-col gap-1 overflow-hidden"
-                      aria-label={t('scheduledCount', { count: billsForDay.length })}
-                    >
-                      {billsForDay.slice(0, 3).map((bill) => (
-                        <span
-                          key={bill.id}
-                          className="text-foreground truncate rounded-full border border-white/[0.08] bg-white/[0.05] px-1.5 py-0.5 text-[10px] leading-none"
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: days.length / 7 }, (_, weekIndex) => (
+                  <tr key={weekIndex}>
+                    {days.slice(weekIndex * 7, weekIndex * 7 + 7).map((day, dayIndex) => {
+                      const isToday = day === today
+                      const dateKey = day ? `${monthKey}-${String(day).padStart(2, '0')}` : null
+                      const billsForDay = dateKey
+                        ? monthBills.filter((rule) => rule.next_date === dateKey)
+                        : []
+
+                      return (
+                        <td
+                          key={day ? dateKey : `empty-${weekIndex}-${dayIndex}`}
+                          className="h-16 p-0 align-top sm:h-20"
                         >
-                          {bill.description}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
+                          <div
+                            aria-label={day ? `${monthName} ${day}` : undefined}
+                            aria-current={isToday ? 'date' : undefined}
+                            className={`relative flex h-full flex-col items-start rounded-lg p-1.5 text-xs transition-colors ${
+                              day ? 'hover:bg-white/[0.03]' : ''
+                            } ${isToday ? 'ring-accent bg-accent/5 ring-1' : ''}`}
+                          >
+                            {day && (
+                              <span
+                                className={`font-mono text-[11px] ${
+                                  isToday ? 'text-accent font-semibold' : 'text-muted-foreground'
+                                }`}
+                              >
+                                {day}
+                              </span>
+                            )}
+                            {billsForDay.length > 0 && (
+                              <div
+                                className="mt-auto flex w-full flex-col gap-1 overflow-hidden"
+                                aria-label={t('scheduledCount', { count: billsForDay.length })}
+                              >
+                                {billsForDay.slice(0, 3).map((bill) => (
+                                  <span
+                                    key={bill.id}
+                                    className="text-foreground truncate rounded-full border border-white/[0.08] bg-white/[0.05] px-1.5 py-0.5 text-[10px] leading-none"
+                                  >
+                                    {bill.description}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
 
         <div className="liquid-card p-5">
@@ -185,14 +211,14 @@ export function BillCalendar() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="liquid-card p-4">
           <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <Calendar size={16} className="text-accent" />
+            <Calendar size={16} className="text-accent" aria-hidden="true" />
             <span className="font-mono text-[10px] tracking-wider uppercase">{t('thisMonth')}</span>
           </div>
           <p className="font-heading text-xl font-bold">{formatMoney(monthTotal)}</p>
         </div>
         <div className="liquid-card p-4">
           <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <CheckCircle size={16} className="text-success" />
+            <CheckCircle size={16} className="text-success" aria-hidden="true" />
             <span className="font-mono text-[10px] tracking-wider uppercase">{t('paid')}</span>
           </div>
           <p className="font-heading text-xl font-bold">
@@ -201,7 +227,7 @@ export function BillCalendar() {
         </div>
         <div className="liquid-card p-4">
           <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <Clock size={16} className="text-warning" />
+            <Clock size={16} className="text-warning" aria-hidden="true" />
             <span className="font-mono text-[10px] tracking-wider uppercase">{t('remaining')}</span>
           </div>
           <p className="font-heading text-xl font-bold">{remainingBills.length}</p>

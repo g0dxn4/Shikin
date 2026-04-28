@@ -1,0 +1,48 @@
+{
+  "title": "Categories",
+  "subtitle": "Management",
+  "addCategory": "Add Category",
+  "newCategory": "New Category",
+  "createCategory": "Create Category",
+  "saveChanges": "Save Changes",
+  "deleteCategory": "Delete Category",
+  "deleteDescription": "Are you sure you want to delete this category? This cannot be undone.",
+  "selectPrompt": "Select a category to edit, or click Add Category to create one.",
+  "empty": {
+    "title": "No categories yet",
+    "description": "Create categories to organize your transactions and budgets."
+  },
+  "loadError": "Couldn’t load categories",
+  "table": {
+    "category": "Category",
+    "type": "Type",
+    "actions": "Actions"
+  },
+  "form": {
+    "name": "Name",
+    "namePlaceholder": "e.g. Groceries",
+    "nameRequired": "Category name is required.",
+    "type": "Type",
+    "color": "Color",
+    "icon": "Icon"
+  },
+  "types": {
+    "expense": "Expense",
+    "income": "Income",
+    "transfer": "Transfer"
+  },
+  "actions": {
+    "edit": "Edit {{name}}",
+    "delete": "Delete {{name}}",
+    "selectColor": "Select {{color}} color",
+    "selectIcon": "Select {{icon}} icon"
+  },
+  "toast": {
+    "nameRequired": "Category name is required",
+    "created": "Category created",
+    "updated": "Category updated",
+    "deleted": "Category deleted",
+    "saveFailed": "Failed to save category",
+    "deleteFailed": "Failed to delete category. Remove or reassign linked data first."
+  }
+}

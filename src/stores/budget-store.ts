@@ -38,7 +38,7 @@ function getPeriodDateRange(period: string): { start: string; end: string } {
   switch (period) {
     case 'weekly':
       return {
-        start: today.subtract(6, 'day').format('YYYY-MM-DD'),
+        start: today.startOf('week').format('YYYY-MM-DD'),
         end: today.format('YYYY-MM-DD'),
       }
     case 'yearly':

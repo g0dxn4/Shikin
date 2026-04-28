@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type * as InsightsModule from './insights.js'
 import type * as OsModule from 'node:os'
+import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
 
 const tempDirs = new Set<string>()
 const cleanupCallbacks = new Set<() => void>()
@@ -111,15 +112,12 @@ function seedDatabase(tempHome: string, seed: (db: Database.Database) => void): 
     );
   `)
 
-  db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(1, '001_core_tables')
-  db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(
-    13,
-    '013_recurring_rules_currency'
-  )
-  db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(
-    14,
-    '014_recurring_rules_currency_backfill'
-  )
+  for (const migration of CLI_DATABASE_MIGRATIONS) {
+    db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(
+      Number(migration.slice(0, 3)),
+      migration
+    )
+  }
   seed(db)
   db.close()
 

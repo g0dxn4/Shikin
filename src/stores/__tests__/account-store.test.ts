@@ -156,6 +156,26 @@ describe('account-store', () => {
       expect(useAccountStore.getState().error).toBeNull()
       expect(useAccountStore.getState().fetchError).toBe('refresh failed')
     })
+
+    it('stores credit card limit and statement dates', async () => {
+      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockQuery.mockResolvedValueOnce([])
+
+      await useAccountStore.getState().add({
+        name: 'Credit Card',
+        type: 'credit_card',
+        currency: 'USD',
+        balance: -1000,
+        creditLimit: 27000,
+        statementClosingDay: 15,
+        paymentDueDay: 5,
+      })
+
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.stringContaining('credit_limit, statement_closing_day, payment_due_day'),
+        expect.arrayContaining([2700000, 15, 5])
+      )
+    })
   })
 
   describe('update', () => {
@@ -258,6 +278,27 @@ describe('account-store', () => {
         ])
       )
     })
+
+    it('clears credit card fields when an account is saved as non-credit', async () => {
+      mockQuery.mockResolvedValueOnce([{ currency: 'USD' }])
+      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockQuery.mockResolvedValueOnce([])
+
+      await useAccountStore.getState().update('01ACC001', {
+        name: 'Checking',
+        type: 'checking',
+        currency: 'USD',
+        balance: 200,
+        creditLimit: 27000,
+        statementClosingDay: 15,
+        paymentDueDay: 5,
+      })
+
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.stringContaining('credit_limit = ?, statement_closing_day = ?, payment_due_day = ?'),
+        expect.arrayContaining([null, null, null])
+      )
+    })
   })
 
   describe('remove', () => {
@@ -269,6 +310,48 @@ describe('account-store', () => {
 
       expect(mockExecute).toHaveBeenCalledWith('DELETE FROM accounts WHERE id = ?', ['01ACC001'])
       expect(mockQuery).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('setPrimary', () => {
+    it('marks one active liquid account as primary and clears other liquid primaries', async () => {
+      mockQuery.mockResolvedValueOnce([{ name: 'is_primary' }])
+      mockExecute.mockResolvedValueOnce({ rowsAffected: 2, lastInsertId: 0 })
+      mockQuery.mockResolvedValueOnce([])
+
+      await useAccountStore.getState().setPrimary('01ACC001')
+
+      expect(mockQuery).toHaveBeenCalledWith('PRAGMA table_info(accounts)')
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.stringContaining('SET is_primary = CASE WHEN id = ? THEN 1 ELSE 0 END'),
+        ['01ACC001', '01ACC001', expect.any(String)]
+      )
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.stringContaining("type NOT IN ('investment', 'crypto', 'credit_card')"),
+        expect.any(Array)
+      )
+      expect(mockQuery).toHaveBeenCalledTimes(2)
+    })
+
+    it('creates the primary account column before marking primary when migrations are stale', async () => {
+      mockQuery.mockResolvedValueOnce([{ name: 'id' }])
+      mockExecute
+        .mockResolvedValueOnce({ rowsAffected: 0, lastInsertId: 0 })
+        .mockResolvedValueOnce({ rowsAffected: 2, lastInsertId: 0 })
+      mockQuery.mockResolvedValueOnce([])
+
+      await useAccountStore.getState().setPrimary('01ACC001')
+
+      expect(mockExecute).toHaveBeenNthCalledWith(
+        1,
+        'ALTER TABLE accounts ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0'
+      )
+      expect(mockExecute).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('SET is_primary = CASE WHEN id = ? THEN 1 ELSE 0 END'),
+        ['01ACC001', '01ACC001', expect.any(String)]
+      )
+      expect(mockQuery).toHaveBeenCalledTimes(2)
     })
   })
 

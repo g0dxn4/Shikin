@@ -2,15 +2,13 @@ import Database from 'better-sqlite3'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { mkdirSync } from 'node:fs'
+import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
 
 const DATA_DIR = join(homedir(), '.local', 'share', 'com.asf.shikin')
 const DB_PATH = join(DATA_DIR, 'shikin.db')
 const REQUIRED_CORE_TABLES = ['_migrations', 'accounts', 'categories', 'transactions'] as const
-const REQUIRED_MIGRATIONS = [
-  '001_core_tables',
-  '013_recurring_rules_currency',
-  '014_recurring_rules_currency_backfill',
-] as const
+export const REQUIRED_MIGRATIONS = CLI_DATABASE_MIGRATIONS
+const CREDIT_CARD_COLUMNS = ['credit_limit', 'statement_closing_day', 'payment_due_day'] as const
 
 // Ensure data directory exists
 mkdirSync(DATA_DIR, { recursive: true })
@@ -41,6 +39,33 @@ function assertShikinSchemaReady(db: Database.Database, dbPath = DB_PATH): void 
       (row) => row.name
     )
   )
+
+  // The desktop app can inherit 001/003 from Rust-side migrations before the JS
+  // migration table records them. Mirror the app's safe metadata repair so CLI
+  // readiness does not reject structurally initialized legacy databases.
+  if (!appliedMigrations.has('001_core_tables') && existingTables.has('accounts')) {
+    db.prepare("INSERT OR IGNORE INTO _migrations (id, name) VALUES (1, '001_core_tables')").run()
+    appliedMigrations.add('001_core_tables')
+  }
+  if (!appliedMigrations.has('003_credit_cards') && existingTables.has('accounts')) {
+    const accountColumns = new Set(
+      (db.prepare('PRAGMA table_info(accounts)').all() as Array<{ name: string }>).map(
+        (column) => column.name
+      )
+    )
+    const hasCreditCardColumns = CREDIT_CARD_COLUMNS.every((column) => accountColumns.has(column))
+    if (!hasCreditCardColumns) {
+      const missingColumns = CREDIT_CARD_COLUMNS.filter((column) => !accountColumns.has(column))
+      throw new Error(
+        `Shikin database at ${dbPath} is not ready for CLI/MCP use. ` +
+          `Missing columns for 003_credit_cards: ${missingColumns.join(', ')}. ` +
+          'Open the Shikin app to finish initializing or migrating the shared database.'
+      )
+    }
+    db.prepare("INSERT OR IGNORE INTO _migrations (id, name) VALUES (3, '003_credit_cards')").run()
+    appliedMigrations.add('003_credit_cards')
+  }
+
   const missingMigrations = REQUIRED_MIGRATIONS.filter(
     (migration) => !appliedMigrations.has(migration)
   )

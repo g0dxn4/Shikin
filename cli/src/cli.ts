@@ -4,21 +4,10 @@ import { pathToFileURL } from 'node:url'
 import { Command } from 'commander'
 import { tools, type ToolDefinition } from './tools.js'
 import { close, query } from './database.js'
+import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
 import { z } from 'zod'
 
-const EXPECTED_MIGRATIONS = [
-  '001_core_tables',
-  '003_credit_cards',
-  '004_category_rules',
-  '005_recurring_rules',
-  '006_goals',
-  '007_recaps',
-  '010_transaction_splits',
-  '011_net_worth_snapshots',
-  '012_account_balance_history',
-  '013_recurring_rules_currency',
-  '014_recurring_rules_currency_backfill',
-] as const
+export const EXPECTED_MIGRATIONS = CLI_DATABASE_MIGRATIONS
 
 function isFailureResult(value: unknown): value is Record<string, unknown> & { success: false } {
   return (
@@ -393,6 +382,10 @@ export function createProgram(toolDefinitions: ToolDefinition[] = tools): Comman
   for (const tool of toolDefinitions) {
     const cmd = program.command(tool.name).description(tool.description)
 
+    if (tool.name === 'query-transactions') {
+      cmd.alias('list-transactions')
+    }
+
     const schemaShape = tool.schema.shape
     if (schemaShape && Object.keys(schemaShape).length > 0) {
       const options = zodToOptions(tool.schema)
@@ -415,6 +408,23 @@ export function createProgram(toolDefinitions: ToolDefinition[] = tools): Comman
 
     cmd.action(async (opts) => {
       try {
+        if (tool.cliUnavailableMessage) {
+          console.log(
+            JSON.stringify(
+              {
+                success: false,
+                message: tool.cliUnavailableMessage,
+                error: tool.cliUnavailableMessage,
+                errorType: 'unavailable_error',
+              },
+              null,
+              2
+            )
+          )
+          process.exitCode = 1
+          return
+        }
+
         // Convert CLI string values to proper types based on schema
         const input = coerceInput(opts, tool.schema)
         const parsed = tool.schema.parse(input)

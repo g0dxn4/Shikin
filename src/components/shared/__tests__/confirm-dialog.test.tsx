@@ -27,9 +27,7 @@ describe('ConfirmDialog', () => {
   })
 
   it('renders custom labels', () => {
-    render(
-      <ConfirmDialog {...defaultProps} confirmLabel="Yes, delete" cancelLabel="No, keep" />
-    )
+    render(<ConfirmDialog {...defaultProps} confirmLabel="Yes, delete" cancelLabel="No, keep" />)
 
     expect(screen.getByRole('button', { name: 'Yes, delete' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'No, keep' })).toBeInTheDocument()
@@ -57,13 +55,13 @@ describe('ConfirmDialog', () => {
   it('disables both buttons when isLoading', () => {
     render(<ConfirmDialog {...defaultProps} isLoading />)
 
-    expect(screen.getByRole('button', { name: '...' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Confirm...' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
   })
 
-  it('shows "..." on confirm button when isLoading', () => {
+  it('shows descriptive loading text on confirm button when isLoading', () => {
     render(<ConfirmDialog {...defaultProps} isLoading />)
 
-    expect(screen.getByRole('button', { name: '...' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Confirm...' })).toBeInTheDocument()
   })
 })

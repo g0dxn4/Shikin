@@ -12,7 +12,7 @@ All notable changes to Shikin are documented in this file.
 - Transfer destination account flow in transaction form and transfer-aware balance handling.
 - Playwright coverage for budgets and subscriptions pages.
 - Theme customization MVP in Settings (presets, token editor, apply/save/reset/revert).
-- CLI and MCP now expose the shipped 44-tool surface (42 available tools + 2 compatibility placeholders: `get-financial-news`, `get-congressional-trades`) from shared definitions.
+- CLI and MCP now expose the shipped 41-tool surface (39 available tools + 2 compatibility placeholders: `get-financial-news`, `get-congressional-trades`) from shared definitions.
 
 ### Changed
 
@@ -29,3 +29,4 @@ All notable changes to Shikin are documented in this file.
 
 - Refreshed README, contributing notes, planning docs, sprint overviews, and backlog.
 - Added archival guidance for historical research docs.
+- Clarified MVP limitations for browser subscriptions, CLI transfer writes, debt APR defaults, and external-feed placeholders.

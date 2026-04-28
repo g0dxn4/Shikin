@@ -143,8 +143,8 @@ export function nonNegativeMoneyAmount(
 
 export function unsupportedTransferMessage() {
   return (
-    'Transfer transactions are not fully supported in the CLI yet. ' +
-    'Record the withdrawal and deposit as separate entries with explicit account IDs.'
+    'Transfer transactions are not supported by CLI/MCP transaction-write tools in this MVP. ' +
+    'Workaround: record the withdrawal and matching deposit as separate entries with explicit account IDs.'
   )
 }
 

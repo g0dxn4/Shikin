@@ -26,14 +26,12 @@ vi.mock('react-router', () => ({
 
 const mockFetchAccounts = vi.fn().mockResolvedValue(undefined)
 const mockFetchTransactions = vi.fn().mockResolvedValue(undefined)
-const mockOpenAccountDialog = vi.fn()
 const mockOpenTransactionDialog = vi.fn()
 const mockFetchGoals = vi.fn().mockResolvedValue(undefined)
 const mockLoadRates = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('@/stores/ui-store', () => ({
   useUIStore: () => ({
-    openAccountDialog: mockOpenAccountDialog,
     openTransactionDialog: mockOpenTransactionDialog,
   }),
 }))
@@ -136,6 +134,8 @@ vi.mock('@/stores/health-store', () => ({
 vi.mock('@/stores/spending-insights-store', () => ({
   useSpendingInsightsStore: () => ({
     insights: [],
+    momComparisons: [],
+    isLoading: false,
     loadComparisons: vi.fn(),
   }),
 }))
@@ -159,21 +159,13 @@ describe('Dashboard', () => {
     expect(mockFetchTransactions).toHaveBeenCalled()
   })
 
-  describe('empty state', () => {
-    it('renders CTA when no accounts', () => {
+  describe('without accounts', () => {
+    it('keeps dashboard intelligence visible', () => {
       render(<Dashboard />)
 
-      expect(screen.getByText('empty.title')).toBeInTheDocument()
-      expect(screen.getByText('empty.description')).toBeInTheDocument()
-    })
-
-    it('openAccountDialog called on add account CTA', async () => {
-      const user = userEvent.setup()
-      render(<Dashboard />)
-
-      await user.click(screen.getByText('empty.addAccount'))
-
-      expect(mockOpenAccountDialog).toHaveBeenCalled()
+      expect(screen.getByText('Spending intelligence')).toBeInTheDocument()
+      expect(screen.getByText('Recent activity')).toBeInTheDocument()
+      expect(screen.queryByText('empty.addAccount')).not.toBeInTheDocument()
     })
   })
 
@@ -220,12 +212,13 @@ describe('Dashboard', () => {
     expect(screen.getByText('Financial health: Health unavailable')).toBeInTheDocument()
   })
 
-  it('shows dedicated account load error state instead of onboarding CTA', () => {
+  it('shows account load failures in the dashboard error banner', () => {
     mockAccountError = 'Accounts unavailable'
 
     render(<Dashboard />)
 
-    expect(screen.getByText('Couldn’t load your dashboard accounts')).toBeInTheDocument()
+    expect(screen.getByText('Some dashboard data couldn’t be loaded')).toBeInTheDocument()
+    expect(screen.getByText('Accounts: Accounts unavailable')).toBeInTheDocument()
     expect(screen.queryByText('empty.addAccount')).not.toBeInTheDocument()
   })
 
@@ -246,22 +239,13 @@ describe('Dashboard', () => {
       expect(screen.getByText('$1,950.00')).toBeInTheDocument()
     })
 
-    it('shows up to 3 account cards with name and balance', () => {
+    it('does not render account preview cards', () => {
       render(<Dashboard />)
 
-      expect(screen.getByText('Checking')).toBeInTheDocument()
-      expect(screen.getByText('Savings')).toBeInTheDocument()
-      expect(screen.getByText('Credit')).toBeInTheDocument()
-      // 4th account is not shown (slice to 3)
+      expect(screen.queryByText('Checking')).not.toBeInTheDocument()
+      expect(screen.queryByText('Savings')).not.toBeInTheDocument()
+      expect(screen.queryByText('Credit')).not.toBeInTheDocument()
       expect(screen.queryByText('Extra')).not.toBeInTheDocument()
-    })
-
-    it('"View All" link points to /accounts', () => {
-      render(<Dashboard />)
-
-      const viewAllLinks = screen.getAllByText('viewAll')
-      const accountsLink = viewAllLinks[0].closest('a')
-      expect(accountsLink).toHaveAttribute('href', '/accounts')
     })
   })
 

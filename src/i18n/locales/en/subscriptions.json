@@ -1,14 +1,14 @@
 {
   "title": "Subscriptions",
   "connection": {
-    "connected": "Connected to Subby",
-    "disconnected": "Subby not connected",
-    "configure": "Configure in Settings",
-    "setupTitle": "Connect to Subby",
-    "setupDescription": "Shikin integrates with Subby to track your subscriptions.",
-    "step1": "Install Subby from the ASF suite",
-    "step2": "Make sure Subby has been run at least once",
-    "step3": "Subscriptions will be loaded automatically from Subby's database"
+    "connected": "Subscriptions connected",
+    "disconnected": "Subscriptions unavailable in browser MVP",
+    "configure": "Use CLI/MCP for stored subscription data",
+    "setupTitle": "Browser subscription UI is limited",
+    "setupDescription": "This page is a placeholder in the MVP. Shikin stores subscription data for CLI/MCP analytics, but browser create/edit/list flows are not wired yet.",
+    "step1": "Use CLI/MCP tools such as list-subscriptions and get-subscription-spending for stored subscription data.",
+    "step2": "Continue tracking subscription charges as recurring transactions or normal expenses in the browser app.",
+    "step3": "A browser subscription management UI remains planned future scope."
   },
   "summary": {
     "monthlyTotal": "Monthly Total",
@@ -46,6 +46,6 @@
   },
   "empty": {
     "title": "No subscriptions found",
-    "description": "Your subscriptions from Subby will appear here."
+    "description": "Stored subscriptions are not listed in the browser UI yet."
   }
 }

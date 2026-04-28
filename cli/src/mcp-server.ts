@@ -220,7 +220,8 @@ export function createMcpToolHandler(tool: ToolDefinition) {
     }
 
     try {
-      const parsed = tool.schema.parse(input)
+      const { _meta, ...toolInput } = input
+      const parsed = tool.schema.parse(toolInput)
       const result = await tool.execute(parsed)
       if (isFailureResult(result)) {
         const failureResult = toFailureResult(result)

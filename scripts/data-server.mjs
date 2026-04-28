@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   icon TEXT,
   color TEXT,
   is_archived INTEGER NOT NULL DEFAULT 0,
+  is_primary INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
@@ -472,6 +473,18 @@ WHERE (currency IS NULL OR TRIM(currency) = '') AND account_id IS NOT NULL;
     db.prepare(
       "INSERT INTO _migrations (id, name) VALUES (14, '014_recurring_rules_currency_backfill')"
     ).run()
+  }
+
+  // --- Migration 015: Primary Account ---
+  if (!applied.has('015_primary_account')) {
+    const accountColumns = db.prepare('PRAGMA table_info(accounts)').all()
+    const hasPrimaryColumn = accountColumns.some((column) => column.name === 'is_primary')
+
+    if (!hasPrimaryColumn) {
+      db.exec(`ALTER TABLE accounts ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0;`)
+    }
+
+    db.prepare("INSERT INTO _migrations (id, name) VALUES (15, '015_primary_account')").run()
   }
 
   console.log('[data-server] Migrations complete')

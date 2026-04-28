@@ -12,6 +12,9 @@ export interface AccountFormData {
   type: AccountType
   currency: CurrencyCode
   balance: number
+  creditLimit?: number
+  statementClosingDay?: number
+  paymentDueDay?: number
 }
 
 export interface BalanceHistoryPoint {
@@ -29,6 +32,7 @@ interface AccountState {
   fetch: () => Promise<void>
   add: (data: AccountFormData) => Promise<void>
   update: (id: string, data: AccountFormData) => Promise<void>
+  setPrimary: (id: string) => Promise<void>
   archive: (id: string) => Promise<void>
   unarchive: (id: string) => Promise<void>
   remove: (id: string) => Promise<void>
@@ -45,6 +49,31 @@ function normalizeAccountCurrency(value: string | null | undefined) {
 
 function recurringRuleAccountCurrencyChangeBlockedMessage(ruleCount: number) {
   return `Cannot change this account currency while ${ruleCount} recurring rule(s) still point at the account. Repair, move, or recreate those recurring rules first so scheduled amounts do not silently change meaning.`
+}
+
+async function ensurePrimaryAccountColumn() {
+  const accountColumns = await query<{ name: string }>('PRAGMA table_info(accounts)')
+  const hasPrimaryColumn = accountColumns.some((column) => column.name === 'is_primary')
+
+  if (!hasPrimaryColumn) {
+    await execute('ALTER TABLE accounts ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0')
+  }
+}
+
+function getCreditCardFields(data: AccountFormData) {
+  if (data.type !== 'credit_card') {
+    return {
+      creditLimit: null,
+      statementClosingDay: null,
+      paymentDueDay: null,
+    }
+  }
+
+  return {
+    creditLimit: data.creditLimit === undefined ? null : toCentavos(data.creditLimit),
+    statementClosingDay: data.statementClosingDay ?? null,
+    paymentDueDay: data.paymentDueDay ?? null,
+  }
 }
 
 export const useAccountStore = create<AccountState>((set, get) => ({
@@ -79,10 +108,22 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     try {
       const id = generateId()
       const now = new Date().toISOString()
+      const creditFields = getCreditCardFields(data)
       await execute(
-        `INSERT INTO accounts (id, name, type, currency, balance, is_archived, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
-        [id, data.name, data.type, data.currency, toCentavos(data.balance), now, now]
+        `INSERT INTO accounts (id, name, type, currency, balance, credit_limit, statement_closing_day, payment_due_day, is_archived, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+        [
+          id,
+          data.name,
+          data.type,
+          data.currency,
+          toCentavos(data.balance),
+          creditFields.creditLimit,
+          creditFields.statementClosingDay,
+          creditFields.paymentDueDay,
+          now,
+          now,
+        ]
       )
     } catch (error) {
       set({ error: getErrorMessage(error) })
@@ -126,9 +167,43 @@ export const useAccountStore = create<AccountState>((set, get) => ({
       }
 
       const now = new Date().toISOString()
+      const creditFields = getCreditCardFields(data)
       await execute(
-        `UPDATE accounts SET name = ?, type = ?, currency = ?, balance = ?, updated_at = ? WHERE id = ?`,
-        [data.name, data.type, data.currency, toCentavos(data.balance), now, id]
+        `UPDATE accounts SET name = ?, type = ?, currency = ?, balance = ?, credit_limit = ?, statement_closing_day = ?, payment_due_day = ?, updated_at = ? WHERE id = ?`,
+        [
+          data.name,
+          data.type,
+          data.currency,
+          toCentavos(data.balance),
+          creditFields.creditLimit,
+          creditFields.statementClosingDay,
+          creditFields.paymentDueDay,
+          now,
+          id,
+        ]
+      )
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
+
+    try {
+      await get().fetch()
+    } catch {
+      // The write already committed; fetchError already captures the refresh problem.
+    }
+  },
+
+  setPrimary: async (id) => {
+    set({ error: null })
+    try {
+      await ensurePrimaryAccountColumn()
+      await execute(
+        `UPDATE accounts
+         SET is_primary = CASE WHEN id = ? THEN 1 ELSE 0 END,
+             updated_at = CASE WHEN id = ? THEN ? ELSE updated_at END
+         WHERE is_archived = 0 AND type NOT IN ('investment', 'crypto', 'credit_card')`,
+        [id, id, new Date().toISOString()]
       )
     } catch (error) {
       set({ error: getErrorMessage(error) })

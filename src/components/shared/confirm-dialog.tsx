@@ -47,7 +47,7 @@ export function ConfirmDialog({
             onClick={onConfirm}
             disabled={isLoading}
           >
-            {isLoading ? '...' : confirmLabel}
+            {isLoading ? `${confirmLabel}...` : confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

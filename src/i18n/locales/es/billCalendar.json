@@ -1,9 +1,11 @@
 {
   "title": "Calendario de Facturas",
+  "listView": "Vista de lista",
   "bills": {
     "title": "Facturas",
     "description": "Gastos recurrentes y proximos vencimientos desde tu agenda local.",
     "addRecurring": "Agregar factura recurrente",
+    "calendarView": "Vista de calendario",
     "upcomingDescription": "Ordenado por proximo vencimiento desde reglas de gastos recurrentes.",
     "onTrack": "En orden",
     "emptyTitle": "Aun no hay facturas recurrentes",

@@ -17,14 +17,14 @@ type DebtPlanRow = {
 const getDebtPayoffPlan: ToolDefinition = {
   name: 'get-debt-payoff-plan',
   description:
-    'Calculate a debt payoff plan using snowball or avalanche strategy. Pulls credit card debts from accounts automatically.',
+    'Calculate a debt payoff plan using snowball or avalanche strategy. Pulls credit card debts from accounts automatically; MVP projections use 0% APR because accounts do not store APR yet.',
   schema: z.object({
     strategy: z
       .enum(['snowball', 'avalanche'])
       .optional()
       .default('avalanche')
       .describe(
-        'Payoff strategy. Avalanche = highest APR first. Snowball = smallest balance first.'
+        'Payoff strategy. Avalanche uses highest APR first when APR data exists; in this MVP accounts do not store APR, so avalanche falls back to smallest balance first. Snowball = smallest balance first.'
       ),
     extraPayment: z
       .number()
@@ -49,7 +49,7 @@ const getDebtPayoffPlan: ToolDefinition = {
       id: a.id,
       name: a.name,
       balance: Math.abs(a.balance),
-      apr: 0, // Default — user should configure APR
+      apr: 0, // MVP: accounts have no APR column, so CLI projections exclude interest.
       minPayment: Math.max(Math.round(Math.abs(a.balance) * 0.02), 2500), // 2% or $25 min
     }))
 
@@ -83,13 +83,13 @@ const getDebtPayoffPlan: ToolDefinition = {
       totalMinimumPayment: fromCentavos(totalMinPayment),
       extraMonthlyPayment: extraPayment ?? 0,
       payoffOrder: sorted.map((d) => d.name),
-      message: `${strategy ?? 'avalanche'} strategy: ~${months} months to pay off $${fromCentavos(totalDebt).toFixed(2)} in debt.${extraPayment ? ` With $${extraPayment}/month extra payment.` : ''} Note: APR defaults to 0% — configure APR per account for accurate projections.`,
+      message: `${strategy ?? 'avalanche'} strategy: ~${months} months to pay off $${fromCentavos(totalDebt).toFixed(2)} in debt.${extraPayment ? ` With $${extraPayment}/month extra payment.` : ''} MVP limitation: APR defaults to 0% because accounts do not store APR yet, so interest is excluded from this estimate.`,
     }
   },
 }
 
 // ---------------------------------------------------------------------------
-// 42. convert-currency
+// 39. get-debt-payoff-plan
 // ---------------------------------------------------------------------------
 
 export const debtTools: ToolDefinition[] = [getDebtPayoffPlan]

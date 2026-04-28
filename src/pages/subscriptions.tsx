@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Repeat, AlertCircle, CheckCircle, Calendar, DollarSign } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useSubscriptionStore, type SubbySubscription } from '@/stores/subscription-store'
+import { useSubscriptionStore, type StoredSubscription } from '@/stores/subscription-store'
 
 const STATUS_COLORS: Record<string, string> = {
   trial: '#a855f7',
@@ -18,7 +18,7 @@ function formatCurrency(amount: number, currency: string = 'USD'): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount)
 }
 
-function SubscriptionCard({ sub }: { sub: SubbySubscription }) {
+function SubscriptionCard({ sub }: { sub: StoredSubscription }) {
   const { t } = useTranslation('subscriptions')
 
   const statusColor = STATUS_COLORS[sub.status] ?? '#6b7280'

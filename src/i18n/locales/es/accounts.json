@@ -12,7 +12,12 @@
     "namePlaceholder": "ej. Cuenta Corriente",
     "type": "Tipo de Cuenta",
     "currency": "Moneda",
-    "balance": "Saldo Actual"
+    "balance": "Saldo Actual",
+    "creditDetails": "Detalles de tarjeta de crédito",
+    "creditDetailsDescription": "Rastrea límite, utilización y fechas mensuales del estado.",
+    "creditLimit": "Límite de Crédito",
+    "statementClosingDay": "Día de Cierre",
+    "paymentDueDay": "Día de Pago"
   },
   "types": {
     "checking": "Corriente",
@@ -45,6 +50,11 @@
     "high": "Alta",
     "moderate": "Moderada",
     "low": "Baja"
+  },
+  "credit": {
+    "limit": "Límite",
+    "available": "Disponible",
+    "dates": "Fechas"
   },
   "empty": {
     "title": "Sin cuentas aún",

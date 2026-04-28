@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router'
 import { BillCalendar } from '../bill-calendar'
 
 const recurringStoreMock = vi.hoisted(() => ({
@@ -47,20 +48,29 @@ vi.mock('@/stores/recurring-store', () => ({
   }),
 }))
 
+function renderBillCalendar() {
+  return render(
+    <MemoryRouter>
+      <BillCalendar />
+    </MemoryRouter>
+  )
+}
+
 describe('BillCalendar', () => {
   it('renders calendar grid and navigation', () => {
-    render(<BillCalendar />)
+    renderBillCalendar()
 
     expect(screen.getByText('title')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /listView/i })).toHaveAttribute('href', '/bills')
     expect(screen.getByRole('button', { name: 'prevMonth' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'nextMonth' })).toBeInTheDocument()
-    expect(screen.getByRole('grid')).toBeInTheDocument()
+    expect(screen.getByRole('table')).toBeInTheDocument()
     expect(screen.getAllByText('Rent').length).toBeGreaterThan(0)
   })
 
   it('navigates to previous and next months', async () => {
     const user = userEvent.setup()
-    render(<BillCalendar />)
+    renderBillCalendar()
 
     const prevBtn = screen.getByRole('button', { name: 'prevMonth' })
     const nextBtn = screen.getByRole('button', { name: 'nextMonth' })
@@ -78,7 +88,7 @@ describe('BillCalendar', () => {
   })
 
   it('renders localized day headers', () => {
-    render(<BillCalendar />)
+    renderBillCalendar()
 
     const headers = screen.getAllByRole('columnheader')
     expect(headers.length).toBe(7)

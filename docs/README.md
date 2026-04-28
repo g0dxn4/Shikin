@@ -36,10 +36,10 @@
 | Pages (routed)    | 13    |
 | Pages (total)     | 16    |
 | Zustand Stores    | 19    |
-| CLI/MCP Tools     | 44    |
+| CLI/MCP Tools     | 41    |
 | Service Files     | 24    |
 | Database Tables   | 19    |
-| i18n Namespaces   | 11    |
+| i18n Namespaces   | 15    |
 | Languages         | 2     |
 | Sidebar Nav Items | 10    |
 

@@ -56,6 +56,10 @@ describe('BillsPage', () => {
       </MemoryRouter>
     )
     expect(screen.getByText('bills.title')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /bills\.calendarView/i })).toHaveAttribute(
+      'href',
+      '/bill-calendar'
+    )
     expect(screen.getByText('Rent')).toBeInTheDocument()
     expect(screen.getByText('Housing · Checking')).toBeInTheDocument()
   })

@@ -257,7 +257,7 @@ describe('CLI tool validation regressions', () => {
     expect(result).toEqual({
       success: false,
       message:
-        'Transfer transactions are not fully supported in the CLI yet. Record the withdrawal and deposit as separate entries with explicit account IDs.',
+        'Transfer transactions are not supported by CLI/MCP transaction-write tools in this MVP. Workaround: record the withdrawal and matching deposit as separate entries with explicit account IDs.',
     })
     expect(mockTransaction).not.toHaveBeenCalled()
     expect(mockExecute).not.toHaveBeenCalled()
@@ -1876,7 +1876,7 @@ describe('CLI tool validation regressions', () => {
     expect(result).toEqual({
       success: false,
       message:
-        'Transfer transactions are not fully supported in the CLI yet. Record the withdrawal and deposit as separate entries with explicit account IDs.',
+        'Transfer transactions are not supported by CLI/MCP transaction-write tools in this MVP. Workaround: record the withdrawal and matching deposit as separate entries with explicit account IDs.',
     })
     expect(mockExecute).not.toHaveBeenCalled()
   })

@@ -2,6 +2,7 @@ import {
   z,
   query,
   execute,
+  transaction,
   generateId,
   toCentavos,
   boundedText,
@@ -151,7 +152,7 @@ const splitTransaction: ToolDefinition = {
       return { success: false, message: `Transaction ${transactionId} not found.` }
     }
 
-    const transaction = transactions[0]
+    const targetTransaction = transactions[0]
     const splitsCentavos = splits.map((s) => ({
       categoryId: s.categoryId,
       amount: toCentavos(s.amount),
@@ -159,35 +160,32 @@ const splitTransaction: ToolDefinition = {
     }))
 
     const splitsTotal = splitsCentavos.reduce((sum, s) => sum + s.amount, 0)
-    if (splitsTotal !== transaction.amount) {
+    if (splitsTotal !== targetTransaction.amount) {
       return {
         success: false,
-        message: `Split amounts total $${(splitsTotal / 100).toFixed(2)} but transaction amount is $${(transaction.amount / 100).toFixed(2)}. They must match exactly.`,
+        message: `Split amounts total $${(splitsTotal / 100).toFixed(2)} but transaction amount is $${(targetTransaction.amount / 100).toFixed(2)}. They must match exactly.`,
       }
     }
 
-    // Mark original transaction as split
-    await execute(
-      "UPDATE transactions SET is_split = 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $1",
-      [transactionId]
-    )
+    transaction(() => {
+      execute('DELETE FROM transaction_splits WHERE transaction_id = $1', [transactionId])
 
-    // Insert split records
-    for (const split of splitsCentavos) {
-      const splitId = generateId()
-      await execute(
-        `INSERT INTO transaction_splits (id, transaction_id, category_id, amount, notes)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [splitId, transactionId, split.categoryId, split.amount, split.notes]
-      )
-    }
+      for (const split of splitsCentavos) {
+        const splitId = generateId()
+        execute(
+          `INSERT INTO transaction_splits (id, transaction_id, category_id, subcategory_id, amount, notes)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [splitId, transactionId, split.categoryId, null, split.amount, split.notes]
+        )
+      }
+    })
 
     return {
       success: true,
       transactionId,
-      description: transaction.description,
+      description: targetTransaction.description,
       splitCount: splits.length,
-      message: `Split "${transaction.description}" into ${splits.length} categories.`,
+      message: `Split "${targetTransaction.description}" into ${splits.length} categories.`,
     }
   },
 }

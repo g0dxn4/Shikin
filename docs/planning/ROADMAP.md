@@ -122,6 +122,8 @@ Current baseline (Mar 2026): Shikin has moved to a browser-first runtime using `
 | Recurring and subscription API | Done   | Upcoming bills and recurring payment automation     |
 | MCP server                     | Done   | Exposes the shared tool catalog to external clients |
 
+**MVP limitation decisions:** CLI/MCP keep transfer write support limited for now; linked transfers should be entered in the browser UI or represented as separate explicit-account withdrawal/deposit entries from CLI/MCP. External-feed tools remain structured unavailable placeholders until feed configuration and data-contract work are scoped.
+
 **Dependencies:** Epic 1 (done). Tool implementations depend on their respective feature epics.
 
 ---
@@ -179,9 +181,9 @@ Current baseline (Mar 2026): Shikin has moved to a browser-first runtime using `
 
 | Task                                    | Status  | Notes                                     |
 | --------------------------------------- | ------- | ----------------------------------------- |
-| `listSubscriptions` tool                | Done    | List subscriptions from Subby integration |
+| `listSubscriptions` tool                | Done    | List subscriptions from Shikin local data |
 | `getSubscriptionSpending` tool          | Done    | Calculate subscription costs              |
-| Subscription list page                  | Planned | Active and cancelled tabs                 |
+| Subscription list page                  | Planned | Browser UI is an MVP placeholder          |
 | Subscription creation form              | Planned | Name, amount, billing cycle, next date    |
 | Subscription editing and cancellation   | Planned | Soft cancel (is_active = 0)               |
 | Upcoming payments calendar              | Planned | Next 30 days view                         |
@@ -192,6 +194,8 @@ Current baseline (Mar 2026): Shikin has moved to a browser-first runtime using `
 | Subscription cost trends                | Future  | Monthly cost over time chart              |
 
 **Dependencies:** Epic 1.
+
+**MVP limitation decision:** Subscription data is supported in the local schema and CLI/MCP analytics. Browser subscription management and any external Subby import/sync are future scope, not part of the MVP.
 
 ---
 

@@ -16,6 +16,7 @@ import enGoals from './locales/en/goals.json'
 import enAnalytics from './locales/en/analytics.json'
 import enBillCalendar from './locales/en/billCalendar.json'
 import enInsights from './locales/en/insights.json'
+import enCategories from './locales/en/categories.json'
 
 import esCommon from './locales/es/common.json'
 import esDashboard from './locales/es/dashboard.json'
@@ -31,6 +32,7 @@ import esGoals from './locales/es/goals.json'
 import esAnalytics from './locales/es/analytics.json'
 import esBillCalendar from './locales/es/billCalendar.json'
 import esInsights from './locales/es/insights.json'
+import esCategories from './locales/es/categories.json'
 
 export const resources = {
   en: {
@@ -48,6 +50,7 @@ export const resources = {
     analytics: enAnalytics,
     billCalendar: enBillCalendar,
     insights: enInsights,
+    categories: enCategories,
   },
   es: {
     common: esCommon,
@@ -64,6 +67,7 @@ export const resources = {
     analytics: esAnalytics,
     billCalendar: esBillCalendar,
     insights: esInsights,
+    categories: esCategories,
   },
 } as const
 
@@ -89,6 +93,7 @@ i18n
       'analytics',
       'billCalendar',
       'insights',
+      'categories',
     ],
     interpolation: {
       escapeValue: false,

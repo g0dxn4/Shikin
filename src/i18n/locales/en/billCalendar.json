@@ -1,9 +1,11 @@
 {
   "title": "Bill Calendar",
+  "listView": "List View",
   "bills": {
     "title": "Bills",
     "description": "Recurring expenses and upcoming due dates from your local schedule.",
     "addRecurring": "Add recurring bill",
+    "calendarView": "Calendar View",
     "upcomingDescription": "Sorted by next due date from recurring expense rules.",
     "onTrack": "On track",
     "emptyTitle": "No recurring bills yet",

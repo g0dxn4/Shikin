@@ -14,6 +14,19 @@ const { createMcpToolHandler, registerMcpResources, registerMcpTools } =
   await import('./mcp-server.js')
 
 describe('MCP tool registration', () => {
+  it('keeps tool names unique and client-safe', () => {
+    const toolNames = tools.map((tool) => tool.name)
+
+    expect(new Set(toolNames).size).toBe(toolNames.length)
+    for (const tool of tools) {
+      expect(tool.name).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+      expect(tool.description.trim()).not.toBe('')
+      if (tool.cliUnavailableMessage && tool.mcpUnavailableMessage) {
+        expect(tool.cliUnavailableMessage).toBe(tool.mcpUnavailableMessage)
+      }
+    }
+  })
+
   it('registers the current shared tool catalog', () => {
     const registerTool = vi.fn()
 
@@ -31,6 +44,62 @@ describe('MCP tool registration', () => {
         'get-congressional-trades',
       ])
     )
+  })
+
+  it('executes real shared tools through the MCP handler without CLI-only coercion', async () => {
+    const queryMock = vi.mocked(query)
+    queryMock.mockReset()
+    queryMock.mockReturnValueOnce([
+      {
+        id: 'acct-1',
+        name: 'Checking',
+        type: 'checking',
+        currency: 'USD',
+        balance: 12345,
+        credit_limit: null,
+        statement_closing_day: null,
+        payment_due_day: null,
+      },
+    ])
+
+    const listAccounts = tools.find((tool) => tool.name === 'list-accounts')
+    expect(listAccounts).toBeDefined()
+
+    const handler = createMcpToolHandler(listAccounts!)
+    const result = await handler({ type: 'checking', _meta: { client: 'contract-test' } })
+    const payload = JSON.parse(result.content[0]!.text)
+
+    expect(result.isError).toBeUndefined()
+    expect(queryMock).toHaveBeenCalledWith(expect.stringContaining('AND type = $1'), ['checking'])
+    expect(payload).toEqual({
+      accounts: [
+        {
+          id: 'acct-1',
+          name: 'Checking',
+          type: 'checking',
+          currency: 'USD',
+          balance: 123.45,
+        },
+      ],
+      message: 'Found 1 account.',
+    })
+  })
+
+  it('strips MCP client metadata before schema validation', async () => {
+    const execute = vi.fn(async ({ id }: { id: string }) => ({ success: true, id }))
+    const handler = createMcpToolHandler({
+      name: 'strict-tool',
+      description: 'Test strict metadata handling',
+      schema: z.object({ id: z.string() }).strict(),
+      execute,
+    })
+
+    const result = await handler({ id: 'item-1', _meta: { client: 'contract-test' } })
+    const payload = JSON.parse(result.content[0]!.text)
+
+    expect(result.isError).toBeUndefined()
+    expect(execute).toHaveBeenCalledWith({ id: 'item-1' })
+    expect(payload).toEqual({ success: true, id: 'item-1' })
   })
 })
 
@@ -55,6 +124,29 @@ describe('MCP tool error envelopes', () => {
       error: unavailableTool.mcpUnavailableMessage,
       errorType: 'unavailable_error',
     })
+  })
+
+  it('returns stable unavailable responses for real unavailable catalog tools', async () => {
+    const unavailableTools = tools.filter((tool) => tool.mcpUnavailableMessage)
+
+    expect(unavailableTools.map((tool) => tool.name).sort()).toEqual([
+      'get-congressional-trades',
+      'get-financial-news',
+    ])
+
+    for (const tool of unavailableTools) {
+      const handler = createMcpToolHandler(tool)
+      const result = await handler({})
+      const payload = JSON.parse(result.content[0]!.text)
+
+      expect(result.isError).toBe(true)
+      expect(payload).toEqual({
+        success: false,
+        message: tool.mcpUnavailableMessage,
+        error: tool.mcpUnavailableMessage,
+        errorType: 'unavailable_error',
+      })
+    }
   })
 
   it('returns validation errors with a top-level error string and field-level issues', async () => {

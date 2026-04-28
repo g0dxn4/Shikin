@@ -21,6 +21,7 @@ export interface Account {
   icon: string | null
   color: string | null
   is_archived: number
+  is_primary?: number
   credit_limit?: number
   statement_closing_day?: number
   payment_due_day?: number

@@ -24,6 +24,18 @@ const mockAccount: Account = {
   updated_at: '2024-01-01T00:00:00Z',
 }
 
+const mockCreditCard: Account = {
+  ...mockAccount,
+  id: '01CARD001',
+  name: 'Main Card',
+  type: 'credit_card',
+  currency: 'USD',
+  balance: -100000,
+  credit_limit: 2700000,
+  statement_closing_day: 15,
+  payment_due_day: 5,
+}
+
 describe('AccountForm', () => {
   it('renders all form fields and submit button', () => {
     render(<AccountForm onSubmit={vi.fn()} />)
@@ -46,6 +58,22 @@ describe('AccountForm', () => {
     expect(screen.getByLabelText('form.name')).toHaveValue('Savings')
     // 150050 centavos → 1500.50
     expect(screen.getByLabelText('form.balance')).toHaveValue(1500.5)
+  })
+
+  it('shows and populates credit card fields for credit card accounts', () => {
+    render(<AccountForm account={mockCreditCard} onSubmit={vi.fn()} />)
+
+    expect(screen.getByLabelText('form.creditLimit')).toHaveValue(27000)
+    expect(screen.getByLabelText('form.statementClosingDay')).toHaveValue(15)
+    expect(screen.getByLabelText('form.paymentDueDay')).toHaveValue(5)
+  })
+
+  it('hides credit card fields for non-credit accounts', () => {
+    render(<AccountForm account={mockAccount} onSubmit={vi.fn()} />)
+
+    expect(screen.queryByLabelText('form.creditLimit')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('form.statementClosingDay')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('form.paymentDueDay')).not.toBeInTheDocument()
   })
 
   it('shows validation error for empty name on submit', async () => {
@@ -82,6 +110,18 @@ describe('AccountForm', () => {
         expect.anything()
       )
     })
+  })
+
+  it('keeps investment and crypto out of account type choices', () => {
+    const { container } = render(<AccountForm onSubmit={vi.fn()} />)
+
+    const options = Array.from(container.querySelectorAll('option')).map((option) => option.value)
+
+    expect(options).toEqual(
+      expect.arrayContaining(['checking', 'savings', 'credit_card', 'cash', 'other'])
+    )
+    expect(options).not.toContain('investment')
+    expect(options).not.toContain('crypto')
   })
 
   it('disables submit and shows "..." when isLoading', () => {

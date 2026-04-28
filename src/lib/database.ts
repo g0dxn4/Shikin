@@ -323,6 +323,18 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
       "INSERT INTO _migrations (id, name) VALUES (14, '014_recurring_rules_currency_backfill')"
     )
   }
+
+  // --- Migration 015: Primary Account ---
+  if (!applied.has('015_primary_account')) {
+    const accountColumns = await db.select<{ name: string }[]>('PRAGMA table_info(accounts)')
+    const hasPrimaryColumn = accountColumns.some((column) => column.name === 'is_primary')
+
+    if (!hasPrimaryColumn) {
+      await db.execute(`ALTER TABLE accounts ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0`)
+    }
+
+    await db.execute("INSERT INTO _migrations (id, name) VALUES (15, '015_primary_account')")
+  }
 }
 
 // ── Browser Backend ────────────────────────────────────────────────────────
@@ -583,12 +595,12 @@ export async function exportDatabaseSnapshot(): Promise<Uint8Array> {
     // Use Function() dynamic import to avoid bundler/TS issues with optional Tauri deps
     const pathMod = await (Function('return import("@tauri-apps/api/path")')() as Promise<{
       appDataDir: () => Promise<string>
+      join: (...paths: string[]) => Promise<string>
     }>)
     const fsMod = await (Function('return import("@tauri-apps/plugin-fs")')() as Promise<{
       readFile: (path: string) => Promise<Uint8Array>
     }>)
-    const dataDir = await pathMod.appDataDir()
-    const dbPath = `${dataDir}shikin.db`
+    const dbPath = await pathMod.join(await pathMod.appDataDir(), 'shikin.db')
     return await fsMod.readFile(dbPath)
   }
 
@@ -614,12 +626,12 @@ export async function importDatabaseSnapshot(data: Uint8Array): Promise<void> {
     }
     const pathMod = await (Function('return import("@tauri-apps/api/path")')() as Promise<{
       appDataDir: () => Promise<string>
+      join: (...paths: string[]) => Promise<string>
     }>)
     const fsMod = await (Function('return import("@tauri-apps/plugin-fs")')() as Promise<{
       writeFile: (path: string, data: Uint8Array) => Promise<void>
     }>)
-    const dataDir = await pathMod.appDataDir()
-    const dbPath = `${dataDir}shikin.db`
+    const dbPath = await pathMod.join(await pathMod.appDataDir(), 'shikin.db')
     await fsMod.writeFile(dbPath, data)
     return
   }

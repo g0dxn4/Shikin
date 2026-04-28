@@ -25,6 +25,7 @@ const {
 
 vi.mock('react-router', () => ({
   BrowserRouter: ({ children }: { children: ReactNode }) => <>{children}</>,
+  Navigate: ({ to }: { to: string }) => <div>Navigate to {to}</div>,
   Routes: ({ children }: { children: ReactNode }) => <>{children}</>,
   Route: ({ element }: { element?: ReactNode }) => <>{element ?? null}</>,
 }))

@@ -2,13 +2,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import type * as ToolsModule from './tools.js'
+import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
 
 vi.mock('./tools.js', () => ({ tools: [] }))
 vi.mock('./database.js', () => ({ close: vi.fn(), query: vi.fn() }))
 
 const { close, query } = await import('./database.js')
 const { tools: actualTools } = await vi.importActual<typeof ToolsModule>('./tools.js')
-const { coerceInput, createProgram, zodToOptions } = await import('./cli.js')
+const { coerceInput, createProgram, EXPECTED_MIGRATIONS, zodToOptions } = await import('./cli.js')
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -95,12 +96,48 @@ describe('CLI option registration', () => {
 })
 
 describe('CLI command execution', () => {
+  it('uses the shared migration list for diagnose drift prevention', () => {
+    expect(EXPECTED_MIGRATIONS).toBe(CLI_DATABASE_MIGRATIONS)
+    expect(EXPECTED_MIGRATIONS).toHaveLength(11)
+  })
+
   it('keeps all tool definitions discoverable as CLI commands', () => {
     const program = createProgram(actualTools)
     const commandNames = program.commands.map((command) => command.name())
 
     expect(commandNames).toContain('diagnose')
     expect(commandNames).toEqual(expect.arrayContaining(actualTools.map((tool) => tool.name)))
+  })
+
+  it('keeps list-transactions as an alias for query-transactions', () => {
+    const program = createProgram(actualTools)
+    const queryTransactions = program.commands.find(
+      (command) => command.name() === 'query-transactions'
+    )
+
+    expect(queryTransactions?.aliases()).toContain('list-transactions')
+  })
+
+  it('routes list-transactions through the query-transactions command', async () => {
+    const tool = {
+      name: 'query-transactions',
+      description: 'Query transactions',
+      schema: z.object({ limit: z.number().optional() }),
+      execute: vi.fn(async () => ({ success: true, transactions: [] })),
+    }
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const program = createProgram([tool])
+
+    await program.parseAsync(['node', 'shikin', 'list-transactions', '--limit', '5'])
+
+    expect(tool.execute).toHaveBeenCalledWith({ limit: 5 })
+    expect(logSpy).toHaveBeenCalledWith(
+      JSON.stringify({ success: true, transactions: [] }, null, 2)
+    )
+    expect(errorSpy).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalledTimes(1)
   })
 
   it('returns a nonzero exit code for tool-level failures while preserving JSON output', async () => {
@@ -128,6 +165,39 @@ describe('CLI command execution', () => {
           success: false,
           message: 'Account missing-account not found.',
           reason: 'missing_account',
+        },
+        null,
+        2
+      )
+    )
+    expect(errorSpy).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('short-circuits CLI-unavailable tools without executing implementation code', async () => {
+    const tool = {
+      name: 'feed-placeholder',
+      description: 'Test unavailable CLI tool output',
+      schema: z.object({}),
+      cliUnavailableMessage: 'This feed is not configured yet.',
+      execute: vi.fn(async () => ({ success: true })),
+    }
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const program = createProgram([tool])
+
+    await program.parseAsync(['node', 'shikin', 'feed-placeholder'])
+
+    expect(process.exitCode).toBe(1)
+    expect(tool.execute).not.toHaveBeenCalled()
+    expect(logSpy).toHaveBeenCalledWith(
+      JSON.stringify(
+        {
+          success: false,
+          message: 'This feed is not configured yet.',
+          error: 'This feed is not configured yet.',
+          errorType: 'unavailable_error',
         },
         null,
         2
@@ -319,6 +389,40 @@ describe('CLI command execution', () => {
         2
       )
     )
+    expect(errorSpy).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports missing and unexpected migrations for diagnose --deep', async () => {
+    vi.mocked(query)
+      .mockReturnValueOnce([
+        { name: '001_core_tables' },
+        { name: '003_credit_cards' },
+        { name: '999_legacy_ai_memory' },
+      ])
+      .mockReturnValueOnce([{ count: 2 }])
+      .mockReturnValueOnce([{ count: 14 }])
+      .mockReturnValueOnce([{ count: 42 }])
+      .mockReturnValueOnce([{ integrity_check: 'ok' }])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([])
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const program = createProgram([])
+
+    await program.parseAsync(['node', 'shikin', 'diagnose', '--deep'])
+
+    const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
+    expect(output.database.integrity.migrations).toEqual({
+      expected: 11,
+      applied: 3,
+      missing: CLI_DATABASE_MIGRATIONS.filter(
+        (migration) => migration !== '001_core_tables' && migration !== '003_credit_cards'
+      ),
+      unexpected: ['999_legacy_ai_memory'],
+    })
     expect(errorSpy).not.toHaveBeenCalled()
     expect(close).toHaveBeenCalledTimes(1)
   })

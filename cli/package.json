@@ -1,6 +1,6 @@
 {
   "name": "@shikin/cli",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Shikin CLI and MCP server for local finance automation",
   "type": "module",
   "bin": {

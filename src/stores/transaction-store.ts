@@ -10,7 +10,7 @@ import type { SplitInput } from '@/lib/split-service'
 import type { Transaction, TransactionSplitWithCategory } from '@/types/database'
 import type { TransactionType, CurrencyCode } from '@/types/common'
 
-export interface TransactionFormData {
+interface TransactionFormData {
   amount: number
   type: TransactionType
   description: string

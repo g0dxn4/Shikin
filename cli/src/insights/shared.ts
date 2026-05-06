@@ -14,14 +14,14 @@ export {
 
 dayjs.extend(weekOfYear)
 
-export { dayjs, query, execute, generateId, fromCentavos, formatMoney, noteExists, writeNote }
+export { dayjs, query, generateId, formatMoney, noteExists, writeNote }
 
 export const UNCATEGORIZED = 'Uncategorized'
 
 export type SubscriptionBillingCycle = 'weekly' | 'monthly' | 'quarterly' | 'yearly'
 export type RecapType = 'weekly' | 'monthly'
 export type HealthTrend = 'improving' | 'declining' | 'stable'
-export type HealthGrade = 'A' | 'B' | 'C' | 'D' | 'F'
+type HealthGrade = 'A' | 'B' | 'C' | 'D' | 'F'
 export type AnomalySeverity = 'low' | 'medium' | 'high'
 export type AnomalyType =
   | 'unusual_amount'
@@ -102,7 +102,7 @@ export type HealthSubscore = {
   tip: string
 }
 
-export function getMonthlyMultiplier(cycle: SubscriptionBillingCycle): number {
+function getMonthlyMultiplier(cycle: SubscriptionBillingCycle): number {
   switch (cycle) {
     case 'weekly':
       return 52 / 12
@@ -115,7 +115,7 @@ export function getMonthlyMultiplier(cycle: SubscriptionBillingCycle): number {
   }
 }
 
-export function getYearlyMultiplier(cycle: SubscriptionBillingCycle): number {
+function getYearlyMultiplier(cycle: SubscriptionBillingCycle): number {
   switch (cycle) {
     case 'weekly':
       return 52
@@ -132,7 +132,7 @@ export function toDisplayAmount(centavos: number): number {
   return Math.round(fromCentavos(centavos) * 100) / 100
 }
 
-export function scoreToGrade(score: number): HealthGrade {
+function scoreToGrade(score: number): HealthGrade {
   if (score >= 90) return 'A'
   if (score >= 80) return 'B'
   if (score >= 65) return 'C'

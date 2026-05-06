@@ -20,7 +20,6 @@ export {
   appendNote,
   noteExists,
   listNotes,
-  isSafeNotebookPathInput,
   dayjs,
 }
 
@@ -334,7 +333,7 @@ export function resolveCategoryId(category?: string) {
   }
 }
 
-export function isStrictIsoDate(value: string): boolean {
+function isStrictIsoDate(value: string): boolean {
   if (!ISO_DATE_PATTERN.test(value)) return false
 
   const parsed = new Date(`${value}T00:00:00.000Z`)

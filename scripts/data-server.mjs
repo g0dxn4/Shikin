@@ -7,16 +7,22 @@ import {
   mkdirSync,
   unlinkSync,
   readdirSync,
-  statSync,
+  lstatSync,
 } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { homedir } from 'node:os'
 import Database from 'better-sqlite3'
 import { ulid } from 'ulidx'
+import {
+  PRIVATE_DIR_MODE,
+  PRIVATE_FILE_MODE,
+  ensurePrivateDirectory,
+  hardenPathMode,
+  prepareAppDataDir,
+} from './app-data-dir.mjs'
 import { checkpointWal, importDatabaseBuffer } from './data-server-db.mjs'
 import {
   buildBridgeCorsHeaders,
-  safePath,
+  safePathNoSymlinks,
   validateBridgePreflight,
   validateBridgeRequest,
 } from './data-server-security.mjs'
@@ -27,14 +33,14 @@ const PORT_ENV = process.env.SHIKIN_DATA_SERVER_PORT
 const parsedPort = Number.parseInt(PORT_ENV || '', 10)
 const PORT =
   Number.isInteger(parsedPort) && parsedPort > 0 && parsedPort <= 65535 ? parsedPort : 1480
-const DATA_DIR = join(homedir(), '.local', 'share', 'com.asf.shikin')
+const DATA_DIR = prepareAppDataDir()
 const DB_PATH = join(DATA_DIR, 'shikin.db')
 const SETTINGS_PATH = join(DATA_DIR, 'settings.json')
 const NOTEBOOK_DIR = join(DATA_DIR, 'notebook')
 
 // Ensure directories exist
-mkdirSync(DATA_DIR, { recursive: true })
-mkdirSync(NOTEBOOK_DIR, { recursive: true })
+ensurePrivateDirectory(DATA_DIR)
+ensurePrivateDirectory(NOTEBOOK_DIR)
 
 // ── Database Setup ─────────────────────────────────────────────────────────
 
@@ -43,6 +49,10 @@ function openDatabase() {
   database.pragma('journal_mode = WAL')
   database.pragma('foreign_keys = ON')
   database.pragma('busy_timeout = 5000')
+  hardenPathMode(DB_PATH, PRIVATE_FILE_MODE)
+  hardenPathMode(`${DB_PATH}-wal`, PRIVATE_FILE_MODE)
+  hardenPathMode(`${DB_PATH}-shm`, PRIVATE_FILE_MODE)
+  hardenPathMode(`${DB_PATH}-journal`, PRIVATE_FILE_MODE)
   return database
 }
 
@@ -56,6 +66,93 @@ const closedTransactions = new Map()
 
 function convertParams(sql) {
   return sql.replace(/\$(\d+)/g, '?')
+}
+
+const CURRENT_SHIKIN_MIGRATIONS = [
+  '001_core_tables',
+  '003_credit_cards',
+  '004_category_rules',
+  '005_recurring_rules',
+  '006_goals',
+  '007_recaps',
+  '010_transaction_splits',
+  '011_net_worth_snapshots',
+  '012_account_balance_history',
+  '013_recurring_rules_currency',
+  '014_recurring_rules_currency_backfill',
+  '015_primary_account',
+]
+
+const CURRENT_SHIKIN_SCHEMA = {
+  _migrations: ['id', 'name', 'applied_at'],
+  accounts: [
+    'id',
+    'name',
+    'type',
+    'currency',
+    'balance',
+    'is_archived',
+    'is_primary',
+    'credit_limit',
+    'statement_closing_day',
+    'payment_due_day',
+  ],
+  categories: ['id', 'name', 'type', 'sort_order'],
+  subcategories: ['id', 'category_id', 'name'],
+  transactions: ['id', 'account_id', 'type', 'amount', 'date'],
+  subscriptions: ['id', 'name', 'amount', 'billing_cycle', 'next_billing_date'],
+  budgets: ['id', 'name', 'amount', 'period'],
+  budget_periods: ['id', 'budget_id', 'start_date', 'end_date', 'spent'],
+  investments: ['id', 'symbol', 'name', 'type', 'shares'],
+  stock_prices: ['id', 'symbol', 'price', 'date'],
+  exchange_rates: ['id', 'from_currency', 'to_currency', 'rate', 'date'],
+  settings: ['key', 'value'],
+  extension_data: ['id', 'extension_id', 'key', 'value'],
+  category_rules: ['id', 'pattern', 'category_id'],
+  recurring_rules: ['id', 'description', 'amount', 'currency', 'account_id', 'next_date'],
+  goals: ['id', 'name', 'target_amount', 'current_amount'],
+  recaps: ['id', 'type', 'period_start', 'period_end', 'summary'],
+  transaction_splits: ['id', 'transaction_id', 'amount'],
+  net_worth_snapshots: ['id', 'date', 'net_worth'],
+  account_balance_history: ['id', 'account_id', 'date', 'balance'],
+}
+
+function tableHasColumn(database, tableName, columnName) {
+  return database.pragma(`table_info(${tableName})`).some((column) => column.name === columnName)
+}
+
+function validateCurrentDatabase() {
+  const tableRows = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()
+  const existingTables = new Set(tableRows.map((row) => row.name))
+  const missingTables = Object.keys(CURRENT_SHIKIN_SCHEMA).filter(
+    (tableName) => !existingTables.has(tableName)
+  )
+  if (missingTables.length > 0) {
+    throw new Error(`Database is missing required Shikin tables: ${missingTables.join(', ')}`)
+  }
+
+  for (const [tableName, requiredColumns] of Object.entries(CURRENT_SHIKIN_SCHEMA)) {
+    const existingColumns = new Set(
+      db.pragma(`table_info(${tableName})`).map((column) => column.name)
+    )
+    const missingColumns = requiredColumns.filter((column) => !existingColumns.has(column))
+    if (missingColumns.length > 0) {
+      throw new Error(
+        `Database is missing required Shikin columns on ${tableName}: ${missingColumns.join(', ')}`
+      )
+    }
+  }
+
+  const migrationRows = db.prepare('SELECT name FROM _migrations').all()
+  const appliedMigrations = new Set(migrationRows.map((row) => row.name))
+  const missingMigrations = CURRENT_SHIKIN_MIGRATIONS.filter(
+    (migration) => !appliedMigrations.has(migration)
+  )
+  if (missingMigrations.length > 0) {
+    throw new Error(
+      `Database is missing required Shikin migrations: ${missingMigrations.join(', ')}`
+    )
+  }
 }
 
 // ── Migrations ─────────────────────────────────────────────────────────────
@@ -258,20 +355,14 @@ INSERT OR IGNORE INTO categories (id, name, icon, color, type, sort_order) VALUE
 
   // --- Migration 003: Credit Cards ---
   if (!applied.has('003_credit_cards')) {
-    try {
+    if (!tableHasColumn(db, 'accounts', 'credit_limit')) {
       db.exec('ALTER TABLE accounts ADD COLUMN credit_limit INTEGER')
-    } catch {
-      /* may exist */
     }
-    try {
+    if (!tableHasColumn(db, 'accounts', 'statement_closing_day')) {
       db.exec('ALTER TABLE accounts ADD COLUMN statement_closing_day INTEGER')
-    } catch {
-      /* may exist */
     }
-    try {
+    if (!tableHasColumn(db, 'accounts', 'payment_due_day')) {
       db.exec('ALTER TABLE accounts ADD COLUMN payment_due_day INTEGER')
-    } catch {
-      /* may exist */
     }
 
     db.prepare("INSERT INTO _migrations (id, name) VALUES (3, '003_credit_cards')").run()
@@ -432,10 +523,7 @@ CREATE INDEX IF NOT EXISTS idx_account_balance_account ON account_balance_histor
 
   // --- Migration 013: Recurring Rules Currency ---
   if (!applied.has('013_recurring_rules_currency')) {
-    const recurringRuleColumns = db.prepare('PRAGMA table_info(recurring_rules)').all()
-    const hasCurrencyColumn = recurringRuleColumns.some((column) => column.name === 'currency')
-
-    if (!hasCurrencyColumn) {
+    if (!tableHasColumn(db, 'recurring_rules', 'currency')) {
       db.exec(`ALTER TABLE recurring_rules ADD COLUMN currency TEXT;`)
     }
 
@@ -477,16 +565,14 @@ WHERE (currency IS NULL OR TRIM(currency) = '') AND account_id IS NOT NULL;
 
   // --- Migration 015: Primary Account ---
   if (!applied.has('015_primary_account')) {
-    const accountColumns = db.prepare('PRAGMA table_info(accounts)').all()
-    const hasPrimaryColumn = accountColumns.some((column) => column.name === 'is_primary')
-
-    if (!hasPrimaryColumn) {
+    if (!tableHasColumn(db, 'accounts', 'is_primary')) {
       db.exec(`ALTER TABLE accounts ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0;`)
     }
 
     db.prepare("INSERT INTO _migrations (id, name) VALUES (15, '015_primary_account')").run()
   }
 
+  validateCurrentDatabase()
   console.log('[data-server] Migrations complete')
 }
 
@@ -506,7 +592,11 @@ function loadSettings() {
 }
 
 function saveSettings(settings) {
-  writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf-8')
+  writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2), {
+    encoding: 'utf-8',
+    mode: PRIVATE_FILE_MODE,
+  })
+  hardenPathMode(SETTINGS_PATH, PRIVATE_FILE_MODE)
 }
 
 // ── HTTP Helpers ───────────────────────────────────────────────────────────
@@ -979,7 +1069,7 @@ const server = createServer(async (req, res) => {
     if (path === '/api/fs/read' && req.method === 'GET') {
       const filePath = url.searchParams.get('path')
       if (!filePath) return sendError(res, 'Missing path parameter', 400)
-      const safe = safePath(DATA_DIR, filePath)
+      const safe = safePathNoSymlinks(DATA_DIR, filePath, { allowMissing: true })
       if (!existsSync(safe)) return sendError(res, 'File not found', 404)
       const content = readFileSync(safe, 'utf-8')
       return sendJson(res, { content })
@@ -989,11 +1079,16 @@ const server = createServer(async (req, res) => {
     if (path === '/api/fs/write' && req.method === 'PUT') {
       const body = await readBody(req)
       if (!body.path) return sendError(res, 'Missing path', 400)
-      const safe = safePath(DATA_DIR, body.path)
+      const safe = safePathNoSymlinks(DATA_DIR, body.path, { allowMissing: true })
       // Ensure parent directory exists
       const parentDir = resolve(safe, '..')
-      mkdirSync(parentDir, { recursive: true })
-      writeFileSync(safe, body.content || '', 'utf-8')
+      safePathNoSymlinks(DATA_DIR, parentDir, { allowMissing: true })
+      ensurePrivateDirectory(parentDir)
+      safePathNoSymlinks(DATA_DIR, parentDir)
+      safePathNoSymlinks(DATA_DIR, safe, { allowMissing: true })
+      writeFileSync(safe, body.content || '', { encoding: 'utf-8', mode: PRIVATE_FILE_MODE })
+      hardenPathMode(safe, PRIVATE_FILE_MODE)
+      safePathNoSymlinks(DATA_DIR, safe)
       return sendJson(res, { ok: true })
     }
 
@@ -1001,7 +1096,7 @@ const server = createServer(async (req, res) => {
     if (path === '/api/fs/exists' && req.method === 'GET') {
       const filePath = url.searchParams.get('path')
       if (!filePath) return sendError(res, 'Missing path parameter', 400)
-      const safe = safePath(DATA_DIR, filePath)
+      const safe = safePathNoSymlinks(DATA_DIR, filePath, { allowMissing: true })
       return sendJson(res, { exists: existsSync(safe) })
     }
 
@@ -1009,7 +1104,7 @@ const server = createServer(async (req, res) => {
     if (path === '/api/fs/remove' && req.method === 'DELETE') {
       const filePath = url.searchParams.get('path')
       if (!filePath) return sendError(res, 'Missing path parameter', 400)
-      const safe = safePath(DATA_DIR, filePath)
+      const safe = safePathNoSymlinks(DATA_DIR, filePath, { allowMissing: true })
       if (existsSync(safe)) unlinkSync(safe)
       return sendJson(res, { ok: true })
     }
@@ -1018,13 +1113,13 @@ const server = createServer(async (req, res) => {
     if (path === '/api/fs/readdir' && req.method === 'GET') {
       const dirPath = url.searchParams.get('path')
       if (!dirPath) return sendError(res, 'Missing path parameter', 400)
-      const safe = safePath(DATA_DIR, dirPath)
+      const safe = safePathNoSymlinks(DATA_DIR, dirPath, { allowMissing: true })
       if (!existsSync(safe)) return sendJson(res, { entries: [] })
       const entries = readdirSync(safe).map((name) => {
         const fullPath = join(safe, name)
         let isDirectory = false
         try {
-          isDirectory = statSync(fullPath).isDirectory()
+          isDirectory = lstatSync(fullPath).isDirectory()
         } catch {
           /* ignore */
         }
@@ -1037,8 +1132,10 @@ const server = createServer(async (req, res) => {
     if (path === '/api/fs/mkdir' && req.method === 'POST') {
       const body = await readBody(req)
       if (!body.path) return sendError(res, 'Missing path', 400)
-      const safe = safePath(DATA_DIR, body.path)
-      mkdirSync(safe, { recursive: body.recursive !== false })
+      const safe = safePathNoSymlinks(DATA_DIR, body.path, { allowMissing: true })
+      mkdirSync(safe, { recursive: body.recursive !== false, mode: PRIVATE_DIR_MODE })
+      ensurePrivateDirectory(safe)
+      safePathNoSymlinks(DATA_DIR, safe)
       return sendJson(res, { ok: true })
     }
 
@@ -1072,9 +1169,35 @@ const server = createServer(async (req, res) => {
         return sendError(res, 'Invalid SQLite database file', 400)
       }
 
-      importDatabaseBuffer({ db, dbPath: DB_PATH, buffer })
-      db = openDatabase()
-      runMigrations()
+      let importResult
+      try {
+        importResult = importDatabaseBuffer({ db, dbPath: DB_PATH, buffer })
+        try {
+          db = openDatabase()
+          runMigrations()
+          if (importResult.backupPath && existsSync(importResult.backupPath)) {
+            try {
+              unlinkSync(importResult.backupPath)
+            } catch (cleanupError) {
+              console.warn(
+                `[data-server] Imported database successfully, but could not remove rollback backup: ${cleanupError.message}`
+              )
+            }
+          }
+        } catch (error) {
+          db?.close()
+          importResult.restoreBackup()
+          db = openDatabase()
+          throw error
+        }
+      } catch (error) {
+        try {
+          db.prepare('SELECT 1').get()
+        } catch {
+          db = openDatabase()
+        }
+        throw error
+      }
 
       return sendJson(res, { ok: true, message: 'Database imported successfully.' })
     }

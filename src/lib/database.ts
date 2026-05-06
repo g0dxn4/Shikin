@@ -8,6 +8,14 @@ type TauriDatabase = {
   close(): Promise<void>
 }
 
+type TauriFsModule = {
+  exists: (path: string) => Promise<boolean>
+  readFile: (path: string) => Promise<Uint8Array>
+  remove: (path: string) => Promise<void>
+  rename: (oldPath: string, newPath: string) => Promise<void>
+  writeFile: (path: string, data: Uint8Array, options?: { mode?: number }) => Promise<void>
+}
+
 export type TransactionClient = {
   query<T>(sql: string, bindValues?: unknown[]): Promise<T[]>
   execute(
@@ -21,6 +29,228 @@ export type TransactionClient = {
 let tauriDb: TauriDatabase | null = null
 let tauriInitPromise: Promise<TauriDatabase> | null = null
 
+async function getTauriDbPath(): Promise<string> {
+  const pathMod = await (Function('return import("@tauri-apps/api/path")')() as Promise<{
+    appDataDir: () => Promise<string>
+    join: (...paths: string[]) => Promise<string>
+  }>)
+  return pathMod.join(await pathMod.appDataDir(), 'shikin.db')
+}
+
+async function getTauriSqliteUrl(): Promise<string> {
+  return `sqlite:${await getTauriDbPath()}`
+}
+
+const TAURI_CORE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS accounts (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL CHECK (type IN ('checking', 'savings', 'credit_card', 'cash', 'investment', 'crypto', 'other')),
+  currency TEXT NOT NULL DEFAULT 'USD',
+  balance INTEGER NOT NULL DEFAULT 0,
+  icon TEXT,
+  color TEXT,
+  is_archived INTEGER NOT NULL DEFAULT 0,
+  is_primary INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS categories (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  icon TEXT,
+  color TEXT,
+  type TEXT NOT NULL CHECK (type IN ('expense', 'income', 'transfer')),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS subcategories (
+  id TEXT PRIMARY KEY,
+  category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  icon TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  UNIQUE(category_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS transactions (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  category_id TEXT REFERENCES categories(id) ON DELETE SET NULL,
+  subcategory_id TEXT REFERENCES subcategories(id) ON DELETE SET NULL,
+  type TEXT NOT NULL CHECK (type IN ('expense', 'income', 'transfer')),
+  amount INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  description TEXT NOT NULL,
+  notes TEXT,
+  date TEXT NOT NULL,
+  tags TEXT DEFAULT '[]',
+  is_recurring INTEGER NOT NULL DEFAULT 0,
+  transfer_to_account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id TEXT PRIMARY KEY,
+  account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+  category_id TEXT REFERENCES categories(id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  billing_cycle TEXT NOT NULL CHECK (billing_cycle IN ('weekly', 'monthly', 'quarterly', 'yearly')),
+  next_billing_date TEXT NOT NULL,
+  icon TEXT,
+  color TEXT,
+  url TEXT,
+  notes TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS budgets (
+  id TEXT PRIMARY KEY,
+  category_id TEXT REFERENCES categories(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  period TEXT NOT NULL CHECK (period IN ('weekly', 'monthly', 'yearly')),
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS budget_periods (
+  id TEXT PRIMARY KEY,
+  budget_id TEXT NOT NULL REFERENCES budgets(id) ON DELETE CASCADE,
+  start_date TEXT NOT NULL,
+  end_date TEXT NOT NULL,
+  spent INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS investments (
+  id TEXT PRIMARY KEY,
+  account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+  symbol TEXT NOT NULL,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL CHECK (type IN ('stock', 'etf', 'crypto', 'bond', 'mutual_fund', 'other')),
+  shares REAL NOT NULL DEFAULT 0,
+  avg_cost_basis INTEGER NOT NULL DEFAULT 0,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS stock_prices (
+  id TEXT PRIMARY KEY,
+  symbol TEXT NOT NULL,
+  price INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  date TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  UNIQUE(symbol, date)
+);
+
+CREATE TABLE IF NOT EXISTS exchange_rates (
+  id TEXT PRIMARY KEY,
+  from_currency TEXT NOT NULL,
+  to_currency TEXT NOT NULL,
+  rate REAL NOT NULL,
+  date TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  UNIQUE(from_currency, to_currency, date)
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS extension_data (
+  id TEXT PRIMARY KEY,
+  extension_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  UNIQUE(extension_id, key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_transactions_account ON transactions(account_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
+CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type);
+CREATE INDEX IF NOT EXISTS idx_subcategories_category ON subcategories(category_id);
+CREATE INDEX IF NOT EXISTS idx_budget_periods_budget ON budget_periods(budget_id);
+CREATE INDEX IF NOT EXISTS idx_investments_account ON investments(account_id);
+CREATE INDEX IF NOT EXISTS idx_investments_symbol ON investments(symbol);
+CREATE INDEX IF NOT EXISTS idx_stock_prices_symbol_date ON stock_prices(symbol, date);
+CREATE INDEX IF NOT EXISTS idx_exchange_rates_currencies ON exchange_rates(from_currency, to_currency);
+CREATE INDEX IF NOT EXISTS idx_extension_data_extension ON extension_data(extension_id);
+`
+
+const REQUIRED_SHIKIN_TABLES: Record<string, readonly string[]> = {
+  _migrations: ['id', 'name'],
+  accounts: ['id', 'name', 'balance'],
+  categories: ['id', 'name', 'type'],
+  transactions: ['id', 'account_id', 'type', 'amount', 'date'],
+}
+
+const CURRENT_SHIKIN_MIGRATIONS = [
+  '001_core_tables',
+  '003_credit_cards',
+  '004_category_rules',
+  '005_recurring_rules',
+  '006_goals',
+  '007_recaps',
+  '010_transaction_splits',
+  '011_net_worth_snapshots',
+  '012_account_balance_history',
+  '013_recurring_rules_currency',
+  '014_recurring_rules_currency_backfill',
+  '015_primary_account',
+] as const
+
+const CURRENT_SHIKIN_SCHEMA: Record<string, readonly string[]> = {
+  _migrations: ['id', 'name', 'applied_at'],
+  accounts: [
+    'id',
+    'name',
+    'type',
+    'currency',
+    'balance',
+    'is_archived',
+    'is_primary',
+    'credit_limit',
+    'statement_closing_day',
+    'payment_due_day',
+  ],
+  categories: ['id', 'name', 'type', 'sort_order'],
+  subcategories: ['id', 'category_id', 'name'],
+  transactions: ['id', 'account_id', 'type', 'amount', 'date'],
+  subscriptions: ['id', 'name', 'amount', 'billing_cycle', 'next_billing_date'],
+  budgets: ['id', 'name', 'amount', 'period'],
+  budget_periods: ['id', 'budget_id', 'start_date', 'end_date', 'spent'],
+  investments: ['id', 'symbol', 'name', 'type', 'shares'],
+  stock_prices: ['id', 'symbol', 'price', 'date'],
+  exchange_rates: ['id', 'from_currency', 'to_currency', 'rate', 'date'],
+  settings: ['key', 'value'],
+  extension_data: ['id', 'extension_id', 'key', 'value'],
+  category_rules: ['id', 'pattern', 'category_id'],
+  recurring_rules: ['id', 'description', 'amount', 'currency', 'account_id', 'next_date'],
+  goals: ['id', 'name', 'target_amount', 'current_amount'],
+  recaps: ['id', 'type', 'period_start', 'period_end', 'summary'],
+  transaction_splits: ['id', 'transaction_id', 'amount'],
+  net_worth_snapshots: ['id', 'date', 'net_worth'],
+  account_balance_history: ['id', 'account_id', 'date', 'balance'],
+}
+
 // ── Tauri Backend ──────────────────────────────────────────────────────────
 
 async function getTauriDb(): Promise<TauriDatabase> {
@@ -28,7 +258,7 @@ async function getTauriDb(): Promise<TauriDatabase> {
   if (!tauriInitPromise) {
     tauriInitPromise = (async () => {
       const { default: Database } = await import('@tauri-apps/plugin-sql')
-      const database = await Database.load('sqlite:shikin.db')
+      const database = await Database.load(await getTauriSqliteUrl())
       tauriDb = database as unknown as TauriDatabase
       await runTauriMigrations(tauriDb)
       return tauriDb
@@ -38,8 +268,127 @@ async function getTauriDb(): Promise<TauriDatabase> {
 }
 
 // ── Migrations (Tauri mode) ────────────────────────────────────────────────
-// Migrations 001-003 are handled by tauri-plugin-sql in lib.rs.
-// Migrations 004+ must be run from JS since they're not in the Rust code.
+// Tauri runs the same guarded JS migrations as browser mode so AppData DBs can
+// move between desktop, browser data-server, CLI, and MCP without SQLx history drift.
+
+async function tableHasColumn(
+  db: TauriDatabase,
+  tableName: string,
+  columnName: string
+): Promise<boolean> {
+  const columns = await db.select<{ name: string }[]>(`PRAGMA table_info(${tableName})`)
+  return columns.some((column) => column.name === columnName)
+}
+
+async function executeSqlBatch(db: TauriDatabase, sql: string): Promise<void> {
+  for (const statement of sql
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)) {
+    await db.execute(statement)
+  }
+}
+
+function getFirstRowValue(row: Record<string, unknown> | undefined): unknown {
+  return row ? Object.values(row)[0] : undefined
+}
+
+async function checkpointTauriWal(
+  db: TauriDatabase,
+  { requireComplete = false } = {}
+): Promise<void> {
+  const rows = await db.select<Record<string, unknown>[]>('PRAGMA wal_checkpoint(TRUNCATE)')
+  const result = rows[0] ?? {}
+  const busy = Number(result.busy ?? 0)
+  const log = Number(result.log ?? -1)
+  const checkpointed = Number(result.checkpointed ?? -1)
+
+  if (requireComplete && (busy !== 0 || (log >= 0 && checkpointed >= 0 && checkpointed !== log))) {
+    throw new Error('Could not fully checkpoint the database WAL before continuing')
+  }
+}
+
+async function validateTauriImportDatabase(db: TauriDatabase): Promise<void> {
+  const integrityRows = await db.select<Record<string, unknown>[]>('PRAGMA integrity_check')
+  const integrityCheck = String(getFirstRowValue(integrityRows[0]) ?? '')
+  if (integrityCheck !== 'ok') {
+    throw new Error(
+      `Imported SQLite database failed integrity check: ${integrityCheck || 'unknown'}`
+    )
+  }
+
+  const tableRows = await db.select<{ name: string }[]>(
+    "SELECT name FROM sqlite_master WHERE type = 'table'"
+  )
+  const existingTables = new Set(tableRows.map((row) => row.name))
+  const missingTables = Object.keys(REQUIRED_SHIKIN_TABLES).filter(
+    (tableName) => !existingTables.has(tableName)
+  )
+  if (missingTables.length > 0) {
+    throw new Error(
+      `Imported SQLite database is not a Shikin database. Missing required tables: ${missingTables.join(', ')}`
+    )
+  }
+
+  for (const [tableName, requiredColumns] of Object.entries(REQUIRED_SHIKIN_TABLES)) {
+    const columns = await db.select<{ name: string }[]>(`PRAGMA table_info(${tableName})`)
+    const existingColumns = new Set(columns.map((column) => column.name))
+    const missingColumns = requiredColumns.filter((column) => !existingColumns.has(column))
+    if (missingColumns.length > 0) {
+      throw new Error(
+        `Imported SQLite database is missing required Shikin columns on ${tableName}: ${missingColumns.join(', ')}`
+      )
+    }
+  }
+
+  const coreMigration = await db.select<{ name: string }[]>(
+    "SELECT name FROM _migrations WHERE name = '001_core_tables' LIMIT 1"
+  )
+  if (coreMigration.length === 0) {
+    throw new Error('Imported SQLite database is missing required Shikin migration metadata')
+  }
+}
+
+async function validateTauriCurrentDatabase(db: TauriDatabase): Promise<void> {
+  const tableRows = await db.select<{ name: string }[]>(
+    "SELECT name FROM sqlite_master WHERE type = 'table'"
+  )
+  const existingTables = new Set(tableRows.map((row) => row.name))
+  const missingTables = Object.keys(CURRENT_SHIKIN_SCHEMA).filter(
+    (tableName) => !existingTables.has(tableName)
+  )
+  if (missingTables.length > 0) {
+    throw new Error(`Database is missing required Shikin tables: ${missingTables.join(', ')}`)
+  }
+
+  for (const [tableName, requiredColumns] of Object.entries(CURRENT_SHIKIN_SCHEMA)) {
+    const columns = await db.select<{ name: string }[]>(`PRAGMA table_info(${tableName})`)
+    const existingColumns = new Set(columns.map((column) => column.name))
+    const missingColumns = requiredColumns.filter((column) => !existingColumns.has(column))
+    if (missingColumns.length > 0) {
+      throw new Error(
+        `Database is missing required Shikin columns on ${tableName}: ${missingColumns.join(', ')}`
+      )
+    }
+  }
+
+  const migrationRows = await db.select<{ name: string }[]>('SELECT name FROM _migrations')
+  const appliedMigrations = new Set(migrationRows.map((row) => row.name))
+  const missingMigrations = CURRENT_SHIKIN_MIGRATIONS.filter(
+    (migration) => !appliedMigrations.has(migration)
+  )
+  if (missingMigrations.length > 0) {
+    throw new Error(
+      `Database is missing required Shikin migrations: ${missingMigrations.join(', ')}`
+    )
+  }
+}
+
+async function removeIfExists(fsMod: TauriFsModule, path: string): Promise<void> {
+  if (await fsMod.exists(path)) {
+    await fsMod.remove(path)
+  }
+}
 
 async function runTauriMigrations(db: TauriDatabase): Promise<void> {
   // Ensure _migrations table exists (created by earlier JS code or first run)
@@ -54,21 +403,25 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
   const rows = await db.select<{ name: string }[]>('SELECT name FROM _migrations')
   const applied = new Set(rows.map((r) => r.name))
 
-  // Migration 001-003 are applied by the Rust plugin, but may not be in _migrations table.
-  // Mark them as applied if the tables already exist to keep tracking consistent.
+  // --- Migration 001: Core Tables ---
   if (!applied.has('001_core_tables')) {
-    // Check if core tables exist (the Rust side creates them)
-    const tables = await db.select<{ name: string }[]>(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='accounts'"
-    )
-    if (tables.length > 0) {
-      await db.execute("INSERT OR IGNORE INTO _migrations (id, name) VALUES (1, '001_core_tables')")
-      applied.add('001_core_tables')
-    }
+    await executeSqlBatch(db, TAURI_CORE_SCHEMA_SQL)
+    await db.execute("INSERT OR IGNORE INTO _migrations (id, name) VALUES (1, '001_core_tables')")
+    applied.add('001_core_tables')
   }
+
+  // --- Migration 003: Credit Cards ---
   if (!applied.has('003_credit_cards')) {
-    // Credit cards migration adds columns, not tables. Mark as done if accounts exists
-    // (the Rust side handles it)
+    if (!(await tableHasColumn(db, 'accounts', 'credit_limit'))) {
+      await db.execute('ALTER TABLE accounts ADD COLUMN credit_limit INTEGER')
+    }
+    if (!(await tableHasColumn(db, 'accounts', 'statement_closing_day'))) {
+      await db.execute('ALTER TABLE accounts ADD COLUMN statement_closing_day INTEGER')
+    }
+    if (!(await tableHasColumn(db, 'accounts', 'payment_due_day'))) {
+      await db.execute('ALTER TABLE accounts ADD COLUMN payment_due_day INTEGER')
+    }
+
     await db.execute("INSERT OR IGNORE INTO _migrations (id, name) VALUES (3, '003_credit_cards')")
     applied.add('003_credit_cards')
   }
@@ -326,15 +679,14 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
 
   // --- Migration 015: Primary Account ---
   if (!applied.has('015_primary_account')) {
-    const accountColumns = await db.select<{ name: string }[]>('PRAGMA table_info(accounts)')
-    const hasPrimaryColumn = accountColumns.some((column) => column.name === 'is_primary')
-
-    if (!hasPrimaryColumn) {
+    if (!(await tableHasColumn(db, 'accounts', 'is_primary'))) {
       await db.execute(`ALTER TABLE accounts ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0`)
     }
 
     await db.execute("INSERT INTO _migrations (id, name) VALUES (15, '015_primary_account')")
   }
+
+  await validateTauriCurrentDatabase(db)
 }
 
 // ── Browser Backend ────────────────────────────────────────────────────────
@@ -506,6 +858,7 @@ export async function withTransaction<T>(fn: (tx: TransactionClient) => Promise<
 // ── Public API ─────────────────────────────────────────────────────────────
 // These signatures are consumed by 74+ files — do NOT change them.
 
+// fallow-ignore-next-line unused-export
 export async function getDb(): Promise<TauriDatabase> {
   if (isTauri) {
     return getTauriDb()
@@ -591,16 +944,15 @@ export async function materializeRecurringTransactionsBrowser(): Promise<{
 
 export async function exportDatabaseSnapshot(): Promise<Uint8Array> {
   if (isTauri) {
+    const database = await getTauriDb()
+    await checkpointTauriWal(database, { requireComplete: true })
+
     // In Tauri mode, read the DB file directly via the filesystem plugin
     // Use Function() dynamic import to avoid bundler/TS issues with optional Tauri deps
-    const pathMod = await (Function('return import("@tauri-apps/api/path")')() as Promise<{
-      appDataDir: () => Promise<string>
-      join: (...paths: string[]) => Promise<string>
-    }>)
-    const fsMod = await (Function('return import("@tauri-apps/plugin-fs")')() as Promise<{
-      readFile: (path: string) => Promise<Uint8Array>
-    }>)
-    const dbPath = await pathMod.join(await pathMod.appDataDir(), 'shikin.db')
+    const fsMod = await (Function(
+      'return import("@tauri-apps/plugin-fs")'
+    )() as Promise<TauriFsModule>)
+    const dbPath = await getTauriDbPath()
     return await fsMod.readFile(dbPath)
   }
 
@@ -618,22 +970,100 @@ export async function exportDatabaseSnapshot(): Promise<Uint8Array> {
 
 export async function importDatabaseSnapshot(data: Uint8Array): Promise<void> {
   if (isTauri) {
-    // In Tauri mode, close DB connection, write file, then reload
-    if (tauriDb) {
-      await tauriDb.close()
+    const header = new TextDecoder('ascii').decode(data.subarray(0, 16))
+    if (!header.startsWith('SQLite format 3')) {
+      throw new Error('Invalid SQLite database file')
+    }
+
+    const [{ default: Database }, fsMod] = await Promise.all([
+      import('@tauri-apps/plugin-sql'),
+      Function('return import("@tauri-apps/plugin-fs")')() as Promise<TauriFsModule>,
+    ])
+    const dbPath = await getTauriDbPath()
+    const importStamp = `${Date.now()}`
+    const tempPath = `${dbPath}.import-check-${importStamp}`
+    const backupPath = `${dbPath}.backup-${importStamp}`
+
+    await removeIfExists(fsMod, tempPath)
+    await removeIfExists(fsMod, `${tempPath}-wal`)
+    await removeIfExists(fsMod, `${tempPath}-shm`)
+    await removeIfExists(fsMod, `${tempPath}-journal`)
+    await fsMod.writeFile(tempPath, data, { mode: 0o600 })
+
+    let tempDb: TauriDatabase | null = null
+    try {
+      tempDb = (await Database.load(`sqlite:${tempPath}`)) as unknown as TauriDatabase
+      await validateTauriImportDatabase(tempDb)
+    } finally {
+      await tempDb?.close()
+    }
+
+    let backupCreated = false
+    let importedDb: TauriDatabase | null = null
+
+    try {
+      let currentDb = tauriDb
+      let openedCurrentDb = false
+      if (!currentDb && (await fsMod.exists(dbPath))) {
+        currentDb = (await Database.load(await getTauriSqliteUrl())) as unknown as TauriDatabase
+        openedCurrentDb = true
+      }
+
+      if (currentDb) {
+        await checkpointTauriWal(currentDb, { requireComplete: true })
+        await currentDb.close()
+      }
+      if (openedCurrentDb || tauriDb) {
+        tauriDb = null
+        tauriInitPromise = null
+      }
+
+      await removeIfExists(fsMod, `${dbPath}-wal`)
+      await removeIfExists(fsMod, `${dbPath}-shm`)
+      await removeIfExists(fsMod, `${dbPath}-journal`)
+
+      if (await fsMod.exists(dbPath)) {
+        await fsMod.rename(dbPath, backupPath)
+        backupCreated = true
+      }
+
+      await fsMod.rename(tempPath, dbPath)
+      importedDb = (await Database.load(await getTauriSqliteUrl())) as unknown as TauriDatabase
+      tauriDb = importedDb
+      await runTauriMigrations(importedDb)
+      if (backupCreated) {
+        try {
+          await removeIfExists(fsMod, backupPath)
+        } catch (cleanupError) {
+          console.warn(
+            `Imported database successfully, but could not remove rollback backup: ${cleanupError instanceof Error ? cleanupError.message : cleanupError}`
+          )
+        }
+      }
+      return
+    } catch (error) {
+      await importedDb?.close()
       tauriDb = null
       tauriInitPromise = null
+
+      await removeIfExists(fsMod, `${dbPath}-wal`)
+      await removeIfExists(fsMod, `${dbPath}-shm`)
+      await removeIfExists(fsMod, `${dbPath}-journal`)
+
+      if (backupCreated) {
+        await removeIfExists(fsMod, dbPath)
+        if (await fsMod.exists(backupPath)) {
+          await fsMod.rename(backupPath, dbPath)
+        }
+      }
+
+      throw error
+    } finally {
+      await removeIfExists(fsMod, tempPath)
+      await removeIfExists(fsMod, `${tempPath}-wal`)
+      await removeIfExists(fsMod, `${tempPath}-shm`)
+      await removeIfExists(fsMod, `${tempPath}-journal`)
     }
-    const pathMod = await (Function('return import("@tauri-apps/api/path")')() as Promise<{
-      appDataDir: () => Promise<string>
-      join: (...paths: string[]) => Promise<string>
-    }>)
-    const fsMod = await (Function('return import("@tauri-apps/plugin-fs")')() as Promise<{
-      writeFile: (path: string, data: Uint8Array) => Promise<void>
-    }>)
-    const dbPath = await pathMod.join(await pathMod.appDataDir(), 'shikin.db')
-    await fsMod.writeFile(dbPath, data)
-    return
   }
 
   // Browser mode: POST binary to data server

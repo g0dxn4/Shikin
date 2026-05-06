@@ -375,4 +375,65 @@ describe('Dashboard', () => {
       expect(screen.getByText('60%')).toBeInTheDocument()
     })
   })
+
+  describe('spending intelligence', () => {
+    it('builds graph modes from transaction data', async () => {
+      const user = userEvent.setup()
+      mockAccounts = [
+        { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 100000 },
+      ]
+      mockTransactions = [
+        {
+          id: 'tx-food-current',
+          description: 'Groceries',
+          type: 'expense',
+          amount: 10000,
+          currency: 'USD',
+          date: dayjs().format('YYYY-MM-DD'),
+          category_color: '#f97316',
+          category_name: 'Food',
+          account_name: 'Checking',
+        },
+        {
+          id: 'tx-transport-current',
+          description: 'Taxi',
+          type: 'expense',
+          amount: 2000,
+          currency: 'USD',
+          date: dayjs().format('YYYY-MM-DD'),
+          category_color: '#38bdf8',
+          category_name: 'Transport',
+          account_name: 'Checking',
+        },
+        {
+          id: 'tx-food-previous',
+          description: 'Previous groceries',
+          type: 'expense',
+          amount: 6000,
+          currency: 'USD',
+          date: dayjs().subtract(1, 'month').format('YYYY-MM-DD'),
+          category_color: '#f97316',
+          category_name: 'Food',
+          account_name: 'Checking',
+        },
+      ]
+
+      render(<Dashboard />)
+
+      expect(screen.getByText('Spending graph')).toBeInTheDocument()
+      expect(screen.getByText('Trend')).toBeInTheDocument()
+      expect(screen.getByText('Categories')).toBeInTheDocument()
+      expect(screen.getByText('Movement')).toBeInTheDocument()
+      expect(screen.getAllByText('$120.00').length).toBeGreaterThanOrEqual(1)
+
+      await user.click(screen.getByText('Categories'))
+
+      expect(screen.getAllByText('Food').length).toBeGreaterThanOrEqual(1)
+      expect(screen.getAllByText('Transport').length).toBeGreaterThanOrEqual(1)
+
+      await user.click(screen.getByText('Movement'))
+
+      expect(screen.getByText('Month over month')).toBeInTheDocument()
+    })
+  })
 })

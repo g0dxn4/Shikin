@@ -1,6 +1,6 @@
 {
-  "title": "Savings Goals",
-  "subtitle": "Track your progress",
+  "title": "Goals",
+  "subtitle": "Savings targets that feel tangible.",
   "addGoal": "Add Goal",
   "editGoal": "Edit Goal",
   "deleteGoal": "Delete Goal",
@@ -50,8 +50,22 @@
   },
   "hero": {
     "featuredGoal": "Featured Goal",
+    "expectedCompletion": "Expected completion",
     "aggregateProgress": "Aggregate Progress",
     "goalCount": "goal(s)"
+  },
+  "active": {
+    "title": "Active goals"
+  },
+  "automation": {
+    "title": "Automation",
+    "subtitle": "A practical saving pace based on your goal data.",
+    "monthlyMove": "Move {{amount}} each month toward {{goal}} to stay on pace.",
+    "keepPace": "{{goal}} is already funded or does not need a monthly pace yet. Keep it visible and update progress when money moves.",
+    "empty": "Create a savings goal and Shikin will estimate the pace needed to reach it.",
+    "noGoal": "No active goal",
+    "remaining": "Remaining",
+    "deadline": "Deadline"
   },
   "error": {
     "load": "Couldn't load goals",

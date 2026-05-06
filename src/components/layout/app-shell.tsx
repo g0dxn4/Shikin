@@ -68,6 +68,11 @@ const TransactionDialog = lazy(() =>
     default: m.TransactionDialog,
   }))
 )
+const RecurringRuleDialog = lazy(() =>
+  import('@/components/transactions/recurring-rule-dialog').then((m) => ({
+    default: m.RecurringRuleDialog,
+  }))
+)
 const BudgetDialog = lazy(() =>
   import('@/components/budgets/budget-dialog').then((m) => ({
     default: m.BudgetDialog,
@@ -121,6 +126,7 @@ export function AppShell() {
       <Suspense>
         <AccountDialog />
         <TransactionDialog />
+        <RecurringRuleDialog />
         <BudgetDialog />
         <GoalDialog />
       </Suspense>

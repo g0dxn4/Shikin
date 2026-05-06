@@ -126,6 +126,8 @@ function seedDatabase(tempHome: string, seed: (db: Database.Database) => void): 
 
 async function loadInsights(tempHome: string): Promise<typeof InsightsModule> {
   vi.resetModules()
+  vi.stubEnv('HOME', tempHome)
+  vi.stubEnv('XDG_DATA_HOME', '')
   vi.doMock('node:os', async () => {
     const actual = await vi.importActual<typeof OsModule>('node:os')
     return {
@@ -145,6 +147,7 @@ afterEach(() => {
   cleanupCallbacks.clear()
 
   vi.doUnmock('node:os')
+  vi.unstubAllEnvs()
   vi.resetModules()
 
   for (const dir of tempDirs) {
@@ -371,7 +374,7 @@ describe('insights summaries with a real temporary SQLite database', () => {
          VALUES (?, ?, ?, ?, ?, ?)`
       ).run('cc-usd', 'USD Credit Card', 'credit_card', 'USD', -cents(400), 0)
 
-      const thisMonth = dayjs().startOf('month').add(1, 'day').format('YYYY-MM-DD')
+      const thisMonth = dayjs().format('YYYY-MM-DD')
       db.prepare(
         `INSERT INTO transactions (id, account_id, type, amount, currency, description, date)
          VALUES (?, ?, ?, ?, ?, ?, ?)`

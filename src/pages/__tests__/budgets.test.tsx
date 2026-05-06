@@ -119,7 +119,7 @@ describe('Budgets', () => {
       expect(screen.getByText('error.load')).toBeInTheDocument()
 
       // But should still show the budget
-      expect(screen.getByText('Groceries')).toBeInTheDocument()
+      expect(screen.getAllByText('Groceries').length).toBeGreaterThan(0)
 
       // Should NOT show error state (full page error)
       expect(screen.queryByText('error.loadDetailed')).not.toBeInTheDocument()
@@ -180,7 +180,9 @@ describe('Budgets', () => {
 
       expect(screen.getByText('hero.totalBudgeted')).toBeInTheDocument()
       expect(screen.getByText('hero.totalSpent')).toBeInTheDocument()
-      expect(screen.getByText('hero.totalRemaining')).toBeInTheDocument()
+      expect(screen.getByText('hero.safeToSpend')).toBeInTheDocument()
+      expect(screen.getByText('progress.title')).toBeInTheDocument()
+      expect(screen.getByText('intelligence.title')).toBeInTheDocument()
       expect(screen.getByText('2 hero.budgetCount')).toBeInTheDocument()
     })
   })

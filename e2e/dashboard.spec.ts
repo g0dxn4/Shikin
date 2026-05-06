@@ -10,39 +10,32 @@ test.describe('Dashboard', () => {
     await page.goto('/')
     await page.waitForLoadState('networkidle')
 
-    await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Good evening' })).toBeVisible()
   })
 
-  test('shows empty state when no data', async ({ page }) => {
+  test('shows local-first hero when no data', async ({ page }) => {
     await page.goto('/')
     await page.waitForLoadState('networkidle')
 
-    await expect(page.getByText('Your finances, your way')).toBeVisible()
-    await expect(page.getByRole('button', { name: /Add Account/i })).toBeVisible()
+    await expect(page.getByText('Your money is calm, current, and completely local.')).toBeVisible()
+    await expect(page.getByRole('button', { name: /Add Transaction/i }).first()).toBeVisible()
   })
 
   test('shows metric cards', async ({ page }) => {
     await page.goto('/')
     await page.waitForLoadState('networkidle')
 
-    // Metric card labels should be present (they show even with $0 data)
-    await expect(page.getByText('TOTAL BALANCE')).toBeVisible()
-    await expect(page.getByText('MONTHLY INCOME')).toBeVisible()
-    await expect(page.getByText('MONTHLY EXPENSES')).toBeVisible()
-    await expect(page.getByText('SAVINGS RATE')).toBeVisible()
-
-    // Should render metric-card elements
-    const metricCards = page.locator('.metric-card')
-    await expect(metricCards).toHaveCount(4)
+    await expect(page.getByText('Net Worth')).toBeVisible()
+    await expect(page.getByText('Monthly Income')).toBeVisible()
+    await expect(page.getByText('Monthly Expenses')).toBeVisible()
+    await expect(page.getByText(/savings rate/i)).toBeVisible()
   })
 
   test('metric cards display values', async ({ page }) => {
     await page.goto('/')
     await page.waitForLoadState('networkidle')
 
-    // Even with no data, cards show $0.00 values
-    const metricCards = page.locator('.metric-card')
-    await expect(metricCards.first()).toContainText('$0.00')
+    await expect(page.getByText('$0.00').first()).toBeVisible()
   })
 
   test('has correct page structure', async ({ page }) => {
@@ -50,6 +43,6 @@ test.describe('Dashboard', () => {
     await page.waitForLoadState('networkidle')
 
     await expect(page.locator('.page-content')).toBeVisible()
-    await expect(page.locator('.animate-fade-in-up')).toBeVisible()
+    await expect(page.locator('.liquid-hero')).toBeVisible()
   })
 })

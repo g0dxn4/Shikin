@@ -9,7 +9,11 @@ import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
 const tempHomes = new Set<string>()
 
 function createCliDatabasePath(homeDir: string): string {
-  const dataDir = join(homeDir, '.local', 'share', 'com.asf.shikin')
+  return createCliDatabasePathFromDataHome(join(homeDir, '.local', 'share'))
+}
+
+function createCliDatabasePathFromDataHome(dataHome: string): string {
+  const dataDir = join(dataHome, 'com.asf.shikin')
   mkdirSync(dataDir, { recursive: true })
   return join(dataDir, 'shikin.db')
 }
@@ -63,8 +67,9 @@ function addCreditCardColumns(dbPath: string): void {
   db.close()
 }
 
-async function importFreshDatabaseModule(homeDir: string) {
+async function importFreshDatabaseModule(homeDir: string, xdgDataHome = '') {
   vi.stubEnv('HOME', homeDir)
+  vi.stubEnv('XDG_DATA_HOME', xdgDataHome)
   vi.resetModules()
   return import('./database.js')
 }
@@ -89,7 +94,7 @@ describe('CLI database readiness', () => {
     const { CLI_DATABASE_MIGRATIONS: sharedMigrations } = await import('./migrations.js')
 
     expect(REQUIRED_MIGRATIONS).toBe(sharedMigrations)
-    expect(REQUIRED_MIGRATIONS).toHaveLength(11)
+    expect(REQUIRED_MIGRATIONS).toHaveLength(12)
   })
 
   it('allows queries once the shared Shikin schema is ready', async () => {
@@ -99,6 +104,21 @@ describe('CLI database readiness', () => {
     seedCoreShikinSchema(createCliDatabasePath(homeDir))
 
     const { query, close } = await importFreshDatabaseModule(homeDir)
+
+    expect(query<{ ok: number }>('SELECT 1 AS ok')).toEqual([{ ok: 1 }])
+
+    close()
+  })
+
+  it('uses absolute XDG_DATA_HOME for the shared database location', async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-cli-db-'))
+    const xdgDataHome = mkdtempSync(join(tmpdir(), 'shikin-cli-xdg-data-'))
+    tempHomes.add(homeDir)
+    tempHomes.add(xdgDataHome)
+
+    seedCoreShikinSchema(createCliDatabasePathFromDataHome(xdgDataHome))
+
+    const { query, close } = await importFreshDatabaseModule(homeDir, xdgDataHome)
 
     expect(query<{ ok: number }>('SELECT 1 AS ok')).toEqual([{ ok: 1 }])
 

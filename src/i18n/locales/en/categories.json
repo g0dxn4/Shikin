@@ -1,6 +1,6 @@
 {
   "title": "Categories",
-  "subtitle": "Management",
+  "subtitle": "Shape how transactions, budgets, and reports understand your money.",
   "addCategory": "Add Category",
   "newCategory": "New Category",
   "createCategory": "Create Category",
@@ -10,7 +10,15 @@
   "selectPrompt": "Select a category to edit, or click Add Category to create one.",
   "empty": {
     "title": "No categories yet",
-    "description": "Create categories to organize your transactions and budgets."
+    "description": "Create categories to organize your transactions and budgets.",
+    "group": "No categories in this group yet."
+  },
+  "hero": {
+    "kicker": "Finance taxonomy",
+    "description": "Categories are shared across transactions, budgets, imports, and reports. Keep them clear, compact, and easy to scan."
+  },
+  "modal": {
+    "description": "Edit the category name, type, color, and icon."
   },
   "loadError": "Couldn’t load categories",
   "table": {
@@ -24,7 +32,14 @@
     "nameRequired": "Category name is required.",
     "type": "Type",
     "color": "Color",
-    "icon": "Icon"
+    "icon": "Icon",
+    "chooseIcon": "Choose icon"
+  },
+  "iconPicker": {
+    "title": "Choose an icon",
+    "description": "Search the icon pack and pick the symbol this category should use.",
+    "searchPlaceholder": "Search icons...",
+    "noResults": "No icons match that search."
   },
   "types": {
     "expense": "Expense",

@@ -44,9 +44,9 @@ export function SpendingInsights() {
     return (
       <div className="animate-fade-in-up page-content" role="status" aria-busy="true">
         <span className="sr-only">Loading</span>
-        <div className="liquid-card page-header p-5">
+        <div className="liquid-card page-header min-h-[72px] p-3 sm:p-4">
           <div>
-            <h1 className="font-heading text-2xl font-bold tracking-tight">
+            <h1 className="font-heading text-[28px] font-bold tracking-tight">
               {t('spendingInsights.title')}
             </h1>
             <p className="text-muted-foreground mt-1 text-sm">
@@ -70,18 +70,17 @@ export function SpendingInsights() {
 
   return (
     <div className="animate-fade-in-up page-content">
-      <div className="liquid-card page-header p-5">
+      <div className="liquid-card page-header min-h-[72px] p-3 sm:p-4">
         <div>
-          <h1 className="font-heading text-2xl font-bold tracking-tight">
+          <h1 className="font-heading text-[28px] font-bold tracking-tight">
             {t('spendingInsights.title')}
           </h1>
           <p className="text-muted-foreground mt-1 text-sm">{t('spendingInsights.description')}</p>
         </div>
       </div>
 
-      {/* Tab buttons using button group semantics */}
       <div
-        className="mb-4 flex gap-1 rounded-xl bg-white/[0.03] p-1"
+        className="liquid-card flex gap-1 p-1"
         role="group"
         aria-label={t('spendingInsights.title')}
       >
@@ -92,9 +91,10 @@ export function SpendingInsights() {
             aria-pressed={tab === tItem.id}
             onClick={() => setTab(tItem.id)}
             className={cn(
-              'flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 font-mono text-xs transition-colors',
+              'flex flex-1 items-center justify-center gap-1.5 rounded-[14px] px-3 py-2.5 font-mono text-xs transition-colors',
+              'focus-visible:ring-accent focus-visible:ring-2 focus-visible:outline-none',
               tab === tItem.id
-                ? 'bg-accent/15 text-accent'
+                ? 'bg-accent text-accent-foreground'
                 : 'text-muted-foreground hover:text-foreground'
             )}
           >
@@ -104,7 +104,6 @@ export function SpendingInsights() {
         ))}
       </div>
 
-      {/* Content */}
       <div role="region" aria-label={tabs.find((t) => t.id === tab)?.label}>
         {tab === 'insights' && <InsightsTab insights={insights} />}
         {tab === 'mom' && (
@@ -136,7 +135,7 @@ function InsightsTab({ insights }: { insights: SpendingInsight[] }) {
   const { t } = useTranslation('analytics')
   if (insights.length === 0) {
     return (
-      <div className="liquid-card flex h-48 items-center justify-center p-5">
+      <div className="liquid-hero flex h-64 items-center justify-center p-5">
         <div className="text-center">
           <Lightbulb size={24} className="text-muted-foreground mx-auto mb-2" aria-hidden="true" />
           <p className="text-muted-foreground text-sm">{t('spendingInsights.insightsEmpty')}</p>
@@ -146,7 +145,7 @@ function InsightsTab({ insights }: { insights: SpendingInsight[] }) {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
       {insights.map((insight) => (
         <InsightCard key={insight.id} insight={insight} />
       ))}
@@ -184,37 +183,41 @@ function InsightCard({ insight }: { insight: SpendingInsight }) {
   return (
     <div
       className={cn(
-        'liquid-card flex items-start gap-3 border p-4',
+        'liquid-card min-h-[150px] items-start gap-3 border p-5',
         severityStyles[insight.severity]
       )}
     >
-      <div className="mt-0.5">{severityIcon[insight.severity]}</div>
-      <div className="min-w-0 flex-1">
-        <div className="mb-1 flex items-center gap-2">
-          <div
-            className="h-2.5 w-2.5 rounded-full"
-            style={{ backgroundColor: insight.categoryColor }}
-          />
-          <span className="font-heading text-sm font-semibold">{insight.categoryName}</span>
-          {typeIcon[insight.type]}
-          <span className="sr-only">{severityLabel[insight.severity]}</span>
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 rounded-2xl border border-white/[0.08] bg-white/[0.05] p-2">
+          {severityIcon[insight.severity]}
         </div>
-        <p className="text-muted-foreground text-sm">{insight.message}</p>
-        <div className="mt-2 flex items-center gap-2">
-          <Badge
-            variant="outline"
-            className={cn(
-              'font-mono text-[10px]',
-              insight.type === 'increase' ? 'border-destructive/30 text-destructive' : '',
-              insight.type === 'decrease' ? 'border-success/30 text-success' : ''
-            )}
-          >
-            {insight.type === 'decrease' ? '-' : '+'}
-            {formatMoney(Math.round(Math.abs(insight.amount) * 100))}
-          </Badge>
-          <span className="text-muted-foreground font-mono text-[10px]">
-            {t('spendingInsights.vs3MonthAvg')}
-          </span>
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 flex items-center gap-2">
+            <div
+              className="h-2.5 w-2.5 rounded-full"
+              style={{ backgroundColor: insight.categoryColor }}
+            />
+            <span className="font-heading text-sm font-semibold">{insight.categoryName}</span>
+            {typeIcon[insight.type]}
+            <span className="sr-only">{severityLabel[insight.severity]}</span>
+          </div>
+          <p className="text-muted-foreground text-sm">{insight.message}</p>
+          <div className="mt-2 flex items-center gap-2">
+            <Badge
+              variant="outline"
+              className={cn(
+                'font-mono text-[10px]',
+                insight.type === 'increase' ? 'border-destructive/30 text-destructive' : '',
+                insight.type === 'decrease' ? 'border-success/30 text-success' : ''
+              )}
+            >
+              {insight.type === 'decrease' ? '-' : '+'}
+              {formatMoney(Math.round(Math.abs(insight.amount)))}
+            </Badge>
+            <span className="text-muted-foreground font-mono text-[10px]">
+              {t('spendingInsights.vs3MonthAvg')}
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -241,10 +244,14 @@ function ComparisonTab({
   const totalChangePercent = previousTotal > 0 ? (totalChange / previousTotal) * 100 : 0
 
   return (
-    <div className="space-y-4">
-      {/* Summary card */}
-      <div className="liquid-card border-accent/10 border p-5">
-        <div className="flex items-center justify-between">
+    <div className="space-y-3">
+      <div className="liquid-hero border-accent/10 relative overflow-hidden border p-6 sm:p-7">
+        <CalendarRange
+          size={220}
+          className="pointer-events-none absolute -right-12 -bottom-20 text-white/[0.035]"
+          aria-hidden="true"
+        />
+        <div className="relative z-10 flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
           <div>
             <span className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
               {t('spendingInsights.totalChange')}
@@ -252,12 +259,12 @@ function ComparisonTab({
             <div className="flex items-center gap-2">
               <span
                 className={cn(
-                  'font-heading text-2xl font-bold',
+                  'font-heading text-4xl font-bold tracking-tight sm:text-5xl',
                   totalChange > 0 ? 'text-destructive' : totalChange < 0 ? 'text-success' : ''
                 )}
               >
                 {totalChange > 0 ? '+' : ''}
-                {formatMoney(Math.round(totalChange * 100))}
+                {formatMoney(Math.round(totalChange))}
               </span>
               <Badge
                 variant="outline"
@@ -276,11 +283,11 @@ function ComparisonTab({
           <div className="text-right">
             <div className="text-muted-foreground text-xs">{currentLabel}</div>
             <div className="font-heading font-semibold">
-              {formatMoney(Math.round(currentTotal * 100))}
+              {formatMoney(Math.round(currentTotal))}
             </div>
             <div className="text-muted-foreground text-xs">{previousLabel}</div>
             <div className="text-muted-foreground font-heading text-sm">
-              {formatMoney(Math.round(previousTotal * 100))}
+              {formatMoney(Math.round(previousTotal))}
             </div>
           </div>
         </div>
@@ -292,18 +299,19 @@ function ComparisonTab({
           <p className="text-muted-foreground text-sm">{t('spendingInsights.noData')}</p>
         </div>
       ) : (
-        <div className="liquid-card divide-y divide-white/[0.04] p-0">
-          {/* Header */}
-          <div className="text-muted-foreground grid grid-cols-[1fr_80px_80px_90px] gap-2 px-5 py-3 font-mono text-[10px] tracking-wider uppercase">
-            <span>{t('spendingInsights.category')}</span>
-            <span className="text-right">{t('spendingInsights.current')}</span>
-            <span className="text-right">{t('spendingInsights.previous')}</span>
-            <span className="text-right">{t('spendingInsights.change')}</span>
-          </div>
+        <div className="liquid-card overflow-x-auto p-0">
+          <div className="min-w-[520px] divide-y divide-white/[0.04]">
+            <div className="text-muted-foreground grid grid-cols-[1fr_80px_80px_90px] gap-2 px-5 py-3 font-mono text-[10px] tracking-wider uppercase">
+              <span>{t('spendingInsights.category')}</span>
+              <span className="text-right">{t('spendingInsights.current')}</span>
+              <span className="text-right">{t('spendingInsights.previous')}</span>
+              <span className="text-right">{t('spendingInsights.change')}</span>
+            </div>
 
-          {comparisons.map((comp) => (
-            <ComparisonRow key={comp.categoryName} comp={comp} />
-          ))}
+            {comparisons.map((comp) => (
+              <ComparisonRow key={comp.categoryName} comp={comp} />
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -324,11 +332,9 @@ function ComparisonRow({ comp }: { comp: SpendingComparison }) {
         />
         <span className="truncate text-sm">{comp.categoryName}</span>
       </div>
-      <span className="text-right font-mono text-sm">
-        {formatMoney(Math.round(comp.current * 100))}
-      </span>
+      <span className="text-right font-mono text-sm">{formatMoney(Math.round(comp.current))}</span>
       <span className="text-muted-foreground text-right font-mono text-sm">
-        {formatMoney(Math.round(comp.previous * 100))}
+        {formatMoney(Math.round(comp.previous))}
       </span>
       <div className="flex items-center justify-end gap-1">
         {comp.change !== 0 ? (

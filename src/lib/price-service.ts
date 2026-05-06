@@ -4,17 +4,6 @@ import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
 import type { Investment } from '@/types/database'
 
-export interface PriceResult {
-  symbol: string
-  price: number // centavos
-  currency: string
-}
-
-export interface PricePoint {
-  date: string
-  price: number // centavos
-}
-
 const CRYPTO_ID_MAP: Record<string, string> = {
   BTC: 'bitcoin',
   ETH: 'ethereum',
@@ -44,23 +33,11 @@ async function getAlphaVantageKey(): Promise<string | null> {
   }
 }
 
-async function getFinnhubKey(): Promise<string | null> {
-  try {
-    const store = await load('settings.json')
-    return ((await store.get('finnhub_key')) as string) || null
-  } catch {
-    return null
-  }
-}
-
 function getCryptoId(symbol: string): string {
   return CRYPTO_ID_MAP[symbol.toUpperCase()] || symbol.toLowerCase()
 }
 
-export async function fetchCurrentPrice(
-  symbol: string,
-  type: 'stock' | 'crypto'
-): Promise<number> {
+async function fetchCurrentPrice(symbol: string, type: 'stock' | 'crypto'): Promise<number> {
   if (type === 'crypto') {
     return fetchCryptoPrice(symbol)
   }
@@ -96,56 +73,6 @@ async function fetchCryptoPrice(symbol: string): Promise<number> {
   }
 
   return toCentavos(data[id].usd)
-}
-
-export async function fetchHistoricalPrices(
-  symbol: string,
-  type: 'stock' | 'crypto',
-  days: number = 90
-): Promise<PricePoint[]> {
-  if (type === 'crypto') {
-    return fetchCryptoHistory(symbol, days)
-  }
-  return fetchStockHistory(symbol)
-}
-
-async function fetchStockHistory(symbol: string): Promise<PricePoint[]> {
-  const apiKey = await getAlphaVantageKey()
-  if (!apiKey) throw new Error('Alpha Vantage API key not configured')
-
-  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${encodeURIComponent(symbol)}&outputsize=compact&apikey=${apiKey}`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Alpha Vantage error: ${res.status}`)
-
-  const data = await res.json()
-  const timeSeries = data['Time Series (Daily)']
-  if (!timeSeries) {
-    throw new Error(`No historical data for ${symbol}`)
-  }
-
-  return Object.entries(timeSeries)
-    .map(([date, values]) => ({
-      date,
-      price: toCentavos(parseFloat((values as Record<string, string>)['4. close'])),
-    }))
-    .sort((a, b) => a.date.localeCompare(b.date))
-}
-
-async function fetchCryptoHistory(symbol: string, days: number): Promise<PricePoint[]> {
-  const id = getCryptoId(symbol)
-  const url = `https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=usd&days=${days}`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`CoinGecko error: ${res.status}`)
-
-  const data = await res.json()
-  if (!data.prices) {
-    throw new Error(`No historical data for ${symbol}`)
-  }
-
-  return (data.prices as [number, number][]).map(([timestamp, price]) => ({
-    date: new Date(timestamp).toISOString().split('T')[0],
-    price: toCentavos(price),
-  }))
 }
 
 export async function fetchAllCurrentPrices(
@@ -192,5 +119,3 @@ export async function savePricesToDB(prices: Map<string, number>, currency = 'US
     }
   }
 }
-
-export { getAlphaVantageKey, getFinnhubKey }

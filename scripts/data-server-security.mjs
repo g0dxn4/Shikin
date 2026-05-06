@@ -1,14 +1,10 @@
+import { lstatSync } from 'node:fs'
 import { isAbsolute, relative, resolve } from 'node:path'
 
 export const BRIDGE_ALLOWED_ORIGIN = 'http://localhost:1420'
 export const BRIDGE_HEADER_NAME = 'x-shikin-bridge'
-export const BRIDGE_TOKEN_ENV = 'SHIKIN_DATA_SERVER_BRIDGE_TOKEN'
-export const BRIDGE_ALLOW_HEADERS = [
-  'Content-Type',
-  'Authorization',
-  'originator',
-  'X-Shikin-Bridge',
-]
+const BRIDGE_TOKEN_ENV = 'SHIKIN_DATA_SERVER_BRIDGE_TOKEN'
+const BRIDGE_ALLOW_HEADERS = ['Content-Type', 'Authorization', 'originator', 'X-Shikin-Bridge']
 
 function hasAllowedOrigin(headers) {
   return headers?.origin === BRIDGE_ALLOWED_ORIGIN
@@ -32,6 +28,37 @@ export function safePath(base, userPath) {
   }
 
   throw new Error('Path traversal detected')
+}
+
+export function safePathNoSymlinks(base, userPath, { allowMissing = false } = {}) {
+  const resolvedBase = resolve(base)
+  const resolvedPath = safePath(resolvedBase, userPath)
+
+  const baseStats = lstatSync(resolvedBase)
+  if (baseStats.isSymbolicLink() || !baseStats.isDirectory()) {
+    throw new Error('App data directory is not a safe directory')
+  }
+
+  const confinedPath = relative(resolvedBase, resolvedPath)
+  if (!confinedPath) return resolvedPath
+
+  let currentPath = resolvedBase
+  for (const segment of confinedPath.split(/[\\/]+/)) {
+    currentPath = resolve(currentPath, segment)
+    try {
+      const stats = lstatSync(currentPath)
+      if (stats.isSymbolicLink()) {
+        throw new Error('Path symlink detected')
+      }
+    } catch (error) {
+      if (error?.code === 'ENOENT' && allowMissing) {
+        break
+      }
+      throw error
+    }
+  }
+
+  return resolvedPath
 }
 
 export function validateBridgeRequest(req, expectedToken = getBridgeToken()) {

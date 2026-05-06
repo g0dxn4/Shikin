@@ -1,13 +1,12 @@
 import { create } from 'zustand'
 import { query, execute } from '@/lib/database'
 import { generateId } from '@/lib/ulid'
-import { fromCentavos } from '@/lib/money'
 import type { Account, Investment } from '@/types/database'
 import dayjs from 'dayjs'
 
 // ── Types ────────��─────────────────────────────────────────────────────────
 
-export interface AccountBreakdown {
+interface AccountBreakdown {
   id: string
   name: string
   type: string
@@ -15,7 +14,7 @@ export interface AccountBreakdown {
   balance: number // centavos
 }
 
-export interface NetWorthSnapshot {
+interface NetWorthSnapshot {
   id: string
   date: string
   total_assets: number
@@ -26,9 +25,9 @@ export interface NetWorthSnapshot {
   created_at: string
 }
 
-export interface NetWorthChartPoint {
+interface NetWorthChartPoint {
   date: string
-  netWorth: number // dollars
+  netWorth: number // centavos
   assets: number
   liabilities: number
 }
@@ -197,9 +196,9 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
 
     const history: NetWorthChartPoint[] = rows.map((r) => ({
       date: r.date,
-      netWorth: fromCentavos(r.net_worth),
-      assets: fromCentavos(r.total_assets),
-      liabilities: fromCentavos(r.total_liabilities),
+      netWorth: r.net_worth,
+      assets: r.total_assets,
+      liabilities: r.total_liabilities,
     }))
 
     set({ history })

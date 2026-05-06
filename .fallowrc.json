@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "entry": [
+    "scripts/data-server.mjs",
+    "scripts/dev.mjs",
+    "scripts/e2e-dev.mjs",
+    "scripts/release-preflight.mjs"
+  ],
+  "ignoreDependencies": [
+    "@modelcontextprotocol/sdk",
+    "@tauri-apps/plugin-fs",
+    "@tauri-apps/plugin-store"
+  ],
+  "ignorePatterns": ["coverage/**", "playwright-report/**", "dist/**", "src-tauri/target/**"],
+  "rules": {
+    "unresolved-imports": "off"
+  }
+}

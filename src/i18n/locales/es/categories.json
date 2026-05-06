@@ -1,6 +1,6 @@
 {
   "title": "Categorías",
-  "subtitle": "Gestión",
+  "subtitle": "Define cómo las transacciones, presupuestos e informes entienden tu dinero.",
   "addCategory": "Agregar categoría",
   "newCategory": "Nueva categoría",
   "createCategory": "Crear categoría",
@@ -10,7 +10,15 @@
   "selectPrompt": "Selecciona una categoría para editarla o haz clic en Agregar categoría para crear una.",
   "empty": {
     "title": "Aún no hay categorías",
-    "description": "Crea categorías para organizar tus transacciones y presupuestos."
+    "description": "Crea categorías para organizar tus transacciones y presupuestos.",
+    "group": "Aún no hay categorías en este grupo."
+  },
+  "hero": {
+    "kicker": "Taxonomía financiera",
+    "description": "Las categorías se comparten entre transacciones, presupuestos, importaciones e informes. Mantenlas claras, compactas y fáciles de revisar."
+  },
+  "modal": {
+    "description": "Edita el nombre, tipo, color e ícono de la categoría."
   },
   "loadError": "No se pudieron cargar las categorías",
   "table": {
@@ -24,7 +32,14 @@
     "nameRequired": "El nombre de la categoría es obligatorio.",
     "type": "Tipo",
     "color": "Color",
-    "icon": "Ícono"
+    "icon": "Ícono",
+    "chooseIcon": "Elegir ícono"
+  },
+  "iconPicker": {
+    "title": "Elegir un ícono",
+    "description": "Busca en el paquete de íconos y elige el símbolo de esta categoría.",
+    "searchPlaceholder": "Buscar íconos...",
+    "noResults": "Ningún ícono coincide con esa búsqueda."
   },
   "types": {
     "expense": "Gasto",

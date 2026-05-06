@@ -18,10 +18,10 @@ test.describe('desktop sidebar navigation', () => {
     await expect(sidebar.getByRole('link', { name: 'Transactions' })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Accounts' })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Budgets' })).toBeVisible()
-    await expect(sidebar.getByRole('link', { name: 'Bills' })).toBeVisible()
-    await expect(sidebar.getByRole('link', { name: 'Reports' })).toBeVisible()
+    await expect(sidebar.getByRole('link', { name: 'Categories' })).toBeVisible()
+    await expect(sidebar.getByRole('link', { name: 'Goals' })).toBeVisible()
+    await expect(sidebar.getByRole('link', { name: 'Insights' })).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Settings' })).toBeVisible()
-    await expect(sidebar.getByRole('link', { name: 'Extensions' })).toBeVisible()
   })
 
   test('clicking Dashboard navigates to /', async ({ page }) => {
@@ -35,45 +35,45 @@ test.describe('desktop sidebar navigation', () => {
   })
 
   test('clicking Transactions navigates to /transactions', async ({ page }) => {
-    await page.getByRole('link', { name: 'Transactions' }).click()
+    await page.locator('aside').first().getByRole('link', { name: 'Transactions' }).click()
     await page.waitForURL('/transactions')
     expect(page.url()).toContain('/transactions')
   })
 
   test('clicking Accounts navigates to /accounts', async ({ page }) => {
-    await page.getByRole('link', { name: 'Accounts' }).click()
+    await page.locator('aside').first().getByRole('link', { name: 'Accounts' }).click()
     await page.waitForURL('/accounts')
     expect(page.url()).toContain('/accounts')
   })
 
   test('clicking Budgets navigates to /budgets', async ({ page }) => {
-    await page.getByRole('link', { name: 'Budgets' }).click()
+    await page.locator('aside').first().getByRole('link', { name: 'Budgets' }).click()
     await page.waitForURL('/budgets')
     expect(page.url()).toContain('/budgets')
   })
 
-  test('clicking Bills navigates to /bills', async ({ page }) => {
-    await page.getByRole('link', { name: 'Bills' }).click()
-    await page.waitForURL('/bills')
-    expect(page.url()).toContain('/bills')
+  test('clicking Categories navigates to /categories', async ({ page }) => {
+    await page.locator('aside').first().getByRole('link', { name: 'Categories' }).click()
+    await page.waitForURL('/categories')
+    expect(page.url()).toContain('/categories')
   })
 
-  test('clicking Reports navigates to /reports', async ({ page }) => {
-    await page.getByRole('link', { name: 'Reports' }).click()
-    await page.waitForURL('/reports')
-    expect(page.url()).toContain('/reports')
+  test('clicking Goals navigates to /goals', async ({ page }) => {
+    await page.locator('aside').first().getByRole('link', { name: 'Goals' }).click()
+    await page.waitForURL('/goals')
+    expect(page.url()).toContain('/goals')
   })
 
   test('clicking Settings navigates to /settings', async ({ page }) => {
-    await page.getByRole('link', { name: 'Settings' }).click()
+    await page.locator('aside').first().getByRole('link', { name: 'Settings' }).click()
     await page.waitForURL('/settings')
     expect(page.url()).toContain('/settings')
   })
 
-  test('clicking Extensions navigates to /extensions', async ({ page }) => {
-    await page.getByRole('link', { name: 'Extensions' }).click()
-    await page.waitForURL('/extensions')
-    expect(page.url()).toContain('/extensions')
+  test('clicking Insights navigates to /insights', async ({ page }) => {
+    await page.locator('aside').first().getByRole('link', { name: 'Insights' }).click()
+    await page.waitForURL('/insights')
+    expect(page.url()).toContain('/insights')
   })
 
   test('active nav link is highlighted', async ({ page }) => {
@@ -98,7 +98,7 @@ test.describe('mobile bottom nav navigation', () => {
     await expect(bottomNav.getByText('Dashboard')).toBeVisible()
     await expect(bottomNav.getByText('Transactions')).toBeVisible()
     await expect(bottomNav.getByText('Accounts')).toBeVisible()
-    await expect(bottomNav.getByText('Budgets')).toBeVisible()
+    await expect(bottomNav.getByText('Insights')).toBeVisible()
     await expect(bottomNav.getByRole('button', { name: 'More pages' })).toBeVisible()
   })
 
@@ -116,11 +116,11 @@ test.describe('mobile bottom nav navigation', () => {
     expect(page.url()).toContain('/accounts')
   })
 
-  test('clicking Budgets navigates to /budgets', async ({ page }) => {
+  test('clicking Insights navigates to /insights', async ({ page }) => {
     const bottomNav = page.getByRole('navigation').filter({ hasText: 'Dashboard' })
-    await bottomNav.getByText('Budgets').click()
-    await page.waitForURL('/budgets')
-    expect(page.url()).toContain('/budgets')
+    await bottomNav.getByText('Insights').click()
+    await page.waitForURL('/insights')
+    expect(page.url()).toContain('/insights')
   })
 
   test('clicking Settings navigates to /settings', async ({ page }) => {

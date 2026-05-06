@@ -1,7 +1,8 @@
-import { homedir } from 'node:os'
+import { lstatSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve } from 'node:path'
+import { prepareAppDataDir } from './app-data-dir.js'
 
-const DATA_DIR = join(homedir(), '.local', 'share', 'com.asf.shikin')
+const DATA_DIR = prepareAppDataDir()
 export const NOTEBOOK_DIR = join(DATA_DIR, 'notebook')
 
 export function isSafeNotebookPathInput(
@@ -21,6 +22,39 @@ export function isSafeNotebookPathInput(
   return !trimmed.split(/[\\/]+/).some((segment) => segment === '..')
 }
 
+function assertNoSymlinkComponents(resolvedBase: string, resolvedPath: string): void {
+  try {
+    const baseStats = lstatSync(resolvedBase)
+    if (baseStats.isSymbolicLink() || !baseStats.isDirectory()) {
+      throw new Error('Notebook directory is not a safe directory')
+    }
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      return
+    }
+    throw error
+  }
+
+  const confinedPath = relative(resolvedBase, resolvedPath)
+  if (!confinedPath) return
+
+  let currentPath = resolvedBase
+  for (const segment of confinedPath.split(/[\\/]+/)) {
+    currentPath = resolve(currentPath, segment)
+    try {
+      const stats = lstatSync(currentPath)
+      if (stats.isSymbolicLink()) {
+        throw new Error('Path symlink detected')
+      }
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        return
+      }
+      throw error
+    }
+  }
+}
+
 export function resolveNotebookPath(relativePath: string): string {
   if (!isSafeNotebookPathInput(relativePath, { allowEmpty: true })) {
     throw new Error('Path traversal detected')
@@ -31,6 +65,7 @@ export function resolveNotebookPath(relativePath: string): string {
   const confinedPath = relative(resolvedBase, resolvedPath)
 
   if (confinedPath === '' || (!confinedPath.startsWith('..') && !isAbsolute(confinedPath))) {
+    assertNoSymlinkComponents(resolvedBase, resolvedPath)
     return resolvedPath
   }
 

@@ -41,6 +41,9 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: CLI build
+        run: pnpm build:cli
+
   e2e:
     runs-on: ubuntu-latest
     needs: checks

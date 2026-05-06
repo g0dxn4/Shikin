@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { InvestmentDialog } from '../investment-dialog'
 
@@ -77,12 +77,10 @@ describe('InvestmentDialog', () => {
 
     render(<InvestmentDialog />)
 
-    // Fill the form and submit
-    const user = userEvent.setup()
-    await user.type(screen.getByLabelText('form.symbol'), 'AAPL')
-    await user.type(screen.getByLabelText('form.name'), 'Apple Inc')
-    await user.type(screen.getByLabelText('form.shares'), '10')
-    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+    fireEvent.change(screen.getByLabelText('form.symbol'), { target: { value: 'AAPL' } })
+    fireEvent.change(screen.getByLabelText('form.name'), { target: { value: 'Apple Inc' } })
+    fireEvent.change(screen.getByLabelText('form.shares'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'actions.save' }))
 
     // Verify the button shows loading state (dialog should stay open)
     await waitFor(() => {

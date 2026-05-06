@@ -4,7 +4,7 @@ import { load } from '@/lib/storage'
 
 const STORE_KEY_HISTORY = 'health_score_history'
 
-export interface HealthScoreSnapshot {
+interface HealthScoreSnapshot {
   date: string
   score: number
 }

@@ -50,7 +50,7 @@ const FRANKFURTER_SUPPORTED = new Set([
   'ZAR',
 ])
 
-export type CommonCurrency = (typeof COMMON_CURRENCIES)[number]
+type CommonCurrency = (typeof COMMON_CURRENCIES)[number]
 
 interface FrankfurterResponse {
   base: string

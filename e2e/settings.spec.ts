@@ -23,7 +23,7 @@ test.describe('Settings', () => {
 
   test('currency section is present', async ({ page }) => {
     await expect(page.getByRole('heading', { name: 'Currency' })).toBeVisible()
-    await expect(page.getByText('Preferred Currency')).toBeVisible()
+    await expect(page.getByLabel('Preferred Currency')).toBeVisible()
     await expect(page.getByRole('button', { name: /Refresh Rates/i })).toBeVisible()
   })
 

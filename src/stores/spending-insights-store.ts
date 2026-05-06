@@ -1,23 +1,23 @@
 import { create } from 'zustand'
 import { query } from '@/lib/database'
-import { fromCentavos } from '@/lib/money'
+import { formatMoney } from '@/lib/money'
 import dayjs from 'dayjs'
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
-export interface CategorySpending {
+interface CategorySpending {
   categoryId: string | null
   categoryName: string
   categoryColor: string
-  amount: number // dollars
+  amount: number // centavos
 }
 
 export interface SpendingComparison {
   categoryName: string
   categoryColor: string
-  current: number // dollars
-  previous: number // dollars
-  change: number // dollars (positive = spending more)
+  current: number // centavos
+  previous: number // centavos
+  change: number // centavos (positive = spending more)
   changePercent: number
 }
 
@@ -84,7 +84,7 @@ async function getSpendingByCategory(
     categoryId: r.category_id,
     categoryName: r.category_name || 'Uncategorized',
     categoryColor: r.category_color || '#6b7280',
-    amount: fromCentavos(r.total),
+    amount: r.total,
   }))
 }
 
@@ -131,7 +131,7 @@ function generateInsights(
 
   for (const comp of momComparisons) {
     // Skip tiny amounts
-    if (comp.current < 5 && comp.previous < 5) continue
+    if (comp.current < 500 && comp.previous < 500) continue
 
     const avg3m = avg3mByCategory.get(comp.categoryName) ?? 0
 
@@ -154,7 +154,7 @@ function generateInsights(
     }
 
     // Spending dropped significantly
-    if (avg3m > 10 && comp.current < avg3m * 0.5) {
+    if (avg3m > 1000 && comp.current < avg3m * 0.5) {
       const dropPercent = ((avg3m - comp.current) / avg3m) * 100
       insights.push({
         id: `insight-${counter++}`,
@@ -169,13 +169,13 @@ function generateInsights(
     }
 
     // New spending category this month
-    if (comp.previous === 0 && comp.current > 20 && avg3m === 0) {
+    if (comp.previous === 0 && comp.current > 2000 && avg3m === 0) {
       insights.push({
         id: `insight-${counter++}`,
         type: 'new',
         categoryName: comp.categoryName,
         categoryColor: comp.categoryColor,
-        message: `New spending: ${comp.categoryName} ($${comp.current.toFixed(0)} this month)`,
+        message: `New spending: ${comp.categoryName} (${formatMoney(comp.current)} this month)`,
         amount: comp.current,
         changePercent: 100,
         severity: 'info',

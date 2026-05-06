@@ -98,7 +98,7 @@ describe('CLI option registration', () => {
 describe('CLI command execution', () => {
   it('uses the shared migration list for diagnose drift prevention', () => {
     expect(EXPECTED_MIGRATIONS).toBe(CLI_DATABASE_MIGRATIONS)
-    expect(EXPECTED_MIGRATIONS).toHaveLength(11)
+    expect(EXPECTED_MIGRATIONS).toHaveLength(12)
   })
 
   it('keeps all tool definitions discoverable as CLI commands', () => {
@@ -267,6 +267,7 @@ describe('CLI command execution', () => {
         { name: '012_account_balance_history' },
         { name: '013_recurring_rules_currency' },
         { name: '014_recurring_rules_currency_backfill' },
+        { name: '015_primary_account' },
       ])
       .mockReturnValueOnce([{ count: 2 }])
       .mockReturnValueOnce([{ count: 14 }])
@@ -328,8 +329,8 @@ describe('CLI command execution', () => {
           },
           database: {
             ready: true,
-            migrationCount: 11,
-            latestMigration: '014_recurring_rules_currency_backfill',
+            migrationCount: 12,
+            latestMigration: '015_primary_account',
             accountCount: 2,
             categoryCount: 14,
             transactionCount: 42,
@@ -343,8 +344,8 @@ describe('CLI command execution', () => {
                 violations: [],
               },
               migrations: {
-                expected: 11,
-                applied: 11,
+                expected: 12,
+                applied: 12,
                 missing: [],
                 unexpected: [],
               },
@@ -416,7 +417,7 @@ describe('CLI command execution', () => {
 
     const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
     expect(output.database.integrity.migrations).toEqual({
-      expected: 11,
+      expected: 12,
       applied: 3,
       missing: CLI_DATABASE_MIGRATIONS.filter(
         (migration) => migration !== '001_core_tables' && migration !== '003_credit_cards'

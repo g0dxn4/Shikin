@@ -74,7 +74,7 @@ test.describe('mobile layout', () => {
   })
 
   test('content has bottom padding for nav bar', async ({ page }) => {
-    const contentWrapper = page.locator('.mx-auto.max-w-[1420px]')
+    const contentWrapper = page.locator('main > div')
     await expect(contentWrapper).toBeVisible()
     await expect(contentWrapper).toHaveClass(/pb-24/)
   })

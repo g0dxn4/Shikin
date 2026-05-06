@@ -68,19 +68,6 @@ async function saveAchievements(achievements: UnlockedAchievement[]): Promise<vo
   await store.set(STORE_KEY_ACHIEVEMENTS, achievements)
 }
 
-async function loadStreak(): Promise<StreakData> {
-  try {
-    const store = await load()
-    const raw = await store.get(STORE_KEY_STREAK)
-    if (!raw) return { currentStreak: 0, longestStreak: 0, lastLoggedDate: null }
-    return typeof raw === 'string'
-      ? JSON.parse(raw)
-      : (raw as StreakData)
-  } catch {
-    return { currentStreak: 0, longestStreak: 0, lastLoggedDate: null }
-  }
-}
-
 async function saveStreak(streak: StreakData): Promise<void> {
   const store = await load()
   await store.set(STORE_KEY_STREAK, streak)
@@ -137,10 +124,6 @@ export async function computeStreak(): Promise<StreakData> {
   }
   await saveStreak(streak)
   return streak
-}
-
-export async function getStreak(): Promise<StreakData> {
-  return loadStreak()
 }
 
 // --- Achievement checks ---

@@ -8,11 +8,12 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useForecastStore } from '@/stores/forecast-store'
-import { formatMoney, fromCentavos } from '@/lib/money'
+import { formatMoney } from '@/lib/money'
 import { query } from '@/lib/database'
 import { CHART_ITEM_STYLE, CHART_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '@/lib/constants'
 
 interface SubscriptionDisplay {
+  id: string
   name: string
   amount: number
   billing_cycle: string
@@ -32,9 +33,9 @@ export function Forecast() {
     return forecast.points.map((p) => ({
       date: dayjs(p.date).format('MMM D'),
       fullDate: p.date,
-      projected: fromCentavos(p.projected),
-      optimistic: fromCentavos(p.optimistic),
-      pessimistic: fromCentavos(p.pessimistic),
+      projected: p.projected,
+      optimistic: p.optimistic,
+      pessimistic: p.pessimistic,
     }))
   }, [forecast])
 
@@ -47,10 +48,9 @@ export function Forecast() {
 
   return (
     <div className="animate-fade-in-up page-content">
-      {/* Page Header */}
-      <div className="liquid-card page-header p-5">
+      <div className="liquid-card page-header min-h-[72px] p-3 sm:p-4">
         <div>
-          <h1 className="font-heading text-2xl font-bold tracking-tight">{t('title')}</h1>
+          <h1 className="font-heading text-[28px] font-bold tracking-tight">{t('title')}</h1>
           <p className="text-muted-foreground mt-1 text-sm">{t('description')}</p>
         </div>
         <div className="flex gap-1" role="group" aria-label={t('range.label')}>
@@ -68,153 +68,167 @@ export function Forecast() {
         </div>
       </div>
 
-      {/* Key Metrics */}
       {forecast && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          <MetricCard
-            icon={<DollarSign size={16} />}
-            iconColor="text-primary"
-            label={t('metrics.currentBalance')}
-            value={formatMoney(forecast.currentBalance)}
-          />
-          <MetricCard
-            icon={<TrendingDown size={16} />}
-            iconColor="text-destructive"
-            label={t('metrics.lowestProjected')}
-            value={formatMoney(forecast.minBalance.amount)}
-            valueColor={forecast.minBalance.amount < 0 ? 'text-destructive' : ''}
-          />
-          <MetricCard
-            icon={<Calendar size={16} />}
-            iconColor="text-muted-foreground"
-            label={t('metrics.lowestDate')}
-            value={dayjs(forecast.minBalance.date).format('MMM D, YYYY')}
-          />
-          <MetricCard
-            icon={<Flame size={16} />}
-            iconColor="text-warning"
-            label={t('metrics.dailyBurn')}
-            value={formatMoney(forecast.dailyBurnRate)}
-          />
-          <MetricCard
-            icon={<TrendingUp size={16} />}
-            iconColor="text-success"
-            label={t('metrics.dailyIncome')}
-            value={formatMoney(forecast.dailyIncome)}
-          />
-          <MetricCard
-            icon={<DollarSign size={16} />}
-            iconColor="text-primary"
-            label={t('metrics.projectedEnd')}
-            value={formatMoney(endPoint?.projected ?? 0)}
-            valueColor={(endPoint?.projected ?? 0) < 0 ? 'text-destructive' : ''}
-          />
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.35fr_0.65fr]">
+          <div className="liquid-hero relative min-h-[420px] overflow-hidden p-5 sm:p-6">
+            <div className="bg-accent/20 pointer-events-none absolute -top-28 -right-24 h-72 w-72 rounded-full blur-3xl" />
+            <div className="relative z-10 mb-5 flex items-start justify-between gap-4">
+              <div>
+                <span className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
+                  {t('metrics.projectedEnd')}
+                </span>
+                <p
+                  className={`font-heading mt-2 text-4xl font-bold tracking-tight sm:text-5xl ${
+                    (endPoint?.projected ?? 0) < 0 ? 'text-destructive' : ''
+                  }`}
+                >
+                  {formatMoney(endPoint?.projected ?? 0)}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/[0.08] bg-white/[0.06] p-3">
+                <DollarSign size={24} className="text-accent" aria-hidden="true" />
+              </div>
+            </div>
+
+            {chartData.length > 0 && (
+              <div className="relative z-10 h-72" role="img" aria-label={t('chart.title')}>
+                <SafeChart>
+                  <AreaChart data={chartData}>
+                    <defs>
+                      <linearGradient id="forecastProjectedGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#7C5CFF" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#7C5CFF" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                    <XAxis
+                      dataKey="date"
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: '#A9A9B4', fontSize: 11 }}
+                      interval="preserveStartEnd"
+                    />
+                    <YAxis
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: '#A9A9B4', fontSize: 11 }}
+                      tickFormatter={(v) => formatMoney(Number(v))}
+                    />
+                    <Tooltip
+                      contentStyle={CHART_TOOLTIP_STYLE}
+                      itemStyle={CHART_ITEM_STYLE}
+                      labelStyle={CHART_LABEL_STYLE}
+                      formatter={(value) => formatMoney(Number(value))}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 11, color: '#A9A9B4' }} />
+                    <Area
+                      type="monotone"
+                      dataKey="optimistic"
+                      name={t('chart.optimistic')}
+                      stroke="#34D399"
+                      strokeWidth={1.5}
+                      strokeDasharray="6 3"
+                      fill="none"
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="projected"
+                      name={t('chart.projected')}
+                      stroke="#7C5CFF"
+                      strokeWidth={2}
+                      fill="url(#forecastProjectedGrad)"
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="pessimistic"
+                      name={t('chart.pessimistic')}
+                      stroke="#EF4444"
+                      strokeWidth={1.5}
+                      strokeDasharray="6 3"
+                      fill="none"
+                    />
+                  </AreaChart>
+                </SafeChart>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <MetricCard
+              icon={<DollarSign size={16} />}
+              iconColor="text-primary"
+              label={t('metrics.currentBalance')}
+              value={formatMoney(forecast.currentBalance)}
+            />
+            <MetricCard
+              icon={<TrendingDown size={16} />}
+              iconColor="text-destructive"
+              label={t('metrics.lowestProjected')}
+              value={formatMoney(forecast.minBalance.amount)}
+              valueColor={forecast.minBalance.amount < 0 ? 'text-destructive' : ''}
+            />
+            <MetricCard
+              icon={<Calendar size={16} />}
+              iconColor="text-muted-foreground"
+              label={t('metrics.lowestDate')}
+              value={dayjs(forecast.minBalance.date).format('MMM D, YYYY')}
+            />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-1">
+              <MetricCard
+                icon={<Flame size={16} />}
+                iconColor="text-warning"
+                label={t('metrics.dailyBurn')}
+                value={formatMoney(forecast.dailyBurnRate)}
+              />
+              <MetricCard
+                icon={<TrendingUp size={16} />}
+                iconColor="text-success"
+                label={t('metrics.dailyIncome')}
+                value={formatMoney(forecast.dailyIncome)}
+              />
+            </div>
+            <div
+              className={`liquid-card border p-4 ${
+                forecast.dangerDates.length > 0
+                  ? 'border-destructive/30 bg-destructive/5'
+                  : 'border-success/30 bg-success/5'
+              }`}
+              role={forecast.dangerDates.length > 0 ? 'alert' : 'status'}
+            >
+              <div className="mb-2 flex items-center gap-2">
+                {forecast.dangerDates.length > 0 ? (
+                  <AlertTriangle size={16} className="text-destructive" aria-hidden="true" />
+                ) : (
+                  <TrendingUp size={16} className="text-success" aria-hidden="true" />
+                )}
+                <h3
+                  className={`font-heading text-sm font-semibold ${
+                    forecast.dangerDates.length > 0 ? 'text-destructive' : 'text-success'
+                  }`}
+                >
+                  {forecast.dangerDates.length > 0 ? t('danger.title') : t('danger.noDanger')}
+                </h3>
+              </div>
+              {forecast.dangerDates.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-sm">
+                    {t('danger.balanceBelowZero', {
+                      date: dayjs(forecast.dangerDates[0]).format('MMM D, YYYY'),
+                    })}
+                  </p>
+                  <p className="text-muted-foreground text-sm">
+                    {t('danger.lowestPoint', {
+                      amount: formatMoney(forecast.minBalance.amount),
+                      date: dayjs(forecast.minBalance.date).format('MMM D, YYYY'),
+                    })}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Danger Warnings */}
-      {forecast && forecast.dangerDates.length > 0 && (
-        <div className="liquid-card border-destructive/30 bg-destructive/5 border p-4" role="alert">
-          <div className="mb-2 flex items-center gap-2">
-            <AlertTriangle size={16} className="text-destructive" aria-hidden="true" />
-            <h3 className="font-heading text-destructive text-sm font-semibold">
-              {t('danger.title')}
-            </h3>
-          </div>
-          <div className="space-y-1">
-            <p className="text-sm">
-              {t('danger.balanceBelowZero', {
-                date: dayjs(forecast.dangerDates[0]).format('MMM D, YYYY'),
-              })}
-            </p>
-            <p className="text-muted-foreground text-sm">
-              {t('danger.lowestPoint', {
-                amount: formatMoney(forecast.minBalance.amount),
-                date: dayjs(forecast.minBalance.date).format('MMM D, YYYY'),
-              })}
-            </p>
-          </div>
-        </div>
-      )}
-
-      {forecast && forecast.dangerDates.length === 0 && (
-        <div className="liquid-card border-success/30 bg-success/5 border p-4" role="status">
-          <div className="flex items-center gap-2">
-            <TrendingUp size={16} className="text-success" aria-hidden="true" />
-            <p className="text-success text-sm">{t('danger.noDanger')}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Main Chart */}
-      {forecast && chartData.length > 0 && (
-        <div className="liquid-card p-5">
-          <h3 className="font-heading mb-4 text-sm font-semibold">{t('chart.title')}</h3>
-          <div className="h-80" role="img" aria-label={t('chart.title')}>
-            <SafeChart>
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="forecastProjectedGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#7C5CFF" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#7C5CFF" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                <XAxis
-                  dataKey="date"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: '#A9A9B4', fontSize: 11 }}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: '#A9A9B4', fontSize: 11 }}
-                  tickFormatter={(v) => `$${(v / 1).toLocaleString()}`}
-                />
-                <Tooltip
-                  contentStyle={CHART_TOOLTIP_STYLE}
-                  itemStyle={CHART_ITEM_STYLE}
-                  labelStyle={CHART_LABEL_STYLE}
-                  formatter={(value) =>
-                    `$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                  }
-                />
-                <Legend wrapperStyle={{ fontSize: 11, color: '#A9A9B4' }} />
-                <Area
-                  type="monotone"
-                  dataKey="optimistic"
-                  name={t('chart.optimistic')}
-                  stroke="#34D399"
-                  strokeWidth={1.5}
-                  strokeDasharray="6 3"
-                  fill="none"
-                />
-                <Area
-                  type="monotone"
-                  dataKey="projected"
-                  name={t('chart.projected')}
-                  stroke="#7C5CFF"
-                  strokeWidth={2}
-                  fill="url(#forecastProjectedGrad)"
-                />
-                <Area
-                  type="monotone"
-                  dataKey="pessimistic"
-                  name={t('chart.pessimistic')}
-                  stroke="#EF4444"
-                  strokeWidth={1.5}
-                  strokeDasharray="6 3"
-                  fill="none"
-                />
-              </AreaChart>
-            </SafeChart>
-          </div>
-        </div>
-      )}
-
-      {/* Subscriptions Table */}
       <SubscriptionsTable />
     </div>
   )
@@ -259,8 +273,8 @@ function SubscriptionsTable() {
               </tr>
             </thead>
             <tbody>
-              {subscriptions.map((sub, i) => (
-                <tr key={i} className="border-b border-white/5 last:border-0">
+              {subscriptions.map((sub) => (
+                <tr key={sub.id} className="border-b border-white/5 last:border-0">
                   <td className="py-2.5 font-medium">{sub.name}</td>
                   <td className="py-2.5">{formatMoney(sub.amount)}</td>
                   <td className="py-2.5">
@@ -289,7 +303,7 @@ function useSubscriptions() {
     async function load() {
       try {
         const rows = await query<SubscriptionDisplay>(
-          `SELECT name, amount, billing_cycle, next_billing_date
+          `SELECT id, name, amount, billing_cycle, next_billing_date
            FROM subscriptions
            WHERE is_active = 1
            ORDER BY next_billing_date ASC`
@@ -333,15 +347,33 @@ function MetricCard({
 
 function ForecastSkeleton() {
   return (
-    <div className="page-content">
-      <Skeleton className="h-20 w-full" />
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="liquid-card space-y-3 p-5">
-            <Skeleton className="h-3 w-24" />
-            <Skeleton className="h-6 w-32" />
+    <div className="page-content" role="status" aria-busy="true">
+      <span className="sr-only">Loading</span>
+      <div className="liquid-card page-header min-h-[72px] p-3 sm:p-4">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-40" />
+          <Skeleton className="h-4 w-72" />
+        </div>
+        <Skeleton className="h-9 w-36" />
+      </div>
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.35fr_0.65fr]">
+        <div className="liquid-hero space-y-5 p-5 sm:p-6">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-12 w-56" />
+          <Skeleton className="h-72 w-full" />
+        </div>
+        <div className="space-y-3">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="liquid-card space-y-3 p-5">
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-6 w-32" />
+            </div>
+          ))}
+          <div className="liquid-card space-y-3 p-5">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-12 w-full" />
           </div>
-        ))}
+        </div>
       </div>
       <div className="liquid-card p-5">
         <Skeleton className="h-4 w-32" />

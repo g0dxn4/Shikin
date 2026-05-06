@@ -8,7 +8,7 @@ import {
 } from '@/lib/auto-categorize'
 import type { CategoryRule } from '@/types/database'
 
-export interface CategoryRuleWithDetails extends CategoryRule {
+interface CategoryRuleWithDetails extends CategoryRule {
   category_name?: string
   category_color?: string
 }

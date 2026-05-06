@@ -1,17 +1,14 @@
 import Database from 'better-sqlite3'
 import { join } from 'node:path'
-import { homedir } from 'node:os'
-import { mkdirSync } from 'node:fs'
 import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
+import { PRIVATE_FILE_MODE, hardenPathMode, prepareAppDataDir } from './app-data-dir.js'
 
-const DATA_DIR = join(homedir(), '.local', 'share', 'com.asf.shikin')
+const DATA_DIR = prepareAppDataDir()
 const DB_PATH = join(DATA_DIR, 'shikin.db')
 const REQUIRED_CORE_TABLES = ['_migrations', 'accounts', 'categories', 'transactions'] as const
+// fallow-ignore-next-line unused-export
 export const REQUIRED_MIGRATIONS = CLI_DATABASE_MIGRATIONS
 const CREDIT_CARD_COLUMNS = ['credit_limit', 'statement_closing_day', 'payment_due_day'] as const
-
-// Ensure data directory exists
-mkdirSync(DATA_DIR, { recursive: true })
 
 function convertParams(sql: string): string {
   return sql.replace(/\$(\d+)/g, '?')
@@ -81,7 +78,9 @@ function assertShikinSchemaReady(db: Database.Database, dbPath = DB_PATH): void 
 
 function openDb(): Database.Database {
   try {
-    return new Database(DB_PATH, { fileMustExist: true })
+    const db = new Database(DB_PATH, { fileMustExist: true })
+    hardenPathMode(DB_PATH, PRIVATE_FILE_MODE)
+    return db
   } catch (error) {
     throw new Error(
       `Unable to open the Shikin database at ${DB_PATH}. ` +
@@ -97,6 +96,9 @@ function getDb(): Database.Database {
     const db = openDb()
     db.pragma('journal_mode = WAL')
     db.pragma('foreign_keys = ON')
+    hardenPathMode(`${DB_PATH}-wal`, PRIVATE_FILE_MODE)
+    hardenPathMode(`${DB_PATH}-shm`, PRIVATE_FILE_MODE)
+    hardenPathMode(`${DB_PATH}-journal`, PRIVATE_FILE_MODE)
 
     try {
       assertShikinSchemaReady(db)

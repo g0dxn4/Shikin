@@ -56,22 +56,6 @@ export function calculateStdDev(values: number[]): { mean: number; stdDev: numbe
   return { mean, stdDev: Math.sqrt(variance) }
 }
 
-export async function getMerchantHistory(
-  description: string,
-  days: number = 90
-): Promise<TransactionRow[]> {
-  const since = dayjs().subtract(days, 'day').format('YYYY-MM-DD')
-  return query<TransactionRow>(
-    `SELECT t.id, t.description, t.amount, t.date, t.category_id,
-            COALESCE(c.name, '${UNCATEGORIZED}') as category_name, t.type
-     FROM transactions t
-     LEFT JOIN categories c ON t.category_id = c.id
-     WHERE t.description = $1 AND t.type = 'expense' AND t.date >= $2
-     ORDER BY t.date DESC`,
-    [description, since]
-  )
-}
-
 // --- Detection functions ---
 
 async function detectUnusualAmounts(recentDays: number = 30): Promise<Anomaly[]> {
@@ -336,9 +320,7 @@ export interface AnomalyDetectionOptions {
   largeTransactionThreshold?: number // in dollars, default 500
 }
 
-export async function detectAnomalies(
-  options: AnomalyDetectionOptions = {}
-): Promise<Anomaly[]> {
+export async function detectAnomalies(options: AnomalyDetectionOptions = {}): Promise<Anomaly[]> {
   const thresholdDollars = options.largeTransactionThreshold ?? 500
   const thresholdCentavos = thresholdDollars * 100
 
@@ -352,7 +334,5 @@ export async function detectAnomalies(
 
   // Flatten and sort by severity (high first)
   const severityOrder: Record<AnomalySeverity, number> = { high: 0, medium: 1, low: 2 }
-  return results
-    .flat()
-    .sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity])
+  return results.flat().sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity])
 }

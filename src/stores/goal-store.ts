@@ -13,7 +13,7 @@ export interface GoalWithProgress extends Goal {
   monthlyNeeded: number
 }
 
-export interface GoalFormData {
+interface GoalFormData {
   name: string
   targetAmount: number
   currentAmount: number

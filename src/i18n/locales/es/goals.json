@@ -1,6 +1,6 @@
 {
-  "title": "Metas de Ahorro",
-  "subtitle": "Seguimiento de progreso",
+  "title": "Metas",
+  "subtitle": "Objetivos de ahorro que se sienten tangibles.",
   "addGoal": "Agregar Meta",
   "editGoal": "Editar Meta",
   "deleteGoal": "Eliminar Meta",
@@ -50,8 +50,22 @@
   },
   "hero": {
     "featuredGoal": "Meta Destacada",
+    "expectedCompletion": "Finalización estimada",
     "aggregateProgress": "Progreso General",
     "goalCount": "meta(s)"
+  },
+  "active": {
+    "title": "Metas activas"
+  },
+  "automation": {
+    "title": "Automatización",
+    "subtitle": "Un ritmo de ahorro práctico basado en tus metas.",
+    "monthlyMove": "Mueve {{amount}} cada mes hacia {{goal}} para mantener el ritmo.",
+    "keepPace": "{{goal}} ya está financiada o aún no necesita un ritmo mensual. Mantenla visible y actualiza el progreso cuando muevas dinero.",
+    "empty": "Crea una meta de ahorro y Shikin estimará el ritmo necesario para alcanzarla.",
+    "noGoal": "Sin meta activa",
+    "remaining": "Restante",
+    "deadline": "Fecha límite"
   },
   "error": {
     "load": "No se pudieron cargar las metas",

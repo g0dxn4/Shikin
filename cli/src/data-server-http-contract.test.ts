@@ -1,10 +1,11 @@
 // @vitest-environment node
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
 import { setTimeout as delay } from 'node:timers/promises'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import dayjs from 'dayjs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 let SERVER_URL = 'http://127.0.0.1:1480'
@@ -13,6 +14,7 @@ const TOKEN = 'server-http-contract-token'
 
 let serverProcess: ChildProcessWithoutNullStreams | null = null
 let tempHomeDir = ''
+let tempDataHomeDir = ''
 
 async function getFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -63,12 +65,14 @@ beforeAll(async () => {
   const port = await getFreePort()
   SERVER_URL = `http://127.0.0.1:${port}`
   tempHomeDir = mkdtempSync(join(tmpdir(), 'shikin-data-server-contract-test-'))
+  tempDataHomeDir = join(tempHomeDir, 'xdg-data-home')
   const serverPath = resolve(process.cwd(), 'scripts/data-server.mjs')
 
   serverProcess = spawn('node', [serverPath], {
     env: {
       ...process.env,
       HOME: tempHomeDir,
+      XDG_DATA_HOME: tempDataHomeDir,
       SHIKIN_DATA_SERVER_BRIDGE_TOKEN: TOKEN,
       SHIKIN_DATA_SERVER_PORT: String(port),
       SHIKIN_SERVER_TRANSACTION_TTL_MS: '300',
@@ -97,6 +101,15 @@ describe('data-server authenticated contract', () => {
       'X-Shikin-Bridge': TOKEN,
       'Content-Type': 'application/json',
     }
+
+    const appDataRes = await fetch(`${SERVER_URL}/api/fs/appdata`, {
+      headers: defaultHeaders,
+    })
+    const appDataJson = await appDataRes.json()
+
+    expect(appDataRes.status).toBe(200)
+    expect(appDataJson).toEqual({ path: join(tempDataHomeDir, 'com.asf.shikin') })
+    expect(statSync(appDataJson.path).mode & 0o777).toBe(0o700)
 
     // Store set/get
     const setStoreRes = await fetch(`${SERVER_URL}/api/store/contract-key`, {
@@ -312,6 +325,8 @@ describe('data-server authenticated contract', () => {
 
     const accountId = 'recurring-contract-account'
     const ruleId = 'recurring-contract-rule'
+    const dueDate = dayjs().format('YYYY-MM-DD')
+    const nextDueDate = dayjs().add(1, 'month').format('YYYY-MM-DD')
 
     const insertAccountResponse = await fetch(`${SERVER_URL}/api/db/execute`, {
       method: 'POST',
@@ -337,7 +352,7 @@ describe('data-server authenticated contract', () => {
           'USD',
           'expense',
           'monthly',
-          '2026-04-01',
+          dueDate,
           null,
           accountId,
           null,
@@ -395,7 +410,7 @@ describe('data-server authenticated contract', () => {
     expect(queryRuleStateJson).toEqual([
       {
         balance: 9750,
-        next_date: '2026-05-01',
+        next_date: nextDueDate,
       },
     ])
     expect(queryTransactionStateResponse.status).toBe(200)
@@ -533,6 +548,7 @@ describe('data-server authenticated contract', () => {
 
     const accountId = 'recurring-normalized-account'
     const ruleId = 'recurring-normalized-rule'
+    const dueDate = dayjs().format('YYYY-MM-DD')
 
     const insertAccountResponse = await fetch(`${SERVER_URL}/api/db/execute`, {
       method: 'POST',
@@ -558,7 +574,7 @@ describe('data-server authenticated contract', () => {
           ' usd ',
           'expense',
           'monthly',
-          '2026-04-01',
+          dueDate,
           null,
           accountId,
           null,

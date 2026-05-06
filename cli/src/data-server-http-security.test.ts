@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
@@ -13,6 +13,7 @@ const TOKEN = 'server-http-test-token'
 
 let serverProcess: ChildProcessWithoutNullStreams | null = null
 let tempHomeDir = ''
+let tempDataHomeDir = ''
 
 async function getFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -63,12 +64,14 @@ beforeAll(async () => {
   const port = await getFreePort()
   SERVER_URL = `http://127.0.0.1:${port}`
   tempHomeDir = mkdtempSync(join(tmpdir(), 'shikin-data-server-http-test-'))
+  tempDataHomeDir = join(tempHomeDir, 'xdg-data-home')
   const serverPath = resolve(process.cwd(), 'scripts/data-server.mjs')
 
   serverProcess = spawn('node', [serverPath], {
     env: {
       ...process.env,
       HOME: tempHomeDir,
+      XDG_DATA_HOME: tempDataHomeDir,
       SHIKIN_DATA_SERVER_BRIDGE_TOKEN: TOKEN,
       SHIKIN_DATA_SERVER_PORT: String(port),
     },
@@ -92,14 +95,7 @@ afterAll(async () => {
 describe('data-server request gating', () => {
   it('rejects missing/invalid bridge headers and wrong origin before filesystem side effects', async () => {
     const blockedPath = 'security-test/blocked.md'
-    const expectedFile = join(
-      tempHomeDir,
-      '.local',
-      'share',
-      'com.asf.shikin',
-      'security-test',
-      'blocked.md'
-    )
+    const expectedFile = join(tempDataHomeDir, 'com.asf.shikin', 'security-test', 'blocked.md')
 
     const missingHeaderRes = await fetch(`${SERVER_URL}/api/fs/write`, {
       method: 'PUT',
@@ -151,5 +147,27 @@ describe('data-server request gating', () => {
 
     expect(validTokenRes.status).toBe(200)
     expect(existsSync(expectedFile)).toBe(true)
+  })
+
+  it('rejects filesystem writes through symlinks inside app data', async () => {
+    const appDataDir = join(tempDataHomeDir, 'com.asf.shikin')
+    const outsideDir = join(tempHomeDir, 'outside-symlink-target')
+    const linkPath = join(appDataDir, 'symlinked')
+    const escapedFile = join(outsideDir, 'escape.md')
+    mkdirSync(outsideDir, { recursive: true })
+    symlinkSync(outsideDir, linkPath, 'dir')
+
+    const response = await fetch(`${SERVER_URL}/api/fs/write`, {
+      method: 'PUT',
+      headers: {
+        Origin: ORIGIN,
+        'Content-Type': 'application/json',
+        'X-Shikin-Bridge': TOKEN,
+      },
+      body: JSON.stringify({ path: 'symlinked/escape.md', content: 'escaped' }),
+    })
+
+    expect(response.status).not.toBe(200)
+    expect(existsSync(escapedFile)).toBe(false)
   })
 })

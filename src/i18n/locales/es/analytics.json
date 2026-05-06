@@ -48,7 +48,23 @@
     "less": "Menos",
     "more": "Mas",
     "dayOfWeek": "Dia de la Semana",
-    "lastNDays": "Ultimos {{n}} dias"
+    "lastNDays": "Ultimos {{n}} dias",
+    "timeRange": "Rango de tiempo",
+    "ranges": {
+      "month": "Este mes",
+      "3months": "3 meses",
+      "6months": "6 meses",
+      "year": "Este ano"
+    },
+    "days": {
+      "mon": "Lun",
+      "tue": "Mar",
+      "wed": "Mie",
+      "thu": "Jue",
+      "fri": "Vie",
+      "sat": "Sab",
+      "sun": "Dom"
+    }
   },
   "reports": {
     "title": "Informes",

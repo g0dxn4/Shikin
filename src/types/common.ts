@@ -24,8 +24,6 @@ export type AccountType =
 
 export type TransactionType = 'expense' | 'income' | 'transfer'
 
-export type BillingCycle = 'weekly' | 'monthly' | 'quarterly' | 'yearly'
-
 export type BudgetPeriod = 'weekly' | 'monthly' | 'yearly'
 
 export type InvestmentType = 'stock' | 'etf' | 'crypto' | 'bond' | 'mutual_fund' | 'other'

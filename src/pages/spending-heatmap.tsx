@@ -9,14 +9,8 @@ import { query } from '@/lib/database'
 import { fromCentavos, formatMoney } from '@/lib/money'
 import dayjs from 'dayjs'
 
-const TIME_OPTIONS = [
-  { label: 'This Month', value: 'month' },
-  { label: '3 Months', value: '3months' },
-  { label: '6 Months', value: '6months' },
-  { label: 'This Year', value: 'year' },
-]
-
-const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const TIME_OPTION_VALUES = ['month', '3months', '6months', 'year'] as const
+const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
 
 interface DailySpend {
   date: string
@@ -62,6 +56,15 @@ export function SpendingHeatmap() {
   const loadCountRef = useRef(0)
 
   const { start, end } = useMemo(() => getDateRange(timeRange), [timeRange])
+  const timeOptions = useMemo(
+    () =>
+      TIME_OPTION_VALUES.map((value) => ({
+        value,
+        label: t(`spendingHeatmap.ranges.${value}`),
+      })),
+    [t]
+  )
+  const dayLabels = useMemo(() => DAY_KEYS.map((key) => t(`spendingHeatmap.days.${key}`)), [t])
 
   useEffect(() => {
     const loadId = ++loadCountRef.current
@@ -173,10 +176,10 @@ export function SpendingHeatmap() {
       highestDate: highestDate ? dayjs(highestDate).format('MMM D') : '-',
       highestAmount,
       avgDaily,
-      mostActiveDay: DAY_LABELS[mostActiveIdx],
+      mostActiveDay: dayLabels[mostActiveIdx],
       streak,
     }
-  }, [dailySpends, spendMap, start, end])
+  }, [dailySpends, dayLabels, spendMap, start, end])
 
   // Build heatmap grid: 7 rows (Mon-Sun) x weeksCount columns
   const { grid, weekLabels, maxSpend, gridStartDate, computedWeeksCount } = useMemo(() => {
@@ -242,9 +245,9 @@ export function SpendingHeatmap() {
     return (
       <div className="animate-fade-in-up page-content" role="status" aria-busy="true">
         <span className="sr-only">Loading</span>
-        <div className="liquid-card page-header p-5">
+        <div className="liquid-card page-header min-h-[72px] p-3 sm:p-4">
           <div>
-            <h1 className="font-heading text-2xl font-bold tracking-tight">
+            <h1 className="font-heading text-[28px] font-bold tracking-tight">
               {t('spendingHeatmap.title')}
             </h1>
             <p className="text-muted-foreground mt-1 text-sm">{t('spendingHeatmap.description')}</p>
@@ -258,25 +261,28 @@ export function SpendingHeatmap() {
 
   return (
     <div className="animate-fade-in-up page-content">
-      <div className="liquid-card page-header p-5">
+      <div className="liquid-card page-header min-h-[72px] p-3 sm:p-4">
         <div>
-          <h1 className="font-heading text-2xl font-bold tracking-tight">
+          <h1 className="font-heading text-[28px] font-bold tracking-tight">
             {t('spendingHeatmap.title')}
           </h1>
           <p className="text-muted-foreground mt-1 text-sm">{t('spendingHeatmap.description')}</p>
         </div>
+        <FilterPills
+          options={timeOptions}
+          selected={timeRange}
+          onChange={setTimeRange}
+          ariaLabel={t('spendingHeatmap.timeRange')}
+        />
       </div>
 
-      <FilterPills
-        options={TIME_OPTIONS}
-        selected={timeRange}
-        onChange={setTimeRange}
-        ariaLabel="Time range"
-      />
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_300px]">
-        {/* Heatmap */}
-        <div className="liquid-card p-5">
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.35fr_0.65fr]">
+        <div className="liquid-hero relative min-h-[420px] overflow-hidden p-5 sm:p-6">
+          <Flame
+            size={260}
+            className="pointer-events-none absolute -right-16 -bottom-20 text-white/[0.035]"
+            aria-hidden="true"
+          />
           <div className="mb-4 flex items-center gap-2">
             <Flame size={16} className="text-accent" aria-hidden="true" />
             <h3 className="font-heading text-sm font-semibold">
@@ -285,66 +291,76 @@ export function SpendingHeatmap() {
           </div>
 
           {dailySpends.length === 0 ? (
-            <div className="flex h-32 items-center justify-center">
+            <div className="flex h-72 items-center justify-center rounded-[22px] bg-white/[0.035]">
               <p className="text-muted-foreground text-sm">{t('spendingHeatmap.noData')}</p>
             </div>
           ) : (
             <>
-              {/* Week labels */}
-              <div
-                className="mb-1 ml-8 grid gap-[3px]"
-                style={{ gridTemplateColumns: `repeat(${computedWeeksCount}, minmax(0, 1fr))` }}
-              >
-                {weekLabels.map((label, i) => (
-                  <span key={i} className="text-muted-foreground truncate font-mono text-[8px]">
-                    {label}
-                  </span>
-                ))}
-              </div>
-
-              {/* Grid */}
-              <div className="flex gap-[3px]">
-                <div className="flex w-7 shrink-0 flex-col gap-[3px]">
-                  {DAY_LABELS.map((label, i) => (
-                    <div
-                      key={i}
-                      className="text-muted-foreground flex h-[14px] items-center font-mono text-[8px]"
-                      aria-hidden="true"
-                    >
-                      {i % 2 === 0 ? label.slice(0, 2) : ''}
-                    </div>
-                  ))}
-                </div>
-
+              <div className="overflow-x-auto pb-1">
                 <div
-                  className="grid flex-1 gap-[3px]"
-                  style={{ gridTemplateColumns: `repeat(${computedWeeksCount}, minmax(0, 1fr))` }}
-                  role="grid"
-                  aria-label={t('spendingHeatmap.dailyActivity')}
+                  className="min-w-[560px]"
+                  style={{ minWidth: Math.max(560, computedWeeksCount * 18 + 32) }}
                 >
-                  {grid.map((row, r) => (
-                    <div key={r} role="row" className="contents">
-                      {row.map((value, c) => {
-                        const cellDate = gridStartDate.add(c * 7 + r, 'day')
-                        const dateLabel = cellDate.format('YYYY-MM-DD')
-                        return (
-                          <div
-                            key={`${r}-${c}`}
-                            className={`aspect-square rounded-[2px] transition-colors ${intensityClass(value)}`}
-                            title={
-                              value !== null
-                                ? `${cellDate.format('MMM D')}: ${formatMoney(value)}`
-                                : ''
-                            }
-                            role="gridcell"
-                            aria-label={
-                              value !== null ? `${dateLabel}: ${formatMoney(value)}` : 'No data'
-                            }
-                          />
-                        )
-                      })}
+                  {/* Week labels */}
+                  <div
+                    className="mb-1 ml-8 grid gap-[3px]"
+                    style={{ gridTemplateColumns: `repeat(${computedWeeksCount}, minmax(0, 1fr))` }}
+                  >
+                    {weekLabels.map((label, i) => (
+                      <span key={i} className="text-muted-foreground truncate font-mono text-[8px]">
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* Grid */}
+                  <div className="flex gap-[3px]">
+                    <div className="flex w-7 shrink-0 flex-col gap-[3px]">
+                      {dayLabels.map((label, i) => (
+                        <div
+                          key={label}
+                          className="text-muted-foreground flex h-[14px] items-center font-mono text-[8px]"
+                        >
+                          {i % 2 === 0 ? label.slice(0, 2) : ''}
+                        </div>
+                      ))}
                     </div>
-                  ))}
+
+                    <div
+                      className="grid flex-1 gap-[3px]"
+                      style={{
+                        gridTemplateColumns: `repeat(${computedWeeksCount}, minmax(0, 1fr))`,
+                      }}
+                      role="grid"
+                      aria-label={t('spendingHeatmap.dailyActivity')}
+                    >
+                      {grid.map((row, r) => (
+                        <div key={r} role="row" className="contents">
+                          {row.map((value, c) => {
+                            const cellDate = gridStartDate.add(c * 7 + r, 'day')
+                            const dateLabel = cellDate.format('YYYY-MM-DD')
+                            return (
+                              <div
+                                key={`${r}-${c}`}
+                                className={`aspect-square rounded-[2px] transition-colors ${intensityClass(value)}`}
+                                title={
+                                  value !== null
+                                    ? `${cellDate.format('MMM D')}: ${formatMoney(value)}`
+                                    : ''
+                                }
+                                role="gridcell"
+                                aria-label={
+                                  value !== null
+                                    ? `${dayLabels[r]}, ${dateLabel}: ${formatMoney(value)}`
+                                    : `${dayLabels[r]}: ${t('spendingHeatmap.noData')}`
+                                }
+                              />
+                            )
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -374,7 +390,6 @@ export function SpendingHeatmap() {
           )}
         </div>
 
-        {/* Stats panel */}
         <div className="space-y-3">
           <div className="liquid-card space-y-1 p-4">
             <span className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
@@ -420,15 +435,18 @@ export function SpendingHeatmap() {
 
       {/* Top Categories */}
       {categoryTotals.length > 0 && (
-        <div className="liquid-card space-y-4 p-5">
+        <div className="liquid-card space-y-4 p-5 sm:p-6">
           <h3 className="font-heading text-sm font-semibold">
             {t('spendingHeatmap.topCategories')}
           </h3>
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {categoryTotals.map((cat) => {
               const percent = catMax > 0 ? (cat.total / catMax) * 100 : 0
               return (
-                <div key={cat.name} className="space-y-1">
+                <div
+                  key={cat.name}
+                  className="space-y-2 rounded-[18px] border border-white/[0.06] bg-white/[0.035] p-4"
+                >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div

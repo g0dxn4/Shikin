@@ -23,12 +23,14 @@ test.describe('Transactions', () => {
     await expect(page.getByText(/Add your first transaction/)).toBeVisible()
   })
 
-  test('filter button is present', async ({ page }) => {
+  test('filter controls are present', async ({ page }) => {
     await page.goto('/transactions')
     await page.waitForLoadState('networkidle')
 
-    // Filter button should be visible in the header
-    await expect(page.getByRole('button', { name: /Filter/i })).toBeVisible()
+    await expect(page.getByPlaceholder(/Search/i)).toBeVisible()
+    await expect(page.getByRole('button', { name: 'All' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Expense' })).toBeVisible()
+    await expect(page.getByRole('button', { name: /No category/i })).toBeVisible()
   })
 
   test('page structure has correct layout', async ({ page }) => {

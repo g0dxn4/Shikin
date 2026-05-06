@@ -7,11 +7,10 @@ test.describe('i18n', () => {
   })
 
   test('default language is English', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/transactions')
     await page.waitForLoadState('networkidle')
 
-    // Page heading should be in English
-    await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1, name: 'Transactions' })).toBeVisible()
   })
 
   test('switching to Spanish updates UI', async ({ page }) => {
@@ -21,12 +20,10 @@ test.describe('i18n', () => {
     // Change language to Spanish
     await page.selectOption('select', 'es')
 
-    // Navigate to dashboard
-    await page.goto('/')
+    await page.goto('/transactions')
     await page.waitForLoadState('networkidle')
 
-    // Page heading should now be in Spanish
-    await expect(page.getByRole('heading', { level: 1 }).first()).toContainText('Inicio')
+    await expect(page.getByRole('heading', { level: 1, name: 'Transacciones' })).toBeVisible()
   })
 
   test('Spanish persists across navigation', async ({ page }) => {

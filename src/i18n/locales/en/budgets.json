@@ -1,6 +1,6 @@
 {
   "title": "Budgets",
-  "subtitle": "Spending limits",
+  "subtitle": "Know what is safe before the month ends.",
   "addBudget": "Add Budget",
   "editBudget": "Edit Budget",
   "deleteBudget": "Delete Budget",
@@ -42,10 +42,29 @@
     "overBudget": "Over budget"
   },
   "hero": {
+    "safeToSpend": "Safe to spend",
+    "safeDescription": "Across {{count}} active budget(s), based on spending recorded so far.",
+    "overPlan": "You are {{amount}} over the current budget plan.",
+    "used": "used",
     "totalBudgeted": "Total Budgeted",
     "totalSpent": "Total Spent",
     "totalRemaining": "Total Remaining",
-    "budgetCount": "budget(s)"
+    "budgetCount": "budget(s)",
+    "overCount": "Over plan"
+  },
+  "progress": {
+    "title": "Category progress"
+  },
+  "intelligence": {
+    "title": "Budget intelligence",
+    "safeTitle": "Your budgets are holding steady.",
+    "safeMessage": "You still have {{amount}} available across active budget categories.",
+    "warningTitle": "One category is getting tight.",
+    "warningMessage": "{{category}} is already {{percent}}% used with {{amount}} left in this period.",
+    "overTitle": "One category is over plan.",
+    "overMessage": "{{category}} is {{amount}} over budget. Trim nearby discretionary spending or adjust the plan.",
+    "recommendedAction": "Recommended action",
+    "adjustBudget": "Adjust budget"
   },
   "error": {
     "load": "Couldn't load budgets",

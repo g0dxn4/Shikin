@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatMoney } from '@/lib/money'
 import { useRecurringStore, type RecurringRuleWithDetails } from '@/stores/recurring-store'
+import { useUIStore } from '@/stores/ui-store'
 
 function monthlyEquivalent(rule: RecurringRuleWithDetails) {
   const amount = rule.amount
@@ -88,6 +89,7 @@ function BillRow({ rule }: { rule: RecurringRuleWithDetails }) {
 export function BillsPage() {
   const { t } = useTranslation('billCalendar')
   const { rules, isLoading, fetch } = useRecurringStore()
+  const { openRecurringDialog } = useUIStore()
 
   useEffect(() => {
     void fetch()
@@ -118,11 +120,9 @@ export function BillsPage() {
               {t('bills.calendarView')}
             </Link>
           </Button>
-          <Button asChild className="w-full sm:w-auto">
-            <Link to="/transactions">
-              <Plus size={16} aria-hidden="true" />
-              {t('bills.addRecurring')}
-            </Link>
+          <Button className="w-full sm:w-auto" onClick={() => openRecurringDialog()}>
+            <Plus size={16} aria-hidden="true" />
+            {t('bills.addRecurring')}
           </Button>
         </div>
       </div>

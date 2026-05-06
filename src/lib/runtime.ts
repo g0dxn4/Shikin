@@ -6,8 +6,8 @@ const configuredDataServerUrl = import.meta.env.VITE_DATA_SERVER_URL?.trim()
 export const DATA_SERVER_URL = configuredDataServerUrl
   ? configuredDataServerUrl.replace(/\/+$/, '')
   : 'http://localhost:1480'
-export const DATA_SERVER_BRIDGE_HEADER = 'X-Shikin-Bridge'
-export const DATA_SERVER_BRIDGE_TOKEN = import.meta.env.VITE_DATA_SERVER_BRIDGE_TOKEN || ''
+const DATA_SERVER_BRIDGE_HEADER = 'X-Shikin-Bridge'
+const DATA_SERVER_BRIDGE_TOKEN = import.meta.env.VITE_DATA_SERVER_BRIDGE_TOKEN || ''
 
 export function withDataServerHeaders(headers?: HeadersInit): Headers {
   const bridgeHeaders = new Headers(headers)

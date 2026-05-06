@@ -6,7 +6,6 @@ import type {
   CurrencyCode,
   AccountType,
   TransactionType,
-  BillingCycle,
   BudgetPeriod,
   InvestmentType,
   RecurringFrequency,
@@ -35,15 +34,6 @@ export interface Category {
   icon: string | null
   color: string | null
   type: TransactionType
-  sort_order: number
-  created_at: DateTimeStr
-}
-
-export interface Subcategory {
-  id: ULID
-  category_id: ULID
-  name: string
-  icon: string | null
   sort_order: number
   created_at: DateTimeStr
 }
@@ -82,24 +72,6 @@ export interface TransactionSplitWithCategory extends TransactionSplit {
   subcategory_name: string | null
 }
 
-export interface Subscription {
-  id: ULID
-  account_id: ULID | null
-  category_id: ULID | null
-  name: string
-  amount: Money
-  currency: CurrencyCode
-  billing_cycle: BillingCycle
-  next_billing_date: DateStr
-  icon: string | null
-  color: string | null
-  url: string | null
-  notes: string | null
-  is_active: number
-  created_at: DateTimeStr
-  updated_at: DateTimeStr
-}
-
 export interface Budget {
   id: ULID
   category_id: ULID | null
@@ -109,15 +81,6 @@ export interface Budget {
   is_active: number
   created_at: DateTimeStr
   updated_at: DateTimeStr
-}
-
-export interface BudgetPeriodRecord {
-  id: ULID
-  budget_id: ULID
-  start_date: DateStr
-  end_date: DateStr
-  spent: Money
-  created_at: DateTimeStr
 }
 
 export interface Investment {
@@ -173,30 +136,6 @@ export interface Goal {
   icon: string | null
   color: string | null
   notes: string | null
-  created_at: DateTimeStr
-  updated_at: DateTimeStr
-}
-
-export interface ExchangeRate {
-  id: ULID
-  from_currency: CurrencyCode
-  to_currency: CurrencyCode
-  rate: number
-  date: DateStr
-  created_at: DateTimeStr
-}
-
-export interface Setting {
-  key: string
-  value: string
-  updated_at: DateTimeStr
-}
-
-export interface ExtensionData {
-  id: ULID
-  extension_id: string
-  key: string
-  value: string
   created_at: DateTimeStr
   updated_at: DateTimeStr
 }

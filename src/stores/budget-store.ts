@@ -14,7 +14,7 @@ export interface BudgetWithStatus extends Budget {
   percentUsed: number
 }
 
-export interface BudgetFormData {
+interface BudgetFormData {
   name: string
   categoryId: string
   amount: number

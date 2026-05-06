@@ -1,6 +1,6 @@
 {
   "title": "Presupuestos",
-  "subtitle": "Límites de gasto",
+  "subtitle": "Sabe qué es seguro antes de que termine el mes.",
   "addBudget": "Agregar Presupuesto",
   "editBudget": "Editar Presupuesto",
   "deleteBudget": "Eliminar Presupuesto",
@@ -42,10 +42,29 @@
     "overBudget": "Sobre presupuesto"
   },
   "hero": {
+    "safeToSpend": "Seguro para gastar",
+    "safeDescription": "En {{count}} presupuesto(s) activo(s), según el gasto registrado hasta ahora.",
+    "overPlan": "Estás {{amount}} por encima del plan de presupuesto actual.",
+    "used": "usado",
     "totalBudgeted": "Total Presupuestado",
     "totalSpent": "Total Gastado",
     "totalRemaining": "Total Restante",
-    "budgetCount": "presupuesto(s)"
+    "budgetCount": "presupuesto(s)",
+    "overCount": "Sobre plan"
+  },
+  "progress": {
+    "title": "Progreso por categoría"
+  },
+  "intelligence": {
+    "title": "Inteligencia de presupuesto",
+    "safeTitle": "Tus presupuestos se mantienen estables.",
+    "safeMessage": "Todavía tienes {{amount}} disponible en las categorías con presupuesto activo.",
+    "warningTitle": "Una categoría está ajustada.",
+    "warningMessage": "{{category}} ya está al {{percent}}% usado y quedan {{amount}} en este período.",
+    "overTitle": "Una categoría superó el plan.",
+    "overMessage": "{{category}} está {{amount}} por encima del presupuesto. Reduce gastos discrecionales cercanos o ajusta el plan.",
+    "recommendedAction": "Acción recomendada",
+    "adjustBudget": "Ajustar presupuesto"
   },
   "error": {
     "load": "No se pudieron cargar los presupuestos",

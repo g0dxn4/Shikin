@@ -21,10 +21,10 @@ const tauriPath = () => import('@tauri-apps/api/path')
 // Dynamic import to avoid type errors when plugin-fs types aren't installed
 interface TauriFsModule {
   readTextFile: (path: string) => Promise<string>
-  writeTextFile: (path: string, content: string) => Promise<void>
+  writeTextFile: (path: string, content: string, options?: { mode?: number }) => Promise<void>
   exists: (path: string) => Promise<boolean>
   readDir: (path: string) => Promise<DirEntry[]>
-  mkdir: (path: string, options?: { recursive?: boolean }) => Promise<void>
+  mkdir: (path: string, options?: { mode?: number; recursive?: boolean }) => Promise<void>
   remove: (path: string, options?: { recursive?: boolean }) => Promise<void>
 }
 
@@ -106,7 +106,7 @@ export async function readTextFile(path: string): Promise<string> {
 export async function writeTextFile(path: string, content: string): Promise<void> {
   if (isTauri) {
     const { writeTextFile: tauriWrite } = await tauriFs()
-    await tauriWrite(path, content)
+    await tauriWrite(path, content, { mode: 0o600 })
     return
   }
 
@@ -175,7 +175,7 @@ export async function readDir(path: string): Promise<DirEntry[]> {
 export async function mkdir(path: string, options?: { recursive?: boolean }): Promise<void> {
   if (isTauri) {
     const { mkdir: tauriMkdir } = await tauriFs()
-    await tauriMkdir(path, { recursive: options?.recursive })
+    await tauriMkdir(path, { mode: 0o700, recursive: options?.recursive })
     return
   }
 

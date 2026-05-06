@@ -1,5 +1,6 @@
 import { existsSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import Database from 'better-sqlite3'
+import { PRIVATE_FILE_MODE, hardenPathMode } from './app-data-dir.mjs'
 
 const REQUIRED_SHIKIN_TABLES = {
   _migrations: ['id', 'name'],
@@ -34,15 +35,15 @@ export function checkpointWal(database, { requireComplete = false } = {}) {
   return result
 }
 
-export function ensureSqliteDatabaseBuffer(buffer) {
+function ensureSqliteDatabaseBuffer(buffer) {
   const header = buffer.subarray(0, 16).toString('ascii')
   if (!header.startsWith('SQLite format 3')) {
     throw new Error('Invalid SQLite database file')
   }
 }
 
-export function removeSqliteSidecarFiles(dbPath) {
-  for (const suffix of ['-wal', '-shm']) {
+function removeSqliteSidecarFiles(dbPath) {
+  for (const suffix of ['-wal', '-shm', '-journal']) {
     const sidecarPath = `${dbPath}${suffix}`
     if (existsSync(sidecarPath)) {
       unlinkSync(sidecarPath)
@@ -50,7 +51,7 @@ export function removeSqliteSidecarFiles(dbPath) {
   }
 }
 
-export function validateShikinDatabase(database) {
+function validateShikinDatabase(database) {
   const tableRows = database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()
   const existingTables = new Set(tableRows.map((row) => row.name))
 
@@ -76,14 +77,15 @@ export function validateShikinDatabase(database) {
   }
 }
 
-export function validateImportedDatabaseBuffer(buffer, tempDbPath) {
+function validateImportedDatabaseBuffer(buffer, tempDbPath) {
   ensureSqliteDatabaseBuffer(buffer)
 
   if (existsSync(tempDbPath)) {
     unlinkSync(tempDbPath)
   }
   removeSqliteSidecarFiles(tempDbPath)
-  writeFileSync(tempDbPath, buffer)
+  writeFileSync(tempDbPath, buffer, { mode: PRIVATE_FILE_MODE })
+  hardenPathMode(tempDbPath, PRIVATE_FILE_MODE)
 
   let tempDb
   try {
@@ -104,12 +106,35 @@ export function importDatabaseBuffer({
   buffer,
   tempDbPath = `${dbPath}.import-check`,
 }) {
+  const backupPath = `${dbPath}.backup-${Date.now()}`
+  let backupCreated = false
+
+  function restoreBackup() {
+    if (!backupCreated || !existsSync(backupPath)) return
+    removeSqliteSidecarFiles(dbPath)
+    if (existsSync(dbPath)) {
+      unlinkSync(dbPath)
+    }
+    renameSync(backupPath, dbPath)
+    hardenPathMode(dbPath, PRIVATE_FILE_MODE)
+  }
+
   try {
     validateImportedDatabaseBuffer(buffer, tempDbPath)
     checkpointWal(db, { requireComplete: true })
     db.close()
     removeSqliteSidecarFiles(dbPath)
+    if (existsSync(dbPath)) {
+      renameSync(dbPath, backupPath)
+      backupCreated = true
+    }
     renameSync(tempDbPath, dbPath)
+    hardenPathMode(dbPath, PRIVATE_FILE_MODE)
+
+    return { backupPath: backupCreated ? backupPath : null, restoreBackup }
+  } catch (error) {
+    restoreBackup()
+    throw error
   } finally {
     if (existsSync(tempDbPath)) {
       unlinkSync(tempDbPath)

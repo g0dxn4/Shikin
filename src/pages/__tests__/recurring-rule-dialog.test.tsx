@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { Transactions } from '../transactions'
+import { RecurringRuleDialog } from '@/components/transactions/recurring-rule-dialog'
 import dayjs from 'dayjs'
 
 vi.mock('react-i18next', () => ({
@@ -97,7 +97,7 @@ describe('RecurringRuleDialog accessibility', () => {
   })
 
   it('renders form fields with proper label associations', () => {
-    render(<Transactions />)
+    render(<RecurringRuleDialog />)
 
     // Check that labels are associated with inputs via htmlFor/id
     expect(screen.getByLabelText('form.type')).toBeInTheDocument()
@@ -111,7 +111,7 @@ describe('RecurringRuleDialog accessibility', () => {
 
   it('has proper error semantics when validation fails', async () => {
     const user = userEvent.setup()
-    render(<Transactions />)
+    render(<RecurringRuleDialog />)
 
     // Try to submit without filling required fields
     const submitBtn = screen.getByRole('button', { name: 'actions.save' })
@@ -133,7 +133,7 @@ describe('RecurringRuleDialog accessibility', () => {
 
   it('exposes aria-describedby linking errors to inputs', async () => {
     const user = userEvent.setup()
-    render(<Transactions />)
+    render(<RecurringRuleDialog />)
 
     // Submit empty form to trigger errors
     const submitBtn = screen.getByRole('button', { name: 'actions.save' })
@@ -154,14 +154,14 @@ describe('RecurringRuleDialog accessibility', () => {
   })
 
   it('has accessible name for save button', () => {
-    render(<Transactions />)
+    render(<RecurringRuleDialog />)
 
     const saveButton = screen.getByRole('button', { name: 'actions.save' })
     expect(saveButton).toBeInTheDocument()
   })
 
   it('select triggers have proper id for label association', () => {
-    render(<Transactions />)
+    render(<RecurringRuleDialog />)
 
     // Select triggers should have ids matching their labels
     const typeSelect = document.querySelector('#rec-type')

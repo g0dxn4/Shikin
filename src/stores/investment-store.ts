@@ -6,7 +6,7 @@ import { toCentavos } from '@/lib/money'
 import type { Investment, StockPrice } from '@/types/database'
 import type { InvestmentType, CurrencyCode } from '@/types/common'
 
-export interface InvestmentFormData {
+interface InvestmentFormData {
   symbol: string
   name: string
   type: InvestmentType
@@ -25,7 +25,7 @@ export interface InvestmentWithPrice extends Investment {
   lastPriceDate: string | null
 }
 
-export interface PortfolioSummary {
+interface PortfolioSummary {
   totalMarketValue: number
   totalCostBasis: number
   totalGainLoss: number
@@ -33,7 +33,7 @@ export interface PortfolioSummary {
   byType: Record<string, { marketValue: number; gainLoss: number; count: number }>
 }
 
-export interface PricePoint {
+interface PricePoint {
   date: string
   price: number
 }

@@ -5,7 +5,7 @@ import { generateId } from '@/lib/ulid'
 import type { Category } from '@/types/database'
 import type { TransactionType } from '@/types/common'
 
-export interface CategoryFormData {
+interface CategoryFormData {
   name: string
   type: TransactionType
   color: string

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useCallback } from 'react'
+import { useEffect, useMemo, useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import {
@@ -47,6 +47,8 @@ import { formatMoney, fromCentavos } from '@/lib/money'
 
 dayjs.extend(relativeTime)
 
+type SpendingGraphMode = 'trend' | 'categories' | 'movement'
+
 export function Dashboard() {
   const { t } = useTranslation('dashboard')
   const { t: tTx } = useTranslation('transactions')
@@ -88,12 +90,8 @@ export function Dashboard() {
     getTotalBalanceInPreferred,
     loadRates,
   } = useCurrencyStore()
-  const {
-    insights: spendingInsights,
-    momComparisons = [],
-    isLoading: insightsLoading = false,
-    loadComparisons: loadInsights,
-  } = useSpendingInsightsStore()
+  const { loadComparisons: loadInsights } = useSpendingInsightsStore()
+  const [spendingGraphMode, setSpendingGraphMode] = useState<SpendingGraphMode>('trend')
 
   useEffect(() => {
     void fetchAccounts().catch(() => {})
@@ -185,30 +183,102 @@ export function Dashboard() {
     healthError ? `Financial health: ${healthError}` : null,
   ]
 
-  // Monthly spending chart data (last 6 months)
-  const monthlyChartData = useMemo(() => {
-    const months: { month: string; expenses: number; income: number }[] = []
-    for (let i = 5; i >= 0; i--) {
-      const m = dayjs().subtract(i, 'month')
-      const start = m.startOf('month').format('YYYY-MM-DD')
-      const end = m.endOf('month').format('YYYY-MM-DD')
-      let expenses = 0
-      let income = 0
-      for (const tx of transactions) {
-        if (tx.date >= start && tx.date <= end) {
-          if (tx.type === 'expense') expenses += tx.amount
-          else if (tx.type === 'income') income += tx.amount
-        }
+  const spendingIntelligence = useMemo(() => {
+    const currentStart = dayjs().startOf('month').format('YYYY-MM-DD')
+    const currentEnd = dayjs().format('YYYY-MM-DD')
+    const previousStart = dayjs().subtract(1, 'month').startOf('month').format('YYYY-MM-DD')
+    const previousEnd = dayjs().subtract(1, 'month').endOf('month').format('YYYY-MM-DD')
+
+    const current = new Map<string, { name: string; color: string; amount: number }>()
+    const previous = new Map<string, { name: string; color: string; amount: number }>()
+
+    for (const tx of transactions) {
+      if (tx.type !== 'expense') continue
+
+      const key = tx.category_name || 'Uncategorized'
+      const color = tx.category_color || '#7C5CFF'
+      let target: typeof current | typeof previous | null = null
+
+      if (tx.date >= currentStart && tx.date <= currentEnd) {
+        target = current
+      } else if (tx.date >= previousStart && tx.date <= previousEnd) {
+        target = previous
       }
-      months.push({ month: m.format('MMM'), expenses, income })
+
+      if (!target) continue
+
+      const existing = target.get(key)
+      target.set(key, {
+        name: key,
+        color,
+        amount: (existing?.amount ?? 0) + tx.amount,
+      })
     }
-    return months
+
+    const names = new Set([...current.keys(), ...previous.keys()])
+    const categories = [...names]
+      .map((name) => {
+        const currentAmount = current.get(name)?.amount ?? 0
+        const previousAmount = previous.get(name)?.amount ?? 0
+        const change = currentAmount - previousAmount
+        const changePercent =
+          previousAmount > 0
+            ? Math.round((change / previousAmount) * 100)
+            : currentAmount > 0
+              ? 100
+              : 0
+
+        return {
+          name,
+          color: current.get(name)?.color ?? previous.get(name)?.color ?? '#7C5CFF',
+          current: currentAmount,
+          previous: previousAmount,
+          change,
+          changePercent,
+        }
+      })
+      .sort((a, b) => b.current - a.current)
+
+    const currentTotal = categories.reduce((sum, category) => sum + category.current, 0)
+    const previousTotal = categories.reduce((sum, category) => sum + category.previous, 0)
+    const totalChange = currentTotal - previousTotal
+    const totalChangePercent =
+      previousTotal > 0
+        ? Math.round((totalChange / previousTotal) * 100)
+        : currentTotal > 0
+          ? 100
+          : 0
+    const maxCategorySpend = Math.max(1, ...categories.map((category) => category.current))
+    return {
+      categories,
+      currentTotal,
+      previousTotal,
+      totalChange,
+      totalChangePercent,
+      maxCategorySpend,
+    }
   }, [transactions])
 
-  const maxMonthlyFlow = useMemo(
-    () => Math.max(1, ...monthlyChartData.map((month) => Math.max(month.expenses, month.income))),
-    [monthlyChartData]
-  )
+  const monthlySpendingGraph = useMemo(() => {
+    const months = Array.from({ length: 6 }, (_, index) => {
+      const month = dayjs().subtract(5 - index, 'month')
+      const start = month.startOf('month').format('YYYY-MM-DD')
+      const end = month.endOf('month').format('YYYY-MM-DD')
+      const amount = transactions.reduce((sum, tx) => {
+        if (tx.type !== 'expense' || tx.date < start || tx.date > end) return sum
+        return sum + tx.amount
+      }, 0)
+
+      return {
+        key: month.format('YYYY-MM'),
+        label: month.format('MMM'),
+        amount,
+        isCurrent: month.isSame(dayjs(), 'month'),
+      }
+    })
+    const maxAmount = Math.max(1, ...months.map((month) => month.amount))
+    return { months, maxAmount }
+  }, [transactions])
 
   const hasTransactionsLoadError = !!transactionsFetchError && recentTransactions.length === 0
   const isLoading = accountsLoading || txLoading
@@ -296,96 +366,170 @@ export function Dashboard() {
               Insights
             </Link>
           </div>
-          <div className="rounded-[22px] border border-white/[0.06] bg-white/[0.035] p-4 sm:p-6">
-            <div className="flex h-56 items-end justify-between gap-2 sm:gap-5">
-              {monthlyChartData.map((month, index) => {
-                const height = Math.max(28, Math.round((month.expenses / maxMonthlyFlow) * 200))
-                const isHot = index === monthlyChartData.length - 1 || index === 3
-                return (
-                  <div key={month.month} className="flex flex-1 flex-col items-center gap-3">
-                    <div
-                      className={cn(
-                        'w-full max-w-[54px] rounded-t-lg rounded-b-[3px]',
-                        isHot ? 'bg-accent-hover' : 'bg-white/[0.12]'
-                      )}
-                      style={{ height }}
-                      title={`${month.month}: ${formatMoney(month.expenses)}`}
-                    />
-                    <span className="text-muted-foreground font-mono text-[10px] font-bold uppercase">
-                      {month.month}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
-          <div className="mt-5 space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-muted-foreground text-xs font-bold tracking-[0.16em] uppercase">
-                Backend signals
+          <div className="rounded-[22px] border border-white/[0.06] bg-white/[0.035] p-4">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <p className="text-muted-foreground text-xs font-bold tracking-[0.14em] uppercase">
+                Spending graph
               </p>
-              {insightsLoading && (
-                <span className="text-muted-foreground font-mono text-[10px]">Syncing</span>
-              )}
-            </div>
-            {spendingInsights.length > 0 ? (
-              spendingInsights.slice(0, 3).map((insight) => (
-                <div
-                  key={insight.id}
-                  className={cn(
-                    'flex items-center gap-3 rounded-2xl border px-3 py-2.5',
-                    insight.severity === 'alert' && 'border-destructive/20 bg-destructive/5',
-                    insight.severity === 'warning' && 'border-warning/20 bg-warning/5',
-                    insight.severity === 'info' && 'border-white/[0.08] bg-white/[0.03]'
-                  )}
-                >
-                  <span
-                    className="h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: insight.categoryColor }}
-                  />
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                    {insight.message}
-                  </span>
-                  <span
+              <div className="flex rounded-full border border-white/[0.08] bg-black/20 p-1">
+                {(
+                  [
+                    ['trend', 'Trend'],
+                    ['categories', 'Categories'],
+                    ['movement', 'Movement'],
+                  ] as const
+                ).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setSpendingGraphMode(mode)}
                     className={cn(
-                      'font-mono text-xs font-bold',
-                      insight.type === 'decrease' ? 'text-success' : 'text-warning'
+                      'rounded-full px-2.5 py-1 font-mono text-[10px] font-bold transition-colors',
+                      spendingGraphMode === mode
+                        ? 'bg-accent-hover text-white'
+                        : 'text-muted-foreground hover:text-foreground'
                     )}
                   >
-                    {formatMoney(Math.round(Math.abs(insight.amount) * 100))}
-                  </span>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {spendingGraphMode === 'trend' && (
+              <div className="flex min-h-[360px] items-end justify-between gap-3 rounded-2xl border border-white/[0.04] bg-black/10 px-3 py-4">
+                {monthlySpendingGraph.months.map((month) => {
+                  const height = Math.max(
+                    month.amount > 0 ? 26 : 8,
+                    Math.round((month.amount / monthlySpendingGraph.maxAmount) * 290)
+                  )
+                  return (
+                    <div key={month.key} className="flex flex-1 flex-col items-center gap-3">
+                      <div className="flex h-[300px] w-full items-end justify-center">
+                        <div
+                          className={cn(
+                            'w-full max-w-[48px] rounded-t-2xl rounded-b-md transition-all',
+                            month.isCurrent ? 'bg-accent-hover' : 'bg-white/[0.14]'
+                          )}
+                          style={{ height }}
+                          title={`${month.label}: ${formatMoney(month.amount)}`}
+                        />
+                      </div>
+                      <div className="text-center">
+                        <p className="text-muted-foreground font-mono text-[10px] font-bold uppercase">
+                          {month.label}
+                        </p>
+                        <p className="font-mono text-[10px] font-bold">
+                          {formatMoney(month.amount)}
+                        </p>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {spendingGraphMode === 'categories' &&
+              (spendingIntelligence.categories.some((category) => category.current > 0) ? (
+                <div className="min-h-[360px] space-y-3 rounded-2xl border border-white/[0.04] bg-black/10 p-4">
+                  {spendingIntelligence.categories
+                    .filter((category) => category.current > 0)
+                    .slice(0, 6)
+                    .map((category) => (
+                      <div key={category.name}>
+                        <div className="mb-1.5 flex items-center justify-between gap-3 text-sm">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: category.color }}
+                            />
+                            <span className="truncate font-semibold">{category.name}</span>
+                          </div>
+                          <span className="font-mono text-xs font-bold">
+                            {formatMoney(category.current)}
+                          </span>
+                        </div>
+                        <div className="h-3 overflow-hidden rounded-full bg-white/[0.06]">
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${Math.max(5, Math.round((category.current / spendingIntelligence.maxCategorySpend) * 100))}%`,
+                              backgroundColor: category.color,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
                 </div>
-              ))
-            ) : momComparisons.some((comparison) => comparison.current > 0) ? (
-              momComparisons
-                .filter((comparison) => comparison.current > 0)
-                .slice(0, 3)
-                .map((comparison) => (
-                  <div
-                    key={comparison.categoryName}
-                    className="flex items-center gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.03] px-3 py-2.5"
-                  >
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: comparison.categoryColor }}
-                    />
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                      {comparison.categoryName}
+              ) : (
+                <SpendingGraphEmpty />
+              ))}
+
+            {spendingGraphMode === 'movement' &&
+              (spendingIntelligence.categories.some((category) => category.current > 0) ? (
+                <div className="min-h-[360px] space-y-3 rounded-2xl border border-white/[0.04] bg-black/10 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground text-xs font-bold tracking-[0.14em] uppercase">
+                      Month over month
                     </span>
-                    <span className="font-mono text-xs font-bold">
-                      {formatMoney(Math.round(comparison.current * 100))}
+                    <span
+                      className={cn(
+                        'font-mono text-xs font-bold',
+                        spendingIntelligence.totalChange <= 0 ? 'text-success' : 'text-warning'
+                      )}
+                    >
+                      {spendingIntelligence.totalChangePercent >= 0 ? '+' : ''}
+                      {spendingIntelligence.totalChangePercent}%
                     </span>
                   </div>
-                ))
-            ) : (
-              <p className="text-muted-foreground rounded-2xl border border-white/[0.08] bg-white/[0.03] px-3 py-3 text-sm">
-                Add a few expenses and Shikin will surface category changes here.
-              </p>
-            )}
+                  {spendingIntelligence.categories.slice(0, 6).map((category) => (
+                    <div key={category.name} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
+                      <div className="min-w-0">
+                        <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                          <span className="truncate font-semibold">{category.name}</span>
+                          <span
+                            className={cn(
+                              'font-mono font-bold',
+                              category.change <= 0 ? 'text-success' : 'text-warning'
+                            )}
+                          >
+                            {category.change >= 0 ? '+' : '-'}
+                            {formatMoney(Math.abs(category.change))}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <div className="h-2 overflow-hidden rounded-full bg-white/[0.06]">
+                            <div
+                              className="h-full rounded-full bg-white/[0.2]"
+                              style={{
+                                width: `${Math.max(4, Math.round((category.previous / spendingIntelligence.maxCategorySpend) * 100))}%`,
+                              }}
+                            />
+                          </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-white/[0.06]">
+                            <div
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${Math.max(4, Math.round((category.current / spendingIntelligence.maxCategorySpend) * 100))}%`,
+                                backgroundColor: category.color,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="text-muted-foreground flex justify-end gap-4 font-mono text-[10px] font-bold uppercase">
+                    <span>Previous</span>
+                    <span>Current</span>
+                  </div>
+                </div>
+              ) : (
+                <SpendingGraphEmpty />
+              ))}
           </div>
 
-          <div className="mt-7 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <p className="text-muted-foreground text-xs font-bold">Projected runway</p>
               <p className="mt-2 font-mono text-2xl font-bold tracking-[-0.04em]">
@@ -742,6 +886,16 @@ function MetricCard({
         {value}
       </p>
       {subtitle && <p className="text-muted-foreground mt-0.5 font-mono text-[10px]">{subtitle}</p>}
+    </div>
+  )
+}
+
+function SpendingGraphEmpty() {
+  return (
+    <div className="flex min-h-[278px] items-center justify-center rounded-2xl border border-dashed border-white/[0.08] bg-black/10 text-center">
+      <p className="text-muted-foreground max-w-sm text-sm">
+        Add a few categorized expenses and this graph will show what is driving your month.
+      </p>
     </div>
   )
 }

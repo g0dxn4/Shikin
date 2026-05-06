@@ -68,9 +68,7 @@ function validateRelativePath(relativePath: string): void {
   }
 }
 
-const DIRECTORIES = ['weekly-reviews', 'holdings', 'signals', 'education']
-
-export async function getNotebookPath(): Promise<string> {
+async function getNotebookPath(): Promise<string> {
   const appData = await appDataDir()
   return await join(appData, NOTEBOOK_DIR)
 }
@@ -81,29 +79,6 @@ export async function ensureDirectory(relativePath: string): Promise<void> {
   const fullPath = await join(base, relativePath)
   if (!(await exists(fullPath))) {
     await mkdir(fullPath, { recursive: true })
-  }
-}
-
-export async function initNotebook(): Promise<void> {
-  const base = await getNotebookPath()
-  if (!(await exists(base))) {
-    await mkdir(base, { recursive: true })
-  }
-
-  for (const dir of DIRECTORIES) {
-    const dirPath = await join(base, dir)
-    if (!(await exists(dirPath))) {
-      await mkdir(dirPath, { recursive: true })
-    }
-  }
-
-  // Create index if it doesn't exist
-  const indexPath = await join(base, 'index.md')
-  if (!(await exists(indexPath))) {
-    await writeTextFile(
-      indexPath,
-      `# Shikin Notebook\n\nThis notebook tracks investment insights, portfolio reviews, and educational notes.\n\n## Sections\n\n- **weekly-reviews/** — Automated portfolio performance reviews\n- **holdings/** — Per-symbol research and analysis notes\n- **signals/** — Congressional trades and market signals\n- **education/** — Financial concepts and explanations\n`
-    )
   }
 }
 

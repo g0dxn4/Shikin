@@ -21,7 +21,7 @@ export interface StoredSubscription {
   updated_at: string
 }
 
-export interface UpcomingPayment {
+interface UpcomingPayment {
   name: string
   amount: number
   currency: string

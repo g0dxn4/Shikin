@@ -1,16 +1,15 @@
-import {
-  readFileSync,
-  writeFileSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  unlinkSync,
-} from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { PRIVATE_FILE_MODE, ensurePrivateDirectory, hardenPathMode } from './app-data-dir.js'
 import { NOTEBOOK_DIR, resolveNotebookPath } from './notebook-path.js'
 
 // Ensure notebook directory exists
-mkdirSync(NOTEBOOK_DIR, { recursive: true })
+ensurePrivateDirectory(NOTEBOOK_DIR)
+
+function writePrivateNoteFile(path: string, content: string): void {
+  writeFileSync(path, content, { encoding: 'utf-8', mode: PRIVATE_FILE_MODE })
+  hardenPathMode(path, PRIVATE_FILE_MODE)
+}
 
 export async function readNote(relativePath: string): Promise<string> {
   return readFileSync(resolveNotebookPath(relativePath), 'utf-8')
@@ -18,8 +17,8 @@ export async function readNote(relativePath: string): Promise<string> {
 
 export async function writeNote(relativePath: string, content: string): Promise<void> {
   const fullPath = resolveNotebookPath(relativePath)
-  mkdirSync(dirname(fullPath), { recursive: true })
-  writeFileSync(fullPath, content, 'utf-8')
+  ensurePrivateDirectory(dirname(fullPath))
+  writePrivateNoteFile(fullPath, content)
 }
 
 export async function appendNote(relativePath: string, content: string): Promise<void> {
@@ -30,8 +29,8 @@ export async function appendNote(relativePath: string, content: string): Promise
   } catch {
     // Start a new note when the file does not exist yet.
   }
-  mkdirSync(dirname(fullPath), { recursive: true })
-  writeFileSync(fullPath, existing + '\n' + content, 'utf-8')
+  ensurePrivateDirectory(dirname(fullPath))
+  writePrivateNoteFile(fullPath, existing + '\n' + content)
 }
 
 export async function noteExists(relativePath: string): Promise<boolean> {
@@ -52,8 +51,4 @@ export async function listNotes(directory?: string): Promise<string[]> {
     }
   }
   return results.sort()
-}
-
-export async function deleteNote(relativePath: string): Promise<void> {
-  unlinkSync(resolveNotebookPath(relativePath))
 }

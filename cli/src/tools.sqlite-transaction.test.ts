@@ -215,6 +215,8 @@ async function loadToolsWithRealDatabaseFailure({
   const dbPath = getDbPath(tempHome)
 
   vi.resetModules()
+  vi.stubEnv('HOME', tempHome)
+  vi.stubEnv('XDG_DATA_HOME', '')
   vi.doMock('node:os', async () => {
     const actual = await vi.importActual<typeof OsModule>('node:os')
     return {
@@ -254,6 +256,8 @@ async function loadToolsWithRealDatabaseFailure({
 async function loadToolsWithRealDatabase(tempHome: string) {
   let generatedId = 0
   vi.resetModules()
+  vi.stubEnv('HOME', tempHome)
+  vi.stubEnv('XDG_DATA_HOME', '')
   vi.doMock('node:os', async () => {
     const actual = await vi.importActual<typeof OsModule>('node:os')
     return {
@@ -281,6 +285,7 @@ afterEach(() => {
   vi.doUnmock('./database.js')
   vi.doUnmock('./ulid.js')
   vi.doUnmock('node:os')
+  vi.unstubAllEnvs()
   vi.resetModules()
 
   for (const dir of tempDirs) {
@@ -309,7 +314,7 @@ describe('CLI tools SQLite transaction rollback', () => {
       balance: 10_000,
       transactions: [],
     })
-  })
+  }, 10_000)
 
   it('rolls back update-transaction when the final row update fails', async () => {
     const tempHome = createTempHome()

@@ -187,7 +187,7 @@ describe('Goals', () => {
 
       expect(screen.getByText('hero.featuredGoal')).toBeInTheDocument()
       expect(screen.getByText('hero.aggregateProgress')).toBeInTheDocument()
-      expect(screen.getByText('2 hero.goalCount')).toBeInTheDocument()
+      expect(screen.getAllByText('2 hero.goalCount').length).toBeGreaterThan(0)
     })
   })
 

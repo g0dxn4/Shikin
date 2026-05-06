@@ -2,12 +2,12 @@ import { create } from 'zustand'
 import { query, execute } from '@/lib/database'
 import { getErrorMessage } from '@/lib/errors'
 import { generateId } from '@/lib/ulid'
-import { toCentavos, fromCentavos } from '@/lib/money'
+import { toCentavos } from '@/lib/money'
 import type { Account } from '@/types/database'
 import type { AccountType, CurrencyCode } from '@/types/common'
 import dayjs from 'dayjs'
 
-export interface AccountFormData {
+interface AccountFormData {
   name: string
   type: AccountType
   currency: CurrencyCode
@@ -17,7 +17,7 @@ export interface AccountFormData {
   paymentDueDay?: number
 }
 
-export interface BalanceHistoryPoint {
+interface BalanceHistoryPoint {
   date: string
   balance: number // centavos
 }
@@ -324,8 +324,3 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     }
   },
 }))
-
-/** Get the decimal balance for display in forms */
-export function getAccountBalanceDecimal(account: Account): number {
-  return fromCentavos(account.balance)
-}

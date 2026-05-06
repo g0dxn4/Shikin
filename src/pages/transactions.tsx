@@ -40,7 +40,7 @@ function formatDateHeader(date: string): string {
 export function Transactions() {
   const { t } = useTranslation('transactions')
   const { t: tCommon } = useTranslation('common')
-  const { openTransactionDialog } = useUIStore()
+  const { openTransactionDialog, openRecurringDialog } = useUIStore()
   const {
     transactions,
     isLoading,
@@ -124,6 +124,10 @@ export function Transactions() {
           <Button variant="outline" onClick={() => setStatementImportOpen(true)}>
             <Plus size={16} />
             {t('import.button')}
+          </Button>
+          <Button variant="outline" onClick={() => openRecurringDialog()}>
+            <Plus size={16} />
+            {t('recurring.addRule')}
           </Button>
           <Button onClick={() => openTransactionDialog()}>
             <Plus size={16} />

@@ -24,7 +24,7 @@ test.describe('mobile viewport', () => {
     await expect(bottomNav.getByText('Dashboard')).toBeVisible()
     await expect(bottomNav.getByText('Transactions')).toBeVisible()
     await expect(bottomNav.getByText('Accounts')).toBeVisible()
-    await expect(bottomNav.getByText('Budgets')).toBeVisible()
+    await expect(bottomNav.getByText('Insights')).toBeVisible()
     await expect(bottomNav.getByRole('button', { name: 'More pages' })).toBeVisible()
   })
 
@@ -39,7 +39,12 @@ test.describe('mobile viewport', () => {
     await page.waitForURL('/accounts')
     expect(page.url()).toContain('/accounts')
 
-    await bottomNav.getByRole('link', { name: 'Budgets' }).click()
+    await bottomNav.getByRole('link', { name: 'Insights' }).click()
+    await page.waitForURL('/insights')
+    expect(page.url()).toContain('/insights')
+
+    await bottomNav.getByRole('button', { name: 'More pages' }).click()
+    await page.getByRole('link', { name: 'Budgets' }).click()
     await page.waitForURL('/budgets')
     expect(page.url()).toContain('/budgets')
 
@@ -53,7 +58,7 @@ test.describe('mobile viewport', () => {
   })
 
   test('mobile: content has bottom padding', async ({ page }) => {
-    const contentWrapper = page.locator('main .mx-auto')
+    const contentWrapper = page.locator('main > div')
     await expect(contentWrapper).toHaveClass(/pb-24/)
   })
 })

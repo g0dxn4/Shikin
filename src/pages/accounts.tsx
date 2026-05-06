@@ -1,4 +1,13 @@
-import { useEffect, useState, useMemo, lazy, Suspense, useCallback } from 'react'
+import {
+  useEffect,
+  useState,
+  useMemo,
+  lazy,
+  Suspense,
+  useCallback,
+  type FormEvent,
+  type ReactNode,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Landmark,
@@ -11,6 +20,7 @@ import {
   ArchiveRestore,
   Archive,
   Star,
+  CreditCard,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts'
@@ -20,9 +30,27 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { ErrorState } from '@/components/ui/error-state'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
-import { formatMoney, fromCentavos } from '@/lib/money'
+import { useTransactionStore } from '@/stores/transaction-store'
+import { formatMoney, fromCentavos, toCentavos } from '@/lib/money'
 import type { Account } from '@/types/database'
 import dayjs from 'dayjs'
 
@@ -36,6 +64,7 @@ export function Accounts() {
   const { t } = useTranslation('accounts')
   const { t: tCommon } = useTranslation('common')
   const { openAccountDialog } = useUIStore()
+  const addTransaction = useTransactionStore((s) => s.add)
   const {
     accounts,
     archivedAccounts,
@@ -55,6 +84,10 @@ export function Accounts() {
   const [settingPrimaryId, setSettingPrimaryId] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [showArchived, setShowArchived] = useState(false)
+  const [paymentCard, setPaymentCard] = useState<Account | null>(null)
+  const [paymentSourceId, setPaymentSourceId] = useState('')
+  const [paymentAmount, setPaymentAmount] = useState('')
+  const [isPayingCard, setIsPayingCard] = useState(false)
 
   useEffect(() => {
     void fetch().catch(() => {})
@@ -117,6 +150,16 @@ export function Accounts() {
       [...depositAccounts].sort((a, b) => b.balance - a.balance)[0] ??
       liquidAccounts[0],
     [depositAccounts, liquidAccounts]
+  )
+  const paymentSourceAccounts = useMemo(() => {
+    if (!paymentCard) return []
+    return depositAccounts.filter(
+      (account) => account.currency === paymentCard.currency && account.balance > 0
+    )
+  }, [depositAccounts, paymentCard])
+  const selectedPaymentSource = useMemo(
+    () => paymentSourceAccounts.find((account) => account.id === paymentSourceId) ?? null,
+    [paymentSourceAccounts, paymentSourceId]
   )
 
   const accountMix = useMemo(
@@ -187,6 +230,81 @@ export function Accounts() {
       toast.error(t('toast.error'))
     } finally {
       setSettingPrimaryId(null)
+    }
+  }
+
+  const closePaymentDialog = useCallback(() => {
+    setPaymentCard(null)
+    setPaymentSourceId('')
+    setPaymentAmount('')
+    setIsPayingCard(false)
+  }, [])
+
+  const openPaymentDialog = useCallback(
+    (card: Account) => {
+      const sources = depositAccounts.filter(
+        (account) => account.currency === card.currency && account.balance > 0
+      )
+      const defaultSource =
+        sources.find((account) => account.is_primary === 1) ??
+        [...sources].sort((a, b) => b.balance - a.balance)[0]
+      const debt = Math.max(0, -card.balance)
+      const defaultAmount = defaultSource ? Math.min(debt, defaultSource.balance) : debt
+
+      setPaymentCard(card)
+      setPaymentSourceId(defaultSource?.id ?? '')
+      setPaymentAmount(defaultAmount > 0 ? fromCentavos(defaultAmount).toFixed(2) : '')
+    },
+    [depositAccounts]
+  )
+
+  const handleCardPayment = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!paymentCard) return
+
+    const amount = Number(paymentAmount)
+    const amountCentavos = Number.isFinite(amount) ? toCentavos(amount) : 0
+    const cardDebt = Math.max(0, -paymentCard.balance)
+
+    if (!selectedPaymentSource) {
+      toast.error(t('credit.noSource'))
+      return
+    }
+
+    if (selectedPaymentSource.currency !== paymentCard.currency) {
+      toast.error(t('credit.paymentCurrencyMismatch'))
+      return
+    }
+
+    if (amountCentavos <= 0 || amountCentavos > cardDebt) {
+      toast.error(t('credit.paymentValidation'))
+      return
+    }
+
+    if (amountCentavos > selectedPaymentSource.balance) {
+      toast.error(t('credit.paymentInsufficientFunds'))
+      return
+    }
+
+    setIsPayingCard(true)
+    try {
+      await addTransaction({
+        amount,
+        type: 'transfer',
+        description: `${t('credit.paymentDescriptionPrefix')} ${paymentCard.name}`,
+        categoryId: null,
+        accountId: selectedPaymentSource.id,
+        transferToAccountId: paymentCard.id,
+        currency: paymentCard.currency,
+        date: dayjs().format('YYYY-MM-DD'),
+        notes: null,
+      })
+      toast.success(t('credit.paymentSuccess'))
+      closePaymentDialog()
+    } catch {
+      toast.error(t('credit.paymentError'))
+    } finally {
+      setIsPayingCard(false)
     }
   }
 
@@ -345,6 +463,11 @@ export function Accounts() {
                         onEdit={() => openAccountDialog(account.id)}
                         onSetPrimary={() => handleSetPrimary(account.id)}
                         isSettingPrimary={settingPrimaryId === account.id}
+                        onPayCreditCard={
+                          account.type === 'credit_card' && account.balance < 0
+                            ? () => openPaymentDialog(account)
+                            : undefined
+                        }
                         onArchive={() => setArchiveId(account.id)}
                         onDelete={() => setDeleteId(account.id)}
                         t={t}
@@ -454,6 +577,84 @@ export function Accounts() {
           onConfirm={handleDelete}
         />
       </Suspense>
+
+      <Dialog
+        open={!!paymentCard}
+        onOpenChange={(open) => {
+          if (!open) closePaymentDialog()
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('credit.paymentTitle')}</DialogTitle>
+            <DialogDescription>
+              {paymentCard
+                ? t('credit.paymentDescription', { card: paymentCard.name })
+                : t('credit.paymentDescriptionEmpty')}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form className="space-y-4" onSubmit={handleCardPayment}>
+            <div className="space-y-2">
+              <Label htmlFor="credit-payment-source">{t('credit.sourceAccount')}</Label>
+              <Select
+                value={paymentSourceId}
+                onValueChange={setPaymentSourceId}
+                disabled={paymentSourceAccounts.length === 0 || isPayingCard}
+              >
+                <SelectTrigger id="credit-payment-source">
+                  <SelectValue placeholder={t('credit.sourceAccountPlaceholder')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {paymentSourceAccounts.map((account) => (
+                    <SelectItem key={account.id} value={account.id}>
+                      {account.name} · {formatMoney(account.balance, account.currency)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {paymentSourceAccounts.length === 0 && (
+                <p className="text-muted-foreground text-xs">{t('credit.noSource')}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="credit-payment-amount">{t('credit.amount')}</Label>
+              <Input
+                id="credit-payment-amount"
+                type="number"
+                min="0.01"
+                step="0.01"
+                inputMode="decimal"
+                value={paymentAmount}
+                onChange={(event) => setPaymentAmount(event.target.value)}
+                disabled={isPayingCard || paymentSourceAccounts.length === 0}
+              />
+              {paymentCard && (
+                <p className="text-muted-foreground text-xs">
+                  {t('credit.paymentMax', {
+                    amount: formatMoney(Math.max(0, -paymentCard.balance), paymentCard.currency),
+                  })}
+                </p>
+              )}
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={closePaymentDialog}
+                disabled={isPayingCard}
+              >
+                {tCommon('actions.cancel')}
+              </Button>
+              <Button type="submit" disabled={isPayingCard || paymentSourceAccounts.length === 0}>
+                {isPayingCard ? t('credit.paymentSaving') : t('credit.confirmPayment')}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -467,6 +668,7 @@ function AccountCard({
   onEdit,
   onSetPrimary,
   isSettingPrimary = false,
+  onPayCreditCard,
   onArchive,
   onDelete,
   archiveLabel,
@@ -480,10 +682,11 @@ function AccountCard({
   onEdit: () => void
   onSetPrimary?: () => void
   isSettingPrimary?: boolean
+  onPayCreditCard?: () => void
   onArchive: () => void
   onDelete: () => void
   archiveLabel?: string
-  archiveIcon?: React.ReactNode
+  archiveIcon?: ReactNode
   archived?: boolean
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   t: any
@@ -626,6 +829,20 @@ function AccountCard({
               </p>
             </div>
           </div>
+        )}
+
+        {isCreditCard && onPayCreditCard && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-3 w-full justify-center"
+            onClick={onPayCreditCard}
+            aria-label={`Pay ${account.name}`}
+          >
+            <CreditCard size={14} />
+            {t('credit.pay')}
+          </Button>
         )}
 
         {/* Credit card utilization bar */}

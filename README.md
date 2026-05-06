@@ -28,23 +28,23 @@ Shikin is built to keep both:
 - **Savings Goals**: Target-based goals with deadlines, progress rings, and monthly contribution estimates.
 - **Recurring Transactions**: Auto-generated transactions from recurring rules (rent, salary, utilities).
 - **Split Transactions**: Split a single payment across multiple categories.
-- **Subscriptions**: Local subscription data model and CLI/MCP analytics; browser management is an MVP placeholder.
+- **Subscription Insights**: Local subscription data model powering bill forecasts and CLI/MCP analytics.
 - **Investments**: Portfolio tracking with live prices (Alpha Vantage for stocks, CoinGecko for crypto).
 - **Multi-Currency**: Live exchange rates via frankfurter.app with preferred currency conversion.
 
-### CLI & MCP Server — 41 Tool Definitions
+### CLI & MCP Server — 39 Tool Definitions
 
 - **CLI**: `shikin add-transaction --amount 5.50 --type expense --description "Coffee"`
 - **MCP Server**: Connect Claude Code, Claude Desktop, Cursor, or any MCP-compatible client
-- **41 Tool Definitions**: 39 end-to-end tools plus 2 structured unavailable compatibility placeholders for external-feed features
+- **Portable AI Skill**: Optional `Skill.md` reference for AI tools that support file-based skills
+- **39 Tool Definitions**: All shipped CLI/MCP tools run end-to-end against local data
 - **No Built-in Chat Assistant**: Shikin is the local finance engine; external clients can automate it through CLI/MCP
 
 Current MVP limitations:
 
-- Browser subscription management is a placeholder; subscription rows are available to CLI/MCP analytics but are not listed or edited in the browser UI yet.
-- CLI transaction-write tools do not create linked transfers yet; record the withdrawal and matching deposit as separate explicit-account entries as a workaround.
-- Debt payoff estimates default APR to 0% because account APR is not stored in the MVP schema, so those estimates exclude interest.
-- External-feed tools for financial news and congressional trades are compatibility placeholders and return structured unavailable responses.
+- Recurring transfer rules are not supported yet; one-off transfers work in the app and CLI/MCP.
+- Debt payoff estimates default credit-card APR to 0% because account APR is not stored yet, so automatically inferred card payoff projections exclude interest.
+- Installment purchases such as meses sin intereses are not first-class yet; record each installment as a recurring or monthly credit-card transaction for now.
 
 ### Intelligence & Analytics
 
@@ -66,21 +66,21 @@ Current MVP limitations:
 
 ## Tech Stack
 
-| Layer      | Technology                       | Purpose                                                                                          |
-| ---------- | -------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Runtime    | Tauri v2 + Browser + Vite        | Desktop app and web runtime                                                                      |
-| Frontend   | React 19 + TypeScript            | UI and application logic                                                                         |
-| Styling    | Tailwind CSS v4 + shadcn/ui      | Design system and components                                                                     |
-| Routing    | React Router v7                  | Client-side navigation                                                                           |
-| State      | Zustand (19 stores)              | Global state management                                                                          |
-| Database   | SQLite (shared storage)          | 21 tables, migration-backed schema                                                               |
-| Settings   | Tauri Store / data-server bridge | Local key-value config storage                                                                   |
-| Automation | CLI (`commander`) + MCP SDK      | Local automation surface (41 shared tool definitions; 2 are structured unavailable placeholders) |
-| Forms      | React Hook Form + Zod v4         | Form validation and parsing                                                                      |
-| Charts     | Recharts                         | Financial visualizations                                                                         |
-| PDF        | jsPDF                            | Report generation                                                                                |
-| i18n       | i18next + react-i18next          | Localization (en/es)                                                                             |
-| Build/Test | Vite + Vitest + Playwright       | Build pipeline and test tooling                                                                  |
+| Layer      | Technology                       | Purpose                                               |
+| ---------- | -------------------------------- | ----------------------------------------------------- |
+| Runtime    | Tauri v2 + Browser + Vite        | Desktop app and web runtime                           |
+| Frontend   | React 19 + TypeScript            | UI and application logic                              |
+| Styling    | Tailwind CSS v4 + shadcn/ui      | Design system and components                          |
+| Routing    | React Router v7                  | Client-side navigation                                |
+| State      | Zustand (19 stores)              | Global state management                               |
+| Database   | SQLite (shared storage)          | 21 tables, migration-backed schema                    |
+| Settings   | Tauri Store / data-server bridge | Local key-value config storage                        |
+| Automation | CLI (`commander`) + MCP SDK      | Local automation surface (39 shared tool definitions) |
+| Forms      | React Hook Form + Zod v4         | Form validation and parsing                           |
+| Charts     | Recharts                         | Financial visualizations                              |
+| PDF        | jsPDF                            | Report generation                                     |
+| i18n       | i18next + react-i18next          | Localization (en/es)                                  |
+| Build/Test | Vite + Vitest + Playwright       | Build pipeline and test tooling                       |
 
 ---
 
@@ -132,6 +132,20 @@ To install CLI/MCP support separately later:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-cli.sh | sh
+```
+
+To install the optional portable AI skill reference for Shikin CLI/MCP usage:
+
+```bash
+# Neutral portable copy under Shikin app data
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh
+
+# Install directly into a supported tool's skill directory
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh -s -- --opencode
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh -s -- --agents
+
+# Or choose any custom skills root
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh -s -- --dir ~/.config/my-ai-tool/skills
 ```
 
 Windows users can install the `.msi` or setup `.exe` from [GitHub Releases](https://github.com/g0dxn4/Shikin/releases/latest). macOS users can install the `.dmg`.
@@ -198,7 +212,7 @@ pnpm build:tauri  # Builds .deb + .AppImage (Linux), .dmg (macOS), .msi (Windows
 
 ## CLI & MCP Server
 
-Shikin exposes 41 shared CLI/MCP tool definitions. 39 are currently available end-to-end, and 2 compatibility placeholders return structured unavailable responses for external-feed features.
+Shikin exposes 39 shared CLI/MCP tool definitions. All shipped tools are available end-to-end against the local database.
 
 ```bash
 # Install automation support for the installed desktop app.
@@ -232,6 +246,17 @@ npx tsx src/mcp-server.ts
     }
   }
 }
+```
+
+### AI Skill Pack
+
+Shikin ships a neutral, portable AI skill at `skills/shikin-cli-mcp/SKILL.md`. It documents safe temp-data testing, the unified `shikin` CLI UX, the MCP server command, expected tool counts, resources, and verification commands. It is not tied to one assistant; copy or install it into any file-based skill-capable AI tool.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh -s -- --opencode
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh -s -- --claude
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh -s -- --agents
 ```
 
 ## Data Safety
@@ -272,11 +297,12 @@ Shikin/
 │   │   ├── pdf-generator.ts
 │   │   ├── achievement-service.ts
 │   │   └── ...
-│   ├── pages/                # 19 page files, 14 routed
-│   ├── stores/               # 19 Zustand stores
-│   ├── i18n/                 # 15 namespaces, 2 languages (en/es)
+│   ├── pages/                # 18 routed page files
+│   ├── stores/               # 18 Zustand stores
+│   ├── i18n/                 # 14 namespaces, 2 languages (en/es)
 │   └── types/                # TypeScript type definitions
-├── cli/                      # CLI + MCP server (41 shared tool definitions; 2 structured unavailable placeholders)
+├── cli/                      # CLI + MCP server (39 shared tool definitions)
+├── skills/                   # Portable AI skill packs distributed by Shikin
 ├── docs/                     # Project documentation
 ├── e2e/                      # Playwright end-to-end tests
 └── public/                   # Static assets

@@ -22,6 +22,24 @@ npm run build
 
 The desktop app owns the `shikin` command. The installer places the automation bridge under Shikin's app data directory, so it does not create a second user-facing CLI command.
 
+## AI Skill Pack
+
+Shikin also distributes a neutral `Skill.md` reference for AI tools that support file-based skills. It is stored in the repo at `skills/shikin-cli-mcp/SKILL.md` and documents safe CLI/MCP usage, temp-data testing, command syntax, MCP configuration, expected tool counts, and verification commands.
+
+Install a portable copy under Shikin app data:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh
+```
+
+Install directly into a supported tool or a custom skills root:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh -s -- --opencode
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh -s -- --agents
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh -s -- --dir ~/.config/my-ai-tool/skills
+```
+
 ## CLI Usage
 
 After the desktop launcher is installed and CLI support is installed:
@@ -43,7 +61,7 @@ npx tsx src/cli.ts diagnose
 Notes:
 
 - When multiple accounts exist, pass `--account-id` explicitly for commands that write transactions or recurring rules.
-- Transfer writes are intentionally limited in the MVP: CLI transaction-write tools reject `type=transfer`. Record the withdrawal and matching deposit as separate entries with explicit account IDs until linked-transfer write support is added.
+- One-off transfers are supported with `--type transfer --account-id <source> --transfer-to-account-id <destination>`. Recurring transfer rules are still deferred.
 - Structured options must be valid JSON.
 - The CLI reads and writes the shared Shikin database in `~/.local/share/com.asf.shikin/shikin.db`.
 
@@ -132,8 +150,8 @@ The MCP server also exposes read-only resources:
 
 ## Current Scope
 
-- CLI and MCP share the same 41-tool definition catalog in `cli/src/tools.ts`.
-- 39 tools are currently available end-to-end; 2 compatibility placeholders (`get-financial-news`, `get-congressional-trades`) return structured unavailable responses on both CLI and MCP surfaces.
-- Debt payoff projections infer debts from negative credit-card account balances. Accounts do not store APR in the MVP, so CLI payoff estimates default APR to 0% and exclude interest.
-- Subscription tools read Shikin's local `subscriptions` table for analytics. The browser subscriptions page is still a placeholder and is not wired to create, edit, or list those rows.
+- CLI and MCP share the same 39-tool definition catalog in `cli/src/tools.ts`.
+- All shipped tools are available end-to-end against the local database.
+- Debt payoff projections infer debts from negative credit-card account balances. Accounts do not store APR yet, so CLI payoff estimates default card APR to 0% and exclude interest for automatically inferred cards.
+- Subscription tools read Shikin's local `subscriptions` table for analytics and bill forecasting.
 - The app does not ship a built-in chat assistant; external clients can connect through MCP or call the CLI directly.

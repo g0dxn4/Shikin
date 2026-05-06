@@ -140,13 +140,6 @@ export function nonNegativeMoneyAmount(
   return moneyAmount(description, { min: 0, max })
 }
 
-export function unsupportedTransferMessage() {
-  return (
-    'Transfer transactions are not supported by CLI/MCP transaction-write tools in this MVP. ' +
-    'Workaround: record the withdrawal and matching deposit as separate entries with explicit account IDs.'
-  )
-}
-
 export function resolveAccountId(accountId?: string) {
   if (accountId) {
     const accounts = query<{ id: string; currency: string }>(

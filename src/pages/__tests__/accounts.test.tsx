@@ -38,6 +38,7 @@ const mockArchive = vi.fn()
 const mockUnarchive = vi.fn()
 const mockSetPrimary = vi.fn()
 const mockOpenAccountDialog = vi.fn()
+const mockAddTransaction = vi.fn()
 
 let mockAccounts: unknown[] = []
 let mockArchivedAccounts: unknown[] = []
@@ -66,6 +67,13 @@ vi.mock('@/stores/account-store', () => ({
   }),
 }))
 
+vi.mock('@/stores/transaction-store', () => ({
+  useTransactionStore: (selector?: (state: { add: typeof mockAddTransaction }) => unknown) => {
+    const state = { add: mockAddTransaction }
+    return selector ? selector(state) : state
+  },
+}))
+
 describe('Accounts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -73,6 +81,7 @@ describe('Accounts', () => {
     mockArchivedAccounts = []
     mockIsLoading = false
     mockFetchError = null
+    mockAddTransaction.mockReset()
   })
 
   it('calls fetch on mount', () => {
@@ -259,6 +268,53 @@ describe('Accounts', () => {
     expect(screen.getByText('$26,000.00')).toBeInTheDocument()
     expect(screen.getByText(/C 15/)).toBeInTheDocument()
     expect(screen.getByText(/D 5/)).toBeInTheDocument()
+  })
+
+  it('records a credit card payment as a transfer from a cash account', async () => {
+    const { toast } = await import('sonner')
+    const user = userEvent.setup()
+    mockAddTransaction.mockResolvedValueOnce(undefined)
+    mockAccounts = [
+      {
+        id: 'acc-checking',
+        name: 'Daily Checking',
+        type: 'checking',
+        currency: 'USD',
+        balance: 50000,
+        is_primary: 1,
+      },
+      {
+        id: 'acc-card',
+        name: 'Travel Card',
+        type: 'credit_card',
+        currency: 'USD',
+        balance: -10000,
+        credit_limit: 100000,
+      },
+    ]
+
+    render(<Accounts />)
+
+    await user.click(screen.getByLabelText('Pay Travel Card'))
+    await user.clear(screen.getByLabelText('credit.amount'))
+    await user.type(screen.getByLabelText('credit.amount'), '25')
+    await user.click(screen.getByRole('button', { name: 'credit.confirmPayment' }))
+
+    await waitFor(() => {
+      expect(mockAddTransaction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          amount: 25,
+          type: 'transfer',
+          accountId: 'acc-checking',
+          transferToAccountId: 'acc-card',
+          currency: 'USD',
+          categoryId: null,
+          description: 'credit.paymentDescriptionPrefix Travel Card',
+          notes: null,
+        })
+      )
+      expect(toast.success).toHaveBeenCalledWith('credit.paymentSuccess')
+    })
   })
 
   it('renders archived accounts behind a toggle', async () => {

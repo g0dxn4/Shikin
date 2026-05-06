@@ -11,12 +11,13 @@ shikin/
   src/           # React frontend (dashboard, transactions, accounts, etc.)
   src-tauri/     # Tauri v2 desktop shell (Rust)
   cli/           # CLI + MCP server (Node.js, better-sqlite3)
+  skills/        # Portable AI skill packs distributed by Shikin
 ```
 
 - **Frontend**: React 19 + TypeScript + Tailwind v4 + shadcn/ui
 - **Desktop**: Tauri v2 (Rust)
 - **Database**: SQLite via shared storage (`~/.local/share/com.asf.shikin/`)
-- **CLI/MCP**: 41 shared tool definitions via commander CLI + MCP server (39 available end-to-end + 2 compatibility placeholders)
+- **CLI/MCP**: 39 shared tool definitions via commander CLI + MCP server, all available end-to-end
 - **State**: Zustand stores
 - **Testing**: Vitest + Testing Library + Playwright (e2e)
 - **Package Manager**: pnpm (root) + npm (cli/)
@@ -65,9 +66,13 @@ npx tsx src/mcp-server.ts
 }
 ```
 
-### 41 Tool Definitions
+### 39 Tool Definitions
 
-Transaction, Account, Category, Analytics, Budget, Goal, Subscription, Investment, Recurring, Notebook, Intelligence, Debt, Currency tools — 39 available end-to-end, plus 2 compatibility placeholders for external-feed features.
+Transaction, Account, Category, Analytics, Budget, Goal, Subscription, Investment, Recurring, Notebook, Intelligence, Debt, Currency tools — all available end-to-end against local data.
+
+### Portable AI Skill
+
+Shikin distributes a neutral skill at `skills/shikin-cli-mcp/SKILL.md` for AI tools that support file-based skills. Install it with `scripts/install-skill.sh`; keep it portable and do not add project `.claude/skills` copies.
 
 ## Building & Installing
 

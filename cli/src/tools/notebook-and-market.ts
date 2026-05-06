@@ -6,7 +6,6 @@ import {
   noteExists,
   listNotes,
   notebookPathSchema,
-  unavailableToolResult,
   type ToolDefinition,
 } from './shared.js'
 
@@ -106,49 +105,7 @@ const listNotebookTool: ToolDefinition = {
 }
 
 // ---------------------------------------------------------------------------
-// 28. get-financial-news
-// ---------------------------------------------------------------------------
-
-const getFinancialNews: ToolDefinition = {
-  name: 'get-financial-news',
-  description: 'Fetch financial news for a specific symbol or the broader portfolio.',
-  schema: z.object({
-    symbol: z.string().optional().describe('Optional ticker or asset symbol to filter news.'),
-    days: z.number().optional().default(7).describe('Number of days to look back'),
-  }),
-  cliUnavailableMessage:
-    'Financial news is not available in this release surface. External news feeds are not configured yet.',
-  mcpUnavailableMessage:
-    'Financial news is not available in this release surface. External news feeds are not configured yet.',
-  execute: async () =>
-    unavailableToolResult(
-      'Financial news is not available in this release surface. External news feeds are not configured yet.'
-    ),
-}
-
-// ---------------------------------------------------------------------------
-// 29. get-congressional-trades
-// ---------------------------------------------------------------------------
-
-const getCongressionalTrades: ToolDefinition = {
-  name: 'get-congressional-trades',
-  description: 'Fetch recent congressional trading disclosures for research workflows.',
-  schema: z.object({
-    symbol: z.string().optional().describe('Optional ticker symbol to filter disclosures.'),
-    days: z.number().optional().default(30).describe('Number of days to look back'),
-  }),
-  cliUnavailableMessage:
-    'Congressional trades are not available in this release surface. External data feeds are not configured yet.',
-  mcpUnavailableMessage:
-    'Congressional trades are not available in this release surface. External data feeds are not configured yet.',
-  execute: async () =>
-    unavailableToolResult(
-      'Congressional trades are not available in this release surface. External data feeds are not configured yet.'
-    ),
-}
-
-// ---------------------------------------------------------------------------
-// 30. generate-portfolio-review
+// 28. generate-portfolio-review
 // ---------------------------------------------------------------------------
 
 const generatePortfolioReview: ToolDefinition = {
@@ -166,14 +123,12 @@ const generatePortfolioReview: ToolDefinition = {
 }
 
 // ---------------------------------------------------------------------------
-// 31. manage-category-rules
+// 29. manage-category-rules
 // ---------------------------------------------------------------------------
 
 export const notebookandmarketTools: ToolDefinition[] = [
   writeNotebookTool,
   readNotebookTool,
   listNotebookTool,
-  getFinancialNews,
-  getCongressionalTrades,
   generatePortfolioReview,
 ]

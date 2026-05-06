@@ -10,7 +10,6 @@ import {
   boundedText,
   isoDate,
   positiveMoneyAmount,
-  unsupportedTransferMessage,
   resolveAccountId,
   crossCurrencyMoveMessage,
   unknownTransactionCurrencyFailure,
@@ -26,6 +25,7 @@ type TransactionRow = {
   id: string
   account_id: string
   category_id: string | null
+  transfer_to_account_id: string | null
   type: 'expense' | 'income' | 'transfer'
   amount: number
   currency: string | null
@@ -43,6 +43,112 @@ type QueriedTransactionRow = {
   notes: string | null
   category_name: string
   account_name: string
+  transfer_to_account_id: string | null
+  transfer_to_account_name: string | null
+}
+
+type AccountRef = {
+  id: string
+  currency: string
+}
+
+function resolveTransferDestination(transferToAccountId: string | undefined, source: AccountRef) {
+  if (!transferToAccountId) {
+    return {
+      success: false as const,
+      message: 'transferToAccountId is required for transfer transactions.',
+    }
+  }
+
+  if (transferToAccountId === source.id) {
+    return {
+      success: false as const,
+      message: 'Transfer destination account must be different from the source account.',
+    }
+  }
+
+  const accounts = query<{ id: string; currency: string }>(
+    'SELECT id, currency FROM accounts WHERE id = $1 LIMIT 1',
+    [transferToAccountId]
+  )
+
+  if (accounts.length === 0) {
+    return {
+      success: false as const,
+      message: `Transfer destination account ${transferToAccountId} not found.`,
+    }
+  }
+
+  const destination = accounts[0]
+  if (destination.currency !== source.currency) {
+    return {
+      success: false as const,
+      message: `Cannot transfer from ${source.currency} to ${destination.currency}. Cross-currency transfers are not supported because no FX conversion is applied.`,
+    }
+  }
+
+  return { success: true as const, id: destination.id, currency: destination.currency }
+}
+
+function reverseBalanceImpact(tx: TransactionRow) {
+  if (tx.type === 'transfer') {
+    if (!tx.transfer_to_account_id) {
+      return {
+        success: false as const,
+        message: `Transfer transaction ${tx.id} has no destination account. Repair or recreate it before editing it.`,
+      }
+    }
+
+    execute(
+      "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
+      [tx.amount, tx.account_id]
+    )
+    execute(
+      "UPDATE accounts SET balance = balance - $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
+      [tx.amount, tx.transfer_to_account_id]
+    )
+    return { success: true as const }
+  }
+
+  const balanceChange = tx.type === 'income' ? tx.amount : -tx.amount
+  execute(
+    "UPDATE accounts SET balance = balance - $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
+    [balanceChange, tx.account_id]
+  )
+  return { success: true as const }
+}
+
+function applyBalanceImpact(
+  type: TransactionRow['type'],
+  amount: number,
+  accountId: string,
+  transferToAccountId: string | null
+) {
+  if (type === 'transfer') {
+    if (!transferToAccountId) {
+      return {
+        success: false as const,
+        message: 'transferToAccountId is required for transfer transactions.',
+      }
+    }
+
+    execute(
+      "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
+      [-amount, accountId]
+    )
+    execute(
+      "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
+      [amount, transferToAccountId]
+    )
+    return { success: true as const }
+  }
+
+  const balanceChange = type === 'income' ? amount : -amount
+  execute(
+    "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
+    [balanceChange, accountId]
+  )
+  return { success: true as const }
 }
 
 const addTransaction: ToolDefinition = {
@@ -67,26 +173,33 @@ const addTransaction: ToolDefinition = {
       'Optional account ID to apply the transaction to. Required when multiple accounts exist.',
       128
     ).optional(),
+    transferToAccountId: boundedText(
+      'Transfer destination account ID',
+      'Destination account ID for transfer transactions. Required when type is transfer.',
+      128
+    ).optional(),
   }),
-  execute: async ({ amount, type, description, category, date, notes, accountId }) => {
-    if (type === 'transfer') {
-      return {
-        success: false,
-        message: unsupportedTransferMessage(),
-      }
-    }
-
+  execute: async ({
+    amount,
+    type,
+    description,
+    category,
+    date,
+    notes,
+    accountId,
+    transferToAccountId,
+  }) => {
     const id = generateId()
     const amountCentavos = toCentavos(amount)
     const txDate = date || dayjs().format('YYYY-MM-DD')
 
     return transaction(() => {
-      const resolvedCategory = resolveCategoryId(category)
+      const resolvedCategory =
+        type === 'transfer'
+          ? { success: true as const, id: null, name: null }
+          : resolveCategoryId(category)
       if (!resolvedCategory.success) {
-        return {
-          success: false,
-          message: resolvedCategory.message,
-        }
+        return { success: false, message: resolvedCategory.message }
       }
 
       const resolvedAccount = resolveAccountId(accountId)
@@ -97,13 +210,23 @@ const addTransaction: ToolDefinition = {
         }
       }
 
+      const resolvedTransferDestination =
+        type === 'transfer'
+          ? resolveTransferDestination(transferToAccountId, resolvedAccount)
+          : { success: true as const, id: null }
+
+      if (!resolvedTransferDestination.success) {
+        return { success: false, message: resolvedTransferDestination.message }
+      }
+
       execute(
-        `INSERT INTO transactions (id, account_id, category_id, type, amount, currency, description, notes, date)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        `INSERT INTO transactions (id, account_id, category_id, transfer_to_account_id, type, amount, currency, description, notes, date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         [
           id,
           resolvedAccount.id,
           resolvedCategory.id,
+          resolvedTransferDestination.id,
           type,
           amountCentavos,
           resolvedAccount.currency,
@@ -113,17 +236,22 @@ const addTransaction: ToolDefinition = {
         ]
       )
 
-      const balanceChange = type === 'income' ? amountCentavos : -amountCentavos
-      execute(
-        "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
-        [balanceChange, resolvedAccount.id]
+      const balanceResult = applyBalanceImpact(
+        type,
+        amountCentavos,
+        resolvedAccount.id,
+        resolvedTransferDestination.id
       )
+      if (!balanceResult.success) {
+        return { success: false, message: balanceResult.message }
+      }
 
       return {
         success: true,
         transaction: {
           id,
           accountId: resolvedAccount.id,
+          transferToAccountId: resolvedTransferDestination.id,
           amount,
           type,
           description,
@@ -161,6 +289,11 @@ const updateTransaction: ToolDefinition = {
       'New account ID to move the transaction to',
       128
     ).optional(),
+    transferToAccountId: boundedText(
+      'Transfer destination account ID',
+      'Destination account ID for transfer transactions',
+      128
+    ).optional(),
   }),
   execute: async ({
     transactionId,
@@ -171,6 +304,7 @@ const updateTransaction: ToolDefinition = {
     date,
     notes,
     accountId,
+    transferToAccountId,
   }) => {
     return transaction(() => {
       const existing = query<TransactionRow>('SELECT * FROM transactions WHERE id = $1', [
@@ -188,13 +322,6 @@ const updateTransaction: ToolDefinition = {
 
       if (!tx.currency) {
         return unknownTransactionCurrencyFailure(tx)
-      }
-
-      if (type === 'transfer') {
-        return {
-          success: false,
-          message: unsupportedTransferMessage(),
-        }
       }
 
       const newAmount = amount !== undefined ? toCentavos(amount) : oldAmountCentavos
@@ -228,7 +355,9 @@ const updateTransaction: ToolDefinition = {
       const newCurrency = sourceCurrency
 
       let newCategoryId = tx.category_id
-      if (category !== undefined) {
+      if (newType === 'transfer') {
+        newCategoryId = null
+      } else if (category !== undefined) {
         const resolvedCategory = resolveCategoryId(category)
         if (!resolvedCategory.success) {
           return { success: false, message: resolvedCategory.message }
@@ -236,25 +365,48 @@ const updateTransaction: ToolDefinition = {
         newCategoryId = resolvedCategory.id
       }
 
-      // Reverse old balance impact
-      const oldBalanceChange = oldType === 'income' ? oldAmountCentavos : -oldAmountCentavos
-      execute(
-        "UPDATE accounts SET balance = balance - $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
-        [oldBalanceChange, oldAccountId]
-      )
+      if (newType !== 'transfer' && transferToAccountId !== undefined) {
+        return {
+          success: false,
+          message: 'transferToAccountId can only be used when the transaction type is transfer.',
+        }
+      }
 
-      // Apply new balance impact
-      const newBalanceChange = newType === 'income' ? newAmount : -newAmount
-      execute(
-        "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
-        [newBalanceChange, newAccountId]
+      let newTransferToAccountId: string | null = null
+      if (newType === 'transfer') {
+        const resolvedDestination = resolveTransferDestination(
+          transferToAccountId ?? tx.transfer_to_account_id ?? undefined,
+          {
+            id: newAccountId,
+            currency: newCurrency,
+          }
+        )
+        if (!resolvedDestination.success) {
+          return { success: false, message: resolvedDestination.message }
+        }
+        newTransferToAccountId = resolvedDestination.id
+      }
+
+      const reverseResult = reverseBalanceImpact(tx)
+      if (!reverseResult.success) {
+        return { success: false, message: reverseResult.message }
+      }
+
+      const applyResult = applyBalanceImpact(
+        newType,
+        newAmount,
+        newAccountId,
+        newTransferToAccountId
       )
+      if (!applyResult.success) {
+        return { success: false, message: applyResult.message }
+      }
 
       const updateResult = execute(
         `UPDATE transactions
-         SET amount = $1, type = $2, description = $3, category_id = $4, date = $5, notes = $6, account_id = $7, currency = $8,
-             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE id = $9`,
+         SET amount = $1, type = $2, description = $3, category_id = $4, date = $5, notes = $6, account_id = $7, currency = $8, transfer_to_account_id = $9,
+              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = $10`,
         [
           newAmount,
           newType,
@@ -264,6 +416,7 @@ const updateTransaction: ToolDefinition = {
           notes !== undefined ? (notes === '' ? null : notes) : tx.notes,
           newAccountId,
           newCurrency,
+          newTransferToAccountId,
           transactionId,
         ]
       )
@@ -281,6 +434,8 @@ const updateTransaction: ToolDefinition = {
           amount: displayAmount,
           type: newType,
           description: description !== undefined ? description : tx.description,
+          accountId: newAccountId,
+          transferToAccountId: newTransferToAccountId,
           date: date || tx.date,
         },
         message: `Updated transaction ${transactionId}: $${displayAmount.toFixed(2)} ${newType}`,
@@ -312,11 +467,10 @@ const deleteTransaction: ToolDefinition = {
 
       const tx = existing[0]
 
-      const balanceChange = tx.type === 'income' ? tx.amount : -tx.amount
-      execute(
-        "UPDATE accounts SET balance = balance - $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
-        [balanceChange, tx.account_id]
-      )
+      const reverseResult = reverseBalanceImpact(tx)
+      if (!reverseResult.success) {
+        return { success: false, message: reverseResult.message }
+      }
 
       execute('DELETE FROM transactions WHERE id = $1', [transactionId])
 
@@ -366,8 +520,13 @@ const queryTransactions: ToolDefinition = {
 
     if (accountId) {
       paramIndex++
-      conditions.push(`t.account_id = $${paramIndex}`)
-      params.push(accountId)
+      const sourceAccountParam = paramIndex
+      paramIndex++
+      const destinationAccountParam = paramIndex
+      conditions.push(
+        `(t.account_id = $${sourceAccountParam} OR t.transfer_to_account_id = $${destinationAccountParam})`
+      )
+      params.push(accountId, accountId)
     }
     if (categoryId) {
       paramIndex++
@@ -402,12 +561,14 @@ const queryTransactions: ToolDefinition = {
     params.push(limit)
 
     const transactions = await query<QueriedTransactionRow>(
-      `SELECT t.id, t.description, t.amount, t.type, t.date, t.notes,
+      `SELECT t.id, t.description, t.amount, t.type, t.date, t.notes, t.transfer_to_account_id,
               COALESCE(c.name, 'Uncategorized') as category_name,
-              a.name as account_name
+              a.name as account_name,
+              ta.name as transfer_to_account_name
        FROM transactions t
        LEFT JOIN categories c ON t.category_id = c.id
        LEFT JOIN accounts a ON t.account_id = a.id
+       LEFT JOIN accounts ta ON t.transfer_to_account_id = ta.id
        ${whereClause}
        ORDER BY t.date DESC, t.created_at DESC
        LIMIT ${limitParam}`,
@@ -429,6 +590,8 @@ const queryTransactions: ToolDefinition = {
         type: t.type,
         category: t.category_name,
         account: t.account_name,
+        transferToAccountId: t.transfer_to_account_id,
+        transferToAccount: t.transfer_to_account_name,
         date: t.date,
         notes: t.notes,
       })),

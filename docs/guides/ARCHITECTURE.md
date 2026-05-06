@@ -17,7 +17,7 @@ Shikin runs as a React SPA in the browser. Data remains local by combining:
 
 ```mermaid
 graph TB
-    UI[React UI — 18 pages] --> ZS[19 Zustand Stores]
+    UI[React UI — 18 pages] --> ZS[18 Zustand Stores]
     ZS --> DBAPI[query / execute]
     ZS --> SVC[27 Service/Lib Files]
     SVC --> DBAPI
@@ -34,27 +34,26 @@ graph TB
 
 - `src/App.tsx` sets up routing, app shell, and lazy-loaded pages.
 - `src/components/layout/` provides shared frame components (sidebar and bottom nav).
-- `src/pages/` hosts 18 page files with 12 routed pages:
+- `src/pages/` hosts 18 routed page files:
 
-| Route            | Page          | Description                                      |
-| ---------------- | ------------- | ------------------------------------------------ |
-| `/`              | Dashboard     | Overview with charts, alerts, health score, tips |
-| `/transactions`  | Transactions  | Tabbed list (transactions + recurring), import   |
-| `/accounts`      | Accounts      | Account management with credit card tracking     |
-| `/budgets`       | Budgets       | Budget creation and progress monitoring          |
-| `/goals`         | Goals         | Savings goals with progress rings                |
-| `/investments`   | Investments   | Portfolio with price charts and allocation       |
-| `/subscriptions` | Subscriptions | Recurring service tracking                       |
-| `/debt-payoff`   | Debt Payoff   | Snowball vs avalanche planner with charts        |
-| `/forecast`      | Forecast      | Cash flow projections (30/60/90 day)             |
-| `/reports`       | Reports       | Monthly/annual reports with PDF export           |
-| `/settings`      | Settings      | Currency, category rules, data                   |
+| Route           | Page         | Description                                      |
+| --------------- | ------------ | ------------------------------------------------ |
+| `/`             | Dashboard    | Overview with charts, alerts, health score, tips |
+| `/transactions` | Transactions | Tabbed list (transactions + recurring), import   |
+| `/accounts`     | Accounts     | Account management with credit card tracking     |
+| `/budgets`      | Budgets      | Budget creation and progress monitoring          |
+| `/goals`        | Goals        | Savings goals with progress rings                |
+| `/investments`  | Investments  | Portfolio with price charts and allocation       |
+| `/debt-payoff`  | Debt Payoff  | Snowball vs avalanche planner with charts        |
+| `/forecast`     | Forecast     | Cash flow projections (30/60/90 day)             |
+| `/reports`      | Reports      | Monthly/annual reports with PDF export           |
+| `/settings`     | Settings     | Currency, category rules, data                   |
 
-Additional unrouted pages: net-worth, spending-heatmap, category-management, bill-calendar.
+Additional routed pages include net-worth, spending-insights, spending-heatmap, bill-calendar, categories, insights, extensions, and reports.
 
 ### Layer 2: State and Domain Logic
 
-19 Zustand stores under `src/stores/` isolate feature state:
+18 Zustand stores under `src/stores/` isolate feature state:
 
 | Store                  | Purpose                                           |
 | ---------------------- | ------------------------------------------------- |
@@ -64,7 +63,6 @@ Additional unrouted pages: net-worth, spending-heatmap, category-management, bil
 | `category-store`       | Category management                               |
 | `goal-store`           | Savings goals with progress computation           |
 | `investment-store`     | Investment CRUD, portfolio summary, price history |
-| `subscription-store`   | Subscription tracking                             |
 | `recurring-store`      | Recurring rules, materialization on startup       |
 | `debt-store`           | Debt payoff calculations                          |
 | `forecast-store`       | Cash flow forecast generation                     |

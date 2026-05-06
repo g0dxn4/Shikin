@@ -54,7 +54,24 @@
   "credit": {
     "limit": "Limit",
     "available": "Available",
-    "dates": "Dates"
+    "dates": "Dates",
+    "pay": "Pay card",
+    "paymentTitle": "Pay credit card",
+    "paymentDescription": "Record a payment to {{card}} from one of your cash accounts.",
+    "paymentDescriptionEmpty": "Record a payment from a cash account to a credit card.",
+    "paymentDescriptionPrefix": "Payment to",
+    "sourceAccount": "Source account",
+    "sourceAccountPlaceholder": "Choose source account",
+    "amount": "Payment amount",
+    "confirmPayment": "Record payment",
+    "paymentSaving": "Recording...",
+    "paymentMax": "Current card debt: {{amount}}",
+    "paymentSuccess": "Credit card payment recorded",
+    "paymentError": "Could not record credit card payment",
+    "paymentValidation": "Enter an amount greater than zero and no more than the card balance.",
+    "paymentInsufficientFunds": "The source account does not have enough balance for this payment.",
+    "paymentCurrencyMismatch": "Credit card payments must use accounts in the same currency.",
+    "noSource": "No same-currency cash account with available funds."
   },
   "empty": {
     "title": "No accounts yet",

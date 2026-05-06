@@ -128,7 +128,7 @@ The core table. Every expense, income, and transfer is a transaction.
 
 **Design note:** The `amount` field is always positive. The `type` field determines the sign: `expense` subtracts from the account balance, `income` adds to it, and `transfer` subtracts from the source and adds to the destination.
 
-**MVP limitation:** The schema can represent a transfer destination, and the browser transaction flow handles transfers. CLI transaction-write tools intentionally reject transfer writes for now; use separate explicit-account withdrawal/deposit entries from CLI/MCP when needed.
+**Transfer behavior:** Browser and CLI/MCP one-off transaction flows handle linked transfers by subtracting from `account_id` and adding to `transfer_to_account_id`. Recurring transfer rules remain deferred.
 
 ### subscriptions
 

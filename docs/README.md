@@ -33,13 +33,13 @@
 
 | Metric            | Count |
 | ----------------- | ----- |
-| Pages (routed)    | 13    |
-| Pages (total)     | 16    |
-| Zustand Stores    | 19    |
-| CLI/MCP Tools     | 41    |
-| Service Files     | 24    |
-| Database Tables   | 19    |
-| i18n Namespaces   | 15    |
+| Pages (routed)    | 18    |
+| Pages (total)     | 18    |
+| Zustand Stores    | 18    |
+| CLI/MCP Tools     | 39    |
+| Service Files     | 26    |
+| Database Tables   | 21    |
+| i18n Namespaces   | 14    |
 | Languages         | 2     |
 | Sidebar Nav Items | 10    |
 

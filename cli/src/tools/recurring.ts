@@ -9,7 +9,6 @@ import {
   dayjs,
   advanceDate,
   boundedText,
-  unsupportedTransferMessage,
   resolveAccountId,
   recurringRulesHasCurrencyColumn,
   crossCurrencyMoveMessage,
@@ -122,10 +121,7 @@ const manageRecurringTransaction: ToolDefinition = {
       }
 
       if (type === 'transfer') {
-        return {
-          success: false,
-          message: unsupportedTransferMessage(),
-        }
+        return unsupportedRecurringTransferFailure()
       }
 
       const resolvedCategory = resolveCategoryId(category)
@@ -234,10 +230,7 @@ const manageRecurringTransaction: ToolDefinition = {
       }
       if (type !== undefined) {
         if (type === 'transfer') {
-          return {
-            success: false,
-            message: unsupportedTransferMessage(),
-          }
+          return unsupportedRecurringTransferFailure()
         }
         setClauses.push(`type = $${paramIdx++}`)
         params.push(type)

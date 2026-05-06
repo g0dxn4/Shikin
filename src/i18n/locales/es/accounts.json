@@ -54,7 +54,24 @@
   "credit": {
     "limit": "Límite",
     "available": "Disponible",
-    "dates": "Fechas"
+    "dates": "Fechas",
+    "pay": "Pagar tarjeta",
+    "paymentTitle": "Pagar tarjeta de crédito",
+    "paymentDescription": "Registra un pago a {{card}} desde una de tus cuentas de efectivo.",
+    "paymentDescriptionEmpty": "Registra un pago desde una cuenta de efectivo hacia una tarjeta de crédito.",
+    "paymentDescriptionPrefix": "Pago a",
+    "sourceAccount": "Cuenta origen",
+    "sourceAccountPlaceholder": "Elige cuenta origen",
+    "amount": "Monto del pago",
+    "confirmPayment": "Registrar pago",
+    "paymentSaving": "Registrando...",
+    "paymentMax": "Deuda actual de la tarjeta: {{amount}}",
+    "paymentSuccess": "Pago de tarjeta registrado",
+    "paymentError": "No se pudo registrar el pago de tarjeta",
+    "paymentValidation": "Ingresa un monto mayor que cero y no mayor al balance de la tarjeta.",
+    "paymentInsufficientFunds": "La cuenta origen no tiene saldo suficiente para este pago.",
+    "paymentCurrencyMismatch": "Los pagos de tarjeta deben usar cuentas en la misma moneda.",
+    "noSource": "No hay cuenta de efectivo en la misma moneda con fondos disponibles."
   },
   "empty": {
     "title": "Sin cuentas aún",

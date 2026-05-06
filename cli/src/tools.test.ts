@@ -37,6 +37,7 @@ const { tools } = await import('./tools.js')
 const addTransaction = tools.find((tool) => tool.name === 'add-transaction')!
 const updateTransaction = tools.find((tool) => tool.name === 'update-transaction')!
 const deleteTransaction = tools.find((tool) => tool.name === 'delete-transaction')!
+const queryTransactions = tools.find((tool) => tool.name === 'query-transactions')!
 const createAccount = tools.find((tool) => tool.name === 'create-account')!
 const updateAccount = tools.find((tool) => tool.name === 'update-account')!
 const getSpendingSummary = tools.find((tool) => tool.name === 'get-spending-summary')!
@@ -50,8 +51,6 @@ const manageCategoryRules = tools.find((tool) => tool.name === 'manage-category-
 const getSpendingAnomalies = tools.find((tool) => tool.name === 'get-spending-anomalies')!
 const listSubscriptions = tools.find((tool) => tool.name === 'list-subscriptions')!
 const getSubscriptionSpending = tools.find((tool) => tool.name === 'get-subscription-spending')!
-const getFinancialNews = tools.find((tool) => tool.name === 'get-financial-news')!
-const getCongressionalTrades = tools.find((tool) => tool.name === 'get-congressional-trades')!
 const getBalanceOverview = tools.find((tool) => tool.name === 'get-balance-overview')!
 const analyzeSpendingTrends = tools.find((tool) => tool.name === 'analyze-spending-trends')!
 const getForecastedCashFlow = tools.find((tool) => tool.name === 'get-forecasted-cash-flow')!
@@ -137,7 +136,18 @@ describe('CLI tool validation regressions', () => {
     expect(mockExecute).toHaveBeenNthCalledWith(
       1,
       expect.stringContaining('INSERT INTO transactions'),
-      ['tx_test_123', 'acct-2', null, 'expense', 1000, 'EUR', 'Coffee', null, expect.any(String)]
+      [
+        'tx_test_123',
+        'acct-2',
+        null,
+        null,
+        'expense',
+        1000,
+        'EUR',
+        'Coffee',
+        null,
+        expect.any(String),
+      ]
     )
     expect(result.transaction.accountId).toBe('acct-2')
   })
@@ -158,7 +168,18 @@ describe('CLI tool validation regressions', () => {
     expect(mockExecute).toHaveBeenNthCalledWith(
       1,
       expect.stringContaining('INSERT INTO transactions'),
-      ['tx_test_123', 'acct-1', null, 'expense', 1000, 'BRL', 'Coffee', null, expect.any(String)]
+      [
+        'tx_test_123',
+        'acct-1',
+        null,
+        null,
+        'expense',
+        1000,
+        'BRL',
+        'Coffee',
+        null,
+        expect.any(String),
+      ]
     )
     expect(mockExecute).toHaveBeenNthCalledWith(
       2,
@@ -244,12 +265,88 @@ describe('CLI tool validation regressions', () => {
     expect(mockExecute).not.toHaveBeenCalled()
   })
 
-  it('rejects unsupported transfer creation in add-transaction', async () => {
+  it('creates transfer transactions and updates both account balances', async () => {
+    mockQuery
+      .mockReturnValueOnce([{ id: 'acct-checking', currency: 'USD' }])
+      .mockReturnValueOnce([{ id: 'acct-savings', currency: 'USD' }])
+
     const input = addTransaction.schema.parse({
-      amount: 10,
+      amount: 25,
       type: 'transfer',
       description: 'Move cash',
-      accountId: 'acct-1',
+      accountId: 'acct-checking',
+      transferToAccountId: 'acct-savings',
+    })
+
+    const result = await addTransaction.execute(input)
+
+    expect(mockTransaction).toHaveBeenCalledTimes(1)
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('INSERT INTO transactions'),
+      [
+        'tx_test_123',
+        'acct-checking',
+        null,
+        'acct-savings',
+        'transfer',
+        2500,
+        'USD',
+        'Move cash',
+        null,
+        expect.any(String),
+      ]
+    )
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('UPDATE accounts SET balance = balance + $1'),
+      [-2500, 'acct-checking']
+    )
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('UPDATE accounts SET balance = balance + $1'),
+      [2500, 'acct-savings']
+    )
+    expect(result).toMatchObject({
+      success: true,
+      transaction: {
+        accountId: 'acct-checking',
+        transferToAccountId: 'acct-savings',
+        type: 'transfer',
+      },
+    })
+  })
+
+  it('requires a destination account for transfer creation', async () => {
+    mockQuery.mockReturnValueOnce([{ id: 'acct-checking', currency: 'USD' }])
+
+    const input = addTransaction.schema.parse({
+      amount: 25,
+      type: 'transfer',
+      description: 'Move cash',
+      accountId: 'acct-checking',
+    })
+
+    const result = await addTransaction.execute(input)
+
+    expect(result).toEqual({
+      success: false,
+      message: 'transferToAccountId is required for transfer transactions.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('rejects cross-currency transfer creation', async () => {
+    mockQuery
+      .mockReturnValueOnce([{ id: 'acct-usd', currency: 'USD' }])
+      .mockReturnValueOnce([{ id: 'acct-eur', currency: 'EUR' }])
+
+    const input = addTransaction.schema.parse({
+      amount: 25,
+      type: 'transfer',
+      description: 'Move cash',
+      accountId: 'acct-usd',
+      transferToAccountId: 'acct-eur',
     })
 
     const result = await addTransaction.execute(input)
@@ -257,9 +354,8 @@ describe('CLI tool validation regressions', () => {
     expect(result).toEqual({
       success: false,
       message:
-        'Transfer transactions are not supported by CLI/MCP transaction-write tools in this MVP. Workaround: record the withdrawal and matching deposit as separate entries with explicit account IDs.',
+        'Cannot transfer from USD to EUR. Cross-currency transfers are not supported because no FX conversion is applied.',
     })
-    expect(mockTransaction).not.toHaveBeenCalled()
     expect(mockExecute).not.toHaveBeenCalled()
   })
 
@@ -914,32 +1010,6 @@ describe('CLI tool validation regressions', () => {
     })
   })
 
-  it('keeps placeholder financial news tool available with a structured unavailable response', async () => {
-    const result = await getFinancialNews.execute({ symbol: 'AAPL', days: 7 })
-
-    expect(result).toEqual({
-      success: false,
-      message:
-        'Financial news is not available in this release surface. External news feeds are not configured yet.',
-      error:
-        'Financial news is not available in this release surface. External news feeds are not configured yet.',
-      errorType: 'unavailable_error',
-    })
-  })
-
-  it('keeps placeholder congressional trades tool available with a structured unavailable response', async () => {
-    const result = await getCongressionalTrades.execute({ symbol: 'AAPL', days: 30 })
-
-    expect(result).toEqual({
-      success: false,
-      message:
-        'Congressional trades are not available in this release surface. External data feeds are not configured yet.',
-      error:
-        'Congressional trades are not available in this release surface. External data feeds are not configured yet.',
-      errorType: 'unavailable_error',
-    })
-  })
-
   it('detects large transactions as spending anomalies', async () => {
     mockQuery.mockImplementation((sql: string) => {
       if (sql.includes('t.amount >= $1')) {
@@ -1386,6 +1456,7 @@ describe('CLI tool validation regressions', () => {
       null,
       'acct-1',
       'GBP',
+      null,
       'tx-1',
     ])
   })
@@ -1422,6 +1493,7 @@ describe('CLI tool validation regressions', () => {
       'updated note',
       'acct-1',
       'MXN',
+      null,
       'tx-legacy',
     ])
     expect(result.success).toBe(true)
@@ -1875,8 +1947,9 @@ describe('CLI tool validation regressions', () => {
 
     expect(result).toEqual({
       success: false,
+      reason: 'unsupported_recurring_transfer',
       message:
-        'Transfer transactions are not supported by CLI/MCP transaction-write tools in this MVP. Workaround: record the withdrawal and matching deposit as separate entries with explicit account IDs.',
+        'Recurring transfers are not supported yet. Create separate recurring income/expense rules until destination-account support is fully implemented.',
     })
     expect(mockExecute).not.toHaveBeenCalled()
   })
@@ -2288,6 +2361,7 @@ describe('CLI tool validation regressions', () => {
       'old notes',
       'acct-1',
       'JPY',
+      null,
       'tx-1',
     ])
     expect(result).toMatchObject({
@@ -2365,6 +2439,91 @@ describe('CLI tool validation regressions', () => {
     expect(result).toEqual({
       success: true,
       message: 'Deleted expense: $10.00 "Coffee" from 2026-04-14',
+    })
+  })
+
+  it('reverses both accounts when deleting a transfer transaction', async () => {
+    mockQuery.mockReturnValueOnce([
+      {
+        id: 'tx-transfer',
+        amount: 2500,
+        type: 'transfer',
+        account_id: 'acct-checking',
+        transfer_to_account_id: 'acct-savings',
+        description: 'Move cash',
+        date: '2026-04-14',
+      },
+    ])
+
+    const input = deleteTransaction.schema.parse({
+      transactionId: 'tx-transfer',
+    })
+
+    const result = await deleteTransaction.execute(input)
+
+    expect(mockTransaction).toHaveBeenCalledTimes(1)
+    expect(mockExecute).toHaveBeenCalledTimes(3)
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('UPDATE accounts SET balance = balance + $1'),
+      [2500, 'acct-checking']
+    )
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('UPDATE accounts SET balance = balance - $1'),
+      [2500, 'acct-savings']
+    )
+    expect(mockExecute).toHaveBeenNthCalledWith(3, 'DELETE FROM transactions WHERE id = $1', [
+      'tx-transfer',
+    ])
+    expect(result).toEqual({
+      success: true,
+      message: 'Deleted transfer: $25.00 "Move cash" from 2026-04-14',
+    })
+  })
+
+  it('filters query-transactions by source or destination transfer account', async () => {
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'tx-transfer',
+          description: 'Card payment',
+          amount: 5000,
+          type: 'transfer',
+          date: '2026-04-14',
+          notes: null,
+          category_name: 'Uncategorized',
+          account_name: 'Checking',
+          transfer_to_account_id: 'acct-card',
+          transfer_to_account_name: 'Visa',
+        },
+      ])
+      .mockReturnValueOnce([{ count: 1 }])
+
+    const input = queryTransactions.schema.parse({ accountId: 'acct-card', limit: 5 })
+
+    const result = await queryTransactions.execute(input)
+
+    expect(mockQuery).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('(t.account_id = $1 OR t.transfer_to_account_id = $2)'),
+      ['acct-card', 'acct-card', 5]
+    )
+    expect(mockQuery).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('(t.account_id = $1 OR t.transfer_to_account_id = $2)'),
+      ['acct-card', 'acct-card']
+    )
+    expect(result).toMatchObject({
+      count: 1,
+      totalMatched: 1,
+      transactions: [
+        {
+          id: 'tx-transfer',
+          transferToAccountId: 'acct-card',
+          transferToAccount: 'Visa',
+        },
+      ],
     })
   })
 

@@ -21,29 +21,26 @@ Practical map of the current React frontend for hardening and follow-up work.
 
 ### Routed pages (current)
 
-| Route                | Page component                    |
-| -------------------- | --------------------------------- |
-| `/`                  | `src/pages/dashboard.tsx`         |
-| `/transactions`      | `src/pages/transactions.tsx`      |
-| `/accounts`          | `src/pages/accounts.tsx`          |
-| `/budgets`           | `src/pages/budgets.tsx`           |
-| `/goals`             | `src/pages/goals.tsx`             |
-| `/investments`       | `src/pages/investments.tsx`       |
-| `/subscriptions`     | `src/pages/subscriptions.tsx`     |
-| `/debt-payoff`       | `src/pages/debt-payoff.tsx`       |
-| `/forecast`          | `src/pages/forecast.tsx`          |
-| `/net-worth`         | `src/pages/net-worth.tsx`         |
-| `/spending-insights` | `src/pages/spending-insights.tsx` |
-| `/spending-heatmap`  | `src/pages/spending-heatmap.tsx`  |
-| `/settings`          | `src/pages/settings.tsx`          |
-| `/bills`             | `src/pages/bills.tsx`             |
-| `/reports`           | `src/pages/reports.tsx`           |
-| `/extensions`        | `src/pages/extensions.tsx`        |
-
-### Present but not wired in `App.tsx`
-
-- `src/pages/bill-calendar.tsx`
-- `src/pages/category-management.tsx`
+| Route                | Page component                      |
+| -------------------- | ----------------------------------- |
+| `/`                  | `src/pages/dashboard.tsx`           |
+| `/transactions`      | `src/pages/transactions.tsx`        |
+| `/accounts`          | `src/pages/accounts.tsx`            |
+| `/budgets`           | `src/pages/budgets.tsx`             |
+| `/goals`             | `src/pages/goals.tsx`               |
+| `/insights`          | `src/pages/insights.tsx`            |
+| `/investments`       | `src/pages/investments.tsx`         |
+| `/debt-payoff`       | `src/pages/debt-payoff.tsx`         |
+| `/forecast`          | `src/pages/forecast.tsx`            |
+| `/net-worth`         | `src/pages/net-worth.tsx`           |
+| `/spending-insights` | `src/pages/spending-insights.tsx`   |
+| `/spending-heatmap`  | `src/pages/spending-heatmap.tsx`    |
+| `/settings`          | `src/pages/settings.tsx`            |
+| `/bills`             | `src/pages/bills.tsx`               |
+| `/bill-calendar`     | `src/pages/bill-calendar.tsx`       |
+| `/reports`           | `src/pages/reports.tsx`             |
+| `/extensions`        | `src/pages/extensions.tsx`          |
+| `/categories`        | `src/pages/category-management.tsx` |
 
 ### Direct page-to-data access (bypassing stores)
 
@@ -96,7 +93,6 @@ Practical map of the current React frontend for hardening and follow-up work.
 | `budget-store.ts`            | Budgets CRUD + period spend status                              |
 | `goal-store.ts`              | Goals CRUD + progress/deadline math                             |
 | `investment-store.ts`        | Investments CRUD, latest prices, portfolio summary/history      |
-| `subscription-store.ts`      | Browser subscription placeholder state (local rows are CLI/MCP-only in MVP) |
 | `recurring-store.ts`         | Recurring rules CRUD + materialization into transactions        |
 | `debt-store.ts`              | Debt strategy planner (snowball/avalanche)                      |
 | `forecast-store.ts`          | Cashflow forecast generation + range selection                  |
@@ -172,10 +168,10 @@ Practical map of the current React frontend for hardening and follow-up work.
   - Store tests: broad coverage across major stores (`__tests__/*-store.test.ts`).
   - Lib tests: money, ULID, theme, exchange rates, forecasting, anomaly logic, splits, bridge headers, storage failure paths.
 - **E2E (Playwright, `e2e/*.spec.ts`):**
-  - navigation/layout/dashboard/settings/accounts/transactions/budgets/subscriptions/i18n/responsive.
+  - navigation/layout/dashboard/settings/accounts/transactions/budgets/i18n/responsive.
 - **Notably thinner coverage (current):**
   - No dedicated page tests for goals, debt-payoff, forecast, net-worth, spending-insights/heatmap.
-  - No dedicated store tests for `budget-store`, `investment-store`, `net-worth-store`, `recap-store`, `spending-insights-store`, `subscription-store`.
+  - No dedicated store tests for `budget-store`, `investment-store`, `net-worth-store`, `recap-store`, `spending-insights-store`.
 
 ### Browser bridge regression coverage (frontend hardening workflow)
 

@@ -40,8 +40,7 @@ describe('MCP tool registration', () => {
         'list-subscriptions',
         'get-spending-summary',
         'get-education-tip',
-        'get-financial-news',
-        'get-congressional-trades',
+        'generate-portfolio-review',
       ])
     )
   })
@@ -126,27 +125,10 @@ describe('MCP tool error envelopes', () => {
     })
   })
 
-  it('returns stable unavailable responses for real unavailable catalog tools', async () => {
-    const unavailableTools = tools.filter((tool) => tool.mcpUnavailableMessage)
-
-    expect(unavailableTools.map((tool) => tool.name).sort()).toEqual([
-      'get-congressional-trades',
-      'get-financial-news',
-    ])
-
-    for (const tool of unavailableTools) {
-      const handler = createMcpToolHandler(tool)
-      const result = await handler({})
-      const payload = JSON.parse(result.content[0]!.text)
-
-      expect(result.isError).toBe(true)
-      expect(payload).toEqual({
-        success: false,
-        message: tool.mcpUnavailableMessage,
-        error: tool.mcpUnavailableMessage,
-        errorType: 'unavailable_error',
-      })
-    }
+  it('does not expose unavailable tools in the real catalog', () => {
+    expect(
+      tools.filter((tool) => tool.mcpUnavailableMessage || tool.cliUnavailableMessage)
+    ).toEqual([])
   })
 
   it('returns validation errors with a top-level error string and field-level issues', async () => {

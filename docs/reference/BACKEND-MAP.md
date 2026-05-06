@@ -6,16 +6,16 @@ This is a practical backend map for the current repo layout. It is a documentati
 
 - **Desktop app runtime**
   - `src/main.tsx` → app shell and routing.
-  - `src-tauri/src/main.rs` → starts `shikin_lib::run()`.
-  - `src-tauri/src/lib.rs` → Rust bootstrap + plugin registration (`sql`, `store`, `fs`, `updater`).
+  - `src-tauri/src/main.rs` → starts `shikin_lib::run_entrypoint(...)`.
+  - `src-tauri/src/lib.rs` → Rust bootstrap, desktop/CLI/MCP entrypoint routing, and plugin registration (`sql`, `store`, `fs`, `updater`).
   - `src-tauri/migrations/001_core_tables.sql`, `003_credit_cards.sql` and migration list in `src-tauri/src/lib.rs`.
 - **Browser mode runtime**
   - `pnpm dev` executes `scripts/dev.mjs`, which starts `scripts/data-server.mjs` and Vite in one process group.
   - Browser runtime DB/storage calls are funneled through `src/lib/database.ts`, `src/lib/storage.ts`, and `src/lib/virtual-fs.ts`.
 - **CLI mode**
   - `cli/src/cli.ts` registers every command from `cli/src/tools.ts` and runs via Commander.
-- Current shared tool surface: **41 tool definitions** (from `cli/src/tools.ts`), including **2 structured unavailable placeholders** for external-feed features.
-- MVP limitation decisions: CLI transaction-write tools reject transfer writes; debt payoff uses inferred credit-card balances with APR fixed at 0% because account APR is not stored; browser subscription management is a placeholder while CLI/MCP can read local subscription rows.
+- Current shared tool surface: **39 tool definitions** (from `cli/src/tools.ts`), all available end-to-end against local data.
+- MVP limitation decisions: one-off transfer writes are supported in the app and CLI/MCP, but recurring transfer rules remain deferred; debt payoff uses inferred credit-card balances with APR fixed at 0% because account APR is not stored; browser subscription management is deferred while local subscription rows still feed forecasts and CLI/MCP analytics.
 - **MCP mode**
   - `cli/src/mcp-server.ts` registers the same `tools` and bootstraps MCP over stdio.
 
@@ -36,9 +36,9 @@ This is a practical backend map for the current repo layout. It is a documentati
    - Calls `close()` from `cli/src/database.ts` in finally.
 
 2. `cli/src/tools.ts`:
-   - Defines 41 shared tool definitions (39 available end-to-end, plus 2 structured unavailable placeholders).
+   - Defines 39 shared tool definitions.
    - Each tool is self-contained: schema + business SQL + return payload.
-   - `add-transaction`, `update-transaction`, and recurring write paths reject transfer writes in the CLI/MCP MVP. Use separate explicit-account withdrawal/deposit entries as the documented workaround.
+   - `add-transaction`, `update-transaction`, `delete-transaction`, and `query-transactions` are transfer-aware. Recurring transfer rules remain deferred because recurring rule materialization does not yet carry destination-account support.
 
 3. `cli/src/database.ts` (CLI-only data layer):
    - Uses `better-sqlite3` against `~/.local/share/com.asf.shikin/shikin.db`.
@@ -47,8 +47,8 @@ This is a practical backend map for the current repo layout. It is a documentati
 
 ## 3) MCP flow
 
-- `cli/src/mcp-server.ts` creates `McpServer({ name: 'shikin', version: '0.1.0' })`.
-- Registers **all 41** shared tool definitions from `tools` with:
+- `cli/src/mcp-server.ts` creates `McpServer({ name: 'shikin', version: '<release>' })`.
+- Registers **all 39** shared tool definitions from `tools` with:
   - tool name
   - description
   - `tool.schema.shape`
@@ -129,7 +129,7 @@ This is a practical backend map for the current repo layout. It is a documentati
 - E2E exists for UI flows (`e2e/*.spec.ts`) but does not exercise CLI/MCP/datastore server internals directly.
 - **Practical CLI/MCP/data-server strategy:**
   - **CLI (`cli/src/tools.ts`)**: add integration tests that execute real SQL against a temp DB for one CRUD path (`add-account`/`add-transaction`/delete) plus one aggregate path (`get-balance-overview` or equivalent).
-   - **MCP (`cli/src/mcp-server.ts`)**: add a transport harness that boots the server, asserts all **41** tool registrations, and executes one representative tool end-to-end.
+  - **MCP (`cli/src/mcp-server.ts`)**: add a transport harness that boots the server, asserts all **39** tool registrations, and executes one representative tool end-to-end.
   - **Data server (`scripts/data-server.mjs`)**: add HTTP contract tests for `/api/db/*`, `/api/store*`, and `/api/fs/*`.
   - **Hardening checks**: add explicit `safePath` boundary cases (relative paths, separator tricks, normalization edge cases) as verification tests.
 
@@ -138,9 +138,7 @@ This is a practical backend map for the current repo layout. It is a documentati
 - **Updater manifest**: `src-tauri/tauri.conf.json` → `plugins.updater.endpoints` (`https://github.com/g0dxn4/Shikin/releases/latest/download/latest.json`).
 - **Exchange rates**: `src/lib/exchange-rate-service.ts` → `https://api.frankfurter.app`.
 - **Prices**: `src/lib/price-service.ts` → Alpha Vantage + CoinGecko APIs.
-- **News**: `src/lib/news-service.ts` → Finnhub + NewsAPI.
-- **Congressional trades dataset**: `src/lib/congressional-trades.ts` → house stock watcher S3 dataset.
-- **CLI/MCP external-feed placeholders**: `get-financial-news` and `get-congressional-trades` do not call those feeds in the MVP; they return structured unavailable responses.
+- **News**: `src/lib/news-service.ts` → Finnhub + NewsAPI for browser-side price/intelligence surfaces that request it.
 
 ## 9) Major hardening hotspots already identified
 
@@ -153,7 +151,7 @@ This is a practical backend map for the current repo layout. It is a documentati
 
 3. **CLI/bridge error handling gaps**
    - Browser `src/lib/storage.ts` `createBrowserStore()` swallows get/set failures (reads return `null`, writes silently drop).
-   - `cli/src/tools.ts` is feature-complete but several integrations are placeholders/deferred (notably external-feed placeholders return structured unavailable results).
+   - `cli/src/tools.ts` is the canonical automation catalog; keep CLI, MCP, and docs in sync when adding or removing tools.
 
 4. **Schema/API drift risk**
 

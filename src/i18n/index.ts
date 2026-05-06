@@ -8,7 +8,6 @@ import enSettings from './locales/en/settings.json'
 import enAccounts from './locales/en/accounts.json'
 import enTransactions from './locales/en/transactions.json'
 import enBudgets from './locales/en/budgets.json'
-import enSubscriptions from './locales/en/subscriptions.json'
 import enInvestments from './locales/en/investments.json'
 import enDebtPayoff from './locales/en/debtPayoff.json'
 import enForecast from './locales/en/forecast.json'
@@ -24,7 +23,6 @@ import esSettings from './locales/es/settings.json'
 import esAccounts from './locales/es/accounts.json'
 import esTransactions from './locales/es/transactions.json'
 import esBudgets from './locales/es/budgets.json'
-import esSubscriptions from './locales/es/subscriptions.json'
 import esInvestments from './locales/es/investments.json'
 import esDebtPayoff from './locales/es/debtPayoff.json'
 import esForecast from './locales/es/forecast.json'
@@ -42,7 +40,6 @@ export const resources = {
     accounts: enAccounts,
     transactions: enTransactions,
     budgets: enBudgets,
-    subscriptions: enSubscriptions,
     investments: enInvestments,
     debtPayoff: enDebtPayoff,
     forecast: enForecast,
@@ -59,7 +56,6 @@ export const resources = {
     accounts: esAccounts,
     transactions: esTransactions,
     budgets: esBudgets,
-    subscriptions: esSubscriptions,
     investments: esInvestments,
     debtPayoff: esDebtPayoff,
     forecast: esForecast,
@@ -85,7 +81,6 @@ i18n
       'accounts',
       'transactions',
       'budgets',
-      'subscriptions',
       'investments',
       'debtPayoff',
       'forecast',

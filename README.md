@@ -88,10 +88,42 @@ Current MVP limitations:
 
 ### Prerequisites
 
+Released desktop installs do not require developer tools. For source setup, install:
+
 - [Node.js](https://nodejs.org/) >= 18
 - [pnpm](https://pnpm.io/) >= 9
 
 ### Installation
+
+Install the latest released desktop app on Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh
+```
+
+The helper is interactive by default. It detects your distro, recommends `.deb` on Debian/Ubuntu, `.rpm` on RPM distros, or AppImage elsewhere, then asks what to install. To skip the prompt and auto-select:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --auto
+```
+
+Sudo is optional. Native `.deb`/`.rpm` packages require admin privileges, but declining the sudo prompt falls back to the AppImage install under `~/Applications`. To skip sudo entirely:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --no-sudo
+```
+
+You can force a specific install type:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --deb
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --rpm
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --appimage
+```
+
+Windows users can install the `.msi` or setup `.exe` from [GitHub Releases](https://github.com/g0dxn4/Shikin/releases/latest). macOS users can install the `.dmg`.
+
+Developer/source setup:
 
 ```bash
 git clone https://github.com/g0dxn4/Shikin.git

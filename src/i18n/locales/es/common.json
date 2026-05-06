@@ -45,6 +45,28 @@
     "empty": "Sin datos a\u00fan",
     "success": "\u00c9xito"
   },
+  "updates": {
+    "prompt": {
+      "badge": "Actualizaci\u00f3n de escritorio firmada",
+      "title": "Shikin v{{version}} est\u00e1 lista",
+      "description": "Instala la versi\u00f3n firmada y reinicia en un solo paso. Tus datos financieros locales permanecen en este dispositivo.",
+      "readyTitle": "Versi\u00f3n {{version}} instalada",
+      "readyDescription": "Reinicia Shikin para usar la versi\u00f3n actualizada.",
+      "availableStatus": "Versi\u00f3n verificada encontrada",
+      "downloadingStatus": "Descargando e instalando",
+      "readyStatus": "Lista para reiniciar",
+      "restartingStatus": "Reiniciando Shikin",
+      "signedStatus": "Firmada con la clave configurada del actualizador de Shikin.",
+      "errorTitle": "La actualizaci\u00f3n necesita atenci\u00f3n",
+      "updateNow": "Actualizar y reiniciar",
+      "installing": "Actualizando...",
+      "restartNow": "Reiniciar ahora",
+      "restarting": "Reiniciando...",
+      "dismiss": "Descartar aviso de actualizaci\u00f3n",
+      "downloadProgress": "{{downloaded}} de {{total}} descargados",
+      "downloadProgressAria": "Progreso de descarga de la actualizaci\u00f3n"
+    }
+  },
   "extensions": {
     "title": "Extensiones",
     "description": "Herramientas e integraciones locales para usar Shikin dia a dia.",

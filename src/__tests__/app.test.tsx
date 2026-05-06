@@ -11,7 +11,9 @@ const {
   mockRefreshNetWorth,
   mockInitPriceScheduler,
   mockStopPriceScheduler,
-  mockCheckForUpdates,
+  mockGetAvailableUpdate,
+  mockInstallUpdate,
+  mockRelaunchToApplyUpdate,
 } = vi.hoisted(() => ({
   mockMaterializeTransactions: vi.fn(),
   mockAutoRefreshRates: vi.fn(),
@@ -20,7 +22,9 @@ const {
   mockRefreshNetWorth: vi.fn(),
   mockInitPriceScheduler: vi.fn(),
   mockStopPriceScheduler: vi.fn(),
-  mockCheckForUpdates: vi.fn(),
+  mockGetAvailableUpdate: vi.fn(),
+  mockInstallUpdate: vi.fn(),
+  mockRelaunchToApplyUpdate: vi.fn(),
 }))
 
 vi.mock('react-router', () => ({
@@ -28,6 +32,7 @@ vi.mock('react-router', () => ({
   Navigate: ({ to }: { to: string }) => <div>Navigate to {to}</div>,
   Routes: ({ children }: { children: ReactNode }) => <>{children}</>,
   Route: ({ element }: { element?: ReactNode }) => <>{element ?? null}</>,
+  Link: ({ to, children }: { to: string; children: ReactNode }) => <a href={to}>{children}</a>,
 }))
 
 vi.mock('sonner', () => ({
@@ -82,7 +87,9 @@ vi.mock('@/lib/price-scheduler', () => ({
 }))
 
 vi.mock('@/lib/updater', () => ({
-  checkForUpdates: mockCheckForUpdates,
+  getAvailableUpdate: mockGetAvailableUpdate,
+  installUpdate: mockInstallUpdate,
+  relaunchToApplyUpdate: mockRelaunchToApplyUpdate,
 }))
 
 import App from '../App'
@@ -99,6 +106,9 @@ describe('App startup orchestration', () => {
     mockFetchAccounts.mockResolvedValue(undefined)
     mockSnapshotBalances.mockResolvedValue(undefined)
     mockRefreshNetWorth.mockResolvedValue(undefined)
+    mockGetAvailableUpdate.mockResolvedValue(null)
+    mockInstallUpdate.mockResolvedValue(undefined)
+    mockRelaunchToApplyUpdate.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -123,7 +133,7 @@ describe('App startup orchestration', () => {
     expect(mockSnapshotBalances).not.toHaveBeenCalled()
     expect(mockRefreshNetWorth).not.toHaveBeenCalled()
     expect(mockInitPriceScheduler).toHaveBeenCalledTimes(1)
-    expect(mockCheckForUpdates).toHaveBeenCalledTimes(1)
+    expect(mockGetAvailableUpdate).toHaveBeenCalledTimes(1)
   })
 
   it('retries startup tasks and clears the banner after recovery', async () => {
@@ -185,6 +195,174 @@ describe('App startup orchestration', () => {
 
     await waitFor(() => {
       expect(screen.queryByText('Startup tasks need attention')).not.toBeInTheDocument()
+    })
+  })
+
+  it('installs and restarts a startup update from one click', async () => {
+    const user = userEvent.setup()
+    mockGetAvailableUpdate.mockResolvedValueOnce({
+      available: true,
+      version: '0.2.7',
+      downloadAndInstall: vi.fn(),
+    })
+
+    render(<App />)
+
+    expect(await screen.findByText('Shikin v0.2.7 is ready')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Update & restart' }))
+
+    await waitFor(() => {
+      expect(mockInstallUpdate).toHaveBeenCalledTimes(1)
+      expect(mockRelaunchToApplyUpdate).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('hides the startup update card when dismissed before installing', async () => {
+    const user = userEvent.setup()
+    mockGetAvailableUpdate.mockResolvedValueOnce({
+      available: true,
+      version: '0.2.7',
+      downloadAndInstall: vi.fn(),
+    })
+
+    render(<App />)
+
+    expect(await screen.findByText('Shikin v0.2.7 is ready')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Dismiss update prompt' }))
+
+    await waitFor(() => {
+      expect(screen.queryByText('Shikin v0.2.7 is ready')).not.toBeInTheDocument()
+    })
+  })
+
+  it('hides the startup update card with Escape before installing', async () => {
+    const user = userEvent.setup()
+    mockGetAvailableUpdate.mockResolvedValueOnce({
+      available: true,
+      version: '0.2.7',
+      downloadAndInstall: vi.fn(),
+    })
+
+    render(<App />)
+
+    expect(await screen.findByText('Shikin v0.2.7 is ready')).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+
+    await waitFor(() => {
+      expect(screen.queryByText('Shikin v0.2.7 is ready')).not.toBeInTheDocument()
+    })
+  })
+
+  it('does not dismiss the startup update card when Escape was already handled', async () => {
+    mockGetAvailableUpdate.mockResolvedValueOnce({
+      available: true,
+      version: '0.2.7',
+      downloadAndInstall: vi.fn(),
+    })
+
+    render(<App />)
+
+    expect(await screen.findByText('Shikin v0.2.7 is ready')).toBeInTheDocument()
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    })
+    event.preventDefault()
+    window.dispatchEvent(event)
+
+    expect(screen.getByText('Shikin v0.2.7 is ready')).toBeInTheDocument()
+  })
+
+  it('retries install from the startup update card after install failure', async () => {
+    const user = userEvent.setup()
+    mockGetAvailableUpdate.mockResolvedValueOnce({
+      available: true,
+      version: '0.2.7',
+      downloadAndInstall: vi.fn(),
+    })
+    mockInstallUpdate
+      .mockRejectedValueOnce(new Error('Download failed'))
+      .mockResolvedValueOnce(undefined)
+
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: 'Update & restart' }))
+
+    expect(await screen.findByText('Download failed')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Update & restart' }))
+
+    await waitFor(() => {
+      expect(mockInstallUpdate).toHaveBeenCalledTimes(2)
+      expect(mockRelaunchToApplyUpdate).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('retries only restart after startup update relaunch failure', async () => {
+    const user = userEvent.setup()
+    mockGetAvailableUpdate.mockResolvedValueOnce({
+      available: true,
+      version: '0.2.7',
+      downloadAndInstall: vi.fn(),
+    })
+    mockRelaunchToApplyUpdate
+      .mockRejectedValueOnce(new Error('Restart failed'))
+      .mockResolvedValueOnce(undefined)
+
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: 'Update & restart' }))
+
+    expect(await screen.findByText('Restart failed')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Restart now' }))
+
+    await waitFor(() => {
+      expect(mockInstallUpdate).toHaveBeenCalledTimes(1)
+      expect(mockRelaunchToApplyUpdate).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  it('keeps an installed startup update ready when startup tasks are retried', async () => {
+    const user = userEvent.setup()
+    mockMaterializeTransactions
+      .mockRejectedValueOnce(new Error('Recurring down'))
+      .mockResolvedValue(undefined)
+    mockGetAvailableUpdate.mockResolvedValue({
+      available: true,
+      version: '0.2.7',
+      downloadAndInstall: vi.fn(),
+    })
+    mockRelaunchToApplyUpdate
+      .mockRejectedValueOnce(new Error('Restart failed'))
+      .mockResolvedValueOnce(undefined)
+
+    render(<App />)
+
+    expect(await screen.findByText('Startup tasks need attention')).toBeInTheDocument()
+
+    await user.click(await screen.findByRole('button', { name: 'Update & restart' }))
+
+    expect(await screen.findByText('Restart failed')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Retry startup' }))
+
+    await waitFor(() => {
+      expect(screen.queryByText('Startup tasks need attention')).not.toBeInTheDocument()
+    })
+    expect(screen.getByText('Version 0.2.7 is installed')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Restart now' }))
+
+    await waitFor(() => {
+      expect(mockGetAvailableUpdate).toHaveBeenCalledTimes(1)
+      expect(mockInstallUpdate).toHaveBeenCalledTimes(1)
+      expect(mockRelaunchToApplyUpdate).toHaveBeenCalledTimes(2)
     })
   })
 })

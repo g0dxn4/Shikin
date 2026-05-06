@@ -45,6 +45,28 @@
     "empty": "No data yet",
     "success": "Success"
   },
+  "updates": {
+    "prompt": {
+      "badge": "Signed desktop update",
+      "title": "Shikin v{{version}} is ready",
+      "description": "Install the signed release and restart in one step. Your local finance data stays on this device.",
+      "readyTitle": "Version {{version}} is installed",
+      "readyDescription": "Restart Shikin to switch to the updated build.",
+      "availableStatus": "Verified release found",
+      "downloadingStatus": "Downloading and installing",
+      "readyStatus": "Ready to relaunch",
+      "restartingStatus": "Restarting Shikin",
+      "signedStatus": "Signed by the configured Shikin updater key.",
+      "errorTitle": "Update needs attention",
+      "updateNow": "Update & restart",
+      "installing": "Updating...",
+      "restartNow": "Restart now",
+      "restarting": "Restarting...",
+      "dismiss": "Dismiss update prompt",
+      "downloadProgress": "{{downloaded}} of {{total}} downloaded",
+      "downloadProgressAria": "Update download progress"
+    }
+  },
   "extensions": {
     "title": "Extensions",
     "description": "Local tools and integrations that make Shikin useful day to day.",

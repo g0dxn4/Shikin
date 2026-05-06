@@ -5,13 +5,22 @@ import { ErrorBoundary } from '@/components/error-boundary'
 import { AppShell } from '@/components/layout/app-shell'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
+import {
+  OneClickUpdateCard,
+  type OneClickUpdatePhase,
+} from '@/components/update/one-click-update-card'
 import { getErrorMessage } from '@/lib/errors'
 import { useRecurringStore } from '@/stores/recurring-store'
 import { useCurrencyStore } from '@/stores/currency-store'
 import { useAccountStore } from '@/stores/account-store'
 import { useNetWorthStore } from '@/stores/net-worth-store'
 import { initPriceScheduler, stopPriceScheduler } from '@/lib/price-scheduler'
-import { checkForUpdates } from '@/lib/updater'
+import {
+  getAvailableUpdate,
+  installUpdate,
+  relaunchToApplyUpdate,
+  type AvailableUpdate,
+} from '@/lib/updater'
 import '@/i18n'
 import '@/styles/globals.css'
 
@@ -60,7 +69,16 @@ const CategoryManagement = lazy(() =>
 export default function App() {
   const [startupErrors, setStartupErrors] = useState<Record<string, string>>({})
   const [startupInProgress, setStartupInProgress] = useState(false)
+  const [startupUpdate, setStartupUpdate] = useState<AvailableUpdate | null>(null)
+  const [updatePromptDismissed, setUpdatePromptDismissed] = useState(false)
+  const [updatePhase, setUpdatePhase] = useState<OneClickUpdatePhase>('available')
+  const [updateError, setUpdateError] = useState<string | null>(null)
+  const [downloadedBytes, setDownloadedBytes] = useState(0)
+  const [downloadTotalBytes, setDownloadTotalBytes] = useState<number | null>(null)
+  const [readyUpdateVersion, setReadyUpdateVersion] = useState<string | null>(null)
   const startupInFlightRef = useRef(false)
+  const updateInFlightRef = useRef(false)
+  const readyUpdateVersionRef = useRef<string | null>(null)
   const materializeTransactions = useRecurringStore((s) => s.materializeTransactions)
   const autoRefreshRates = useCurrencyStore((s) => s.autoRefreshIfStale)
   const fetchAccounts = useAccountStore((s) => s.fetch)
@@ -84,6 +102,84 @@ export default function App() {
       return { ...current, [key]: message }
     })
   }, [])
+
+  const checkStartupUpdate = useCallback(async () => {
+    if (updateInFlightRef.current || readyUpdateVersionRef.current) return
+
+    try {
+      const update = await getAvailableUpdate()
+      if (!update) return
+
+      setStartupUpdate(update)
+      readyUpdateVersionRef.current = null
+      setReadyUpdateVersion(null)
+      setUpdatePhase('available')
+      setUpdateError(null)
+      setDownloadedBytes(0)
+      setDownloadTotalBytes(null)
+      setUpdatePromptDismissed(false)
+    } catch (error) {
+      console.error('Update check failed:', getErrorMessage(error))
+    }
+  }, [])
+
+  const restartForStartupUpdate = useCallback(async () => {
+    setUpdatePhase('restarting')
+    setUpdateError(null)
+
+    try {
+      await relaunchToApplyUpdate()
+    } catch (error) {
+      setUpdateError(getErrorMessage(error))
+      setUpdatePhase('error')
+    }
+  }, [])
+
+  const installAndRestartStartupUpdate = useCallback(async () => {
+    if (updateInFlightRef.current) return
+
+    if (readyUpdateVersion) {
+      updateInFlightRef.current = true
+      try {
+        await restartForStartupUpdate()
+      } finally {
+        updateInFlightRef.current = false
+      }
+      return
+    }
+
+    if (!startupUpdate) return
+
+    updateInFlightRef.current = true
+    setUpdatePhase('downloading')
+    setUpdateError(null)
+    setDownloadedBytes(0)
+    setDownloadTotalBytes(null)
+
+    try {
+      const version = startupUpdate.version
+      await installUpdate(startupUpdate, (progress) => {
+        if (progress.event === 'Started') {
+          setDownloadTotalBytes(progress.data.contentLength ?? null)
+          setDownloadedBytes(0)
+          return
+        }
+
+        if (progress.event === 'Progress') {
+          setDownloadedBytes((current) => current + progress.data.chunkLength)
+        }
+      })
+      readyUpdateVersionRef.current = version
+      setReadyUpdateVersion(version)
+      setUpdatePhase('ready')
+      await restartForStartupUpdate()
+    } catch (error) {
+      setUpdateError(getErrorMessage(error))
+      setUpdatePhase('error')
+    } finally {
+      updateInFlightRef.current = false
+    }
+  }, [readyUpdateVersion, restartForStartupUpdate, startupUpdate])
 
   const runStartupTasks = useCallback(() => {
     if (startupInFlightRef.current) return
@@ -125,9 +221,10 @@ export default function App() {
       setStartupInProgress(false)
     })
 
-    checkForUpdates()
+    void checkStartupUpdate()
   }, [
     autoRefreshRates,
+    checkStartupUpdate,
     clearStartupError,
     fetchAccounts,
     materializeTransactions,
@@ -166,6 +263,24 @@ export default function App() {
               </div>
             </div>
           )}
+
+          {startupUpdate &&
+            (!updatePromptDismissed ||
+              updatePhase === 'downloading' ||
+              updatePhase === 'restarting') && (
+              <OneClickUpdateCard
+                version={readyUpdateVersion ?? startupUpdate.version}
+                phase={updatePhase}
+                error={updateError}
+                downloadedBytes={downloadedBytes}
+                totalBytes={downloadTotalBytes}
+                readyToRestart={Boolean(readyUpdateVersion)}
+                onUpdateAndRestart={() => {
+                  void installAndRestartStartupUpdate()
+                }}
+                onDismiss={() => setUpdatePromptDismissed(true)}
+              />
+            )}
 
           <Suspense fallback={<LoadingSpinner />}>
             <Routes>

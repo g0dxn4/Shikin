@@ -420,6 +420,7 @@ export function Investments() {
                 <Area
                   type="monotone"
                   dataKey="value"
+                  isAnimationActive={false}
                   stroke="#7C5CFF"
                   strokeWidth={2}
                   fill="url(#valueGradient)"
@@ -442,6 +443,7 @@ export function Investments() {
                 <PieChart>
                   <Pie
                     data={allocationData}
+                    isAnimationActive={false}
                     cx="50%"
                     cy="50%"
                     innerRadius={55}

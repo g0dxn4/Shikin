@@ -403,6 +403,7 @@ write_desktop_entry() {
     printf '%s\n' 'Icon=Shikin'
     printf '%s\n' 'Terminal=false'
     printf '%s\n' 'Categories=Office;Finance;'
+    printf '%s\n' 'Keywords=ASF;Shikin;Finance;Money;Budget;'
     printf '%s\n' 'StartupWMClass=Shikin'
   } >"$desktop_file"
   chmod 644 "$desktop_file"

@@ -124,6 +124,7 @@ export function Forecast() {
                     <Area
                       type="monotone"
                       dataKey="optimistic"
+                      isAnimationActive={false}
                       name={t('chart.optimistic')}
                       stroke="#34D399"
                       strokeWidth={1.5}
@@ -133,6 +134,7 @@ export function Forecast() {
                     <Area
                       type="monotone"
                       dataKey="projected"
+                      isAnimationActive={false}
                       name={t('chart.projected')}
                       stroke="#7C5CFF"
                       strokeWidth={2}
@@ -141,6 +143,7 @@ export function Forecast() {
                     <Area
                       type="monotone"
                       dataKey="pessimistic"
+                      isAnimationActive={false}
                       name={t('chart.pessimistic')}
                       stroke="#EF4444"
                       strokeWidth={1.5}

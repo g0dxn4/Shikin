@@ -156,6 +156,7 @@ export function NetWorth() {
                   <Area
                     type="monotone"
                     dataKey="netWorth"
+                    isAnimationActive={false}
                     stroke="#7C5CFF"
                     strokeWidth={2}
                     fill="url(#netWorthGrad)"

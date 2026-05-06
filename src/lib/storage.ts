@@ -79,7 +79,6 @@ function createBrowserStore(): Store {
 }
 
 async function createTauriStore(path?: string): Promise<Store> {
-  // Dynamic import via Function() to avoid TS2307 when plugin-store types aren't installed
   interface TauriStoreModule {
     load: (path: string, opts?: { autoSave?: boolean }) => Promise<TauriStore>
   }
@@ -90,9 +89,7 @@ async function createTauriStore(path?: string): Promise<Store> {
     save: () => Promise<void> | void
   }
 
-  const { load: loadStore } = (await Function(
-    'return import("@tauri-apps/plugin-store")'
-  )()) as TauriStoreModule
+  const { load: loadStore } = (await import('@tauri-apps/plugin-store')) as TauriStoreModule
   const store = await loadStore(path ?? 'settings.json', { autoSave: true })
   return {
     async get(key: string) {

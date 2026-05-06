@@ -33,7 +33,7 @@ export function SafeChart({ width = '100%', height = '100%', children }: SafeCha
   return (
     <div ref={ref} style={{ width: '100%', height: '100%', minHeight: 1 }}>
       {ready ? (
-        <ResponsiveContainer width={width} height={height}>
+        <ResponsiveContainer width={width} height={height} debounce={120}>
           {children}
         </ResponsiveContainer>
       ) : null}

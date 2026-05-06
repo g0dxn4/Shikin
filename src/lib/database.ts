@@ -30,7 +30,7 @@ let tauriDb: TauriDatabase | null = null
 let tauriInitPromise: Promise<TauriDatabase> | null = null
 
 async function getTauriDbPath(): Promise<string> {
-  const pathMod = await (Function('return import("@tauri-apps/api/path")')() as Promise<{
+  const pathMod = await (import('@tauri-apps/api/path') as Promise<{
     appDataDir: () => Promise<string>
     join: (...paths: string[]) => Promise<string>
   }>)
@@ -948,10 +948,7 @@ export async function exportDatabaseSnapshot(): Promise<Uint8Array> {
     await checkpointTauriWal(database, { requireComplete: true })
 
     // In Tauri mode, read the DB file directly via the filesystem plugin
-    // Use Function() dynamic import to avoid bundler/TS issues with optional Tauri deps
-    const fsMod = await (Function(
-      'return import("@tauri-apps/plugin-fs")'
-    )() as Promise<TauriFsModule>)
+    const fsMod = await (import('@tauri-apps/plugin-fs') as Promise<TauriFsModule>)
     const dbPath = await getTauriDbPath()
     return await fsMod.readFile(dbPath)
   }
@@ -977,7 +974,7 @@ export async function importDatabaseSnapshot(data: Uint8Array): Promise<void> {
 
     const [{ default: Database }, fsMod] = await Promise.all([
       import('@tauri-apps/plugin-sql'),
-      Function('return import("@tauri-apps/plugin-fs")')() as Promise<TauriFsModule>,
+      import('@tauri-apps/plugin-fs') as Promise<TauriFsModule>,
     ])
     const dbPath = await getTauriDbPath()
     const importStamp = `${Date.now()}`

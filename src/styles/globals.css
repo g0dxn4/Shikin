@@ -336,6 +336,79 @@ body,
   border-radius: 4px;
 }
 
+/* WebKitGTK has a much weaker compositor than Chromium. Keep the browser UI
+   glassy, but flatten expensive blur/animation effects inside the Tauri shell. */
+.tauri-runtime {
+  &,
+  & body,
+  & #root {
+    background: var(--color-background);
+  }
+
+  & body {
+    background: var(--color-background);
+  }
+
+  & .glass-card,
+  & .glass-sidebar,
+  & .glass-panel,
+  & .metric-card,
+  & .liquid-card,
+  & .liquid-hero {
+    background: rgba(16, 16, 22, 0.96);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  }
+
+  & .liquid-action {
+    box-shadow: none;
+  }
+
+  & [class*='backdrop-blur'] {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  & .grid-bg {
+    background-color: var(--color-background);
+    background-image: none;
+  }
+
+  & main.grid-bg {
+    border: 0;
+    border-radius: 0;
+    contain: paint;
+    overscroll-behavior: contain;
+    scroll-behavior: auto;
+    scrollbar-gutter: stable;
+    transform: translateZ(0);
+    will-change: scroll-position;
+  }
+
+  & .page-content > * {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 420px;
+  }
+
+  & [class*='transition-'],
+  & .sidebar-link,
+  & .metric-card {
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+  }
+
+  & .animate-fade-in-up,
+  & .animate-fade-in,
+  & .animate-slide-in-right,
+  & .animate-slide-in-left,
+  & .animate-slide-up,
+  & .animate-pulse,
+  & .skeleton {
+    animation: none;
+  }
+}
+
 /* Animations */
 @keyframes skeleton-shimmer {
   0% {

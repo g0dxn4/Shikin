@@ -831,6 +831,7 @@ function ForecastWidget() {
             <Area
               type="monotone"
               dataKey="optimistic"
+              isAnimationActive={false}
               name={t('forecast.optimistic')}
               stroke="#34D399"
               strokeWidth={1}
@@ -840,6 +841,7 @@ function ForecastWidget() {
             <Area
               type="monotone"
               dataKey="projected"
+              isAnimationActive={false}
               name={t('forecast.projected')}
               stroke="#7C5CFF"
               strokeWidth={2}
@@ -848,6 +850,7 @@ function ForecastWidget() {
             <Area
               type="monotone"
               dataKey="pessimistic"
+              isAnimationActive={false}
               name={t('forecast.pessimistic')}
               stroke="#F87171"
               strokeWidth={1}

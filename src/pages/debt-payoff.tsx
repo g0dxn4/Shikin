@@ -208,6 +208,7 @@ function DebtChart() {
                 key={d.id}
                 type="monotone"
                 dataKey={d.name}
+                isAnimationActive={false}
                 fill={DEBT_COLORS[i % DEBT_COLORS.length]}
                 fillOpacity={0.3}
                 stroke={DEBT_COLORS[i % DEBT_COLORS.length]}

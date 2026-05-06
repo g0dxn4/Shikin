@@ -30,6 +30,7 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "publisher": "ASF",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -39,7 +40,15 @@
     ],
     "category": "Finance",
     "shortDescription": "Local-first personal finance manager",
-    "longDescription": "A privacy-first desktop app for managing your personal finances. Track transactions, budgets, investments, and subscriptions — all stored locally on your device."
+    "longDescription": "A privacy-first desktop app for managing your personal finances. Track transactions, budgets, investments, and subscriptions — all stored locally on your device.",
+    "linux": {
+      "deb": {
+        "desktopTemplate": "linux/Shikin.desktop"
+      },
+      "rpm": {
+        "desktopTemplate": "linux/Shikin.desktop"
+      }
+    }
   },
   "plugins": {
     "updater": {

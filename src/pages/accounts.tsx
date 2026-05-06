@@ -958,6 +958,7 @@ function AccountCard({
                   <Area
                     type="monotone"
                     dataKey="balance"
+                    isAnimationActive={false}
                     stroke={accentColor}
                     strokeWidth={2}
                     fill={`url(#grad-${account.id})`}

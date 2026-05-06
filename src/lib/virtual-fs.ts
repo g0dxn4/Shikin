@@ -18,7 +18,6 @@ async function readBridgeError(response: Response, fallback: string): Promise<st
 // ── Lazy Tauri imports (avoid bundling in browser builds) ───────────
 
 const tauriPath = () => import('@tauri-apps/api/path')
-// Dynamic import to avoid type errors when plugin-fs types aren't installed
 interface TauriFsModule {
   readTextFile: (path: string) => Promise<string>
   writeTextFile: (path: string, content: string, options?: { mode?: number }) => Promise<void>
@@ -29,7 +28,7 @@ interface TauriFsModule {
 }
 
 const tauriFs = (): Promise<TauriFsModule> =>
-  Function('return import("@tauri-apps/plugin-fs")')() as Promise<TauriFsModule>
+  import('@tauri-apps/plugin-fs') as Promise<TauriFsModule>
 
 // ── Types ───────────────────────────────────────────────────────────
 

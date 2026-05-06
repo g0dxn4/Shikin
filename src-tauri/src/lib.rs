@@ -3,17 +3,28 @@ use std::{
     fs, io,
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
+    sync::atomic::{AtomicBool, Ordering},
     time::SystemTime,
 };
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
+use tauri::Manager;
+
 const DB_FILE_NAME: &str = "shikin.db";
 const APP_IDENTIFIER: &str = "com.asf.shikin";
 const CLI_SUPPORT_DIR: &str = "cli-support";
 const CLI_BRIDGE_BIN: &str = "shikin-bridge";
 const MCP_BRIDGE_BIN: &str = "shikin-mcp";
+const SETTINGS_FILE_NAME: &str = "settings.json";
+const CLOSE_TO_TRAY_KEY: &str = "close_to_tray_enabled";
+const DEFAULT_CLOSE_TO_TRAY_ENABLED: bool = true;
+const MAIN_WINDOW_LABEL: &str = "main";
+const TRAY_MENU_SHOW_ID: &str = "show_shikin";
+const TRAY_MENU_QUIT_ID: &str = "quit_shikin";
+
+static TRAY_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BridgeKind {
@@ -96,6 +107,31 @@ fn installed_bridge_script(kind: BridgeKind) -> Option<PathBuf> {
         .join(kind.source_script_name());
 
     script_path.is_file().then_some(script_path)
+}
+
+fn settings_file_path(identifier: &str) -> Option<PathBuf> {
+    Some(dirs::data_dir()?.join(identifier).join(SETTINGS_FILE_NAME))
+}
+
+fn close_to_tray_setting_from_json(settings: &serde_json::Value) -> bool {
+    settings
+        .get(CLOSE_TO_TRAY_KEY)
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(DEFAULT_CLOSE_TO_TRAY_ENABLED)
+}
+
+fn close_to_tray_enabled(identifier: &str) -> bool {
+    let Some(settings_path) = settings_file_path(identifier) else {
+        return DEFAULT_CLOSE_TO_TRAY_ENABLED;
+    };
+
+    let Ok(contents) = fs::read_to_string(settings_path) else {
+        return DEFAULT_CLOSE_TO_TRAY_ENABLED;
+    };
+
+    serde_json::from_str::<serde_json::Value>(&contents)
+        .map(|settings| close_to_tray_setting_from_json(&settings))
+        .unwrap_or(DEFAULT_CLOSE_TO_TRAY_ENABLED)
 }
 
 fn run_node_script(script_path: &Path, args: &[OsString]) -> io::Result<i32> {
@@ -387,6 +423,54 @@ fn prepare_app_data_db(identifier: &str) -> io::Result<()> {
     Ok(())
 }
 
+fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let window = app
+        .get_webview_window(MAIN_WINDOW_LABEL)
+        .or_else(|| app.webview_windows().into_values().next());
+
+    if let Some(window) = window {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
+    use tauri::{
+        menu::{Menu, MenuItem},
+        tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    };
+
+    let show_item = MenuItem::with_id(app, TRAY_MENU_SHOW_ID, "Show Shikin", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, TRAY_MENU_QUIT_ID, "Quit Shikin", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+    let mut tray = TrayIconBuilder::new()
+        .menu(&menu)
+        .tooltip("Shikin")
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            TRAY_MENU_SHOW_ID => show_main_window(app),
+            TRAY_MENU_QUIT_ID => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| match event {
+            TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } => show_main_window(tray.app_handle()),
+            _ => {}
+        });
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray = tray.icon(icon);
+    }
+
+    tray.build(app)?;
+    TRAY_AVAILABLE.store(true, Ordering::Relaxed);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let context = tauri::generate_context!();
@@ -410,7 +494,24 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            if let Err(error) = setup_tray(app) {
+                eprintln!("warning: could not start Shikin tray support: {error}");
+            }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() != MAIN_WINDOW_LABEL {
+                return;
+            }
+
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if TRAY_AVAILABLE.load(Ordering::Relaxed) && close_to_tray_enabled(APP_IDENTIFIER) {
+                    api.prevent_close();
+                    if let Err(error) = window.hide() {
+                        eprintln!("warning: could not hide Shikin window to tray: {error}");
+                    }
+                }
+            }
         })
         .run(context)
         .expect("error while running tauri application");
@@ -463,6 +564,24 @@ mod tests {
                 args: os_args(&["--verbose"]),
             }
         );
+    }
+
+    #[test]
+    fn defaults_close_to_tray_setting_to_enabled() {
+        assert!(close_to_tray_setting_from_json(&serde_json::json!({})));
+        assert!(close_to_tray_setting_from_json(&serde_json::json!({
+            CLOSE_TO_TRAY_KEY: "invalid"
+        })));
+    }
+
+    #[test]
+    fn reads_close_to_tray_setting_boolean() {
+        assert!(close_to_tray_setting_from_json(&serde_json::json!({
+            CLOSE_TO_TRAY_KEY: true
+        })));
+        assert!(!close_to_tray_setting_from_json(&serde_json::json!({
+            CLOSE_TO_TRAY_KEY: false
+        })));
     }
 
     #[test]

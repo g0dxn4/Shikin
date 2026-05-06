@@ -41,6 +41,9 @@ import {
 import { isTauri } from '@/lib/runtime'
 import type { AvailableUpdate } from '@/lib/updater'
 
+const CLOSE_TO_TRAY_KEY = 'close_to_tray_enabled'
+const DEFAULT_CLOSE_TO_TRAY_ENABLED = true
+
 export function SettingsPage() {
   const { t, i18n } = useTranslation('settings')
   const { t: tCommon } = useTranslation('common')
@@ -66,6 +69,8 @@ export function SettingsPage() {
   const [updateError, setUpdateError] = useState<string | null>(null)
   const [downloadedBytes, setDownloadedBytes] = useState(0)
   const [downloadTotalBytes, setDownloadTotalBytes] = useState<number | null>(null)
+  const [closeToTrayEnabled, setCloseToTrayEnabled] = useState(DEFAULT_CLOSE_TO_TRAY_ENABLED)
+  const [isSavingDesktopSettings, setIsSavingDesktopSettings] = useState(false)
   const [lastUpdateAction, setLastUpdateAction] = useState<'check' | 'install' | 'restart' | null>(
     null
   )
@@ -97,9 +102,30 @@ export function SettingsPage() {
       .then(async (store) => {
         setAlphaVantageKey(((await store.get('alpha_vantage_key')) as string) || '')
         setFinnhubKey(((await store.get('finnhub_key')) as string) || '')
+        const storedCloseToTray = await store.get(CLOSE_TO_TRAY_KEY)
+        setCloseToTrayEnabled(
+          typeof storedCloseToTray === 'boolean' ? storedCloseToTray : DEFAULT_CLOSE_TO_TRAY_ENABLED
+        )
       })
       .catch(() => {})
   }, [loadRules, loadRates, fetchAccounts])
+
+  const handleCloseToTrayToggle = async () => {
+    const nextValue = !closeToTrayEnabled
+    setIsSavingDesktopSettings(true)
+
+    try {
+      const store = await load('settings.json')
+      await store.set(CLOSE_TO_TRAY_KEY, nextValue)
+      await store.save()
+      setCloseToTrayEnabled(nextValue)
+      toast.success(nextValue ? t('desktop.closeToTrayEnabled') : t('desktop.closeToTrayDisabled'))
+    } catch {
+      toast.error(tCommon('status.error'))
+    } finally {
+      setIsSavingDesktopSettings(false)
+    }
+  }
 
   const handleCheckForUpdates = async () => {
     setIsCheckingUpdates(true)
@@ -307,6 +333,41 @@ export function SettingsPage() {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="border-border/60 flex items-center justify-between gap-4 rounded-[18px] border bg-white/[0.035] p-4">
+            <div className="min-w-0 space-y-1">
+              <Label
+                htmlFor="close-to-tray-switch"
+                className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
+              >
+                {t('desktop.closeToTrayLabel')}
+              </Label>
+              <p className="text-muted-foreground text-xs">
+                {isTauri ? t('desktop.closeToTrayDescription') : t('desktop.desktopOnly')}
+              </p>
+            </div>
+            <button
+              id="close-to-tray-switch"
+              type="button"
+              role="switch"
+              aria-checked={closeToTrayEnabled}
+              aria-label={t('desktop.closeToTrayLabel')}
+              onClick={() => {
+                void handleCloseToTrayToggle()
+              }}
+              disabled={!isTauri || isSavingDesktopSettings}
+              className={`focus-visible:ring-accent focus-visible:ring-offset-background relative h-7 w-12 shrink-0 rounded-full border transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+                closeToTrayEnabled ? 'border-accent/60 bg-accent/80' : 'border-white/10 bg-white/10'
+              }`}
+            >
+              <span
+                className={`bg-background absolute top-1 size-5 rounded-full shadow-sm transition-transform ${
+                  closeToTrayEnabled ? 'translate-x-5' : 'translate-x-1'
+                }`}
+                aria-hidden="true"
+              />
+            </button>
           </div>
         </section>
 

@@ -96,6 +96,13 @@
     "label": "Language",
     "description": "Choose your preferred language"
   },
+  "desktop": {
+    "desktopOnly": "This setting is available in the desktop app.",
+    "closeToTrayLabel": "Keep running after close",
+    "closeToTrayDescription": "When enabled, closing the window hides Shikin to the system tray instead of quitting.",
+    "closeToTrayEnabled": "Shikin will keep running in the tray when closed",
+    "closeToTrayDisabled": "Shikin will quit when the window is closed"
+  },
   "updates": {
     "description": "Install signed desktop updates without leaving Shikin.",
     "desktopOnly": "In-app updates are available in the desktop app.",

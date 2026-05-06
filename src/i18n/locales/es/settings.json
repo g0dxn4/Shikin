@@ -96,6 +96,13 @@
     "label": "Idioma",
     "description": "Elige tu idioma preferido"
   },
+  "desktop": {
+    "desktopOnly": "Esta opción está disponible en la app de escritorio.",
+    "closeToTrayLabel": "Seguir ejecutando al cerrar",
+    "closeToTrayDescription": "Cuando está activado, cerrar la ventana oculta Shikin en la bandeja del sistema en vez de salir.",
+    "closeToTrayEnabled": "Shikin seguirá ejecutándose en la bandeja al cerrar",
+    "closeToTrayDisabled": "Shikin saldrá cuando se cierre la ventana"
+  },
   "updates": {
     "description": "Instala actualizaciones firmadas del escritorio sin salir de Shikin.",
     "desktopOnly": "Las actualizaciones dentro de la app están disponibles en la app de escritorio.",

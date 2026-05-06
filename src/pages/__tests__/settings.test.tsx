@@ -15,6 +15,12 @@ export const mockGetAvailableUpdate = vi.fn().mockResolvedValue(null)
 export const mockInstallUpdate = vi.fn().mockResolvedValue(undefined)
 export const mockRelaunchToApplyUpdate = vi.fn().mockResolvedValue(undefined)
 
+const storageMocks = vi.hoisted(() => ({
+  get: vi.fn(),
+  set: vi.fn(),
+  save: vi.fn(),
+}))
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
@@ -87,15 +93,18 @@ vi.mock('@/lib/updater', () => ({
 
 vi.mock('@/lib/storage', () => ({
   load: vi.fn().mockResolvedValue({
-    get: vi.fn().mockResolvedValue(''),
-    set: vi.fn().mockResolvedValue(undefined),
-    save: vi.fn().mockResolvedValue(undefined),
+    get: storageMocks.get,
+    set: storageMocks.set,
+    save: storageMocks.save,
   }),
 }))
 
 describe('SettingsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    storageMocks.get.mockResolvedValue('')
+    storageMocks.set.mockResolvedValue(undefined)
+    storageMocks.save.mockResolvedValue(undefined)
   })
 
   it('renders General section', async () => {
@@ -127,6 +136,26 @@ describe('SettingsPage', () => {
     expect(screen.getByText('sections.updates')).toBeInTheDocument()
     expect(await screen.findByText('0.1.0')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'updates.check' })).toBeInTheDocument()
+  })
+
+  it('persists the close-to-tray desktop setting', async () => {
+    const user = userEvent.setup()
+    storageMocks.get.mockImplementation(async (key: string) =>
+      key === 'close_to_tray_enabled' ? true : ''
+    )
+
+    render(<SettingsPage />)
+
+    const toggle = await screen.findByRole('switch', { name: 'desktop.closeToTrayLabel' })
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+
+    await user.click(toggle)
+
+    await waitFor(() => {
+      expect(storageMocks.set).toHaveBeenCalledWith('close_to_tray_enabled', false)
+    })
+    expect(storageMocks.save).toHaveBeenCalledOnce()
+    expect(mockToastSuccess).toHaveBeenCalledWith('desktop.closeToTrayDisabled')
   })
 
   it('checks for updates and installs an available release', async () => {

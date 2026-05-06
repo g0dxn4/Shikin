@@ -5,12 +5,17 @@ REPO="${SHIKIN_REPO:-g0dxn4/Shikin}"
 VERSION="${SHIKIN_VERSION:-}"
 INSTALL_KIND="${SHIKIN_INSTALL_KIND:-choose}"
 REQUESTED_INSTALL_KIND="$INSTALL_KIND"
+INSTALL_CLI="${SHIKIN_INSTALL_CLI:-ask}"
 NO_SUDO="${SHIKIN_NO_SUDO:-0}"
 INSTALL_DIR="${SHIKIN_INSTALL_DIR:-}"
+CLI_INSTALLER_REF="${SHIKIN_CLI_INSTALLER_REF:-}"
+CLI_INSTALLER_URL="${SHIKIN_CLI_INSTALLER_URL:-}"
 OS_RELEASE_FILE="${SHIKIN_OS_RELEASE_FILE:-/etc/os-release}"
 ASSET_DEB_PATTERN='_amd64\.deb'
 ASSET_RPM_PATTERN='x86_64\.rpm'
 ASSET_APPIMAGE_PATTERN='_amd64\.AppImage'
+RELEASE_TAG=""
+RESOLVED_RELEASE_TAG=""
 DETECTED_ARCH=""
 DETECTED_DISTRO_NAME="Linux"
 DETECTED_DISTRO_ID="unknown"
@@ -43,7 +48,7 @@ else
 fi
 
 usage() {
-  printf '%s\n' 'Usage: install-linux.sh [--choose|--auto|--deb|--rpm|--appimage] [--no-sudo]'
+  printf '%s\n' 'Usage: install-linux.sh [--choose|--auto|--deb|--rpm|--appimage] [--with-cli|--no-cli] [--no-sudo]'
   printf '%s\n' ''
   printf '%s\n' 'Installs the latest Shikin Linux desktop release.'
   printf '%s\n' ''
@@ -53,6 +58,8 @@ usage() {
   printf '%s\n' '  --deb        Force the Debian/Ubuntu .deb installer; may require sudo'
   printf '%s\n' '  --rpm        Force the RPM installer; may require sudo'
   printf '%s\n' '  --appimage   Force the portable AppImage installer; does not use sudo'
+  printf '%s\n' '  --with-cli   Also install CLI/MCP automation support; requires Node.js and npm'
+  printf '%s\n' '  --no-cli     Skip the CLI/MCP support prompt'
   printf '%s\n' '  --no-sudo    Install the AppImage under your home directory; never calls sudo'
   printf '%s\n' '  --sudo       Allow sudo prompts for native packages (default)'
   printf '%s\n' '  -h, --help   Show this help'
@@ -60,6 +67,9 @@ usage() {
   printf '%s\n' 'Environment:'
   printf '%s\n' '  SHIKIN_INSTALL_DIR   AppImage install directory (default: ~/Applications)'
   printf '%s\n' '  SHIKIN_INSTALL_KIND  choose, auto, deb, rpm, or appimage'
+  printf '%s\n' '  SHIKIN_INSTALL_CLI   ask, yes, or no (default: ask)'
+  printf '%s\n' '  SHIKIN_CLI_INSTALLER_REF  Git ref for the CLI installer script (default: installed release tag)'
+  printf '%s\n' '  SHIKIN_CLI_INSTALLER_URL  Override the CLI installer script URL'
   printf '%s\n' '  SHIKIN_NO_SUDO       1/yes/true to force the no-sudo AppImage path'
   printf '%s\n' '  SHIKIN_REPO          GitHub repo owner/name (default: g0dxn4/Shikin)'
   printf '%s\n' '  SHIKIN_VERSION       Release version, for example 0.2.6 or v0.2.6'
@@ -72,6 +82,10 @@ die() {
 
 info() {
   printf '==> %s\n' "$*"
+}
+
+warn() {
+  printf 'warning: %s\n' "$*" >&2
 }
 
 print_banner() {
@@ -104,6 +118,12 @@ while [ "$#" -gt 0 ]; do
     --appimage)
       INSTALL_KIND="appimage"
       ;;
+    --with-cli | --install-cli)
+      INSTALL_CLI="yes"
+      ;;
+    --no-cli | --without-cli)
+      INSTALL_CLI="no"
+      ;;
     --no-sudo)
       NO_SUDO="1"
       ;;
@@ -124,6 +144,19 @@ done
 case "$INSTALL_KIND" in
   auto | choose | deb | rpm | appimage) ;;
   *) die "SHIKIN_INSTALL_KIND must be choose, auto, deb, rpm, or appimage" ;;
+esac
+
+case "$INSTALL_CLI" in
+  1 | yes | YES | true | TRUE | on | ON)
+    INSTALL_CLI="yes"
+    ;;
+  0 | no | NO | false | FALSE | off | OFF)
+    INSTALL_CLI="no"
+    ;;
+  ask | ASK | choose | CHOOSE | prompt | PROMPT | "")
+    INSTALL_CLI="ask"
+    ;;
+  *) die "SHIKIN_INSTALL_CLI must be ask, yes, no, true, false, 1, 0, on, off, choose, or prompt" ;;
 esac
 
 case "$NO_SUDO" in
@@ -287,6 +320,12 @@ find_asset_url() {
   tr -d '\n\r' <"$RELEASE_JSON" \
     | tr '{' '\n' \
     | sed -n "s/.*\"browser_download_url\"[[:space:]]*:[[:space:]]*\"\([^\"]*${pattern}\)\".*/\1/p" \
+    | head -n 1
+}
+
+find_release_tag() {
+  tr -d '\n\r' <"$RELEASE_JSON" \
+    | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
     | head -n 1
 }
 
@@ -478,6 +517,82 @@ install_appimage() {
   info "Shikin AppImage installed. Launch it from your app menu or run: ${appimage_path}"
 }
 
+install_cli_support() {
+  [ -n "$RESOLVED_RELEASE_TAG" ] || return 1
+
+  cli_installer_ref="${CLI_INSTALLER_REF:-$RESOLVED_RELEASE_TAG}"
+  cli_installer_url="${CLI_INSTALLER_URL:-https://raw.githubusercontent.com/${REPO}/${cli_installer_ref}/scripts/install-cli.sh}"
+  cli_installer="${TMP_DIR}/install-cli.sh"
+
+  info "Downloading Shikin CLI installer"
+  if ! curl -fsSL "$cli_installer_url" -o "$cli_installer"; then
+    return 1
+  fi
+  [ -s "$cli_installer" ] || return 1
+
+  SHIKIN_REPO="$REPO" SHIKIN_VERSION="$RESOLVED_RELEASE_TAG" sh "$cli_installer"
+}
+
+install_cli_support_or_warn() {
+  if install_cli_support; then
+    return
+  fi
+
+  warn "CLI/MCP support installation failed. The desktop app install is complete."
+  warn "You can install CLI support later with: curl -fsSL https://raw.githubusercontent.com/${REPO}/${CLI_INSTALLER_REF:-$RESOLVED_RELEASE_TAG}/scripts/install-cli.sh | sh"
+}
+
+has_cli_prerequisites() {
+  command_exists node \
+    && command_exists npm \
+    && node -e "const major = Number(process.versions.node.split('.')[0]); process.exit(Number.isFinite(major) && major >= 18 ? 0 : 1)" >/dev/null 2>&1
+}
+
+maybe_install_cli_support() {
+  case "$INSTALL_CLI" in
+    yes)
+      if has_cli_prerequisites; then
+        install_cli_support_or_warn
+      else
+        warn "Node.js >= 18 and npm are required for CLI/MCP support. Skipping optional CLI install."
+      fi
+      return
+      ;;
+    no)
+      info "Skipping CLI/MCP automation support."
+      return
+      ;;
+  esac
+
+  if ! has_cli_prerequisites; then
+    info "Skipping CLI/MCP support prompt because Node.js >= 18 and npm are required."
+    info "Install Node.js >= 18 and npm, then run: curl -fsSL https://raw.githubusercontent.com/${REPO}/${CLI_INSTALLER_REF:-$RESOLVED_RELEASE_TAG}/scripts/install-cli.sh | sh"
+    return
+  fi
+
+  printf '\n'
+  printf '%sCLI/MCP automation support%s\n' "$BOLD" "$NC"
+  printf 'This enables commands like %sshikin list-accounts%s and %sshikin mcp%s.\n' "$BOLD" "$NC" "$BOLD" "$NC"
+  printf 'It requires Node.js >= 18 and npm because the automation bridge runs on Node.\n'
+  printf '\n'
+
+  if ! read_terminal_answer 'Install CLI/MCP support too? [y/N] '; then
+    info "Skipping CLI/MCP support because no interactive terminal is available."
+    info "You can install it later with: curl -fsSL https://raw.githubusercontent.com/${REPO}/${CLI_INSTALLER_REF:-$RESOLVED_RELEASE_TAG}/scripts/install-cli.sh | sh"
+    return
+  fi
+
+  case "$TERMINAL_ANSWER" in
+    y | Y | yes | YES | Yes)
+      install_cli_support_or_warn
+      ;;
+    *)
+      info "Skipping CLI/MCP automation support."
+      info "You can install it later with: curl -fsSL https://raw.githubusercontent.com/${REPO}/${CLI_INSTALLER_REF:-$RESOLVED_RELEASE_TAG}/scripts/install-cli.sh | sh"
+      ;;
+  esac
+}
+
 detect_linux_distro
 print_banner
 describe_detection
@@ -501,9 +616,14 @@ describe_install_choice
 
 info "Fetching Shikin release metadata"
 curl -fsSL "$API_URL" -o "$RELEASE_JSON"
+RESOLVED_RELEASE_TAG="$(find_release_tag)"
+[ -n "$RESOLVED_RELEASE_TAG" ] || RESOLVED_RELEASE_TAG="$RELEASE_TAG"
+[ -n "$RESOLVED_RELEASE_TAG" ] || die "could not determine release tag"
 
 case "$INSTALL_KIND" in
   deb) install_deb ;;
   rpm) install_rpm ;;
   appimage) install_appimage ;;
 esac
+
+maybe_install_cli_support

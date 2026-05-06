@@ -87,7 +87,7 @@ afterEach(() => {
 
 describe('CLI database readiness', () => {
   it('exports the shared migration readiness list for drift prevention', async () => {
-    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-cli-db-'))
+    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-'))
     tempHomes.add(homeDir)
 
     const { REQUIRED_MIGRATIONS } = await importFreshDatabaseModule(homeDir)
@@ -98,7 +98,7 @@ describe('CLI database readiness', () => {
   })
 
   it('allows queries once the shared Shikin schema is ready', async () => {
-    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-cli-db-'))
+    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-'))
     tempHomes.add(homeDir)
 
     seedCoreShikinSchema(createCliDatabasePath(homeDir))
@@ -111,8 +111,8 @@ describe('CLI database readiness', () => {
   })
 
   it('uses absolute XDG_DATA_HOME for the shared database location', async () => {
-    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-cli-db-'))
-    const xdgDataHome = mkdtempSync(join(tmpdir(), 'shikin-cli-xdg-data-'))
+    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-'))
+    const xdgDataHome = mkdtempSync(join(tmpdir(), 'shikin-xdg-data-'))
     tempHomes.add(homeDir)
     tempHomes.add(xdgDataHome)
 
@@ -126,7 +126,7 @@ describe('CLI database readiness', () => {
   })
 
   it('rejects databases that are missing required core tables before use', async () => {
-    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-cli-db-'))
+    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-'))
     tempHomes.add(homeDir)
 
     const dbPath = createCliDatabasePath(homeDir)
@@ -144,7 +144,7 @@ describe('CLI database readiness', () => {
   })
 
   it('repairs legacy Rust-side migration markers before use', async () => {
-    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-cli-db-'))
+    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-'))
     tempHomes.add(homeDir)
 
     const dbPath = createCliDatabasePath(homeDir)
@@ -164,7 +164,7 @@ describe('CLI database readiness', () => {
   })
 
   it('does not repair the credit-card marker when credit-card columns are missing', async () => {
-    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-cli-db-'))
+    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-'))
     tempHomes.add(homeDir)
 
     seedCoreShikinSchema(
@@ -182,7 +182,7 @@ describe('CLI database readiness', () => {
   })
 
   it('rejects databases that are missing non-legacy migration markers before use', async () => {
-    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-cli-db-'))
+    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-'))
     tempHomes.add(homeDir)
 
     const dbPath = createCliDatabasePath(homeDir)
@@ -199,7 +199,7 @@ describe('CLI database readiness', () => {
   })
 
   it('rejects databases that are missing any required CLI migration before use', async () => {
-    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-cli-db-'))
+    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-'))
     tempHomes.add(homeDir)
 
     seedCoreShikinSchema(

@@ -37,14 +37,18 @@ pnpm lint && pnpm typecheck  # Lint + type check
 ## CLI & MCP Server
 
 ```bash
-cd cli && npm install
+# Installed desktop app automation support
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-cli.sh | sh
 
-# CLI usage
+# Unified desktop-owned CLI
+shikin list-accounts
+shikin add-transaction --amount 5.50 --type expense --description "Coffee"
+shikin get-balance-overview
+shikin mcp
+
+# Source/dev alternatives
+cd cli && npm install && npm run build
 npx tsx src/cli.ts list-accounts
-npx tsx src/cli.ts add-transaction --amount 5.50 --type expense --description "Coffee"
-npx tsx src/cli.ts get-balance-overview
-
-# MCP server (for Claude Code, Claude Desktop, Cursor, etc.)
 npx tsx src/mcp-server.ts
 ```
 
@@ -54,8 +58,8 @@ npx tsx src/mcp-server.ts
 {
   "mcpServers": {
     "shikin": {
-      "command": "npx",
-      "args": ["tsx", "/path/to/Shikin/cli/src/mcp-server.ts"]
+      "command": "shikin",
+      "args": ["mcp"]
     }
   }
 }

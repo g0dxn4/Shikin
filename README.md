@@ -88,7 +88,7 @@ Current MVP limitations:
 
 ### Prerequisites
 
-Released desktop installs do not require developer tools. For source setup, install:
+Released desktop installs do not require developer tools. Optional CLI/MCP automation support requires Node.js and npm. For source setup, install:
 
 - [Node.js](https://nodejs.org/) >= 18
 - [pnpm](https://pnpm.io/) >= 9
@@ -101,7 +101,7 @@ Install the latest released desktop app on Linux:
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh
 ```
 
-The helper is interactive by default. It detects your distro, recommends `.deb` on Debian/Ubuntu, `.rpm` on RPM distros, or AppImage elsewhere, then asks what to install. To skip the prompt and auto-select:
+The helper is interactive by default. It detects your distro, recommends `.deb` on Debian/Ubuntu, `.rpm` on RPM distros, or AppImage elsewhere, then asks what to install. After the desktop app is installed, it asks whether to install optional CLI/MCP automation support. To skip the package prompt and auto-select:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --auto
@@ -119,6 +119,19 @@ You can force a specific install type:
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --deb
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --rpm
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --appimage
+```
+
+You can also force or skip CLI/MCP support from the desktop installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --auto --with-cli
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --auto --no-cli
+```
+
+To install CLI/MCP support separately later:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-cli.sh | sh
 ```
 
 Windows users can install the `.msi` or setup `.exe` from [GitHub Releases](https://github.com/g0dxn4/Shikin/releases/latest). macOS users can install the `.dmg`.
@@ -188,14 +201,23 @@ pnpm build:tauri  # Builds .deb + .AppImage (Linux), .dmg (macOS), .msi (Windows
 Shikin exposes 41 shared CLI/MCP tool definitions. 39 are currently available end-to-end, and 2 compatibility placeholders return structured unavailable responses for external-feed features.
 
 ```bash
-cd cli && npm install
+# Install automation support for the installed desktop app.
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-cli.sh | sh
 
-# CLI
+# The desktop-owned `shikin` command is the user-facing entrypoint.
+shikin # open the app
+shikin list-accounts
+shikin add-transaction --amount 12.50 --type expense --description "Lunch"
+shikin get-spending-summary --period month
+shikin mcp
+
+# CLI (source/dev alternative)
+cd cli && npm install && npm run build
 npx tsx src/cli.ts list-accounts
 npx tsx src/cli.ts add-transaction --amount 12.50 --type expense --description "Lunch"
 npx tsx src/cli.ts get-spending-summary --period month
 
-# MCP server (for Claude Code, Claude Desktop, Cursor)
+# MCP server (source/dev alternative)
 npx tsx src/mcp-server.ts
 ```
 
@@ -205,8 +227,8 @@ npx tsx src/mcp-server.ts
 {
   "mcpServers": {
     "shikin": {
-      "command": "npx",
-      "args": ["tsx", "/path/to/Shikin/cli/src/mcp-server.ts"]
+      "command": "shikin",
+      "args": ["mcp"]
     }
   }
 }

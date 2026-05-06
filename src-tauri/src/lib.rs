@@ -1,6 +1,8 @@
 use std::{
+    ffi::{OsStr, OsString},
     fs, io,
     path::{Path, PathBuf},
+    process::{Command, ExitStatus},
     time::SystemTime,
 };
 
@@ -8,6 +10,180 @@ use std::{
 use std::os::unix::fs::PermissionsExt;
 
 const DB_FILE_NAME: &str = "shikin.db";
+const APP_IDENTIFIER: &str = "com.asf.shikin";
+const CLI_SUPPORT_DIR: &str = "cli-support";
+const CLI_BRIDGE_BIN: &str = "shikin-bridge";
+const MCP_BRIDGE_BIN: &str = "shikin-mcp";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BridgeKind {
+    Cli,
+    Mcp,
+}
+
+impl BridgeKind {
+    fn bin_name(self) -> &'static str {
+        match self {
+            Self::Cli => CLI_BRIDGE_BIN,
+            Self::Mcp => MCP_BRIDGE_BIN,
+        }
+    }
+
+    fn source_script_name(self) -> &'static str {
+        match self {
+            Self::Cli => "cli.js",
+            Self::Mcp => "mcp-server.js",
+        }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum EntrypointMode {
+    Gui,
+    Bridge {
+        kind: BridgeKind,
+        args: Vec<OsString>,
+    },
+}
+
+fn classify_entrypoint_args<I, S>(args: I) -> EntrypointMode
+where
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
+    let mut args = args.into_iter().map(Into::into);
+    let _program = args.next();
+    let mut command_args: Vec<OsString> = args.collect();
+
+    if command_args.is_empty() {
+        return EntrypointMode::Gui;
+    }
+
+    if command_args
+        .first()
+        .is_some_and(|arg| arg == OsStr::new("mcp"))
+    {
+        command_args.remove(0);
+        return EntrypointMode::Bridge {
+            kind: BridgeKind::Mcp,
+            args: command_args,
+        };
+    }
+
+    EntrypointMode::Bridge {
+        kind: BridgeKind::Cli,
+        args: command_args,
+    }
+}
+
+fn status_code(status: ExitStatus) -> i32 {
+    status.code().unwrap_or(1)
+}
+
+fn source_bridge_script(kind: BridgeKind) -> Option<PathBuf> {
+    let script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../cli/dist")
+        .join(kind.source_script_name());
+
+    script_path.is_file().then_some(script_path)
+}
+
+fn installed_bridge_script(kind: BridgeKind) -> Option<PathBuf> {
+    let script_path = dirs::data_dir()?
+        .join(APP_IDENTIFIER)
+        .join(CLI_SUPPORT_DIR)
+        .join("dist")
+        .join(kind.source_script_name());
+
+    script_path.is_file().then_some(script_path)
+}
+
+fn run_node_script(script_path: &Path, args: &[OsString]) -> io::Result<i32> {
+    let mut command = Command::new("node");
+    command.arg(script_path).args(args);
+    command.status().map(status_code)
+}
+
+fn bridge_command(kind: BridgeKind) -> Command {
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("cmd");
+        command.arg("/C").arg(kind.bin_name());
+        command
+    }
+
+    #[cfg(not(windows))]
+    {
+        Command::new(kind.bin_name())
+    }
+}
+
+fn run_bridge(kind: BridgeKind, args: &[OsString]) -> io::Result<i32> {
+    if let Some(script_path) = source_bridge_script(kind) {
+        match run_node_script(&script_path, args) {
+            Ok(code) => return Ok(code),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+
+    if let Some(script_path) = installed_bridge_script(kind) {
+        match run_node_script(&script_path, args) {
+            Ok(code) => return Ok(code),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+
+    let mut command = bridge_command(kind);
+    command.args(args);
+    command.status().map(status_code)
+}
+
+fn print_bridge_error(kind: BridgeKind, error: &io::Error) {
+    eprintln!(
+        "error: could not start Shikin {} support: {error}",
+        match kind {
+            BridgeKind::Cli => "command-line",
+            BridgeKind::Mcp => "MCP",
+        }
+    );
+    eprintln!();
+    eprintln!("Install the local automation support:");
+    eprintln!(
+        "  curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-cli.sh | sh"
+    );
+    eprintln!();
+
+    match kind {
+        BridgeKind::Cli => {
+            eprintln!("Then run commands with `shikin <command>`.");
+        }
+        BridgeKind::Mcp => {
+            eprintln!("Then start MCP with `shikin mcp`.");
+        }
+    }
+}
+
+pub fn run_entrypoint<I, S>(args: I) -> i32
+where
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
+    match classify_entrypoint_args(args) {
+        EntrypointMode::Gui => {
+            run();
+            0
+        }
+        EntrypointMode::Bridge { kind, args } => match run_bridge(kind, &args) {
+            Ok(code) => code,
+            Err(error) => {
+                print_bridge_error(kind, &error);
+                1
+            }
+        },
+    }
+}
 
 fn ensure_private_dir(path: &Path) -> io::Result<()> {
     fs::create_dir_all(path)?;
@@ -253,6 +429,40 @@ mod tests {
         ));
         fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    fn os_args(args: &[&str]) -> Vec<OsString> {
+        args.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn classifies_empty_invocation_as_gui() {
+        assert_eq!(
+            classify_entrypoint_args(os_args(&["shikin"])),
+            EntrypointMode::Gui
+        );
+    }
+
+    #[test]
+    fn classifies_finance_args_as_cli_bridge() {
+        assert_eq!(
+            classify_entrypoint_args(os_args(&["shikin", "list-accounts", "--json"])),
+            EntrypointMode::Bridge {
+                kind: BridgeKind::Cli,
+                args: os_args(&["list-accounts", "--json"]),
+            }
+        );
+    }
+
+    #[test]
+    fn classifies_mcp_subcommand_as_mcp_bridge() {
+        assert_eq!(
+            classify_entrypoint_args(os_args(&["shikin", "mcp", "--verbose"])),
+            EntrypointMode::Bridge {
+                kind: BridgeKind::Mcp,
+                args: os_args(&["--verbose"]),
+            }
+        );
     }
 
     #[test]

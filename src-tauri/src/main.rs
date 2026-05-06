@@ -2,5 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    shikin_lib::run();
+    let exit_code = shikin_lib::run_entrypoint(std::env::args_os());
+    if exit_code != 0 {
+        std::process::exit(exit_code);
+    }
 }

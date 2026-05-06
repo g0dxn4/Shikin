@@ -96,6 +96,10 @@ describe('CLI option registration', () => {
 })
 
 describe('CLI command execution', () => {
+  it('uses shikin as the command name for the unified desktop CLI', () => {
+    expect(createProgram([]).name()).toBe('shikin')
+  })
+
   it('uses the shared migration list for diagnose drift prevention', () => {
     expect(EXPECTED_MIGRATIONS).toBe(CLI_DATABASE_MIGRATIONS)
     expect(EXPECTED_MIGRATIONS).toHaveLength(12)

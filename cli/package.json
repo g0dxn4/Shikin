@@ -4,7 +4,7 @@
   "description": "Shikin CLI and MCP server for local finance automation",
   "type": "module",
   "bin": {
-    "shikin": "./dist/cli.js",
+    "shikin-bridge": "./dist/cli.js",
     "shikin-mcp": "./dist/mcp-server.js"
   },
   "scripts": {

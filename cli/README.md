@@ -4,18 +4,36 @@ Shikin exposes the local finance engine through a CLI and an MCP server.
 
 ## Install
 
-From the repo root:
+For an installed desktop app, use the standalone CLI installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-cli.sh | sh
+```
+
+The Linux desktop installer also asks whether to install this support after the app install finishes.
+
+For source development from the repo root:
 
 ```bash
 pnpm install
 cd cli && npm install
+npm run build
 ```
+
+The desktop app owns the `shikin` command. The installer places the automation bridge under Shikin's app data directory, so it does not create a second user-facing CLI command.
 
 ## CLI Usage
 
-Run commands from `cli/`:
+After the desktop launcher is installed and CLI support is installed:
 
 ```bash
+shikin # open the app
+shikin list-accounts
+shikin add-transaction --amount 12.50 --type expense --description "Lunch" --account-id acct_123
+shikin manage-recurring-transaction --action create --description "Rent" --amount 1200 --type expense --frequency monthly --account-id acct_123
+shikin diagnose
+
+# Source/dev alternative
 npx tsx src/cli.ts list-accounts
 npx tsx src/cli.ts add-transaction --amount 12.50 --type expense --description "Lunch" --account-id acct_123
 npx tsx src/cli.ts manage-recurring-transaction --action create --description "Rent" --amount 1200 --type expense --frequency monthly --account-id acct_123
@@ -32,9 +50,9 @@ Notes:
 ## Tool Discovery and Reference
 
 - All CLI commands come from the shared tool definitions in `src/tools.ts` and are mirrored in MCP.
-- `npx tsx src/cli.ts --help` lists every available CLI command and the required options.
-- `npx tsx src/cli.ts diagnose` prints CLI/MCP surface counts plus available/unavailable tool names.
-- `npx tsx src/cli.ts diagnose --deep` adds migration/integrity/balance diagnostics.
+- `shikin --help` lists every available CLI command and the required options when the desktop launcher can reach the CLI bridge.
+- `shikin diagnose` prints CLI/MCP surface counts plus available/unavailable tool names.
+- `shikin diagnose --deep` adds migration/integrity/balance diagnostics.
 - MCP clients can discover the same tool set via the standard MCP `tools/list` flow and read resources listed below.
 
 ## Currency conversion behavior
@@ -54,9 +72,12 @@ To use currency conversion from CLI successfully, ensure rates are populated bef
 
 ## MCP Server
 
-Start the MCP server from `cli/`:
+Start the MCP server through the desktop-owned command:
 
 ```bash
+shikin mcp
+
+# Source/dev alternative
 npx tsx src/mcp-server.ts
 ```
 
@@ -66,8 +87,8 @@ Claude Desktop example:
 {
   "mcpServers": {
     "shikin": {
-      "command": "npx",
-      "args": ["tsx", "/path/to/Shikin/cli/src/mcp-server.ts"]
+      "command": "shikin",
+      "args": ["mcp"]
     }
   }
 }
@@ -78,7 +99,7 @@ Claude Desktop example:
 Use `diagnose` to confirm the shared database is ready for CLI/MCP use:
 
 ```bash
-npx tsx src/cli.ts diagnose
+shikin diagnose
 ```
 
 This prints JSON with:

@@ -82,9 +82,10 @@ The MCP server exposes the same shared tool catalog as the CLI and these resourc
 - `shikin://categories`
 - `shikin://recent-transactions`
 
-## Expected Tool Surface
+## Representative Tool Surface
 
-Current catalog size is 39 tools. All shipped tools are available end-to-end against the local database.
+Current catalog size is 63 tools. All shipped tools are available end-to-end against the local database.
+The lists below are representative groups for orientation; use `shikin tools --json` for the authoritative command, argument, and enum catalog.
 
 Transaction tools:
 

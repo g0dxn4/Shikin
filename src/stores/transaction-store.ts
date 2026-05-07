@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { query, withTransaction } from '@/lib/database'
+import type { TransactionClient } from '@/lib/database'
 import { getErrorMessage } from '@/lib/errors'
 import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
@@ -20,10 +21,200 @@ interface TransactionFormData {
   currency: CurrencyCode
   date: string
   notes: string | null
+  status?: Transaction['status'] | null
 }
 
 interface MutationOptions {
   skipRefresh?: boolean
+}
+
+type BalanceImpactInput = {
+  type: TransactionType
+  amount: number
+  accountId: string
+  transferToAccountId?: string | null
+  status?: Transaction['status'] | null
+}
+
+type WritableAccountRef = {
+  id: string
+  currency: CurrencyCode
+}
+
+function isBalanceAffectingStatus(status: Transaction['status'] | null | undefined): boolean {
+  return (status ?? 'posted') !== 'pending'
+}
+
+function normalizeCurrency(value: string | null | undefined) {
+  return typeof value === 'string' ? value.trim().toUpperCase() : ''
+}
+
+async function assertRecurringRuleCompatible(
+  tx: TransactionClient,
+  recurringRuleId: string | null | undefined,
+  transactionRef: { accountId: string; type: TransactionType; currency: string | null | undefined }
+) {
+  if (!recurringRuleId) return
+
+  const rules = await tx.query<{
+    account_id: string
+    type: TransactionType
+    currency: string | null
+  }>('SELECT account_id, type, currency FROM recurring_rules WHERE id = ? LIMIT 1', [
+    recurringRuleId,
+  ])
+
+  if (rules.length === 0) {
+    throw new Error(`Recurring rule ${recurringRuleId} not found.`)
+  }
+
+  const rule = rules[0]
+  if (rule.account_id !== transactionRef.accountId) {
+    throw new Error(
+      `Recurring rule ${recurringRuleId} belongs to account ${rule.account_id}, not ${transactionRef.accountId}.`
+    )
+  }
+  if (rule.type !== transactionRef.type) {
+    throw new Error(
+      `Recurring rule ${recurringRuleId} is for ${rule.type} transactions, not ${transactionRef.type}.`
+    )
+  }
+
+  const ruleCurrency = normalizeCurrency(rule.currency)
+  const transactionCurrency = normalizeCurrency(transactionRef.currency)
+  if (!ruleCurrency) {
+    throw new Error(
+      `Recurring rule ${recurringRuleId} has no stored currency. Repair or recreate it before linking transactions.`
+    )
+  }
+  if (!transactionCurrency) {
+    throw new Error(
+      `Transaction currency is unknown; cannot link recurring rule ${recurringRuleId}.`
+    )
+  }
+  if (ruleCurrency !== transactionCurrency) {
+    throw new Error(
+      `Recurring rule ${recurringRuleId} uses ${ruleCurrency}, not ${transactionCurrency}.`
+    )
+  }
+}
+
+async function resolveWritableTransactionAccount(
+  tx: TransactionClient,
+  accountId: string | null | undefined,
+  label = 'Account'
+): Promise<WritableAccountRef> {
+  if (!accountId) throw new Error(`${label} is required.`)
+
+  const accounts =
+    (await tx.query<{ id: string; currency: string | null; is_archived: number | null }>(
+      'SELECT id, currency, is_archived FROM accounts WHERE id = ? LIMIT 1',
+      [accountId]
+    )) ?? []
+  if (accounts.length === 0) {
+    throw new Error(`${label} ${accountId} not found.`)
+  }
+  if (accounts[0]?.is_archived === 1) {
+    throw new Error(
+      `${label} ${accountId} is archived. Unarchive it before using it for new writes.`
+    )
+  }
+
+  const currency = normalizeCurrency(accounts[0].currency)
+  if (!currency) {
+    throw new Error(
+      `${label} ${accountId} has no stored currency. Repair it before writing transactions.`
+    )
+  }
+
+  return { id: accounts[0].id, currency }
+}
+
+function assertTransactionCurrencyMatchesAccount(
+  transactionCurrency: string | null | undefined,
+  account: WritableAccountRef
+) {
+  const normalizedTransactionCurrency = normalizeCurrency(transactionCurrency)
+  if (!normalizedTransactionCurrency) {
+    throw new Error(
+      `Transaction currency is required and must match account ${account.id} currency ${account.currency}.`
+    )
+  }
+  if (normalizedTransactionCurrency !== account.currency) {
+    throw new Error(
+      `Transaction currency ${normalizedTransactionCurrency} does not match account ${account.id} currency ${account.currency}.`
+    )
+  }
+}
+
+async function resolveTransactionWriteAccounts(tx: TransactionClient, data: TransactionFormData) {
+  const sourceAccount = await resolveWritableTransactionAccount(tx, data.accountId)
+  assertTransactionCurrencyMatchesAccount(data.currency, sourceAccount)
+
+  if (data.type !== 'transfer') {
+    return { sourceAccount, transferDestination: null, currency: sourceAccount.currency }
+  }
+
+  const transferDestination = await resolveWritableTransactionAccount(
+    tx,
+    data.transferToAccountId,
+    'Transfer destination account'
+  )
+  if (transferDestination.id === sourceAccount.id) {
+    throw new Error('Transfer destination account must be different from the source account.')
+  }
+  if (transferDestination.currency !== sourceAccount.currency) {
+    throw new Error(
+      `Cannot transfer from ${sourceAccount.currency} to ${transferDestination.currency}. Cross-currency transfers are not supported because no FX conversion is applied.`
+    )
+  }
+
+  return { sourceAccount, transferDestination, currency: sourceAccount.currency }
+}
+
+async function applyBalanceImpact(
+  tx: TransactionClient,
+  input: BalanceImpactInput,
+  now: string,
+  direction: 1 | -1
+) {
+  if (!isBalanceAffectingStatus(input.status)) return
+
+  if (input.type === 'transfer' && input.transferToAccountId) {
+    await tx.execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
+      -input.amount * direction,
+      now,
+      input.accountId,
+    ])
+    await tx.execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
+      input.amount * direction,
+      now,
+      input.transferToAccountId,
+    ])
+    return
+  }
+
+  const delta = (input.type === 'income' ? input.amount : -input.amount) * direction
+  await tx.execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
+    delta,
+    now,
+    input.accountId,
+  ])
+}
+
+async function getTransactionForMutation(
+  tx: TransactionClient,
+  id: string
+): Promise<Transaction | null> {
+  const rows =
+    (await tx.query<Transaction>('SELECT * FROM transactions WHERE id = ? LIMIT 1', [id])) ?? []
+  return rows[0] ?? null
+}
+
+function assertSingleRowAffected(result: { rowsAffected: number }, message: string) {
+  if (result.rowsAffected !== 1) {
+    throw new Error(message)
+  }
 }
 
 /** Transaction row with joined display names */
@@ -88,43 +279,42 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         const id = generateId()
         const now = new Date().toISOString()
         const amountCentavos = toCentavos(data.amount)
-        const isTransfer = data.type === 'transfer' && !!data.transferToAccountId
+        const isTransfer = data.type === 'transfer'
+        const { sourceAccount, transferDestination, currency } =
+          await resolveTransactionWriteAccounts(tx, data)
 
         await tx.execute(
-          `INSERT INTO transactions (id, account_id, category_id, transfer_to_account_id, type, amount, currency, description, notes, date, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO transactions (id, account_id, category_id, transfer_to_account_id, type, amount, currency, description, notes, status, date, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             id,
-            data.accountId,
+            sourceAccount.id,
             isTransfer ? null : data.categoryId,
-            isTransfer ? data.transferToAccountId : null,
+            transferDestination?.id ?? null,
             data.type,
             amountCentavos,
-            data.currency,
+            currency,
             data.description,
             data.notes,
+            data.status ?? 'posted',
             data.date,
             now,
             now,
           ]
         )
 
-        if (isTransfer && data.transferToAccountId) {
-          await tx.execute(
-            'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
-            [amountCentavos, now, data.accountId]
-          )
-          await tx.execute(
-            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
-            [amountCentavos, now, data.transferToAccountId]
-          )
-        } else {
-          const balanceDelta = data.type === 'income' ? amountCentavos : -amountCentavos
-          await tx.execute(
-            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
-            [balanceDelta, now, data.accountId]
-          )
-        }
+        await applyBalanceImpact(
+          tx,
+          {
+            type: data.type,
+            amount: amountCentavos,
+            accountId: sourceAccount.id,
+            transferToAccountId: transferDestination?.id ?? null,
+            status: data.status ?? 'posted',
+          },
+          now,
+          1
+        )
       })
 
       // Learn categorization from this transaction
@@ -144,67 +334,78 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   update: async (id, data) => {
     set({ error: null })
     try {
-      const existing = get().getById(id)
-      if (!existing) return
+      const changed = await withTransaction(async (tx) => {
+        const existing = await getTransactionForMutation(tx, id)
+        if (!existing) return false
 
-      await withTransaction(async (tx) => {
         const now = new Date().toISOString()
         const newAmountCentavos = toCentavos(data.amount)
         const oldIsTransfer = existing.type === 'transfer' && !!existing.transfer_to_account_id
-        const newIsTransfer = data.type === 'transfer' && !!data.transferToAccountId
+        const newIsTransfer = data.type === 'transfer'
+        const newStatus = data.status ?? existing.status ?? 'posted'
+        const { sourceAccount, transferDestination, currency } =
+          await resolveTransactionWriteAccounts(tx, data)
+        const identityChanged =
+          sourceAccount.id !== existing.account_id ||
+          data.type !== existing.type ||
+          normalizeCurrency(currency) !== normalizeCurrency(existing.currency)
 
-        if (oldIsTransfer && existing.transfer_to_account_id) {
-          await tx.execute(
-            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
-            [existing.amount, now, existing.account_id]
-          )
-          await tx.execute(
-            'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
-            [existing.amount, now, existing.transfer_to_account_id]
-          )
-        } else {
-          const oldDelta = existing.type === 'income' ? -existing.amount : existing.amount
-          await tx.execute(
-            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
-            [oldDelta, now, existing.account_id]
-          )
+        if (identityChanged) {
+          await assertRecurringRuleCompatible(tx, existing.recurring_rule_id, {
+            accountId: sourceAccount.id,
+            type: data.type,
+            currency,
+          })
         }
 
-        await tx.execute(
-          `UPDATE transactions SET account_id = ?, category_id = ?, transfer_to_account_id = ?, type = ?, amount = ?, currency = ?, description = ?, notes = ?, date = ?, updated_at = ?
+        await applyBalanceImpact(
+          tx,
+          {
+            type: existing.type,
+            amount: existing.amount,
+            accountId: existing.account_id,
+            transferToAccountId: oldIsTransfer ? existing.transfer_to_account_id : null,
+            status: existing.status,
+          },
+          now,
+          -1
+        )
+
+        const updateResult = await tx.execute(
+          `UPDATE transactions SET account_id = ?, category_id = ?, transfer_to_account_id = ?, type = ?, amount = ?, currency = ?, description = ?, notes = ?, status = ?, date = ?, updated_at = ?
             WHERE id = ?`,
           [
-            data.accountId,
+            sourceAccount.id,
             newIsTransfer ? null : data.categoryId,
-            newIsTransfer ? data.transferToAccountId : null,
+            transferDestination?.id ?? null,
             data.type,
             newAmountCentavos,
-            data.currency,
+            currency,
             data.description,
             data.notes,
+            newStatus,
             data.date,
             now,
             id,
           ]
         )
+        assertSingleRowAffected(updateResult, `Transaction ${id} could not be updated safely.`)
 
-        if (newIsTransfer && data.transferToAccountId) {
-          await tx.execute(
-            'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
-            [newAmountCentavos, now, data.accountId]
-          )
-          await tx.execute(
-            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
-            [newAmountCentavos, now, data.transferToAccountId]
-          )
-        } else {
-          const newDelta = data.type === 'income' ? newAmountCentavos : -newAmountCentavos
-          await tx.execute(
-            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
-            [newDelta, now, data.accountId]
-          )
-        }
+        await applyBalanceImpact(
+          tx,
+          {
+            type: data.type,
+            amount: newAmountCentavos,
+            accountId: sourceAccount.id,
+            transferToAccountId: transferDestination?.id ?? null,
+            status: newStatus,
+          },
+          now,
+          1
+        )
+        return true
       })
+      if (!changed) return
     } catch (error) {
       set({ error: getErrorMessage(error) })
       throw error
@@ -216,31 +417,30 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   remove: async (id) => {
     set({ error: null })
     try {
-      const existing = get().getById(id)
-      if (!existing) return
+      const changed = await withTransaction(async (tx) => {
+        const existing = await getTransactionForMutation(tx, id)
+        if (!existing) return false
 
-      await withTransaction(async (tx) => {
         const now = new Date().toISOString()
 
-        if (existing.type === 'transfer' && existing.transfer_to_account_id) {
-          await tx.execute(
-            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
-            [existing.amount, now, existing.account_id]
-          )
-          await tx.execute(
-            'UPDATE accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
-            [existing.amount, now, existing.transfer_to_account_id]
-          )
-        } else {
-          const reverseDelta = existing.type === 'income' ? -existing.amount : existing.amount
-          await tx.execute(
-            'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
-            [reverseDelta, now, existing.account_id]
-          )
-        }
+        await applyBalanceImpact(
+          tx,
+          {
+            type: existing.type,
+            amount: existing.amount,
+            accountId: existing.account_id,
+            transferToAccountId: existing.transfer_to_account_id,
+            status: existing.status,
+          },
+          now,
+          -1
+        )
 
-        await tx.execute('DELETE FROM transactions WHERE id = ?', [id])
+        const deleteResult = await tx.execute('DELETE FROM transactions WHERE id = ?', [id])
+        assertSingleRowAffected(deleteResult, `Transaction ${id} could not be deleted safely.`)
+        return true
       })
+      if (!changed) return
     } catch (error) {
       set({ error: getErrorMessage(error) })
       throw error
@@ -257,18 +457,24 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         const now = new Date().toISOString()
         const amountCentavos = toCentavos(data.amount)
 
+        if (data.type === 'transfer') {
+          throw new Error('Split transactions cannot be transfers.')
+        }
+        const { sourceAccount, currency } = await resolveTransactionWriteAccounts(tx, data)
+
         await tx.execute(
-          `INSERT INTO transactions (id, account_id, category_id, type, amount, currency, description, notes, date, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO transactions (id, account_id, category_id, type, amount, currency, description, notes, status, date, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             id,
-            data.accountId,
+            sourceAccount.id,
             data.categoryId,
             data.type,
             amountCentavos,
-            data.currency,
+            currency,
             data.description,
             data.notes,
+            data.status ?? 'posted',
             data.date,
             now,
             now,
@@ -277,12 +483,17 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
 
         await createSplits(id, splits, amountCentavos, tx)
 
-        const balanceDelta = data.type === 'income' ? amountCentavos : -amountCentavos
-        await tx.execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-          balanceDelta,
+        await applyBalanceImpact(
+          tx,
+          {
+            type: data.type,
+            amount: amountCentavos,
+            accountId: sourceAccount.id,
+            status: data.status ?? 'posted',
+          },
           now,
-          data.accountId,
-        ])
+          1
+        )
       })
     } catch (error) {
       set({ error: getErrorMessage(error) })

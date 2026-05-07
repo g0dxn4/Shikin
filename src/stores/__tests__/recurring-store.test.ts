@@ -209,6 +209,31 @@ describe('recurring-store', () => {
       expect(mockExecute).not.toHaveBeenCalled()
     })
 
+    it('rejects recurring-rule creation for archived accounts', async () => {
+      mockQuery.mockResolvedValueOnce([{ currency: 'USD', is_archived: 1 }])
+
+      await expect(
+        useRecurringStore.getState().create({
+          description: 'Rent',
+          amount: 1500,
+          type: 'expense',
+          frequency: 'monthly',
+          nextDate: '2026-04-01',
+          endDate: null,
+          accountId: '01ACCARCHIVED',
+          toAccountId: null,
+          categoryId: '01CAT001',
+          subcategoryId: null,
+          tags: '',
+          notes: 'Monthly rent',
+        })
+      ).rejects.toThrow(
+        'Account 01ACCARCHIVED is archived. Unarchive it before using it for new writes.'
+      )
+
+      expect(mockExecute).not.toHaveBeenCalled()
+    })
+
     it('rejects unsupported recurring transfers', async () => {
       await expect(
         useRecurringStore.getState().create({
@@ -399,15 +424,68 @@ describe('recurring-store', () => {
 
       expect(mockExecute).not.toHaveBeenCalled()
     })
+
+    it('blocks recurring-rule identity updates when transactions are linked', async () => {
+      mockQuery
+        .mockResolvedValueOnce([
+          {
+            id: '01RULE001',
+            description: 'Rent',
+            amount: 150000,
+            currency: 'USD',
+            type: 'expense',
+            frequency: 'monthly',
+            next_date: '2026-04-01',
+            end_date: null,
+            account_id: '01ACC001',
+            to_account_id: null,
+            category_id: '01CAT001',
+            subcategory_id: null,
+            tags: '',
+            notes: 'Monthly rent',
+            active: 1,
+            created_at: '2026-01-01T00:00:00Z',
+            updated_at: '2026-01-01T00:00:00Z',
+          },
+        ])
+        .mockResolvedValueOnce([{ count: 1 }])
+
+      await expect(
+        useRecurringStore.getState().update('01RULE001', {
+          description: 'Rent',
+          amount: 1500,
+          type: 'income',
+          frequency: 'monthly',
+          nextDate: '2026-04-01',
+          endDate: null,
+          accountId: '01ACC001',
+          toAccountId: null,
+          categoryId: '01CAT001',
+          subcategoryId: null,
+          tags: '',
+          notes: 'Monthly rent',
+        })
+      ).rejects.toThrow(
+        'Recurring rule 01RULE001 has 1 linked transaction. Clear or migrate those links before changing the rule account or type.'
+      )
+
+      expect(mockExecute).not.toHaveBeenCalled()
+    })
   })
 
   describe('remove', () => {
     it('deletes rule and re-fetches', async () => {
-      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockExecute
+        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
       mockQuery.mockResolvedValueOnce([]) // re-fetch
 
       await useRecurringStore.getState().remove('01RULE001')
 
+      expect(mockExecute).toHaveBeenCalledWith(
+        'UPDATE transactions SET recurring_rule_id = NULL WHERE recurring_rule_id = ?',
+        ['01RULE001']
+      )
       expect(mockExecute).toHaveBeenCalledWith('DELETE FROM recurring_rules WHERE id = ?', [
         '01RULE001',
       ])

@@ -18,6 +18,7 @@ import dayjs from 'dayjs'
 export interface RecurringRuleWithDetails extends RecurringRule {
   account_name?: string
   account_currency?: CurrencyCode
+  account_is_archived?: number
   category_name?: string
   category_color?: string
 }
@@ -73,15 +74,28 @@ function advanceDate(date: string, frequency: RecurringFrequency): string {
 }
 
 async function resolveAccountCurrency(accountId: string): Promise<CurrencyCode> {
-  const accounts = await query<{ currency: CurrencyCode }>(
-    'SELECT currency FROM accounts WHERE id = ? LIMIT 1',
+  const accounts = await query<{ currency: CurrencyCode; is_archived: number | null }>(
+    'SELECT currency, is_archived FROM accounts WHERE id = ? LIMIT 1',
     [accountId]
   )
   if (accounts.length === 0) {
     throw new Error(`Account ${accountId} not found.`)
   }
+  if (accounts[0].is_archived === 1) {
+    throw new Error(
+      `Account ${accountId} is archived. Unarchive it before using it for new writes.`
+    )
+  }
 
   return accounts[0].currency
+}
+
+async function countLinkedRecurringTransactions(ruleId: string) {
+  const rows = await query<{ count: number }>(
+    'SELECT COUNT(*) as count FROM transactions WHERE recurring_rule_id = ?',
+    [ruleId]
+  )
+  return rows[0]?.count ?? 0
 }
 
 function unknownRecurringRuleCurrencyMessage(rule: { id: string; description?: string | null }) {
@@ -209,6 +223,7 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
       const now = new Date().toISOString()
       const amountCentavos = toCentavos(data.amount)
       const isMovingAccounts = data.accountId !== rule.account_id
+      const isChangingIdentity = isMovingAccounts || data.type !== rule.type
       let currency = normalizeRecurringCurrency(rule.currency)
 
       if (isMovingAccounts) {
@@ -219,6 +234,15 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
           throw new Error(crossCurrencyRecurringRuleMoveMessage(currency, targetCurrency))
         }
         currency = targetCurrency
+      }
+
+      if (isChangingIdentity) {
+        const linkedTransactionCount = await countLinkedRecurringTransactions(id)
+        if (linkedTransactionCount > 0) {
+          throw new Error(
+            `Recurring rule ${id} has ${linkedTransactionCount} linked transaction${linkedTransactionCount === 1 ? '' : 's'}. Clear or migrate those links before changing the rule account or type.`
+          )
+        }
       }
 
       await execute(
@@ -257,7 +281,13 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
   remove: async (id) => {
     set({ error: null })
     try {
-      await execute('DELETE FROM recurring_rules WHERE id = ?', [id])
+      await withTransaction(async (tx) => {
+        await tx.execute(
+          'UPDATE transactions SET recurring_rule_id = NULL WHERE recurring_rule_id = ?',
+          [id]
+        )
+        await tx.execute('DELETE FROM recurring_rules WHERE id = ?', [id])
+      })
     } catch (error) {
       set({ error: getErrorMessage(error) })
       throw error
@@ -317,7 +347,7 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
 
       // Get all active rules where next_date <= today
       const dueRules = await query<RecurringRuleWithDetails>(
-        `SELECT r.*, a.currency as account_currency
+        `SELECT r.*, a.currency as account_currency, a.is_archived as account_is_archived
          FROM recurring_rules r
          LEFT JOIN accounts a ON r.account_id = a.id
          WHERE r.active = 1 AND r.next_date <= ?`,
@@ -329,6 +359,13 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
       const unsupportedTransferRule = dueRules.find((rule) => rule.type === 'transfer')
       if (unsupportedTransferRule) {
         throw new Error(unsupportedRecurringTransferMessage())
+      }
+
+      const archivedAccountRule = dueRules.find((rule) => rule.account_is_archived === 1)
+      if (archivedAccountRule) {
+        throw new Error(
+          `Recurring rule "${archivedAccountRule.description}" points at archived account ${archivedAccountRule.account_id}. Unarchive the account or pause the rule before materializing it.`
+        )
       }
 
       const unknownCurrencyRule = dueRules.find(
@@ -378,8 +415,8 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
 
             const txId = generateId()
             await tx.execute(
-              `INSERT INTO transactions (id, account_id, category_id, subcategory_id, type, amount, currency, description, notes, date, tags, is_recurring, transfer_to_account_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+              `INSERT INTO transactions (id, account_id, category_id, subcategory_id, type, amount, currency, description, notes, date, tags, is_recurring, transfer_to_account_id, status, recurring_rule_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'posted', ?)`,
               [
                 txId,
                 rule.account_id,
@@ -393,6 +430,7 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
                 nextDate,
                 rule.tags || '[]',
                 rule.to_account_id,
+                rule.id,
               ]
             )
 

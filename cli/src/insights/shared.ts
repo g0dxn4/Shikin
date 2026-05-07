@@ -336,7 +336,8 @@ export function createBudgetAdherenceSubscore(
     const spent =
       query<{ total: number }>(
         `SELECT COALESCE(SUM(amount), 0) AS total FROM transactions
-         WHERE category_id = $1 AND type = 'expense' AND date >= $2 AND date <= $3`,
+         WHERE category_id = $1 AND type = 'expense' AND date >= $2 AND date <= $3
+           AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
         [budget.category_id, start, today]
       )[0]?.total ?? 0
     if (spent <= budget.amount) withinCount += 1

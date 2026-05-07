@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { tools, type ToolDefinition } from './tools.js'
 import { query, close } from './database.js'
 import { fromCentavos } from './money.js'
+import { getAccountAliases } from './tools/shared.js'
 
 type McpToolResult = {
   content: Array<{ type: 'text'; text: string }>
@@ -147,6 +148,18 @@ function isFailureResult(value: unknown): value is Record<string, unknown> & { s
   )
 }
 
+function normalizeMcpToolResult(result: unknown): Record<string, unknown> {
+  if (typeof result !== 'object' || result === null || Array.isArray(result)) {
+    return { success: true, result }
+  }
+
+  if ('success' in result) {
+    return result as Record<string, unknown>
+  }
+
+  return { success: true, ...(result as Record<string, unknown>) }
+}
+
 function toMcpErrorEnvelope(
   message: string,
   errorType: McpErrorType,
@@ -176,16 +189,19 @@ function toUnavailableResult(message: string): McpToolResult {
 
 function toFailureResult(result: Record<string, unknown>): McpToolResult {
   const message =
-    typeof result.error === 'string'
-      ? result.error
-      : typeof result.message === 'string'
-        ? result.message
+    typeof result.message === 'string'
+      ? result.message
+      : typeof result.error === 'string'
+        ? result.error
         : 'Tool execution failed.'
+  const errorDetail =
+    typeof result.error === 'string' && result.error !== message ? result.error : undefined
 
   return toMcpTextResult(
     {
       ...result,
       ...toMcpErrorEnvelope(message, 'execution_error'),
+      ...(errorDetail ? { errorDetail } : {}),
     },
     true
   )
@@ -238,7 +254,7 @@ export function createMcpToolHandler(tool: ToolDefinition) {
         durationMs: Date.now() - startedAt,
         success: true,
       })
-      return toMcpTextResult(result)
+      return toMcpTextResult(normalizeMcpToolResult(result))
     } catch (err) {
       logMcpEvent('tool_completed', {
         tool: tool.name,
@@ -271,8 +287,17 @@ export function registerMcpResources(server: Pick<McpServer, 'resource'>): void 
       const accounts = query<Record<string, unknown>>(
         'SELECT id, name, type, currency, balance FROM accounts WHERE is_archived = 0 ORDER BY name'
       )
+      const aliasesByAccount = Object.entries(getAccountAliases()).reduce<Record<string, string[]>>(
+        (acc, [alias, accountId]) => {
+          acc[accountId] = [...(acc[accountId] ?? []), alias]
+          return acc
+        },
+        {}
+      )
+
       return accounts.map((account) => ({
         ...account,
+        aliases: aliasesByAccount[account.id as string] ?? [],
         balance: fromCentavos(account.balance as number),
       }))
     })
@@ -293,10 +318,13 @@ export function registerMcpResources(server: Pick<McpServer, 'resource'>): void 
     'shikin://recent-transactions',
     createMcpResourceHandler('recent-transactions', () => {
       const transactions = query<Record<string, unknown>>(
-        `SELECT t.id, t.description, t.type, t.amount, t.date, c.name as category, a.name as account
+        `SELECT t.id, t.description, t.type, t.amount, t.currency, t.date, t.notes, t.status, t.source, t.note,
+                t.recurring_rule_id as recurringRuleId, t.transfer_to_account_id as transferToAccountId,
+                COALESCE(c.name, 'Uncategorized') as category, a.name as account, ta.name as transferToAccount
          FROM transactions t
          LEFT JOIN categories c ON t.category_id = c.id
          LEFT JOIN accounts a ON t.account_id = a.id
+         LEFT JOIN accounts ta ON t.transfer_to_account_id = ta.id
          ORDER BY t.date DESC, t.created_at DESC
          LIMIT 20`
       )

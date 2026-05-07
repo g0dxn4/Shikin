@@ -1,23 +1,40 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+const { mockDbQuery, mockDbExecute, mockDbWithTransaction } = vi.hoisted(() => {
+  const mockDbQuery = vi.fn()
+  const mockDbExecute = vi.fn()
+  return {
+    mockDbQuery,
+    mockDbExecute,
+    mockDbWithTransaction: vi.fn((fn) => fn({ query: mockDbQuery, execute: mockDbExecute })),
+  }
+})
+
 vi.mock('@/lib/database', () => ({
-  query: vi.fn(),
-  execute: vi.fn(),
+  query: mockDbQuery,
+  execute: mockDbExecute,
+  withTransaction: mockDbWithTransaction,
 }))
 
 vi.mock('@/lib/ulid', () => ({
   generateId: vi.fn().mockReturnValue('01TESTACC00000000000000000'),
 }))
 
-import { query, execute } from '@/lib/database'
+import { query, execute, withTransaction } from '@/lib/database'
+import type { TransactionClient } from '@/lib/database'
 import { useAccountStore } from '../account-store'
 
 const mockQuery = vi.mocked(query)
 const mockExecute = vi.mocked(execute)
+const mockWithTransaction = vi.mocked(withTransaction)
 
 describe('account-store', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockQuery.mockResolvedValue([])
+    mockWithTransaction.mockImplementation((fn) =>
+      fn({ query: mockQuery, execute: mockExecute } as TransactionClient)
+    )
     // Reset zustand store between tests
     useAccountStore.setState({
       accounts: [],
@@ -205,10 +222,17 @@ describe('account-store', () => {
       expect(mockQuery).toHaveBeenCalledTimes(2)
     })
 
-    it('rejects account currency changes while recurring rules still point at the account', async () => {
-      mockQuery
-        .mockResolvedValueOnce([{ currency: 'USD' }])
-        .mockResolvedValueOnce([{ currency: 'BRL' }])
+    it('rejects account currency changes while linked monetary rows still point at the account', async () => {
+      mockQuery.mockImplementation((sql: string) => {
+        if (sql.includes('SELECT currency, is_archived, balance FROM accounts')) {
+          return Promise.resolve([{ currency: 'USD', is_archived: 0, balance: 0 }])
+        }
+        if (sql.includes('FROM recurring_rules WHERE account_id')) {
+          return Promise.resolve([{ count: 1 }])
+        }
+        if (sql.includes('COUNT(*) as count')) return Promise.resolve([{ count: 0 }])
+        return Promise.resolve([])
+      })
 
       await expect(
         useAccountStore.getState().update('01ACC001', {
@@ -217,18 +241,14 @@ describe('account-store', () => {
           currency: 'EUR',
           balance: 200,
         })
-      ).rejects.toThrow(
-        'Cannot change this account currency while 1 recurring rule(s) still point at the account. Repair, move, or recreate those recurring rules first so scheduled amounts do not silently change meaning.'
-      )
+      ).rejects.toThrow('Cannot change this account currency while 1 linked monetary reference')
 
       expect(mockExecute).not.toHaveBeenCalled()
-      expect(useAccountStore.getState().error).toBe(
-        'Cannot change this account currency while 1 recurring rule(s) still point at the account. Repair, move, or recreate those recurring rules first so scheduled amounts do not silently change meaning.'
-      )
+      expect(useAccountStore.getState().error).toContain('recurring rules as source=1')
     })
 
     it('allows currency normalization-only saves when recurring rules depend on the account', async () => {
-      mockQuery.mockResolvedValueOnce([{ currency: ' usd ' }])
+      mockQuery.mockResolvedValueOnce([{ currency: ' usd ', is_archived: 0, balance: 0 }])
       mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
       mockQuery.mockResolvedValueOnce([])
 
@@ -252,31 +272,40 @@ describe('account-store', () => {
       )
     })
 
-    it('allows repairing account currency when dependent recurring rules already match the target', async () => {
-      mockQuery
-        .mockResolvedValueOnce([{ currency: 'EUR' }])
-        .mockResolvedValueOnce([{ currency: 'USD' }, { currency: ' usd ' }])
-      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
-      mockQuery.mockResolvedValueOnce([])
+    it('rejects updates to archived accounts', async () => {
+      mockQuery.mockResolvedValueOnce([{ currency: 'USD', is_archived: 1, balance: 0 }])
 
-      await useAccountStore.getState().update('01ACC001', {
-        name: 'Updated',
-        type: 'checking',
-        currency: 'USD',
-        balance: 200,
+      await expect(
+        useAccountStore.getState().update('01ACC001', {
+          name: 'Archived update',
+          type: 'checking',
+          currency: 'USD',
+          balance: 200,
+        })
+      ).rejects.toThrow('Account 01ACC001 is archived. Unarchive it before editing it.')
+
+      expect(mockExecute).not.toHaveBeenCalled()
+    })
+
+    it('rejects account currency changes when the account has a nonzero balance', async () => {
+      mockQuery.mockImplementation((sql: string) => {
+        if (sql.includes('SELECT currency, is_archived, balance FROM accounts')) {
+          return Promise.resolve([{ currency: 'EUR', is_archived: 0, balance: 1234 }])
+        }
+        if (sql.includes('COUNT(*) as count')) return Promise.resolve([{ count: 0 }])
+        return Promise.resolve([])
       })
 
-      expect(mockExecute).toHaveBeenCalledWith(
-        expect.stringContaining('UPDATE accounts SET'),
-        expect.arrayContaining([
-          'Updated',
-          'checking',
-          'USD',
-          20000,
-          expect.any(String),
-          '01ACC001',
-        ])
-      )
+      await expect(
+        useAccountStore.getState().update('01ACC001', {
+          name: 'Updated',
+          type: 'checking',
+          currency: 'USD',
+          balance: 200,
+        })
+      ).rejects.toThrow('nonzero account balance=1')
+
+      expect(mockExecute).not.toHaveBeenCalled()
     })
 
     it('clears credit card fields when an account is saved as non-credit', async () => {
@@ -302,14 +331,39 @@ describe('account-store', () => {
   })
 
   describe('remove', () => {
-    it('deletes account and re-fetches', async () => {
+    it('deletes account with no linked references and re-fetches', async () => {
       mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
       mockQuery.mockResolvedValueOnce([]) // re-fetch
 
       await useAccountStore.getState().remove('01ACC001')
 
       expect(mockExecute).toHaveBeenCalledWith('DELETE FROM accounts WHERE id = ?', ['01ACC001'])
-      expect(mockQuery).toHaveBeenCalledTimes(1)
+      expect(mockWithTransaction).toHaveBeenCalledTimes(1)
+    })
+
+    it('archives accounts with linked references instead of deleting them', async () => {
+      mockQuery.mockResolvedValueOnce([{ count: 1 }])
+      mockExecute
+        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+
+      await useAccountStore.getState().remove('01ACC001')
+
+      expect(mockExecute).toHaveBeenCalledWith(
+        'UPDATE accounts SET is_archived = 1, updated_at = ? WHERE id = ?',
+        [expect.any(String), '01ACC001']
+      )
+      expect(mockExecute).not.toHaveBeenCalledWith('DELETE FROM accounts WHERE id = ?', [
+        '01ACC001',
+      ])
+      expect(mockExecute).toHaveBeenCalledWith(
+        'UPDATE recurring_rules SET active = 0, updated_at = ? WHERE active = 1 AND (account_id = ? OR to_account_id = ?)',
+        [expect.any(String), '01ACC001', '01ACC001']
+      )
+      expect(mockExecute).toHaveBeenCalledWith(
+        'UPDATE subscriptions SET is_active = 0, updated_at = ? WHERE is_active = 1 AND account_id = ?',
+        [expect.any(String), '01ACC001']
+      )
     })
   })
 
@@ -357,13 +411,23 @@ describe('account-store', () => {
 
   describe('archive', () => {
     it('archives an account and re-fetches', async () => {
-      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockExecute
+        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
       mockQuery.mockResolvedValueOnce([])
 
       await useAccountStore.getState().archive('01ACC001')
 
       expect(mockExecute).toHaveBeenCalledWith(
         'UPDATE accounts SET is_archived = 1, updated_at = ? WHERE id = ?',
+        [expect.any(String), '01ACC001']
+      )
+      expect(mockExecute).toHaveBeenCalledWith(
+        'UPDATE recurring_rules SET active = 0, updated_at = ? WHERE active = 1 AND (account_id = ? OR to_account_id = ?)',
+        [expect.any(String), '01ACC001', '01ACC001']
+      )
+      expect(mockExecute).toHaveBeenCalledWith(
+        'UPDATE subscriptions SET is_active = 0, updated_at = ? WHERE is_active = 1 AND account_id = ?',
         [expect.any(String), '01ACC001']
       )
       expect(mockQuery).toHaveBeenCalledTimes(1)

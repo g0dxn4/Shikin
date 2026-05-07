@@ -2,15 +2,24 @@ import {
   z,
   query,
   execute,
+  transaction,
   generateId,
   toCentavos,
   fromCentavos,
   dayjs,
-  nextDateForDay,
+  boundedText,
+  positiveMoneyAmount,
+  isoDate,
+  assetCode,
+  resolveAccountId,
+  resolveCategoryId,
+  normalizeCurrencyCode,
+  writeAuditLog,
   type ToolDefinition,
 } from './shared.js'
 
 import { listSubscriptionsSummary, getSubscriptionSpendingSummary } from '../insights.js'
+import { getCreditCardBillEntries, type CreditCardBillEntry } from './credit-cards.js'
 
 type InvestmentRow = {
   id: string
@@ -24,19 +33,120 @@ type InvestmentRow = {
   notes: string | null
 }
 
-type CreditCardBillRow = {
-  name: string
-  balance: number
-  currency: string
-  payment_due_day: number | null
-}
-
 type RecurringBillRow = {
   description: string
   amount: number
   currency: string
   date: string
   count: number
+}
+
+type UpcomingBillEntry = {
+  name: string
+  amount: number
+  currency: string
+  dueDate: string
+  source: string
+  daysUntilDue: number
+}
+
+type SubscriptionRow = {
+  id: string
+  account_id: string | null
+  category_id: string | null
+  name: string
+  amount: number
+  currency: string
+  billing_cycle: 'weekly' | 'monthly' | 'quarterly' | 'yearly'
+  next_billing_date: string
+  icon: string | null
+  color: string | null
+  url: string | null
+  notes: string | null
+  is_active: number
+}
+
+type SubscriptionAccountRow = {
+  id: string
+  currency: string
+  is_archived: number
+}
+
+function assertSingleRowUpdated(result: { rowsAffected: number }, message: string) {
+  if (result.rowsAffected !== 1) {
+    throw new Error(message)
+  }
+}
+
+function subscriptionSnapshot(subscription: SubscriptionRow) {
+  return {
+    id: subscription.id,
+    accountId: subscription.account_id,
+    categoryId: subscription.category_id,
+    name: subscription.name,
+    amount: fromCentavos(subscription.amount),
+    amountCentavos: subscription.amount,
+    currency: subscription.currency,
+    billingCycle: subscription.billing_cycle,
+    nextBillingDate: subscription.next_billing_date,
+    icon: subscription.icon,
+    color: subscription.color,
+    url: subscription.url,
+    notes: subscription.notes,
+    isActive: subscription.is_active === 1,
+  }
+}
+
+function getSubscription(subscriptionId: string): SubscriptionRow | null {
+  const rows = query<SubscriptionRow>('SELECT * FROM subscriptions WHERE id = $1 LIMIT 1', [
+    subscriptionId,
+  ]) as SubscriptionRow[] | undefined
+  return rows?.[0] ?? null
+}
+
+function resolveOptionalSubscriptionAccount(accountId?: string, account?: string) {
+  if (!accountId && !account) return { success: true as const, id: null, currency: null }
+  return resolveAccountId(accountId, account)
+}
+
+function getSubscriptionAccount(accountId: string) {
+  const account = query<SubscriptionAccountRow>(
+    'SELECT id, currency, is_archived FROM accounts WHERE id = $1 LIMIT 1',
+    [accountId]
+  )[0]
+  if (!account) return { success: false as const, message: `Account ${accountId} not found.` }
+  if (account.is_archived === 1) {
+    return {
+      success: false as const,
+      message: `Account ${accountId} is archived. Unarchive it before using it for new writes.`,
+    }
+  }
+  return { success: true as const, id: account.id, currency: account.currency }
+}
+
+function resolveOptionalSubscriptionCategory(categoryId?: string, category?: string) {
+  if (categoryId) {
+    const rows = query<{ id: string; name: string }>(
+      'SELECT id, name FROM categories WHERE id = $1 LIMIT 1',
+      [categoryId]
+    )
+    if (rows.length === 0) {
+      return { success: false as const, message: `Category ${categoryId} not found.` }
+    }
+    return { success: true as const, id: rows[0].id, name: rows[0].name }
+  }
+  return resolveCategoryId(category)
+}
+
+function subscriptionCurrencyFailure(accountCurrency: string | null, currency: string) {
+  if (!accountCurrency) return null
+  return normalizeCurrencyCode(accountCurrency) === normalizeCurrencyCode(currency)
+    ? null
+    : {
+        success: false as const,
+        reason: 'subscription_currency_mismatch' as const,
+        message: `Subscription currency ${currency} does not match linked account currency ${accountCurrency}. Use an account with matching currency or omit the account link.`,
+      }
 }
 
 const manageInvestment: ToolDefinition = {
@@ -85,13 +195,15 @@ const manageInvestment: ToolDefinition = {
 
       const id = generateId()
       const avgCostCentavos = avgCost !== undefined ? toCentavos(avgCost) : 0
+      const resolvedAccount = accountId ? resolveAccountId(accountId) : null
+      if (resolvedAccount && !resolvedAccount.success) return resolvedAccount
 
       await execute(
         `INSERT INTO investments (id, account_id, symbol, name, type, shares, avg_cost_basis, currency, notes)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [
           id,
-          accountId ?? null,
+          resolvedAccount?.id ?? null,
           symbol.toUpperCase(),
           name,
           type ?? 'stock',
@@ -169,8 +281,10 @@ const manageInvestment: ToolDefinition = {
         params.push(currency)
       }
       if (accountId !== undefined) {
+        const resolvedAccount = accountId ? resolveAccountId(accountId) : null
+        if (resolvedAccount && !resolvedAccount.success) return resolvedAccount
         setClauses.push(`account_id = $${paramIdx++}`)
-        params.push(accountId)
+        params.push(resolvedAccount?.id ?? null)
       }
       if (notes !== undefined) {
         setClauses.push(`notes = $${paramIdx++}`)
@@ -253,35 +367,9 @@ const getUpcomingBills: ToolDefinition = {
   execute: async ({ daysAhead }) => {
     const today = dayjs()
     const cutoff = today.add(daysAhead, 'day')
-    const bills: Array<{
-      name: string
-      amount: number
-      currency: string
-      dueDate: string
-      source: string
-      daysUntilDue: number
-    }> = []
+    const bills: Array<CreditCardBillEntry | UpcomingBillEntry> = []
 
-    // Credit card payment due dates
-    const creditCards = await query<CreditCardBillRow>(
-      "SELECT * FROM accounts WHERE type = 'credit_card' AND is_archived = 0 AND payment_due_day IS NOT NULL"
-    )
-
-    for (const card of creditCards) {
-      if (card.payment_due_day) {
-        const dueDate = nextDateForDay(card.payment_due_day)
-        if (dueDate.isBefore(cutoff) || dueDate.isSame(cutoff, 'day')) {
-          bills.push({
-            name: `${card.name} payment`,
-            amount: fromCentavos(Math.abs(card.balance)),
-            currency: card.currency,
-            dueDate: dueDate.format('YYYY-MM-DD'),
-            source: 'credit_card',
-            daysUntilDue: dueDate.diff(today, 'day'),
-          })
-        }
-      }
-    }
+    bills.push(...getCreditCardBillEntries(daysAhead))
 
     // Recurring transactions
     const recurringTx = await query<RecurringBillRow>(
@@ -289,6 +377,7 @@ const getUpcomingBills: ToolDefinition = {
        FROM transactions
        WHERE is_recurring = 1 AND type = 'expense'
          AND date >= $1
+         AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
        GROUP BY description, amount
        HAVING count >= 1
        ORDER BY date DESC`,
@@ -345,6 +434,386 @@ const getUpcomingBills: ToolDefinition = {
   },
 }
 
+const createSubscription: ToolDefinition = {
+  name: 'create-subscription',
+  description:
+    'Create a subscription with optional account/category resolution and a dry-run preview.',
+  schema: z.object({
+    name: boundedText('Subscription name', 'Subscription name', 160),
+    amount: positiveMoneyAmount('Subscription amount in the main currency unit'),
+    billingCycle: z
+      .enum(['weekly', 'monthly', 'quarterly', 'yearly'])
+      .optional()
+      .default('monthly')
+      .describe('Billing cycle'),
+    nextBillingDate: isoDate('Next billing date in YYYY-MM-DD format'),
+    currency: assetCode(
+      'Currency or asset code. Defaults to the linked account currency or USD'
+    ).optional(),
+    accountId: boundedText('Account ID', 'Optional linked account ID', 128).optional(),
+    account: boundedText(
+      'Account reference',
+      'Optional linked account alias, exact account ID, or exact account name',
+      128
+    ).optional(),
+    categoryId: boundedText('Category ID', 'Optional linked category ID', 128).optional(),
+    category: boundedText('Category', 'Optional category name to resolve', 120).optional(),
+    icon: boundedText('Icon', 'Optional icon name', 80).optional(),
+    color: boundedText('Color', 'Optional display color', 80).optional(),
+    url: z.string().trim().max(500).optional().describe('Optional subscription URL'),
+    notes: z.string().trim().max(1000).optional().describe('Optional notes'),
+    active: z.boolean().optional().default(true).describe('Whether the subscription is active'),
+    dryRun: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Validate and preview the subscription without writing it'),
+  }),
+  execute: async ({
+    name,
+    amount,
+    billingCycle,
+    nextBillingDate,
+    currency,
+    accountId,
+    account,
+    categoryId,
+    category,
+    icon,
+    color,
+    url,
+    notes,
+    active,
+    dryRun,
+  }) => {
+    const resolvedAccount = resolveOptionalSubscriptionAccount(accountId, account)
+    if (!resolvedAccount.success) return resolvedAccount
+    const resolvedCategory = resolveOptionalSubscriptionCategory(categoryId, category)
+    if (!resolvedCategory.success) return resolvedCategory
+
+    const resolvedCurrency = currency ?? resolvedAccount.currency ?? 'USD'
+    const currencyFailure = subscriptionCurrencyFailure(resolvedAccount.currency, resolvedCurrency)
+    if (currencyFailure) return currencyFailure
+
+    const id = generateId()
+    const amountCentavos = toCentavos(amount)
+    const subscription: SubscriptionRow = {
+      id,
+      account_id: resolvedAccount.id,
+      category_id: resolvedCategory.id,
+      name,
+      amount: amountCentavos,
+      currency: resolvedCurrency,
+      billing_cycle: billingCycle,
+      next_billing_date: nextBillingDate,
+      icon: icon ?? null,
+      color: color ?? null,
+      url: url ?? null,
+      notes: notes ?? null,
+      is_active: active ? 1 : 0,
+    }
+
+    if (dryRun) {
+      return {
+        success: true,
+        action: 'created' as const,
+        dryRun: true,
+        wouldCreate: subscriptionSnapshot(subscription),
+        message: `Dry run: subscription "${name}" would be created.`,
+      }
+    }
+
+    transaction(() => {
+      execute(
+        `INSERT INTO subscriptions (id, account_id, category_id, name, amount, currency, billing_cycle, next_billing_date, icon, color, url, notes, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        [
+          id,
+          subscription.account_id,
+          subscription.category_id,
+          name,
+          amountCentavos,
+          resolvedCurrency,
+          billingCycle,
+          nextBillingDate,
+          icon ?? null,
+          color ?? null,
+          url ?? null,
+          notes ?? null,
+          active ? 1 : 0,
+        ]
+      )
+      writeAuditLog({
+        entity: 'subscription',
+        entityId: id,
+        action: 'create',
+        before: null,
+        after: { subscription: subscriptionSnapshot(subscription) },
+      })
+    })
+
+    return {
+      success: true,
+      action: 'created' as const,
+      subscription: subscriptionSnapshot(subscription),
+      message: `Created subscription "${name}".`,
+    }
+  },
+}
+
+const updateSubscription: ToolDefinition = {
+  name: 'update-subscription',
+  description:
+    'Update a subscription by ID with optional account/category resolution and a dry-run preview.',
+  schema: z.object({
+    subscriptionId: boundedText('Subscription ID', 'Subscription ID to update', 128),
+    name: boundedText('Subscription name', 'New subscription name', 160).optional(),
+    amount: positiveMoneyAmount('New subscription amount in the main currency unit').optional(),
+    billingCycle: z.enum(['weekly', 'monthly', 'quarterly', 'yearly']).optional(),
+    nextBillingDate: isoDate('New next billing date in YYYY-MM-DD format').optional(),
+    currency: assetCode('New currency or asset code').optional(),
+    accountId: boundedText('Account ID', 'New linked account ID', 128).optional(),
+    account: boundedText(
+      'Account reference',
+      'New linked account alias, exact account ID, or exact account name',
+      128
+    ).optional(),
+    clearAccount: z.boolean().optional().default(false).describe('Clear the linked account'),
+    categoryId: boundedText('Category ID', 'New linked category ID', 128).optional(),
+    category: boundedText('Category', 'New category name to resolve', 120).optional(),
+    clearCategory: z.boolean().optional().default(false).describe('Clear the linked category'),
+    icon: z.string().trim().max(80).optional().describe('New icon. Pass an empty string to clear.'),
+    color: z
+      .string()
+      .trim()
+      .max(80)
+      .optional()
+      .describe('New color. Pass an empty string to clear.'),
+    url: z.string().trim().max(500).optional().describe('New URL. Pass an empty string to clear.'),
+    notes: z
+      .string()
+      .trim()
+      .max(1000)
+      .optional()
+      .describe('New notes. Pass an empty string to clear.'),
+    active: z.boolean().optional().describe('Whether the subscription is active'),
+    dryRun: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Validate and preview the subscription update without writing it'),
+  }),
+  execute: async ({
+    subscriptionId,
+    name,
+    amount,
+    billingCycle,
+    nextBillingDate,
+    currency,
+    accountId,
+    account,
+    clearAccount,
+    categoryId,
+    category,
+    clearCategory,
+    icon,
+    color,
+    url,
+    notes,
+    active,
+    dryRun,
+  }) => {
+    const existing = getSubscription(subscriptionId)
+    if (!existing) {
+      return {
+        success: false,
+        reason: 'subscription_not_found',
+        message: `Subscription ${subscriptionId} not found.`,
+      }
+    }
+
+    if (clearAccount && (accountId || account)) {
+      return { success: false, message: 'Use either clearAccount or account/accountId, not both.' }
+    }
+    if (clearCategory && (categoryId || category)) {
+      return {
+        success: false,
+        message: 'Use either clearCategory or category/categoryId, not both.',
+      }
+    }
+
+    const resolvedAccount = clearAccount
+      ? { success: true as const, id: null, currency: null }
+      : accountId || account
+        ? resolveOptionalSubscriptionAccount(accountId, account)
+        : existing.account_id
+          ? getSubscriptionAccount(existing.account_id)
+          : { success: true as const, id: null, currency: null }
+    if (!resolvedAccount.success) return resolvedAccount
+
+    const resolvedCategory = clearCategory
+      ? { success: true as const, id: null, name: null }
+      : categoryId || category
+        ? resolveOptionalSubscriptionCategory(categoryId, category)
+        : { success: true as const, id: existing.category_id, name: null }
+    if (!resolvedCategory.success) return resolvedCategory
+
+    const nextCurrency = currency ?? existing.currency
+    const accountCurrency = resolvedAccount.currency
+    const currencyFailure = subscriptionCurrencyFailure(accountCurrency, nextCurrency)
+    if (currencyFailure) return currencyFailure
+
+    const updated: SubscriptionRow = {
+      ...existing,
+      account_id: resolvedAccount.id,
+      category_id: resolvedCategory.id,
+      name: name ?? existing.name,
+      amount: amount !== undefined ? toCentavos(amount) : existing.amount,
+      currency: nextCurrency,
+      billing_cycle: billingCycle ?? existing.billing_cycle,
+      next_billing_date: nextBillingDate ?? existing.next_billing_date,
+      icon: icon !== undefined ? (icon === '' ? null : icon) : existing.icon,
+      color: color !== undefined ? (color === '' ? null : color) : existing.color,
+      url: url !== undefined ? (url === '' ? null : url) : existing.url,
+      notes: notes !== undefined ? (notes === '' ? null : notes) : existing.notes,
+      is_active: active !== undefined ? (active ? 1 : 0) : existing.is_active,
+    }
+
+    const setClauses: string[] = []
+    const params: unknown[] = []
+    let paramIdx = 1
+    const addSet = (column: string, value: unknown) => {
+      setClauses.push(`${column} = $${paramIdx++}`)
+      params.push(value)
+    }
+
+    if (updated.account_id !== existing.account_id) addSet('account_id', updated.account_id)
+    if (updated.category_id !== existing.category_id) addSet('category_id', updated.category_id)
+    if (updated.name !== existing.name) addSet('name', updated.name)
+    if (updated.amount !== existing.amount) addSet('amount', updated.amount)
+    if (normalizeCurrencyCode(updated.currency) !== normalizeCurrencyCode(existing.currency)) {
+      addSet('currency', updated.currency)
+    }
+    if (updated.billing_cycle !== existing.billing_cycle)
+      addSet('billing_cycle', updated.billing_cycle)
+    if (updated.next_billing_date !== existing.next_billing_date) {
+      addSet('next_billing_date', updated.next_billing_date)
+    }
+    if (updated.icon !== existing.icon) addSet('icon', updated.icon)
+    if (updated.color !== existing.color) addSet('color', updated.color)
+    if (updated.url !== existing.url) addSet('url', updated.url)
+    if (updated.notes !== existing.notes) addSet('notes', updated.notes)
+    if (updated.is_active !== existing.is_active) addSet('is_active', updated.is_active)
+
+    if (setClauses.length === 0) {
+      return {
+        success: true,
+        action: 'updated' as const,
+        ...(dryRun ? { dryRun: true } : {}),
+        changed: false,
+        subscription: subscriptionSnapshot(existing),
+        message: dryRun
+          ? `Dry run: subscription "${existing.name}" already matches the requested values.`
+          : `Subscription "${existing.name}" already matches the requested values.`,
+      }
+    }
+
+    if (dryRun) {
+      return {
+        success: true,
+        action: 'updated' as const,
+        dryRun: true,
+        changed: true,
+        wouldUpdate: {
+          subscriptionId,
+          before: subscriptionSnapshot(existing),
+          after: subscriptionSnapshot(updated),
+        },
+        message: `Dry run: subscription "${updated.name}" would be updated.`,
+      }
+    }
+
+    transaction(() => {
+      setClauses.push(`updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`)
+      params.push(subscriptionId)
+      const updateResult = execute(
+        `UPDATE subscriptions SET ${setClauses.join(', ')} WHERE id = $${paramIdx}`,
+        params
+      )
+      assertSingleRowUpdated(
+        updateResult,
+        `Subscription ${subscriptionId} could not be updated safely.`
+      )
+      writeAuditLog({
+        entity: 'subscription',
+        entityId: subscriptionId,
+        action: 'update',
+        before: { subscription: subscriptionSnapshot(existing) },
+        after: { subscription: subscriptionSnapshot(updated) },
+      })
+    })
+
+    return {
+      success: true,
+      action: 'updated' as const,
+      changed: true,
+      subscription: subscriptionSnapshot(updated),
+      message: `Updated subscription "${updated.name}".`,
+    }
+  },
+}
+
+const deleteSubscription: ToolDefinition = {
+  name: 'delete-subscription',
+  description: 'Delete a subscription by ID with a dry-run preview.',
+  schema: z.object({
+    subscriptionId: boundedText('Subscription ID', 'Subscription ID to delete', 128),
+    dryRun: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Validate and preview the subscription deletion without writing it'),
+  }),
+  execute: async ({ subscriptionId, dryRun }) => {
+    const existing = getSubscription(subscriptionId)
+    if (!existing) {
+      return {
+        success: false,
+        reason: 'subscription_not_found',
+        message: `Subscription ${subscriptionId} not found.`,
+      }
+    }
+
+    if (dryRun) {
+      return {
+        success: true,
+        action: 'deleted' as const,
+        dryRun: true,
+        wouldDelete: subscriptionSnapshot(existing),
+        message: `Dry run: subscription "${existing.name}" would be deleted.`,
+      }
+    }
+
+    transaction(() => {
+      execute('DELETE FROM subscriptions WHERE id = $1', [subscriptionId])
+      writeAuditLog({
+        entity: 'subscription',
+        entityId: subscriptionId,
+        action: 'delete',
+        before: { subscription: subscriptionSnapshot(existing) },
+        after: null,
+      })
+    })
+
+    return {
+      success: true,
+      action: 'deleted' as const,
+      subscription: subscriptionSnapshot(existing),
+      message: `Deleted subscription "${existing.name}".`,
+    }
+  },
+}
+
 // ---------------------------------------------------------------------------
 // 23. list-subscriptions
 // ---------------------------------------------------------------------------
@@ -382,6 +851,9 @@ const getSubscriptionSpending: ToolDefinition = {
 export const investmentsandsubscriptionsTools: ToolDefinition[] = [
   manageInvestment,
   getUpcomingBills,
+  createSubscription,
+  updateSubscription,
+  deleteSubscription,
   listSubscriptions,
   getSubscriptionSpending,
 ]

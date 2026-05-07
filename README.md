@@ -32,12 +32,12 @@ Shikin is built to keep both:
 - **Investments**: Portfolio tracking with live prices (Alpha Vantage for stocks, CoinGecko for crypto).
 - **Multi-Currency**: Live exchange rates via frankfurter.app with preferred currency conversion.
 
-### CLI & MCP Server — 39 Tool Definitions
+### CLI & MCP Server — 63 Tool Definitions
 
 - **CLI**: `shikin add-transaction --amount 5.50 --type expense --description "Coffee"`
 - **MCP Server**: Connect Claude Code, Claude Desktop, Cursor, or any MCP-compatible client
 - **Portable AI Skill**: Optional `Skill.md` reference for AI tools that support file-based skills
-- **39 Tool Definitions**: All shipped CLI/MCP tools run end-to-end against local data
+- **63 Tool Definitions**: All shipped CLI/MCP tools run end-to-end against local data
 - **No Built-in Chat Assistant**: Shikin is the local finance engine; external clients can automate it through CLI/MCP
 
 Current MVP limitations:
@@ -75,7 +75,7 @@ Current MVP limitations:
 | State      | Zustand (19 stores)              | Global state management                               |
 | Database   | SQLite (shared storage)          | 21 tables, migration-backed schema                    |
 | Settings   | Tauri Store / data-server bridge | Local key-value config storage                        |
-| Automation | CLI (`commander`) + MCP SDK      | Local automation surface (39 shared tool definitions) |
+| Automation | CLI (`commander`) + MCP SDK      | Local automation surface (63 shared tool definitions) |
 | Forms      | React Hook Form + Zod v4         | Form validation and parsing                           |
 | Charts     | Recharts                         | Financial visualizations                              |
 | PDF        | jsPDF                            | Report generation                                     |
@@ -212,7 +212,7 @@ pnpm build:tauri  # Builds .deb + .AppImage (Linux), .dmg (macOS), .msi (Windows
 
 ## CLI & MCP Server
 
-Shikin exposes 39 shared CLI/MCP tool definitions. All shipped tools are available end-to-end against the local database.
+Shikin exposes 63 shared CLI/MCP tool definitions. All shipped tools are available end-to-end against the local database.
 
 ```bash
 # Install automation support for the installed desktop app.
@@ -301,7 +301,7 @@ Shikin/
 │   ├── stores/               # 18 Zustand stores
 │   ├── i18n/                 # 14 namespaces, 2 languages (en/es)
 │   └── types/                # TypeScript type definitions
-├── cli/                      # CLI + MCP server (39 shared tool definitions)
+├── cli/                      # CLI + MCP server (63 shared tool definitions)
 ├── skills/                   # Portable AI skill packs distributed by Shikin
 ├── docs/                     # Project documentation
 ├── e2e/                      # Playwright end-to-end tests

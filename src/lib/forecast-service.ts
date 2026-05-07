@@ -57,7 +57,8 @@ export async function generateCashFlowForecast(
   const dailyAverages = await query<DailyAggregate>(
     `SELECT type, CAST(SUM(amount) AS REAL) / 90.0 as avg_daily
      FROM transactions
-     WHERE date >= ? AND date <= ? AND type IN ('expense', 'income')
+      WHERE date >= ? AND date <= ? AND type IN ('expense', 'income')
+        AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
      GROUP BY type`,
     [ninetyDaysAgo, today]
   )

@@ -47,7 +47,9 @@ interface BudgetRow {
 /** Fetch total expenses in a date range */
 async function getTotalExpenses(start: string, end: string): Promise<number> {
   const rows = await query<TotalRow>(
-    `SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE type = 'expense' AND date >= ? AND date <= ?`,
+    `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
+     WHERE type = 'expense' AND date >= ? AND date <= ?
+       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
     [start, end]
   )
   return rows[0]?.total ?? 0
@@ -56,7 +58,9 @@ async function getTotalExpenses(start: string, end: string): Promise<number> {
 /** Fetch total income in a date range */
 async function getTotalIncome(start: string, end: string): Promise<number> {
   const rows = await query<TotalRow>(
-    `SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE type = 'income' AND date >= ? AND date <= ?`,
+    `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
+     WHERE type = 'income' AND date >= ? AND date <= ?
+       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
     [start, end]
   )
   return rows[0]?.total ?? 0
@@ -68,7 +72,8 @@ async function getSpendingByCategory(start: string, end: string): Promise<Spendi
     `SELECT COALESCE(c.name, '${UNCATEGORIZED}') as category_name, SUM(t.amount) as total, COUNT(*) as count
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
-     WHERE t.type = 'expense' AND t.date >= ? AND t.date <= ?
+      WHERE t.type = 'expense' AND t.date >= ? AND t.date <= ?
+        AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      GROUP BY c.name
      ORDER BY total DESC`,
     [start, end]
@@ -81,7 +86,8 @@ async function getBiggestExpense(start: string, end: string): Promise<BiggestRow
     `SELECT t.description, t.amount, COALESCE(c.name, '${UNCATEGORIZED}') as category_name
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
-     WHERE t.type = 'expense' AND t.date >= ? AND t.date <= ?
+      WHERE t.type = 'expense' AND t.date >= ? AND t.date <= ?
+        AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      ORDER BY t.amount DESC LIMIT 1`,
     [start, end]
   )
@@ -94,7 +100,8 @@ async function getBudgetAdherence(start: string, end: string): Promise<BudgetRow
     `SELECT b.name, b.amount as budget_amount,
        COALESCE((SELECT SUM(t.amount) FROM transactions t
          WHERE t.category_id = b.category_id AND t.type = 'expense'
-         AND t.date >= ? AND t.date <= ?), 0) as spent
+          AND t.date >= ? AND t.date <= ?
+          AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')), 0) as spent
      FROM budgets b WHERE b.is_active = 1`,
     [start, end]
   )
@@ -136,10 +143,9 @@ export async function loadRecapHistory(limit: number = 20): Promise<Recap[]> {
     highlights_json: string
     generated_at: string
   }
-  const rows = await query<RecapRow>(
-    'SELECT * FROM recaps ORDER BY generated_at DESC LIMIT ?',
-    [limit]
-  )
+  const rows = await query<RecapRow>('SELECT * FROM recaps ORDER BY generated_at DESC LIMIT ?', [
+    limit,
+  ])
   return rows.map((r) => ({
     id: r.id,
     type: r.type,
@@ -212,16 +218,21 @@ export async function generateWeeklyRecap(): Promise<Recap> {
   const parts: string[] = []
 
   if (totalExpenses === 0 && totalIncome === 0) {
-    parts.push('No transactions recorded this week. A fresh start or a quiet period -- either way, your balances stayed put.')
+    parts.push(
+      'No transactions recorded this week. A fresh start or a quiet period -- either way, your balances stayed put.'
+    )
   } else {
     parts.push(
       `This week you spent ${formatMoney(totalExpenses)} and earned ${formatMoney(totalIncome)}.`
     )
 
     if (prevExpenses > 0) {
-      const direction = totalExpenses > prevExpenses ? 'up' : totalExpenses < prevExpenses ? 'down' : 'flat'
+      const direction =
+        totalExpenses > prevExpenses ? 'up' : totalExpenses < prevExpenses ? 'down' : 'flat'
       if (direction !== 'flat') {
-        parts.push(`Spending is ${direction} ${expenseChange.replace(/[+-]/, '')} compared to last week.`)
+        parts.push(
+          `Spending is ${direction} ${expenseChange.replace(/[+-]/, '')} compared to last week.`
+        )
       }
     }
 
@@ -286,23 +297,16 @@ export async function generateMonthlyRecap(month?: string): Promise<Recap> {
   const prevStart = prevTarget.startOf('month').format('YYYY-MM-DD')
   const prevEnd = prevTarget.endOf('month').format('YYYY-MM-DD')
 
-  const [
-    totalExpenses,
-    totalIncome,
-    prevExpenses,
-    prevIncome,
-    categories,
-    biggest,
-    budgets,
-  ] = await Promise.all([
-    getTotalExpenses(start, end),
-    getTotalIncome(start, end),
-    getTotalExpenses(prevStart, prevEnd),
-    getTotalIncome(prevStart, prevEnd),
-    getSpendingByCategory(start, end),
-    getBiggestExpense(start, end),
-    getBudgetAdherence(start, end),
-  ])
+  const [totalExpenses, totalIncome, prevExpenses, prevIncome, categories, biggest, budgets] =
+    await Promise.all([
+      getTotalExpenses(start, end),
+      getTotalIncome(start, end),
+      getTotalExpenses(prevStart, prevEnd),
+      getTotalIncome(prevStart, prevEnd),
+      getSpendingByCategory(start, end),
+      getBiggestExpense(start, end),
+      getBudgetAdherence(start, end),
+    ])
 
   const savings = totalIncome - totalExpenses
   const savingsRate = totalIncome > 0 ? Math.round((savings / totalIncome) * 100) : 0
@@ -321,7 +325,12 @@ export async function generateMonthlyRecap(month?: string): Promise<Recap> {
     )
 
     if (prevExpenses > 0 || prevIncome > 0) {
-      const spendDir = totalExpenses > prevExpenses ? 'increased' : totalExpenses < prevExpenses ? 'decreased' : 'stayed the same'
+      const spendDir =
+        totalExpenses > prevExpenses
+          ? 'increased'
+          : totalExpenses < prevExpenses
+            ? 'decreased'
+            : 'stayed the same'
       parts.push(
         `Compared to ${prevTarget.format('MMMM')}, spending ${spendDir} (${expenseChange}) and income changed ${incomeChange}.`
       )
@@ -353,9 +362,13 @@ export async function generateMonthlyRecap(month?: string): Promise<Recap> {
         parts.push(`Over budget on: ${names}.`)
       }
       if (underBudget.length > 0 && overBudget.length > 0) {
-        parts.push(`Stayed within budget on ${underBudget.length} other${underBudget.length > 1 ? ' categories' : ' category'}.`)
+        parts.push(
+          `Stayed within budget on ${underBudget.length} other${underBudget.length > 1 ? ' categories' : ' category'}.`
+        )
       } else if (underBudget.length > 0) {
-        parts.push(`All ${underBudget.length} budget${underBudget.length > 1 ? 's' : ''} stayed on track.`)
+        parts.push(
+          `All ${underBudget.length} budget${underBudget.length > 1 ? 's' : ''} stayed on track.`
+        )
       }
     }
   }

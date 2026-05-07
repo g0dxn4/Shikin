@@ -74,6 +74,9 @@ const MAX_ABSOLUTE_AMOUNT = 1_000_000_000
 const ISO_DATE_PATTERN = /^\d{4}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/
 const CURRENCY_CODE_PATTERN = /^[A-Z]{3}$/
 const ASSET_CODE_PATTERN = /^[A-Z0-9]{2,10}$/
+const ACCOUNT_ALIASES_SETTING_KEY = 'account_aliases'
+const ACCOUNT_ALIAS_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/
+export const FINANCE_PROFILE_SETTING_KEY = 'finance_profile'
 
 export function boundedText(label: string, description: string, maxLength = 255) {
   return z
@@ -140,10 +143,242 @@ export function nonNegativeMoneyAmount(
   return moneyAmount(description, { min: 0, max })
 }
 
-export function resolveAccountId(accountId?: string) {
+export function safeJsonParse<T>(value: string | null | undefined, fallback: T): T {
+  if (typeof value !== 'string' || value.trim() === '') return fallback
+
+  try {
+    return JSON.parse(value) as T
+  } catch {
+    return fallback
+  }
+}
+
+export function safeJsonStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? 'null'
+  } catch (error) {
+    throw new Error(
+      `Could not serialize value as JSON: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
+    )
+  }
+}
+
+function normalizeSettingKey(key: string): string {
+  const normalized = key.trim()
+  if (!normalized) {
+    throw new Error('Setting key is required.')
+  }
+  return normalized
+}
+
+export function getJsonSetting<T>(key: string, fallback: T): T {
+  const settingKey = normalizeSettingKey(key)
+  const row = query<{ value: string }>('SELECT value FROM settings WHERE key = $1 LIMIT 1', [
+    settingKey,
+  ])[0]
+
+  return safeJsonParse(row?.value, fallback)
+}
+
+export function setJsonSetting(key: string, value: unknown): void {
+  const settingKey = normalizeSettingKey(key)
+  execute(
+    `INSERT INTO settings (key, value, updated_at)
+     VALUES ($1, $2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
+    [settingKey, safeJsonStringify(value)]
+  )
+}
+
+type AuditLogInput = {
+  entity: string
+  entityId?: string | null
+  action: string
+  before?: unknown
+  after?: unknown
+  source?: string | null
+  note?: string | null
+  createdAt?: string
+}
+
+function requireNonEmptyText(value: string, label: string): string {
+  const normalized = value.trim()
+  if (!normalized) {
+    throw new Error(`${label} is required.`)
+  }
+  return normalized
+}
+
+function optionalText(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim()
+  return normalized || null
+}
+
+export function writeAuditLog(input: AuditLogInput): { id: string; createdAt: string } {
+  const id = generateId()
+  const createdAt = input.createdAt ?? dayjs().toISOString()
+
+  execute(
+    `INSERT INTO audit_log (id, entity, entity_id, action, before_json, after_json, source, note, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [
+      id,
+      requireNonEmptyText(input.entity, 'Audit entity'),
+      optionalText(input.entityId),
+      requireNonEmptyText(input.action, 'Audit action'),
+      input.before === undefined ? null : safeJsonStringify(input.before),
+      input.after === undefined ? null : safeJsonStringify(input.after),
+      optionalText(input.source),
+      optionalText(input.note),
+      createdAt,
+    ]
+  )
+
+  return { id, createdAt }
+}
+
+export function normalizeAccountAlias(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+export function validateAccountAlias(value: string): boolean {
+  return ACCOUNT_ALIAS_PATTERN.test(normalizeAccountAlias(value))
+}
+
+export function getAccountAliases(): Record<string, string> {
+  const parsed = getJsonSetting<unknown>(ACCOUNT_ALIASES_SETTING_KEY, {})
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+
+  return Object.fromEntries(
+    Object.entries(parsed as Record<string, unknown>).filter(
+      ([alias, accountId]) => validateAccountAlias(alias) && typeof accountId === 'string'
+    )
+  ) as Record<string, string>
+}
+
+export function setAccountAlias(accountId: string, alias: string) {
+  const normalizedAlias = normalizeAccountAlias(alias)
+  if (!validateAccountAlias(normalizedAlias)) {
+    return {
+      success: false as const,
+      message:
+        'Alias must start with a letter or number and use only lowercase letters, numbers, dots, underscores, or hyphens.',
+    }
+  }
+
+  const aliases = getAccountAliases()
+  const existingAccountId = aliases[normalizedAlias]
+  if (existingAccountId && existingAccountId !== accountId) {
+    return {
+      success: false as const,
+      reason: 'alias_conflict' as const,
+      message: `Alias "${normalizedAlias}" already points to account ${existingAccountId}. Remove or choose a different alias before reassigning it.`,
+    }
+  }
+
+  aliases[normalizedAlias] = accountId
+  setJsonSetting(ACCOUNT_ALIASES_SETTING_KEY, aliases)
+
+  return { success: true as const, alias: normalizedAlias, accountId }
+}
+
+export function removeAccountAliasesForAccount(accountId: string): string[] {
+  const aliases = getAccountAliases()
+  const removedAliases = Object.entries(aliases)
+    .filter(([, aliasedAccountId]) => aliasedAccountId === accountId)
+    .map(([alias]) => alias)
+    .sort()
+
+  if (removedAliases.length === 0) return []
+
+  for (const alias of removedAliases) {
+    delete aliases[alias]
+  }
+  setJsonSetting(ACCOUNT_ALIASES_SETTING_KEY, aliases)
+
+  return removedAliases
+}
+
+type ResolvedAccountRow = { id: string; name?: string; currency: string; is_archived: number }
+
+function archivedAccountFailure(account: string) {
+  return {
+    success: false as const,
+    message: `Account ${account} is archived. Unarchive it before using it for new writes.`,
+  }
+}
+
+function resolveAccountAlias(account: string) {
+  const normalizedAlias = normalizeAccountAlias(account)
+  const aliases = getAccountAliases()
+  const aliasedAccountId = aliases[normalizedAlias]
+  if (!aliasedAccountId) return null
+
+  const accounts = query<ResolvedAccountRow>(
+    'SELECT id, currency, is_archived FROM accounts WHERE id = $1 LIMIT 1',
+    [aliasedAccountId]
+  )
+
+  if (accounts.length === 0) {
+    return {
+      success: false as const,
+      message: `Account alias "${normalizedAlias}" points to missing account ${aliasedAccountId}.`,
+    }
+  }
+
+  if (accounts[0].is_archived === 1) {
+    return archivedAccountFailure(`alias "${normalizedAlias}"`)
+  }
+
+  return { success: true as const, id: accounts[0].id, currency: accounts[0].currency }
+}
+
+function resolveAccountReference(account: string) {
+  const aliasMatch = resolveAccountAlias(account)
+  if (aliasMatch) return aliasMatch
+
+  const accounts = query<ResolvedAccountRow>(
+    `SELECT id, name, currency, is_archived
+     FROM accounts
+     WHERE id = $1 OR LOWER(name) = LOWER($2)
+     ORDER BY name ASC, id ASC
+     LIMIT 2`,
+    [account, account]
+  )
+
+  const activeAccounts = accounts.filter((row) => row.is_archived !== 1)
+
+  if (activeAccounts.length === 1) {
+    return {
+      success: true as const,
+      id: activeAccounts[0].id,
+      currency: activeAccounts[0].currency,
+    }
+  }
+
+  if (activeAccounts.length > 1) {
+    return {
+      success: false as const,
+      message: `Account "${account}" matches multiple accounts. Use accountId or define a unique alias.`,
+    }
+  }
+
+  if (accounts.length > 0) {
+    return archivedAccountFailure(`"${account}"`)
+  }
+
+  return {
+    success: false as const,
+    message: `Account alias, ID, or name "${account}" not found.`,
+  }
+}
+
+export function resolveAccountId(accountId?: string, account?: string) {
   if (accountId) {
-    const accounts = query<{ id: string; currency: string }>(
-      'SELECT id, currency FROM accounts WHERE id = $1 LIMIT 1',
+    const accounts = query<ResolvedAccountRow>(
+      'SELECT id, currency, is_archived FROM accounts WHERE id = $1 LIMIT 1',
       [accountId]
     )
 
@@ -151,11 +386,19 @@ export function resolveAccountId(accountId?: string) {
       return { success: false as const, message: `Account ${accountId} not found.` }
     }
 
+    if (accounts[0].is_archived === 1) {
+      return archivedAccountFailure(accountId)
+    }
+
     return { success: true as const, id: accounts[0].id, currency: accounts[0].currency }
   }
 
-  const accounts = query<{ id: string; name: string; currency: string }>(
-    'SELECT id, name, currency FROM accounts ORDER BY name ASC, id ASC LIMIT 2'
+  if (account) {
+    return resolveAccountReference(account)
+  }
+
+  const accounts = query<ResolvedAccountRow>(
+    'SELECT id, name, currency, is_archived FROM accounts WHERE is_archived = 0 ORDER BY name ASC, id ASC LIMIT 2'
   )
 
   if (accounts.length === 0) {

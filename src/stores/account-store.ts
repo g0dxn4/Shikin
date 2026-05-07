@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import { query, execute } from '@/lib/database'
+import { query, execute, withTransaction } from '@/lib/database'
+import type { TransactionClient } from '@/lib/database'
 import { getErrorMessage } from '@/lib/errors'
 import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
@@ -47,8 +48,26 @@ function normalizeAccountCurrency(value: string | null | undefined) {
   return typeof value === 'string' ? value.trim().toUpperCase() : ''
 }
 
-function recurringRuleAccountCurrencyChangeBlockedMessage(ruleCount: number) {
-  return `Cannot change this account currency while ${ruleCount} recurring rule(s) still point at the account. Repair, move, or recreate those recurring rules first so scheduled amounts do not silently change meaning.`
+type AccountCurrencyBlockerCounts = {
+  transactionSourceCount: number
+  transactionTransferDestinationCount: number
+  recurringRuleSourceCount: number
+  recurringRuleDestinationCount: number
+  subscriptionCount: number
+  investmentCount: number
+  creditCardStatementCount: number
+  balanceHistoryCount: number
+  goalCount: number
+  nonzeroBalanceCount: number
+}
+
+function totalAccountCurrencyBlockers(counts: AccountCurrencyBlockerCounts) {
+  return Object.values(counts).reduce((sum, count) => sum + count, 0)
+}
+
+function accountCurrencyChangeBlockedMessage(counts: AccountCurrencyBlockerCounts) {
+  const total = totalAccountCurrencyBlockers(counts)
+  return `Cannot change this account currency while ${total} linked monetary reference${total === 1 ? '' : 's'} still point at the account. Create a new account or explicitly migrate the referenced data so amounts do not silently change meaning. Counts: transactions as source=${counts.transactionSourceCount}, transactions as transfer destination=${counts.transactionTransferDestinationCount}, recurring rules as source=${counts.recurringRuleSourceCount}, recurring rules as destination=${counts.recurringRuleDestinationCount}, subscriptions=${counts.subscriptionCount}, investments=${counts.investmentCount}, credit card statements=${counts.creditCardStatementCount}, account balance history=${counts.balanceHistoryCount}, goals=${counts.goalCount}, nonzero account balance=${counts.nonzeroBalanceCount}.`
 }
 
 async function ensurePrimaryAccountColumn() {
@@ -73,6 +92,89 @@ function getCreditCardFields(data: AccountFormData) {
     creditLimit: data.creditLimit === undefined ? null : toCentavos(data.creditLimit),
     statementClosingDay: data.statementClosingDay ?? null,
     paymentDueDay: data.paymentDueDay ?? null,
+  }
+}
+
+async function countAccountReferences(tx: TransactionClient, accountId: string) {
+  const count = async (sql: string, params: unknown[] = [accountId]) => {
+    const rows = await tx.query<{ count: number }>(sql, params)
+    return rows[0]?.count ?? 0
+  }
+
+  const counts = {
+    linkedTransactionCount: await count(
+      'SELECT COUNT(*) as count FROM transactions WHERE account_id = ? OR transfer_to_account_id = ?',
+      [accountId, accountId]
+    ),
+    linkedRecurringRuleCount: await count(
+      'SELECT COUNT(*) as count FROM recurring_rules WHERE account_id = ? OR to_account_id = ?',
+      [accountId, accountId]
+    ),
+    linkedGoalCount: await count('SELECT COUNT(*) as count FROM goals WHERE account_id = ?'),
+    linkedBalanceHistoryCount: await count(
+      'SELECT COUNT(*) as count FROM account_balance_history WHERE account_id = ?'
+    ),
+    linkedCreditCardStatementCount: await count(
+      'SELECT COUNT(*) as count FROM credit_card_statements WHERE account_id = ?'
+    ),
+    linkedInvestmentCount: await count(
+      'SELECT COUNT(*) as count FROM investments WHERE account_id = ?'
+    ),
+    linkedSubscriptionCount: await count(
+      'SELECT COUNT(*) as count FROM subscriptions WHERE account_id = ?'
+    ),
+    linkedAliasCount: 0,
+  }
+
+  const settingsRows = await tx.query<{ value: string }>(
+    'SELECT value FROM settings WHERE key = ? LIMIT 1',
+    ['account_aliases']
+  )
+  try {
+    const aliases = JSON.parse(settingsRows[0]?.value ?? '{}') as Record<string, unknown>
+    counts.linkedAliasCount = Object.values(aliases).filter((value) => value === accountId).length
+  } catch {
+    counts.linkedAliasCount = 0
+  }
+
+  return Object.values(counts).reduce((sum, value) => sum + value, 0)
+}
+
+async function countAccountCurrencyBlockers(
+  tx: TransactionClient,
+  accountId: string,
+  currentBalance: number
+): Promise<AccountCurrencyBlockerCounts> {
+  const count = async (sql: string) => {
+    const rows = await tx.query<{ count: number }>(sql, [accountId])
+    return rows[0]?.count ?? 0
+  }
+
+  return {
+    transactionSourceCount: await count(
+      'SELECT COUNT(*) as count FROM transactions WHERE account_id = ?'
+    ),
+    transactionTransferDestinationCount: await count(
+      'SELECT COUNT(*) as count FROM transactions WHERE transfer_to_account_id = ?'
+    ),
+    recurringRuleSourceCount: await count(
+      'SELECT COUNT(*) as count FROM recurring_rules WHERE account_id = ?'
+    ),
+    recurringRuleDestinationCount: await count(
+      'SELECT COUNT(*) as count FROM recurring_rules WHERE to_account_id = ?'
+    ),
+    subscriptionCount: await count(
+      'SELECT COUNT(*) as count FROM subscriptions WHERE account_id = ?'
+    ),
+    investmentCount: await count('SELECT COUNT(*) as count FROM investments WHERE account_id = ?'),
+    creditCardStatementCount: await count(
+      'SELECT COUNT(*) as count FROM credit_card_statements WHERE account_id = ?'
+    ),
+    balanceHistoryCount: await count(
+      'SELECT COUNT(*) as count FROM account_balance_history WHERE account_id = ?'
+    ),
+    goalCount: await count('SELECT COUNT(*) as count FROM goals WHERE account_id = ?'),
+    nonzeroBalanceCount: currentBalance === 0 ? 0 : 1,
   }
 }
 
@@ -140,48 +242,44 @@ export const useAccountStore = create<AccountState>((set, get) => ({
   update: async (id, data) => {
     set({ error: null })
     try {
-      const existing = await query<Pick<Account, 'currency'>>(
-        'SELECT currency FROM accounts WHERE id = ? LIMIT 1',
-        [id]
-      )
-      if (existing.length === 0) {
-        throw new Error(`Account ${id} not found.`)
-      }
-
-      if (
-        normalizeAccountCurrency(existing[0].currency) !== normalizeAccountCurrency(data.currency)
-      ) {
-        const targetCurrency = normalizeAccountCurrency(data.currency)
-        const linkedRecurringRules = await query<{ currency: string | null }>(
-          'SELECT currency FROM recurring_rules WHERE account_id = ?',
+      await withTransaction(async (tx) => {
+        const existing = await tx.query<Pick<Account, 'currency' | 'is_archived' | 'balance'>>(
+          'SELECT currency, is_archived, balance FROM accounts WHERE id = ? LIMIT 1',
           [id]
         )
-        const blockingRules = linkedRecurringRules.filter((rule) => {
-          const ruleCurrency = normalizeAccountCurrency(rule.currency)
-          return ruleCurrency === '' || ruleCurrency !== targetCurrency
-        })
-
-        if (blockingRules.length > 0) {
-          throw new Error(recurringRuleAccountCurrencyChangeBlockedMessage(blockingRules.length))
+        if (existing.length === 0) {
+          throw new Error(`Account ${id} not found.`)
         }
-      }
+        if (existing[0].is_archived === 1) {
+          throw new Error(`Account ${id} is archived. Unarchive it before editing it.`)
+        }
 
-      const now = new Date().toISOString()
-      const creditFields = getCreditCardFields(data)
-      await execute(
-        `UPDATE accounts SET name = ?, type = ?, currency = ?, balance = ?, credit_limit = ?, statement_closing_day = ?, payment_due_day = ?, updated_at = ? WHERE id = ?`,
-        [
-          data.name,
-          data.type,
-          data.currency,
-          toCentavos(data.balance),
-          creditFields.creditLimit,
-          creditFields.statementClosingDay,
-          creditFields.paymentDueDay,
-          now,
-          id,
-        ]
-      )
+        if (
+          normalizeAccountCurrency(existing[0].currency) !== normalizeAccountCurrency(data.currency)
+        ) {
+          const blockerCounts = await countAccountCurrencyBlockers(tx, id, existing[0].balance)
+          if (totalAccountCurrencyBlockers(blockerCounts) > 0) {
+            throw new Error(accountCurrencyChangeBlockedMessage(blockerCounts))
+          }
+        }
+
+        const now = new Date().toISOString()
+        const creditFields = getCreditCardFields(data)
+        await tx.execute(
+          `UPDATE accounts SET name = ?, type = ?, currency = ?, balance = ?, credit_limit = ?, statement_closing_day = ?, payment_due_day = ?, updated_at = ? WHERE id = ?`,
+          [
+            data.name,
+            data.type,
+            data.currency,
+            toCentavos(data.balance),
+            creditFields.creditLimit,
+            creditFields.statementClosingDay,
+            creditFields.paymentDueDay,
+            now,
+            id,
+          ]
+        )
+      })
     } catch (error) {
       set({ error: getErrorMessage(error) })
       throw error
@@ -220,10 +318,21 @@ export const useAccountStore = create<AccountState>((set, get) => ({
   archive: async (id) => {
     set({ error: null })
     try {
-      await execute('UPDATE accounts SET is_archived = 1, updated_at = ? WHERE id = ?', [
-        new Date().toISOString(),
-        id,
-      ])
+      await withTransaction(async (tx) => {
+        const now = new Date().toISOString()
+        await tx.execute('UPDATE accounts SET is_archived = 1, updated_at = ? WHERE id = ?', [
+          now,
+          id,
+        ])
+        await tx.execute(
+          'UPDATE recurring_rules SET active = 0, updated_at = ? WHERE active = 1 AND (account_id = ? OR to_account_id = ?)',
+          [now, id, id]
+        )
+        await tx.execute(
+          'UPDATE subscriptions SET is_active = 0, updated_at = ? WHERE is_active = 1 AND account_id = ?',
+          [now, id]
+        )
+      })
     } catch (error) {
       set({ error: getErrorMessage(error) })
       throw error
@@ -258,7 +367,27 @@ export const useAccountStore = create<AccountState>((set, get) => ({
   remove: async (id) => {
     set({ error: null })
     try {
-      await execute('DELETE FROM accounts WHERE id = ?', [id])
+      await withTransaction(async (tx) => {
+        const linkedReferenceCount = await countAccountReferences(tx, id)
+        if (linkedReferenceCount > 0) {
+          const now = new Date().toISOString()
+          await tx.execute('UPDATE accounts SET is_archived = 1, updated_at = ? WHERE id = ?', [
+            now,
+            id,
+          ])
+          await tx.execute(
+            'UPDATE recurring_rules SET active = 0, updated_at = ? WHERE active = 1 AND (account_id = ? OR to_account_id = ?)',
+            [now, id, id]
+          )
+          await tx.execute(
+            'UPDATE subscriptions SET is_active = 0, updated_at = ? WHERE is_active = 1 AND account_id = ?',
+            [now, id]
+          )
+          return
+        }
+
+        await tx.execute('DELETE FROM accounts WHERE id = ?', [id])
+      })
     } catch (error) {
       set({ error: getErrorMessage(error) })
       throw error

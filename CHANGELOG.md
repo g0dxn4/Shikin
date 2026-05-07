@@ -12,7 +12,7 @@ All notable changes to Shikin are documented in this file.
 - Transfer destination account flow in transaction form and transfer-aware balance handling.
 - Playwright coverage for budgets and core navigation pages.
 - Theme customization MVP in Settings (presets, token editor, apply/save/reset/revert).
-- CLI and MCP now expose the shipped 39-tool surface from shared definitions, with every shipped tool available end-to-end.
+- CLI and MCP now expose the shipped shared-tool surface from shared definitions, with every shipped tool available end-to-end.
 - Credit card account cards can record a payment from a cash/deposit account as a transfer, reducing the card balance used.
 
 ### Changed

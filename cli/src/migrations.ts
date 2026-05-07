@@ -11,4 +11,5 @@ export const CLI_DATABASE_MIGRATIONS = [
   '013_recurring_rules_currency',
   '014_recurring_rules_currency_backfill',
   '015_primary_account',
+  '016_cli_qol_foundation',
 ] as const

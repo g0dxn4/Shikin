@@ -1,6 +1,9 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import dayjs from 'dayjs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const { mockQuery, mockExecute, mockTransaction, mockNoteExists, mockWriteNote } = vi.hoisted(
   () => ({
@@ -39,7 +42,10 @@ const updateTransaction = tools.find((tool) => tool.name === 'update-transaction
 const deleteTransaction = tools.find((tool) => tool.name === 'delete-transaction')!
 const queryTransactions = tools.find((tool) => tool.name === 'query-transactions')!
 const createAccount = tools.find((tool) => tool.name === 'create-account')!
+const upsertAccount = tools.find((tool) => tool.name === 'upsert-account')!
 const updateAccount = tools.find((tool) => tool.name === 'update-account')!
+const setAccountAlias = tools.find((tool) => tool.name === 'set-account-alias')!
+const deleteAccount = tools.find((tool) => tool.name === 'delete-account')!
 const getSpendingSummary = tools.find((tool) => tool.name === 'get-spending-summary')!
 const writeNotebook = tools.find((tool) => tool.name === 'write-notebook')!
 const listNotebook = tools.find((tool) => tool.name === 'list-notebook')!
@@ -47,9 +53,20 @@ const manageRecurringTransaction = tools.find(
   (tool) => tool.name === 'manage-recurring-transaction'
 )!
 const materializeRecurring = tools.find((tool) => tool.name === 'materialize-recurring')!
+const getRecurringExpectedVsPaid = tools.find(
+  (tool) => tool.name === 'get-recurring-expected-vs-paid'
+)!
 const manageCategoryRules = tools.find((tool) => tool.name === 'manage-category-rules')!
+const suggestCategory = tools.find((tool) => tool.name === 'suggest-category')!
+const reviewSuggestions = tools.find((tool) => tool.name === 'review-suggestions')!
+const approveSuggestion = tools.find((tool) => tool.name === 'approve-suggestion')!
+const rejectSuggestion = tools.find((tool) => tool.name === 'reject-suggestion')!
 const getSpendingAnomalies = tools.find((tool) => tool.name === 'get-spending-anomalies')!
 const listSubscriptions = tools.find((tool) => tool.name === 'list-subscriptions')!
+const getUpcomingBills = tools.find((tool) => tool.name === 'get-upcoming-bills')!
+const createSubscription = tools.find((tool) => tool.name === 'create-subscription')!
+const updateSubscription = tools.find((tool) => tool.name === 'update-subscription')!
+const deleteSubscription = tools.find((tool) => tool.name === 'delete-subscription')!
 const getSubscriptionSpending = tools.find((tool) => tool.name === 'get-subscription-spending')!
 const getBalanceOverview = tools.find((tool) => tool.name === 'get-balance-overview')!
 const analyzeSpendingTrends = tools.find((tool) => tool.name === 'analyze-spending-trends')!
@@ -59,6 +76,27 @@ const getSpendingRecap = tools.find((tool) => tool.name === 'get-spending-recap'
 const getEducationTip = tools.find((tool) => tool.name === 'get-education-tip')!
 const generatePortfolioReview = tools.find((tool) => tool.name === 'generate-portfolio-review')!
 const convertCurrency = tools.find((tool) => tool.name === 'convert-currency')!
+const createBudget = tools.find((tool) => tool.name === 'create-budget')!
+const upsertBudget = tools.find((tool) => tool.name === 'upsert-budget')!
+const deleteBudget = tools.find((tool) => tool.name === 'delete-budget')!
+const financeProfile = tools.find((tool) => tool.name === 'finance-profile')!
+const importTransactions = tools.find((tool) => tool.name === 'import-transactions')!
+const exportData = tools.find((tool) => tool.name === 'export-data')!
+const setupStatus = tools.find((tool) => tool.name === 'setup-status')!
+const getCreditCardStatus = tools.find((tool) => tool.name === 'get-credit-card-status')!
+const createCreditCardStatement = tools.find(
+  (tool) => tool.name === 'create-credit-card-statement'
+)!
+const updateCreditCardStatement = tools.find(
+  (tool) => tool.name === 'update-credit-card-statement'
+)!
+const listCreditCardStatements = tools.find((tool) => tool.name === 'list-credit-card-statements')!
+const deleteCreditCardStatement = tools.find(
+  (tool) => tool.name === 'delete-credit-card-statement'
+)!
+const createBucket = tools.find((tool) => tool.name === 'create-bucket')!
+const listBuckets = tools.find((tool) => tool.name === 'list-buckets')!
+const allocateIncome = tools.find((tool) => tool.name === 'allocate-income')!
 const lastSixMonthLabels = Array.from({ length: 6 }, (_, index) =>
   dayjs()
     .subtract(5 - index, 'month')
@@ -128,9 +166,15 @@ describe('CLI tool validation regressions', () => {
 
     const result = await addTransaction.execute(input)
 
-    expect(mockQuery).toHaveBeenCalledTimes(1)
-    expect(mockQuery).toHaveBeenCalledWith(
-      'SELECT id, currency FROM accounts WHERE id = $1 LIMIT 1',
+    expect(mockQuery).toHaveBeenCalledTimes(2)
+    expect(mockQuery).toHaveBeenNthCalledWith(
+      1,
+      'SELECT id, currency, is_archived FROM accounts WHERE id = $1 LIMIT 1',
+      ['acct-2']
+    )
+    expect(mockQuery).toHaveBeenNthCalledWith(
+      2,
+      'SELECT id, balance FROM accounts WHERE id IN ($1)',
       ['acct-2']
     )
     expect(mockExecute).toHaveBeenNthCalledWith(
@@ -146,10 +190,79 @@ describe('CLI tool validation regressions', () => {
         'EUR',
         'Coffee',
         null,
+        'posted',
+        null,
+        null,
+        null,
         expect.any(String),
       ]
     )
     expect(result.transaction.accountId).toBe('acct-2')
+  })
+
+  it('validates recurringRuleId during add-transaction dry-runs', async () => {
+    mockQuery.mockReturnValueOnce([{ id: 'acct-1', currency: 'USD' }]).mockReturnValueOnce([])
+
+    const input = addTransaction.schema.parse({
+      amount: 10,
+      type: 'expense',
+      description: 'Coffee',
+      accountId: 'acct-1',
+      recurringRuleId: 'missing-rule',
+      dryRun: true,
+    })
+
+    const result = await addTransaction.execute(input)
+
+    expect(result).toEqual({
+      success: false,
+      message: 'Recurring rule missing-rule not found.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('rejects recurringRuleId links for a different account', async () => {
+    mockQuery
+      .mockReturnValueOnce([{ id: 'acct-1', currency: 'USD' }])
+      .mockReturnValueOnce([
+        { id: 'rule-1', account_id: 'acct-2', type: 'expense', currency: 'USD' },
+      ])
+
+    const input = addTransaction.schema.parse({
+      amount: 10,
+      type: 'expense',
+      description: 'Coffee',
+      accountId: 'acct-1',
+      recurringRuleId: 'rule-1',
+      dryRun: true,
+    })
+
+    const result = await addTransaction.execute(input)
+
+    expect(result).toEqual({
+      success: false,
+      message: 'Recurring rule rule-1 belongs to account acct-2, not acct-1.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('rejects archived explicit accounts for new transactions', async () => {
+    mockQuery.mockReturnValueOnce([{ id: 'acct-archived', currency: 'USD', is_archived: 1 }])
+
+    const input = addTransaction.schema.parse({
+      amount: 10,
+      type: 'expense',
+      description: 'Coffee',
+      accountId: 'acct-archived',
+    })
+
+    const result = await addTransaction.execute(input)
+
+    expect(result).toEqual({
+      success: false,
+      message: 'Account acct-archived is archived. Unarchive it before using it for new writes.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
   })
 
   it('wraps add-transaction writes in a transaction', async () => {
@@ -164,7 +277,7 @@ describe('CLI tool validation regressions', () => {
     const result = await addTransaction.execute(input)
 
     expect(mockTransaction).toHaveBeenCalledTimes(1)
-    expect(mockExecute).toHaveBeenCalledTimes(2)
+    expect(mockExecute).toHaveBeenCalledTimes(3)
     expect(mockExecute).toHaveBeenNthCalledWith(
       1,
       expect.stringContaining('INSERT INTO transactions'),
@@ -178,6 +291,10 @@ describe('CLI tool validation regressions', () => {
         'BRL',
         'Coffee',
         null,
+        'posted',
+        null,
+        null,
+        null,
         expect.any(String),
       ]
     )
@@ -185,6 +302,11 @@ describe('CLI tool validation regressions', () => {
       2,
       expect.stringContaining('UPDATE accounts SET balance = balance + $1'),
       [-1000, 'acct-1']
+    )
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('INSERT INTO audit_log'),
+      expect.any(Array)
     )
     expect(result).toMatchObject({
       success: true,
@@ -294,6 +416,10 @@ describe('CLI tool validation regressions', () => {
         'USD',
         'Move cash',
         null,
+        'posted',
+        null,
+        null,
+        null,
         expect.any(String),
       ]
     )
@@ -355,6 +481,29 @@ describe('CLI tool validation regressions', () => {
       success: false,
       message:
         'Cannot transfer from USD to EUR. Cross-currency transfers are not supported because no FX conversion is applied.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('rejects archived transfer destination accounts', async () => {
+    mockQuery
+      .mockReturnValueOnce([{ id: 'acct-usd', currency: 'USD' }])
+      .mockReturnValueOnce([{ id: 'acct-old', currency: 'USD', is_archived: 1 }])
+
+    const input = addTransaction.schema.parse({
+      amount: 25,
+      type: 'transfer',
+      description: 'Move cash',
+      accountId: 'acct-usd',
+      transferToAccountId: 'acct-old',
+    })
+
+    const result = await addTransaction.execute(input)
+
+    expect(result).toEqual({
+      success: false,
+      message:
+        'Transfer destination account acct-old is archived. Unarchive it before using it for new writes.',
     })
     expect(mockExecute).not.toHaveBeenCalled()
   })
@@ -1010,6 +1159,1689 @@ describe('CLI tool validation regressions', () => {
     })
   })
 
+  it('previews account upserts by alias without writing', async () => {
+    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM settings') && params?.[0] === 'account_aliases') {
+        return [{ value: JSON.stringify({ main: 'acct-1' }) }]
+      }
+      if (sql.includes('FROM accounts WHERE id = $1')) {
+        return [
+          {
+            id: 'acct-1',
+            name: 'Checking',
+            type: 'checking',
+            currency: 'USD',
+            balance: 1000,
+            is_archived: 0,
+            credit_limit: null,
+            statement_closing_day: null,
+            payment_due_day: null,
+          },
+        ]
+      }
+      return []
+    })
+
+    const result = await upsertAccount.execute(
+      upsertAccount.schema.parse({ alias: 'main', balance: 42, dryRun: true })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      action: 'updated',
+      dryRun: true,
+      matchedBy: 'alias',
+      wouldUpdate: {
+        after: expect.objectContaining({ id: 'acct-1', balance: 42 }),
+      },
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('rejects account upserts that would reassign an existing alias', async () => {
+    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM accounts WHERE id = $1 LIMIT 1') && params?.[0] === 'acct-1') {
+        return [
+          {
+            id: 'acct-1',
+            name: 'Checking',
+            type: 'checking',
+            currency: 'USD',
+            balance: 0,
+            is_archived: 0,
+            credit_limit: null,
+            statement_closing_day: null,
+            payment_due_day: null,
+          },
+        ]
+      }
+      if (sql.includes('FROM settings') && params?.[0] === 'account_aliases') {
+        return [{ value: JSON.stringify({ main: 'acct-2' }) }]
+      }
+      return []
+    })
+
+    const result = await upsertAccount.execute(
+      upsertAccount.schema.parse({ accountId: 'acct-1', alias: 'main', dryRun: true })
+    )
+
+    expect(result).toEqual({
+      success: false,
+      reason: 'alias_conflict',
+      message:
+        'Alias "main" already points to account acct-2. Remove or choose a different alias before reassigning it.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('rejects aliases for archived accounts', async () => {
+    mockQuery.mockReturnValueOnce([
+      {
+        id: 'acct-archived',
+        name: 'Old Checking',
+        type: 'checking',
+        currency: 'USD',
+        balance: 0,
+        is_archived: 1,
+        credit_limit: null,
+        statement_closing_day: null,
+        payment_due_day: null,
+      },
+    ])
+
+    const result = await setAccountAlias.execute(
+      setAccountAlias.schema.parse({
+        accountId: 'acct-archived',
+        alias: 'old-checking',
+        dryRun: true,
+      })
+    )
+
+    expect(result).toEqual({
+      success: false,
+      message:
+        'Account "Old Checking" (acct-archived) is archived. Unarchive it before using it for new writes.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('removes aliases when deleting otherwise unreferenced accounts', async () => {
+    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('SELECT * FROM accounts WHERE id = $1')) {
+        return [
+          {
+            id: 'acct-1',
+            name: 'Checking',
+            type: 'checking',
+            currency: 'USD',
+            balance: 0,
+            is_archived: 0,
+            credit_limit: null,
+            statement_closing_day: null,
+            payment_due_day: null,
+          },
+        ]
+      }
+      if (sql.includes('FROM settings') && params?.[0] === 'account_aliases') {
+        return [{ value: JSON.stringify({ main: 'acct-1', savings: 'acct-2' }) }]
+      }
+      if (sql.includes('COUNT(*) as count')) return [{ count: 0 }]
+      return []
+    })
+
+    const result = await deleteAccount.execute(deleteAccount.schema.parse({ accountId: 'acct-1' }))
+
+    expect(result).toMatchObject({ success: true, action: 'deleted', aliasesRemoved: ['main'] })
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO settings (key, value, updated_at)'),
+      ['account_aliases', JSON.stringify({ savings: 'acct-2' })]
+    )
+    expect(mockExecute).toHaveBeenCalledWith('DELETE FROM accounts WHERE id = $1', ['acct-1'])
+  })
+
+  it('writes account audit rows for metadata-only updates', async () => {
+    mockQuery.mockReturnValueOnce([
+      {
+        id: 'acct-1',
+        name: 'Checking',
+        type: 'checking',
+        currency: 'USD',
+        balance: 1000,
+        is_archived: 0,
+        credit_limit: null,
+        statement_closing_day: null,
+        payment_due_day: null,
+      },
+    ])
+
+    const result = await updateAccount.execute(
+      updateAccount.schema.parse({
+        accountId: 'acct-1',
+        name: 'Everyday Checking',
+        type: 'savings',
+      })
+    )
+
+    expect(result).toMatchObject({ success: true })
+    expect(mockExecute).toHaveBeenCalledTimes(2)
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('INSERT INTO audit_log'),
+      expect.arrayContaining(['account', 'acct-1', 'update'])
+    )
+    const auditParams = mockExecute.mock.calls[1]?.[1] as unknown[]
+    const before = JSON.parse(String(auditParams[4]))
+    const after = JSON.parse(String(auditParams[5]))
+    expect(before.account).toMatchObject({ name: 'Checking', type: 'checking' })
+    expect(after.account).toMatchObject({ name: 'Everyday Checking', type: 'savings' })
+  })
+
+  it('previews budget upserts by category and default monthly period', async () => {
+    mockQuery.mockReturnValueOnce([{ id: 'cat-food', name: 'Food' }]).mockReturnValueOnce([])
+
+    const result = await upsertBudget.execute(
+      upsertBudget.schema.parse({ categoryName: 'Food', amount: 500, dryRun: true })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      action: 'created',
+      dryRun: true,
+      wouldCreate: expect.objectContaining({
+        name: 'Food Budget',
+        amount: 500,
+        period: 'monthly',
+        categoryId: 'cat-food',
+      }),
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('matches category budgets without defaulting the lookup period', async () => {
+    mockQuery.mockReturnValueOnce([{ id: 'cat-food', name: 'Food' }]).mockReturnValueOnce([
+      {
+        id: 'budget-yearly',
+        name: 'Annual Food',
+        amount: 120000,
+        period: 'yearly',
+        category_id: 'cat-food',
+        category_name: 'Food',
+        is_active: 1,
+      },
+    ])
+
+    const result = await upsertBudget.execute(
+      upsertBudget.schema.parse({ categoryName: 'Food', amount: 1500, dryRun: true })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      action: 'updated',
+      dryRun: true,
+      matchedBy: 'category',
+      wouldUpdate: {
+        budgetId: 'budget-yearly',
+        after: expect.objectContaining({ period: 'yearly', amount: 1500 }),
+      },
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('writes audit rows for budget create, update, and delete writes', async () => {
+    await createBudget.execute(
+      createBudget.schema.parse({ name: 'Monthly Food', amount: 500, period: 'monthly' })
+    )
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO audit_log'),
+      expect.arrayContaining(['budget', 'tx_test_123', 'create'])
+    )
+
+    mockExecute.mockClear()
+    mockQuery.mockReset()
+    mockQuery.mockReturnValueOnce([
+      {
+        id: 'budget-1',
+        name: 'Monthly Food',
+        amount: 50000,
+        period: 'monthly',
+        category_id: null,
+        category_name: null,
+        is_active: 1,
+      },
+    ])
+    await upsertBudget.execute(upsertBudget.schema.parse({ name: 'Monthly Food', amount: 600 }))
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO audit_log'),
+      expect.arrayContaining(['budget', 'budget-1', 'update'])
+    )
+
+    mockExecute.mockClear()
+    mockQuery.mockReset()
+    mockQuery.mockReturnValueOnce([
+      {
+        id: 'budget-1',
+        name: 'Monthly Food',
+        amount: 60000,
+        period: 'monthly',
+        category_id: null,
+        category_name: null,
+        is_active: 1,
+      },
+    ])
+    await deleteBudget.execute(deleteBudget.schema.parse({ budgetId: 'budget-1' }))
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO audit_log'),
+      expect.arrayContaining(['budget', 'budget-1', 'delete'])
+    )
+  })
+
+  it('requires a stable match key for budget upserts', async () => {
+    const result = await upsertBudget.execute(upsertBudget.schema.parse({ amount: 500 }))
+
+    expect(result).toEqual({
+      success: false,
+      reason: 'budget_stable_match_required',
+      message:
+        'Provide budgetId, name, categoryId, or categoryName so upsert-budget has a stable match key.',
+    })
+    expect(mockQuery).not.toHaveBeenCalled()
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('previews credit-card statement creation and rejects duplicate statement periods', async () => {
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'cc-1',
+          name: 'Rewards Card',
+          type: 'credit_card',
+          currency: 'USD',
+          balance: -12345,
+          credit_limit: 500000,
+          statement_closing_day: 15,
+          payment_due_day: 5,
+          is_archived: 0,
+        },
+      ])
+      .mockReturnValueOnce([])
+
+    const preview = await createCreditCardStatement.execute(
+      createCreditCardStatement.schema.parse({
+        accountId: 'cc-1',
+        statementStartDate: '2026-04-16',
+        closingDate: '2026-05-15',
+        dueDate: '2026-06-05',
+        statementBalance: 123.45,
+        minimumPayment: 25,
+        dryRun: true,
+      })
+    )
+
+    expect(preview).toMatchObject({
+      success: true,
+      action: 'created',
+      dryRun: true,
+      wouldCreate: expect.objectContaining({
+        accountId: 'cc-1',
+        statementBalance: 123.45,
+        minimumPayment: 25,
+        amountToPay: 123.45,
+        paymentStatus: 'open',
+      }),
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+
+    mockQuery.mockReset()
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'cc-1',
+          name: 'Rewards Card',
+          type: 'credit_card',
+          currency: 'USD',
+          balance: -12345,
+          credit_limit: 500000,
+          statement_closing_day: 15,
+          payment_due_day: 5,
+          is_archived: 0,
+        },
+      ])
+      .mockReturnValueOnce([{ id: 'stmt-existing' }])
+
+    const duplicate = await createCreditCardStatement.execute(
+      createCreditCardStatement.schema.parse({
+        accountId: 'cc-1',
+        statementEndDate: '2026-05-15',
+        dueDate: '2026-06-05',
+        statementBalance: 123.45,
+      })
+    )
+
+    expect(duplicate).toEqual({
+      success: false,
+      reason: 'statement_exists',
+      message:
+        'A statement already exists for account cc-1 ending 2026-05-15. Update stmt-existing instead.',
+      statementId: 'stmt-existing',
+    })
+  })
+
+  it('updates credit-card statement paid amounts and writes an audit row', async () => {
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'stmt-1',
+          account_id: 'cc-1',
+          statement_start_date: '2026-04-16',
+          statement_end_date: '2026-05-15',
+          due_date: '2026-06-05',
+          statement_balance: 12345,
+          minimum_payment: 2500,
+          paid_amount: 0,
+          currency: 'USD',
+          status: 'open',
+          source: null,
+          note: null,
+          account_name: 'Rewards Card',
+          account_currency: 'USD',
+          account_type: 'credit_card',
+          account_is_archived: 0,
+        },
+      ])
+      .mockReturnValueOnce([])
+
+    const result = await updateCreditCardStatement.execute(
+      updateCreditCardStatement.schema.parse({
+        statementId: 'stmt-1',
+        paidAmount: 25,
+        source: 'bank-import',
+      })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      action: 'updated',
+      changed: true,
+      statement: expect.objectContaining({
+        paidAmount: 25,
+        amountToPay: 98.45,
+        minimumPaymentDue: 0,
+        paymentStatus: 'partial',
+      }),
+    })
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE credit_card_statements SET'),
+      [2500, 'partial', 'bank-import', 'stmt-1']
+    )
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO audit_log'),
+      expect.arrayContaining(['credit_card_statement', 'stmt-1', 'update'])
+    )
+  })
+
+  it('rejects paid credit-card statement status while money remains unpaid', async () => {
+    mockQuery.mockReturnValueOnce([
+      {
+        id: 'stmt-1',
+        account_id: 'cc-1',
+        statement_start_date: '2026-04-16',
+        statement_end_date: '2026-05-15',
+        due_date: '2026-06-05',
+        statement_balance: 12345,
+        minimum_payment: 2500,
+        paid_amount: 0,
+        currency: 'USD',
+        status: 'open',
+        source: null,
+        note: null,
+        account_name: 'Rewards Card',
+        account_currency: 'USD',
+        account_type: 'credit_card',
+        account_is_archived: 0,
+      },
+    ])
+
+    const result = await updateCreditCardStatement.execute(
+      updateCreditCardStatement.schema.parse({
+        statementId: 'stmt-1',
+        status: 'paid',
+        dryRun: true,
+      })
+    )
+
+    expect(result).toEqual({
+      success: false,
+      reason: 'statement_status_inconsistent',
+      message: 'Statement status cannot be paid while 123.45 USD remains unpaid.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('reports no-op credit-card statement dry-runs as unchanged', async () => {
+    mockQuery.mockReturnValueOnce([
+      {
+        id: 'stmt-1',
+        account_id: 'cc-1',
+        statement_start_date: '2026-04-16',
+        statement_end_date: '2026-05-15',
+        due_date: '2026-06-05',
+        statement_balance: 12345,
+        minimum_payment: 2500,
+        paid_amount: 0,
+        currency: 'USD',
+        status: 'open',
+        source: null,
+        note: null,
+        account_name: 'Rewards Card',
+        account_currency: 'USD',
+        account_type: 'credit_card',
+        account_is_archived: 0,
+      },
+    ])
+
+    const result = await updateCreditCardStatement.execute(
+      updateCreditCardStatement.schema.parse({ statementId: 'stmt-1', dryRun: true })
+    )
+
+    expect(result).toMatchObject({ success: true, dryRun: true, changed: false })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('lists and deletes credit-card statements with stable action metadata', async () => {
+    mockQuery.mockReturnValueOnce([
+      {
+        id: 'stmt-1',
+        account_id: 'cc-1',
+        statement_start_date: null,
+        statement_end_date: '2026-05-15',
+        due_date: '2026-06-05',
+        statement_balance: 10000,
+        minimum_payment: 2000,
+        paid_amount: 0,
+        currency: 'USD',
+        status: 'open',
+        source: null,
+        note: null,
+        account_name: 'Rewards Card',
+      },
+    ])
+
+    const listResult = await listCreditCardStatements.execute(
+      listCreditCardStatements.schema.parse({ status: 'open', limit: 10 })
+    )
+    expect(listResult).toMatchObject({
+      success: true,
+      count: 1,
+      statements: [expect.objectContaining({ id: 'stmt-1', amountToPay: 100 })],
+    })
+
+    mockQuery.mockReset()
+    mockQuery.mockReturnValueOnce([
+      {
+        id: 'stmt-1',
+        account_id: 'cc-1',
+        statement_start_date: null,
+        statement_end_date: '2026-05-15',
+        due_date: '2026-06-05',
+        statement_balance: 10000,
+        minimum_payment: 2000,
+        paid_amount: 0,
+        currency: 'USD',
+        status: 'open',
+        source: null,
+        note: null,
+        account_name: 'Rewards Card',
+      },
+    ])
+
+    const deleteResult = await deleteCreditCardStatement.execute(
+      deleteCreditCardStatement.schema.parse({ statementId: 'stmt-1', dryRun: true })
+    )
+    expect(deleteResult).toMatchObject({ success: true, action: 'deleted', dryRun: true })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('filters credit-card statements by effective overdue status', async () => {
+    mockQuery.mockReturnValueOnce([
+      {
+        id: 'stmt-overdue',
+        account_id: 'cc-1',
+        statement_start_date: null,
+        statement_end_date: '2026-01-15',
+        due_date: '2000-01-01',
+        statement_balance: 10000,
+        minimum_payment: 2000,
+        paid_amount: 0,
+        currency: 'USD',
+        status: 'open',
+        source: null,
+        note: null,
+        account_name: 'Rewards Card',
+      },
+    ])
+
+    const result = await listCreditCardStatements.execute(
+      listCreditCardStatements.schema.parse({ status: 'overdue', limit: 10 })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      count: 1,
+      statements: [expect.objectContaining({ id: 'stmt-overdue', paymentStatus: 'overdue' })],
+    })
+    expect(mockQuery.mock.calls[0]?.[0]).not.toContain('s.status =')
+  })
+
+  it('can list statements for archived credit-card accounts when explicitly included', async () => {
+    mockQuery
+      .mockReturnValueOnce([{ id: 'cc-archived', type: 'credit_card', is_archived: 1 }])
+      .mockReturnValueOnce([
+        {
+          id: 'stmt-archived',
+          account_id: 'cc-archived',
+          statement_start_date: null,
+          statement_end_date: '2026-05-15',
+          due_date: '2026-06-05',
+          statement_balance: 10000,
+          minimum_payment: 2000,
+          paid_amount: 0,
+          currency: 'USD',
+          status: 'open',
+          source: null,
+          note: null,
+          account_name: 'Archived Rewards Card',
+          account_is_archived: 1,
+        },
+      ])
+
+    const result = await listCreditCardStatements.execute(
+      listCreditCardStatements.schema.parse({
+        accountId: 'cc-archived',
+        includeArchivedAccounts: true,
+      })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      count: 1,
+      statements: [expect.objectContaining({ id: 'stmt-archived', accountId: 'cc-archived' })],
+    })
+  })
+
+  it('integrates statement data into credit-card status and upcoming bills', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("FROM accounts WHERE type = 'credit_card'")) {
+        return [
+          {
+            id: 'cc-1',
+            name: 'Rewards Card',
+            type: 'credit_card',
+            currency: 'USD',
+            balance: -20000,
+            credit_limit: 500000,
+            statement_closing_day: 15,
+            payment_due_day: 5,
+            is_archived: 0,
+          },
+        ]
+      }
+      if (
+        sql.includes('FROM credit_card_statements s') &&
+        sql.includes('WHERE s.account_id = $1')
+      ) {
+        return [
+          {
+            id: 'stmt-1',
+            account_id: 'cc-1',
+            statement_start_date: '2026-04-16',
+            statement_end_date: '2026-05-15',
+            due_date: dayjs().add(5, 'day').format('YYYY-MM-DD'),
+            statement_balance: 12345,
+            minimum_payment: 2500,
+            paid_amount: 500,
+            currency: 'USD',
+            status: 'partial',
+            source: 'import',
+            note: 'May statement',
+          },
+        ]
+      }
+      if (sql.includes('FROM transactions') && sql.includes('account_id = $1')) {
+        return [{ total: 4567 }]
+      }
+      if (sql.includes('JOIN accounts a ON s.account_id = a.id')) {
+        return [
+          {
+            id: 'stmt-1',
+            account_id: 'cc-1',
+            account_name: 'Rewards Card',
+            statement_start_date: '2026-04-16',
+            statement_end_date: '2026-05-15',
+            due_date: dayjs().add(5, 'day').format('YYYY-MM-DD'),
+            statement_balance: 12345,
+            minimum_payment: 2500,
+            paid_amount: 500,
+            currency: 'USD',
+            status: 'partial',
+            source: 'import',
+            note: 'May statement',
+          },
+        ]
+      }
+      if (sql.includes('payment_due_day IS NOT NULL')) return []
+      if (sql.includes('FROM transactions') && sql.includes('is_recurring = 1')) return []
+      return []
+    })
+
+    const statusResult = await getCreditCardStatus.execute(getCreditCardStatus.schema.parse({}))
+    const billsResult = await getUpcomingBills.execute(
+      getUpcomingBills.schema.parse({ daysAhead: 30 })
+    )
+
+    expect(statusResult).toMatchObject({
+      success: true,
+      cards: [
+        expect.objectContaining({
+          statementBalance: 123.45,
+          minimumPayment: 25,
+          minimumPaymentDue: 20,
+          amountToPay: 118.45,
+          paymentStatus: 'partial',
+          currentPeriodSpending: 45.67,
+        }),
+      ],
+      summary: expect.objectContaining({ totalAmountToPay: 118.45, totalMinimumDue: 20 }),
+    })
+    expect(billsResult).toMatchObject({
+      success: true,
+      bills: [
+        expect.objectContaining({
+          source: 'credit_card',
+          statementId: 'stmt-1',
+          amount: 118.45,
+          minimumPaymentDue: 20,
+          paymentStatus: 'partial',
+        }),
+      ],
+    })
+  })
+
+  it('reports expected recurring bills with linked and fallback paid matches', async () => {
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'rule-linked',
+          description: 'Rent',
+          amount: 100000,
+          type: 'expense',
+          frequency: 'monthly',
+          next_date: '2026-05-01',
+          end_date: null,
+          account_id: 'acct-1',
+          category_id: null,
+          notes: null,
+          active: 1,
+          currency: 'USD',
+          account_name: 'Checking',
+          account_currency: 'USD',
+          category_name: null,
+        },
+        {
+          id: 'rule-fallback',
+          description: 'Gym Membership',
+          amount: 3000,
+          type: 'expense',
+          frequency: 'monthly',
+          next_date: '2026-05-10',
+          end_date: null,
+          account_id: 'acct-1',
+          category_id: null,
+          notes: null,
+          active: 1,
+          currency: 'USD',
+          account_name: 'Checking',
+          account_currency: 'USD',
+          category_name: null,
+        },
+      ])
+      .mockReturnValueOnce([
+        {
+          id: 'tx-rent',
+          recurring_rule_id: 'rule-linked',
+          account_id: 'acct-1',
+          type: 'expense',
+          amount: 100000,
+          currency: 'USD',
+          description: 'Rent',
+          date: '2026-05-01',
+          status: 'posted',
+        },
+        {
+          id: 'tx-gym',
+          recurring_rule_id: null,
+          account_id: 'acct-1',
+          type: 'expense',
+          amount: 3000,
+          currency: 'USD',
+          description: 'Gym Membership May',
+          date: '2026-05-11',
+          status: 'cleared',
+        },
+      ])
+
+    const result = await getRecurringExpectedVsPaid.execute(
+      getRecurringExpectedVsPaid.schema.parse({
+        startDate: '2026-05-01',
+        endDate: '2026-05-31',
+        asOfDate: '2026-05-31',
+      })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      summary: { expectedCount: 2, paidCount: 2, linkedMatches: 1, fallbackMatches: 1 },
+      expected: expect.arrayContaining([
+        expect.objectContaining({ ruleId: 'rule-linked', status: 'paid', fallbackMatched: false }),
+        expect.objectContaining({
+          ruleId: 'rule-fallback',
+          status: 'paid',
+          fallbackMatched: true,
+          match: expect.objectContaining({ method: 'fallback_heuristic', fallback: true }),
+        }),
+      ]),
+    })
+  })
+
+  it('allocates income to cashflow buckets with source transaction validation and audit', async () => {
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'bucket-1',
+          name: 'Rent',
+          description: null,
+          target_amount: 150000,
+          balance: 10000,
+          currency: 'USD',
+          sort_order: 1,
+          is_active: 1,
+        },
+      ])
+      .mockReturnValueOnce([
+        {
+          id: 'tx-income',
+          account_id: 'acct-1',
+          type: 'income',
+          amount: 200000,
+          currency: 'USD',
+          description: 'Paycheck',
+          date: '2026-05-01',
+          status: 'posted',
+          account_name: 'Checking',
+          account_is_archived: 0,
+        },
+      ])
+      .mockReturnValueOnce([{ total: 25000 }])
+      .mockReturnValueOnce([
+        {
+          id: 'tx-income',
+          account_id: 'acct-1',
+          type: 'income',
+          amount: 200000,
+          currency: 'USD',
+          description: 'Paycheck',
+          date: '2026-05-01',
+          status: 'posted',
+          account_name: 'Checking',
+          account_is_archived: 0,
+        },
+      ])
+      .mockReturnValueOnce([{ total: 25000 }])
+
+    const result = await allocateIncome.execute(
+      allocateIncome.schema.parse({
+        bucketId: 'bucket-1',
+        transactionId: 'tx-income',
+        amount: 50,
+        allocationDate: '2026-05-02',
+        source: 'paycheck-plan',
+      })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      action: 'allocated',
+      allocation: expect.objectContaining({
+        bucketId: 'bucket-1',
+        transactionId: 'tx-income',
+        amount: 50,
+      }),
+      bucket: expect.objectContaining({ balance: 150 }),
+    })
+    expect(mockTransaction).toHaveBeenCalledTimes(1)
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('INSERT INTO cashflow_bucket_allocations'),
+      ['tx_test_123', 'bucket-1', 'tx-income', 5000, 'USD', '2026-05-02', 'paycheck-plan', null]
+    )
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('UPDATE cashflow_buckets SET balance = balance + $1'),
+      [5000, 'bucket-1']
+    )
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('INSERT INTO audit_log'),
+      expect.arrayContaining(['cashflow_bucket_allocation', 'tx_test_123', 'allocate'])
+    )
+  })
+
+  it('rechecks source income allocation limits inside the write transaction', async () => {
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'bucket-1',
+          name: 'Rent',
+          description: null,
+          target_amount: 150000,
+          balance: 10000,
+          currency: 'USD',
+          sort_order: 1,
+          is_active: 1,
+        },
+      ])
+      .mockReturnValueOnce([
+        {
+          id: 'tx-income',
+          account_id: 'acct-1',
+          type: 'income',
+          amount: 10000,
+          currency: 'USD',
+          description: 'Paycheck',
+          date: '2026-05-01',
+          status: 'posted',
+          account_name: 'Checking',
+          account_is_archived: 0,
+        },
+      ])
+      .mockReturnValueOnce([{ total: 0 }])
+      .mockReturnValueOnce([
+        {
+          id: 'tx-income',
+          account_id: 'acct-1',
+          type: 'income',
+          amount: 10000,
+          currency: 'USD',
+          description: 'Paycheck',
+          date: '2026-05-01',
+          status: 'posted',
+          account_name: 'Checking',
+          account_is_archived: 0,
+        },
+      ])
+      .mockReturnValueOnce([{ total: 9000 }])
+
+    const result = await allocateIncome.execute(
+      allocateIncome.schema.parse({ bucketId: 'bucket-1', transactionId: 'tx-income', amount: 20 })
+    )
+
+    expect(result).toEqual({
+      success: false,
+      reason: 'source_transaction_overallocated',
+      message: 'Source transaction tx-income has 10.00 USD remaining to allocate.',
+      remainingAmount: 10,
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('previews and lists cashflow buckets without writes', async () => {
+    mockQuery.mockReturnValueOnce([])
+
+    const preview = await createBucket.execute(
+      createBucket.schema.parse({ name: 'Taxes', targetAmount: 500, dryRun: true })
+    )
+    expect(preview).toMatchObject({
+      success: true,
+      action: 'created',
+      dryRun: true,
+      wouldCreate: expect.objectContaining({ name: 'Taxes', targetAmount: 500, balance: 0 }),
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+
+    mockQuery.mockReset()
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'bucket-1',
+          name: 'Taxes',
+          description: null,
+          target_amount: 50000,
+          balance: 10000,
+          currency: 'USD',
+          sort_order: 0,
+          is_active: 1,
+        },
+      ])
+      .mockReturnValueOnce([
+        {
+          bucket_id: 'bucket-1',
+          allocation_count: 2,
+          allocated_amount: 10000,
+          last_allocation_date: '2026-05-01',
+        },
+      ])
+
+    const listResult = await listBuckets.execute(listBuckets.schema.parse({}))
+    expect(listResult).toMatchObject({
+      success: true,
+      buckets: [
+        expect.objectContaining({
+          name: 'Taxes',
+          balance: 100,
+          allocationSummary: expect.objectContaining({ count: 2, allocatedAmount: 100 }),
+        }),
+      ],
+    })
+  })
+
+  it('queues, reviews, approves, and rejects category suggestions', async () => {
+    mockQuery.mockReturnValueOnce([]).mockReturnValueOnce([{ id: 'cat-food', name: 'Food' }])
+
+    const queued = await suggestCategory.execute(
+      suggestCategory.schema.parse({
+        description: 'Coffee Shop',
+        enqueue: true,
+        categoryId: 'cat-food',
+        confidence: 0.72,
+        dryRun: true,
+      })
+    )
+    expect(queued).toMatchObject({
+      success: true,
+      action: 'enqueued',
+      dryRun: true,
+      wouldEnqueue: expect.objectContaining({ suggestedCategoryId: 'cat-food', confidence: 0.72 }),
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+
+    mockQuery.mockReset()
+    mockQuery.mockReturnValueOnce([
+      {
+        id: 'suggestion-1',
+        transaction_id: null,
+        description: 'Coffee Shop',
+        suggested_category_id: 'cat-food',
+        suggested_subcategory_id: null,
+        confidence: 0.72,
+        status: 'pending',
+        source: 'ai',
+        note: null,
+        created_at: '2026-05-01T00:00:00.000Z',
+        reviewed_at: null,
+        category_name: 'Food',
+        subcategory_name: null,
+      },
+    ])
+
+    const review = await reviewSuggestions.execute(reviewSuggestions.schema.parse({}))
+    expect(review).toMatchObject({
+      success: true,
+      count: 1,
+      suggestions: [expect.objectContaining({ id: 'suggestion-1', status: 'pending' })],
+    })
+
+    mockQuery.mockReset()
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'suggestion-1',
+          transaction_id: null,
+          description: 'Coffee Shop',
+          suggested_category_id: 'cat-food',
+          suggested_subcategory_id: null,
+          confidence: 0.72,
+          status: 'pending',
+          source: 'ai',
+          note: null,
+          created_at: '2026-05-01T00:00:00.000Z',
+          reviewed_at: null,
+          category_name: 'Food',
+          subcategory_name: null,
+        },
+      ])
+      .mockReturnValueOnce([{ id: 'cat-food', name: 'Food' }])
+      .mockReturnValueOnce([])
+
+    const approved = await approveSuggestion.execute(
+      approveSuggestion.schema.parse({ id: 'suggestion-1', createRule: true, source: 'reviewer' })
+    )
+    expect(approved).toMatchObject({
+      success: true,
+      action: 'approved',
+      rule: { action: 'created' },
+    })
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE category_suggestions'),
+      ['cat-food', null, 'reviewer', null, expect.any(String), 'suggestion-1']
+    )
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO category_rules'),
+      ['tx_test_123', 'coffee shop', 'cat-food', null]
+    )
+
+    mockQuery.mockReset()
+    mockExecute.mockReset()
+    mockQuery.mockReturnValueOnce([
+      {
+        id: 'suggestion-2',
+        transaction_id: null,
+        description: 'Unknown shop',
+        suggested_category_id: null,
+        suggested_subcategory_id: null,
+        confidence: 0.2,
+        status: 'pending',
+        source: null,
+        note: null,
+        created_at: '2026-05-01T00:00:00.000Z',
+        reviewed_at: null,
+        category_name: null,
+        subcategory_name: null,
+      },
+    ])
+
+    const rejected = await rejectSuggestion.execute(
+      rejectSuggestion.schema.parse({ id: 'suggestion-2', note: 'too vague', dryRun: true })
+    )
+    expect(rejected).toMatchObject({
+      success: true,
+      action: 'rejected',
+      dryRun: true,
+      wouldReject: { after: expect.objectContaining({ status: 'rejected', note: 'too vague' }) },
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('rejects stale category suggestion approvals inside the write transaction', async () => {
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'suggestion-1',
+          transaction_id: null,
+          description: 'Coffee Shop',
+          suggested_category_id: 'cat-food',
+          suggested_subcategory_id: null,
+          confidence: 0.72,
+          status: 'pending',
+          source: 'ai',
+          note: null,
+          created_at: '2026-05-01T00:00:00.000Z',
+          reviewed_at: null,
+          category_name: 'Food',
+          subcategory_name: null,
+        },
+      ])
+      .mockReturnValueOnce([{ id: 'cat-food', name: 'Food' }])
+      .mockReturnValueOnce([])
+    mockExecute.mockReturnValueOnce({ rowsAffected: 0, lastInsertId: 0 })
+
+    await expect(
+      approveSuggestion.execute(approveSuggestion.schema.parse({ id: 'suggestion-1' }))
+    ).rejects.toThrow(
+      'Category suggestion suggestion-1 could not be approved because it was already reviewed.'
+    )
+  })
+
+  it('validates queued category suggestion subcategory and transaction references', async () => {
+    mockQuery
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([{ id: 'cat-food', name: 'Food' }])
+      .mockReturnValueOnce([{ id: 'sub-travel', category_id: 'cat-travel', name: 'Flights' }])
+
+    const mismatch = await suggestCategory.execute(
+      suggestCategory.schema.parse({
+        description: 'Coffee Shop',
+        enqueue: true,
+        categoryId: 'cat-food',
+        subcategoryId: 'sub-travel',
+        dryRun: true,
+      })
+    )
+
+    expect(mismatch).toEqual({
+      success: false,
+      reason: 'subcategory_category_mismatch',
+      message: 'Subcategory sub-travel belongs to category cat-travel, not cat-food.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+
+    mockQuery.mockReset()
+    mockQuery
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([{ id: 'cat-food', name: 'Food' }])
+      .mockReturnValueOnce([])
+
+    const missingTransaction = await suggestCategory.execute(
+      suggestCategory.schema.parse({
+        description: 'Coffee Shop',
+        enqueue: true,
+        categoryId: 'cat-food',
+        transactionId: 'tx-missing',
+        dryRun: true,
+      })
+    )
+
+    expect(missingTransaction).toEqual({
+      success: false,
+      reason: 'transaction_not_found',
+      message: 'Transaction tx-missing not found.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('previews subscription creation with account and category resolution', async () => {
+    mockQuery
+      .mockReturnValueOnce([{ id: 'acct-1', currency: 'USD', is_archived: 0 }])
+      .mockReturnValueOnce([{ id: 'cat-streaming', name: 'Streaming' }])
+
+    const result = await createSubscription.execute(
+      createSubscription.schema.parse({
+        name: 'Netflix',
+        amount: 15.99,
+        nextBillingDate: '2026-06-01',
+        accountId: 'acct-1',
+        categoryId: 'cat-streaming',
+        dryRun: true,
+      })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      action: 'created',
+      dryRun: true,
+      wouldCreate: expect.objectContaining({
+        accountId: 'acct-1',
+        categoryId: 'cat-streaming',
+        amount: 15.99,
+        currency: 'USD',
+      }),
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('updates and deletes subscriptions with action metadata', async () => {
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'sub-1',
+          account_id: 'acct-1',
+          category_id: null,
+          name: 'Old plan',
+          amount: 999,
+          currency: 'USD',
+          billing_cycle: 'monthly',
+          next_billing_date: '2026-06-01',
+          icon: null,
+          color: null,
+          url: null,
+          notes: 'old',
+          is_active: 1,
+        },
+      ])
+      .mockReturnValueOnce([{ id: 'acct-1', currency: 'USD', is_archived: 0 }])
+      .mockReturnValueOnce([
+        {
+          id: 'sub-1',
+          account_id: 'acct-1',
+          category_id: null,
+          name: 'New plan',
+          amount: 1299,
+          currency: 'USD',
+          billing_cycle: 'monthly',
+          next_billing_date: '2026-06-01',
+          icon: null,
+          color: null,
+          url: null,
+          notes: null,
+          is_active: 1,
+        },
+      ])
+
+    const updateResult = await updateSubscription.execute(
+      updateSubscription.schema.parse({ subscriptionId: 'sub-1', name: 'New plan', amount: 12.99 })
+    )
+    const deleteResult = await deleteSubscription.execute(
+      deleteSubscription.schema.parse({ subscriptionId: 'sub-1', dryRun: true })
+    )
+
+    expect(updateResult).toMatchObject({ success: true, action: 'updated', changed: true })
+    expect(deleteResult).toMatchObject({ success: true, action: 'deleted', dryRun: true })
+    expect(mockExecute).toHaveBeenCalledWith(expect.stringContaining('UPDATE subscriptions SET'), [
+      'New plan',
+      1299,
+      'sub-1',
+    ])
+  })
+
+  it('reports no-op subscription dry-runs as unchanged', async () => {
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'sub-1',
+          account_id: 'acct-1',
+          category_id: null,
+          name: 'Plan',
+          amount: 999,
+          currency: 'USD',
+          billing_cycle: 'monthly',
+          next_billing_date: '2026-06-01',
+          icon: null,
+          color: null,
+          url: null,
+          notes: null,
+          is_active: 1,
+        },
+      ])
+      .mockReturnValueOnce([{ id: 'acct-1', currency: 'USD', is_archived: 0 }])
+
+    const result = await updateSubscription.execute(
+      updateSubscription.schema.parse({ subscriptionId: 'sub-1', dryRun: true })
+    )
+
+    expect(result).toMatchObject({ success: true, action: 'updated', dryRun: true, changed: false })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('validates retained subscription account currency on updates', async () => {
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'sub-1',
+          account_id: 'acct-1',
+          category_id: null,
+          name: 'Plan',
+          amount: 999,
+          currency: 'USD',
+          billing_cycle: 'monthly',
+          next_billing_date: '2026-06-01',
+          icon: null,
+          color: null,
+          url: null,
+          notes: null,
+          is_active: 1,
+        },
+      ])
+      .mockReturnValueOnce([{ id: 'acct-1', currency: 'USD', is_archived: 0 }])
+
+    const result = await updateSubscription.execute(
+      updateSubscription.schema.parse({ subscriptionId: 'sub-1', currency: 'EUR', dryRun: true })
+    )
+
+    expect(result).toEqual({
+      success: false,
+      reason: 'subscription_currency_mismatch',
+      message:
+        'Subscription currency EUR does not match linked account currency USD. Use an account with matching currency or omit the account link.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('stores finance profile preferences as stable JSON and reports setup presence', async () => {
+    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM settings') && params?.[0] === 'finance_profile') {
+        return [{ value: JSON.stringify({ currency: 'USD' }) }]
+      }
+      if (sql.includes('FROM settings') && params?.[0] === 'account_aliases') {
+        return [{ value: '{}' }]
+      }
+      if (sql.includes('COUNT(*) as count FROM accounts')) return [{ count: 1 }]
+      if (sql.includes('COUNT(*) as count FROM categories')) return [{ count: 1 }]
+      return [{ count: 0 }]
+    })
+
+    const profileResult = await financeProfile.execute(
+      financeProfile.schema.parse({ action: 'set', profile: { risk: 'low' } })
+    )
+    const statusResult = await setupStatus.execute(setupStatus.schema.parse({}))
+
+    expect(profileResult).toMatchObject({
+      success: true,
+      action: 'updated',
+      profile: { currency: 'USD', risk: 'low' },
+    })
+    expect(mockExecute).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO settings'), [
+      'finance_profile',
+      '{"currency":"USD","risk":"low"}',
+    ])
+    expect(statusResult.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'finance_profile', ok: true, count: 1 }),
+      ])
+    )
+  })
+
+  it('deep-merges nested finance profile preferences by default', async () => {
+    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM settings') && params?.[0] === 'finance_profile') {
+        return [
+          {
+            value: JSON.stringify({
+              preferences: { currency: 'USD', language: 'en' },
+              risk: 'medium',
+            }),
+          },
+        ]
+      }
+      return []
+    })
+
+    const result = await financeProfile.execute(
+      financeProfile.schema.parse({ action: 'set', profile: { preferences: { language: 'es' } } })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      profile: {
+        preferences: { currency: 'USD', language: 'es' },
+        risk: 'medium',
+      },
+    })
+    expect(mockExecute).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO settings'), [
+      'finance_profile',
+      '{"preferences":{"currency":"USD","language":"es"},"risk":"medium"}',
+    ])
+  })
+
+  it('reports CSV validation failures without pretending explicit apply was a dry-run', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'shikin-csv-invalid-'))
+    const file = join(dir, 'transactions.csv')
+    writeFileSync(file, 'date,description,amount\n2026-05-01,Coffee,\n', 'utf8')
+
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('FROM accounts WHERE id = $1')) {
+        return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
+      }
+      return []
+    })
+
+    try {
+      const result = await importTransactions.execute(
+        importTransactions.schema.parse({ file, accountId: 'acct-1', apply: true })
+      )
+
+      expect(result).toMatchObject({
+        success: false,
+        reason: 'csv_validation_failed',
+        applyRequested: true,
+        dryRun: false,
+        summary: { invalidRows: 1, importedRows: 0 },
+      })
+      expect(mockExecute).not.toHaveBeenCalled()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('previews CSV transaction imports by default with row-level metadata', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'shikin-csv-preview-'))
+    const file = join(dir, 'transactions.csv')
+    writeFileSync(
+      file,
+      'date,description,amount,category,status,currency,externalId\n2026-05-01,Coffee,-4.50,Food,posted,USD,bank-1\n',
+      'utf8'
+    )
+
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('FROM accounts WHERE id = $1')) {
+        return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
+      }
+      if (sql.includes('FROM categories WHERE LOWER(name) = LOWER($1)')) {
+        return [{ id: 'cat-food', name: 'Food' }]
+      }
+      return []
+    })
+
+    try {
+      const result = await importTransactions.execute(
+        importTransactions.schema.parse({ file, accountId: 'acct-1' })
+      )
+
+      expect(result).toMatchObject({
+        success: true,
+        dryRun: true,
+        summary: { totalRows: 1, validRows: 1, importedRows: 0 },
+        rows: [
+          expect.objectContaining({
+            status: 'valid',
+            input: expect.objectContaining({
+              amount: 4.5,
+              type: 'expense',
+              note: 'externalId=bank-1',
+            }),
+          }),
+        ],
+      })
+      expect(mockExecute).not.toHaveBeenCalled()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('skips duplicate CSV import rows by external ID metadata', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'shikin-csv-duplicate-'))
+    const file = join(dir, 'transactions.csv')
+    writeFileSync(
+      file,
+      'date,description,amount,externalId\n2026-05-01,Coffee,-4.50,bank-1\n',
+      'utf8'
+    )
+
+    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM accounts WHERE id = $1')) {
+        return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
+      }
+      if (sql.includes('FROM transactions') && params?.includes('externalId=')) {
+        return [{ id: 'tx-existing', note: 'externalId=bank-1' }]
+      }
+      return []
+    })
+
+    try {
+      const result = await importTransactions.execute(
+        importTransactions.schema.parse({ file, accountId: 'acct-1' })
+      )
+
+      expect(result).toMatchObject({
+        success: true,
+        dryRun: true,
+        summary: { totalRows: 1, validRows: 0, skippedRows: 1, importedRows: 0 },
+        rows: [
+          expect.objectContaining({
+            status: 'skipped',
+            reason: 'duplicate',
+            existingTransactionId: 'tx-existing',
+          }),
+        ],
+      })
+      expect(mockExecute).not.toHaveBeenCalled()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('uses exact externalId duplicate matching for CSV imports', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'shikin-csv-externalid-exact-'))
+    const file = join(dir, 'transactions.csv')
+    writeFileSync(file, 'date,description,amount,externalId\n2026-05-01,Coffee,-4.50,12\n', 'utf8')
+
+    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM accounts WHERE id = $1')) {
+        return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
+      }
+      if (sql.includes('FROM transactions') && params?.includes('externalId=')) {
+        return [{ id: 'tx-existing', note: 'externalId=123' }]
+      }
+      return []
+    })
+
+    try {
+      const result = await importTransactions.execute(
+        importTransactions.schema.parse({ file, accountId: 'acct-1' })
+      )
+
+      expect(result).toMatchObject({
+        success: true,
+        dryRun: true,
+        summary: { totalRows: 1, validRows: 1, skippedRows: 0 },
+        rows: [expect.objectContaining({ status: 'valid', externalId: '12' })],
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('returns a structured failure when a CSV import file cannot be read', async () => {
+    const missingFile = join(tmpdir(), 'shikin-missing-import-file.csv')
+    mockQuery.mockReturnValueOnce([{ id: 'acct-1', currency: 'USD', is_archived: 0 }])
+
+    const result = await importTransactions.execute(
+      importTransactions.schema.parse({ file: missingFile, accountId: 'acct-1' })
+    )
+
+    expect(result).toMatchObject({
+      success: false,
+      reason: 'csv_file_read_failed',
+      file: missingFile,
+      message: `Could not read CSV file "${missingFile}".`,
+      error: expect.any(String),
+    })
+  })
+
+  it('rejects conflicting CSV apply and dryRun flags', async () => {
+    const result = await importTransactions.execute(
+      importTransactions.schema.parse({
+        file: '/tmp/does-not-need-to-exist.csv',
+        accountId: 'acct-1',
+        apply: true,
+        dryRun: true,
+      })
+    )
+
+    expect(result).toEqual({
+      success: false,
+      reason: 'import_flag_conflict',
+      message: 'Use either apply or dryRun, not both.',
+    })
+    expect(mockQuery).not.toHaveBeenCalled()
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('applies CSV transaction imports only when apply is explicit', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'shikin-csv-apply-'))
+    const file = join(dir, 'transactions.csv')
+    writeFileSync(file, 'date,description,amount\n2026-05-01,Paycheck,100.00\n', 'utf8')
+
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('FROM accounts WHERE id = $1')) {
+        return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
+      }
+      if (sql.includes('SELECT id, balance FROM accounts')) {
+        return [{ id: 'acct-1', balance: 5000 }]
+      }
+      return []
+    })
+
+    try {
+      const result = await importTransactions.execute(
+        importTransactions.schema.parse({ file, accountId: 'acct-1', apply: true })
+      )
+
+      expect(result).toMatchObject({
+        success: true,
+        dryRun: false,
+        summary: { totalRows: 1, importedRows: 1 },
+      })
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO transactions'),
+        [
+          'tx_test_123',
+          'acct-1',
+          null,
+          null,
+          'income',
+          10000,
+          'USD',
+          'Paycheck',
+          null,
+          'posted',
+          'csv-import',
+          null,
+          null,
+          '2026-05-01',
+        ]
+      )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('exports deterministic table data with best-effort redaction', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('FROM transactions ')) {
+        return [
+          {
+            id: 'tx-1',
+            description: 'Secret purchase',
+            notes: 'private note',
+            amount: 1234,
+          },
+        ]
+      }
+      if (sql.includes('FROM investments ')) {
+        return [{ id: 'inv-1', symbol: 'VT', notes: 'broker memo' }]
+      }
+      if (sql.includes('FROM settings ')) {
+        return [
+          { key: 'finance_profile', value: '{"monthlyIncome":1000}' },
+          { key: 'account_aliases', value: '{"main":"acct-1"}' },
+        ]
+      }
+      return []
+    })
+
+    const result = await exportData.execute(
+      exportData.schema.parse({ format: 'json', redacted: true })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      format: 'json',
+      redacted: true,
+      data: {
+        transactions: [expect.objectContaining({ description: '[REDACTED]', notes: '[REDACTED]' })],
+        investments: [expect.objectContaining({ symbol: 'VT', notes: '[REDACTED]' })],
+        settings: [
+          expect.objectContaining({ key: 'finance_profile', value: '[REDACTED]' }),
+          expect.objectContaining({ key: 'account_aliases', value: '[REDACTED]' }),
+        ],
+      },
+    })
+    expect(result.tables).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'cashflow_buckets' })])
+    )
+  })
+
+  it('protects CSV exports from formula-leading string cells', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('FROM accounts ')) {
+        return [{ id: 'acct-1', name: '=HYPERLINK("http://example.test")', currency: 'USD' }]
+      }
+      return []
+    })
+
+    const result = await exportData.execute(exportData.schema.parse({ format: 'csv' }))
+
+    expect(result.files.accounts).toContain('\t=HYPERLINK')
+  })
+
   it('detects large transactions as spending anomalies', async () => {
     mockQuery.mockImplementation((sql: string) => {
       if (sql.includes('t.amount >= $1')) {
@@ -1446,8 +3278,8 @@ describe('CLI tool validation regressions', () => {
     expect(mockTransaction.mock.invocationCallOrder[0]).toBeLessThan(
       mockQuery.mock.invocationCallOrder[0]
     )
-    expect(mockExecute).toHaveBeenCalledTimes(3)
-    expect(mockExecute.mock.calls[2]?.[1]).toEqual([
+    expect(mockExecute).toHaveBeenCalledTimes(2)
+    expect(mockExecute.mock.calls[0]?.[1]).toEqual([
       1000,
       'expense',
       'Coffee',
@@ -1457,8 +3289,13 @@ describe('CLI tool validation regressions', () => {
       'acct-1',
       'GBP',
       null,
+      'posted',
+      null,
+      null,
+      null,
       'tx-1',
     ])
+    expect(mockExecute.mock.calls[1]?.[0]).toContain('INSERT INTO audit_log')
   })
 
   it('preserves a stored historical transaction currency on metadata-only edits', async () => {
@@ -1484,7 +3321,7 @@ describe('CLI tool validation regressions', () => {
     )
 
     expect(mockQuery).toHaveBeenCalledTimes(1)
-    expect(mockExecute).toHaveBeenNthCalledWith(3, expect.stringContaining('UPDATE transactions'), [
+    expect(mockExecute).toHaveBeenNthCalledWith(1, expect.stringContaining('UPDATE transactions'), [
       2500,
       'expense',
       'Museum ticket',
@@ -1493,6 +3330,10 @@ describe('CLI tool validation regressions', () => {
       'updated note',
       'acct-1',
       'MXN',
+      null,
+      'posted',
+      null,
+      null,
       null,
       'tx-legacy',
     ])
@@ -1560,7 +3401,7 @@ describe('CLI tool validation regressions', () => {
     )
     expect(mockQuery).toHaveBeenNthCalledWith(
       2,
-      'SELECT id, currency FROM accounts WHERE id = $1 LIMIT 1',
+      'SELECT id, currency, is_archived FROM accounts WHERE id = $1 LIMIT 1',
       ['missing-account']
     )
     expect(result).toEqual({
@@ -1595,6 +3436,94 @@ describe('CLI tool validation regressions', () => {
       success: false,
       message:
         'Cannot move this transaction from USD to EUR. Cross-currency moves are not supported because they would change amount semantics without FX conversion.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('rejects balance-affecting transaction updates against archived accounts', async () => {
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'tx-archived-account',
+          amount: 1000,
+          type: 'expense',
+          account_id: 'acct-archived',
+          category_id: null,
+          currency: 'USD',
+          description: 'Old coffee',
+          date: '2026-04-14',
+          notes: null,
+        },
+      ])
+      .mockReturnValueOnce([{ id: 'acct-archived', name: 'Archived Checking' }])
+
+    const result = await updateTransaction.execute(
+      updateTransaction.schema.parse({ transactionId: 'tx-archived-account', amount: 12 })
+    )
+
+    expect(result).toEqual({
+      success: false,
+      reason: 'archived_account_balance_mutation',
+      accountIds: ['acct-archived'],
+      message:
+        'Cannot mutate balances for archived account Archived Checking (acct-archived). Unarchive affected accounts before editing or deleting balance-affecting transactions.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('rejects balance-affecting transaction deletes against archived accounts', async () => {
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'tx-archived-delete',
+          amount: 1000,
+          type: 'expense',
+          account_id: 'acct-archived',
+          description: 'Old coffee',
+          date: '2026-04-14',
+        },
+      ])
+      .mockReturnValueOnce([{ id: 'acct-archived', name: 'Archived Checking' }])
+
+    const result = await deleteTransaction.execute(
+      deleteTransaction.schema.parse({ transactionId: 'tx-archived-delete' })
+    )
+
+    expect(result).toMatchObject({
+      success: false,
+      reason: 'archived_account_balance_mutation',
+      accountIds: ['acct-archived'],
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('revalidates retained recurringRuleId links against the final transaction shape', async () => {
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'tx-1',
+          amount: 1000,
+          type: 'expense',
+          account_id: 'acct-1',
+          category_id: null,
+          currency: 'USD',
+          description: 'Coffee',
+          date: '2026-04-14',
+          notes: null,
+          recurring_rule_id: 'rule-1',
+        },
+      ])
+      .mockReturnValueOnce([
+        { id: 'rule-1', account_id: 'acct-1', type: 'expense', currency: 'USD' },
+      ])
+
+    const result = await updateTransaction.execute(
+      updateTransaction.schema.parse({ transactionId: 'tx-1', type: 'income' })
+    )
+
+    expect(result).toEqual({
+      success: false,
+      message: 'Recurring rule rule-1 is for expense transactions, not income.',
     })
     expect(mockExecute).not.toHaveBeenCalled()
   })
@@ -1673,7 +3602,7 @@ describe('CLI tool validation regressions', () => {
     const result = await manageRecurringTransaction.execute(input)
 
     expect(mockQuery).toHaveBeenCalledWith(
-      'SELECT id, currency FROM accounts WHERE id = $1 LIMIT 1',
+      'SELECT id, currency, is_archived FROM accounts WHERE id = $1 LIMIT 1',
       ['acct-2']
     )
     expect(mockExecute).toHaveBeenCalledWith(
@@ -1835,6 +3764,72 @@ describe('CLI tool validation regressions', () => {
     expect(mockExecute).not.toHaveBeenCalled()
   })
 
+  it('blocks recurring-rule identity changes when transactions are linked', async () => {
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'rule-linked',
+          description: 'Linked rent',
+          amount: 100000,
+          type: 'expense',
+          frequency: 'monthly',
+          account_id: 'acct-1',
+          currency: 'USD',
+        },
+      ])
+      .mockReturnValueOnce([{ name: 'currency' }])
+      .mockReturnValueOnce([{ count: 2 }])
+
+    const result = await manageRecurringTransaction.execute(
+      manageRecurringTransaction.schema.parse({
+        action: 'update',
+        ruleId: 'rule-linked',
+        type: 'income',
+      })
+    )
+
+    expect(result).toEqual({
+      success: false,
+      message:
+        'Recurring rule rule-linked has 2 linked transactions. Clear or migrate those links before changing the rule account or type.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('unlinks historical transactions before deleting a recurring rule', async () => {
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'rule-delete',
+          description: 'Old rent',
+          amount: 100000,
+          type: 'expense',
+          frequency: 'monthly',
+          next_date: '2026-01-01',
+          active: 1,
+        },
+      ])
+      .mockReturnValueOnce([{ count: 1 }])
+
+    const result = await manageRecurringTransaction.execute(
+      manageRecurringTransaction.schema.parse({ action: 'delete', ruleId: 'rule-delete' })
+    )
+
+    expect(mockTransaction).toHaveBeenCalledTimes(1)
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      1,
+      'UPDATE transactions SET recurring_rule_id = NULL WHERE recurring_rule_id = $1',
+      ['rule-delete']
+    )
+    expect(mockExecute).toHaveBeenNthCalledWith(2, 'DELETE FROM recurring_rules WHERE id = $1', [
+      'rule-delete',
+    ])
+    expect(result).toEqual({
+      success: true,
+      message: 'Deleted recurring rule "Old rent" and unlinked 1 transaction.',
+    })
+  })
+
   it('lists category rules from the migrated category_rules table', async () => {
     mockQuery.mockReturnValueOnce([
       {
@@ -1993,6 +3988,7 @@ describe('CLI tool validation regressions', () => {
         'Coffee subscription',
         'monthly',
         '2026-04-15',
+        'rule-1',
       ]
     )
     expect(mockExecute).toHaveBeenNthCalledWith(
@@ -2005,6 +4001,36 @@ describe('CLI tool validation regressions', () => {
       created: 1,
       message: 'Created 1 transaction(s) from recurring rules.',
     })
+  })
+
+  it('rejects materializing recurring rules attached to archived accounts', async () => {
+    mockQuery.mockReturnValueOnce([
+      {
+        id: 'rule-archived',
+        account_id: 'acct-old',
+        currency: 'USD',
+        account_currency: 'USD',
+        account_is_archived: 1,
+        category_id: 'cat-1',
+        type: 'expense',
+        amount: 1250,
+        description: 'Old account subscription',
+        notes: null,
+        next_date: '2026-04-15',
+        frequency: 'monthly',
+        end_date: null,
+      },
+    ])
+
+    const result = await materializeRecurring.execute(materializeRecurring.schema.parse({}))
+
+    expect(result).toEqual({
+      success: false,
+      reason: 'account_archived',
+      message:
+        'Recurring rule "Old account subscription" points at archived account acct-old. Unarchive the account or pause the rule before materializing it.',
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
   })
 
   it('treats recurring rule and account currencies with casing or whitespace drift as equivalent', async () => {
@@ -2046,14 +4072,21 @@ describe('CLI tool validation regressions', () => {
         'Coffee subscription',
         'monthly',
         '2026-04-15',
+        'rule-1',
       ]
     )
   })
 
-  it('blocks account currency changes while recurring rules still depend on the account', async () => {
-    mockQuery
-      .mockReturnValueOnce([{ id: 'acct-1', name: 'Checking', currency: 'USD' }])
-      .mockReturnValueOnce([{ currency: 'USD' }, { currency: 'BRL' }])
+  it('blocks account currency changes while linked monetary rows still depend on the account', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('SELECT * FROM accounts WHERE id = $1')) {
+        return [{ id: 'acct-1', name: 'Checking', currency: 'USD', is_archived: 0 }]
+      }
+      if (sql.includes('FROM recurring_rules')) return [{ count: 2 }]
+      if (sql.includes('SELECT balance FROM accounts')) return [{ balance: 0 }]
+      if (sql.includes('COUNT(*) as count')) return [{ count: 0 }]
+      return []
+    })
 
     const input = updateAccount.schema.parse({
       accountId: 'acct-1',
@@ -2065,15 +4098,20 @@ describe('CLI tool validation regressions', () => {
     expect(result).toEqual({
       success: false,
       message:
-        'Cannot change this account currency while 2 recurring rule(s) still point at the account. Repair, move, or recreate those recurring rules first so scheduled amounts do not silently change meaning.',
+        'Cannot change this account currency while 2 linked monetary references still point at the account. Create a new account or explicitly migrate the referenced data so amounts do not silently change meaning.',
     })
     expect(mockExecute).not.toHaveBeenCalled()
   })
 
-  it('allows account currency repair when dependent recurring rules already match the target currency', async () => {
-    mockQuery
-      .mockReturnValueOnce([{ id: 'acct-1', name: 'Checking', currency: 'EUR' }])
-      .mockReturnValueOnce([{ currency: 'USD' }, { currency: ' usd ' }])
+  it('allows account currency updates when no linked monetary rows exist', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('SELECT * FROM accounts WHERE id = $1')) {
+        return [{ id: 'acct-1', name: 'Checking', currency: 'EUR', is_archived: 0 }]
+      }
+      if (sql.includes('SELECT balance FROM accounts')) return [{ balance: 0 }]
+      if (sql.includes('COUNT(*) as count')) return [{ count: 0 }]
+      return []
+    })
 
     const input = updateAccount.schema.parse({
       accountId: 'acct-1',
@@ -2086,7 +4124,7 @@ describe('CLI tool validation regressions', () => {
       success: true,
       message: 'Updated account "Checking".',
     })
-    expect(mockExecute).toHaveBeenCalledTimes(1)
+    expect(mockExecute).toHaveBeenCalledTimes(2)
   })
 
   it('rejects recurring-rule creation when the linked account currency is invalid after normalization', async () => {
@@ -2276,6 +4314,7 @@ describe('CLI tool validation regressions', () => {
         'Coffee subscription',
         'monthly',
         '2026-04-15',
+        'rule-1',
       ]
     )
     expect(result).toMatchObject({ success: true, created: 1 })
@@ -2344,15 +4383,10 @@ describe('CLI tool validation regressions', () => {
     expect(mockExecute).toHaveBeenCalledTimes(3)
     expect(mockExecute).toHaveBeenNthCalledWith(
       1,
-      expect.stringContaining('UPDATE accounts SET balance = balance - $1'),
-      [-1000, 'acct-1']
-    )
-    expect(mockExecute).toHaveBeenNthCalledWith(
-      2,
       expect.stringContaining('UPDATE accounts SET balance = balance + $1'),
-      [-1200, 'acct-1']
+      [-200, 'acct-1']
     )
-    expect(mockExecute).toHaveBeenNthCalledWith(3, expect.stringContaining('UPDATE transactions'), [
+    expect(mockExecute).toHaveBeenNthCalledWith(2, expect.stringContaining('UPDATE transactions'), [
       1200,
       'expense',
       'Lunch',
@@ -2362,8 +4396,17 @@ describe('CLI tool validation regressions', () => {
       'acct-1',
       'JPY',
       null,
+      'posted',
+      null,
+      null,
+      null,
       'tx-1',
     ])
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('INSERT INTO audit_log'),
+      expect.any(Array)
+    )
     expect(result).toMatchObject({
       success: true,
       transaction: {
@@ -2392,7 +4435,6 @@ describe('CLI tool validation regressions', () => {
     ])
     mockExecute
       .mockReturnValueOnce({ rowsAffected: 1, lastInsertId: 1 })
-      .mockReturnValueOnce({ rowsAffected: 1, lastInsertId: 1 })
       .mockReturnValueOnce({ rowsAffected: 0, lastInsertId: 1 })
 
     const input = updateTransaction.schema.parse({
@@ -2404,7 +4446,7 @@ describe('CLI tool validation regressions', () => {
       'Transaction tx-1 could not be updated safely.'
     )
     expect(mockTransaction).toHaveBeenCalledTimes(1)
-    expect(mockExecute).toHaveBeenCalledTimes(3)
+    expect(mockExecute).toHaveBeenCalledTimes(2)
   })
 
   it('wraps delete-transaction balance and row deletion in a transaction', async () => {
@@ -2427,15 +4469,20 @@ describe('CLI tool validation regressions', () => {
 
     expect(mockTransaction).toHaveBeenCalledTimes(1)
     expect(mockQuery).toHaveBeenCalledWith('SELECT * FROM transactions WHERE id = $1', ['tx-1'])
-    expect(mockExecute).toHaveBeenCalledTimes(2)
+    expect(mockExecute).toHaveBeenCalledTimes(3)
     expect(mockExecute).toHaveBeenNthCalledWith(
       1,
-      expect.stringContaining('UPDATE accounts SET balance = balance - $1'),
-      [-1000, 'acct-1']
+      expect.stringContaining('UPDATE accounts SET balance = balance + $1'),
+      [1000, 'acct-1']
     )
     expect(mockExecute).toHaveBeenNthCalledWith(2, 'DELETE FROM transactions WHERE id = $1', [
       'tx-1',
     ])
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('INSERT INTO audit_log'),
+      expect.any(Array)
+    )
     expect(result).toEqual({
       success: true,
       message: 'Deleted expense: $10.00 "Coffee" from 2026-04-14',
@@ -2462,7 +4509,7 @@ describe('CLI tool validation regressions', () => {
     const result = await deleteTransaction.execute(input)
 
     expect(mockTransaction).toHaveBeenCalledTimes(1)
-    expect(mockExecute).toHaveBeenCalledTimes(3)
+    expect(mockExecute).toHaveBeenCalledTimes(4)
     expect(mockExecute).toHaveBeenNthCalledWith(
       1,
       expect.stringContaining('UPDATE accounts SET balance = balance + $1'),
@@ -2470,12 +4517,17 @@ describe('CLI tool validation regressions', () => {
     )
     expect(mockExecute).toHaveBeenNthCalledWith(
       2,
-      expect.stringContaining('UPDATE accounts SET balance = balance - $1'),
-      [2500, 'acct-savings']
+      expect.stringContaining('UPDATE accounts SET balance = balance + $1'),
+      [-2500, 'acct-savings']
     )
     expect(mockExecute).toHaveBeenNthCalledWith(3, 'DELETE FROM transactions WHERE id = $1', [
       'tx-transfer',
     ])
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      4,
+      expect.stringContaining('INSERT INTO audit_log'),
+      expect.any(Array)
+    )
     expect(result).toEqual({
       success: true,
       message: 'Deleted transfer: $25.00 "Move cash" from 2026-04-14',

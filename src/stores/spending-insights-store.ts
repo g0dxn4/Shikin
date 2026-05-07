@@ -72,9 +72,10 @@ async function getSpendingByCategory(
        COALESCE(SUM(t.amount), 0) as total
      FROM transactions t
      LEFT JOIN categories c ON c.id = t.category_id
-     WHERE t.type = 'expense'
-       AND t.date >= ?
-       AND t.date <= ?
+      WHERE t.type = 'expense'
+        AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
+        AND t.date >= ?
+        AND t.date <= ?
      GROUP BY t.category_id
      ORDER BY total DESC`,
     [startDate, endDate]

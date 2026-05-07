@@ -11,6 +11,10 @@ import type {
   RecurringFrequency,
 } from './common'
 
+export type TransactionStatus = 'pending' | 'posted' | 'cleared'
+export type CategorySuggestionStatus = 'pending' | 'approved' | 'rejected'
+export type CreditCardStatementStatus = 'open' | 'partial' | 'paid' | 'overdue'
+
 export interface Account {
   id: ULID
   name: string
@@ -52,6 +56,10 @@ export interface Transaction {
   tags: string
   is_recurring: number
   transfer_to_account_id: ULID | null
+  status?: TransactionStatus
+  source?: string | null
+  note?: string | null
+  recurring_rule_id?: ULID | null
   created_at: DateTimeStr
   updated_at: DateTimeStr
 }
@@ -147,6 +155,74 @@ export interface CategoryRule {
   subcategory_id: ULID | null
   confidence: number
   hit_count: number
+  created_at: DateTimeStr
+  updated_at: DateTimeStr
+}
+
+export interface AuditLog {
+  id: ULID
+  entity: string
+  entity_id: string | null
+  action: string
+  before_json: string | null
+  after_json: string | null
+  source: string | null
+  note: string | null
+  created_at: DateTimeStr
+}
+
+export interface CashflowBucket {
+  id: ULID
+  name: string
+  description: string | null
+  target_amount: Money | null
+  balance: Money
+  currency: CurrencyCode
+  sort_order: number
+  is_active: number
+  created_at: DateTimeStr
+  updated_at: DateTimeStr
+}
+
+export interface CashflowBucketAllocation {
+  id: ULID
+  bucket_id: ULID
+  transaction_id: ULID | null
+  amount: Money
+  currency: CurrencyCode
+  allocation_date: DateStr
+  source: string | null
+  note: string | null
+  created_at: DateTimeStr
+}
+
+export interface CategorySuggestion {
+  id: ULID
+  transaction_id: ULID | null
+  description: string
+  suggested_category_id: ULID | null
+  suggested_subcategory_id: ULID | null
+  confidence: number
+  status: CategorySuggestionStatus
+  source: string | null
+  note: string | null
+  created_at: DateTimeStr
+  reviewed_at: DateTimeStr | null
+}
+
+export interface CreditCardStatement {
+  id: ULID
+  account_id: ULID
+  statement_start_date: DateStr | null
+  statement_end_date: DateStr
+  due_date: DateStr
+  statement_balance: Money
+  minimum_payment: Money
+  paid_amount: Money
+  currency: CurrencyCode
+  status: CreditCardStatementStatus
+  source: string | null
+  note: string | null
   created_at: DateTimeStr
   updated_at: DateTimeStr
 }

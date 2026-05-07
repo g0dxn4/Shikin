@@ -153,7 +153,8 @@ async function checkBudgetBoss(): Promise<boolean> {
   for (const b of budgets) {
     const spent = await query<{ total: number }>(
       `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
-       WHERE category_id = ? AND type = 'expense' AND date >= ? AND date <= ?`,
+       WHERE category_id = ? AND type = 'expense' AND date >= ? AND date <= ?
+         AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
       [b.category_id, start, end]
     )
     if ((spent[0]?.total ?? 0) > b.amount) return false
@@ -167,11 +168,15 @@ async function checkSavingsStar(): Promise<boolean> {
   const end = lastMonth.endOf('month').format('YYYY-MM-DD')
 
   const income = await query<{ total: number }>(
-    `SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE type = 'income' AND date >= ? AND date <= ?`,
+    `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
+     WHERE type = 'income' AND date >= ? AND date <= ?
+       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
     [start, end]
   )
   const expenses = await query<{ total: number }>(
-    `SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE type = 'expense' AND date >= ? AND date <= ?`,
+    `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
+     WHERE type = 'expense' AND date >= ? AND date <= ?
+       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
     [start, end]
   )
 
@@ -192,7 +197,8 @@ async function checkDiversified(): Promise<boolean> {
 
   const rows = await query<{ cnt: number }>(
     `SELECT COUNT(DISTINCT category_id) as cnt FROM transactions
-     WHERE type = 'expense' AND category_id IS NOT NULL AND date >= ? AND date <= ?`,
+     WHERE type = 'expense' AND category_id IS NOT NULL AND date >= ? AND date <= ?
+       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
     [start, end]
   )
   return (rows[0]?.cnt ?? 0) >= 5

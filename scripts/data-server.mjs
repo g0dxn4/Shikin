@@ -81,6 +81,7 @@ const CURRENT_SHIKIN_MIGRATIONS = [
   '013_recurring_rules_currency',
   '014_recurring_rules_currency_backfill',
   '015_primary_account',
+  '016_cli_qol_foundation',
 ]
 
 const CURRENT_SHIKIN_SCHEMA = {
@@ -99,14 +100,24 @@ const CURRENT_SHIKIN_SCHEMA = {
   ],
   categories: ['id', 'name', 'type', 'sort_order'],
   subcategories: ['id', 'category_id', 'name'],
-  transactions: ['id', 'account_id', 'type', 'amount', 'date'],
+  transactions: [
+    'id',
+    'account_id',
+    'type',
+    'amount',
+    'date',
+    'status',
+    'source',
+    'note',
+    'recurring_rule_id',
+  ],
   subscriptions: ['id', 'name', 'amount', 'billing_cycle', 'next_billing_date'],
   budgets: ['id', 'name', 'amount', 'period'],
   budget_periods: ['id', 'budget_id', 'start_date', 'end_date', 'spent'],
   investments: ['id', 'symbol', 'name', 'type', 'shares'],
   stock_prices: ['id', 'symbol', 'price', 'date'],
   exchange_rates: ['id', 'from_currency', 'to_currency', 'rate', 'date'],
-  settings: ['key', 'value'],
+  settings: ['key', 'value', 'updated_at'],
   extension_data: ['id', 'extension_id', 'key', 'value'],
   category_rules: ['id', 'pattern', 'category_id'],
   recurring_rules: ['id', 'description', 'amount', 'currency', 'account_id', 'next_date'],
@@ -115,10 +126,194 @@ const CURRENT_SHIKIN_SCHEMA = {
   transaction_splits: ['id', 'transaction_id', 'amount'],
   net_worth_snapshots: ['id', 'date', 'net_worth'],
   account_balance_history: ['id', 'account_id', 'date', 'balance'],
+  audit_log: [
+    'id',
+    'entity',
+    'entity_id',
+    'action',
+    'before_json',
+    'after_json',
+    'source',
+    'note',
+    'created_at',
+  ],
+  cashflow_buckets: [
+    'id',
+    'name',
+    'description',
+    'target_amount',
+    'balance',
+    'currency',
+    'sort_order',
+    'is_active',
+    'created_at',
+    'updated_at',
+  ],
+  cashflow_bucket_allocations: [
+    'id',
+    'bucket_id',
+    'transaction_id',
+    'amount',
+    'currency',
+    'allocation_date',
+    'source',
+    'note',
+    'created_at',
+  ],
+  category_suggestions: [
+    'id',
+    'transaction_id',
+    'description',
+    'suggested_category_id',
+    'suggested_subcategory_id',
+    'confidence',
+    'status',
+    'source',
+    'note',
+    'created_at',
+    'reviewed_at',
+  ],
+  credit_card_statements: [
+    'id',
+    'account_id',
+    'statement_start_date',
+    'statement_end_date',
+    'due_date',
+    'statement_balance',
+    'minimum_payment',
+    'paid_amount',
+    'currency',
+    'status',
+    'source',
+    'note',
+    'created_at',
+    'updated_at',
+  ],
 }
 
 function tableHasColumn(database, tableName, columnName) {
   return database.pragma(`table_info(${tableName})`).some((column) => column.name === columnName)
+}
+
+function ensureTableColumn(database, tableName, columnName, definition) {
+  if (!tableHasColumn(database, tableName, columnName)) {
+    database.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition};`)
+  }
+}
+
+function normalizeSqlDefinition(value) {
+  return String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+function normalizeTransactionStatusDefault(value) {
+  let normalized = normalizeSqlDefinition(value)
+  while (normalized.startsWith('(') && normalized.endsWith(')')) {
+    normalized = normalized.slice(1, -1).trim()
+  }
+  return normalized.replace(/^['"]|['"]$/g, '')
+}
+
+function hasVerifiedTrigger(triggers, name, snippets) {
+  const triggerSql = normalizeSqlDefinition(triggers.find((trigger) => trigger.name === name)?.sql)
+  return snippets.every((snippet) => triggerSql.includes(snippet))
+}
+
+function recreateTransactionStatusTriggers(database) {
+  database.exec(`
+    DROP TRIGGER IF EXISTS trg_transactions_status_insert_valid;
+    DROP TRIGGER IF EXISTS trg_transactions_status_insert_default;
+    DROP TRIGGER IF EXISTS trg_transactions_status_update_valid;
+    DROP TRIGGER IF EXISTS trg_transactions_status_update_default;
+
+    CREATE TRIGGER trg_transactions_status_insert_valid
+    BEFORE INSERT ON transactions
+    FOR EACH ROW
+    WHEN NEW.status IS NOT NULL AND TRIM(NEW.status) != '' AND NEW.status NOT IN ('pending', 'posted', 'cleared')
+    BEGIN
+      SELECT RAISE(ABORT, 'Invalid transaction status');
+    END;
+    CREATE TRIGGER trg_transactions_status_insert_default
+    AFTER INSERT ON transactions
+    FOR EACH ROW
+    WHEN NEW.status IS NULL OR TRIM(NEW.status) = ''
+    BEGIN
+      UPDATE transactions SET status = 'posted' WHERE id = NEW.id;
+    END;
+    CREATE TRIGGER trg_transactions_status_update_valid
+    BEFORE UPDATE OF status ON transactions
+    FOR EACH ROW
+    WHEN NEW.status IS NOT NULL AND TRIM(NEW.status) != '' AND NEW.status NOT IN ('pending', 'posted', 'cleared')
+    BEGIN
+      SELECT RAISE(ABORT, 'Invalid transaction status');
+    END;
+    CREATE TRIGGER trg_transactions_status_update_default
+    AFTER UPDATE OF status ON transactions
+    FOR EACH ROW
+    WHEN NEW.status IS NULL OR TRIM(NEW.status) = ''
+    BEGIN
+      UPDATE transactions SET status = 'posted' WHERE id = NEW.id;
+    END;
+  `)
+}
+
+function assertTransactionStatusReady(database) {
+  const statusColumn = database
+    .pragma('table_info(transactions)')
+    .find((column) => column.name === 'status')
+  if (!statusColumn) return
+
+  const defaultValue = normalizeTransactionStatusDefault(statusColumn.dflt_value)
+  const hasPostedDefault = defaultValue === 'posted'
+  const hasNoDefault = defaultValue === ''
+  if (!hasPostedDefault && !hasNoDefault) {
+    throw new Error('Database transaction status column has an unsafe default.')
+  }
+  if (Number(statusColumn.notnull ?? 0) === 1 && !hasPostedDefault) {
+    throw new Error('Database transaction status column is missing the posted default.')
+  }
+
+  const triggers = database
+    .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'transactions'")
+    .all()
+  const hasInsertDefaultTrigger = hasVerifiedTrigger(
+    triggers,
+    'trg_transactions_status_insert_default',
+    ['after insert on transactions', "update transactions set status = 'posted' where id = new.id"]
+  )
+  const hasUpdateDefaultTrigger = hasVerifiedTrigger(
+    triggers,
+    'trg_transactions_status_update_default',
+    [
+      'after update of status on transactions',
+      "update transactions set status = 'posted' where id = new.id",
+    ]
+  )
+  if (!hasPostedDefault) {
+    if (!hasInsertDefaultTrigger || !hasUpdateDefaultTrigger) {
+      throw new Error('Database transaction status column is missing default-status protection.')
+    }
+  }
+
+  const validStatusSnippets = [
+    "new.status not in ('pending', 'posted', 'cleared')",
+    'raise(abort',
+    'invalid transaction status',
+  ]
+  if (
+    !hasVerifiedTrigger(triggers, 'trg_transactions_status_insert_valid', [
+      'before insert on transactions',
+      ...validStatusSnippets,
+    ]) ||
+    !hasVerifiedTrigger(triggers, 'trg_transactions_status_update_valid', [
+      'before update of status on transactions',
+      ...validStatusSnippets,
+    ])
+  ) {
+    throw new Error('Database transaction status column is missing valid-status protection.')
+  }
 }
 
 function validateCurrentDatabase() {
@@ -142,6 +337,8 @@ function validateCurrentDatabase() {
       )
     }
   }
+
+  assertTransactionStatusReady(db)
 
   const migrationRows = db.prepare('SELECT name FROM _migrations').all()
   const appliedMigrations = new Set(migrationRows.map((row) => row.name))
@@ -572,6 +769,178 @@ WHERE (currency IS NULL OR TRIM(currency) = '') AND account_id IS NOT NULL;
     db.prepare("INSERT INTO _migrations (id, name) VALUES (15, '015_primary_account')").run()
   }
 
+  // --- Migration 016: CLI QOL Foundation ---
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+  `)
+  ensureTableColumn(db, 'settings', 'updated_at', 'TEXT')
+  ensureTableColumn(
+    db,
+    'transactions',
+    'status',
+    `TEXT NOT NULL DEFAULT 'posted' CHECK (status IN ('pending', 'posted', 'cleared'))`
+  )
+  ensureTableColumn(db, 'transactions', 'source', 'TEXT')
+  ensureTableColumn(db, 'transactions', 'note', 'TEXT')
+  ensureTableColumn(
+    db,
+    'transactions',
+    'recurring_rule_id',
+    'TEXT REFERENCES recurring_rules(id) ON DELETE SET NULL'
+  )
+
+  db.exec(`UPDATE settings SET updated_at = COALESCE(updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));`)
+  db.exec(
+    `UPDATE transactions SET status = 'posted' WHERE status IS NULL OR TRIM(status) = '' OR status NOT IN ('pending', 'posted', 'cleared');`
+  )
+  recreateTransactionStatusTriggers(db)
+  assertTransactionStatusReady(db)
+
+  db.exec(`
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id TEXT PRIMARY KEY,
+        entity TEXT NOT NULL,
+        entity_id TEXT,
+        action TEXT NOT NULL,
+        before_json TEXT,
+        after_json TEXT,
+        source TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+    `)
+  ensureTableColumn(db, 'audit_log', 'entity_id', 'TEXT')
+  ensureTableColumn(db, 'audit_log', 'before_json', 'TEXT')
+  ensureTableColumn(db, 'audit_log', 'after_json', 'TEXT')
+  ensureTableColumn(db, 'audit_log', 'source', 'TEXT')
+  ensureTableColumn(db, 'audit_log', 'note', 'TEXT')
+  ensureTableColumn(db, 'audit_log', 'created_at', 'TEXT')
+  db.exec(
+    `UPDATE audit_log SET created_at = COALESCE(created_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));`
+  )
+  db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log(entity, entity_id);
+      CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at);
+
+      CREATE TABLE IF NOT EXISTS cashflow_buckets (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        target_amount INTEGER,
+        balance INTEGER NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT 'USD',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+    `)
+  ensureTableColumn(db, 'cashflow_buckets', 'description', 'TEXT')
+  ensureTableColumn(db, 'cashflow_buckets', 'target_amount', 'INTEGER')
+  ensureTableColumn(db, 'cashflow_buckets', 'balance', 'INTEGER NOT NULL DEFAULT 0')
+  ensureTableColumn(db, 'cashflow_buckets', 'currency', `TEXT NOT NULL DEFAULT 'USD'`)
+  ensureTableColumn(db, 'cashflow_buckets', 'sort_order', 'INTEGER NOT NULL DEFAULT 0')
+  ensureTableColumn(db, 'cashflow_buckets', 'is_active', 'INTEGER NOT NULL DEFAULT 1')
+  ensureTableColumn(db, 'cashflow_buckets', 'created_at', 'TEXT')
+  ensureTableColumn(db, 'cashflow_buckets', 'updated_at', 'TEXT')
+  db.exec(
+    `UPDATE cashflow_buckets SET created_at = COALESCE(created_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), updated_at = COALESCE(updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));`
+  )
+  db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_cashflow_buckets_active ON cashflow_buckets(is_active);
+
+      CREATE TABLE IF NOT EXISTS cashflow_bucket_allocations (
+        id TEXT PRIMARY KEY,
+        bucket_id TEXT NOT NULL REFERENCES cashflow_buckets(id) ON DELETE CASCADE,
+        transaction_id TEXT REFERENCES transactions(id) ON DELETE SET NULL,
+        amount INTEGER NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'USD',
+        allocation_date TEXT NOT NULL,
+        source TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+    `)
+  ensureTableColumn(db, 'cashflow_bucket_allocations', 'transaction_id', 'TEXT')
+  ensureTableColumn(db, 'cashflow_bucket_allocations', 'currency', `TEXT NOT NULL DEFAULT 'USD'`)
+  ensureTableColumn(db, 'cashflow_bucket_allocations', 'source', 'TEXT')
+  ensureTableColumn(db, 'cashflow_bucket_allocations', 'note', 'TEXT')
+  ensureTableColumn(db, 'cashflow_bucket_allocations', 'created_at', 'TEXT')
+  db.exec(
+    `UPDATE cashflow_bucket_allocations SET created_at = COALESCE(created_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));`
+  )
+  db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_cashflow_allocations_bucket ON cashflow_bucket_allocations(bucket_id);
+      CREATE INDEX IF NOT EXISTS idx_cashflow_allocations_transaction ON cashflow_bucket_allocations(transaction_id);
+      CREATE INDEX IF NOT EXISTS idx_cashflow_allocations_date ON cashflow_bucket_allocations(allocation_date);
+
+      CREATE TABLE IF NOT EXISTS category_suggestions (
+        id TEXT PRIMARY KEY,
+        transaction_id TEXT REFERENCES transactions(id) ON DELETE SET NULL,
+        description TEXT NOT NULL,
+        suggested_category_id TEXT REFERENCES categories(id) ON DELETE SET NULL,
+        suggested_subcategory_id TEXT REFERENCES subcategories(id) ON DELETE SET NULL,
+        confidence REAL NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+        source TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        reviewed_at TEXT
+      );
+    `)
+  ensureTableColumn(db, 'category_suggestions', 'transaction_id', 'TEXT')
+  ensureTableColumn(db, 'category_suggestions', 'suggested_subcategory_id', 'TEXT')
+  ensureTableColumn(db, 'category_suggestions', 'source', 'TEXT')
+  ensureTableColumn(db, 'category_suggestions', 'note', 'TEXT')
+  ensureTableColumn(db, 'category_suggestions', 'created_at', 'TEXT')
+  ensureTableColumn(db, 'category_suggestions', 'reviewed_at', 'TEXT')
+  db.exec(
+    `UPDATE category_suggestions SET created_at = COALESCE(created_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));`
+  )
+  db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_category_suggestions_status ON category_suggestions(status);
+      CREATE INDEX IF NOT EXISTS idx_category_suggestions_transaction ON category_suggestions(transaction_id);
+
+      CREATE TABLE IF NOT EXISTS credit_card_statements (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        statement_start_date TEXT,
+        statement_end_date TEXT NOT NULL,
+        due_date TEXT NOT NULL,
+        statement_balance INTEGER NOT NULL DEFAULT 0,
+        minimum_payment INTEGER NOT NULL DEFAULT 0,
+        paid_amount INTEGER NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT 'USD',
+        status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'partial', 'paid', 'overdue')),
+        source TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+    `)
+  ensureTableColumn(db, 'credit_card_statements', 'statement_start_date', 'TEXT')
+  ensureTableColumn(db, 'credit_card_statements', 'currency', `TEXT NOT NULL DEFAULT 'USD'`)
+  ensureTableColumn(db, 'credit_card_statements', 'source', 'TEXT')
+  ensureTableColumn(db, 'credit_card_statements', 'note', 'TEXT')
+  ensureTableColumn(db, 'credit_card_statements', 'created_at', 'TEXT')
+  ensureTableColumn(db, 'credit_card_statements', 'updated_at', 'TEXT')
+  db.exec(
+    `UPDATE credit_card_statements SET created_at = COALESCE(created_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), updated_at = COALESCE(updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));`
+  )
+  db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_card_statements_account_period ON credit_card_statements(account_id, statement_end_date);
+      CREATE INDEX IF NOT EXISTS idx_credit_card_statements_due ON credit_card_statements(due_date);
+      CREATE INDEX IF NOT EXISTS idx_credit_card_statements_status ON credit_card_statements(status);
+      CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status);
+      CREATE INDEX IF NOT EXISTS idx_transactions_recurring_rule ON transactions(recurring_rule_id);
+    `)
+
+  db.prepare("INSERT OR IGNORE INTO _migrations (id, name) VALUES (16, '016_cli_qol_foundation')").run()
+
   validateCurrentDatabase()
   console.log('[data-server] Migrations complete')
 }
@@ -833,7 +1202,7 @@ function materializeRecurringBatch() {
   const runBatch = db.transaction(() => {
     const dueRules = db
       .prepare(
-        convertParams(`SELECT r.*, a.currency as account_currency
+        convertParams(`SELECT r.*, a.currency as account_currency, a.is_archived as account_is_archived
          FROM recurring_rules r
          LEFT JOIN accounts a ON r.account_id = a.id
          WHERE r.active = 1 AND r.next_date <= $1`)
@@ -854,6 +1223,15 @@ function materializeRecurringBatch() {
         success: false,
         reason: 'unsupported_recurring_transfer',
         message: unsupportedRecurringTransferMessage(),
+      }
+    }
+
+    const archivedAccountRule = dueRules.find((rule) => rule.account_is_archived === 1)
+    if (archivedAccountRule) {
+      return {
+        success: false,
+        reason: 'account_archived',
+        message: `Recurring rule "${archivedAccountRule.description}" points at archived account ${archivedAccountRule.account_id}. Unarchive the account or pause the rule before materializing it.`,
       }
     }
 
@@ -913,8 +1291,8 @@ function materializeRecurringBatch() {
         }
 
         db.prepare(
-          convertParams(`INSERT INTO transactions (id, account_id, category_id, subcategory_id, type, amount, currency, description, notes, date, tags, is_recurring, transfer_to_account_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1, $12)`)
+          convertParams(`INSERT INTO transactions (id, account_id, category_id, subcategory_id, type, amount, currency, description, notes, date, tags, is_recurring, transfer_to_account_id, status, recurring_rule_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1, $12, 'posted', $13)`)
         ).run(
           ulid(),
           rule.account_id,
@@ -927,7 +1305,8 @@ function materializeRecurringBatch() {
           rule.notes,
           occurrenceDate,
           rule.tags || '[]',
-          rule.to_account_id
+          rule.to_account_id,
+          rule.id
         )
 
         const balanceChange = rule.type === 'income' ? rule.amount : -rule.amount

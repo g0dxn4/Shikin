@@ -83,6 +83,7 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
              FROM transactions t
              WHERE t.category_id = ?
                AND t.type = 'expense'
+               AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
                AND t.date >= ?
                AND t.date <= ?`,
             [b.category_id, start, end]

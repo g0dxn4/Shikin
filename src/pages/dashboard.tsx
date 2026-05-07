@@ -49,6 +49,10 @@ dayjs.extend(relativeTime)
 
 type SpendingGraphMode = 'trend' | 'categories' | 'movement'
 
+function isPostedLedgerTransaction(tx: Pick<TransactionWithDetails, 'status'>): boolean {
+  return (tx.status ?? 'posted') !== 'pending'
+}
+
 export function Dashboard() {
   const { t } = useTranslation('dashboard')
   const { t: tTx } = useTranslation('transactions')
@@ -142,6 +146,7 @@ export function Dashboard() {
     let income = 0
     let expenses = 0
     for (const tx of transactions) {
+      if (!isPostedLedgerTransaction(tx)) continue
       if (tx.date >= startOfMonth && tx.date <= today) {
         if (tx.type === 'income') income += tx.amount
         else if (tx.type === 'expense') expenses += tx.amount
@@ -156,6 +161,7 @@ export function Dashboard() {
     let income = 0
     let expenses = 0
     for (const tx of transactions) {
+      if (!isPostedLedgerTransaction(tx)) continue
       if (tx.date >= start && tx.date <= end) {
         if (tx.type === 'income') income += tx.amount
         else if (tx.type === 'expense') expenses += tx.amount
@@ -193,6 +199,7 @@ export function Dashboard() {
     const previous = new Map<string, { name: string; color: string; amount: number }>()
 
     for (const tx of transactions) {
+      if (!isPostedLedgerTransaction(tx)) continue
       if (tx.type !== 'expense') continue
 
       const key = tx.category_name || 'Uncategorized'
@@ -265,6 +272,7 @@ export function Dashboard() {
       const start = month.startOf('month').format('YYYY-MM-DD')
       const end = month.endOf('month').format('YYYY-MM-DD')
       const amount = transactions.reduce((sum, tx) => {
+        if (!isPostedLedgerTransaction(tx)) return sum
         if (tx.type !== 'expense' || tx.date < start || tx.date > end) return sum
         return sum + tx.amount
       }, 0)

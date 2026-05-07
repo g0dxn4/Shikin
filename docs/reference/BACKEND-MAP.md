@@ -14,7 +14,7 @@ This is a practical backend map for the current repo layout. It is a documentati
   - Browser runtime DB/storage calls are funneled through `src/lib/database.ts`, `src/lib/storage.ts`, and `src/lib/virtual-fs.ts`.
 - **CLI mode**
   - `cli/src/cli.ts` registers every command from `cli/src/tools.ts` and runs via Commander.
-- Current shared tool surface: **39 tool definitions** (from `cli/src/tools.ts`), all available end-to-end against local data.
+- Current shared tool surface: **63 tool definitions** (from `cli/src/tools/index.ts`), all available end-to-end against local data.
 - MVP limitation decisions: one-off transfer writes are supported in the app and CLI/MCP, but recurring transfer rules remain deferred; debt payoff uses inferred credit-card balances with APR fixed at 0% because account APR is not stored; browser subscription management is deferred while local subscription rows still feed forecasts and CLI/MCP analytics.
 - **MCP mode**
   - `cli/src/mcp-server.ts` registers the same `tools` and bootstraps MCP over stdio.
@@ -36,7 +36,7 @@ This is a practical backend map for the current repo layout. It is a documentati
    - Calls `close()` from `cli/src/database.ts` in finally.
 
 2. `cli/src/tools.ts`:
-   - Defines 39 shared tool definitions.
+   - Defines the shared CLI/MCP tool catalog.
    - Each tool is self-contained: schema + business SQL + return payload.
    - `add-transaction`, `update-transaction`, `delete-transaction`, and `query-transactions` are transfer-aware. Recurring transfer rules remain deferred because recurring rule materialization does not yet carry destination-account support.
 
@@ -48,7 +48,7 @@ This is a practical backend map for the current repo layout. It is a documentati
 ## 3) MCP flow
 
 - `cli/src/mcp-server.ts` creates `McpServer({ name: 'shikin', version: '<release>' })`.
-- Registers **all 39** shared tool definitions from `tools` with:
+- Registers **all 63** shared tool definitions from `tools` with:
   - tool name
   - description
   - `tool.schema.shape`
@@ -129,7 +129,7 @@ This is a practical backend map for the current repo layout. It is a documentati
 - E2E exists for UI flows (`e2e/*.spec.ts`) but does not exercise CLI/MCP/datastore server internals directly.
 - **Practical CLI/MCP/data-server strategy:**
   - **CLI (`cli/src/tools.ts`)**: add integration tests that execute real SQL against a temp DB for one CRUD path (`add-account`/`add-transaction`/delete) plus one aggregate path (`get-balance-overview` or equivalent).
-  - **MCP (`cli/src/mcp-server.ts`)**: add a transport harness that boots the server, asserts all **39** tool registrations, and executes one representative tool end-to-end.
+  - **MCP (`cli/src/mcp-server.ts`)**: add a transport harness that boots the server, asserts all **63** tool registrations, and executes one representative tool end-to-end.
   - **Data server (`scripts/data-server.mjs`)**: add HTTP contract tests for `/api/db/*`, `/api/store*`, and `/api/fs/*`.
   - **Hardening checks**: add explicit `safePath` boundary cases (relative paths, separator tricks, normalization edge cases) as verification tests.
 

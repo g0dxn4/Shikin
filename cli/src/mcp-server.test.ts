@@ -38,6 +38,13 @@ describe('MCP tool registration', () => {
     expect(toolNames).toEqual(
       expect.arrayContaining([
         'list-subscriptions',
+        'create-subscription',
+        'create-credit-card-statement',
+        'get-recurring-expected-vs-paid',
+        'allocate-income',
+        'review-suggestions',
+        'finance-profile',
+        'export-data',
         'get-spending-summary',
         'get-education-tip',
         'generate-portfolio-review',
@@ -48,18 +55,20 @@ describe('MCP tool registration', () => {
   it('executes real shared tools through the MCP handler without CLI-only coercion', async () => {
     const queryMock = vi.mocked(query)
     queryMock.mockReset()
-    queryMock.mockReturnValueOnce([
-      {
-        id: 'acct-1',
-        name: 'Checking',
-        type: 'checking',
-        currency: 'USD',
-        balance: 12345,
-        credit_limit: null,
-        statement_closing_day: null,
-        payment_due_day: null,
-      },
-    ])
+    queryMock
+      .mockReturnValueOnce([
+        {
+          id: 'acct-1',
+          name: 'Checking',
+          type: 'checking',
+          currency: 'USD',
+          balance: 12345,
+          credit_limit: null,
+          statement_closing_day: null,
+          payment_due_day: null,
+        },
+      ])
+      .mockReturnValueOnce([])
 
     const listAccounts = tools.find((tool) => tool.name === 'list-accounts')
     expect(listAccounts).toBeDefined()
@@ -71,6 +80,7 @@ describe('MCP tool registration', () => {
     expect(result.isError).toBeUndefined()
     expect(queryMock).toHaveBeenCalledWith(expect.stringContaining('AND type = $1'), ['checking'])
     expect(payload).toEqual({
+      success: true,
       accounts: [
         {
           id: 'acct-1',
@@ -78,6 +88,7 @@ describe('MCP tool registration', () => {
           type: 'checking',
           currency: 'USD',
           balance: 123.45,
+          aliases: [],
         },
       ],
       message: 'Found 1 account.',
@@ -228,6 +239,7 @@ describe('MCP resource registration', () => {
       .mockReturnValueOnce([
         { id: 'acct-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 12345 },
       ])
+      .mockReturnValueOnce([{ value: '{"checking":"acct-1"}' }])
       .mockReturnValueOnce([{ id: 'cat-1', name: 'Food', type: 'expense', color: '#fff' }])
       .mockReturnValueOnce([
         {
@@ -235,9 +247,17 @@ describe('MCP resource registration', () => {
           description: 'Coffee',
           type: 'expense',
           amount: 450,
+          currency: 'USD',
           date: '2026-01-01',
+          notes: 'receipt saved',
+          status: 'posted',
+          source: 'mcp-test',
+          note: 'resource note',
+          recurringRuleId: 'rule-1',
+          transferToAccountId: null,
           category: 'Food',
           account: 'Checking',
+          transferToAccount: null,
         },
       ])
 
@@ -266,7 +286,14 @@ describe('MCP resource registration', () => {
       'recent-transactions',
     ])
     expect(JSON.parse(accountsResult.contents[0]!.text)).toEqual([
-      { id: 'acct-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 123.45 },
+      {
+        id: 'acct-1',
+        name: 'Checking',
+        type: 'checking',
+        currency: 'USD',
+        balance: 123.45,
+        aliases: ['checking'],
+      },
     ])
     expect(JSON.parse(categoriesResult.contents[0]!.text)).toEqual([
       { id: 'cat-1', name: 'Food', type: 'expense', color: '#fff' },
@@ -277,9 +304,17 @@ describe('MCP resource registration', () => {
         description: 'Coffee',
         type: 'expense',
         amount: 4.5,
+        currency: 'USD',
         date: '2026-01-01',
+        notes: 'receipt saved',
+        status: 'posted',
+        source: 'mcp-test',
+        note: 'resource note',
+        recurringRuleId: 'rule-1',
+        transferToAccountId: null,
         category: 'Food',
         account: 'Checking',
+        transferToAccount: null,
       },
     ])
   })

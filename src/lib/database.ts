@@ -215,6 +215,7 @@ const CURRENT_SHIKIN_MIGRATIONS = [
   '013_recurring_rules_currency',
   '014_recurring_rules_currency_backfill',
   '015_primary_account',
+  '016_cli_qol_foundation',
 ] as const
 
 const CURRENT_SHIKIN_SCHEMA: Record<string, readonly string[]> = {
@@ -233,14 +234,24 @@ const CURRENT_SHIKIN_SCHEMA: Record<string, readonly string[]> = {
   ],
   categories: ['id', 'name', 'type', 'sort_order'],
   subcategories: ['id', 'category_id', 'name'],
-  transactions: ['id', 'account_id', 'type', 'amount', 'date'],
+  transactions: [
+    'id',
+    'account_id',
+    'type',
+    'amount',
+    'date',
+    'status',
+    'source',
+    'note',
+    'recurring_rule_id',
+  ],
   subscriptions: ['id', 'name', 'amount', 'billing_cycle', 'next_billing_date'],
   budgets: ['id', 'name', 'amount', 'period'],
   budget_periods: ['id', 'budget_id', 'start_date', 'end_date', 'spent'],
   investments: ['id', 'symbol', 'name', 'type', 'shares'],
   stock_prices: ['id', 'symbol', 'price', 'date'],
   exchange_rates: ['id', 'from_currency', 'to_currency', 'rate', 'date'],
-  settings: ['key', 'value'],
+  settings: ['key', 'value', 'updated_at'],
   extension_data: ['id', 'extension_id', 'key', 'value'],
   category_rules: ['id', 'pattern', 'category_id'],
   recurring_rules: ['id', 'description', 'amount', 'currency', 'account_id', 'next_date'],
@@ -249,6 +260,69 @@ const CURRENT_SHIKIN_SCHEMA: Record<string, readonly string[]> = {
   transaction_splits: ['id', 'transaction_id', 'amount'],
   net_worth_snapshots: ['id', 'date', 'net_worth'],
   account_balance_history: ['id', 'account_id', 'date', 'balance'],
+  audit_log: [
+    'id',
+    'entity',
+    'entity_id',
+    'action',
+    'before_json',
+    'after_json',
+    'source',
+    'note',
+    'created_at',
+  ],
+  cashflow_buckets: [
+    'id',
+    'name',
+    'description',
+    'target_amount',
+    'balance',
+    'currency',
+    'sort_order',
+    'is_active',
+    'created_at',
+    'updated_at',
+  ],
+  cashflow_bucket_allocations: [
+    'id',
+    'bucket_id',
+    'transaction_id',
+    'amount',
+    'currency',
+    'allocation_date',
+    'source',
+    'note',
+    'created_at',
+  ],
+  category_suggestions: [
+    'id',
+    'transaction_id',
+    'description',
+    'suggested_category_id',
+    'suggested_subcategory_id',
+    'confidence',
+    'status',
+    'source',
+    'note',
+    'created_at',
+    'reviewed_at',
+  ],
+  credit_card_statements: [
+    'id',
+    'account_id',
+    'statement_start_date',
+    'statement_end_date',
+    'due_date',
+    'statement_balance',
+    'minimum_payment',
+    'paid_amount',
+    'currency',
+    'status',
+    'source',
+    'note',
+    'created_at',
+    'updated_at',
+  ],
 }
 
 // ── Tauri Backend ──────────────────────────────────────────────────────────
@@ -260,6 +334,7 @@ async function getTauriDb(): Promise<TauriDatabase> {
       const { default: Database } = await import('@tauri-apps/plugin-sql')
       const database = await Database.load(await getTauriSqliteUrl())
       tauriDb = database as unknown as TauriDatabase
+      await enableTauriForeignKeys(tauriDb)
       await runTauriMigrations(tauriDb)
       return tauriDb
     })()
@@ -280,6 +355,21 @@ async function tableHasColumn(
   return columns.some((column) => column.name === columnName)
 }
 
+async function ensureTableColumn(
+  db: TauriDatabase,
+  tableName: string,
+  columnName: string,
+  definition: string
+): Promise<void> {
+  if (!(await tableHasColumn(db, tableName, columnName))) {
+    await db.execute(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`)
+  }
+}
+
+async function enableTauriForeignKeys(db: TauriDatabase): Promise<void> {
+  await db.execute('PRAGMA foreign_keys = ON')
+}
+
 async function executeSqlBatch(db: TauriDatabase, sql: string): Promise<void> {
   for (const statement of sql
     .split(';')
@@ -291,6 +381,74 @@ async function executeSqlBatch(db: TauriDatabase, sql: string): Promise<void> {
 
 function getFirstRowValue(row: Record<string, unknown> | undefined): unknown {
   return row ? Object.values(row)[0] : undefined
+}
+
+function normalizeSqlDefinition(value: unknown): string {
+  return String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+function normalizeTransactionStatusDefault(value: unknown): string {
+  let normalized = normalizeSqlDefinition(value)
+  while (normalized.startsWith('(') && normalized.endsWith(')')) {
+    normalized = normalized.slice(1, -1).trim()
+  }
+  return normalized.replace(/^['"]|['"]$/g, '')
+}
+
+function hasVerifiedTrigger(
+  triggers: Array<{ name: string; sql?: string | null }>,
+  name: string,
+  snippets: string[]
+): boolean {
+  const triggerSql = normalizeSqlDefinition(triggers.find((trigger) => trigger.name === name)?.sql)
+  return snippets.every((snippet) => triggerSql.includes(snippet))
+}
+
+async function recreateTauriTransactionStatusTriggers(db: TauriDatabase): Promise<void> {
+  await db.execute('DROP TRIGGER IF EXISTS trg_transactions_status_insert_valid')
+  await db.execute('DROP TRIGGER IF EXISTS trg_transactions_status_insert_default')
+  await db.execute('DROP TRIGGER IF EXISTS trg_transactions_status_update_valid')
+  await db.execute('DROP TRIGGER IF EXISTS trg_transactions_status_update_default')
+
+  await db.execute(`
+    CREATE TRIGGER trg_transactions_status_insert_valid
+    BEFORE INSERT ON transactions
+    FOR EACH ROW
+    WHEN NEW.status IS NOT NULL AND TRIM(NEW.status) != '' AND NEW.status NOT IN ('pending', 'posted', 'cleared')
+    BEGIN
+      SELECT RAISE(ABORT, 'Invalid transaction status');
+    END
+  `)
+  await db.execute(`
+    CREATE TRIGGER trg_transactions_status_insert_default
+    AFTER INSERT ON transactions
+    FOR EACH ROW
+    WHEN NEW.status IS NULL OR TRIM(NEW.status) = ''
+    BEGIN
+      UPDATE transactions SET status = 'posted' WHERE id = NEW.id;
+    END
+  `)
+  await db.execute(`
+    CREATE TRIGGER trg_transactions_status_update_valid
+    BEFORE UPDATE OF status ON transactions
+    FOR EACH ROW
+    WHEN NEW.status IS NOT NULL AND TRIM(NEW.status) != '' AND NEW.status NOT IN ('pending', 'posted', 'cleared')
+    BEGIN
+      SELECT RAISE(ABORT, 'Invalid transaction status');
+    END
+  `)
+  await db.execute(`
+    CREATE TRIGGER trg_transactions_status_update_default
+    AFTER UPDATE OF status ON transactions
+    FOR EACH ROW
+    WHEN NEW.status IS NULL OR TRIM(NEW.status) = ''
+    BEGIN
+      UPDATE transactions SET status = 'posted' WHERE id = NEW.id;
+    END
+  `)
 }
 
 async function checkpointTauriWal(
@@ -308,12 +466,78 @@ async function checkpointTauriWal(
   }
 }
 
+async function assertTauriTransactionStatusReady(db: TauriDatabase): Promise<void> {
+  const columns = await db.select<Array<{ name: string; notnull?: number; dflt_value?: unknown }>>(
+    'PRAGMA table_info(transactions)'
+  )
+  const statusColumn = columns.find((column) => column.name === 'status')
+  if (!statusColumn) return
+
+  const defaultValue = normalizeTransactionStatusDefault(statusColumn.dflt_value)
+  const hasPostedDefault = defaultValue === 'posted'
+  const hasNoDefault = defaultValue === ''
+  if (!hasPostedDefault && !hasNoDefault) {
+    throw new Error('Database transaction status column has an unsafe default.')
+  }
+  if (Number(statusColumn.notnull ?? 0) === 1 && !hasPostedDefault) {
+    throw new Error('Database transaction status column is missing the posted default.')
+  }
+
+  const triggers = await db.select<Array<{ name: string; sql?: string | null }>>(
+    "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'transactions'"
+  )
+  const hasInsertDefaultTrigger = hasVerifiedTrigger(
+    triggers,
+    'trg_transactions_status_insert_default',
+    ['after insert on transactions', "update transactions set status = 'posted' where id = new.id"]
+  )
+  const hasUpdateDefaultTrigger = hasVerifiedTrigger(
+    triggers,
+    'trg_transactions_status_update_default',
+    [
+      'after update of status on transactions',
+      "update transactions set status = 'posted' where id = new.id",
+    ]
+  )
+  if (!hasPostedDefault) {
+    if (!hasInsertDefaultTrigger || !hasUpdateDefaultTrigger) {
+      throw new Error('Database transaction status column is missing default-status protection.')
+    }
+  }
+
+  const validStatusSnippets = [
+    "new.status not in ('pending', 'posted', 'cleared')",
+    'raise(abort',
+    'invalid transaction status',
+  ]
+  if (
+    !hasVerifiedTrigger(triggers, 'trg_transactions_status_insert_valid', [
+      'before insert on transactions',
+      ...validStatusSnippets,
+    ]) ||
+    !hasVerifiedTrigger(triggers, 'trg_transactions_status_update_valid', [
+      'before update of status on transactions',
+      ...validStatusSnippets,
+    ])
+  ) {
+    throw new Error('Database transaction status column is missing valid-status protection.')
+  }
+}
+
 async function validateTauriImportDatabase(db: TauriDatabase): Promise<void> {
   const integrityRows = await db.select<Record<string, unknown>[]>('PRAGMA integrity_check')
   const integrityCheck = String(getFirstRowValue(integrityRows[0]) ?? '')
   if (integrityCheck !== 'ok') {
     throw new Error(
       `Imported SQLite database failed integrity check: ${integrityCheck || 'unknown'}`
+    )
+  }
+
+  const foreignKeyRows = await db.select<Record<string, unknown>[]>('PRAGMA foreign_key_check')
+  if (foreignKeyRows.length > 0) {
+    const firstViolation = foreignKeyRows[0]
+    throw new Error(
+      `Imported SQLite database failed foreign key check: ${JSON.stringify(firstViolation)}`
     )
   }
 
@@ -371,6 +595,8 @@ async function validateTauriCurrentDatabase(db: TauriDatabase): Promise<void> {
       )
     }
   }
+
+  await assertTauriTransactionStatusReady(db)
 
   const migrationRows = await db.select<{ name: string }[]>('SELECT name FROM _migrations')
   const appliedMigrations = new Set(migrationRows.map((row) => row.name))
@@ -686,6 +912,207 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
     await db.execute("INSERT INTO _migrations (id, name) VALUES (15, '015_primary_account')")
   }
 
+  // --- Migration 016: CLI QOL Foundation ---
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    )
+  `)
+  await ensureTableColumn(db, 'settings', 'updated_at', 'TEXT')
+  await ensureTableColumn(
+    db,
+    'transactions',
+    'status',
+    `TEXT NOT NULL DEFAULT 'posted' CHECK (status IN ('pending', 'posted', 'cleared'))`
+  )
+  await ensureTableColumn(db, 'transactions', 'source', 'TEXT')
+  await ensureTableColumn(db, 'transactions', 'note', 'TEXT')
+  await ensureTableColumn(
+    db,
+    'transactions',
+    'recurring_rule_id',
+    'TEXT REFERENCES recurring_rules(id) ON DELETE SET NULL'
+  )
+
+  await db.execute(
+    `UPDATE settings SET updated_at = COALESCE(updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
+  )
+  await db.execute(
+    `UPDATE transactions SET status = 'posted' WHERE status IS NULL OR TRIM(status) = '' OR status NOT IN ('pending', 'posted', 'cleared')`
+  )
+  await recreateTauriTransactionStatusTriggers(db)
+  await assertTauriTransactionStatusReady(db)
+
+  await db.execute(`
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id TEXT PRIMARY KEY,
+        entity TEXT NOT NULL,
+        entity_id TEXT,
+        action TEXT NOT NULL,
+        before_json TEXT,
+        after_json TEXT,
+        source TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      )
+    `)
+  await ensureTableColumn(db, 'audit_log', 'entity_id', 'TEXT')
+  await ensureTableColumn(db, 'audit_log', 'before_json', 'TEXT')
+  await ensureTableColumn(db, 'audit_log', 'after_json', 'TEXT')
+  await ensureTableColumn(db, 'audit_log', 'source', 'TEXT')
+  await ensureTableColumn(db, 'audit_log', 'note', 'TEXT')
+  await ensureTableColumn(db, 'audit_log', 'created_at', 'TEXT')
+  await db.execute(
+    `UPDATE audit_log SET created_at = COALESCE(created_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
+  )
+  await db.execute(
+    `CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log(entity, entity_id)`
+  )
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at)`)
+
+  await db.execute(`
+      CREATE TABLE IF NOT EXISTS cashflow_buckets (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        target_amount INTEGER,
+        balance INTEGER NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT 'USD',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      )
+    `)
+  await ensureTableColumn(db, 'cashflow_buckets', 'description', 'TEXT')
+  await ensureTableColumn(db, 'cashflow_buckets', 'target_amount', 'INTEGER')
+  await ensureTableColumn(db, 'cashflow_buckets', 'balance', 'INTEGER NOT NULL DEFAULT 0')
+  await ensureTableColumn(db, 'cashflow_buckets', 'currency', `TEXT NOT NULL DEFAULT 'USD'`)
+  await ensureTableColumn(db, 'cashflow_buckets', 'sort_order', 'INTEGER NOT NULL DEFAULT 0')
+  await ensureTableColumn(db, 'cashflow_buckets', 'is_active', 'INTEGER NOT NULL DEFAULT 1')
+  await ensureTableColumn(db, 'cashflow_buckets', 'created_at', 'TEXT')
+  await ensureTableColumn(db, 'cashflow_buckets', 'updated_at', 'TEXT')
+  await db.execute(
+    `UPDATE cashflow_buckets SET created_at = COALESCE(created_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), updated_at = COALESCE(updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
+  )
+  await db.execute(
+    `CREATE INDEX IF NOT EXISTS idx_cashflow_buckets_active ON cashflow_buckets(is_active)`
+  )
+
+  await db.execute(`
+      CREATE TABLE IF NOT EXISTS cashflow_bucket_allocations (
+        id TEXT PRIMARY KEY,
+        bucket_id TEXT NOT NULL REFERENCES cashflow_buckets(id) ON DELETE CASCADE,
+        transaction_id TEXT REFERENCES transactions(id) ON DELETE SET NULL,
+        amount INTEGER NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'USD',
+        allocation_date TEXT NOT NULL,
+        source TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      )
+    `)
+  await ensureTableColumn(db, 'cashflow_bucket_allocations', 'transaction_id', 'TEXT')
+  await ensureTableColumn(
+    db,
+    'cashflow_bucket_allocations',
+    'currency',
+    `TEXT NOT NULL DEFAULT 'USD'`
+  )
+  await ensureTableColumn(db, 'cashflow_bucket_allocations', 'source', 'TEXT')
+  await ensureTableColumn(db, 'cashflow_bucket_allocations', 'note', 'TEXT')
+  await ensureTableColumn(db, 'cashflow_bucket_allocations', 'created_at', 'TEXT')
+  await db.execute(
+    `UPDATE cashflow_bucket_allocations SET created_at = COALESCE(created_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
+  )
+  await db.execute(
+    `CREATE INDEX IF NOT EXISTS idx_cashflow_allocations_bucket ON cashflow_bucket_allocations(bucket_id)`
+  )
+  await db.execute(
+    `CREATE INDEX IF NOT EXISTS idx_cashflow_allocations_transaction ON cashflow_bucket_allocations(transaction_id)`
+  )
+  await db.execute(
+    `CREATE INDEX IF NOT EXISTS idx_cashflow_allocations_date ON cashflow_bucket_allocations(allocation_date)`
+  )
+
+  await db.execute(`
+      CREATE TABLE IF NOT EXISTS category_suggestions (
+        id TEXT PRIMARY KEY,
+        transaction_id TEXT REFERENCES transactions(id) ON DELETE SET NULL,
+        description TEXT NOT NULL,
+        suggested_category_id TEXT REFERENCES categories(id) ON DELETE SET NULL,
+        suggested_subcategory_id TEXT REFERENCES subcategories(id) ON DELETE SET NULL,
+        confidence REAL NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+        source TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        reviewed_at TEXT
+      )
+    `)
+  await ensureTableColumn(db, 'category_suggestions', 'transaction_id', 'TEXT')
+  await ensureTableColumn(db, 'category_suggestions', 'suggested_subcategory_id', 'TEXT')
+  await ensureTableColumn(db, 'category_suggestions', 'source', 'TEXT')
+  await ensureTableColumn(db, 'category_suggestions', 'note', 'TEXT')
+  await ensureTableColumn(db, 'category_suggestions', 'created_at', 'TEXT')
+  await ensureTableColumn(db, 'category_suggestions', 'reviewed_at', 'TEXT')
+  await db.execute(
+    `UPDATE category_suggestions SET created_at = COALESCE(created_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
+  )
+  await db.execute(
+    `CREATE INDEX IF NOT EXISTS idx_category_suggestions_status ON category_suggestions(status)`
+  )
+  await db.execute(
+    `CREATE INDEX IF NOT EXISTS idx_category_suggestions_transaction ON category_suggestions(transaction_id)`
+  )
+
+  await db.execute(`
+      CREATE TABLE IF NOT EXISTS credit_card_statements (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        statement_start_date TEXT,
+        statement_end_date TEXT NOT NULL,
+        due_date TEXT NOT NULL,
+        statement_balance INTEGER NOT NULL DEFAULT 0,
+        minimum_payment INTEGER NOT NULL DEFAULT 0,
+        paid_amount INTEGER NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT 'USD',
+        status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'partial', 'paid', 'overdue')),
+        source TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      )
+    `)
+  await ensureTableColumn(db, 'credit_card_statements', 'statement_start_date', 'TEXT')
+  await ensureTableColumn(db, 'credit_card_statements', 'currency', `TEXT NOT NULL DEFAULT 'USD'`)
+  await ensureTableColumn(db, 'credit_card_statements', 'source', 'TEXT')
+  await ensureTableColumn(db, 'credit_card_statements', 'note', 'TEXT')
+  await ensureTableColumn(db, 'credit_card_statements', 'created_at', 'TEXT')
+  await ensureTableColumn(db, 'credit_card_statements', 'updated_at', 'TEXT')
+  await db.execute(
+    `UPDATE credit_card_statements SET created_at = COALESCE(created_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), updated_at = COALESCE(updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
+  )
+  await db.execute(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_card_statements_account_period ON credit_card_statements(account_id, statement_end_date)`
+  )
+  await db.execute(
+    `CREATE INDEX IF NOT EXISTS idx_credit_card_statements_due ON credit_card_statements(due_date)`
+  )
+  await db.execute(
+    `CREATE INDEX IF NOT EXISTS idx_credit_card_statements_status ON credit_card_statements(status)`
+  )
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status)`)
+  await db.execute(
+    `CREATE INDEX IF NOT EXISTS idx_transactions_recurring_rule ON transactions(recurring_rule_id)`
+  )
+
+  await db.execute(
+    "INSERT OR IGNORE INTO _migrations (id, name) VALUES (16, '016_cli_qol_foundation')"
+  )
+
   await validateTauriCurrentDatabase(db)
 }
 
@@ -990,6 +1417,7 @@ export async function importDatabaseSnapshot(data: Uint8Array): Promise<void> {
     let tempDb: TauriDatabase | null = null
     try {
       tempDb = (await Database.load(`sqlite:${tempPath}`)) as unknown as TauriDatabase
+      await enableTauriForeignKeys(tempDb)
       await validateTauriImportDatabase(tempDb)
     } finally {
       await tempDb?.close()
@@ -1003,6 +1431,7 @@ export async function importDatabaseSnapshot(data: Uint8Array): Promise<void> {
       let openedCurrentDb = false
       if (!currentDb && (await fsMod.exists(dbPath))) {
         currentDb = (await Database.load(await getTauriSqliteUrl())) as unknown as TauriDatabase
+        await enableTauriForeignKeys(currentDb)
         openedCurrentDb = true
       }
 
@@ -1027,6 +1456,7 @@ export async function importDatabaseSnapshot(data: Uint8Array): Promise<void> {
       await fsMod.rename(tempPath, dbPath)
       importedDb = (await Database.load(await getTauriSqliteUrl())) as unknown as TauriDatabase
       tauriDb = importedDb
+      await enableTauriForeignKeys(importedDb)
       await runTauriMigrations(importedDb)
       if (backupCreated) {
         try {

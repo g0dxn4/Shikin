@@ -41,6 +41,7 @@ export async function generateSpendingRecapSummary(type: RecapType, period?: str
     `SELECT currency, type, COALESCE(SUM(amount), 0) AS total
      FROM transactions
      WHERE type IN ('expense', 'income') AND date >= $1 AND date <= $2
+       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
      GROUP BY currency, type`,
     [start, end]
   )
@@ -48,6 +49,7 @@ export async function generateSpendingRecapSummary(type: RecapType, period?: str
     `SELECT currency, type, COALESCE(SUM(amount), 0) AS total
      FROM transactions
      WHERE type IN ('expense', 'income') AND date >= $1 AND date <= $2
+       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
      GROUP BY currency, type`,
     [previousStart, previousEnd]
   )
@@ -61,6 +63,7 @@ export async function generateSpendingRecapSummary(type: RecapType, period?: str
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1 AND t.date <= $2
+       AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      GROUP BY t.currency, c.name
      ORDER BY t.currency ASC, total DESC`,
     [start, end]
@@ -75,6 +78,7 @@ export async function generateSpendingRecapSummary(type: RecapType, period?: str
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1 AND t.date <= $2
+       AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      ORDER BY t.currency ASC, t.amount DESC`,
     [start, end]
   )
@@ -302,7 +306,8 @@ export async function generateSpendingRecapSummary(type: RecapType, period?: str
     `SELECT b.name, b.amount AS budget_amount,
             COALESCE((SELECT SUM(t.amount) FROM transactions t
               WHERE t.category_id = b.category_id AND t.type = 'expense'
-              AND t.date >= $1 AND t.date <= $2), 0) AS spent
+              AND t.date >= $1 AND t.date <= $2
+              AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')), 0) AS spent
      FROM budgets b WHERE b.is_active = 1`,
     [start, end]
   )

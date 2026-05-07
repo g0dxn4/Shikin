@@ -42,9 +42,17 @@ const mockQuery = vi.mocked(query)
 const mockExecute = vi.mocked(execute)
 const mockWithTransaction = vi.mocked(withTransaction)
 
+function mockCurrentTransactionFromStore(id = '01TX001') {
+  const current = useTransactionStore.getState().getById(id)
+  mockQuery.mockResolvedValueOnce(current ? [current] : [])
+}
+
 describe('transaction-store', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockQuery.mockReset()
+    mockExecute.mockReset()
+    mockWithTransaction.mockReset()
     mockWithTransaction.mockImplementation(
       async (fn: (tx: TransactionClient) => Promise<unknown>) =>
         fn({ query: databaseMocks.query, execute: databaseMocks.execute } as TransactionClient)
@@ -106,7 +114,9 @@ describe('transaction-store', () => {
         .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
         .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
       // query: re-fetch transactions
-      mockQuery.mockResolvedValueOnce([])
+      mockQuery
+        .mockResolvedValueOnce([{ id: '01ACC001', currency: 'USD', is_archived: 0 }])
+        .mockResolvedValueOnce([])
 
       await useTransactionStore.getState().add({
         amount: 25.5,
@@ -148,7 +158,9 @@ describe('transaction-store', () => {
       mockExecute
         .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
         .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
-      mockQuery.mockRejectedValue(new Error('refresh failed'))
+      mockQuery
+        .mockResolvedValueOnce([{ id: '01ACC001', currency: 'USD', is_archived: 0 }])
+        .mockRejectedValue(new Error('refresh failed'))
 
       await expect(
         useTransactionStore.getState().add({
@@ -172,7 +184,9 @@ describe('transaction-store', () => {
       mockExecute
         .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
         .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
-      mockQuery.mockResolvedValueOnce([])
+      mockQuery
+        .mockResolvedValueOnce([{ id: '01ACC001', currency: 'USD', is_archived: 0 }])
+        .mockResolvedValueOnce([])
 
       await useTransactionStore.getState().add({
         amount: 3000,
@@ -192,6 +206,102 @@ describe('transaction-store', () => {
         expect.stringContaining('UPDATE accounts SET balance = balance + ?'),
         expect.arrayContaining([300000, expect.any(String), '01ACC001'])
       )
+    })
+
+    it('inserts pending transactions without changing account balances', async () => {
+      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockQuery
+        .mockResolvedValueOnce([{ id: '01ACC001', currency: 'USD', is_archived: 0 }])
+        .mockResolvedValueOnce([])
+
+      await useTransactionStore.getState().add({
+        amount: 25.5,
+        type: 'expense',
+        description: 'Pending groceries',
+        categoryId: null,
+        accountId: '01ACC001',
+        transferToAccountId: null,
+        currency: 'USD',
+        date: '2024-01-15',
+        notes: null,
+        status: 'pending',
+      })
+
+      expect(mockExecute).toHaveBeenCalledTimes(1)
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO transactions'),
+        expect.arrayContaining(['pending'])
+      )
+      expect(mockExecute).not.toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE accounts SET balance = balance + ?'),
+        expect.anything()
+      )
+    })
+
+    it('rejects transactions against archived accounts', async () => {
+      mockQuery.mockResolvedValueOnce([{ is_archived: 1 }])
+
+      await expect(
+        useTransactionStore.getState().add({
+          amount: 25.5,
+          type: 'expense',
+          description: 'Archived account groceries',
+          categoryId: null,
+          accountId: '01ACCARCHIVED',
+          transferToAccountId: null,
+          currency: 'USD',
+          date: '2024-01-15',
+          notes: null,
+        })
+      ).rejects.toThrow(
+        'Account 01ACCARCHIVED is archived. Unarchive it before using it for new writes.'
+      )
+
+      expect(mockExecute).not.toHaveBeenCalled()
+    })
+
+    it('rejects transaction currency mismatches with the source account', async () => {
+      mockQuery.mockResolvedValueOnce([{ id: '01ACC001', currency: 'EUR', is_archived: 0 }])
+
+      await expect(
+        useTransactionStore.getState().add({
+          amount: 25.5,
+          type: 'expense',
+          description: 'Groceries',
+          categoryId: null,
+          accountId: '01ACC001',
+          transferToAccountId: null,
+          currency: 'USD',
+          date: '2024-01-15',
+          notes: null,
+        })
+      ).rejects.toThrow('Transaction currency USD does not match account 01ACC001 currency EUR.')
+
+      expect(mockExecute).not.toHaveBeenCalled()
+    })
+
+    it('rejects cross-currency transfer writes', async () => {
+      mockQuery
+        .mockResolvedValueOnce([{ id: '01ACC001', currency: 'USD', is_archived: 0 }])
+        .mockResolvedValueOnce([{ id: '01ACC002', currency: 'EUR', is_archived: 0 }])
+
+      await expect(
+        useTransactionStore.getState().add({
+          amount: 25.5,
+          type: 'transfer',
+          description: 'Move money',
+          categoryId: null,
+          accountId: '01ACC001',
+          transferToAccountId: '01ACC002',
+          currency: 'USD',
+          date: '2024-01-15',
+          notes: null,
+        })
+      ).rejects.toThrow(
+        'Cannot transfer from USD to EUR. Cross-currency transfers are not supported because no FX conversion is applied.'
+      )
+
+      expect(mockExecute).not.toHaveBeenCalled()
     })
   })
 
@@ -225,7 +335,10 @@ describe('transaction-store', () => {
         .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
         .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
         .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
-      mockQuery.mockResolvedValueOnce([])
+      mockCurrentTransactionFromStore()
+      mockQuery
+        .mockResolvedValueOnce([{ id: '01ACC001', currency: 'USD', is_archived: 0 }])
+        .mockResolvedValueOnce([])
 
       await useTransactionStore.getState().update('01TX001', {
         amount: 35,
@@ -261,8 +374,209 @@ describe('transaction-store', () => {
       )
     })
 
+    it('updates pending transactions without changing account balances', async () => {
+      useTransactionStore.setState({
+        transactions: [
+          {
+            id: '01TX001',
+            account_id: '01ACC001',
+            category_id: '01CAT001',
+            subcategory_id: null,
+            type: 'expense',
+            amount: 2500,
+            currency: 'USD',
+            description: 'Pending lunch',
+            notes: null,
+            date: '2024-01-15',
+            tags: '[]',
+            is_recurring: 0,
+            transfer_to_account_id: null,
+            status: 'pending',
+            created_at: '2024-01-15T12:00:00Z',
+            updated_at: '2024-01-15T12:00:00Z',
+          },
+        ],
+      })
+
+      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockCurrentTransactionFromStore()
+      mockQuery
+        .mockResolvedValueOnce([{ id: '01ACC001', currency: 'USD', is_archived: 0 }])
+        .mockResolvedValueOnce([])
+
+      await useTransactionStore.getState().update('01TX001', {
+        amount: 35,
+        type: 'expense',
+        description: 'Updated pending lunch',
+        categoryId: '01CAT001',
+        accountId: '01ACC001',
+        transferToAccountId: null,
+        currency: 'USD',
+        date: '2024-01-15',
+        notes: 'with tip',
+      })
+
+      expect(mockExecute).toHaveBeenCalledTimes(1)
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE transactions SET'),
+        expect.arrayContaining([3500])
+      )
+      expect(mockExecute).not.toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE accounts SET balance = balance + ?'),
+        expect.anything()
+      )
+    })
+
+    it('posts pending transactions and applies their balance impact', async () => {
+      useTransactionStore.setState({
+        transactions: [
+          {
+            id: '01TX001',
+            account_id: '01ACC001',
+            category_id: '01CAT001',
+            subcategory_id: null,
+            type: 'expense',
+            amount: 2500,
+            currency: 'USD',
+            description: 'Pending lunch',
+            notes: null,
+            date: '2024-01-15',
+            tags: '[]',
+            is_recurring: 0,
+            transfer_to_account_id: null,
+            status: 'pending',
+            created_at: '2024-01-15T12:00:00Z',
+            updated_at: '2024-01-15T12:00:00Z',
+          },
+        ],
+      })
+
+      mockExecute
+        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockCurrentTransactionFromStore()
+      mockQuery
+        .mockResolvedValueOnce([{ id: '01ACC001', currency: 'USD', is_archived: 0 }])
+        .mockResolvedValueOnce([])
+
+      await useTransactionStore.getState().update('01TX001', {
+        amount: 35,
+        type: 'expense',
+        description: 'Posted lunch',
+        categoryId: '01CAT001',
+        accountId: '01ACC001',
+        transferToAccountId: null,
+        currency: 'USD',
+        date: '2024-01-15',
+        notes: 'with tip',
+        status: 'posted',
+      })
+
+      expect(mockExecute).toHaveBeenNthCalledWith(
+        1,
+        expect.stringContaining('UPDATE transactions SET'),
+        expect.arrayContaining([3500, 'posted'])
+      )
+      expect(mockExecute).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('UPDATE accounts SET balance = balance + ?'),
+        expect.arrayContaining([-3500, expect.any(String), '01ACC001'])
+      )
+    })
+
+    it('rejects updates that would leave an incompatible recurring rule link', async () => {
+      useTransactionStore.setState({
+        transactions: [
+          {
+            id: '01TX001',
+            account_id: '01ACC001',
+            category_id: '01CAT001',
+            subcategory_id: null,
+            type: 'expense',
+            amount: 2500,
+            currency: 'USD',
+            description: 'Recurring lunch',
+            notes: null,
+            date: '2024-01-15',
+            tags: '[]',
+            is_recurring: 0,
+            transfer_to_account_id: null,
+            recurring_rule_id: '01RULE001',
+            status: 'posted',
+            created_at: '2024-01-15T12:00:00Z',
+            updated_at: '2024-01-15T12:00:00Z',
+          },
+        ],
+      })
+      mockCurrentTransactionFromStore()
+      mockQuery
+        .mockResolvedValueOnce([{ id: '01ACC003', currency: 'USD', is_archived: 0 }])
+        .mockResolvedValueOnce([{ account_id: '01ACC002', type: 'expense', currency: 'USD' }])
+
+      await expect(
+        useTransactionStore.getState().update('01TX001', {
+          amount: 25,
+          type: 'expense',
+          description: 'Recurring lunch',
+          categoryId: '01CAT001',
+          accountId: '01ACC003',
+          transferToAccountId: null,
+          currency: 'USD',
+          date: '2024-01-15',
+          notes: null,
+        })
+      ).rejects.toThrow('Recurring rule 01RULE001 belongs to account 01ACC002, not 01ACC003.')
+      expect(mockExecute).not.toHaveBeenCalled()
+    })
+
+    it('rejects moving transactions onto archived accounts', async () => {
+      useTransactionStore.setState({
+        transactions: [
+          {
+            id: '01TX001',
+            account_id: '01ACC001',
+            category_id: '01CAT001',
+            subcategory_id: null,
+            type: 'expense',
+            amount: 2500,
+            currency: 'USD',
+            description: 'Lunch',
+            notes: null,
+            date: '2024-01-15',
+            tags: '[]',
+            is_recurring: 0,
+            transfer_to_account_id: null,
+            status: 'posted',
+            created_at: '2024-01-15T12:00:00Z',
+            updated_at: '2024-01-15T12:00:00Z',
+          },
+        ],
+      })
+      mockCurrentTransactionFromStore()
+      mockQuery.mockResolvedValueOnce([{ is_archived: 1 }])
+
+      await expect(
+        useTransactionStore.getState().update('01TX001', {
+          amount: 25,
+          type: 'expense',
+          description: 'Lunch moved',
+          categoryId: '01CAT001',
+          accountId: '01ACCARCHIVED',
+          transferToAccountId: null,
+          currency: 'USD',
+          date: '2024-01-15',
+          notes: null,
+        })
+      ).rejects.toThrow(
+        'Account 01ACCARCHIVED is archived. Unarchive it before using it for new writes.'
+      )
+
+      expect(mockExecute).not.toHaveBeenCalled()
+    })
+
     it('does nothing if transaction not found', async () => {
       useTransactionStore.setState({ transactions: [] })
+      mockQuery.mockResolvedValueOnce([])
 
       await useTransactionStore.getState().update('nonexistent', {
         amount: 10,
@@ -281,11 +595,46 @@ describe('transaction-store', () => {
   })
 
   describe('addWithSplits', () => {
+    it('inserts pending split transactions without changing account balances', async () => {
+      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockQuery
+        .mockResolvedValueOnce([{ id: '01ACC001', currency: 'USD', is_archived: 0 }])
+        .mockResolvedValueOnce([])
+
+      await useTransactionStore.getState().addWithSplits(
+        {
+          amount: 25.5,
+          type: 'expense',
+          description: 'Pending split groceries',
+          categoryId: '01CAT001',
+          accountId: '01ACC001',
+          transferToAccountId: null,
+          currency: 'USD',
+          date: '2024-01-15',
+          notes: null,
+          status: 'pending',
+        },
+        [{ categoryId: '01CAT001', amount: 25.5, notes: null }]
+      )
+
+      expect(mockExecute).toHaveBeenCalledTimes(1)
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO transactions'),
+        expect.arrayContaining(['pending'])
+      )
+      expect(mockExecute).not.toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE accounts SET balance = balance + ?'),
+        expect.anything()
+      )
+    })
+
     it('does not reject when refresh fails after a committed split write', async () => {
       mockExecute
         .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
         .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
-      mockQuery.mockRejectedValue(new Error('refresh failed'))
+      mockQuery
+        .mockResolvedValueOnce([{ id: '01ACC001', currency: 'USD', is_archived: 0 }])
+        .mockRejectedValue(new Error('refresh failed'))
 
       await expect(
         useTransactionStore.getState().addWithSplits(
@@ -306,6 +655,31 @@ describe('transaction-store', () => {
 
       expect(useTransactionStore.getState().error).toBeNull()
       expect(useTransactionStore.getState().fetchError).toBe('refresh failed')
+    })
+
+    it('rejects split transactions against archived accounts', async () => {
+      mockQuery.mockResolvedValueOnce([{ is_archived: 1 }])
+
+      await expect(
+        useTransactionStore.getState().addWithSplits(
+          {
+            amount: 25.5,
+            type: 'expense',
+            description: 'Archived split groceries',
+            categoryId: '01CAT001',
+            accountId: '01ACCARCHIVED',
+            transferToAccountId: null,
+            currency: 'USD',
+            date: '2024-01-15',
+            notes: null,
+          },
+          [{ categoryId: '01CAT001', amount: 25.5, notes: null }]
+        )
+      ).rejects.toThrow(
+        'Account 01ACCARCHIVED is archived. Unarchive it before using it for new writes.'
+      )
+
+      expect(mockExecute).not.toHaveBeenCalled()
     })
   })
 
@@ -336,6 +710,7 @@ describe('transaction-store', () => {
       mockExecute
         .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
         .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockCurrentTransactionFromStore()
       mockQuery.mockResolvedValueOnce([])
 
       await useTransactionStore.getState().remove('01TX001')
@@ -355,8 +730,47 @@ describe('transaction-store', () => {
       expect(mockAccountFetch).toHaveBeenCalled()
     })
 
+    it('deletes pending transactions without changing account balances', async () => {
+      useTransactionStore.setState({
+        transactions: [
+          {
+            id: '01TX001',
+            account_id: '01ACC001',
+            category_id: null,
+            subcategory_id: null,
+            type: 'income',
+            amount: 500000,
+            currency: 'USD',
+            description: 'Pending salary',
+            notes: null,
+            date: '2024-01-31',
+            tags: '[]',
+            is_recurring: 0,
+            transfer_to_account_id: null,
+            status: 'pending',
+            created_at: '2024-01-31T00:00:00Z',
+            updated_at: '2024-01-31T00:00:00Z',
+          },
+        ],
+      })
+
+      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockCurrentTransactionFromStore()
+      mockQuery.mockResolvedValueOnce([])
+
+      await useTransactionStore.getState().remove('01TX001')
+
+      expect(mockExecute).toHaveBeenCalledTimes(1)
+      expect(mockExecute).toHaveBeenCalledWith('DELETE FROM transactions WHERE id = ?', ['01TX001'])
+      expect(mockExecute).not.toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE accounts SET balance = balance + ?'),
+        expect.anything()
+      )
+    })
+
     it('does nothing if transaction not found', async () => {
       useTransactionStore.setState({ transactions: [] })
+      mockQuery.mockResolvedValueOnce([])
 
       await useTransactionStore.getState().remove('nonexistent')
 

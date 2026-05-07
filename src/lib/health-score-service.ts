@@ -47,13 +47,15 @@ async function calculateSavingsRate(): Promise<SubScore> {
 
   const incomeResult = await query<{ total: number | null }>(
     `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
-     WHERE type = 'income' AND date >= ? AND date <= ?`,
+     WHERE type = 'income' AND date >= ? AND date <= ?
+       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
     [start, end]
   )
 
   const expenseResult = await query<{ total: number | null }>(
     `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
-     WHERE type = 'expense' AND date >= ? AND date <= ?`,
+     WHERE type = 'expense' AND date >= ? AND date <= ?
+       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
     [start, end]
   )
 
@@ -132,7 +134,8 @@ async function calculateBudgetAdherence(): Promise<SubScore> {
 
     const spentResult = await query<{ total: number | null }>(
       `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
-       WHERE category_id = ? AND type = 'expense' AND date >= ? AND date <= ?`,
+       WHERE category_id = ? AND type = 'expense' AND date >= ? AND date <= ?
+         AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
       [budget.category_id, start, end]
     )
 
@@ -168,7 +171,8 @@ async function calculateDebtToIncome(): Promise<SubScore> {
   const end = dayjs().format('YYYY-MM-DD')
   const incomeResult = await query<{ total: number | null }>(
     `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
-     WHERE type = 'income' AND date >= ? AND date <= ?`,
+     WHERE type = 'income' AND date >= ? AND date <= ?
+       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
     [start, end]
   )
 
@@ -224,7 +228,8 @@ async function calculateEmergencyFund(): Promise<SubScore> {
   const today = dayjs().format('YYYY-MM-DD')
   const expenseResult = await query<{ total: number | null }>(
     `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
-     WHERE type = 'expense' AND date >= ? AND date <= ?`,
+     WHERE type = 'expense' AND date >= ? AND date <= ?
+       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
     [threeMonthsAgo, today]
   )
 
@@ -274,7 +279,8 @@ async function calculateSpendingConsistency(): Promise<SubScore> {
 
     const result = await query<{ total: number | null }>(
       `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
-       WHERE type = 'expense' AND date >= ? AND date <= ?`,
+       WHERE type = 'expense' AND date >= ? AND date <= ?
+         AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
       [start, end]
     )
 

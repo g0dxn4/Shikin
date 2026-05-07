@@ -67,7 +67,7 @@ Notes:
 
 ## Tool Discovery and Reference
 
-- All CLI commands come from the shared tool definitions in `src/tools.ts` and are mirrored in MCP.
+- Tool commands come from the shared definitions in `src/tools/index.ts` and are mirrored in MCP; CLI-only built-ins such as `diagnose`, `tools`, `validate`, and `record` are registered separately.
 - `shikin --help` lists every available CLI command and the required options when the desktop launcher can reach the CLI bridge.
 - `shikin diagnose` prints CLI/MCP surface counts plus available/unavailable tool names.
 - `shikin diagnose --deep` adds migration/integrity/balance diagnostics.
@@ -150,7 +150,7 @@ The MCP server also exposes read-only resources:
 
 ## Current Scope
 
-- CLI and MCP share the same 39-tool definition catalog in `cli/src/tools.ts`.
+- CLI and MCP share the same 63-tool definition catalog in `cli/src/tools.ts`.
 - All shipped tools are available end-to-end against the local database.
 - Debt payoff projections infer debts from negative credit-card account balances. Accounts do not store APR yet, so CLI payoff estimates default card APR to 0% and exclude interest for automatically inferred cards.
 - Subscription tools read Shikin's local `subscriptions` table for analytics and bill forecasting.

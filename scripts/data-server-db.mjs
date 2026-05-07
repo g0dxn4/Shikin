@@ -94,6 +94,13 @@ function validateImportedDatabaseBuffer(buffer, tempDbPath) {
     if (integrityCheck !== 'ok') {
       throw new Error(`Imported SQLite database failed integrity check: ${integrityCheck}`)
     }
+    tempDb.pragma('foreign_keys = ON')
+    const foreignKeyViolations = tempDb.pragma('foreign_key_check')
+    if (foreignKeyViolations.length > 0) {
+      throw new Error(
+        `Imported SQLite database failed foreign key check: ${JSON.stringify(foreignKeyViolations[0])}`
+      )
+    }
     validateShikinDatabase(tempDb)
   } finally {
     tempDb?.close()

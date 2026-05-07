@@ -6,6 +6,7 @@ import { tools, type ToolDefinition } from './tools.js'
 import { close, query } from './database.js'
 import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
 import { z } from 'zod'
+import dayjs from 'dayjs'
 
 export const EXPECTED_MIGRATIONS = CLI_DATABASE_MIGRATIONS
 
@@ -13,6 +14,705 @@ function isFailureResult(value: unknown): value is Record<string, unknown> & { s
   return (
     typeof value === 'object' && value !== null && 'success' in value && value.success === false
   )
+}
+
+type OutputOptions = {
+  json?: boolean
+  pretty?: boolean
+  quiet?: boolean
+  redacted?: boolean
+}
+
+type DescribedOption = ReturnType<typeof zodToOptions>[number] & {
+  name: string
+  type: string
+  enumValues?: string[]
+}
+
+const OUTPUT_OPTION_KEYS = new Set(['json', 'pretty', 'quiet', 'redacted'])
+const SENSITIVE_KEY_PATTERN =
+  /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key)/i
+
+function addOutputOptions(cmd: Command, options: { includeRedacted?: boolean } = {}): Command {
+  const withBaseOptions = cmd
+    .option('--json', 'Print compact JSON output')
+    .option('--pretty', 'Print pretty JSON output (default)')
+    .option('--quiet', 'Suppress successful output; failures still print JSON')
+  return options.includeRedacted === false
+    ? withBaseOptions
+    : withBaseOptions.option('--redacted', 'Redact future sensitive fields from output')
+}
+
+function getOutputOptions(opts: Record<string, unknown>): OutputOptions {
+  return {
+    json: Boolean(opts.json),
+    pretty: Boolean(opts.pretty),
+    quiet: Boolean(opts.quiet),
+    redacted: Boolean(opts.redacted),
+  }
+}
+
+function normalizeResult(result: unknown): unknown {
+  if (typeof result !== 'object' || result === null || Array.isArray(result)) {
+    return { success: true, result }
+  }
+
+  const record = result as Record<string, unknown>
+  const normalized: Record<string, unknown> =
+    'success' in record ? { ...record } : { success: true, ...record }
+
+  if (normalized.success === false && typeof normalized.code !== 'string') {
+    normalized.code = getFailureCode(normalized)
+  }
+
+  if (
+    normalized.success === false &&
+    typeof normalized.hint !== 'string' &&
+    typeof normalized.message === 'string'
+  ) {
+    const hint = inferHint(normalized.message)
+    if (hint) normalized.hint = hint
+  }
+
+  return normalized
+}
+
+function getFailureCode(result: Record<string, unknown>): string {
+  for (const key of ['reason', 'errorType', 'error']) {
+    const value = result[key]
+    if (typeof value === 'string' && value.trim()) {
+      return toErrorCode(value)
+    }
+  }
+  return 'COMMAND_FAILED'
+}
+
+function toErrorCode(value: string): string {
+  return value
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toUpperCase()
+}
+
+function inferHint(message: string): string | null {
+  const lower = message.toLowerCase()
+  if (lower.includes('account') && lower.includes('not found')) {
+    return 'Run shikin list-accounts to find a valid account, or set an alias with shikin set-account-alias.'
+  }
+  if (lower.includes('category') && lower.includes('not found')) {
+    return 'Run shikin suggest-category --description "..." or shikin manage-category-rules --action list.'
+  }
+  if (lower.includes('multiple accounts')) {
+    return 'Pass --account-id or --account explicitly, or set an account alias with shikin set-account-alias.'
+  }
+  return null
+}
+
+function writeOutput(result: unknown, options: OutputOptions): void {
+  const normalized = normalizeResult(result)
+  if (options.quiet && !isFailureResult(normalized)) {
+    return
+  }
+
+  const output = options.redacted ? redactSensitiveFields(normalized) : normalized
+  const indent = options.json && !options.pretty ? undefined : 2
+  console.log(JSON.stringify(output, null, indent))
+}
+
+function redactSensitiveFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactSensitiveFields)
+  if (typeof value !== 'object' || value === null) return value
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, nestedValue]) => [
+      key,
+      SENSITIVE_KEY_PATTERN.test(key) ? '[REDACTED]' : redactSensitiveFields(nestedValue),
+    ])
+  )
+}
+
+function errorResult(
+  code: string,
+  message: string,
+  extra: Record<string, unknown> = {}
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {
+    success: false,
+    code,
+    message,
+    ...extra,
+  }
+  const hint = inferHint(message)
+  if (hint && typeof result.hint !== 'string') result.hint = hint
+  return result
+}
+
+function errorFromUnknown(err: unknown): Record<string, unknown> {
+  if (err instanceof z.ZodError) {
+    return errorResult('VALIDATION_ERROR', 'Validation error', { issues: err.issues })
+  }
+
+  return errorResult('COMMAND_ERROR', err instanceof Error ? err.message : String(err))
+}
+
+function describeOutputOptions(options: { includeRedacted?: boolean } = {}) {
+  const outputOptions = [
+    {
+      name: 'json',
+      flag: 'json',
+      type: 'boolean',
+      required: false,
+      description: 'Print compact JSON output',
+    },
+    {
+      name: 'pretty',
+      flag: 'pretty',
+      type: 'boolean',
+      required: false,
+      description: 'Print pretty JSON output',
+    },
+    {
+      name: 'quiet',
+      flag: 'quiet',
+      type: 'boolean',
+      required: false,
+      description: 'Suppress successful output',
+    },
+  ]
+  return options.includeRedacted === false
+    ? outputOptions
+    : [
+        ...outputOptions,
+        {
+          name: 'redacted',
+          flag: 'redacted',
+          type: 'boolean',
+          required: false,
+          description: 'Redact sensitive output fields',
+        },
+      ]
+}
+
+function describeToolOptions(schema: z.ZodObject<any>): DescribedOption[] {
+  const optionByFlag = new Map(zodToOptions(schema).map((option) => [option.flag, option]))
+
+  return Object.entries(schema.shape).map(([name, zodType]) => {
+    const flag = camelToKebab(name)
+    const option = optionByFlag.get(flag)
+    const inner = unwrapSchema(zodType as z.ZodTypeAny)
+    const enumValues = getEnumValues(inner)
+    const describedFlag =
+      option?.isBoolean && option.defaultValue === true ? `no-${flag}` : (option?.flag ?? flag)
+
+    return {
+      ...(option ?? {
+        flag,
+        description: '',
+        required: true,
+        isArray: false,
+        isBoolean: false,
+        isStructured: false,
+      }),
+      flag: describedFlag,
+      name,
+      type: describeZodType(inner),
+      ...(enumValues ? { enumValues } : {}),
+    }
+  })
+}
+
+function describeZodType(schema: z.ZodTypeAny): string {
+  const inner = unwrapSchema(schema)
+
+  if (inner instanceof z.ZodEnum) return 'enum'
+  if (inner instanceof z.ZodNumber) return 'number'
+  if (inner instanceof z.ZodBoolean) return 'boolean'
+  if (inner instanceof z.ZodString) return 'string'
+  if (inner instanceof z.ZodArray) return `array<${describeZodType(inner.element)}>`
+  if (inner instanceof z.ZodObject) return 'object'
+
+  return 'unknown'
+}
+
+function getEnumValues(schema: z.ZodTypeAny): string[] | undefined {
+  const inner = unwrapSchema(schema)
+  if (!(inner instanceof z.ZodEnum)) return undefined
+
+  const options = (inner as any).options
+  return Array.isArray(options) ? [...options] : undefined
+}
+
+function getToolAliases(tool: ToolDefinition): string[] {
+  return tool.name === 'query-transactions' ? ['list-transactions'] : []
+}
+
+function getCommandCatalog(toolDefinitions: ToolDefinition[]) {
+  const defaultOutputOptions = describeOutputOptions()
+  const validateOutputOptions = describeOutputOptions({ includeRedacted: false })
+  const builtInCommands = [
+    {
+      name: 'diagnose',
+      kind: 'builtin',
+      validateable: false,
+      description: 'Validate shared database connectivity and print CLI/MCP health details',
+      aliases: [],
+      arguments: [],
+      options: [
+        {
+          name: 'deep',
+          flag: 'deep',
+          type: 'boolean',
+          required: false,
+          description: 'Run read-only integrity, foreign-key, migration, and balance checks',
+        },
+      ],
+      outputOptions: defaultOutputOptions,
+    },
+    {
+      name: 'tools',
+      kind: 'builtin',
+      validateable: false,
+      description: 'Return machine-readable command discovery metadata',
+      aliases: [],
+      arguments: [],
+      options: [],
+      outputOptions: defaultOutputOptions,
+    },
+    {
+      name: 'validate',
+      kind: 'builtin',
+      validateable: false,
+      description: 'Validate another command without executing it',
+      aliases: [],
+      arguments: [
+        { name: 'commandName', required: true },
+        { name: 'args', required: false, variadic: true },
+      ],
+      options: [],
+      outputOptions: validateOutputOptions,
+    },
+    {
+      name: 'record',
+      kind: 'builtin',
+      validateable: false,
+      description: 'Parse a natural-language transaction entry and return a confirmation preview',
+      aliases: [],
+      arguments: [{ name: 'entry', required: true, variadic: true }],
+      options: [
+        {
+          name: 'apply',
+          flag: 'apply',
+          type: 'boolean',
+          required: false,
+          description: 'Apply the parsed transaction noninteractively',
+        },
+        {
+          name: 'dryRun',
+          flag: 'dry-run',
+          type: 'boolean',
+          required: false,
+          description: 'Validate and preview without writing (default)',
+        },
+        {
+          name: 'account',
+          flag: 'account',
+          type: 'string',
+          required: false,
+          description: 'Account alias, exact account ID, or exact account name',
+        },
+        {
+          name: 'accountId',
+          flag: 'account-id',
+          type: 'string',
+          required: false,
+          description: 'Canonical account ID',
+        },
+        {
+          name: 'category',
+          flag: 'category',
+          type: 'string',
+          required: false,
+          description: 'Category name override',
+        },
+        {
+          name: 'status',
+          flag: 'status',
+          type: 'enum',
+          required: false,
+          enumValues: ['pending', 'posted', 'cleared'],
+          description: 'Transaction status',
+        },
+        {
+          name: 'notes',
+          flag: 'notes',
+          type: 'string',
+          required: false,
+          description: 'User transaction notes',
+        },
+        {
+          name: 'source',
+          flag: 'source',
+          type: 'string',
+          required: false,
+          description: 'Assistant or origin label for transaction metadata',
+        },
+        {
+          name: 'note',
+          flag: 'note',
+          type: 'string',
+          required: false,
+          description: 'Assistant changelog note for transaction metadata',
+        },
+      ],
+      outputOptions: defaultOutputOptions,
+    },
+  ]
+
+  const toolCommands = toolDefinitions.map((tool) => ({
+    name: tool.name,
+    kind: 'tool',
+    validateable: true,
+    validationScope: 'schema',
+    description: tool.description,
+    aliases: getToolAliases(tool),
+    availableInCli: !tool.cliUnavailableMessage,
+    availableInMcp: !tool.mcpUnavailableMessage,
+    cliUnavailableMessage: tool.cliUnavailableMessage,
+    mcpUnavailableMessage: tool.mcpUnavailableMessage,
+    options: describeToolOptions(tool.schema),
+    outputOptions: defaultOutputOptions,
+  }))
+
+  const commands = [...builtInCommands, ...toolCommands]
+
+  return {
+    success: true,
+    commandCount: commands.length,
+    toolCount: toolDefinitions.length,
+    outputOptions: defaultOutputOptions,
+    commands,
+  }
+}
+
+function parseValidateArgs(args: string[], tool: ToolDefinition): Record<string, unknown> {
+  const options = describeToolOptions(tool.schema)
+  const optionByFlag = new Map(options.map((option) => [option.flag, option]))
+  const input: Record<string, unknown> = {}
+
+  for (let index = 0; index < args.length; index++) {
+    const token = args[index]
+    if (!token.startsWith('--')) {
+      throw new Error(`Unexpected positional argument "${token}". Use --option value pairs.`)
+    }
+
+    const inlineValueIndex = token.indexOf('=')
+    const rawFlag = token.slice(2, inlineValueIndex === -1 ? undefined : inlineValueIndex)
+    const inlineValue = inlineValueIndex === -1 ? undefined : token.slice(inlineValueIndex + 1)
+    const negated = rawFlag.startsWith('no-')
+    const baseFlag = negated ? rawFlag.slice(3) : rawFlag
+
+    const option = optionByFlag.get(rawFlag)
+    if (OUTPUT_OPTION_KEYS.has(kebabToCamel(baseFlag)) && !option) {
+      continue
+    }
+
+    if (!option) {
+      throw new Error(`Unknown option --${rawFlag} for ${tool.name}.`)
+    }
+    const optionFlag = option.flag.startsWith('no-') ? option.flag.slice(3) : option.flag
+
+    if (negated && !option.isBoolean) {
+      throw new Error(`--no-${optionFlag} is only valid for boolean options.`)
+    }
+
+    if (option.isBoolean) {
+      const next = args[index + 1]
+      if (negated) {
+        input[option.name] = false
+      } else if (inlineValue !== undefined) {
+        input[option.name] = inlineValue
+      } else if (
+        option.defaultValue === undefined &&
+        typeof next === 'string' &&
+        !next.startsWith('--') &&
+        ['true', 'false'].includes(next.trim().toLowerCase())
+      ) {
+        input[option.name] = next
+        index++
+      } else {
+        input[option.name] = true
+      }
+      continue
+    }
+
+    if (inlineValue !== undefined) {
+      input[option.name] = inlineValue
+      continue
+    }
+
+    const next = args[index + 1]
+    if (next === undefined || next.startsWith('--')) {
+      throw new Error(`Missing value for --${optionFlag}.`)
+    }
+
+    input[option.name] = next
+    index++
+  }
+
+  return input
+}
+
+function kebabToCamel(value: string): string {
+  return value.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
+}
+
+function camelToKebab(value: string): string {
+  return value.replace(/([A-Z])/g, '-$1').toLowerCase()
+}
+
+function validateToolInput(commandName: string, args: string[], toolDefinitions: ToolDefinition[]) {
+  const tool = toolDefinitions.find(
+    (candidate) => candidate.name === commandName || getToolAliases(candidate).includes(commandName)
+  )
+
+  if (!tool) {
+    return errorResult('UNKNOWN_COMMAND', `Command ${commandName} was not found.`, {
+      hint: 'Run shikin tools --pretty to list available commands.',
+    })
+  }
+
+  try {
+    const rawInput = parseValidateArgs(args, tool)
+    const coercedInput = coerceInput(rawInput, tool.schema)
+    const parsed = tool.schema.safeParse(coercedInput)
+
+    if (!parsed.success) {
+      return errorResult('VALIDATION_ERROR', 'Validation error', { issues: parsed.error.issues })
+    }
+
+    return {
+      success: true,
+      command: tool.name,
+      validationScope: 'schema',
+      input: parsed.data,
+      message: `${tool.name} input is schema-valid. No domain checks ran and no changes were made.`,
+    }
+  } catch (err) {
+    return errorFromUnknown(err)
+  }
+}
+
+function parseRecordEntry(entry: string) {
+  const amountMatch = entry.match(
+    /(?:^|\s)(-?(?:\d{1,3}(?:[,.]\d{3})+(?:[,.]\d{1,2})?|\d+(?:[,.]\d{1,2})?))\s*([A-Z]{3})?\b/
+  )
+  const amount = amountMatch ? parseAmountToken(amountMatch[1]) : null
+  const currency = amountMatch?.[2] ? amountMatch[2].toUpperCase() : null
+  const lower = entry.toLowerCase()
+  const type = /\b(income|salary|paycheck|deposit|earned|received)\b/.test(lower)
+    ? 'income'
+    : 'expense'
+  const date = lower.includes('yesterday') ? relativeIsoDate(-1) : relativeIsoDate(0)
+  const categoryMatch = entry.match(/\bcategory\s+(.+?)(?:\s+(?:today|yesterday|tomorrow)\b|$)/i)
+  const category = categoryMatch?.[1]?.trim() || null
+  const description = entry
+    .replace(amountMatch?.[0] ?? '', ' ')
+    .replace(/\bcategory\s+.+?(?:\s+(?:today|yesterday|tomorrow)\b|$)/i, ' ')
+    .replace(/\b(today|yesterday|tomorrow)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return {
+    raw: entry,
+    amount,
+    currency,
+    type,
+    description: description || null,
+    category,
+    date,
+    confidence: amount === null || !description ? 'low' : category ? 'medium' : 'low',
+  }
+}
+
+function relativeIsoDate(offsetDays: number): string {
+  return dayjs().add(offsetDays, 'day').format('YYYY-MM-DD')
+}
+
+function parseAmountToken(value: string): number | null {
+  const token = value.trim()
+  const lastComma = token.lastIndexOf(',')
+  const lastDot = token.lastIndexOf('.')
+  const decimalSeparator = lastComma > lastDot ? ',' : lastDot > lastComma ? '.' : null
+  let normalized = token
+
+  if (lastComma !== -1 && lastDot !== -1 && decimalSeparator) {
+    const thousandsSeparator = decimalSeparator === ',' ? '.' : ','
+    normalized = token.split(thousandsSeparator).join('').replace(decimalSeparator, '.')
+  } else if (decimalSeparator) {
+    const separatorIndex = decimalSeparator === ',' ? lastComma : lastDot
+    const decimals = token.length - separatorIndex - 1
+    const looksLikeThousands = decimals === 3 && /^-?\d{1,3}([,.]\d{3})+$/.test(token)
+    normalized = looksLikeThousands
+      ? token.split(decimalSeparator).join('')
+      : token.replace(decimalSeparator, '.')
+  }
+
+  const amount = Number(normalized)
+  return Number.isFinite(amount) ? amount : null
+}
+
+type ParsedRecordEntry = ReturnType<typeof parseRecordEntry>
+
+const RECORD_STATUSES = new Set(['pending', 'posted', 'cleared'])
+
+async function executeRecordCommand(
+  parsed: ParsedRecordEntry,
+  options: Record<string, unknown>,
+  toolDefinitions: ToolDefinition[]
+) {
+  if (parsed.amount === null || !parsed.description) {
+    return errorResult(
+      'RECORD_PARSE_FAILED',
+      'Could not confidently parse a transaction amount and description.',
+      {
+        parsed,
+        hint: 'Try shikin add-transaction with explicit --amount, --type, --description, and --account or --account-id.',
+      }
+    )
+  }
+
+  const apply = Boolean(options.apply)
+  const explicitDryRun = Boolean(options.dryRun)
+  if (apply && explicitDryRun) {
+    return errorResult('RECORD_FLAG_CONFLICT', 'Use either --apply or --dry-run, not both.')
+  }
+
+  const status = typeof options.status === 'string' ? options.status.trim() : undefined
+  if (status && !RECORD_STATUSES.has(status)) {
+    return errorResult('VALIDATION_ERROR', 'Validation error', {
+      issues: [
+        {
+          path: ['status'],
+          message: 'Status must be pending, posted, or cleared.',
+        },
+      ],
+    })
+  }
+
+  const transactionArgs = compactRecordArgs({
+    amount: parsed.amount,
+    type: parsed.type,
+    description: parsed.description,
+    category:
+      typeof options.category === 'string' ? options.category : (parsed.category ?? undefined),
+    date: parsed.date,
+    notes: typeof options.notes === 'string' ? options.notes : undefined,
+    source: typeof options.source === 'string' ? options.source : undefined,
+    note: typeof options.note === 'string' ? options.note : undefined,
+    status,
+    account: typeof options.account === 'string' ? options.account : undefined,
+    accountId: typeof options.accountId === 'string' ? options.accountId : undefined,
+  })
+  const metadata = {
+    source: typeof options.source === 'string' ? options.source : null,
+    note: typeof options.note === 'string' ? options.note : null,
+  }
+  const suggestedCommand = {
+    command: 'add-transaction',
+    args: compactRecordArgs({ ...transactionArgs, dryRun: undefined }),
+  }
+  const addTransaction = toolDefinitions.find((tool) => tool.name === 'add-transaction')
+
+  if (!addTransaction) {
+    return {
+      success: true,
+      dryRun: true,
+      parsed,
+      metadata,
+      requiresConfirmation: true,
+      suggestedCommand,
+      message:
+        'Preview only. Review the parsed fields, then run add-transaction with the suggested args to record it.',
+    }
+  }
+
+  const previewInput = addTransaction.schema.parse({ ...transactionArgs, dryRun: true })
+  const previewResult = await addTransaction.execute(previewInput)
+  const normalizedPreview = normalizeResult(previewResult) as Record<string, unknown>
+  const previewCurrency = getRecordPreviewCurrency(normalizedPreview)
+  if (!isFailureResult(normalizedPreview) && parsed.currency) {
+    if (!previewCurrency) {
+      return errorResult(
+        'RECORD_CURRENCY_UNKNOWN',
+        `Record parsed currency ${parsed.currency}, but the resolved account currency is unknown.`,
+        {
+          parsed,
+          resolvedCurrency: previewCurrency,
+          hint: 'Repair the account currency or run add-transaction explicitly after choosing a valid account.',
+        }
+      )
+    }
+
+    if (parsed.currency !== previewCurrency) {
+      return errorResult(
+        'RECORD_CURRENCY_MISMATCH',
+        `Record parsed currency ${parsed.currency}, but the resolved account uses ${previewCurrency}.`,
+        {
+          parsed,
+          resolvedCurrency: previewCurrency,
+          hint: 'Use an account with the same currency or run add-transaction explicitly after converting the amount.',
+        }
+      )
+    }
+  }
+
+  if (!apply) {
+    return {
+      ...normalizedPreview,
+      ...(isFailureResult(normalizedPreview) ? {} : { dryRun: true, requiresConfirmation: true }),
+      parsed,
+      metadata,
+      suggestedCommand,
+    }
+  }
+
+  if (isFailureResult(normalizedPreview)) {
+    return {
+      ...normalizedPreview,
+      parsed,
+      metadata,
+      suggestedCommand,
+    }
+  }
+
+  const addInput = addTransaction.schema.parse({ ...transactionArgs, dryRun: false })
+  const result = await addTransaction.execute(addInput)
+  const normalized = normalizeResult(result) as Record<string, unknown>
+
+  return {
+    ...normalized,
+    applied: !isFailureResult(normalized),
+    parsed,
+  }
+}
+
+function compactRecordArgs(args: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(args).filter(([, value]) => value !== undefined))
+}
+
+function getRecordPreviewCurrency(result: Record<string, unknown>): string | null {
+  const candidate =
+    result.wouldCreate && typeof result.wouldCreate === 'object'
+      ? (result.wouldCreate as Record<string, unknown>).currency
+      : result.transaction && typeof result.transaction === 'object'
+        ? (result.transaction as Record<string, unknown>).currency
+        : null
+
+  if (typeof candidate !== 'string') return null
+  const currency = candidate.trim().toUpperCase()
+  return currency === '' ? null : currency
 }
 
 // Convert a Zod schema to commander options
@@ -53,7 +753,7 @@ export function zodToOptions(schema: z.ZodObject<any>): Array<{
       isStructured = true
     }
 
-    const flag = key.replace(/([A-Z])/g, '-$1').toLowerCase() // camelCase → kebab-case
+    const flag = camelToKebab(key)
     const rawDesc = (inner as any)?.description || (zodType as any)?.description || ''
     const desc = isStructured
       ? `${rawDesc}${rawDesc ? ' ' : ''}Pass as JSON (example: '[{"key":"value"}]').`
@@ -245,7 +945,8 @@ function getDiagnoseSummary(toolDefinitions: ToolDefinition[], deep: boolean): D
          0
        ) AS computedBalance
      FROM accounts a
-     LEFT JOIN transactions t ON t.account_id = a.id OR t.transfer_to_account_id = a.id
+     LEFT JOIN transactions t ON (t.account_id = a.id OR t.transfer_to_account_id = a.id)
+       AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      GROUP BY a.id, a.name, a.balance
      ORDER BY a.name ASC, a.id ASC`
   )
@@ -352,35 +1053,85 @@ export function createProgram(toolDefinitions: ToolDefinition[] = tools): Comman
     .description('Shikin — control your finances from the command line')
     .version('1.0.2')
 
-  program
-    .command('diagnose')
-    .description('Validate shared database connectivity and print CLI/MCP health details')
-    .option('--deep', 'Run read-only integrity, foreign-key, migration, and balance checks')
-    .action((options: { deep?: boolean }) => {
-      try {
-        console.log(
-          JSON.stringify(getDiagnoseSummary(toolDefinitions, Boolean(options.deep)), null, 2)
-        )
-      } catch (err) {
-        console.log(
-          JSON.stringify(
-            {
-              success: false,
-              message: err instanceof Error ? err.message : String(err),
-            },
-            null,
-            2
-          )
-        )
-        process.exitCode = 1
-      } finally {
-        close()
-      }
-    })
+  addOutputOptions(
+    program
+      .command('diagnose')
+      .description('Validate shared database connectivity and print CLI/MCP health details')
+      .option('--deep', 'Run read-only integrity, foreign-key, migration, and balance checks')
+  ).action((options: Record<string, unknown>) => {
+    const outputOptions = getOutputOptions(options)
+    try {
+      writeOutput(getDiagnoseSummary(toolDefinitions, Boolean(options.deep)), outputOptions)
+    } catch (err) {
+      writeOutput(
+        errorResult('DIAGNOSE_FAILED', err instanceof Error ? err.message : String(err)),
+        outputOptions
+      )
+      process.exitCode = 1
+    } finally {
+      close()
+    }
+  })
+
+  addOutputOptions(
+    program.command('tools').description('Return machine-readable command discovery metadata')
+  ).action((options: Record<string, unknown>) => {
+    writeOutput(getCommandCatalog(toolDefinitions), getOutputOptions(options))
+    close()
+  })
+
+  addOutputOptions(
+    program
+      .command('validate')
+      .description('Validate another command without executing it')
+      .argument('<commandName>', 'Command to validate')
+      .argument('[args...]', 'Command options to validate')
+      .allowUnknownOption(true)
+      .allowExcessArguments(true),
+    { includeRedacted: false }
+  ).action((commandName: string, args: string[] = [], options: Record<string, unknown>) => {
+    const outputOptions = getOutputOptions(options)
+    const result = validateToolInput(commandName, args, toolDefinitions)
+    writeOutput(result, outputOptions)
+    if (isFailureResult(normalizeResult(result))) process.exitCode = 1
+    close()
+  })
+
+  addOutputOptions(
+    program
+      .command('record')
+      .description('Parse a natural-language transaction entry and return a confirmation preview')
+      .argument('<entry...>', 'Natural-language transaction entry')
+      .option('--apply', 'Apply the parsed transaction noninteractively')
+      .option('--dry-run', 'Validate and preview the parsed transaction without writing it')
+      .option('--account <value>', 'Account alias, exact account ID, or exact account name')
+      .option('--account-id <value>', 'Canonical account ID')
+      .option('--category <value>', 'Category name override')
+      .option('--status <status>', 'Transaction status: pending, posted, or cleared')
+      .option('--notes <value>', 'User transaction notes')
+      .option('--source <value>', 'Assistant or origin label for transaction metadata')
+      .option('--note <value>', 'Assistant changelog note for transaction metadata')
+  ).action(async (entryParts: string[], options: Record<string, unknown>) => {
+    const outputOptions = getOutputOptions(options)
+    const entry = entryParts.join(' ')
+    const parsed = parseRecordEntry(entry)
+
+    try {
+      const result = await executeRecordCommand(parsed, options, toolDefinitions)
+      writeOutput(result, outputOptions)
+      if (isFailureResult(normalizeResult(result))) process.exitCode = 1
+    } catch (err) {
+      writeOutput(errorFromUnknown(err), outputOptions)
+      process.exitCode = 1
+    } finally {
+      close()
+    }
+  })
 
   // Register each tool as a CLI command
   for (const tool of toolDefinitions) {
     const cmd = program.command(tool.name).description(tool.description)
+    addOutputOptions(cmd)
 
     if (tool.name === 'query-transactions') {
       cmd.alias('list-transactions')
@@ -391,35 +1142,33 @@ export function createProgram(toolDefinitions: ToolDefinition[] = tools): Comman
       const options = zodToOptions(tool.schema)
 
       for (const opt of options) {
+        if (OUTPUT_OPTION_KEYS.has(kebabToCamel(opt.flag))) {
+          continue
+        }
+
         const placeholder = opt.isStructured ? '<json>' : '<value>'
         const flagStr = opt.isBoolean
           ? opt.defaultValue === true
             ? `--no-${opt.flag}`
-            : `--${opt.flag}`
+            : opt.defaultValue === undefined
+              ? `--${opt.flag} [value]`
+              : `--${opt.flag}`
           : `--${opt.flag} ${placeholder}`
 
-        if (opt.required) {
-          cmd.requiredOption(flagStr, opt.description)
-        } else {
-          cmd.option(flagStr, opt.description, opt.defaultValue as string)
-        }
+        cmd.option(flagStr, opt.description, opt.defaultValue as string)
       }
     }
 
-    cmd.action(async (opts) => {
+    cmd.action(async (opts: Record<string, unknown>) => {
+      const outputOptions = getOutputOptions(opts)
       try {
         if (tool.cliUnavailableMessage) {
-          console.log(
-            JSON.stringify(
-              {
-                success: false,
-                message: tool.cliUnavailableMessage,
-                error: tool.cliUnavailableMessage,
-                errorType: 'unavailable_error',
-              },
-              null,
-              2
-            )
+          writeOutput(
+            errorResult('UNAVAILABLE_ERROR', tool.cliUnavailableMessage, {
+              error: tool.cliUnavailableMessage,
+              errorType: 'unavailable_error',
+            }),
+            outputOptions
           )
           process.exitCode = 1
           return
@@ -430,25 +1179,13 @@ export function createProgram(toolDefinitions: ToolDefinition[] = tools): Comman
         const parsed = tool.schema.parse(input)
         const result = await tool.execute(parsed)
 
-        console.log(JSON.stringify(result, null, 2))
+        writeOutput(result, outputOptions)
 
-        if (isFailureResult(result)) {
+        if (isFailureResult(normalizeResult(result))) {
           process.exitCode = 1
         }
       } catch (err) {
-        if (err instanceof z.ZodError) {
-          console.error(JSON.stringify({ error: 'Validation error', issues: err.issues }, null, 2))
-        } else {
-          console.error(
-            JSON.stringify(
-              {
-                error: err instanceof Error ? err.message : String(err),
-              },
-              null,
-              2
-            )
-          )
-        }
+        writeOutput(errorFromUnknown(err), outputOptions)
         process.exitCode = 1
       } finally {
         close()
@@ -474,6 +1211,7 @@ export function coerceInput(
     if (value === undefined) continue
 
     const zodType = shape[key] as z.ZodTypeAny | undefined
+    if (OUTPUT_OPTION_KEYS.has(key) && !zodType) continue
     if (!zodType) continue
 
     result[key] = coerceValue(value, zodType, key)
@@ -546,7 +1284,7 @@ function parseStructuredValue(value: unknown, optionName: string): unknown {
     return JSON.parse(trimmed)
   } catch {
     throw new Error(
-      `Invalid JSON for --${optionName.replace(/([A-Z])/g, '-$1').toLowerCase()}. Provide valid JSON for structured options.`
+      `Invalid JSON for --${camelToKebab(optionName)}. Provide valid JSON for structured options.`
     )
   }
 }
@@ -557,9 +1295,16 @@ function unwrapSchema(schema: z.ZodTypeAny): z.ZodTypeAny {
   while (
     current instanceof z.ZodOptional ||
     current instanceof z.ZodDefault ||
-    current instanceof z.ZodNullable
+    current instanceof z.ZodNullable ||
+    current instanceof z.ZodEffects
   ) {
-    current = current instanceof z.ZodDefault ? current._def.innerType : current.unwrap()
+    if (current instanceof z.ZodDefault) {
+      current = current._def.innerType
+    } else if (current instanceof z.ZodEffects) {
+      current = current._def.schema
+    } else {
+      current = current.unwrap()
+    }
   }
 
   return current

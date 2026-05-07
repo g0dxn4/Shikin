@@ -51,7 +51,9 @@ const getBalanceOverview: ToolDefinition = {
          COALESCE(SUM(CASE WHEN t.type = 'expense' THEN t.amount ELSE 0 END), 0) as total_expenses
        FROM transactions t
        JOIN accounts a ON a.id = t.account_id
-       WHERE a.is_archived = 0 AND t.date >= $1 AND t.date <= $2
+       WHERE a.is_archived = 0
+         AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
+         AND t.date >= $1 AND t.date <= $2
        GROUP BY t.currency`,
       [currentMonthStart, currentMonthEnd]
     )
@@ -70,7 +72,9 @@ const getBalanceOverview: ToolDefinition = {
          COALESCE(SUM(CASE WHEN t.type = 'expense' THEN t.amount ELSE 0 END), 0) as total_expenses
        FROM transactions t
        JOIN accounts a ON a.id = t.account_id
-       WHERE a.is_archived = 0 AND t.date >= $1 AND t.date <= $2
+       WHERE a.is_archived = 0
+         AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
+         AND t.date >= $1 AND t.date <= $2
        GROUP BY t.currency`,
       [prevMonthStart, prevMonthEnd]
     )
@@ -193,7 +197,9 @@ const analyzeSpendingTrends: ToolDefinition = {
          SUM(t.amount) as total
        FROM transactions t
        LEFT JOIN categories c ON t.category_id = c.id
-        WHERE t.type = 'expense' AND t.date >= $1 AND t.date <= $2
+        WHERE t.type = 'expense'
+          AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
+          AND t.date >= $1 AND t.date <= $2
         GROUP BY month, t.currency, t.category_id, category_name
         ORDER BY month, t.currency, total DESC`,
       [startDate, endDate]
@@ -211,7 +217,9 @@ const analyzeSpendingTrends: ToolDefinition = {
          COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as total_expenses,
          COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as total_income
        FROM transactions
-       WHERE type IN ('income', 'expense') AND date >= $1 AND date <= $2
+       WHERE type IN ('income', 'expense')
+         AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
+         AND date >= $1 AND date <= $2
         GROUP BY month, currency
         ORDER BY month, currency`,
       [startDate, endDate]

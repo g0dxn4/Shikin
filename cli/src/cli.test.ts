@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
+import dayjs from 'dayjs'
 import type * as ToolsModule from './tools.js'
 import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
 
@@ -102,7 +103,7 @@ describe('CLI command execution', () => {
 
   it('uses the shared migration list for diagnose drift prevention', () => {
     expect(EXPECTED_MIGRATIONS).toBe(CLI_DATABASE_MIGRATIONS)
-    expect(EXPECTED_MIGRATIONS).toHaveLength(12)
+    expect(EXPECTED_MIGRATIONS).toHaveLength(13)
   })
 
   it('keeps all tool definitions discoverable as CLI commands', () => {
@@ -144,6 +145,447 @@ describe('CLI command execution', () => {
     expect(close).toHaveBeenCalledTimes(1)
   })
 
+  it('passes global --redacted through when a tool schema owns redacted', async () => {
+    const tool = {
+      name: 'export-data',
+      description: 'Export data',
+      schema: z.object({
+        format: z.enum(['json', 'csv']).default('json'),
+        redacted: z.boolean().default(false),
+      }),
+      execute: vi.fn(async (input: Record<string, unknown>) => ({ success: true, input })),
+    }
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const program = createProgram([tool])
+
+    await program.parseAsync(['node', 'shikin', 'export-data', '--format', 'csv', '--redacted'])
+
+    expect(tool.execute).toHaveBeenCalledWith({ format: 'csv', redacted: true })
+    expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toMatchObject({
+      success: true,
+      input: { format: 'csv', redacted: true },
+    })
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns machine-readable command discovery metadata', async () => {
+    const tool = {
+      name: 'catalog-demo',
+      description: 'Catalog test tool',
+      schema: z.object({
+        kind: z.enum(['expense', 'income']).describe('Transaction kind'),
+        dryRun: z.boolean().default(false).describe('Preview only'),
+        activeOnly: z.boolean().optional().default(true).describe('Only active items'),
+        splits: z.array(z.object({ amount: z.number() })).optional(),
+      }),
+      execute: vi.fn(async () => ({ success: true })),
+    }
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const program = createProgram([tool])
+
+    await program.parseAsync(['node', 'shikin', 'tools', '--json'])
+
+    const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
+    const catalogDemo = output.commands.find(
+      (command: { name: string }) => command.name === 'catalog-demo'
+    )
+    const validateCommand = output.commands.find(
+      (command: { name: string }) => command.name === 'validate'
+    )
+
+    expect(output.success).toBe(true)
+    expect(output.outputOptions.map((option: { name: string }) => option.name)).toEqual([
+      'json',
+      'pretty',
+      'quiet',
+      'redacted',
+    ])
+    expect(catalogDemo.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'kind', type: 'enum', enumValues: ['expense', 'income'] }),
+        expect.objectContaining({ name: 'dryRun', flag: 'dry-run', type: 'boolean' }),
+        expect.objectContaining({ name: 'activeOnly', flag: 'no-active-only', type: 'boolean' }),
+        expect.objectContaining({ name: 'splits', type: 'array<object>', isStructured: true }),
+      ])
+    )
+    expect(catalogDemo.validationScope).toBe('schema')
+    expect(validateCommand.outputOptions.map((option: { name: string }) => option.name)).toEqual([
+      'json',
+      'pretty',
+      'quiet',
+    ])
+    expect(logSpy.mock.calls[0]?.[0]).not.toContain('\n')
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('validates another command without executing it', async () => {
+    const tool = {
+      name: 'validate-demo',
+      description: 'Validate test tool',
+      schema: z.object({
+        amount: z.number().positive(),
+        type: z.enum(['expense', 'income']),
+        dryRun: z.boolean().default(false),
+      }),
+      execute: vi.fn(async () => ({ success: true })),
+    }
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const program = createProgram([tool])
+
+    await program.parseAsync([
+      'node',
+      'shikin',
+      'validate',
+      'validate-demo',
+      '--amount',
+      '12.34',
+      '--type',
+      'expense',
+      '--dry-run',
+    ])
+
+    expect(tool.execute).not.toHaveBeenCalled()
+    expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toMatchObject({
+      success: true,
+      command: 'validate-demo',
+      validationScope: 'schema',
+      input: { amount: 12.34, type: 'expense', dryRun: true },
+      message:
+        'validate-demo input is schema-valid. No domain checks ran and no changes were made.',
+    })
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('validates default-true boolean options using the real --no-* flag shape', async () => {
+    const tool = {
+      name: 'validate-boolean-demo',
+      description: 'Validate boolean flag test tool',
+      schema: z.object({
+        activeOnly: z.boolean().optional().default(true),
+      }),
+      execute: vi.fn(async () => ({ success: true })),
+    }
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const program = createProgram([tool])
+
+    await program.parseAsync([
+      'node',
+      'shikin',
+      'validate',
+      'validate-boolean-demo',
+      '--no-active-only',
+    ])
+
+    expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toMatchObject({
+      success: true,
+      command: 'validate-boolean-demo',
+      input: { activeOnly: false },
+    })
+
+    await program.parseAsync([
+      'node',
+      'shikin',
+      'validate',
+      'validate-boolean-demo',
+      '--active-only=false',
+    ])
+
+    expect(JSON.parse(logSpy.mock.calls[1]?.[0] as string)).toMatchObject({
+      success: false,
+      code: 'COMMAND_ERROR',
+      message: 'Unknown option --active-only for validate-boolean-demo.',
+    })
+    expect(close).toHaveBeenCalledTimes(2)
+  })
+
+  it('parses optional boolean false consistently for CLI execution and validation', async () => {
+    const tool = {
+      name: 'optional-bool-demo',
+      description: 'Optional boolean test tool',
+      schema: z.object({ active: z.boolean().optional() }),
+      execute: vi.fn(async (input: Record<string, unknown>) => ({ success: true, input })),
+    }
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await createProgram([tool]).parseAsync([
+      'node',
+      'shikin',
+      'optional-bool-demo',
+      '--active',
+      'false',
+    ])
+
+    expect(tool.execute).toHaveBeenCalledWith({ active: false })
+    expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toMatchObject({
+      success: true,
+      input: { active: false },
+    })
+
+    vi.mocked(close).mockReset()
+    await createProgram([tool]).parseAsync([
+      'node',
+      'shikin',
+      'validate',
+      'optional-bool-demo',
+      '--active',
+      'false',
+    ])
+
+    expect(JSON.parse(logSpy.mock.calls[1]?.[0] as string)).toMatchObject({
+      success: true,
+      input: { active: false },
+    })
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats validate target arguments as target options when names collide with output flags', async () => {
+    const tool = {
+      name: 'export-data',
+      description: 'Export data',
+      schema: z.object({ redacted: z.boolean().optional().default(false) }),
+      execute: vi.fn(async () => ({ success: true })),
+    }
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await createProgram([tool]).parseAsync([
+      'node',
+      'shikin',
+      'validate',
+      'export-data',
+      '--redacted',
+    ])
+
+    expect(tool.execute).not.toHaveBeenCalled()
+    expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toMatchObject({
+      success: true,
+      command: 'export-data',
+      input: { redacted: true },
+    })
+  })
+
+  it('previews natural-language records with formatted amounts and local dates', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const program = createProgram([])
+
+    await program.parseAsync([
+      'node',
+      'shikin',
+      'record',
+      '--source',
+      'luna',
+      '--note',
+      'Discord balance note',
+      'Amazon',
+      'case',
+      '1,234.56',
+      'MXN',
+      'category',
+      'shopping',
+      'today',
+    ])
+
+    const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
+    expect(output).toMatchObject({
+      success: true,
+      requiresConfirmation: true,
+      parsed: {
+        amount: 1234.56,
+        currency: 'MXN',
+        type: 'expense',
+        description: 'Amazon case',
+        category: 'shopping',
+        date: dayjs().format('YYYY-MM-DD'),
+      },
+      metadata: {
+        source: 'luna',
+        note: 'Discord balance note',
+      },
+    })
+    expect(output.suggestedCommand.args.amount).toBe(1234.56)
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not treat lowercase prose after an amount as a currency code', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const program = createProgram([])
+
+    await program.parseAsync(['node', 'shikin', 'record', 'paid', '10', 'for', 'lunch'])
+
+    const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
+    expect(output).toMatchObject({
+      success: true,
+      parsed: {
+        amount: 10,
+        currency: null,
+        description: 'paid for lunch',
+      },
+    })
+  })
+
+  it('routes record preview and apply through the add-transaction tool', async () => {
+    const addTransaction = {
+      name: 'add-transaction',
+      description: 'Add transaction',
+      schema: z.object({
+        amount: z.number().positive(),
+        type: z.enum(['expense', 'income', 'transfer']),
+        description: z.string(),
+        category: z.string().optional(),
+        date: z.string(),
+        account: z.string().optional(),
+        accountId: z.string().optional(),
+        notes: z.string().optional(),
+        source: z.string().optional(),
+        note: z.string().optional(),
+        status: z.enum(['pending', 'posted', 'cleared']).optional().default('posted'),
+        dryRun: z.boolean().default(false),
+      }),
+      execute: vi.fn(async (input: Record<string, unknown>) =>
+        input.dryRun
+          ? { success: true, dryRun: true, wouldCreate: input }
+          : { success: true, transaction: { id: 'tx-applied', ...input } }
+      ),
+    }
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await createProgram([addTransaction]).parseAsync([
+      'node',
+      'shikin',
+      'record',
+      '--account',
+      'checking',
+      '--category',
+      'Food',
+      '--status',
+      'pending',
+      '--source',
+      'luna',
+      '--note',
+      'metadata memo',
+      'Coffee',
+      '4.50',
+    ])
+
+    expect(addTransaction.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 4.5,
+        type: 'expense',
+        description: 'Coffee',
+        account: 'checking',
+        category: 'Food',
+        status: 'pending',
+        source: 'luna',
+        note: 'metadata memo',
+        dryRun: true,
+      })
+    )
+    expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toMatchObject({
+      success: true,
+      dryRun: true,
+      requiresConfirmation: true,
+      wouldCreate: {
+        account: 'checking',
+        status: 'pending',
+      },
+      suggestedCommand: {
+        command: 'add-transaction',
+        args: expect.not.objectContaining({ dryRun: expect.anything() }),
+      },
+    })
+
+    vi.mocked(close).mockReset()
+    logSpy.mockClear()
+    await createProgram([addTransaction]).parseAsync([
+      'node',
+      'shikin',
+      'record',
+      '--apply',
+      '--account-id',
+      'acct-1',
+      '--status',
+      'posted',
+      'Coffee',
+      '4.50',
+    ])
+
+    expect(addTransaction.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({ accountId: 'acct-1', status: 'posted', dryRun: false })
+    )
+    expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toMatchObject({
+      success: true,
+      applied: true,
+      transaction: { id: 'tx-applied', accountId: 'acct-1', dryRun: false },
+    })
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects record entries with explicit currency when the resolved account currency is unknown', async () => {
+    const addTransaction = {
+      name: 'add-transaction',
+      description: 'Add transaction',
+      schema: z.object({
+        amount: z.number().positive(),
+        type: z.enum(['expense', 'income', 'transfer']),
+        description: z.string(),
+        category: z.string().optional(),
+        date: z.string(),
+        dryRun: z.boolean().default(false),
+      }),
+      execute: vi.fn(async () => ({
+        success: true,
+        dryRun: true,
+        wouldCreate: { currency: '' },
+      })),
+    }
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await createProgram([addTransaction]).parseAsync([
+      'node',
+      'shikin',
+      'record',
+      'Coffee',
+      '4.50',
+      'USD',
+    ])
+
+    expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toMatchObject({
+      success: false,
+      code: 'RECORD_CURRENCY_UNKNOWN',
+      message: 'Record parsed currency USD, but the resolved account currency is unknown.',
+    })
+    expect(addTransaction.execute).toHaveBeenCalledTimes(1)
+  })
+
+  it('honors quiet and redacted output flags', async () => {
+    const tool = {
+      name: 'secret-demo',
+      description: 'Secret output test tool',
+      schema: z.object({}),
+      execute: vi.fn(async () => ({ success: true, token: 'secret-value' })),
+    }
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const program = createProgram([tool])
+
+    await program.parseAsync(['node', 'shikin', 'secret-demo', '--quiet'])
+
+    expect(logSpy).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalledTimes(1)
+
+    vi.mocked(close).mockReset()
+    await createProgram([tool]).parseAsync(['node', 'shikin', 'secret-demo', '--redacted'])
+
+    expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toEqual({
+      success: true,
+      token: '[REDACTED]',
+    })
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
   it('returns a nonzero exit code for tool-level failures while preserving JSON output', async () => {
     const tool = {
       name: 'domain-failure',
@@ -169,6 +611,8 @@ describe('CLI command execution', () => {
           success: false,
           message: 'Account missing-account not found.',
           reason: 'missing_account',
+          code: 'MISSING_ACCOUNT',
+          hint: 'Run shikin list-accounts to find a valid account, or set an alias with shikin set-account-alias.',
         },
         null,
         2
@@ -199,6 +643,7 @@ describe('CLI command execution', () => {
       JSON.stringify(
         {
           success: false,
+          code: 'UNAVAILABLE_ERROR',
           message: 'This feed is not configured yet.',
           error: 'This feed is not configured yet.',
           errorType: 'unavailable_error',
@@ -272,6 +717,7 @@ describe('CLI command execution', () => {
         { name: '013_recurring_rules_currency' },
         { name: '014_recurring_rules_currency_backfill' },
         { name: '015_primary_account' },
+        { name: '016_cli_qol_foundation' },
       ])
       .mockReturnValueOnce([{ count: 2 }])
       .mockReturnValueOnce([{ count: 14 }])
@@ -333,8 +779,8 @@ describe('CLI command execution', () => {
           },
           database: {
             ready: true,
-            migrationCount: 12,
-            latestMigration: '015_primary_account',
+            migrationCount: 13,
+            latestMigration: '016_cli_qol_foundation',
             accountCount: 2,
             categoryCount: 14,
             transactionCount: 42,
@@ -348,8 +794,8 @@ describe('CLI command execution', () => {
                 violations: [],
               },
               migrations: {
-                expected: 12,
-                applied: 12,
+                expected: 13,
+                applied: 13,
                 missing: [],
                 unexpected: [],
               },
@@ -421,7 +867,7 @@ describe('CLI command execution', () => {
 
     const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
     expect(output.database.integrity.migrations).toEqual({
-      expected: 12,
+      expected: 13,
       applied: 3,
       missing: CLI_DATABASE_MIGRATIONS.filter(
         (migration) => migration !== '001_core_tables' && migration !== '003_credit_cards'

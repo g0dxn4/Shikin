@@ -48,6 +48,7 @@ playwright-report/
 docs/development/
 
 # AI tools
+.plans/
 .delta9/
 .cursor/
 .aider*

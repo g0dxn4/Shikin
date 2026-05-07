@@ -9,6 +9,7 @@ import { automationTools } from './automation.js'
 import { planningandhealthTools } from './planning-and-health.js'
 import { dataOpsTools } from './data-ops.js'
 import { cashflowBucketTools } from './cashflow-buckets.js'
+import { auditAndContextTools } from './audit-and-context.js'
 
 export const tools: ToolDefinition[] = [
   ...transactionsTools,
@@ -19,6 +20,7 @@ export const tools: ToolDefinition[] = [
   ...notebookandmarketTools,
   ...automationTools,
   ...dataOpsTools,
+  ...auditAndContextTools,
   ...cashflowBucketTools,
   ...planningandhealthTools,
 ]

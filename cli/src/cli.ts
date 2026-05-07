@@ -4,11 +4,20 @@ import { pathToFileURL } from 'node:url'
 import { Command } from 'commander'
 import { tools, type ToolDefinition } from './tools.js'
 import { close, query } from './database.js'
+import {
+  findTransactionDuplicate,
+  transactionDuplicateReason,
+  type TransactionDuplicateCheck,
+} from './duplicate-detection.js'
 import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
+import { toCentavos } from './money.js'
 import { z } from 'zod'
 import dayjs from 'dayjs'
 
 export const EXPECTED_MIGRATIONS = CLI_DATABASE_MIGRATIONS
+export const COMMAND_CATALOG_VERSION = '2026-05-07.cli-qol-followups'
+export const CLI_SCHEMA_VERSION = 'cli-tools-json.v1'
+export const CLI_FOUNDATION_MIGRATION = '016_cli_qol_foundation'
 
 function isFailureResult(value: unknown): value is Record<string, unknown> & { success: false } {
   return (
@@ -195,6 +204,11 @@ function describeOutputOptions(options: { includeRedacted?: boolean } = {}) {
       ]
 }
 
+function describeToolOutputOptions(schema: z.ZodObject<any>) {
+  const ownsRedacted = Object.prototype.hasOwnProperty.call(schema.shape, 'redacted')
+  return describeOutputOptions({ includeRedacted: !ownsRedacted })
+}
+
 function describeToolOptions(schema: z.ZodObject<any>): DescribedOption[] {
   const optionByFlag = new Map(zodToOptions(schema).map((option) => [option.flag, option]))
 
@@ -245,12 +259,23 @@ function getEnumValues(schema: z.ZodTypeAny): string[] | undefined {
 }
 
 function getToolAliases(tool: ToolDefinition): string[] {
+  if (tool.name === 'backup-database') return ['backup']
+  if (tool.name === 'restore-database') return ['restore']
   return tool.name === 'query-transactions' ? ['list-transactions'] : []
 }
 
 function getCommandCatalog(toolDefinitions: ToolDefinition[]) {
   const defaultOutputOptions = describeOutputOptions()
   const validateOutputOptions = describeOutputOptions({ includeRedacted: false })
+  const cliUnavailableTools = toolDefinitions
+    .filter((tool) => tool.cliUnavailableMessage)
+    .map((tool) => tool.name)
+    .sort()
+  const mcpUnavailableTools = toolDefinitions
+    .filter((tool) => tool.mcpUnavailableMessage)
+    .map((tool) => tool.name)
+    .sort()
+  const latestRequiredMigration = CLI_DATABASE_MIGRATIONS.at(-1) ?? null
   const builtInCommands = [
     {
       name: 'diagnose',
@@ -314,6 +339,13 @@ function getCommandCatalog(toolDefinitions: ToolDefinition[]) {
           type: 'boolean',
           required: false,
           description: 'Validate and preview without writing (default)',
+        },
+        {
+          name: 'allowDuplicate',
+          flag: 'allow-duplicate',
+          type: 'boolean',
+          required: false,
+          description: 'Apply even when an exact or likely duplicate transaction is detected',
         },
         {
           name: 'account',
@@ -382,13 +414,91 @@ function getCommandCatalog(toolDefinitions: ToolDefinition[]) {
     cliUnavailableMessage: tool.cliUnavailableMessage,
     mcpUnavailableMessage: tool.mcpUnavailableMessage,
     options: describeToolOptions(tool.schema),
-    outputOptions: defaultOutputOptions,
+    outputOptions: describeToolOutputOptions(tool.schema),
   }))
 
   const commands = [...builtInCommands, ...toolCommands]
 
   return {
     success: true,
+    catalogVersion: COMMAND_CATALOG_VERSION,
+    schemaVersion: CLI_SCHEMA_VERSION,
+    generatedAt: new Date().toISOString(),
+    compatibility: {
+      localFirst: true,
+      sharedCatalog: true,
+      notes: [
+        'Commands execute against the local Shikin SQLite database; no remote service is required.',
+        'CLI and MCP surfaces are generated from the same shared tool definition catalog.',
+      ],
+      cli: {
+        availableToolCount: toolDefinitions.length - cliUnavailableTools.length,
+        unavailableToolCount: cliUnavailableTools.length,
+        unavailableTools: cliUnavailableTools,
+      },
+      mcp: {
+        availableToolCount: toolDefinitions.length - mcpUnavailableTools.length,
+        unavailableToolCount: mcpUnavailableTools.length,
+        unavailableTools: mcpUnavailableTools,
+      },
+      validation: {
+        scope: 'schema',
+        note: 'The validate command parses arguments against the command schema only; it does not run domain checks or write data.',
+      },
+    },
+    database: {
+      requiredMigrations: [...CLI_DATABASE_MIGRATIONS],
+      latestRequiredMigration,
+      migrationCount: CLI_DATABASE_MIGRATIONS.length,
+      expectsCurrent016FoundationSchema: latestRequiredMigration === CLI_FOUNDATION_MIGRATION,
+      foundationMigration: CLI_FOUNDATION_MIGRATION,
+      readinessContract: {
+        migrationsAreRequired: true,
+        structuralChecksRunAtDatabaseOpen: true,
+        optionalSupportSurfacesDegradeWhenTablesOrColumnsAreMissing: true,
+      },
+      supportSchema: {
+        goals: {
+          table: 'goals',
+          columns: [
+            'id',
+            'name',
+            'target_amount',
+            'current_amount',
+            'deadline',
+            'account_id',
+            'icon',
+            'color',
+            'notes',
+            'created_at',
+            'updated_at',
+          ],
+          requiredForCatalog: false,
+        },
+        investments: {
+          table: 'investments',
+          columns: [
+            'id',
+            'account_id',
+            'symbol',
+            'name',
+            'type',
+            'shares',
+            'avg_cost_basis',
+            'currency',
+            'notes',
+            'created_at',
+            'updated_at',
+          ],
+          requiredForCatalog: false,
+        },
+        stockPrices: {
+          table: 'stock_prices',
+          columns: ['id', 'symbol', 'price', 'currency', 'date', 'created_at'],
+          requiredForCatalog: false,
+        },
+      },
+    },
     commandCount: commands.length,
     toolCount: toolDefinitions.length,
     outputOptions: defaultOutputOptions,
@@ -585,6 +695,7 @@ async function executeRecordCommand(
 
   const apply = Boolean(options.apply)
   const explicitDryRun = Boolean(options.dryRun)
+  const allowDuplicate = Boolean(options.allowDuplicate)
   if (apply && explicitDryRun) {
     return errorResult('RECORD_FLAG_CONFLICT', 'Use either --apply or --dry-run, not both.')
   }
@@ -612,6 +723,7 @@ async function executeRecordCommand(
     source: typeof options.source === 'string' ? options.source : undefined,
     note: typeof options.note === 'string' ? options.note : undefined,
     status,
+    allowDuplicate: allowDuplicate ? true : undefined,
     account: typeof options.account === 'string' ? options.account : undefined,
     accountId: typeof options.accountId === 'string' ? options.accountId : undefined,
   })
@@ -638,7 +750,10 @@ async function executeRecordCommand(
     }
   }
 
-  const previewInput = addTransaction.schema.parse({ ...transactionArgs, dryRun: true })
+  const previewInput = compactRecordArgs({
+    ...addTransaction.schema.parse({ ...transactionArgs, dryRun: true }),
+    allowDuplicate: allowDuplicate ? true : undefined,
+  })
   const previewResult = await addTransaction.execute(previewInput)
   const normalizedPreview = normalizeResult(previewResult) as Record<string, unknown>
   const previewCurrency = getRecordPreviewCurrency(normalizedPreview)
@@ -668,6 +783,10 @@ async function executeRecordCommand(
     }
   }
 
+  const duplicateCheck = isFailureResult(normalizedPreview)
+    ? null
+    : findRecordDuplicateCheck(normalizedPreview, transactionArgs)
+
   if (!apply) {
     return {
       ...normalizedPreview,
@@ -675,6 +794,7 @@ async function executeRecordCommand(
       parsed,
       metadata,
       suggestedCommand,
+      ...(duplicateCheck?.match ? { duplicateCheck } : {}),
     }
   }
 
@@ -687,7 +807,29 @@ async function executeRecordCommand(
     }
   }
 
-  const addInput = addTransaction.schema.parse({ ...transactionArgs, dryRun: false })
+  if (duplicateCheck?.match && !allowDuplicate) {
+    return {
+      success: false,
+      reason: transactionDuplicateReason(duplicateCheck.match.kind),
+      duplicate: duplicateCheck.match,
+      duplicateCheck,
+      parsed,
+      metadata,
+      suggestedCommand: {
+        ...suggestedCommand,
+        args: { ...suggestedCommand.args, allowDuplicate: true },
+      },
+      message:
+        duplicateCheck.match.kind === 'exact_duplicate'
+          ? `Exact duplicate transaction ${duplicateCheck.match.existingTransactionId} already exists. Re-run with --allow-duplicate to record it anyway.`
+          : `Potential duplicate transaction ${duplicateCheck.match.existingTransactionId} is within ${duplicateCheck.match.windowDays} days with similar description. Re-run with --allow-duplicate to record it anyway.`,
+    }
+  }
+
+  const addInput = compactRecordArgs({
+    ...addTransaction.schema.parse({ ...transactionArgs, dryRun: false }),
+    allowDuplicate: allowDuplicate ? true : undefined,
+  })
   const result = await addTransaction.execute(addInput)
   const normalized = normalizeResult(result) as Record<string, unknown>
 
@@ -695,11 +837,74 @@ async function executeRecordCommand(
     ...normalized,
     applied: !isFailureResult(normalized),
     parsed,
+    ...(duplicateCheck?.match && allowDuplicate && !isFailureResult(normalized)
+      ? {
+          duplicateOverride: {
+            allowed: true,
+            reason: 'allow_duplicate',
+            duplicate: duplicateCheck.match,
+            duplicateCheck,
+          },
+        }
+      : {}),
   }
 }
 
 function compactRecordArgs(args: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(args).filter(([, value]) => value !== undefined))
+}
+
+function findRecordDuplicateCheck(
+  previewResult: Record<string, unknown>,
+  transactionArgs: Record<string, unknown>
+): TransactionDuplicateCheck | null {
+  const transactionPreview = getRecordPreviewTransaction(previewResult)
+  const accountId =
+    stringField(transactionPreview, 'accountId') ?? stringField(transactionArgs, 'accountId')
+  const date = stringField(transactionPreview, 'date') ?? stringField(transactionArgs, 'date')
+  const description =
+    stringField(transactionPreview, 'description') ?? stringField(transactionArgs, 'description')
+  const type = stringField(transactionPreview, 'type') ?? stringField(transactionArgs, 'type')
+  const amount = numberField(transactionPreview, 'amount') ?? numberField(transactionArgs, 'amount')
+  const status = stringField(transactionPreview, 'status') ?? stringField(transactionArgs, 'status')
+  const transferToAccountId =
+    stringField(transactionPreview, 'transferToAccountId') ??
+    stringField(transactionArgs, 'transferToAccountId')
+
+  if (!accountId || !date || !description || amount === null) return null
+  if (type !== 'expense' && type !== 'income' && type !== 'transfer') return null
+
+  return findTransactionDuplicate({
+    accountId,
+    date,
+    amountCentavos: toCentavos(amount),
+    type,
+    status: status === 'pending' || status === 'cleared' ? status : 'posted',
+    transferToAccountId,
+    description,
+  })
+}
+
+function getRecordPreviewTransaction(result: Record<string, unknown>): Record<string, unknown> {
+  if (result.wouldCreate && typeof result.wouldCreate === 'object') {
+    return result.wouldCreate as Record<string, unknown>
+  }
+  if (result.transaction && typeof result.transaction === 'object') {
+    return result.transaction as Record<string, unknown>
+  }
+  return {}
+}
+
+function stringField(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key]
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed || null
+}
+
+function numberField(record: Record<string, unknown>, key: string): number | null {
+  const value = record[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 function getRecordPreviewCurrency(result: Record<string, unknown>): string | null {
@@ -1104,6 +1309,7 @@ export function createProgram(toolDefinitions: ToolDefinition[] = tools): Comman
       .argument('<entry...>', 'Natural-language transaction entry')
       .option('--apply', 'Apply the parsed transaction noninteractively')
       .option('--dry-run', 'Validate and preview the parsed transaction without writing it')
+      .option('--allow-duplicate', 'Apply even when an exact or likely duplicate is detected')
       .option('--account <value>', 'Account alias, exact account ID, or exact account name')
       .option('--account-id <value>', 'Canonical account ID')
       .option('--category <value>', 'Category name override')
@@ -1135,6 +1341,12 @@ export function createProgram(toolDefinitions: ToolDefinition[] = tools): Comman
 
     if (tool.name === 'query-transactions') {
       cmd.alias('list-transactions')
+    }
+    if (tool.name === 'backup-database') {
+      cmd.alias('backup')
+    }
+    if (tool.name === 'restore-database') {
+      cmd.alias('restore')
     }
 
     const schemaShape = tool.schema.shape

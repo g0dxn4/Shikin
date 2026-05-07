@@ -6,11 +6,24 @@ import type * as ToolsModule from './tools.js'
 import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
 
 vi.mock('./tools.js', () => ({ tools: [] }))
-vi.mock('./database.js', () => ({ close: vi.fn(), query: vi.fn() }))
+vi.mock('./database.js', () => ({
+  close: vi.fn(),
+  query: vi.fn(),
+  backupDatabase: vi.fn(),
+  restoreDatabase: vi.fn(),
+  DATABASE_BACKUP_SETTING_KEY: 'database_backups',
+}))
 
 const { close, query } = await import('./database.js')
 const { tools: actualTools } = await vi.importActual<typeof ToolsModule>('./tools.js')
-const { coerceInput, createProgram, EXPECTED_MIGRATIONS, zodToOptions } = await import('./cli.js')
+const {
+  CLI_SCHEMA_VERSION,
+  COMMAND_CATALOG_VERSION,
+  coerceInput,
+  createProgram,
+  EXPECTED_MIGRATIONS,
+  zodToOptions,
+} = await import('./cli.js')
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -123,6 +136,17 @@ describe('CLI command execution', () => {
     expect(queryTransactions?.aliases()).toContain('list-transactions')
   })
 
+  it('keeps short aliases for database backup and restore commands', () => {
+    const program = createProgram(actualTools)
+    const backupDatabase = program.commands.find((command) => command.name() === 'backup-database')
+    const restoreDatabase = program.commands.find(
+      (command) => command.name() === 'restore-database'
+    )
+
+    expect(backupDatabase?.aliases()).toContain('backup')
+    expect(restoreDatabase?.aliases()).toContain('restore')
+  })
+
   it('routes list-transactions through the query-transactions command', async () => {
     const tool = {
       name: 'query-transactions',
@@ -177,6 +201,7 @@ describe('CLI command execution', () => {
         kind: z.enum(['expense', 'income']).describe('Transaction kind'),
         dryRun: z.boolean().default(false).describe('Preview only'),
         activeOnly: z.boolean().optional().default(true).describe('Only active items'),
+        redacted: z.boolean().default(false).describe('Redact tool payload'),
         splits: z.array(z.object({ amount: z.number() })).optional(),
       }),
       execute: vi.fn(async () => ({ success: true })),
@@ -196,6 +221,25 @@ describe('CLI command execution', () => {
     )
 
     expect(output.success).toBe(true)
+    expect(output.catalogVersion).toBe(COMMAND_CATALOG_VERSION)
+    expect(output.schemaVersion).toBe(CLI_SCHEMA_VERSION)
+    expect(Number.isNaN(Date.parse(output.generatedAt))).toBe(false)
+    expect(output.commandCount).toBe(output.commands.length)
+    expect(output.toolCount).toBe(1)
+    expect(output.compatibility).toMatchObject({
+      localFirst: true,
+      sharedCatalog: true,
+      cli: { availableToolCount: 1, unavailableToolCount: 0, unavailableTools: [] },
+      mcp: { availableToolCount: 1, unavailableToolCount: 0, unavailableTools: [] },
+      validation: { scope: 'schema' },
+    })
+    expect(output.database).toMatchObject({
+      requiredMigrations: [...CLI_DATABASE_MIGRATIONS],
+      latestRequiredMigration: '016_cli_qol_foundation',
+      migrationCount: CLI_DATABASE_MIGRATIONS.length,
+      expectsCurrent016FoundationSchema: true,
+      foundationMigration: '016_cli_qol_foundation',
+    })
     expect(output.outputOptions.map((option: { name: string }) => option.name)).toEqual([
       'json',
       'pretty',
@@ -207,10 +251,16 @@ describe('CLI command execution', () => {
         expect.objectContaining({ name: 'kind', type: 'enum', enumValues: ['expense', 'income'] }),
         expect.objectContaining({ name: 'dryRun', flag: 'dry-run', type: 'boolean' }),
         expect.objectContaining({ name: 'activeOnly', flag: 'no-active-only', type: 'boolean' }),
+        expect.objectContaining({ name: 'redacted', flag: 'redacted', type: 'boolean' }),
         expect.objectContaining({ name: 'splits', type: 'array<object>', isStructured: true }),
       ])
     )
     expect(catalogDemo.validationScope).toBe('schema')
+    expect(catalogDemo.outputOptions.map((option: { name: string }) => option.name)).toEqual([
+      'json',
+      'pretty',
+      'quiet',
+    ])
     expect(validateCommand.outputOptions.map((option: { name: string }) => option.name)).toEqual([
       'json',
       'pretty',
@@ -521,6 +571,190 @@ describe('CLI command execution', () => {
       transaction: { id: 'tx-applied', accountId: 'acct-1', dryRun: false },
     })
     expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('blocks exact duplicate natural-language records before apply', async () => {
+    const addTransaction = {
+      name: 'add-transaction',
+      description: 'Add transaction',
+      schema: z.object({
+        amount: z.number().positive(),
+        type: z.enum(['expense', 'income', 'transfer']),
+        description: z.string(),
+        date: z.string(),
+        dryRun: z.boolean().default(false),
+      }),
+      execute: vi.fn(async (input: Record<string, unknown>) =>
+        input.dryRun
+          ? {
+              success: true,
+              dryRun: true,
+              wouldCreate: { ...input, accountId: 'acct-1', currency: 'USD' },
+            }
+          : { success: true, transaction: { id: 'tx-applied', ...input } }
+      ),
+    }
+    vi.mocked(query).mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM transactions') && params?.[0] === 'acct-1') {
+        return [
+          {
+            id: 'tx-existing',
+            account_id: 'acct-1',
+            date: params[1],
+            amount: 450,
+            type: 'expense',
+            description: 'coffee',
+          },
+        ]
+      }
+      return []
+    })
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await createProgram([addTransaction]).parseAsync([
+      'node',
+      'shikin',
+      'record',
+      '--apply',
+      'Coffee',
+      '4.50',
+    ])
+
+    expect(addTransaction.execute).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toMatchObject({
+      success: false,
+      reason: 'duplicate_transaction',
+      duplicate: {
+        kind: 'exact_duplicate',
+        existingTransactionId: 'tx-existing',
+      },
+    })
+    expect(process.exitCode).toBe(1)
+  })
+
+  it('checks record duplicates against the requested transaction status', async () => {
+    const addTransaction = {
+      name: 'add-transaction',
+      description: 'Add transaction',
+      schema: z.object({
+        amount: z.number().positive(),
+        type: z.enum(['expense', 'income', 'transfer']),
+        description: z.string(),
+        date: z.string(),
+        status: z.enum(['pending', 'posted', 'cleared']).default('posted'),
+        dryRun: z.boolean().default(false),
+      }),
+      execute: vi.fn(async (input: Record<string, unknown>) =>
+        input.dryRun
+          ? {
+              success: true,
+              dryRun: true,
+              wouldCreate: { ...input, accountId: 'acct-1', currency: 'USD' },
+            }
+          : { success: true, transaction: { id: 'tx-applied', ...input } }
+      ),
+    }
+    vi.mocked(query).mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM transactions') && params?.[4] === 'posted') {
+        return [
+          {
+            id: 'tx-posted',
+            account_id: 'acct-1',
+            date: params[1],
+            amount: 450,
+            type: 'expense',
+            status: 'posted',
+            description: 'coffee',
+          },
+        ]
+      }
+      return []
+    })
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await createProgram([addTransaction]).parseAsync([
+      'node',
+      'shikin',
+      'record',
+      '--apply',
+      '--status',
+      'pending',
+      'Coffee',
+      '4.50',
+    ])
+
+    expect(addTransaction.execute).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toMatchObject({
+      success: true,
+      applied: true,
+      transaction: { id: 'tx-applied', status: 'pending' },
+    })
+  })
+
+  it('applies natural-language record duplicates when allowDuplicate is explicit', async () => {
+    const addTransaction = {
+      name: 'add-transaction',
+      description: 'Add transaction',
+      schema: z.object({
+        amount: z.number().positive(),
+        type: z.enum(['expense', 'income', 'transfer']),
+        description: z.string(),
+        date: z.string(),
+        dryRun: z.boolean().default(false),
+      }),
+      execute: vi.fn(async (input: Record<string, unknown>) =>
+        input.dryRun
+          ? {
+              success: true,
+              dryRun: true,
+              wouldCreate: { ...input, accountId: 'acct-1', currency: 'USD' },
+            }
+          : { success: true, transaction: { id: 'tx-applied', ...input } }
+      ),
+    }
+    vi.mocked(query).mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM transactions') && params?.[0] === 'acct-1') {
+        return [
+          {
+            id: 'tx-existing',
+            account_id: 'acct-1',
+            date: params[1],
+            amount: 450,
+            type: 'expense',
+            description: 'coffee',
+          },
+        ]
+      }
+      return []
+    })
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await createProgram([addTransaction]).parseAsync([
+      'node',
+      'shikin',
+      'record',
+      '--apply',
+      '--allow-duplicate',
+      'Coffee',
+      '4.50',
+    ])
+
+    expect(addTransaction.execute).toHaveBeenCalledTimes(2)
+    expect(addTransaction.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({ dryRun: false, allowDuplicate: true })
+    )
+    expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toMatchObject({
+      success: true,
+      applied: true,
+      duplicateOverride: {
+        allowed: true,
+        duplicate: {
+          kind: 'exact_duplicate',
+          existingTransactionId: 'tx-existing',
+        },
+      },
+      transaction: { id: 'tx-applied', allowDuplicate: true },
+    })
   })
 
   it('rejects record entries with explicit currency when the resolved account currency is unknown', async () => {

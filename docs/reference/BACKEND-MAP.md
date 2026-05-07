@@ -13,8 +13,8 @@ This is a practical backend map for the current repo layout. It is a documentati
   - `pnpm dev` executes `scripts/dev.mjs`, which starts `scripts/data-server.mjs` and Vite in one process group.
   - Browser runtime DB/storage calls are funneled through `src/lib/database.ts`, `src/lib/storage.ts`, and `src/lib/virtual-fs.ts`.
 - **CLI mode**
-  - `cli/src/cli.ts` registers every command from `cli/src/tools.ts` and runs via Commander.
-- Current shared tool surface: **63 tool definitions** (from `cli/src/tools/index.ts`), all available end-to-end against local data.
+  - `cli/src/cli.ts` registers every command from the shared catalog exported by `cli/src/tools/index.ts` and runs via Commander.
+- Current shared tool surface: **68 tool definitions** (from `cli/src/tools/index.ts`), all available end-to-end against local data.
 - MVP limitation decisions: one-off transfer writes are supported in the app and CLI/MCP, but recurring transfer rules remain deferred; debt payoff uses inferred credit-card balances with APR fixed at 0% because account APR is not stored; browser subscription management is deferred while local subscription rows still feed forecasts and CLI/MCP analytics.
 - **MCP mode**
   - `cli/src/mcp-server.ts` registers the same `tools` and bootstraps MCP over stdio.
@@ -29,14 +29,15 @@ This is a practical backend map for the current repo layout. It is a documentati
 ## 2) CLI flow
 
 1. `cli/src/cli.ts`:
-   - Creates a `commander` program and iterates `tools` from `cli/src/tools.ts`.
+   - Creates a `commander` program and iterates `tools` from `cli/src/tools/index.ts`.
    - Converts tool `zod` schemas into command options (`zodToOptions`).
+   - Exposes `tools --json` as the authoritative command catalog with catalog/schema versions, CLI/MCP compatibility counts, validation scope, and required migration metadata.
    - Coerces string inputs to numbers/booleans (`coerceInput`).
    - Executes `tool.execute(...)` and prints JSON response.
    - Calls `close()` from `cli/src/database.ts` in finally.
 
-2. `cli/src/tools.ts`:
-   - Defines the shared CLI/MCP tool catalog.
+2. `cli/src/tools/index.ts` and `cli/src/tools/*`:
+   - Defines and composes the shared CLI/MCP tool catalog.
    - Each tool is self-contained: schema + business SQL + return payload.
    - `add-transaction`, `update-transaction`, `delete-transaction`, and `query-transactions` are transfer-aware. Recurring transfer rules remain deferred because recurring rule materialization does not yet carry destination-account support.
 
@@ -48,7 +49,7 @@ This is a practical backend map for the current repo layout. It is a documentati
 ## 3) MCP flow
 
 - `cli/src/mcp-server.ts` creates `McpServer({ name: 'shikin', version: '<release>' })`.
-- Registers **all 63** shared tool definitions from `tools` with:
+- Registers **all 68** shared tool definitions from `tools` with:
   - tool name
   - description
   - `tool.schema.shape`
@@ -119,7 +120,7 @@ This is a practical backend map for the current repo layout. It is a documentati
   - `src/types/database.ts`
 - Runtime money conversion helpers: `src/lib/money.ts`.
 - Full DB schema documented in `docs/reference/DATABASE.md` (tables + migrations assumptions).
-- Cross-layer note: CLI currently consumes SQL strings directly and does not import these shared domain interfaces in `cli/src/tools.ts`.
+- Cross-layer note: CLI currently consumes SQL strings directly and does not import these shared domain interfaces in `cli/src/tools/*`.
 
 ## 7) Backend tests / gaps
 
@@ -128,8 +129,8 @@ This is a practical backend map for the current repo layout. It is a documentati
   - Store-heavy tests: `src/stores/__tests__/*-store.test.ts` mock DB calls.
 - E2E exists for UI flows (`e2e/*.spec.ts`) but does not exercise CLI/MCP/datastore server internals directly.
 - **Practical CLI/MCP/data-server strategy:**
-  - **CLI (`cli/src/tools.ts`)**: add integration tests that execute real SQL against a temp DB for one CRUD path (`add-account`/`add-transaction`/delete) plus one aggregate path (`get-balance-overview` or equivalent).
-  - **MCP (`cli/src/mcp-server.ts`)**: add a transport harness that boots the server, asserts all **63** tool registrations, and executes one representative tool end-to-end.
+  - **CLI (`cli/src/tools/index.ts` + `cli/src/tools/*`)**: add integration tests that execute real SQL against a temp DB for one CRUD path (`add-account`/`add-transaction`/delete) plus one aggregate path (`get-balance-overview` or equivalent).
+  - **MCP (`cli/src/mcp-server.ts`)**: add a transport harness that boots the server, asserts all **68** tool registrations, and executes one representative tool end-to-end.
   - **Data server (`scripts/data-server.mjs`)**: add HTTP contract tests for `/api/db/*`, `/api/store*`, and `/api/fs/*`.
   - **Hardening checks**: add explicit `safePath` boundary cases (relative paths, separator tricks, normalization edge cases) as verification tests.
 
@@ -151,14 +152,14 @@ This is a practical backend map for the current repo layout. It is a documentati
 
 3. **CLI/bridge error handling gaps**
    - Browser `src/lib/storage.ts` `createBrowserStore()` swallows get/set failures (reads return `null`, writes silently drop).
-   - `cli/src/tools.ts` is the canonical automation catalog; keep CLI, MCP, and docs in sync when adding or removing tools.
+   - `cli/src/tools/index.ts` composes the canonical automation catalog from `cli/src/tools/*`; keep CLI, MCP, and docs in sync when adding or removing tools.
 
 4. **Schema/API drift risk**
 
 - Tauri and browser share `src/lib/database.ts` abstractions, while CLI + data-server carry independent migration/init and path assumptions (`~/.local/share/com.asf.shikin`).
 
 5. **MCP/CLI DB layer consistency**
-   - Both CLI and MCP intentionally share `cli/src/tools.ts`, but operational behavior can diverge because storage path and migration lifecycle differ between CLI process and app data-server path.
+   - Both CLI and MCP intentionally share the `cli/src/tools/index.ts` catalog, but operational behavior can diverge because storage path and migration lifecycle differ between CLI process and app data-server path.
 
 ## 10) Milestone 6 checkpoint notes
 
@@ -185,7 +186,7 @@ This doc is the mapping baseline; the local bridge hardening items below are alr
 ### Near-term validation work
 
 1. Add contract tests for `scripts/data-server.mjs` endpoints (`/api/db/*`, `/api/fs/*`, `/api/store/*`).
-2. Add CLI runtime smoke coverage for critical commands in `cli/src/tools.ts` (CRUD + balance integrity).
+2. Add CLI runtime smoke coverage for critical commands in `cli/src/tools/*` (CRUD + balance integrity).
 3. Add a notebook persistence matrix test across Tauri/browser/CLI note backends for directory shape and file operations.
 
 ### Historical acceptance criteria for Milestone 2

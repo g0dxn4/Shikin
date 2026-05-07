@@ -150,7 +150,9 @@ The MCP server also exposes read-only resources:
 
 ## Current Scope
 
-- CLI and MCP share the same 63-tool definition catalog in `cli/src/tools.ts`.
+- CLI and MCP share the same 68-tool definition catalog in `cli/src/tools/index.ts`, including `backup-database`, guarded `restore-database`, `audit-list`, `audit-show`, and `assistant-context`.
+- `shikin tools --json` is the authoritative discovery contract and includes `catalogVersion`, `schemaVersion`, generation time, CLI/MCP compatibility counts, validation-scope notes, and required migration metadata.
+- `setup-status` and `assistant-context` expose existing goal, debt, and investment support surfaces. Investment support remains limited to stored holdings (`manage-investment`) and portfolio review (`generate-portfolio-review`).
 - All shipped tools are available end-to-end against the local database.
 - Debt payoff projections infer debts from negative credit-card account balances. Accounts do not store APR yet, so CLI payoff estimates default card APR to 0% and exclude interest for automatically inferred cards.
 - Subscription tools read Shikin's local `subscriptions` table for analytics and bill forecasting.

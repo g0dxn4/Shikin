@@ -6,6 +6,9 @@ vi.mock('./database.js', () => ({
   query: vi.fn(),
   execute: vi.fn(),
   close: vi.fn(),
+  backupDatabase: vi.fn(),
+  restoreDatabase: vi.fn(),
+  DATABASE_BACKUP_SETTING_KEY: 'database_backups',
 }))
 
 const { query } = await import('./database.js')
@@ -43,6 +46,11 @@ describe('MCP tool registration', () => {
         'get-recurring-expected-vs-paid',
         'allocate-income',
         'review-suggestions',
+        'backup-database',
+        'restore-database',
+        'audit-list',
+        'audit-show',
+        'assistant-context',
         'finance-profile',
         'export-data',
         'get-spending-summary',

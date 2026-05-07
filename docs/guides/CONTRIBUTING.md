@@ -105,7 +105,7 @@ cli/
 ├── src/
 │   ├── cli.ts            # Commander CLI entry point
 │   ├── mcp-server.ts     # MCP server entry point
-│   ├── tools/            # Shared 63-definition catalog
+│   ├── tools/            # Shared 68-definition catalog
 │   └── database.ts       # better-sqlite3 data access
 ```
 
@@ -499,7 +499,7 @@ test(cli): add unit tests for addTransaction tool
 
 ## Adding a New CLI or MCP Tool
 
-Add new tools to `cli/src/tools.ts`, then wire any CLI- or MCP-specific behavior through `cli/src/cli.ts` and `cli/src/mcp-server.ts` as needed. See `../reference/BACKEND-MAP.md` for the current backend entry points.
+Add new tools under `cli/src/tools/` and export them from `cli/src/tools/index.ts`, then wire any CLI- or MCP-specific behavior through `cli/src/cli.ts` and `cli/src/mcp-server.ts` as needed. See `../reference/BACKEND-MAP.md` for the current backend entry points.
 
 ---
 

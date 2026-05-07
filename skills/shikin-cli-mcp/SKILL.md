@@ -84,8 +84,8 @@ The MCP server exposes the same shared tool catalog as the CLI and these resourc
 
 ## Representative Tool Surface
 
-Current catalog size is 63 tools. All shipped tools are available end-to-end against the local database.
-The lists below are representative groups for orientation; use `shikin tools --json` for the authoritative command, argument, and enum catalog.
+Current catalog size is 68 tools. All shipped tools are available end-to-end against the local database.
+The lists below are representative groups for orientation; use `shikin tools --json` for the authoritative command, argument, enum, catalog/schema version, compatibility, and required-migration metadata.
 
 Transaction tools:
 
@@ -133,6 +133,13 @@ Investment, subscription, and automation tools:
 - `get-spending-anomalies`
 - `get-forecasted-cash-flow`
 - `convert-currency`
+- `backup-database` (CLI also has alias `backup`)
+- `restore-database` (CLI also has alias `restore`; guarded restore refuses unsafe active handles)
+- `audit-list`
+- `audit-show`
+- `assistant-context`
+
+Goal, debt, and investment support is discoverable through `setup-status` and `assistant-context`. Investment support intentionally stays on the existing `manage-investment` and `generate-portfolio-review` tools; do not assume broader broker sync or price-fetching capabilities from this skill.
 
 Notebook tools:
 

@@ -13,6 +13,8 @@ import {
   type ToolDefinition,
 } from './shared.js'
 import { transactionsTools } from './transactions.js'
+import { backupDatabase, restoreDatabase } from '../database.js'
+import { findTransactionDuplicate, type TransactionDuplicateMatch } from '../duplicate-detection.js'
 
 type CsvRow = {
   lineNumber: number
@@ -39,14 +41,29 @@ type ImportTransactionInput = {
 }
 
 type ImportDuplicateMatch =
-  | { kind: 'duplicate'; id: string }
-  | { kind: 'potential_duplicate'; id: string }
+  | { kind: 'duplicate'; id: string; matchType: 'external_id'; externalId: string }
+  | {
+      kind: 'exact_duplicate' | 'potential_duplicate'
+      id: string
+      match: TransactionDuplicateMatch
+    }
   | null
 
 type ExportTableSpec = {
   name: string
   columns: string[]
   orderBy: string
+}
+
+type SkippedExportTable = {
+  name: string
+  reason: 'missing_optional_table_or_column'
+  message: string
+}
+
+type ReadExportTablesResult = {
+  tables: Record<string, Array<Record<string, unknown>>>
+  skippedTables: SkippedExportTable[]
 }
 
 const REQUIRED_IMPORT_COLUMNS = ['date', 'description', 'amount'] as const
@@ -390,6 +407,28 @@ const EXPORT_TABLES: ExportTableSpec[] = [
   },
 ]
 
+const OPTIONAL_EXPORT_TABLES = new Set([
+  'subscriptions',
+  'budgets',
+  'budget_periods',
+  'investments',
+  'stock_prices',
+  'exchange_rates',
+  'extension_data',
+  'category_rules',
+  'recurring_rules',
+  'goals',
+  'recaps',
+  'transaction_splits',
+  'net_worth_snapshots',
+  'account_balance_history',
+  'audit_log',
+  'cashflow_buckets',
+  'cashflow_bucket_allocations',
+  'category_suggestions',
+  'credit_card_statements',
+])
+
 const REDACTED_FIELD_PATTERN =
   /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key|notes?|description|url|value|summary|tags|source|before_json|after_json|pattern|highlights_json|breakdown_json)/i
 const REDACTED_SETTINGS_VALUE_KEYS = new Set([FINANCE_PROFILE_SETTING_KEY, 'account_aliases'])
@@ -428,6 +467,48 @@ function hasFinanceProfile(value: unknown): boolean {
   return Boolean(
     value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0
   )
+}
+
+function databaseOperationError(error: unknown, fallbackReason: string): Record<string, unknown> {
+  const message = error instanceof Error ? error.message : String(error)
+  const code =
+    error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+      ? error.code
+      : undefined
+  const reasonByCode: Record<string, string> = {
+    RESTORE_ACTIVE_HANDLES: 'restore_active_handles',
+    RESTORE_UNSUPPORTED_PLATFORM: 'restore_unsupported_platform',
+    RESTORE_SOURCE_IS_ACTIVE_DB: 'restore_source_is_active_database',
+    RESTORE_LOCK_EXISTS: 'restore_lock_exists',
+    RESTORE_SOURCE_HAS_SIDECARS: 'restore_source_has_sidecars',
+  }
+  const hintByCode: Record<string, string> = {
+    RESTORE_ACTIVE_HANDLES:
+      'Close Shikin, the browser data-server, MCP server, and other CLI sessions before retrying restore. Backup remains safe to run while the database is active.',
+    RESTORE_UNSUPPORTED_PLATFORM:
+      'Use the Shikin app restore flow on this platform, or stop all Shikin processes and replace the database manually after creating a backup.',
+    RESTORE_SOURCE_IS_ACTIVE_DB:
+      'Choose a backup file from the backups directory or another safe location; never restore from the active database file or its sidecars.',
+    RESTORE_LOCK_EXISTS:
+      'If no restore is running, remove the stale restore lock file after confirming no Shikin restore process is active.',
+    RESTORE_SOURCE_HAS_SIDECARS:
+      'Create a clean backup with shikin backup-database and restore that single backup file instead of a live SQLite database family.',
+  }
+  const fallbackCode = fallbackReason.toUpperCase().replace(/[^A-Z0-9]+/g, '_')
+
+  return {
+    success: false,
+    reason: code ? (reasonByCode[code] ?? fallbackReason) : fallbackReason,
+    message,
+    code: code ?? fallbackCode,
+    ...(error && typeof error === 'object' && 'activeHandles' in error
+      ? { activeHandles: error.activeHandles }
+      : {}),
+    ...(error && typeof error === 'object' && 'sidecars' in error
+      ? { sidecars: error.sidecars }
+      : {}),
+    ...(code && hintByCode[code] ? { hint: hintByCode[code] } : {}),
+  }
 }
 
 function parseCsv(text: string): ParsedCsv {
@@ -630,21 +711,6 @@ function findDuplicateImportTransaction(
   input: ImportTransactionInput,
   externalId: string | null
 ): ImportDuplicateMatch {
-  const params: unknown[] = [
-    input.accountId,
-    input.date,
-    toCentavos(input.amount),
-    input.type,
-    input.description,
-  ]
-  let sql = `SELECT id FROM transactions
-             WHERE account_id = $1
-               AND date = $2
-               AND amount = $3
-               AND type = $4
-               AND description = $5`
-  sql += ' LIMIT 1'
-
   if (externalId) {
     const rows =
       query<{ id: string; note: string | null }>(
@@ -657,11 +723,79 @@ function findDuplicateImportTransaction(
     const exactExternalIdMatch = rows.find((row) =>
       extractExternalIds(row.note).includes(externalId)
     )
-    return exactExternalIdMatch ? { kind: 'duplicate', id: exactExternalIdMatch.id } : null
+    if (exactExternalIdMatch) {
+      return {
+        kind: 'duplicate',
+        id: exactExternalIdMatch.id,
+        matchType: 'external_id',
+        externalId,
+      }
+    }
   }
 
-  const potentialDuplicate = (query<{ id: string }>(sql, params) ?? [])[0]
-  return potentialDuplicate ? { kind: 'potential_duplicate', id: potentialDuplicate.id } : null
+  const duplicateCheck = findTransactionDuplicate({
+    accountId: input.accountId,
+    date: input.date,
+    amountCentavos: toCentavos(input.amount),
+    type: input.type,
+    status: input.status,
+    description: input.description,
+  })
+  return duplicateCheck.match
+    ? {
+        kind: duplicateCheck.match.kind,
+        id: duplicateCheck.match.existingTransactionId,
+        match: duplicateCheck.match,
+      }
+    : null
+}
+
+function importInputForOutput(input: ImportTransactionInput): Record<string, unknown> {
+  const output: Record<string, unknown> = { ...input }
+  delete output.dryRun
+  delete output.allowDuplicate
+  return output
+}
+
+function importDuplicateDetails(duplicate: ImportDuplicateMatch): Record<string, unknown> | null {
+  if (!duplicate) return null
+  if (duplicate.kind === 'duplicate') {
+    return {
+      kind: duplicate.kind,
+      matchType: duplicate.matchType,
+      externalId: duplicate.externalId,
+      existingTransactionId: duplicate.id,
+    }
+  }
+
+  return {
+    kind: duplicate.kind,
+    existingTransactionId: duplicate.id,
+    match: duplicate.match,
+  }
+}
+
+function importDuplicateOverride(duplicate: ImportDuplicateMatch): Record<string, unknown> | null {
+  const details = importDuplicateDetails(duplicate)
+  if (!details) return null
+  return {
+    allowed: true,
+    reason: 'allow_duplicate',
+    duplicate: details,
+  }
+}
+
+function potentialDuplicateFields(duplicate: ImportDuplicateMatch): Record<string, unknown> {
+  if (duplicate?.kind !== 'potential_duplicate') return {}
+  return {
+    reason: 'potential_duplicate',
+    potentialDuplicate: {
+      existingTransactionId: duplicate.id,
+      match: duplicate.match,
+    },
+    message:
+      'Potential matching transaction exists; row is not skipped automatically unless an externalId duplicate is found.',
+  }
 }
 
 function escapeCsvValue(value: unknown): string {
@@ -712,18 +846,97 @@ function redactExportRow(tableName: string, row: Record<string, unknown>): Recor
   )
 }
 
-function readExportTables(redacted: boolean) {
-  return transaction(
+function isMissingExportTableOrColumnError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  return /no such (table|column)/i.test(error.message)
+}
+
+function readExportTables(redacted: boolean): ReadExportTablesResult {
+  const skippedTables: SkippedExportTable[] = []
+  const tables = transaction(
     () =>
       Object.fromEntries(
         EXPORT_TABLES.map((spec) => {
-          const rows = query<Record<string, unknown>>(
-            `SELECT ${spec.columns.join(', ')} FROM ${spec.name} ORDER BY ${spec.orderBy}`
-          )
+          let rows: Array<Record<string, unknown>>
+          try {
+            rows = query<Record<string, unknown>>(
+              `SELECT ${spec.columns.join(', ')} FROM ${spec.name} ORDER BY ${spec.orderBy}`
+            )
+          } catch (error) {
+            if (
+              !OPTIONAL_EXPORT_TABLES.has(spec.name) ||
+              !isMissingExportTableOrColumnError(error)
+            ) {
+              throw error
+            }
+            skippedTables.push({
+              name: spec.name,
+              reason: 'missing_optional_table_or_column',
+              message: error instanceof Error ? error.message : String(error),
+            })
+            rows = []
+          }
           return [spec.name, redacted ? rows.map((row) => redactExportRow(spec.name, row)) : rows]
         })
       ) as Record<string, Array<Record<string, unknown>>>
   )
+  return { tables, skippedTables }
+}
+
+const backupDatabaseTool: ToolDefinition = {
+  name: 'backup-database',
+  description:
+    'Create a consistent manual SQLite database backup under the Shikin app data backups directory.',
+  schema: z.object({}),
+  execute: async () => {
+    try {
+      const backup = await backupDatabase()
+      return {
+        success: true,
+        path: backup.path,
+        backup,
+        message: `Created database backup at ${backup.path}.`,
+      }
+    } catch (error) {
+      return databaseOperationError(error, 'database_backup_failed')
+    }
+  },
+}
+
+const restoreDatabaseTool: ToolDefinition = {
+  name: 'restore-database',
+  description:
+    'Validate and restore a Shikin SQLite database backup, creating a rollback backup before replacement. Apply mode requires Linux /proc handle checks; dry-run validation is safe on all platforms.',
+  schema: z.object({
+    file: boundedText(
+      'Database backup file',
+      'Path to a Shikin SQLite backup file to restore',
+      4096
+    ),
+    dryRun: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Validate the backup without replacing the active database'),
+  }),
+  execute: async ({ file, dryRun }) => {
+    try {
+      const restore = await restoreDatabase({ sourcePath: file, dryRun })
+      const rollbackPath = !restore.dryRun ? restore.rollbackPath : undefined
+      return {
+        success: true,
+        dryRun: restore.dryRun,
+        sourcePath: restore.sourcePath,
+        ...(rollbackPath ? { rollbackPath } : {}),
+        restore,
+        message: restore.dryRun
+          ? `Validated database backup ${restore.sourcePath}; no restore was applied.`
+          : `Restored database from ${restore.sourcePath}. Rollback backup: ${restore.rollbackPath ?? 'none'}.`,
+      }
+    } catch (error) {
+      return databaseOperationError(error, 'database_restore_failed')
+    }
+  },
 }
 
 const financeProfile: ToolDefinition = {
@@ -822,11 +1035,16 @@ const importTransactions: ToolDefinition = {
     ).optional(),
     apply: z.boolean().optional().default(false).describe('Apply the import. Omit for preview.'),
     dryRun: z.boolean().optional().default(false).describe('Force preview mode without writes'),
+    allowDuplicate: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Import rows even when an external-ID or likely duplicate is detected'),
     source: boundedText('Source', 'Default source label for imported rows', 120)
       .optional()
       .default('csv-import'),
   }),
-  execute: async ({ file, accountId, account, apply, dryRun, source }) => {
+  execute: async ({ file, accountId, account, apply, dryRun, allowDuplicate, source }) => {
     if (apply && dryRun) {
       return {
         success: false,
@@ -936,21 +1154,28 @@ const importTransactions: ToolDefinition = {
 
         const validatedInput = parsedInput.data as ImportTransactionInput
         const duplicate = findDuplicateImportTransaction(validatedInput, built.externalId)
-        if (duplicate?.kind === 'duplicate') {
+        if (duplicate && !allowDuplicate) {
           previewRows.push({
             row: rowNumber,
             lineNumber: row.lineNumber,
             status: 'skipped',
-            reason: 'duplicate',
+            reason: duplicate.kind === 'duplicate' ? 'duplicate' : duplicate.kind,
             externalId: built.externalId,
             existingTransactionId: duplicate.id,
-            input: { ...built.input, dryRun: undefined },
-            message: 'Matching transaction already exists; row would be skipped.',
+            duplicate: importDuplicateDetails(duplicate),
+            input: importInputForOutput(validatedInput),
+            message:
+              duplicate.kind === 'duplicate' || duplicate.kind === 'exact_duplicate'
+                ? 'Matching transaction already exists; row would be skipped.'
+                : 'Potential matching transaction exists; row would be skipped unless allowDuplicate is true.',
           })
           continue
         }
 
-        const dryRunResult = await addTransactionTool.execute(validatedInput)
+        const dryRunResult = await addTransactionTool.execute({
+          ...validatedInput,
+          allowDuplicate: allowDuplicate ? true : undefined,
+        })
         if (dryRunResult?.success === false) {
           const messages = [String(dryRunResult.message ?? 'Row failed validation.')]
           errors.push({ row: rowNumber, lineNumber: row.lineNumber, messages })
@@ -968,15 +1193,13 @@ const importTransactions: ToolDefinition = {
           lineNumber: row.lineNumber,
           status: 'valid',
           externalId: built.externalId,
-          input: { ...built.input, dryRun: undefined },
-          ...(duplicate?.kind === 'potential_duplicate'
+          input: importInputForOutput(validatedInput),
+          ...(allowDuplicate && duplicate
             ? {
-                reason: 'potential_duplicate',
-                potentialDuplicate: { existingTransactionId: duplicate.id },
-                message:
-                  'Potential matching transaction exists, but no externalId was provided; row will not be skipped automatically.',
+                reason: 'duplicate_override',
+                duplicateOverride: importDuplicateOverride(duplicate),
               }
-            : {}),
+            : potentialDuplicateFields(duplicate)),
           preview: dryRunResult.wouldCreate ?? dryRunResult,
         })
       }
@@ -1066,6 +1289,7 @@ const importTransactions: ToolDefinition = {
           reason: previewRow.reason ?? 'duplicate',
           externalId: previewRow.externalId ?? null,
           existingTransactionId: previewRow.existingTransactionId,
+          duplicate: previewRow.duplicate,
           message: 'Matching transaction already exists; row was skipped.',
         })
         continue
@@ -1074,20 +1298,28 @@ const importTransactions: ToolDefinition = {
       const input = previewRow.input as ImportTransactionInput
       const externalId = typeof previewRow.externalId === 'string' ? previewRow.externalId : null
       const duplicate = findDuplicateImportTransaction(input, externalId)
-      if (duplicate?.kind === 'duplicate') {
+      if (duplicate && !allowDuplicate) {
         appliedRows.push({
           row: previewRow.row,
           lineNumber: previewRow.lineNumber,
           status: 'skipped',
-          reason: 'duplicate',
+          reason: duplicate.kind === 'duplicate' ? 'duplicate' : duplicate.kind,
           externalId,
           existingTransactionId: duplicate.id,
-          message: 'Matching transaction already exists; row was skipped.',
+          duplicate: importDuplicateDetails(duplicate),
+          message:
+            duplicate.kind === 'duplicate' || duplicate.kind === 'exact_duplicate'
+              ? 'Matching transaction already exists; row was skipped.'
+              : 'Potential matching transaction exists; row was skipped because allowDuplicate is false.',
         })
         continue
       }
 
-      const result = await addTransactionTool.execute({ ...input, dryRun: false })
+      const result = await addTransactionTool.execute({
+        ...input,
+        dryRun: false,
+        allowDuplicate: allowDuplicate ? true : undefined,
+      })
       if (result?.success === false) {
         applyErrors.push({
           row: previewRow.row as number,
@@ -1101,12 +1333,12 @@ const importTransactions: ToolDefinition = {
         lineNumber: previewRow.lineNumber,
         externalId: previewRow.externalId,
         status: 'imported',
-        ...(duplicate?.kind === 'potential_duplicate'
+        ...(allowDuplicate && duplicate
           ? {
-              reason: 'potential_duplicate',
-              potentialDuplicate: { existingTransactionId: duplicate.id },
+              reason: 'duplicate_override',
+              duplicateOverride: importDuplicateOverride(duplicate),
             }
-          : {}),
+          : potentialDuplicateFields(duplicate)),
         transaction: result.transaction ?? result,
       })
     }
@@ -1147,11 +1379,13 @@ const exportData: ToolDefinition = {
       .describe('Redact sensitive free-text fields in the exported data'),
   }),
   execute: async ({ format, redacted }) => {
-    const tables = readExportTables(redacted)
+    const exportResult = readExportTables(redacted)
+    const { tables, skippedTables } = exportResult
     const tableSummaries = EXPORT_TABLES.map((spec) => ({
       name: spec.name,
       columns: spec.columns,
       rowCount: tables[spec.name]?.length ?? 0,
+      skipped: skippedTables.some((skippedTable) => skippedTable.name === spec.name),
     }))
 
     if (format === 'json') {
@@ -1160,8 +1394,11 @@ const exportData: ToolDefinition = {
         format,
         redacted,
         tables: tableSummaries,
+        skippedTables,
         data: tables,
-        message: `Exported ${tableSummaries.length} table(s) as JSON.`,
+        message: `Exported ${tableSummaries.length} table(s) as JSON${
+          skippedTables.length ? `; skipped ${skippedTables.length} optional table(s).` : '.'
+        }`,
       }
     }
 
@@ -1171,10 +1408,13 @@ const exportData: ToolDefinition = {
         format,
         redacted,
         tables: tableSummaries,
+        skippedTables,
         files: Object.fromEntries(
           EXPORT_TABLES.map((spec) => [spec.name, rowsToCsv(spec.columns, tables[spec.name] ?? [])])
         ),
-        message: `Exported ${tableSummaries.length} table(s) as CSV strings.`,
+        message: `Exported ${tableSummaries.length} table(s) as CSV strings${
+          skippedTables.length ? `; skipped ${skippedTables.length} optional table(s).` : '.'
+        }`,
       }
     }
 
@@ -1183,14 +1423,23 @@ const exportData: ToolDefinition = {
       format,
       redacted,
       tables: tableSummaries,
+      skippedTables,
       content: [
         '# Shikin Data Export',
         '',
         ...EXPORT_TABLES.map((spec) => tableToMarkdown(spec, tables[spec.name] ?? [])),
       ].join('\n\n'),
-      message: `Exported ${tableSummaries.length} table(s) as Markdown.`,
+      message: `Exported ${tableSummaries.length} table(s) as Markdown${
+        skippedTables.length ? `; skipped ${skippedTables.length} optional table(s).` : '.'
+      }`,
     }
   },
 }
 
-export const dataOpsTools: ToolDefinition[] = [financeProfile, importTransactions, exportData]
+export const dataOpsTools: ToolDefinition[] = [
+  backupDatabaseTool,
+  restoreDatabaseTool,
+  financeProfile,
+  importTransactions,
+  exportData,
+]

@@ -22,6 +22,11 @@ import {
   writeAuditLog,
   type ToolDefinition,
 } from './shared.js'
+import {
+  findTransactionDuplicate,
+  transactionDuplicateReason,
+  type TransactionDuplicateCheck,
+} from '../duplicate-detection.js'
 
 type TransactionStatus = 'pending' | 'posted' | 'cleared'
 
@@ -233,7 +238,7 @@ function transactionAuditSnapshot(tx: TransactionRow) {
   }
 }
 
-function writeTransactionBalanceAudit({
+function buildTransactionBalanceAuditPreview({
   action,
   before,
   after,
@@ -247,7 +252,7 @@ function writeTransactionBalanceAudit({
   balancesBefore: Map<string, number>
 }) {
   const balanceChanges = buildBalanceAuditChanges(balanceDeltas, balancesBefore)
-  writeAuditLog({
+  return {
     entity: 'transaction',
     entityId: after?.id ?? before?.id ?? null,
     action,
@@ -273,6 +278,38 @@ function writeTransactionBalanceAudit({
       : null,
     source: after?.source ?? before?.source ?? null,
     note: after?.note ?? before?.note ?? null,
+    balanceChanges,
+  }
+}
+
+function transactionDuplicateFailure(duplicateCheck: TransactionDuplicateCheck) {
+  const match = duplicateCheck.match
+  if (!match) return null
+
+  return {
+    success: false as const,
+    reason: transactionDuplicateReason(match.kind),
+    duplicate: match,
+    duplicateCheck,
+    message:
+      match.kind === 'exact_duplicate'
+        ? `Exact duplicate transaction ${match.existingTransactionId} already exists. Re-run with allowDuplicate to record it anyway.`
+        : `Potential duplicate transaction ${match.existingTransactionId} is within ${match.windowDays} days with similar description. Re-run with allowDuplicate to record it anyway.`,
+  }
+}
+
+function writeTransactionBalanceAudit(
+  params: Parameters<typeof buildTransactionBalanceAuditPreview>[0]
+) {
+  const auditPreview = buildTransactionBalanceAuditPreview(params)
+  writeAuditLog({
+    entity: auditPreview.entity,
+    entityId: auditPreview.entityId,
+    action: auditPreview.action,
+    before: auditPreview.before,
+    after: auditPreview.after,
+    source: auditPreview.source,
+    note: auditPreview.note,
   })
 }
 
@@ -437,6 +474,11 @@ const addTransaction: ToolDefinition = {
       .optional()
       .default(false)
       .describe('Validate and preview the transaction without writing it'),
+    allowDuplicate: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Record the transaction even when an exact or likely duplicate is detected'),
   }),
   execute: async ({
     amount,
@@ -453,6 +495,7 @@ const addTransaction: ToolDefinition = {
     account,
     transferToAccountId,
     dryRun,
+    allowDuplicate,
   }) => {
     const id = generateId()
     const amountCentavos = toCentavos(amount)
@@ -498,10 +541,31 @@ const addTransaction: ToolDefinition = {
         return { success: false, message: resolvedRecurringRule.message }
       }
 
+      const duplicateCheck = findTransactionDuplicate({
+        accountId: resolvedAccount.id,
+        date: txDate,
+        amountCentavos,
+        type,
+        status: transactionStatus,
+        transferToAccountId: resolvedTransferDestination.id,
+        description,
+      })
+
       if (dryRun) {
+        const duplicateFailure = transactionDuplicateFailure(duplicateCheck)
         return {
           success: true,
           dryRun: true,
+          ...(duplicateCheck.match
+            ? {
+                duplicateCheck,
+                duplicatePolicy: {
+                  allowDuplicate,
+                  applyBlocked: !allowDuplicate,
+                  reason: duplicateCheck.match.kind,
+                },
+              }
+            : {}),
           wouldCreate: {
             id,
             accountId: resolvedAccount.id,
@@ -518,8 +582,15 @@ const addTransaction: ToolDefinition = {
             note: transactionNote,
             recurringRuleId: resolvedRecurringRule.id,
           },
-          message: `Dry run: ${type} transaction for ${resolvedAccount.currency} ${amount.toFixed(2)} would be created.`,
+          message:
+            duplicateFailure && !allowDuplicate
+              ? `${duplicateFailure.message} No changes were written.`
+              : `Dry run: ${type} transaction for ${resolvedAccount.currency} ${amount.toFixed(2)} would be created.`,
         }
+      }
+
+      if (duplicateCheck.match && !allowDuplicate) {
+        return transactionDuplicateFailure(duplicateCheck)
       }
 
       const newTransaction: TransactionRow = {
@@ -593,6 +664,16 @@ const addTransaction: ToolDefinition = {
           note: transactionNote,
           recurringRuleId: resolvedRecurringRule.id,
         },
+        ...(duplicateCheck.match && allowDuplicate
+          ? {
+              duplicateOverride: {
+                allowed: true,
+                reason: 'allow_duplicate',
+                duplicate: duplicateCheck.match,
+                duplicateCheck,
+              },
+            }
+          : {}),
         message: `Added ${type}: $${amount.toFixed(2)} for "${description}" on ${txDate}`,
       }
     })
@@ -651,6 +732,11 @@ const updateTransaction: ToolDefinition = {
       'Destination account ID for transfer transactions',
       128
     ).optional(),
+    dryRun: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Validate and preview the update without writing it'),
   }),
   execute: async ({
     transactionId,
@@ -666,6 +752,7 @@ const updateTransaction: ToolDefinition = {
     recurringRuleId,
     accountId,
     transferToAccountId,
+    dryRun,
   }) => {
     return transaction(() => {
       const existing = query<TransactionRow>('SELECT * FROM transactions WHERE id = $1', [
@@ -795,6 +882,37 @@ const updateTransaction: ToolDefinition = {
       const archivedMutationFailure = archivedBalanceMutationFailure([...balanceDeltas.keys()])
       if (archivedMutationFailure) return archivedMutationFailure
       const balancesBefore = readAccountBalances([...balanceDeltas.keys()])
+      if (dryRun) {
+        const auditPreview = buildTransactionBalanceAuditPreview({
+          action: 'update',
+          before: tx,
+          after: updatedTx,
+          balanceDeltas,
+          balancesBefore,
+        })
+
+        return {
+          success: true,
+          dryRun: true,
+          wouldUpdate: {
+            transactionId,
+            before: transactionAuditSnapshot(tx),
+            after: transactionAuditSnapshot(updatedTx),
+            validation: {
+              status: updatedTx.status,
+              currency: updatedTx.currency,
+              recurringRuleId: updatedTx.recurring_rule_id,
+            },
+            balanceImpact: {
+              affectsBalances: auditPreview.balanceChanges.length > 0,
+              deltas: auditPreview.balanceChanges,
+            },
+            balanceDeltas: auditPreview.balanceChanges,
+            auditPreview,
+          },
+          message: `Dry run: transaction ${transactionId} would be updated; no changes were written.`,
+        }
+      }
       applyBalanceDeltas(balanceDeltas)
 
       const updateResult = execute(
@@ -866,8 +984,13 @@ const deleteTransaction: ToolDefinition = {
     'Delete a transaction. Use this when the user wants to remove a transaction. The account balance will be adjusted accordingly.',
   schema: z.object({
     transactionId: z.string().describe('The ID of the transaction to delete'),
+    dryRun: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Validate and preview the deletion without writing it'),
   }),
-  execute: async ({ transactionId }) => {
+  execute: async ({ transactionId, dryRun }) => {
     return transaction(() => {
       const existing = query<TransactionRow>('SELECT * FROM transactions WHERE id = $1', [
         transactionId,
@@ -887,6 +1010,31 @@ const deleteTransaction: ToolDefinition = {
       const archivedMutationFailure = archivedBalanceMutationFailure([...balanceDeltas.keys()])
       if (archivedMutationFailure) return archivedMutationFailure
       const balancesBefore = readAccountBalances([...balanceDeltas.keys()])
+      if (dryRun) {
+        const auditPreview = buildTransactionBalanceAuditPreview({
+          action: 'delete',
+          before: tx,
+          after: null,
+          balanceDeltas,
+          balancesBefore,
+        })
+
+        return {
+          success: true,
+          dryRun: true,
+          wouldDelete: {
+            transactionId,
+            transaction: transactionAuditSnapshot(tx),
+            balanceImpact: {
+              affectsBalances: auditPreview.balanceChanges.length > 0,
+              deltas: auditPreview.balanceChanges,
+            },
+            balanceDeltas: auditPreview.balanceChanges,
+            auditPreview,
+          },
+          message: `Dry run: transaction ${transactionId} would be deleted; no changes were written.`,
+        }
+      }
       applyBalanceDeltas(balanceDeltas)
 
       execute('DELETE FROM transactions WHERE id = $1', [transactionId])

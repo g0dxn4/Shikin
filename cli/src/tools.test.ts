@@ -5,21 +5,32 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const { mockQuery, mockExecute, mockTransaction, mockNoteExists, mockWriteNote } = vi.hoisted(
-  () => ({
-    mockQuery: vi.fn(),
-    mockExecute: vi.fn(),
-    mockTransaction: vi.fn((fn: () => unknown) => fn()),
-    mockNoteExists: vi.fn(),
-    mockWriteNote: vi.fn(),
-  })
-)
+const {
+  mockQuery,
+  mockExecute,
+  mockTransaction,
+  mockNoteExists,
+  mockWriteNote,
+  mockBackupDatabase,
+  mockRestoreDatabase,
+} = vi.hoisted(() => ({
+  mockQuery: vi.fn(),
+  mockExecute: vi.fn(),
+  mockTransaction: vi.fn((fn: () => unknown) => fn()),
+  mockNoteExists: vi.fn(),
+  mockWriteNote: vi.fn(),
+  mockBackupDatabase: vi.fn(),
+  mockRestoreDatabase: vi.fn(),
+}))
 
 vi.mock('./database.js', () => ({
   query: mockQuery,
   execute: mockExecute,
   transaction: mockTransaction,
   close: vi.fn(),
+  backupDatabase: mockBackupDatabase,
+  restoreDatabase: mockRestoreDatabase,
+  DATABASE_BACKUP_SETTING_KEY: 'database_backups',
 }))
 
 vi.mock('./ulid.js', () => ({
@@ -79,10 +90,15 @@ const convertCurrency = tools.find((tool) => tool.name === 'convert-currency')!
 const createBudget = tools.find((tool) => tool.name === 'create-budget')!
 const upsertBudget = tools.find((tool) => tool.name === 'upsert-budget')!
 const deleteBudget = tools.find((tool) => tool.name === 'delete-budget')!
+const backupDatabaseTool = tools.find((tool) => tool.name === 'backup-database')!
+const restoreDatabaseTool = tools.find((tool) => tool.name === 'restore-database')!
 const financeProfile = tools.find((tool) => tool.name === 'finance-profile')!
 const importTransactions = tools.find((tool) => tool.name === 'import-transactions')!
 const exportData = tools.find((tool) => tool.name === 'export-data')!
 const setupStatus = tools.find((tool) => tool.name === 'setup-status')!
+const auditList = tools.find((tool) => tool.name === 'audit-list')!
+const auditShow = tools.find((tool) => tool.name === 'audit-show')!
+const assistantContext = tools.find((tool) => tool.name === 'assistant-context')!
 const getCreditCardStatus = tools.find((tool) => tool.name === 'get-credit-card-status')!
 const createCreditCardStatement = tools.find(
   (tool) => tool.name === 'create-credit-card-statement'
@@ -110,6 +126,8 @@ describe('CLI tool validation regressions', () => {
     mockTransaction.mockClear()
     mockNoteExists.mockReset()
     mockWriteNote.mockReset()
+    mockBackupDatabase.mockReset()
+    mockRestoreDatabase.mockReset()
     mockTransaction.mockImplementation((fn: () => unknown) => fn())
     mockExecute.mockReturnValue({ rowsAffected: 1, lastInsertId: 1 })
   })
@@ -166,14 +184,14 @@ describe('CLI tool validation regressions', () => {
 
     const result = await addTransaction.execute(input)
 
-    expect(mockQuery).toHaveBeenCalledTimes(2)
+    expect(mockQuery).toHaveBeenCalledTimes(4)
     expect(mockQuery).toHaveBeenNthCalledWith(
       1,
       'SELECT id, currency, is_archived FROM accounts WHERE id = $1 LIMIT 1',
       ['acct-2']
     )
     expect(mockQuery).toHaveBeenNthCalledWith(
-      2,
+      4,
       'SELECT id, balance FROM accounts WHERE id IN ($1)',
       ['acct-2']
     )
@@ -263,6 +281,93 @@ describe('CLI tool validation regressions', () => {
       message: 'Account acct-archived is archived. Unarchive it before using it for new writes.',
     })
     expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('blocks direct add-transaction duplicates unless allowDuplicate is explicit', async () => {
+    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM accounts WHERE id = $1')) {
+        return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
+      }
+      if (sql.includes('FROM transactions') && params?.length === 7) {
+        return [
+          {
+            id: 'tx-existing',
+            account_id: 'acct-1',
+            date: params[1],
+            amount: 450,
+            type: 'expense',
+            status: 'posted',
+            description: 'coffee',
+          },
+        ]
+      }
+      return []
+    })
+
+    const result = await addTransaction.execute(
+      addTransaction.schema.parse({
+        amount: 4.5,
+        type: 'expense',
+        description: 'Coffee',
+        accountId: 'acct-1',
+        date: '2026-05-01',
+      })
+    )
+
+    expect(result).toMatchObject({
+      success: false,
+      reason: 'duplicate_transaction',
+      duplicate: { kind: 'exact_duplicate', existingTransactionId: 'tx-existing' },
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('includes transfer destination account when checking direct add duplicates', async () => {
+    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM accounts WHERE id = $1') && params?.[0] === 'acct-source') {
+        return [{ id: 'acct-source', currency: 'USD', is_archived: 0 }]
+      }
+      if (sql.includes('FROM accounts WHERE id = $1') && params?.[0] === 'acct-dest') {
+        return [{ id: 'acct-dest', currency: 'USD', is_archived: 0 }]
+      }
+      if (sql.includes('FROM transactions') && params?.[5] === 'acct-other') {
+        return [
+          {
+            id: 'tx-other-dest',
+            account_id: 'acct-source',
+            transfer_to_account_id: 'acct-other',
+            date: params[1],
+            amount: 2500,
+            type: 'transfer',
+            status: 'posted',
+            description: 'Move cash',
+          },
+        ]
+      }
+      if (sql.includes('SELECT id, balance FROM accounts')) {
+        return [
+          { id: 'acct-source', balance: 10000 },
+          { id: 'acct-dest', balance: 5000 },
+        ]
+      }
+      return []
+    })
+
+    const result = await addTransaction.execute(
+      addTransaction.schema.parse({
+        amount: 25,
+        type: 'transfer',
+        description: 'Move cash',
+        accountId: 'acct-source',
+        transferToAccountId: 'acct-dest',
+        date: '2026-05-01',
+      })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      transaction: { transferToAccountId: 'acct-dest' },
+    })
   })
 
   it('wraps add-transaction writes in a transaction', async () => {
@@ -2518,6 +2623,845 @@ describe('CLI tool validation regressions', () => {
     )
   })
 
+  it('creates backup and restore tool responses through shared database helpers', async () => {
+    const backup = {
+      path: '/tmp/shikin-backups/shikin-20260507T120000000Z.db',
+      createdAt: '2026-05-07T12:00:00.000Z',
+      sizeBytes: 4096,
+      totalPages: 1,
+      remainingPages: 0,
+      sourcePath: '/tmp/shikin.db',
+      kind: 'manual' as const,
+    }
+    mockBackupDatabase.mockResolvedValueOnce(backup)
+    mockRestoreDatabase.mockResolvedValueOnce({
+      sourcePath: backup.path,
+      restoredAt: '2026-05-07T12:01:00.000Z',
+      rollbackPath: '/tmp/shikin-backups/rollback-shikin-20260507T120100000Z.db',
+      sizeBytes: 4096,
+      dryRun: false,
+      integrityCheck: 'ok',
+      foreignKeyViolations: 0,
+    })
+    mockRestoreDatabase.mockResolvedValueOnce({
+      sourcePath: backup.path,
+      validatedAt: '2026-05-07T12:02:00.000Z',
+      wouldRestore: true,
+      wouldCreateRollback: true,
+      sizeBytes: 4096,
+      dryRun: true,
+      integrityCheck: 'ok',
+      foreignKeyViolations: 0,
+    })
+
+    const backupResult = await backupDatabaseTool.execute(backupDatabaseTool.schema.parse({}))
+    const restoreResult = await restoreDatabaseTool.execute(
+      restoreDatabaseTool.schema.parse({ file: backup.path })
+    )
+    const restoreDryRunResult = await restoreDatabaseTool.execute(
+      restoreDatabaseTool.schema.parse({ file: backup.path, dryRun: true })
+    )
+
+    expect(backupResult).toMatchObject({ success: true, path: backup.path, backup })
+    expect(mockBackupDatabase).toHaveBeenCalledTimes(1)
+    expect(mockRestoreDatabase).toHaveBeenCalledWith({ sourcePath: backup.path, dryRun: false })
+    expect(restoreResult).toMatchObject({
+      success: true,
+      sourcePath: backup.path,
+      rollbackPath: '/tmp/shikin-backups/rollback-shikin-20260507T120100000Z.db',
+    })
+    expect(restoreDryRunResult).toMatchObject({
+      success: true,
+      dryRun: true,
+      sourcePath: backup.path,
+      restore: {
+        validatedAt: '2026-05-07T12:02:00.000Z',
+        wouldRestore: true,
+        wouldCreateRollback: true,
+      },
+    })
+    expect(restoreDryRunResult).not.toHaveProperty('rollbackPath')
+  })
+
+  it('reports stale balance snapshots, recent backups, and assistant context readiness', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'shikin-backup-status-'))
+    const backupPath = join(dir, 'shikin-recent.db')
+    writeFileSync(backupPath, 'sqlite backup placeholder', 'utf8')
+
+    try {
+      mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+        if (
+          sql.includes('sqlite_master') &&
+          ['account_balance_history', 'goals', 'investments', 'stock_prices'].includes(
+            String(params?.[0])
+          )
+        ) {
+          return [{ count: 1 }]
+        }
+        if (sql.includes('PRAGMA table_info(goals)')) {
+          return [
+            'id',
+            'name',
+            'target_amount',
+            'current_amount',
+            'deadline',
+            'account_id',
+            'icon',
+            'color',
+            'notes',
+            'created_at',
+            'updated_at',
+          ].map((name) => ({ name }))
+        }
+        if (sql.includes('PRAGMA table_info(investments)')) {
+          return [
+            'id',
+            'account_id',
+            'symbol',
+            'name',
+            'type',
+            'shares',
+            'avg_cost_basis',
+            'currency',
+            'notes',
+            'created_at',
+            'updated_at',
+          ].map((name) => ({ name }))
+        }
+        if (sql.includes('PRAGMA table_info(stock_prices)')) {
+          return ['id', 'symbol', 'price', 'currency', 'date', 'created_at'].map((name) => ({
+            name,
+          }))
+        }
+        if (sql.includes('PRAGMA table_info(account_balance_history)')) {
+          return ['id', 'account_id', 'date', 'balance'].map((name) => ({ name }))
+        }
+        if (sql.includes('FROM settings') && params?.[0] === 'account_aliases') {
+          return [{ value: JSON.stringify({ checking: 'acct-1' }) }]
+        }
+        if (sql.includes('FROM settings') && params?.[0] === 'finance_profile') {
+          return [{ value: JSON.stringify({ currency: 'USD' }) }]
+        }
+        if (sql.includes('FROM settings') && params?.[0] === 'database_backups') {
+          return [
+            {
+              value: JSON.stringify({
+                lastBackup: {
+                  path: backupPath,
+                  createdAt: dayjs().subtract(1, 'day').toISOString(),
+                },
+              }),
+            },
+          ]
+        }
+        if (sql.includes('NOT EXISTS') && sql.includes('account_balance_history')) {
+          return [{ count: 1 }]
+        }
+        if (sql.includes('SELECT MAX(h.date)') && sql.includes('< $1')) {
+          return [{ count: 2 }]
+        }
+        if (sql.includes('SELECT MAX(date) as latestDate')) {
+          return [{ latestDate: dayjs().subtract(45, 'day').format('YYYY-MM-DD') }]
+        }
+        if (sql.includes('COUNT(*) as count FROM accounts')) return [{ count: 3 }]
+        if (sql.includes('COUNT(*) as count FROM categories')) return [{ count: 10 }]
+        if (sql.includes('COUNT(*) as count FROM goals')) return [{ count: 2 }]
+        if (sql.includes("type = 'credit_card'") && sql.includes('balance < 0')) {
+          return [{ count: 1 }]
+        }
+        if (sql.includes('COUNT(*) as count FROM investments')) return [{ count: 3 }]
+        return [{ count: 0 }]
+      })
+
+      const result = await setupStatus.execute(setupStatus.schema.parse({}))
+
+      expect(result.checks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: 'balance_snapshots',
+            ok: false,
+            count: 3,
+            details: expect.objectContaining({ missing: 1, stale: 2 }),
+          }),
+          expect.objectContaining({
+            key: 'goals',
+            ok: true,
+            count: 2,
+            details: expect.objectContaining({
+              available: true,
+              availableTools: expect.arrayContaining(['get-goal-status']),
+            }),
+          }),
+          expect.objectContaining({
+            key: 'debt_support',
+            ok: true,
+            count: 1,
+            details: expect.objectContaining({
+              available: true,
+              availableTools: ['get-debt-payoff-plan'],
+            }),
+          }),
+          expect.objectContaining({
+            key: 'investment_support',
+            ok: true,
+            count: 3,
+            details: expect.objectContaining({
+              available: true,
+              availableTools: expect.arrayContaining([
+                'manage-investment',
+                'generate-portfolio-review',
+              ]),
+            }),
+          }),
+          expect.objectContaining({ key: 'recent_backup', ok: true, count: 1 }),
+          expect.objectContaining({ key: 'assistant_context_readiness', ok: true, count: 1 }),
+        ])
+      )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not report goal or investment support as available for partial tables', async () => {
+    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('sqlite_master') && ['goals', 'investments'].includes(String(params?.[0]))) {
+        return [{ count: 1 }]
+      }
+      if (sql.includes('PRAGMA table_info(goals)')) return [{ name: 'id' }]
+      if (sql.includes('PRAGMA table_info(investments)')) return [{ name: 'id' }]
+      if (sql.includes('PRAGMA table_info(stock_prices)')) return []
+      if (sql.includes('FROM settings')) return []
+      if (sql.includes('SELECT MAX(date) as latestDate')) return [{ latestDate: null }]
+      return [{ count: 0 }]
+    })
+
+    const result = await setupStatus.execute(setupStatus.schema.parse({}))
+
+    expect(result.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'goals',
+          ok: false,
+          details: expect.objectContaining({ available: false, availableTools: [] }),
+        }),
+        expect.objectContaining({
+          key: 'investment_support',
+          ok: false,
+          details: expect.objectContaining({ available: false, availableTools: [] }),
+        }),
+      ])
+    )
+  })
+
+  it('degrades setup-status optional tables instead of throwing when they are absent', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('sqlite_master')) return [{ count: 0 }]
+      if (sql.includes('FROM settings')) return []
+      if (sql.includes('COUNT(*) as count FROM accounts')) return [{ count: 1 }]
+      if (sql.includes('COUNT(*) as count FROM categories')) return [{ count: 1 }]
+      if (sql.includes('COUNT(*) as count FROM transactions')) return [{ count: 0 }]
+      if (sql.includes("type = 'credit_card'")) return [{ count: 0 }]
+      return []
+    })
+
+    const result = await setupStatus.execute(setupStatus.schema.parse({}))
+
+    expect(result.success).toBe(true)
+    expect(result.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'budgets',
+          ok: false,
+          count: 0,
+          details: { available: false },
+        }),
+        expect.objectContaining({
+          key: 'recurring_rules',
+          ok: false,
+          count: 0,
+          details: { available: false },
+        }),
+        expect.objectContaining({
+          key: 'subscriptions',
+          ok: false,
+          count: 0,
+          details: { available: false },
+        }),
+      ])
+    )
+  })
+
+  it('lists audit entries with parsed JSON and redaction controls', async () => {
+    const auditRow = {
+      id: 'audit-1',
+      entity: 'transaction',
+      entity_id: 'tx-1',
+      action: 'update',
+      before_json: JSON.stringify({
+        transaction: {
+          id: 'tx-1',
+          accountId: 'acct-1',
+          amount: 450,
+          description: 'Coffee shop',
+          merchant: 'Downtown Cafe',
+          notes: 'receipt attached',
+        },
+      }),
+      after_json: JSON.stringify({
+        transaction: {
+          id: 'tx-1',
+          accountId: 'acct-1',
+          amount: 500,
+          description: 'Coffee shop corrected',
+          payee: 'Downtown Cafe',
+          status: 'posted',
+        },
+      }),
+      source: 'csv-import',
+      note: 'manual correction requested by user',
+      created_at: '2026-05-07T12:00:00.000Z',
+    }
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('FROM audit_log')) return [auditRow]
+      return []
+    })
+
+    const unredacted = await auditList.execute(
+      auditList.schema.parse({ entity: 'transaction', limit: 5 })
+    )
+    const redacted = await auditList.execute(
+      auditList.schema.parse({ entity: 'transaction', limit: 5, redacted: true })
+    )
+
+    expect(unredacted).toMatchObject({
+      success: true,
+      redacted: false,
+      count: 1,
+      rows: [
+        {
+          id: 'audit-1',
+          entity: 'transaction',
+          entityId: 'tx-1',
+          action: 'update',
+          before: {
+            transaction: {
+              id: 'tx-1',
+              accountId: 'acct-1',
+              amount: 450,
+              description: 'Coffee shop',
+              notes: 'receipt attached',
+            },
+          },
+          after: {
+            transaction: {
+              amount: 500,
+              description: 'Coffee shop corrected',
+              payee: 'Downtown Cafe',
+              status: 'posted',
+            },
+          },
+          source: 'csv-import',
+          note: 'manual correction requested by user',
+          createdAt: '2026-05-07T12:00:00.000Z',
+        },
+      ],
+    })
+    expect(redacted.rows[0]).toMatchObject({
+      before: {
+        transaction: {
+          id: 'tx-1',
+          accountId: 'acct-1',
+          amount: 450,
+          description: '[REDACTED]',
+          merchant: '[REDACTED]',
+          notes: '[REDACTED]',
+        },
+      },
+      after: {
+        transaction: {
+          id: 'tx-1',
+          accountId: 'acct-1',
+          amount: 500,
+          description: '[REDACTED]',
+          payee: '[REDACTED]',
+          status: 'posted',
+        },
+      },
+      source: '[REDACTED]',
+      note: '[REDACTED]',
+    })
+  })
+
+  it('returns a stable not-found response for missing audit entries', async () => {
+    mockQuery.mockReturnValueOnce([])
+
+    const result = await auditShow.execute(auditShow.schema.parse({ id: 'audit-missing' }))
+
+    expect(result).toEqual({
+      success: false,
+      reason: 'audit_entry_not_found',
+      code: 'AUDIT_ENTRY_NOT_FOUND',
+      message: 'Audit entry audit-missing not found.',
+    })
+  })
+
+  it('builds redacted assistant context from setup, finance, planning, and audit sources', async () => {
+    const today = dayjs().format('YYYY-MM-DD')
+    const dueDate = dayjs().add(7, 'day').format('YYYY-MM-DD')
+
+    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('sqlite_master')) return [{ count: 1 }]
+      if (sql.includes('PRAGMA table_info(budgets)')) {
+        return ['id', 'name', 'amount', 'period', 'category_id', 'is_active'].map((name) => ({
+          name,
+        }))
+      }
+      if (sql.includes('PRAGMA table_info(subscriptions)')) {
+        return [
+          'id',
+          'account_id',
+          'category_id',
+          'name',
+          'amount',
+          'currency',
+          'billing_cycle',
+          'next_billing_date',
+          'url',
+          'notes',
+          'is_active',
+        ].map((name) => ({ name }))
+      }
+      if (sql.includes('PRAGMA table_info(credit_card_statements)')) {
+        return [
+          'id',
+          'account_id',
+          'statement_start_date',
+          'statement_end_date',
+          'due_date',
+          'statement_balance',
+          'minimum_payment',
+          'paid_amount',
+          'currency',
+          'status',
+          'source',
+          'note',
+        ].map((name) => ({ name }))
+      }
+      if (sql.includes('PRAGMA table_info(goals)')) {
+        return [
+          'id',
+          'name',
+          'target_amount',
+          'current_amount',
+          'deadline',
+          'account_id',
+          'icon',
+          'color',
+          'notes',
+          'created_at',
+          'updated_at',
+        ].map((name) => ({ name }))
+      }
+      if (sql.includes('PRAGMA table_info(investments)')) {
+        return [
+          'id',
+          'account_id',
+          'symbol',
+          'name',
+          'type',
+          'shares',
+          'avg_cost_basis',
+          'currency',
+          'notes',
+          'created_at',
+          'updated_at',
+        ].map((name) => ({ name }))
+      }
+      if (sql.includes('PRAGMA table_info(stock_prices)')) {
+        return ['id', 'symbol', 'price', 'currency', 'date', 'created_at'].map((name) => ({ name }))
+      }
+      if (sql.includes('FROM settings') && params?.[0] === 'account_aliases') {
+        return [{ value: JSON.stringify({ checking: 'acct-1', visa: 'cc-1' }) }]
+      }
+      if (sql.includes('FROM settings') && params?.[0] === 'finance_profile') {
+        return [
+          {
+            value: JSON.stringify({
+              household: 'private details',
+              preferences: { currency: 'USD' },
+            }),
+          },
+        ]
+      }
+      if (sql.includes('FROM settings') && params?.[0] === 'database_backups') return []
+
+      if (sql.includes('statement_closing_day IS NULL')) return [{ count: 0 }]
+      if (sql.includes('NOT EXISTS') && sql.includes('account_balance_history'))
+        return [{ count: 0 }]
+      if (sql.includes('SELECT MAX(h.date)') && sql.includes('< $1')) return [{ count: 0 }]
+      if (sql.includes('SELECT MAX(date) as latestDate')) return [{ latestDate: today }]
+      if (sql.includes('COUNT(*) as count FROM accounts WHERE is_archived = 0')) {
+        return [{ count: 2 }]
+      }
+      if (sql.includes('COUNT(*) as count FROM categories')) return [{ count: 3 }]
+      if (sql.includes('COUNT(*) as count FROM transactions')) return [{ count: 4 }]
+      if (sql.includes('COUNT(*) as count FROM budgets WHERE is_active = 1')) {
+        return [{ count: 1 }]
+      }
+      if (sql.includes('COUNT(*) as count') && sql.includes('recurring_rules WHERE active = 1')) {
+        return [{ count: 1 }]
+      }
+      if (sql.includes('COUNT(*) as count') && sql.includes('subscriptions WHERE is_active = 1')) {
+        return [{ count: 1 }]
+      }
+
+      if (sql.includes('ORDER BY is_primary DESC')) {
+        return [
+          {
+            id: 'acct-1',
+            name: 'Main Checking',
+            type: 'checking',
+            currency: 'USD',
+            balance: 12345,
+            is_archived: 0,
+            is_primary: 1,
+            credit_limit: null,
+            statement_closing_day: null,
+            payment_due_day: null,
+          },
+          {
+            id: 'cc-1',
+            name: 'Visa Card',
+            type: 'credit_card',
+            currency: 'USD',
+            balance: -25000,
+            is_archived: 0,
+            is_primary: 0,
+            credit_limit: 100000,
+            statement_closing_day: 20,
+            payment_due_day: 5,
+          },
+        ]
+      }
+      if (sql.includes('FROM budgets b') && sql.includes('WHERE b.is_active = 1')) {
+        return [
+          {
+            id: 'budget-1',
+            name: 'Groceries Budget',
+            amount: 50000,
+            period: 'monthly',
+            category_id: 'cat-food',
+            category_name: 'Groceries',
+            is_active: 1,
+          },
+        ]
+      }
+      if (sql.includes('FROM subscriptions s') && sql.includes('WHERE s.is_active = 1')) {
+        return [
+          {
+            id: 'sub-1',
+            account_id: 'acct-1',
+            category_id: 'cat-media',
+            name: 'Streaming Service',
+            amount: 1299,
+            currency: 'USD',
+            billing_cycle: 'monthly',
+            next_billing_date: dueDate,
+            url: 'https://example.test/account',
+            notes: 'family plan',
+            is_active: 1,
+            account_name: 'Main Checking',
+            category_name: 'Media',
+          },
+        ]
+      }
+      if (
+        sql.includes("type = 'credit_card' AND is_archived = 0 AND balance < 0") &&
+        sql.includes('FROM accounts')
+      ) {
+        return [
+          {
+            id: 'cc-1',
+            name: 'Visa Card',
+            currency: 'USD',
+            balance: -25000,
+            credit_limit: 100000,
+            statement_closing_day: 20,
+            payment_due_day: 5,
+          },
+        ]
+      }
+      if (
+        sql.includes("type = 'credit_card' AND is_archived = 0") &&
+        sql.includes('FROM accounts')
+      ) {
+        return [
+          {
+            id: 'cc-1',
+            name: 'Visa Card',
+            currency: 'USD',
+            balance: -25000,
+            credit_limit: 100000,
+            statement_closing_day: 20,
+            payment_due_day: 5,
+          },
+        ]
+      }
+      if (sql.includes('FROM credit_card_statements s')) {
+        return [
+          {
+            id: 'stmt-1',
+            account_id: 'cc-1',
+            statement_start_date: today,
+            statement_end_date: today,
+            due_date: dueDate,
+            statement_balance: 25000,
+            minimum_payment: 2500,
+            paid_amount: 5000,
+            currency: 'USD',
+            status: 'partial',
+            source: 'email import',
+            note: 'statement note',
+            account_name: 'Visa Card',
+          },
+        ]
+      }
+      if (sql.includes('FROM recurring_rules r') && sql.includes('r.next_date <=')) {
+        return [
+          {
+            id: 'rule-1',
+            description: 'Monthly Rent',
+            amount: 100000,
+            type: 'expense',
+            frequency: 'monthly',
+            next_date: today,
+            end_date: null,
+            account_id: 'acct-1',
+            category_id: 'cat-rent',
+            notes: null,
+            active: 1,
+            currency: 'USD',
+            account_name: 'Main Checking',
+            account_currency: 'USD',
+            category_name: 'Rent',
+          },
+        ]
+      }
+      if (sql.includes('FROM transactions') && sql.includes('recurring_rule_id')) {
+        return [
+          {
+            id: 'tx-paid',
+            recurring_rule_id: 'rule-1',
+            account_id: 'acct-1',
+            type: 'expense',
+            amount: 100000,
+            currency: 'USD',
+            description: 'Monthly Rent',
+            date: today,
+            status: 'posted',
+          },
+        ]
+      }
+      if (sql.includes('FROM goals g')) {
+        return [
+          {
+            id: 'goal-1',
+            name: 'Emergency Fund',
+            target_amount: 1000000,
+            current_amount: 250000,
+            deadline: dueDate,
+            account_id: 'acct-1',
+            notes: 'private goal note',
+            account_name: 'Main Checking',
+          },
+        ]
+      }
+      if (sql.includes('FROM investments')) {
+        return [
+          {
+            id: 'inv-1',
+            account_id: 'acct-invest',
+            symbol: 'VTI',
+            name: 'Total Market ETF',
+            type: 'etf',
+            shares: 2,
+            avg_cost_basis: 10000,
+            currency: 'USD',
+            notes: 'long term',
+          },
+        ]
+      }
+      if (sql.includes('FROM audit_log')) {
+        return [
+          {
+            id: 'audit-1',
+            entity: 'transaction',
+            entity_id: 'tx-1',
+            action: 'create',
+            before_json: null,
+            after_json: JSON.stringify({ transaction: { id: 'tx-1', description: 'Coffee' } }),
+            source: 'assistant',
+            note: 'created from chat',
+            created_at: '2026-05-07T12:00:00.000Z',
+          },
+        ]
+      }
+
+      return []
+    })
+
+    const result = await assistantContext.execute(assistantContext.schema.parse({ redacted: true }))
+
+    expect(result).toMatchObject({
+      success: true,
+      redacted: true,
+      setup: {
+        setupComplete: true,
+        warnings: expect.arrayContaining([expect.objectContaining({ key: 'recent_backup' })]),
+      },
+      accounts: { count: 2, aliasCount: 2, aliasesRedacted: true, aliases: {} },
+      financeProfile: {
+        present: true,
+        keys: ['household', 'preferences'],
+        profileRedacted: true,
+        profile: { household: '[REDACTED]' },
+      },
+      budgets: { available: true, count: 1 },
+      subscriptions: { available: true, count: 1 },
+      creditCards: { summary: { cardCount: 1, statementCount: 1, dueCount: 1 } },
+      recurring: { available: true, success: true, summary: { expectedCount: 1, paidCount: 1 } },
+      support: {
+        goals: {
+          available: true,
+          count: 1,
+          availableTools: expect.arrayContaining(['get-goal-status']),
+        },
+        debt: { available: true, count: 1, availableTools: ['get-debt-payoff-plan'] },
+        investments: {
+          available: true,
+          count: 1,
+          availableTools: expect.arrayContaining([
+            'manage-investment',
+            'generate-portfolio-review',
+          ]),
+        },
+      },
+      supportSummary: {
+        availableTools: expect.arrayContaining([
+          'get-goal-status',
+          'get-debt-payoff-plan',
+          'manage-investment',
+          'generate-portfolio-review',
+        ]),
+        surfaces: {
+          investments: {
+            available: true,
+            count: 1,
+            availableTools: expect.arrayContaining(['generate-portfolio-review']),
+          },
+        },
+      },
+      recentAuditEntries: { redacted: true, count: 1 },
+    })
+    expect(result.accounts.rows[0].name).toBe('[REDACTED]')
+    expect(result.subscriptions.active[0].name).toBe('[REDACTED]')
+    expect(result.creditCards.statements[0].source).toBe('[REDACTED]')
+    expect(result.recurring.expected[0].description).toBe('[REDACTED]')
+    expect(result.support.goals.goals[0].name).toBe('[REDACTED]')
+    expect(result.support.investments.holdings[0].name).toBe('[REDACTED]')
+    expect(result.recentAuditEntries.rows[0].after.transaction.description).toBe('[REDACTED]')
+  })
+
+  it('returns partial assistant context when setup-status hits schema drift', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('COUNT(*) as count FROM accounts WHERE is_archived = 0')) {
+        throw new Error('SQLITE_ERROR: no such column: is_archived')
+      }
+      if (sql.includes('sqlite_master')) return [{ count: 0 }]
+      if (sql.includes('FROM accounts')) return []
+      if (sql.includes('FROM categories')) return []
+      if (sql.includes('FROM transactions')) return []
+      if (sql.includes('FROM settings')) return []
+      return []
+    })
+
+    const result = await assistantContext.execute(assistantContext.schema.parse({ redacted: true }))
+
+    expect(result).toMatchObject({
+      success: true,
+      setup: {
+        setupComplete: false,
+        message: 'Setup status is unavailable; assistant context returned partial data.',
+      },
+      budgets: { available: false, count: 0 },
+    })
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ section: 'setup', severity: 'warning' }),
+        expect.objectContaining({ section: 'budgets', severity: 'gap' }),
+      ])
+    )
+  })
+
+  it('returns partial assistant context when recurring expected-vs-paid throws', async () => {
+    const today = dayjs().format('YYYY-MM-DD')
+    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('sqlite_master')) return [{ count: 1 }]
+      if (sql.includes('PRAGMA table_info(budgets)')) {
+        return ['id', 'name', 'amount', 'period', 'category_id', 'is_active'].map((name) => ({
+          name,
+        }))
+      }
+      if (sql.includes('PRAGMA table_info(subscriptions)')) {
+        return ['id', 'name', 'amount', 'billing_cycle', 'next_billing_date', 'is_active'].map(
+          (name) => ({ name })
+        )
+      }
+      if (sql.includes('PRAGMA table_info(credit_card_statements)')) return []
+      if (sql.includes('PRAGMA table_info(goals)')) return []
+      if (sql.includes('PRAGMA table_info(investments)')) return []
+      if (sql.includes('PRAGMA table_info(stock_prices)')) return []
+      if (sql.includes('FROM settings') && params?.[0] === 'account_aliases') return []
+      if (sql.includes('FROM settings') && params?.[0] === 'finance_profile') return []
+      if (sql.includes('FROM settings') && params?.[0] === 'database_backups') return []
+      if (sql.includes('SELECT MAX(date) as latestDate')) return [{ latestDate: today }]
+      if (sql.includes('FROM recurring_rules r') && sql.includes('r.next_date <=')) {
+        throw new Error('recurring query failed')
+      }
+      if (sql.includes('COUNT(*) as count FROM accounts')) return [{ count: 1 }]
+      if (sql.includes('COUNT(*) as count FROM categories')) return [{ count: 1 }]
+      if (sql.includes('COUNT(*) as count FROM transactions')) return [{ count: 0 }]
+      if (sql.includes('COUNT(*) as count FROM budgets')) return [{ count: 0 }]
+      if (sql.includes('COUNT(*) as count') && sql.includes('recurring_rules'))
+        return [{ count: 0 }]
+      if (sql.includes('COUNT(*) as count') && sql.includes('subscriptions')) return [{ count: 0 }]
+      if (sql.includes('statement_closing_day IS NULL')) return [{ count: 0 }]
+      if (sql.includes('NOT EXISTS') && sql.includes('account_balance_history'))
+        return [{ count: 0 }]
+      if (sql.includes('SELECT MAX(h.date)') && sql.includes('< $1')) return [{ count: 0 }]
+      if (sql.includes('ORDER BY is_primary DESC')) return []
+      if (sql.includes('FROM audit_log')) return []
+      return []
+    })
+
+    const result = await assistantContext.execute(assistantContext.schema.parse({}))
+
+    expect(result.recurring).toMatchObject({
+      available: true,
+      success: false,
+      scheduleBasis: null,
+      scheduleNote: null,
+      fallbackWindowDays: null,
+      summary: null,
+      expected: [],
+    })
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ section: 'recurring', severity: 'warning' }),
+      ])
+    )
+  })
+
   it('deep-merges nested finance profile preferences by default', async () => {
     mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
       if (sql.includes('FROM settings') && params?.[0] === 'finance_profile') {
@@ -2662,6 +3606,115 @@ describe('CLI tool validation regressions', () => {
         ],
       })
       expect(mockExecute).not.toHaveBeenCalled()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('skips likely duplicate CSV import rows unless allowDuplicate is explicit', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'shikin-csv-likely-duplicate-'))
+    const file = join(dir, 'transactions.csv')
+    writeFileSync(file, 'date,description,amount\n2026-05-01,Coffee Shop,-4.50\n', 'utf8')
+
+    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM accounts WHERE id = $1')) {
+        return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
+      }
+      if (sql.includes('FROM transactions') && params?.length === 4) {
+        return []
+      }
+      if (sql.includes('FROM transactions') && params?.length === 9) {
+        return [
+          {
+            id: 'tx-similar',
+            account_id: 'acct-1',
+            date: '2026-05-01',
+            amount: 450,
+            type: 'expense',
+            description: 'coffee shop',
+          },
+        ]
+      }
+      return []
+    })
+
+    try {
+      const result = await importTransactions.execute(
+        importTransactions.schema.parse({ file, accountId: 'acct-1' })
+      )
+
+      expect(result).toMatchObject({
+        success: true,
+        dryRun: true,
+        summary: { totalRows: 1, validRows: 0, skippedRows: 1, importedRows: 0 },
+        rows: [
+          expect.objectContaining({
+            status: 'skipped',
+            reason: 'potential_duplicate',
+            existingTransactionId: 'tx-similar',
+            duplicate: expect.objectContaining({ kind: 'potential_duplicate' }),
+          }),
+        ],
+      })
+      expect(mockExecute).not.toHaveBeenCalled()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('imports external-ID duplicates when allowDuplicate is explicit', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'shikin-csv-allow-duplicate-'))
+    const file = join(dir, 'transactions.csv')
+    writeFileSync(
+      file,
+      'date,description,amount,externalId\n2026-05-01,Coffee,-4.50,bank-1\n',
+      'utf8'
+    )
+
+    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM accounts WHERE id = $1')) {
+        return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
+      }
+      if (sql.includes('FROM transactions') && params?.includes('externalId=')) {
+        return [{ id: 'tx-existing', note: 'externalId=bank-1' }]
+      }
+      return []
+    })
+
+    try {
+      const result = await importTransactions.execute(
+        importTransactions.schema.parse({
+          file,
+          accountId: 'acct-1',
+          apply: true,
+          allowDuplicate: true,
+        })
+      )
+
+      expect(result).toMatchObject({
+        success: true,
+        dryRun: false,
+        summary: { totalRows: 1, validRows: 1, skippedRows: 0, importedRows: 1 },
+        rows: [
+          expect.objectContaining({
+            status: 'imported',
+            reason: 'duplicate_override',
+            duplicateOverride: expect.objectContaining({
+              allowed: true,
+              duplicate: expect.objectContaining({
+                kind: 'duplicate',
+                matchType: 'external_id',
+                externalId: 'bank-1',
+                existingTransactionId: 'tx-existing',
+              }),
+            }),
+          }),
+        ],
+      })
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO transactions'),
+        expect.any(Array)
+      )
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -2840,6 +3893,34 @@ describe('CLI tool validation regressions', () => {
     const result = await exportData.execute(exportData.schema.parse({ format: 'csv' }))
 
     expect(result.files.accounts).toContain('\t=HYPERLINK')
+  })
+
+  it('skips missing optional export tables instead of failing the whole export', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('FROM accounts ')) {
+        return [{ id: 'acct-1', name: 'Checking', currency: 'USD' }]
+      }
+      if (sql.includes('FROM cashflow_buckets ')) {
+        throw new Error('SQLITE_ERROR: no such table: cashflow_buckets')
+      }
+      return []
+    })
+
+    const result = await exportData.execute(exportData.schema.parse({ format: 'json' }))
+
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        accounts: [expect.objectContaining({ id: 'acct-1' })],
+        cashflow_buckets: [],
+      },
+      skippedTables: [
+        expect.objectContaining({
+          name: 'cashflow_buckets',
+          reason: 'missing_optional_table_or_column',
+        }),
+      ],
+    })
   })
 
   it('detects large transactions as spending anomalies', async () => {
@@ -4419,6 +5500,65 @@ describe('CLI tool validation regressions', () => {
     })
   })
 
+  it('previews update-transaction dry-runs without writing', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('SELECT * FROM transactions WHERE id = $1')) {
+        return [
+          {
+            id: 'tx-1',
+            amount: 1000,
+            type: 'expense',
+            account_id: 'acct-1',
+            category_id: null,
+            transfer_to_account_id: null,
+            currency: 'USD',
+            description: 'Coffee',
+            date: '2026-04-14',
+            notes: 'old notes',
+            status: 'posted',
+            source: 'assistant',
+            note: 'old audit note',
+            recurring_rule_id: null,
+          },
+        ]
+      }
+      if (sql.includes('SELECT id, balance FROM accounts')) {
+        return [{ id: 'acct-1', balance: 5000 }]
+      }
+      return []
+    })
+
+    const result = await updateTransaction.execute(
+      updateTransaction.schema.parse({
+        transactionId: 'tx-1',
+        amount: 12,
+        description: 'Lunch',
+        dryRun: true,
+      })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      dryRun: true,
+      wouldUpdate: {
+        transactionId: 'tx-1',
+        before: { amount: 10, amountCentavos: 1000, description: 'Coffee' },
+        after: { amount: 12, amountCentavos: 1200, description: 'Lunch' },
+        validation: { status: 'posted', currency: 'USD', recurringRuleId: null },
+        balanceDeltas: [
+          {
+            accountId: 'acct-1',
+            deltaCentavos: -200,
+            previousBalanceCentavos: 5000,
+            newBalanceCentavos: 4800,
+          },
+        ],
+        auditPreview: { entity: 'transaction', action: 'update' },
+      },
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
   it('aborts update-transaction when the final row update does not affect exactly one row', async () => {
     mockQuery.mockReturnValueOnce([
       {
@@ -4487,6 +5627,58 @@ describe('CLI tool validation regressions', () => {
       success: true,
       message: 'Deleted expense: $10.00 "Coffee" from 2026-04-14',
     })
+  })
+
+  it('previews delete-transaction dry-runs without writing', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('SELECT * FROM transactions WHERE id = $1')) {
+        return [
+          {
+            id: 'tx-1',
+            amount: 1000,
+            type: 'expense',
+            account_id: 'acct-1',
+            category_id: null,
+            transfer_to_account_id: null,
+            currency: 'USD',
+            description: 'Coffee',
+            date: '2026-04-14',
+            notes: null,
+            status: 'posted',
+            source: null,
+            note: null,
+            recurring_rule_id: null,
+          },
+        ]
+      }
+      if (sql.includes('SELECT id, balance FROM accounts')) {
+        return [{ id: 'acct-1', balance: 5000 }]
+      }
+      return []
+    })
+
+    const result = await deleteTransaction.execute(
+      deleteTransaction.schema.parse({ transactionId: 'tx-1', dryRun: true })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      dryRun: true,
+      wouldDelete: {
+        transactionId: 'tx-1',
+        transaction: { amount: 10, amountCentavos: 1000, description: 'Coffee' },
+        balanceDeltas: [
+          {
+            accountId: 'acct-1',
+            deltaCentavos: 1000,
+            previousBalanceCentavos: 5000,
+            newBalanceCentavos: 6000,
+          },
+        ],
+        auditPreview: { entity: 'transaction', action: 'delete' },
+      },
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
   })
 
   it('reverses both accounts when deleting a transfer transaction', async () => {

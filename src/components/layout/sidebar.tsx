@@ -87,8 +87,14 @@ export function Sidebar() {
       >
         {!sidebarCollapsed && (
           <div className="flex items-center gap-2.5">
-            <div className="liquid-action font-heading flex h-8 w-8 items-center justify-center rounded-xl text-sm font-bold">
-              S
+            <div className="bg-background/80 ring-border/60 flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl ring-1">
+              <img
+                src="/icon.png"
+                alt=""
+                aria-hidden="true"
+                draggable={false}
+                className="h-full w-full object-cover"
+              />
             </div>
             <span className="gradient-text font-heading text-xl font-bold">Shikin</span>
           </div>

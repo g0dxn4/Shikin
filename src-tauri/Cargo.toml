@@ -1,6 +1,6 @@
 [package]
 name = "shikin"
-version = "1.0.0"
+version = "1.0.1"
 description = "Local-first personal finance manager"
 authors = ["ASF"]
 license = "MIT"

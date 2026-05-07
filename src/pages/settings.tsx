@@ -325,10 +325,10 @@ export function SettingsPage() {
               id="language-select"
               value={i18n.language}
               onChange={(e) => i18n.changeLanguage(e.target.value)}
-              className="glass-input text-foreground mt-2 w-full px-3 py-2 text-sm"
+              className="border-accent/55 focus:border-accent focus:ring-accent/25 mt-2 w-full rounded-[18px] border bg-white px-4 py-3 text-sm font-semibold text-black shadow-[0_10px_30px_rgba(0,0,0,0.2)] outline-none focus:ring-2"
             >
               {SUPPORTED_LANGUAGES.map((lang) => (
-                <option key={lang.code} value={lang.code}>
+                <option key={lang.code} value={lang.code} className="bg-white text-black">
                   {lang.name}
                 </option>
               ))}
@@ -357,13 +357,15 @@ export function SettingsPage() {
                 void handleCloseToTrayToggle()
               }}
               disabled={!isTauri || isSavingDesktopSettings}
-              className={`focus-visible:ring-accent focus-visible:ring-offset-background relative h-7 w-12 shrink-0 rounded-full border transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
-                closeToTrayEnabled ? 'border-accent/60 bg-accent/80' : 'border-white/10 bg-white/10'
+              className={`focus-visible:ring-accent focus-visible:ring-offset-background relative h-8 w-14 shrink-0 rounded-full border p-1 transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+                closeToTrayEnabled
+                  ? 'border-accent/70 bg-accent shadow-[0_0_24px_rgba(124,92,255,0.28)]'
+                  : 'border-white/10 bg-white/10'
               }`}
             >
               <span
-                className={`bg-background absolute top-1 size-5 rounded-full shadow-sm transition-transform ${
-                  closeToTrayEnabled ? 'translate-x-5' : 'translate-x-1'
+                className={`block size-6 rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.35)] transition-transform ${
+                  closeToTrayEnabled ? 'translate-x-6' : 'translate-x-0'
                 }`}
                 aria-hidden="true"
               />

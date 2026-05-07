@@ -75,7 +75,7 @@ export function Sidebar() {
   return (
     <aside
       aria-label="Sidebar"
-      className="glass-sidebar hidden h-[calc(100vh-1rem)] shrink-0 flex-col overflow-hidden transition-[width] duration-200 ease-out md:flex"
+      className="glass-sidebar hidden h-full shrink-0 flex-col overflow-hidden transition-[width] duration-200 ease-out md:flex"
       style={{ width: sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH }}
     >
       {/* Header */}

@@ -14,6 +14,7 @@ import { useTranslation } from 'react-i18next'
 import { Sidebar } from './sidebar'
 import { BottomNav } from '@/components/layout/bottom-nav'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
+import { TauriTitleBar } from '@/components/layout/tauri-title-bar'
 
 const mobilePrimaryNavItems = [
   { icon: <LayoutDashboard size={20} />, labelKey: 'nav.dashboard', label: 'Dashboard', href: '/' },
@@ -102,27 +103,30 @@ export function AppShell() {
   }, [pathname])
 
   return (
-    <div className="bg-background flex h-screen gap-0 overflow-hidden p-0 md:gap-2 md:p-2">
+    <div className="bg-background flex h-screen flex-col overflow-hidden">
       <a
         href="#main-content"
         className="bg-accent text-accent-foreground sr-only fixed top-4 left-4 z-[60] rounded px-3 py-2 focus:not-sr-only"
       >
         Skip to main content
       </a>
-      <Sidebar />
-      <main
-        id="main-content"
-        ref={mainRef}
-        tabIndex={-1}
-        className="grid-bg focus-visible:ring-ring flex-1 overflow-y-auto focus-visible:ring-2 focus-visible:outline-none md:rounded-[24px] md:border md:border-white/[0.06]"
-      >
-        <div className="w-full p-3 pb-24 sm:p-4 md:p-3 md:pb-3">
-          <Suspense fallback={<LoadingSpinner className="h-full" />}>
-            <Outlet />
-          </Suspense>
-        </div>
-      </main>
-      <BottomNav items={primaryItems} moreItems={moreItems} activeHref={pathname} />
+      <TauriTitleBar />
+      <div className="flex min-h-0 flex-1 gap-0 overflow-hidden p-0 md:gap-2 md:p-2">
+        <Sidebar />
+        <main
+          id="main-content"
+          ref={mainRef}
+          tabIndex={-1}
+          className="grid-bg focus-visible:ring-ring min-h-0 flex-1 overflow-y-auto focus-visible:ring-2 focus-visible:outline-none md:rounded-[24px] md:border md:border-white/[0.06]"
+        >
+          <div className="w-full p-3 pb-24 sm:p-4 md:p-3 md:pb-3">
+            <Suspense fallback={<LoadingSpinner className="h-full" />}>
+              <Outlet />
+            </Suspense>
+          </div>
+        </main>
+        <BottomNav items={primaryItems} moreItems={moreItems} activeHref={pathname} />
+      </div>
       <Suspense>
         <AccountDialog />
         <TransactionDialog />

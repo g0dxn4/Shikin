@@ -16,6 +16,10 @@ type TauriFsModule = {
   writeFile: (path: string, data: Uint8Array, options?: { mode?: number }) => Promise<void>
 }
 
+type TauriCoreModule = {
+  invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>
+}
+
 export type TransactionClient = {
   query<T>(sql: string, bindValues?: unknown[]): Promise<T[]>
   execute(
@@ -28,6 +32,8 @@ export type TransactionClient = {
 
 let tauriDb: TauriDatabase | null = null
 let tauriInitPromise: Promise<TauriDatabase> | null = null
+let tauriTransactionSequence = 0
+let tauriDbOperationQueue: Promise<unknown> = Promise.resolve()
 
 async function getTauriDbPath(): Promise<string> {
   const pathMod = await (import('@tauri-apps/api/path') as Promise<{
@@ -340,6 +346,63 @@ async function getTauriDb(): Promise<TauriDatabase> {
     })()
   }
   return tauriInitPromise
+}
+
+async function invokeTauri<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  const { invoke } = (await import('@tauri-apps/api/core')) as TauriCoreModule
+  return invoke<T>(command, args)
+}
+
+function enqueueTauriDbOperation<T>(operation: () => Promise<T>): Promise<T> {
+  const run = tauriDbOperationQueue.then(operation, operation)
+  tauriDbOperationQueue = run.catch(() => {})
+  return run
+}
+
+function nextTauriTransactionId(): string {
+  tauriTransactionSequence += 1
+  return `shikin-tx-${Date.now()}-${tauriTransactionSequence}`
+}
+
+function createTauriTransactionClient(transactionId: string): TransactionClient {
+  return {
+    query: <T>(sql: string, bindValues?: unknown[]) =>
+      invokeTauri<T[]>('shikin_db_tx_query', {
+        statement: {
+          transactionId,
+          query: sql,
+          values: bindValues || [],
+        },
+      }),
+    execute: (sql: string, bindValues?: unknown[]) =>
+      invokeTauri<{ rowsAffected: number; lastInsertId: number }>('shikin_db_tx_execute', {
+        statement: {
+          transactionId,
+          query: sql,
+          values: bindValues || [],
+        },
+      }),
+  }
+}
+
+async function runTauriWithTransaction<T>(fn: (tx: TransactionClient) => Promise<T>): Promise<T> {
+  await getTauriDb()
+
+  const transactionId = nextTauriTransactionId()
+  await invokeTauri<void>('shikin_db_tx_begin', { transactionId })
+
+  try {
+    const result = await fn(createTauriTransactionClient(transactionId))
+    await invokeTauri<void>('shikin_db_tx_commit', { transactionId })
+    return result
+  } catch (error) {
+    try {
+      await invokeTauri<void>('shikin_db_tx_rollback', { transactionId })
+    } catch {
+      // Preserve the original application error when rollback also fails.
+    }
+    throw error
+  }
 }
 
 // ── Migrations (Tauri mode) ────────────────────────────────────────────────
@@ -1240,23 +1303,7 @@ function assertBrowserTransactionFinalStatus(
 
 export async function withTransaction<T>(fn: (tx: TransactionClient) => Promise<T>): Promise<T> {
   if (isTauri) {
-    const database = await getTauriDb()
-    await database.execute('BEGIN')
-
-    const tx: TransactionClient = {
-      query: <T>(sql: string, bindValues?: unknown[]) =>
-        database.select<T[]>(sql, bindValues || []),
-      execute: (sql: string, bindValues?: unknown[]) => database.execute(sql, bindValues || []),
-    }
-
-    try {
-      const result = await fn(tx)
-      await database.execute('COMMIT')
-      return result
-    } catch (error) {
-      await database.execute('ROLLBACK')
-      throw error
-    }
+    return enqueueTauriDbOperation(() => runTauriWithTransaction(fn))
   }
 
   const transactionId = await beginBrowserTransaction()
@@ -1308,8 +1355,10 @@ export async function getDb(): Promise<TauriDatabase> {
 
 export async function query<T>(sql: string, bindValues?: unknown[]): Promise<T[]> {
   if (isTauri) {
-    const database = await getTauriDb()
-    return database.select<T[]>(sql, bindValues || [])
+    return enqueueTauriDbOperation(async () => {
+      const database = await getTauriDb()
+      return database.select<T[]>(sql, bindValues || [])
+    })
   }
   return browserQuery<T>(sql, bindValues || [])
 }
@@ -1319,29 +1368,18 @@ export async function execute(
   bindValues?: unknown[]
 ): Promise<{ rowsAffected: number; lastInsertId: number }> {
   if (isTauri) {
-    const database = await getTauriDb()
-    return database.execute(sql, bindValues || [])
+    return enqueueTauriDbOperation(async () => {
+      const database = await getTauriDb()
+      return database.execute(sql, bindValues || [])
+    })
   }
   return browserExecute(sql, bindValues || [])
 }
 
-export async function runInTransaction<T>(fn: () => Promise<T>): Promise<T> {
-  if (!isTauri) {
-    throw new Error(
-      'runInTransaction() is only supported in Tauri mode. Use withTransaction() for generic browser transaction flows, or a dedicated server endpoint for domain-specific browser workflows.'
-    )
-  }
-
-  const database = await getTauriDb()
-  await database.execute('BEGIN')
-  try {
-    const result = await fn()
-    await database.execute('COMMIT')
-    return result
-  } catch (error) {
-    await database.execute('ROLLBACK')
-    throw error
-  }
+export async function runInTransaction<T>(_fn: () => Promise<T>): Promise<T> {
+  throw new Error(
+    'runInTransaction() is no longer supported. Use withTransaction((tx) => ...) so all transaction reads and writes use the same connection.'
+  )
 }
 
 export async function materializeRecurringTransactionsBrowser(): Promise<{

@@ -46,25 +46,25 @@ describe('budget-store', () => {
   })
 
   it('calculates spent, remaining and percentUsed on successful fetch', async () => {
-    mockQuery
-      .mockResolvedValueOnce([
-        {
-          id: 'budget-1',
-          name: 'Groceries',
-          category_id: 'cat-1',
-          amount: 50000,
-          period: 'monthly',
-          is_active: 1,
-          created_at: '2024-01-01T00:00:00Z',
-          updated_at: '2024-01-01T00:00:00Z',
-          category_name: 'Food',
-          category_color: '#ff0000',
-        },
-      ])
-      .mockResolvedValueOnce([{ total: 30000 }])
+    mockQuery.mockResolvedValueOnce([
+      {
+        id: 'budget-1',
+        name: 'Groceries',
+        category_id: 'cat-1',
+        amount: 50000,
+        period: 'monthly',
+        is_active: 1,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        category_name: 'Food',
+        category_color: '#ff0000',
+        spent: 30000,
+      },
+    ])
 
     await useBudgetStore.getState().fetch()
 
+    expect(mockQuery).toHaveBeenCalledTimes(1)
     const state = useBudgetStore.getState()
     expect(state.budgets).toHaveLength(1)
     expect(state.budgets[0].spent).toBe(30000)
@@ -78,29 +78,31 @@ describe('budget-store', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2024-05-15T12:00:00Z'))
 
-    mockQuery
-      .mockResolvedValueOnce([
-        {
-          id: 'budget-1',
-          name: 'Groceries',
-          category_id: 'cat-1',
-          amount: 50000,
-          period: 'weekly',
-          is_active: 1,
-          created_at: '2024-01-01T00:00:00Z',
-          updated_at: '2024-01-01T00:00:00Z',
-          category_name: 'Food',
-          category_color: '#ff0000',
-        },
-      ])
-      .mockResolvedValueOnce([{ total: 12000 }])
+    mockQuery.mockResolvedValueOnce([
+      {
+        id: 'budget-1',
+        name: 'Groceries',
+        category_id: 'cat-1',
+        amount: 50000,
+        period: 'weekly',
+        is_active: 1,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        category_name: 'Food',
+        category_color: '#ff0000',
+        spent: 12000,
+      },
+    ])
 
     try {
       await useBudgetStore.getState().fetch()
 
       expect(mockQuery).toHaveBeenLastCalledWith(expect.any(String), [
-        'cat-1',
         '2024-05-12',
+        '2024-05-15',
+        '2024-05-01',
+        '2024-05-15',
+        '2024-01-01',
         '2024-05-15',
       ])
     } finally {

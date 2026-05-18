@@ -64,45 +64,51 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
   fetch: async () => {
     set({ isLoading: true, fetchError: null })
     try {
+      const weeklyRange = getPeriodDateRange('weekly')
+      const monthlyRange = getPeriodDateRange('monthly')
+      const yearlyRange = getPeriodDateRange('yearly')
       const raw = await query<
-        Budget & { category_name: string | null; category_color: string | null }
+        Budget & { category_name: string | null; category_color: string | null; spent: number }
       >(
-        `SELECT b.*, c.name as category_name, c.color as category_color
+        `SELECT b.*, c.name as category_name, c.color as category_color,
+                COALESCE(SUM(t.amount), 0) as spent
          FROM budgets b
          LEFT JOIN categories c ON b.category_id = c.id
-         WHERE b.is_active = 1
-         ORDER BY b.created_at DESC`
-      )
-
-      const budgets: BudgetWithStatus[] = await Promise.all(
-        raw.map(async (b) => {
-          const { start, end } = getPeriodDateRange(b.period)
-
-          const result = await query<{ total: number | null }>(
-            `SELECT COALESCE(SUM(t.amount), 0) as total
-             FROM transactions t
-             WHERE t.category_id = ?
-               AND t.type = 'expense'
-               AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
-               AND t.date >= ?
-               AND t.date <= ?`,
-            [b.category_id, start, end]
+         LEFT JOIN transactions t ON t.category_id = b.category_id
+          AND t.type = 'expense'
+          AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
+          AND (
+            (b.period = 'weekly' AND t.date >= ? AND t.date <= ?) OR
+            (b.period = 'monthly' AND t.date >= ? AND t.date <= ?) OR
+            (b.period = 'yearly' AND t.date >= ? AND t.date <= ?)
           )
-
-          const spent = result[0]?.total ?? 0
-          const remaining = b.amount - spent
-          const percentUsed = b.amount > 0 ? Math.round((spent / b.amount) * 100) : 0
-
-          return {
-            ...b,
-            categoryName: b.category_name ?? 'Uncategorized',
-            categoryColor: b.category_color ?? '#6b7280',
-            spent,
-            remaining,
-            percentUsed,
-          }
-        })
+         WHERE b.is_active = 1
+         GROUP BY b.id
+         ORDER BY b.created_at DESC`,
+        [
+          weeklyRange.start,
+          weeklyRange.end,
+          monthlyRange.start,
+          monthlyRange.end,
+          yearlyRange.start,
+          yearlyRange.end,
+        ]
       )
+
+      const budgets: BudgetWithStatus[] = raw.map((b) => {
+        const spent = b.spent ?? 0
+        const remaining = b.amount - spent
+        const percentUsed = b.amount > 0 ? Math.round((spent / b.amount) * 100) : 0
+
+        return {
+          ...b,
+          categoryName: b.category_name ?? 'Uncategorized',
+          categoryColor: b.category_color ?? '#6b7280',
+          spent,
+          remaining,
+          percentUsed,
+        }
+      })
 
       set({ budgets, fetchError: null })
     } catch (error) {

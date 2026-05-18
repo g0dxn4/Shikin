@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { ChevronLeft, ChevronRight, Calendar, CheckCircle, Clock } from 'lucide-react'
@@ -29,10 +29,31 @@ export function BillCalendar() {
   const today = monthOffset === 0 ? now.getDate() : null
   const monthKey = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}`
   const todayKey = toDateKey(now)
-  const scheduledBills = rules.filter((rule) => rule.active === 1 && rule.type === 'expense')
-  const monthBills = scheduledBills.filter((rule) => rule.next_date.startsWith(monthKey))
-  const remainingBills = monthBills.filter((rule) => rule.next_date >= todayKey)
-  const monthTotal = monthBills.reduce((total, rule) => total + rule.amount, 0)
+  const { monthBills, remainingBills, monthTotal, billsByDate } = useMemo(() => {
+    const monthBills: typeof rules = []
+    const remainingBills: typeof rules = []
+    const grouped = new Map<string, typeof rules>()
+    let monthTotal = 0
+
+    for (const rule of rules) {
+      if (rule.active !== 1 || rule.type !== 'expense' || !rule.next_date.startsWith(monthKey)) {
+        continue
+      }
+
+      monthBills.push(rule)
+      monthTotal += rule.amount
+
+      if (rule.next_date >= todayKey) {
+        remainingBills.push(rule)
+      }
+
+      const bills = grouped.get(rule.next_date) ?? []
+      bills.push(rule)
+      grouped.set(rule.next_date, bills)
+    }
+
+    return { monthBills, remainingBills, monthTotal, billsByDate: grouped }
+  }, [rules, monthKey, todayKey])
 
   const dayHeaders = [
     t('dayLabels.sunday'),
@@ -123,9 +144,7 @@ export function BillCalendar() {
                     {days.slice(weekIndex * 7, weekIndex * 7 + 7).map((day, dayIndex) => {
                       const isToday = day === today
                       const dateKey = day ? `${monthKey}-${String(day).padStart(2, '0')}` : null
-                      const billsForDay = dateKey
-                        ? monthBills.filter((rule) => rule.next_date === dateKey)
-                        : []
+                      const billsForDay = dateKey ? (billsByDate.get(dateKey) ?? []) : []
 
                       return (
                         <td

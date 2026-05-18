@@ -140,72 +140,59 @@ export function Dashboard() {
     return getTotalBalanceInPreferred(accounts)
   }, [hasMixedCurrencies, totalBalance, accounts, getTotalBalanceInPreferred])
 
-  const { monthlyIncome, monthlyExpenses } = useMemo(() => {
-    const startOfMonth = dayjs().startOf('month').format('YYYY-MM-DD')
-    const today = dayjs().format('YYYY-MM-DD')
-    let income = 0
-    let expenses = 0
-    for (const tx of transactions) {
-      if (!isPostedLedgerTransaction(tx)) continue
-      if (tx.date >= startOfMonth && tx.date <= today) {
-        if (tx.type === 'income') income += tx.amount
-        else if (tx.type === 'expense') expenses += tx.amount
+  const {
+    monthlyIncome,
+    monthlyExpenses,
+    previousIncome,
+    previousExpenses,
+    spendingIntelligence,
+    monthlySpendingGraph,
+  } = useMemo(() => {
+    const now = dayjs()
+    const currentStart = now.startOf('month').format('YYYY-MM-DD')
+    const currentEnd = now.format('YYYY-MM-DD')
+    const previousMonth = now.subtract(1, 'month')
+    const previousStart = previousMonth.startOf('month').format('YYYY-MM-DD')
+    const previousEnd = previousMonth.endOf('month').format('YYYY-MM-DD')
+    const graphMonths = Array.from({ length: 6 }, (_, index) => {
+      const month = now.subtract(5 - index, 'month')
+      return {
+        key: month.format('YYYY-MM'),
+        label: month.format('MMM'),
+        start: month.startOf('month').format('YYYY-MM-DD'),
+        end: month.endOf('month').format('YYYY-MM-DD'),
+        amount: 0,
+        isCurrent: month.isSame(now, 'month'),
       }
-    }
-    return { monthlyIncome: income, monthlyExpenses: expenses }
-  }, [transactions])
+    })
+    const graphMonthsByKey = new Map(graphMonths.map((month) => [month.key, month]))
 
-  const { previousIncome, previousExpenses } = useMemo(() => {
-    const start = dayjs().subtract(1, 'month').startOf('month').format('YYYY-MM-DD')
-    const end = dayjs().subtract(1, 'month').endOf('month').format('YYYY-MM-DD')
-    let income = 0
-    let expenses = 0
-    for (const tx of transactions) {
-      if (!isPostedLedgerTransaction(tx)) continue
-      if (tx.date >= start && tx.date <= end) {
-        if (tx.type === 'income') income += tx.amount
-        else if (tx.type === 'expense') expenses += tx.amount
-      }
-    }
-    return { previousIncome: income, previousExpenses: expenses }
-  }, [transactions])
-
-  const savingsRate = useMemo(() => {
-    if (monthlyIncome <= 0) return 0
-    return Math.round(((monthlyIncome - monthlyExpenses) / monthlyIncome) * 100)
-  }, [monthlyIncome, monthlyExpenses])
-
-  const incomeDelta = monthlyIncome - previousIncome
-  const expenseDelta = monthlyExpenses - previousExpenses
-
-  const recentTransactions = useMemo(() => transactions.slice(0, 8), [transactions])
-  const dashboardErrors = [
-    accountsFetchError ? `Accounts: ${accountsFetchError}` : null,
-    transactionsFetchError && recentTransactions.length > 0
-      ? `Transactions: ${transactionsFetchError}`
-      : null,
-    goalsFetchError ? `Goals: ${goalsFetchError}` : null,
-    currencyError ? `Exchange rates: ${currencyError}` : null,
-    healthError ? `Financial health: ${healthError}` : null,
-  ]
-
-  const spendingIntelligence = useMemo(() => {
-    const currentStart = dayjs().startOf('month').format('YYYY-MM-DD')
-    const currentEnd = dayjs().format('YYYY-MM-DD')
-    const previousStart = dayjs().subtract(1, 'month').startOf('month').format('YYYY-MM-DD')
-    const previousEnd = dayjs().subtract(1, 'month').endOf('month').format('YYYY-MM-DD')
-
+    let currentIncome = 0
+    let currentExpenses = 0
+    let lastIncome = 0
+    let lastExpenses = 0
     const current = new Map<string, { name: string; color: string; amount: number }>()
     const previous = new Map<string, { name: string; color: string; amount: number }>()
 
     for (const tx of transactions) {
       if (!isPostedLedgerTransaction(tx)) continue
+
+      if (tx.date >= currentStart && tx.date <= currentEnd) {
+        if (tx.type === 'income') currentIncome += tx.amount
+        else if (tx.type === 'expense') currentExpenses += tx.amount
+      } else if (tx.date >= previousStart && tx.date <= previousEnd) {
+        if (tx.type === 'income') lastIncome += tx.amount
+        else if (tx.type === 'expense') lastExpenses += tx.amount
+      }
+
       if (tx.type !== 'expense') continue
 
-      const key = tx.category_name || 'Uncategorized'
-      const color = tx.category_color || '#7C5CFF'
-      let target: typeof current | typeof previous | null = null
+      const graphMonth = graphMonthsByKey.get(tx.date.slice(0, 7))
+      if (graphMonth && tx.date >= graphMonth.start && tx.date <= graphMonth.end) {
+        graphMonth.amount += tx.amount
+      }
 
+      let target: typeof current | typeof previous | null = null
       if (tx.date >= currentStart && tx.date <= currentEnd) {
         target = current
       } else if (tx.date >= previousStart && tx.date <= previousEnd) {
@@ -214,6 +201,8 @@ export function Dashboard() {
 
       if (!target) continue
 
+      const key = tx.category_name || 'Uncategorized'
+      const color = tx.category_color || '#7C5CFF'
       const existing = target.get(key)
       target.set(key, {
         name: key,
@@ -256,37 +245,49 @@ export function Dashboard() {
           ? 100
           : 0
     const maxCategorySpend = Math.max(1, ...categories.map((category) => category.current))
+    const months = graphMonths.map((month) => ({
+      key: month.key,
+      label: month.label,
+      amount: month.amount,
+      isCurrent: month.isCurrent,
+    }))
+    const maxAmount = Math.max(1, ...months.map((month) => month.amount))
+
     return {
-      categories,
-      currentTotal,
-      previousTotal,
-      totalChange,
-      totalChangePercent,
-      maxCategorySpend,
+      monthlyIncome: currentIncome,
+      monthlyExpenses: currentExpenses,
+      previousIncome: lastIncome,
+      previousExpenses: lastExpenses,
+      spendingIntelligence: {
+        categories,
+        currentTotal,
+        previousTotal,
+        totalChange,
+        totalChangePercent,
+        maxCategorySpend,
+      },
+      monthlySpendingGraph: { months, maxAmount },
     }
   }, [transactions])
 
-  const monthlySpendingGraph = useMemo(() => {
-    const months = Array.from({ length: 6 }, (_, index) => {
-      const month = dayjs().subtract(5 - index, 'month')
-      const start = month.startOf('month').format('YYYY-MM-DD')
-      const end = month.endOf('month').format('YYYY-MM-DD')
-      const amount = transactions.reduce((sum, tx) => {
-        if (!isPostedLedgerTransaction(tx)) return sum
-        if (tx.type !== 'expense' || tx.date < start || tx.date > end) return sum
-        return sum + tx.amount
-      }, 0)
+  const savingsRate = useMemo(() => {
+    if (monthlyIncome <= 0) return 0
+    return Math.round(((monthlyIncome - monthlyExpenses) / monthlyIncome) * 100)
+  }, [monthlyIncome, monthlyExpenses])
 
-      return {
-        key: month.format('YYYY-MM'),
-        label: month.format('MMM'),
-        amount,
-        isCurrent: month.isSame(dayjs(), 'month'),
-      }
-    })
-    const maxAmount = Math.max(1, ...months.map((month) => month.amount))
-    return { months, maxAmount }
-  }, [transactions])
+  const incomeDelta = monthlyIncome - previousIncome
+  const expenseDelta = monthlyExpenses - previousExpenses
+
+  const recentTransactions = useMemo(() => transactions.slice(0, 8), [transactions])
+  const dashboardErrors = [
+    accountsFetchError ? `Accounts: ${accountsFetchError}` : null,
+    transactionsFetchError && recentTransactions.length > 0
+      ? `Transactions: ${transactionsFetchError}`
+      : null,
+    goalsFetchError ? `Goals: ${goalsFetchError}` : null,
+    currencyError ? `Exchange rates: ${currencyError}` : null,
+    healthError ? `Financial health: ${healthError}` : null,
+  ]
 
   const hasTransactionsLoadError = !!transactionsFetchError && recentTransactions.length === 0
   const isLoading = accountsLoading || txLoading

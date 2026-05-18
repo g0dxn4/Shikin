@@ -10,7 +10,14 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-use tauri::Manager;
+use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
+use sqlx::{
+    sqlite::{SqliteArguments, SqliteConnectOptions, SqliteConnection, SqliteValueRef},
+    Column, ConnectOptions, Executor, Row, Sqlite, TypeInfo, Value, ValueRef,
+};
+use tauri::{Manager, State};
+use tokio::sync::Mutex;
 
 const DB_FILE_NAME: &str = "shikin.db";
 const APP_IDENTIFIER: &str = "com.asf.shikin";
@@ -23,6 +30,32 @@ const DEFAULT_CLOSE_TO_TRAY_ENABLED: bool = true;
 const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_MENU_SHOW_ID: &str = "show_shikin";
 const TRAY_MENU_QUIT_ID: &str = "quit_shikin";
+
+#[derive(Default)]
+struct ShikinDbState {
+    inner: Mutex<ShikinDbInner>,
+}
+
+#[derive(Default)]
+struct ShikinDbInner {
+    connection: Option<SqliteConnection>,
+    active_transaction_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ShikinDbStatement {
+    transaction_id: String,
+    query: String,
+    values: Vec<JsonValue>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ShikinDbExecuteResult {
+    rows_affected: u64,
+    last_insert_id: i64,
+}
 
 static TRAY_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
@@ -246,6 +279,223 @@ fn set_private_file_mode(path: &Path) -> io::Result<()> {
     fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
 
     Ok(())
+}
+
+async fn open_sqlite_connection_at_path(path: &Path) -> Result<SqliteConnection, String> {
+    let mut connection = SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(true)
+        .connect()
+        .await
+        .map_err(|error| error.to_string())?;
+    connection
+        .execute("PRAGMA foreign_keys = ON")
+        .await
+        .map_err(|error| error.to_string())?;
+
+    Ok(connection)
+}
+
+async fn open_shikin_sqlite_connection(app: &tauri::AppHandle) -> Result<SqliteConnection, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    ensure_private_dir(&app_data_dir).map_err(|error| error.to_string())?;
+
+    let db_path = app_data_dir.join(DB_FILE_NAME);
+    let connection = open_sqlite_connection_at_path(&db_path).await?;
+    if db_path.exists() {
+        set_private_file_mode(&db_path).map_err(|error| error.to_string())?;
+    }
+
+    Ok(connection)
+}
+
+fn bind_json_values<'q>(
+    mut query: sqlx::query::Query<'q, Sqlite, SqliteArguments<'q>>,
+    values: Vec<JsonValue>,
+) -> sqlx::query::Query<'q, Sqlite, SqliteArguments<'q>> {
+    for value in values {
+        query = match value {
+            JsonValue::Null => query.bind(None::<JsonValue>),
+            JsonValue::Bool(value) => query.bind(value),
+            JsonValue::Number(value) => {
+                if let Some(value) = value.as_i64() {
+                    query.bind(value)
+                } else if let Some(value) = value.as_u64() {
+                    query.bind(value as i64)
+                } else {
+                    query.bind(value.as_f64().unwrap_or_default())
+                }
+            }
+            JsonValue::String(value) => query.bind(value),
+            value => query.bind(value),
+        };
+    }
+
+    query
+}
+
+fn sqlite_value_to_json(value: SqliteValueRef<'_>) -> Result<JsonValue, String> {
+    if value.is_null() {
+        return Ok(JsonValue::Null);
+    }
+
+    let json = match value.type_info().name() {
+        "TEXT" => value
+            .to_owned()
+            .try_decode::<String>()
+            .map(JsonValue::String)
+            .unwrap_or(JsonValue::Null),
+        "REAL" => value
+            .to_owned()
+            .try_decode::<f64>()
+            .map(JsonValue::from)
+            .unwrap_or(JsonValue::Null),
+        "INTEGER" | "NUMERIC" => value
+            .to_owned()
+            .try_decode::<i64>()
+            .map(JsonValue::from)
+            .unwrap_or(JsonValue::Null),
+        "BOOLEAN" => value
+            .to_owned()
+            .try_decode::<bool>()
+            .map(JsonValue::Bool)
+            .unwrap_or(JsonValue::Null),
+        "BLOB" => value
+            .to_owned()
+            .try_decode::<Vec<u8>>()
+            .map(|bytes| bytes.into_iter().map(JsonValue::from).collect())
+            .map(JsonValue::Array)
+            .unwrap_or(JsonValue::Null),
+        "NULL" => JsonValue::Null,
+        other => return Err(format!("unsupported SQLite datatype: {other}")),
+    };
+
+    Ok(json)
+}
+
+async fn execute_on_shikin_connection(
+    connection: &mut SqliteConnection,
+    query: String,
+    values: Vec<JsonValue>,
+) -> Result<ShikinDbExecuteResult, String> {
+    let result = bind_json_values(sqlx::query(&query), values)
+        .execute(connection)
+        .await
+        .map_err(|error| error.to_string())?;
+
+    Ok(ShikinDbExecuteResult {
+        rows_affected: result.rows_affected(),
+        last_insert_id: result.last_insert_rowid(),
+    })
+}
+
+async fn select_on_shikin_connection(
+    connection: &mut SqliteConnection,
+    query: String,
+    values: Vec<JsonValue>,
+) -> Result<Vec<serde_json::Map<String, JsonValue>>, String> {
+    let rows = bind_json_values(sqlx::query(&query), values)
+        .fetch_all(connection)
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut result = Vec::with_capacity(rows.len());
+
+    for row in rows {
+        let mut object = serde_json::Map::new();
+        for (index, column) in row.columns().iter().enumerate() {
+            let value = row.try_get_raw(index).map_err(|error| error.to_string())?;
+            object.insert(column.name().to_string(), sqlite_value_to_json(value)?);
+        }
+        result.push(object);
+    }
+
+    Ok(result)
+}
+
+fn ensure_active_transaction<'a>(
+    state: &'a mut ShikinDbInner,
+    transaction_id: &str,
+) -> Result<&'a mut SqliteConnection, String> {
+    match state.active_transaction_id.as_deref() {
+        Some(active_transaction_id) if active_transaction_id == transaction_id => state
+            .connection
+            .as_mut()
+            .ok_or_else(|| "database transaction connection is not available".to_string()),
+        Some(_) => Err("another database transaction is active".to_string()),
+        None => Err("no database transaction is active".to_string()),
+    }
+}
+
+#[tauri::command]
+async fn shikin_db_tx_begin(
+    app: tauri::AppHandle,
+    state: State<'_, ShikinDbState>,
+    transaction_id: String,
+) -> Result<(), String> {
+    let mut guard = state.inner.lock().await;
+    if guard.active_transaction_id.is_some() {
+        return Err("another database transaction is already active".to_string());
+    }
+
+    let mut connection = open_shikin_sqlite_connection(&app).await?;
+    execute_on_shikin_connection(&mut connection, "BEGIN IMMEDIATE".to_string(), vec![]).await?;
+
+    guard.connection = Some(connection);
+    guard.active_transaction_id = Some(transaction_id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn shikin_db_tx_execute(
+    state: State<'_, ShikinDbState>,
+    statement: ShikinDbStatement,
+) -> Result<ShikinDbExecuteResult, String> {
+    let mut guard = state.inner.lock().await;
+    let connection = ensure_active_transaction(&mut guard, &statement.transaction_id)?;
+    execute_on_shikin_connection(connection, statement.query, statement.values).await
+}
+
+#[tauri::command]
+async fn shikin_db_tx_query(
+    state: State<'_, ShikinDbState>,
+    statement: ShikinDbStatement,
+) -> Result<Vec<serde_json::Map<String, JsonValue>>, String> {
+    let mut guard = state.inner.lock().await;
+    let connection = ensure_active_transaction(&mut guard, &statement.transaction_id)?;
+    select_on_shikin_connection(connection, statement.query, statement.values).await
+}
+
+#[tauri::command]
+async fn shikin_db_tx_commit(
+    state: State<'_, ShikinDbState>,
+    transaction_id: String,
+) -> Result<(), String> {
+    let mut guard = state.inner.lock().await;
+    let connection = ensure_active_transaction(&mut guard, &transaction_id)?;
+    execute_on_shikin_connection(connection, "COMMIT".to_string(), vec![]).await?;
+    guard.active_transaction_id = None;
+    guard.connection = None;
+    Ok(())
+}
+
+#[tauri::command]
+async fn shikin_db_tx_rollback(
+    state: State<'_, ShikinDbState>,
+    transaction_id: String,
+) -> Result<(), String> {
+    let mut guard = state.inner.lock().await;
+    let rollback_result = match ensure_active_transaction(&mut guard, &transaction_id) {
+        Ok(connection) => {
+            execute_on_shikin_connection(connection, "ROLLBACK".to_string(), vec![]).await
+        }
+        Err(error) => Err(error),
+    };
+    guard.active_transaction_id = None;
+    guard.connection = None;
+    rollback_result.map(|_| ())
 }
 
 fn backup_suffix() -> String {
@@ -489,6 +739,14 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .manage(ShikinDbState::default())
+        .invoke_handler(tauri::generate_handler![
+            shikin_db_tx_begin,
+            shikin_db_tx_execute,
+            shikin_db_tx_query,
+            shikin_db_tx_commit,
+            shikin_db_tx_rollback,
+        ])
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -537,6 +795,95 @@ mod tests {
 
     fn os_args(args: &[&str]) -> Vec<OsString> {
         args.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn shikin_db_transaction_helpers_commit_on_one_connection() {
+        tauri::async_runtime::block_on(async {
+            let root = temp_test_dir("db-tx-commit");
+            let db_path = root.join(DB_FILE_NAME);
+            let mut connection = open_sqlite_connection_at_path(&db_path).await.unwrap();
+
+            execute_on_shikin_connection(
+                &mut connection,
+                "CREATE TABLE accounts (id TEXT PRIMARY KEY, balance INTEGER NOT NULL)".into(),
+                vec![],
+            )
+            .await
+            .unwrap();
+            execute_on_shikin_connection(&mut connection, "BEGIN IMMEDIATE".into(), vec![])
+                .await
+                .unwrap();
+            execute_on_shikin_connection(
+                &mut connection,
+                "INSERT INTO accounts (id, balance) VALUES (?, ?)".into(),
+                vec![JsonValue::String("acct-1".into()), JsonValue::from(100)],
+            )
+            .await
+            .unwrap();
+            execute_on_shikin_connection(
+                &mut connection,
+                "UPDATE accounts SET balance = balance - ? WHERE id = ?".into(),
+                vec![JsonValue::from(25), JsonValue::String("acct-1".into())],
+            )
+            .await
+            .unwrap();
+            execute_on_shikin_connection(&mut connection, "COMMIT".into(), vec![])
+                .await
+                .unwrap();
+
+            let rows = select_on_shikin_connection(
+                &mut connection,
+                "SELECT balance FROM accounts WHERE id = ?".into(),
+                vec![JsonValue::String("acct-1".into())],
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(rows[0].get("balance"), Some(&JsonValue::from(75)));
+            fs::remove_dir_all(root).unwrap();
+        });
+    }
+
+    #[test]
+    fn shikin_db_transaction_helpers_rollback_on_one_connection() {
+        tauri::async_runtime::block_on(async {
+            let root = temp_test_dir("db-tx-rollback");
+            let db_path = root.join(DB_FILE_NAME);
+            let mut connection = open_sqlite_connection_at_path(&db_path).await.unwrap();
+
+            execute_on_shikin_connection(
+                &mut connection,
+                "CREATE TABLE transactions (id TEXT PRIMARY KEY, amount INTEGER NOT NULL)".into(),
+                vec![],
+            )
+            .await
+            .unwrap();
+            execute_on_shikin_connection(&mut connection, "BEGIN IMMEDIATE".into(), vec![])
+                .await
+                .unwrap();
+            execute_on_shikin_connection(
+                &mut connection,
+                "INSERT INTO transactions (id, amount) VALUES (?, ?)".into(),
+                vec![JsonValue::String("tx-1".into()), JsonValue::from(1200)],
+            )
+            .await
+            .unwrap();
+            execute_on_shikin_connection(&mut connection, "ROLLBACK".into(), vec![])
+                .await
+                .unwrap();
+
+            let rows = select_on_shikin_connection(
+                &mut connection,
+                "SELECT COUNT(*) AS count FROM transactions".into(),
+                vec![],
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(rows[0].get("count"), Some(&JsonValue::from(0)));
+            fs::remove_dir_all(root).unwrap();
+        });
     }
 
     #[test]

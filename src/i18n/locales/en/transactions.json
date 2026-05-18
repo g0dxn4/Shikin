@@ -60,6 +60,10 @@
     "allResults": "All results",
     "uncategorized": "Uncategorized ({{count}})"
   },
+  "pagination": {
+    "summary": "Showing {{shown}} of {{total}} matching transactions",
+    "showMore": "Show {{count}} more"
+  },
   "viewAll": "View All",
   "recentTransactions": "Recent Transactions",
   "addQuick": "Add Transaction",

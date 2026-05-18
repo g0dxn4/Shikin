@@ -4094,7 +4094,9 @@ version = "1.0.6"
 dependencies = [
  "dirs",
  "log",
+ "serde",
  "serde_json",
+ "sqlx",
  "tauri",
  "tauri-build",
  "tauri-plugin-fs",
@@ -4105,6 +4107,7 @@ dependencies = [
  "tauri-plugin-sql",
  "tauri-plugin-store",
  "tauri-plugin-updater",
+ "tokio",
 ]
 
 [[package]]

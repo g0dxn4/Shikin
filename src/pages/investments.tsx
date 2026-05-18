@@ -150,17 +150,48 @@ export function Investments() {
 
     const dates = [...dateSet].sort()
 
+    const holdingsBySymbol = new Map<
+      string,
+      { shares: number; fallbackValue: number; points: { date: string; price: number }[] }
+    >()
+
+    for (const inv of investments) {
+      const points = priceHistory.get(inv.symbol)
+      if (!points) continue
+
+      const existing = holdingsBySymbol.get(inv.symbol)
+      if (existing) {
+        existing.shares += inv.shares
+        existing.fallbackValue += inv.shares * inv.avg_cost_basis
+      } else {
+        holdingsBySymbol.set(inv.symbol, {
+          shares: inv.shares,
+          fallbackValue: inv.shares * inv.avg_cost_basis,
+          points,
+        })
+      }
+    }
+
+    const cursors = new Map<string, { index: number; price: number | null }>()
+    for (const symbol of holdingsBySymbol.keys()) {
+      cursors.set(symbol, { index: -1, price: null })
+    }
+
     return dates.map((date) => {
       let total = 0
-      for (const inv of investments) {
-        const history = priceHistory.get(inv.symbol)
-        if (!history) continue
-        // Find the closest price on or before this date
-        let price = inv.avg_cost_basis
-        for (const p of history) {
-          if (p.date <= date) price = p.price
+      for (const [symbol, holding] of holdingsBySymbol.entries()) {
+        const cursor = cursors.get(symbol)
+        if (!cursor) continue
+
+        while (
+          cursor.index + 1 < holding.points.length &&
+          holding.points[cursor.index + 1].date <= date
+        ) {
+          cursor.index += 1
+          cursor.price = holding.points[cursor.index].price
         }
-        total += inv.shares * price
+
+        total += cursor.price === null ? holding.fallbackValue : holding.shares * cursor.price
       }
       return { date, value: total }
     })

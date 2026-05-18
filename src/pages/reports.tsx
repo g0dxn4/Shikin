@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowDownRight, ArrowUpRight, BarChart3, PieChart, Receipt, Wallet } from 'lucide-react'
 import dayjs from 'dayjs'
@@ -30,17 +30,39 @@ export function ReportsPage() {
     void Promise.allSettled([fetchAccounts(), fetchBudgets(), fetchTransactions()])
   }, [fetchAccounts, fetchBudgets, fetchTransactions])
 
-  const monthStart = startOfCurrentMonth()
-  const monthEnd = endOfCurrentMonth()
-  const monthTransactions = transactions.filter(
-    (tx) => tx.date >= monthStart && tx.date <= monthEnd && tx.type !== 'transfer'
-  )
-  const income = monthTransactions
-    .filter((tx) => tx.type === 'income')
-    .reduce((total, tx) => total + tx.amount, 0)
-  const expenses = monthTransactions
-    .filter((tx) => tx.type === 'expense')
-    .reduce((total, tx) => total + tx.amount, 0)
+  const { monthTransactionCount, income, expenses, topCategories } = useMemo(() => {
+    const monthStart = startOfCurrentMonth()
+    const monthEnd = endOfCurrentMonth()
+    const categoryTotals = new Map<string, { name: string; color: string; amount: number }>()
+    let transactionCount = 0
+    let totalIncome = 0
+    let totalExpenses = 0
+
+    for (const tx of transactions) {
+      if (tx.date < monthStart || tx.date > monthEnd || tx.type === 'transfer') continue
+
+      transactionCount += 1
+      if (tx.type === 'income') {
+        totalIncome += tx.amount
+      } else if (tx.type === 'expense') {
+        totalExpenses += tx.amount
+        const key = tx.category_name ?? t('reports.uncategorized')
+        const existing = categoryTotals.get(key)
+        categoryTotals.set(key, {
+          name: key,
+          color: existing?.color ?? tx.category_color ?? 'var(--accent)',
+          amount: (existing?.amount ?? 0) + tx.amount,
+        })
+      }
+    }
+
+    return {
+      monthTransactionCount: transactionCount,
+      income: totalIncome,
+      expenses: totalExpenses,
+      topCategories: [...categoryTotals.values()].sort((a, b) => b.amount - a.amount).slice(0, 5),
+    }
+  }, [transactions, t])
   const netFlow = income - expenses
   const totalBalance = accounts.reduce((total, account) => total + account.balance, 0)
   const totalBudgeted = budgets.reduce((total, budget) => total + budget.amount, 0)
@@ -48,23 +70,6 @@ export function ReportsPage() {
   const budgetUsage =
     totalBudgeted > 0 ? Math.round((totalSpentAgainstBudgets / totalBudgeted) * 100) : 0
   const isLoading = accountsLoading || budgetsLoading || transactionsLoading
-
-  const topCategories = Object.values(
-    monthTransactions
-      .filter((tx) => tx.type === 'expense')
-      .reduce<Record<string, { name: string; color: string; amount: number }>>((groups, tx) => {
-        const key = tx.category_name ?? t('reports.uncategorized')
-        groups[key] ??= {
-          name: key,
-          color: tx.category_color ?? 'var(--accent)',
-          amount: 0,
-        }
-        groups[key].amount += tx.amount
-        return groups
-      }, {})
-  )
-    .sort((a, b) => b.amount - a.amount)
-    .slice(0, 5)
 
   return (
     <div className="page-content animate-fade-in-up">
@@ -156,7 +161,7 @@ export function ReportsPage() {
             </div>
             <div className="flex justify-between gap-3">
               <span className="text-muted-foreground">{t('reports.transactions')}</span>
-              <span className="font-semibold">{monthTransactions.length}</span>
+              <span className="font-semibold">{monthTransactionCount}</span>
             </div>
           </div>
         </div>

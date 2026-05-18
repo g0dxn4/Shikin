@@ -60,6 +60,10 @@
     "allResults": "Todos los resultados",
     "uncategorized": "Sin categoria ({{count}})"
   },
+  "pagination": {
+    "summary": "Mostrando {{shown}} de {{total}} transacciones coincidentes",
+    "showMore": "Mostrar {{count}} mas"
+  },
   "viewAll": "Ver Todas",
   "recentTransactions": "Transacciones Recientes",
   "addQuick": "Agregar Transacción",

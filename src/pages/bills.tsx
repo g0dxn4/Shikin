@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { CalendarClock, CheckCircle, Clock, Plus, Receipt, Repeat } from 'lucide-react'
@@ -95,13 +95,38 @@ export function BillsPage() {
     void fetch()
   }, [fetch])
 
-  const bills = rules
-    .filter((rule) => rule.active === 1 && rule.type === 'expense')
-    .sort((a, b) => a.next_date.localeCompare(b.next_date))
-  const dueThisMonth = bills.filter((rule) => dayjs(rule.next_date).isSame(dayjs(), 'month'))
-  const dueSoon = bills.filter((rule) => daysUntil(rule.next_date) <= 30)
-  const overdue = bills.filter((rule) => daysUntil(rule.next_date) < 0)
-  const monthlyTotal = bills.reduce((total, rule) => total + monthlyEquivalent(rule), 0)
+  const { bills, dueThisMonth, dueSoon, overdue, monthlyTotal } = useMemo(() => {
+    const today = dayjs()
+    const todayStart = today.startOf('day')
+    const activeBills: RecurringRuleWithDetails[] = []
+    const thisMonth: RecurringRuleWithDetails[] = []
+    const soon: RecurringRuleWithDetails[] = []
+    const pastDue: RecurringRuleWithDetails[] = []
+    let total = 0
+
+    for (const rule of rules) {
+      if (rule.active !== 1 || rule.type !== 'expense') continue
+
+      activeBills.push(rule)
+      total += monthlyEquivalent(rule)
+
+      const dueDate = dayjs(rule.next_date)
+      const dueIn = dueDate.startOf('day').diff(todayStart, 'day')
+      if (dueDate.isSame(today, 'month')) thisMonth.push(rule)
+      if (dueIn <= 30) soon.push(rule)
+      if (dueIn < 0) pastDue.push(rule)
+    }
+
+    activeBills.sort((a, b) => a.next_date.localeCompare(b.next_date))
+
+    return {
+      bills: activeBills,
+      dueThisMonth: thisMonth,
+      dueSoon: soon,
+      overdue: pastDue,
+      monthlyTotal: total,
+    }
+  }, [rules])
 
   return (
     <div className="page-content animate-fade-in-up">

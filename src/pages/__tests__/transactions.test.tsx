@@ -230,6 +230,34 @@ describe('Transactions', () => {
     expect(screen.getByText('Food')).toBeInTheDocument()
   })
 
+  it('renders large transaction lists in pages instead of mounting every row at once', async () => {
+    const user = userEvent.setup()
+    mockTransactions = Array.from({ length: 105 }, (_, index) => ({
+      id: `tx-${index}`,
+      description: `Paged ${index.toString().padStart(3, '0')}`,
+      type: 'expense',
+      amount: 1000,
+      currency: 'USD',
+      date: dayjs().format('YYYY-MM-DD'),
+      category_id: null,
+      category_color: null,
+      category_name: null,
+      account_name: 'Checking',
+    }))
+
+    render(<Transactions />)
+
+    expect(screen.getByText('Paged 000')).toBeInTheDocument()
+    expect(screen.getByText('Paged 099')).toBeInTheDocument()
+    expect(screen.queryByText('Paged 100')).not.toBeInTheDocument()
+    expect(screen.getByText('pagination.summary')).toBeInTheDocument()
+
+    await user.click(screen.getByText('pagination.showMore'))
+
+    expect(screen.getByText('Paged 100')).toBeInTheDocument()
+    expect(screen.getByText('Paged 104')).toBeInTheDocument()
+  })
+
   it('keeps transaction actions visible on mobile while preserving desktop hover reveal', () => {
     mockTransactions = [
       {

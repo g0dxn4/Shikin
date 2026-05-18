@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, lazy, Suspense } from 'react'
+import { useDeferredValue, useEffect, useState, useMemo, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeftRight, Plus, Pencil, Trash2, Search, Split, ChevronDown } from 'lucide-react'
 import { toast } from 'sonner'
@@ -32,6 +32,8 @@ const ConfirmDialog = lazy(() =>
 type TypeFilter = 'all' | 'expense' | 'income' | 'transfer'
 type ReviewFilter = 'all' | 'uncategorized'
 
+const TRANSACTIONS_PAGE_SIZE = 100
+
 function formatDateHeader(date: string): string {
   const d = dayjs(date)
   if (d.isToday()) return 'Today'
@@ -54,8 +56,10 @@ export function Transactions() {
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const deferredSearchQuery = useDeferredValue(searchQuery)
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all')
+  const [visibleCount, setVisibleCount] = useState(TRANSACTIONS_PAGE_SIZE)
   const [statementImportOpen, setStatementImportOpen] = useState(false)
 
   useEffect(() => {
@@ -66,11 +70,11 @@ export function Transactions() {
   const activeErrors = hasTransactionLoadError ? [] : [transactionFetchError]
 
   const filteredTransactions = useMemo(() => {
+    const q = deferredSearchQuery.trim().toLowerCase()
     return transactions.filter((tx) => {
       if (typeFilter !== 'all' && tx.type !== typeFilter) return false
       if (reviewFilter === 'uncategorized' && tx.category_id !== null) return false
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase()
+      if (q) {
         return (
           tx.description.toLowerCase().includes(q) ||
           tx.category_name?.toLowerCase().includes(q) ||
@@ -79,7 +83,18 @@ export function Transactions() {
       }
       return true
     })
-  }, [transactions, typeFilter, reviewFilter, searchQuery])
+  }, [transactions, typeFilter, reviewFilter, deferredSearchQuery])
+
+  useEffect(() => {
+    setVisibleCount(TRANSACTIONS_PAGE_SIZE)
+  }, [typeFilter, reviewFilter, deferredSearchQuery])
+
+  const visibleTransactions = useMemo(
+    () => filteredTransactions.slice(0, visibleCount),
+    [filteredTransactions, visibleCount]
+  )
+
+  const hasMoreTransactions = visibleTransactions.length < filteredTransactions.length
 
   const uncategorizedCount = useMemo(
     () => transactions.filter((tx) => tx.category_id === null && tx.type !== 'transfer').length,
@@ -88,13 +103,13 @@ export function Transactions() {
 
   const groupedByDate = useMemo(() => {
     const groups = new Map<string, TransactionWithDetails[]>()
-    for (const tx of filteredTransactions) {
+    for (const tx of visibleTransactions) {
       const date = tx.date
       if (!groups.has(date)) groups.set(date, [])
       groups.get(date)!.push(tx)
     }
     return groups
-  }, [filteredTransactions])
+  }, [visibleTransactions])
 
   const handleDelete = async () => {
     if (!deleteId) return
@@ -236,6 +251,22 @@ export function Transactions() {
               </div>
             </div>
           ))}
+          {hasMoreTransactions && (
+            <div className="liquid-card flex flex-col items-center gap-3 p-4 text-center sm:flex-row sm:justify-between sm:text-left">
+              <p className="text-muted-foreground text-xs">
+                {t('pagination.summary', {
+                  shown: visibleTransactions.length,
+                  total: filteredTransactions.length,
+                })}
+              </p>
+              <Button
+                variant="outline"
+                onClick={() => setVisibleCount((count) => count + TRANSACTIONS_PAGE_SIZE)}
+              >
+                {t('pagination.showMore', { count: TRANSACTIONS_PAGE_SIZE })}
+              </Button>
+            </div>
+          )}
         </div>
       )}
 

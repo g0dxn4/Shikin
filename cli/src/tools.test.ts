@@ -5031,6 +5031,9 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('materializes due recurring transactions, updates balances, and advances next_date', async () => {
+    const dueDate = dayjs().format('YYYY-MM-DD')
+    const nextDueDate = dayjs().add(1, 'month').format('YYYY-MM-DD')
+
     mockQuery.mockReturnValueOnce([
       {
         id: 'rule-1',
@@ -5042,7 +5045,7 @@ describe('CLI tool validation regressions', () => {
         amount: 1250,
         description: 'Coffee subscription',
         notes: 'monthly',
-        next_date: '2026-04-15',
+        next_date: dueDate,
         frequency: 'monthly',
         end_date: null,
       },
@@ -5054,7 +5057,7 @@ describe('CLI tool validation regressions', () => {
     expect(mockExecute).toHaveBeenNthCalledWith(
       1,
       expect.stringContaining('UPDATE recurring_rules SET active = $1, next_date = $2'),
-      [1, '2026-05-15', 'rule-1', '2026-04-15']
+      [1, nextDueDate, 'rule-1', dueDate]
     )
     expect(mockExecute).toHaveBeenNthCalledWith(
       2,
@@ -5068,7 +5071,7 @@ describe('CLI tool validation regressions', () => {
         'CAD',
         'Coffee subscription',
         'monthly',
-        '2026-04-15',
+        dueDate,
         'rule-1',
       ]
     )
@@ -5115,6 +5118,8 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('treats recurring rule and account currencies with casing or whitespace drift as equivalent', async () => {
+    const dueDate = dayjs().format('YYYY-MM-DD')
+
     mockQuery.mockReturnValueOnce([
       {
         id: 'rule-1',
@@ -5126,7 +5131,7 @@ describe('CLI tool validation regressions', () => {
         amount: 1250,
         description: 'Coffee subscription',
         notes: 'monthly',
-        next_date: '2026-04-15',
+        next_date: dueDate,
         frequency: 'monthly',
         end_date: null,
       },
@@ -5152,7 +5157,7 @@ describe('CLI tool validation regressions', () => {
         'CAD',
         'Coffee subscription',
         'monthly',
-        '2026-04-15',
+        dueDate,
         'rule-1',
       ]
     )
@@ -5357,6 +5362,9 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('materializes recurring transactions with the stored rule currency when the linked account still matches', async () => {
+    const dueDate = dayjs().format('YYYY-MM-DD')
+    const nextDueDate = dayjs().add(1, 'month').format('YYYY-MM-DD')
+
     mockQuery.mockReturnValueOnce([
       {
         id: 'rule-1',
@@ -5368,7 +5376,7 @@ describe('CLI tool validation regressions', () => {
         amount: 1250,
         description: 'Coffee subscription',
         notes: 'monthly',
-        next_date: '2026-04-15',
+        next_date: dueDate,
         frequency: 'monthly',
         end_date: null,
       },
@@ -5380,7 +5388,7 @@ describe('CLI tool validation regressions', () => {
     expect(mockExecute).toHaveBeenNthCalledWith(
       1,
       expect.stringContaining('UPDATE recurring_rules SET active = $1, next_date = $2'),
-      [1, '2026-05-15', 'rule-1', '2026-04-15']
+      [1, nextDueDate, 'rule-1', dueDate]
     )
     expect(mockExecute).toHaveBeenNthCalledWith(
       2,
@@ -5394,7 +5402,7 @@ describe('CLI tool validation regressions', () => {
         'USD',
         'Coffee subscription',
         'monthly',
-        '2026-04-15',
+        dueDate,
         'rule-1',
       ]
     )

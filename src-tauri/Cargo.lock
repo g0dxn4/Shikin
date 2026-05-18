@@ -4090,7 +4090,7 @@ dependencies = [
 
 [[package]]
 name = "shikin"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "dirs",
  "log",

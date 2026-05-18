@@ -12,6 +12,7 @@ import { TransactionForm, type TransactionFormValues, type SplitRowData } from '
 import { useUIStore } from '@/stores/ui-store'
 import { useTransactionStore } from '@/stores/transaction-store'
 import { toCentavos } from '@/lib/money'
+import { getErrorMessage } from '@/lib/errors'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 
 export function TransactionDialog() {
@@ -45,8 +46,8 @@ export function TransactionDialog() {
         toast.success(t('toast.created'))
       }
       closeTransactionDialog()
-    } catch {
-      toast.error(t('toast.error'))
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('toast.error')))
     } finally {
       setIsLoading(false)
     }

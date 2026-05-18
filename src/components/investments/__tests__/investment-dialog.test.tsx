@@ -64,6 +64,9 @@ vi.mock('@/stores/account-store', () => ({
 describe('InvestmentDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockAdd.mockReset()
+    mockUpdate.mockReset()
+    mockGetById.mockReset()
   })
 
   it('prevents dialog closure while mutation is in flight', async () => {
@@ -127,5 +130,23 @@ describe('InvestmentDialog', () => {
     await waitFor(() => {
       expect(mockCloseInvestmentDialog).toHaveBeenCalled()
     })
+  })
+
+  it('shows specific error toast when mutation throws', async () => {
+    const { toast } = await import('sonner')
+    const user = userEvent.setup()
+    mockAdd.mockRejectedValueOnce(new Error('Investment DB error'))
+
+    render(<InvestmentDialog />)
+
+    await user.type(screen.getByLabelText('form.symbol'), 'AAPL')
+    await user.type(screen.getByLabelText('form.name'), 'Apple Inc')
+    await user.type(screen.getByLabelText('form.shares'), '10')
+    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Investment DB error')
+    })
+    expect(mockCloseInvestmentDialog).not.toHaveBeenCalled()
   })
 })

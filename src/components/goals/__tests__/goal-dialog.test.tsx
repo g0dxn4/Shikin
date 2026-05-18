@@ -67,6 +67,9 @@ vi.mock('@/stores/account-store', () => ({
 describe('GoalDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockAdd.mockReset()
+    mockUpdate.mockReset()
+    mockGetById.mockReset()
   })
 
   it('prevents dialog closure while mutation is in flight', async () => {
@@ -130,5 +133,22 @@ describe('GoalDialog', () => {
     await waitFor(() => {
       expect(mockCloseGoalDialog).toHaveBeenCalled()
     })
+  })
+
+  it('shows specific error toast when mutation throws', async () => {
+    const { toast } = await import('sonner')
+    const user = userEvent.setup()
+    mockAdd.mockRejectedValueOnce(new Error('Goal DB error'))
+
+    render(<GoalDialog />)
+
+    await user.type(screen.getByLabelText('form.name'), 'Failing Goal')
+    await user.type(screen.getByLabelText('form.targetAmount'), '1000')
+    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Goal DB error')
+    })
+    expect(mockCloseGoalDialog).not.toHaveBeenCalled()
   })
 })

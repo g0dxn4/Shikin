@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Budgets } from '../budgets'
 
@@ -11,9 +11,14 @@ globalThis.ResizeObserver = class {
 } as unknown as typeof ResizeObserver
 
 const mockFetch = vi.fn().mockResolvedValue(undefined)
+const mockRemove = vi.fn()
 let mockBudgets: Array<Record<string, unknown>> = []
 let mockFetchError: string | null = null
 let mockIsLoading = false
+
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}))
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -34,17 +39,32 @@ vi.mock('@/stores/budget-store', () => ({
     isLoading: mockIsLoading,
     fetchError: mockFetchError,
     fetch: mockFetch,
-    remove: vi.fn(),
+    remove: mockRemove,
   }),
 }))
 
 vi.mock('@/components/shared/confirm-dialog', () => ({
-  ConfirmDialog: () => null,
+  ConfirmDialog: ({
+    open,
+    onConfirm,
+    title,
+  }: {
+    open: boolean
+    onConfirm: () => void
+    title: string
+  }) =>
+    open ? (
+      <div data-testid="confirm-dialog">
+        <span>{title}</span>
+        <button onClick={onConfirm}>Confirm</button>
+      </div>
+    ) : null,
 }))
 
 describe('Budgets', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockRemove.mockReset()
     mockBudgets = []
     mockFetchError = null
     mockIsLoading = false
@@ -185,5 +205,35 @@ describe('Budgets', () => {
       expect(screen.getByText('intelligence.title')).toBeInTheDocument()
       expect(screen.getByText('2 hero.budgetCount')).toBeInTheDocument()
     })
+  })
+
+  it('shows a specific error toast when deleting a budget fails', async () => {
+    const { toast } = await import('sonner')
+    const user = userEvent.setup()
+    mockRemove.mockRejectedValueOnce(new Error('Budget delete DB error'))
+    mockBudgets = [
+      {
+        id: 'budget-delete-fail',
+        name: 'Groceries',
+        categoryName: 'Food',
+        categoryColor: '#ff0000',
+        amount: 50000,
+        spent: 30000,
+        remaining: 20000,
+        percentUsed: 60,
+        period: 'monthly',
+      },
+    ]
+
+    render(<Budgets />)
+
+    await user.click(screen.getByLabelText('actions.delete Groceries'))
+    await user.click(screen.getByText('Confirm'))
+
+    await waitFor(() => {
+      expect(mockRemove).toHaveBeenCalledWith('budget-delete-fail')
+      expect(toast.error).toHaveBeenCalledWith('Budget delete DB error')
+    })
+    expect(toast.success).not.toHaveBeenCalled()
   })
 })

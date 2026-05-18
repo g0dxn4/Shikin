@@ -79,6 +79,9 @@ vi.mock('@/stores/category-store', () => ({
 describe('BudgetDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockAdd.mockReset()
+    mockUpdate.mockReset()
+    mockGetById.mockReturnValue(mockBudget)
   })
 
   it('prevents dialog closure while mutation is in flight', async () => {
@@ -140,5 +143,20 @@ describe('BudgetDialog', () => {
     await waitFor(() => {
       expect(mockCloseBudgetDialog).toHaveBeenCalled()
     })
+  })
+
+  it('shows specific error toast when mutation throws', async () => {
+    const { toast } = await import('sonner')
+    mockUpdate.mockRejectedValueOnce(new Error('Budget DB error'))
+
+    render(<BudgetDialog />)
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Budget DB error')
+    })
+    expect(mockCloseBudgetDialog).not.toHaveBeenCalled()
   })
 })

@@ -1,7 +1,10 @@
 import { randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
 
-const bridgeToken = randomBytes(24).toString('hex')
+const bridgeToken =
+  process.env.SHIKIN_DATA_SERVER_BRIDGE_TOKEN ||
+  process.env.VITE_DATA_SERVER_BRIDGE_TOKEN ||
+  randomBytes(24).toString('hex')
 const DEFAULT_DATA_SERVER_PORT = '1480'
 
 function resolveDataServerUrl() {

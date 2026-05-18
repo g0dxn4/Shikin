@@ -12,6 +12,7 @@ import { GoalForm, type GoalFormValues } from './goal-form'
 import { useUIStore } from '@/stores/ui-store'
 import { useGoalStore } from '@/stores/goal-store'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
+import { getErrorMessage } from '@/lib/errors'
 
 export function GoalDialog() {
   const { t } = useTranslation('goals')
@@ -47,8 +48,8 @@ export function GoalDialog() {
         toast.success(t('toast.created'))
       }
       closeGoalDialog()
-    } catch {
-      toast.error(t('toast.error'))
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('toast.error')))
     } finally {
       setIsLoading(false)
     }

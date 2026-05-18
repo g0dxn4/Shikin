@@ -24,6 +24,7 @@ import { useAccountStore } from '@/stores/account-store'
 import { parseStatement, type ParsedTransaction } from '@/lib/statement-parser'
 import { importStatementFile } from '@/lib/statement-import'
 import { cn } from '@/lib/utils'
+import { getErrorMessage } from '@/lib/errors'
 
 interface StatementImportDialogProps {
   open: boolean
@@ -127,8 +128,8 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
       }
 
       handleOpenChange(false)
-    } catch {
-      toast.error(t('import.error'))
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('import.error')))
     } finally {
       setIsImporting(false)
     }

@@ -27,6 +27,7 @@ import { useRecurringStore, type RecurringRuleFormData } from '@/stores/recurrin
 import { useAccountStore } from '@/stores/account-store'
 import { useCategoryStore } from '@/stores/category-store'
 import { fromCentavos } from '@/lib/money'
+import { getErrorMessage } from '@/lib/errors'
 import type { RecurringFrequency, TransactionType } from '@/types/common'
 
 const RECURRING_TYPES = ['expense', 'income'] as const
@@ -137,8 +138,8 @@ export function RecurringRuleDialog() {
         toast.success(t('recurring.toast.created'))
       }
       closeRecurringDialog()
-    } catch {
-      toast.error(t('recurring.toast.error'))
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('recurring.toast.error')))
     } finally {
       setIsLoading(false)
     }

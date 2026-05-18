@@ -10,6 +10,7 @@ import { ErrorState } from '@/components/ui/error-state'
 import { useUIStore } from '@/stores/ui-store'
 import { useGoalStore, type GoalWithProgress } from '@/stores/goal-store'
 import { formatMoney } from '@/lib/money'
+import { getErrorMessage } from '@/lib/errors'
 
 const ConfirmDialog = lazy(() =>
   import('@/components/shared/confirm-dialog').then((m) => ({
@@ -159,8 +160,8 @@ export function Goals() {
       await remove(deleteId)
       toast.success(t('toast.deleted'))
       setDeleteId(null)
-    } catch {
-      toast.error(t('toast.error'))
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('toast.error')))
     } finally {
       setIsDeleting(false)
     }

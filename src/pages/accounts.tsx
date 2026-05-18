@@ -50,6 +50,7 @@ import {
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
 import { useTransactionStore } from '@/stores/transaction-store'
+import { getErrorMessage } from '@/lib/errors'
 import { formatMoney, fromCentavos, toCentavos } from '@/lib/money'
 import type { Account } from '@/types/database'
 import dayjs from 'dayjs'
@@ -191,8 +192,8 @@ export function Accounts() {
       await remove(deleteId)
       toast.success(t('toast.deleted'))
       setDeleteId(null)
-    } catch {
-      toast.error(t('toast.error'))
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('toast.error')))
     } finally {
       setIsDeleting(false)
     }
@@ -205,8 +206,8 @@ export function Accounts() {
       await archive(archiveId)
       toast.success(t('toast.archived'))
       setArchiveId(null)
-    } catch {
-      toast.error(t('toast.error'))
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('toast.error')))
     } finally {
       setIsArchiving(false)
     }
@@ -216,8 +217,8 @@ export function Accounts() {
     try {
       await unarchive(id)
       toast.success(t('toast.restored'))
-    } catch {
-      toast.error(t('toast.error'))
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('toast.error')))
     }
   }
 
@@ -226,8 +227,8 @@ export function Accounts() {
     try {
       await setPrimary(id)
       toast.success('Primary account updated')
-    } catch {
-      toast.error(t('toast.error'))
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('toast.error')))
     } finally {
       setSettingPrimaryId(null)
     }
@@ -301,8 +302,8 @@ export function Accounts() {
       })
       toast.success(t('credit.paymentSuccess'))
       closePaymentDialog()
-    } catch {
-      toast.error(t('credit.paymentError'))
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('credit.paymentError')))
     } finally {
       setIsPayingCard(false)
     }

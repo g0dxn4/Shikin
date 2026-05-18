@@ -39,6 +39,12 @@ type BalanceImpactInput = {
 type WritableAccountRef = {
   id: string
   currency: CurrencyCode
+  reference: string
+}
+
+function formatAccountReference(accountId: string, accountName: string | null | undefined) {
+  const name = accountName?.trim()
+  return name ? `"${name}" (${accountId})` : accountId
 }
 
 function isBalanceAffectingStatus(status: Transaction['status'] | null | undefined): boolean {
@@ -107,27 +113,33 @@ async function resolveWritableTransactionAccount(
   if (!accountId) throw new Error(`${label} is required.`)
 
   const accounts =
-    (await tx.query<{ id: string; currency: string | null; is_archived: number | null }>(
-      'SELECT id, currency, is_archived FROM accounts WHERE id = ? LIMIT 1',
-      [accountId]
-    )) ?? []
+    (await tx.query<{
+      id: string | null
+      name: string | null
+      currency: string | null
+      is_archived: number | null
+    }>('SELECT id, name, currency, is_archived FROM accounts WHERE id = ? LIMIT 1', [accountId])) ??
+    []
   if (accounts.length === 0) {
     throw new Error(`${label} ${accountId} not found.`)
   }
-  if (accounts[0]?.is_archived === 1) {
+  const account = accounts[0]
+  const accountReference = formatAccountReference(account.id ?? accountId, account.name)
+
+  if (account.is_archived === 1) {
     throw new Error(
-      `${label} ${accountId} is archived. Unarchive it before using it for new writes.`
+      `${label} ${accountReference} is archived. Unarchive it before using it for new writes.`
     )
   }
 
-  const currency = normalizeCurrency(accounts[0].currency)
+  const currency = normalizeCurrency(account.currency)
   if (!currency) {
     throw new Error(
-      `${label} ${accountId} has no stored currency. Repair it before writing transactions.`
+      `${label} ${accountReference} has no stored currency. Repair it before writing transactions.`
     )
   }
 
-  return { id: accounts[0].id, currency }
+  return { id: account.id ?? accountId, currency, reference: accountReference }
 }
 
 function assertTransactionCurrencyMatchesAccount(
@@ -137,12 +149,14 @@ function assertTransactionCurrencyMatchesAccount(
   const normalizedTransactionCurrency = normalizeCurrency(transactionCurrency)
   if (!normalizedTransactionCurrency) {
     throw new Error(
-      `Transaction currency is required and must match account ${account.id} currency ${account.currency}.`
+      `Transaction currency is required and must match account ${account.reference} ` +
+        `currency ${account.currency}.`
     )
   }
   if (normalizedTransactionCurrency !== account.currency) {
     throw new Error(
-      `Transaction currency ${normalizedTransactionCurrency} does not match account ${account.id} currency ${account.currency}.`
+      `Transaction currency ${normalizedTransactionCurrency} does not match account ` +
+        `${account.reference} currency ${account.currency}.`
     )
   }
 }

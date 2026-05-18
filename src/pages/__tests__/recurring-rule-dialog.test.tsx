@@ -20,6 +20,8 @@ const mockFetchRecurring = vi.fn().mockResolvedValue(undefined)
 const mockCreateRule = vi.fn()
 const mockUpdateRule = vi.fn()
 const mockGetRecurringById = vi.fn()
+const mockCloseRecurringDialog = vi.fn()
+let mockEditingRecurringId: string | null = null
 
 const mockRules = [
   {
@@ -42,9 +44,9 @@ vi.mock('@/stores/ui-store', () => ({
   useUIStore: () => ({
     openTransactionDialog: vi.fn(),
     recurringDialogOpen: true,
-    editingRecurringId: null,
+    editingRecurringId: mockEditingRecurringId,
     openRecurringDialog: vi.fn(),
-    closeRecurringDialog: vi.fn(),
+    closeRecurringDialog: mockCloseRecurringDialog,
   }),
 }))
 
@@ -94,6 +96,10 @@ vi.mock('@/stores/category-store', () => ({
 describe('RecurringRuleDialog accessibility', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockEditingRecurringId = null
+    mockCreateRule.mockReset()
+    mockUpdateRule.mockReset()
+    mockGetRecurringById.mockReset()
   })
 
   it('renders form fields with proper label associations', () => {
@@ -158,6 +164,26 @@ describe('RecurringRuleDialog accessibility', () => {
 
     const saveButton = screen.getByRole('button', { name: 'actions.save' })
     expect(saveButton).toBeInTheDocument()
+  })
+
+  it('shows specific error toast when mutation throws', async () => {
+    const { toast } = await import('sonner')
+    const user = userEvent.setup()
+    mockEditingRecurringId = 'rule-1'
+    mockGetRecurringById.mockReturnValue(mockRules[0])
+    mockUpdateRule.mockRejectedValueOnce(new Error('Recurring DB error'))
+
+    render(<RecurringRuleDialog />)
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('recurring.form.description')).toHaveValue('Monthly Rent')
+    })
+    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Recurring DB error')
+    })
+    expect(mockCloseRecurringDialog).not.toHaveBeenCalled()
   })
 
   it('select triggers have proper id for label association', () => {

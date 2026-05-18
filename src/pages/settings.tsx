@@ -120,8 +120,8 @@ export function SettingsPage() {
       await store.save()
       setCloseToTrayEnabled(nextValue)
       toast.success(nextValue ? t('desktop.closeToTrayEnabled') : t('desktop.closeToTrayDisabled'))
-    } catch {
-      toast.error(tCommon('status.error'))
+    } catch (error) {
+      toast.error(getErrorMessage(error, tCommon('status.error')))
     } finally {
       setIsSavingDesktopSettings(false)
     }
@@ -146,10 +146,10 @@ export function SettingsPage() {
         toast.success(t('updates.noneToast'))
       }
     } catch (error) {
-      const message = getErrorMessage(error)
+      const message = getErrorMessage(error, t('updates.errorToast'))
       setUpdateError(message)
       setLastCheckResult(null)
-      toast.error(t('updates.errorToast'))
+      toast.error(message)
     } finally {
       setIsCheckingUpdates(false)
     }
@@ -181,9 +181,9 @@ export function SettingsPage() {
       setReadyUpdateVersion(version)
       toast.success(t('updates.installedToast', { version }))
     } catch (error) {
-      const message = getErrorMessage(error)
+      const message = getErrorMessage(error, t('updates.installErrorToast'))
       setUpdateError(message)
-      toast.error(t('updates.installErrorToast'))
+      toast.error(message)
     } finally {
       setIsInstallingUpdate(false)
     }
@@ -197,10 +197,10 @@ export function SettingsPage() {
     try {
       await relaunchToApplyUpdate()
     } catch (error) {
-      const message = getErrorMessage(error)
+      const message = getErrorMessage(error, t('updates.restartErrorToast'))
       setUpdateError(message)
       setIsRestartingForUpdate(false)
-      toast.error(t('updates.restartErrorToast'))
+      toast.error(message)
     }
   }
 
@@ -216,8 +216,8 @@ export function SettingsPage() {
       a.click()
       URL.revokeObjectURL(url)
       toast.success(t('data.exportSuccess'))
-    } catch {
-      toast.error(t('data.exportError'))
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('data.exportError')))
     } finally {
       setIsExportingData(false)
     }
@@ -246,8 +246,8 @@ export function SettingsPage() {
       await importDatabaseSnapshot(new Uint8Array(buffer))
       toast.success(t('data.importSuccess'))
       window.location.reload()
-    } catch {
-      toast.error(t('data.importError'))
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('data.importError')))
     } finally {
       setIsImportingData(false)
       setImportConfirmOpen(false)
@@ -572,8 +572,8 @@ export function SettingsPage() {
                 try {
                   await doRefreshRates()
                   toast.success(tCommon('status.success'))
-                } catch {
-                  toast.error(tCommon('status.error'))
+                } catch (error) {
+                  toast.error(getErrorMessage(error, tCommon('status.error')))
                 }
               }}
               disabled={ratesLoading}
@@ -799,8 +799,8 @@ export function SettingsPage() {
                   await store.set('finnhub_key', finnhubKey)
                   await store.save()
                   toast.success(tCommon('status.success'))
-                } catch {
-                  toast.error(tCommon('status.error'))
+                } catch (error) {
+                  toast.error(getErrorMessage(error, tCommon('status.error')))
                 } finally {
                   setIsSavingDataKeys(false)
                 }

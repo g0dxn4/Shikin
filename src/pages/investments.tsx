@@ -23,6 +23,7 @@ import { useInvestmentStore, type InvestmentWithPrice } from '@/stores/investmen
 import { useAccountStore } from '@/stores/account-store'
 import { formatMoney, fromCentavos } from '@/lib/money'
 import { fetchAllCurrentPrices, savePricesToDB } from '@/lib/price-service'
+import { getErrorMessage } from '@/lib/errors'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -99,8 +100,8 @@ export function Investments() {
       await remove(deleteId)
       toast.success(t('toast.deleted'))
       setDeleteId(null)
-    } catch {
-      toast.error(t('toast.error'))
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('toast.error')))
     } finally {
       setIsDeleting(false)
     }
@@ -117,8 +118,8 @@ export function Investments() {
       } else {
         toast.info(t('toast.noPrices'))
       }
-    } catch {
-      toast.error(t('toast.refreshError'))
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('toast.refreshError')))
     } finally {
       setIsRefreshing(false)
     }

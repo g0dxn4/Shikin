@@ -77,11 +77,15 @@ vi.mock('@/stores/transaction-store', () => ({
 describe('Accounts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockRemove.mockReset()
+    mockArchive.mockReset()
+    mockUnarchive.mockReset()
+    mockSetPrimary.mockReset()
+    mockAddTransaction.mockReset()
     mockAccounts = []
     mockArchivedAccounts = []
     mockIsLoading = false
     mockFetchError = null
-    mockAddTransaction.mockReset()
   })
 
   it('calls fetch on mount', () => {
@@ -177,6 +181,33 @@ describe('Accounts', () => {
     })
   })
 
+  it('shows a specific error toast when deleting an account fails', async () => {
+    const { toast } = await import('sonner')
+    const user = userEvent.setup()
+    mockRemove.mockRejectedValueOnce(new Error('Account delete DB error'))
+
+    mockAccounts = [
+      {
+        id: 'acc-delete-fail',
+        name: 'Delete Fails',
+        type: 'checking',
+        currency: 'USD',
+        balance: 0,
+      },
+    ]
+
+    render(<Accounts />)
+
+    await user.click(screen.getByLabelText('Delete Delete Fails'))
+    await user.click(screen.getByText('Confirm'))
+
+    await waitFor(() => {
+      expect(mockRemove).toHaveBeenCalledWith('acc-delete-fail')
+      expect(toast.error).toHaveBeenCalledWith('Account delete DB error')
+    })
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
   it('archives an active account from the account card actions', async () => {
     const { toast } = await import('sonner')
     const user = userEvent.setup()
@@ -197,6 +228,57 @@ describe('Accounts', () => {
       expect(mockArchive).toHaveBeenCalledWith('acc-archive')
       expect(toast.success).toHaveBeenCalledWith('toast.archived')
     })
+  })
+
+  it('shows a specific error toast when archiving an account fails', async () => {
+    const { toast } = await import('sonner')
+    const user = userEvent.setup()
+    mockArchive.mockRejectedValueOnce(new Error('Archive DB error'))
+    mockAccounts = [
+      {
+        id: 'acc-archive-fail',
+        name: 'Archive Fails',
+        type: 'checking',
+        currency: 'USD',
+        balance: 0,
+      },
+    ]
+
+    render(<Accounts />)
+
+    await user.click(screen.getByLabelText('archiveAccount Archive Fails'))
+    await user.click(screen.getByText('Confirm'))
+
+    await waitFor(() => {
+      expect(mockArchive).toHaveBeenCalledWith('acc-archive-fail')
+      expect(toast.error).toHaveBeenCalledWith('Archive DB error')
+    })
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it('shows a specific error toast when restoring an account fails', async () => {
+    const { toast } = await import('sonner')
+    const user = userEvent.setup()
+    mockUnarchive.mockRejectedValueOnce(new Error('Restore DB error'))
+    mockArchivedAccounts = [
+      {
+        id: 'acc-restore-fail',
+        name: 'Restore Fails',
+        type: 'checking',
+        currency: 'USD',
+        balance: 0,
+      },
+    ]
+
+    render(<Accounts />)
+
+    await user.click(await screen.findByLabelText('unarchiveAccount Restore Fails'))
+
+    await waitFor(() => {
+      expect(mockUnarchive).toHaveBeenCalledWith('acc-restore-fail')
+      expect(toast.error).toHaveBeenCalledWith('Restore DB error')
+    })
+    expect(toast.success).not.toHaveBeenCalled()
   })
 
   it('uses an explicitly primary account for the hero card', () => {
@@ -234,6 +316,31 @@ describe('Accounts', () => {
       expect(mockSetPrimary).toHaveBeenCalledWith('acc-primary')
       expect(toast.success).toHaveBeenCalledWith('Primary account updated')
     })
+  })
+
+  it('shows a specific error toast when setting a primary account fails', async () => {
+    const { toast } = await import('sonner')
+    const user = userEvent.setup()
+    mockSetPrimary.mockRejectedValueOnce(new Error('Primary DB error'))
+    mockAccounts = [
+      {
+        id: 'acc-primary-fail',
+        name: 'Primary Fails',
+        type: 'checking',
+        currency: 'USD',
+        balance: 0,
+      },
+    ]
+
+    render(<Accounts />)
+
+    await user.click(screen.getByLabelText('Set Primary Fails as primary'))
+
+    await waitFor(() => {
+      expect(mockSetPrimary).toHaveBeenCalledWith('acc-primary-fail')
+      expect(toast.error).toHaveBeenCalledWith('Primary DB error')
+    })
+    expect(toast.success).not.toHaveBeenCalled()
   })
 
   it('does not offer primary action on credit cards', () => {
@@ -315,6 +422,43 @@ describe('Accounts', () => {
       )
       expect(toast.success).toHaveBeenCalledWith('credit.paymentSuccess')
     })
+  })
+
+  it('shows a specific error toast when recording a credit card payment fails', async () => {
+    const { toast } = await import('sonner')
+    const user = userEvent.setup()
+    mockAddTransaction.mockRejectedValueOnce(new Error('Payment DB error'))
+    mockAccounts = [
+      {
+        id: 'acc-checking',
+        name: 'Daily Checking',
+        type: 'checking',
+        currency: 'USD',
+        balance: 50000,
+        is_primary: 1,
+      },
+      {
+        id: 'acc-card',
+        name: 'Travel Card',
+        type: 'credit_card',
+        currency: 'USD',
+        balance: -10000,
+        credit_limit: 100000,
+      },
+    ]
+
+    render(<Accounts />)
+
+    await user.click(screen.getByLabelText('Pay Travel Card'))
+    await user.clear(screen.getByLabelText('credit.amount'))
+    await user.type(screen.getByLabelText('credit.amount'), '25')
+    await user.click(screen.getByRole('button', { name: 'credit.confirmPayment' }))
+
+    await waitFor(() => {
+      expect(mockAddTransaction).toHaveBeenCalled()
+      expect(toast.error).toHaveBeenCalledWith('Payment DB error')
+    })
+    expect(toast.success).not.toHaveBeenCalled()
   })
 
   it('renders archived accounts behind a toggle', async () => {

@@ -12,6 +12,7 @@ import { AccountForm, type AccountFormValues } from './account-form'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
+import { getErrorMessage } from '@/lib/errors'
 
 export function AccountDialog() {
   const { t } = useTranslation('accounts')
@@ -36,8 +37,8 @@ export function AccountDialog() {
         toast.success(t('toast.created'))
       }
       closeAccountDialog()
-    } catch {
-      toast.error(t('toast.error'))
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('toast.error')))
     } finally {
       setIsLoading(false)
     }

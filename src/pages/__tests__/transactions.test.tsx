@@ -79,6 +79,7 @@ vi.mock('@/stores/transaction-store', () => ({
 describe('Transactions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockRemove.mockReset()
     mockTransactions = []
     mockIsLoading = false
     mockTransactionFetchError = null
@@ -337,5 +338,36 @@ describe('Transactions', () => {
       expect(mockRemove).toHaveBeenCalledWith('tx-del')
       expect(toast.success).toHaveBeenCalledWith('toast.deleted')
     })
+  })
+
+  it('shows a specific error toast when deleting a transaction fails', async () => {
+    const { toast } = await import('sonner')
+    const user = userEvent.setup()
+    mockRemove.mockRejectedValueOnce(new Error('Transaction delete DB error'))
+
+    mockTransactions = [
+      {
+        id: 'tx-delete-fail',
+        description: 'Delete Fails',
+        type: 'expense',
+        amount: 1000,
+        currency: 'USD',
+        date: dayjs().format('YYYY-MM-DD'),
+        category_color: null,
+        category_name: null,
+        account_name: 'Checking',
+      },
+    ]
+
+    render(<Transactions />)
+
+    await user.click(screen.getByLabelText('Delete Delete Fails'))
+    await user.click(screen.getByText('Confirm'))
+
+    await waitFor(() => {
+      expect(mockRemove).toHaveBeenCalledWith('tx-delete-fail')
+      expect(toast.error).toHaveBeenCalledWith('Transaction delete DB error')
+    })
+    expect(toast.success).not.toHaveBeenCalled()
   })
 })

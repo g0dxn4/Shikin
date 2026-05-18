@@ -12,6 +12,7 @@ import { BudgetForm, type BudgetFormValues } from './budget-form'
 import { useUIStore } from '@/stores/ui-store'
 import { useBudgetStore } from '@/stores/budget-store'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
+import { getErrorMessage } from '@/lib/errors'
 
 export function BudgetDialog() {
   const { t } = useTranslation('budgets')
@@ -42,8 +43,8 @@ export function BudgetDialog() {
         toast.success(t('toast.created'))
       }
       closeBudgetDialog()
-    } catch {
-      toast.error(t('toast.error'))
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('toast.error')))
     } finally {
       setIsLoading(false)
     }

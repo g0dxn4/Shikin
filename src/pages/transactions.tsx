@@ -15,6 +15,7 @@ import { useUIStore } from '@/stores/ui-store'
 import { useTransactionStore } from '@/stores/transaction-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import { formatMoney } from '@/lib/money'
+import { getErrorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import type { TransactionSplitWithCategory } from '@/types/database'
 import { StatementImportDialog } from '@/components/transactions/statement-import-dialog'
@@ -102,8 +103,8 @@ export function Transactions() {
       await remove(deleteId)
       toast.success(t('toast.deleted'))
       setDeleteId(null)
-    } catch {
-      toast.error(t('toast.error'))
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('toast.error')))
     } finally {
       setIsDeleting(false)
     }

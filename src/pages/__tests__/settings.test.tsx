@@ -158,6 +158,24 @@ describe('SettingsPage', () => {
     expect(mockToastSuccess).toHaveBeenCalledWith('desktop.closeToTrayDisabled')
   })
 
+  it('shows specific error toast when close-to-tray save fails', async () => {
+    const user = userEvent.setup()
+    storageMocks.get.mockImplementation(async (key: string) =>
+      key === 'close_to_tray_enabled' ? true : ''
+    )
+    storageMocks.set.mockRejectedValueOnce(new Error('Desktop settings failed'))
+
+    render(<SettingsPage />)
+
+    const toggle = await screen.findByRole('switch', { name: 'desktop.closeToTrayLabel' })
+    await user.click(toggle)
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith('Desktop settings failed')
+    })
+    expect(mockToastSuccess).not.toHaveBeenCalledWith('desktop.closeToTrayDisabled')
+  })
+
   it('checks for updates and installs an available release', async () => {
     const user = userEvent.setup()
     const downloadAndInstall = vi.fn().mockResolvedValue(undefined)
@@ -378,6 +396,20 @@ describe('SettingsPage', () => {
     })
   })
 
+  it('shows specific error toast when data export fails', async () => {
+    const user = userEvent.setup()
+    mockExportDatabaseSnapshot.mockRejectedValueOnce(new Error('Export failed'))
+
+    render(<SettingsPage />)
+
+    await user.click(screen.getByRole('button', { name: 'data.export' }))
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith('Export failed')
+    })
+    expect(mockToastSuccess).not.toHaveBeenCalledWith('data.exportSuccess')
+  })
+
   describe('destructive import confirmation', () => {
     it('opens confirmation even when pre-import backup export fails', async () => {
       const user = userEvent.setup()
@@ -518,7 +550,7 @@ describe('SettingsPage', () => {
     it('shows error toast when import fails', async () => {
       const user = userEvent.setup()
       mockExportDatabaseSnapshot.mockResolvedValue(new Uint8Array([1, 2, 3]))
-      mockImportDatabaseSnapshot.mockRejectedValue(new Error('Import failed'))
+      mockImportDatabaseSnapshot.mockRejectedValueOnce(new Error('Import failed'))
 
       render(<SettingsPage />)
 
@@ -528,7 +560,9 @@ describe('SettingsPage', () => {
       await user.upload(fileInput, file)
       await user.click(screen.getByRole('button', { name: /Yes, Replace All Data/ }))
 
-      expect(mockToastError).toHaveBeenCalledWith('data.importError')
+      await waitFor(() => {
+        expect(mockToastError).toHaveBeenCalledWith('Import failed')
+      })
     })
   })
 })

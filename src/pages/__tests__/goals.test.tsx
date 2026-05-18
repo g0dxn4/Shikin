@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Goals } from '../goals'
 
@@ -11,9 +11,14 @@ globalThis.ResizeObserver = class {
 } as unknown as typeof ResizeObserver
 
 const mockFetch = vi.fn().mockResolvedValue(undefined)
+const mockRemove = vi.fn()
 let mockGoals: Array<Record<string, unknown>> = []
 let mockFetchError: string | null = null
 let mockIsLoading = false
+
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}))
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -34,17 +39,32 @@ vi.mock('@/stores/goal-store', () => ({
     isLoading: mockIsLoading,
     fetchError: mockFetchError,
     fetch: mockFetch,
-    remove: vi.fn(),
+    remove: mockRemove,
   }),
 }))
 
 vi.mock('@/components/shared/confirm-dialog', () => ({
-  ConfirmDialog: () => null,
+  ConfirmDialog: ({
+    open,
+    onConfirm,
+    title,
+  }: {
+    open: boolean
+    onConfirm: () => void
+    title: string
+  }) =>
+    open ? (
+      <div data-testid="confirm-dialog">
+        <span>{title}</span>
+        <button onClick={onConfirm}>Confirm</button>
+      </div>
+    ) : null,
 }))
 
 describe('Goals', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockRemove.mockReset()
     mockGoals = []
     mockFetchError = null
     mockIsLoading = false
@@ -235,5 +255,37 @@ describe('Goals', () => {
 
       expect(screen.getAllByText('card.overdue').length).toBeGreaterThan(0)
     })
+  })
+
+  it('shows a specific error toast when deleting a goal fails', async () => {
+    const { toast } = await import('sonner')
+    const user = userEvent.setup()
+    mockRemove.mockRejectedValueOnce(new Error('Goal delete DB error'))
+    mockGoals = [
+      {
+        id: 'goal-delete-fail',
+        name: 'Emergency Fund',
+        target_amount: 10000,
+        current_amount: 5000,
+        progress: 50,
+        daysRemaining: 100,
+        monthlyNeeded: 500,
+        accountName: null,
+        color: null,
+        icon: null,
+        notes: null,
+      },
+    ]
+
+    render(<Goals />)
+
+    await user.click(screen.getByLabelText('actions.delete Emergency Fund'))
+    await user.click(screen.getByText('Confirm'))
+
+    await waitFor(() => {
+      expect(mockRemove).toHaveBeenCalledWith('goal-delete-fail')
+      expect(toast.error).toHaveBeenCalledWith('Goal delete DB error')
+    })
+    expect(toast.success).not.toHaveBeenCalled()
   })
 })

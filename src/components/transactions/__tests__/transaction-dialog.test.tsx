@@ -199,7 +199,7 @@ describe('TransactionDialog', () => {
     await user.click(screen.getByRole('button', { name: 'actions.save' }))
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith('toast.error')
+      expect(toast.error).toHaveBeenCalledWith('DB error')
     })
   })
 })

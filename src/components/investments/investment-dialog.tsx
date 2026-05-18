@@ -12,6 +12,7 @@ import { InvestmentForm, type InvestmentFormValues } from './investment-form'
 import { useUIStore } from '@/stores/ui-store'
 import { useInvestmentStore } from '@/stores/investment-store'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
+import { getErrorMessage } from '@/lib/errors'
 
 export function InvestmentDialog() {
   const { t } = useTranslation('investments')
@@ -36,8 +37,8 @@ export function InvestmentDialog() {
         toast.success(t('toast.created'))
       }
       closeInvestmentDialog()
-    } catch {
-      toast.error(t('toast.error'))
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('toast.error')))
     } finally {
       setIsLoading(false)
     }

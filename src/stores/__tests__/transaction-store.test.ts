@@ -239,7 +239,9 @@ describe('transaction-store', () => {
     })
 
     it('rejects transactions against archived accounts', async () => {
-      mockQuery.mockResolvedValueOnce([{ is_archived: 1 }])
+      mockQuery.mockResolvedValueOnce([
+        { id: '01ACCARCHIVED', name: 'Archived Checking', currency: 'USD', is_archived: 1 },
+      ])
 
       await expect(
         useTransactionStore.getState().add({
@@ -254,7 +256,7 @@ describe('transaction-store', () => {
           notes: null,
         })
       ).rejects.toThrow(
-        'Account 01ACCARCHIVED is archived. Unarchive it before using it for new writes.'
+        'Account "Archived Checking" (01ACCARCHIVED) is archived. Unarchive it before using it for new writes.'
       )
 
       expect(mockExecute).not.toHaveBeenCalled()
@@ -553,7 +555,9 @@ describe('transaction-store', () => {
         ],
       })
       mockCurrentTransactionFromStore()
-      mockQuery.mockResolvedValueOnce([{ is_archived: 1 }])
+      mockQuery.mockResolvedValueOnce([
+        { id: '01ACCARCHIVED', name: 'Archived Checking', currency: 'USD', is_archived: 1 },
+      ])
 
       await expect(
         useTransactionStore.getState().update('01TX001', {
@@ -568,7 +572,7 @@ describe('transaction-store', () => {
           notes: null,
         })
       ).rejects.toThrow(
-        'Account 01ACCARCHIVED is archived. Unarchive it before using it for new writes.'
+        'Account "Archived Checking" (01ACCARCHIVED) is archived. Unarchive it before using it for new writes.'
       )
 
       expect(mockExecute).not.toHaveBeenCalled()
@@ -658,7 +662,9 @@ describe('transaction-store', () => {
     })
 
     it('rejects split transactions against archived accounts', async () => {
-      mockQuery.mockResolvedValueOnce([{ is_archived: 1 }])
+      mockQuery.mockResolvedValueOnce([
+        { id: '01ACCARCHIVED', name: 'Archived Checking', currency: 'USD', is_archived: 1 },
+      ])
 
       await expect(
         useTransactionStore.getState().addWithSplits(
@@ -676,7 +682,7 @@ describe('transaction-store', () => {
           [{ categoryId: '01CAT001', amount: 25.5, notes: null }]
         )
       ).rejects.toThrow(
-        'Account 01ACCARCHIVED is archived. Unarchive it before using it for new writes.'
+        'Account "Archived Checking" (01ACCARCHIVED) is archived. Unarchive it before using it for new writes.'
       )
 
       expect(mockExecute).not.toHaveBeenCalled()

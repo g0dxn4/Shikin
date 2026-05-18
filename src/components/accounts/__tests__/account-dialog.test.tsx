@@ -56,6 +56,9 @@ vi.mock('@/stores/account-store', () => ({
 describe('AccountDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockAdd.mockReset()
+    mockUpdate.mockReset()
+    mockGetById.mockReset()
   })
 
   it('prevents dialog closure while mutation is in flight', async () => {
@@ -146,7 +149,7 @@ describe('AccountDialog', () => {
     await user.click(screen.getByRole('button', { name: 'actions.save' }))
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith('toast.error')
+      expect(toast.error).toHaveBeenCalledWith('DB error')
     })
   })
 })

@@ -1256,7 +1256,7 @@ export function createProgram(toolDefinitions: ToolDefinition[] = tools): Comman
   const program = new Command()
     .name('shikin')
     .description('Shikin — control your finances from the command line')
-    .version('1.0.5')
+    .version('1.0.6')
 
   addOutputOptions(
     program

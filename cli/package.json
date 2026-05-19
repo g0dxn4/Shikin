@@ -1,6 +1,6 @@
 {
   "name": "@shikin/cli",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "packageManager": "pnpm@11.1.1",
   "description": "Shikin CLI and MCP server for local finance automation",
   "type": "module",

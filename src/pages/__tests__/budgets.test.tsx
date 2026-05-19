@@ -207,6 +207,34 @@ describe('Budgets', () => {
     })
   })
 
+  it('renders long budget lists in pages', async () => {
+    const user = userEvent.setup()
+    mockBudgets = Array.from({ length: 21 }, (_, index) => {
+      const suffix = String(index).padStart(2, '0')
+      return {
+        id: `budget-${suffix}`,
+        name: `Budget ${suffix}`,
+        categoryName: `Category ${suffix}`,
+        categoryColor: '#ff0000',
+        amount: 50000,
+        spent: 25000,
+        remaining: 25000,
+        percentUsed: 100 - index,
+        period: 'monthly',
+      }
+    })
+
+    render(<Budgets />)
+
+    expect(screen.getByText('Category 00')).toBeInTheDocument()
+    expect(screen.getByText('Category 19')).toBeInTheDocument()
+    expect(screen.queryByText('Category 20')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /pagination\.showMore/i }))
+
+    expect(screen.getByText('Category 20')).toBeInTheDocument()
+  })
+
   it('shows a specific error toast when deleting a budget fails', async () => {
     const { toast } = await import('sonner')
     const user = userEvent.setup()

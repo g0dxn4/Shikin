@@ -42,7 +42,6 @@ let mockAccountError: string | null = null
 let mockTransactionError: string | null = null
 let mockGoalError: string | null = null
 let mockCurrencyError: string | null = null
-let mockHealthError: string | null = null
 
 vi.mock('@/stores/account-store', () => ({
   useAccountStore: () => ({
@@ -64,41 +63,11 @@ vi.mock('@/stores/transaction-store', () => ({
   }),
 }))
 
-vi.mock('@/stores/forecast-store', () => ({
-  useForecastStore: () => ({
-    forecast: null,
-    isLoading: false,
-    selectedRange: 30,
-    setRange: vi.fn(),
-    generateForecast: vi.fn(),
-    getMinBalanceDate: () => null,
-    getDangerDates: () => [],
-  }),
-}))
-
-vi.mock('@/stores/anomaly-store', () => ({
-  useAnomalyStore: () => ({
-    isLoading: false,
-    scanForAnomalies: vi.fn(),
-    getActiveAnomalies: () => [],
-    dismissAnomaly: vi.fn(),
-  }),
-}))
-
 vi.mock('@/stores/goal-store', () => ({
   useGoalStore: () => ({
     goals: [],
     fetchError: mockGoalError,
     fetch: mockFetchGoals,
-  }),
-}))
-
-vi.mock('@/stores/recap-store', () => ({
-  useRecapStore: () => ({
-    currentRecap: null,
-    isLoading: false,
-    generateWeekly: vi.fn(),
-    loadLatestWeekly: vi.fn(),
   }),
 }))
 
@@ -122,15 +91,6 @@ vi.mock('@/stores/achievement-store', () => ({
   }),
 }))
 
-vi.mock('@/stores/health-store', () => ({
-  useHealthStore: () => ({
-    score: null,
-    isLoading: false,
-    error: mockHealthError,
-    calculateScore: vi.fn(),
-  }),
-}))
-
 vi.mock('@/stores/spending-insights-store', () => ({
   useSpendingInsightsStore: () => ({
     insights: [],
@@ -149,7 +109,6 @@ describe('Dashboard', () => {
     mockTransactionError = null
     mockGoalError = null
     mockCurrencyError = null
-    mockHealthError = null
   })
 
   it('calls fetchAccounts and fetchTransactions on mount', () => {
@@ -167,6 +126,32 @@ describe('Dashboard', () => {
       expect(screen.getByText('Recent activity')).toBeInTheDocument()
       expect(screen.queryByText('empty.addAccount')).not.toBeInTheDocument()
     })
+  })
+
+  it('does not render removed dashboard intelligence sections', () => {
+    mockAccounts = [
+      { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 100000 },
+    ]
+    mockTransactions = [
+      {
+        id: 'tx-1',
+        description: 'Coffee',
+        type: 'expense',
+        amount: 500,
+        currency: 'USD',
+        date: dayjs().format('YYYY-MM-DD'),
+        category_color: null,
+        category_name: null,
+        account_name: 'Checking',
+      },
+    ]
+
+    render(<Dashboard />)
+
+    expect(screen.queryByText('alerts.title')).not.toBeInTheDocument()
+    expect(screen.queryByText('forecast.title')).not.toBeInTheDocument()
+    expect(screen.queryByText('healthScore.title')).not.toBeInTheDocument()
+    expect(screen.queryByText('recap.title')).not.toBeInTheDocument()
   })
 
   it('shows a visible error banner when core dashboard data fails', () => {
@@ -196,20 +181,18 @@ describe('Dashboard', () => {
     expect(screen.getByText('Transactions: Transactions unavailable')).toBeInTheDocument()
   })
 
-  it('keeps goal, exchange rate, and health partial failures visible', () => {
+  it('keeps goal and exchange rate partial failures visible', () => {
     mockAccounts = [
       { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 1000 },
     ]
     mockGoalError = 'Goals unavailable'
     mockCurrencyError = 'Rates unavailable'
-    mockHealthError = 'Health unavailable'
 
     render(<Dashboard />)
 
     expect(screen.getByText('Some dashboard data couldn’t be loaded')).toBeInTheDocument()
     expect(screen.getByText('Goals: Goals unavailable')).toBeInTheDocument()
     expect(screen.getByText('Exchange rates: Rates unavailable')).toBeInTheDocument()
-    expect(screen.getByText('Financial health: Health unavailable')).toBeInTheDocument()
   })
 
   it('shows account load failures in the dashboard error banner', () => {

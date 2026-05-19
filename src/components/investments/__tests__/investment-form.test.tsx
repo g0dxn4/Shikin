@@ -62,6 +62,13 @@ describe('InvestmentForm', () => {
     expect(screen.queryByText(/Accounts couldn.*t be loaded/)).not.toBeInTheDocument()
   })
 
+  it('does not render the old explanatory guidance block', () => {
+    render(<InvestmentForm onSubmit={vi.fn()} />)
+
+    expect(screen.queryByText('form.guidanceTitle')).not.toBeInTheDocument()
+    expect(screen.queryByText('form.guidanceAccount')).not.toBeInTheDocument()
+  })
+
   describe('accessibility', () => {
     it('has proper label associations for all fields', () => {
       render(<InvestmentForm onSubmit={vi.fn()} />)

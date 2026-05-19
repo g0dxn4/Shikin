@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { ErrorState } from '@/components/ui/error-state'
+import { ShowMorePagination } from '@/components/shared/show-more-pagination'
 import { useUIStore } from '@/stores/ui-store'
 import { useBudgetStore, type BudgetWithStatus } from '@/stores/budget-store'
 import { formatMoney } from '@/lib/money'
@@ -17,6 +18,8 @@ const ConfirmDialog = lazy(() =>
     default: m.ConfirmDialog,
   }))
 )
+
+const BUDGETS_PAGE_SIZE = 20
 
 function getProgressColor(percent: number): string {
   if (percent > 100) return '#F87171'
@@ -112,6 +115,7 @@ export function Budgets() {
   const { budgets, isLoading, fetchError, fetch, remove } = useBudgetStore()
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [visibleBudgetCount, setVisibleBudgetCount] = useState(BUDGETS_PAGE_SIZE)
 
   const hasInitialLoadError = !!fetchError && budgets.length === 0
 
@@ -141,6 +145,8 @@ export function Budgets() {
     () => [...budgets].sort((a, b) => b.percentUsed - a.percentUsed),
     [budgets]
   )
+
+  const visibleProgressBudgets = progressBudgets.slice(0, visibleBudgetCount)
 
   const intelligence = useMemo(() => {
     const overBudget = budgets.find((budget) => budget.percentUsed > 100)
@@ -328,7 +334,7 @@ export function Budgets() {
                 </div>
               </div>
               <div className="space-y-3">
-                {progressBudgets.map((budget) => (
+                {visibleProgressBudgets.map((budget) => (
                   <CompactBudgetRow
                     key={budget.id}
                     budget={budget}
@@ -337,6 +343,22 @@ export function Budgets() {
                   />
                 ))}
               </div>
+              <ShowMorePagination
+                shown={visibleProgressBudgets.length}
+                total={progressBudgets.length}
+                summaryLabel={tCommon('pagination.summary', {
+                  shown: visibleProgressBudgets.length,
+                  total: progressBudgets.length,
+                })}
+                showMoreLabel={tCommon('pagination.showMore', {
+                  count: Math.min(
+                    BUDGETS_PAGE_SIZE,
+                    progressBudgets.length - visibleProgressBudgets.length
+                  ),
+                })}
+                onShowMore={() => setVisibleBudgetCount((count) => count + BUDGETS_PAGE_SIZE)}
+                className="mt-4"
+              />
             </div>
 
             <div className="liquid-card min-h-[420px] p-5 sm:p-6">

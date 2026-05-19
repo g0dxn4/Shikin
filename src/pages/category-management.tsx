@@ -48,6 +48,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { ErrorState } from '@/components/ui/error-state'
+import { ShowMorePagination } from '@/components/shared/show-more-pagination'
 import {
   Select,
   SelectContent,
@@ -162,6 +163,7 @@ const COLOR_OPTIONS = [
 ]
 
 const TYPE_OPTIONS: TransactionType[] = ['expense', 'income', 'transfer']
+const CATEGORIES_PAGE_SIZE = 12
 
 const DEFAULT_CATEGORY_FORM = {
   name: '',
@@ -230,6 +232,7 @@ function CategoryIcon({ name, size = 14 }: { name: string | null; size?: number 
 
 export function CategoryManagement() {
   const { t } = useTranslation(['categories', 'common'])
+  const { t: tCommon } = useTranslation('common')
   const { categories, isLoading, fetchError, fetch, add, update, remove } = useCategoryStore()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [isAdding, setIsAdding] = useState(false)
@@ -239,6 +242,13 @@ export function CategoryManagement() {
   const [saveAttempted, setSaveAttempted] = useState(false)
   const [isIconPickerOpen, setIsIconPickerOpen] = useState(false)
   const [iconSearch, setIconSearch] = useState('')
+  const [visibleCategoryCounts, setVisibleCategoryCounts] = useState<
+    Record<TransactionType, number>
+  >(() => ({
+    expense: CATEGORIES_PAGE_SIZE,
+    income: CATEGORIES_PAGE_SIZE,
+    transfer: CATEGORIES_PAGE_SIZE,
+  }))
 
   const [formName, setFormName] = useState(DEFAULT_CATEGORY_FORM.name)
   const [formType, setFormType] = useState<TransactionType>(DEFAULT_CATEGORY_FORM.type)
@@ -424,6 +434,8 @@ export function CategoryManagement() {
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
           {TYPE_OPTIONS.map((type) => {
             const typedCategories = categories.filter((cat) => cat.type === type)
+            const visibleCount = visibleCategoryCounts[type] ?? CATEGORIES_PAGE_SIZE
+            const visibleCategories = typedCategories.slice(0, visibleCount)
             return (
               <section
                 key={type}
@@ -441,7 +453,7 @@ export function CategoryManagement() {
                   </Badge>
                 </div>
                 <div className="space-y-2" role="list" aria-label={t(`types.${type}`)}>
-                  {typedCategories.map((cat) => (
+                  {visibleCategories.map((cat) => (
                     <div
                       key={cat.id}
                       role="listitem"
@@ -496,6 +508,27 @@ export function CategoryManagement() {
                     </div>
                   )}
                 </div>
+                <ShowMorePagination
+                  shown={visibleCategories.length}
+                  total={typedCategories.length}
+                  summaryLabel={tCommon('pagination.summary', {
+                    shown: visibleCategories.length,
+                    total: typedCategories.length,
+                  })}
+                  showMoreLabel={tCommon('pagination.showMore', {
+                    count: Math.min(
+                      CATEGORIES_PAGE_SIZE,
+                      typedCategories.length - visibleCategories.length
+                    ),
+                  })}
+                  onShowMore={() =>
+                    setVisibleCategoryCounts((current) => ({
+                      ...current,
+                      [type]: (current[type] ?? CATEGORIES_PAGE_SIZE) + CATEGORIES_PAGE_SIZE,
+                    }))
+                  }
+                  className="mt-4"
+                />
               </section>
             )
           })}

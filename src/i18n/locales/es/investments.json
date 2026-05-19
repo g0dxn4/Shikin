@@ -15,11 +15,7 @@
     "account": "Cuenta",
     "noAccount": "Ninguna",
     "notes": "Notas",
-    "notesPlaceholder": "Notas opcionales sobre esta inversión...",
-    "guidanceTitle": "Cómo funcionan tenencias y cuentas",
-    "guidanceAccount": "Los saldos de cuentas de inversión son efectivo o valor contenedor; las tenencias suman valor de portafolio por separado en el patrimonio.",
-    "guidanceExamples": "Ejemplos: AAPL, VOO, WALMEX.MX, NAFTRAC.MX, BTC, BONOS o notas manuales de CETES.",
-    "guidancePrices": "Actualizar usa CoinGecko para cripto y claves Alpha Vantage/Finnhub de Configuración cuando el proveedor soporta el símbolo. CETES/manuales pueden conservar precio manual o base de costo."
+    "notesPlaceholder": "Notas opcionales sobre esta inversión..."
   },
   "types": {
     "stock": "Acción",
@@ -29,14 +25,6 @@
     "mutual_fund": "Fondo Mutuo",
     "cetes": "CETES",
     "other": "Otro"
-  },
-  "guidance": {
-    "accountTitle": "Cuentas vs tenencias",
-    "account": "Usa el saldo de la cuenta de inversión para efectivo o valor contenedor. Agrega cada tenencia abajo para que el patrimonio incluya el portafolio por separado.",
-    "examplesTitle": "EE. UU. / México / CETES",
-    "examples": "Los símbolos pueden ser tickers de EE. UU. como AAPL/VOO, mexicanos como WALMEX.MX, cripto como BTC, o instrumentos CETES/manuales.",
-    "pricesTitle": "Actualizar precios",
-    "prices": "Cripto se actualiza con CoinGecko. Acciones, ETFs, fondos, bonos y símbolos MX soportados usan primero Alpha Vantage y luego Finnhub. CETES/manuales no soportados conservan el último precio guardado o la base de costo."
   },
   "summary": {
     "portfolioValue": "Valor del Portafolio",

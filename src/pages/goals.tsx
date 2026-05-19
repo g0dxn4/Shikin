@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { ErrorState } from '@/components/ui/error-state'
+import { ShowMorePagination } from '@/components/shared/show-more-pagination'
 import { useUIStore } from '@/stores/ui-store'
 import { useGoalStore, type GoalWithProgress } from '@/stores/goal-store'
 import { formatMoney } from '@/lib/money'
@@ -17,6 +18,8 @@ const ConfirmDialog = lazy(() =>
     default: m.ConfirmDialog,
   }))
 )
+
+const GOALS_PAGE_SIZE = 20
 
 function getProgressColor(percent: number): string {
   if (percent >= 75) return '#34D399'
@@ -120,6 +123,7 @@ export function Goals() {
   const { goals, isLoading, fetchError, fetch, remove } = useGoalStore()
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [visibleGoalCount, setVisibleGoalCount] = useState(GOALS_PAGE_SIZE)
 
   const hasInitialLoadError = !!fetchError && goals.length === 0
 
@@ -150,6 +154,8 @@ export function Goals() {
       return b.progress - a.progress
     })
   }, [goals])
+
+  const visibleOrderedGoals = orderedGoals.slice(0, visibleGoalCount)
 
   const automationGoal = featuredGoal ?? orderedGoals[0] ?? null
 
@@ -302,7 +308,7 @@ export function Goals() {
                 </Badge>
               </div>
               <div className="space-y-3">
-                {orderedGoals.map((goal) => (
+                {visibleOrderedGoals.map((goal) => (
                   <GoalRow
                     key={goal.id}
                     goal={goal}
@@ -311,6 +317,22 @@ export function Goals() {
                   />
                 ))}
               </div>
+              <ShowMorePagination
+                shown={visibleOrderedGoals.length}
+                total={orderedGoals.length}
+                summaryLabel={tCommon('pagination.summary', {
+                  shown: visibleOrderedGoals.length,
+                  total: orderedGoals.length,
+                })}
+                showMoreLabel={tCommon('pagination.showMore', {
+                  count: Math.min(
+                    GOALS_PAGE_SIZE,
+                    orderedGoals.length - visibleOrderedGoals.length
+                  ),
+                })}
+                onShowMore={() => setVisibleGoalCount((count) => count + GOALS_PAGE_SIZE)}
+                className="mt-4"
+              />
             </section>
 
             <section className="liquid-card min-h-[340px] p-5 sm:p-6">

@@ -119,6 +119,49 @@ describe('Investments', () => {
     expect(screen.getByText('empty.title')).toBeInTheDocument()
   })
 
+  it('does not render the old page guidance card', () => {
+    render(<Investments />)
+
+    expect(screen.queryByText('guidance.accountTitle')).not.toBeInTheDocument()
+    expect(screen.queryByText('guidance.examplesTitle')).not.toBeInTheDocument()
+    expect(screen.queryByText('guidance.pricesTitle')).not.toBeInTheDocument()
+  })
+
+  it('renders long holding lists in pages', async () => {
+    const user = userEvent.setup()
+    mockInvestments = Array.from({ length: 25 }, (_, index) => {
+      const suffix = String(index).padStart(2, '0')
+      return {
+        id: `inv-${suffix}`,
+        account_id: null,
+        symbol: `HLD${suffix}`,
+        name: `Holding ${suffix}`,
+        type: 'stock',
+        shares: 1,
+        avg_cost_basis: 10000,
+        currency: 'USD',
+        notes: null,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        currentPrice: 12000,
+        marketValue: 100000 - index,
+        gainLoss: 2000,
+        gainLossPercent: 20,
+        lastPriceDate: '2024-01-10',
+      }
+    })
+
+    render(<Investments />)
+
+    expect(screen.getAllByText('HLD00').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('HLD23').length).toBeGreaterThan(0)
+    expect(screen.queryByText('HLD24')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /pagination\.showMore/i }))
+
+    expect(screen.getAllByText('HLD24').length).toBeGreaterThan(0)
+  })
+
   it('does not show page-level load banner for price history failures', () => {
     mockInvestments = [
       {

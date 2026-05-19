@@ -152,13 +152,6 @@ export function InvestmentForm({
         </Select>
       </div>
 
-      <div className="rounded-xl border border-white/[0.08] bg-white/[0.04] p-3 text-xs leading-relaxed">
-        <p className="font-heading text-foreground mb-1 font-semibold">{t('form.guidanceTitle')}</p>
-        <p className="text-muted-foreground">{t('form.guidanceAccount')}</p>
-        <p className="text-muted-foreground mt-1">{t('form.guidanceExamples')}</p>
-        <p className="text-muted-foreground mt-1">{t('form.guidancePrices')}</p>
-      </div>
-
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <Label htmlFor="inv-shares">{t('form.shares')}</Label>

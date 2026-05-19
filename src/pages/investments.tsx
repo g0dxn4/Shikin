@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { ErrorState } from '@/components/ui/error-state'
+import { ShowMorePagination } from '@/components/shared/show-more-pagination'
 import { useUIStore } from '@/stores/ui-store'
 import { useInvestmentStore, type InvestmentWithPrice } from '@/stores/investment-store'
 import { useAccountStore } from '@/stores/account-store'
@@ -43,6 +44,7 @@ const InvestmentDialog = lazy(() =>
 
 const TIME_RANGES = ['1W', '1M', '3M', '6M', '1Y', 'All'] as const
 type TimeRange = (typeof TIME_RANGES)[number]
+const INVESTMENTS_PAGE_SIZE = 24
 
 const TYPE_COLORS: Record<string, string> = {
   stock: '#7C5CFF',
@@ -82,6 +84,7 @@ export function Investments() {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [timeRange, setTimeRange] = useState<TimeRange>('3M')
   const [sortField, setSortField] = useState<SortField>('value')
+  const [visibleInvestmentCount, setVisibleInvestmentCount] = useState(INVESTMENTS_PAGE_SIZE)
 
   useEffect(() => {
     void fetchInvestments().catch(() => {})
@@ -230,6 +233,8 @@ export function Investments() {
     })
   }, [investments, sortField])
 
+  const visibleInvestments = sortedInvestments.slice(0, visibleInvestmentCount)
+
   const isPriceStale = (lastDate: string | null) => {
     if (!lastDate) return true
     return dayjs().diff(dayjs(lastDate), 'hour') > 24
@@ -268,7 +273,6 @@ export function Investments() {
             <p className="text-muted-foreground mt-1 text-sm font-medium">{t('subtitle')}</p>
           </div>
         </div>
-        <InvestmentGuidance t={t} />
         {hasInitialLoadError ? (
           <ErrorState
             title="Couldn’t load your investments"
@@ -324,8 +328,6 @@ export function Investments() {
           void fetchInvestments().catch(() => {})
         }}
       />
-
-      <InvestmentGuidance t={t} />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -559,7 +561,7 @@ export function Investments() {
             <span className="text-right">{t('holdings.header.gainLoss')}</span>
           </div>
           <div>
-            {sortedInvestments.map((inv) => (
+            {visibleInvestments.map((inv) => (
               <HoldingRow
                 key={inv.id}
                 investment={inv}
@@ -574,7 +576,7 @@ export function Investments() {
 
         {/* Mobile cards */}
         <div className="space-y-3 md:hidden">
-          {sortedInvestments.map((inv) => (
+          {visibleInvestments.map((inv) => (
             <HoldingCard
               key={inv.id}
               investment={inv}
@@ -585,6 +587,23 @@ export function Investments() {
             />
           ))}
         </div>
+
+        <ShowMorePagination
+          shown={visibleInvestments.length}
+          total={sortedInvestments.length}
+          summaryLabel={tCommon('pagination.summary', {
+            shown: visibleInvestments.length,
+            total: sortedInvestments.length,
+          })}
+          showMoreLabel={tCommon('pagination.showMore', {
+            count: Math.min(
+              INVESTMENTS_PAGE_SIZE,
+              sortedInvestments.length - visibleInvestments.length
+            ),
+          })}
+          onShowMore={() => setVisibleInvestmentCount((count) => count + INVESTMENTS_PAGE_SIZE)}
+          className="mt-4"
+        />
       </div>
 
       <Suspense>
@@ -601,31 +620,6 @@ export function Investments() {
           onConfirm={handleDelete}
         />
       </Suspense>
-    </div>
-  )
-}
-
-function InvestmentGuidance({ t }: { t: ReturnType<typeof useTranslation<'investments'>>['t'] }) {
-  return (
-    <div className="liquid-card grid gap-3 p-4 text-xs leading-relaxed md:grid-cols-3">
-      <div>
-        <p className="font-heading text-foreground mb-1 font-semibold">
-          {t('guidance.accountTitle')}
-        </p>
-        <p className="text-muted-foreground">{t('guidance.account')}</p>
-      </div>
-      <div>
-        <p className="font-heading text-foreground mb-1 font-semibold">
-          {t('guidance.examplesTitle')}
-        </p>
-        <p className="text-muted-foreground">{t('guidance.examples')}</p>
-      </div>
-      <div>
-        <p className="font-heading text-foreground mb-1 font-semibold">
-          {t('guidance.pricesTitle')}
-        </p>
-        <p className="text-muted-foreground">{t('guidance.prices')}</p>
-      </div>
     </div>
   )
 }

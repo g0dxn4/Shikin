@@ -45,6 +45,10 @@
     "empty": "Sin datos a\u00fan",
     "success": "\u00c9xito"
   },
+  "pagination": {
+    "summary": "Mostrando {{shown}} de {{total}}",
+    "showMore": "Mostrar {{count}} mas"
+  },
   "updates": {
     "prompt": {
       "badge": "Actualizaci\u00f3n de escritorio firmada",

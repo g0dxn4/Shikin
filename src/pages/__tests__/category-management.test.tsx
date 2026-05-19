@@ -47,6 +47,8 @@ const translationMap: Record<string, string> = {
   'common:actions.saving': 'Saving...',
   'common:actions.cancel': 'Cancel',
   'common:actions.delete': 'Delete',
+  'pagination.summary': 'Showing {{shown}} of {{total}}',
+  'pagination.showMore': 'Show {{count}} more',
   selectPrompt: 'Select a category to edit, or click Add Category to create one.',
   deleteCategory: 'Delete Category',
   deleteDescription: 'Are you sure you want to delete this category? This cannot be undone.',
@@ -138,6 +140,32 @@ describe('CategoryManagement', () => {
     render(<CategoryManagement />)
     expect(screen.getByText('Food')).toBeInTheDocument()
     expect(screen.getByText('Salary')).toBeInTheDocument()
+  })
+
+  it('renders long category groups in pages', async () => {
+    const user = userEvent.setup()
+    mockCategories = Array.from({ length: 13 }, (_, index) => {
+      const suffix = String(index).padStart(2, '0')
+      return {
+        id: `01CAT${suffix}`,
+        name: `Expense Cat ${suffix}`,
+        type: 'expense',
+        color: '#f97316',
+        icon: 'utensils',
+        sort_order: index,
+        created_at: '2024-01-01T00:00:00Z',
+      }
+    })
+
+    render(<CategoryManagement />)
+
+    expect(screen.getByText('Expense Cat 00')).toBeInTheDocument()
+    expect(screen.getByText('Expense Cat 11')).toBeInTheDocument()
+    expect(screen.queryByText('Expense Cat 12')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /Show 1 more/i }))
+
+    expect(screen.getByText('Expense Cat 12')).toBeInTheDocument()
   })
 
   it('clears a stale selected category after the category disappears', async () => {

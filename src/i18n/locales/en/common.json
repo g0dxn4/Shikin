@@ -45,6 +45,10 @@
     "empty": "No data yet",
     "success": "Success"
   },
+  "pagination": {
+    "summary": "Showing {{shown}} of {{total}}",
+    "showMore": "Show {{count}} more"
+  },
   "updates": {
     "prompt": {
       "badge": "Signed desktop update",

@@ -257,6 +257,36 @@ describe('Goals', () => {
     })
   })
 
+  it('renders long goal lists in pages', async () => {
+    const user = userEvent.setup()
+    mockGoals = Array.from({ length: 21 }, (_, index) => {
+      const suffix = String(index).padStart(2, '0')
+      return {
+        id: `goal-${suffix}`,
+        name: `Goal ${suffix}`,
+        target_amount: 10000,
+        current_amount: 5000,
+        progress: 50,
+        daysRemaining: 100,
+        monthlyNeeded: 500,
+        accountName: null,
+        color: null,
+        icon: null,
+        notes: null,
+      }
+    })
+
+    render(<Goals />)
+
+    expect(screen.getAllByText('Goal 00').length).toBeGreaterThan(0)
+    expect(screen.getByText('Goal 19')).toBeInTheDocument()
+    expect(screen.queryByText('Goal 20')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /pagination\.showMore/i }))
+
+    expect(screen.getByText('Goal 20')).toBeInTheDocument()
+  })
+
   it('shows a specific error toast when deleting a goal fails', async () => {
     const { toast } = await import('sonner')
     const user = userEvent.setup()

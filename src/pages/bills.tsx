@@ -1,10 +1,11 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { CalendarClock, CheckCircle, Clock, Plus, Receipt, Repeat } from 'lucide-react'
 import dayjs from 'dayjs'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ShowMorePagination } from '@/components/shared/show-more-pagination'
 import { formatMoney } from '@/lib/money'
 import { useRecurringStore, type RecurringRuleWithDetails } from '@/stores/recurring-store'
 import { useUIStore } from '@/stores/ui-store'
@@ -31,6 +32,8 @@ function monthlyEquivalent(rule: RecurringRuleWithDetails) {
 function daysUntil(date: string) {
   return dayjs(date).startOf('day').diff(dayjs().startOf('day'), 'day')
 }
+
+const BILLS_PAGE_SIZE = 20
 
 function BillRow({ rule }: { rule: RecurringRuleWithDetails }) {
   const { t } = useTranslation('billCalendar')
@@ -88,8 +91,10 @@ function BillRow({ rule }: { rule: RecurringRuleWithDetails }) {
 
 export function BillsPage() {
   const { t } = useTranslation('billCalendar')
+  const { t: tCommon } = useTranslation('common')
   const { rules, isLoading, fetch } = useRecurringStore()
   const { openRecurringDialog } = useUIStore()
+  const [visibleBillCount, setVisibleBillCount] = useState(BILLS_PAGE_SIZE)
 
   useEffect(() => {
     void fetch()
@@ -127,6 +132,8 @@ export function BillsPage() {
       monthlyTotal: total,
     }
   }, [rules])
+
+  const visibleBills = bills.slice(0, visibleBillCount)
 
   return (
     <div className="page-content animate-fade-in-up">
@@ -208,9 +215,22 @@ export function BillsPage() {
           </div>
         ) : (
           <div>
-            {bills.map((rule) => (
+            {visibleBills.map((rule) => (
               <BillRow key={rule.id} rule={rule} />
             ))}
+            <ShowMorePagination
+              shown={visibleBills.length}
+              total={bills.length}
+              summaryLabel={tCommon('pagination.summary', {
+                shown: visibleBills.length,
+                total: bills.length,
+              })}
+              showMoreLabel={tCommon('pagination.showMore', {
+                count: Math.min(BILLS_PAGE_SIZE, bills.length - visibleBills.length),
+              })}
+              onShowMore={() => setVisibleBillCount((count) => count + BILLS_PAGE_SIZE)}
+              className="mt-4"
+            />
           </div>
         )}
       </div>

@@ -26,7 +26,7 @@ export type TransactionType = 'expense' | 'income' | 'transfer'
 
 export type BudgetPeriod = 'weekly' | 'monthly' | 'yearly'
 
-export type InvestmentType = 'stock' | 'etf' | 'crypto' | 'bond' | 'mutual_fund' | 'other'
+export type InvestmentType = 'stock' | 'etf' | 'crypto' | 'bond' | 'mutual_fund' | 'cetes' | 'other'
 
 export type RecurringFrequency =
   | 'daily'

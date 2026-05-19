@@ -17,10 +17,10 @@ shikin/
 - **Frontend**: React 19 + TypeScript + Tailwind v4 + shadcn/ui
 - **Desktop**: Tauri v2 (Rust)
 - **Database**: SQLite via shared storage (`~/.local/share/com.asf.shikin/`)
-- **CLI/MCP**: 68 shared tool definitions via commander CLI + MCP server, all available end-to-end
+- **CLI/MCP**: 83 shared CLI/MCP tools via commander CLI + MCP server, all available end-to-end
 - **State**: Zustand stores
 - **Testing**: Vitest + Testing Library + Playwright (e2e)
-- **Package Manager**: pnpm (root) + npm (cli/)
+- **Package Manager**: pnpm
 
 ## Development
 
@@ -48,9 +48,9 @@ shikin get-balance-overview
 shikin mcp
 
 # Source/dev alternatives
-cd cli && npm install && npm run build
-npx tsx src/cli.ts list-accounts
-npx tsx src/mcp-server.ts
+cd cli && pnpm install && pnpm run build
+pnpm exec tsx src/cli.ts list-accounts
+pnpm exec tsx src/mcp-server.ts
 ```
 
 ### MCP Configuration (Claude Desktop)
@@ -66,7 +66,7 @@ npx tsx src/mcp-server.ts
 }
 ```
 
-### 68 Tool Definitions
+### 83 Shared CLI/MCP Tools
 
 Transaction, Account, Category, Analytics, Budget, Goal, Subscription, Investment, Recurring, Notebook, Intelligence, Debt, Currency, Backup/Restore, Audit, and Assistant Context tools — all available end-to-end against local data.
 

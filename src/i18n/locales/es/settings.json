@@ -159,8 +159,8 @@
     "resetWarning": "Esto eliminará permanentemente todos tus datos. Esta acción no se puede deshacer."
   },
   "dataApis": {
-    "description": "Claves API opcionales para obtener precios de acciones y noticias financieras. Niveles gratuitos disponibles.",
-    "alphaVantageHint": "Nivel gratuito: 25 solicitudes/día. Obtén una clave en alphavantage.co",
-    "finnhubHint": "Nivel gratuito: 60 solicitudes/min. Obtén una clave en finnhub.io"
+    "description": "Claves API opcionales para actualizar precios de inversiones. Alpha Vantage se intenta primero y luego Finnhub; usa símbolos del proveedor como WALMEX.MX cuando estén soportados.",
+    "alphaVantageHint": "Nivel gratuito: 25 solicitudes/día. Soporta muchos símbolos de EE. UU. y algunos internacionales/MX.",
+    "finnhubHint": "Nivel gratuito: 60 solicitudes/min. Se usa como respaldo para acciones, ETFs, fondos, bonos o símbolos tipo CETES soportados."
   }
 }

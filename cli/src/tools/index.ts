@@ -10,8 +10,10 @@ import { planningandhealthTools } from './planning-and-health.js'
 import { dataOpsTools } from './data-ops.js'
 import { cashflowBucketTools } from './cashflow-buckets.js'
 import { auditAndContextTools } from './audit-and-context.js'
+import { pluginTools } from './plugins.js'
+import { loadEnabledPluginToolDefinitions } from '../plugins.js'
 
-export const tools: ToolDefinition[] = [
+export const builtInTools: ToolDefinition[] = [
   ...transactionsTools,
   ...accountsandanalyticsTools,
   ...creditCardsTools,
@@ -23,4 +25,10 @@ export const tools: ToolDefinition[] = [
   ...auditAndContextTools,
   ...cashflowBucketTools,
   ...planningandhealthTools,
+  ...pluginTools,
+]
+
+export const tools: ToolDefinition[] = [
+  ...builtInTools,
+  ...loadEnabledPluginToolDefinitions(builtInTools),
 ]

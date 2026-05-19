@@ -14,7 +14,7 @@ This is a practical backend map for the current repo layout. It is a documentati
   - Browser runtime DB/storage calls are funneled through `src/lib/database.ts`, `src/lib/storage.ts`, and `src/lib/virtual-fs.ts`.
 - **CLI mode**
   - `cli/src/cli.ts` registers every command from the shared catalog exported by `cli/src/tools/index.ts` and runs via Commander.
-- Current shared tool surface: **68 tool definitions** (from `cli/src/tools/index.ts`), all available end-to-end against local data.
+- Current shared tool surface: **83 shared CLI/MCP tools** (from `cli/src/tools/index.ts`) and **87 CLI commands** including CLI-only built-ins, all available end-to-end against local data.
 - MVP limitation decisions: one-off transfer writes are supported in the app and CLI/MCP, but recurring transfer rules remain deferred; debt payoff uses inferred credit-card balances with APR fixed at 0% because account APR is not stored; browser subscription management is deferred while local subscription rows still feed forecasts and CLI/MCP analytics.
 - **MCP mode**
   - `cli/src/mcp-server.ts` registers the same `tools` and bootstraps MCP over stdio.
@@ -49,7 +49,7 @@ This is a practical backend map for the current repo layout. It is a documentati
 ## 3) MCP flow
 
 - `cli/src/mcp-server.ts` creates `McpServer({ name: 'shikin', version: '<release>' })`.
-- Registers **all 68** shared tool definitions from `tools` with:
+- Registers **all 83** shared tool definitions from `tools` with:
   - tool name
   - description
   - `tool.schema.shape`
@@ -72,8 +72,8 @@ This is a practical backend map for the current repo layout. It is a documentati
   - Browser recurring materialization remains a dedicated endpoint wrapper: `materializeRecurringTransactionsBrowser()` → `/api/recurring/materialize`.
 
 - **Migration ownership (runtime reality)**
-  - Tauri Rust registration (`src-tauri/src/lib.rs`): **001-003 only**.
-  - Browser/Tauri JS migration runner (`src/lib/database.ts`): **004-008 and 010-014**.
+  - Tauri Rust registration (`src-tauri/src/lib.rs`): core packaged SQL migrations.
+  - Browser/Tauri JS migration runner (`src/lib/database.ts`): app-side additive migrations through the current CLI-required schema, including placeholder transaction metadata.
   - Migration `009` is intentionally absent from the JS sequence in `src/lib/database.ts`.
   - `cli/src/database.ts` performs no schema migration.
 
@@ -84,7 +84,7 @@ This is a practical backend map for the current repo layout. It is a documentati
 
 - **Browser bridge DB (`scripts/data-server.mjs`)**
   - Direct `better-sqlite3` DB at `~/.local/share/com.asf.shikin/shikin.db`.
-  - Own migration runner (`_migrations` table, ids 001-014, with no `009_*` migration defined).
+  - Own migration runner (`_migrations` table) for browser-mode shared storage initialization and bridge compatibility.
   - Endpoints used by app:
     - `POST /api/db/query`
     - `POST /api/db/execute`
@@ -130,7 +130,7 @@ This is a practical backend map for the current repo layout. It is a documentati
 - E2E exists for UI flows (`e2e/*.spec.ts`) but does not exercise CLI/MCP/datastore server internals directly.
 - **Practical CLI/MCP/data-server strategy:**
   - **CLI (`cli/src/tools/index.ts` + `cli/src/tools/*`)**: add integration tests that execute real SQL against a temp DB for one CRUD path (`add-account`/`add-transaction`/delete) plus one aggregate path (`get-balance-overview` or equivalent).
-  - **MCP (`cli/src/mcp-server.ts`)**: add a transport harness that boots the server, asserts all **68** tool registrations, and executes one representative tool end-to-end.
+   - **MCP (`cli/src/mcp-server.ts`)**: add a transport harness that boots the server, asserts all **83** tool registrations, and executes one representative tool end-to-end.
   - **Data server (`scripts/data-server.mjs`)**: add HTTP contract tests for `/api/db/*`, `/api/store*`, and `/api/fs/*`.
   - **Hardening checks**: add explicit `safePath` boundary cases (relative paths, separator tricks, normalization edge cases) as verification tests.
 

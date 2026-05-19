@@ -143,7 +143,7 @@ CREATE TABLE IF NOT EXISTS investments (
   account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
   symbol TEXT NOT NULL,
   name TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('stock', 'etf', 'crypto', 'bond', 'mutual_fund', 'other')),
+  type TEXT NOT NULL CHECK (type IN ('stock', 'etf', 'crypto', 'bond', 'mutual_fund', 'cetes', 'other')),
   shares REAL NOT NULL DEFAULT 0,
   avg_cost_basis INTEGER NOT NULL DEFAULT 0,
   currency TEXT NOT NULL DEFAULT 'USD',
@@ -222,6 +222,8 @@ const CURRENT_SHIKIN_MIGRATIONS = [
   '014_recurring_rules_currency_backfill',
   '015_primary_account',
   '016_cli_qol_foundation',
+  '017_investment_type_cetes',
+  '018_placeholder_transactions',
 ] as const
 
 const CURRENT_SHIKIN_SCHEMA: Record<string, readonly string[]> = {
@@ -250,6 +252,12 @@ const CURRENT_SHIKIN_SCHEMA: Record<string, readonly string[]> = {
     'source',
     'note',
     'recurring_rule_id',
+    'is_placeholder',
+    'placeholder_status',
+    'resolved_at',
+    'resolved_by_transaction_id',
+    'placeholder_reason',
+    'placeholder_parent_transaction_id',
   ],
   subscriptions: ['id', 'name', 'amount', 'billing_cycle', 'next_billing_date'],
   budgets: ['id', 'name', 'amount', 'period'],
@@ -459,6 +467,57 @@ function normalizeTransactionStatusDefault(value: unknown): string {
     normalized = normalized.slice(1, -1).trim()
   }
   return normalized.replace(/^['"]|['"]$/g, '')
+}
+
+async function investmentTypeCheckIncludesCetes(db: TauriDatabase): Promise<boolean> {
+  const rows = await db.select<Array<{ sql: string | null }>>(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'investments' LIMIT 1"
+  )
+  return normalizeSqlDefinition(rows[0]?.sql).includes("'cetes'")
+}
+
+async function widenTauriInvestmentTypeCheckForCetes(db: TauriDatabase): Promise<void> {
+  if (await investmentTypeCheckIncludesCetes(db)) return
+
+  await db.execute('PRAGMA foreign_keys = OFF')
+  try {
+    await db.execute('BEGIN')
+    await db.execute('DROP TABLE IF EXISTS __investments_cetes_migration')
+    await db.execute(`
+      CREATE TABLE __investments_cetes_migration (
+        id TEXT PRIMARY KEY,
+        account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+        symbol TEXT NOT NULL,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('stock', 'etf', 'crypto', 'bond', 'mutual_fund', 'cetes', 'other')),
+        shares REAL NOT NULL DEFAULT 0,
+        avg_cost_basis INTEGER NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT 'USD',
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      )
+    `)
+    await db.execute(`
+      INSERT INTO __investments_cetes_migration (
+        id, account_id, symbol, name, type, shares, avg_cost_basis, currency, notes, created_at, updated_at
+      )
+      SELECT id, account_id, symbol, name, type, shares, avg_cost_basis, currency, notes, created_at, updated_at
+      FROM investments
+    `)
+    await db.execute('DROP TABLE investments')
+    await db.execute('ALTER TABLE __investments_cetes_migration RENAME TO investments')
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_investments_account ON investments(account_id)'
+    )
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_investments_symbol ON investments(symbol)')
+    await db.execute('COMMIT')
+  } catch (error) {
+    await db.execute('ROLLBACK').catch(() => {})
+    throw error
+  } finally {
+    await db.execute('PRAGMA foreign_keys = ON')
+  }
 }
 
 function hasVerifiedTrigger(
@@ -1175,6 +1234,36 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
   await db.execute(
     "INSERT OR IGNORE INTO _migrations (id, name) VALUES (16, '016_cli_qol_foundation')"
   )
+
+  if (!applied.has('017_investment_type_cetes')) {
+    await widenTauriInvestmentTypeCheckForCetes(db)
+    await db.execute(
+      "INSERT OR IGNORE INTO _migrations (id, name) VALUES (17, '017_investment_type_cetes')"
+    )
+    applied.add('017_investment_type_cetes')
+  }
+
+  if (!applied.has('018_placeholder_transactions')) {
+    await ensureTableColumn(db, 'transactions', 'is_placeholder', 'INTEGER NOT NULL DEFAULT 0')
+    await ensureTableColumn(db, 'transactions', 'placeholder_status', 'TEXT')
+    await ensureTableColumn(db, 'transactions', 'resolved_at', 'TEXT')
+    await ensureTableColumn(db, 'transactions', 'resolved_by_transaction_id', 'TEXT')
+    await ensureTableColumn(db, 'transactions', 'placeholder_reason', 'TEXT')
+    await ensureTableColumn(db, 'transactions', 'placeholder_parent_transaction_id', 'TEXT')
+    await db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_transactions_placeholder_status ON transactions(is_placeholder, placeholder_status)`
+    )
+    await db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_transactions_placeholder_resolved_by ON transactions(resolved_by_transaction_id)`
+    )
+    await db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_transactions_placeholder_parent ON transactions(placeholder_parent_transaction_id)`
+    )
+    await db.execute(
+      "INSERT OR IGNORE INTO _migrations (id, name) VALUES (18, '018_placeholder_transactions')"
+    )
+    applied.add('018_placeholder_transactions')
+  }
 
   await validateTauriCurrentDatabase(db)
 }

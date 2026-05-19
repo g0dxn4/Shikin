@@ -1,2 +1,18 @@
 packages:
   - 'cli'
+
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+minimumReleaseAgeIgnoreMissingTime: false
+blockExoticSubdeps: true
+trustPolicy: no-downgrade
+trustPolicyIgnoreAfter: 10080
+strictDepBuilds: true
+verifyStoreIntegrity: true
+strictStorePkgContentCheck: true
+sideEffectsCache: false
+auditLevel: moderate
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+  fallow: true

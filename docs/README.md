@@ -24,6 +24,7 @@
 | ----------------------------------------- | ------------------------------------------------------------- |
 | [Database](reference/DATABASE.md)         | SQLite schema, conventions, migrations, example queries       |
 | [Backend Map](reference/BACKEND-MAP.md)   | Current CLI, MCP, local bridge, and backend entry-point map   |
+| [Automation Workflows](reference/AUTOMATION-WORKFLOWS.md) | Generic CLI/MCP finance workflows, provenance rules, and smoke coverage |
 | [Frontend Map](reference/FRONTEND-MAP.md) | Current routes, stores, dialogs, and frontend entry-point map |
 | [API](reference/API.md)                   | Local HTTP API specification (planned)                        |
 | [Extensions](reference/EXTENSIONS.md)     | Plugin system design, manifest format, permissions, hooks     |
@@ -36,7 +37,7 @@
 | Pages (routed)    | 18    |
 | Pages (total)     | 18    |
 | Zustand Stores    | 18    |
-| CLI/MCP Tools     | 68    |
+| CLI/MCP Tools     | 83 shared / 87 CLI commands |
 | Service Files     | 26    |
 | Database Tables   | 21    |
 | i18n Namespaces   | 14    |

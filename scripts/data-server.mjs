@@ -82,6 +82,8 @@ const CURRENT_SHIKIN_MIGRATIONS = [
   '014_recurring_rules_currency_backfill',
   '015_primary_account',
   '016_cli_qol_foundation',
+  '017_investment_type_cetes',
+  '018_placeholder_transactions',
 ]
 
 const CURRENT_SHIKIN_SCHEMA = {
@@ -110,6 +112,12 @@ const CURRENT_SHIKIN_SCHEMA = {
     'source',
     'note',
     'recurring_rule_id',
+    'is_placeholder',
+    'placeholder_status',
+    'resolved_at',
+    'resolved_by_transaction_id',
+    'placeholder_reason',
+    'placeholder_parent_transaction_id',
   ],
   subscriptions: ['id', 'name', 'amount', 'billing_cycle', 'next_billing_date'],
   budgets: ['id', 'name', 'amount', 'period'],
@@ -214,6 +222,51 @@ function normalizeTransactionStatusDefault(value) {
     normalized = normalized.slice(1, -1).trim()
   }
   return normalized.replace(/^['"]|['"]$/g, '')
+}
+
+function investmentTypeCheckIncludesCetes(database) {
+  const row = database
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'investments' LIMIT 1")
+    .get()
+  return normalizeSqlDefinition(row?.sql).includes("'cetes'")
+}
+
+function widenInvestmentTypeCheckForCetes(database) {
+  if (investmentTypeCheckIncludesCetes(database)) return
+
+  database.pragma('foreign_keys = OFF')
+  try {
+    const migrate = database.transaction(() => {
+      database.exec(`
+        DROP TABLE IF EXISTS __investments_cetes_migration;
+        CREATE TABLE __investments_cetes_migration (
+          id TEXT PRIMARY KEY,
+          account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+          symbol TEXT NOT NULL,
+          name TEXT NOT NULL,
+          type TEXT NOT NULL CHECK (type IN ('stock', 'etf', 'crypto', 'bond', 'mutual_fund', 'cetes', 'other')),
+          shares REAL NOT NULL DEFAULT 0,
+          avg_cost_basis INTEGER NOT NULL DEFAULT 0,
+          currency TEXT NOT NULL DEFAULT 'USD',
+          notes TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        );
+        INSERT INTO __investments_cetes_migration (
+          id, account_id, symbol, name, type, shares, avg_cost_basis, currency, notes, created_at, updated_at
+        )
+        SELECT id, account_id, symbol, name, type, shares, avg_cost_basis, currency, notes, created_at, updated_at
+        FROM investments;
+        DROP TABLE investments;
+        ALTER TABLE __investments_cetes_migration RENAME TO investments;
+        CREATE INDEX IF NOT EXISTS idx_investments_account ON investments(account_id);
+        CREATE INDEX IF NOT EXISTS idx_investments_symbol ON investments(symbol);
+      `)
+    })
+    migrate()
+  } finally {
+    database.pragma('foreign_keys = ON')
+  }
 }
 
 function hasVerifiedTrigger(triggers, name, snippets) {
@@ -469,7 +522,7 @@ CREATE TABLE IF NOT EXISTS investments (
   account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
   symbol TEXT NOT NULL,
   name TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('stock', 'etf', 'crypto', 'bond', 'mutual_fund', 'other')),
+  type TEXT NOT NULL CHECK (type IN ('stock', 'etf', 'crypto', 'bond', 'mutual_fund', 'cetes', 'other')),
   shares REAL NOT NULL DEFAULT 0,
   avg_cost_basis INTEGER NOT NULL DEFAULT 0,
   currency TEXT NOT NULL DEFAULT 'USD',
@@ -940,6 +993,28 @@ WHERE (currency IS NULL OR TRIM(currency) = '') AND account_id IS NOT NULL;
     `)
 
   db.prepare("INSERT OR IGNORE INTO _migrations (id, name) VALUES (16, '016_cli_qol_foundation')").run()
+
+  if (!applied.has('017_investment_type_cetes')) {
+    widenInvestmentTypeCheckForCetes(db)
+    db.prepare("INSERT OR IGNORE INTO _migrations (id, name) VALUES (17, '017_investment_type_cetes')").run()
+    applied.add('017_investment_type_cetes')
+  }
+
+  if (!applied.has('018_placeholder_transactions')) {
+    ensureTableColumn(db, 'transactions', 'is_placeholder', 'INTEGER NOT NULL DEFAULT 0')
+    ensureTableColumn(db, 'transactions', 'placeholder_status', 'TEXT')
+    ensureTableColumn(db, 'transactions', 'resolved_at', 'TEXT')
+    ensureTableColumn(db, 'transactions', 'resolved_by_transaction_id', 'TEXT')
+    ensureTableColumn(db, 'transactions', 'placeholder_reason', 'TEXT')
+    ensureTableColumn(db, 'transactions', 'placeholder_parent_transaction_id', 'TEXT')
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_transactions_placeholder_status ON transactions(is_placeholder, placeholder_status);
+      CREATE INDEX IF NOT EXISTS idx_transactions_placeholder_resolved_by ON transactions(resolved_by_transaction_id);
+      CREATE INDEX IF NOT EXISTS idx_transactions_placeholder_parent ON transactions(placeholder_parent_transaction_id);
+    `)
+    db.prepare("INSERT OR IGNORE INTO _migrations (id, name) VALUES (18, '018_placeholder_transactions')").run()
+    applied.add('018_placeholder_transactions')
+  }
 
   validateCurrentDatabase()
   console.log('[data-server] Migrations complete')

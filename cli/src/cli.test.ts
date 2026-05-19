@@ -116,7 +116,7 @@ describe('CLI command execution', () => {
 
   it('uses the shared migration list for diagnose drift prevention', () => {
     expect(EXPECTED_MIGRATIONS).toBe(CLI_DATABASE_MIGRATIONS)
-    expect(EXPECTED_MIGRATIONS).toHaveLength(13)
+    expect(EXPECTED_MIGRATIONS).toHaveLength(CLI_DATABASE_MIGRATIONS.length)
   })
 
   it('keeps all tool definitions discoverable as CLI commands', () => {
@@ -235,7 +235,7 @@ describe('CLI command execution', () => {
     })
     expect(output.database).toMatchObject({
       requiredMigrations: [...CLI_DATABASE_MIGRATIONS],
-      latestRequiredMigration: '016_cli_qol_foundation',
+      latestRequiredMigration: '018_placeholder_transactions',
       migrationCount: CLI_DATABASE_MIGRATIONS.length,
       expectsCurrent016FoundationSchema: true,
       foundationMigration: '016_cli_qol_foundation',
@@ -267,6 +267,93 @@ describe('CLI command execution', () => {
       'quiet',
     ])
     expect(logSpy.mock.calls[0]?.[0]).not.toContain('\n')
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses generic automation provenance wording for record metadata options', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const program = createProgram([])
+
+    await program.parseAsync(['node', 'shikin', 'tools', '--json'])
+
+    const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
+    const recordCommand = output.commands.find(
+      (command: { name: string }) => command.name === 'record'
+    )
+    const sourceOption = recordCommand.options.find(
+      (option: { name: string }) => option.name === 'source'
+    )
+    const noteOption = recordCommand.options.find(
+      (option: { name: string }) => option.name === 'note'
+    )
+
+    expect(sourceOption.description).toBe(
+      'Automation source or origin label for transaction provenance'
+    )
+    expect(noteOption.description).toBe('Workflow changelog note for transaction provenance')
+    expect(`${sourceOption.description} ${noteOption.description}`).not.toMatch(/assistant|luna/i)
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the assistant-safe workflow commands discoverable with stable option contracts', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const program = createProgram(actualTools)
+
+    await program.parseAsync(['node', 'shikin', 'tools', '--json'])
+
+    const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
+    const commandByName = new Map(
+      output.commands.map((command: { name: string }) => [command.name, command])
+    )
+    const requiredWorkflowOptions: Record<string, string[]> = {
+      'record-card-payment': [
+        'fromAccount',
+        'cardAccount',
+        'amount',
+        'dryRun',
+        'allowDuplicate',
+        'source',
+        'note',
+      ],
+      'credit-card-cycle-explain': ['accountId', 'account', 'asOf', 'purchaseDate'],
+      'create-placeholder-transaction': [
+        'account',
+        'amount',
+        'type',
+        'description',
+        'dryRun',
+        'source',
+        'note',
+      ],
+      'resolve-placeholder-transaction': [
+        'transactionId',
+        'description',
+        'dryRun',
+        'source',
+        'note',
+      ],
+      'split-placeholder-transaction': ['transactionId', 'splits', 'dryRun', 'source', 'note'],
+      'tag-transaction': ['transactionId', 'tag', 'source', 'note'],
+      'create-subscription-from-transaction': ['transactionId', 'dryRun', 'source', 'note'],
+      undo: ['apply', 'dryRun', 'source', 'note'],
+      'finance-sanity-check': ['redacted', 'limit'],
+    }
+
+    for (const [name, optionNames] of Object.entries(requiredWorkflowOptions)) {
+      const command = commandByName.get(name) as
+        | { availableInCli?: boolean; availableInMcp?: boolean; options: Array<{ name: string }> }
+        | undefined
+      expect(command, `missing ${name}`).toBeDefined()
+      expect(command).toMatchObject({ availableInCli: true, availableInMcp: true })
+      expect(command!.options.map((option) => option.name)).toEqual(
+        expect.arrayContaining(optionNames)
+      )
+    }
+
+    const recordCommand = commandByName.get('record') as { options: Array<{ name: string }> }
+    expect(recordCommand.options.map((option) => option.name)).toEqual(
+      expect.arrayContaining(['strict', 'dryRun', 'allowDuplicate', 'source', 'note'])
+    )
     expect(close).toHaveBeenCalledTimes(1)
   })
 
@@ -426,7 +513,7 @@ describe('CLI command execution', () => {
       'shikin',
       'record',
       '--source',
-      'luna',
+      'discord-bot',
       '--note',
       'Discord balance note',
       'Amazon',
@@ -451,7 +538,7 @@ describe('CLI command execution', () => {
         date: dayjs().format('YYYY-MM-DD'),
       },
       metadata: {
-        source: 'luna',
+        source: 'discord-bot',
         note: 'Discord balance note',
       },
     })
@@ -473,6 +560,256 @@ describe('CLI command execution', () => {
         currency: null,
         description: 'paid for lunch',
       },
+    })
+  })
+
+  it('parses Spanish income phrases, account phrases, and date ranges with warnings', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const program = createProgram([])
+
+    await program.parseAsync([
+      'node',
+      'shikin',
+      'record',
+      'pago',
+      'de',
+      'anticipo',
+      '100',
+      '11',
+      'al',
+      '15',
+      'de',
+      'mayo',
+      'account',
+      'checking',
+    ])
+
+    const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
+    expect(output).toMatchObject({
+      success: true,
+      parsed: {
+        amount: 100,
+        type: 'income',
+        description: 'pago de anticipo',
+        account: 'checking',
+        date: `${dayjs().year()}-05-11`,
+      },
+      parseWarnings: expect.arrayContaining([
+        expect.objectContaining({ type: 'date_range_ambiguous' }),
+      ]),
+      candidates: {
+        dates: [
+          expect.objectContaining({
+            kind: 'date_range',
+            date: `${dayjs().year()}-05-11`,
+            rangeEndDate: `${dayjs().year()}-05-15`,
+          }),
+        ],
+      },
+      suggestedCommand: {
+        args: expect.objectContaining({ account: 'checking', type: 'income' }),
+      },
+    })
+    expect(output.parseConfidence).toEqual(expect.any(Number))
+  })
+
+  it('recognizes Spanish income phrase variants', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const phrases = ['deposité 500', 'me pagaron 500', 'ingreso 500']
+
+    for (const phrase of phrases) {
+      logSpy.mockClear()
+      await createProgram([]).parseAsync(['node', 'shikin', 'record', ...phrase.split(' ')])
+      const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
+      expect(output).toMatchObject({
+        success: true,
+        parsed: {
+          amount: 500,
+          type: 'income',
+        },
+      })
+    }
+  })
+
+  it('ignores URL path numbers when parsing record amounts', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const program = createProgram([])
+
+    await program.parseAsync([
+      'node',
+      'shikin',
+      'record',
+      'Lunch',
+      '10',
+      'https://example.com/order/123',
+    ])
+
+    const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
+    expect(output).toMatchObject({
+      success: true,
+      parsed: {
+        amount: 10,
+        description: 'Lunch https://example.com/order/123',
+      },
+      candidates: {
+        amounts: [expect.objectContaining({ amount: 10 })],
+      },
+    })
+    expect(output.candidates.amounts).toHaveLength(1)
+  })
+
+  it('fails strict record parsing with stable ambiguity details', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const program = createProgram([])
+
+    await program.parseAsync([
+      'node',
+      'shikin',
+      'record',
+      '--strict',
+      'Coffee',
+      '5',
+      '6',
+      'May',
+      '11-15',
+    ])
+
+    const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
+    expect(output).toMatchObject({
+      success: false,
+      code: 'AMBIGUOUS_RECORD_PARSE',
+      ambiguityReasons: expect.arrayContaining([
+        'multiple_amounts',
+        'date_range_ambiguous',
+        'confidence_below_minimum',
+      ]),
+      parseWarnings: expect.arrayContaining([
+        expect.objectContaining({ type: 'multiple_amounts' }),
+        expect.objectContaining({ type: 'date_range_ambiguous' }),
+      ]),
+      candidates: {
+        amounts: [expect.objectContaining({ amount: 5 }), expect.objectContaining({ amount: 6 })],
+        dates: [expect.objectContaining({ kind: 'date_range' })],
+      },
+    })
+    expect(process.exitCode).toBe(1)
+  })
+
+  it('enforces explicit record account and type requirements', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const program = createProgram([])
+
+    await program.parseAsync([
+      'node',
+      'shikin',
+      'record',
+      '--require-explicit-account',
+      '--require-explicit-type',
+      'Coffee',
+      '4.50',
+    ])
+
+    const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
+    expect(output).toMatchObject({
+      success: false,
+      code: 'AMBIGUOUS_RECORD_PARSE',
+      ambiguityReasons: expect.arrayContaining(['account_required', 'type_required']),
+    })
+    expect(process.exitCode).toBe(1)
+  })
+
+  it('enforces record confidence thresholds and explicit amount requirements', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await createProgram([]).parseAsync([
+      'node',
+      'shikin',
+      'record',
+      '--min-confidence',
+      '0.9',
+      'Coffee',
+      '4.50',
+    ])
+
+    expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toMatchObject({
+      success: false,
+      code: 'AMBIGUOUS_RECORD_PARSE',
+      ambiguityReasons: expect.arrayContaining(['confidence_below_minimum']),
+      minConfidence: 0.9,
+      strict: false,
+    })
+    expect(process.exitCode).toBe(1)
+
+    process.exitCode = undefined
+    vi.mocked(close).mockReset()
+    logSpy.mockClear()
+
+    await createProgram([]).parseAsync([
+      'node',
+      'shikin',
+      'record',
+      '--require-explicit-amount',
+      'Coffee',
+    ])
+
+    expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toMatchObject({
+      success: false,
+      code: 'AMBIGUOUS_RECORD_PARSE',
+      ambiguityReasons: expect.arrayContaining(['amount_required']),
+      requirements: expect.objectContaining({ explicitAmount: true }),
+    })
+    expect(process.exitCode).toBe(1)
+  })
+
+  it('passes parsed account aliases and duplicate warnings through record previews', async () => {
+    const addTransaction = {
+      name: 'add-transaction',
+      description: 'Add transaction',
+      schema: z.object({
+        amount: z.number().positive(),
+        type: z.enum(['expense', 'income', 'transfer']),
+        description: z.string(),
+        date: z.string(),
+        account: z.string().optional(),
+        dryRun: z.boolean().default(false),
+      }),
+      execute: vi.fn(async (input: Record<string, unknown>) => ({
+        success: true,
+        dryRun: true,
+        wouldCreate: { ...input, accountId: 'acct-1', currency: 'USD' },
+        duplicateWarnings: [
+          {
+            type: 'exact_duplicate',
+            reason: 'duplicate_transaction',
+            existingTransactionId: 'tx-existing',
+          },
+        ],
+      })),
+    }
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await createProgram([addTransaction]).parseAsync([
+      'node',
+      'shikin',
+      'record',
+      'paid',
+      '4.50',
+      'for',
+      'coffee',
+      'account',
+      'checking',
+    ])
+
+    expect(addTransaction.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ account: 'checking', dryRun: true })
+    )
+    expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toMatchObject({
+      success: true,
+      duplicateWarnings: [
+        expect.objectContaining({ type: 'exact_duplicate', existingTransactionId: 'tx-existing' }),
+      ],
+      parsed: expect.objectContaining({ account: 'checking', type: 'expense' }),
+      parseConfidence: expect.any(Number),
     })
   })
 
@@ -513,7 +850,7 @@ describe('CLI command execution', () => {
       '--status',
       'pending',
       '--source',
-      'luna',
+      'discord-bot',
       '--note',
       'metadata memo',
       'Coffee',
@@ -528,7 +865,7 @@ describe('CLI command execution', () => {
         account: 'checking',
         category: 'Food',
         status: 'pending',
-        source: 'luna',
+        source: 'discord-bot',
         note: 'metadata memo',
         dryRun: true,
       })
@@ -558,17 +895,33 @@ describe('CLI command execution', () => {
       'acct-1',
       '--status',
       'posted',
+      '--source',
+      'opaque-automation-source',
+      '--note',
+      'apply provenance note',
       'Coffee',
       '4.50',
     ])
 
     expect(addTransaction.execute).toHaveBeenLastCalledWith(
-      expect.objectContaining({ accountId: 'acct-1', status: 'posted', dryRun: false })
+      expect.objectContaining({
+        accountId: 'acct-1',
+        status: 'posted',
+        source: 'opaque-automation-source',
+        note: 'apply provenance note',
+        dryRun: false,
+      })
     )
     expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toMatchObject({
       success: true,
       applied: true,
-      transaction: { id: 'tx-applied', accountId: 'acct-1', dryRun: false },
+      transaction: {
+        id: 'tx-applied',
+        accountId: 'acct-1',
+        source: 'opaque-automation-source',
+        note: 'apply provenance note',
+        dryRun: false,
+      },
     })
     expect(close).toHaveBeenCalledTimes(1)
   })
@@ -623,10 +976,80 @@ describe('CLI command execution', () => {
     expect(addTransaction.execute).toHaveBeenCalledTimes(1)
     expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toMatchObject({
       success: false,
+      code: 'DUPLICATE_TRANSACTION',
       reason: 'duplicate_transaction',
       duplicate: {
         kind: 'exact_duplicate',
         existingTransactionId: 'tx-existing',
+      },
+    })
+    expect(process.exitCode).toBe(1)
+  })
+
+  it('blocks potential duplicate natural-language records before apply', async () => {
+    const addTransaction = {
+      name: 'add-transaction',
+      description: 'Add transaction',
+      schema: z.object({
+        amount: z.number().positive(),
+        type: z.enum(['expense', 'income', 'transfer']),
+        description: z.string(),
+        date: z.string(),
+        status: z.enum(['pending', 'posted', 'cleared']).default('posted'),
+        dryRun: z.boolean().default(false),
+      }),
+      execute: vi.fn(async (input: Record<string, unknown>) =>
+        input.dryRun
+          ? {
+              success: true,
+              dryRun: true,
+              wouldCreate: { ...input, accountId: 'acct-1', currency: 'USD' },
+            }
+          : { success: true, transaction: { id: 'tx-applied', ...input } }
+      ),
+    }
+    vi.mocked(query).mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM transactions') && params?.length === 7) return []
+      if (sql.includes('FROM transactions') && params?.length === 9) {
+        return [
+          {
+            id: 'tx-nearby',
+            account_id: 'acct-1',
+            transfer_to_account_id: null,
+            date: '2026-05-03',
+            amount: 450,
+            type: 'expense',
+            status: 'posted',
+            description: 'coffee',
+          },
+        ]
+      }
+      return []
+    })
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await createProgram([addTransaction]).parseAsync([
+      'node',
+      'shikin',
+      'record',
+      '--apply',
+      'Coffee',
+      '4.50',
+      '2026-05-01',
+    ])
+
+    expect(addTransaction.execute).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toMatchObject({
+      success: false,
+      code: 'POTENTIAL_DUPLICATE_TRANSACTION',
+      reason: 'potential_duplicate_transaction',
+      duplicate: {
+        kind: 'potential_duplicate',
+        existingTransactionId: 'tx-nearby',
+        daysApart: 2,
+      },
+      suggestedCommand: {
+        args: expect.objectContaining({ allowDuplicate: true }),
       },
     })
     expect(process.exitCode).toBe(1)
@@ -952,6 +1375,8 @@ describe('CLI command execution', () => {
         { name: '014_recurring_rules_currency_backfill' },
         { name: '015_primary_account' },
         { name: '016_cli_qol_foundation' },
+        { name: '017_investment_type_cetes' },
+        { name: '018_placeholder_transactions' },
       ])
       .mockReturnValueOnce([{ count: 2 }])
       .mockReturnValueOnce([{ count: 14 }])
@@ -1013,8 +1438,8 @@ describe('CLI command execution', () => {
           },
           database: {
             ready: true,
-            migrationCount: 13,
-            latestMigration: '016_cli_qol_foundation',
+            migrationCount: CLI_DATABASE_MIGRATIONS.length,
+            latestMigration: '018_placeholder_transactions',
             accountCount: 2,
             categoryCount: 14,
             transactionCount: 42,
@@ -1028,8 +1453,8 @@ describe('CLI command execution', () => {
                 violations: [],
               },
               migrations: {
-                expected: 13,
-                applied: 13,
+                expected: CLI_DATABASE_MIGRATIONS.length,
+                applied: CLI_DATABASE_MIGRATIONS.length,
                 missing: [],
                 unexpected: [],
               },
@@ -1101,7 +1526,7 @@ describe('CLI command execution', () => {
 
     const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
     expect(output.database.integrity.migrations).toEqual({
-      expected: 13,
+      expected: CLI_DATABASE_MIGRATIONS.length,
       applied: 3,
       missing: CLI_DATABASE_MIGRATIONS.filter(
         (migration) => migration !== '001_core_tables' && migration !== '003_credit_cards'

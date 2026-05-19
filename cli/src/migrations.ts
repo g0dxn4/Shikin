@@ -12,4 +12,6 @@ export const CLI_DATABASE_MIGRATIONS = [
   '014_recurring_rules_currency_backfill',
   '015_primary_account',
   '016_cli_qol_foundation',
+  '017_investment_type_cetes',
+  '018_placeholder_transactions',
 ] as const

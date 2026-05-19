@@ -341,6 +341,42 @@ function getCommandCatalog(toolDefinitions: ToolDefinition[]) {
           description: 'Validate and preview without writing (default)',
         },
         {
+          name: 'strict',
+          flag: 'strict',
+          type: 'boolean',
+          required: false,
+          description: 'Fail when natural-language parsing is ambiguous or low-confidence',
+        },
+        {
+          name: 'minConfidence',
+          flag: 'min-confidence',
+          type: 'number',
+          required: false,
+          description: 'Minimum parse confidence from 0 to 1 before recording',
+        },
+        {
+          name: 'requireExplicitType',
+          flag: 'require-explicit-type',
+          type: 'boolean',
+          required: false,
+          description: 'Require income or expense intent to be explicit in the entry',
+        },
+        {
+          name: 'requireExplicitAccount',
+          flag: 'require-explicit-account',
+          type: 'boolean',
+          required: false,
+          description:
+            'Require an account via --account, --account-id, or an account phrase in the entry',
+        },
+        {
+          name: 'requireExplicitAmount',
+          flag: 'require-explicit-amount',
+          type: 'boolean',
+          required: false,
+          description: 'Require an explicit amount in the entry',
+        },
+        {
           name: 'allowDuplicate',
           flag: 'allow-duplicate',
           type: 'boolean',
@@ -388,14 +424,14 @@ function getCommandCatalog(toolDefinitions: ToolDefinition[]) {
           flag: 'source',
           type: 'string',
           required: false,
-          description: 'Assistant or origin label for transaction metadata',
+          description: 'Automation source or origin label for transaction provenance',
         },
         {
           name: 'note',
           flag: 'note',
           type: 'string',
           required: false,
-          description: 'Assistant changelog note for transaction metadata',
+          description: 'Workflow changelog note for transaction provenance',
         },
       ],
       outputOptions: defaultOutputOptions,
@@ -450,7 +486,7 @@ function getCommandCatalog(toolDefinitions: ToolDefinition[]) {
       requiredMigrations: [...CLI_DATABASE_MIGRATIONS],
       latestRequiredMigration,
       migrationCount: CLI_DATABASE_MIGRATIONS.length,
-      expectsCurrent016FoundationSchema: latestRequiredMigration === CLI_FOUNDATION_MIGRATION,
+      expectsCurrent016FoundationSchema: CLI_DATABASE_MIGRATIONS.includes(CLI_FOUNDATION_MIGRATION),
       foundationMigration: CLI_FOUNDATION_MIGRATION,
       readinessContract: {
         migrationsAreRequired: true,
@@ -614,36 +650,525 @@ function validateToolInput(commandName: string, args: string[], toolDefinitions:
   }
 }
 
-function parseRecordEntry(entry: string) {
-  const amountMatch = entry.match(
-    /(?:^|\s)(-?(?:\d{1,3}(?:[,.]\d{3})+(?:[,.]\d{1,2})?|\d+(?:[,.]\d{1,2})?))\s*([A-Z]{3})?\b/
+type RecordTransactionType = 'expense' | 'income'
+
+type TextSpan = {
+  start: number
+  end: number
+}
+
+type RecordParseWarning = {
+  type: string
+  message: string
+}
+
+type RecordAmountCandidate = TextSpan & {
+  amount: number
+  currency: string | null
+  token: string
+  selected: boolean
+}
+
+type RecordTypeCandidate = {
+  type: RecordTransactionType
+  term: string
+  selected: boolean
+}
+
+type RecordDateCandidate = TextSpan & {
+  date: string
+  source: string
+  kind: 'relative' | 'iso' | 'month_day' | 'date_range' | 'default_today'
+  selected: boolean
+  rangeEndDate?: string
+}
+
+type RecordTextCandidate = TextSpan & {
+  value: string
+  selected: boolean
+}
+
+type ParsedRecordEntry = {
+  raw: string
+  amount: number | null
+  currency: string | null
+  type: RecordTransactionType
+  description: string | null
+  category: string | null
+  account: string | null
+  date: string
+  confidence: number
+  confidenceLabel: 'low' | 'medium' | 'high'
+  parseWarnings: RecordParseWarning[]
+  ambiguityReasons: string[]
+  candidates: {
+    amounts: RecordAmountCandidate[]
+    types: RecordTypeCandidate[]
+    dates: RecordDateCandidate[]
+    categories: RecordTextCandidate[]
+    accounts: RecordTextCandidate[]
+  }
+  explicit: {
+    amount: boolean
+    type: boolean
+    date: boolean
+    category: boolean
+    account: boolean
+  }
+}
+
+const RECORD_AMOUNT_PATTERN =
+  /(-?(?:\d{1,3}(?:[,.]\d{3})+(?:[,.]\d{1,2})?|\d+(?:[,.]\d{1,2})?))\s*([A-Z]{3})?\b/g
+
+const MONTHS: Record<string, number> = {
+  jan: 1,
+  january: 1,
+  feb: 2,
+  february: 2,
+  mar: 3,
+  march: 3,
+  apr: 4,
+  april: 4,
+  may: 5,
+  jun: 6,
+  june: 6,
+  jul: 7,
+  july: 7,
+  aug: 8,
+  august: 8,
+  sep: 9,
+  sept: 9,
+  september: 9,
+  oct: 10,
+  october: 10,
+  nov: 11,
+  november: 11,
+  dec: 12,
+  december: 12,
+  enero: 1,
+  febrero: 2,
+  marzo: 3,
+  abril: 4,
+  mayo: 5,
+  junio: 6,
+  julio: 7,
+  agosto: 8,
+  septiembre: 9,
+  octubre: 10,
+  noviembre: 11,
+  diciembre: 12,
+}
+
+function parseRecordEntry(entry: string): ParsedRecordEntry {
+  const dateCandidates = findRecordDateCandidates(entry)
+  const explicitDateCandidates = dateCandidates.filter(
+    (candidate) => candidate.kind !== 'default_today'
   )
-  const amount = amountMatch ? parseAmountToken(amountMatch[1]) : null
-  const currency = amountMatch?.[2] ? amountMatch[2].toUpperCase() : null
-  const lower = entry.toLowerCase()
-  const type = /\b(income|salary|paycheck|deposit|earned|received)\b/.test(lower)
-    ? 'income'
-    : 'expense'
-  const date = lower.includes('yesterday') ? relativeIsoDate(-1) : relativeIsoDate(0)
-  const categoryMatch = entry.match(/\bcategory\s+(.+?)(?:\s+(?:today|yesterday|tomorrow)\b|$)/i)
-  const category = categoryMatch?.[1]?.trim() || null
-  const description = entry
-    .replace(amountMatch?.[0] ?? '', ' ')
-    .replace(/\bcategory\s+.+?(?:\s+(?:today|yesterday|tomorrow)\b|$)/i, ' ')
-    .replace(/\b(today|yesterday|tomorrow)\b/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+  const nonAmountSpans = [...findUrlSpans(entry), ...explicitDateCandidates]
+  const amountCandidates = findRecordAmountCandidates(entry, nonAmountSpans)
+  const selectedAmount = amountCandidates[0] ?? null
+  const typeCandidates = findRecordTypeCandidates(entry)
+  const selectedType = chooseRecordType(typeCandidates)
+  const categoryCandidates = findRecordTextCandidates(
+    entry,
+    /\b(?:category|categoria)\s+(.+?)(?=\s+(?:account|cuenta|today|yesterday|tomorrow|hoy|ayer|manana|category|categoria)\b|$)/gi
+  )
+  const accountCandidates = findRecordTextCandidates(
+    entry,
+    /\b(?:account|cuenta)\s+(.+?)(?=\s+(?:category|categoria|today|yesterday|tomorrow|hoy|ayer|manana)\b|$)/gi
+  )
+  const selectedCategory = categoryCandidates[0] ?? null
+  const selectedAccount = accountCandidates[0] ?? null
+  const selectedDate = dateCandidates[0]
+  const parseWarnings = buildRecordParseWarnings({
+    amountCandidates,
+    typeCandidates,
+    explicitDateCandidates,
+    selectedAmount,
+  })
+  const ambiguityReasons = buildRecordAmbiguityReasons(parseWarnings)
+  const description = buildRecordDescription(entry, [
+    ...(selectedAmount ? [selectedAmount] : []),
+    ...(selectedCategory ? [selectedCategory] : []),
+    ...(selectedAccount ? [selectedAccount] : []),
+    ...explicitDateCandidates,
+  ])
+  const confidence = calculateRecordParseConfidence({
+    amount: selectedAmount?.amount ?? null,
+    currency: selectedAmount?.currency ?? null,
+    description,
+    typeCandidates,
+    selectedCategory,
+    selectedAccount,
+    selectedDate,
+    parseWarnings,
+  })
 
   return {
     raw: entry,
-    amount,
-    currency,
-    type,
-    description: description || null,
-    category,
-    date,
-    confidence: amount === null || !description ? 'low' : category ? 'medium' : 'low',
+    amount: selectedAmount?.amount ?? null,
+    currency: selectedAmount?.currency ?? null,
+    type: selectedType,
+    description,
+    category: selectedCategory?.value ?? null,
+    account: selectedAccount?.value ?? null,
+    date: selectedDate.date,
+    confidence,
+    confidenceLabel: confidence >= 0.8 ? 'high' : confidence >= 0.6 ? 'medium' : 'low',
+    parseWarnings,
+    ambiguityReasons,
+    candidates: {
+      amounts: amountCandidates.map((candidate, index) => ({
+        ...candidate,
+        selected: index === 0,
+      })),
+      types: typeCandidates.map((candidate) => ({
+        ...candidate,
+        selected: candidate.type === selectedType && hasSingleRecordType(typeCandidates),
+      })),
+      dates: dateCandidates.map((candidate, index) => ({ ...candidate, selected: index === 0 })),
+      categories: categoryCandidates.map((candidate, index) => ({
+        ...candidate,
+        selected: index === 0,
+      })),
+      accounts: accountCandidates.map((candidate, index) => ({
+        ...candidate,
+        selected: index === 0,
+      })),
+    },
+    explicit: {
+      amount: selectedAmount !== null,
+      type: hasSingleRecordType(typeCandidates),
+      date: selectedDate.kind !== 'default_today',
+      category: selectedCategory !== null,
+      account: selectedAccount !== null,
+    },
   }
+}
+
+function findRecordAmountCandidates(
+  entry: string,
+  excludedSpans: TextSpan[]
+): RecordAmountCandidate[] {
+  return Array.from(entry.matchAll(RECORD_AMOUNT_PATTERN))
+    .map((match): RecordAmountCandidate | null => {
+      const token = match[1]
+      const amount = parseAmountToken(token)
+      if (amount === null) return null
+
+      const start = match.index ?? 0
+      const end = (match.index ?? 0) + match[0].length
+      const span = { start, end }
+      const previous = start > 0 ? entry[start - 1] : ''
+      if (previous && /[\w/.-]/.test(previous)) return null
+      if (excludedSpans.some((excluded) => spansOverlap(span, excluded))) return null
+
+      return {
+        ...span,
+        amount,
+        currency: match[2] ? match[2].toUpperCase() : null,
+        token,
+        selected: false,
+      }
+    })
+    .filter((candidate): candidate is RecordAmountCandidate => candidate !== null)
+}
+
+function findRecordTypeCandidates(entry: string): RecordTypeCandidate[] {
+  const normalized = normalizeRecordText(entry)
+  const patterns: Array<{ type: RecordTransactionType; term: string; pattern: RegExp }> = [
+    { type: 'income', term: 'pago de anticipo', pattern: /\bpago\s+de\s+anticipo\b/ },
+    { type: 'income', term: 'me pagaron', pattern: /\bme\s+pagaron\b/ },
+    {
+      type: 'income',
+      term: 'income',
+      pattern:
+        /\b(income|salary|paycheck|deposit|deposited|earned|received|ingreso|ingrese|deposite|anticipo)\b/,
+    },
+    {
+      type: 'expense',
+      term: 'expense',
+      pattern: /\b(expense|spent|paid|bought|purchase|charge|charged|pague|compre|gaste)\b/,
+    },
+  ]
+
+  return patterns.flatMap(({ type, term, pattern }) =>
+    Array.from(normalized.matchAll(new RegExp(pattern, 'g'))).map((match) => ({
+      type,
+      term: match[0] || term,
+      selected: false,
+    }))
+  )
+}
+
+function chooseRecordType(candidates: RecordTypeCandidate[]): RecordTransactionType {
+  const uniqueTypes = uniqueRecordTypes(candidates)
+  return uniqueTypes.length === 1 ? uniqueTypes[0] : 'expense'
+}
+
+function hasSingleRecordType(candidates: RecordTypeCandidate[]): boolean {
+  return uniqueRecordTypes(candidates).length === 1
+}
+
+function uniqueRecordTypes(candidates: RecordTypeCandidate[]): RecordTransactionType[] {
+  return Array.from(new Set(candidates.map((candidate) => candidate.type)))
+}
+
+function findRecordDateCandidates(entry: string): RecordDateCandidate[] {
+  const candidates: RecordDateCandidate[] = []
+  const pushCandidate = (candidate: Omit<RecordDateCandidate, 'selected'>) => {
+    if (!candidates.some((existing) => spansOverlap(existing, candidate))) {
+      candidates.push({ ...candidate, selected: false })
+    }
+  }
+
+  for (const match of entry.matchAll(/\b(today|hoy)\b/gi)) {
+    pushCandidate({
+      start: match.index ?? 0,
+      end: (match.index ?? 0) + match[0].length,
+      date: relativeIsoDate(0),
+      source: match[0],
+      kind: 'relative',
+    })
+  }
+  for (const match of entry.matchAll(/\b(yesterday|ayer)\b/gi)) {
+    pushCandidate({
+      start: match.index ?? 0,
+      end: (match.index ?? 0) + match[0].length,
+      date: relativeIsoDate(-1),
+      source: match[0],
+      kind: 'relative',
+    })
+  }
+  for (const match of entry.matchAll(/\b(tomorrow|manana)\b/gi)) {
+    pushCandidate({
+      start: match.index ?? 0,
+      end: (match.index ?? 0) + match[0].length,
+      date: relativeIsoDate(1),
+      source: match[0],
+      kind: 'relative',
+    })
+  }
+  for (const match of entry.matchAll(/\b(\d{4})-(\d{2})-(\d{2})\b/g)) {
+    const date = normalizeRecordDate(Number(match[1]), Number(match[2]), Number(match[3]))
+    if (!date) continue
+    pushCandidate({
+      start: match.index ?? 0,
+      end: (match.index ?? 0) + match[0].length,
+      date,
+      source: match[0],
+      kind: 'iso',
+    })
+  }
+  for (const match of entry.matchAll(
+    /\b(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec)\s+(\d{1,2})(?:\s*[-]\s*(\d{1,2}))?\b/gi
+  )) {
+    const month = MONTHS[match[1].toLowerCase()]
+    const startDate = normalizeRecordDate(dayjs().year(), month, Number(match[2]))
+    if (!startDate) continue
+    const rangeEndDate = match[3]
+      ? normalizeRecordDate(dayjs().year(), month, Number(match[3]))
+      : null
+    pushCandidate({
+      start: match.index ?? 0,
+      end: (match.index ?? 0) + match[0].length,
+      date: startDate,
+      source: match[0],
+      kind: rangeEndDate ? 'date_range' : 'month_day',
+      ...(rangeEndDate ? { rangeEndDate } : {}),
+    })
+  }
+  for (const match of entry.matchAll(
+    /\b(\d{1,2})(?:\s*(?:al|-)\s*(\d{1,2}))?\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/gi
+  )) {
+    const month = MONTHS[match[3].toLowerCase()]
+    const startDate = normalizeRecordDate(dayjs().year(), month, Number(match[1]))
+    if (!startDate) continue
+    const rangeEndDate = match[2]
+      ? normalizeRecordDate(dayjs().year(), month, Number(match[2]))
+      : null
+    pushCandidate({
+      start: match.index ?? 0,
+      end: (match.index ?? 0) + match[0].length,
+      date: startDate,
+      source: match[0],
+      kind: rangeEndDate ? 'date_range' : 'month_day',
+      ...(rangeEndDate ? { rangeEndDate } : {}),
+    })
+  }
+
+  if (candidates.length === 0) {
+    candidates.push({
+      start: 0,
+      end: 0,
+      date: relativeIsoDate(0),
+      source: 'default',
+      kind: 'default_today',
+      selected: false,
+    })
+  }
+
+  return candidates
+}
+
+function findRecordTextCandidates(entry: string, pattern: RegExp): RecordTextCandidate[] {
+  return Array.from(entry.matchAll(pattern))
+    .map((match) => {
+      const value = match[1]?.trim()
+      if (!value) return null
+      return {
+        start: match.index ?? 0,
+        end: (match.index ?? 0) + match[0].length,
+        value,
+        selected: false,
+      }
+    })
+    .filter((candidate): candidate is RecordTextCandidate => candidate !== null)
+}
+
+function buildRecordParseWarnings(input: {
+  amountCandidates: RecordAmountCandidate[]
+  typeCandidates: RecordTypeCandidate[]
+  explicitDateCandidates: RecordDateCandidate[]
+  selectedAmount: RecordAmountCandidate | null
+}): RecordParseWarning[] {
+  const warnings: RecordParseWarning[] = []
+
+  if (!input.selectedAmount) {
+    warnings.push({ type: 'amount_missing', message: 'No explicit transaction amount was found.' })
+  } else if (input.amountCandidates.length > 1) {
+    warnings.push({
+      type: 'multiple_amounts',
+      message: 'Multiple possible amounts were found; the first amount was selected.',
+    })
+  }
+
+  const typeCount = uniqueRecordTypes(input.typeCandidates).length
+  if (typeCount === 0) {
+    warnings.push({
+      type: 'type_defaulted_to_expense',
+      message: 'No explicit income or expense intent was found; expense was selected by default.',
+    })
+  } else if (typeCount > 1) {
+    warnings.push({
+      type: 'multiple_types',
+      message: 'Both income and expense intent were detected; expense was selected by default.',
+    })
+  }
+
+  const dateRanges = input.explicitDateCandidates.filter(
+    (candidate) => candidate.kind === 'date_range'
+  )
+  if (dateRanges.length > 0) {
+    warnings.push({
+      type: 'date_range_ambiguous',
+      message: 'A date range was found; the first date in the range was selected.',
+    })
+  }
+  if (input.explicitDateCandidates.length > 1) {
+    warnings.push({
+      type: 'multiple_dates',
+      message: 'Multiple possible dates were found; the first date was selected.',
+    })
+  }
+  if (input.explicitDateCandidates.length === 0) {
+    warnings.push({
+      type: 'date_defaulted_to_today',
+      message: 'No explicit date was found; today was selected by default.',
+    })
+  }
+
+  return warnings
+}
+
+function buildRecordAmbiguityReasons(warnings: RecordParseWarning[]): string[] {
+  return warnings
+    .map((warning) => warning.type)
+    .filter((type) =>
+      [
+        'amount_missing',
+        'multiple_amounts',
+        'multiple_types',
+        'date_range_ambiguous',
+        'multiple_dates',
+      ].includes(type)
+    )
+}
+
+function calculateRecordParseConfidence(input: {
+  amount: number | null
+  currency: string | null
+  description: string | null
+  typeCandidates: RecordTypeCandidate[]
+  selectedCategory: RecordTextCandidate | null
+  selectedAccount: RecordTextCandidate | null
+  selectedDate: RecordDateCandidate
+  parseWarnings: RecordParseWarning[]
+}): number {
+  let score = 0
+  if (input.amount !== null) score += 0.35
+  if (input.description) score += 0.2
+  if (hasSingleRecordType(input.typeCandidates)) score += 0.15
+  else if (input.typeCandidates.length === 0) score += 0.05
+  if (input.selectedDate.kind !== 'default_today') score += 0.1
+  else score += 0.05
+  if (input.selectedCategory) score += 0.05
+  if (input.selectedAccount) score += 0.05
+  if (input.currency) score += 0.05
+  if (input.parseWarnings.some((warning) => warning.type === 'multiple_amounts')) score -= 0.15
+  if (input.parseWarnings.some((warning) => warning.type === 'multiple_types')) score -= 0.15
+  if (input.parseWarnings.some((warning) => warning.type === 'date_range_ambiguous')) score -= 0.1
+  if (input.parseWarnings.some((warning) => warning.type === 'amount_missing')) score -= 0.35
+  if (!input.description) score -= 0.15
+
+  return Math.max(0, Math.min(1, Number(score.toFixed(2))))
+}
+
+function buildRecordDescription(entry: string, spans: TextSpan[]): string | null {
+  const description = removeRecordSpans(entry, spans)
+    .replace(/\b(?:today|yesterday|tomorrow|hoy|ayer|manana)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return description || null
+}
+
+function removeRecordSpans(value: string, spans: TextSpan[]): string {
+  return spans
+    .filter((span) => span.end > span.start)
+    .sort((left, right) => right.start - left.start)
+    .reduce((result, span) => `${result.slice(0, span.start)} ${result.slice(span.end)}`, value)
+}
+
+function findUrlSpans(entry: string): TextSpan[] {
+  return Array.from(entry.matchAll(/\b(?:https?:\/\/|www\.)\S+/gi)).map((match) => ({
+    start: match.index ?? 0,
+    end: (match.index ?? 0) + match[0].length,
+  }))
+}
+
+function spansOverlap(left: TextSpan, right: TextSpan): boolean {
+  return left.start < right.end && right.start < left.end
+}
+
+function normalizeRecordText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+}
+
+function normalizeRecordDate(year: number, month: number, day: number): string | null {
+  const date = dayjs(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`)
+  if (
+    !date.isValid() ||
+    date.year() !== year ||
+    date.month() + 1 !== month ||
+    date.date() !== day
+  ) {
+    return null
+  }
+  return date.format('YYYY-MM-DD')
 }
 
 function relativeIsoDate(offsetDays: number): string {
@@ -673,31 +1198,148 @@ function parseAmountToken(value: string): number | null {
   return Number.isFinite(amount) ? amount : null
 }
 
-type ParsedRecordEntry = ReturnType<typeof parseRecordEntry>
-
 const RECORD_STATUSES = new Set(['pending', 'posted', 'cleared'])
+
+type RecordParsePolicy = {
+  strict: boolean
+  minConfidence: number
+  minConfidenceProvided: boolean
+  requireExplicitType: boolean
+  requireExplicitAccount: boolean
+  requireExplicitAmount: boolean
+}
+
+function getRecordParsePolicy(
+  options: Record<string, unknown>
+):
+  | { success: true; policy: RecordParsePolicy }
+  | { success: false; result: Record<string, unknown> } {
+  const strict = Boolean(options.strict)
+  const minConfidenceProvided =
+    options.minConfidence !== undefined && options.minConfidence !== null
+  const minConfidence = minConfidenceProvided ? Number(options.minConfidence) : strict ? 0.75 : 0
+
+  if (!Number.isFinite(minConfidence) || minConfidence < 0 || minConfidence > 1) {
+    return {
+      success: false,
+      result: errorResult('VALIDATION_ERROR', 'Validation error', {
+        issues: [
+          {
+            path: ['minConfidence'],
+            message: 'Minimum confidence must be a number from 0 to 1.',
+          },
+        ],
+      }),
+    }
+  }
+
+  return {
+    success: true,
+    policy: {
+      strict,
+      minConfidence,
+      minConfidenceProvided,
+      requireExplicitType: Boolean(options.requireExplicitType),
+      requireExplicitAccount: Boolean(options.requireExplicitAccount),
+      requireExplicitAmount: Boolean(options.requireExplicitAmount),
+    },
+  }
+}
+
+function getRecordStrictAmbiguityReasons(
+  parsed: ParsedRecordEntry,
+  options: Record<string, unknown>,
+  policy: RecordParsePolicy
+): string[] {
+  const reasons = new Set<string>()
+
+  if (policy.strict) {
+    for (const reason of parsed.ambiguityReasons) reasons.add(reason)
+    if (parsed.amount === null) reasons.add('amount_missing')
+    if (!parsed.description) reasons.add('description_missing')
+  }
+  if (policy.requireExplicitAmount && !parsed.explicit.amount) reasons.add('amount_required')
+  if (policy.requireExplicitType && !parsed.explicit.type) reasons.add('type_required')
+  if (policy.requireExplicitAccount && !hasExplicitRecordAccount(parsed, options)) {
+    reasons.add('account_required')
+  }
+  if ((policy.strict || policy.minConfidenceProvided) && parsed.confidence < policy.minConfidence) {
+    reasons.add('confidence_below_minimum')
+  }
+
+  return Array.from(reasons)
+}
+
+function hasExplicitRecordAccount(
+  parsed: ParsedRecordEntry,
+  options: Record<string, unknown>
+): boolean {
+  return (
+    (typeof options.account === 'string' && options.account.trim().length > 0) ||
+    (typeof options.accountId === 'string' && options.accountId.trim().length > 0) ||
+    parsed.explicit.account
+  )
+}
+
+function recordParseMetadata(parsed: ParsedRecordEntry): Record<string, unknown> {
+  return {
+    parseConfidence: parsed.confidence,
+    parseWarnings: parsed.parseWarnings,
+    candidates: parsed.candidates,
+    ambiguityReasons: parsed.ambiguityReasons,
+  }
+}
 
 async function executeRecordCommand(
   parsed: ParsedRecordEntry,
   options: Record<string, unknown>,
   toolDefinitions: ToolDefinition[]
 ) {
+  const apply = Boolean(options.apply)
+  const explicitDryRun = Boolean(options.dryRun)
+  const allowDuplicate = Boolean(options.allowDuplicate)
+  if (apply && explicitDryRun) {
+    return errorResult('RECORD_FLAG_CONFLICT', 'Use either --apply or --dry-run, not both.')
+  }
+
+  const parsePolicy = getRecordParsePolicy(options)
+  if (!parsePolicy.success) return parsePolicy.result
+
+  const strictAmbiguityReasons = getRecordStrictAmbiguityReasons(
+    parsed,
+    options,
+    parsePolicy.policy
+  )
+  if (strictAmbiguityReasons.length > 0) {
+    return errorResult(
+      'AMBIGUOUS_RECORD_PARSE',
+      'Natural-language record parse is ambiguous. Use explicit flags or relax strict parsing.',
+      {
+        parsed,
+        ...recordParseMetadata(parsed),
+        ambiguityReasons: strictAmbiguityReasons,
+        strict: parsePolicy.policy.strict,
+        minConfidence: parsePolicy.policy.minConfidence,
+        requirements: {
+          explicitAmount: parsePolicy.policy.requireExplicitAmount,
+          explicitType: parsePolicy.policy.requireExplicitType,
+          explicitAccount: parsePolicy.policy.requireExplicitAccount,
+        },
+        hint: 'Try shikin add-transaction with explicit --amount, --type, --description, and --account or --account-id.',
+      }
+    )
+  }
+
   if (parsed.amount === null || !parsed.description) {
     return errorResult(
       'RECORD_PARSE_FAILED',
       'Could not confidently parse a transaction amount and description.',
       {
         parsed,
+        ...recordParseMetadata(parsed),
         hint: 'Try shikin add-transaction with explicit --amount, --type, --description, and --account or --account-id.',
       }
     )
-  }
-
-  const apply = Boolean(options.apply)
-  const explicitDryRun = Boolean(options.dryRun)
-  const allowDuplicate = Boolean(options.allowDuplicate)
-  if (apply && explicitDryRun) {
-    return errorResult('RECORD_FLAG_CONFLICT', 'Use either --apply or --dry-run, not both.')
   }
 
   const status = typeof options.status === 'string' ? options.status.trim() : undefined
@@ -724,7 +1366,7 @@ async function executeRecordCommand(
     note: typeof options.note === 'string' ? options.note : undefined,
     status,
     allowDuplicate: allowDuplicate ? true : undefined,
-    account: typeof options.account === 'string' ? options.account : undefined,
+    account: typeof options.account === 'string' ? options.account : (parsed.account ?? undefined),
     accountId: typeof options.accountId === 'string' ? options.accountId : undefined,
   })
   const metadata = {
@@ -742,6 +1384,7 @@ async function executeRecordCommand(
       success: true,
       dryRun: true,
       parsed,
+      ...recordParseMetadata(parsed),
       metadata,
       requiresConfirmation: true,
       suggestedCommand,
@@ -764,6 +1407,7 @@ async function executeRecordCommand(
         `Record parsed currency ${parsed.currency}, but the resolved account currency is unknown.`,
         {
           parsed,
+          ...recordParseMetadata(parsed),
           resolvedCurrency: previewCurrency,
           hint: 'Repair the account currency or run add-transaction explicitly after choosing a valid account.',
         }
@@ -776,6 +1420,7 @@ async function executeRecordCommand(
         `Record parsed currency ${parsed.currency}, but the resolved account uses ${previewCurrency}.`,
         {
           parsed,
+          ...recordParseMetadata(parsed),
           resolvedCurrency: previewCurrency,
           hint: 'Use an account with the same currency or run add-transaction explicitly after converting the amount.',
         }
@@ -792,6 +1437,7 @@ async function executeRecordCommand(
       ...normalizedPreview,
       ...(isFailureResult(normalizedPreview) ? {} : { dryRun: true, requiresConfirmation: true }),
       parsed,
+      ...recordParseMetadata(parsed),
       metadata,
       suggestedCommand,
       ...(duplicateCheck?.match ? { duplicateCheck } : {}),
@@ -802,6 +1448,7 @@ async function executeRecordCommand(
     return {
       ...normalizedPreview,
       parsed,
+      ...recordParseMetadata(parsed),
       metadata,
       suggestedCommand,
     }
@@ -814,6 +1461,7 @@ async function executeRecordCommand(
       duplicate: duplicateCheck.match,
       duplicateCheck,
       parsed,
+      ...recordParseMetadata(parsed),
       metadata,
       suggestedCommand: {
         ...suggestedCommand,
@@ -837,6 +1485,7 @@ async function executeRecordCommand(
     ...normalized,
     applied: !isFailureResult(normalized),
     parsed,
+    ...recordParseMetadata(parsed),
     ...(duplicateCheck?.match && allowDuplicate && !isFailureResult(normalized)
       ? {
           duplicateOverride: {
@@ -1256,7 +1905,7 @@ export function createProgram(toolDefinitions: ToolDefinition[] = tools): Comman
   const program = new Command()
     .name('shikin')
     .description('Shikin — control your finances from the command line')
-    .version('1.0.7')
+    .version('1.0.8')
 
   addOutputOptions(
     program
@@ -1309,14 +1958,19 @@ export function createProgram(toolDefinitions: ToolDefinition[] = tools): Comman
       .argument('<entry...>', 'Natural-language transaction entry')
       .option('--apply', 'Apply the parsed transaction noninteractively')
       .option('--dry-run', 'Validate and preview the parsed transaction without writing it')
+      .option('--strict', 'Fail when natural-language parsing is ambiguous or low-confidence')
+      .option('--min-confidence <value>', 'Minimum parse confidence from 0 to 1 before recording')
+      .option('--require-explicit-type', 'Require income or expense intent to be explicit')
+      .option('--require-explicit-account', 'Require account via flag or account phrase')
+      .option('--require-explicit-amount', 'Require an explicit amount in the entry')
       .option('--allow-duplicate', 'Apply even when an exact or likely duplicate is detected')
       .option('--account <value>', 'Account alias, exact account ID, or exact account name')
       .option('--account-id <value>', 'Canonical account ID')
       .option('--category <value>', 'Category name override')
       .option('--status <status>', 'Transaction status: pending, posted, or cleared')
       .option('--notes <value>', 'User transaction notes')
-      .option('--source <value>', 'Assistant or origin label for transaction metadata')
-      .option('--note <value>', 'Assistant changelog note for transaction metadata')
+      .option('--source <value>', 'Automation source or origin label for transaction provenance')
+      .option('--note <value>', 'Workflow changelog note for transaction provenance')
   ).action(async (entryParts: string[], options: Record<string, unknown>) => {
     const outputOptions = getOutputOptions(options)
     const entry = entryParts.join(' ')

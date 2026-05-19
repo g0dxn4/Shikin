@@ -5,6 +5,10 @@ vi.mock('@/lib/database', () => ({
   execute: vi.fn(),
 }))
 
+vi.mock('@/lib/ulid', () => ({
+  generateId: vi.fn(() => 'inv-test-id'),
+}))
+
 import { query, execute } from '@/lib/database'
 import { useInvestmentStore } from '../investment-store'
 
@@ -119,5 +123,74 @@ describe('investment-store', () => {
     expect(mockExecute).toHaveBeenCalledTimes(1)
     expect(mockQuery).toHaveBeenCalledTimes(1)
     expect(useInvestmentStore.getState().error).toBeNull()
+  })
+
+  it('adds a CETES holding with normalized symbol and centavo cost basis', async () => {
+    mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 1 })
+    mockQuery.mockResolvedValueOnce([])
+
+    await useInvestmentStore.getState().add({
+      symbol: 'cetes-28',
+      name: 'CETES 28 días',
+      type: 'cetes',
+      shares: 10,
+      avgCost: 9.91,
+      currency: 'MXN',
+      accountId: 'acct-invest',
+      notes: 'Manual government note',
+    })
+
+    expect(mockExecute).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO investments'), [
+      'inv-test-id',
+      'acct-invest',
+      'CETES-28',
+      'CETES 28 días',
+      'cetes',
+      10,
+      991,
+      'MXN',
+      'Manual government note',
+      expect.any(String),
+      expect.any(String),
+    ])
+    expect(mockQuery).toHaveBeenCalledTimes(1)
+  })
+
+  it('updates an investment and clears optional account and notes', async () => {
+    mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 1 })
+    mockQuery.mockResolvedValueOnce([])
+
+    await useInvestmentStore.getState().update('inv-1', {
+      symbol: 'walmex.mx',
+      name: 'Walmart de México',
+      type: 'stock',
+      shares: 3,
+      avgCost: 72.5,
+      currency: 'MXN',
+    })
+
+    expect(mockExecute).toHaveBeenCalledWith(expect.stringContaining('UPDATE investments SET'), [
+      null,
+      'WALMEX.MX',
+      'Walmart de México',
+      'stock',
+      3,
+      7250,
+      'MXN',
+      null,
+      expect.any(String),
+      'inv-1',
+    ])
+    expect(mockQuery).toHaveBeenCalledTimes(1)
+  })
+
+  it('deletes an investment and refreshes cached holdings', async () => {
+    mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 1 })
+    mockQuery.mockResolvedValueOnce([])
+
+    await useInvestmentStore.getState().remove('inv-1')
+
+    expect(mockExecute).toHaveBeenCalledWith('DELETE FROM investments WHERE id = ?', ['inv-1'])
+    expect(mockQuery).toHaveBeenCalledTimes(1)
   })
 })

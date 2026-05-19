@@ -47,7 +47,18 @@ const REQUIRED_CORE_SCHEMA: Record<string, readonly string[]> = {
 }
 const REQUIRED_CLI_QOL_SCHEMA: Record<string, readonly string[]> = {
   settings: ['key', 'value', 'updated_at'],
-  transactions: ['status', 'source', 'note', 'recurring_rule_id'],
+  transactions: [
+    'status',
+    'source',
+    'note',
+    'recurring_rule_id',
+    'is_placeholder',
+    'placeholder_status',
+    'resolved_at',
+    'resolved_by_transaction_id',
+    'placeholder_reason',
+    'placeholder_parent_transaction_id',
+  ],
   audit_log: [
     'id',
     'entity',

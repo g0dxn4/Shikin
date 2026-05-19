@@ -9,6 +9,7 @@ import {
   dayjs,
   nextDateForDay,
   boundedText,
+  positiveMoneyAmount,
   nonNegativeMoneyAmount,
   isoDate,
   currencyCode,
@@ -16,9 +17,15 @@ import {
   resolveAccountId,
   getAccountAliases,
   normalizeAccountAlias,
+  resolveCategoryId,
   writeAuditLog,
   type ToolDefinition,
 } from './shared.js'
+import {
+  findTransactionDuplicate,
+  transactionDuplicateReason,
+  type TransactionDuplicateCheck,
+} from '../duplicate-detection.js'
 
 type StatementStatus = 'open' | 'partial' | 'paid' | 'overdue'
 
@@ -61,6 +68,47 @@ type StatementAccountFilterRow = {
   is_archived: number
 }
 
+type PaymentSourceAccountRow = {
+  id: string
+  name: string
+  type: string
+  currency: string | null
+  balance: number
+  is_archived: number
+}
+
+type CardPaymentMode = 'transfer' | 'cleanup-expense' | 'statement-payment-only'
+
+type CardPaymentTransactionPreview = {
+  id: string
+  accountId: string
+  accountName: string
+  transferToAccountId: string | null
+  transferToAccountName: string | null
+  categoryId: string | null
+  type: 'expense' | 'transfer'
+  amount: number
+  amountCentavos: number
+  currency: string
+  description: string
+  notes: string | null
+  source: string | null
+  note: string | null
+  status: 'posted'
+  date: string
+}
+
+type CardPaymentBalanceChange = {
+  accountId: string
+  accountName: string
+  previousBalance: number
+  newBalance: number
+  delta: number
+  previousBalanceCentavos: number
+  newBalanceCentavos: number
+  deltaCentavos: number
+}
+
 export type CreditCardBillEntry = {
   name: string
   amount: number
@@ -78,6 +126,9 @@ export type CreditCardBillEntry = {
 }
 
 const statementStatusSchema = z.enum(['open', 'partial', 'paid', 'overdue'])
+
+const cardPaymentModeSchema = z.enum(['transfer', 'cleanup-expense', 'statement-payment-only'])
+const STATEMENT_FILTER_SCAN_LIMIT = 1000
 
 function paymentAmounts(statement: {
   statement_balance: number
@@ -102,6 +153,19 @@ function effectiveStatementStatus(statement: CreditCardStatementRow): StatementS
   const payment = paymentAmounts(statement)
   if (payment.amountToPayCentavos <= 0) return 'paid'
   if (statement.status === 'overdue' || dayjs(statement.due_date).isBefore(dayjs(), 'day')) {
+    return 'overdue'
+  }
+  if (statement.status === 'partial' || statement.paid_amount > 0) return 'partial'
+  return 'open'
+}
+
+function effectiveStatementStatusAsOf(
+  statement: CreditCardStatementRow,
+  asOf: dayjs.Dayjs
+): StatementStatus {
+  const payment = paymentAmounts(statement)
+  if (payment.amountToPayCentavos <= 0) return 'paid'
+  if (statement.status === 'overdue' || dayjs(statement.due_date).isBefore(asOf, 'day')) {
     return 'overdue'
   }
   if (statement.status === 'partial' || statement.paid_amount > 0) return 'partial'
@@ -141,6 +205,163 @@ function validateStatementStatusConsistency(input: {
   }
 
   return { success: true as const }
+}
+
+function readPaymentSourceAccount(accountId: string) {
+  const account = query<PaymentSourceAccountRow>('SELECT * FROM accounts WHERE id = $1 LIMIT 1', [
+    accountId,
+  ])[0]
+
+  if (!account) {
+    return {
+      success: false as const,
+      reason: 'account_not_found',
+      message: `Account ${accountId} not found.`,
+    }
+  }
+  if (account.is_archived === 1) {
+    return {
+      success: false as const,
+      reason: 'account_archived',
+      message: `Account ${accountId} is archived. Unarchive it before using it for new writes.`,
+    }
+  }
+  if (account.type === 'credit_card') {
+    return {
+      success: false as const,
+      reason: 'source_account_cannot_be_credit_card',
+      message:
+        'fromAccount must resolve to a checking, cash, savings, or other non-credit-card account.',
+    }
+  }
+  if (!normalizeCurrencyCode(account.currency ?? undefined)) {
+    return {
+      success: false as const,
+      reason: 'source_account_currency_missing',
+      message: `Account ${accountId} is missing a currency. Repair it before recording card payments.`,
+    }
+  }
+
+  return { success: true as const, account }
+}
+
+function resolvePaymentSourceAccount(fromAccount: string) {
+  const resolved = resolveAccountId(undefined, fromAccount)
+  if (!resolved.success) return resolved
+  return readPaymentSourceAccount(resolved.id)
+}
+
+function formatCardPaymentBalanceImpact(changes: CardPaymentBalanceChange[]) {
+  return {
+    affectsBalances: changes.length > 0,
+    accounts: changes,
+    deltas: changes,
+  }
+}
+
+function buildCardPaymentBalanceImpact(input: {
+  mode: CardPaymentMode
+  amountCentavos: number
+  fromAccount: PaymentSourceAccountRow | null
+  cardAccount: CreditCardAccountRow
+}) {
+  const changes: CardPaymentBalanceChange[] = []
+  const addChange = (
+    account: { id: string; name: string; balance: number },
+    deltaCentavos: number
+  ) => {
+    changes.push({
+      accountId: account.id,
+      accountName: account.name,
+      previousBalance: fromCentavos(account.balance),
+      newBalance: fromCentavos(account.balance + deltaCentavos),
+      delta: fromCentavos(deltaCentavos),
+      previousBalanceCentavos: account.balance,
+      newBalanceCentavos: account.balance + deltaCentavos,
+      deltaCentavos,
+    })
+  }
+
+  if (input.mode === 'transfer' && input.fromAccount) {
+    addChange(input.fromAccount, -input.amountCentavos)
+    addChange(input.cardAccount, input.amountCentavos)
+  }
+  if (input.mode === 'cleanup-expense' && input.fromAccount) {
+    addChange(input.fromAccount, -input.amountCentavos)
+  }
+
+  return formatCardPaymentBalanceImpact(changes)
+}
+
+function cardPaymentTransactionSnapshot(transaction: CardPaymentTransactionPreview) {
+  return transaction
+}
+
+function cardPaymentDuplicateWarnings(duplicateCheck: TransactionDuplicateCheck) {
+  const match = duplicateCheck.match
+  if (!match) return []
+  return [
+    {
+      type: match.kind,
+      reason: transactionDuplicateReason(match.kind),
+      existingTransactionId: match.existingTransactionId,
+      accountId: match.accountId,
+      date: match.date,
+      amount: fromCentavos(match.amountCentavos),
+      amountCentavos: match.amountCentavos,
+      daysApart: match.daysApart,
+      descriptionSimilarity: match.descriptionSimilarity,
+      message:
+        match.kind === 'exact_duplicate'
+          ? `Exact duplicate transaction ${match.existingTransactionId} already exists.`
+          : `Potential duplicate transaction ${match.existingTransactionId} is within ${match.windowDays} days with similar description.`,
+    },
+  ]
+}
+
+function buildStatementPaymentImpact(input: {
+  statement: CreditCardStatementRow
+  amountCentavos: number
+  source?: string
+  note?: string
+}) {
+  const previousPaidAmountCentavos = input.statement.paid_amount
+  const newPaidAmountCentavos = previousPaidAmountCentavos + input.amountCentavos
+  const updatedStatement: CreditCardStatementRow = {
+    ...input.statement,
+    paid_amount: newPaidAmountCentavos,
+    status: deriveStatementStatus({
+      statementBalance: input.statement.statement_balance,
+      paidAmount: newPaidAmountCentavos,
+      dueDate: input.statement.due_date,
+    }),
+    source: input.source !== undefined ? input.source : input.statement.source,
+    note: input.note !== undefined ? input.note : input.statement.note,
+  }
+  const payment = paymentAmounts(updatedStatement)
+
+  return {
+    statement: updatedStatement,
+    preview: {
+      statementId: input.statement.id,
+      accountId: input.statement.account_id,
+      previousPaidAmount: fromCentavos(previousPaidAmountCentavos),
+      previousPaidAmountCentavos,
+      newPaidAmount: fromCentavos(newPaidAmountCentavos),
+      newPaidAmountCentavos,
+      paidDelta: fromCentavos(input.amountCentavos),
+      paidDeltaCentavos: input.amountCentavos,
+      statementBalance: fromCentavos(input.statement.statement_balance),
+      statementBalanceCentavos: input.statement.statement_balance,
+      amountToPay: payment.amountToPay,
+      amountToPayCentavos: payment.amountToPayCentavos,
+      minimumPaymentDue: payment.minimumPaymentDue,
+      minimumPaymentDueCentavos: payment.minimumPaymentDueCentavos,
+      previousPaymentStatus: effectiveStatementStatus(input.statement),
+      paymentStatus: effectiveStatementStatus(updatedStatement),
+      dueDate: input.statement.due_date,
+    },
+  }
 }
 
 function statementSnapshot(statement: CreditCardStatementRow) {
@@ -465,6 +686,53 @@ function previousDateForDay(day: number): dayjs.Dayjs {
   return previousMonth.date(Math.min(day, previousMonth.daysInMonth()))
 }
 
+function dateForDayInMonth(month: dayjs.Dayjs, day: number): dayjs.Dayjs {
+  return month.date(Math.min(day, month.daysInMonth()))
+}
+
+function nextDateForDayAfter(day: number, afterDate: dayjs.Dayjs): dayjs.Dayjs {
+  const sameMonth = dateForDayInMonth(afterDate, day)
+  if (sameMonth.isAfter(afterDate, 'day')) return sameMonth
+  return dateForDayInMonth(afterDate.add(1, 'month'), day)
+}
+
+function previousClosingBefore(closingDate: dayjs.Dayjs, closingDay: number): dayjs.Dayjs {
+  const previousMonth = closingDate.subtract(1, 'month')
+  return dateForDayInMonth(previousMonth, closingDay)
+}
+
+function cycleForDate(input: {
+  closingDay: number
+  dueDay: number
+  date: dayjs.Dayjs
+  explicitClosingDate?: string
+  explicitDueDate?: string
+}) {
+  const currentCycleClosing = input.explicitClosingDate
+    ? dayjs(input.explicitClosingDate)
+    : (() => {
+        const thisMonthClosing = dateForDayInMonth(input.date, input.closingDay)
+        return input.date.isAfter(thisMonthClosing, 'day')
+          ? dateForDayInMonth(input.date.add(1, 'month'), input.closingDay)
+          : thisMonthClosing
+      })()
+  const previousClosing = previousClosingBefore(currentCycleClosing, input.closingDay)
+  const nextCycleClosing = dateForDayInMonth(currentCycleClosing.add(1, 'month'), input.closingDay)
+  const currentCycleExpectedDue = input.explicitDueDate
+    ? dayjs(input.explicitDueDate)
+    : nextDateForDayAfter(input.dueDay, currentCycleClosing)
+  const nextCycleExpectedDue = nextDateForDayAfter(input.dueDay, nextCycleClosing)
+
+  return {
+    currentCycleStartDate: previousClosing.add(1, 'day').format('YYYY-MM-DD'),
+    currentCycleClosingDate: currentCycleClosing.format('YYYY-MM-DD'),
+    currentCycleExpectedDueDate: currentCycleExpectedDue.format('YYYY-MM-DD'),
+    nextCycleStartDate: currentCycleClosing.add(1, 'day').format('YYYY-MM-DD'),
+    nextClosingDate: nextCycleClosing.format('YYYY-MM-DD'),
+    nextCycleExpectedDueDate: nextCycleExpectedDue.format('YYYY-MM-DD'),
+  }
+}
+
 function getLatestStatementForAccount(accountId: string): CreditCardStatementRow | null {
   return (
     query<CreditCardStatementRow>(
@@ -506,6 +774,477 @@ function getCurrentPeriodSpending(
     spending: fromCentavos(total),
     spendingCentavos: total,
   }
+}
+
+const recordCardPayment: ToolDefinition = {
+  name: 'record-card-payment',
+  description:
+    'Record or preview a credit-card payment as an accounting transfer, cleanup expense, or statement-only payment update.',
+  schema: z.object({
+    fromAccount: boundedText(
+      'Source account reference',
+      'Paying account alias, ID, or exact name. Required unless mode is statement-payment-only',
+      128
+    ).optional(),
+    cardAccount: boundedText('Card account reference', 'Credit card alias, ID, or exact name', 128),
+    amount: positiveMoneyAmount('Payment amount in the main currency unit'),
+    date: isoDate('Payment date').optional(),
+    mode: cardPaymentModeSchema.optional().default('transfer'),
+    statementId: boundedText('Statement ID', 'Statement to mark as paid', 128).optional(),
+    applyToLatestStatement: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Apply the payment amount to the latest statement for the card account'),
+    description: boundedText('Description', 'Transaction description', 240).optional(),
+    category: boundedText(
+      'Category reference',
+      'Category ID or exact category name for cleanup-expense mode',
+      128
+    ).optional(),
+    notes: z.string().trim().max(2000).optional().describe('Transaction notes'),
+    source: z.string().trim().max(120).optional().describe('Automation source or origin label'),
+    note: z.string().trim().max(1000).optional().describe('Workflow changelog note'),
+    dryRun: z.boolean().optional().default(false).describe('Validate and preview without writing'),
+    allowDuplicate: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Allow recording even when a similar transaction already exists'),
+  }),
+  execute: async ({
+    fromAccount,
+    cardAccount,
+    amount,
+    date,
+    mode,
+    statementId,
+    applyToLatestStatement,
+    description,
+    category,
+    notes,
+    source,
+    note,
+    dryRun,
+    allowDuplicate,
+  }) => {
+    const paymentDate = date ?? dayjs().format('YYYY-MM-DD')
+    const amountCentavos = toCentavos(amount)
+    const warnings: Array<{ type: string; message: string; [key: string]: unknown }> = []
+
+    const resolvedCard = resolveCreditCardAccount(undefined, cardAccount)
+    if (!resolvedCard.success) return resolvedCard
+    const card = resolvedCard.account
+
+    let sourceAccount: PaymentSourceAccountRow | null = null
+    if (mode !== 'statement-payment-only') {
+      if (!fromAccount) {
+        return {
+          success: false,
+          reason: 'from_account_required',
+          message: 'fromAccount is required unless mode is statement-payment-only.',
+        }
+      }
+      const resolvedSource = resolvePaymentSourceAccount(fromAccount)
+      if (!resolvedSource.success) return resolvedSource
+      sourceAccount = resolvedSource.account
+      if (
+        normalizeCurrencyCode(sourceAccount.currency ?? undefined) !==
+        normalizeCurrencyCode(card.currency)
+      ) {
+        return {
+          success: false,
+          reason: 'currency_mismatch',
+          message: `Payment source currency ${sourceAccount.currency} does not match card currency ${card.currency}.`,
+        }
+      }
+    }
+
+    let categoryId: string | null = null
+    if (mode === 'cleanup-expense') {
+      if (!category) {
+        return {
+          success: false,
+          reason: 'category_required',
+          message:
+            'category is required for cleanup-expense mode so the cleanup spend is explicit.',
+        }
+      }
+      const resolvedCategory = resolveCategoryId(category)
+      if (!resolvedCategory.success) return resolvedCategory
+      categoryId = resolvedCategory.id
+    }
+
+    if (mode !== 'cleanup-expense' && category) {
+      warnings.push({
+        type: 'category_ignored',
+        message: 'category is only used for cleanup-expense mode and will be ignored.',
+      })
+    }
+
+    let selectedStatement: CreditCardStatementRow | null = null
+    if (statementId) {
+      selectedStatement = getStatement(statementId)
+      if (!selectedStatement) {
+        return {
+          success: false,
+          reason: 'statement_not_found',
+          message: `Credit card statement ${statementId} not found.`,
+        }
+      }
+      const writable = ensureStatementWritable(selectedStatement)
+      if (!writable.success) return writable
+      if (selectedStatement.account_id !== card.id) {
+        return {
+          success: false,
+          reason: 'statement_card_mismatch',
+          message: `Statement ${statementId} belongs to account ${selectedStatement.account_id}, not ${card.id}.`,
+        }
+      }
+    } else if (applyToLatestStatement) {
+      selectedStatement = getLatestStatementForAccount(card.id)
+      if (!selectedStatement) {
+        warnings.push({
+          type: 'statement_not_found',
+          message:
+            'No latest statement exists for this card account; no statement paid amount will be updated.',
+        })
+      }
+    }
+
+    if (mode === 'statement-payment-only' && !selectedStatement) {
+      return {
+        success: false,
+        reason: 'statement_required',
+        message:
+          'statement-payment-only mode requires statementId or applyToLatestStatement with an existing statement.',
+        warnings,
+      }
+    }
+
+    const statementImpact = selectedStatement
+      ? buildStatementPaymentImpact({ statement: selectedStatement, amountCentavos, source, note })
+      : null
+
+    const transactionDescription =
+      description ??
+      (mode === 'cleanup-expense'
+        ? `Credit card payment cleanup: ${card.name}`
+        : `Credit card payment: ${card.name}`)
+    const transactionPreview: CardPaymentTransactionPreview | null =
+      mode === 'statement-payment-only' || !sourceAccount
+        ? null
+        : {
+            id: generateId(),
+            accountId: sourceAccount.id,
+            accountName: sourceAccount.name,
+            transferToAccountId: mode === 'transfer' ? card.id : null,
+            transferToAccountName: mode === 'transfer' ? card.name : null,
+            categoryId,
+            type: mode === 'transfer' ? 'transfer' : 'expense',
+            amount,
+            amountCentavos,
+            currency: normalizeCurrencyCode(sourceAccount.currency ?? card.currency),
+            description: transactionDescription,
+            notes: notes ?? null,
+            source: source ?? null,
+            note: note ?? null,
+            status: 'posted',
+            date: paymentDate,
+          }
+
+    const balanceImpact = buildCardPaymentBalanceImpact({
+      mode,
+      amountCentavos,
+      fromAccount: sourceAccount,
+      cardAccount: card,
+    })
+
+    const duplicateCheck = transactionPreview
+      ? findTransactionDuplicate({
+          accountId: transactionPreview.accountId,
+          date: transactionPreview.date,
+          amountCentavos,
+          type: transactionPreview.type,
+          status: transactionPreview.status,
+          transferToAccountId: transactionPreview.transferToAccountId,
+          description: transactionPreview.description,
+        })
+      : null
+    const duplicateWarnings = duplicateCheck ? cardPaymentDuplicateWarnings(duplicateCheck) : []
+    if (duplicateCheck?.match && !allowDuplicate && !dryRun) {
+      return {
+        success: false,
+        reason: transactionDuplicateReason(duplicateCheck.match.kind),
+        duplicate: duplicateCheck.match,
+        duplicateCheck,
+        duplicateWarnings,
+        message:
+          duplicateCheck.match.kind === 'exact_duplicate'
+            ? `Exact duplicate transaction ${duplicateCheck.match.existingTransactionId} already exists. Re-run with allowDuplicate to record it anyway.`
+            : `Potential duplicate transaction ${duplicateCheck.match.existingTransactionId} is within ${duplicateCheck.match.windowDays} days with similar description. Re-run with allowDuplicate to record it anyway.`,
+      }
+    }
+
+    const wouldCreateTransactions = transactionPreview ? [transactionPreview] : []
+    const wouldUpdateStatements = statementImpact ? [statementImpact.preview] : []
+    const transactionAuditPreview = transactionPreview
+      ? {
+          entity: 'transaction',
+          entityId: transactionPreview.id,
+          action: 'create',
+          before: null,
+          after: {
+            transaction: cardPaymentTransactionSnapshot(transactionPreview),
+            balances: balanceImpact.accounts.map((change) => ({
+              accountId: change.accountId,
+              balanceCentavos: change.newBalanceCentavos,
+              balance: change.newBalance,
+            })),
+          },
+          source: source ?? null,
+          note: note ?? null,
+          balanceChanges: balanceImpact.accounts,
+        }
+      : null
+    const statementAuditPreview = statementImpact
+      ? {
+          entity: 'credit_card_statement',
+          entityId: statementImpact.statement.id,
+          action: 'update',
+          before: { statement: statementAuditSnapshot(selectedStatement!) },
+          after: { statement: statementAuditSnapshot(statementImpact.statement) },
+          source: source ?? null,
+          note: note ?? null,
+        }
+      : null
+
+    if (dryRun) {
+      return {
+        success: true,
+        action: 'recorded' as const,
+        dryRun: true,
+        mode,
+        amount,
+        amountCentavos,
+        wouldCreateTransactions,
+        wouldUpdateStatements,
+        balanceImpact,
+        statementImpact: statementImpact?.preview ?? null,
+        duplicateWarnings,
+        duplicatePolicy: duplicateCheck?.match
+          ? {
+              allowDuplicate,
+              applyBlocked: !allowDuplicate,
+              reason: transactionDuplicateReason(duplicateCheck.match.kind),
+            }
+          : { allowDuplicate, applyBlocked: false, reason: null },
+        warnings,
+        auditPreview: [transactionAuditPreview, statementAuditPreview].filter(Boolean),
+        message: `Dry run: ${mode} card payment for ${card.name} would be recorded.`,
+      }
+    }
+
+    transaction(() => {
+      if (transactionPreview) {
+        execute(
+          `INSERT INTO transactions
+             (id, account_id, category_id, transfer_to_account_id, type, amount, currency, description, notes, status, source, note, date)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+          [
+            transactionPreview.id,
+            transactionPreview.accountId,
+            transactionPreview.categoryId,
+            transactionPreview.transferToAccountId,
+            transactionPreview.type,
+            transactionPreview.amountCentavos,
+            transactionPreview.currency,
+            transactionPreview.description,
+            transactionPreview.notes,
+            transactionPreview.status,
+            transactionPreview.source,
+            transactionPreview.note,
+            transactionPreview.date,
+          ]
+        )
+        for (const change of balanceImpact.accounts) {
+          execute(
+            "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
+            [change.deltaCentavos, change.accountId]
+          )
+        }
+        writeAuditLog({
+          entity: 'transaction',
+          entityId: transactionPreview.id,
+          action: 'create',
+          before: null,
+          after: transactionAuditPreview?.after ?? null,
+          source,
+          note,
+        })
+      }
+
+      if (statementImpact) {
+        const updateResult = execute(
+          `UPDATE credit_card_statements
+           SET paid_amount = $1, status = $2, source = $3, note = $4, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+           WHERE id = $5`,
+          [
+            statementImpact.statement.paid_amount,
+            statementImpact.statement.status,
+            statementImpact.statement.source,
+            statementImpact.statement.note,
+            statementImpact.statement.id,
+          ]
+        )
+        assertSingleRowUpdated(
+          updateResult,
+          `Credit card statement ${statementImpact.statement.id} could not be updated safely.`
+        )
+        writeAuditLog({
+          entity: 'credit_card_statement',
+          entityId: statementImpact.statement.id,
+          action: 'update',
+          before: statementAuditPreview?.before ?? null,
+          after: statementAuditPreview?.after ?? null,
+          source,
+          note,
+        })
+      }
+    })
+
+    return {
+      success: true,
+      action: 'recorded' as const,
+      mode,
+      transactions: wouldCreateTransactions,
+      updatedStatements: wouldUpdateStatements,
+      balanceImpact,
+      statementImpact: statementImpact?.preview ?? null,
+      duplicateWarnings,
+      warnings,
+      message: `${mode} card payment for ${card.name} recorded.`,
+    }
+  },
+}
+
+const creditCardCycleExplain: ToolDefinition = {
+  name: 'credit-card-cycle-explain',
+  description:
+    'Explain a credit-card statement cycle, due-date status, next upcoming due date, and optional purchase-date classification.',
+  schema: z.object({
+    accountId: boundedText('Account ID', 'Credit card account ID', 128).optional(),
+    account: boundedText(
+      'Account reference',
+      'Credit card account alias, ID, or exact name',
+      128
+    ).optional(),
+    asOf: isoDate('Date to explain the cycle from').optional(),
+    purchaseDate: isoDate('Optional purchase date to classify into a statement cycle').optional(),
+    closingDate: isoDate('Explicit current cycle closing date override').optional(),
+    dueDate: isoDate('Explicit current cycle expected due date override').optional(),
+  }),
+  execute: async ({ accountId, account, asOf, purchaseDate, closingDate, dueDate }) => {
+    const resolved = resolveCreditCardAccount(accountId, account)
+    if (!resolved.success) return resolved
+    const card = resolved.account
+    const asOfDate = dayjs(asOf ?? dayjs().format('YYYY-MM-DD'))
+    const closingDay =
+      card.statement_closing_day ?? (closingDate ? dayjs(closingDate).date() : null)
+    const dueDay = card.payment_due_day ?? (dueDate ? dayjs(dueDate).date() : null)
+
+    if (!closingDay || !dueDay) {
+      return {
+        success: false,
+        reason: 'cycle_settings_required',
+        message:
+          'Credit-card cycle explanation requires statement closing and payment due days, or explicit closingDate and dueDate overrides.',
+      }
+    }
+
+    const cycle = cycleForDate({
+      closingDay,
+      dueDay,
+      date: asOfDate,
+      explicitClosingDate: closingDate,
+      explicitDueDate: dueDate,
+    })
+    const latest = getLatestStatementForAccount(card.id)
+    const latestPaymentStatus = latest ? effectiveStatementStatusAsOf(latest, asOfDate) : null
+    const latestPayment = latest ? paymentAmounts(latest) : null
+    const latestDuePassed = latest ? dayjs(latest.due_date).isBefore(asOfDate, 'day') : null
+    const latestStatement = latest
+      ? {
+          ...statementSnapshot({ ...latest, account_name: card.name }),
+          paymentStatus: latestPaymentStatus,
+          duePassed: latestDuePassed,
+        }
+      : null
+    const latestStatementHasFutureDue =
+      latest && latestPayment && latestPayment.amountToPayCentavos > 0 && !latestDuePassed
+    const nextUpcomingDueDate = latestStatementHasFutureDue
+      ? latest.due_date
+      : cycle.currentCycleExpectedDueDate
+
+    let purchaseClassification: null | {
+      purchaseDate: string
+      cycleStartDate: string
+      cycleClosingDate: string
+      expectedDueDate: string
+      classification: string
+      summary: string
+    } = null
+    if (purchaseDate) {
+      const purchase = dayjs(purchaseDate)
+      const purchaseCycle = cycleForDate({ closingDay, dueDay, date: purchase })
+      const classification =
+        latest &&
+        !purchase.isAfter(dayjs(latest.statement_end_date), 'day') &&
+        !purchase.isBefore(dayjs(latest.statement_start_date ?? latest.statement_end_date), 'day')
+          ? 'latest_statement'
+          : purchase.isBefore(asOfDate, 'day')
+            ? 'past_cycle_or_current_unstatemented'
+            : 'current_or_future_cycle'
+      purchaseClassification = {
+        purchaseDate,
+        cycleStartDate: purchaseCycle.currentCycleStartDate,
+        cycleClosingDate: purchaseCycle.currentCycleClosingDate,
+        expectedDueDate: purchaseCycle.currentCycleExpectedDueDate,
+        classification,
+        summary: `A purchase on ${purchaseDate} is expected to close on ${purchaseCycle.currentCycleClosingDate} and be due on ${purchaseCycle.currentCycleExpectedDueDate}.`,
+      }
+    }
+
+    const humanSummary = latest
+      ? `${card.name}: latest statement closed ${latest.statement_end_date} and is ${latestPaymentStatus} with ${latestPayment?.amountToPay.toFixed(2)} ${latest.currency} remaining. Current cycle closes ${cycle.currentCycleClosingDate} and is expected due ${cycle.currentCycleExpectedDueDate}.`
+      : `${card.name}: no persisted statements yet. Current cycle closes ${cycle.currentCycleClosingDate} and is expected due ${cycle.currentCycleExpectedDueDate}.`
+
+    return {
+      success: true,
+      account: {
+        id: card.id,
+        name: card.name,
+        currency: card.currency,
+        statementClosingDay: card.statement_closing_day ?? null,
+        paymentDueDay: card.payment_due_day ?? null,
+      },
+      asOf: asOfDate.format('YYYY-MM-DD'),
+      latestStatement,
+      latestStatementDueDate: latest?.due_date ?? null,
+      latestStatementPaymentStatus: latestPaymentStatus,
+      latestStatementDuePassed: latestDuePassed,
+      currentCycleStartDate: cycle.currentCycleStartDate,
+      currentCycleClosingDate: cycle.currentCycleClosingDate,
+      currentCycleExpectedDueDate: cycle.currentCycleExpectedDueDate,
+      nextCycleStartDate: cycle.nextCycleStartDate,
+      nextClosingDate: cycle.nextClosingDate,
+      nextCycleExpectedDueDate: cycle.nextCycleExpectedDueDate,
+      nextUpcomingDueDate,
+      purchaseClassification,
+      summary: humanSummary,
+      message: humanSummary,
+    }
+  },
 }
 
 const createCreditCardStatement: ToolDefinition = {
@@ -965,8 +1704,8 @@ const listCreditCardStatements: ToolDefinition = {
     if (endDate) addFilter('s.statement_end_date <= ?', endDate)
     if (!includeArchivedAccounts) filters.push('COALESCE(a.is_archived, 0) = 0')
 
-    const shouldLimitInSql = status === 'all'
-    if (shouldLimitInSql) params.push(limit)
+    const scanLimit = status === 'all' ? limit : Math.max(limit, STATEMENT_FILTER_SCAN_LIMIT)
+    params.push(scanLimit)
     const rows = query<CreditCardStatementRow>(
       `SELECT s.*, a.name as account_name, a.currency as account_currency, a.type as account_type,
               a.is_archived as account_is_archived
@@ -974,7 +1713,7 @@ const listCreditCardStatements: ToolDefinition = {
        LEFT JOIN accounts a ON s.account_id = a.id
        ${filters.length ? `WHERE ${filters.join(' AND ')}` : ''}
        ORDER BY s.statement_end_date DESC, s.due_date DESC, s.id DESC
-       ${shouldLimitInSql ? `LIMIT $${params.length}` : ''}`,
+        LIMIT $${params.length}`,
       params
     )
     const statements = rows
@@ -1235,6 +1974,8 @@ export function getCreditCardBillEntries(daysAhead: number): CreditCardBillEntry
 
 export const creditCardsTools: ToolDefinition[] = [
   getCreditCardStatus,
+  recordCardPayment,
+  creditCardCycleExplain,
   createCreditCardStatement,
   updateCreditCardStatement,
   listCreditCardStatements,

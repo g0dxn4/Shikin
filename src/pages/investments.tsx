@@ -22,8 +22,8 @@ import { useUIStore } from '@/stores/ui-store'
 import { useInvestmentStore, type InvestmentWithPrice } from '@/stores/investment-store'
 import { useAccountStore } from '@/stores/account-store'
 import { formatMoney, fromCentavos } from '@/lib/money'
-import { fetchAllCurrentPrices, savePricesToDB } from '@/lib/price-service'
 import { getErrorMessage } from '@/lib/errors'
+import { fetchAllCurrentPrices, savePricesToDB } from '@/lib/price-service'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -50,7 +50,12 @@ const TYPE_COLORS: Record<string, string> = {
   crypto: '#ffd60a',
   bond: '#30d158',
   mutual_fund: '#ff9f0a',
+  cetes: '#00c7be',
   other: '#71717a',
+}
+
+function getPriceCurrencyMap(investments: InvestmentWithPrice[]) {
+  return new Map(investments.map((investment) => [investment.symbol, investment.currency]))
 }
 
 type SortField = 'value' | 'gainLoss' | 'name' | 'type'
@@ -112,7 +117,7 @@ export function Investments() {
     try {
       const prices = await fetchAllCurrentPrices(investments)
       if (prices.size > 0) {
-        await savePricesToDB(prices)
+        await savePricesToDB(prices, getPriceCurrencyMap(investments))
         await fetchInvestments()
         toast.success(t('toast.pricesUpdated'))
       } else {
@@ -258,8 +263,12 @@ export function Investments() {
     return (
       <div className="animate-fade-in-up page-content">
         <div className="liquid-card page-header p-5">
-          <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
+          <div>
+            <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
+            <p className="text-muted-foreground mt-1 text-sm font-medium">{t('subtitle')}</p>
+          </div>
         </div>
+        <InvestmentGuidance t={t} />
         {hasInitialLoadError ? (
           <ErrorState
             title="Couldn’t load your investments"
@@ -294,9 +303,7 @@ export function Investments() {
       <div className="liquid-card page-header p-5">
         <div>
           <h1 className="font-heading text-2xl font-bold tracking-tight">{t('title')}</h1>
-          <p className="text-muted-foreground mt-1 text-sm font-medium">
-            Portfolio health, holdings, and allocation
-          </p>
+          <p className="text-muted-foreground mt-1 text-sm font-medium">{t('subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="secondary" onClick={handleRefresh} disabled={isRefreshing}>
@@ -317,6 +324,8 @@ export function Investments() {
           void fetchInvestments().catch(() => {})
         }}
       />
+
+      <InvestmentGuidance t={t} />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -592,6 +601,31 @@ export function Investments() {
           onConfirm={handleDelete}
         />
       </Suspense>
+    </div>
+  )
+}
+
+function InvestmentGuidance({ t }: { t: ReturnType<typeof useTranslation<'investments'>>['t'] }) {
+  return (
+    <div className="liquid-card grid gap-3 p-4 text-xs leading-relaxed md:grid-cols-3">
+      <div>
+        <p className="font-heading text-foreground mb-1 font-semibold">
+          {t('guidance.accountTitle')}
+        </p>
+        <p className="text-muted-foreground">{t('guidance.account')}</p>
+      </div>
+      <div>
+        <p className="font-heading text-foreground mb-1 font-semibold">
+          {t('guidance.examplesTitle')}
+        </p>
+        <p className="text-muted-foreground">{t('guidance.examples')}</p>
+      </div>
+      <div>
+        <p className="font-heading text-foreground mb-1 font-semibold">
+          {t('guidance.pricesTitle')}
+        </p>
+        <p className="text-muted-foreground">{t('guidance.prices')}</p>
+      </div>
     </div>
   )
 }

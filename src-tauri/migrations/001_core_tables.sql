@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS investments (
   account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
   symbol TEXT NOT NULL,
   name TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('stock', 'etf', 'crypto', 'bond', 'mutual_fund', 'other')),
+  type TEXT NOT NULL CHECK (type IN ('stock', 'etf', 'crypto', 'bond', 'mutual_fund', 'cetes', 'other')),
   shares REAL NOT NULL DEFAULT 0,
   avg_cost_basis INTEGER NOT NULL DEFAULT 0,
   currency TEXT NOT NULL DEFAULT 'USD',

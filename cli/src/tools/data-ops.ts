@@ -140,6 +140,12 @@ const EXPORT_TABLES: ExportTableSpec[] = [
       'source',
       'note',
       'recurring_rule_id',
+      'is_placeholder',
+      'placeholder_status',
+      'resolved_at',
+      'resolved_by_transaction_id',
+      'placeholder_reason',
+      'placeholder_parent_transaction_id',
       'created_at',
       'updated_at',
     ],
@@ -430,7 +436,7 @@ const OPTIONAL_EXPORT_TABLES = new Set([
 ])
 
 const REDACTED_FIELD_PATTERN =
-  /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key|notes?|description|url|value|summary|tags|source|before_json|after_json|pattern|highlights_json|breakdown_json)/i
+  /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key|notes?|description|url|value|summary|tags|source|reason|before_json|after_json|pattern|highlights_json|breakdown_json)/i
 const REDACTED_SETTINGS_VALUE_KEYS = new Set([FINANCE_PROFILE_SETTING_KEY, 'account_aliases'])
 
 function stableJsonValue(value: unknown): unknown {
@@ -442,6 +448,25 @@ function stableJsonValue(value: unknown): unknown {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([key, nested]) => [key, stableJsonValue(nested)])
   )
+}
+
+function redactStableJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactStableJsonValue)
+  if (!value || typeof value !== 'object') return value
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, nested]) => [
+        key,
+        REDACTED_FIELD_PATTERN.test(key) ? '[REDACTED]' : redactStableJsonValue(nested),
+      ])
+  )
+}
+
+function financeProfileOutput(value: unknown, redacted: boolean): unknown {
+  const stable = stableJsonValue(value)
+  return redacted ? redactStableJsonValue(stable) : stable
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -942,7 +967,7 @@ const restoreDatabaseTool: ToolDefinition = {
 const financeProfile: ToolDefinition = {
   name: 'finance-profile',
   description:
-    'Get, set, or clear stable assistant finance profile preferences stored in settings.',
+    'Get, set, or clear stable automation finance profile preferences stored in settings.',
   schema: z.object({
     action: z.enum(['get', 'set', 'clear']).optional().default('get'),
     profile: z
@@ -956,8 +981,13 @@ const financeProfile: ToolDefinition = {
       .optional()
       .default(false)
       .describe('Validate and preview profile writes without storing them'),
+    redacted: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Redact sensitive free-text finance profile fields in the response'),
   }),
-  execute: async ({ action, profile, merge, dryRun }) => {
+  execute: async ({ action, profile, merge, dryRun, redacted }) => {
     const current = getJsonSetting<unknown>(FINANCE_PROFILE_SETTING_KEY, {})
 
     if (action === 'get') {
@@ -965,7 +995,7 @@ const financeProfile: ToolDefinition = {
         success: true,
         action: 'read' as const,
         present: hasFinanceProfile(current),
-        profile: stableJsonValue(current),
+        profile: financeProfileOutput(current, redacted),
         message: hasFinanceProfile(current)
           ? 'Finance profile is configured.'
           : 'Finance profile is not configured.',
@@ -978,7 +1008,7 @@ const financeProfile: ToolDefinition = {
           success: true,
           action: 'cleared' as const,
           dryRun: true,
-          before: stableJsonValue(current),
+          before: financeProfileOutput(current, redacted),
           after: {},
           message: 'Dry run: finance profile would be cleared.',
         }
@@ -1004,8 +1034,8 @@ const financeProfile: ToolDefinition = {
         success: true,
         action: 'updated' as const,
         dryRun: true,
-        before: stableJsonValue(current),
-        after: nextProfile,
+        before: financeProfileOutput(current, redacted),
+        after: financeProfileOutput(nextProfile, redacted),
         message: 'Dry run: finance profile would be updated.',
       }
     }
@@ -1015,7 +1045,7 @@ const financeProfile: ToolDefinition = {
       success: true,
       action: 'updated' as const,
       present: hasFinanceProfile(nextProfile),
-      profile: nextProfile,
+      profile: financeProfileOutput(nextProfile, redacted),
       message: 'Finance profile updated.',
     }
   },

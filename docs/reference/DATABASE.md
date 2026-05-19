@@ -108,27 +108,41 @@ Nested categories under a parent category.
 
 The core table. Every expense, income, and transfer is a transaction.
 
-| Column                   | Type    | Constraints                                    | Description                             |
-| ------------------------ | ------- | ---------------------------------------------- | --------------------------------------- |
-| `id`                     | TEXT    | PRIMARY KEY                                    | ULID                                    |
-| `account_id`             | TEXT    | NOT NULL, FK -> accounts(id) ON DELETE CASCADE | Source account                          |
-| `category_id`            | TEXT    | FK -> categories(id) ON DELETE SET NULL        | Category (nullable)                     |
-| `subcategory_id`         | TEXT    | FK -> subcategories(id) ON DELETE SET NULL     | Subcategory (nullable)                  |
-| `type`                   | TEXT    | NOT NULL, CHECK                                | One of: `expense`, `income`, `transfer` |
-| `amount`                 | INTEGER | NOT NULL                                       | Amount in centavos (always positive)    |
-| `currency`               | TEXT    | NOT NULL, DEFAULT 'USD'                        | ISO 4217 currency code                  |
-| `description`            | TEXT    | NOT NULL                                       | What was this transaction for           |
-| `notes`                  | TEXT    | nullable                                       | Additional details                      |
-| `date`                   | TEXT    | NOT NULL                                       | Transaction date (YYYY-MM-DD)           |
-| `tags`                   | TEXT    | DEFAULT '[]'                                   | JSON array of tag strings               |
-| `is_recurring`           | INTEGER | NOT NULL, DEFAULT 0                            | Whether this is a recurring transaction |
-| `transfer_to_account_id` | TEXT    | FK -> accounts(id) ON DELETE SET NULL          | Destination account for transfers       |
-| `created_at`             | TEXT    | NOT NULL, auto                                 | ISO 8601 timestamp                      |
-| `updated_at`             | TEXT    | NOT NULL, auto                                 | ISO 8601 timestamp                      |
+| Column                              | Type    | Constraints                                    | Description                                      |
+| ----------------------------------- | ------- | ---------------------------------------------- | ------------------------------------------------ |
+| `id`                                | TEXT    | PRIMARY KEY                                    | ULID                                             |
+| `account_id`                        | TEXT    | NOT NULL, FK -> accounts(id) ON DELETE CASCADE | Source account                                   |
+| `category_id`                       | TEXT    | FK -> categories(id) ON DELETE SET NULL        | Category (nullable)                              |
+| `subcategory_id`                    | TEXT    | FK -> subcategories(id) ON DELETE SET NULL     | Subcategory (nullable)                           |
+| `type`                              | TEXT    | NOT NULL, CHECK                                | One of: `expense`, `income`, `transfer`          |
+| `amount`                            | INTEGER | NOT NULL                                       | Amount in centavos (always positive)             |
+| `currency`                          | TEXT    | NOT NULL, DEFAULT 'USD'                        | ISO 4217 currency code                           |
+| `description`                       | TEXT    | NOT NULL                                       | What was this transaction for                    |
+| `notes`                             | TEXT    | nullable                                       | Transaction details                              |
+| `date`                              | TEXT    | NOT NULL                                       | Transaction date (YYYY-MM-DD)                    |
+| `tags`                              | TEXT    | DEFAULT '[]'                                   | JSON array of display tag strings                |
+| `is_recurring`                      | INTEGER | NOT NULL, DEFAULT 0                            | Whether this is a recurring transaction          |
+| `transfer_to_account_id`            | TEXT    | FK -> accounts(id) ON DELETE SET NULL          | Destination account for transfers                |
+| `status`                            | TEXT    | DEFAULT 'posted'                               | `pending`, `posted`, or `cleared`                |
+| `source`                            | TEXT    | nullable                                       | Generic provenance/source label                  |
+| `note`                              | TEXT    | nullable                                       | Audit/changelog note for the write               |
+| `recurring_rule_id`                 | TEXT    | FK -> recurring_rules(id) ON DELETE SET NULL   | Source recurring rule, when materialized         |
+| `is_placeholder`                    | INTEGER | NOT NULL, DEFAULT 0                            | 1 for placeholder/unknown-charge rows            |
+| `placeholder_status`                | TEXT    | nullable                                       | `unresolved`, `resolved`, `split`, or `cancelled` |
+| `resolved_at`                       | TEXT    | nullable                                       | ISO timestamp when placeholder was resolved      |
+| `resolved_by_transaction_id`        | TEXT    | Logical FK -> transactions(id)                 | Transaction that resolved this placeholder       |
+| `placeholder_reason`                | TEXT    | nullable                                       | Why the placeholder exists                       |
+| `placeholder_parent_transaction_id` | TEXT    | Logical FK -> transactions(id)                 | Parent placeholder for split child transactions  |
+| `created_at`                        | TEXT    | NOT NULL, auto                                 | ISO 8601 timestamp                               |
+| `updated_at`                        | TEXT    | NOT NULL, auto                                 | ISO 8601 timestamp                               |
 
 **Design note:** The `amount` field is always positive. The `type` field determines the sign: `expense` subtracts from the account balance, `income` adds to it, and `transfer` subtracts from the source and adds to the destination.
 
 **Transfer behavior:** Browser and CLI/MCP one-off transaction flows handle linked transfers by subtracting from `account_id` and adding to `transfer_to_account_id`. Recurring transfer rules remain deferred.
+
+**Placeholder behavior:** Placeholder rows are ordinary transactions marked with `is_placeholder = 1`. Unresolved placeholders affect balances according to normal `type`/`status` rules. Resolving a placeholder mutates the original row to `placeholder_status = 'resolved'`; splitting a placeholder sets the parent to `pending`/`split` and creates posted child transactions whose amounts exactly equal the original amount.
+
+**Placeholder references:** `resolved_by_transaction_id` and `placeholder_parent_transaction_id` are application-level self-references. SQLite cannot add physical foreign-key constraints to existing columns with `ALTER TABLE ... ADD COLUMN`, so runtime migrations add these columns as plain `TEXT` and Shikin tools enforce the relationships in application code.
 
 ### subscriptions
 
@@ -342,6 +356,47 @@ Split transactions across multiple categories.
 | `notes`          | TEXT    | nullable                                           | Split notes             |
 | `created_at`     | TEXT    | NOT NULL, auto                                     | ISO 8601 timestamp      |
 
+### audit_log
+
+Append-only provenance table for CLI/MCP/app workflows that create, update, split, tag, undo, or otherwise mutate persisted finance data.
+
+| Column        | Type | Constraints | Description                                                                 |
+| ------------- | ---- | ----------- | --------------------------------------------------------------------------- |
+| `id`          | TEXT | PRIMARY KEY | ULID                                                                        |
+| `entity`      | TEXT | NOT NULL    | Logical entity type, for example `transaction` or `credit_card_statement`   |
+| `entity_id`   | TEXT | nullable    | ID of the affected row when the action targets a single persisted entity    |
+| `action`      | TEXT | NOT NULL    | Workflow action, for example `create`, `update`, `tag`, or `split-placeholder` |
+| `before_json` | TEXT | nullable    | JSON snapshot before the change; shape depends on `entity`/`action`         |
+| `after_json`  | TEXT | nullable    | JSON snapshot after the change; shape depends on `entity`/`action`          |
+| `source`      | TEXT | nullable    | Opaque provenance/source label supplied by the caller                       |
+| `note`        | TEXT | nullable    | Operator/audit note supplied by the caller                                  |
+| `created_at`  | TEXT | NOT NULL, auto | ISO 8601 timestamp                                                       |
+
+**Source semantics:** `source` is arbitrary provenance metadata, not an identity or trusted product enum. Use `note` for changelog/operator context; transaction-facing notes remain on `transactions.notes`.
+
+### credit_card_statements
+
+Persisted statement periods for credit-card accounts. These rows back statement status, upcoming bills, statement paid-amount updates, and credit-card cycle explanations.
+
+| Column                 | Type    | Constraints                                  | Description                                      |
+| ---------------------- | ------- | -------------------------------------------- | ------------------------------------------------ |
+| `id`                   | TEXT    | PRIMARY KEY                                  | ULID                                             |
+| `account_id`           | TEXT    | NOT NULL, FK -> accounts(id) ON DELETE CASCADE | Credit-card account                            |
+| `statement_start_date` | TEXT    | nullable                                     | Statement period start date (YYYY-MM-DD)         |
+| `statement_end_date`   | TEXT    | NOT NULL                                     | Statement closing/end date (YYYY-MM-DD)          |
+| `due_date`             | TEXT    | NOT NULL                                     | Payment due date for this persisted statement    |
+| `statement_balance`    | INTEGER | NOT NULL, DEFAULT 0                          | Statement balance in centavos                    |
+| `minimum_payment`      | INTEGER | NOT NULL, DEFAULT 0                          | Minimum payment in centavos                      |
+| `paid_amount`          | INTEGER | NOT NULL, DEFAULT 0                          | Amount already paid toward the statement         |
+| `currency`             | TEXT    | NOT NULL, DEFAULT 'USD'                      | ISO 4217 currency code; should match the account |
+| `status`               | TEXT    | NOT NULL, DEFAULT 'open'                     | `open`, `partial`, `paid`, or `overdue`          |
+| `source`               | TEXT    | nullable                                     | Opaque provenance/source label                   |
+| `note`                 | TEXT    | nullable                                     | Operator/audit note                              |
+| `created_at`           | TEXT    | NOT NULL, auto                               | ISO 8601 timestamp                               |
+| `updated_at`           | TEXT    | NOT NULL, auto                               | ISO 8601 timestamp                               |
+
+**Statement payment math:** `amountToPay = max(statement_balance - paid_amount, 0)`. `minimumPaymentDue = max(min(minimum_payment, statement_balance) - paid_amount, 0)`. `record-card-payment` can update `paid_amount` directly without creating a transaction when using statement-only mode.
+
 ---
 
 ## Indexes
@@ -369,6 +424,14 @@ The migration creates these indexes for query performance:
 | `idx_recaps_type`                     | recaps             | type                       | Filter by recap type              |
 | `idx_recaps_generated`                | recaps             | generated_at               | Sort by generation date           |
 | `idx_transaction_splits_transaction`  | transaction_splits | transaction_id             | List splits for a transaction     |
+| `idx_transactions_placeholder_status` | transactions       | is_placeholder, placeholder_status | List unresolved placeholders      |
+| `idx_transactions_placeholder_resolved_by` | transactions   | resolved_by_transaction_id | Resolve-link lookups              |
+| `idx_transactions_placeholder_parent` | transactions       | placeholder_parent_transaction_id | Placeholder split child lookups   |
+| `idx_audit_log_entity`                | audit_log          | entity, entity_id          | Audit history for an entity       |
+| `idx_audit_log_created`               | audit_log          | created_at                 | Recent audit context              |
+| `idx_credit_card_statements_account_period` | credit_card_statements | account_id, statement_end_date | Unique statement period per card |
+| `idx_credit_card_statements_due`      | credit_card_statements | due_date                | Upcoming/overdue statement lookup |
+| `idx_credit_card_statements_status`   | credit_card_statements | status                  | Status filtering                  |
 
 ### Recommended Future Indexes
 

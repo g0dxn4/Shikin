@@ -16,8 +16,8 @@ For source development from the repo root:
 
 ```bash
 pnpm install
-cd cli && npm install
-npm run build
+cd cli && pnpm install
+pnpm run build
 ```
 
 The desktop app owns the `shikin` command. The installer places the automation bridge under Shikin's app data directory, so it does not create a second user-facing CLI command.
@@ -49,13 +49,17 @@ shikin # open the app
 shikin list-accounts
 shikin add-transaction --amount 12.50 --type expense --description "Lunch" --account-id acct_123
 shikin manage-recurring-transaction --action create --description "Rent" --amount 1200 --type expense --frequency monthly --account-id acct_123
+shikin record-card-payment --from-account checking --card-account rewards-card --amount 250 --apply-to-latest-statement --dry-run
+shikin finance-sanity-check --days-ahead 14 --json
+shikin query-transactions --tag "tax prep" --json
+shikin undo --last --dry-run --json
 shikin diagnose
 
 # Source/dev alternative
-npx tsx src/cli.ts list-accounts
-npx tsx src/cli.ts add-transaction --amount 12.50 --type expense --description "Lunch" --account-id acct_123
-npx tsx src/cli.ts manage-recurring-transaction --action create --description "Rent" --amount 1200 --type expense --frequency monthly --account-id acct_123
-npx tsx src/cli.ts diagnose
+pnpm exec tsx src/cli.ts list-accounts
+pnpm exec tsx src/cli.ts add-transaction --amount 12.50 --type expense --description "Lunch" --account-id acct_123
+pnpm exec tsx src/cli.ts manage-recurring-transaction --action create --description "Rent" --amount 1200 --type expense --frequency monthly --account-id acct_123
+pnpm exec tsx src/cli.ts diagnose
 ```
 
 Notes:
@@ -64,6 +68,24 @@ Notes:
 - One-off transfers are supported with `--type transfer --account-id <source> --transfer-to-account-id <destination>`. Recurring transfer rules are still deferred.
 - Structured options must be valid JSON.
 - The CLI reads and writes the shared Shikin database in `~/.local/share/com.asf.shikin/shikin.db`.
+
+## Automation Workflows
+
+Generic CLI/MCP workflows are available for automation clients and local scripts:
+
+- `record-card-payment` records credit-card payments as transfers, cleanup expenses, or statement-only paid-amount updates. Dry-run previews include `balanceImpact`, statement impact, duplicate warnings, and audit previews.
+- `credit-card-cycle-explain` explains current statement cycle, latest statement due date, next upcoming due date, and optional purchase-date classification without ambiguous `nextPaymentDueDate` wording.
+- `create-placeholder-transaction`, `list-placeholder-transactions`, `resolve-placeholder-transaction`, and `split-placeholder-transaction` track unknown charges while preserving balance impact and audit history.
+- `record --strict` adds confidence-based parsing for natural-language recording. Use `--min-confidence`, `--require-explicit-type`, `--require-explicit-account`, and `--require-explicit-amount` for automation-safe parsing.
+- `tag-transaction`, `untag-transaction`, `list-tags`, and `query-transactions --tag <tag>` use the existing transaction tags JSON field for project-style labels and audit tag changes. Shikin does not create a separate project entity for these labels.
+- `create-subscription-from-transaction` turns an existing expense or income transaction into a subscription using transaction defaults, with optional account/category/date/amount overrides, dry-run previews, transfer rejection, and audit provenance.
+- `undo` is dry-run-first and can roll back transaction or credit-card-statement audit entries. Pass `--apply` only after reviewing the preview, `balanceImpact`, source/command filters, and dependent-write warnings.
+- `finance-sanity-check` is the neutral daily-review-style command for overdue/due-soon card statements, unresolved placeholders, duplicate-looking transactions, upcoming subscriptions/recurring rules, low balances, balance mismatches, transaction hygiene issues, high Other Expenses, and recent provenance-tagged writes. Use `--redacted` and `--limit` for safer automation output.
+- `list-plugins`, `enable-plugin`, and `disable-plugin` manage trusted-local CLI/MCP plugins. Plugin tools are disabled by default and appear as `plugin-<plugin-id>-<tool-name>` after explicit trusted-local approval.
+
+Use `--source <label>` for generic provenance such as `manual`, `csv-import`, `mcp`, `scheduled-script`, `local-bot`, or another automation name. Source labels are opaque metadata, not trusted identities or product-specific behavior. Use `--note <text>` for the audit/changelog note; transaction `--notes` remain transaction details.
+
+See [`../docs/reference/AUTOMATION-WORKFLOWS.md`](../docs/reference/AUTOMATION-WORKFLOWS.md) for the plan-delivered workflow additions, persistence updates, validation coverage, and hard-smoke checks.
 
 ## Tool Discovery and Reference
 
@@ -96,7 +118,7 @@ Start the MCP server through the desktop-owned command:
 shikin mcp
 
 # Source/dev alternative
-npx tsx src/mcp-server.ts
+pnpm exec tsx src/mcp-server.ts
 ```
 
 Claude Desktop example:
@@ -150,9 +172,9 @@ The MCP server also exposes read-only resources:
 
 ## Current Scope
 
-- CLI and MCP share the same 68-tool definition catalog in `cli/src/tools/index.ts`, including `backup-database`, guarded `restore-database`, `audit-list`, `audit-show`, and `assistant-context`.
+- CLI and MCP share the same tool definition catalog in `cli/src/tools/index.ts`, including `backup-database`, guarded `restore-database`, `undo`, `finance-sanity-check`, `audit-list`, `audit-show`, `automation-context`, and plugin management tools.
 - `shikin tools --json` is the authoritative discovery contract and includes `catalogVersion`, `schemaVersion`, generation time, CLI/MCP compatibility counts, validation-scope notes, and required migration metadata.
-- `setup-status` and `assistant-context` expose existing goal, debt, and investment support surfaces. Investment support remains limited to stored holdings (`manage-investment`) and portfolio review (`generate-portfolio-review`).
+- `setup-status` and the automation context tool expose existing goal, debt, and investment support surfaces. Investment support remains limited to stored holdings (`manage-investment`) and portfolio review (`generate-portfolio-review`).
 - All shipped tools are available end-to-end against the local database.
 - Debt payoff projections infer debts from negative credit-card account balances. Accounts do not store APR yet, so CLI payoff estimates default card APR to 0% and exclude interest for automatically inferred cards.
 - Subscription tools read Shikin's local `subscriptions` table for analytics and bill forecasting.

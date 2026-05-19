@@ -9,6 +9,7 @@ import {
   Settings,
   Sparkles,
   LayoutGrid,
+  TrendingUp,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Sidebar } from './sidebar'
@@ -30,7 +31,6 @@ const mobilePrimaryNavItems = [
     labelKey: 'nav.accounts',
     label: 'Accounts',
     href: '/accounts',
-    activeHrefs: ['/investments'],
   },
   {
     icon: <BarChart3 size={20} />,
@@ -43,6 +43,12 @@ const mobilePrimaryNavItems = [
 
 const mobileMoreNavItems = [
   { icon: <PiggyBank size={20} />, labelKey: 'nav.budgets', label: 'Budgets', href: '/budgets' },
+  {
+    icon: <TrendingUp size={20} />,
+    labelKey: 'nav.investments',
+    label: 'Investments',
+    href: '/investments',
+  },
   {
     icon: <LayoutGrid size={20} />,
     labelKey: 'nav.categories',

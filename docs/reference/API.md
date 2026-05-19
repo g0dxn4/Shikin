@@ -215,6 +215,15 @@ GET /api/v1/transactions
       "tags": ["groceries", "weekly"],
       "is_recurring": false,
       "transfer_to_account_id": null,
+      "status": "posted",
+      "source": "csv-import",
+      "note": "Imported from May statement",
+      "is_placeholder": false,
+      "placeholder_status": null,
+      "resolved_at": null,
+      "resolved_by_transaction_id": null,
+      "placeholder_reason": null,
+      "placeholder_parent_transaction_id": null,
       "created_at": "2025-01-20T18:30:00.000Z",
       "updated_at": "2025-01-20T18:30:00.000Z"
     }

@@ -11,7 +11,7 @@ Before you begin, make sure you have these tools installed:
 | Tool      | Version  | Install                                     |
 | --------- | -------- | ------------------------------------------- |
 | Node.js   | >= 18    | [nodejs.org](https://nodejs.org/)           |
-| pnpm      | >= 9     | `npm install -g pnpm`                       |
+| pnpm      | >= 9     | `pnpm dlx pnpm`                       |
 | Rust      | Optional | Needed for Tauri desktop development/builds |
 | Tauri CLI | Optional | Needed for Tauri desktop development/builds |
 
@@ -105,7 +105,7 @@ cli/
 ├── src/
 │   ├── cli.ts            # Commander CLI entry point
 │   ├── mcp-server.ts     # MCP server entry point
-│   ├── tools/            # Shared 68-definition catalog
+│   ├── tools/            # Shared 83-tool CLI/MCP catalog
 │   └── database.ts       # better-sqlite3 data access
 ```
 
@@ -140,7 +140,7 @@ cli/
 - **Tailwind CSS v4** -- All styling uses Tailwind utility classes. No CSS-in-JS or CSS modules.
 - **shadcn/ui** -- UI primitives come from shadcn/ui (installed in `src/components/ui/`). Add new components with:
   ```bash
-  npx shadcn@latest add <component-name>
+  pnpm dlx shadcn@latest add <component-name>
   ```
 - **Custom classes** -- Custom utility classes (e.g., `glass-sidebar`, `glass-card`, `gradient-text`) are defined in `src/styles/globals.css`.
 - **`cn()` helper** -- Use `cn()` from `@/lib/utils` to merge Tailwind classes:

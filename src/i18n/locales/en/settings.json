@@ -159,8 +159,8 @@
     "resetWarning": "This will permanently delete all your data. This action cannot be undone."
   },
   "dataApis": {
-    "description": "Optional API keys for fetching stock prices and financial news. Free tiers available.",
-    "alphaVantageHint": "Free tier: 25 requests/day. Get a key at alphavantage.co",
-    "finnhubHint": "Free tier: 60 requests/min. Get a key at finnhub.io"
+    "description": "Optional API keys for refreshing investment prices. Alpha Vantage is tried first, then Finnhub; use provider symbols such as WALMEX.MX when supported.",
+    "alphaVantageHint": "Free tier: 25 requests/day. Supports many US and some international/MX symbols.",
+    "finnhubHint": "Free tier: 60 requests/min. Used as a fallback for supported stock, ETF, fund, bond, or CETES-style symbols."
   }
 }

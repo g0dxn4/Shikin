@@ -29,8 +29,8 @@ test.describe('Settings', () => {
 
   test('market data API section shows provider inputs', async ({ page }) => {
     await expect(page.getByRole('heading', { name: 'Market Data APIs' })).toBeVisible()
-    await expect(page.getByText('Alpha Vantage')).toBeVisible()
-    await expect(page.getByText('Finnhub').first()).toBeVisible()
+    await expect(page.getByText('Alpha Vantage', { exact: true })).toBeVisible()
+    await expect(page.getByText('Finnhub', { exact: true })).toBeVisible()
     await expect(page.getByPlaceholder('Alpha Vantage API key')).toBeVisible()
     await expect(page.getByPlaceholder('Finnhub API key')).toBeVisible()
   })

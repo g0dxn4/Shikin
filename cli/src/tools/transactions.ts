@@ -29,6 +29,8 @@ import {
 } from '../duplicate-detection.js'
 
 type TransactionStatus = 'pending' | 'posted' | 'cleared'
+type PlaceholderTransactionStatus = 'unresolved' | 'resolved' | 'split' | 'cancelled'
+const placeholderStatusSchema = z.enum(['unresolved', 'resolved', 'split', 'cancelled'])
 
 type TransactionRow = {
   id: string
@@ -44,6 +46,13 @@ type TransactionRow = {
   source?: string | null
   note?: string | null
   recurring_rule_id?: string | null
+  tags?: string | null
+  is_placeholder?: number | null
+  placeholder_status?: PlaceholderTransactionStatus | null
+  resolved_at?: string | null
+  resolved_by_transaction_id?: string | null
+  placeholder_reason?: string | null
+  placeholder_parent_transaction_id?: string | null
   date: string
 }
 
@@ -59,6 +68,13 @@ type QueriedTransactionRow = {
   source: string | null
   note: string | null
   recurring_rule_id: string | null
+  tags: string | null
+  is_placeholder: number | null
+  placeholder_status: PlaceholderTransactionStatus | null
+  resolved_at: string | null
+  resolved_by_transaction_id: string | null
+  placeholder_reason: string | null
+  placeholder_parent_transaction_id: string | null
   category_name: string
   account_name: string
   transfer_to_account_id: string | null
@@ -88,6 +104,32 @@ type BalanceAuditChange = {
   newBalanceCentavos: number | null
   previousBalance: number | null
   newBalance: number | null
+}
+
+type PlaceholderSplitInput = {
+  amount: number
+  description?: string
+  category?: string
+  notes?: string
+}
+
+type TransactionTag = {
+  key: string
+  label: string
+}
+
+type BalanceImpactPreview = {
+  affectsBalances: boolean
+  accounts: Array<{
+    accountId: string
+    accountName: string | null
+    previousBalance: number | null
+    newBalance: number | null
+    delta: number
+    previousBalanceCentavos: number | null
+    newBalanceCentavos: number | null
+    deltaCentavos: number
+  }>
 }
 
 function normalizeTransactionStatus(status: TransactionRow['status']): TransactionStatus {
@@ -167,6 +209,20 @@ function readAccountBalances(accountIds: string[]): Map<string, number> {
   return new Map(rows.map((row) => [row.id, row.balance]))
 }
 
+function readAccountNames(accountIds: string[]): Map<string, string | null> {
+  const uniqueAccountIds = [...new Set(accountIds)].sort((a, b) => a.localeCompare(b))
+  if (uniqueAccountIds.length === 0) return new Map()
+
+  const placeholders = uniqueAccountIds.map((_, index) => `$${index + 1}`).join(', ')
+  const rows =
+    query<{ id: string; name: string | null }>(
+      `SELECT id, name FROM accounts WHERE id IN (${placeholders})`,
+      uniqueAccountIds
+    ) ?? []
+
+  return new Map(rows.map((row) => [row.id, row.name ?? null]))
+}
+
 function archivedBalanceMutationFailure(accountIds: string[]) {
   const uniqueAccountIds = [...new Set(accountIds)].sort((a, b) => a.localeCompare(b))
   if (uniqueAccountIds.length === 0) return null
@@ -218,7 +274,51 @@ function buildBalanceAuditChanges(
   })
 }
 
+function formatBalanceImpactPreview(
+  balanceChanges: BalanceAuditChange[],
+  accountNames: Map<string, string | null> = new Map()
+): BalanceImpactPreview & { deltas: BalanceAuditChange[] } {
+  return {
+    affectsBalances: balanceChanges.length > 0,
+    deltas: balanceChanges,
+    accounts: balanceChanges.map((change) => ({
+      accountId: change.accountId,
+      accountName: accountNames.get(change.accountId) ?? null,
+      previousBalance: change.previousBalance,
+      newBalance: change.newBalance,
+      delta: fromCentavos(change.deltaCentavos),
+      previousBalanceCentavos: change.previousBalanceCentavos,
+      newBalanceCentavos: change.newBalanceCentavos,
+      deltaCentavos: change.deltaCentavos,
+    })),
+  }
+}
+
+function transactionDuplicateWarnings(duplicateCheck: TransactionDuplicateCheck) {
+  const match = duplicateCheck.match
+  if (!match) return []
+
+  return [
+    {
+      type: match.kind,
+      reason: transactionDuplicateReason(match.kind),
+      existingTransactionId: match.existingTransactionId,
+      accountId: match.accountId,
+      date: match.date,
+      amount: fromCentavos(match.amountCentavos),
+      amountCentavos: match.amountCentavos,
+      daysApart: match.daysApart,
+      descriptionSimilarity: match.descriptionSimilarity,
+      message:
+        match.kind === 'exact_duplicate'
+          ? `Exact duplicate transaction ${match.existingTransactionId} already exists.`
+          : `Potential duplicate transaction ${match.existingTransactionId} is within ${match.windowDays} days with similar description.`,
+    },
+  ]
+}
+
 function transactionAuditSnapshot(tx: TransactionRow) {
+  const tagDetails = parseStoredTransactionTags(tx.tags)
   return {
     id: tx.id,
     accountId: tx.account_id,
@@ -234,8 +334,169 @@ function transactionAuditSnapshot(tx: TransactionRow) {
     source: tx.source ?? null,
     note: tx.note ?? null,
     recurringRuleId: tx.recurring_rule_id ?? null,
+    tags: tagDetails.map((tag) => tag.label),
+    tagDetails,
+    isPlaceholder: Boolean(tx.is_placeholder),
+    placeholderStatus: tx.placeholder_status ?? null,
+    resolvedAt: tx.resolved_at ?? null,
+    resolvedByTransactionId: tx.resolved_by_transaction_id ?? null,
+    placeholderReason: tx.placeholder_reason ?? null,
+    placeholderParentTransactionId: tx.placeholder_parent_transaction_id ?? null,
     date: tx.date,
   }
+}
+
+function publicTransactionSnapshot(tx: TransactionRow) {
+  const tagDetails = parseStoredTransactionTags(tx.tags)
+  return {
+    id: tx.id,
+    accountId: tx.account_id,
+    categoryId: tx.category_id,
+    transferToAccountId: tx.transfer_to_account_id,
+    type: tx.type,
+    amount: fromCentavos(tx.amount),
+    amountCentavos: tx.amount,
+    currency: tx.currency,
+    description: tx.description,
+    notes: tx.notes,
+    status: normalizeTransactionStatus(tx.status),
+    source: tx.source ?? null,
+    note: tx.note ?? null,
+    recurringRuleId: tx.recurring_rule_id ?? null,
+    tags: tagDetails.map((tag) => tag.label),
+    tagDetails,
+    isPlaceholder: Boolean(tx.is_placeholder),
+    placeholderStatus: tx.placeholder_status ?? null,
+    resolvedAt: tx.resolved_at ?? null,
+    resolvedByTransactionId: tx.resolved_by_transaction_id ?? null,
+    placeholderReason: tx.placeholder_reason ?? null,
+    placeholderParentTransactionId: tx.placeholder_parent_transaction_id ?? null,
+    date: tx.date,
+  }
+}
+
+function normalizeTransactionTagLabel(label: string): string {
+  return label.trim().replace(/\s+/g, ' ')
+}
+
+function normalizeTransactionTagKey(label: string): string {
+  return normalizeTransactionTagLabel(label).toLocaleLowerCase()
+}
+
+function transactionTagFromUnknown(value: unknown): TransactionTag | null {
+  if (typeof value === 'string') {
+    const label = normalizeTransactionTagLabel(value)
+    const key = normalizeTransactionTagKey(label)
+    return key ? { key, label } : null
+  }
+
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    const labelValue = record.label ?? record.name ?? record.value ?? record.key
+    if (typeof labelValue !== 'string') return null
+    const label = normalizeTransactionTagLabel(labelValue)
+    const keyValue = typeof record.key === 'string' ? record.key : label
+    const key = normalizeTransactionTagKey(keyValue)
+    return key && label ? { key, label } : null
+  }
+
+  return null
+}
+
+function parseStoredTransactionTags(rawTags: string | null | undefined): TransactionTag[] {
+  if (!rawTags || rawTags.trim() === '') return []
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawTags)
+  } catch {
+    return []
+  }
+
+  const values = Array.isArray(parsed) ? parsed : [parsed]
+  const tags: TransactionTag[] = []
+  const seenKeys = new Set<string>()
+
+  for (const value of values) {
+    const tag = transactionTagFromUnknown(value)
+    if (!tag || seenKeys.has(tag.key)) continue
+    tags.push(tag)
+    seenKeys.add(tag.key)
+  }
+
+  return tags
+}
+
+function serializeTransactionTags(tags: TransactionTag[]): string {
+  return JSON.stringify(tags.map((tag) => tag.label))
+}
+
+function addTransactionTag(rawTags: string | null | undefined, label: string) {
+  const tag = transactionTagFromUnknown(label)
+  if (!tag) return { changed: false as const, tags: parseStoredTransactionTags(rawTags) }
+
+  const tags = parseStoredTransactionTags(rawTags)
+  if (tags.some((existing) => existing.key === tag.key)) {
+    return { changed: false as const, tags }
+  }
+
+  return { changed: true as const, tags: [...tags, tag] }
+}
+
+function removeTransactionTag(rawTags: string | null | undefined, label: string) {
+  const key = normalizeTransactionTagKey(label)
+  const tags = parseStoredTransactionTags(rawTags)
+  const nextTags = tags.filter((tag) => tag.key !== key)
+  return { changed: nextTags.length !== tags.length, tags: nextTags }
+}
+
+function transactionTagOutput(tags: TransactionTag[]) {
+  return {
+    tags: tags.map((tag) => tag.label),
+    tagDetails: tags,
+  }
+}
+
+function resolvePlaceholderCategory(category: string | undefined) {
+  const resolved = resolveCategoryId(category)
+  if (!resolved.success) return resolved
+  return { success: true as const, categoryId: resolved.id }
+}
+
+function placeholderFailure(reason: string, message: string) {
+  return { success: false as const, reason, message }
+}
+
+function assertPlaceholderTransaction(tx: TransactionRow) {
+  if (!tx.is_placeholder) {
+    return placeholderFailure(
+      'not_placeholder_transaction',
+      `Transaction ${tx.id} is not a placeholder.`
+    )
+  }
+  return null
+}
+
+function assertUnresolvedPlaceholder(tx: TransactionRow) {
+  const placeholderError = assertPlaceholderTransaction(tx)
+  if (placeholderError) return placeholderError
+  if ((tx.placeholder_status ?? 'unresolved') !== 'unresolved') {
+    return placeholderFailure(
+      'placeholder_not_unresolved',
+      `Placeholder transaction ${tx.id} is ${tx.placeholder_status ?? 'unknown'} and cannot be changed by this workflow.`
+    )
+  }
+  return null
+}
+
+function protectedPlaceholderLifecycleFailure(tx: TransactionRow, action: 'update' | 'delete') {
+  if (!tx.is_placeholder) return null
+  const placeholderStatus = tx.placeholder_status ?? 'unresolved'
+  if (placeholderStatus === 'unresolved') return null
+  return placeholderFailure(
+    'protected_placeholder_lifecycle',
+    `Placeholder transaction ${tx.id} is ${placeholderStatus} and cannot be ${action}d with the generic transaction workflow.`
+  )
 }
 
 function buildTransactionBalanceAuditPreview({
@@ -276,8 +537,8 @@ function buildTransactionBalanceAuditPreview({
           })),
         }
       : null,
-    source: after?.source ?? before?.source ?? null,
-    note: after?.note ?? before?.note ?? null,
+    source: after ? (after.source ?? null) : (before?.source ?? null),
+    note: after ? (after.note ?? null) : (before?.note ?? null),
     balanceChanges,
   }
 }
@@ -436,12 +697,12 @@ const addTransaction: ToolDefinition = {
     notes: boundedText('Notes', 'Additional notes about the transaction', 1000).optional(),
     note: boundedText(
       'Note',
-      'Assistant changelog note to store with the transaction',
+      'Workflow changelog note to store with the transaction',
       1000
     ).optional(),
     source: boundedText(
       'Source',
-      'Assistant or origin label to store with the transaction',
+      'Automation source or origin label to store with the transaction',
       120
     ).optional(),
     status: z
@@ -550,46 +811,9 @@ const addTransaction: ToolDefinition = {
         transferToAccountId: resolvedTransferDestination.id,
         description,
       })
+      const duplicateWarnings = transactionDuplicateWarnings(duplicateCheck)
 
-      if (dryRun) {
-        const duplicateFailure = transactionDuplicateFailure(duplicateCheck)
-        return {
-          success: true,
-          dryRun: true,
-          ...(duplicateCheck.match
-            ? {
-                duplicateCheck,
-                duplicatePolicy: {
-                  allowDuplicate,
-                  applyBlocked: !allowDuplicate,
-                  reason: duplicateCheck.match.kind,
-                },
-              }
-            : {}),
-          wouldCreate: {
-            id,
-            accountId: resolvedAccount.id,
-            transferToAccountId: resolvedTransferDestination.id,
-            amount,
-            currency: resolvedAccount.currency,
-            type,
-            description,
-            category: resolvedCategory.name,
-            date: txDate,
-            notes: transactionNotes,
-            status: transactionStatus,
-            source: transactionSource,
-            note: transactionNote,
-            recurringRuleId: resolvedRecurringRule.id,
-          },
-          message:
-            duplicateFailure && !allowDuplicate
-              ? `${duplicateFailure.message} No changes were written.`
-              : `Dry run: ${type} transaction for ${resolvedAccount.currency} ${amount.toFixed(2)} would be created.`,
-        }
-      }
-
-      if (duplicateCheck.match && !allowDuplicate) {
+      if (duplicateCheck.match && !allowDuplicate && !dryRun) {
         return transactionDuplicateFailure(duplicateCheck)
       }
 
@@ -615,6 +839,61 @@ const addTransaction: ToolDefinition = {
       }
       const balanceDeltas = balanceImpact.impacts
       const balancesBefore = readAccountBalances([...balanceDeltas.keys()])
+      const accountNames = dryRun ? readAccountNames([...balanceDeltas.keys()]) : new Map()
+      const auditPreview = buildTransactionBalanceAuditPreview({
+        action: 'create',
+        before: null,
+        after: newTransaction,
+        balanceDeltas,
+        balancesBefore,
+      })
+      const balanceImpactPreview = formatBalanceImpactPreview(
+        auditPreview.balanceChanges,
+        accountNames
+      )
+
+      if (dryRun) {
+        const duplicateFailure = transactionDuplicateFailure(duplicateCheck)
+        return {
+          success: true,
+          dryRun: true,
+          balanceImpact: balanceImpactPreview,
+          ...(duplicateWarnings.length > 0 ? { duplicateWarnings } : {}),
+          ...(duplicateCheck.match
+            ? {
+                duplicateCheck,
+                duplicatePolicy: {
+                  allowDuplicate,
+                  applyBlocked: !allowDuplicate,
+                  reason: duplicateCheck.match.kind,
+                },
+              }
+            : {}),
+          wouldCreate: {
+            id,
+            accountId: resolvedAccount.id,
+            transferToAccountId: resolvedTransferDestination.id,
+            amount,
+            currency: resolvedAccount.currency,
+            type,
+            description,
+            category: resolvedCategory.name,
+            date: txDate,
+            notes: transactionNotes,
+            status: transactionStatus,
+            source: transactionSource,
+            note: transactionNote,
+            recurringRuleId: resolvedRecurringRule.id,
+            balanceImpact: balanceImpactPreview,
+            balanceDeltas: auditPreview.balanceChanges,
+            auditPreview,
+          },
+          message:
+            duplicateFailure && !allowDuplicate
+              ? `${duplicateFailure.message} No changes were written.`
+              : `Dry run: ${type} transaction for ${resolvedAccount.currency} ${amount.toFixed(2)} would be created.`,
+        }
+      }
 
       execute(
         `INSERT INTO transactions (id, account_id, category_id, transfer_to_account_id, type, amount, currency, description, notes, status, source, note, recurring_rule_id, date)
@@ -705,13 +984,13 @@ const updateTransaction: ToolDefinition = {
       .trim()
       .max(1000)
       .optional()
-      .describe('New assistant changelog note. Pass an empty string to clear.'),
+      .describe('New workflow changelog note. Pass an empty string to clear.'),
     source: z
       .string()
       .trim()
       .max(120)
       .optional()
-      .describe('New assistant or origin label. Pass an empty string to clear.'),
+      .describe('New automation source or origin label. Pass an empty string to clear.'),
     status: z
       .enum(['pending', 'posted', 'cleared'])
       .optional()
@@ -764,6 +1043,8 @@ const updateTransaction: ToolDefinition = {
       }
 
       const tx = existing[0]
+      const lifecycleFailure = protectedPlaceholderLifecycleFailure(tx, 'update')
+      if (lifecycleFailure) return lifecycleFailure
       const oldAmountCentavos = tx.amount
       const oldType = tx.type
       const oldAccountId = tx.account_id
@@ -882,6 +1163,7 @@ const updateTransaction: ToolDefinition = {
       const archivedMutationFailure = archivedBalanceMutationFailure([...balanceDeltas.keys()])
       if (archivedMutationFailure) return archivedMutationFailure
       const balancesBefore = readAccountBalances([...balanceDeltas.keys()])
+      const accountNames = dryRun ? readAccountNames([...balanceDeltas.keys()]) : new Map()
       if (dryRun) {
         const auditPreview = buildTransactionBalanceAuditPreview({
           action: 'update',
@@ -894,6 +1176,7 @@ const updateTransaction: ToolDefinition = {
         return {
           success: true,
           dryRun: true,
+          balanceImpact: formatBalanceImpactPreview(auditPreview.balanceChanges, accountNames),
           wouldUpdate: {
             transactionId,
             before: transactionAuditSnapshot(tx),
@@ -903,10 +1186,7 @@ const updateTransaction: ToolDefinition = {
               currency: updatedTx.currency,
               recurringRuleId: updatedTx.recurring_rule_id,
             },
-            balanceImpact: {
-              affectsBalances: auditPreview.balanceChanges.length > 0,
-              deltas: auditPreview.balanceChanges,
-            },
+            balanceImpact: formatBalanceImpactPreview(auditPreview.balanceChanges, accountNames),
             balanceDeltas: auditPreview.balanceChanges,
             auditPreview,
           },
@@ -1001,6 +1281,8 @@ const deleteTransaction: ToolDefinition = {
       }
 
       const tx = existing[0]
+      const lifecycleFailure = protectedPlaceholderLifecycleFailure(tx, 'delete')
+      if (lifecycleFailure) return lifecycleFailure
 
       const balanceImpact = getBalanceImpact(tx)
       if (!balanceImpact.success) {
@@ -1010,6 +1292,7 @@ const deleteTransaction: ToolDefinition = {
       const archivedMutationFailure = archivedBalanceMutationFailure([...balanceDeltas.keys()])
       if (archivedMutationFailure) return archivedMutationFailure
       const balancesBefore = readAccountBalances([...balanceDeltas.keys()])
+      const accountNames = dryRun ? readAccountNames([...balanceDeltas.keys()]) : new Map()
       if (dryRun) {
         const auditPreview = buildTransactionBalanceAuditPreview({
           action: 'delete',
@@ -1022,13 +1305,11 @@ const deleteTransaction: ToolDefinition = {
         return {
           success: true,
           dryRun: true,
+          balanceImpact: formatBalanceImpactPreview(auditPreview.balanceChanges, accountNames),
           wouldDelete: {
             transactionId,
             transaction: transactionAuditSnapshot(tx),
-            balanceImpact: {
-              affectsBalances: auditPreview.balanceChanges.length > 0,
-              deltas: auditPreview.balanceChanges,
-            },
+            balanceImpact: formatBalanceImpactPreview(auditPreview.balanceChanges, accountNames),
             balanceDeltas: auditPreview.balanceChanges,
             auditPreview,
           },
@@ -1080,6 +1361,7 @@ const queryTransactions: ToolDefinition = {
       'Search term to match against transaction descriptions',
       200
     ).optional(),
+    tag: boundedText('Tag', 'Filter by transaction tag label or key', 120).optional(),
     limit: z
       .number()
       .int()
@@ -1089,10 +1371,25 @@ const queryTransactions: ToolDefinition = {
       .default(20)
       .describe('Maximum number of results (default 20, max 100)'),
   }),
-  execute: async ({ accountId, categoryId, type, status, startDate, endDate, search, limit }) => {
+  execute: async ({
+    accountId,
+    categoryId,
+    type,
+    status,
+    startDate,
+    endDate,
+    search,
+    tag,
+    limit,
+  }) => {
     const conditions: string[] = []
     const params: unknown[] = []
     let paramIndex = 0
+    const tagKey = tag ? normalizeTransactionTagKey(tag) : null
+
+    if (tag && !tagKey) {
+      return { success: false, message: 'Tag filter must not be empty.' }
+    }
 
     if (accountId) {
       paramIndex++
@@ -1134,15 +1431,31 @@ const queryTransactions: ToolDefinition = {
       conditions.push(`t.description LIKE $${paramIndex}`)
       params.push(`%${search}%`)
     }
+    if (tagKey) {
+      paramIndex++
+      conditions.push(`json_valid(t.tags) AND EXISTS (
+        SELECT 1
+        FROM json_each(t.tags) AS tag
+        WHERE (tag.type = 'text' AND lower(trim(tag.value)) = $${paramIndex})
+           OR (tag.type = 'object' AND (
+             lower(trim(COALESCE(json_extract(tag.value, '$.key'), ''))) = $${paramIndex}
+             OR lower(trim(COALESCE(json_extract(tag.value, '$.label'), ''))) = $${paramIndex}
+             OR lower(trim(COALESCE(json_extract(tag.value, '$.name'), ''))) = $${paramIndex}
+              OR lower(trim(COALESCE(json_extract(tag.value, '$.value'), ''))) = $${paramIndex}
+            ))
+      )`)
+      params.push(tagKey, tagKey, tagKey, tagKey, tagKey)
+    }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
-    paramIndex++
-    const limitParam = `$${paramIndex}`
-    params.push(limit)
+    const queryParams = [...params]
+    const limitClause = `LIMIT $${paramIndex + 1}`
+    queryParams.push(limit)
 
-    const transactions = await query<QueriedTransactionRow>(
-      `SELECT t.id, t.description, t.amount, t.currency, t.type, t.date, t.notes, t.status, t.source, t.note, t.recurring_rule_id, t.transfer_to_account_id,
+    const transactionRows = await query<QueriedTransactionRow>(
+      `SELECT t.id, t.description, t.amount, t.currency, t.type, t.date, t.notes, t.status, t.source, t.note, t.recurring_rule_id, t.tags, t.transfer_to_account_id,
+              t.is_placeholder, t.placeholder_status, t.resolved_at, t.resolved_by_transaction_id, t.placeholder_reason, t.placeholder_parent_transaction_id,
               COALESCE(c.name, 'Uncategorized') as category_name,
               a.name as account_name,
               ta.name as transfer_to_account_name
@@ -1152,16 +1465,18 @@ const queryTransactions: ToolDefinition = {
        LEFT JOIN accounts ta ON t.transfer_to_account_id = ta.id
        ${whereClause}
        ORDER BY t.date DESC, t.created_at DESC
-       LIMIT ${limitParam}`,
-      params
+       ${limitClause}`,
+      queryParams
     )
 
-    const countResult = await query<{ count: number }>(
-      `SELECT COUNT(*) as count FROM transactions t ${whereClause}`,
-      params.slice(0, -1)
-    )
-
-    const totalMatched = countResult[0]?.count || 0
+    const transactions = transactionRows
+    const totalMatched =
+      (
+        await query<{ count: number }>(
+          `SELECT COUNT(*) as count FROM transactions t ${whereClause}`,
+          params
+        )
+      )[0]?.count ?? 0
 
     return {
       transactions: transactions.map((t) => ({
@@ -1180,6 +1495,13 @@ const queryTransactions: ToolDefinition = {
         source: t.source,
         note: t.note,
         recurringRuleId: t.recurring_rule_id,
+        ...transactionTagOutput(parseStoredTransactionTags(t.tags)),
+        isPlaceholder: Boolean(t.is_placeholder),
+        placeholderStatus: t.placeholder_status,
+        resolvedAt: t.resolved_at,
+        resolvedByTransactionId: t.resolved_by_transaction_id,
+        placeholderReason: t.placeholder_reason,
+        placeholderParentTransactionId: t.placeholder_parent_transaction_id,
       })),
       count: transactions.length,
       totalMatched,
@@ -1191,9 +1513,787 @@ const queryTransactions: ToolDefinition = {
   },
 }
 
+const tagTransaction: ToolDefinition = {
+  name: 'tag-transaction',
+  description: 'Add a tag to an existing transaction using the transaction tags JSON field.',
+  schema: z.object({
+    transactionId: boundedText('Transaction ID', 'Transaction ID to tag', 128),
+    tag: boundedText('Tag', 'Tag label to add', 120),
+    source: boundedText('Source', 'Automation source or origin label', 120).optional(),
+    note: boundedText('Note', 'Workflow changelog note', 500).optional(),
+    dryRun: z.boolean().optional().default(false),
+  }),
+  execute: async ({ transactionId, tag, source, note, dryRun }) => {
+    const normalizedTag = normalizeTransactionTagKey(tag)
+    if (!normalizedTag) return { success: false, message: 'Tag must not be empty.' }
+
+    return transaction(() => {
+      const rows = query<TransactionRow>('SELECT * FROM transactions WHERE id = $1 LIMIT 1', [
+        transactionId,
+      ])
+      if (rows.length === 0)
+        return { success: false, message: `Transaction ${transactionId} not found.` }
+
+      const before = rows[0]
+      const tagChange = addTransactionTag(before.tags, tag)
+      const after: TransactionRow = {
+        ...before,
+        tags: serializeTransactionTags(tagChange.tags),
+      }
+      const beforeSnapshot = publicTransactionSnapshot(before)
+      const afterSnapshot = publicTransactionSnapshot(after)
+
+      if (dryRun) {
+        return {
+          success: true,
+          action: 'tagged' as const,
+          dryRun: true,
+          changed: tagChange.changed,
+          wouldUpdate: {
+            transactionId,
+            before: beforeSnapshot,
+            after: afterSnapshot,
+          },
+          message: tagChange.changed
+            ? `Dry run: tag "${tag}" would be added to transaction ${transactionId}.`
+            : `Dry run: transaction ${transactionId} already has tag "${tag}".`,
+        }
+      }
+
+      if (!tagChange.changed) {
+        return {
+          success: true,
+          action: 'tagged' as const,
+          changed: false,
+          transaction: beforeSnapshot,
+          message: `Transaction ${transactionId} already has tag "${tag}".`,
+        }
+      }
+
+      const updateResult = execute(
+        `UPDATE transactions SET tags = $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2`,
+        [after.tags, transactionId]
+      )
+      if (updateResult.rowsAffected !== 1) {
+        throw new Error(`Transaction ${transactionId} could not be tagged safely.`)
+      }
+      writeAuditLog({
+        entity: 'transaction',
+        entityId: transactionId,
+        action: 'tag',
+        before: { transaction: beforeSnapshot },
+        after: { transaction: afterSnapshot },
+        source: source ?? null,
+        note: note ?? null,
+      })
+
+      return {
+        success: true,
+        action: 'tagged' as const,
+        changed: true,
+        transaction: afterSnapshot,
+        message: `Added tag "${tag}" to transaction ${transactionId}.`,
+      }
+    })
+  },
+}
+
+const untagTransaction: ToolDefinition = {
+  name: 'untag-transaction',
+  description: 'Remove a tag from an existing transaction.',
+  schema: z.object({
+    transactionId: boundedText('Transaction ID', 'Transaction ID to untag', 128),
+    tag: boundedText('Tag', 'Tag label or key to remove', 120),
+    source: boundedText('Source', 'Automation source or origin label', 120).optional(),
+    note: boundedText('Note', 'Workflow changelog note', 500).optional(),
+    dryRun: z.boolean().optional().default(false),
+  }),
+  execute: async ({ transactionId, tag, source, note, dryRun }) => {
+    const normalizedTag = normalizeTransactionTagKey(tag)
+    if (!normalizedTag) return { success: false, message: 'Tag must not be empty.' }
+
+    return transaction(() => {
+      const rows = query<TransactionRow>('SELECT * FROM transactions WHERE id = $1 LIMIT 1', [
+        transactionId,
+      ])
+      if (rows.length === 0)
+        return { success: false, message: `Transaction ${transactionId} not found.` }
+
+      const before = rows[0]
+      const tagChange = removeTransactionTag(before.tags, tag)
+      const after: TransactionRow = {
+        ...before,
+        tags: serializeTransactionTags(tagChange.tags),
+      }
+      const beforeSnapshot = publicTransactionSnapshot(before)
+      const afterSnapshot = publicTransactionSnapshot(after)
+
+      if (dryRun) {
+        return {
+          success: true,
+          action: 'untagged' as const,
+          dryRun: true,
+          changed: tagChange.changed,
+          wouldUpdate: {
+            transactionId,
+            before: beforeSnapshot,
+            after: afterSnapshot,
+          },
+          message: tagChange.changed
+            ? `Dry run: tag "${tag}" would be removed from transaction ${transactionId}.`
+            : `Dry run: transaction ${transactionId} does not have tag "${tag}".`,
+        }
+      }
+
+      if (!tagChange.changed) {
+        return {
+          success: true,
+          action: 'untagged' as const,
+          changed: false,
+          transaction: beforeSnapshot,
+          message: `Transaction ${transactionId} does not have tag "${tag}".`,
+        }
+      }
+
+      const updateResult = execute(
+        `UPDATE transactions SET tags = $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2`,
+        [after.tags, transactionId]
+      )
+      if (updateResult.rowsAffected !== 1) {
+        throw new Error(`Transaction ${transactionId} could not be untagged safely.`)
+      }
+      writeAuditLog({
+        entity: 'transaction',
+        entityId: transactionId,
+        action: 'untag',
+        before: { transaction: beforeSnapshot },
+        after: { transaction: afterSnapshot },
+        source: source ?? null,
+        note: note ?? null,
+      })
+
+      return {
+        success: true,
+        action: 'untagged' as const,
+        changed: true,
+        transaction: afterSnapshot,
+        message: `Removed tag "${tag}" from transaction ${transactionId}.`,
+      }
+    })
+  },
+}
+
+const listTags: ToolDefinition = {
+  name: 'list-tags',
+  description: 'List transaction tags with usage counts.',
+  schema: z.object({}),
+  execute: async () => {
+    const rows = query<{ id: string; date: string; tags: string | null }>(
+      `SELECT id, date, tags
+       FROM transactions
+       WHERE tags IS NOT NULL AND TRIM(tags) NOT IN ('', '[]')
+       ORDER BY date DESC, created_at DESC`,
+      []
+    )
+    const tagsByKey = new Map<
+      string,
+      { key: string; label: string; count: number; lastUsedDate: string | null }
+    >()
+
+    for (const row of rows) {
+      for (const tag of parseStoredTransactionTags(row.tags)) {
+        const existing = tagsByKey.get(tag.key)
+        if (!existing) {
+          tagsByKey.set(tag.key, {
+            key: tag.key,
+            label: tag.label,
+            count: 1,
+            lastUsedDate: row.date ?? null,
+          })
+          continue
+        }
+        existing.count += 1
+        if (row.date && (!existing.lastUsedDate || row.date > existing.lastUsedDate)) {
+          existing.lastUsedDate = row.date
+        }
+      }
+    }
+
+    const tags = [...tagsByKey.values()].sort(
+      (a, b) => b.count - a.count || a.label.localeCompare(b.label)
+    )
+
+    return {
+      tags,
+      count: tags.length,
+      message:
+        tags.length === 0
+          ? 'No transaction tags found.'
+          : `Found ${tags.length} tag${tags.length === 1 ? '' : 's'}.`,
+    }
+  },
+}
+
 // ---------------------------------------------------------------------------
 // 5. get-spending-summary
 // ---------------------------------------------------------------------------
+
+const createPlaceholderTransaction: ToolDefinition = {
+  name: 'create-placeholder-transaction',
+  description:
+    'Create an unresolved placeholder transaction when the amount is known but final merchant/category details are not yet confirmed.',
+  schema: z.object({
+    amount: positiveMoneyAmount('Placeholder amount'),
+    type: z.enum(['expense', 'income']).optional().default('expense'),
+    description: boundedText('Description', 'Placeholder description', 500)
+      .optional()
+      .default('Unknown transaction'),
+    accountId: boundedText('Account ID', 'Account ID to attach the placeholder to', 128).optional(),
+    account: boundedText(
+      'Account reference',
+      'Account alias, ID, or exact account name',
+      200
+    ).optional(),
+    category: boundedText('Category', 'Optional category name or ID', 200).optional(),
+    date: isoDate('Transaction date (YYYY-MM-DD)').optional(),
+    notes: boundedText('Notes', 'Transaction notes', 2000).optional(),
+    placeholderReason: boundedText(
+      'Placeholder reason',
+      'Why this transaction is not fully resolved yet',
+      500
+    ).optional(),
+    source: boundedText('Source', 'Automation source or origin label', 120).optional(),
+    note: boundedText('Note', 'Workflow changelog note', 500).optional(),
+    dryRun: z.boolean().optional().default(false),
+  }),
+  execute: async ({
+    amount,
+    type,
+    description,
+    accountId,
+    account,
+    category,
+    date,
+    notes,
+    placeholderReason,
+    source,
+    note,
+    dryRun,
+  }) => {
+    const resolvedAccount = resolveAccountId(accountId, account)
+    if (!resolvedAccount.success) return resolvedAccount
+    const resolvedAccountId = resolvedAccount.id
+    const accountRows = query<AccountRef & { is_archived: number }>(
+      'SELECT id, currency, is_archived FROM accounts WHERE id = $1 LIMIT 1',
+      [resolvedAccountId]
+    )
+    if (accountRows.length === 0)
+      return { success: false, message: `Account ${resolvedAccountId} not found.` }
+    if (accountRows[0].is_archived === 1) {
+      return {
+        success: false,
+        message: `Account ${resolvedAccountId} is archived. Unarchive it before using it for new writes.`,
+      }
+    }
+    const categoryResult = resolvePlaceholderCategory(category)
+    if (!categoryResult.success) return categoryResult
+
+    const amountCentavos = toCentavos(amount)
+    const nowDate = date ?? dayjs().format('YYYY-MM-DD')
+    const tx: TransactionRow = {
+      id: generateId(),
+      account_id: resolvedAccountId,
+      category_id: categoryResult.categoryId,
+      transfer_to_account_id: null,
+      type,
+      amount: amountCentavos,
+      currency: accountRows[0].currency,
+      description,
+      notes: notes ?? null,
+      status: 'posted',
+      source: source ?? null,
+      note: note ?? null,
+      recurring_rule_id: null,
+      is_placeholder: 1,
+      placeholder_status: 'unresolved',
+      resolved_at: null,
+      resolved_by_transaction_id: null,
+      placeholder_reason: placeholderReason ?? null,
+      placeholder_parent_transaction_id: null,
+      date: nowDate,
+    }
+
+    const balanceImpact = getBalanceImpact(tx)
+    if (!balanceImpact.success) return { success: false, message: balanceImpact.message }
+    const balanceDeltas = balanceImpact.impacts
+    const archivedMutationFailure = archivedBalanceMutationFailure([...balanceDeltas.keys()])
+    if (archivedMutationFailure) return archivedMutationFailure
+    const balancesBefore = readAccountBalances([...balanceDeltas.keys()])
+    const auditPreview = buildTransactionBalanceAuditPreview({
+      action: 'create',
+      before: null,
+      after: tx,
+      balanceDeltas,
+      balancesBefore,
+    })
+    const accountNames = dryRun ? readAccountNames([...balanceDeltas.keys()]) : new Map()
+    const formattedBalanceImpact = formatBalanceImpactPreview(
+      auditPreview.balanceChanges,
+      accountNames
+    )
+
+    if (dryRun) {
+      return {
+        success: true,
+        dryRun: true,
+        wouldCreate: publicTransactionSnapshot(tx),
+        balanceImpact: formattedBalanceImpact,
+        auditPreview,
+        message: `Dry run: placeholder transaction ${tx.id} would be created; no changes were written.`,
+      }
+    }
+
+    return transaction(() => {
+      applyBalanceDeltas(balanceDeltas)
+      execute(
+        `INSERT INTO transactions (id, account_id, category_id, transfer_to_account_id, type, amount, currency, description, notes, status, source, note, recurring_rule_id, is_placeholder, placeholder_status, resolved_at, resolved_by_transaction_id, placeholder_reason, placeholder_parent_transaction_id, date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+        [
+          tx.id,
+          tx.account_id,
+          tx.category_id,
+          tx.transfer_to_account_id,
+          tx.type,
+          tx.amount,
+          tx.currency,
+          tx.description,
+          tx.notes,
+          tx.status,
+          tx.source,
+          tx.note,
+          tx.recurring_rule_id,
+          tx.is_placeholder,
+          tx.placeholder_status,
+          tx.resolved_at,
+          tx.resolved_by_transaction_id,
+          tx.placeholder_reason,
+          tx.placeholder_parent_transaction_id,
+          tx.date,
+        ]
+      )
+      writeTransactionBalanceAudit({
+        action: 'create',
+        before: null,
+        after: tx,
+        balanceDeltas,
+        balancesBefore,
+      })
+      return {
+        success: true,
+        transaction: publicTransactionSnapshot(tx),
+        balanceImpact: formattedBalanceImpact,
+        message: `Created unresolved placeholder transaction ${tx.id}.`,
+      }
+    })
+  },
+}
+
+const listPlaceholderTransactions: ToolDefinition = {
+  name: 'list-placeholder-transactions',
+  description:
+    'List transactions marked as placeholders, optionally filtered by placeholder status.',
+  schema: z.object({
+    status: placeholderStatusSchema.optional().describe('Filter by placeholder status'),
+    accountId: boundedText('Account ID', 'Filter by account ID', 128).optional(),
+    account: boundedText(
+      'Account reference',
+      'Account alias, ID, or exact account name',
+      200
+    ).optional(),
+    limit: z.number().int().min(1).max(100).optional().default(50),
+  }),
+  execute: async ({ status, accountId, account, limit }) => {
+    const conditions = ['t.is_placeholder = 1']
+    const params: unknown[] = []
+    let paramIndex = 0
+
+    if (status) {
+      paramIndex++
+      conditions.push(`t.placeholder_status = $${paramIndex}`)
+      params.push(status)
+    }
+    if (accountId || account) {
+      const resolvedAccount = resolveAccountId(accountId, account)
+      if (!resolvedAccount.success) return resolvedAccount
+      paramIndex++
+      conditions.push(`t.account_id = $${paramIndex}`)
+      params.push(resolvedAccount.id)
+    }
+    paramIndex++
+    params.push(limit)
+
+    const placeholders = query<QueriedTransactionRow>(
+      `SELECT t.id, t.description, t.amount, t.currency, t.type, t.date, t.notes, t.status, t.source, t.note, t.recurring_rule_id, t.tags, t.transfer_to_account_id,
+              t.is_placeholder, t.placeholder_status, t.resolved_at, t.resolved_by_transaction_id, t.placeholder_reason, t.placeholder_parent_transaction_id,
+              COALESCE(c.name, 'Uncategorized') as category_name,
+              a.name as account_name,
+              ta.name as transfer_to_account_name
+       FROM transactions t
+       LEFT JOIN categories c ON t.category_id = c.id
+       LEFT JOIN accounts a ON t.account_id = a.id
+       LEFT JOIN accounts ta ON t.transfer_to_account_id = ta.id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY t.date DESC, t.created_at DESC
+       LIMIT $${paramIndex}`,
+      params
+    )
+
+    return {
+      placeholders: placeholders.map((t) => ({
+        id: t.id,
+        description: t.description,
+        amount: fromCentavos(t.amount),
+        amountCentavos: t.amount,
+        currency: t.currency,
+        type: t.type,
+        category: t.category_name,
+        account: t.account_name,
+        date: t.date,
+        notes: t.notes,
+        status: t.status,
+        source: t.source,
+        note: t.note,
+        placeholderStatus: t.placeholder_status,
+        resolvedAt: t.resolved_at,
+        resolvedByTransactionId: t.resolved_by_transaction_id,
+        placeholderReason: t.placeholder_reason,
+        placeholderParentTransactionId: t.placeholder_parent_transaction_id,
+      })),
+      count: placeholders.length,
+      message:
+        placeholders.length === 0
+          ? 'No placeholder transactions found.'
+          : `Found ${placeholders.length} placeholder transaction${placeholders.length === 1 ? '' : 's'}.`,
+    }
+  },
+}
+
+const resolvePlaceholderTransaction: ToolDefinition = {
+  name: 'resolve-placeholder-transaction',
+  description:
+    'Resolve an unresolved placeholder by updating the original transaction with final known details while preserving placeholder audit metadata.',
+  schema: z.object({
+    transactionId: boundedText('Transaction ID', 'Placeholder transaction ID', 128),
+    amount: positiveMoneyAmount('Resolved amount').optional(),
+    type: z.enum(['expense', 'income']).optional(),
+    description: boundedText('Description', 'Resolved transaction description', 500).optional(),
+    category: boundedText('Category', 'Resolved category name or ID', 200).optional(),
+    date: isoDate('Resolved transaction date').optional(),
+    notes: boundedText('Notes', 'Resolved transaction notes', 2000).optional(),
+    source: boundedText('Source', 'Automation source or origin label', 120).optional(),
+    note: boundedText('Note', 'Workflow changelog note', 500).optional(),
+    dryRun: z.boolean().optional().default(false),
+  }),
+  execute: async ({
+    transactionId,
+    amount,
+    type,
+    description,
+    category,
+    date,
+    notes,
+    source,
+    note,
+    dryRun,
+  }) => {
+    return transaction(() => {
+      const rows = query<TransactionRow>('SELECT * FROM transactions WHERE id = $1 LIMIT 1', [
+        transactionId,
+      ])
+      if (rows.length === 0)
+        return { success: false, message: `Transaction ${transactionId} not found.` }
+      const before = rows[0]
+      const unresolvedError = assertUnresolvedPlaceholder(before)
+      if (unresolvedError) return unresolvedError
+      const categoryResult = resolvePlaceholderCategory(category)
+      if (!categoryResult.success) return categoryResult
+
+      const after: TransactionRow = {
+        ...before,
+        amount: amount !== undefined ? toCentavos(amount) : before.amount,
+        type: type ?? before.type,
+        description: description ?? before.description,
+        category_id: category !== undefined ? categoryResult.categoryId : before.category_id,
+        date: date ?? before.date,
+        notes: notes !== undefined ? (notes === '' ? null : notes) : before.notes,
+        source: source !== undefined ? (source === '' ? null : source) : (before.source ?? null),
+        note: note !== undefined ? (note === '' ? null : note) : (before.note ?? null),
+        placeholder_status: 'resolved',
+        resolved_at: dayjs().toISOString(),
+        resolved_by_transaction_id: before.id,
+      }
+      const oldImpact = getBalanceImpact(before)
+      if (!oldImpact.success) return { success: false, message: oldImpact.message }
+      const newImpact = getBalanceImpact(after)
+      if (!newImpact.success) return { success: false, message: newImpact.message }
+      const balanceDeltas = diffBalanceImpacts(oldImpact.impacts, newImpact.impacts)
+      const archivedMutationFailure = archivedBalanceMutationFailure([...balanceDeltas.keys()])
+      if (archivedMutationFailure) return archivedMutationFailure
+      const balancesBefore = readAccountBalances([...balanceDeltas.keys()])
+      const auditPreview = buildTransactionBalanceAuditPreview({
+        action: 'update',
+        before,
+        after,
+        balanceDeltas,
+        balancesBefore,
+      })
+      const accountNames = dryRun ? readAccountNames([...balanceDeltas.keys()]) : new Map()
+      const formattedBalanceImpact = formatBalanceImpactPreview(
+        auditPreview.balanceChanges,
+        accountNames
+      )
+
+      if (dryRun) {
+        return {
+          success: true,
+          dryRun: true,
+          wouldResolve: {
+            before: publicTransactionSnapshot(before),
+            after: publicTransactionSnapshot(after),
+          },
+          balanceImpact: formattedBalanceImpact,
+          auditPreview,
+          message: `Dry run: placeholder transaction ${transactionId} would be resolved; no changes were written.`,
+        }
+      }
+
+      const updateResult = execute(
+        `UPDATE transactions
+         SET amount = $1, type = $2, description = $3, category_id = $4, date = $5, notes = $6, source = $7, note = $8,
+             placeholder_status = 'resolved', resolved_at = $9, resolved_by_transaction_id = $10,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = $11 AND is_placeholder = 1 AND COALESCE(placeholder_status, 'unresolved') = 'unresolved'`,
+        [
+          after.amount,
+          after.type,
+          after.description,
+          after.category_id,
+          after.date,
+          after.notes,
+          after.source,
+          after.note,
+          after.resolved_at,
+          after.resolved_by_transaction_id,
+          transactionId,
+        ]
+      )
+      if (updateResult.rowsAffected !== 1) {
+        throw new Error(`Placeholder transaction ${transactionId} could not be resolved safely.`)
+      }
+      applyBalanceDeltas(balanceDeltas)
+      writeTransactionBalanceAudit({
+        action: 'update',
+        before,
+        after,
+        balanceDeltas,
+        balancesBefore,
+      })
+      return {
+        success: true,
+        transaction: publicTransactionSnapshot(after),
+        balanceImpact: formattedBalanceImpact,
+        message: `Resolved placeholder transaction ${transactionId}.`,
+      }
+    })
+  },
+}
+
+const splitPlaceholderTransaction: ToolDefinition = {
+  name: 'split-placeholder-transaction',
+  description:
+    'Resolve an unresolved placeholder into multiple concrete transactions whose amounts exactly equal the original placeholder amount.',
+  schema: z.object({
+    transactionId: boundedText('Transaction ID', 'Placeholder transaction ID', 128),
+    splits: z
+      .array(
+        z.object({
+          amount: positiveMoneyAmount('Split amount'),
+          description: boundedText('Description', 'Split transaction description', 500).optional(),
+          category: boundedText('Category', 'Split category name or ID', 200).optional(),
+          notes: boundedText('Notes', 'Split notes', 2000).optional(),
+        })
+      )
+      .min(2)
+      .max(20),
+    source: boundedText('Source', 'Automation source or origin label', 120).optional(),
+    note: boundedText('Note', 'Workflow changelog note', 500).optional(),
+    dryRun: z.boolean().optional().default(false),
+  }),
+  execute: async ({ transactionId, splits, source, note, dryRun }) => {
+    return transaction(() => {
+      const rows = query<TransactionRow>('SELECT * FROM transactions WHERE id = $1 LIMIT 1', [
+        transactionId,
+      ])
+      if (rows.length === 0)
+        return { success: false, message: `Transaction ${transactionId} not found.` }
+      const before = rows[0]
+      const unresolvedError = assertUnresolvedPlaceholder(before)
+      if (unresolvedError) return unresolvedError
+
+      const splitCentavos = splits.map((split: PlaceholderSplitInput) => toCentavos(split.amount))
+      const totalCentavos = splitCentavos.reduce(
+        (sum: number, amountCentavos: number) => sum + amountCentavos,
+        0
+      )
+      if (totalCentavos !== before.amount) {
+        return placeholderFailure(
+          'split_amount_mismatch',
+          `Split amounts must equal the original placeholder amount exactly (${fromCentavos(before.amount).toFixed(2)}).`
+        )
+      }
+
+      const childTransactions: TransactionRow[] = []
+      for (const [index, split] of splits.entries()) {
+        const categoryResult = resolvePlaceholderCategory(split.category)
+        if (!categoryResult.success) return categoryResult
+        childTransactions.push({
+          ...before,
+          id: generateId(),
+          category_id: categoryResult.categoryId,
+          amount: splitCentavos[index],
+          description: split.description ?? `${before.description} (${index + 1})`,
+          notes: split.notes ?? null,
+          source: source !== undefined ? (source === '' ? null : source) : (before.source ?? null),
+          note: note !== undefined ? (note === '' ? null : note) : (before.note ?? null),
+          is_placeholder: 0,
+          placeholder_status: null,
+          resolved_at: dayjs().toISOString(),
+          resolved_by_transaction_id: null,
+          placeholder_reason: null,
+          placeholder_parent_transaction_id: before.id,
+        })
+      }
+
+      const after: TransactionRow = {
+        ...before,
+        status: 'pending',
+        source: source !== undefined ? (source === '' ? null : source) : (before.source ?? null),
+        note: note !== undefined ? (note === '' ? null : note) : (before.note ?? null),
+        placeholder_status: 'split',
+        resolved_at: dayjs().toISOString(),
+      }
+      const oldImpact = getBalanceImpact(before)
+      if (!oldImpact.success) return { success: false, message: oldImpact.message }
+      const afterImpact = getBalanceImpact(after)
+      if (!afterImpact.success) return { success: false, message: afterImpact.message }
+      const combinedNewImpacts = new Map(afterImpact.impacts)
+      for (const child of childTransactions) {
+        const childImpact = getBalanceImpact(child)
+        if (!childImpact.success) return { success: false, message: childImpact.message }
+        for (const [accountId, delta] of childImpact.impacts) {
+          addImpact(combinedNewImpacts, accountId, delta)
+        }
+      }
+      const balanceDeltas = diffBalanceImpacts(oldImpact.impacts, combinedNewImpacts)
+      const archivedMutationFailure = archivedBalanceMutationFailure([...balanceDeltas.keys()])
+      if (archivedMutationFailure) return archivedMutationFailure
+      const balancesBefore = readAccountBalances([...balanceDeltas.keys()])
+      const auditPreview = buildTransactionBalanceAuditPreview({
+        action: 'update',
+        before,
+        after,
+        balanceDeltas,
+        balancesBefore,
+      })
+      const accountNames = dryRun ? readAccountNames([...balanceDeltas.keys()]) : new Map()
+      const formattedBalanceImpact = formatBalanceImpactPreview(
+        auditPreview.balanceChanges,
+        accountNames
+      )
+
+      if (dryRun) {
+        return {
+          success: true,
+          dryRun: true,
+          wouldSplit: {
+            before: publicTransactionSnapshot(before),
+            after: publicTransactionSnapshot(after),
+            children: childTransactions.map(publicTransactionSnapshot),
+          },
+          balanceImpact: formattedBalanceImpact,
+          auditPreview,
+          message: `Dry run: placeholder transaction ${transactionId} would be split into ${childTransactions.length} transactions; no changes were written.`,
+        }
+      }
+
+      const updateResult = execute(
+        `UPDATE transactions
+         SET status = 'pending', source = $1, note = $2, placeholder_status = 'split', resolved_at = $3,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = $4 AND is_placeholder = 1 AND COALESCE(placeholder_status, 'unresolved') = 'unresolved'`,
+        [after.source, after.note, after.resolved_at, transactionId]
+      )
+      if (updateResult.rowsAffected !== 1) {
+        throw new Error(`Placeholder transaction ${transactionId} could not be split safely.`)
+      }
+      applyBalanceDeltas(balanceDeltas)
+      for (const child of childTransactions) {
+        execute(
+          `INSERT INTO transactions (id, account_id, category_id, transfer_to_account_id, type, amount, currency, description, notes, status, source, note, recurring_rule_id, is_placeholder, placeholder_status, resolved_at, resolved_by_transaction_id, placeholder_reason, placeholder_parent_transaction_id, date)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+          [
+            child.id,
+            child.account_id,
+            child.category_id,
+            child.transfer_to_account_id,
+            child.type,
+            child.amount,
+            child.currency,
+            child.description,
+            child.notes,
+            child.status,
+            child.source,
+            child.note,
+            child.recurring_rule_id,
+            child.is_placeholder,
+            child.placeholder_status,
+            child.resolved_at,
+            child.resolved_by_transaction_id,
+            child.placeholder_reason,
+            child.placeholder_parent_transaction_id,
+            child.date,
+          ]
+        )
+      }
+      writeTransactionBalanceAudit({
+        action: 'update',
+        before,
+        after,
+        balanceDeltas,
+        balancesBefore,
+      })
+      writeAuditLog({
+        entity: 'transaction',
+        entityId: transactionId,
+        action: 'split-placeholder',
+        before: publicTransactionSnapshot(before),
+        after: {
+          placeholder: publicTransactionSnapshot(after),
+          children: childTransactions.map(publicTransactionSnapshot),
+        },
+        source: after.source,
+        note: after.note,
+      })
+      return {
+        success: true,
+        placeholder: publicTransactionSnapshot(after),
+        transactions: childTransactions.map(publicTransactionSnapshot),
+        balanceImpact: formattedBalanceImpact,
+        message: `Split placeholder transaction ${transactionId} into ${childTransactions.length} transactions.`,
+      }
+    })
+  },
+}
 
 const getSpendingSummary: ToolDefinition = {
   name: 'get-spending-summary',
@@ -1340,5 +2440,12 @@ export const transactionsTools: ToolDefinition[] = [
   updateTransaction,
   deleteTransaction,
   queryTransactions,
+  tagTransaction,
+  untagTransaction,
+  listTags,
+  createPlaceholderTransaction,
+  listPlaceholderTransactions,
+  resolvePlaceholderTransaction,
+  splitPlaceholderTransaction,
   getSpendingSummary,
 ]

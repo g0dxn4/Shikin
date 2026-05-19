@@ -1,5 +1,6 @@
 {
   "title": "Investments",
+  "subtitle": "Track US, Mexican, crypto, and manual holdings in one portfolio.",
   "addInvestment": "Add Investment",
   "editInvestment": "Edit Investment",
   "deleteInvestment": "Delete Investment",
@@ -14,7 +15,11 @@
     "account": "Account",
     "noAccount": "None",
     "notes": "Notes",
-    "notesPlaceholder": "Optional notes about this investment..."
+    "notesPlaceholder": "Optional notes about this investment...",
+    "guidanceTitle": "How holdings and accounts work",
+    "guidanceAccount": "Linked investment account balances are cash/container balances; holdings add portfolio value separately in net worth.",
+    "guidanceExamples": "Examples: AAPL, VOO, WALMEX.MX, NAFTRAC.MX, BTC, BONOS, or CETES/manual notes.",
+    "guidancePrices": "Refresh uses CoinGecko for crypto and Alpha Vantage/Finnhub keys from Settings when providers support the symbol. CETES/manual assets can keep manual prices or cost basis."
   },
   "types": {
     "stock": "Stock",
@@ -22,7 +27,16 @@
     "crypto": "Crypto",
     "bond": "Bond",
     "mutual_fund": "Mutual Fund",
+    "cetes": "CETES",
     "other": "Other"
+  },
+  "guidance": {
+    "accountTitle": "Accounts vs holdings",
+    "account": "Use the investment account balance for cash or container value. Add each holding below so net worth includes the portfolio separately.",
+    "examplesTitle": "US / Mexico / CETES",
+    "examples": "Symbols can be US tickers like AAPL/VOO, Mexican tickers like WALMEX.MX, crypto like BTC, or CETES/manual instruments.",
+    "pricesTitle": "Price refresh",
+    "prices": "Crypto refreshes through CoinGecko. Stocks, ETFs, funds, bonds, and supported MX symbols use your Alpha Vantage key first, then Finnhub. Unsupported CETES/manual assets keep the latest saved price or cost basis."
   },
   "summary": {
     "portfolioValue": "Portfolio Value",

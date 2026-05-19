@@ -12,6 +12,7 @@ import type {
 } from './common'
 
 export type TransactionStatus = 'pending' | 'posted' | 'cleared'
+export type PlaceholderTransactionStatus = 'unresolved' | 'resolved' | 'split' | 'cancelled'
 export type CategorySuggestionStatus = 'pending' | 'approved' | 'rejected'
 export type CreditCardStatementStatus = 'open' | 'partial' | 'paid' | 'overdue'
 
@@ -60,6 +61,12 @@ export interface Transaction {
   source?: string | null
   note?: string | null
   recurring_rule_id?: ULID | null
+  is_placeholder?: number
+  placeholder_status?: PlaceholderTransactionStatus | null
+  resolved_at?: DateTimeStr | null
+  resolved_by_transaction_id?: ULID | null
+  placeholder_reason?: string | null
+  placeholder_parent_transaction_id?: ULID | null
   created_at: DateTimeStr
   updated_at: DateTimeStr
 }

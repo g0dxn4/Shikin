@@ -25,6 +25,10 @@ async function getInvestments(): Promise<Investment[]> {
   return query<Investment>('SELECT * FROM investments')
 }
 
+function getPriceCurrencyMap(investments: Investment[]) {
+  return new Map(investments.map((investment) => [investment.symbol, investment.currency]))
+}
+
 async function getLastPriceDate(symbol: string): Promise<string | null> {
   const rows = await query<{ date: string }>(
     'SELECT date FROM stock_prices WHERE symbol = ? ORDER BY date DESC LIMIT 1',
@@ -76,7 +80,7 @@ async function fetchStalePrices(): Promise<void> {
 
   const prices = await fetchAllCurrentPrices(staleInvestments)
   if (prices.size > 0) {
-    await savePricesToDB(prices)
+    await savePricesToDB(prices, getPriceCurrencyMap(staleInvestments))
     const now = new Date().toISOString()
     useInvestmentStore.getState().setLastPriceFetch(now)
     await useInvestmentStore.getState().fetch()
@@ -93,7 +97,7 @@ function startStockScheduler(): void {
 
     const prices = await fetchAllCurrentPrices(stocks)
     if (prices.size > 0) {
-      await savePricesToDB(prices)
+      await savePricesToDB(prices, getPriceCurrencyMap(stocks))
       useInvestmentStore.getState().setLastPriceFetch(new Date().toISOString())
       await useInvestmentStore.getState().fetch()
     }
@@ -109,7 +113,7 @@ function startCryptoScheduler(): void {
 
     const prices = await fetchAllCurrentPrices(crypto)
     if (prices.size > 0) {
-      await savePricesToDB(prices)
+      await savePricesToDB(prices, getPriceCurrencyMap(crypto))
       useInvestmentStore.getState().setLastPriceFetch(new Date().toISOString())
       await useInvestmentStore.getState().fetch()
     }

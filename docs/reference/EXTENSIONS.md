@@ -2,11 +2,92 @@
 
 This document describes the design of Shikin's extension system, including the manifest format, permission model, hook points, data access API, and a complete example extension walkthrough.
 
-**Status:** Planned for a future release. This document serves as the design specification.
+**Status:** A CLI/MCP trusted-local plugin MVP is implemented. The broader UI, hook, widget, and packaged community extension model remains planned.
 
 ---
 
-## Overview
+## Current CLI/MCP Plugin MVP
+
+The current implementation is intentionally narrow and local-first:
+
+- Plugins are discovered under the app data `extensions/` directory, for example `~/.local/share/com.asf.shikin/extensions/` on Linux. Set `SHIKIN_EXTENSIONS_DIR` to point tests or local development at a different directory.
+- Each plugin directory must contain `manifest.json`, and the directory name must match the manifest `id`.
+- Plugins are disabled by default. Discovery reads manifests only; disabled plugin code is not loaded.
+- Enablement and approved permissions are stored in `extensions/plugin-state.json`.
+- Only trusted-local JavaScript plugins are supported. Entry points must be built `.js` or `.mjs` files. TypeScript entry points and packaged community plugins are future work.
+- Plugin tools are exposed as shared CLI/MCP tools named `plugin-<plugin-id>-<tool-name>`.
+- Local plugin code runs in the CLI/MCP process when an enabled plugin tool is invoked. Only enable plugins whose code you trust.
+- The current MVP is not a sandbox. Manifest permissions gate only the Shikin-provided `ctx` helpers. Trusted-local plugin code can still use Node/runtime capabilities available to the user, including filesystem and network access.
+
+Management commands:
+
+```bash
+shikin list-plugins --json
+shikin enable-plugin --plugin-id my-plugin --trusted-local --approve-permissions --json
+shikin disable-plugin --plugin-id my-plugin --json
+```
+
+Minimal manifest shape for the CLI/MCP MVP:
+
+```json
+{
+  "id": "my-plugin",
+  "name": "My Plugin",
+  "version": "1.0.0",
+  "main": "index.mjs",
+  "permissions": ["read:accounts", "read:extension_data", "write:extension_data"],
+  "tools": [
+    {
+      "name": "summarize",
+      "description": "Return a custom account summary",
+      "handler": "summarize",
+      "input": {
+        "accountId": {
+          "type": "string",
+          "required": false,
+          "description": "Optional account id to inspect"
+        }
+      }
+    }
+  ]
+}
+```
+
+Minimal handler example:
+
+```js
+export async function summarize(input, ctx) {
+  const accounts = input.accountId
+    ? [await ctx.finance.getAccount(input.accountId)]
+    : await ctx.finance.listAccounts()
+
+  await ctx.data.set('last_run_at', new Date().toISOString())
+
+  return {
+    accountCount: accounts.filter(Boolean).length,
+    pluginId: ctx.plugin.id
+  }
+}
+```
+
+The MVP context exposes structured APIs only:
+
+- `ctx.data.get/set/delete/list` for this plugin's `extension_data`, gated by `read:extension_data` and `write:extension_data`.
+- `ctx.finance.listAccounts/getAccount`, gated by `read:accounts`.
+- `ctx.finance.listCategories`, gated by `read:categories`.
+- `ctx.finance.listTransactions`, gated by `read:transactions`.
+- `ctx.finance.listCreditCardStatements`, gated by `read:statements`.
+- `ctx.audit.write`, gated by `write:audit` and always stamped with `source: plugin:<plugin-id>`.
+
+Raw SQL is not exposed through the plugin context, but that is not a process-level security boundary in the trusted-local MVP. The broader sections below describe the intended future sandboxed/community extension system; where they show TypeScript entry points, UI widgets, hooks, network permissions, or sandbox guarantees, treat those as design direction rather than current MVP behavior.
+
+---
+
+## Future Sandboxed/Community Design
+
+The rest of this document describes the broader extension system Shikin intends to grow into. It is not fully implemented by the current CLI/MCP MVP.
+
+### Overview
 
 Shikin's extension system allows community developers to add features without modifying the core application. Extensions can:
 
@@ -137,9 +218,9 @@ Every extension requires a `manifest.json` file at its root.
 | `license`          | string   | no       | SPDX license identifier.                                                      |
 | `repository`       | string   | no       | Source code URL.                                                              |
 | `minShikinVersion` | string   | no       | Minimum Shikin version required.                                              |
-| `main`             | string   | yes      | Entry point file relative to extension directory.                             |
+| `main`             | string   | yes      | Entry point file relative to extension directory. Current CLI/MCP MVP supports `.js` and `.mjs`. |
 | `permissions`      | string[] | yes      | Required permissions (see Permission Model below).                            |
-| `tools`            | object[] | no       | Automation actions this extension exposes. Each has `name` and `description`. |
+| `tools`            | object[] | no       | Automation actions this extension exposes. Current CLI/MCP MVP also requires `handler` and optional `input`. |
 | `hooks`            | string[] | no       | Application hooks this extension subscribes to.                               |
 | `ui`               | object   | no       | UI components this extension provides.                                        |
 
@@ -167,6 +248,7 @@ Extensions must declare all required permissions in their manifest. Users are sh
 | `write:transactions`      | Create, edit, or delete transactions |
 | `read:categories`         | Read categories and subcategories    |
 | `write:categories`        | Create or modify categories          |
+| `read:statements`         | Read credit-card statements          |
 | `read:budgets`            | Read budget definitions and status   |
 | `write:budgets`           | Create or modify budgets             |
 | `read:investments`        | Read investment holdings             |
@@ -178,6 +260,7 @@ Extensions must declare all required permissions in their manifest. Users are sh
 | `read:extension_data`     | Read this extension's stored data    |
 | `write:extension_data`    | Write to this extension's data store |
 | `read:all_extension_data` | Read any extension's stored data     |
+| `write:audit`             | Write plugin-scoped audit entries    |
 
 #### Network
 
@@ -587,6 +670,8 @@ stateDiagram-v2
 ---
 
 ## Security Considerations
+
+The items below are future sandboxed/community-extension requirements. For the current CLI/MCP trusted-local MVP, plugin code is loaded directly into the Node process; permissions are cooperative `ctx` API gates, not an OS, network, filesystem, or process sandbox.
 
 1. **No raw SQL** -- Extensions cannot execute arbitrary SQL. All database access goes through the structured `ctx.db` API.
 2. **Permission enforcement** -- Every `ctx.db` call checks the extension's declared permissions. Accessing a table without the right permission throws `PermissionDenied`.

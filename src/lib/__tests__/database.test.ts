@@ -33,6 +33,7 @@ function mockTauriDatabaseModules() {
     '015_primary_account',
     '016_cli_qol_foundation',
     '017_investment_type_cetes',
+    '018_placeholder_transactions',
   ].map((name) => ({ name }))
   const tableRows = [
     '_migrations',
@@ -56,7 +57,6 @@ function mockTauriDatabaseModules() {
     'account_balance_history',
     'recurring_rules',
     'audit_log',
-    'assistant_context',
     'cashflow_buckets',
     'cashflow_bucket_allocations',
     'category_suggestions',
@@ -84,6 +84,12 @@ function mockTauriDatabaseModules() {
     'source',
     'note',
     'recurring_rule_id',
+    'is_placeholder',
+    'placeholder_status',
+    'resolved_at',
+    'resolved_by_transaction_id',
+    'placeholder_reason',
+    'placeholder_parent_transaction_id',
     'billing_cycle',
     'next_billing_date',
     'period',

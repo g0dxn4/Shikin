@@ -88,7 +88,7 @@ function getBackupReadiness() {
 
 const setupStatus: ToolDefinition = {
   name: 'setup-status',
-  description: 'Show missing or incomplete setup that affects CLI and assistant usefulness.',
+  description: 'Show missing or incomplete setup that affects CLI and automation workflows.',
   schema: z.object({}),
   execute: async () => {
     const accountCount = count('SELECT COUNT(*) as count FROM accounts WHERE is_archived = 0')
@@ -194,7 +194,7 @@ const setupStatus: ToolDefinition = {
       ? getLatestBalanceSnapshotDate()
       : null
     const backupReadiness = getBackupReadiness()
-    const assistantContextReady =
+    const automationContextReady =
       accountCount > 0 && categoryCount > 0 && aliasCount > 0 && financeProfilePresent
 
     const checks = [
@@ -224,7 +224,7 @@ const setupStatus: ToolDefinition = {
         ok: financeProfilePresent,
         required: false,
         count: financeProfilePresent ? 1 : 0,
-        hint: 'Run shikin finance-profile --action set --profile ... to store assistant preferences.',
+        hint: 'Run shikin finance-profile --action set --profile ... to store automation preferences.',
       },
       {
         key: 'transactions',
@@ -342,17 +342,17 @@ const setupStatus: ToolDefinition = {
         hint: 'Run shikin backup-database to create a recent manual database backup.',
       },
       {
-        key: 'assistant_context_readiness',
-        ok: assistantContextReady,
+        key: 'automation_context_readiness',
+        ok: automationContextReady,
         required: false,
-        count: assistantContextReady ? 1 : 0,
+        count: automationContextReady ? 1 : 0,
         details: {
           accounts: accountCount > 0,
           categories: categoryCount > 0,
           accountAliases: aliasCount > 0,
           financeProfile: financeProfilePresent,
         },
-        hint: 'Configure account aliases and a finance profile so assistant workflows have stable context.',
+        hint: 'Configure account aliases and a finance profile so automation workflows have stable context.',
       },
     ]
     const missingRequired = checks.filter((check) => check.required && !check.ok)

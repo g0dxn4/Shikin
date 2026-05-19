@@ -11,6 +11,7 @@ import {
   PanelLeft,
   Sparkles,
   LayoutGrid,
+  TrendingUp,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -39,7 +40,13 @@ const navItems: SidebarNavItem[] = [
     icon: Landmark,
     labelKey: 'nav.accounts',
     label: 'Accounts',
-    activePaths: ['/accounts', '/investments'],
+    activePaths: ['/accounts'],
+  },
+  {
+    path: '/investments',
+    icon: TrendingUp,
+    labelKey: 'nav.investments',
+    label: 'Investments',
   },
   { path: '/budgets', icon: PiggyBank, labelKey: 'nav.budgets', label: 'Budgets' },
   { path: '/categories', icon: LayoutGrid, labelKey: 'nav.categories', label: 'Categories' },

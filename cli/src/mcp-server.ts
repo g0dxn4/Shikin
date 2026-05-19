@@ -319,6 +319,10 @@ export function registerMcpResources(server: Pick<McpServer, 'resource'>): void 
     createMcpResourceHandler('recent-transactions', () => {
       const transactions = query<Record<string, unknown>>(
         `SELECT t.id, t.description, t.type, t.amount, t.currency, t.date, t.notes, t.status, t.source, t.note,
+                t.is_placeholder as isPlaceholder, t.placeholder_status as placeholderStatus,
+                t.resolved_at as resolvedAt, t.resolved_by_transaction_id as resolvedByTransactionId,
+                t.placeholder_reason as placeholderReason,
+                t.placeholder_parent_transaction_id as placeholderParentTransactionId,
                 t.recurring_rule_id as recurringRuleId, t.transfer_to_account_id as transferToAccountId,
                 COALESCE(c.name, 'Uncategorized') as category, a.name as account, ta.name as transferToAccount
          FROM transactions t
@@ -339,7 +343,7 @@ export function registerMcpResources(server: Pick<McpServer, 'resource'>): void 
 export function createMcpServer(toolDefinitions: ToolDefinition[] = tools): McpServer {
   const server = new McpServer({
     name: 'shikin',
-    version: '1.0.7',
+    version: '1.0.8',
   })
 
   registerMcpTools(server, toolDefinitions)

@@ -100,7 +100,13 @@ function seedCoreShikinSchema(
       ${transactionStatusDefinition},
       source TEXT,
       note TEXT,
-      recurring_rule_id TEXT`
+      recurring_rule_id TEXT,
+      is_placeholder INTEGER NOT NULL DEFAULT 0,
+      placeholder_status TEXT,
+      resolved_at TEXT,
+      resolved_by_transaction_id TEXT,
+      placeholder_reason TEXT,
+      placeholder_parent_transaction_id TEXT`
           : ''
       }
     );
@@ -236,7 +242,7 @@ describe('CLI database readiness', () => {
     const { CLI_DATABASE_MIGRATIONS: sharedMigrations } = await import('./migrations.js')
 
     expect(REQUIRED_MIGRATIONS).toBe(sharedMigrations)
-    expect(REQUIRED_MIGRATIONS).toHaveLength(13)
+    expect(REQUIRED_MIGRATIONS).toHaveLength(sharedMigrations.length)
   })
 
   it('allows queries once the shared Shikin schema is ready', async () => {

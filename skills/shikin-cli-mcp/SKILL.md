@@ -14,6 +14,9 @@ Use Shikin's desktop-owned `shikin` command and MCP server safely and consistent
 - Do not run write commands against the user's real finance database unless they explicitly ask for it.
 - For tests and smoke checks, set `XDG_DATA_HOME` to a temp directory under `/tmp/opencode` so Shikin uses an isolated database.
 - Initialize a temp database with `scripts/data-server.mjs`; it runs migrations and seeds default categories.
+- Prefer dry-run or preview modes before writes (`--dry-run`, `--apply` only after review, or tool-specific preview defaults).
+- Treat `source` as an opaque provenance label and `note` as audit/changelog metadata. Transaction `notes` are user-facing transaction details.
+- Use redacted output (`--redacted` or tool `redacted: true`) when returning finance details into shared logs, transcripts, or automation systems.
 
 ## User-Facing UX
 
@@ -84,7 +87,7 @@ The MCP server exposes the same shared tool catalog as the CLI and these resourc
 
 ## Representative Tool Surface
 
-Current catalog size is 68 tools. All shipped tools are available end-to-end against the local database.
+Current catalog size is 83 shared CLI/MCP tools and 87 total CLI commands including CLI-only built-ins. All shipped tools are available end-to-end against the local database.
 The lists below are representative groups for orientation; use `shikin tools --json` for the authoritative command, argument, enum, catalog/schema version, compatibility, and required-migration metadata.
 
 Transaction tools:
@@ -95,6 +98,7 @@ Transaction tools:
 - `query-transactions`
 - `get-spending-summary`
 - `split-transaction`
+- `tag-transaction`, `untag-transaction`, `list-tags` (project-style labels stored as transaction tags, not a separate project entity)
 
 Account and analytics tools:
 
@@ -127,6 +131,7 @@ Investment, subscription, and automation tools:
 - `get-upcoming-bills`
 - `list-subscriptions`
 - `get-subscription-spending`
+- `create-subscription-from-transaction`
 - `manage-category-rules`
 - `manage-recurring-transaction`
 - `materialize-recurring`
@@ -137,9 +142,11 @@ Investment, subscription, and automation tools:
 - `restore-database` (CLI also has alias `restore`; guarded restore refuses unsafe active handles)
 - `audit-list`
 - `audit-show`
-- `assistant-context`
+- `undo`
+- `finance-sanity-check`
+- `automation-context`
 
-Goal, debt, and investment support is discoverable through `setup-status` and `assistant-context`. Investment support intentionally stays on the existing `manage-investment` and `generate-portfolio-review` tools; do not assume broader broker sync or price-fetching capabilities from this skill.
+Goal, debt, and investment support is discoverable through `setup-status` and `automation-context`. Investment support intentionally stays on the existing `manage-investment` and `generate-portfolio-review` tools; do not assume broader broker sync or price-fetching capabilities from this skill.
 
 Notebook tools:
 
@@ -147,6 +154,14 @@ Notebook tools:
 - `read-notebook`
 - `list-notebook`
 - `generate-portfolio-review`
+
+## Safe Workflow Patterns
+
+- For money movement, run dry-run previews first. Examples: `record-card-payment --dry-run`, placeholder create/resolve/split dry-runs, and `undo` without `--apply`.
+- For subscription automation, use `create-subscription-from-transaction` against an existing expense or income transaction. Review derived defaults and overrides before applying; transfers are not valid subscription sources.
+- For project-style organization, use transaction tags: `tag-transaction`, `untag-transaction`, `list-tags`, and `query-transactions --tag <tag>`.
+- For rollback, start with `undo --last --dry-run` or filter by `--audit-id`, `--transaction-id`, `--statement-id`, `--source`, `--command`, or `--account`. Apply only after checking dependent-write warnings and balance impact.
+- For a neutral daily review, use `finance-sanity-check --redacted --limit <n>` to inspect due card statements, unresolved placeholders, duplicate-looking transactions, upcoming bills, balance mismatches, transaction hygiene, high Other Expenses, and recent provenance-tagged writes.
 
 ## Verification Checklist
 

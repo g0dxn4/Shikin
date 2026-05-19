@@ -156,6 +156,12 @@ function seedDatabase({
       source TEXT,
       note TEXT,
       recurring_rule_id TEXT,
+      is_placeholder INTEGER NOT NULL DEFAULT 0,
+      placeholder_status TEXT,
+      resolved_at TEXT,
+      resolved_by_transaction_id TEXT,
+      placeholder_reason TEXT,
+      placeholder_parent_transaction_id TEXT,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );

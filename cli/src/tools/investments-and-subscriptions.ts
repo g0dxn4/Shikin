@@ -72,6 +72,18 @@ type SubscriptionAccountRow = {
   is_archived: number
 }
 
+type TransactionSubscriptionSourceRow = {
+  id: string
+  account_id: string | null
+  category_id: string | null
+  type: 'expense' | 'income' | 'transfer'
+  amount: number
+  currency: string | null
+  description: string
+  notes: string | null
+  date: string
+}
+
 function assertSingleRowUpdated(result: { rowsAffected: number }, message: string) {
   if (result.rowsAffected !== 1) {
     throw new Error(message)
@@ -149,19 +161,52 @@ function subscriptionCurrencyFailure(accountCurrency: string | null, currency: s
       }
 }
 
+function nextSubscriptionDateFromTransactionDate(
+  transactionDate: string,
+  billingCycle: SubscriptionRow['billing_cycle']
+): string {
+  const baseDate = dayjs(transactionDate)
+  switch (billingCycle) {
+    case 'weekly':
+      return baseDate.add(1, 'week').format('YYYY-MM-DD')
+    case 'quarterly':
+      return baseDate.add(3, 'month').format('YYYY-MM-DD')
+    case 'yearly':
+      return baseDate.add(1, 'year').format('YYYY-MM-DD')
+    case 'monthly':
+    default:
+      return baseDate.add(1, 'month').format('YYYY-MM-DD')
+  }
+}
+
+function transactionSourceSnapshot(transactionRow: TransactionSubscriptionSourceRow) {
+  return {
+    id: transactionRow.id,
+    accountId: transactionRow.account_id,
+    categoryId: transactionRow.category_id,
+    type: transactionRow.type,
+    amount: fromCentavos(transactionRow.amount),
+    amountCentavos: transactionRow.amount,
+    currency: transactionRow.currency,
+    description: transactionRow.description,
+    notes: transactionRow.notes,
+    date: transactionRow.date,
+  }
+}
+
 const manageInvestment: ToolDefinition = {
   name: 'manage-investment',
   description:
-    'Add, update, or delete an investment holding. Use this to track stocks, ETFs, crypto, bonds, and other investments.',
+    'Add, update, or delete an investment holding. Use this to track US/MX stocks, ETFs, crypto, bonds, CETES, mutual funds, and other investments.',
   schema: z.object({
     action: z.enum(['add', 'update', 'delete']).describe('The action to perform'),
     investmentId: z.string().optional().describe('Required for update/delete. The investment ID.'),
     name: z.string().optional().describe('Investment name (e.g. "Apple Inc.")'),
     symbol: z.string().optional().describe('Ticker symbol (e.g. "AAPL")'),
     type: z
-      .enum(['stock', 'etf', 'crypto', 'bond', 'mutual_fund', 'other'])
+      .enum(['stock', 'etf', 'crypto', 'bond', 'mutual_fund', 'cetes', 'other'])
       .optional()
-      .describe('Investment type'),
+      .describe('Investment type, including CETES for Mexican treasury holdings'),
     shares: z.number().optional().describe('Number of shares/units'),
     avgCost: z.number().optional().describe('Average cost basis per share in main currency unit'),
     currentPrice: z
@@ -561,6 +606,198 @@ const createSubscription: ToolDefinition = {
   },
 }
 
+const createSubscriptionFromTransaction: ToolDefinition = {
+  name: 'create-subscription-from-transaction',
+  description:
+    'Create a subscription using an existing transaction as the default source for amount, account, category, name, and currency.',
+  schema: z.object({
+    transactionId: boundedText('Transaction ID', 'Transaction to use as subscription source', 128),
+    name: boundedText(
+      'Subscription name',
+      'Optional subscription name. Defaults to transaction description',
+      160
+    ).optional(),
+    billingCycle: z
+      .enum(['weekly', 'monthly', 'quarterly', 'yearly'])
+      .optional()
+      .default('monthly')
+      .describe('Billing cycle'),
+    nextDate: isoDate('Next billing date in YYYY-MM-DD format').optional(),
+    nextBillingDate: isoDate('Next billing date in YYYY-MM-DD format').optional(),
+    amount: positiveMoneyAmount(
+      'Subscription amount override in the main currency unit'
+    ).optional(),
+    accountId: boundedText('Account ID', 'Optional linked account ID override', 128).optional(),
+    account: boundedText(
+      'Account reference',
+      'Optional linked account alias, exact account ID, or exact account name override',
+      128
+    ).optional(),
+    categoryId: boundedText('Category ID', 'Optional linked category ID override', 128).optional(),
+    category: boundedText('Category', 'Optional category name override', 120).optional(),
+    notes: z.string().trim().max(1000).optional().describe('Optional subscription notes'),
+    source: boundedText(
+      'Source',
+      'Automation source or origin label for audit provenance',
+      120
+    ).optional(),
+    note: boundedText('Note', 'Workflow changelog note for audit provenance', 500).optional(),
+    dryRun: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Validate and preview the subscription without writing it'),
+  }),
+  execute: async ({
+    transactionId,
+    name,
+    billingCycle,
+    nextDate,
+    nextBillingDate,
+    amount,
+    accountId,
+    account,
+    categoryId,
+    category,
+    notes,
+    source,
+    note,
+    dryRun,
+  }) => {
+    if (nextDate && nextBillingDate && nextDate !== nextBillingDate) {
+      return {
+        success: false,
+        reason: 'conflicting_next_billing_date',
+        message: 'Use either nextDate or nextBillingDate, not both with different values.',
+      }
+    }
+
+    const sourceRows = query<TransactionSubscriptionSourceRow>(
+      'SELECT id, account_id, category_id, type, amount, currency, description, notes, date FROM transactions WHERE id = $1 LIMIT 1',
+      [transactionId]
+    )
+    if (sourceRows.length === 0) {
+      return {
+        success: false,
+        reason: 'transaction_not_found',
+        message: `Transaction ${transactionId} not found.`,
+      }
+    }
+
+    const sourceTransaction = sourceRows[0]
+    if (sourceTransaction.type === 'transfer') {
+      return {
+        success: false,
+        reason: 'subscription_transaction_type_unsupported',
+        message: 'Transfer transactions cannot be converted into subscriptions.',
+      }
+    }
+    if (!sourceTransaction.currency) {
+      return {
+        success: false,
+        reason: 'transaction_currency_missing',
+        message: `Transaction ${transactionId} has no currency. Repair it before creating a subscription from it.`,
+      }
+    }
+
+    const resolvedAccount =
+      accountId || account
+        ? resolveOptionalSubscriptionAccount(accountId, account)
+        : sourceTransaction.account_id
+          ? getSubscriptionAccount(sourceTransaction.account_id)
+          : { success: true as const, id: null, currency: null }
+    if (!resolvedAccount.success) return resolvedAccount
+
+    const resolvedCategory =
+      categoryId || category
+        ? resolveOptionalSubscriptionCategory(categoryId, category)
+        : { success: true as const, id: sourceTransaction.category_id, name: null }
+    if (!resolvedCategory.success) return resolvedCategory
+
+    const currencyFailure = subscriptionCurrencyFailure(
+      resolvedAccount.currency,
+      sourceTransaction.currency
+    )
+    if (currencyFailure) return currencyFailure
+
+    const id = generateId()
+    const amountCentavos = amount !== undefined ? toCentavos(amount) : sourceTransaction.amount
+    const resolvedNextBillingDate =
+      nextDate ??
+      nextBillingDate ??
+      nextSubscriptionDateFromTransactionDate(sourceTransaction.date, billingCycle)
+    const subscription: SubscriptionRow = {
+      id,
+      account_id: resolvedAccount.id,
+      category_id: resolvedCategory.id,
+      name: name ?? sourceTransaction.description,
+      amount: amountCentavos,
+      currency: sourceTransaction.currency,
+      billing_cycle: billingCycle,
+      next_billing_date: resolvedNextBillingDate,
+      icon: null,
+      color: null,
+      url: null,
+      notes: notes ?? sourceTransaction.notes,
+      is_active: 1,
+    }
+    const sourceSnapshot = transactionSourceSnapshot(sourceTransaction)
+    const subscriptionOutput = subscriptionSnapshot(subscription)
+
+    if (dryRun) {
+      return {
+        success: true,
+        action: 'created' as const,
+        dryRun: true,
+        wouldCreateSubscription: subscriptionOutput,
+        wouldLinkTransactionId: transactionId,
+        sourceTransaction: sourceSnapshot,
+        message: `Dry run: subscription "${subscription.name}" would be created from transaction ${transactionId}.`,
+      }
+    }
+
+    transaction(() => {
+      execute(
+        `INSERT INTO subscriptions (id, account_id, category_id, name, amount, currency, billing_cycle, next_billing_date, icon, color, url, notes, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        [
+          id,
+          subscription.account_id,
+          subscription.category_id,
+          subscription.name,
+          subscription.amount,
+          subscription.currency,
+          subscription.billing_cycle,
+          subscription.next_billing_date,
+          subscription.icon,
+          subscription.color,
+          subscription.url,
+          subscription.notes,
+          subscription.is_active,
+        ]
+      )
+      writeAuditLog({
+        entity: 'subscription',
+        entityId: id,
+        action: 'create-from-transaction',
+        before: { transaction: sourceSnapshot },
+        after: { subscription: subscriptionOutput, linkedTransactionId: transactionId },
+        source: source ?? null,
+        note: note ?? null,
+      })
+    })
+
+    return {
+      success: true,
+      action: 'created' as const,
+      subscription: subscriptionOutput,
+      linkedTransactionId: transactionId,
+      sourceTransaction: sourceSnapshot,
+      message: `Created subscription "${subscription.name}" from transaction ${transactionId}.`,
+    }
+  },
+}
+
 const updateSubscription: ToolDefinition = {
   name: 'update-subscription',
   description:
@@ -852,6 +1089,7 @@ export const investmentsandsubscriptionsTools: ToolDefinition[] = [
   manageInvestment,
   getUpcomingBills,
   createSubscription,
+  createSubscriptionFromTransaction,
   updateSubscription,
   deleteSubscription,
   listSubscriptions,

@@ -40,6 +40,16 @@ describe('MCP tool registration', () => {
     expect(toolNames).toEqual(tools.map((tool) => tool.name))
     expect(toolNames).toEqual(
       expect.arrayContaining([
+        'record-card-payment',
+        'credit-card-cycle-explain',
+        'create-placeholder-transaction',
+        'list-placeholder-transactions',
+        'resolve-placeholder-transaction',
+        'split-placeholder-transaction',
+        'tag-transaction',
+        'untag-transaction',
+        'list-tags',
+        'create-subscription-from-transaction',
         'list-subscriptions',
         'create-subscription',
         'create-credit-card-statement',
@@ -48,14 +58,19 @@ describe('MCP tool registration', () => {
         'review-suggestions',
         'backup-database',
         'restore-database',
+        'undo',
+        'finance-sanity-check',
         'audit-list',
         'audit-show',
-        'assistant-context',
+        'automation-context',
         'finance-profile',
         'export-data',
         'get-spending-summary',
         'get-education-tip',
         'generate-portfolio-review',
+        'list-plugins',
+        'enable-plugin',
+        'disable-plugin',
       ])
     )
   })

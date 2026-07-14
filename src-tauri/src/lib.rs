@@ -132,14 +132,48 @@ fn source_bridge_script(kind: BridgeKind) -> Option<PathBuf> {
     script_path.is_file().then_some(script_path)
 }
 
-fn installed_bridge_script(kind: BridgeKind) -> Option<PathBuf> {
-    let script_path = dirs::data_dir()?
-        .join(APP_IDENTIFIER)
-        .join(CLI_SUPPORT_DIR)
-        .join("dist")
-        .join(kind.source_script_name());
+fn installed_bridge_script(kind: BridgeKind) -> io::Result<Option<PathBuf>> {
+    let Some(data_dir) = dirs::data_dir() else {
+        return Ok(None);
+    };
+    let support_dir = data_dir.join(APP_IDENTIFIER).join(CLI_SUPPORT_DIR);
+    let script_path = support_dir.join("dist").join(kind.source_script_name());
+    if !script_path.is_file() {
+        return Ok(None);
+    }
 
-    script_path.is_file().then_some(script_path)
+    let package_path = support_dir.join("package.json");
+    let package_contents = fs::read_to_string(&package_path).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "installed Shikin automation support has no readable package metadata ({error}); reinstall it"
+            ),
+        )
+    })?;
+    let package: serde_json::Value = serde_json::from_str(&package_contents).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "installed Shikin automation support has invalid package metadata ({error}); reinstall it"
+            ),
+        )
+    })?;
+    let installed_version = package
+        .get("version")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let expected_version = env!("CARGO_PKG_VERSION");
+    if installed_version != expected_version {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "installed Shikin automation support version {installed_version:?} is incompatible with desktop version {expected_version}; reinstall automation support"
+            ),
+        ));
+    }
+
+    Ok(Some(script_path))
 }
 
 fn settings_file_path(identifier: &str) -> Option<PathBuf> {
@@ -196,7 +230,7 @@ fn run_bridge(kind: BridgeKind, args: &[OsString]) -> io::Result<i32> {
         }
     }
 
-    if let Some(script_path) = installed_bridge_script(kind) {
+    if let Some(script_path) = installed_bridge_script(kind)? {
         match run_node_script(&script_path, args) {
             Ok(code) => return Ok(code),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}

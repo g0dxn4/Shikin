@@ -38,6 +38,7 @@ type RecurringRuleRow = {
   category_name?: string | null
   account_currency?: string | null
   account_is_archived?: number | null
+  account_mode?: 'transactional' | 'snapshot_only' | null
 }
 
 type CountRow = { count: number }
@@ -680,7 +681,8 @@ const materializeRecurring: ToolDefinition = {
 
     // Find due recurring rules
     const dueRules = await query<RecurringRuleRow>(
-      `SELECT r.*, a.name as account_name, a.currency as account_currency, a.is_archived as account_is_archived
+      `SELECT r.*, a.name as account_name, a.currency as account_currency,
+              a.is_archived as account_is_archived, a.account_mode
        FROM recurring_rules r
        LEFT JOIN accounts a ON r.account_id = a.id
        WHERE r.active = 1 AND r.next_date <= $1`,
@@ -706,6 +708,17 @@ const materializeRecurring: ToolDefinition = {
         success: false,
         reason: 'account_archived',
         message: `Recurring rule "${archivedAccountRule.description}" points at archived account ${archivedAccountRule.account_id}. Unarchive the account or pause the rule before materializing it.`,
+      }
+    }
+
+    const snapshotAccountRule = dueRules.find(
+      (rule) => (rule.account_mode ?? 'transactional') === 'snapshot_only'
+    )
+    if (snapshotAccountRule) {
+      return {
+        success: false,
+        reason: 'snapshot_only_account',
+        message: `Recurring rule "${snapshotAccountRule.description}" points at snapshot-only account ${snapshotAccountRule.account_id}. Snapshot-only accounts do not accept transaction ledger writes.`,
       }
     }
 
@@ -777,7 +790,7 @@ const materializeRecurring: ToolDefinition = {
 
           const balanceChange = rule.type === 'income' ? rule.amount : -rule.amount
           execute(
-            "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
+            "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2 AND COALESCE(account_mode, 'transactional') = 'transactional'",
             [balanceChange, rule.account_id]
           )
 
@@ -875,7 +888,13 @@ const getRecurringExpectedVsPaid: ToolDefinition = {
     const occurrences = buildRecurringOccurrences(rules, startDate, endDate)
     const extendedStart = dayjs(startDate).subtract(fallbackWindowDays, 'day').format('YYYY-MM-DD')
     const extendedEnd = dayjs(endDate).add(fallbackWindowDays, 'day').format('YYYY-MM-DD')
-    const txFilters = ['type = $1', 'date >= $2', 'date <= $3']
+    const txFilters = [
+      'type = $1',
+      'date >= $2',
+      'date <= $3',
+      "COALESCE(reporting_treatment, 'normal') = 'normal'",
+      'COALESCE(is_archived, 0) = 0',
+    ]
     const txParams: unknown[] = [type, extendedStart, extendedEnd]
     if (accountId) {
       txFilters.push(`account_id = $${txParams.length + 1}`)

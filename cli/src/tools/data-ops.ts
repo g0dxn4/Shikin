@@ -37,6 +37,9 @@ type ImportTransactionInput = {
   status?: 'pending' | 'posted' | 'cleared'
   source?: string
   note?: string
+  ledgerTreatment?: 'normal' | 'staged_no_balance_impact'
+  reportingTreatment?: 'normal' | 'exclude_from_cashflow'
+  stagingBatchId?: string
   dryRun: boolean
 }
 
@@ -105,6 +108,7 @@ const EXPORT_TABLES: ExportTableSpec[] = [
       'credit_limit',
       'statement_closing_day',
       'payment_due_day',
+      'account_mode',
       'created_at',
       'updated_at',
     ],
@@ -146,10 +150,60 @@ const EXPORT_TABLES: ExportTableSpec[] = [
       'resolved_by_transaction_id',
       'placeholder_reason',
       'placeholder_parent_transaction_id',
+      'ledger_treatment',
+      'reporting_treatment',
+      'transaction_kind',
+      'staging_batch_id',
+      'reconciliation_id',
+      'matched_transaction_id',
+      'is_archived',
       'created_at',
       'updated_at',
     ],
     orderBy: 'date ASC, created_at ASC, id ASC',
+  },
+  {
+    name: 'account_reconciliations',
+    columns: [
+      'id',
+      'account_id',
+      'reconciliation_date',
+      'actual_balance',
+      'stored_balance_before',
+      'ledger_balance_before',
+      'ledger_balance_after',
+      'adjustment_amount',
+      'adjustment_transaction_id',
+      'staging_batch_id',
+      'statement_start_date',
+      'statement_end_date',
+      'source',
+      'note',
+      'created_at',
+    ],
+    orderBy: 'reconciliation_date ASC, account_id ASC, id ASC',
+  },
+  {
+    name: 'receivables',
+    columns: [
+      'id',
+      'payer',
+      'amount',
+      'received_amount',
+      'currency',
+      'due_date',
+      'project_reference',
+      'invoice_reference',
+      'status',
+      'account_id',
+      'matched_transaction_id',
+      'notes',
+      'source',
+      'note',
+      'created_at',
+      'updated_at',
+    ],
+    orderBy: 'due_date ASC, created_at ASC, id ASC',
   },
   {
     name: 'subscriptions',
@@ -414,6 +468,8 @@ const EXPORT_TABLES: ExportTableSpec[] = [
 ]
 
 const OPTIONAL_EXPORT_TABLES = new Set([
+  'account_reconciliations',
+  'receivables',
   'subscriptions',
   'budgets',
   'budget_periods',
@@ -436,7 +492,7 @@ const OPTIONAL_EXPORT_TABLES = new Set([
 ])
 
 const REDACTED_FIELD_PATTERN =
-  /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key|notes?|description|url|value|summary|tags|source|reason|before_json|after_json|pattern|highlights_json|breakdown_json)/i
+  /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key|payer|project[_-]?reference|invoice[_-]?reference|notes?|description|url|value|summary|tags|source|reason|before_json|after_json|pattern|highlights_json|breakdown_json)/i
 const REDACTED_SETTINGS_VALUE_KEYS = new Set([FINANCE_PROFILE_SETTING_KEY, 'account_aliases'])
 
 function stableJsonValue(value: unknown): unknown {
@@ -640,12 +696,18 @@ function buildImportRowInput({
   accountId,
   accountCurrency,
   defaultSource,
+  ledgerTreatment,
+  reportingTreatment,
+  stagingBatchId,
 }: {
   row: CsvRow
   headers: string[]
   accountId: string
   accountCurrency: string
   defaultSource: string
+  ledgerTreatment: 'normal' | 'staged_no_balance_impact'
+  reportingTreatment: 'normal' | 'exclude_from_cashflow'
+  stagingBatchId?: string
 }):
   | { success: true; input: ImportTransactionInput; externalId: string | null }
   | { success: false; errors: string[] } {
@@ -706,7 +768,10 @@ function buildImportRowInput({
     date: values.date.trim(),
     accountId,
     dryRun: true,
+    ledgerTreatment,
+    reportingTreatment,
   }
+  if (stagingBatchId) input.stagingBatchId = stagingBatchId
   const category = normalizeOptionalCell(values.category)
   const notes = normalizeOptionalCell(values.notes)
   const source = normalizeOptionalCell(values.source) ?? defaultSource
@@ -765,6 +830,8 @@ function findDuplicateImportTransaction(
     type: input.type,
     status: input.status,
     description: input.description,
+    source: input.source,
+    note: input.note,
   })
   return duplicateCheck.match
     ? {
@@ -1073,13 +1140,46 @@ const importTransactions: ToolDefinition = {
     source: boundedText('Source', 'Default source label for imported rows', 120)
       .optional()
       .default('csv-import'),
+    ledgerTreatment: z
+      .enum(['normal', 'staged_no_balance_impact'])
+      .optional()
+      .default('normal')
+      .describe('Import incomplete history as staged rows without changing balances'),
+    reportingTreatment: z
+      .enum(['normal', 'exclude_from_cashflow'])
+      .optional()
+      .default('normal')
+      .describe('Default reporting treatment for imported rows'),
+    stagingBatchId: boundedText(
+      'Staging batch ID',
+      'Required when importing staged_no_balance_impact history',
+      128
+    ).optional(),
   }),
-  execute: async ({ file, accountId, account, apply, dryRun, allowDuplicate, source }) => {
+  execute: async ({
+    file,
+    accountId,
+    account,
+    apply,
+    dryRun,
+    allowDuplicate,
+    source,
+    ledgerTreatment,
+    reportingTreatment,
+    stagingBatchId,
+  }) => {
     if (apply && dryRun) {
       return {
         success: false,
         reason: 'import_flag_conflict',
         message: 'Use either apply or dryRun, not both.',
+      }
+    }
+    if (ledgerTreatment === 'staged_no_balance_impact' && !stagingBatchId) {
+      return {
+        success: false,
+        reason: 'staging_batch_required',
+        message: 'stagingBatchId is required when importing staged statement history.',
       }
     }
 
@@ -1157,6 +1257,9 @@ const importTransactions: ToolDefinition = {
           accountId: resolvedAccount.id,
           accountCurrency: resolvedAccount.currency,
           defaultSource: source,
+          ledgerTreatment,
+          reportingTreatment,
+          stagingBatchId,
         })
         if (!built.success) {
           errors.push({ row: rowNumber, lineNumber: row.lineNumber, messages: built.errors })

@@ -24,9 +24,7 @@ export function normalizePattern(description: string): string {
  *  2. Partial match (pattern contains description or description contains pattern)
  *  3. Historical: most common category from transactions with similar descriptions
  */
-export async function suggestCategory(
-  description: string
-): Promise<CategorySuggestion | null> {
+export async function suggestCategory(description: string): Promise<CategorySuggestion | null> {
   const normalized = normalizePattern(description)
   if (!normalized) return null
 
@@ -63,9 +61,11 @@ export async function suggestCategory(
   // 3. Historical — most common category from transactions with similar descriptions
   const historical = await query<{ category_id: string; cnt: number }>(
     `SELECT category_id, COUNT(*) as cnt
-     FROM transactions
-     WHERE category_id IS NOT NULL
-       AND (LOWER(description) LIKE '%' || ? || '%' OR ? LIKE '%' || LOWER(description) || '%')
+      FROM transactions
+      WHERE category_id IS NOT NULL
+        AND COALESCE(reporting_treatment, 'normal') = 'normal'
+        AND COALESCE(is_archived, 0) = 0
+        AND (LOWER(description) LIKE '%' || ? || '%' OR ? LIKE '%' || LOWER(description) || '%')
      GROUP BY category_id
      ORDER BY cnt DESC
      LIMIT 1`,

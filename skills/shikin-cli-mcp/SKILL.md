@@ -87,7 +87,7 @@ The MCP server exposes the same shared tool catalog as the CLI and these resourc
 
 ## Representative Tool Surface
 
-Current catalog size is 83 shared CLI/MCP tools and 87 total CLI commands including CLI-only built-ins. All shipped tools are available end-to-end against the local database.
+Current catalog size is 90 shared CLI/MCP tools and 94 total CLI commands including CLI-only built-ins. All shipped tools are available end-to-end against the local database.
 The lists below are representative groups for orientation; use `shikin tools --json` for the authoritative command, argument, enum, catalog/schema version, compatibility, and required-migration metadata.
 
 Transaction tools:
@@ -96,6 +96,7 @@ Transaction tools:
 - `update-transaction`
 - `delete-transaction`
 - `query-transactions`
+- `match-transfer-transactions`, `unmatch-transfer-transactions`
 - `get-spending-summary`
 - `split-transaction`
 - `tag-transaction`, `untag-transaction`, `list-tags` (project-style labels stored as transaction tags, not a separate project entity)
@@ -111,6 +112,8 @@ Account and analytics tools:
 - `analyze-spending-trends`
 - `get-credit-card-status`
 - `get-net-worth`
+- `reconcile` (apply requires `basis=effective_ledger`)
+- `finalize-staged-statement-history`
 
 Budget, planning, and health tools:
 
@@ -128,6 +131,7 @@ Budget, planning, and health tools:
 Investment, subscription, and automation tools:
 
 - `manage-investment`
+- `manage-receivable`, `list-receivables`, `match-receivable`, `unmatch-receivable`
 - `get-upcoming-bills`
 - `list-subscriptions`
 - `get-subscription-spending`
@@ -158,6 +162,11 @@ Notebook tools:
 ## Safe Workflow Patterns
 
 - For money movement, run dry-run previews first. Examples: `record-card-payment --dry-run`, placeholder create/resolve/split dry-runs, and `undo` without `--apply`.
+- For incomplete statement history, import rows with `ledgerTreatment=staged_no_balance_impact` and one `stagingBatchId`, then preview and apply `finalize-staged-statement-history`. Do not finalize staged rows one at a time.
+- For reconciliation, preview `reconcile` first and inspect the effective ledger, stored balance, and bridge. Apply only with `basis=effective_ledger` after confirming the observed balance.
+- Use `accountMode=snapshot_only` for observed valuation accounts that do not have a transaction ledger. Transaction writers reject snapshot-only accounts; create a new transactional account instead of changing the balance basis after history exists.
+- For exact own-account payment pairs, preview `match-transfer-transactions`; use `unmatch-transfer-transactions` to reverse a mistaken link without deleting either imported row.
+- For expected client income, use receivables rather than pending transactions. Preview `match-receivable` and use `unmatch-receivable` for corrections.
 - For subscription automation, use `create-subscription-from-transaction` against an existing expense or income transaction. Review derived defaults and overrides before applying; transfers are not valid subscription sources.
 - For project-style organization, use transaction tags: `tag-transaction`, `untag-transaction`, `list-tags`, and `query-transactions --tag <tag>`.
 - For rollback, start with `undo --last --dry-run` or filter by `--audit-id`, `--transaction-id`, `--statement-id`, `--source`, `--command`, or `--account`. Apply only after checking dependent-write warnings and balance impact.

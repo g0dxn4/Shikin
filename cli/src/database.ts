@@ -46,6 +46,7 @@ const REQUIRED_CORE_SCHEMA: Record<string, readonly string[]> = {
   _migrations: ['id', 'name', 'applied_at'],
 }
 const REQUIRED_CLI_QOL_SCHEMA: Record<string, readonly string[]> = {
+  accounts: ['account_mode'],
   settings: ['key', 'value', 'updated_at'],
   transactions: [
     'status',
@@ -58,6 +59,13 @@ const REQUIRED_CLI_QOL_SCHEMA: Record<string, readonly string[]> = {
     'resolved_by_transaction_id',
     'placeholder_reason',
     'placeholder_parent_transaction_id',
+    'ledger_treatment',
+    'reporting_treatment',
+    'transaction_kind',
+    'staging_batch_id',
+    'reconciliation_id',
+    'matched_transaction_id',
+    'is_archived',
   ],
   audit_log: [
     'id',
@@ -117,6 +125,41 @@ const REQUIRED_CLI_QOL_SCHEMA: Record<string, readonly string[]> = {
     'paid_amount',
     'currency',
     'status',
+    'source',
+    'note',
+    'created_at',
+    'updated_at',
+  ],
+  account_reconciliations: [
+    'id',
+    'account_id',
+    'reconciliation_date',
+    'actual_balance',
+    'stored_balance_before',
+    'ledger_balance_before',
+    'ledger_balance_after',
+    'adjustment_amount',
+    'adjustment_transaction_id',
+    'staging_batch_id',
+    'statement_start_date',
+    'statement_end_date',
+    'source',
+    'note',
+    'created_at',
+  ],
+  receivables: [
+    'id',
+    'payer',
+    'amount',
+    'received_amount',
+    'currency',
+    'due_date',
+    'project_reference',
+    'invoice_reference',
+    'status',
+    'account_id',
+    'matched_transaction_id',
+    'notes',
     'source',
     'note',
     'created_at',
@@ -1114,7 +1157,7 @@ export function execute(
 
 export function transaction<T>(fn: () => T): T {
   const db = getDb()
-  return db.transaction(fn)()
+  return db.transaction(fn).immediate()
 }
 
 export function close(): void {

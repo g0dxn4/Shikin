@@ -145,6 +145,8 @@ function getSourceIncomeTransaction(transactionId: string) {
      FROM transactions t
      LEFT JOIN accounts a ON t.account_id = a.id
      WHERE t.id = $1
+       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(t.is_archived, 0) = 0
      LIMIT 1`,
     [transactionId]
   )[0]

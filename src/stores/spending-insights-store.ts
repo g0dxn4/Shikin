@@ -73,6 +73,8 @@ async function getSpendingByCategory(
      FROM transactions t
      LEFT JOIN categories c ON c.id = t.category_id
       WHERE t.type = 'expense'
+        AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+        AND COALESCE(t.is_archived, 0) = 0
         AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
         AND t.date >= ?
         AND t.date <= ?

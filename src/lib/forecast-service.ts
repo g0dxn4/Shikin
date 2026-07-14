@@ -58,6 +58,8 @@ export async function generateCashFlowForecast(
     `SELECT type, CAST(SUM(amount) AS REAL) / 90.0 as avg_daily
      FROM transactions
       WHERE date >= ? AND date <= ? AND type IN ('expense', 'income')
+        AND COALESCE(reporting_treatment, 'normal') = 'normal'
+        AND COALESCE(is_archived, 0) = 0
         AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
      GROUP BY type`,
     [ninetyDaysAgo, today]

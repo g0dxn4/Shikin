@@ -52,6 +52,8 @@ const getBalanceOverview: ToolDefinition = {
        FROM transactions t
        JOIN accounts a ON a.id = t.account_id
        WHERE a.is_archived = 0
+         AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+         AND COALESCE(t.is_archived, 0) = 0
          AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
          AND t.date >= $1 AND t.date <= $2
        GROUP BY t.currency`,
@@ -73,6 +75,8 @@ const getBalanceOverview: ToolDefinition = {
        FROM transactions t
        JOIN accounts a ON a.id = t.account_id
        WHERE a.is_archived = 0
+         AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+         AND COALESCE(t.is_archived, 0) = 0
          AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
          AND t.date >= $1 AND t.date <= $2
        GROUP BY t.currency`,
@@ -198,6 +202,8 @@ const analyzeSpendingTrends: ToolDefinition = {
        FROM transactions t
        LEFT JOIN categories c ON t.category_id = c.id
         WHERE t.type = 'expense'
+          AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+          AND COALESCE(t.is_archived, 0) = 0
           AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
           AND t.date >= $1 AND t.date <= $2
         GROUP BY month, t.currency, t.category_id, category_name
@@ -218,6 +224,8 @@ const analyzeSpendingTrends: ToolDefinition = {
          COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as total_income
        FROM transactions
        WHERE type IN ('income', 'expense')
+         AND COALESCE(reporting_treatment, 'normal') = 'normal'
+         AND COALESCE(is_archived, 0) = 0
          AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
          AND date >= $1 AND date <= $2
         GROUP BY month, currency

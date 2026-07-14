@@ -70,6 +70,8 @@ async function detectUnusualAmounts(recentDays: number = 30): Promise<Anomaly[]>
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1
+       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(t.is_archived, 0) = 0
        AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      ORDER BY t.date DESC`,
     [since]
@@ -85,6 +87,8 @@ async function detectUnusualAmounts(recentDays: number = 30): Promise<Anomaly[]>
     const history = await query<{ amount: number }>(
       `SELECT amount FROM transactions
        WHERE description = $1 AND type = 'expense' AND date >= $2 AND date < $3
+         AND COALESCE(reporting_treatment, 'normal') = 'normal'
+         AND COALESCE(is_archived, 0) = 0
          AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
       [tx.description, historyStart, since]
     )
@@ -129,6 +133,8 @@ async function detectDuplicateCharges(): Promise<Anomaly[]> {
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1
+       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(t.is_archived, 0) = 0
        AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      ORDER BY t.date DESC`,
     [since]
@@ -194,6 +200,8 @@ async function detectSpendingSpikes(): Promise<Anomaly[]> {
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1 AND t.date <= $2
+       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(t.is_archived, 0) = 0
        AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      GROUP BY t.category_id`,
     [thisMonthStart, thisMonthEnd]
@@ -205,6 +213,8 @@ async function detectSpendingSpikes(): Promise<Anomaly[]> {
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1 AND t.date <= $2
+       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(t.is_archived, 0) = 0
        AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      GROUP BY t.category_id`,
     [avgStart, avgEnd]
@@ -255,6 +265,8 @@ async function detectSubscriptionPriceChanges(): Promise<Anomaly[]> {
        SELECT description, amount, date
        FROM transactions
         WHERE type = 'expense' AND is_recurring = 1 AND date >= $1
+          AND COALESCE(reporting_treatment, 'normal') = 'normal'
+          AND COALESCE(is_archived, 0) = 0
           AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
        ORDER BY date ASC
      )
@@ -299,6 +311,8 @@ async function detectLargeTransactions(thresholdCentavos: number): Promise<Anoma
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
       WHERE t.type = 'expense' AND t.amount >= $1 AND t.date >= $2
+        AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+        AND COALESCE(t.is_archived, 0) = 0
         AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      ORDER BY t.amount DESC`,
     [thresholdCentavos, since]

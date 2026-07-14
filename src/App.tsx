@@ -40,6 +40,9 @@ const Goals = lazy(() => import('@/pages/goals').then((m) => ({ default: m.Goals
 const DebtPayoff = lazy(() =>
   import('@/pages/debt-payoff').then((m) => ({ default: m.DebtPayoff }))
 )
+const Receivables = lazy(() =>
+  import('@/pages/receivables').then((m) => ({ default: m.Receivables }))
+)
 const Forecast = lazy(() => import('@/pages/forecast').then((m) => ({ default: m.Forecast })))
 const NetWorth = lazy(() => import('@/pages/net-worth').then((m) => ({ default: m.NetWorth })))
 const SpendingHeatmap = lazy(() =>
@@ -290,6 +293,7 @@ export default function App() {
                 <Route path="/insights" element={<InsightsPage />} />
                 <Route path="/investments" element={<Investments />} />
                 <Route path="/debt-payoff" element={<DebtPayoff />} />
+                <Route path="/receivables" element={<Receivables />} />
                 <Route path="/forecast" element={<Forecast />} />
                 <Route path="/net-worth" element={<NetWorth />} />
                 <Route path="/spending-insights" element={<SpendingInsights />} />

@@ -37,6 +37,7 @@ describe('MCP tool registration', () => {
 
     const toolNames = registerTool.mock.calls.map(([name]) => name)
 
+    expect(tools).toHaveLength(90)
     expect(toolNames).toEqual(tools.map((tool) => tool.name))
     expect(toolNames).toEqual(
       expect.arrayContaining([
@@ -68,6 +69,13 @@ describe('MCP tool registration', () => {
         'get-spending-summary',
         'get-education-tip',
         'generate-portfolio-review',
+        'finalize-staged-statement-history',
+        'match-transfer-transactions',
+        'manage-receivable',
+        'list-receivables',
+        'match-receivable',
+        'unmatch-transfer-transactions',
+        'unmatch-receivable',
         'list-plugins',
         'enable-plugin',
         'disable-plugin',
@@ -111,6 +119,7 @@ describe('MCP tool registration', () => {
           type: 'checking',
           currency: 'USD',
           balance: 123.45,
+          accountMode: 'transactional',
           aliases: [],
         },
       ],
@@ -260,7 +269,14 @@ describe('MCP resource registration', () => {
     queryMock.mockReset()
     queryMock
       .mockReturnValueOnce([
-        { id: 'acct-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 12345 },
+        {
+          id: 'acct-1',
+          name: 'Checking',
+          type: 'checking',
+          currency: 'USD',
+          balance: 12345,
+          accountMode: 'snapshot_only',
+        },
       ])
       .mockReturnValueOnce([{ value: '{"checking":"acct-1"}' }])
       .mockReturnValueOnce([{ id: 'cat-1', name: 'Food', type: 'expense', color: '#fff' }])
@@ -278,9 +294,19 @@ describe('MCP resource registration', () => {
           note: 'resource note',
           recurringRuleId: 'rule-1',
           transferToAccountId: null,
+          ledgerTreatment: 'normal',
+          reportingTreatment: 'exclude_from_cashflow',
+          transactionKind: 'reconciliation_bridge',
+          stagingBatchId: null,
+          reconciliationId: 'reconciliation-1',
+          matchedTransactionId: null,
           category: 'Food',
           account: 'Checking',
+          accountMode: 'snapshot_only',
           transferToAccount: null,
+          reconciliationDate: '2026-01-01',
+          statementStartDate: '2025-12-01',
+          statementEndDate: '2025-12-31',
         },
       ])
 
@@ -315,6 +341,7 @@ describe('MCP resource registration', () => {
         type: 'checking',
         currency: 'USD',
         balance: 123.45,
+        accountMode: 'snapshot_only',
         aliases: ['checking'],
       },
     ])
@@ -335,11 +362,24 @@ describe('MCP resource registration', () => {
         note: 'resource note',
         recurringRuleId: 'rule-1',
         transferToAccountId: null,
+        ledgerTreatment: 'normal',
+        reportingTreatment: 'exclude_from_cashflow',
+        transactionKind: 'reconciliation_bridge',
+        stagingBatchId: null,
+        reconciliationId: 'reconciliation-1',
+        matchedTransactionId: null,
         category: 'Food',
         account: 'Checking',
+        accountMode: 'snapshot_only',
         transferToAccount: null,
+        reconciliationDate: '2026-01-01',
+        statementStartDate: '2025-12-01',
+        statementEndDate: '2025-12-31',
       },
     ])
+    expect(queryMock).toHaveBeenCalledWith(
+      expect.stringContaining('COALESCE(t.is_archived, 0) = 0')
+    )
   })
 
   it('returns structured execution errors for resource failures', async () => {

@@ -77,7 +77,10 @@ async function saveStreak(streak: StreakData): Promise<void> {
 
 export async function computeStreak(): Promise<StreakData> {
   const rows = await query<{ d: string }>(
-    `SELECT DISTINCT date(date) as d FROM transactions ORDER BY d DESC`
+    `SELECT DISTINCT date(date) as d FROM transactions
+     WHERE COALESCE(reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(is_archived, 0) = 0
+     ORDER BY d DESC`
   )
 
   if (rows.length === 0) {
@@ -129,7 +132,11 @@ export async function computeStreak(): Promise<StreakData> {
 // --- Achievement checks ---
 
 async function checkFirstSteps(): Promise<boolean> {
-  const rows = await query<{ cnt: number }>('SELECT COUNT(*) as cnt FROM transactions')
+  const rows = await query<{ cnt: number }>(
+    `SELECT COUNT(*) as cnt FROM transactions
+     WHERE COALESCE(reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(is_archived, 0) = 0`
+  )
   return (rows[0]?.cnt ?? 0) >= 1
 }
 
@@ -154,6 +161,8 @@ async function checkBudgetBoss(): Promise<boolean> {
     const spent = await query<{ total: number }>(
       `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
        WHERE category_id = ? AND type = 'expense' AND date >= ? AND date <= ?
+         AND COALESCE(reporting_treatment, 'normal') = 'normal'
+         AND COALESCE(is_archived, 0) = 0
          AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
       [b.category_id, start, end]
     )
@@ -170,12 +179,16 @@ async function checkSavingsStar(): Promise<boolean> {
   const income = await query<{ total: number }>(
     `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
      WHERE type = 'income' AND date >= ? AND date <= ?
+       AND COALESCE(reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(is_archived, 0) = 0
        AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
     [start, end]
   )
   const expenses = await query<{ total: number }>(
     `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
      WHERE type = 'expense' AND date >= ? AND date <= ?
+       AND COALESCE(reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(is_archived, 0) = 0
        AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
     [start, end]
   )
@@ -187,7 +200,11 @@ async function checkSavingsStar(): Promise<boolean> {
 }
 
 async function checkCenturyClub(): Promise<boolean> {
-  const rows = await query<{ cnt: number }>('SELECT COUNT(*) as cnt FROM transactions')
+  const rows = await query<{ cnt: number }>(
+    `SELECT COUNT(*) as cnt FROM transactions
+     WHERE COALESCE(reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(is_archived, 0) = 0`
+  )
   return (rows[0]?.cnt ?? 0) >= 100
 }
 
@@ -198,6 +215,8 @@ async function checkDiversified(): Promise<boolean> {
   const rows = await query<{ cnt: number }>(
     `SELECT COUNT(DISTINCT category_id) as cnt FROM transactions
      WHERE type = 'expense' AND category_id IS NOT NULL AND date >= ? AND date <= ?
+       AND COALESCE(reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(is_archived, 0) = 0
        AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
     [start, end]
   )

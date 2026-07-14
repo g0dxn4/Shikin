@@ -76,6 +76,8 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
          LEFT JOIN categories c ON b.category_id = c.id
          LEFT JOIN transactions t ON t.category_id = b.category_id
           AND t.type = 'expense'
+          AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+          AND COALESCE(t.is_archived, 0) = 0
           AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
           AND (
             (b.period = 'weekly' AND t.date >= ? AND t.date <= ?) OR

@@ -64,6 +64,7 @@ describe('Sidebar', () => {
     expect(screen.getByText('nav.budgets')).toBeInTheDocument()
     expect(screen.getByText('nav.categories')).toBeInTheDocument()
     expect(screen.getByText('nav.goals')).toBeInTheDocument()
+    expect(screen.getByText('nav.receivables')).toBeInTheDocument()
     expect(screen.getByText('nav.insights')).toBeInTheDocument()
     expect(screen.getByText('nav.settings')).toBeInTheDocument()
   })
@@ -81,7 +82,7 @@ describe('Sidebar', () => {
     render(<Sidebar />)
 
     const links = screen.getAllByRole('link')
-    expect(links.length).toBe(9)
+    expect(links.length).toBe(10)
   })
 
   it('collapse button calls toggleSidebar', async () => {

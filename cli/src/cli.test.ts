@@ -235,7 +235,7 @@ describe('CLI command execution', () => {
     })
     expect(output.database).toMatchObject({
       requiredMigrations: [...CLI_DATABASE_MIGRATIONS],
-      latestRequiredMigration: '018_placeholder_transactions',
+      latestRequiredMigration: '019_financial_semantics',
       migrationCount: CLI_DATABASE_MIGRATIONS.length,
       expectsCurrent016FoundationSchema: true,
       foundationMigration: '016_cli_qol_foundation',
@@ -302,6 +302,8 @@ describe('CLI command execution', () => {
     await program.parseAsync(['node', 'shikin', 'tools', '--json'])
 
     const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
+    expect(output.catalogVersion).toBe('2026-07-14.financial-semantics')
+    expect(output.toolCount).toBe(90)
     const commandByName = new Map(
       output.commands.map((command: { name: string }) => [command.name, command])
     )
@@ -335,6 +337,31 @@ describe('CLI command execution', () => {
       'split-placeholder-transaction': ['transactionId', 'splits', 'dryRun', 'source', 'note'],
       'tag-transaction': ['transactionId', 'tag', 'source', 'note'],
       'create-subscription-from-transaction': ['transactionId', 'dryRun', 'source', 'note'],
+      'finalize-staged-statement-history': [
+        'accountId',
+        'account',
+        'stagingBatchId',
+        'actualBalance',
+        'statementStartDate',
+        'statementEndDate',
+        'apply',
+        'source',
+        'note',
+      ],
+      reconcile: ['accountId', 'account', 'actualBalance', 'basis', 'apply', 'source', 'note'],
+      'match-transfer-transactions': [
+        'sourceTransactionId',
+        'mirrorTransactionId',
+        'dateWindowDays',
+        'apply',
+        'source',
+        'note',
+      ],
+      'unmatch-transfer-transactions': ['sourceTransactionId', 'apply', 'source', 'note'],
+      'manage-receivable': ['action', 'receivableId', 'payer', 'amount', 'apply'],
+      'list-receivables': ['status', 'overdue', 'accountId', 'account', 'search'],
+      'match-receivable': ['receivableId', 'transactionId', 'apply', 'source', 'note'],
+      'unmatch-receivable': ['receivableId', 'apply', 'source', 'note'],
       undo: ['apply', 'dryRun', 'source', 'note'],
       'finance-sanity-check': ['redacted', 'limit'],
     }
@@ -1377,6 +1404,7 @@ describe('CLI command execution', () => {
         { name: '016_cli_qol_foundation' },
         { name: '017_investment_type_cetes' },
         { name: '018_placeholder_transactions' },
+        { name: '019_financial_semantics' },
       ])
       .mockReturnValueOnce([{ count: 2 }])
       .mockReturnValueOnce([{ count: 14 }])
@@ -1439,7 +1467,7 @@ describe('CLI command execution', () => {
           database: {
             ready: true,
             migrationCount: CLI_DATABASE_MIGRATIONS.length,
-            latestMigration: '018_placeholder_transactions',
+            latestMigration: '019_financial_semantics',
             accountCount: 2,
             categoryCount: 14,
             transactionCount: 42,

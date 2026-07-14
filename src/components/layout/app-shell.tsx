@@ -10,6 +10,7 @@ import {
   Sparkles,
   LayoutGrid,
   TrendingUp,
+  Wallet,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Sidebar } from './sidebar'
@@ -61,6 +62,12 @@ const mobileMoreNavItems = [
     label: 'Goals',
     href: '/goals',
     activeHrefs: ['/debt-payoff'],
+  },
+  {
+    icon: <Wallet size={20} />,
+    labelKey: 'nav.receivables',
+    label: 'Receivables',
+    href: '/receivables',
   },
   { icon: <Settings size={20} />, labelKey: 'nav.settings', label: 'Settings', href: '/settings' },
 ]

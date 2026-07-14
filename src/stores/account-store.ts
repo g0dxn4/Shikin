@@ -16,6 +16,7 @@ interface AccountFormData {
   creditLimit?: number
   statementClosingDay?: number
   paymentDueDay?: number
+  accountMode?: Account['account_mode']
 }
 
 interface BalanceHistoryPoint {
@@ -212,8 +213,8 @@ export const useAccountStore = create<AccountState>((set, get) => ({
       const now = new Date().toISOString()
       const creditFields = getCreditCardFields(data)
       await execute(
-        `INSERT INTO accounts (id, name, type, currency, balance, credit_limit, statement_closing_day, payment_due_day, is_archived, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+        `INSERT INTO accounts (id, name, type, currency, balance, credit_limit, statement_closing_day, payment_due_day, account_mode, is_archived, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
         [
           id,
           data.name,
@@ -223,6 +224,7 @@ export const useAccountStore = create<AccountState>((set, get) => ({
           creditFields.creditLimit,
           creditFields.statementClosingDay,
           creditFields.paymentDueDay,
+          data.accountMode ?? 'transactional',
           now,
           now,
         ]
@@ -253,6 +255,26 @@ export const useAccountStore = create<AccountState>((set, get) => ({
         if (existing[0].is_archived === 1) {
           throw new Error(`Account ${id} is archived. Unarchive it before editing it.`)
         }
+        if (data.accountMode) {
+          const modes = await tx.query<Pick<Account, 'account_mode'>>(
+            'SELECT account_mode FROM accounts WHERE id = ? LIMIT 1',
+            [id]
+          )
+          if (data.accountMode !== (modes[0]?.account_mode ?? 'transactional')) {
+            const transactionRows = await tx.query<{ count: number }>(
+              `SELECT COUNT(*) AS count
+               FROM transactions
+               WHERE (account_id = ? OR transfer_to_account_id = ?)
+                 AND COALESCE(is_archived, 0) = 0`,
+              [id, id]
+            )
+            if ((transactionRows[0]?.count ?? 0) > 0) {
+              throw new Error(
+                'Create a new account to change balance tracking mode after transactions exist.'
+              )
+            }
+          }
+        }
 
         if (
           normalizeAccountCurrency(existing[0].currency) !== normalizeAccountCurrency(data.currency)
@@ -266,7 +288,7 @@ export const useAccountStore = create<AccountState>((set, get) => ({
         const now = new Date().toISOString()
         const creditFields = getCreditCardFields(data)
         await tx.execute(
-          `UPDATE accounts SET name = ?, type = ?, currency = ?, balance = ?, credit_limit = ?, statement_closing_day = ?, payment_due_day = ?, updated_at = ? WHERE id = ?`,
+          `UPDATE accounts SET name = ?, type = ?, currency = ?, balance = ?, credit_limit = ?, statement_closing_day = ?, payment_due_day = ?, account_mode = COALESCE(?, account_mode), updated_at = ? WHERE id = ?`,
           [
             data.name,
             data.type,
@@ -275,6 +297,7 @@ export const useAccountStore = create<AccountState>((set, get) => ({
             creditFields.creditLimit,
             creditFields.statementClosingDay,
             creditFields.paymentDueDay,
+            data.accountMode ?? null,
             now,
             id,
           ]

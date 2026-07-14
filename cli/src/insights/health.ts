@@ -20,6 +20,8 @@ export async function calculateFinancialHealthScoreSummary() {
     `SELECT currency, type, COALESCE(SUM(amount), 0) AS total
      FROM transactions
      WHERE type IN ('income', 'expense') AND date >= $1 AND date <= $2
+       AND COALESCE(reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(is_archived, 0) = 0
        AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
      GROUP BY currency, type`,
     [startOfMonth, today]
@@ -40,6 +42,8 @@ export async function calculateFinancialHealthScoreSummary() {
     `SELECT currency, COALESCE(SUM(amount), 0) AS total
      FROM transactions
      WHERE type = 'expense' AND date >= $1 AND date <= $2
+       AND COALESCE(reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(is_archived, 0) = 0
        AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
      GROUP BY currency`,
     [dayjs().subtract(3, 'month').startOf('month').format('YYYY-MM-DD'), today]
@@ -48,6 +52,8 @@ export async function calculateFinancialHealthScoreSummary() {
     `SELECT substr(date, 1, 7) AS month, currency, COALESCE(SUM(amount), 0) AS total
      FROM transactions
      WHERE type = 'expense' AND date >= $1 AND date <= $2
+       AND COALESCE(reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(is_archived, 0) = 0
        AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
      GROUP BY substr(date, 1, 7), currency`,
     [sixMonthsAgo, today]

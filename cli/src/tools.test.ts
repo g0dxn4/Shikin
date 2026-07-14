@@ -209,7 +209,7 @@ describe('CLI tool validation regressions', () => {
     expect(mockQuery).toHaveBeenCalledTimes(4)
     expect(mockQuery).toHaveBeenNthCalledWith(
       1,
-      'SELECT id, currency, is_archived FROM accounts WHERE id = $1 LIMIT 1',
+      'SELECT id, currency, is_archived, account_mode FROM accounts WHERE id = $1 LIMIT 1',
       ['acct-2']
     )
     expect(mockQuery).toHaveBeenNthCalledWith(
@@ -233,6 +233,9 @@ describe('CLI tool validation regressions', () => {
         'posted',
         null,
         null,
+        null,
+        'normal',
+        'normal',
         null,
         expect.any(String),
       ]
@@ -263,13 +266,17 @@ describe('CLI tool validation regressions', () => {
 
   it('previews add-transaction balance impact and audit on dry-runs', async () => {
     mockQuery.mockImplementation((sql: string) => {
-      if (sql.includes('SELECT id, currency, is_archived FROM accounts WHERE id = $1 LIMIT 1')) {
+      if (
+        sql.includes(
+          'SELECT id, currency, is_archived, account_mode FROM accounts WHERE id = $1 LIMIT 1'
+        )
+      ) {
         return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
       }
       if (sql.includes('SELECT id, balance FROM accounts')) {
         return [{ id: 'acct-1', balance: 5000 }]
       }
-      if (sql.includes('SELECT id, name FROM accounts') && !sql.includes('AND is_archived = 1')) {
+      if (sql.includes('SELECT id, name FROM accounts') && !sql.includes('is_archived = 1')) {
         return [{ id: 'acct-1', name: 'Checking' }]
       }
       return []
@@ -324,13 +331,17 @@ describe('CLI tool validation regressions', () => {
 
   it('previews placeholder transaction creation with balance and audit impact', async () => {
     mockQuery.mockImplementation((sql: string) => {
-      if (sql.includes('SELECT id, currency, is_archived FROM accounts WHERE id = $1 LIMIT 1')) {
+      if (
+        sql.includes(
+          'SELECT id, currency, is_archived, account_mode FROM accounts WHERE id = $1 LIMIT 1'
+        )
+      ) {
         return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
       }
       if (sql.includes('SELECT id, balance FROM accounts')) {
         return [{ id: 'acct-1', balance: 5000 }]
       }
-      if (sql.includes('SELECT id, name FROM accounts') && !sql.includes('AND is_archived = 1')) {
+      if (sql.includes('SELECT id, name FROM accounts') && !sql.includes('is_archived = 1')) {
         return [{ id: 'acct-1', name: 'Checking' }]
       }
       return []
@@ -452,7 +463,7 @@ describe('CLI tool validation regressions', () => {
       if (sql.includes('SELECT id, balance FROM accounts')) {
         return [{ id: 'acct-1', balance: 5000 }]
       }
-      if (sql.includes('SELECT id, name FROM accounts') && !sql.includes('AND is_archived = 1')) {
+      if (sql.includes('SELECT id, name FROM accounts') && !sql.includes('is_archived = 1')) {
         return [{ id: 'acct-1', name: 'Checking' }]
       }
       return []
@@ -637,7 +648,7 @@ describe('CLI tool validation regressions', () => {
       if (sql.includes('SELECT id, balance FROM accounts')) {
         return [{ id: 'acct-1', balance: 5000 }]
       }
-      if (sql.includes('SELECT id, name FROM accounts') && !sql.includes('AND is_archived = 1')) {
+      if (sql.includes('SELECT id, name FROM accounts') && !sql.includes('is_archived = 1')) {
         return [{ id: 'acct-1', name: 'Checking' }]
       }
       return []
@@ -896,6 +907,9 @@ describe('CLI tool validation regressions', () => {
         null,
         null,
         null,
+        'normal',
+        'normal',
+        null,
         expect.any(String),
       ]
     )
@@ -1020,6 +1034,9 @@ describe('CLI tool validation regressions', () => {
         'posted',
         null,
         null,
+        null,
+        'normal',
+        'normal',
         null,
         expect.any(String),
       ]
@@ -1901,19 +1918,18 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('writes account audit rows for metadata-only updates', async () => {
-    mockQuery.mockReturnValueOnce([
-      {
-        id: 'acct-1',
-        name: 'Checking',
-        type: 'checking',
-        currency: 'USD',
-        balance: 1000,
-        is_archived: 0,
-        credit_limit: null,
-        statement_closing_day: null,
-        payment_due_day: null,
-      },
-    ])
+    const accountRow = {
+      id: 'acct-1',
+      name: 'Checking',
+      type: 'checking',
+      currency: 'USD',
+      balance: 1000,
+      is_archived: 0,
+      credit_limit: null,
+      statement_closing_day: null,
+      payment_due_day: null,
+    }
+    mockQuery.mockReturnValueOnce([accountRow]).mockReturnValueOnce([accountRow])
 
     const result = await updateAccount.execute(
       updateAccount.schema.parse({
@@ -2166,7 +2182,7 @@ describe('CLI tool validation regressions', () => {
         previousPaidAmount: 20,
         newPaidAmount: 70,
         amountToPay: 53.45,
-        paymentStatus: 'partial',
+        paymentStatus: 'overdue',
       }),
       duplicatePolicy: { allowDuplicate: false, applyBlocked: false, reason: null },
       warnings: [],
@@ -2290,7 +2306,11 @@ describe('CLI tool validation regressions', () => {
       if (sql.includes('SELECT value FROM settings')) {
         return [{ value: JSON.stringify({ 'checking-main': 'acct-1', 'rewards-card': 'cc-1' }) }]
       }
-      if (sql.includes('SELECT id, currency, is_archived FROM accounts WHERE id = $1 LIMIT 1')) {
+      if (
+        sql.includes(
+          'SELECT id, currency, is_archived, account_mode FROM accounts WHERE id = $1 LIMIT 1'
+        )
+      ) {
         return [{ id: params?.[0], currency: 'USD', is_archived: 0 }]
       }
       if (sql.includes('SELECT * FROM accounts WHERE id = $1 LIMIT 1')) {
@@ -2627,7 +2647,11 @@ describe('CLI tool validation regressions', () => {
         if (sql.includes('SELECT value FROM settings')) {
           return Object.keys(aliases).length > 0 ? [{ value: JSON.stringify(aliases) }] : []
         }
-        if (sql.includes('SELECT id, currency, is_archived FROM accounts WHERE id = $1 LIMIT 1')) {
+        if (
+          sql.includes(
+            'SELECT id, currency, is_archived, account_mode FROM accounts WHERE id = $1 LIMIT 1'
+          )
+        ) {
           return params?.[0] === 'cc-1' ? [{ id: 'cc-1', currency: 'MXN', is_archived: 0 }] : []
         }
         if (sql.includes('WHERE id = $1 OR LOWER(name) = LOWER($2)')) {
@@ -2711,7 +2735,7 @@ describe('CLI tool validation regressions', () => {
         statementBalance: 123.45,
         minimumPayment: 25,
         amountToPay: 123.45,
-        paymentStatus: 'open',
+        paymentStatus: 'overdue',
       }),
     })
     expect(mockExecute).not.toHaveBeenCalled()
@@ -2791,7 +2815,7 @@ describe('CLI tool validation regressions', () => {
         paidAmount: 25,
         amountToPay: 98.45,
         minimumPaymentDue: 0,
-        paymentStatus: 'partial',
+        paymentStatus: 'overdue',
       }),
     })
     expect(mockExecute).toHaveBeenCalledWith(
@@ -2892,7 +2916,7 @@ describe('CLI tool validation regressions', () => {
     ])
 
     const listResult = await listCreditCardStatements.execute(
-      listCreditCardStatements.schema.parse({ status: 'open', limit: 10 })
+      listCreditCardStatements.schema.parse({ status: 'overdue', limit: 10 })
     )
     expect(listResult).toMatchObject({
       success: true,
@@ -4417,7 +4441,38 @@ describe('CLI tool validation regressions', () => {
       if (sql.includes('FROM audit_log') && sql.includes('created_at >')) return []
       if (sql.includes('FROM audit_log')) return [auditRow]
       if (sql.includes('FROM transactions') && sql.includes('WHERE id = $1'))
-        return [{ id: 'tx-undo' }]
+        return [
+          {
+            id: 'tx-undo',
+            account_id: 'acct-1',
+            category_id: null,
+            transfer_to_account_id: null,
+            type: 'expense',
+            amount: 1000,
+            currency: 'USD',
+            description: 'Lunch',
+            notes: null,
+            status: 'posted',
+            source: 'mcp',
+            note: 'created by workflow',
+            recurring_rule_id: null,
+            tags: '[]',
+            is_placeholder: 0,
+            placeholder_status: null,
+            resolved_at: null,
+            resolved_by_transaction_id: null,
+            placeholder_reason: null,
+            placeholder_parent_transaction_id: null,
+            date: '2026-05-18',
+            ledger_treatment: 'normal',
+            reporting_treatment: 'normal',
+            transaction_kind: 'standard',
+            staging_batch_id: null,
+            reconciliation_id: null,
+            matched_transaction_id: null,
+            is_archived: 0,
+          },
+        ]
       if (sql.includes('FROM accounts') && sql.includes('WHERE id IN')) {
         return [{ id: 'acct-1', name: 'Checking', balance: 4000 }]
       }
@@ -4496,7 +4551,38 @@ describe('CLI tool validation regressions', () => {
       if (sql.includes('FROM audit_log') && sql.includes('created_at >')) return []
       if (sql.includes('FROM audit_log')) return [auditRow]
       if (sql.includes('FROM transactions') && sql.includes('WHERE id = $1'))
-        return [{ id: 'tx-undo' }]
+        return [
+          {
+            id: 'tx-undo',
+            account_id: 'acct-1',
+            category_id: null,
+            transfer_to_account_id: null,
+            type: 'expense',
+            amount: 1000,
+            currency: 'USD',
+            description: 'Lunch',
+            notes: null,
+            status: 'posted',
+            source: 'mcp',
+            note: 'created by workflow',
+            recurring_rule_id: null,
+            tags: '[]',
+            is_placeholder: 0,
+            placeholder_status: null,
+            resolved_at: null,
+            resolved_by_transaction_id: null,
+            placeholder_reason: null,
+            placeholder_parent_transaction_id: null,
+            date: '2026-05-18',
+            ledger_treatment: 'normal',
+            reporting_treatment: 'normal',
+            transaction_kind: 'standard',
+            staging_batch_id: null,
+            reconciliation_id: null,
+            matched_transaction_id: null,
+            is_archived: 0,
+          },
+        ]
       if (sql.includes('FROM accounts') && sql.includes('WHERE id IN')) {
         return [{ id: 'acct-1', name: 'Checking', balance: 4000 }]
       }
@@ -4715,7 +4801,22 @@ describe('CLI tool validation regressions', () => {
       if (sql.includes('FROM audit_log') && sql.includes('created_at >')) return []
       if (sql.includes('FROM audit_log')) return [auditRow]
       if (sql.includes('FROM credit_card_statements') && sql.includes('WHERE id = $1')) {
-        return [{ id: 'stmt-1' }]
+        return [
+          {
+            id: 'stmt-1',
+            account_id: 'cc-1',
+            statement_start_date: '2026-04-01',
+            statement_end_date: '2026-04-30',
+            due_date: '2026-05-10',
+            statement_balance: 50000,
+            minimum_payment: 2500,
+            paid_amount: 20000,
+            currency: 'USD',
+            status: 'partial',
+            source: 'bank-import',
+            note: 'after correction',
+          },
+        ]
       }
       return []
     })
@@ -4897,6 +4998,15 @@ describe('CLI tool validation regressions', () => {
             currency: 'USD',
             stored_balance: 10000,
             computed_balance: 9500,
+            account_mode: 'transactional',
+          },
+          {
+            id: 'acct-snapshot',
+            name: 'Bitso',
+            currency: 'MXN',
+            stored_balance: 500000,
+            computed_balance: 0,
+            account_mode: 'snapshot_only',
           },
         ]
       }
@@ -4953,10 +5063,10 @@ describe('CLI tool validation regressions', () => {
       redacted: true,
       status: 'critical',
       summary: {
-        totalFindings: 12,
+        totalFindings: 13,
         critical: 2,
         warning: 7,
-        info: 3,
+        info: 4,
       },
     })
     const findings = result.findings as Array<Record<string, unknown>>
@@ -4969,6 +5079,7 @@ describe('CLI tool validation regressions', () => {
         'recurring_expected_late',
         'low_balance',
         'balance_mismatch',
+        'snapshot_ledger_difference',
         'old_pending_transaction',
         'missing_category',
         'unusually_large_transaction',
@@ -4996,6 +5107,12 @@ describe('CLI tool validation regressions', () => {
       accountName: '[REDACTED]',
       daysApart: 2,
       descriptionSimilarity: 1,
+      duplicateSignals: expect.arrayContaining([
+        'same_account',
+        'same_amount',
+        'same_type',
+        'same_status',
+      ]),
     })
     expect(findings.find((finding) => finding.type === 'recent_provenance_write')).toMatchObject({
       source: '[REDACTED]',
@@ -5005,6 +5122,15 @@ describe('CLI tool validation regressions', () => {
       String(sql).includes('ABS(t.amount) >= $3')
     )
     expect(hygieneCall?.[1]).toEqual(['2026-05-11', '2026-04-18', 100000, '2026-04-18', 10])
+    expect(String(hygieneCall?.[0])).toContain(
+      "transaction_kind, 'standard') <> 'reconciliation_bridge'"
+    )
+    expect(findings.find((finding) => finding.type === 'snapshot_ledger_difference')).toMatchObject(
+      {
+        severity: 'info',
+        accountMode: 'snapshot_only',
+      }
+    )
   })
 
   it('reports exact duplicate finance sanity findings once per transaction pair', async () => {
@@ -5873,7 +5999,7 @@ describe('CLI tool validation regressions', () => {
       if (sql.includes('SELECT id, balance FROM accounts')) {
         return [{ id: 'acct-1', balance: 5000 }]
       }
-      if (sql.includes('SELECT id, name FROM accounts') && !sql.includes('AND is_archived = 1')) {
+      if (sql.includes('SELECT id, name FROM accounts') && !sql.includes('is_archived = 1')) {
         return [{ id: 'acct-1', name: 'Checking' }]
       }
       return []
@@ -5904,6 +6030,9 @@ describe('CLI tool validation regressions', () => {
           'posted',
           'csv-import',
           null,
+          null,
+          'normal',
+          'normal',
           null,
           '2026-05-01',
         ]
@@ -6458,6 +6587,9 @@ describe('CLI tool validation regressions', () => {
       null,
       null,
       null,
+      'normal',
+      'normal',
+      null,
       'tx-1',
     ])
     expect(mockExecute.mock.calls[1]?.[0]).toContain('INSERT INTO audit_log')
@@ -6503,6 +6635,9 @@ describe('CLI tool validation regressions', () => {
       null,
       null,
       null,
+      'normal',
+      'normal',
+      null,
       'tx-1',
     ])
     expect(mockExecute.mock.calls[1]?.[0]).toContain('INSERT INTO audit_log')
@@ -6532,7 +6667,7 @@ describe('CLI tool validation regressions', () => {
       })
     )
 
-    expect(mockQuery).toHaveBeenCalledTimes(1)
+    expect(mockQuery).toHaveBeenCalledTimes(2)
     expect(mockExecute).toHaveBeenNthCalledWith(1, expect.stringContaining('UPDATE transactions'), [
       2500,
       'expense',
@@ -6546,6 +6681,9 @@ describe('CLI tool validation regressions', () => {
       'posted',
       null,
       null,
+      null,
+      'normal',
+      'normal',
       null,
       'tx-legacy',
     ])
@@ -6613,7 +6751,7 @@ describe('CLI tool validation regressions', () => {
     )
     expect(mockQuery).toHaveBeenNthCalledWith(
       2,
-      'SELECT id, currency, is_archived FROM accounts WHERE id = $1 LIMIT 1',
+      'SELECT id, currency, is_archived, account_mode FROM accounts WHERE id = $1 LIMIT 1',
       ['missing-account']
     )
     expect(result).toEqual({
@@ -6814,7 +6952,7 @@ describe('CLI tool validation regressions', () => {
     const result = await manageRecurringTransaction.execute(input)
 
     expect(mockQuery).toHaveBeenCalledWith(
-      'SELECT id, currency, is_archived FROM accounts WHERE id = $1 LIMIT 1',
+      'SELECT id, currency, is_archived, account_mode FROM accounts WHERE id = $1 LIMIT 1',
       ['acct-2']
     )
     expect(mockExecute).toHaveBeenCalledWith(
@@ -7620,6 +7758,9 @@ describe('CLI tool validation regressions', () => {
       null,
       null,
       null,
+      'normal',
+      'normal',
+      null,
       'tx-1',
     ])
     expect(mockExecute).toHaveBeenNthCalledWith(
@@ -7664,7 +7805,7 @@ describe('CLI tool validation regressions', () => {
       if (sql.includes('SELECT id, balance FROM accounts')) {
         return [{ id: 'acct-1', balance: 5000 }]
       }
-      if (sql.includes('SELECT id, name FROM accounts') && !sql.includes('AND is_archived = 1')) {
+      if (sql.includes('SELECT id, name FROM accounts') && !sql.includes('is_archived = 1')) {
         return [{ id: 'acct-1', name: 'Checking' }]
       }
       return []
@@ -7816,7 +7957,7 @@ describe('CLI tool validation regressions', () => {
       if (sql.includes('SELECT id, balance FROM accounts')) {
         return [{ id: 'acct-1', balance: 5000 }]
       }
-      if (sql.includes('SELECT id, name FROM accounts') && !sql.includes('AND is_archived = 1')) {
+      if (sql.includes('SELECT id, name FROM accounts') && !sql.includes('is_archived = 1')) {
         return [{ id: 'acct-1', name: 'Checking' }]
       }
       return []

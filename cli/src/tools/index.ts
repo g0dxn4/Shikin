@@ -11,6 +11,7 @@ import { dataOpsTools } from './data-ops.js'
 import { cashflowBucketTools } from './cashflow-buckets.js'
 import { auditAndContextTools } from './audit-and-context.js'
 import { pluginTools } from './plugins.js'
+import { receivablesTools } from './receivables.js'
 import { loadEnabledPluginToolDefinitions } from '../plugins.js'
 
 export const builtInTools: ToolDefinition[] = [
@@ -25,6 +26,7 @@ export const builtInTools: ToolDefinition[] = [
   ...auditAndContextTools,
   ...cashflowBucketTools,
   ...planningandhealthTools,
+  ...receivablesTools,
   ...pluginTools,
 ]
 

@@ -421,6 +421,8 @@ const getUpcomingBills: ToolDefinition = {
       `SELECT description, amount, currency, MAX(date) as date, COUNT(*) as count
        FROM transactions
        WHERE is_recurring = 1 AND type = 'expense'
+         AND COALESCE(reporting_treatment, 'normal') = 'normal'
+         AND COALESCE(is_archived, 0) = 0
          AND date >= $1
          AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
        GROUP BY description, amount

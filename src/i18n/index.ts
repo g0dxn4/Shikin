@@ -10,6 +10,7 @@ import enTransactions from './locales/en/transactions.json'
 import enBudgets from './locales/en/budgets.json'
 import enInvestments from './locales/en/investments.json'
 import enDebtPayoff from './locales/en/debtPayoff.json'
+import enReceivables from './locales/en/receivables.json'
 import enForecast from './locales/en/forecast.json'
 import enGoals from './locales/en/goals.json'
 import enAnalytics from './locales/en/analytics.json'
@@ -25,6 +26,7 @@ import esTransactions from './locales/es/transactions.json'
 import esBudgets from './locales/es/budgets.json'
 import esInvestments from './locales/es/investments.json'
 import esDebtPayoff from './locales/es/debtPayoff.json'
+import esReceivables from './locales/es/receivables.json'
 import esForecast from './locales/es/forecast.json'
 import esGoals from './locales/es/goals.json'
 import esAnalytics from './locales/es/analytics.json'
@@ -42,6 +44,7 @@ export const resources = {
     budgets: enBudgets,
     investments: enInvestments,
     debtPayoff: enDebtPayoff,
+    receivables: enReceivables,
     forecast: enForecast,
     goals: enGoals,
     analytics: enAnalytics,
@@ -58,6 +61,7 @@ export const resources = {
     budgets: esBudgets,
     investments: esInvestments,
     debtPayoff: esDebtPayoff,
+    receivables: esReceivables,
     forecast: esForecast,
     goals: esGoals,
     analytics: esAnalytics,
@@ -83,6 +87,7 @@ i18n
       'budgets',
       'investments',
       'debtPayoff',
+      'receivables',
       'forecast',
       'goals',
       'analytics',

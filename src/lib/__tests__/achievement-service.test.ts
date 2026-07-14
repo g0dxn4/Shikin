@@ -5,10 +5,14 @@ const mockStore = vi.hoisted(() => {
   const data: Record<string, unknown> = {}
   return {
     get: vi.fn(async (key: string) => data[key] ?? null),
-    set: vi.fn(async (key: string, value: unknown) => { data[key] = value }),
+    set: vi.fn(async (key: string, value: unknown) => {
+      data[key] = value
+    }),
     save: vi.fn(async () => {}),
     _data: data,
-    _clear: () => { Object.keys(data).forEach((k) => delete data[k]) },
+    _clear: () => {
+      Object.keys(data).forEach((k) => delete data[k])
+    },
   }
 })
 
@@ -76,11 +80,7 @@ describe('achievement-service', () => {
       const yesterday = dayjs().subtract(1, 'day').format('YYYY-MM-DD')
       const twoDaysAgo = dayjs().subtract(2, 'day').format('YYYY-MM-DD')
 
-      mockQuery.mockResolvedValueOnce([
-        { d: today },
-        { d: yesterday },
-        { d: twoDaysAgo },
-      ])
+      mockQuery.mockResolvedValueOnce([{ d: today }, { d: yesterday }, { d: twoDaysAgo }])
 
       const streak = await computeStreak()
       expect(streak.currentStreak).toBe(3)
@@ -92,10 +92,7 @@ describe('achievement-service', () => {
       const yesterday = dayjs().subtract(1, 'day').format('YYYY-MM-DD')
       const twoDaysAgo = dayjs().subtract(2, 'day').format('YYYY-MM-DD')
 
-      mockQuery.mockResolvedValueOnce([
-        { d: yesterday },
-        { d: twoDaysAgo },
-      ])
+      mockQuery.mockResolvedValueOnce([{ d: yesterday }, { d: twoDaysAgo }])
 
       const streak = await computeStreak()
       expect(streak.currentStreak).toBe(2)
@@ -106,11 +103,7 @@ describe('achievement-service', () => {
       const threeDaysAgo = dayjs().subtract(3, 'day').format('YYYY-MM-DD')
       const fourDaysAgo = dayjs().subtract(4, 'day').format('YYYY-MM-DD')
 
-      mockQuery.mockResolvedValueOnce([
-        { d: today },
-        { d: threeDaysAgo },
-        { d: fourDaysAgo },
-      ])
+      mockQuery.mockResolvedValueOnce([{ d: today }, { d: threeDaysAgo }, { d: fourDaysAgo }])
 
       const streak = await computeStreak()
       expect(streak.currentStreak).toBe(1) // only today
@@ -131,7 +124,7 @@ describe('achievement-service', () => {
     it('returns newly unlocked first_steps when >= 1 transaction', async () => {
       mockQuery.mockImplementation(async (sql: string) => {
         const s = sql as string
-        if (s === 'SELECT COUNT(*) as cnt FROM transactions') {
+        if (s.includes('SELECT COUNT(*) as cnt FROM transactions')) {
           return [{ cnt: 5 }]
         }
         if (s.includes('DISTINCT date(date)')) {
@@ -170,7 +163,7 @@ describe('achievement-service', () => {
 
       mockQuery.mockImplementation(async (sql: string) => {
         const s = sql as string
-        if (s === 'SELECT COUNT(*) as cnt FROM transactions') {
+        if (s.includes('SELECT COUNT(*) as cnt FROM transactions')) {
           return [{ cnt: 5 }]
         }
         if (s.includes('DISTINCT date(date)')) {
@@ -190,7 +183,7 @@ describe('achievement-service', () => {
     it('saves newly unlocked achievements to shared store', async () => {
       mockQuery.mockImplementation(async (sql: string) => {
         const s = sql as string
-        if (s === 'SELECT COUNT(*) as cnt FROM transactions') {
+        if (s.includes('SELECT COUNT(*) as cnt FROM transactions')) {
           return [{ cnt: 1 }]
         }
         if (s.includes('DISTINCT date(date)')) {
@@ -212,7 +205,7 @@ describe('achievement-service', () => {
     it('newly unlocked achievements have correct shape', async () => {
       mockQuery.mockImplementation(async (sql: string) => {
         const s = sql as string
-        if (s === 'SELECT COUNT(*) as cnt FROM transactions') {
+        if (s.includes('SELECT COUNT(*) as cnt FROM transactions')) {
           return [{ cnt: 100 }] // unlocks first_steps and century_club
         }
         if (s.includes('DISTINCT date(date)')) {

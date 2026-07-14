@@ -58,10 +58,7 @@ async function isDuplicate(
  * @param accountId - The account ID to assign imported transactions to
  * @returns Import results with counts and any errors
  */
-export async function importStatementFile(
-  file: File,
-  accountId: string
-): Promise<ImportResult> {
+export async function importStatementFile(file: File, accountId: string): Promise<ImportResult> {
   const result: ImportResult = { imported: 0, skipped: 0, errors: [] }
 
   // Read and parse the file
@@ -85,6 +82,20 @@ export async function importStatementFile(
     result.errors.push('No transactions found in file')
     return result
   }
+
+  const accounts = await query<{
+    currency: string
+    account_mode?: 'transactional' | 'snapshot_only' | null
+  }>('SELECT currency, account_mode FROM accounts WHERE id = ? LIMIT 1', [accountId])
+  if (!accounts[0]) {
+    result.errors.push(`Account ${accountId} not found`)
+    return result
+  }
+  if ((accounts[0].account_mode ?? 'transactional') === 'snapshot_only') {
+    result.errors.push('Snapshot-only accounts do not accept transaction ledger imports')
+    return result
+  }
+  const accountCurrency = accounts[0].currency
 
   // Import each transaction, skipping duplicates
   const now = new Date().toISOString()
@@ -111,7 +122,7 @@ export async function importStatementFile(
           null, // no category assigned on import
           tx.type,
           amountCentavos,
-          'USD',
+          accountCurrency,
           tx.description,
           null,
           tx.date,
@@ -134,11 +145,10 @@ export async function importStatementFile(
 
   // Update account balance in one shot
   if (totalBalanceDelta !== 0) {
-    await execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-      totalBalanceDelta,
-      now,
-      accountId,
-    ])
+    await execute(
+      "UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ? AND COALESCE(account_mode, 'transactional') = 'transactional'",
+      [totalBalanceDelta, now, accountId]
+    )
   }
 
   // Refresh stores

@@ -12,6 +12,7 @@ import {
   Sparkles,
   LayoutGrid,
   TrendingUp,
+  Wallet,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -56,6 +57,12 @@ const navItems: SidebarNavItem[] = [
     labelKey: 'nav.goals',
     label: 'Goals',
     activePaths: ['/goals', '/debt-payoff'],
+  },
+  {
+    path: '/receivables',
+    icon: Wallet,
+    labelKey: 'nav.receivables',
+    label: 'Receivables',
   },
   {
     path: '/insights',

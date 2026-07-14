@@ -39,6 +39,7 @@ type CreditCardAccountRow = {
   statement_closing_day: number | null
   payment_due_day: number | null
   is_archived: number
+  account_mode?: 'transactional' | 'snapshot_only' | null
 }
 
 type CreditCardStatementRow = {
@@ -66,6 +67,7 @@ type StatementAccountFilterRow = {
   id: string
   type: string
   is_archived: number
+  account_mode?: 'transactional' | 'snapshot_only' | null
 }
 
 type PaymentSourceAccountRow = {
@@ -75,6 +77,7 @@ type PaymentSourceAccountRow = {
   currency: string | null
   balance: number
   is_archived: number
+  account_mode?: 'transactional' | 'snapshot_only' | null
 }
 
 type CardPaymentMode = 'transfer' | 'cleanup-expense' | 'statement-payment-only'
@@ -224,6 +227,13 @@ function readPaymentSourceAccount(accountId: string) {
       success: false as const,
       reason: 'account_archived',
       message: `Account ${accountId} is archived. Unarchive it before using it for new writes.`,
+    }
+  }
+  if ((account.account_mode ?? 'transactional') === 'snapshot_only') {
+    return {
+      success: false as const,
+      reason: 'snapshot_only_account',
+      message: `Account ${accountId} is snapshot-only and cannot be used for transaction ledger writes.`,
     }
   }
   if (account.type === 'credit_card') {
@@ -476,6 +486,13 @@ function getCreditCardAccountById(accountId: string) {
       success: false as const,
       reason: 'account_archived',
       message: `Account ${accountId} is archived. Unarchive it before using it for new writes.`,
+    }
+  }
+  if ((account.account_mode ?? 'transactional') === 'snapshot_only') {
+    return {
+      success: false as const,
+      reason: 'snapshot_only_account',
+      message: `Account ${accountId} is snapshot-only and cannot be used for transaction ledger writes.`,
     }
   }
   if (account.type !== 'credit_card') {
@@ -763,6 +780,8 @@ function getCurrentPeriodSpending(
      FROM transactions
      WHERE account_id = $1
        AND type = 'expense'
+       AND COALESCE(reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(is_archived, 0) = 0
        AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
        AND date >= $2 AND date <= $3`,
       [card.id, startDate, today]

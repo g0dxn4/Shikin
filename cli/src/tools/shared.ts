@@ -301,7 +301,22 @@ export function removeAccountAliasesForAccount(accountId: string): string[] {
   return removedAliases
 }
 
-type ResolvedAccountRow = { id: string; name?: string; currency: string; is_archived: number }
+type ResolvedAccountRow = {
+  id: string
+  name?: string
+  currency: string
+  is_archived: number
+  account_mode?: 'transactional' | 'snapshot_only' | null
+}
+
+function resolvedAccount(row: ResolvedAccountRow) {
+  return {
+    success: true as const,
+    id: row.id,
+    currency: row.currency,
+    accountMode: row.account_mode ?? ('transactional' as const),
+  }
+}
 
 function archivedAccountFailure(account: string) {
   return {
@@ -316,10 +331,11 @@ function resolveAccountAlias(account: string) {
   const aliasedAccountId = aliases[normalizedAlias]
   if (!aliasedAccountId) return null
 
-  const accounts = query<ResolvedAccountRow>(
-    'SELECT id, currency, is_archived FROM accounts WHERE id = $1 LIMIT 1',
-    [aliasedAccountId]
-  )
+  const accounts =
+    query<ResolvedAccountRow>(
+      'SELECT id, currency, is_archived, account_mode FROM accounts WHERE id = $1 LIMIT 1',
+      [aliasedAccountId]
+    ) ?? []
 
   if (accounts.length === 0) {
     return {
@@ -332,30 +348,27 @@ function resolveAccountAlias(account: string) {
     return archivedAccountFailure(`alias "${normalizedAlias}"`)
   }
 
-  return { success: true as const, id: accounts[0].id, currency: accounts[0].currency }
+  return resolvedAccount(accounts[0])
 }
 
 function resolveAccountReference(account: string) {
   const aliasMatch = resolveAccountAlias(account)
   if (aliasMatch) return aliasMatch
 
-  const accounts = query<ResolvedAccountRow>(
-    `SELECT id, name, currency, is_archived
+  const accounts =
+    query<ResolvedAccountRow>(
+      `SELECT id, name, currency, is_archived, account_mode
      FROM accounts
      WHERE id = $1 OR LOWER(name) = LOWER($2)
      ORDER BY name ASC, id ASC
      LIMIT 2`,
-    [account, account]
-  )
+      [account, account]
+    ) ?? []
 
   const activeAccounts = accounts.filter((row) => row.is_archived !== 1)
 
   if (activeAccounts.length === 1) {
-    return {
-      success: true as const,
-      id: activeAccounts[0].id,
-      currency: activeAccounts[0].currency,
-    }
+    return resolvedAccount(activeAccounts[0])
   }
 
   if (activeAccounts.length > 1) {
@@ -377,10 +390,11 @@ function resolveAccountReference(account: string) {
 
 export function resolveAccountId(accountId?: string, account?: string) {
   if (accountId) {
-    const accounts = query<ResolvedAccountRow>(
-      'SELECT id, currency, is_archived FROM accounts WHERE id = $1 LIMIT 1',
-      [accountId]
-    )
+    const accounts =
+      query<ResolvedAccountRow>(
+        'SELECT id, currency, is_archived, account_mode FROM accounts WHERE id = $1 LIMIT 1',
+        [accountId]
+      ) ?? []
 
     if (accounts.length === 0) {
       return { success: false as const, message: `Account ${accountId} not found.` }
@@ -390,16 +404,17 @@ export function resolveAccountId(accountId?: string, account?: string) {
       return archivedAccountFailure(accountId)
     }
 
-    return { success: true as const, id: accounts[0].id, currency: accounts[0].currency }
+    return resolvedAccount(accounts[0])
   }
 
   if (account) {
     return resolveAccountReference(account)
   }
 
-  const accounts = query<ResolvedAccountRow>(
-    'SELECT id, name, currency, is_archived FROM accounts WHERE is_archived = 0 ORDER BY name ASC, id ASC LIMIT 2'
-  )
+  const accounts =
+    query<ResolvedAccountRow>(
+      'SELECT id, name, currency, is_archived, account_mode FROM accounts WHERE is_archived = 0 ORDER BY name ASC, id ASC LIMIT 2'
+    ) ?? []
 
   if (accounts.length === 0) {
     return {
@@ -416,7 +431,7 @@ export function resolveAccountId(accountId?: string, account?: string) {
     }
   }
 
-  return { success: true as const, id: accounts[0].id, currency: accounts[0].currency }
+  return resolvedAccount(accounts[0])
 }
 
 export function recurringRulesHasCurrencyColumn() {
@@ -521,10 +536,11 @@ export function resolveCategoryId(category?: string) {
     return { success: true as const, id: null, name: null }
   }
 
-  const exactMatches = query<{ id: string; name: string }>(
-    'SELECT id, name FROM categories WHERE LOWER(name) = LOWER($1) ORDER BY name ASC LIMIT 2',
-    [category]
-  )
+  const exactMatches =
+    query<{ id: string; name: string }>(
+      'SELECT id, name FROM categories WHERE LOWER(name) = LOWER($1) ORDER BY name ASC LIMIT 2',
+      [category]
+    ) ?? []
 
   if (exactMatches.length === 1) {
     return {
@@ -541,10 +557,11 @@ export function resolveCategoryId(category?: string) {
     }
   }
 
-  const partialMatches = query<{ id: string; name: string }>(
-    'SELECT id, name FROM categories WHERE LOWER(name) LIKE LOWER($1) ORDER BY name ASC LIMIT 3',
-    [`%${category}%`]
-  )
+  const partialMatches =
+    query<{ id: string; name: string }>(
+      'SELECT id, name FROM categories WHERE LOWER(name) LIKE LOWER($1) ORDER BY name ASC LIMIT 3',
+      [`%${category}%`]
+    ) ?? []
 
   if (partialMatches.length === 1) {
     return {

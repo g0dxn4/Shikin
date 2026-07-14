@@ -75,6 +75,8 @@ export function SpendingHeatmap() {
           `SELECT date, COALESCE(SUM(amount), 0) as total
            FROM transactions
            WHERE type = 'expense' AND date >= ? AND date <= ?
+             AND COALESCE(reporting_treatment, 'normal') = 'normal'
+             AND COALESCE(is_archived, 0) = 0
            GROUP BY date
            ORDER BY date`,
           [start, end]
@@ -84,6 +86,8 @@ export function SpendingHeatmap() {
            FROM transactions t
            LEFT JOIN categories c ON c.id = t.category_id
            WHERE t.type = 'expense' AND t.date >= ? AND t.date <= ?
+             AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+             AND COALESCE(t.is_archived, 0) = 0
            GROUP BY t.category_id
            ORDER BY total DESC
            LIMIT 6`,

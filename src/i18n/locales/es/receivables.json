@@ -1,0 +1,76 @@
+{
+  "title": "Por Cobrar",
+  "subtitle": "Ingresos esperados y facturas pendientes que te deben.",
+  "addReceivable": "Agregar Por Cobrar",
+  "editReceivable": "Editar Por Cobrar",
+  "cancelReceivable": "Cancelar Por Cobrar",
+  "deleteReceivable": "Eliminar Por Cobrar",
+  "cancelConfirm": "¿Estás seguro de que deseas cancelar este cobro? Se marcará como cancelado y se excluirá de los totales pendientes.",
+  "deleteConfirm": "¿Estás seguro de que deseas eliminar este cobro? Esta acción no se puede deshacer.",
+  "dialog": {
+    "addDescription": "Registra dinero que te deben — una factura, pago de proyecto o ingreso esperado.",
+    "editDescription": "Actualiza el pagador, monto, fecha de vencimiento o progreso de pago de este cobro."
+  },
+  "discard": {
+    "title": "¿Descartar cambios?",
+    "description": "Tienes cambios sin guardar. ¿Cerrar este formulario sin guardar?",
+    "confirm": "Descartar"
+  },
+  "form": {
+    "payer": "Pagador",
+    "payerPlaceholder": "ej. Acme Corp",
+    "amount": "Monto",
+    "receivedAmount": "Recibido Hasta Ahora",
+    "currency": "Moneda",
+    "dueDate": "Fecha de Vencimiento",
+    "account": "Cuenta Vinculada",
+    "accountPlaceholder": "Seleccionar una cuenta (opcional)",
+    "projectReference": "Proyecto",
+    "projectPlaceholder": "ej. Rediseño de Sitio Web",
+    "invoiceReference": "Factura #",
+    "invoicePlaceholder": "ej. FAC-2026-001",
+    "notes": "Notas",
+    "notesPlaceholder": "Cualquier nota adicional...",
+    "accountsError": "No se pudieron cargar las cuentas",
+    "receivedExceedsAmount": "El monto recibido no puede exceder el monto total"
+  },
+  "summary": {
+    "outstanding": "Pendiente",
+    "overdue": "Vencido",
+    "received": "Recibido"
+  },
+  "filters": {
+    "label": "Filtrar cobros por estado",
+    "all": "Todos",
+    "open": "Abierto",
+    "partial": "Parcial",
+    "received": "Recibido",
+    "cancelled": "Cancelado",
+    "overdue": "Vencido"
+  },
+  "card": {
+    "due": "Vence",
+    "overdue": "Vencido",
+    "dueToday": "Vence hoy",
+    "remaining": "restante",
+    "of": "de",
+    "noAccount": "Sin cuenta vinculada",
+    "cancelled": "Cancelado",
+    "progressLabel": "Progreso de recepción"
+  },
+  "error": {
+    "load": "No se pudieron cargar los cobros",
+    "loadDetailed": "No se pudieron cargar tus cobros"
+  },
+  "toast": {
+    "created": "Cobro creado exitosamente",
+    "updated": "Cobro actualizado exitosamente",
+    "cancelled": "Cobro cancelado",
+    "deleted": "Cobro eliminado exitosamente",
+    "error": "Algo salió mal"
+  },
+  "empty": {
+    "title": "Sin cobros aún",
+    "description": "Rastrea el dinero que te deben — facturas, pagos de proyectos o ingresos esperados."
+  }
+}

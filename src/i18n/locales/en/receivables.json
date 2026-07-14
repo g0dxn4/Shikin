@@ -1,0 +1,76 @@
+{
+  "title": "Receivables",
+  "subtitle": "Expected income and outstanding invoices owed to you.",
+  "addReceivable": "Add Receivable",
+  "editReceivable": "Edit Receivable",
+  "cancelReceivable": "Cancel Receivable",
+  "deleteReceivable": "Delete Receivable",
+  "cancelConfirm": "Are you sure you want to cancel this receivable? It will be marked as cancelled and excluded from outstanding totals.",
+  "deleteConfirm": "Are you sure you want to delete this receivable? This action cannot be undone.",
+  "dialog": {
+    "addDescription": "Record money owed to you — an invoice, project payment, or expected income.",
+    "editDescription": "Update the payer, amount, due date, or payment progress for this receivable."
+  },
+  "discard": {
+    "title": "Discard changes?",
+    "description": "You have unsaved changes. Close this form without saving?",
+    "confirm": "Discard"
+  },
+  "form": {
+    "payer": "Payer",
+    "payerPlaceholder": "e.g. Acme Corp",
+    "amount": "Amount",
+    "receivedAmount": "Received So Far",
+    "currency": "Currency",
+    "dueDate": "Due Date",
+    "account": "Linked Account",
+    "accountPlaceholder": "Select an account (optional)",
+    "projectReference": "Project",
+    "projectPlaceholder": "e.g. Website Redesign",
+    "invoiceReference": "Invoice #",
+    "invoicePlaceholder": "e.g. INV-2026-001",
+    "notes": "Notes",
+    "notesPlaceholder": "Any additional notes...",
+    "accountsError": "Accounts couldn't be loaded",
+    "receivedExceedsAmount": "Received amount cannot exceed the total amount"
+  },
+  "summary": {
+    "outstanding": "Outstanding",
+    "overdue": "Overdue",
+    "received": "Received"
+  },
+  "filters": {
+    "label": "Filter receivables by status",
+    "all": "All",
+    "open": "Open",
+    "partial": "Partial",
+    "received": "Received",
+    "cancelled": "Cancelled",
+    "overdue": "Overdue"
+  },
+  "card": {
+    "due": "Due",
+    "overdue": "Overdue",
+    "dueToday": "Due today",
+    "remaining": "remaining",
+    "of": "of",
+    "noAccount": "No account linked",
+    "cancelled": "Cancelled",
+    "progressLabel": "Received progress"
+  },
+  "error": {
+    "load": "Couldn't load receivables",
+    "loadDetailed": "Couldn't load your receivables"
+  },
+  "toast": {
+    "created": "Receivable created successfully",
+    "updated": "Receivable updated successfully",
+    "cancelled": "Receivable cancelled",
+    "deleted": "Receivable deleted successfully",
+    "error": "Something went wrong"
+  },
+  "empty": {
+    "title": "No receivables yet",
+    "description": "Track money owed to you — invoices, project payments, or expected income."
+  }
+}

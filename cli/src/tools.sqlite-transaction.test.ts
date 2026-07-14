@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import type * as DatabaseModule from './database.js'
 import type * as OsModule from 'node:os'
 import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
+import { applyFinancialSemanticsTestSchema } from './financial-semantics-test-schema.js'
 
 const tempDirs = new Set<string>()
 const cleanupCallbacks = new Set<() => void>()
@@ -165,6 +166,14 @@ function seedDatabase({
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
+    CREATE TABLE account_balance_history (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      date TEXT NOT NULL,
+      balance INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      UNIQUE(account_id, date)
+    );
     CREATE TABLE audit_log (
       id TEXT PRIMARY KEY,
       entity TEXT NOT NULL,
@@ -240,6 +249,7 @@ function seedDatabase({
   `)
 
   seedTransactionStatusTriggers(db)
+  applyFinancialSemanticsTestSchema(db)
 
   for (const migration of CLI_DATABASE_MIGRATIONS) {
     db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(
@@ -981,5 +991,503 @@ describe('CLI tools SQLite transaction rollback', () => {
       buckets: [{ id: 'bucket-1', name: 'Rent', balance: 0 }],
       allocations: [],
     })
+  }, 10_000)
+
+  it('rejects transaction ledger writes for snapshot-only accounts', async () => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({ tempHome, accountBalance: 110_225 })
+    const db = new Database(dbPath)
+    try {
+      db.prepare("UPDATE accounts SET account_mode = 'snapshot_only' WHERE id = 'acct-1'").run()
+    } finally {
+      db.close()
+    }
+
+    const { tools } = await loadToolsWithRealDatabase(tempHome)
+    const addTransaction = tools.find((tool) => tool.name === 'add-transaction')!
+    await expect(
+      addTransaction.execute(
+        addTransaction.schema.parse({
+          accountId: 'acct-1',
+          amount: 10,
+          type: 'expense',
+          description: 'Should not write',
+          dryRun: true,
+        })
+      )
+    ).resolves.toMatchObject({ success: false, reason: 'snapshot_only_account' })
+
+    const guarded = new Database(dbPath)
+    try {
+      expect(() =>
+        guarded
+          .prepare(
+            `INSERT INTO transactions (id, account_id, type, amount, currency, description, date)
+             VALUES ('blocked-snapshot-row', 'acct-1', 'expense', 100, 'USD', 'Blocked', '2026-06-01')`
+          )
+          .run()
+      ).toThrow('Snapshot-only accounts cannot accept transaction ledger rows')
+      guarded
+        .prepare(
+          `INSERT INTO accounts (id, name, type, currency, balance, is_archived)
+           VALUES ('acct-with-history', 'History', 'checking', 'USD', 0, 0)`
+        )
+        .run()
+      guarded
+        .prepare(
+          `INSERT INTO transactions (id, account_id, type, amount, currency, description, date)
+           VALUES ('history-row', 'acct-with-history', 'expense', 100, 'USD', 'History', '2026-06-01')`
+        )
+        .run()
+      expect(() =>
+        guarded
+          .prepare(
+            "UPDATE accounts SET account_mode = 'snapshot_only' WHERE id = 'acct-with-history'"
+          )
+          .run()
+      ).toThrow('Accounts with transaction history cannot become snapshot-only')
+    } finally {
+      guarded.close()
+    }
+  })
+
+  it('reconciles from the effective ledger even when the stored balance already matches', async () => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({ tempHome, accountBalance: 110_225 })
+    const { tools } = await loadToolsWithRealDatabase(tempHome)
+    const reconcile = tools.find((tool) => tool.name === 'reconcile')!
+
+    await expect(
+      reconcile.execute(reconcile.schema.parse({ accountId: 'acct-1', actualBalance: 1102.25 }))
+    ).resolves.toMatchObject({
+      dryRun: true,
+      storedBalanceCentavos: 110_225,
+      ledgerBalanceCentavos: 0,
+      differenceCentavos: 110_225,
+      applyRequired: true,
+    })
+
+    await expect(
+      reconcile.execute(
+        reconcile.schema.parse({
+          accountId: 'acct-1',
+          actualBalance: 1102.25,
+          date: '2026-05-31',
+          basis: 'effective_ledger',
+          apply: true,
+        })
+      )
+    ).resolves.toMatchObject({
+      success: true,
+      dryRun: false,
+      verifiedLedgerBalanceCentavos: 110_225,
+    })
+
+    const db = new Database(dbPath, { readonly: true })
+    try {
+      expect(
+        db
+          .prepare(
+            `SELECT amount, reporting_treatment, transaction_kind, category_id
+             FROM transactions WHERE transaction_kind = 'reconciliation_bridge'`
+          )
+          .get()
+      ).toEqual({
+        amount: 110_225,
+        reporting_treatment: 'exclude_from_cashflow',
+        transaction_kind: 'reconciliation_bridge',
+        category_id: null,
+      })
+      expect(
+        db
+          .prepare(
+            'SELECT actual_balance, stored_balance_before, ledger_balance_before, ledger_balance_after FROM account_reconciliations'
+          )
+          .get()
+      ).toEqual({
+        actual_balance: 110_225,
+        stored_balance_before: 110_225,
+        ledger_balance_before: 0,
+        ledger_balance_after: 110_225,
+      })
+    } finally {
+      db.close()
+    }
+
+    const guardDb = new Database(dbPath, { readonly: true })
+    const adjustmentId = (
+      guardDb
+        .prepare("SELECT id FROM transactions WHERE transaction_kind = 'reconciliation_bridge'")
+        .get() as { id: string }
+    ).id
+    guardDb.close()
+    const updateTransaction = tools.find((tool) => tool.name === 'update-transaction')!
+    const deleteTransaction = tools.find((tool) => tool.name === 'delete-transaction')!
+    await expect(
+      updateTransaction.execute(
+        updateTransaction.schema.parse({ transactionId: adjustmentId, amount: 1 })
+      )
+    ).resolves.toMatchObject({ success: false, reason: 'protected_transaction_kind' })
+    await expect(
+      deleteTransaction.execute(deleteTransaction.schema.parse({ transactionId: adjustmentId }))
+    ).resolves.toMatchObject({ success: false, reason: 'protected_transaction_kind' })
+  })
+
+  it('finalizes a staged statement batch and reconciliation bridge in one transaction', async () => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({ tempHome, accountBalance: 110_225 })
+    const db = new Database(dbPath)
+    try {
+      const insert = db.prepare(
+        `INSERT INTO transactions (
+           id, account_id, type, amount, currency, description, date, status,
+           ledger_treatment, reporting_treatment, staging_batch_id
+         ) VALUES (?, 'acct-1', ?, ?, 'USD', ?, ?, 'posted',
+           'staged_no_balance_impact', 'normal', 'statement-2026-05')`
+      )
+      insert.run('staged-1', 'expense', 10_000, 'Purchase', '2026-05-05')
+      insert.run('staged-2', 'income', 25_000, 'Deposit', '2026-05-20')
+    } finally {
+      db.close()
+    }
+
+    const { tools } = await loadToolsWithRealDatabase(tempHome)
+    const finalize = tools.find((tool) => tool.name === 'finalize-staged-statement-history')!
+    const input = {
+      accountId: 'acct-1',
+      stagingBatchId: 'statement-2026-05',
+      statementStartDate: '2026-05-01',
+      statementEndDate: '2026-05-31',
+      actualBalance: 1102.25,
+    }
+
+    await expect(finalize.execute(finalize.schema.parse(input))).resolves.toMatchObject({
+      dryRun: true,
+      transactionCount: 2,
+      stagedBalanceEffectCentavos: 15_000,
+      reconciliationBridgeCentavos: 95_225,
+    })
+    await expect(
+      finalize.execute(finalize.schema.parse({ ...input, apply: true }))
+    ).resolves.toMatchObject({
+      success: true,
+      dryRun: false,
+      verifiedLedgerBalanceCentavos: 110_225,
+    })
+
+    const verified = new Database(dbPath, { readonly: true })
+    try {
+      expect(
+        verified
+          .prepare(
+            `SELECT id, status, ledger_treatment
+             FROM transactions WHERE staging_batch_id = 'statement-2026-05' ORDER BY id`
+          )
+          .all()
+      ).toEqual([
+        { id: 'staged-1', status: 'cleared', ledger_treatment: 'normal' },
+        { id: 'staged-2', status: 'cleared', ledger_treatment: 'normal' },
+      ])
+      expect(
+        verified
+          .prepare('SELECT staging_batch_id, adjustment_amount FROM account_reconciliations')
+          .get()
+      ).toEqual({ staging_batch_id: 'statement-2026-05', adjustment_amount: 95_225 })
+    } finally {
+      verified.close()
+    }
+
+    const updateTransaction = tools.find((tool) => tool.name === 'update-transaction')!
+    const deleteTransaction = tools.find((tool) => tool.name === 'delete-transaction')!
+    await expect(
+      updateTransaction.execute(
+        updateTransaction.schema.parse({ transactionId: 'staged-1', amount: 101 })
+      )
+    ).resolves.toMatchObject({ success: false, reason: 'finalized_statement_transaction' })
+    await expect(
+      deleteTransaction.execute(deleteTransaction.schema.parse({ transactionId: 'staged-1' }))
+    ).resolves.toMatchObject({ success: false, reason: 'finalized_statement_transaction' })
+  })
+
+  it('matches an exact transfer pair while preserving the imported mirror', async () => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({ tempHome, accountBalance: 9_500 })
+    const db = new Database(dbPath)
+    try {
+      db.prepare(
+        `INSERT INTO accounts (id, name, type, currency, balance, is_archived)
+         VALUES ('acct-2', 'Credit Card', 'credit_card', 'USD', 700, 0)`
+      ).run()
+      const insert = db.prepare(
+        `INSERT INTO transactions (
+           id, account_id, type, amount, currency, description, date, status,
+           ledger_treatment, reporting_treatment
+         ) VALUES (?, ?, ?, 500, 'USD', ?, ?, 'posted', 'normal', 'normal')`
+      )
+      insert.run('funding-row', 'acct-1', 'expense', 'Card payment', '2026-05-10')
+      insert.run('mirror-row', 'acct-2', 'income', 'Payment received', '2026-05-11')
+    } finally {
+      db.close()
+    }
+
+    const { tools } = await loadToolsWithRealDatabase(tempHome)
+    const matchTransfer = tools.find((tool) => tool.name === 'match-transfer-transactions')!
+    const input = {
+      sourceTransactionId: 'funding-row',
+      mirrorTransactionId: 'mirror-row',
+    }
+    await expect(matchTransfer.execute(matchTransfer.schema.parse(input))).resolves.toMatchObject({
+      success: true,
+      dryRun: true,
+      wouldMatch: { matchEvidence: { exactAmount: true, daysApart: 1 } },
+    })
+    await expect(
+      matchTransfer.execute(matchTransfer.schema.parse({ ...input, apply: true }))
+    ).resolves.toMatchObject({ success: true, dryRun: false })
+    const deleteTransaction = tools.find((tool) => tool.name === 'delete-transaction')!
+    await expect(
+      deleteTransaction.execute(deleteTransaction.schema.parse({ transactionId: 'funding-row' }))
+    ).resolves.toMatchObject({ success: false, reason: 'matched_transaction' })
+    await expect(
+      deleteTransaction.execute(deleteTransaction.schema.parse({ transactionId: 'mirror-row' }))
+    ).resolves.toMatchObject({ success: false, reason: 'archived_transaction' })
+
+    const verified = new Database(dbPath, { readonly: true })
+    try {
+      expect(
+        verified
+          .prepare(
+            'SELECT id, type, transfer_to_account_id, matched_transaction_id, is_archived, transaction_kind, reporting_treatment FROM transactions ORDER BY id'
+          )
+          .all()
+      ).toEqual([
+        {
+          id: 'funding-row',
+          type: 'transfer',
+          transfer_to_account_id: 'acct-2',
+          matched_transaction_id: 'mirror-row',
+          is_archived: 0,
+          transaction_kind: 'standard',
+          reporting_treatment: 'exclude_from_cashflow',
+        },
+        {
+          id: 'mirror-row',
+          type: 'income',
+          transfer_to_account_id: null,
+          matched_transaction_id: 'funding-row',
+          is_archived: 1,
+          transaction_kind: 'archived_transfer_mirror',
+          reporting_treatment: 'exclude_from_cashflow',
+        },
+      ])
+      expect(verified.prepare('SELECT id, balance FROM accounts ORDER BY id').all()).toEqual([
+        { id: 'acct-1', balance: 9_500 },
+        { id: 'acct-2', balance: 700 },
+      ])
+    } finally {
+      verified.close()
+    }
+
+    const unmatchTransfer = tools.find((tool) => tool.name === 'unmatch-transfer-transactions')!
+    await expect(
+      unmatchTransfer.execute(unmatchTransfer.schema.parse({ sourceTransactionId: 'funding-row' }))
+    ).resolves.toMatchObject({ success: true, dryRun: true })
+    await expect(
+      unmatchTransfer.execute(
+        unmatchTransfer.schema.parse({ sourceTransactionId: 'funding-row', apply: true })
+      )
+    ).resolves.toMatchObject({ success: true, dryRun: false })
+    const restored = new Database(dbPath, { readonly: true })
+    try {
+      expect(
+        restored
+          .prepare(
+            'SELECT id, type, transfer_to_account_id, matched_transaction_id, is_archived, transaction_kind, reporting_treatment FROM transactions ORDER BY id'
+          )
+          .all()
+      ).toEqual([
+        {
+          id: 'funding-row',
+          type: 'expense',
+          transfer_to_account_id: null,
+          matched_transaction_id: null,
+          is_archived: 0,
+          transaction_kind: 'standard',
+          reporting_treatment: 'normal',
+        },
+        {
+          id: 'mirror-row',
+          type: 'income',
+          transfer_to_account_id: null,
+          matched_transaction_id: null,
+          is_archived: 0,
+          transaction_kind: 'standard',
+          reporting_treatment: 'normal',
+        },
+      ])
+    } finally {
+      restored.close()
+    }
+  })
+
+  it('tracks and matches receivables independently from pending transactions', async () => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({
+      tempHome,
+      accountBalance: 50_000,
+      transaction: {
+        id: 'client-payment',
+        type: 'income',
+        amount: 25_000,
+        description: 'Client invoice paid',
+        date: '2026-05-20',
+        status: 'cleared',
+      },
+    })
+    const { tools } = await loadToolsWithRealDatabase(tempHome)
+    const manage = tools.find((tool) => tool.name === 'manage-receivable')!
+    const match = tools.find((tool) => tool.name === 'match-receivable')!
+
+    const largerReceivable = (await manage.execute(
+      manage.schema.parse({
+        action: 'create',
+        payer: 'Client B',
+        amount: 300,
+        dueDate: '2026-05-20',
+        currency: 'USD',
+        accountId: 'acct-1',
+        apply: true,
+      })
+    )) as { receivable: { id: string } }
+    await expect(
+      match.execute(
+        match.schema.parse({
+          receivableId: largerReceivable.receivable.id,
+          transactionId: 'client-payment',
+          apply: true,
+        })
+      )
+    ).resolves.toMatchObject({ success: false, reason: 'payment_amount_mismatch' })
+
+    const created = (await manage.execute(
+      manage.schema.parse({
+        action: 'create',
+        payer: 'Client A',
+        amount: 250,
+        dueDate: '2026-05-20',
+        currency: 'USD',
+        accountId: 'acct-1',
+        invoiceReference: 'INV-42',
+        apply: true,
+      })
+    )) as { receivable: { id: string } }
+    await expect(
+      match.execute(
+        match.schema.parse({
+          receivableId: created.receivable.id,
+          transactionId: 'client-payment',
+          apply: true,
+        })
+      )
+    ).resolves.toMatchObject({ success: true, dryRun: false })
+
+    const deleteTransaction = tools.find((tool) => tool.name === 'delete-transaction')!
+    await expect(
+      deleteTransaction.execute(deleteTransaction.schema.parse({ transactionId: 'client-payment' }))
+    ).resolves.toMatchObject({ success: false, reason: 'referenced_financial_transaction' })
+
+    const db = new Database(dbPath, { readonly: true })
+    try {
+      expect(
+        db
+          .prepare(
+            'SELECT payer, amount, received_amount, status, matched_transaction_id FROM receivables WHERE id = ?'
+          )
+          .get(created.receivable.id)
+      ).toEqual({
+        payer: 'Client A',
+        amount: 25_000,
+        received_amount: 25_000,
+        status: 'received',
+        matched_transaction_id: 'client-payment',
+      })
+    } finally {
+      db.close()
+    }
+
+    const unmatch = tools.find((tool) => tool.name === 'unmatch-receivable')!
+    await expect(
+      unmatch.execute(unmatch.schema.parse({ receivableId: created.receivable.id, apply: true }))
+    ).resolves.toMatchObject({ success: true, dryRun: false })
+    const restored = new Database(dbPath, { readonly: true })
+    try {
+      expect(
+        restored
+          .prepare(
+            'SELECT received_amount, status, matched_transaction_id FROM receivables WHERE id = ?'
+          )
+          .get(created.receivable.id)
+      ).toEqual({ received_amount: 0, status: 'open', matched_transaction_id: null })
+    } finally {
+      restored.close()
+    }
+  })
+
+  it('rejects generic undo after a transaction becomes a matched receivable payment', async () => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({ tempHome, accountBalance: 0 })
+    const { tools } = await loadToolsWithRealDatabase(tempHome)
+    const addTransaction = tools.find((tool) => tool.name === 'add-transaction')!
+    const manageReceivable = tools.find((tool) => tool.name === 'manage-receivable')!
+    const matchReceivable = tools.find((tool) => tool.name === 'match-receivable')!
+    const undo = tools.find((tool) => tool.name === 'undo')!
+
+    const added = (await addTransaction.execute(
+      addTransaction.schema.parse({
+        accountId: 'acct-1',
+        type: 'income',
+        amount: 250,
+        currency: 'USD',
+        description: 'Audited client payment',
+        date: '2026-06-15',
+      })
+    )) as { transaction: { id: string } }
+    const created = (await manageReceivable.execute(
+      manageReceivable.schema.parse({
+        action: 'create',
+        payer: 'Undo Guard Client',
+        amount: 250,
+        currency: 'USD',
+        dueDate: '2026-06-15',
+        accountId: 'acct-1',
+        apply: true,
+      })
+    )) as { receivable: { id: string } }
+    await matchReceivable.execute(
+      matchReceivable.schema.parse({
+        receivableId: created.receivable.id,
+        transactionId: added.transaction.id,
+        apply: true,
+      })
+    )
+
+    await expect(
+      undo.execute(
+        undo.schema.parse({
+          transactionId: added.transaction.id,
+          apply: true,
+          allowDependentWrites: true,
+        })
+      )
+    ).rejects.toThrow('linked financial provenance')
+
+    const db = new Database(dbPath, { readonly: true })
+    try {
+      expect(
+        db.prepare('SELECT amount FROM transactions WHERE id = ?').get(added.transaction.id)
+      ).toEqual({ amount: 25_000 })
+    } finally {
+      db.close()
+    }
   }, 10_000)
 })

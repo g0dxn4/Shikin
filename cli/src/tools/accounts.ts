@@ -33,6 +33,7 @@ type AccountRow = {
   credit_limit: number | null
   statement_closing_day: number | null
   payment_due_day: number | null
+  account_mode: 'transactional' | 'snapshot_only'
 }
 
 type AccountType =
@@ -69,6 +70,7 @@ function accountAuditSnapshot(account: AccountRow) {
     creditLimitCentavos: account.credit_limit,
     statementClosingDay: account.statement_closing_day,
     paymentDueDay: account.payment_due_day,
+    accountMode: account.account_mode ?? 'transactional',
   }
 }
 
@@ -109,8 +111,15 @@ function accountTypeSchema() {
   return z.enum(['checking', 'savings', 'credit_card', 'cash', 'investment', 'crypto', 'other'])
 }
 
+function accountModeSchema() {
+  return z.enum(['transactional', 'snapshot_only'])
+}
+
 function getAccountById(accountId: string): AccountRow | null {
-  return query<AccountRow>('SELECT * FROM accounts WHERE id = $1 LIMIT 1', [accountId])[0] ?? null
+  return (
+    (query<AccountRow>('SELECT * FROM accounts WHERE id = $1 LIMIT 1', [accountId]) ?? [])[0] ??
+    null
+  )
 }
 
 function archivedAccountResult(account: AccountRow) {
@@ -128,6 +137,26 @@ function assertSingleRowUpdated(result: { rowsAffected: number }, message: strin
 
 function accountCurrencyChangeBlockedMessage(referenceCount: number) {
   return `Cannot change this account currency while ${referenceCount} linked monetary reference${referenceCount === 1 ? '' : 's'} still point at the account. Create a new account or explicitly migrate the referenced data so amounts do not silently change meaning.`
+}
+
+function accountModeChangeFailure(
+  account: AccountRow,
+  nextMode: AccountRow['account_mode'] | undefined
+) {
+  if (!nextMode || nextMode === (account.account_mode ?? 'transactional')) return null
+  const transactionCount =
+    (query<{ count: number }>(
+      `SELECT COUNT(*) AS count
+       FROM transactions
+       WHERE account_id = $1 OR transfer_to_account_id = $2`,
+      [account.id, account.id]
+    ) ?? [])[0]?.count ?? 0
+  if (transactionCount === 0) return null
+  return {
+    success: false as const,
+    reason: 'account_mode_transition_requires_new_account' as const,
+    message: `Account "${account.name}" has ${transactionCount} ledger row${transactionCount === 1 ? '' : 's'}. Create a new ${nextMode} account so historical and observed balance bases are not mixed.`,
+  }
 }
 
 function countAccountCurrencyBlockers(sql: string, params: unknown[]): number {
@@ -326,6 +355,7 @@ const listAccounts: ToolDefinition = {
         type: a.type,
         currency: a.currency,
         balance: fromCentavos(a.balance),
+        accountMode: a.account_mode ?? 'transactional',
       })),
       message:
         accounts.length === 0
@@ -357,6 +387,12 @@ const createAccount: ToolDefinition = {
     balance: moneyAmount('Initial balance in the main currency unit (default: 0)')
       .optional()
       .default(0),
+    accountMode: accountModeSchema()
+      .optional()
+      .default('transactional')
+      .describe(
+        'transactional derives balance changes from the ledger; snapshot_only uses observed valuations'
+      ),
     creditLimit: nonNegativeMoneyAmount(
       'Credit limit in the main currency unit (only for credit_card type)'
     ).optional(),
@@ -388,6 +424,7 @@ const createAccount: ToolDefinition = {
     creditLimit,
     statementClosingDay,
     paymentDueDay,
+    accountMode,
     dryRun,
   }) => {
     const id = generateId()
@@ -403,6 +440,7 @@ const createAccount: ToolDefinition = {
       credit_limit: creditLimitCentavos,
       statement_closing_day: statementClosingDay ?? null,
       payment_due_day: paymentDueDay ?? null,
+      account_mode: accountMode,
     }
 
     if (dryRun) {
@@ -416,8 +454,8 @@ const createAccount: ToolDefinition = {
 
     transaction(() => {
       execute(
-        `INSERT INTO accounts (id, name, type, currency, balance, is_archived, credit_limit, statement_closing_day, payment_due_day)
-         VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8)`,
+        `INSERT INTO accounts (id, name, type, currency, balance, is_archived, credit_limit, statement_closing_day, payment_due_day, account_mode)
+         VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, $9)`,
         [
           id,
           name,
@@ -427,6 +465,7 @@ const createAccount: ToolDefinition = {
           creditLimitCentavos,
           statementClosingDay ?? null,
           paymentDueDay ?? null,
+          accountMode,
         ]
       )
       writeAuditLog({
@@ -464,6 +503,7 @@ const createAccount: ToolDefinition = {
         creditLimit: creditLimit ?? undefined,
         statementClosingDay: statementClosingDay ?? undefined,
         paymentDueDay: paymentDueDay ?? undefined,
+        accountMode,
       },
       message: parts.join(', '),
     }
@@ -496,6 +536,7 @@ const upsertAccount: ToolDefinition = {
     type: accountTypeSchema().optional().describe('Account type to create or set'),
     currency: assetCode('Currency or asset code to create or set').optional(),
     balance: moneyAmount('Account balance in the main currency unit').optional(),
+    accountMode: accountModeSchema().optional().describe('Account balance tracking mode'),
     creditLimit: nonNegativeMoneyAmount(
       'Credit limit in the main currency unit (only for credit_card type)'
     ).optional(),
@@ -530,6 +571,7 @@ const upsertAccount: ToolDefinition = {
     creditLimit,
     statementClosingDay,
     paymentDueDay,
+    accountMode,
     dryRun,
   }) => {
     const match = resolveAccountForUpsert({ accountId, account, alias, name })
@@ -562,6 +604,7 @@ const upsertAccount: ToolDefinition = {
         credit_limit: creditLimitCentavos,
         statement_closing_day: statementClosingDay ?? null,
         payment_due_day: paymentDueDay ?? null,
+        account_mode: accountMode ?? 'transactional',
       }
 
       if (dryRun) {
@@ -578,8 +621,8 @@ const upsertAccount: ToolDefinition = {
 
       transaction(() => {
         execute(
-          `INSERT INTO accounts (id, name, type, currency, balance, is_archived, credit_limit, statement_closing_day, payment_due_day)
-           VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8)`,
+          `INSERT INTO accounts (id, name, type, currency, balance, is_archived, credit_limit, statement_closing_day, payment_due_day, account_mode)
+           VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, $9)`,
           [
             id,
             createdAccount.name,
@@ -589,6 +632,7 @@ const upsertAccount: ToolDefinition = {
             creditLimitCentavos,
             statementClosingDay ?? null,
             paymentDueDay ?? null,
+            createdAccount.account_mode,
           ]
         )
         if (normalizedAlias) setAccountAlias(id, normalizedAlias)
@@ -624,6 +668,8 @@ const upsertAccount: ToolDefinition = {
     if (currencyFailure) {
       return { success: false, message: currencyFailure }
     }
+    const modeFailure = accountModeChangeFailure(existing, accountMode)
+    if (modeFailure) return modeFailure
 
     const updatedAccount: AccountRow = {
       ...existing,
@@ -634,6 +680,7 @@ const upsertAccount: ToolDefinition = {
       credit_limit: creditLimit !== undefined ? toCentavos(creditLimit) : existing.credit_limit,
       statement_closing_day: statementClosingDay ?? existing.statement_closing_day,
       payment_due_day: paymentDueDay ?? existing.payment_due_day,
+      account_mode: accountMode ?? existing.account_mode,
     }
     const setClauses: string[] = []
     const params: unknown[] = []
@@ -645,6 +692,9 @@ const upsertAccount: ToolDefinition = {
 
     if (name !== undefined && name !== existing.name) addSet('name', name)
     if (type !== undefined && type !== existing.type) addSet('type', type)
+    if (accountMode !== undefined && accountMode !== existing.account_mode) {
+      addSet('account_mode', accountMode)
+    }
     if (
       currency !== undefined &&
       normalizeCurrencyCode(currency) !== normalizeCurrencyCode(existing.currency)
@@ -690,6 +740,10 @@ const upsertAccount: ToolDefinition = {
 
     if (setClauses.length > 0 || aliasWouldChange) {
       transaction(() => {
+        const currentAccount = getAccountById(existing.id)
+        if (!currentAccount) throw new Error(`Account ${existing.id} disappeared during update.`)
+        const currentModeFailure = accountModeChangeFailure(currentAccount, accountMode)
+        if (currentModeFailure) throw new Error(currentModeFailure.message)
         if (setClauses.length > 0) {
           setClauses.push(`updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`)
           params.push(existing.id)
@@ -758,6 +812,7 @@ const updateAccount: ToolDefinition = {
       .describe('New account type'),
     currency: assetCode('New currency or asset code').optional(),
     balance: moneyAmount('New balance in main currency unit').optional(),
+    accountMode: accountModeSchema().optional().describe('New account balance tracking mode'),
     creditLimit: nonNegativeMoneyAmount('New credit limit in main currency unit').optional(),
     statementClosingDay: z
       .number()
@@ -788,6 +843,7 @@ const updateAccount: ToolDefinition = {
     creditLimit,
     statementClosingDay,
     paymentDueDay,
+    accountMode,
     dryRun,
   }) => {
     const existing = await query<AccountRow>('SELECT * FROM accounts WHERE id = $1', [accountId])
@@ -804,6 +860,8 @@ const updateAccount: ToolDefinition = {
 
     const currencyFailure = accountCurrencyChangeFailure(accountId, account.currency, currency)
     if (currencyFailure) return { success: false, message: currencyFailure }
+    const modeFailure = accountModeChangeFailure(account, accountMode)
+    if (modeFailure) return modeFailure
 
     if (name !== undefined) {
       setClauses.push(`name = $${paramIdx++}`)
@@ -812,6 +870,10 @@ const updateAccount: ToolDefinition = {
     if (type !== undefined) {
       setClauses.push(`type = $${paramIdx++}`)
       params.push(type)
+    }
+    if (accountMode !== undefined) {
+      setClauses.push(`account_mode = $${paramIdx++}`)
+      params.push(accountMode)
     }
     if (currency !== undefined) {
       setClauses.push(`currency = $${paramIdx++}`)
@@ -847,6 +909,7 @@ const updateAccount: ToolDefinition = {
       credit_limit: creditLimit !== undefined ? toCentavos(creditLimit) : account.credit_limit,
       statement_closing_day: statementClosingDay ?? account.statement_closing_day,
       payment_due_day: paymentDueDay ?? account.payment_due_day,
+      account_mode: accountMode ?? account.account_mode,
     }
 
     if (dryRun) {
@@ -866,6 +929,10 @@ const updateAccount: ToolDefinition = {
     params.push(accountId)
 
     transaction(() => {
+      const currentAccount = getAccountById(accountId)
+      if (!currentAccount) throw new Error(`Account ${accountId} disappeared during update.`)
+      const currentModeFailure = accountModeChangeFailure(currentAccount, accountMode)
+      if (currentModeFailure) throw new Error(currentModeFailure.message)
       const updateResult = execute(
         `UPDATE accounts SET ${setClauses.join(', ')} WHERE id = $${paramIdx}`,
         params
@@ -1035,10 +1102,72 @@ const balanceSnapshot: ToolDefinition = {
   },
 }
 
+function getEffectiveLedgerBalance(accountId: string): number {
+  return (
+    query<{ balance: number }>(
+      `SELECT COALESCE(SUM(CASE
+         WHEN t.type = 'income' AND t.account_id = $1 THEN t.amount
+         WHEN t.type = 'expense' AND t.account_id = $2 THEN -t.amount
+         WHEN t.type = 'transfer' AND t.account_id = $3 THEN -t.amount
+         WHEN t.type = 'transfer' AND t.transfer_to_account_id = $4 THEN t.amount
+         ELSE 0
+       END), 0) AS balance
+       FROM transactions t
+       WHERE (t.account_id = $5 OR t.transfer_to_account_id = $6)
+         AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
+         AND COALESCE(t.ledger_treatment, 'normal') = 'normal'
+         AND COALESCE(t.is_archived, 0) = 0`,
+      [accountId, accountId, accountId, accountId, accountId, accountId]
+    )[0]?.balance ?? 0
+  )
+}
+
+function insertReconciliationRecord(input: {
+  id: string
+  accountId: string
+  date: string
+  actualBalance: number
+  storedBalanceBefore: number
+  ledgerBalanceBefore: number
+  ledgerBalanceAfter: number
+  adjustmentAmount: number
+  adjustmentTransactionId?: string | null
+  stagingBatchId?: string | null
+  statementStartDate?: string | null
+  statementEndDate?: string | null
+  source?: string | null
+  note?: string | null
+}) {
+  execute(
+    `INSERT INTO account_reconciliations (
+       id, account_id, reconciliation_date, actual_balance, stored_balance_before,
+       ledger_balance_before, ledger_balance_after, adjustment_amount,
+       adjustment_transaction_id, staging_batch_id, statement_start_date,
+       statement_end_date, source, note
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+    [
+      input.id,
+      input.accountId,
+      input.date,
+      input.actualBalance,
+      input.storedBalanceBefore,
+      input.ledgerBalanceBefore,
+      input.ledgerBalanceAfter,
+      input.adjustmentAmount,
+      input.adjustmentTransactionId ?? null,
+      input.stagingBatchId ?? null,
+      input.statementStartDate ?? null,
+      input.statementEndDate ?? null,
+      input.source ?? null,
+      input.note ?? null,
+    ]
+  )
+}
+
 const reconcile: ToolDefinition = {
   name: 'reconcile',
   description:
-    'Compare an account balance against an observed balance and optionally apply an adjustment transaction.',
+    'Compare an observed balance against the effective transaction ledger and optionally apply an atomic reconciliation bridge.',
   schema: z.object({
     accountId: boundedText('Account ID', 'Canonical account ID', 128).optional(),
     account: boundedText(
@@ -1050,6 +1179,12 @@ const reconcile: ToolDefinition = {
       .describe('Friendly account alias, exact account ID, or exact account name'),
     actualBalance: moneyAmount('Observed actual balance in the main currency unit'),
     date: isoDate('Reconciliation date in YYYY-MM-DD format. Defaults to today.').optional(),
+    statementStartDate: isoDate('Optional statement coverage start date').optional(),
+    statementEndDate: isoDate('Optional statement coverage end date').optional(),
+    basis: z
+      .literal('effective_ledger')
+      .optional()
+      .describe('Required for apply: acknowledges ledger-derived reconciliation semantics'),
     apply: z
       .boolean()
       .optional()
@@ -1062,7 +1197,25 @@ const reconcile: ToolDefinition = {
     ).optional(),
     note: boundedText('Note', 'Optional note stored in the adjustment notes', 500).optional(),
   }),
-  execute: async ({ accountId, account, actualBalance, date, apply, source, note }) => {
+  execute: async ({
+    accountId,
+    account,
+    actualBalance,
+    date,
+    statementStartDate,
+    statementEndDate,
+    basis,
+    apply,
+    source,
+    note,
+  }) => {
+    if (statementStartDate && statementEndDate && statementStartDate > statementEndDate) {
+      return {
+        success: false,
+        reason: 'invalid_statement_range',
+        message: 'statementStartDate must be on or before statementEndDate.',
+      }
+    }
     const resolvedAccount = resolveAccountId(accountId, account)
     if (!resolvedAccount.success) {
       return { success: false, message: resolvedAccount.message }
@@ -1077,18 +1230,36 @@ const reconcile: ToolDefinition = {
 
     const accountRow = rows[0]
     const actualCentavos = toCentavos(actualBalance)
-    const differenceCentavos = actualCentavos - accountRow.balance
+    const ledgerBalanceCentavos = getEffectiveLedgerBalance(accountRow.id)
+    const ledgerDifferenceCentavos = actualCentavos - ledgerBalanceCentavos
+    const storedDifferenceCentavos = actualCentavos - accountRow.balance
+    const snapshotOnly = (accountRow.account_mode ?? 'transactional') === 'snapshot_only'
+    const differenceCentavos = snapshotOnly ? storedDifferenceCentavos : ledgerDifferenceCentavos
     const reconciliationDate = date || dayjs().format('YYYY-MM-DD')
     const baseResult = {
       account: {
         id: accountRow.id,
         name: accountRow.name,
         currency: accountRow.currency,
+        accountMode: accountRow.account_mode ?? 'transactional',
       },
       storedBalance: fromCentavos(accountRow.balance),
+      storedBalanceCentavos: accountRow.balance,
+      ledgerBalance: fromCentavos(ledgerBalanceCentavos),
+      ledgerBalanceCentavos,
       actualBalance: fromCentavos(actualCentavos),
+      actualBalanceCentavos: actualCentavos,
       difference: fromCentavos(differenceCentavos),
+      differenceCentavos,
+      ledgerDifference: fromCentavos(ledgerDifferenceCentavos),
+      ledgerDifferenceCentavos,
+      storedDifference: fromCentavos(storedDifferenceCentavos),
+      storedDifferenceCentavos,
       date: reconciliationDate,
+      statementCoverage: {
+        startDate: statementStartDate ?? null,
+        endDate: statementEndDate ?? null,
+      },
     }
 
     if (!apply) {
@@ -1097,25 +1268,121 @@ const reconcile: ToolDefinition = {
         dryRun: true,
         applied: false,
         applyRequired: differenceCentavos !== 0,
+        requiredBasis: 'effective_ledger',
         ...baseResult,
         requiresConfirmation: differenceCentavos !== 0,
         message:
           differenceCentavos === 0
-            ? `Account "${accountRow.name}" already matches ${accountRow.currency} ${actualBalance.toFixed(2)}.`
-            : `Account "${accountRow.name}" differs by ${accountRow.currency} ${fromCentavos(differenceCentavos).toFixed(2)}. Re-run with --apply to create an adjustment transaction.`,
+            ? `Account "${accountRow.name}" effective ledger already matches ${accountRow.currency} ${actualBalance.toFixed(2)}.`
+            : `Account "${accountRow.name}" needs a ${accountRow.currency} ${fromCentavos(differenceCentavos).toFixed(2)} reconciliation change based on its effective ledger. Re-run with --apply.`,
+      }
+    }
+
+    if (basis !== 'effective_ledger') {
+      return {
+        success: false,
+        reason: 'reconciliation_basis_required',
+        requiredBasis: 'effective_ledger',
+        message:
+          'Applying reconciliation requires basis="effective_ledger" after reviewing the ledger-derived preview.',
       }
     }
 
     const result = transaction(() => {
+      const accountRow = getAccountById(resolvedAccount.id)
+      if (!accountRow) {
+        throw new Error(`Account ${resolvedAccount.id} disappeared during reconciliation.`)
+      }
+      const ledgerBalanceCentavos = getEffectiveLedgerBalance(accountRow.id)
+      const ledgerDifferenceCentavos = actualCentavos - ledgerBalanceCentavos
+      const storedDifferenceCentavos = actualCentavos - accountRow.balance
+      const snapshotOnly = (accountRow.account_mode ?? 'transactional') === 'snapshot_only'
+      const differenceCentavos = snapshotOnly ? storedDifferenceCentavos : ledgerDifferenceCentavos
+      const baseResult = {
+        account: {
+          id: accountRow.id,
+          name: accountRow.name,
+          currency: accountRow.currency,
+          accountMode: accountRow.account_mode ?? 'transactional',
+        },
+        storedBalance: fromCentavos(accountRow.balance),
+        storedBalanceCentavos: accountRow.balance,
+        ledgerBalance: fromCentavos(ledgerBalanceCentavos),
+        ledgerBalanceCentavos,
+        actualBalance: fromCentavos(actualCentavos),
+        actualBalanceCentavos: actualCentavos,
+        difference: fromCentavos(differenceCentavos),
+        differenceCentavos,
+        ledgerDifference: fromCentavos(ledgerDifferenceCentavos),
+        ledgerDifferenceCentavos,
+        storedDifference: fromCentavos(storedDifferenceCentavos),
+        storedDifferenceCentavos,
+        date: reconciliationDate,
+        statementCoverage: {
+          startDate: statementStartDate ?? null,
+          endDate: statementEndDate ?? null,
+        },
+      }
       const snapshot = upsertBalanceSnapshot(accountRow.id, reconciliationDate, actualCentavos)
+      const reconciliationId = generateId()
 
-      if (differenceCentavos === 0) {
+      if (differenceCentavos === 0 || snapshotOnly) {
+        insertReconciliationRecord({
+          id: reconciliationId,
+          accountId: accountRow.id,
+          date: reconciliationDate,
+          actualBalance: actualCentavos,
+          storedBalanceBefore: accountRow.balance,
+          ledgerBalanceBefore: ledgerBalanceCentavos,
+          ledgerBalanceAfter: ledgerBalanceCentavos,
+          adjustmentAmount: 0,
+          statementStartDate,
+          statementEndDate,
+          source,
+          note,
+        })
+        assertSingleRowUpdated(
+          execute(
+            "UPDATE accounts SET balance = $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
+            [actualCentavos, accountRow.id]
+          ),
+          `Account ${accountRow.id} could not be reconciled safely.`
+        )
+        const verifiedLedgerCentavos = getEffectiveLedgerBalance(accountRow.id)
+        if (!snapshotOnly && verifiedLedgerCentavos !== actualCentavos) {
+          throw new Error(
+            `Reconciliation verification failed: ledger ${verifiedLedgerCentavos} did not match observed balance ${actualCentavos}.`
+          )
+        }
+        writeAuditLog({
+          entity: 'account',
+          entityId: accountRow.id,
+          action: 'reconcile',
+          before: {
+            account: accountAuditSnapshot(accountRow),
+            ledgerBalanceCentavos,
+          },
+          after: {
+            account: accountAuditSnapshot({ ...accountRow, balance: actualCentavos }),
+            reconciliationId,
+            adjustmentTransactionId: null,
+            verifiedLedgerCentavos,
+          },
+          source: source ?? null,
+          note: note ?? null,
+        })
         return {
           success: true,
+          dryRun: false,
           ...baseResult,
+          reconciliationId,
           snapshot,
           adjustmentTransaction: null,
-          message: `Recorded reconciliation snapshot for "${accountRow.name}"; no adjustment was needed.`,
+          verifiedLedgerBalance: fromCentavos(verifiedLedgerCentavos),
+          verifiedLedgerBalanceCentavos: verifiedLedgerCentavos,
+          message: snapshotOnly
+            ? `Recorded observed valuation for snapshot-only account "${accountRow.name}" without creating cashflow.`
+            : `Recorded reconciliation for "${accountRow.name}"; its effective ledger already matched.`,
         }
       }
 
@@ -1123,25 +1390,58 @@ const reconcile: ToolDefinition = {
       const adjustmentType = differenceCentavos > 0 ? 'income' : 'expense'
       const adjustmentAmount = Math.abs(differenceCentavos)
 
+      insertReconciliationRecord({
+        id: reconciliationId,
+        accountId: accountRow.id,
+        date: reconciliationDate,
+        actualBalance: actualCentavos,
+        storedBalanceBefore: accountRow.balance,
+        ledgerBalanceBefore: ledgerBalanceCentavos,
+        ledgerBalanceAfter: actualCentavos,
+        adjustmentAmount: differenceCentavos,
+        statementStartDate,
+        statementEndDate,
+        source,
+        note,
+      })
+
       execute(
-        `INSERT INTO transactions (id, account_id, category_id, transfer_to_account_id, type, amount, currency, description, notes, status, source, note, date)
-         VALUES ($1, $2, NULL, NULL, $3, $4, $5, $6, NULL, 'posted', $7, $8, $9)`,
+        `INSERT INTO transactions (
+           id, account_id, category_id, transfer_to_account_id, type, amount, currency,
+           description, notes, status, source, note, ledger_treatment, reporting_treatment,
+           transaction_kind, reconciliation_id, is_archived, date
+         ) VALUES ($1, $2, NULL, NULL, $3, $4, $5, $6, NULL, 'posted', $7, $8,
+           'normal', 'exclude_from_cashflow', 'reconciliation_bridge', $9, 0, $10)`,
         [
           adjustmentId,
           accountRow.id,
           adjustmentType,
           adjustmentAmount,
           accountRow.currency,
-          'Balance reconciliation adjustment',
+          'Balance reconciliation bridge',
           source ?? null,
           note ?? null,
+          reconciliationId,
           reconciliationDate,
         ]
+      )
+      assertSingleRowUpdated(
+        execute('UPDATE account_reconciliations SET adjustment_transaction_id = $1 WHERE id = $2', [
+          adjustmentId,
+          reconciliationId,
+        ]),
+        `Reconciliation ${reconciliationId} could not be linked to its bridge.`
       )
       execute(
         "UPDATE accounts SET balance = $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
         [actualCentavos, accountRow.id]
       )
+      const verifiedLedgerCentavos = getEffectiveLedgerBalance(accountRow.id)
+      if (verifiedLedgerCentavos !== actualCentavos) {
+        throw new Error(
+          `Reconciliation verification failed: ledger ${verifiedLedgerCentavos} did not match observed balance ${actualCentavos}.`
+        )
+      }
       writeAuditLog({
         entity: 'account',
         entityId: accountRow.id,
@@ -1160,6 +1460,8 @@ const reconcile: ToolDefinition = {
             balance: fromCentavos(actualCentavos),
           },
           adjustmentTransactionId: adjustmentId,
+          reconciliationId,
+          verifiedLedgerCentavos,
         },
         source: source ?? null,
         note: note ?? null,
@@ -1167,25 +1469,319 @@ const reconcile: ToolDefinition = {
 
       return {
         success: true,
+        dryRun: false,
         ...baseResult,
+        reconciliationId,
         snapshot,
         adjustmentTransaction: {
           id: adjustmentId,
           type: adjustmentType,
           amount: fromCentavos(adjustmentAmount),
           currency: accountRow.currency,
-          description: 'Balance reconciliation adjustment',
+          description: 'Balance reconciliation bridge',
           notes: null,
           status: 'posted',
           source: source ?? null,
           note: note ?? null,
           date: reconciliationDate,
+          reportingTreatment: 'exclude_from_cashflow',
+          transactionKind: 'reconciliation_bridge',
+          reconciliationId,
         },
-        message: `Reconciled "${accountRow.name}" to ${accountRow.currency} ${actualBalance.toFixed(2)} with an adjustment transaction.`,
+        verifiedLedgerBalance: fromCentavos(verifiedLedgerCentavos),
+        verifiedLedgerBalanceCentavos: verifiedLedgerCentavos,
+        message: `Reconciled "${accountRow.name}" to ${accountRow.currency} ${actualBalance.toFixed(2)} from its effective ledger.`,
       }
     })
 
     return result
+  },
+}
+
+type StagedHistoryRow = {
+  id: string
+  type: 'income' | 'expense' | 'transfer'
+  amount: number
+  date: string
+}
+
+function getStagedHistoryRows(accountId: string, stagingBatchId: string): StagedHistoryRow[] {
+  return query<StagedHistoryRow>(
+    `SELECT id, type, amount, date
+     FROM transactions
+     WHERE account_id = $1
+       AND staging_batch_id = $2
+       AND COALESCE(ledger_treatment, 'normal') = 'staged_no_balance_impact'
+       AND COALESCE(is_archived, 0) = 0
+     ORDER BY date ASC, id ASC`,
+    [accountId, stagingBatchId]
+  )
+}
+
+function stagedCoverageFailure(
+  rows: StagedHistoryRow[],
+  statementStartDate: string,
+  statementEndDate: string
+) {
+  if (rows.length === 0) {
+    return {
+      success: false as const,
+      reason: 'staged_batch_not_found' as const,
+      message: 'No staged rows were found for this account and batch.',
+    }
+  }
+  if (rows.some((row) => row.type === 'transfer')) {
+    return {
+      success: false as const,
+      reason: 'staged_transfer_requires_matching' as const,
+      message: 'Staged statement rows must remain account-side income or expense entries.',
+    }
+  }
+  const observedStartDate = rows[0].date
+  const observedEndDate = rows[rows.length - 1].date
+  if (observedStartDate < statementStartDate || observedEndDate > statementEndDate) {
+    return {
+      success: false as const,
+      reason: 'statement_coverage_mismatch' as const,
+      message: `Batch dates ${observedStartDate} through ${observedEndDate} fall outside declared coverage ${statementStartDate} through ${statementEndDate}.`,
+    }
+  }
+  return null
+}
+
+function stagedBatchImpact(rows: StagedHistoryRow[]): number {
+  return rows.reduce((sum, row) => sum + (row.type === 'income' ? row.amount : -row.amount), 0)
+}
+
+const finalizeStagedStatementHistory: ToolDefinition = {
+  name: 'finalize-staged-statement-history',
+  description:
+    'Validate and atomically finalize staged statement history, create its reconciliation bridge, set the observed balance, and verify the ledger.',
+  schema: z.object({
+    accountId: boundedText('Account ID', 'Canonical account ID', 128).optional(),
+    account: boundedText('Account alias', 'Account alias, exact ID, or exact name', 128).optional(),
+    stagingBatchId: boundedText('Staging batch ID', 'Batch identifier assigned during import', 128),
+    statementStartDate: isoDate('Declared statement coverage start date'),
+    statementEndDate: isoDate('Declared statement coverage end date'),
+    actualBalance: moneyAmount('Observed balance at the statement end'),
+    reconciliationDate: isoDate('Reconciliation date; defaults to statementEndDate').optional(),
+    apply: z.boolean().optional().default(false).describe('Apply the atomic finalization'),
+    source: boundedText('Source', 'Optional audit source', 120).optional(),
+    note: boundedText('Note', 'Optional audit note', 500).optional(),
+  }),
+  execute: async ({
+    accountId,
+    account,
+    stagingBatchId,
+    statementStartDate,
+    statementEndDate,
+    actualBalance,
+    reconciliationDate,
+    apply,
+    source,
+    note,
+  }) => {
+    if (statementStartDate > statementEndDate) {
+      return {
+        success: false,
+        reason: 'invalid_statement_range',
+        message: 'statementStartDate must be on or before statementEndDate.',
+      }
+    }
+    const resolvedAccount = resolveAccountId(accountId, account)
+    if (!resolvedAccount.success) return { success: false, message: resolvedAccount.message }
+    const accountRow = getAccountById(resolvedAccount.id)
+    if (!accountRow) return { success: false, message: `Account ${resolvedAccount.id} not found.` }
+    if ((accountRow.account_mode ?? 'transactional') !== 'transactional') {
+      return {
+        success: false,
+        reason: 'snapshot_only_account',
+        message:
+          'Snapshot-only accounts use observed valuations rather than staged ledger finalization.',
+      }
+    }
+
+    const rows = getStagedHistoryRows(accountRow.id, stagingBatchId)
+    const coverageFailure = stagedCoverageFailure(rows, statementStartDate, statementEndDate)
+    if (coverageFailure) return coverageFailure
+    const actualCentavos = toCentavos(actualBalance)
+    const ledgerBefore = getEffectiveLedgerBalance(accountRow.id)
+    const batchImpact = stagedBatchImpact(rows)
+    const ledgerAfterBatch = ledgerBefore + batchImpact
+    const bridgeDifference = actualCentavos - ledgerAfterBatch
+    const date = reconciliationDate ?? statementEndDate
+    const preview = {
+      account: { id: accountRow.id, name: accountRow.name, currency: accountRow.currency },
+      stagingBatchId,
+      statementCoverage: {
+        startDate: statementStartDate,
+        endDate: statementEndDate,
+        observedStartDate: rows[0].date,
+        observedEndDate: rows[rows.length - 1].date,
+      },
+      transactionCount: rows.length,
+      transactionIds: rows.map((row) => row.id),
+      ledgerBalanceBefore: fromCentavos(ledgerBefore),
+      ledgerBalanceBeforeCentavos: ledgerBefore,
+      stagedBalanceEffect: fromCentavos(batchImpact),
+      stagedBalanceEffectCentavos: batchImpact,
+      ledgerBalanceAfterBatch: fromCentavos(ledgerAfterBatch),
+      ledgerBalanceAfterBatchCentavos: ledgerAfterBatch,
+      reconciliationBridge: fromCentavos(bridgeDifference),
+      reconciliationBridgeCentavos: bridgeDifference,
+      actualBalance: fromCentavos(actualCentavos),
+      actualBalanceCentavos: actualCentavos,
+      reconciliationDate: date,
+    }
+    if (!apply) {
+      return {
+        success: true,
+        dryRun: true,
+        applyRequired: true,
+        ...preview,
+        message: `Dry run: ${rows.length} staged transaction(s) would be finalized with a ${accountRow.currency} ${fromCentavos(bridgeDifference).toFixed(2)} bridge.`,
+      }
+    }
+
+    return transaction(() => {
+      const currentAccount = getAccountById(accountRow.id)
+      if (!currentAccount)
+        throw new Error(`Account ${accountRow.id} disappeared during finalization.`)
+      if ((currentAccount.account_mode ?? 'transactional') !== 'transactional') {
+        throw new Error('Account mode changed after preview. Preview the staged batch again.')
+      }
+      const currentRows = getStagedHistoryRows(accountRow.id, stagingBatchId)
+      const currentCoverageFailure = stagedCoverageFailure(
+        currentRows,
+        statementStartDate,
+        statementEndDate
+      )
+      if (currentCoverageFailure) throw new Error(currentCoverageFailure.message)
+      if (
+        currentRows.length !== rows.length ||
+        currentRows.some((row, index) => row.id !== rows[index]?.id)
+      ) {
+        throw new Error('Staged batch changed after preview. Preview it again before applying.')
+      }
+      const currentLedgerBefore = getEffectiveLedgerBalance(accountRow.id)
+      const currentBatchImpact = stagedBatchImpact(currentRows)
+      const currentBridgeDifference = actualCentavos - (currentLedgerBefore + currentBatchImpact)
+      const reconciliationId = generateId()
+      const adjustmentId = currentBridgeDifference === 0 ? null : generateId()
+      insertReconciliationRecord({
+        id: reconciliationId,
+        accountId: accountRow.id,
+        date,
+        actualBalance: actualCentavos,
+        storedBalanceBefore: currentAccount.balance,
+        ledgerBalanceBefore: currentLedgerBefore,
+        ledgerBalanceAfter: actualCentavos,
+        adjustmentAmount: currentBridgeDifference,
+        stagingBatchId,
+        statementStartDate,
+        statementEndDate,
+        source,
+        note,
+      })
+      const finalized = execute(
+        `UPDATE transactions
+         SET ledger_treatment = 'normal', status = 'cleared',
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE account_id = $1 AND staging_batch_id = $2
+           AND COALESCE(ledger_treatment, 'normal') = 'staged_no_balance_impact'
+           AND COALESCE(is_archived, 0) = 0`,
+        [accountRow.id, stagingBatchId]
+      )
+      if (finalized.rowsAffected !== currentRows.length) {
+        throw new Error(
+          `Expected to finalize ${currentRows.length} rows but updated ${finalized.rowsAffected}.`
+        )
+      }
+      let adjustmentTransaction = null
+      if (adjustmentId) {
+        const adjustmentType = currentBridgeDifference > 0 ? 'income' : 'expense'
+        const adjustmentAmount = Math.abs(currentBridgeDifference)
+        execute(
+          `INSERT INTO transactions (
+             id, account_id, category_id, transfer_to_account_id, type, amount, currency,
+             description, notes, status, source, note, ledger_treatment, reporting_treatment,
+             transaction_kind, reconciliation_id, is_archived, date
+           ) VALUES ($1, $2, NULL, NULL, $3, $4, $5, 'Balance reconciliation bridge', NULL,
+             'posted', $6, $7, 'normal', 'exclude_from_cashflow', 'reconciliation_bridge', $8, 0, $9)`,
+          [
+            adjustmentId,
+            accountRow.id,
+            adjustmentType,
+            adjustmentAmount,
+            accountRow.currency,
+            source ?? null,
+            note ?? null,
+            reconciliationId,
+            date,
+          ]
+        )
+        assertSingleRowUpdated(
+          execute(
+            'UPDATE account_reconciliations SET adjustment_transaction_id = $1 WHERE id = $2',
+            [adjustmentId, reconciliationId]
+          ),
+          `Reconciliation ${reconciliationId} could not be linked to its bridge.`
+        )
+        adjustmentTransaction = {
+          id: adjustmentId,
+          type: adjustmentType,
+          amount: fromCentavos(adjustmentAmount),
+          amountCentavos: adjustmentAmount,
+          reportingTreatment: 'exclude_from_cashflow',
+          transactionKind: 'reconciliation_bridge',
+          reconciliationId,
+        }
+      }
+      assertSingleRowUpdated(
+        execute(
+          "UPDATE accounts SET balance = $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
+          [actualCentavos, accountRow.id]
+        ),
+        `Account ${accountRow.id} could not be updated after finalization.`
+      )
+      const snapshot = upsertBalanceSnapshot(accountRow.id, date, actualCentavos)
+      const verifiedLedgerCentavos = getEffectiveLedgerBalance(accountRow.id)
+      if (verifiedLedgerCentavos !== actualCentavos) {
+        throw new Error(
+          `Finalization verification failed: ledger ${verifiedLedgerCentavos} did not match observed balance ${actualCentavos}.`
+        )
+      }
+      writeAuditLog({
+        entity: 'account',
+        entityId: accountRow.id,
+        action: 'finalize-staged-statement-history',
+        before: {
+          account: accountAuditSnapshot(currentAccount),
+          stagingBatchId,
+          transactionIds: currentRows.map((row) => row.id),
+          ledgerBalanceCentavos: currentLedgerBefore,
+        },
+        after: {
+          reconciliationId,
+          adjustmentTransactionId: adjustmentId,
+          balanceCentavos: actualCentavos,
+          verifiedLedgerCentavos,
+        },
+        source: source ?? null,
+        note: note ?? null,
+      })
+      return {
+        success: true,
+        dryRun: false,
+        ...preview,
+        reconciliationId,
+        adjustmentTransaction,
+        snapshot,
+        verifiedLedgerBalance: fromCentavos(verifiedLedgerCentavos),
+        verifiedLedgerBalanceCentavos: verifiedLedgerCentavos,
+        message: `Finalized ${currentRows.length} staged transaction(s) and reconciled "${accountRow.name}" atomically.`,
+      }
+    })
   },
 }
 
@@ -1413,6 +2009,7 @@ export const accountsTools: ToolDefinition[] = [
   setAccountAliasTool,
   balanceSnapshot,
   reconcile,
+  finalizeStagedStatementHistory,
   deleteAccount,
   listCategories,
 ]

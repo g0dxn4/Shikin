@@ -34,6 +34,7 @@ function mockTauriDatabaseModules() {
     '016_cli_qol_foundation',
     '017_investment_type_cetes',
     '018_placeholder_transactions',
+    '019_financial_semantics',
   ].map((name) => ({ name }))
   const tableRows = [
     '_migrations',
@@ -61,6 +62,8 @@ function mockTauriDatabaseModules() {
     'cashflow_bucket_allocations',
     'category_suggestions',
     'credit_card_statements',
+    'account_reconciliations',
+    'receivables',
   ].map((name) => ({ name }))
   const columnRows = [
     'id',
@@ -75,6 +78,7 @@ function mockTauriDatabaseModules() {
     'credit_limit',
     'statement_closing_day',
     'payment_due_day',
+    'account_mode',
     'category_id',
     'sort_order',
     'account_id',
@@ -90,6 +94,12 @@ function mockTauriDatabaseModules() {
     'resolved_by_transaction_id',
     'placeholder_reason',
     'placeholder_parent_transaction_id',
+    'ledger_treatment',
+    'reporting_treatment',
+    'transaction_kind',
+    'staging_batch_id',
+    'reconciliation_id',
+    'matched_transaction_id',
     'billing_cycle',
     'next_billing_date',
     'period',
@@ -146,6 +156,19 @@ function mockTauriDatabaseModules() {
     'statement_balance',
     'minimum_payment',
     'paid_amount',
+    'reconciliation_date',
+    'actual_balance',
+    'stored_balance_before',
+    'ledger_balance_before',
+    'ledger_balance_after',
+    'adjustment_amount',
+    'adjustment_transaction_id',
+    'payer',
+    'received_amount',
+    'project_reference',
+    'invoice_reference',
+    'matched_transaction_id',
+    'notes',
   ].map((name) => ({ name, notnull: name === 'status' ? 0 : undefined, dflt_value: null }))
   const triggerRows = [
     {

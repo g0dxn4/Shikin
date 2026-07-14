@@ -32,12 +32,12 @@ Shikin is built to keep both:
 - **Investments**: Portfolio tracking with live prices (Alpha Vantage for stocks, CoinGecko for crypto).
 - **Multi-Currency**: Live exchange rates via frankfurter.app with preferred currency conversion.
 
-### CLI & MCP Server — 83 Shared Tools
+### CLI & MCP Server — 90 Shared Tools
 
 - **CLI**: `shikin add-transaction --amount 5.50 --type expense --description "Coffee"`
 - **MCP Server**: Connect Claude Code, Claude Desktop, Cursor, or any MCP-compatible client
 - **Portable AI Skill**: Optional `Skill.md` reference for AI tools that support file-based skills
-- **Shared Tool Definitions**: 83 shipped CLI/MCP tools run end-to-end against local data, including backup, guarded restore, audit, and automation-context tools
+- **Shared Tool Definitions**: 90 shipped CLI/MCP tools run end-to-end against local data, including reconciliation, receivables, backup, guarded restore, audit, and automation-context tools
 - **Authoritative Discovery**: `shikin tools --json` includes command schemas plus catalog/schema version, compatibility, and required migration metadata
 - **No Built-in Chat Assistant**: Shikin is the local finance engine; external clients can automate it through CLI/MCP
 
@@ -76,7 +76,7 @@ Current MVP limitations:
 | State      | Zustand (19 stores)              | Global state management                               |
 | Database   | SQLite (shared storage)          | 21 tables, migration-backed schema                    |
 | Settings   | Tauri Store / data-server bridge | Local key-value config storage                        |
-| Automation | CLI (`commander`) + MCP SDK      | Local automation surface (83 shared tools; 87 CLI commands including built-ins) |
+| Automation | CLI (`commander`) + MCP SDK      | Local automation surface (90 shared tools; 94 CLI commands including built-ins) |
 | Forms      | React Hook Form + Zod v4         | Form validation and parsing                           |
 | Charts     | Recharts                         | Financial visualizations                              |
 | PDF        | jsPDF                            | Report generation                                     |
@@ -213,7 +213,7 @@ pnpm build:tauri  # Builds .deb + .AppImage (Linux), .dmg (macOS), .msi (Windows
 
 ## CLI & MCP Server
 
-Shikin exposes 83 shared CLI/MCP tools and 87 total CLI commands including CLI-only built-ins. All shipped tools are available end-to-end against the local database.
+Shikin exposes 90 shared CLI/MCP tools and 94 total CLI commands including CLI-only built-ins. All shipped tools are available end-to-end against the local database.
 Automation clients can use the same generic finance workflows as humans and scripts: dry-run-first money writes, credit-card payment previews, project-style transaction tags, subscription creation from existing payments, audit-backed undo, and `finance-sanity-check` for daily-review-style checks. Treat `--source` as an opaque provenance label, `--note` as an audit/changelog note, and transaction `--notes` as transaction details.
 
 ```bash
@@ -305,7 +305,7 @@ Shikin/
 │   ├── stores/               # 18 Zustand stores
 │   ├── i18n/                 # 14 namespaces, 2 languages (en/es)
 │   └── types/                # TypeScript type definitions
-├── cli/                      # CLI + MCP server (83 shared tools)
+├── cli/                      # CLI + MCP server (90 shared tools)
 ├── skills/                   # Portable AI skill packs distributed by Shikin
 ├── docs/                     # Project documentation
 ├── e2e/                      # Playwright end-to-end tests

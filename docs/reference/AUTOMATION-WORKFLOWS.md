@@ -2,7 +2,7 @@
 
 This reference captures the generic CLI/MCP finance workflows added or hardened by the assistant-safe workflow plan. The features are for any human, script, CLI user, MCP client, bot, or AI assistant. Shikin does not hardcode a specific assistant, Discord bot, or source label.
 
-Use `shikin tools --json` as the authoritative machine-readable contract. At the time of this update, Shikin exposes 83 shared CLI/MCP tools and 87 total CLI commands including CLI-only built-ins.
+Use `shikin tools --json` as the authoritative machine-readable contract. At the time of this update, Shikin exposes 90 shared CLI/MCP tools and 94 total CLI commands including CLI-only built-ins.
 
 ## Provenance And Notes
 

@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import type * as InsightsModule from './insights.js'
 import type * as OsModule from 'node:os'
 import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
+import { applyFinancialSemanticsTestSchema } from './financial-semantics-test-schema.js'
 
 const tempDirs = new Set<string>()
 const cleanupCallbacks = new Set<() => void>()
@@ -224,6 +225,7 @@ function seedDatabase(tempHome: string, seed: (db: Database.Database) => void): 
   `)
 
   seedTransactionStatusTriggers(db)
+  applyFinancialSemanticsTestSchema(db)
 
   for (const migration of CLI_DATABASE_MIGRATIONS) {
     db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(

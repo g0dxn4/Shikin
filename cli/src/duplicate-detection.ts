@@ -14,6 +14,8 @@ export type TransactionDuplicateInput = {
   status?: 'pending' | 'posted' | 'cleared' | null
   transferToAccountId?: string | null
   description: string
+  source?: string | null
+  note?: string | null
   excludeTransactionId?: string
 }
 
@@ -33,6 +35,13 @@ export type TransactionDuplicateMatch = {
   daysApart: number
   windowDays: number
   similarityThreshold: number
+  signals: string[]
+  provenance: {
+    candidateSource: string | null
+    existingSource: string | null
+    candidateExternalIds: string[]
+    existingExternalIds: string[]
+  }
 }
 
 export type TransactionDuplicateCheck = {
@@ -44,6 +53,8 @@ export type TransactionDuplicateCheck = {
     status: 'pending' | 'posted' | 'cleared'
     transferToAccountId: string | null
     normalizedDescription: string
+    source: string | null
+    externalIds: string[]
   }
   windowDays: number
   similarityThreshold: number
@@ -59,6 +70,8 @@ type DuplicateCandidateRow = {
   status: 'pending' | 'posted' | 'cleared' | null
   transfer_to_account_id: string | null
   description: string
+  source: string | null
+  note: string | null
 }
 
 export function normalizeTransactionDescriptionForDuplicate(description: string): string {
@@ -97,11 +110,14 @@ export function findTransactionDuplicate(
     status,
     transferToAccountId,
     normalizedDescription,
+    source: input.source ?? null,
+    externalIds: extractExternalIds(input.note),
   }
 
-  const exactCandidates = filterExcluded(
-    query<DuplicateCandidateRow>(
-      `SELECT id, account_id, date, amount, type, COALESCE(NULLIF(TRIM(status), ''), 'posted') as status, transfer_to_account_id, description
+  const exactCandidates = filterDistinctProvenance(
+    filterExcluded(
+      query<DuplicateCandidateRow>(
+        `SELECT id, account_id, date, amount, type, COALESCE(NULLIF(TRIM(status), ''), 'posted') as status, transfer_to_account_id, description, source, note
        FROM transactions
        WHERE account_id = $1
           AND date = $2
@@ -109,18 +125,21 @@ export function findTransactionDuplicate(
           AND type = $4
           AND COALESCE(NULLIF(TRIM(status), ''), 'posted') = $5
           AND ($6 IS NULL OR transfer_to_account_id = $7)
+          AND COALESCE(is_archived, 0) = 0
        ORDER BY created_at DESC, id DESC`,
-      [
-        input.accountId,
-        input.date,
-        input.amountCentavos,
-        input.type,
-        status,
-        transferToAccountId,
-        transferToAccountId,
-      ]
-    ) ?? [],
-    input.excludeTransactionId
+        [
+          input.accountId,
+          input.date,
+          input.amountCentavos,
+          input.type,
+          status,
+          transferToAccountId,
+          transferToAccountId,
+        ]
+      ) ?? [],
+      input.excludeTransactionId
+    ),
+    input
   )
   const exactCandidate = exactCandidates.find(
     (candidate) =>
@@ -145,9 +164,10 @@ export function findTransactionDuplicate(
 
   const startDate = dayjs(input.date).subtract(windowDays, 'day').format('YYYY-MM-DD')
   const endDate = dayjs(input.date).add(windowDays, 'day').format('YYYY-MM-DD')
-  const potentialCandidates = filterExcluded(
-    query<DuplicateCandidateRow>(
-      `SELECT id, account_id, date, amount, type, COALESCE(NULLIF(TRIM(status), ''), 'posted') as status, transfer_to_account_id, description
+  const potentialCandidates = filterDistinctProvenance(
+    filterExcluded(
+      query<DuplicateCandidateRow>(
+        `SELECT id, account_id, date, amount, type, COALESCE(NULLIF(TRIM(status), ''), 'posted') as status, transfer_to_account_id, description, source, note
        FROM transactions
        WHERE account_id = $1
           AND amount = $2
@@ -156,20 +176,23 @@ export function findTransactionDuplicate(
           AND date >= $5
           AND date <= $6
           AND ($7 IS NULL OR transfer_to_account_id = $8)
+          AND COALESCE(is_archived, 0) = 0
         ORDER BY ABS(julianday(date) - julianday($9)) ASC, date DESC, created_at DESC, id DESC`,
-      [
-        input.accountId,
-        input.amountCentavos,
-        input.type,
-        status,
-        startDate,
-        endDate,
-        transferToAccountId,
-        transferToAccountId,
-        input.date,
-      ]
-    ) ?? [],
-    input.excludeTransactionId
+        [
+          input.accountId,
+          input.amountCentavos,
+          input.type,
+          status,
+          startDate,
+          endDate,
+          transferToAccountId,
+          transferToAccountId,
+          input.date,
+        ]
+      ) ?? [],
+      input.excludeTransactionId
+    ),
+    input
   )
 
   const scoredCandidates = potentialCandidates
@@ -225,6 +248,33 @@ function filterExcluded(
   return rows.filter((row) => row.id !== excludeTransactionId)
 }
 
+function extractExternalIds(note: string | null | undefined): string[] {
+  if (!note) return []
+  return note
+    .split(';')
+    .map((part) => part.trim())
+    .filter((part) => part.startsWith('externalId='))
+    .map((part) => part.slice('externalId='.length).trim())
+    .filter(Boolean)
+}
+
+function filterDistinctProvenance(
+  rows: DuplicateCandidateRow[],
+  input: TransactionDuplicateInput
+): DuplicateCandidateRow[] {
+  const inputExternalIds = extractExternalIds(input.note)
+  if (inputExternalIds.length === 0) return rows
+  const inputSource = input.source?.trim().toLowerCase()
+  if (!inputSource) return rows
+  const inputIds = new Set(inputExternalIds)
+  return rows.filter((row) => {
+    const candidateSource = row.source?.trim().toLowerCase()
+    if (!candidateSource || candidateSource !== inputSource) return true
+    const candidateIds = extractExternalIds(row.note)
+    return candidateIds.length === 0 || candidateIds.some((id) => inputIds.has(id))
+  })
+}
+
 function buildDuplicateMatch({
   kind,
   candidate,
@@ -248,6 +298,22 @@ function buildDuplicateMatch({
   windowDays: number
   similarityThreshold: number
 }): TransactionDuplicateMatch {
+  const candidateExternalIds = extractExternalIds(input.note)
+  const existingExternalIds = extractExternalIds(candidate.note)
+  const signals = [
+    'same_account',
+    'same_amount',
+    'same_type',
+    'same_status',
+    candidateDaysApart === 0 ? 'same_date' : `within_${candidateDaysApart}_days`,
+    descriptionSimilarity === 1 ? 'same_normalized_description' : 'similar_description',
+  ]
+  if (
+    candidateExternalIds.length > 0 &&
+    existingExternalIds.some((id) => candidateExternalIds.includes(id))
+  ) {
+    signals.push('same_external_id')
+  }
   return {
     kind,
     existingTransactionId: candidate.id,
@@ -264,6 +330,13 @@ function buildDuplicateMatch({
     daysApart: candidateDaysApart,
     windowDays,
     similarityThreshold,
+    signals,
+    provenance: {
+      candidateSource: input.source ?? null,
+      existingSource: candidate.source ?? null,
+      candidateExternalIds,
+      existingExternalIds,
+    },
   }
 }
 

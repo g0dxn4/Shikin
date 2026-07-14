@@ -49,6 +49,8 @@ async function getTotalExpenses(start: string, end: string): Promise<number> {
   const rows = await query<TotalRow>(
     `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
      WHERE type = 'expense' AND date >= ? AND date <= ?
+       AND COALESCE(reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(is_archived, 0) = 0
        AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
     [start, end]
   )
@@ -60,6 +62,8 @@ async function getTotalIncome(start: string, end: string): Promise<number> {
   const rows = await query<TotalRow>(
     `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
      WHERE type = 'income' AND date >= ? AND date <= ?
+       AND COALESCE(reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(is_archived, 0) = 0
        AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
     [start, end]
   )
@@ -73,6 +77,8 @@ async function getSpendingByCategory(start: string, end: string): Promise<Spendi
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
       WHERE t.type = 'expense' AND t.date >= ? AND t.date <= ?
+        AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+        AND COALESCE(t.is_archived, 0) = 0
         AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      GROUP BY c.name
      ORDER BY total DESC`,
@@ -87,6 +93,8 @@ async function getBiggestExpense(start: string, end: string): Promise<BiggestRow
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
       WHERE t.type = 'expense' AND t.date >= ? AND t.date <= ?
+        AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+        AND COALESCE(t.is_archived, 0) = 0
         AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      ORDER BY t.amount DESC LIMIT 1`,
     [start, end]
@@ -101,6 +109,8 @@ async function getBudgetAdherence(start: string, end: string): Promise<BudgetRow
        COALESCE((SELECT SUM(t.amount) FROM transactions t
          WHERE t.category_id = b.category_id AND t.type = 'expense'
           AND t.date >= ? AND t.date <= ?
+          AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+          AND COALESCE(t.is_archived, 0) = 0
           AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')), 0) as spent
      FROM budgets b WHERE b.is_active = 1`,
     [start, end]

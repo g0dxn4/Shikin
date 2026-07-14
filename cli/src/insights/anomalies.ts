@@ -18,6 +18,8 @@ export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: 
     `SELECT DISTINCT currency
      FROM transactions
      WHERE type = 'expense' AND currency IS NOT NULL AND TRIM(currency) != ''
+       AND COALESCE(reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(is_archived, 0) = 0
        AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`
   )
   const hasMixedCurrencies = ledgerCurrencies.length > 1
@@ -38,6 +40,8 @@ export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: 
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1
+       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(t.is_archived, 0) = 0
        AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      ORDER BY t.date DESC`,
     [dayjs().subtract(30, 'day').format('YYYY-MM-DD')]
@@ -55,6 +59,8 @@ export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: 
     const history = query<{ amount: number }>(
       `SELECT amount FROM transactions
        WHERE description = $1 AND currency = $2 AND type = 'expense' AND date >= $3 AND date < $4
+         AND COALESCE(reporting_treatment, 'normal') = 'normal'
+         AND COALESCE(is_archived, 0) = 0
          AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
       [row.description, row.currency, historyStart, recentWindowStart]
     )
@@ -88,6 +94,8 @@ export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: 
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1
+       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(t.is_archived, 0) = 0
        AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      ORDER BY t.date DESC`,
     [dayjs().subtract(7, 'day').format('YYYY-MM-DD')]
@@ -130,6 +138,8 @@ export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: 
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1 AND t.date <= $2
+       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(t.is_archived, 0) = 0
        AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      GROUP BY t.currency, t.category_id`,
     [currentMonthStart, today]
@@ -140,6 +150,8 @@ export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: 
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1 AND t.date <= $2
+       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(t.is_archived, 0) = 0
        AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      GROUP BY t.currency, t.category_id`,
     [historicalStart, historicalEnd]
@@ -173,6 +185,8 @@ export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: 
        SELECT description, currency, amount, date
         FROM transactions
         WHERE type = 'expense' AND is_recurring = 1 AND date >= $1
+          AND COALESCE(reporting_treatment, 'normal') = 'normal'
+          AND COALESCE(is_archived, 0) = 0
           AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
         ORDER BY date ASC
       )
@@ -204,6 +218,8 @@ export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: 
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.amount >= $1 AND t.date >= $2
+       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+       AND COALESCE(t.is_archived, 0) = 0
        AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      ORDER BY t.currency ASC, t.amount DESC`,
     [thresholdCentavos, dayjs().subtract(7, 'day').format('YYYY-MM-DD')]

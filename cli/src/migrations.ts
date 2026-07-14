@@ -14,4 +14,5 @@ export const CLI_DATABASE_MIGRATIONS = [
   '016_cli_qol_foundation',
   '017_investment_type_cetes',
   '018_placeholder_transactions',
+  '019_financial_semantics',
 ] as const

@@ -12,6 +12,10 @@ import type {
 } from './common'
 
 export type TransactionStatus = 'pending' | 'posted' | 'cleared'
+export type AccountMode = 'transactional' | 'snapshot_only'
+export type LedgerTreatment = 'normal' | 'staged_no_balance_impact'
+export type ReportingTreatment = 'normal' | 'exclude_from_cashflow'
+export type TransactionKind = 'standard' | 'reconciliation_bridge' | 'archived_transfer_mirror'
 export type PlaceholderTransactionStatus = 'unresolved' | 'resolved' | 'split' | 'cancelled'
 export type CategorySuggestionStatus = 'pending' | 'approved' | 'rejected'
 export type CreditCardStatementStatus = 'open' | 'partial' | 'paid' | 'overdue'
@@ -26,6 +30,7 @@ export interface Account {
   color: string | null
   is_archived: number
   is_primary?: number
+  account_mode?: AccountMode
   credit_limit?: number
   statement_closing_day?: number
   payment_due_day?: number
@@ -61,12 +66,56 @@ export interface Transaction {
   source?: string | null
   note?: string | null
   recurring_rule_id?: ULID | null
+  ledger_treatment?: LedgerTreatment
+  reporting_treatment?: ReportingTreatment
+  transaction_kind?: TransactionKind
+  staging_batch_id?: string | null
+  reconciliation_id?: ULID | null
+  matched_transaction_id?: ULID | null
+  is_archived?: number
   is_placeholder?: number
   placeholder_status?: PlaceholderTransactionStatus | null
   resolved_at?: DateTimeStr | null
   resolved_by_transaction_id?: ULID | null
   placeholder_reason?: string | null
   placeholder_parent_transaction_id?: ULID | null
+  created_at: DateTimeStr
+  updated_at: DateTimeStr
+}
+
+export interface AccountReconciliation {
+  id: ULID
+  account_id: ULID
+  reconciliation_date: DateStr
+  actual_balance: Money
+  stored_balance_before: Money
+  ledger_balance_before: Money
+  ledger_balance_after: Money
+  adjustment_amount: Money
+  adjustment_transaction_id: ULID | null
+  staging_batch_id: string | null
+  statement_start_date: DateStr | null
+  statement_end_date: DateStr | null
+  source: string | null
+  note: string | null
+  created_at: DateTimeStr
+}
+
+export interface Receivable {
+  id: ULID
+  payer: string
+  amount: Money
+  received_amount: Money
+  currency: CurrencyCode
+  due_date: DateStr
+  project_reference: string | null
+  invoice_reference: string | null
+  status: 'open' | 'partial' | 'received' | 'cancelled'
+  account_id: ULID | null
+  matched_transaction_id: ULID | null
+  notes: string | null
+  source: string | null
+  note: string | null
   created_at: DateTimeStr
   updated_at: DateTimeStr
 }

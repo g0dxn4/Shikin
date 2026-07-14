@@ -57,6 +57,7 @@ type AccountContextRow = {
   credit_limit?: number | null
   statement_closing_day?: number | null
   payment_due_day?: number | null
+  account_mode?: 'transactional' | 'snapshot_only' | null
 }
 
 type BudgetContextRow = {
@@ -1225,6 +1226,44 @@ function transactionSnapshotFromAudit(value: unknown): UndoTransactionSnapshot |
   }
 }
 
+function protectedUndoSemanticsFailure(entry: AuditLogRow) {
+  if (entry.entity !== 'transaction') return null
+  for (const value of [parseAuditJson(entry.before_json), parseAuditJson(entry.after_json)]) {
+    const tx = nestedSnapshot(value, 'transaction')
+    if (!tx) continue
+    if (
+      (tx.ledgerTreatment !== undefined && tx.ledgerTreatment !== 'normal') ||
+      (tx.reportingTreatment !== undefined && tx.reportingTreatment !== 'normal') ||
+      (tx.transactionKind !== undefined && tx.transactionKind !== 'standard') ||
+      Boolean(tx.stagingBatchId) ||
+      Boolean(tx.reconciliationId) ||
+      Boolean(tx.matchedTransactionId) ||
+      tx.isArchived === true
+    ) {
+      return failure(
+        'dedicated_financial_undo_required',
+        'This transaction uses staging, reconciliation, matching, archive, or reporting semantics and cannot be restored through generic undo. Use its dedicated reversal or unmatch workflow.'
+      )
+    }
+
+    for (const accountId of [asString(tx.accountId), asString(tx.transferToAccountId)].filter(
+      (value): value is string => Boolean(value)
+    )) {
+      const account = (query<{ account_mode?: 'transactional' | 'snapshot_only' | null }>(
+        'SELECT account_mode FROM accounts WHERE id = $1 LIMIT 1',
+        [accountId]
+      ) ?? [])[0]
+      if ((account?.account_mode ?? 'transactional') === 'snapshot_only') {
+        return failure(
+          'snapshot_only_account',
+          `Generic undo cannot mutate transaction history for snapshot-only account ${accountId}.`
+        )
+      }
+    }
+  }
+  return null
+}
+
 function statementSnapshotFromAudit(value: unknown): UndoStatementSnapshot | null {
   const statement = nestedSnapshot(value, 'statement')
   if (!statement) return null
@@ -1689,8 +1728,179 @@ function deleteUndoStatement(statementId: string) {
   }
 }
 
-function applyUndoPlan(entry: AuditLogRow, plan: UndoPlan, source?: string, note?: string) {
-  transaction(() => {
+function currentTransactionMatchesAudit(
+  current: Record<string, unknown>,
+  expected: UndoTransactionSnapshot
+) {
+  let tags: string[] = []
+  try {
+    const parsed = JSON.parse(asString(current.tags) ?? '[]') as unknown
+    if (Array.isArray(parsed)) {
+      tags = parsed
+        .map((tag) =>
+          typeof tag === 'string'
+            ? tag
+            : isPlainObject(tag) && typeof tag.label === 'string'
+              ? tag.label
+              : null
+        )
+        .filter((tag): tag is string => Boolean(tag))
+    }
+  } catch {
+    return false
+  }
+
+  return (
+    current.account_id === expected.accountId &&
+    (current.category_id ?? null) === expected.categoryId &&
+    (current.transfer_to_account_id ?? null) === expected.transferToAccountId &&
+    current.type === expected.type &&
+    current.amount === expected.amountCentavos &&
+    (current.currency ?? null) === expected.currency &&
+    current.description === expected.description &&
+    (current.notes ?? null) === expected.notes &&
+    normalizeUndoTransactionStatus(current.status) === expected.status &&
+    (current.source ?? null) === expected.source &&
+    (current.note ?? null) === expected.note &&
+    (current.recurring_rule_id ?? null) === expected.recurringRuleId &&
+    JSON.stringify(tags) === JSON.stringify(expected.tags) &&
+    Boolean(current.is_placeholder) === expected.isPlaceholder &&
+    (current.placeholder_status ?? null) === expected.placeholderStatus &&
+    (current.resolved_at ?? null) === expected.resolvedAt &&
+    (current.resolved_by_transaction_id ?? null) === expected.resolvedByTransactionId &&
+    (current.placeholder_reason ?? null) === expected.placeholderReason &&
+    (current.placeholder_parent_transaction_id ?? null) ===
+      expected.placeholderParentTransactionId &&
+    current.date === expected.date
+  )
+}
+
+function assertCurrentTransactionUndoState(entry: AuditLogRow, plan: UndoPlan) {
+  if (plan.entity === 'credit_card_statement') {
+    const current = (query<Record<string, unknown>>(
+      'SELECT * FROM credit_card_statements WHERE id = $1 LIMIT 1',
+      [plan.entityId]
+    ) ?? [])[0]
+    if (plan.inverseAction === 'create') {
+      if (current)
+        throw new Error(`Statement ${plan.entityId} was recreated after this audit entry.`)
+      return
+    }
+    if (!current) throw new Error(`Statement ${plan.entityId} no longer exists.`)
+    const expectedCurrent = statementSnapshotFromAudit(parseAuditJson(entry.after_json))
+    if (
+      !expectedCurrent ||
+      current.account_id !== expectedCurrent.accountId ||
+      (current.statement_start_date ?? null) !== expectedCurrent.statementStartDate ||
+      current.statement_end_date !== expectedCurrent.statementEndDate ||
+      current.due_date !== expectedCurrent.dueDate ||
+      current.statement_balance !== expectedCurrent.statementBalanceCentavos ||
+      current.minimum_payment !== expectedCurrent.minimumPaymentCentavos ||
+      current.paid_amount !== expectedCurrent.paidAmountCentavos ||
+      current.currency !== expectedCurrent.currency ||
+      current.status !== expectedCurrent.status ||
+      (current.source ?? null) !== expectedCurrent.source ||
+      (current.note ?? null) !== expectedCurrent.note
+    ) {
+      throw new Error(
+        `Statement ${plan.entityId} changed after audit entry ${entry.id}; refresh the undo preview.`
+      )
+    }
+    return
+  }
+
+  const current = (query<Record<string, unknown>>(
+    'SELECT * FROM transactions WHERE id = $1 LIMIT 1',
+    [plan.entityId]
+  ) ?? [])[0]
+
+  if (plan.inverseAction === 'create') {
+    if (current)
+      throw new Error(`Transaction ${plan.entityId} was recreated after this audit entry.`)
+    return
+  }
+  if (!current) throw new Error(`Transaction ${plan.entityId} no longer exists.`)
+
+  const expectedCurrent = transactionSnapshotFromAudit(parseAuditJson(entry.after_json))
+  if (!expectedCurrent || !currentTransactionMatchesAudit(current, expectedCurrent)) {
+    throw new Error(
+      `Transaction ${plan.entityId} changed after audit entry ${entry.id}; refresh the undo preview.`
+    )
+  }
+  if (
+    (current.ledger_treatment ?? 'normal') !== 'normal' ||
+    (current.reporting_treatment ?? 'normal') !== 'normal' ||
+    (current.transaction_kind ?? 'standard') !== 'standard' ||
+    current.staging_batch_id ||
+    current.reconciliation_id ||
+    current.matched_transaction_id ||
+    current.is_archived === 1
+  ) {
+    throw new Error(
+      `Transaction ${plan.entityId} now uses protected financial semantics and requires a dedicated workflow.`
+    )
+  }
+
+  const references = (query<{
+    reconciliation_count: number
+    receivable_count: number
+    finalized_statement_count: number
+  }>(
+    `SELECT
+         (SELECT COUNT(*) FROM account_reconciliations WHERE adjustment_transaction_id = $1) AS reconciliation_count,
+         (SELECT COUNT(*) FROM receivables WHERE matched_transaction_id = $2) AS receivable_count,
+         (SELECT COUNT(*) FROM account_reconciliations
+          WHERE account_id = $3 AND staging_batch_id = $4) AS finalized_statement_count`,
+    [plan.entityId, plan.entityId, current.account_id, current.staging_batch_id ?? null]
+  ) ?? [])[0]
+  if (
+    (references?.reconciliation_count ?? 0) > 0 ||
+    (references?.receivable_count ?? 0) > 0 ||
+    (references?.finalized_statement_count ?? 0) > 0
+  ) {
+    throw new Error(
+      `Transaction ${plan.entityId} is now linked financial provenance and cannot be changed by generic undo.`
+    )
+  }
+}
+
+function applyUndoPlan(
+  previewEntry: AuditLogRow,
+  source: string | undefined,
+  note: string | undefined,
+  allowDependentWrites: boolean
+) {
+  return transaction(() => {
+    const entry = (query<AuditLogRow>(
+      `SELECT id, entity, entity_id, action, before_json, after_json, source, note, created_at
+         FROM audit_log WHERE id = $1 LIMIT 1`,
+      [previewEntry.id]
+    ) ?? [])[0]
+    if (
+      !entry ||
+      entry.entity !== previewEntry.entity ||
+      entry.entity_id !== previewEntry.entity_id ||
+      entry.action !== previewEntry.action ||
+      entry.before_json !== previewEntry.before_json ||
+      entry.after_json !== previewEntry.after_json
+    ) {
+      throw new Error(`Audit entry ${previewEntry.id} changed; refresh the undo preview.`)
+    }
+    const protectedSemanticsFailure = protectedUndoSemanticsFailure(entry)
+    if (protectedSemanticsFailure) throw new Error(protectedSemanticsFailure.message)
+    const planResult = buildUndoPlan(entry)
+    if ('success' in planResult && planResult.success === false) {
+      throw new Error(planResult.message)
+    }
+    const plan = planResult as UndoPlan
+    const currentDependentWrites = dependentAuditRows(entry)
+    if (currentDependentWrites.length > 0 && !allowDependentWrites) {
+      throw new Error(
+        `Audit entry ${entry.id} now has later dependent writes; refresh the preview.`
+      )
+    }
+    assertCurrentTransactionUndoState(entry, plan)
+
     if (plan.entity === 'transaction') {
       if (plan.inverseAction === 'delete') deleteUndoTransaction(plan.entityId)
       if (plan.inverseAction === 'update') {
@@ -1738,6 +1948,7 @@ function applyUndoPlan(entry: AuditLogRow, plan: UndoPlan, source?: string, note
       source: source ?? 'undo',
       note,
     })
+    return plan
   })
 }
 
@@ -1855,16 +2066,19 @@ function getDuplicateSanityFindings(input: { redacted: boolean; limit: number })
     status: 'pending' | 'posted' | 'cleared' | null
     transfer_to_account_id: string | null
     description: string
+    source: string | null
+    note: string | null
   }>(
     `SELECT t.id, t.account_id, a.name AS account_name, t.date, t.amount, t.currency, t.type,
             COALESCE(NULLIF(TRIM(t.status), ''), 'posted') AS status,
-            t.transfer_to_account_id, t.description
+             t.transfer_to_account_id, t.description, t.source, t.note
      FROM transactions t
      LEFT JOIN accounts a ON a.id = t.account_id
      WHERE t.type IN ('expense', 'income', 'transfer')
        AND t.account_id IS NOT NULL
        AND t.date IS NOT NULL
-       AND t.description IS NOT NULL
+        AND t.description IS NOT NULL
+        AND COALESCE(t.is_archived, 0) = 0
       ORDER BY t.date DESC, t.id DESC
      LIMIT $1`,
     [Math.max(input.limit * 4, input.limit)]
@@ -1883,6 +2097,8 @@ function getDuplicateSanityFindings(input: { redacted: boolean; limit: number })
       status: row.status,
       transferToAccountId: row.transfer_to_account_id,
       description: row.description,
+      source: row.source,
+      note: row.note,
       excludeTransactionId: row.id,
     })
     const match = duplicateCheck.match
@@ -1914,10 +2130,12 @@ function getDuplicateSanityFindings(input: { redacted: boolean; limit: number })
       descriptionSimilarity: match.descriptionSimilarity,
       windowDays: match.windowDays,
       similarityThreshold: match.similarityThreshold,
+      duplicateSignals: match.signals,
+      provenance: match.provenance,
       message:
         match.kind === 'exact_duplicate'
-          ? `Transactions ${transactionIds[0]} and ${transactionIds[1]} look duplicated.`
-          : `Transactions ${transactionIds[0]} and ${transactionIds[1]} look potentially duplicated within ${match.windowDays} days.`,
+          ? `Transactions ${transactionIds[0]} and ${transactionIds[1]} match on ${match.signals.join(', ')}.`
+          : `Transactions ${transactionIds[0]} and ${transactionIds[1]} match on ${match.signals.join(', ')} within ${match.windowDays} days.`,
     })
   }
 
@@ -2052,8 +2270,9 @@ function getBalanceMismatchFindings(input: { redacted: boolean; limit: number })
     currency: string
     stored_balance: number
     computed_balance: number | null
+    account_mode: 'transactional' | 'snapshot_only' | null
   }>(
-    `SELECT a.id, a.name, a.currency, a.balance AS stored_balance,
+    `SELECT a.id, a.name, a.currency, a.balance AS stored_balance, a.account_mode,
             COALESCE(SUM(CASE
               WHEN COALESCE(NULLIF(TRIM(t.status), ''), 'posted') = 'pending' THEN 0
               WHEN t.type = 'income' THEN t.amount
@@ -2065,10 +2284,14 @@ function getBalanceMismatchFindings(input: { redacted: boolean; limit: number })
               FROM transactions t2
               WHERE t2.transfer_to_account_id = a.id
                 AND t2.type = 'transfer'
-                AND COALESCE(NULLIF(TRIM(t2.status), ''), 'posted') <> 'pending'
-            ), 0) AS computed_balance
+                 AND COALESCE(NULLIF(TRIM(t2.status), ''), 'posted') <> 'pending'
+                 AND COALESCE(t2.ledger_treatment, 'normal') = 'normal'
+                 AND COALESCE(t2.is_archived, 0) = 0
+             ), 0) AS computed_balance
      FROM accounts a
      LEFT JOIN transactions t ON t.account_id = a.id
+       AND COALESCE(t.ledger_treatment, 'normal') = 'normal'
+       AND COALESCE(t.is_archived, 0) = 0
      WHERE COALESCE(a.is_archived, 0) = 0
      GROUP BY a.id
      HAVING ABS(stored_balance - computed_balance) > 0
@@ -2077,8 +2300,8 @@ function getBalanceMismatchFindings(input: { redacted: boolean; limit: number })
     [input.limit]
   )
   return rows.map((row) => ({
-    severity: 'critical' as const,
-    type: 'balance_mismatch',
+    severity: row.account_mode === 'snapshot_only' ? ('info' as const) : ('critical' as const),
+    type: row.account_mode === 'snapshot_only' ? 'snapshot_ledger_difference' : 'balance_mismatch',
     accountId: row.id,
     accountName: maybeRedactText(row.name, input.redacted),
     storedBalance: fromCentavos(row.stored_balance),
@@ -2086,7 +2309,11 @@ function getBalanceMismatchFindings(input: { redacted: boolean; limit: number })
     computedBalance: fromCentavos(row.computed_balance ?? 0),
     computedBalanceCentavos: row.computed_balance ?? 0,
     currency: row.currency,
-    message: `Account ${row.id} stored balance differs from transaction-derived balance.`,
+    accountMode: row.account_mode ?? 'transactional',
+    message:
+      row.account_mode === 'snapshot_only'
+        ? `Snapshot-only account ${row.id} valuation differs from its incomplete transaction ledger; this is informational until holdings or history are imported.`
+        : `Account ${row.id} stored balance differs from transaction-derived balance.`,
   }))
 }
 
@@ -2114,9 +2341,13 @@ function getTransactionHygieneFindings(input: {
             t.category_id, t.account_id, a.name AS account_name
      FROM transactions t
      LEFT JOIN accounts a ON a.id = t.account_id
-     WHERE (COALESCE(NULLIF(TRIM(t.status), ''), 'posted') = 'pending' AND t.date <= $1)
-         OR (t.type = 'expense' AND t.category_id IS NULL AND t.date >= $2)
-         OR (ABS(t.amount) >= $3 AND t.date >= $4)
+      WHERE (
+        (COALESCE(NULLIF(TRIM(t.status), ''), 'posted') = 'pending' AND t.date <= $1)
+        OR (t.type = 'expense' AND t.category_id IS NULL AND t.date >= $2)
+        OR (ABS(t.amount) >= $3 AND t.date >= $4)
+      )
+        AND COALESCE(t.is_archived, 0) = 0
+        AND COALESCE(t.transaction_kind, 'standard') <> 'reconciliation_bridge'
       ORDER BY t.date DESC, t.id DESC
       LIMIT $5`,
     [staleDate, recentDate, input.largeAmountCentavos, recentDate, input.limit]
@@ -2310,6 +2541,8 @@ const undo: ToolDefinition = {
     if (!found.success) return found
 
     const entry = found.entry
+    const protectedSemanticsFailure = protectedUndoSemanticsFailure(entry)
+    if (protectedSemanticsFailure) return protectedSemanticsFailure
     const planResult = buildUndoPlan(entry)
     if ('success' in planResult && planResult.success === false) return planResult
     const plan = planResult as UndoPlan
@@ -2337,14 +2570,14 @@ const undo: ToolDefinition = {
       }
     }
 
-    applyUndoPlan(entry, plan, source, note)
+    const appliedPlan = applyUndoPlan(entry, source, note, allowDependentWrites)
     return {
       success: true,
       dryRun: false,
       auditEntry: formatAuditRow(entry, false),
-      undone: plan,
+      undone: appliedPlan,
       dependentWrites,
-      message: `Undid audit entry ${entry.id} with inverse action ${plan.inverseAction}.`,
+      message: `Undid audit entry ${entry.id} with inverse action ${appliedPlan.inverseAction}.`,
     }
   },
 }

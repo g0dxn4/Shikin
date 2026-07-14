@@ -516,6 +516,8 @@ const getBudgetStatus: ToolDefinition = {
             `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
              WHERE category_id = $1
                AND type = 'expense'
+               AND COALESCE(reporting_treatment, 'normal') = 'normal'
+               AND COALESCE(is_archived, 0) = 0
                AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
                AND date >= $2 AND date <= $3`,
             [budget.category_id, periodStart, periodEnd]
@@ -524,6 +526,8 @@ const getBudgetStatus: ToolDefinition = {
           spentResult = await query<{ total: number | null }>(
             `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
              WHERE type = 'expense'
+               AND COALESCE(reporting_treatment, 'normal') = 'normal'
+               AND COALESCE(is_archived, 0) = 0
                AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
                AND date >= $1 AND date <= $2`,
             [periodStart, periodEnd]

@@ -346,8 +346,11 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
       const today = dayjs().format('YYYY-MM-DD')
 
       // Get all active rules where next_date <= today
-      const dueRules = await query<RecurringRuleWithDetails>(
-        `SELECT r.*, a.currency as account_currency, a.is_archived as account_is_archived
+      const dueRules = await query<
+        RecurringRuleWithDetails & { account_mode?: 'transactional' | 'snapshot_only' | null }
+      >(
+        `SELECT r.*, a.currency as account_currency, a.is_archived as account_is_archived,
+                a.account_mode
          FROM recurring_rules r
          LEFT JOIN accounts a ON r.account_id = a.id
          WHERE r.active = 1 AND r.next_date <= ?`,
@@ -365,6 +368,15 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
       if (archivedAccountRule) {
         throw new Error(
           `Recurring rule "${archivedAccountRule.description}" points at archived account ${archivedAccountRule.account_id}. Unarchive the account or pause the rule before materializing it.`
+        )
+      }
+
+      const snapshotAccountRule = dueRules.find(
+        (rule) => (rule.account_mode ?? 'transactional') === 'snapshot_only'
+      )
+      if (snapshotAccountRule) {
+        throw new Error(
+          `Recurring rule "${snapshotAccountRule.description}" points at snapshot-only account ${snapshotAccountRule.account_id}. Snapshot-only accounts do not accept transaction ledger writes.`
         )
       }
 
@@ -437,7 +449,7 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
             // Update account balance
             const balanceDelta = rule.type === 'income' ? rule.amount : -rule.amount
             await tx.execute(
-              "UPDATE accounts SET balance = balance + ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+              "UPDATE accounts SET balance = balance + ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND COALESCE(account_mode, 'transactional') = 'transactional'",
               [balanceDelta, rule.account_id]
             )
 

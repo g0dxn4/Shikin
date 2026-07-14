@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, no-console */
 import { pathToFileURL } from 'node:url'
 import { Command } from 'commander'
+import { COMMAND_CATALOG_VERSION } from './contracts.js'
 import { tools, type ToolDefinition } from './tools.js'
 import { close, query } from './database.js'
 import {
@@ -15,7 +16,7 @@ import { z } from 'zod'
 import dayjs from 'dayjs'
 
 export const EXPECTED_MIGRATIONS = CLI_DATABASE_MIGRATIONS
-export const COMMAND_CATALOG_VERSION = '2026-05-07.cli-qol-followups'
+export { COMMAND_CATALOG_VERSION } from './contracts.js'
 export const CLI_SCHEMA_VERSION = 'cli-tools-json.v1'
 export const CLI_FOUNDATION_MIGRATION = '016_cli_qol_foundation'
 
@@ -40,7 +41,7 @@ type DescribedOption = ReturnType<typeof zodToOptions>[number] & {
 
 const OUTPUT_OPTION_KEYS = new Set(['json', 'pretty', 'quiet', 'redacted'])
 const SENSITIVE_KEY_PATTERN =
-  /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key)/i
+  /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key|payer|project[_-]?reference|invoice[_-]?reference)/i
 
 function addOutputOptions(cmd: Command, options: { includeRedacted?: boolean } = {}): Command {
   const withBaseOptions = cmd

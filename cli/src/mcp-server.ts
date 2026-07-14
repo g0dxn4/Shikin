@@ -2,6 +2,7 @@
 import { pathToFileURL } from 'node:url'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { COMMAND_CATALOG_VERSION } from './contracts.js'
 import { z } from 'zod'
 import { tools, type ToolDefinition } from './tools.js'
 import { query, close } from './database.js'
@@ -285,7 +286,8 @@ export function registerMcpResources(server: Pick<McpServer, 'resource'>): void 
     'shikin://accounts',
     createMcpResourceHandler('accounts', () => {
       const accounts = query<Record<string, unknown>>(
-        'SELECT id, name, type, currency, balance FROM accounts WHERE is_archived = 0 ORDER BY name'
+        `SELECT id, name, type, currency, balance, account_mode AS accountMode
+         FROM accounts WHERE is_archived = 0 ORDER BY name`
       )
       const aliasesByAccount = Object.entries(getAccountAliases()).reduce<Record<string, string[]>>(
         (acc, [alias, accountId]) => {
@@ -324,11 +326,23 @@ export function registerMcpResources(server: Pick<McpServer, 'resource'>): void 
                 t.placeholder_reason as placeholderReason,
                 t.placeholder_parent_transaction_id as placeholderParentTransactionId,
                 t.recurring_rule_id as recurringRuleId, t.transfer_to_account_id as transferToAccountId,
-                COALESCE(c.name, 'Uncategorized') as category, a.name as account, ta.name as transferToAccount
+                t.ledger_treatment AS ledgerTreatment,
+                t.reporting_treatment AS reportingTreatment,
+                t.transaction_kind AS transactionKind,
+                t.staging_batch_id AS stagingBatchId,
+                t.reconciliation_id AS reconciliationId,
+                t.matched_transaction_id AS matchedTransactionId,
+                COALESCE(c.name, 'Uncategorized') as category, a.name as account,
+                a.account_mode AS accountMode, ta.name as transferToAccount,
+                ar.reconciliation_date AS reconciliationDate,
+                ar.statement_start_date AS statementStartDate,
+                ar.statement_end_date AS statementEndDate
          FROM transactions t
          LEFT JOIN categories c ON t.category_id = c.id
          LEFT JOIN accounts a ON t.account_id = a.id
          LEFT JOIN accounts ta ON t.transfer_to_account_id = ta.id
+         LEFT JOIN account_reconciliations ar ON t.reconciliation_id = ar.id
+         WHERE COALESCE(t.is_archived, 0) = 0
          ORDER BY t.date DESC, t.created_at DESC
          LIMIT 20`
       )
@@ -343,7 +357,7 @@ export function registerMcpResources(server: Pick<McpServer, 'resource'>): void 
 export function createMcpServer(toolDefinitions: ToolDefinition[] = tools): McpServer {
   const server = new McpServer({
     name: 'shikin',
-    version: '1.0.10',
+    version: COMMAND_CATALOG_VERSION,
   })
 
   registerMcpTools(server, toolDefinitions)

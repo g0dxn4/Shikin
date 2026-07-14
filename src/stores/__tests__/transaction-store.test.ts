@@ -262,6 +262,36 @@ describe('transaction-store', () => {
       expect(mockExecute).not.toHaveBeenCalled()
     })
 
+    it('rejects transaction ledger writes against snapshot-only accounts', async () => {
+      mockQuery.mockResolvedValueOnce([
+        {
+          id: '01ACCSNAPSHOT',
+          name: 'Exchange valuation',
+          currency: 'USD',
+          is_archived: 0,
+          account_mode: 'snapshot_only',
+        },
+      ])
+
+      await expect(
+        useTransactionStore.getState().add({
+          amount: 25.5,
+          type: 'expense',
+          description: 'Should not write',
+          categoryId: null,
+          accountId: '01ACCSNAPSHOT',
+          transferToAccountId: null,
+          currency: 'USD',
+          date: '2024-01-15',
+          notes: null,
+        })
+      ).rejects.toThrow(
+        'Account 01ACCSNAPSHOT is snapshot-only and cannot accept transaction ledger rows.'
+      )
+
+      expect(mockExecute).not.toHaveBeenCalled()
+    })
+
     it('rejects transaction currency mismatches with the source account', async () => {
       mockQuery.mockResolvedValueOnce([{ id: '01ACC001', currency: 'EUR', is_archived: 0 }])
 

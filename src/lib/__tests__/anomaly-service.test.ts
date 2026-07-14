@@ -50,6 +50,24 @@ describe('anomaly-service', () => {
   })
 
   describe('detectAnomalies', () => {
+    it('excludes reporting-suppressed and archived transactions from every anomaly query', async () => {
+      mockQuery.mockResolvedValue([])
+
+      await detectAnomalies()
+
+      const transactionQueries = mockQuery.mock.calls
+        .map(([sql]) => sql)
+        .filter(
+          (sql): sql is string => typeof sql === 'string' && sql.includes('FROM transactions')
+        )
+
+      expect(transactionQueries).toHaveLength(6)
+      for (const sql of transactionQueries) {
+        expect(sql).toMatch(/COALESCE\((?:t\.)?reporting_treatment, 'normal'\) = 'normal'/)
+        expect(sql).toMatch(/COALESCE\((?:t\.)?is_archived, 0\) = 0/)
+      }
+    })
+
     it('returns empty array when no transactions exist', async () => {
       // All detection functions query for transactions and get empty results
       mockQuery.mockResolvedValue([])
@@ -91,10 +109,31 @@ describe('anomaly-service', () => {
       mockQuery.mockImplementation(async (sql: string) => {
         const s = sql as string
         // detectDuplicateCharges query: recent expenses within 7 days
-        if (s.includes("t.type = 'expense'") && s.includes('t.date >= $1') && !s.includes('t.amount >= $1') && !s.includes('GROUP BY')) {
+        if (
+          s.includes("t.type = 'expense'") &&
+          s.includes('t.date >= $1') &&
+          !s.includes('t.amount >= $1') &&
+          !s.includes('GROUP BY')
+        ) {
           return [
-            { id: 'tx1', description: 'Coffee Shop', amount: 500, date: today, category_id: null, category_name: 'Uncategorized', type: 'expense' },
-            { id: 'tx2', description: 'Coffee Shop', amount: 500, date: today, category_id: null, category_name: 'Uncategorized', type: 'expense' },
+            {
+              id: 'tx1',
+              description: 'Coffee Shop',
+              amount: 500,
+              date: today,
+              category_id: null,
+              category_name: 'Uncategorized',
+              type: 'expense',
+            },
+            {
+              id: 'tx2',
+              description: 'Coffee Shop',
+              amount: 500,
+              date: today,
+              category_id: null,
+              category_name: 'Uncategorized',
+              type: 'expense',
+            },
           ]
         }
         return []
@@ -110,9 +149,24 @@ describe('anomaly-service', () => {
       mockQuery.mockImplementation(async (sql: string) => {
         const s = sql as string
         // detectUnusualAmounts: get recent expenses
-        if (s.includes("t.type = 'expense'") && s.includes('t.date >= $1') && s.includes('t.id') && !s.includes('GROUP_CONCAT') && !s.includes('t.amount >= $1') && !s.includes('GROUP BY')) {
+        if (
+          s.includes("t.type = 'expense'") &&
+          s.includes('t.date >= $1') &&
+          s.includes('t.id') &&
+          !s.includes('GROUP_CONCAT') &&
+          !s.includes('t.amount >= $1') &&
+          !s.includes('GROUP BY')
+        ) {
           return [
-            { id: 'tx1', description: 'Store', amount: 50000, date: '2024-01-15', category_id: null, category_name: 'Uncategorized', type: 'expense' },
+            {
+              id: 'tx1',
+              description: 'Store',
+              amount: 50000,
+              date: '2024-01-15',
+              category_id: null,
+              category_name: 'Uncategorized',
+              type: 'expense',
+            },
           ]
         }
         // History for merchant: only 2 entries
@@ -132,8 +186,24 @@ describe('anomaly-service', () => {
         const s = sql as string
         if (s.includes('t.amount >= $1')) {
           return [
-            { id: 'tx1', description: 'Medium', amount: 60000, date: '2024-01-15', category_id: null, category_name: 'Uncategorized', type: 'expense' },
-            { id: 'tx2', description: 'High', amount: 120000, date: '2024-01-15', category_id: null, category_name: 'Uncategorized', type: 'expense' },
+            {
+              id: 'tx1',
+              description: 'Medium',
+              amount: 60000,
+              date: '2024-01-15',
+              category_id: null,
+              category_name: 'Uncategorized',
+              type: 'expense',
+            },
+            {
+              id: 'tx2',
+              description: 'High',
+              amount: 120000,
+              date: '2024-01-15',
+              category_id: null,
+              category_name: 'Uncategorized',
+              type: 'expense',
+            },
           ]
         }
         return []
@@ -153,9 +223,7 @@ describe('anomaly-service', () => {
       mockQuery.mockImplementation(async (sql: string) => {
         const s = sql as string
         if (s.includes('GROUP_CONCAT')) {
-          return [
-            { description: 'Netflix', amounts: '1599,1799' },
-          ]
+          return [{ description: 'Netflix', amounts: '1599,1799' }]
         }
         return []
       })

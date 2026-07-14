@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
+import { applyFinancialSemanticsTestSchema } from './financial-semantics-test-schema.js'
 
 const tempHomes = new Set<string>()
 
@@ -187,6 +188,10 @@ function seedCoreShikinSchema(
 
   if (includeCliQolTransactionColumns) {
     seedTransactionStatusTriggers(db)
+  }
+
+  if (migrations.includes('019_financial_semantics')) {
+    applyFinancialSemanticsTestSchema(db)
   }
 
   for (const migration of migrations) {

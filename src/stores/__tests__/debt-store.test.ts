@@ -33,7 +33,12 @@ const mockPayoffPlan = {
 }
 
 const mockComparison = {
-  snowball: { ...mockPayoffPlan, strategy: 'snowball' as const, months: 26, totalInterestPaid: 60000 },
+  snowball: {
+    ...mockPayoffPlan,
+    strategy: 'snowball' as const,
+    months: 26,
+    totalInterestPaid: 60000,
+  },
   avalanche: mockPayoffPlan,
   interestSaved: 10000,
   monthsDifference: 2,
@@ -74,9 +79,7 @@ describe('debt-store', () => {
 
       await useDebtStore.getState().loadDebts()
 
-      expect(mockQuery).toHaveBeenCalledWith(
-        expect.stringContaining("type = 'credit_card'")
-      )
+      expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining("type = 'credit_card'"))
       const state = useDebtStore.getState()
       expect(state.debts).toHaveLength(1)
       expect(state.debts[0].name).toBe('Chase Visa')

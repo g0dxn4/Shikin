@@ -11,6 +11,7 @@ import {
   positiveMoneyAmount,
   isoDate,
   assetCode,
+  isAccountWriteEligible,
   resolveAccountId,
   resolveCategoryId,
   normalizeCurrencyCode,
@@ -25,12 +26,24 @@ type InvestmentRow = {
   id: string
   name: string
   symbol: string
-  type: string
+  type: InvestmentType
   shares: number
   avg_cost_basis: number
   currency: string
   account_id: string | null
   notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+const INVESTMENT_TYPES = ['stock', 'etf', 'crypto', 'bond', 'mutual_fund', 'cetes', 'other'] as const
+type InvestmentType = (typeof INVESTMENT_TYPES)[number]
+
+type InvestmentWithPriceRow = InvestmentRow & {
+  account_name: string | null
+  latest_price: number | null
+  latest_price_currency: string | null
+  latest_price_date: string | null
 }
 
 type RecurringBillRow = {
@@ -127,7 +140,7 @@ function getSubscriptionAccount(accountId: string) {
     [accountId]
   )[0]
   if (!account) return { success: false as const, message: `Account ${accountId} not found.` }
-  if (account.is_archived === 1) {
+  if (!isAccountWriteEligible(account)) {
     return {
       success: false as const,
       message: `Account ${accountId} is archived. Unarchive it before using it for new writes.`,
@@ -194,28 +207,169 @@ function transactionSourceSnapshot(transactionRow: TransactionSubscriptionSource
   }
 }
 
+function normalizeOptionalText(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim()
+  return normalized || null
+}
+
+function normalizeInvestmentSymbol(value: string): string {
+  return value.trim().toUpperCase()
+}
+
+function redactInvestmentText(value: string | null, redacted: boolean): string | null {
+  if (!redacted) return value
+  return value === null ? null : '[REDACTED]'
+}
+
+function resolveOptionalInvestmentAccount(accountId?: string, account?: string) {
+  const normalizedAccountId = normalizeOptionalText(accountId)
+  const normalizedAccount = normalizeOptionalText(account)
+
+  if (!normalizedAccountId && !normalizedAccount) {
+    return { success: true as const, id: null, currency: null, name: null }
+  }
+
+  const resolved = resolveAccountId(
+    normalizedAccountId ?? undefined,
+    normalizedAccount ?? undefined
+  )
+  if (!resolved.success) return resolved
+
+  const accountRow = query<{ name: string | null }>(
+    'SELECT name FROM accounts WHERE id = $1 LIMIT 1',
+    [resolved.id]
+  )[0]
+
+  return {
+    success: true as const,
+    id: resolved.id,
+    currency: resolved.currency,
+    name: accountRow?.name ?? null,
+  }
+}
+
+function investmentSnapshot(
+  investment: InvestmentWithPriceRow,
+  options: { redacted?: boolean } = {}
+) {
+  const redacted = options.redacted ?? false
+  const avgCostCentavos = investment.avg_cost_basis
+  const costBasisCentavos = Math.round(investment.shares * investment.avg_cost_basis)
+  const currentPriceCentavos = investment.latest_price ?? null
+  const marketValueCentavos =
+    currentPriceCentavos === null ? null : Math.round(investment.shares * currentPriceCentavos)
+  const gainLossCentavos =
+    marketValueCentavos === null ? null : marketValueCentavos - costBasisCentavos
+  const gainLossPercent =
+    gainLossCentavos === null || costBasisCentavos <= 0
+      ? null
+      : Math.round((gainLossCentavos / costBasisCentavos) * 10000) / 100
+
+  return {
+    id: investment.id,
+    accountId: investment.account_id,
+    accountName: redactInvestmentText(investment.account_name, redacted),
+    symbol: investment.symbol,
+    name: redactInvestmentText(investment.name, redacted),
+    type: investment.type,
+    shares: investment.shares,
+    avgCost: fromCentavos(avgCostCentavos),
+    avgCostCentavos,
+    costBasis: fromCentavos(costBasisCentavos),
+    costBasisCentavos,
+    currency: investment.currency,
+    notes: redactInvestmentText(investment.notes, redacted),
+    createdAt: investment.created_at,
+    updatedAt: investment.updated_at,
+    currentPrice:
+      currentPriceCentavos === null ? null : fromCentavos(currentPriceCentavos),
+    currentPriceCentavos,
+    priceCurrency: investment.latest_price_currency,
+    priceDate: investment.latest_price_date,
+    lastPriceDate: investment.latest_price_date,
+    marketValue:
+      marketValueCentavos === null ? null : fromCentavos(marketValueCentavos),
+    marketValueCentavos,
+    gainLoss: gainLossCentavos === null ? null : fromCentavos(gainLossCentavos),
+    gainLossCentavos,
+    gainLossPercent,
+  }
+}
+
+function getInvestment(investmentId: string): InvestmentWithPriceRow | null {
+  const rows = query<InvestmentWithPriceRow>(
+    `SELECT i.id, i.account_id, i.symbol, i.name, i.type, i.shares, i.avg_cost_basis, i.currency, i.notes, i.created_at, i.updated_at,
+            a.name as account_name,
+            sp.price as latest_price,
+            sp.currency as latest_price_currency,
+            sp.date as latest_price_date
+     FROM investments i
+     LEFT JOIN accounts a ON a.id = i.account_id
+     LEFT JOIN (
+       SELECT symbol, price, currency, date,
+              ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC, created_at DESC, id DESC) as rn
+       FROM stock_prices
+     ) sp ON sp.symbol = i.symbol AND sp.rn = 1
+     WHERE i.id = $1
+     LIMIT 1`,
+    [investmentId]
+  )
+
+  return rows[0] ?? null
+}
+
 const manageInvestment: ToolDefinition = {
   name: 'manage-investment',
   description:
     'Add, update, or delete an investment holding. Use this to track US/MX stocks, ETFs, crypto, bonds, CETES, mutual funds, and other investments.',
   schema: z.object({
     action: z.enum(['add', 'update', 'delete']).describe('The action to perform'),
-    investmentId: z.string().optional().describe('Required for update/delete. The investment ID.'),
-    name: z.string().optional().describe('Investment name (e.g. "Apple Inc.")'),
-    symbol: z.string().optional().describe('Ticker symbol (e.g. "AAPL")'),
-    type: z
-      .enum(['stock', 'etf', 'crypto', 'bond', 'mutual_fund', 'cetes', 'other'])
+    investmentId: boundedText('Investment ID', 'Required for update/delete. The investment ID.', 128)
+      .optional(),
+    name: boundedText('Investment name', 'Investment name (e.g. "Apple Inc.")', 200).optional(),
+    symbol: assetCode('Ticker symbol (e.g. "AAPL")').optional(),
+    type: z.enum(INVESTMENT_TYPES).optional().describe('Investment type, including CETES for Mexican treasury holdings'),
+    shares: z.number().finite().min(0).optional().describe('Number of shares/units'),
+    avgCost: z
+      .number()
+      .finite()
+      .min(0)
       .optional()
-      .describe('Investment type, including CETES for Mexican treasury holdings'),
-    shares: z.number().optional().describe('Number of shares/units'),
-    avgCost: z.number().optional().describe('Average cost basis per share in main currency unit'),
+      .describe('Average cost basis per share in main currency unit'),
     currentPrice: z
       .number()
+      .finite()
+      .min(0)
       .optional()
       .describe('Current price per share (will be saved to price history)'),
-    currency: z.string().optional().default('USD').describe('Currency code'),
-    accountId: z.string().optional().describe('Link to an account'),
-    notes: z.string().optional().describe('Notes about the investment'),
+    currency: assetCode('Currency code').optional(),
+    accountId: z
+      .string()
+      .trim()
+      .max(128)
+      .optional()
+      .describe('Link to an account by ID. Pass an empty string on update to clear.'),
+    account: z
+      .string()
+      .trim()
+      .max(128)
+      .optional()
+      .describe('Account alias, exact account ID, or exact account name'),
+    notes: z
+      .string()
+      .trim()
+      .max(1000)
+      .optional()
+      .describe('Notes about the investment. Pass an empty string on update to clear.'),
+    source: boundedText('Source', 'Automation source or origin label for audit provenance', 120)
+      .optional(),
+    note: boundedText('Note', 'Workflow changelog note for audit provenance', 500).optional(),
+    dryRun: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Validate and preview the investment change without writing it'),
   }),
   execute: async ({
     action,
@@ -228,75 +382,180 @@ const manageInvestment: ToolDefinition = {
     currentPrice,
     currency,
     accountId,
+    account,
     notes,
+    source,
+    note,
+    dryRun,
   }) => {
     if (action === 'add') {
       if (!name || !symbol) {
         return {
           success: false,
+          reason: 'missing_required_fields',
           message: 'Name and symbol are required when adding an investment.',
         }
       }
 
       const id = generateId()
+      const normalizedSymbol = normalizeInvestmentSymbol(symbol)
+      const resolvedCurrency = normalizeCurrencyCode(currency) || 'USD'
       const avgCostCentavos = avgCost !== undefined ? toCentavos(avgCost) : 0
-      const resolvedAccount = accountId ? resolveAccountId(accountId) : null
-      if (resolvedAccount && !resolvedAccount.success) return resolvedAccount
-
-      await execute(
-        `INSERT INTO investments (id, account_id, symbol, name, type, shares, avg_cost_basis, currency, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [
-          id,
-          resolvedAccount?.id ?? null,
-          symbol.toUpperCase(),
-          name,
-          type ?? 'stock',
-          shares ?? 0,
-          avgCostCentavos,
-          currency,
-          notes ?? null,
-        ]
-      )
-
-      if (currentPrice !== undefined) {
-        const priceId = generateId()
-        const today = dayjs().format('YYYY-MM-DD')
-        await execute(
-          `INSERT OR REPLACE INTO stock_prices (id, symbol, price, currency, date)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [priceId, symbol.toUpperCase(), toCentavos(currentPrice), currency, today]
-        )
+      const resolvedAccount = resolveOptionalInvestmentAccount(accountId, account)
+      if (!resolvedAccount.success) return resolvedAccount
+      const now = dayjs().toISOString()
+      const today = dayjs().format('YYYY-MM-DD')
+      const priceCentavos = currentPrice !== undefined ? toCentavos(currentPrice) : null
+      const investment: InvestmentWithPriceRow = {
+        id,
+        account_id: resolvedAccount.id,
+        account_name: resolvedAccount.name,
+        symbol: normalizedSymbol,
+        name,
+        type: type ?? 'stock',
+        shares: shares ?? 0,
+        avg_cost_basis: avgCostCentavos,
+        currency: resolvedCurrency,
+        notes: normalizeOptionalText(notes),
+        created_at: now,
+        updated_at: now,
+        latest_price: priceCentavos,
+        latest_price_currency: priceCentavos === null ? null : resolvedCurrency,
+        latest_price_date: priceCentavos === null ? null : today,
       }
+      const snapshot = investmentSnapshot(investment)
+
+      if (dryRun) {
+        return {
+          success: true,
+          action: 'added' as const,
+          dryRun: true,
+          wouldCreate: snapshot,
+          message: `Dry run: investment ${name} (${normalizedSymbol}) would be added.`,
+        }
+      }
+
+      transaction(() => {
+        execute(
+          `INSERT INTO investments (id, account_id, symbol, name, type, shares, avg_cost_basis, currency, notes, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [
+            id,
+            investment.account_id,
+            investment.symbol,
+            investment.name,
+            investment.type,
+            investment.shares,
+            investment.avg_cost_basis,
+            investment.currency,
+            investment.notes,
+            investment.created_at,
+            investment.updated_at,
+          ]
+        )
+
+        if (priceCentavos !== null) {
+          execute(
+            `INSERT OR REPLACE INTO stock_prices (id, symbol, price, currency, date, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [generateId(), investment.symbol, priceCentavos, investment.currency, today, now]
+          )
+        }
+
+        writeAuditLog({
+          entity: 'investment',
+          entityId: id,
+          action: 'add',
+          before: null,
+          after: { investment: snapshot },
+          source: source ?? null,
+          note: note ?? null,
+        })
+      })
 
       return {
         success: true,
-        investment: {
-          id,
-          name,
-          symbol: symbol.toUpperCase(),
-          type: type ?? 'stock',
-          shares: shares ?? 0,
-          avgCost: avgCost ?? 0,
-        },
-        message: `Added investment: ${name} (${symbol.toUpperCase()}) — ${shares ?? 0} shares at $${(avgCost ?? 0).toFixed(2)} avg cost.`,
+        action: 'added' as const,
+        dryRun: false,
+        investment: snapshot,
+        message: `Added investment: ${name} (${normalizedSymbol}) — ${shares ?? 0} shares at ${resolvedCurrency} ${(avgCost ?? 0).toFixed(2)} avg cost.`,
       }
     }
 
     if (action === 'update') {
       if (!investmentId) {
-        return { success: false, message: 'investmentId is required for update.' }
+        return {
+          success: false,
+          reason: 'investment_id_required',
+          message: 'investmentId is required for update.',
+        }
       }
 
-      const existing = await query<InvestmentRow>('SELECT * FROM investments WHERE id = $1', [
-        investmentId,
-      ])
-
-      if (existing.length === 0) {
-        return { success: false, message: `Investment ${investmentId} not found.` }
+      const existing = getInvestment(investmentId)
+      if (!existing) {
+        return {
+          success: false,
+          reason: 'investment_not_found',
+          message: `Investment ${investmentId} not found.`,
+        }
       }
 
-      const inv = existing[0]
+      const accountWasProvided = accountId !== undefined || account !== undefined
+      const resolvedAccount = accountWasProvided
+        ? resolveOptionalInvestmentAccount(accountId, account)
+        : null
+      if (resolvedAccount && !resolvedAccount.success) return resolvedAccount
+
+      const normalizedSymbol = symbol !== undefined ? normalizeInvestmentSymbol(symbol) : existing.symbol
+      const symbolChanged = normalizedSymbol !== existing.symbol
+      const resolvedCurrency = currency !== undefined ? normalizeCurrencyCode(currency) : existing.currency
+      const investmentFieldsChanged =
+        name !== undefined ||
+        symbol !== undefined ||
+        type !== undefined ||
+        shares !== undefined ||
+        avgCost !== undefined ||
+        currency !== undefined ||
+        accountWasProvided ||
+        notes !== undefined
+
+      if (!investmentFieldsChanged && currentPrice === undefined) {
+        return {
+          success: false,
+          reason: 'no_investment_changes',
+          message: 'No fields to update.',
+        }
+      }
+
+      const now = dayjs().toISOString()
+      const today = dayjs().format('YYYY-MM-DD')
+      const priceCentavos = currentPrice !== undefined ? toCentavos(currentPrice) : null
+      const updated: InvestmentWithPriceRow = {
+        ...existing,
+        account_id: resolvedAccount && resolvedAccount.success ? resolvedAccount.id : existing.account_id,
+        account_name:
+          resolvedAccount && resolvedAccount.success ? resolvedAccount.name : existing.account_name,
+        symbol: normalizedSymbol,
+        name: name ?? existing.name,
+        type: type ?? existing.type,
+        shares: shares ?? existing.shares,
+        avg_cost_basis: avgCost !== undefined ? toCentavos(avgCost) : existing.avg_cost_basis,
+        currency: resolvedCurrency,
+        notes: notes !== undefined ? normalizeOptionalText(notes) : existing.notes,
+        updated_at: investmentFieldsChanged ? now : existing.updated_at,
+        latest_price:
+          priceCentavos !== null ? priceCentavos : symbolChanged ? null : existing.latest_price,
+        latest_price_currency:
+          priceCentavos !== null
+            ? resolvedCurrency
+            : symbolChanged
+              ? null
+              : existing.latest_price_currency,
+        latest_price_date:
+          priceCentavos !== null ? today : symbolChanged ? null : existing.latest_price_date,
+      }
+      const beforeSnapshot = investmentSnapshot(existing)
+      const afterSnapshot = investmentSnapshot(updated)
       const setClauses: string[] = []
       const params: unknown[] = []
       let paramIdx = 1
@@ -307,87 +566,241 @@ const manageInvestment: ToolDefinition = {
       }
       if (symbol !== undefined) {
         setClauses.push(`symbol = $${paramIdx++}`)
-        params.push(symbol.toUpperCase())
+        params.push(updated.symbol)
       }
       if (type !== undefined) {
         setClauses.push(`type = $${paramIdx++}`)
-        params.push(type)
+        params.push(updated.type)
       }
       if (shares !== undefined) {
         setClauses.push(`shares = $${paramIdx++}`)
-        params.push(shares)
+        params.push(updated.shares)
       }
       if (avgCost !== undefined) {
         setClauses.push(`avg_cost_basis = $${paramIdx++}`)
-        params.push(toCentavos(avgCost))
+        params.push(updated.avg_cost_basis)
       }
       if (currency !== undefined) {
         setClauses.push(`currency = $${paramIdx++}`)
-        params.push(currency)
+        params.push(updated.currency)
       }
-      if (accountId !== undefined) {
-        const resolvedAccount = accountId ? resolveAccountId(accountId) : null
-        if (resolvedAccount && !resolvedAccount.success) return resolvedAccount
+      if (accountWasProvided) {
         setClauses.push(`account_id = $${paramIdx++}`)
-        params.push(resolvedAccount?.id ?? null)
+        params.push(updated.account_id)
       }
       if (notes !== undefined) {
         setClauses.push(`notes = $${paramIdx++}`)
-        params.push(notes)
+        params.push(updated.notes)
       }
 
-      if (setClauses.length === 0 && currentPrice === undefined) {
-        return { success: false, message: 'No fields to update.' }
+      if (dryRun) {
+        return {
+          success: true,
+          action: 'updated' as const,
+          dryRun: true,
+          wouldUpdate: {
+            investmentId,
+            before: beforeSnapshot,
+            after: afterSnapshot,
+          },
+          message: `Dry run: investment "${updated.name}" would be updated.`,
+        }
       }
 
-      if (setClauses.length > 0) {
-        setClauses.push(`updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`)
-        params.push(investmentId)
-        await execute(
-          `UPDATE investments SET ${setClauses.join(', ')} WHERE id = $${paramIdx}`,
-          params
-        )
-      }
+      transaction(() => {
+        if (setClauses.length > 0) {
+          setClauses.push(`updated_at = $${paramIdx++}`)
+          params.push(updated.updated_at)
+          params.push(investmentId)
+          const updateResult = execute(
+            `UPDATE investments SET ${setClauses.join(', ')} WHERE id = $${paramIdx}`,
+            params
+          )
+          assertSingleRowUpdated(
+            updateResult,
+            `Investment ${investmentId} could not be updated safely.`
+          )
+        }
 
-      if (currentPrice !== undefined) {
-        const priceId = generateId()
-        const today = dayjs().format('YYYY-MM-DD')
-        const sym = symbol?.toUpperCase() ?? inv.symbol
-        await execute(
-          `INSERT OR REPLACE INTO stock_prices (id, symbol, price, currency, date)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [priceId, sym, toCentavos(currentPrice), currency ?? inv.currency, today]
-        )
-      }
+        if (priceCentavos !== null) {
+          execute(
+            `INSERT OR REPLACE INTO stock_prices (id, symbol, price, currency, date, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [generateId(), updated.symbol, priceCentavos, updated.currency, today, now]
+          )
+        }
+
+        writeAuditLog({
+          entity: 'investment',
+          entityId: investmentId,
+          action: 'update',
+          before: { investment: beforeSnapshot },
+          after: { investment: afterSnapshot },
+          source: source ?? null,
+          note: note ?? null,
+        })
+      })
 
       return {
         success: true,
-        message: `Updated investment "${name ?? inv.name}".`,
+        action: 'updated' as const,
+        dryRun: false,
+        investment: afterSnapshot,
+        message: `Updated investment "${updated.name}".`,
       }
     }
 
     if (action === 'delete') {
       if (!investmentId) {
-        return { success: false, message: 'investmentId is required for delete.' }
+        return {
+          success: false,
+          reason: 'investment_id_required',
+          message: 'investmentId is required for delete.',
+        }
       }
 
-      const existing = await query<InvestmentRow>('SELECT * FROM investments WHERE id = $1', [
-        investmentId,
-      ])
+      const existing = getInvestment(investmentId)
+      if (!existing) {
+        return {
+          success: false,
+          reason: 'investment_not_found',
+          message: `Investment ${investmentId} not found.`,
+        }
+      }
+      const beforeSnapshot = investmentSnapshot(existing)
 
-      if (existing.length === 0) {
-        return { success: false, message: `Investment ${investmentId} not found.` }
+      if (dryRun) {
+        return {
+          success: true,
+          action: 'deleted' as const,
+          dryRun: true,
+          wouldDelete: beforeSnapshot,
+          message: `Dry run: investment "${existing.name}" (${existing.symbol}) would be deleted.`,
+        }
       }
 
-      await execute('DELETE FROM investments WHERE id = $1', [investmentId])
+      transaction(() => {
+        const deleteResult = execute('DELETE FROM investments WHERE id = $1', [investmentId])
+        assertSingleRowUpdated(
+          deleteResult,
+          `Investment ${investmentId} could not be deleted safely.`
+        )
+        writeAuditLog({
+          entity: 'investment',
+          entityId: investmentId,
+          action: 'delete',
+          before: { investment: beforeSnapshot },
+          after: null,
+          source: source ?? null,
+          note: note ?? null,
+        })
+      })
 
       return {
         success: true,
-        message: `Deleted investment "${existing[0].name}" (${existing[0].symbol}).`,
+        action: 'deleted' as const,
+        dryRun: false,
+        investment: beforeSnapshot,
+        message: `Deleted investment "${existing.name}" (${existing.symbol}).`,
       }
     }
 
     return { success: false, message: `Unknown action: ${action}` }
+  },
+}
+
+const listInvestments: ToolDefinition = {
+  name: 'list-investments',
+  description:
+    'List investment holdings with optional type, account, symbol, and text filters. Returns stable holding snapshots for CLI and MCP automation.',
+  schema: z.object({
+    type: z.enum(INVESTMENT_TYPES).optional().describe('Filter by investment type'),
+    accountId: boundedText('Account ID', 'Filter by linked account ID', 128).optional(),
+    account: boundedText(
+      'Account reference',
+      'Filter by account alias, exact account ID, or exact account name',
+      128
+    ).optional(),
+    symbol: assetCode('Filter by exact ticker symbol').optional(),
+    search: boundedText('Search term', 'Search symbol, investment name, or notes', 200).optional(),
+    redacted: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Redact investment names, account names, and notes in output'),
+    limit: z.number().int().min(1).max(500).optional().default(100),
+  }),
+  execute: async ({ type, accountId, account, symbol, search, redacted, limit }) => {
+    const conditions: string[] = []
+    const params: unknown[] = []
+    let paramIdx = 1
+    let resolvedAccountId: string | null = null
+
+    if (type) {
+      conditions.push(`i.type = $${paramIdx++}`)
+      params.push(type)
+    }
+
+    if (accountId || account) {
+      const resolvedAccount = resolveOptionalInvestmentAccount(accountId, account)
+      if (!resolvedAccount.success) return resolvedAccount
+      resolvedAccountId = resolvedAccount.id
+      conditions.push(`i.account_id = $${paramIdx++}`)
+      params.push(resolvedAccount.id)
+    }
+
+    if (symbol) {
+      conditions.push(`i.symbol = $${paramIdx++}`)
+      params.push(normalizeInvestmentSymbol(symbol))
+    }
+
+    if (search) {
+      const searchPattern = `%${search}%`
+      conditions.push(
+        `(LOWER(i.symbol) LIKE LOWER($${paramIdx}) OR LOWER(i.name) LIKE LOWER($${paramIdx}) OR LOWER(COALESCE(i.notes, '')) LIKE LOWER($${paramIdx}))`
+      )
+      params.push(searchPattern, searchPattern, searchPattern)
+      paramIdx++
+    }
+
+    params.push(limit)
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+    const investments = query<InvestmentWithPriceRow>(
+      `SELECT i.id, i.account_id, i.symbol, i.name, i.type, i.shares, i.avg_cost_basis, i.currency, i.notes, i.created_at, i.updated_at,
+              a.name as account_name,
+              sp.price as latest_price,
+              sp.currency as latest_price_currency,
+              sp.date as latest_price_date
+       FROM investments i
+       LEFT JOIN accounts a ON a.id = i.account_id
+       LEFT JOIN (
+         SELECT symbol, price, currency, date,
+                ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC, created_at DESC, id DESC) as rn
+         FROM stock_prices
+       ) sp ON sp.symbol = i.symbol AND sp.rn = 1
+       ${whereClause}
+       ORDER BY i.symbol ASC, i.id ASC
+       LIMIT $${paramIdx}`,
+      params
+    )
+
+    const snapshots = investments.map((investment) => investmentSnapshot(investment, { redacted }))
+    return {
+      success: true,
+      investments: snapshots,
+      count: snapshots.length,
+      redacted,
+      filters: {
+        type: type ?? null,
+        accountId: resolvedAccountId,
+        symbol: symbol ? normalizeInvestmentSymbol(symbol) : null,
+        search: search ?? null,
+      },
+      message:
+        snapshots.length === 0
+          ? 'No investments found.'
+          : `Found ${snapshots.length} investment${snapshots.length === 1 ? '' : 's'}.`,
+    }
   },
 }
 
@@ -421,9 +834,9 @@ const getUpcomingBills: ToolDefinition = {
       `SELECT description, amount, currency, MAX(date) as date, COUNT(*) as count
        FROM transactions
        WHERE is_recurring = 1 AND type = 'expense'
-         AND COALESCE(reporting_treatment, 'normal') = 'normal'
-         AND COALESCE(is_archived, 0) = 0
-         AND date >= $1
+          AND COALESCE(reporting_treatment, 'normal') = 'normal'
+          AND COALESCE(is_archived, 0) = 0
+          AND date >= $1
          AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
        GROUP BY description, amount
        HAVING count >= 1
@@ -602,6 +1015,7 @@ const createSubscription: ToolDefinition = {
     return {
       success: true,
       action: 'created' as const,
+      dryRun: false,
       subscription: subscriptionSnapshot(subscription),
       message: `Created subscription "${name}".`,
     }
@@ -792,6 +1206,7 @@ const createSubscriptionFromTransaction: ToolDefinition = {
     return {
       success: true,
       action: 'created' as const,
+      dryRun: false,
       subscription: subscriptionOutput,
       linkedTransactionId: transactionId,
       sourceTransaction: sourceSnapshot,
@@ -1089,6 +1504,7 @@ const getSubscriptionSpending: ToolDefinition = {
 
 export const investmentsandsubscriptionsTools: ToolDefinition[] = [
   manageInvestment,
+  listInvestments,
   getUpcomingBills,
   createSubscription,
   createSubscriptionFromTransaction,

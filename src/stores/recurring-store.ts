@@ -81,7 +81,7 @@ async function resolveAccountCurrency(accountId: string): Promise<CurrencyCode> 
   if (accounts.length === 0) {
     throw new Error(`Account ${accountId} not found.`)
   }
-  if (accounts[0].is_archived === 1) {
+  if (accounts[0].is_archived !== 0) {
     throw new Error(
       `Account ${accountId} is archived. Unarchive it before using it for new writes.`
     )
@@ -364,7 +364,7 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
         throw new Error(unsupportedRecurringTransferMessage())
       }
 
-      const archivedAccountRule = dueRules.find((rule) => rule.account_is_archived === 1)
+      const archivedAccountRule = dueRules.find((rule) => rule.account_is_archived !== 0)
       if (archivedAccountRule) {
         throw new Error(
           `Recurring rule "${archivedAccountRule.description}" points at archived account ${archivedAccountRule.account_id}. Unarchive the account or pause the rule before materializing it.`

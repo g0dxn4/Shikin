@@ -309,6 +309,10 @@ type ResolvedAccountRow = {
   account_mode?: 'transactional' | 'snapshot_only' | null
 }
 
+export function isAccountWriteEligible(account: { is_archived: unknown }): boolean {
+  return account.is_archived === 0
+}
+
 function resolvedAccount(row: ResolvedAccountRow) {
   return {
     success: true as const,
@@ -344,7 +348,7 @@ function resolveAccountAlias(account: string) {
     }
   }
 
-  if (accounts[0].is_archived === 1) {
+  if (!isAccountWriteEligible(accounts[0])) {
     return archivedAccountFailure(`alias "${normalizedAlias}"`)
   }
 
@@ -365,7 +369,7 @@ function resolveAccountReference(account: string) {
       [account, account]
     ) ?? []
 
-  const activeAccounts = accounts.filter((row) => row.is_archived !== 1)
+  const activeAccounts = accounts.filter(isAccountWriteEligible)
 
   if (activeAccounts.length === 1) {
     return resolvedAccount(activeAccounts[0])
@@ -400,7 +404,7 @@ export function resolveAccountId(accountId?: string, account?: string) {
       return { success: false as const, message: `Account ${accountId} not found.` }
     }
 
-    if (accounts[0].is_archived === 1) {
+    if (!isAccountWriteEligible(accounts[0])) {
       return archivedAccountFailure(accountId)
     }
 

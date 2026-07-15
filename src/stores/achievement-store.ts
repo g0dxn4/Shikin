@@ -48,10 +48,7 @@ export const useAchievementStore = create<AchievementState>((set, get) => ({
         achievements,
         currentStreak: streak.currentStreak,
         longestStreak: streak.longestStreak,
-        newlyUnlocked: [
-          ...get().newlyUnlocked.filter((n) => !n.dismissed),
-          ...newlyUnlocked,
-        ],
+        newlyUnlocked: [...get().newlyUnlocked.filter((n) => !n.dismissed), ...newlyUnlocked],
       })
     } finally {
       set({ isLoading: false })
@@ -66,9 +63,7 @@ export const useAchievementStore = create<AchievementState>((set, get) => ({
     void dismissAchievementService(id)
     set((state) => ({
       newlyUnlocked: state.newlyUnlocked.filter((a) => a.id !== id),
-      achievements: state.achievements.map((a) =>
-        a.id === id ? { ...a, dismissed: true } : a
-      ),
+      achievements: state.achievements.map((a) => (a.id === id ? { ...a, dismissed: true } : a)),
     }))
   },
 }))

@@ -303,7 +303,7 @@ describe('CLI command execution', () => {
 
     const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
     expect(output.catalogVersion).toBe('2026-07-14.financial-semantics')
-    expect(output.toolCount).toBe(90)
+    expect(output.toolCount).toBe(91)
     const commandByName = new Map(
       output.commands.map((command: { name: string }) => [command.name, command])
     )
@@ -362,6 +362,16 @@ describe('CLI command execution', () => {
       'list-receivables': ['status', 'overdue', 'accountId', 'account', 'search'],
       'match-receivable': ['receivableId', 'transactionId', 'apply', 'source', 'note'],
       'unmatch-receivable': ['receivableId', 'apply', 'source', 'note'],
+      'manage-investment': [
+        'action',
+        'investmentId',
+        'accountId',
+        'account',
+        'dryRun',
+        'source',
+        'note',
+      ],
+      'list-investments': ['type', 'accountId', 'account', 'symbol', 'search', 'redacted'],
       undo: ['apply', 'dryRun', 'source', 'note'],
       'finance-sanity-check': ['redacted', 'limit'],
     }

@@ -15,6 +15,15 @@
     "incomeVsLastMonth": "Ingresos vs mes anterior",
     "expensesVsLastMonth": "Gastos vs mes anterior"
   },
+  "currency": {
+    "totalUnavailable": "Patrimonio neto no disponible",
+    "missingRates": "Faltan tipos de cambio para {{currencies}}. Actualiza los tipos para calcular un total completo.",
+    "invalidData": "Datos de moneda no válidos para {{details}}. Corrige la cuenta o tasa afectada antes de calcular el total.",
+    "invalidRate": "tipo de cambio {{from}} → {{to}} ({{rate}})",
+    "preferredCurrency": "Moneda preferida",
+    "blankValue": "moneda vacía",
+    "derivedUnavailable": "No disponible hasta completar los tipos de cambio"
+  },
   "charts": {
     "spending": "Gastos Mensuales",
     "categories": "Por Categoría",

@@ -37,7 +37,7 @@ async function getLastPriceDate(symbol: string): Promise<string | null> {
   return rows.length > 0 ? rows[0].date : null
 }
 
-function isStale(lastDate: string | null, type: 'stock' | 'crypto'): boolean {
+export function isInvestmentPriceStale(lastDate: string | null, type: 'stock' | 'crypto'): boolean {
   if (!lastDate) return true
 
   const last = new Date(lastDate)
@@ -67,7 +67,7 @@ async function fetchStalePrices(): Promise<void> {
   for (const inv of investments) {
     const lastDate = await getLastPriceDate(inv.symbol)
     const isCrypto = inv.type === 'crypto'
-    if (isStale(lastDate, isCrypto ? 'crypto' : 'stock')) {
+    if (isInvestmentPriceStale(lastDate, isCrypto ? 'crypto' : 'stock')) {
       staleInvestments.push(inv)
     }
   }

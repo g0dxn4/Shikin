@@ -33,6 +33,21 @@ vi.mock('@/lib/exchange-rate-service', () => ({
 
 import { useCurrencyStore } from '../currency-store'
 
+function makeAccount(id: string, balance: number, currency: string): Account {
+  return {
+    id,
+    name: `Account ${id}`,
+    type: 'checking',
+    balance,
+    currency,
+    icon: 'wallet',
+    color: '#000000',
+    is_archived: 0,
+    created_at: '',
+    updated_at: '',
+  }
+}
+
 describe('currency-store', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -46,6 +61,7 @@ describe('currency-store', () => {
 
     useCurrencyStore.setState({
       rates: {},
+      invalidRates: [],
       preferredCurrency: 'USD',
       lastFetched: null,
       isLoading: false,
@@ -192,36 +208,101 @@ describe('currency-store', () => {
     })
   })
 
+  describe('invalid cached rate diagnostics', () => {
+    it('returns typed source/target/rate details for malformed cached rows', async () => {
+      mockStoreGet.mockResolvedValueOnce(null)
+      mockGetCachedRates.mockResolvedValueOnce([
+        { from_currency: ' ', to_currency: 'USD', rate: 1, date: '2026-03-17' },
+      ])
+      mockGetLastFetchDate.mockResolvedValueOnce('2026-03-17')
+
+      await useCurrencyStore.getState().loadRates()
+
+      expect(
+        useCurrencyStore
+          .getState()
+          .getTotalBalanceInPreferred([makeAccount('valid', 100_000, 'USD')])
+      ).toEqual({
+        complete: false,
+        preferredCurrency: 'USD',
+        missingCurrencies: [],
+        reason: 'invalid_currency_data',
+        invalidRates: [{ fromCurrency: '', toCurrency: 'USD', rate: '1' }],
+      })
+    })
+  })
+
   describe('convertToPreferred', () => {
-    it('returns same amount when currencies match', () => {
-      useCurrencyStore.setState({ preferredCurrency: 'USD' })
+    it('returns a complete same-currency amount without a cached rate', () => {
+      useCurrencyStore.setState({ preferredCurrency: ' usd ', rates: {} })
 
-      const result = useCurrencyStore.getState().convertToPreferred(10000, 'USD')
-
-      expect(result).toBe(10000)
+      expect(useCurrencyStore.getState().convertToPreferred(10_000, 'USD')).toEqual({
+        complete: true,
+        preferredCurrency: 'USD',
+        amountCentavos: 10_000,
+        missingCurrencies: [],
+      })
     })
 
-    it('converts using cached rate', () => {
+    it('normalizes currency codes and converts using a valid cached rate', () => {
       useCurrencyStore.setState({
-        preferredCurrency: 'EUR',
-        rates: { 'USD:EUR': 0.92 },
+        preferredCurrency: ' usd ',
+        rates: { ' eur : usd ': 1.1 },
       })
 
-      const result = useCurrencyStore.getState().convertToPreferred(10000, 'USD')
-
-      expect(result).toBe(9200) // Math.round(10000 * 0.92)
+      expect(useCurrencyStore.getState().convertToPreferred(10_000, ' eur ')).toEqual({
+        complete: true,
+        preferredCurrency: 'USD',
+        amountCentavos: 11_000,
+        missingCurrencies: [],
+      })
     })
 
-    it('returns original amount when no rate available', () => {
-      useCurrencyStore.setState({
+    it('returns an explicit incomplete result when no rate is available', () => {
+      useCurrencyStore.setState({ preferredCurrency: 'JPY', rates: {} })
+
+      expect(useCurrencyStore.getState().convertToPreferred(10_000, 'USD')).toEqual({
+        complete: false,
         preferredCurrency: 'JPY',
-        rates: {},
+        missingCurrencies: ['USD'],
+        reason: 'missing_exchange_rates',
       })
-
-      const result = useCurrencyStore.getState().convertToPreferred(10000, 'USD')
-
-      expect(result).toBe(10000)
     })
+
+    it.each(['', 'US D'])('returns invalid-data diagnostics for malformed input %j', (currency) => {
+      expect(useCurrencyStore.getState().convertToPreferred(10_000, currency)).toEqual({
+        complete: false,
+        preferredCurrency: 'USD',
+        missingCurrencies: [],
+        reason: 'invalid_currency_data',
+        invalidCurrencies: [{ accountId: null, accountName: null, value: currency.trim() }],
+      })
+    })
+
+    it('accepts a non-fiat asset code for a same-asset total', () => {
+      useCurrencyStore.setState({ preferredCurrency: 'USDT', rates: {} })
+
+      expect(useCurrencyStore.getState().convertToPreferred(10_000, ' usdt ')).toEqual({
+        complete: true,
+        preferredCurrency: 'USDT',
+        amountCentavos: 10_000,
+        missingCurrencies: [],
+      })
+    })
+
+    it.each([Number.NaN, Number.POSITIVE_INFINITY, 0, -0.5])(
+      'rejects an invalid, zero, or negative cached rate (%s)',
+      (rate) => {
+        useCurrencyStore.setState({ preferredCurrency: 'USD', rates: { 'EUR:USD': rate } })
+
+        expect(useCurrencyStore.getState().convertToPreferred(10_000, 'EUR')).toEqual({
+          complete: false,
+          preferredCurrency: 'USD',
+          missingCurrencies: ['EUR'],
+          reason: 'missing_exchange_rates',
+        })
+      }
+    )
   })
 
   describe('refreshRates', () => {
@@ -240,17 +321,23 @@ describe('currency-store', () => {
   })
 
   describe('getRate', () => {
-    it('returns 1 for same currency', () => {
-      expect(useCurrencyStore.getState().getRate('USD', 'USD')).toBe(1)
+    it('normalizes same-currency codes', () => {
+      expect(useCurrencyStore.getState().getRate(' usd ', 'USD')).toBe(1)
     })
 
-    it('returns rate from cache', () => {
-      useCurrencyStore.setState({ rates: { 'USD:EUR': 0.92 } })
+    it('returns a normalized valid rate from cache', () => {
+      useCurrencyStore.setState({ rates: { ' usd : eur ': 0.92 } })
 
-      expect(useCurrencyStore.getState().getRate('USD', 'EUR')).toBe(0.92)
+      expect(useCurrencyStore.getState().getRate('USD', ' eur ')).toBe(0.92)
     })
 
-    it('returns null when rate not found', () => {
+    it.each([Number.NaN, 0, -1])('returns null for unusable cached rate %s', (rate) => {
+      useCurrencyStore.setState({ rates: { 'USD:EUR': rate } })
+
+      expect(useCurrencyStore.getState().getRate('USD', 'EUR')).toBeNull()
+    })
+
+    it('returns null when rate is not found', () => {
       useCurrencyStore.setState({ rates: {} })
 
       expect(useCurrencyStore.getState().getRate('USD', 'BRL')).toBeNull()
@@ -258,43 +345,81 @@ describe('currency-store', () => {
   })
 
   describe('getTotalBalanceInPreferred', () => {
-    it('sums account balances converted to preferred currency', () => {
+    it('sums account balances only after complete conversion', () => {
       useCurrencyStore.setState({
         preferredCurrency: 'USD',
         rates: { 'EUR:USD': 1.087 },
       })
 
-      const accounts: Account[] = [
-        {
-          id: '1',
-          name: 'Checking',
-          type: 'checking',
-          balance: 100000,
-          currency: 'USD',
-          icon: 'wallet',
-          color: '#000000',
-          is_archived: 0,
-          created_at: '',
-          updated_at: '',
-        },
-        {
-          id: '2',
-          name: 'Euro Savings',
-          type: 'savings',
-          balance: 50000,
-          currency: 'EUR',
-          icon: 'piggy-bank',
-          color: '#111111',
-          is_archived: 0,
-          created_at: '',
-          updated_at: '',
-        },
-      ]
+      const total = useCurrencyStore
+        .getState()
+        .getTotalBalanceInPreferred([
+          makeAccount('1', 100_000, 'USD'),
+          makeAccount('2', 50_000, 'EUR'),
+        ])
 
-      const total = useCurrencyStore.getState().getTotalBalanceInPreferred(accounts)
+      expect(total).toEqual({
+        complete: true,
+        preferredCurrency: 'USD',
+        amountCentavos: 154_350,
+        missingCurrencies: [],
+      })
+    })
 
-      // 100000 (USD->USD) + Math.round(50000 * 1.087) = 100000 + 54350 = 154350
-      expect(total).toBe(154350)
+    it('aggregates normalized same-currency accounts without rates', () => {
+      useCurrencyStore.setState({ preferredCurrency: 'mxn', rates: {} })
+
+      expect(
+        useCurrencyStore
+          .getState()
+          .getTotalBalanceInPreferred([
+            makeAccount('1', 10_000, ' MXN '),
+            makeAccount('2', 5_000, 'mxn'),
+          ])
+      ).toEqual({
+        complete: true,
+        preferredCurrency: 'MXN',
+        amountCentavos: 15_000,
+        missingCurrencies: [],
+      })
+    })
+
+    it('returns affected-account diagnostics instead of throwing for invalid currency data', () => {
+      useCurrencyStore.setState({ preferredCurrency: 'USD', rates: {} })
+      const invalidAccount = makeAccount('broken', 50_000, ' ')
+      invalidAccount.name = 'Broken savings'
+
+      expect(
+        useCurrencyStore
+          .getState()
+          .getTotalBalanceInPreferred([makeAccount('valid', 100_000, 'USD'), invalidAccount])
+      ).toEqual({
+        complete: false,
+        preferredCurrency: 'USD',
+        missingCurrencies: [],
+        reason: 'invalid_currency_data',
+        invalidCurrencies: [{ accountId: 'broken', accountName: 'Broken savings', value: '' }],
+      })
+    })
+
+    it('reports every missing currency and does not expose a partial amount', () => {
+      useCurrencyStore.setState({ preferredCurrency: 'USD', rates: {} })
+
+      const total = useCurrencyStore
+        .getState()
+        .getTotalBalanceInPreferred([
+          makeAccount('1', 100_000, 'USD'),
+          makeAccount('2', 50_000, 'eur'),
+          makeAccount('3', 25_000, ' MXN '),
+        ])
+
+      expect(total).toEqual({
+        complete: false,
+        preferredCurrency: 'USD',
+        missingCurrencies: ['EUR', 'MXN'],
+        reason: 'missing_exchange_rates',
+      })
+      expect(total).not.toHaveProperty('amountCentavos')
     })
   })
 })

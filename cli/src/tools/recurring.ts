@@ -702,7 +702,7 @@ const materializeRecurring: ToolDefinition = {
       return unsupportedRecurringTransferFailure()
     }
 
-    const archivedAccountRule = dueRules.find((rule) => rule.account_is_archived === 1)
+    const archivedAccountRule = dueRules.find((rule) => rule.account_is_archived !== 0)
     if (archivedAccountRule) {
       return {
         success: false,

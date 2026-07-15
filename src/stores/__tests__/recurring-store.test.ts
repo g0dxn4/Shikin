@@ -92,6 +92,7 @@ describe('recurring-store', () => {
           updated_at: '2026-01-01T00:00:00Z',
           account_name: 'Checking',
           account_currency: 'USD',
+          account_is_archived: 0,
           category_name: 'Entertainment',
           category_color: '#8b5cf6',
         },
@@ -126,7 +127,7 @@ describe('recurring-store', () => {
   describe('create', () => {
     it('inserts rule with centavos and next_date', async () => {
       mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
-      mockQuery.mockResolvedValueOnce([{ currency: ' eur ' }])
+      mockQuery.mockResolvedValueOnce([{ currency: ' eur ', is_archived: 0 }])
       mockQuery.mockResolvedValueOnce([]) // re-fetch
 
       await useRecurringStore.getState().create({
@@ -160,7 +161,7 @@ describe('recurring-store', () => {
 
     it('does not reject when refresh fails after a committed write', async () => {
       mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
-      mockQuery.mockResolvedValueOnce([{ currency: 'EUR' }])
+      mockQuery.mockResolvedValueOnce([{ currency: 'EUR', is_archived: 0 }])
       mockQuery.mockRejectedValueOnce(new Error('refresh failed'))
 
       await expect(
@@ -185,7 +186,7 @@ describe('recurring-store', () => {
     })
 
     it('rejects recurring-rule creation when the linked account currency is invalid after normalization', async () => {
-      mockQuery.mockResolvedValueOnce([{ currency: '   ' }])
+      mockQuery.mockResolvedValueOnce([{ currency: '   ', is_archived: 0 }])
 
       await expect(
         useRecurringStore.getState().create({
@@ -282,7 +283,7 @@ describe('recurring-store', () => {
             updated_at: '2026-01-01T00:00:00Z',
           },
         ])
-        .mockResolvedValueOnce([{ currency: 'EUR' }])
+        .mockResolvedValueOnce([{ currency: 'EUR', is_archived: 0 }])
         .mockResolvedValueOnce([])
       mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
 
@@ -332,7 +333,7 @@ describe('recurring-store', () => {
             updated_at: '2026-01-01T00:00:00Z',
           },
         ])
-        .mockResolvedValueOnce([{ currency: 'EUR' }])
+        .mockResolvedValueOnce([{ currency: 'EUR', is_archived: 0 }])
 
       await expect(
         useRecurringStore.getState().update('01RULE001', {
@@ -581,6 +582,7 @@ describe('recurring-store', () => {
           created_at: '2026-01-01T00:00:00Z',
           updated_at: '2026-01-01T00:00:00Z',
           account_currency: 'USD',
+          account_is_archived: 0,
         },
       ])
 
@@ -635,6 +637,7 @@ describe('recurring-store', () => {
           created_at: '2026-01-01T00:00:00Z',
           updated_at: '2026-01-01T00:00:00Z',
           account_currency: 'USD',
+          account_is_archived: 0,
         },
       ])
       mockExecute.mockResolvedValue({ rowsAffected: 1, lastInsertId: 0 })
@@ -682,6 +685,7 @@ describe('recurring-store', () => {
           created_at: '2026-01-01T00:00:00Z',
           updated_at: '2026-01-01T00:00:00Z',
           account_currency: 'EUR',
+          account_is_archived: 0,
         },
       ])
 
@@ -715,6 +719,7 @@ describe('recurring-store', () => {
           created_at: '2026-01-01T00:00:00Z',
           updated_at: '2026-01-01T00:00:00Z',
           account_currency: 'EUR',
+          account_is_archived: 0,
         },
       ])
 
@@ -748,6 +753,7 @@ describe('recurring-store', () => {
           created_at: '2026-01-01T00:00:00Z',
           updated_at: '2026-01-01T00:00:00Z',
           account_currency: 'USD',
+          account_is_archived: 0,
         },
       ])
 
@@ -766,6 +772,7 @@ describe('recurring-store', () => {
           amount: 1599,
           currency: 'EUR',
           account_currency: 'EUR',
+          account_is_archived: 0,
           type: 'expense',
           frequency: 'monthly',
           next_date: '2026-03-01',
@@ -822,6 +829,7 @@ describe('recurring-store', () => {
           amount: 1599,
           currency: 'EUR',
           account_currency: 'EUR',
+          account_is_archived: 0,
           type: 'expense',
           frequency: 'monthly',
           next_date: '2026-03-01',

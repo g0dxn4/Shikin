@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ReactNode } from 'react'
 import { Investments } from '../investments'
 
 const mockFetch = vi.fn().mockResolvedValue(undefined)
@@ -9,6 +10,16 @@ let mockInvestments: Array<Record<string, unknown>> = []
 let mockFetchError: string | null = null
 let mockError: string | null = null
 let mockIsLoading = false
+let mockPortfolioSummary: Record<string, unknown> = {
+  totalMarketValue: 0,
+  totalCostBasis: 0,
+  totalGainLoss: 0,
+  totalGainLossPercent: 0,
+  byType: {},
+  byCurrency: {},
+  currencies: [],
+  isMixedCurrency: false,
+}
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -36,15 +47,10 @@ vi.mock('@/stores/investment-store', () => ({
     fetch: mockFetch,
     remove: mockRemove,
     priceHistory: new Map(),
-    portfolioSummary: {
-      totalMarketValue: 0,
-      totalCostBasis: 0,
-      totalGainLoss: 0,
-      totalGainLossPercent: 0,
-      byType: {},
-    },
+    portfolioSummary: mockPortfolioSummary,
     lastPriceFetch: null,
     fetchPriceHistory: vi.fn().mockResolvedValue([]),
+    setLastPriceFetch: vi.fn(),
   }),
 }))
 
@@ -59,6 +65,10 @@ vi.mock('@/stores/account-store', () => ({
 vi.mock('@/lib/price-service', () => ({
   fetchAllCurrentPrices: vi.fn().mockResolvedValue(new Map()),
   savePricesToDB: vi.fn(),
+}))
+
+vi.mock('@/lib/price-scheduler', () => ({
+  isInvestmentPriceStale: vi.fn((lastDate: string | null) => !lastDate),
 }))
 
 vi.mock('@/components/shared/confirm-dialog', () => ({
@@ -83,6 +93,10 @@ vi.mock('@/components/investments/investment-dialog', () => ({
   InvestmentDialog: () => null,
 }))
 
+vi.mock('@/components/ui/safe-chart', () => ({
+  SafeChart: (props: { children: ReactNode }) => <div>{props.children}</div>,
+}))
+
 vi.mock('recharts', () => ({
   AreaChart: () => null,
   Area: () => null,
@@ -105,6 +119,16 @@ describe('Investments', () => {
     mockFetchError = null
     mockError = null
     mockIsLoading = false
+    mockPortfolioSummary = {
+      totalMarketValue: 0,
+      totalCostBasis: 0,
+      totalGainLoss: 0,
+      totalGainLossPercent: 0,
+      byType: {},
+      byCurrency: {},
+      currencies: [],
+      isMixedCurrency: false,
+    }
   })
 
   it('renders title', () => {
@@ -127,8 +151,7 @@ describe('Investments', () => {
     expect(screen.queryByText('guidance.pricesTitle')).not.toBeInTheDocument()
   })
 
-  it('renders long holding lists in pages', async () => {
-    const user = userEvent.setup()
+  it('renders long holding lists in pages', () => {
     mockInvestments = Array.from({ length: 25 }, (_, index) => {
       const suffix = String(index).padStart(2, '0')
       return {
@@ -157,10 +180,10 @@ describe('Investments', () => {
     expect(screen.getAllByText('HLD23').length).toBeGreaterThan(0)
     expect(screen.queryByText('HLD24')).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /pagination\.showMore/i }))
+    fireEvent.click(screen.getByRole('button', { name: /pagination\.showMore/i }))
 
     expect(screen.getAllByText('HLD24').length).toBeGreaterThan(0)
-  })
+  }, 10_000)
 
   it('does not show page-level load banner for price history failures', () => {
     mockInvestments = [
@@ -268,48 +291,6 @@ describe('Investments', () => {
     })
   })
 
-  it('renders title', () => {
-    render(<Investments />)
-
-    expect(screen.getByText('title')).toBeInTheDocument()
-  })
-
-  it('renders empty state text', () => {
-    render(<Investments />)
-
-    expect(screen.getByText('empty.title')).toBeInTheDocument()
-  })
-
-  it('does not show page-level load banner for price history failures', () => {
-    mockInvestments = [
-      {
-        id: 'inv-1',
-        account_id: null,
-        symbol: 'AAPL',
-        name: 'Apple',
-        type: 'stock',
-        shares: 1,
-        avg_cost_basis: 10000,
-        currency: 'USD',
-        notes: null,
-        created_at: '2024-01-01T00:00:00Z',
-        updated_at: '2024-01-01T00:00:00Z',
-        currentPrice: 12000,
-        marketValue: 12000,
-        gainLoss: 2000,
-        gainLossPercent: 20,
-        lastPriceDate: '2024-01-10',
-      },
-    ]
-    mockError = 'Price history unavailable'
-
-    render(<Investments />)
-
-    expect(screen.queryByText('Couldn’t load investments')).not.toBeInTheDocument()
-    expect(screen.queryByText('Price history unavailable')).not.toBeInTheDocument()
-    expect(screen.getByText('title')).toBeInTheDocument()
-  })
-
   it('shows a specific error toast when deleting an investment fails', async () => {
     const { toast } = await import('sonner')
     const user = userEvent.setup()
@@ -382,5 +363,234 @@ describe('Investments', () => {
       expect(toast.error).toHaveBeenCalledWith('Price refresh DB error')
     })
     expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it('filters holdings by asset type', async () => {
+    const user = userEvent.setup()
+    mockInvestments = [
+      {
+        id: 'inv-1',
+        account_id: null,
+        symbol: 'AAPL',
+        name: 'Apple',
+        type: 'stock',
+        shares: 1,
+        avg_cost_basis: 10000,
+        currency: 'USD',
+        notes: null,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        currentPrice: 12000,
+        marketValue: 12000,
+        gainLoss: 2000,
+        gainLossPercent: 20,
+        lastPriceDate: '2024-01-10',
+      },
+      {
+        id: 'inv-2',
+        account_id: null,
+        symbol: 'BTC',
+        name: 'Bitcoin',
+        type: 'crypto',
+        shares: 1,
+        avg_cost_basis: 5000000,
+        currency: 'USD',
+        notes: null,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        currentPrice: 6000000,
+        marketValue: 6000000,
+        gainLoss: 1000000,
+        gainLossPercent: 20,
+        lastPriceDate: '2024-01-10',
+      },
+    ]
+
+    render(<Investments />)
+
+    expect(screen.getAllByText('AAPL').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('BTC').length).toBeGreaterThan(0)
+
+    // Click crypto filter
+    const cryptoChip = screen.getByRole('button', { name: /types.crypto/i })
+    await user.click(cryptoChip)
+
+    expect(screen.queryByText('AAPL')).not.toBeInTheDocument()
+    expect(screen.getAllByText('BTC').length).toBeGreaterThan(0)
+  })
+
+  it('filters holdings by search query', async () => {
+    const user = userEvent.setup()
+    mockInvestments = [
+      {
+        id: 'inv-1',
+        account_id: null,
+        symbol: 'AAPL',
+        name: 'Apple',
+        type: 'stock',
+        shares: 1,
+        avg_cost_basis: 10000,
+        currency: 'USD',
+        notes: null,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        currentPrice: 12000,
+        marketValue: 12000,
+        gainLoss: 2000,
+        gainLossPercent: 20,
+        lastPriceDate: '2024-01-10',
+      },
+      {
+        id: 'inv-2',
+        account_id: null,
+        symbol: 'GOOGL',
+        name: 'Google',
+        type: 'stock',
+        shares: 1,
+        avg_cost_basis: 20000,
+        currency: 'USD',
+        notes: null,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        currentPrice: 22000,
+        marketValue: 22000,
+        gainLoss: 2000,
+        gainLossPercent: 10,
+        lastPriceDate: '2024-01-10',
+      },
+    ]
+
+    render(<Investments />)
+
+    const searchInput = screen.getByPlaceholderText('search.placeholder')
+    await user.type(searchInput, 'AAPL')
+
+    expect(screen.getAllByText('AAPL').length).toBeGreaterThan(0)
+    expect(screen.queryByText('GOOGL')).not.toBeInTheDocument()
+  })
+
+  it('shows empty filter state and allows clearing filters', async () => {
+    const user = userEvent.setup()
+    mockInvestments = [
+      {
+        id: 'inv-1',
+        account_id: null,
+        symbol: 'AAPL',
+        name: 'Apple',
+        type: 'stock',
+        shares: 1,
+        avg_cost_basis: 10000,
+        currency: 'USD',
+        notes: null,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        currentPrice: 12000,
+        marketValue: 12000,
+        gainLoss: 2000,
+        gainLossPercent: 20,
+        lastPriceDate: '2024-01-10',
+      },
+    ]
+
+    render(<Investments />)
+
+    const searchInput = screen.getByPlaceholderText('search.placeholder')
+    await user.type(searchInput, 'XYZ')
+
+    expect(screen.getByText('empty.filter')).toBeInTheDocument()
+
+    await user.click(screen.getByText('empty.clearFilters'))
+
+    expect(screen.queryByText('empty.filter')).not.toBeInTheDocument()
+    expect(screen.getAllByText('AAPL').length).toBeGreaterThan(0)
+  })
+
+  it('shows mixed-currency warning and per-currency subtotals', () => {
+    mockPortfolioSummary = {
+      totalMarketValue: 63000,
+      totalCostBasis: 52000,
+      totalGainLoss: 11000,
+      totalGainLossPercent: 21.15,
+      byType: { stock: { marketValue: 63000, gainLoss: 11000, count: 2 } },
+      byCurrency: {
+        USD: { marketValue: 12000, costBasis: 10000, gainLoss: 2000, count: 1 },
+        MXN: { marketValue: 51000, costBasis: 42000, gainLoss: 9000, count: 1 },
+      },
+      currencies: ['MXN', 'USD'],
+      isMixedCurrency: true,
+    }
+
+    mockInvestments = [
+      {
+        id: 'inv-1',
+        account_id: null,
+        symbol: 'AAPL',
+        name: 'Apple',
+        type: 'stock',
+        shares: 1,
+        avg_cost_basis: 10000,
+        currency: 'USD',
+        notes: null,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        currentPrice: 12000,
+        marketValue: 12000,
+        gainLoss: 2000,
+        gainLossPercent: 20,
+        lastPriceDate: '2024-01-10',
+      },
+      {
+        id: 'inv-2',
+        account_id: null,
+        symbol: 'WALMEX.MX',
+        name: 'Walmart de México',
+        type: 'stock',
+        shares: 1,
+        avg_cost_basis: 42000,
+        currency: 'MXN',
+        notes: null,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        currentPrice: 51000,
+        marketValue: 51000,
+        gainLoss: 9000,
+        gainLossPercent: 21.43,
+        lastPriceDate: '2024-01-10',
+      },
+    ]
+
+    render(<Investments />)
+
+    expect(screen.getByText('currencyWarning.title')).toBeInTheDocument()
+    expect(screen.getByText('currencyWarning.body')).toBeInTheDocument()
+    expect(screen.getByText('MXN')).toBeInTheDocument()
+    expect(screen.getByText('USD')).toBeInTheDocument()
+  })
+
+  it('shows price source label', () => {
+    mockInvestments = [
+      {
+        id: 'inv-1',
+        account_id: null,
+        symbol: 'AAPL',
+        name: 'Apple',
+        type: 'stock',
+        shares: 1,
+        avg_cost_basis: 10000,
+        currency: 'USD',
+        notes: null,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        currentPrice: 12000,
+        marketValue: 12000,
+        gainLoss: 2000,
+        gainLossPercent: 20,
+        lastPriceDate: '2024-01-10',
+      },
+    ]
+
+    render(<Investments />)
+
+    expect(screen.getByText('priceSource.label')).toBeInTheDocument()
   })
 })

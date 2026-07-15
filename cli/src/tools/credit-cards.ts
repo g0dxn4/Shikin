@@ -13,6 +13,7 @@ import {
   nonNegativeMoneyAmount,
   isoDate,
   currencyCode,
+  isAccountWriteEligible,
   normalizeCurrencyCode,
   resolveAccountId,
   getAccountAliases,
@@ -222,7 +223,7 @@ function readPaymentSourceAccount(accountId: string) {
       message: `Account ${accountId} not found.`,
     }
   }
-  if (account.is_archived === 1) {
+  if (!isAccountWriteEligible(account)) {
     return {
       success: false as const,
       reason: 'account_archived',
@@ -481,7 +482,7 @@ function getCreditCardAccountById(accountId: string) {
       message: `Account ${accountId} not found.`,
     }
   }
-  if (account.is_archived === 1) {
+  if (!isAccountWriteEligible(account)) {
     return {
       success: false as const,
       reason: 'account_archived',
@@ -563,7 +564,7 @@ function getStatementAccountById(accountId: string, includeArchivedAccounts: boo
       message: `Account ${accountId} is not a credit card account.`,
     }
   }
-  if (account.is_archived === 1 && !includeArchivedAccounts) {
+  if (!isAccountWriteEligible(account) && !includeArchivedAccounts) {
     return {
       success: false as const,
       reason: 'account_archived',
@@ -602,7 +603,7 @@ function resolveStatementAccountFilter(
   const creditCards = matches.filter((row) => row.type === 'credit_card')
   const visible = includeArchivedAccounts
     ? creditCards
-    : creditCards.filter((row) => row.is_archived !== 1)
+    : creditCards.filter(isAccountWriteEligible)
 
   if (visible.length === 1) return { success: true as const, accountId: visible[0].id }
   if (visible.length > 1) {
@@ -663,7 +664,7 @@ function getStatement(statementId: string): CreditCardStatementRow | null {
 }
 
 function ensureStatementWritable(statement: CreditCardStatementRow) {
-  if (statement.account_is_archived === 1) {
+  if (statement.account_is_archived !== 0) {
     return {
       success: false as const,
       reason: 'account_archived',
@@ -1135,6 +1136,7 @@ const recordCardPayment: ToolDefinition = {
     return {
       success: true,
       action: 'recorded' as const,
+      dryRun: false,
       mode,
       transactions: wouldCreateTransactions,
       updatedStatements: wouldUpdateStatements,

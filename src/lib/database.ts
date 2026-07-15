@@ -2,7 +2,7 @@ import { isTauri, DATA_SERVER_URL, withDataServerHeaders } from '@/lib/runtime'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type TauriDatabase = {
+export type TauriDatabase = {
   select<T>(sql: string, params?: unknown[]): Promise<T>
   execute(sql: string, params?: unknown[]): Promise<{ rowsAffected: number; lastInsertId: number }>
   close(): Promise<void>
@@ -782,7 +782,7 @@ async function removeIfExists(fsMod: TauriFsModule, path: string): Promise<void>
   }
 }
 
-async function runTauriMigrations(db: TauriDatabase): Promise<void> {
+export async function runTauriMigrations(db: TauriDatabase): Promise<void> {
   // Ensure _migrations table exists (created by earlier JS code or first run)
   await db.execute(`
     CREATE TABLE IF NOT EXISTS _migrations (

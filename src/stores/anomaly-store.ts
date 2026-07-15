@@ -9,7 +9,10 @@ async function getDismissedIds(): Promise<Set<string>> {
     const store = await load()
     const raw = await store.get(STORE_KEY_DISMISSED)
     if (!raw) return new Set()
-    const parsed = (typeof raw === 'string' ? JSON.parse(raw) : raw) as { ids: string[]; expiry: number }
+    const parsed = (typeof raw === 'string' ? JSON.parse(raw) : raw) as {
+      ids: string[]
+      expiry: number
+    }
     // Auto-expire dismissed list after 30 days
     if (Date.now() > parsed.expiry) {
       await store.set(STORE_KEY_DISMISSED, null)

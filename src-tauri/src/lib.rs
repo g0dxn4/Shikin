@@ -1,3 +1,6 @@
+mod database_operation_lock;
+mod database_operation_recovery_journal;
+
 use std::{
     ffi::{OsStr, OsString},
     fs, io,
@@ -737,13 +740,15 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
             TRAY_MENU_QUIT_ID => app.exit(0),
             _ => {}
         })
-        .on_tray_icon_event(|tray, event| match event {
-            TrayIconEvent::Click {
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
-            } => show_main_window(tray.app_handle()),
-            _ => {}
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
         });
 
     if let Some(icon) = app.default_window_icon().cloned() {

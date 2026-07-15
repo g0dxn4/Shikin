@@ -1,0 +1,643 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shikin.local/contracts/database-operation-lock-v1.json",
+  "title": "Shikin database operation coordination records",
+  "description": "Contract only; Milestone 2 does not implement runtime locks. Persisted records coordinate concurrent runtime leases with exclusive restore/import intent.",
+  "discriminator": {
+    "propertyName": "recordKind"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/operationStateRecord"
+    },
+    {
+      "$ref": "#/$defs/registrationMutexRecord"
+    }
+  ],
+  "x-shikin-protocol": "shikin.database-operation-lock",
+  "x-shikin-version": 1,
+  "x-shikin-timing-constraints": {
+    "registrationMutexTtlMs": {
+      "minimum": 1000,
+      "maximum": 15000
+    },
+    "runtimeLeaseTtlMs": {
+      "minimum": 5000,
+      "maximum": 300000
+    },
+    "heartbeatIntervalMs": {
+      "minimum": 1000
+    },
+    "heartbeatMustBeLessThanTtlFraction": 0.3333333333333333,
+    "expiredWhen": "now >= expiresAt",
+    "clockRule": "Acquisition, renewal, drain, and expiration comparisons for one database identity use the same clock domain."
+  },
+  "x-shikin-operation-state-concurrency": {
+    "id": "registry-mutex-serialized-operation-state-mutation",
+    "strategy": "registry-mutex-serialization",
+    "scope": "databaseIdentity",
+    "mutexRecordKind": "registration_mutex",
+    "stateRecordKind": "operation_state",
+    "protocolSteps": [
+      {
+        "order": 1,
+        "id": "acquire-registry-mutex",
+        "requirement": "Callers MUST atomically acquire the registration_mutex for the databaseIdentity before the authoritative read of the operation_state they intend to modify; any advisory pre-read is non-authoritative."
+      },
+      {
+        "order": 2,
+        "id": "reread-operation-state",
+        "requirement": "After mutex acquisition, callers MUST reread the current operation_state and derive the mutation only from that post-acquisition state."
+      },
+      {
+        "order": 3,
+        "id": "derive-next-state",
+        "requirement": "Callers MUST preserve all unmodified post-acquisition state, never decrease fencingGenerationHighWater, and set stateRevision to previous.stateRevision + 1 exactly."
+      },
+      {
+        "order": 4,
+        "id": "revalidate-before-publish",
+        "requirement": "Immediately before publication, callers MUST revalidate that the unexpired mutex still has the same databaseIdentity, mutexId owner token, and complete owner evidence; mismatch, expiry, removal, or replacement requires abort without publishing."
+      },
+      {
+        "order": 5,
+        "id": "atomically-publish-state",
+        "requirement": "Only after successful final mutex revalidation, atomically publish the complete operation_state, including its revision and fencing high-water value."
+      },
+      {
+        "order": 6,
+        "id": "revalidate-before-release",
+        "requirement": "Only after successful state publication and immediately before mutex release, callers MUST revalidate the same unexpired mutexId owner token and complete owner evidence."
+      },
+      {
+        "order": 7,
+        "id": "release-registry-mutex",
+        "requirement": "Release only the mutex record whose owner token and evidence still match; a failed or superseded holder MUST NOT remove a successor mutex."
+      }
+    ],
+    "stateRevision": {
+      "previousRevisionSource": "post-acquisition-reread",
+      "requiredDelta": 1,
+      "nextRevisionExpression": "previous.stateRevision + 1",
+      "failureRule": "A failed, expired, or superseded mutation MUST NOT publish an operation_state or advance stateRevision."
+    },
+    "mutexOwnership": {
+      "ownerTokenField": "mutexId",
+      "revalidationFields": [
+        "databaseIdentity",
+        "mutexId",
+        "owner.ownerId",
+        "owner.runtimeId",
+        "owner.hostId",
+        "owner.processId",
+        "owner.processStartedAt",
+        "expiresAt"
+      ],
+      "revalidateImmediatelyBefore": ["operation-state-publish", "registry-mutex-release"],
+      "publishGuard": "The implementation MUST prevent mutex replacement from interleaving between final owner-token revalidation and atomic state publication, or use an equivalent conditional fenced write; an unguarded check-then-write is forbidden.",
+      "staleRecoveryRule": "Expired-mutex removal or replacement MUST be atomic and replacement MUST use a fresh mutexId; an older holder that was expired, removed, or superseded MUST NOT publish operation_state and MUST NOT remove the successor mutex."
+    },
+    "mutations": [
+      {
+        "id": "lease-registration",
+        "transitionIds": ["register-runtime-lease"],
+        "serialization": "registration_mutex",
+        "stateRevisionDelta": 1
+      },
+      {
+        "id": "lease-renewal",
+        "transitionIds": ["renew-runtime-lease"],
+        "serialization": "registration_mutex",
+        "stateRevisionDelta": 1
+      },
+      {
+        "id": "lease-release",
+        "transitionIds": ["release-record"],
+        "serialization": "registration_mutex",
+        "stateRevisionDelta": 1
+      },
+      {
+        "id": "stale-cleanup",
+        "transitionIds": ["stale-cleanup"],
+        "serialization": "registration_mutex",
+        "stateRevisionDelta": 1
+      },
+      {
+        "id": "exclusive-intent-publish",
+        "transitionIds": ["acquire-exclusive-intent"],
+        "serialization": "registration_mutex",
+        "stateRevisionDelta": 1
+      },
+      {
+        "id": "exclusive-intent-phase-change",
+        "transitionIds": [
+          "drain-runtime-leases",
+          "begin-exclusive-mutation",
+          "complete-exclusive-mutation",
+          "stale-cleanup"
+        ],
+        "serialization": "registration_mutex",
+        "stateRevisionDelta": 1
+      },
+      {
+        "id": "exclusive-intent-clear",
+        "transitionIds": ["release-record", "cancel-exclusive-intent"],
+        "serialization": "registration_mutex",
+        "stateRevisionDelta": 1
+      },
+      {
+        "id": "fencing-high-water-advance",
+        "transitionIds": [
+          "register-runtime-lease",
+          "acquire-exclusive-intent",
+          "cancel-exclusive-intent",
+          "stale-cleanup"
+        ],
+        "serialization": "registration_mutex",
+        "stateRevisionDelta": 1
+      }
+    ]
+  },
+  "x-shikin-transitions": [
+    {
+      "id": "acquire-registration-mutex",
+      "from": "registration mutex absent or expired",
+      "to": "registration_mutex",
+      "preconditions": [
+        "Atomically create or replace only an expired registration mutex for the same databaseIdentity and assign a fresh mutexId owner token."
+      ],
+      "effects": [
+        "The mutex holder may perform one short serialized operation-state mutation but receives no authority to mutate the database.",
+        "A removed, expired, or superseded holder fails owner-token revalidation and cannot publish state or remove its successor mutex."
+      ]
+    },
+    {
+      "id": "register-runtime-lease",
+      "operationStateMutation": true,
+      "concurrencyRule": "registry-mutex-serialized-operation-state-mutation",
+      "from": "operation_state with exclusiveIntent null",
+      "to": "operation_state with one additional runtime lease",
+      "preconditions": [
+        "Caller holds the unexpired registration mutex with matching owner evidence.",
+        "No existing lease has the same ownerId.",
+        "exclusiveIntent is null at the atomic state update."
+      ],
+      "effects": [
+        "Increment fencingGenerationHighWater exactly once and assign the new value to the lease.",
+        "Publish the lease and stateRevision = previous.stateRevision + 1 atomically, then revalidate and release the registration mutex."
+      ]
+    },
+    {
+      "id": "renew-runtime-lease",
+      "operationStateMutation": true,
+      "concurrencyRule": "registry-mutex-serialized-operation-state-mutation",
+      "from": "unexpired runtime lease",
+      "to": "same runtime lease with later heartbeatAt and expiresAt",
+      "preconditions": [
+        "Caller follows the registry-mutex-serialized operation-state mutation protocol.",
+        "ownerId, runtimeId, hostId, processId, processStartedAt, and fencingGeneration all match.",
+        "The lease is not expired."
+      ],
+      "effects": [
+        "Do not change fencingGeneration or fencingGenerationHighWater.",
+        "Atomically publish the renewal with stateRevision = previous.stateRevision + 1 before mutex release."
+      ]
+    },
+    {
+      "id": "acquire-exclusive-intent",
+      "operationStateMutation": true,
+      "concurrencyRule": "registry-mutex-serialized-operation-state-mutation",
+      "from": "operation_state with exclusiveIntent null",
+      "to": "operation_state with phase registered",
+      "preconditions": [
+        "Caller holds the unexpired registration mutex.",
+        "No exclusive intent exists."
+      ],
+      "effects": [
+        "Increment fencingGenerationHighWater and assign it to the intent.",
+        "Atomically publish the intent with stateRevision = previous.stateRevision + 1 before revalidating and releasing the registration mutex; all later runtime-lease registrations must fail."
+      ]
+    },
+    {
+      "id": "drain-runtime-leases",
+      "operationStateMutation": true,
+      "concurrencyRule": "registry-mutex-serialized-operation-state-mutation",
+      "from": "exclusive intent phase registered or draining",
+      "to": "phase draining, then exclusive when leases is empty",
+      "preconditions": [
+        "Every phase change follows the registry-mutex-serialized operation-state mutation protocol.",
+        "No new runtime leases may register while the intent exists.",
+        "Live leases drain by owner release; only expired leases may be removed by stale cleanup."
+      ],
+      "effects": [
+        "Each published phase change sets stateRevision = previous.stateRevision + 1.",
+        "Database mutation remains forbidden until leases is empty and phase is exclusive."
+      ]
+    },
+    {
+      "id": "cancel-exclusive-intent",
+      "operationStateMutation": true,
+      "concurrencyRule": "registry-mutex-serialized-operation-state-mutation",
+      "from": "exclusive intent phase registered, draining, or exclusive",
+      "to": "exclusiveIntent null with cancellation generation fenced",
+      "preconditions": [
+        "Caller follows the registry-mutex-serialized operation-state mutation protocol.",
+        "operationId, fencingGeneration, and full owner evidence match the persisted intent; supplied phase is descriptive and the current persisted phase decides eligibility.",
+        "Both stateRevision and fencingGenerationHighWater can be incremented without exceeding the JSON safe-integer limit."
+      ],
+      "effects": [
+        "Atomically clear exclusiveIntent, preserve every runtime lease, increment fencingGenerationHighWater exactly once, and publish stateRevision = previous.stateRevision + 1 before mutex release.",
+        "The cancelled intent token is fenced from every later exclusive transition."
+      ]
+    },
+    {
+      "id": "begin-exclusive-mutation",
+      "operationStateMutation": true,
+      "concurrencyRule": "registry-mutex-serialized-operation-state-mutation",
+      "from": "exclusive intent phase exclusive with no leases",
+      "to": "phase mutating",
+      "preconditions": [
+        "Caller follows the registry-mutex-serialized operation-state mutation protocol.",
+        "Intent owner evidence and fencingGeneration match the persisted intent.",
+        "The intent generation equals fencingGenerationHighWater."
+      ],
+      "effects": [
+        "Atomically publish the phase with stateRevision = previous.stateRevision + 1 before mutex release.",
+        "Only this fenced owner may mutate, replace, restore, or import database files."
+      ]
+    },
+    {
+      "id": "complete-exclusive-mutation",
+      "operationStateMutation": true,
+      "concurrencyRule": "registry-mutex-serialized-operation-state-mutation",
+      "from": "phase mutating",
+      "to": "phase completed",
+      "preconditions": [
+        "Caller follows the registry-mutex-serialized operation-state mutation protocol.",
+        "Mutation and durability checks completed under the current fencing generation."
+      ],
+      "effects": [
+        "Persist completedAt and stateRevision = previous.stateRevision + 1 atomically before mutex release and intent release."
+      ]
+    },
+    {
+      "id": "release-record",
+      "operationStateMutation": true,
+      "concurrencyRule": "registry-mutex-serialized-operation-state-mutation",
+      "from": "runtime lease or completed exclusive intent",
+      "to": "lease removed or exclusiveIntent null",
+      "preconditions": [
+        "Caller follows the registry-mutex-serialized operation-state mutation protocol.",
+        "Full owner evidence and fencingGeneration match.",
+        "An intent may be normally released only from completed phase."
+      ],
+      "effects": [
+        "Atomically remove the lease or clear the intent with stateRevision = previous.stateRevision + 1 before mutex release.",
+        "Never decrement fencingGenerationHighWater."
+      ]
+    },
+    {
+      "id": "stale-cleanup",
+      "operationStateMutation": true,
+      "concurrencyRule": "registry-mutex-serialized-operation-state-mutation",
+      "from": "expired mutex, expired runtime lease, or demonstrably abandoned non-mutating intent",
+      "to": "record removed or intent phase abandoned",
+      "preconditions": [
+        "Any cleanup that changes operation_state follows the registry-mutex-serialized operation-state mutation protocol; expired-mutex removal or replacement remains an atomic mutex operation.",
+        "Expiry uses the contract clock rule.",
+        "A live lease is never stolen before expiresAt.",
+        "A mutating intent is never automatically removed; recovery must first fence the old generation and prove file-state safety."
+      ],
+      "effects": [
+        "Any changed operation_state is atomically published with stateRevision = previous.stateRevision + 1.",
+        "Keep fencingGenerationHighWater at or above every generation ever issued."
+      ]
+    }
+  ],
+  "x-shikin-safety-invariants": [
+    {
+      "id": "unique-runtime-owners",
+      "rule": "For one databaseIdentity, active runtime leases have unique ownerId values; multiple different owners may coexist."
+    },
+    {
+      "id": "one-exclusive-intent",
+      "rule": "An operation state contains at most one exclusive restore/import intent."
+    },
+    {
+      "id": "no-new-leases-while-intent-active",
+      "rule": "Once exclusiveIntent is non-null, registration of every new runtime lease fails until the intent is released."
+    },
+    {
+      "id": "mutex-is-state-coordination-only",
+      "rule": "The short-lived record named registration_mutex is persisted separately, serializes every operation_state mutation, and grants no database mutation authority."
+    },
+    {
+      "id": "serialized-state-mutations",
+      "rule": "Registration, renewal, release, stale cleanup, exclusive-intent publication/phase change/cancellation/clear, and fencing high-water advance all follow x-shikin-operation-state-concurrency without exception."
+    },
+    {
+      "id": "drain-before-mutation",
+      "rule": "Exclusive mutation begins only after the intent is published and every runtime lease has drained or expired."
+    },
+    {
+      "id": "fencing-monotonicity",
+      "rule": "fencingGenerationHighWater never decreases and every successful lease or intent acquisition receives a strictly greater generation."
+    },
+    {
+      "id": "owner-process-and-generation-match",
+      "rule": "Renewal, cancellation, mutation, completion, release, and stale recovery require the transition-specific owner, runtime, host, process, and fencing evidence."
+    },
+    {
+      "id": "expired-owner-cannot-mutate",
+      "rule": "An expired, released, abandoned, or superseded owner cannot authorize writes, rename database files, or publish completion."
+    },
+    {
+      "id": "atomic-state-publication",
+      "rule": "Under the current revalidated registry mutex, lease/intent transitions, stateRevision = previous.stateRevision + 1, and fencing high-water updates are atomically persisted; partial records are invalid."
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "databaseIdentity": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "ownerEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ownerId", "runtimeId", "hostId", "processId", "processStartedAt"],
+      "properties": {
+        "ownerId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "runtimeId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "hostId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "processId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "processStartedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "runtimeLease": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recordKind",
+        "leaseId",
+        "owner",
+        "fencingGeneration",
+        "acquiredAt",
+        "heartbeatAt",
+        "expiresAt",
+        "ttlMs"
+      ],
+      "properties": {
+        "recordKind": {
+          "const": "runtime_lease"
+        },
+        "leaseId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "owner": {
+          "$ref": "#/$defs/ownerEvidence"
+        },
+        "fencingGeneration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "acquiredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "heartbeatAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ttlMs": {
+          "type": "integer",
+          "minimum": 5000,
+          "maximum": 300000
+        }
+      }
+    },
+    "exclusiveIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recordKind",
+        "operationId",
+        "operation",
+        "phase",
+        "owner",
+        "fencingGeneration",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "recordKind": {
+          "const": "exclusive_intent"
+        },
+        "operationId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "operation": {
+          "enum": ["restore", "import"]
+        },
+        "phase": {
+          "enum": ["registered", "draining", "exclusive", "mutating", "completed", "abandoned"]
+        },
+        "owner": {
+          "$ref": "#/$defs/ownerEvidence"
+        },
+        "fencingGeneration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "metadata": {
+          "type": "object"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "phase": {
+                "const": "completed"
+              }
+            },
+            "required": ["phase"]
+          },
+          "then": {
+            "required": ["completedAt"]
+          }
+        }
+      ]
+    },
+    "operationStateRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "protocolVersion",
+        "recordKind",
+        "databaseIdentity",
+        "stateRevision",
+        "fencingGenerationHighWater",
+        "leases",
+        "exclusiveIntent",
+        "updatedBy",
+        "updatedAt"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "shikin.database-operation-lock"
+        },
+        "protocolVersion": {
+          "const": 1
+        },
+        "recordKind": {
+          "const": "operation_state"
+        },
+        "databaseIdentity": {
+          "$ref": "#/$defs/databaseIdentity"
+        },
+        "stateRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic operation-state revision; every successful mutation sets this to the post-acquisition previous value plus exactly one."
+        },
+        "fencingGenerationHighWater": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "leases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/runtimeLease"
+          },
+          "uniqueItems": true
+        },
+        "exclusiveIntent": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/exclusiveIntent"
+            }
+          ]
+        },
+        "updatedBy": {
+          "$ref": "#/$defs/ownerEvidence"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "exclusiveIntent": {
+                "type": "object",
+                "properties": {
+                  "phase": {
+                    "enum": ["exclusive", "mutating", "completed", "abandoned"]
+                  }
+                },
+                "required": ["phase"]
+              }
+            },
+            "required": ["exclusiveIntent"]
+          },
+          "then": {
+            "properties": {
+              "leases": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "registrationMutexRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "protocolVersion",
+        "recordKind",
+        "databaseIdentity",
+        "mutexId",
+        "owner",
+        "acquiredAt",
+        "expiresAt",
+        "ttlMs"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "shikin.database-operation-lock"
+        },
+        "protocolVersion": {
+          "const": 1
+        },
+        "recordKind": {
+          "const": "registration_mutex"
+        },
+        "databaseIdentity": {
+          "$ref": "#/$defs/databaseIdentity"
+        },
+        "mutexId": {
+          "$ref": "#/$defs/identifier",
+          "description": "Fresh owner nonce/token used to fence expired, removed, or superseded mutex holders."
+        },
+        "owner": {
+          "$ref": "#/$defs/ownerEvidence"
+        },
+        "acquiredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ttlMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 15000
+        }
+      }
+    }
+  }
+}

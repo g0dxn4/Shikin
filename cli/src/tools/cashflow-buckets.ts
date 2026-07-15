@@ -13,6 +13,7 @@ import {
   isoDate,
   currencyCode,
   normalizeCurrencyCode,
+  isAccountWriteEligible,
   resolveAccountId,
   writeAuditLog,
   type ToolDefinition,
@@ -158,7 +159,7 @@ function getSourceIncomeTransaction(transactionId: string) {
       message: `Source transaction ${transactionId} not found.`,
     }
   }
-  if (tx.account_is_archived === 1) {
+  if (!isAccountWriteEligible({ is_archived: tx.account_is_archived })) {
     return {
       success: false as const,
       reason: 'account_archived',

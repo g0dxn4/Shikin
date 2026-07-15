@@ -13,7 +13,12 @@ globalThis.ResizeObserver = class {
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: (key: string, options?: { currencies?: string; details?: string }) =>
+      options?.currencies
+        ? `${key}: ${options.currencies}`
+        : options?.details
+          ? `${key}: ${options.details}`
+          : key,
     i18n: { language: 'en', changeLanguage: vi.fn() },
   }),
 }))
@@ -42,6 +47,26 @@ let mockAccountError: string | null = null
 let mockTransactionError: string | null = null
 let mockGoalError: string | null = null
 let mockCurrencyError: string | null = null
+let mockTotalBalanceResult:
+  | {
+      complete: true
+      preferredCurrency: string
+      amountCentavos: number
+      missingCurrencies: readonly []
+    }
+  | {
+      complete: false
+      preferredCurrency: string
+      missingCurrencies: string[]
+      reason: 'missing_exchange_rates' | 'invalid_currency_data'
+      invalidCurrencies?: Array<{
+        accountId: string | null
+        accountName: string | null
+        value: string
+      }>
+      invalidRates?: Array<{ fromCurrency: string; toCurrency: string; rate: string }>
+    }
+  | null = null
 
 vi.mock('@/stores/account-store', () => ({
   useAccountStore: () => ({
@@ -76,7 +101,12 @@ vi.mock('@/stores/currency-store', () => ({
     preferredCurrency: 'USD',
     error: mockCurrencyError,
     getTotalBalanceInPreferred: (accounts: Array<{ balance: number }>) =>
-      accounts.reduce((sum, account) => sum + account.balance, 0),
+      mockTotalBalanceResult ?? {
+        complete: true,
+        preferredCurrency: 'USD',
+        amountCentavos: accounts.reduce((sum, account) => sum + account.balance, 0),
+        missingCurrencies: [],
+      },
     loadRates: mockLoadRates,
   }),
 }))
@@ -109,6 +139,7 @@ describe('Dashboard', () => {
     mockTransactionError = null
     mockGoalError = null
     mockCurrencyError = null
+    mockTotalBalanceResult = null
   })
 
   it('calls fetchAccounts and fetchTransactions on mount', () => {
@@ -215,11 +246,53 @@ describe('Dashboard', () => {
       ]
     })
 
-    it('shows formatted total balance in hero card', () => {
+    it('shows the complete preferred-currency total in the hero card', () => {
       render(<Dashboard />)
 
       // Total = 150000 + 50000 - 10000 + 5000 = 195000 cents = $1,950.00
       expect(screen.getByText('$1,950.00')).toBeInTheDocument()
+      expect(screen.queryByRole('alert', { name: /currency\.totalUnavailable/ })).toBeNull()
+    })
+
+    it('renders accessible invalid-currency diagnostics without a scalar total', () => {
+      mockTotalBalanceResult = {
+        complete: false,
+        preferredCurrency: 'USD',
+        missingCurrencies: [],
+        reason: 'invalid_currency_data',
+        invalidCurrencies: [{ accountId: 'acc-broken', accountName: 'Broken savings', value: '' }],
+        invalidRates: [{ fromCurrency: '', toCurrency: 'USD', rate: '1' }],
+      }
+
+      render(<Dashboard />)
+
+      const warning = screen.getByRole('alert')
+      expect(warning).toHaveTextContent('currency.totalUnavailable')
+      expect(warning).toHaveTextContent(
+        'currency.invalidData: Broken savings (currency.blankValue), currency.invalidRate'
+      )
+      expect(screen.queryByText('$1,950.00')).not.toBeInTheDocument()
+    })
+
+    it('shows an accessible missing-rate warning without a false scalar total', () => {
+      mockAccounts = [
+        { id: 'acc-usd', name: 'Checking', type: 'checking', currency: 'USD', balance: 100000 },
+        { id: 'acc-eur', name: 'Euro', type: 'savings', currency: 'EUR', balance: 200000 },
+      ]
+      mockTotalBalanceResult = {
+        complete: false,
+        preferredCurrency: 'USD',
+        missingCurrencies: ['EUR'],
+        reason: 'missing_exchange_rates',
+      }
+
+      render(<Dashboard />)
+
+      const warning = screen.getByRole('alert')
+      expect(warning).toHaveTextContent('currency.totalUnavailable')
+      expect(warning).toHaveTextContent('currency.missingRates: EUR')
+      expect(screen.queryByText('$3,000.00')).not.toBeInTheDocument()
+      expect(screen.getByText('currency.derivedUnavailable')).toBeInTheDocument()
     })
 
     it('does not render account preview cards', () => {
@@ -356,6 +429,96 @@ describe('Dashboard', () => {
       expect(screen.getAllByText('$2,000.00').length).toBeGreaterThanOrEqual(1)
       // Savings rate: (5000-2000)/5000*100 = 60%
       expect(screen.getByText('60%')).toBeInTheDocument()
+    })
+
+    it('applies migration-019 cash-flow eligibility to every aggregate', async () => {
+      const user = userEvent.setup()
+      const today = dayjs().format('YYYY-MM-DD')
+      const previousMonth = dayjs().subtract(1, 'month').format('YYYY-MM-DD')
+      const transaction = (
+        id: string,
+        type: string,
+        amount: number,
+        date = today,
+        overrides: Record<string, unknown> = {}
+      ) => ({
+        id,
+        description: id,
+        type,
+        amount,
+        currency: 'USD',
+        date,
+        status: 'posted',
+        reporting_treatment: 'normal',
+        transaction_kind: 'standard',
+        is_archived: 0,
+        category_color: '#f97316',
+        category_name: type === 'expense' ? 'Food' : null,
+        account_name: 'Checking',
+        ...overrides,
+      })
+
+      mockAccounts = [
+        { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 100000 },
+      ]
+      mockTransactions = [
+        transaction('posted-income', 'income', 100_000),
+        transaction('cleared-income', 'income', 50_000, today, { status: 'cleared' }),
+        transaction('posted-food', 'expense', 20_000),
+        transaction('cleared-transport', 'expense', 10_000, today, {
+          status: 'cleared',
+          category_name: 'Transport',
+          category_color: '#38bdf8',
+        }),
+        transaction('previous-income', 'income', 90_000, previousMonth),
+        transaction('previous-food', 'expense', 5_000, previousMonth),
+        transaction('pending', 'expense', 901_000, today, { status: 'pending' }),
+        transaction('reconciliation-bridge', 'expense', 902_000, today, {
+          reporting_treatment: 'exclude_from_cashflow',
+          transaction_kind: 'reconciliation_bridge',
+        }),
+        transaction('archived-mirror', 'expense', 903_000, today, {
+          transaction_kind: 'archived_transfer_mirror',
+        }),
+        transaction('archived-standard', 'expense', 904_000, today, { is_archived: 1 }),
+        transaction('transfer', 'transfer', 905_000),
+        transaction('malformed-status', 'expense', 906_000, today, { status: 'unknown' }),
+        transaction('malformed-reporting', 'expense', 907_000, today, {
+          reporting_treatment: 'unknown',
+        }),
+        transaction('malformed-kind', 'expense', 908_000, today, {
+          transaction_kind: 'unknown',
+        }),
+        transaction('malformed-type', 'refund', 909_000),
+        transaction('malformed-archive', 'expense', 910_000, today, { is_archived: 'yes' }),
+      ]
+
+      render(<Dashboard />)
+
+      expect(screen.getByText('$1,500.00')).toBeInTheDocument()
+      expect(screen.getAllByText('$300.00').length).toBeGreaterThanOrEqual(1)
+      expect(screen.getByText('80%')).toBeInTheDocument()
+      expect(screen.getByText('+$600.00 vs last month')).toBeInTheDocument()
+      expect(screen.getByText('+$250.00 vs last month')).toBeInTheDocument()
+      expect(screen.getByTitle(`${dayjs().format('MMM')}: $300.00`)).toBeInTheDocument()
+
+      await user.click(screen.getByText('Categories'))
+
+      expect(
+        screen.getByText('Food', { selector: 'span.truncate.font-semibold' }).parentElement
+          ?.parentElement
+      ).toHaveTextContent('Food$200.00')
+      expect(
+        screen.getByText('Transport', { selector: 'span.truncate.font-semibold' }).parentElement
+          ?.parentElement
+      ).toHaveTextContent('Transport$100.00')
+
+      await user.click(screen.getByText('Movement'))
+
+      expect(
+        screen.getByText('Food', { selector: 'span.truncate.font-semibold' }).parentElement
+      ).toHaveTextContent('Food+$150.00')
+      expect(screen.getByText('+500%')).toBeInTheDocument()
     })
   })
 

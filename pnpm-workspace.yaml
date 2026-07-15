@@ -1,5 +1,8 @@
 packages:
   - 'cli'
+  - 'packages/*'
+
+injectWorkspacePackages: true
 
 minimumReleaseAge: 1440
 minimumReleaseAgeStrict: true

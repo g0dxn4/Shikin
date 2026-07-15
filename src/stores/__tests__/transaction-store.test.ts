@@ -238,29 +238,37 @@ describe('transaction-store', () => {
       )
     })
 
-    it('rejects transactions against archived accounts', async () => {
-      mockQuery.mockResolvedValueOnce([
-        { id: '01ACCARCHIVED', name: 'Archived Checking', currency: 'USD', is_archived: 1 },
-      ])
+    it.each([1, 2, null, undefined])(
+      'rejects transactions against account is_archived flag %s',
+      async (isArchived) => {
+        mockQuery.mockResolvedValueOnce([
+          {
+            id: '01ACCARCHIVED',
+            name: 'Archived Checking',
+            currency: 'USD',
+            is_archived: isArchived,
+          },
+        ])
 
-      await expect(
-        useTransactionStore.getState().add({
-          amount: 25.5,
-          type: 'expense',
-          description: 'Archived account groceries',
-          categoryId: null,
-          accountId: '01ACCARCHIVED',
-          transferToAccountId: null,
-          currency: 'USD',
-          date: '2024-01-15',
-          notes: null,
-        })
-      ).rejects.toThrow(
-        'Account "Archived Checking" (01ACCARCHIVED) is archived. Unarchive it before using it for new writes.'
-      )
+        await expect(
+          useTransactionStore.getState().add({
+            amount: 25.5,
+            type: 'expense',
+            description: 'Archived account groceries',
+            categoryId: null,
+            accountId: '01ACCARCHIVED',
+            transferToAccountId: null,
+            currency: 'USD',
+            date: '2024-01-15',
+            notes: null,
+          })
+        ).rejects.toThrow(
+          'Account "Archived Checking" (01ACCARCHIVED) is archived. Unarchive it before using it for new writes.'
+        )
 
-      expect(mockExecute).not.toHaveBeenCalled()
-    })
+        expect(mockExecute).not.toHaveBeenCalled()
+      }
+    )
 
     it('rejects transaction ledger writes against snapshot-only accounts', async () => {
       mockQuery.mockResolvedValueOnce([

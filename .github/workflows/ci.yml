@@ -27,11 +27,11 @@ jobs:
       - name: Release preflight
         run: pnpm release:preflight
 
-      - name: Lint
-        run: pnpm lint
+      - name: Lint, type check, and format check
+        run: pnpm check
 
-      - name: Type check
-        run: pnpm typecheck
+      - name: Schema contract
+        run: pnpm test:schema-contract
 
       - name: Unit tests
         run: pnpm test:run
@@ -41,6 +41,59 @@ jobs:
 
       - name: CLI build
         run: pnpm build:cli
+
+  coordination:
+    name: Coordination (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Linux Tauri test dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Node database operation lock tests
+        run: pnpm exec vitest run scripts/database-operation-lock.test.mjs cli/src/database-operation-lock.test.ts
+
+      - name: Node recovery journal full suite
+        if: runner.os == 'Linux'
+        run: pnpm exec vitest run scripts/database-operation-recovery-journal.test.mjs cli/src/database-operation-recovery-journal-types.test.ts
+
+      - name: Node recovery journal unsupported-platform contract
+        if: runner.os != 'Linux'
+        run: |
+          pnpm exec vitest run scripts/database-operation-recovery-journal.test.mjs -t "recovery journal cross-platform contract"
+          pnpm exec vitest run cli/src/database-operation-recovery-journal-types.test.ts
+
+      - name: Rust database operation lock tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml database_operation_lock
+
+      - name: Rust recovery journal full suite
+        if: runner.os == 'Linux'
+        run: cargo test --manifest-path src-tauri/Cargo.toml database_operation_recovery_journal
+
+      - name: Rust recovery journal unsupported-platform contract
+        if: runner.os != 'Linux'
+        run: cargo test --manifest-path src-tauri/Cargo.toml database_operation_recovery_journal
 
   e2e:
     runs-on: ubuntu-latest

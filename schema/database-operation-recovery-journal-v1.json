@@ -1,0 +1,279 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shikin.local/contracts/database-operation-recovery-journal-v1.json",
+  "title": "Shikin prepared database mutation recovery journal record",
+  "description": "Durable, append-only recovery evidence prepared before a restore or import mutation. Milestone 4B0b-1 does not wire database runtime behavior.",
+  "x-shikin-protocol": "shikin.database-operation-recovery-journal",
+  "x-shikin-version": 1,
+  "x-shikin-layout": {
+    "root": "recovery-journal-v1/operations/<operationKey>",
+    "artifactDirectory": "artifacts",
+    "recordDirectory": "records",
+    "artifactFilename": "<role>-<artifactKey>.sqlite",
+    "preparedRecordFilename": "00000000000000000000-<recordHash>.json",
+    "preparedRecordCount": 1
+  },
+  "x-shikin-hash-domains": {
+    "operationKey": "shikin.database-operation-recovery-journal/v1/operation-key\\0",
+    "artifactKey": "shikin.database-operation-recovery-journal/v1/artifact-key\\0",
+    "artifactContent": "shikin.database-operation-recovery-journal/v1/artifact-content\\0",
+    "record": "shikin.database-operation-recovery-journal/v1/record\\0"
+  },
+  "x-shikin-canonical-json": {
+    "allowedValues": [
+      "null",
+      "boolean",
+      "string",
+      "nonnegative-safe-integer",
+      "array",
+      "plain-object"
+    ],
+    "objectKeyOrder": "unsigned UTF-8 byte lexicographic",
+    "whitespace": "none",
+    "recordFileTerminator": "exactly one LF excluded from record hash"
+  },
+  "x-shikin-platform-durability": {
+    "supportedPlatform": "linux",
+    "wireValue": "linux-fsync-complete",
+    "unsupportedError": "RECOVERY_DURABILITY_FAILURE",
+    "semantics": "Every non-Linux platform fails after input or proof validation and before journal path creation, evidence verification, or proof issuance."
+  },
+  "x-shikin-preparation-retry": "An existing operation directory is always RECOVERY_PREPARATION_INCOMPLETE, whether partial, complete, or malicious. Preparation never parses, deletes, resumes, or mints a proof from existing disk evidence, and this version exposes no cleanup API.",
+  "x-shikin-max-artifact-bytes": 8589934592,
+  "x-shikin-commit-point": "A proof may be returned only on Linux after the complete final record and both artifacts are flushed, sealed to mode 0400, required directory synchronization is complete, and a full reread verifies canonical bytes, names, hashes, opened sizes, identities, privacy, links, binding, and retained-handle size, mtime, and ctime snapshots across both artifact hashes.",
+  "x-shikin-proof-boundary": {
+    "mutationAuthority": "A Milestone 4B0b-1 proof is evidence only and is not mutation authority.",
+    "futureLockConsumption": "A future database-operation lock integration must verify and consume the proof while holding the registration mutex.",
+    "adapterUse": "A future adapter must validate the committed artifact immediately before using it.",
+    "trustModel": "The same OS principal is trusted; this contract does not claim defense against a hostile same-user process."
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "protocolVersion",
+    "recordKind",
+    "sequence",
+    "previousRecordSha256",
+    "databaseIdentity",
+    "operationId",
+    "operation",
+    "owner",
+    "fencingGeneration",
+    "createdAt",
+    "nonce",
+    "candidate",
+    "rollback",
+    "schemaContract",
+    "checks"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "shikin.database-operation-recovery-journal"
+    },
+    "protocolVersion": {
+      "const": 1
+    },
+    "recordKind": {
+      "const": "prepared_mutation"
+    },
+    "sequence": {
+      "const": 0
+    },
+    "previousRecordSha256": {
+      "type": "null"
+    },
+    "databaseIdentity": {
+      "const": "com.asf.shikin:shikin.db"
+    },
+    "operationId": {
+      "$ref": "#/$defs/identifier"
+    },
+    "operation": {
+      "enum": ["restore", "import"]
+    },
+    "owner": {
+      "$ref": "#/$defs/ownerEvidence"
+    },
+    "fencingGeneration": {
+      "$ref": "#/$defs/positiveSafeInteger"
+    },
+    "createdAt": {
+      "description": "The exact creation timestamp of the bound exclusive intent, not journal publication time. updatedAt, metadata, and stateRevision are proof-only and are not persisted here.",
+      "$ref": "#/$defs/strictTimestamp"
+    },
+    "nonce": {
+      "$ref": "#/$defs/lowerHex64"
+    },
+    "candidate": {
+      "$ref": "#/$defs/candidateArtifact"
+    },
+    "rollback": {
+      "$ref": "#/$defs/rollbackArtifact"
+    },
+    "schemaContract": {
+      "$ref": "#/$defs/schemaContractIdentity"
+    },
+    "checks": {
+      "$ref": "#/$defs/artifactCheckPair"
+    }
+  },
+  "$defs": {
+    "nonnegativeSafeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "positiveSafeInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "artifactSizeBytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8589934592
+    },
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "x-shikin-length-unit": "Unicode code points"
+    },
+    "strictTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+      "x-shikin-validation": "Implementations must parse and exactly round-trip the timestamp, rejecting normalized impossible dates and hour 24."
+    },
+    "lowerHex64": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sha256Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "ownerEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ownerId", "runtimeId", "hostId", "processId", "processStartedAt"],
+      "properties": {
+        "ownerId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "runtimeId": {
+          "enum": ["cli", "mcp", "browser-data-server", "tauri"]
+        },
+        "hostId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "processId": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "processStartedAt": {
+          "$ref": "#/$defs/strictTimestamp"
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "contentDigest", "sizeBytes"],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "contentDigest": {
+          "$ref": "#/$defs/sha256Digest"
+        },
+        "sizeBytes": {
+          "$ref": "#/$defs/artifactSizeBytes"
+        }
+      }
+    },
+    "candidateArtifact": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/artifact"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "pattern": "^artifacts/candidate-[0-9a-f]{64}\\.sqlite$"
+            }
+          }
+        }
+      ]
+    },
+    "rollbackArtifact": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/artifact"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "pattern": "^artifacts/rollback-[0-9a-f]{64}\\.sqlite$"
+            }
+          }
+        }
+      ]
+    },
+    "schemaContractIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rawBytesSha256", "contractVersion", "latestMigration"],
+      "properties": {
+        "rawBytesSha256": {
+          "$ref": "#/$defs/sha256Digest"
+        },
+        "contractVersion": {
+          "$ref": "#/$defs/nonnegativeSafeInteger"
+        },
+        "latestMigration": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "artifactChecks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["integrityCheck", "foreignKeyCheck", "schemaContractCheck", "sidecarCheck"],
+      "properties": {
+        "integrityCheck": {
+          "const": "ok"
+        },
+        "foreignKeyCheck": {
+          "const": "ok"
+        },
+        "schemaContractCheck": {
+          "const": "ok"
+        },
+        "sidecarCheck": {
+          "const": "ok"
+        }
+      }
+    },
+    "artifactCheckPair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate", "rollback"],
+      "properties": {
+        "candidate": {
+          "$ref": "#/$defs/artifactChecks"
+        },
+        "rollback": {
+          "$ref": "#/$defs/artifactChecks"
+        }
+      }
+    }
+  }
+}

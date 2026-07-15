@@ -1,0 +1,147 @@
+{
+  "protocol": "shikin.database-operation-recovery-journal",
+  "protocolVersion": 1,
+  "databaseIdentity": "com.asf.shikin:shikin.db",
+  "canonicalizationVectors": [
+    {
+      "name": "utf8-key-order-and-exact-string-escaping",
+      "value": {
+        "😀": "astral-after-private-use",
+        "": "private-use-before-astral",
+        "controls": "\"\\/\b\t\n\f\r\u0000\u0001\u001f  ",
+        "values": [null, false, true, 0, 9007199254740991]
+      },
+      "canonicalUtf8": "{\"controls\":\"\\\"\\\\/\\b\\t\\n\\f\\r\\u0000\\u0001\\u001f  \",\"values\":[null,false,true,0,9007199254740991],\"\":\"private-use-before-astral\",\"😀\":\"astral-after-private-use\"}",
+      "ordinarySha256": "bf2add1d82970c0e1e03c971abafa367332ab0ecf8dcad634f4a1fc63c0cc0f4"
+    }
+  ],
+  "preparedMutation": {
+    "operationId": "restore-😀-",
+    "nonce": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "artifactBase64": {
+      "candidate": "Y2FuZGlkYXRlAPCfmIAK",
+      "rollback": "AAECAwoN/w=="
+    },
+    "operationKey": "3db4de557323a3e40477fb1c1ade533784e0097a93ed22c57d49f37841692dfc",
+    "artifactKeys": {
+      "candidate": "4f399a3b2b2261effababc734423359db8eaf2909a9f8faf701e3de5228b103e",
+      "rollback": "19be901054c5d1a673933d1fcb872cb9a10e209402a91253fe8de33fc59016e4"
+    },
+    "record": {
+      "protocol": "shikin.database-operation-recovery-journal",
+      "protocolVersion": 1,
+      "recordKind": "prepared_mutation",
+      "sequence": 0,
+      "previousRecordSha256": null,
+      "databaseIdentity": "com.asf.shikin:shikin.db",
+      "operationId": "restore-😀-",
+      "operation": "restore",
+      "owner": {
+        "ownerId": "owner--😀",
+        "runtimeId": "cli",
+        "hostId": "host-\"/\\-\b\t\n\f\r-\u0001-  ",
+        "processId": 4242,
+        "processStartedAt": "2026-07-14T12:00:00.000Z"
+      },
+      "fencingGeneration": 17,
+      "createdAt": "2026-07-14T12:00:01.000Z",
+      "nonce": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "candidate": {
+        "path": "artifacts/candidate-4f399a3b2b2261effababc734423359db8eaf2909a9f8faf701e3de5228b103e.sqlite",
+        "contentDigest": "sha256:905c5ed5738fae782690b587e5c41415ffd652e99ab4d578a30d899978b6c5c2",
+        "sizeBytes": 15
+      },
+      "rollback": {
+        "path": "artifacts/rollback-19be901054c5d1a673933d1fcb872cb9a10e209402a91253fe8de33fc59016e4.sqlite",
+        "contentDigest": "sha256:5f9feb50193adfecfb27fa16009e1b7fbfb90c033846388aafbc1fd78cab6fe5",
+        "sizeBytes": 7
+      },
+      "schemaContract": {
+        "rawBytesSha256": "sha256:9c6269cac2ec752914a6ef9178c8b6ab2e9fbbe7db15b5deaf9aaf1e7b829056",
+        "contractVersion": 1,
+        "latestMigration": "019_financial_semantics"
+      },
+      "checks": {
+        "candidate": {
+          "integrityCheck": "ok",
+          "foreignKeyCheck": "ok",
+          "schemaContractCheck": "ok",
+          "sidecarCheck": "ok"
+        },
+        "rollback": {
+          "integrityCheck": "ok",
+          "foreignKeyCheck": "ok",
+          "schemaContractCheck": "ok",
+          "sidecarCheck": "ok"
+        }
+      }
+    },
+    "canonicalRecordUtf8": "{\"candidate\":{\"contentDigest\":\"sha256:905c5ed5738fae782690b587e5c41415ffd652e99ab4d578a30d899978b6c5c2\",\"path\":\"artifacts/candidate-4f399a3b2b2261effababc734423359db8eaf2909a9f8faf701e3de5228b103e.sqlite\",\"sizeBytes\":15},\"checks\":{\"candidate\":{\"foreignKeyCheck\":\"ok\",\"integrityCheck\":\"ok\",\"schemaContractCheck\":\"ok\",\"sidecarCheck\":\"ok\"},\"rollback\":{\"foreignKeyCheck\":\"ok\",\"integrityCheck\":\"ok\",\"schemaContractCheck\":\"ok\",\"sidecarCheck\":\"ok\"}},\"createdAt\":\"2026-07-14T12:00:01.000Z\",\"databaseIdentity\":\"com.asf.shikin:shikin.db\",\"fencingGeneration\":17,\"nonce\":\"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\",\"operation\":\"restore\",\"operationId\":\"restore-😀-\",\"owner\":{\"hostId\":\"host-\\\"/\\\\-\\b\\t\\n\\f\\r-\\u0001-  \",\"ownerId\":\"owner--😀\",\"processId\":4242,\"processStartedAt\":\"2026-07-14T12:00:00.000Z\",\"runtimeId\":\"cli\"},\"previousRecordSha256\":null,\"protocol\":\"shikin.database-operation-recovery-journal\",\"protocolVersion\":1,\"recordKind\":\"prepared_mutation\",\"rollback\":{\"contentDigest\":\"sha256:5f9feb50193adfecfb27fa16009e1b7fbfb90c033846388aafbc1fd78cab6fe5\",\"path\":\"artifacts/rollback-19be901054c5d1a673933d1fcb872cb9a10e209402a91253fe8de33fc59016e4.sqlite\",\"sizeBytes\":7},\"schemaContract\":{\"contractVersion\":1,\"latestMigration\":\"019_financial_semantics\",\"rawBytesSha256\":\"sha256:9c6269cac2ec752914a6ef9178c8b6ab2e9fbbe7db15b5deaf9aaf1e7b829056\"},\"sequence\":0}",
+    "recordHash": "3cab58449639e02aaa5eaa9c56a218f5dbeb0b2963ed2c43d0ef201436353666",
+    "layout": {
+      "operationDirectory": "recovery-journal-v1/operations/3db4de557323a3e40477fb1c1ade533784e0097a93ed22c57d49f37841692dfc",
+      "candidatePath": "recovery-journal-v1/operations/3db4de557323a3e40477fb1c1ade533784e0097a93ed22c57d49f37841692dfc/artifacts/candidate-4f399a3b2b2261effababc734423359db8eaf2909a9f8faf701e3de5228b103e.sqlite",
+      "rollbackPath": "recovery-journal-v1/operations/3db4de557323a3e40477fb1c1ade533784e0097a93ed22c57d49f37841692dfc/artifacts/rollback-19be901054c5d1a673933d1fcb872cb9a10e209402a91253fe8de33fc59016e4.sqlite",
+      "recordPath": "recovery-journal-v1/operations/3db4de557323a3e40477fb1c1ade533784e0097a93ed22c57d49f37841692dfc/records/00000000000000000000-3cab58449639e02aaa5eaa9c56a218f5dbeb0b2963ed2c43d0ef201436353666.json"
+    }
+  },
+  "metadataNumberVectors": [
+    {
+      "name": "decimal-integral-one",
+      "jsonSource": "1.0",
+      "accepted": true,
+      "canonicalMetadataUtf8": "{\"nested\":[{\"value\":1}]}"
+    },
+    {
+      "name": "exponent-integral-one",
+      "jsonSource": "1e0",
+      "accepted": true,
+      "canonicalMetadataUtf8": "{\"nested\":[{\"value\":1}]}"
+    },
+    {
+      "name": "decimal-positive-zero",
+      "jsonSource": "0.0",
+      "accepted": true,
+      "canonicalMetadataUtf8": "{\"nested\":[{\"value\":0}]}"
+    },
+    {
+      "name": "decimal-negative-zero",
+      "jsonSource": "-0.0",
+      "accepted": false,
+      "canonicalMetadataUtf8": null
+    },
+    {
+      "name": "fraction",
+      "jsonSource": "1.5",
+      "accepted": false,
+      "canonicalMetadataUtf8": null
+    },
+    {
+      "name": "unsafe-integer",
+      "jsonSource": "9007199254740992",
+      "accepted": false,
+      "canonicalMetadataUtf8": null
+    }
+  ],
+  "identifierLengthVectors": [
+    {
+      "name": "128-astral-code-points",
+      "value": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "codePoints": 128,
+      "utf8Bytes": 512,
+      "accepted": true
+    },
+    {
+      "name": "129-astral-code-points",
+      "value": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "codePoints": 129,
+      "utf8Bytes": 516,
+      "accepted": false
+    }
+  ],
+  "onDiskEvidenceFixture": {
+    "root": "schema/fixtures/database-operation-recovery-journal-v1",
+    "operationKey": "3db4de557323a3e40477fb1c1ade533784e0097a93ed22c57d49f37841692dfc",
+    "recordHash": "3cab58449639e02aaa5eaa9c56a218f5dbeb0b2963ed2c43d0ef201436353666"
+  }
+}

@@ -97,9 +97,17 @@ describe('education-service', () => {
 
     it('returns tips with all required fields', () => {
       const actions = [
-        'first-budget', 'create-budget', 'first-investment', 'add-investment',
-        'first-transaction', 'credit-card-payment', 'debt-payment',
-        'savings-deposit', 'view-spending', 'emergency-fund', 'view-net-worth',
+        'first-budget',
+        'create-budget',
+        'first-investment',
+        'add-investment',
+        'first-transaction',
+        'credit-card-payment',
+        'debt-payment',
+        'savings-deposit',
+        'view-spending',
+        'emergency-fund',
+        'view-net-worth',
       ]
       for (const action of actions) {
         const tip = getTipForAction(action)

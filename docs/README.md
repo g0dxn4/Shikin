@@ -37,7 +37,7 @@
 | Pages (routed)    | 18    |
 | Pages (total)     | 18    |
 | Zustand Stores    | 18    |
-| CLI/MCP Tools     | 90 shared / 94 CLI commands |
+| CLI/MCP Tools     | 91 shared / 95 CLI commands |
 | Service Files     | 26    |
 | Database Tables   | 21    |
 | i18n Namespaces   | 14    |

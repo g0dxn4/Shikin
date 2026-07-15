@@ -6,8 +6,7 @@ Use this checklist when promoting tested changes from `developer` into `main`.
 
 - Make sure `developer` is up to date with `origin/developer`.
 - Confirm the feature or fix PRs into `developer` are merged.
-- Run `pnpm lint`.
-- Run `pnpm typecheck`.
+- Run `pnpm check`.
 - Run `pnpm test:run`.
 - Run `pnpm build`.
 - Review open bugs or known regressions that should block promotion.
@@ -27,10 +26,10 @@ Use this checklist when promoting tested changes from `developer` into `main`.
   - `src-tauri/tauri.conf.json`
   - `src-tauri/Cargo.toml`
   - `src-tauri/Cargo.lock` (`[[package]] name = "shikin"` version)
-  - `cli/src/mcp-server.ts` (`McpServer` version field)
+  - `cli/src/version.ts` (`APPLICATION_VERSION` literal)
 - Run `pnpm release:preflight` after bumping versions and fix any reported issues before tagging.
   - Treat preflight pass as required before creating any release tag.
-  - Verifies version parity across `package.json`, `cli/package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` (`shikin`), and `cli/src/mcp-server.ts`.
+  - Verifies version parity across `package.json`, `cli/package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` (`shikin`), and `cli/src/version.ts`.
   - Verifies Tauri JS/Rust plugin major/minor parity from `package.json` ↔ `src-tauri/Cargo.lock`.
   - Verifies core updater assumptions in `src-tauri/tauri.conf.json` (`bundle.createUpdaterArtifacts`, all updater endpoints, updater `pubkey`).
 - Confirm signing prerequisites before creating the tag:

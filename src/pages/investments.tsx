@@ -9,6 +9,9 @@ import {
   RefreshCw,
   AlertTriangle,
   Wallet,
+  Search,
+  Info,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, PieChart, Pie, Cell } from 'recharts'
@@ -25,6 +28,7 @@ import { useAccountStore } from '@/stores/account-store'
 import { formatMoney, fromCentavos } from '@/lib/money'
 import { getErrorMessage } from '@/lib/errors'
 import { fetchAllCurrentPrices, savePricesToDB } from '@/lib/price-service'
+import { isInvestmentPriceStale } from '@/lib/price-scheduler'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -45,6 +49,19 @@ const InvestmentDialog = lazy(() =>
 const TIME_RANGES = ['1W', '1M', '3M', '6M', '1Y', 'All'] as const
 type TimeRange = (typeof TIME_RANGES)[number]
 const INVESTMENTS_PAGE_SIZE = 24
+
+const ASSET_TYPES: { key: string; labelKey: string }[] = [
+  { key: 'all', labelKey: 'filters.all' },
+  { key: 'stock', labelKey: 'types.stock' },
+  { key: 'etf', labelKey: 'types.etf' },
+  { key: 'crypto', labelKey: 'types.crypto' },
+  { key: 'bond', labelKey: 'types.bond' },
+  { key: 'mutual_fund', labelKey: 'types.mutual_fund' },
+  { key: 'cetes', labelKey: 'types.cetes' },
+  { key: 'other', labelKey: 'types.other' },
+]
+
+type AssetFilter = (typeof ASSET_TYPES)[number]['key']
 
 const TYPE_COLORS: Record<string, string> = {
   stock: '#7C5CFF',
@@ -85,6 +102,8 @@ export function Investments() {
   const [timeRange, setTimeRange] = useState<TimeRange>('3M')
   const [sortField, setSortField] = useState<SortField>('value')
   const [visibleInvestmentCount, setVisibleInvestmentCount] = useState(INVESTMENTS_PAGE_SIZE)
+  const [assetFilter, setAssetFilter] = useState<AssetFilter>('all')
+  const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
     void fetchInvestments().catch(() => {})
@@ -121,6 +140,7 @@ export function Investments() {
       const prices = await fetchAllCurrentPrices(investments)
       if (prices.size > 0) {
         await savePricesToDB(prices, getPriceCurrencyMap(investments))
+        useInvestmentStore.getState().setLastPriceFetch(new Date().toISOString())
         await fetchInvestments()
         toast.success(t('toast.pricesUpdated'))
       } else {
@@ -215,9 +235,23 @@ export function Investments() {
     }))
   }, [portfolioSummary])
 
-  // Sorted holdings
+  // Filtered and sorted holdings
+  const filteredInvestments = useMemo(() => {
+    let result = [...investments]
+    if (assetFilter !== 'all') {
+      result = result.filter((inv) => inv.type === assetFilter)
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase()
+      result = result.filter(
+        (inv) => inv.symbol.toLowerCase().includes(q) || inv.name.toLowerCase().includes(q)
+      )
+    }
+    return result
+  }, [investments, assetFilter, searchQuery])
+
   const sortedInvestments = useMemo(() => {
-    return [...investments].sort((a, b) => {
+    return [...filteredInvestments].sort((a, b) => {
       switch (sortField) {
         case 'value':
           return (b.marketValue ?? 0) - (a.marketValue ?? 0)
@@ -231,14 +265,14 @@ export function Investments() {
           return 0
       }
     })
-  }, [investments, sortField])
+  }, [filteredInvestments, sortField])
 
   const visibleInvestments = sortedInvestments.slice(0, visibleInvestmentCount)
 
-  const isPriceStale = (lastDate: string | null) => {
-    if (!lastDate) return true
-    return dayjs().diff(dayjs(lastDate), 'hour') > 24
-  }
+  // Reset pagination when filters or search change
+  useEffect(() => {
+    setVisibleInvestmentCount(INVESTMENTS_PAGE_SIZE)
+  }, [assetFilter, searchQuery, sortField])
 
   const hasInitialLoadError = !!fetchError && investments.length === 0
 
@@ -530,23 +564,103 @@ export function Investments() {
 
       {/* Holdings */}
       <div className="liquid-card p-6">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-heading text-xl font-bold">{t('holdings.title')}</h2>
-          <div className="flex gap-1">
-            {(['value', 'gainLoss', 'name', 'type'] as SortField[]).map((field) => (
+        <div className="mb-4 flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-heading text-xl font-bold">{t('holdings.title')}</h2>
+            <div className="flex items-center gap-2">
+              <span
+                className="text-muted-foreground inline-flex cursor-help items-center gap-1"
+                title={t('priceSource.tooltip')}
+              >
+                <Info size={12} />
+                <span className="font-mono text-[10px]">{t('priceSource.label')}</span>
+              </span>
+              <div className="flex gap-1">
+                {(['value', 'gainLoss', 'name', 'type'] as SortField[]).map((field) => (
+                  <button
+                    key={field}
+                    onClick={() => setSortField(field)}
+                    className={`rounded-full px-2.5 py-1 font-mono text-[10px] font-bold transition-colors ${
+                      sortField === field
+                        ? 'text-accent-hover bg-white/[0.1]'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {t(`holdings.sort.${field}`)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Asset type filter chips */}
+          <div className="flex flex-wrap gap-2">
+            {ASSET_TYPES.map((asset) => (
               <button
-                key={field}
-                onClick={() => setSortField(field)}
-                className={`rounded-full px-2.5 py-1 font-mono text-[10px] font-bold transition-colors ${
-                  sortField === field
+                key={asset.key}
+                onClick={() => setAssetFilter(asset.key)}
+                className={`rounded-full px-3 py-1 font-mono text-[10px] font-bold transition-colors ${
+                  assetFilter === asset.key
                     ? 'text-accent-hover bg-white/[0.1]'
-                    : 'text-muted-foreground hover:text-foreground'
+                    : 'text-muted-foreground hover:text-foreground bg-white/[0.04]'
                 }`}
               >
-                {t(`holdings.sort.${field}`)}
+                {t(asset.labelKey as 'filters.all')}
               </button>
             ))}
           </div>
+
+          {/* Search */}
+          <div className="relative">
+            <Search
+              size={14}
+              className="text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2"
+            />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t('search.placeholder')}
+              className="w-full rounded-xl border border-white/[0.08] bg-white/[0.04] py-2 pr-8 pl-9 font-mono text-xs text-white placeholder:text-white/40 focus:ring-1 focus:ring-white/20 focus:outline-none"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="text-muted-foreground absolute top-1/2 right-2 -translate-y-1/2 hover:text-white"
+                aria-label={t('search.clear')}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          {/* Mixed-currency warning */}
+          {portfolioSummary.isMixedCurrency && (
+            <div className="border-warning/20 bg-warning/10 flex items-start gap-2 rounded-lg border px-3 py-2">
+              <AlertTriangle size={14} className="text-warning mt-0.5" />
+              <div>
+                <p className="text-warning text-xs font-semibold">{t('currencyWarning.title')}</p>
+                <p className="text-muted-foreground text-[10px]">{t('currencyWarning.body')}</p>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {portfolioSummary.currencies.map((currency) => {
+                    const data = portfolioSummary.byCurrency[currency]
+                    if (!data) return null
+                    return (
+                      <span
+                        key={currency}
+                        className="inline-flex items-center gap-1 rounded-full border border-white/[0.08] bg-white/[0.04] px-2 py-0.5 font-mono text-[10px]"
+                      >
+                        <span className="text-muted-foreground">{currency}</span>
+                        <span className="text-white">
+                          {formatMoney(data.marketValue, currency)}
+                        </span>
+                      </span>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Desktop table */}
@@ -565,7 +679,10 @@ export function Investments() {
               <HoldingRow
                 key={inv.id}
                 investment={inv}
-                isStale={isPriceStale(inv.lastPriceDate)}
+                isStale={isInvestmentPriceStale(
+                  inv.lastPriceDate,
+                  inv.type === 'crypto' ? 'crypto' : 'stock'
+                )}
                 onEdit={() => openInvestmentDialog(inv.id)}
                 onDelete={() => setDeleteId(inv.id)}
                 t={t}
@@ -580,13 +697,32 @@ export function Investments() {
             <HoldingCard
               key={inv.id}
               investment={inv}
-              isStale={isPriceStale(inv.lastPriceDate)}
+              isStale={isInvestmentPriceStale(
+                inv.lastPriceDate,
+                inv.type === 'crypto' ? 'crypto' : 'stock'
+              )}
               onEdit={() => openInvestmentDialog(inv.id)}
               onDelete={() => setDeleteId(inv.id)}
               t={t}
             />
           ))}
         </div>
+
+        {sortedInvestments.length === 0 && (assetFilter !== 'all' || searchQuery) && (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <Search size={24} className="text-muted-foreground mb-3" />
+            <p className="text-muted-foreground text-sm">{t('empty.filter')}</p>
+            <button
+              onClick={() => {
+                setAssetFilter('all')
+                setSearchQuery('')
+              }}
+              className="text-accent-hover mt-2 text-xs font-semibold hover:underline"
+            >
+              {t('empty.clearFilters')}
+            </button>
+          </div>
+        )}
 
         <ShowMorePagination
           shown={visibleInvestments.length}

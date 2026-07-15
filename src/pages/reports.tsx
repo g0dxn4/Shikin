@@ -2,10 +2,12 @@ import { useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowDownRight, ArrowUpRight, BarChart3, PieChart, Receipt, Wallet } from 'lucide-react'
 import dayjs from 'dayjs'
+import { isCashFlowEligible } from '@shikin/finance-core'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatMoney } from '@/lib/money'
 import { useAccountStore } from '@/stores/account-store'
 import { useBudgetStore } from '@/stores/budget-store'
+import { useCurrencyStore } from '@/stores/currency-store'
 import { useTransactionStore } from '@/stores/transaction-store'
 
 function startOfCurrentMonth() {
@@ -20,6 +22,7 @@ export function ReportsPage() {
   const { t } = useTranslation('analytics')
   const { accounts, fetch: fetchAccounts, isLoading: accountsLoading } = useAccountStore()
   const { budgets, fetch: fetchBudgets, isLoading: budgetsLoading } = useBudgetStore()
+  const { getTotalBalanceInPreferred, loadRates } = useCurrencyStore()
   const {
     transactions,
     fetch: fetchTransactions,
@@ -27,8 +30,8 @@ export function ReportsPage() {
   } = useTransactionStore()
 
   useEffect(() => {
-    void Promise.allSettled([fetchAccounts(), fetchBudgets(), fetchTransactions()])
-  }, [fetchAccounts, fetchBudgets, fetchTransactions])
+    void Promise.allSettled([fetchAccounts(), fetchBudgets(), fetchTransactions(), loadRates()])
+  }, [fetchAccounts, fetchBudgets, fetchTransactions, loadRates])
 
   const { monthTransactionCount, income, expenses, topCategories } = useMemo(() => {
     const monthStart = startOfCurrentMonth()
@@ -39,7 +42,17 @@ export function ReportsPage() {
     let totalExpenses = 0
 
     for (const tx of transactions) {
-      if (tx.date < monthStart || tx.date > monthEnd || tx.type === 'transfer') continue
+      if (tx.date < monthStart || tx.date > monthEnd) continue
+      if (
+        !isCashFlowEligible({
+          type: tx.type,
+          status: tx.status ?? 'posted',
+          reportingTreatment: tx.reporting_treatment ?? 'normal',
+          transactionKind: tx.transaction_kind ?? 'standard',
+          isArchived: tx.is_archived ?? 0,
+        })
+      )
+        continue
 
       transactionCount += 1
       if (tx.type === 'income') {
@@ -64,7 +77,28 @@ export function ReportsPage() {
     }
   }, [transactions, t])
   const netFlow = income - expenses
-  const totalBalance = accounts.reduce((total, account) => total + account.balance, 0)
+  const totalBalanceResult = useMemo(
+    () => getTotalBalanceInPreferred(accounts),
+    [accounts, getTotalBalanceInPreferred]
+  )
+  const invalidCurrencyDetails =
+    !totalBalanceResult.complete && totalBalanceResult.reason === 'invalid_currency_data'
+      ? [
+          ...(totalBalanceResult.invalidCurrencies ?? []).map((diagnostic) => {
+            const owner =
+              diagnostic.accountName ?? diagnostic.accountId ?? t('reports.preferredCurrency')
+            const value = diagnostic.value || t('reports.blankCurrency')
+            return `${owner} (${value})`
+          }),
+          ...(totalBalanceResult.invalidRates ?? []).map((diagnostic) =>
+            t('reports.invalidRate', {
+              from: diagnostic.fromCurrency || t('reports.blankCurrency'),
+              to: diagnostic.toCurrency || t('reports.blankCurrency'),
+              rate: diagnostic.rate || t('reports.blankCurrency'),
+            })
+          ),
+        ].join(', ')
+      : ''
   const totalBudgeted = budgets.reduce((total, budget) => total + budget.amount, 0)
   const totalSpentAgainstBudgets = budgets.reduce((total, budget) => total + budget.spent, 0)
   const budgetUsage =
@@ -123,7 +157,22 @@ export function ReportsPage() {
               <ReportMiniMetric
                 icon={<Wallet size={15} />}
                 label={t('reports.cash')}
-                value={isLoading ? null : formatMoney(totalBalance)}
+                value={
+                  isLoading ? null : totalBalanceResult.complete ? (
+                    formatMoney(
+                      totalBalanceResult.amountCentavos,
+                      totalBalanceResult.preferredCurrency
+                    )
+                  ) : (
+                    <span className="text-warning block text-sm leading-snug" role="alert">
+                      {totalBalanceResult.reason === 'invalid_currency_data'
+                        ? t('reports.cashInvalidData', { details: invalidCurrencyDetails })
+                        : t('reports.cashUnavailable', {
+                            currencies: totalBalanceResult.missingCurrencies.join(', '),
+                          })}
+                    </span>
+                  )
+                }
                 tone="accent"
               />
               <ReportMiniMetric
@@ -230,7 +279,7 @@ function ReportMiniMetric({
 }: {
   icon: React.ReactNode
   label: string
-  value: string | null
+  value: React.ReactNode | null
   tone: 'accent' | 'success' | 'danger'
 }) {
   const toneClass = {
@@ -245,7 +294,7 @@ function ReportMiniMetric({
         <span className={toneClass}>{icon}</span>
         <span className="font-mono text-[10px] tracking-wider uppercase">{label}</span>
       </div>
-      {value ? (
+      {value !== null ? (
         <p className="font-heading text-lg font-bold">{value}</p>
       ) : (
         <Skeleton className="h-6 w-28" />

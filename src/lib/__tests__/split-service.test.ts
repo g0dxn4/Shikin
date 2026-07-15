@@ -24,10 +24,14 @@ describe('split-service', () => {
     it('creates splits when amounts sum to total', async () => {
       mockExecute.mockResolvedValue({ rowsAffected: 1, lastInsertId: 0 })
 
-      await createSplits('tx1', [
-        { categoryId: 'cat1', amount: 3000 },
-        { categoryId: 'cat2', amount: 7000 },
-      ], 10000)
+      await createSplits(
+        'tx1',
+        [
+          { categoryId: 'cat1', amount: 3000 },
+          { categoryId: 'cat2', amount: 7000 },
+        ],
+        10000
+      )
 
       // First call: DELETE existing splits, then 2 INSERTs
       expect(mockExecute).toHaveBeenCalledWith(
@@ -46,20 +50,28 @@ describe('split-service', () => {
 
     it('throws when split amounts do not sum to total', async () => {
       await expect(
-        createSplits('tx1', [
-          { categoryId: 'cat1', amount: 3000 },
-          { categoryId: 'cat2', amount: 5000 },
-        ], 10000)
+        createSplits(
+          'tx1',
+          [
+            { categoryId: 'cat1', amount: 3000 },
+            { categoryId: 'cat2', amount: 5000 },
+          ],
+          10000
+        )
       ).rejects.toThrow('Split amounts (8000) must equal transaction total (10000)')
     })
 
     it('passes subcategoryId and notes when provided', async () => {
       mockExecute.mockResolvedValue({ rowsAffected: 1, lastInsertId: 0 })
 
-      await createSplits('tx1', [
-        { categoryId: 'cat1', subcategoryId: 'sub1', amount: 5000, notes: 'Half' },
-        { categoryId: 'cat2', amount: 5000 },
-      ], 10000)
+      await createSplits(
+        'tx1',
+        [
+          { categoryId: 'cat1', subcategoryId: 'sub1', amount: 5000, notes: 'Half' },
+          { categoryId: 'cat2', amount: 5000 },
+        ],
+        10000
+      )
 
       const insertCalls = mockExecute.mock.calls.filter(
         (c) => typeof c[0] === 'string' && c[0].includes('INSERT')
@@ -71,9 +83,7 @@ describe('split-service', () => {
     it('deletes existing splits before creating new ones', async () => {
       mockExecute.mockResolvedValue({ rowsAffected: 1, lastInsertId: 0 })
 
-      await createSplits('tx1', [
-        { categoryId: 'cat1', amount: 10000 },
-      ], 10000)
+      await createSplits('tx1', [{ categoryId: 'cat1', amount: 10000 }], 10000)
 
       // Delete should be called first
       expect(mockExecute.mock.calls[0][0]).toContain('DELETE FROM transaction_splits')
@@ -100,10 +110,9 @@ describe('split-service', () => {
 
       const result = await getSplits('tx1')
       expect(result).toEqual(mockSplits)
-      expect(mockQuery).toHaveBeenCalledWith(
-        expect.stringContaining('LEFT JOIN categories'),
-        ['tx1']
-      )
+      expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('LEFT JOIN categories'), [
+        'tx1',
+      ])
     })
 
     it('returns empty array when no splits exist', async () => {

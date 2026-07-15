@@ -101,18 +101,24 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
     try {
       const result = await importStatementFile(selectedFile, accountId)
 
-      if (result.errors.length > 0 && result.imported === 0) {
-        toast.error(t('import.error'), {
-          description: result.errors[0],
-        })
-      } else if (result.errors.length > 0) {
-        toast.warning(
-          t('import.partialError', {
-            imported: result.imported,
-            errorCount: result.errors.length,
+      if (result.errors.length > 0) {
+        if (result.imported === 0) {
+          toast.error(t('import.error'), {
+            description: result.errors[0],
           })
-        )
-      } else if (result.skipped > 0) {
+        } else {
+          toast.warning(
+            t('import.partialError', {
+              imported: result.imported,
+              errorCount: result.errors.length,
+            })
+          )
+        }
+        setStep('preview')
+        return
+      }
+
+      if (result.skipped > 0) {
         toast.success(
           t('import.success', {
             imported: result.imported,

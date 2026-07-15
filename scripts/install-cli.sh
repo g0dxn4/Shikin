@@ -117,7 +117,7 @@ command_exists curl || die 'curl is required'
 command_exists head || die 'head is required'
 command_exists mktemp || die 'mktemp is required'
 command_exists node || die 'Node.js is required'
-command_exists npm || die 'npm is required'
+command_exists npm || die 'npm is required as a fallback when Corepack is unavailable'
 node -e "const major = Number(process.versions.node.split('.')[0]); process.exit(Number.isFinite(major) && major >= 18 ? 0 : 1)" \
   || die 'Node.js >= 18 is required'
 command_exists sed || die 'sed is required'
@@ -176,29 +176,54 @@ curl -fL "$SOURCE_URL" -o "$ARCHIVE_FILE"
 mkdir -p "$SOURCE_DIR"
 tar -xzf "$ARCHIVE_FILE" -C "$SOURCE_DIR"
 
-SOURCE_CLI=""
-for candidate in "$SOURCE_DIR"/*/cli; do
-  if [ -f "$candidate/package.json" ]; then
-    SOURCE_CLI="$candidate"
+SOURCE_ROOT=""
+for candidate in "$SOURCE_DIR"/*; do
+  if [ -f "$candidate/package.json" ] \
+    && [ -f "$candidate/pnpm-lock.yaml" ] \
+    && [ -f "$candidate/pnpm-workspace.yaml" ] \
+    && [ -f "$candidate/cli/package.json" ] \
+    && [ -f "$candidate/packages/finance-core/package.json" ]; then
+    SOURCE_ROOT="$candidate"
     break
   fi
 done
-[ -n "$SOURCE_CLI" ] || die 'could not find cli/package.json in the source archive'
+[ -n "$SOURCE_ROOT" ] || die 'could not find the complete pnpm workspace in the source archive'
+
+PNPM_SPEC="$(node -e "const p=require(process.argv[1]); const spec=p.packageManager || ''; if(!spec.startsWith('pnpm@') || /\\s/.test(spec)) process.exit(1); process.stdout.write(spec)" "$SOURCE_ROOT/package.json")" \
+  || die 'source package.json does not pin pnpm through packageManager'
+PNPM_VERSION="${PNPM_SPEC#pnpm@}"
+
+run_pnpm() {
+  if command_exists corepack; then
+    corepack pnpm "$@"
+  else
+    npx --yes "pnpm@${PNPM_VERSION}" "$@"
+  fi
+}
+
+ACTUAL_PNPM_VERSION="$(cd "$SOURCE_ROOT" && run_pnpm --version)"
+[ "$ACTUAL_PNPM_VERSION" = "$PNPM_VERSION" ] \
+  || die "expected repository-pinned pnpm ${PNPM_VERSION}, received ${ACTUAL_PNPM_VERSION}"
 
 INSTALL_PARENT="${INSTALL_DIR%/*}"
 [ "$INSTALL_PARENT" != "$INSTALL_DIR" ] || INSTALL_PARENT='.'
 mkdir -p "$INSTALL_PARENT"
 
-STAGE_DIR="${INSTALL_DIR}.tmp.$$"
-rm -rf "$STAGE_DIR"
-mkdir -p "$STAGE_DIR"
-cp -R "$SOURCE_CLI/." "$STAGE_DIR/"
-
-info 'Installing CLI dependencies'
-(cd "$STAGE_DIR" && npm install --no-audit --no-fund)
+info "Installing complete workspace with pnpm ${PNPM_VERSION}"
+(cd "$SOURCE_ROOT" && run_pnpm install --frozen-lockfile)
 
 info 'Building CLI support'
-(cd "$STAGE_DIR" && npm run build)
+(cd "$SOURCE_ROOT" && run_pnpm --dir cli build)
+
+STAGE_DIR="${INSTALL_DIR}.tmp.$$"
+rm -rf "$STAGE_DIR"
+info 'Deploying self-contained production CLI support'
+(cd "$SOURCE_ROOT" && run_pnpm --filter @shikin/cli deploy --prod "$STAGE_DIR")
+
+[ -f "$STAGE_DIR/package.json" ] || die 'deployment omitted package.json'
+[ -f "$STAGE_DIR/dist/cli.js" ] || die 'deployment omitted dist/cli.js'
+[ -f "$STAGE_DIR/dist/mcp-server.js" ] || die 'deployment omitted dist/mcp-server.js'
+[ -d "$STAGE_DIR/node_modules" ] || die 'deployment omitted production node_modules'
 
 rm -rf "$INSTALL_DIR"
 mv "$STAGE_DIR" "$INSTALL_DIR"

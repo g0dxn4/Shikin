@@ -4,6 +4,7 @@ import { Link } from 'react-router'
 import { TrendingUp, TrendingDown, Target, Plus, ArrowRight } from 'lucide-react'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
+import { isCashFlowEligible } from '@shikin/finance-core'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
@@ -23,10 +24,6 @@ dayjs.extend(relativeTime)
 
 type SpendingGraphMode = 'trend' | 'categories' | 'movement'
 
-function isPostedLedgerTransaction(tx: Pick<TransactionWithDetails, 'status'>): boolean {
-  return (tx.status ?? 'posted') !== 'pending'
-}
-
 export function Dashboard() {
   const { t } = useTranslation('dashboard')
   const { t: tTx } = useTranslation('transactions')
@@ -44,12 +41,7 @@ export function Dashboard() {
     fetch: fetchTransactions,
   } = useTransactionStore()
   const { goals, fetchError: goalsFetchError, fetch: fetchGoals } = useGoalStore()
-  const {
-    preferredCurrency,
-    error: currencyError,
-    getTotalBalanceInPreferred,
-    loadRates,
-  } = useCurrencyStore()
+  const { error: currencyError, getTotalBalanceInPreferred, loadRates } = useCurrencyStore()
   const { loadComparisons: loadInsights } = useSpendingInsightsStore()
   const [spendingGraphMode, setSpendingGraphMode] = useState<SpendingGraphMode>('trend')
 
@@ -67,19 +59,28 @@ export function Dashboard() {
     }
   }, [transactions.length, txLoading, loadInsights])
 
-  const totalBalance = useMemo(() => accounts.reduce((sum, a) => sum + a.balance, 0), [accounts])
-
-  // Check if accounts have mixed currencies
-  const hasMixedCurrencies = useMemo(() => {
-    const currencies = new Set(accounts.map((a) => a.currency))
-    return currencies.size > 1
-  }, [accounts])
-
-  // Converted total balance in preferred currency
-  const convertedTotalBalance = useMemo(() => {
-    if (!hasMixedCurrencies) return totalBalance
-    return getTotalBalanceInPreferred(accounts)
-  }, [hasMixedCurrencies, totalBalance, accounts, getTotalBalanceInPreferred])
+  const totalBalanceResult = useMemo(
+    () => getTotalBalanceInPreferred(accounts),
+    [accounts, getTotalBalanceInPreferred]
+  )
+  const invalidCurrencyDetails =
+    !totalBalanceResult.complete && totalBalanceResult.reason === 'invalid_currency_data'
+      ? [
+          ...(totalBalanceResult.invalidCurrencies ?? []).map((diagnostic) => {
+            const owner =
+              diagnostic.accountName ?? diagnostic.accountId ?? t('currency.preferredCurrency')
+            const value = diagnostic.value || t('currency.blankValue')
+            return `${owner} (${value})`
+          }),
+          ...(totalBalanceResult.invalidRates ?? []).map((diagnostic) =>
+            t('currency.invalidRate', {
+              from: diagnostic.fromCurrency || t('currency.blankValue'),
+              to: diagnostic.toCurrency || t('currency.blankValue'),
+              rate: diagnostic.rate || t('currency.blankValue'),
+            })
+          ),
+        ].join(', ')
+      : ''
 
   const {
     monthlyIncome,
@@ -116,7 +117,16 @@ export function Dashboard() {
     const previous = new Map<string, { name: string; color: string; amount: number }>()
 
     for (const tx of transactions) {
-      if (!isPostedLedgerTransaction(tx)) continue
+      if (
+        !isCashFlowEligible({
+          type: tx.type,
+          status: tx.status ?? 'posted',
+          reportingTreatment: tx.reporting_treatment ?? 'normal',
+          transactionKind: tx.transaction_kind ?? 'standard',
+          isArchived: tx.is_archived ?? 0,
+        })
+      )
+        continue
 
       if (tx.date >= currentStart && tx.date <= currentEnd) {
         if (tx.type === 'income') currentIncome += tx.amount
@@ -268,11 +278,28 @@ export function Dashboard() {
           <div className="flex h-full flex-col justify-between gap-12">
             <div>
               <p className="text-muted-foreground text-sm font-bold">Net Worth</p>
-              <p className="mt-10 font-mono text-4xl font-bold tracking-[-0.08em] sm:text-5xl md:text-[54px]">
-                {hasMixedCurrencies
-                  ? formatMoney(convertedTotalBalance, preferredCurrency)
-                  : formatMoney(totalBalance)}
-              </p>
+              {totalBalanceResult.complete ? (
+                <p className="mt-10 font-mono text-4xl font-bold tracking-[-0.08em] sm:text-5xl md:text-[54px]">
+                  {formatMoney(
+                    totalBalanceResult.amountCentavos,
+                    totalBalanceResult.preferredCurrency
+                  )}
+                </p>
+              ) : (
+                <div
+                  className="border-warning/30 bg-warning/8 mt-8 max-w-xl rounded-xl border px-4 py-3"
+                  role="alert"
+                >
+                  <p className="text-warning font-semibold">{t('currency.totalUnavailable')}</p>
+                  <p className="text-muted-foreground mt-1 text-sm">
+                    {totalBalanceResult.reason === 'invalid_currency_data'
+                      ? t('currency.invalidData', { details: invalidCurrencyDetails })
+                      : t('currency.missingRates', {
+                          currencies: totalBalanceResult.missingCurrencies.join(', '),
+                        })}
+                  </p>
+                </div>
+              )}
             </div>
             <div className="flex flex-col gap-2 text-sm font-bold sm:flex-row sm:items-center sm:justify-between">
               <span className={savingsRate >= 0 ? 'text-success' : 'text-warning'}>
@@ -482,9 +509,11 @@ export function Dashboard() {
             <div>
               <p className="text-muted-foreground text-xs font-bold">Projected runway</p>
               <p className="mt-2 font-mono text-2xl font-bold tracking-[-0.04em]">
-                {monthlyExpenses > 0
-                  ? `${Math.max(0, convertedTotalBalance / monthlyExpenses).toFixed(1)} months`
-                  : 'Stable'}
+                {totalBalanceResult.complete
+                  ? monthlyExpenses > 0
+                    ? `${Math.max(0, totalBalanceResult.amountCentavos / monthlyExpenses).toFixed(1)} months`
+                    : 'Stable'
+                  : t('currency.derivedUnavailable')}
               </p>
             </div>
             <div>

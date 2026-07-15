@@ -350,42 +350,6 @@ function readAccountBalances(dbPath: string) {
   }
 }
 
-function readAccounts(dbPath: string) {
-  const db = new Database(dbPath, { readonly: true, fileMustExist: true })
-  try {
-    return db
-      .prepare('SELECT id, name, type, currency, balance FROM accounts ORDER BY id')
-      .all() as Array<{
-      id: string
-      name: string
-      type: string
-      currency: string
-      balance: number
-    }>
-  } finally {
-    db.close()
-  }
-}
-
-function readAuditLog(dbPath: string) {
-  const db = new Database(dbPath, { readonly: true, fileMustExist: true })
-  try {
-    return db
-      .prepare(
-        'SELECT entity, entity_id, action, before_json, after_json FROM audit_log ORDER BY created_at, id'
-      )
-      .all() as Array<{
-      entity: string
-      entity_id: string | null
-      action: string
-      before_json: string | null
-      after_json: string | null
-    }>
-  } finally {
-    db.close()
-  }
-}
-
 function readTransactionDetails(dbPath: string) {
   const db = new Database(dbPath, { readonly: true, fileMustExist: true })
   try {
@@ -520,6 +484,46 @@ async function loadToolsWithRealDatabase(tempHome: string) {
   return {
     tools: toolsModule.tools,
   }
+}
+
+async function loadToolsWithPreTransactionMutation(
+  tempHome: string,
+  mutateImmediatelyBeforeBegin: () => void
+) {
+  let generatedId = 0
+  let mutated = false
+  vi.resetModules()
+  vi.stubEnv('HOME', tempHome)
+  vi.stubEnv('XDG_DATA_HOME', '')
+  vi.doMock('node:os', async () => {
+    const actual = await vi.importActual<typeof OsModule>('node:os')
+    return {
+      ...actual,
+      homedir: () => tempHome,
+    }
+  })
+  vi.doMock('./ulid.js', () => ({
+    generateId: () => `tx_sqlite_authority_${++generatedId}`,
+  }))
+  vi.doMock('./database.js', async () => {
+    const actual = await vi.importActual<typeof DatabaseModule>('./database.js')
+    return {
+      ...actual,
+      transaction: <T>(fn: () => T): T => {
+        if (!mutated) {
+          mutated = true
+          mutateImmediatelyBeforeBegin()
+        }
+        return actual.transaction(fn)
+      },
+    }
+  })
+
+  const toolsModule = await import('./tools.js')
+  const databaseModule = await import('./database.js')
+  cleanupCallbacks.add(() => databaseModule.close())
+
+  return { tools: toolsModule.tools }
 }
 
 afterEach(() => {
@@ -761,30 +765,642 @@ describe('CLI tools SQLite transaction rollback', () => {
     })
   })
 
-  it('updates an account through upsert-account and persists the audit row in SQLite', async () => {
+  it('authoritatively resolves an upsert target created immediately before BEGIN IMMEDIATE', async () => {
     const tempHome = createTempHome()
-    const dbPath = seedDatabase({ tempHome, accountBalance: 10_000 })
-    const { tools } = await loadToolsWithRealDatabase(tempHome)
+    const dbPath = seedDatabase({ tempHome, accountBalance: 0 })
+    const { tools } = await loadToolsWithPreTransactionMutation(tempHome, () => {
+      const competingDb = new Database(dbPath)
+      try {
+        competingDb
+          .prepare(
+            `INSERT INTO accounts (id, name, type, currency, balance, is_archived, account_mode)
+             VALUES ('acct-authority', 'Competing account', 'checking', 'USD', 0, 0, 'transactional')`
+          )
+          .run()
+      } finally {
+        competingDb.close()
+      }
+    })
     const upsertAccount = tools.find((tool) => tool.name === 'upsert-account')!
 
     await expect(
       upsertAccount.execute(
-        upsertAccount.schema.parse({ accountId: 'acct-1', name: 'Renamed Primary' })
+        upsertAccount.schema.parse({ accountId: 'acct-authority', name: 'Authoritative update' })
       )
-    ).resolves.toMatchObject({ success: true, action: 'updated' })
-
-    expect(readAccounts(dbPath)).toEqual([
-      expect.objectContaining({ id: 'acct-1', name: 'Renamed Primary', balance: 10_000 }),
-    ])
-    const auditRows = readAuditLog(dbPath)
-    expect(auditRows).toHaveLength(1)
-    expect(auditRows[0]).toMatchObject({
-      entity: 'account',
-      entity_id: 'acct-1',
-      action: 'update',
+    ).resolves.toMatchObject({
+      success: true,
+      action: 'updated',
+      matchedBy: 'accountId',
+      account: { id: 'acct-authority', name: 'Authoritative update' },
     })
-    expect(JSON.parse(auditRows[0].before_json ?? '{}').account.name).toBe('Primary')
-    expect(JSON.parse(auditRows[0].after_json ?? '{}').account.name).toBe('Renamed Primary')
+
+    const db = new Database(dbPath, { readonly: true })
+    try {
+      expect(
+        db.prepare('SELECT id, name FROM accounts WHERE id = ?').all('acct-authority')
+      ).toEqual([{ id: 'acct-authority', name: 'Authoritative update' }])
+      expect(
+        db
+          .prepare(
+            `SELECT action, json_extract(before_json, '$.account.name') AS before_name,
+                    json_extract(after_json, '$.account.name') AS after_name
+               FROM audit_log WHERE entity_id = 'acct-authority'`
+          )
+          .get()
+      ).toEqual({
+        action: 'update',
+        before_name: 'Competing account',
+        after_name: 'Authoritative update',
+      })
+    } finally {
+      db.close()
+    }
+  }, 10_000)
+
+  it.each([
+    ['blank', '   ', 'currency must not be empty'],
+    ['mismatched', 'EUR', 'Transaction currency EUR does not match source account currency USD'],
+  ])(
+    'rolls back an account upsert when effective-ledger data has a %s transaction currency',
+    async (_label, transactionCurrency, message) => {
+      const tempHome = createTempHome()
+      const dbPath = seedDatabase({ tempHome, accountBalance: 0 })
+      const db = new Database(dbPath)
+      try {
+        db.prepare(
+          `INSERT INTO transactions (
+             id, account_id, type, amount, currency, description, date, status,
+             ledger_treatment, transaction_kind, is_archived
+           ) VALUES ('ambiguous-currency', 'acct-1', 'income', 700, ?, 'Ambiguous currency',
+                     '2026-05-30', 'posted', 'normal', 'standard', 0)`
+        ).run(transactionCurrency)
+      } finally {
+        db.close()
+      }
+
+      const { tools } = await loadToolsWithRealDatabase(tempHome)
+      const upsertAccount = tools.find((tool) => tool.name === 'upsert-account')!
+      await expect(
+        upsertAccount.execute(
+          upsertAccount.schema.parse({
+            accountId: 'acct-1',
+            name: 'Should roll back',
+            balance: 10,
+          })
+        )
+      ).rejects.toThrow(message)
+
+      const verified = new Database(dbPath, { readonly: true })
+      try {
+        expect(
+          verified.prepare('SELECT name, balance FROM accounts WHERE id = ?').get('acct-1')
+        ).toEqual({ name: 'Primary', balance: 0 })
+        expect(verified.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({
+          count: 1,
+        })
+        expect(
+          verified.prepare('SELECT COUNT(*) AS count FROM account_reconciliations').get()
+        ).toEqual({ count: 0 })
+        expect(verified.prepare('SELECT COUNT(*) AS count FROM audit_log').get()).toEqual({
+          count: 0,
+        })
+      } finally {
+        verified.close()
+      }
+    }
+  )
+
+  it('rolls back an account upsert when effective-ledger data has a malformed archive flag', async () => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({ tempHome, accountBalance: 0 })
+    const db = new Database(dbPath)
+    try {
+      db.prepare(
+        `INSERT INTO transactions (
+           id, account_id, type, amount, currency, description, date, status,
+           ledger_treatment, transaction_kind, is_archived
+         ) VALUES ('ambiguous-archive', 'acct-1', 'income', 700, 'USD', 'Ambiguous archive',
+                   '2026-05-30', 'posted', 'normal', 'standard', 2)`
+      ).run()
+    } finally {
+      db.close()
+    }
+
+    const { tools } = await loadToolsWithRealDatabase(tempHome)
+    const upsertAccount = tools.find((tool) => tool.name === 'upsert-account')!
+    await expect(
+      upsertAccount.execute(
+        upsertAccount.schema.parse({
+          accountId: 'acct-1',
+          name: 'Should roll back',
+          balance: 10,
+        })
+      )
+    ).rejects.toThrow('Unsupported archive flag: 2')
+
+    const verified = new Database(dbPath, { readonly: true })
+    try {
+      expect(
+        verified.prepare('SELECT name, balance FROM accounts WHERE id = ?').get('acct-1')
+      ).toEqual({ name: 'Primary', balance: 0 })
+      expect(verified.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({
+        count: 1,
+      })
+      expect(
+        verified.prepare('SELECT COUNT(*) AS count FROM account_reconciliations').get()
+      ).toEqual({ count: 0 })
+      expect(verified.prepare('SELECT COUNT(*) AS count FROM audit_log').get()).toEqual({
+        count: 0,
+      })
+    } finally {
+      verified.close()
+    }
+  })
+
+  it('creates positive, negative, zero, and snapshot-only openings with correct provenance', async () => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({ tempHome, accountBalance: 0 })
+    const { tools } = await loadToolsWithRealDatabase(tempHome)
+    const createAccount = tools.find((tool) => tool.name === 'create-account')!
+
+    const positive = (await createAccount.execute(
+      createAccount.schema.parse({ name: 'Positive opening', balance: 123.45 })
+    )) as { account: { id: string; balance: number } }
+    const negative = (await createAccount.execute(
+      createAccount.schema.parse({ name: 'Negative opening', balance: -67.89 })
+    )) as { account: { id: string; balance: number } }
+    const zero = (await createAccount.execute(
+      createAccount.schema.parse({ name: 'Zero opening', balance: 0 })
+    )) as { account: { id: string; balance: number } }
+    const snapshot = (await createAccount.execute(
+      createAccount.schema.parse({
+        name: 'Observed portfolio',
+        type: 'investment',
+        balance: 444.44,
+        accountMode: 'snapshot_only',
+      })
+    )) as { account: { id: string; balance: number; accountMode: string } }
+
+    expect(positive.account.balance).toBe(123.45)
+    expect(negative.account.balance).toBe(-67.89)
+    expect(zero.account.balance).toBe(0)
+    expect(snapshot.account).toMatchObject({ balance: 444.44, accountMode: 'snapshot_only' })
+
+    const db = new Database(dbPath, { readonly: true })
+    try {
+      expect(
+        db
+          .prepare(
+            `SELECT a.id, a.name, a.balance, a.account_mode,
+                    COALESCE((SELECT SUM(CASE
+                      WHEN t.type = 'income' THEN t.amount
+                      WHEN t.type = 'expense' THEN -t.amount
+                      ELSE 0
+                    END) FROM transactions t
+                    WHERE t.account_id = a.id
+                      AND t.status IN ('posted', 'cleared')
+                      AND t.ledger_treatment = 'normal'
+                      AND t.is_archived = 0), 0) AS effective_ledger
+             FROM accounts a
+             WHERE a.id IN (?, ?, ?, ?)
+             ORDER BY a.name`
+          )
+          .all(positive.account.id, negative.account.id, zero.account.id, snapshot.account.id)
+      ).toEqual([
+        {
+          id: negative.account.id,
+          name: 'Negative opening',
+          balance: -6789,
+          account_mode: 'transactional',
+          effective_ledger: -6789,
+        },
+        {
+          id: snapshot.account.id,
+          name: 'Observed portfolio',
+          balance: 44444,
+          account_mode: 'snapshot_only',
+          effective_ledger: 0,
+        },
+        {
+          id: positive.account.id,
+          name: 'Positive opening',
+          balance: 12345,
+          account_mode: 'transactional',
+          effective_ledger: 12345,
+        },
+        {
+          id: zero.account.id,
+          name: 'Zero opening',
+          balance: 0,
+          account_mode: 'transactional',
+          effective_ledger: 0,
+        },
+      ])
+      expect(
+        db
+          .prepare(
+            `SELECT a.name, ar.actual_balance, ar.adjustment_amount,
+                    ar.adjustment_transaction_id, t.id AS transaction_id,
+                    t.type, t.amount, t.status, t.ledger_treatment,
+                    t.reporting_treatment, t.transaction_kind,
+                    t.reconciliation_id, ar.id AS reconciliation_id
+             FROM account_reconciliations ar
+             JOIN accounts a ON a.id = ar.account_id
+             JOIN transactions t ON t.id = ar.adjustment_transaction_id
+             WHERE ar.account_id IN (?, ?, ?, ?)
+             ORDER BY a.name`
+          )
+          .all(positive.account.id, negative.account.id, zero.account.id, snapshot.account.id)
+      ).toEqual([
+        expect.objectContaining({
+          name: 'Negative opening',
+          actual_balance: -6789,
+          adjustment_amount: -6789,
+          type: 'expense',
+          amount: 6789,
+          status: 'posted',
+          ledger_treatment: 'normal',
+          reporting_treatment: 'exclude_from_cashflow',
+          transaction_kind: 'reconciliation_bridge',
+          adjustment_transaction_id: expect.any(String),
+          transaction_id: expect.any(String),
+          reconciliation_id: expect.any(String),
+        }),
+        expect.objectContaining({
+          name: 'Positive opening',
+          actual_balance: 12345,
+          adjustment_amount: 12345,
+          type: 'income',
+          amount: 12345,
+          status: 'posted',
+          ledger_treatment: 'normal',
+          reporting_treatment: 'exclude_from_cashflow',
+          transaction_kind: 'reconciliation_bridge',
+          adjustment_transaction_id: expect.any(String),
+          transaction_id: expect.any(String),
+          reconciliation_id: expect.any(String),
+        }),
+      ])
+      const links = db
+        .prepare(
+          `SELECT ar.id AS reconciliation_id, ar.adjustment_transaction_id,
+                  t.id AS transaction_id, t.reconciliation_id AS transaction_reconciliation_id
+           FROM account_reconciliations ar
+           JOIN transactions t ON t.id = ar.adjustment_transaction_id
+           WHERE ar.account_id IN (?, ?)`
+        )
+        .all(positive.account.id, negative.account.id) as Array<{
+        reconciliation_id: string
+        adjustment_transaction_id: string
+        transaction_id: string
+        transaction_reconciliation_id: string
+      }>
+      expect(links).toHaveLength(2)
+      for (const link of links) {
+        expect(link.adjustment_transaction_id).toBe(link.transaction_id)
+        expect(link.transaction_reconciliation_id).toBe(link.reconciliation_id)
+      }
+    } finally {
+      db.close()
+    }
+  }, 10_000)
+
+  it('reconciles explicit update and upsert balance corrections without metadata-only history', async () => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({ tempHome, accountBalance: 0 })
+    const { tools } = await loadToolsWithRealDatabase(tempHome)
+    const upsertAccount = tools.find((tool) => tool.name === 'upsert-account')!
+    const updateAccount = tools.find((tool) => tool.name === 'update-account')!
+    const accountId = 'acct-provenance'
+
+    await upsertAccount.execute(
+      upsertAccount.schema.parse({
+        accountId,
+        name: 'Provenance checking',
+        balance: 10,
+      })
+    )
+    await upsertAccount.execute(
+      upsertAccount.schema.parse({
+        accountId,
+        name: 'Renamed provenance checking',
+        balance: 10,
+      })
+    )
+
+    let db = new Database(dbPath, { readonly: true })
+    try {
+      expect(
+        db
+          .prepare('SELECT COUNT(*) AS count FROM account_reconciliations WHERE account_id = ?')
+          .get(accountId)
+      ).toEqual({ count: 1 })
+      expect(
+        db.prepare('SELECT COUNT(*) AS count FROM transactions WHERE account_id = ?').get(accountId)
+      ).toEqual({ count: 1 })
+    } finally {
+      db.close()
+    }
+
+    await updateAccount.execute(updateAccount.schema.parse({ accountId, balance: 4 }))
+
+    db = new Database(dbPath)
+    try {
+      db.prepare('UPDATE accounts SET balance = 300 WHERE id = ?').run(accountId)
+    } finally {
+      db.close()
+    }
+
+    await upsertAccount.execute(upsertAccount.schema.parse({ accountId, balance: 4 }))
+    await expect(
+      upsertAccount.execute(upsertAccount.schema.parse({ accountId, balance: 7 }))
+    ).resolves.toMatchObject({
+      success: true,
+      action: 'updated',
+      account: { balance: 7, balanceCentavos: 700 },
+    })
+
+    db = new Database(dbPath, { readonly: true })
+    try {
+      expect(
+        db
+          .prepare(
+            'SELECT actual_balance, stored_balance_before, ledger_balance_before, ledger_balance_after, adjustment_amount, adjustment_transaction_id FROM account_reconciliations WHERE account_id = ? ORDER BY rowid'
+          )
+          .all(accountId)
+      ).toEqual([
+        {
+          actual_balance: 1000,
+          stored_balance_before: 0,
+          ledger_balance_before: 0,
+          ledger_balance_after: 1000,
+          adjustment_amount: 1000,
+          adjustment_transaction_id: expect.any(String),
+        },
+        {
+          actual_balance: 400,
+          stored_balance_before: 1000,
+          ledger_balance_before: 1000,
+          ledger_balance_after: 400,
+          adjustment_amount: -600,
+          adjustment_transaction_id: expect.any(String),
+        },
+        {
+          actual_balance: 400,
+          stored_balance_before: 300,
+          ledger_balance_before: 400,
+          ledger_balance_after: 400,
+          adjustment_amount: 0,
+          adjustment_transaction_id: null,
+        },
+        {
+          actual_balance: 700,
+          stored_balance_before: 400,
+          ledger_balance_before: 400,
+          ledger_balance_after: 700,
+          adjustment_amount: 300,
+          adjustment_transaction_id: expect.any(String),
+        },
+      ])
+      expect(
+        db
+          .prepare(
+            `SELECT type, amount, reporting_treatment, transaction_kind
+             FROM transactions WHERE account_id = ? ORDER BY rowid`
+          )
+          .all(accountId)
+      ).toEqual([
+        {
+          type: 'income',
+          amount: 1000,
+          reporting_treatment: 'exclude_from_cashflow',
+          transaction_kind: 'reconciliation_bridge',
+        },
+        {
+          type: 'expense',
+          amount: 600,
+          reporting_treatment: 'exclude_from_cashflow',
+          transaction_kind: 'reconciliation_bridge',
+        },
+        {
+          type: 'income',
+          amount: 300,
+          reporting_treatment: 'exclude_from_cashflow',
+          transaction_kind: 'reconciliation_bridge',
+        },
+      ])
+      expect(
+        db
+          .prepare(
+            `SELECT a.balance,
+                    COALESCE(SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE -t.amount END), 0) AS effective_ledger
+             FROM accounts a
+             LEFT JOIN transactions t ON t.account_id = a.id
+               AND t.status IN ('posted', 'cleared')
+               AND t.ledger_treatment = 'normal'
+               AND t.is_archived = 0
+             WHERE a.id = ?
+             GROUP BY a.id`
+          )
+          .get(accountId)
+      ).toEqual({ balance: 700, effective_ledger: 700 })
+    } finally {
+      db.close()
+    }
+  }, 10_000)
+
+  it('keeps snapshot-only edits observed-only and establishes provenance on mode conversion', async () => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({ tempHome, accountBalance: 0 })
+    const { tools } = await loadToolsWithRealDatabase(tempHome)
+    const createAccount = tools.find((tool) => tool.name === 'create-account')!
+    const updateAccount = tools.find((tool) => tool.name === 'update-account')!
+    const upsertAccount = tools.find((tool) => tool.name === 'upsert-account')!
+
+    const created = (await createAccount.execute(
+      createAccount.schema.parse({
+        name: 'Observed portfolio',
+        type: 'investment',
+        balance: 50,
+        accountMode: 'snapshot_only',
+      })
+    )) as { account: { id: string } }
+    const accountId = created.account.id
+
+    await updateAccount.execute(
+      updateAccount.schema.parse({ accountId, balance: 60, accountMode: 'snapshot_only' })
+    )
+
+    let db = new Database(dbPath, { readonly: true })
+    try {
+      expect(
+        db.prepare('SELECT balance, account_mode FROM accounts WHERE id = ?').get(accountId)
+      ).toEqual({ balance: 6000, account_mode: 'snapshot_only' })
+      expect(
+        db.prepare('SELECT COUNT(*) AS count FROM transactions WHERE account_id = ?').get(accountId)
+      ).toEqual({ count: 0 })
+      expect(
+        db
+          .prepare('SELECT COUNT(*) AS count FROM account_reconciliations WHERE account_id = ?')
+          .get(accountId)
+      ).toEqual({ count: 0 })
+    } finally {
+      db.close()
+    }
+
+    await expect(
+      upsertAccount.execute(upsertAccount.schema.parse({ accountId, accountMode: 'transactional' }))
+    ).resolves.toMatchObject({
+      success: true,
+      account: { balance: 60, balanceCentavos: 6000, accountMode: 'transactional' },
+    })
+
+    db = new Database(dbPath, { readonly: true })
+    try {
+      expect(
+        db.prepare('SELECT balance, account_mode FROM accounts WHERE id = ?').get(accountId)
+      ).toEqual({ balance: 6000, account_mode: 'transactional' })
+      expect(
+        db
+          .prepare(
+            `SELECT t.amount, t.type, t.reporting_treatment, t.transaction_kind,
+                    ar.actual_balance, ar.adjustment_transaction_id, t.id AS transaction_id,
+                    t.reconciliation_id, ar.id AS reconciliation_id
+             FROM account_reconciliations ar
+             JOIN transactions t ON t.id = ar.adjustment_transaction_id
+             WHERE ar.account_id = ?`
+          )
+          .get(accountId)
+      ).toEqual(
+        expect.objectContaining({
+          amount: 6000,
+          type: 'income',
+          reporting_treatment: 'exclude_from_cashflow',
+          transaction_kind: 'reconciliation_bridge',
+          actual_balance: 6000,
+          adjustment_transaction_id: expect.any(String),
+          transaction_id: expect.any(String),
+          reconciliation_id: expect.any(String),
+        })
+      )
+    } finally {
+      db.close()
+    }
+
+    await expect(
+      updateAccount.execute(updateAccount.schema.parse({ accountId, accountMode: 'snapshot_only' }))
+    ).resolves.toMatchObject({
+      success: false,
+      reason: 'account_mode_transition_requires_new_account',
+    })
+  }, 10_000)
+
+  it('records no-bridge provenance when update and upsert convert nonzero snapshots to zero', async () => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({ tempHome, accountBalance: 0 })
+    const { tools } = await loadToolsWithRealDatabase(tempHome)
+    const createAccount = tools.find((tool) => tool.name === 'create-account')!
+    const updateAccount = tools.find((tool) => tool.name === 'update-account')!
+    const upsertAccount = tools.find((tool) => tool.name === 'upsert-account')!
+
+    const updateTarget = (await createAccount.execute(
+      createAccount.schema.parse({
+        name: 'Update zero provenance',
+        balance: 50,
+        accountMode: 'snapshot_only',
+      })
+    )) as { account: { id: string } }
+    const upsertTarget = (await createAccount.execute(
+      createAccount.schema.parse({
+        name: 'Upsert zero provenance',
+        balance: 75,
+        accountMode: 'snapshot_only',
+      })
+    )) as { account: { id: string } }
+
+    await expect(
+      updateAccount.execute(
+        updateAccount.schema.parse({
+          accountId: updateTarget.account.id,
+          balance: 0,
+          accountMode: 'transactional',
+        })
+      )
+    ).resolves.toMatchObject({ success: true })
+    await expect(
+      upsertAccount.execute(
+        upsertAccount.schema.parse({
+          accountId: upsertTarget.account.id,
+          balance: 0,
+          accountMode: 'transactional',
+        })
+      )
+    ).resolves.toMatchObject({
+      success: true,
+      account: { balanceCentavos: 0, accountMode: 'transactional' },
+    })
+
+    const db = new Database(dbPath, { readonly: true })
+    try {
+      for (const accountId of [updateTarget.account.id, upsertTarget.account.id]) {
+        expect(
+          db.prepare('SELECT balance, account_mode FROM accounts WHERE id = ?').get(accountId)
+        ).toEqual({ balance: 0, account_mode: 'transactional' })
+        expect(
+          db
+            .prepare(
+              `SELECT actual_balance, stored_balance_before, adjustment_amount,
+                      adjustment_transaction_id
+                 FROM account_reconciliations
+                WHERE account_id = ?`
+            )
+            .get(accountId)
+        ).toEqual({
+          actual_balance: 0,
+          stored_balance_before: accountId === updateTarget.account.id ? 5000 : 7500,
+          adjustment_amount: 0,
+          adjustment_transaction_id: null,
+        })
+        expect(
+          db
+            .prepare('SELECT COUNT(*) AS count FROM transactions WHERE account_id = ?')
+            .get(accountId)
+        ).toEqual({ count: 0 })
+      }
+    } finally {
+      db.close()
+    }
+  }, 10_000)
+
+  it('rolls back a nonzero account opening when bridge insertion fails', async () => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({ tempHome, accountBalance: 0 })
+    const { tools } = await loadToolsWithRealDatabaseFailure({ tempHome, failOnExecuteCall: 3 })
+    const createAccount = tools.find((tool) => tool.name === 'create-account')!
+
+    await expect(
+      createAccount.execute(
+        createAccount.schema.parse({ name: 'Rolled back opening', balance: 25 })
+      )
+    ).rejects.toThrow('Injected execute failure on call 3')
+
+    const db = new Database(dbPath, { readonly: true })
+    try {
+      expect(
+        db
+          .prepare("SELECT COUNT(*) AS count FROM accounts WHERE name = 'Rolled back opening'")
+          .get()
+      ).toEqual({ count: 0 })
+      expect(db.prepare('SELECT COUNT(*) AS count FROM account_reconciliations').get()).toEqual({
+        count: 0,
+      })
+      expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 0 })
+      expect(
+        db.prepare("SELECT COUNT(*) AS count FROM audit_log WHERE entity = 'account'").get()
+      ).toEqual({ count: 0 })
+    } finally {
+      db.close()
+    }
   }, 10_000)
 
   it('rolls back update-transaction on a real SQLite abort while moving accounts and flipping type', async () => {
@@ -1049,6 +1665,90 @@ describe('CLI tools SQLite transaction rollback', () => {
     } finally {
       guarded.close()
     }
+  })
+
+  it.each([
+    {
+      label: 'an unarchived archived-transfer mirror',
+      type: 'income',
+      transferToAccountId: null,
+      destinationCurrency: null,
+      destinationMode: null,
+      transactionKind: 'archived_transfer_mirror',
+    },
+    {
+      label: 'a transfer with a missing destination',
+      type: 'transfer',
+      transferToAccountId: null,
+      destinationCurrency: null,
+      destinationMode: null,
+      transactionKind: 'standard',
+    },
+    {
+      label: 'a same-account transfer',
+      type: 'transfer',
+      transferToAccountId: 'acct-1',
+      destinationCurrency: null,
+      destinationMode: null,
+      transactionKind: 'standard',
+    },
+    {
+      label: 'a cross-currency transfer',
+      type: 'transfer',
+      transferToAccountId: 'acct-destination',
+      destinationCurrency: 'EUR',
+      destinationMode: 'transactional',
+      transactionKind: 'standard',
+    },
+    {
+      label: 'a transfer to a snapshot-only destination',
+      type: 'transfer',
+      transferToAccountId: 'acct-destination',
+      destinationCurrency: 'USD',
+      destinationMode: 'snapshot_only',
+      transactionKind: 'standard',
+    },
+  ])('excludes $label from real-SQLite effective-ledger reconciliation', async (scenario) => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({ tempHome, accountBalance: 0 })
+    const db = new Database(dbPath)
+    try {
+      if (scenario.destinationCurrency) {
+        db.prepare(
+          `INSERT INTO accounts (id, name, type, currency, balance, is_archived, account_mode)
+           VALUES ('acct-destination', 'Destination', 'checking', ?, 0, 0, 'transactional')`
+        ).run(scenario.destinationCurrency)
+      }
+      db.prepare(
+        `INSERT INTO transactions (
+           id, account_id, transfer_to_account_id, type, amount, currency, description, date,
+           status, ledger_treatment, transaction_kind, is_archived
+         ) VALUES ('malformed-ledger-row', 'acct-1', ?, ?, 700, 'USD', 'Malformed provenance',
+                   '2026-05-30', 'posted', 'normal', ?, 0)`
+      ).run(scenario.transferToAccountId, scenario.type, scenario.transactionKind)
+      if (scenario.destinationMode === 'snapshot_only') {
+        db.exec('DROP TRIGGER trg_accounts_snapshot_mode_update')
+        db.prepare(
+          "UPDATE accounts SET account_mode = 'snapshot_only' WHERE id = 'acct-destination'"
+        ).run()
+      }
+    } finally {
+      db.close()
+    }
+
+    const { tools } = await loadToolsWithRealDatabase(tempHome)
+    const reconcile = tools.find((tool) => tool.name === 'reconcile')!
+    const result = await reconcile.execute(
+      reconcile.schema.parse({ accountId: 'acct-1', actualBalance: 0 })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      dryRun: true,
+      ledgerBalanceCentavos: 0,
+      differenceCentavos: 0,
+      applyRequired: false,
+    })
   })
 
   it('reconciles from the effective ledger even when the stored balance already matches', async () => {

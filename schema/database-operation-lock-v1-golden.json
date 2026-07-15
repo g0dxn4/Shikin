@@ -1,0 +1,453 @@
+{
+  "databaseIdentity": "com.asf.shikin:shikin.db",
+  "cases": [
+    {
+      "name": "valid-null-exclusive-intent",
+      "valid": true,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "operation_state",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "stateRevision": 0,
+        "fencingGenerationHighWater": 0,
+        "leases": [],
+        "exclusiveIntent": null,
+        "updatedBy": {
+          "ownerId": "owner-golden",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "updatedAt": "2026-07-14T12:00:00.000Z"
+      }
+    },
+    {
+      "name": "missing-required-exclusive-intent",
+      "valid": false,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "operation_state",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "stateRevision": 0,
+        "fencingGenerationHighWater": 0,
+        "leases": [],
+        "updatedBy": {
+          "ownerId": "owner-golden",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "updatedAt": "2026-07-14T12:00:00.000Z"
+      }
+    },
+    {
+      "name": "null-optional-metadata",
+      "valid": false,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "operation_state",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "stateRevision": 1,
+        "fencingGenerationHighWater": 1,
+        "leases": [],
+        "exclusiveIntent": {
+          "recordKind": "exclusive_intent",
+          "operationId": "operation-golden",
+          "operation": "restore",
+          "phase": "registered",
+          "owner": {
+            "ownerId": "owner-golden",
+            "runtimeId": "cli",
+            "hostId": "host-golden",
+            "processId": 1234,
+            "processStartedAt": "2026-07-14T12:00:00.000Z"
+          },
+          "fencingGeneration": 1,
+          "createdAt": "2026-07-14T12:00:00.000Z",
+          "updatedAt": "2026-07-14T12:00:00.000Z",
+          "metadata": null
+        },
+        "updatedBy": {
+          "ownerId": "owner-golden",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "updatedAt": "2026-07-14T12:00:00.000Z"
+      }
+    },
+    {
+      "name": "null-optional-completed-at",
+      "valid": false,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "operation_state",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "stateRevision": 1,
+        "fencingGenerationHighWater": 1,
+        "leases": [],
+        "exclusiveIntent": {
+          "recordKind": "exclusive_intent",
+          "operationId": "operation-golden",
+          "operation": "restore",
+          "phase": "completed",
+          "owner": {
+            "ownerId": "owner-golden",
+            "runtimeId": "cli",
+            "hostId": "host-golden",
+            "processId": 1234,
+            "processStartedAt": "2026-07-14T12:00:00.000Z"
+          },
+          "fencingGeneration": 1,
+          "createdAt": "2026-07-14T12:00:00.000Z",
+          "updatedAt": "2026-07-14T12:00:00.000Z",
+          "completedAt": null
+        },
+        "updatedBy": {
+          "ownerId": "owner-golden",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "updatedAt": "2026-07-14T12:00:00.000Z"
+      }
+    },
+    {
+      "name": "unknown-intent-field",
+      "valid": false,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "operation_state",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "stateRevision": 1,
+        "fencingGenerationHighWater": 1,
+        "leases": [],
+        "exclusiveIntent": {
+          "recordKind": "exclusive_intent",
+          "operationId": "operation-golden",
+          "operation": "import",
+          "phase": "registered",
+          "owner": {
+            "ownerId": "owner-golden",
+            "runtimeId": "tauri",
+            "hostId": "host-golden",
+            "processId": 1234,
+            "processStartedAt": "2026-07-14T12:00:00.000Z"
+          },
+          "fencingGeneration": 1,
+          "createdAt": "2026-07-14T12:00:00.000Z",
+          "updatedAt": "2026-07-14T12:00:00.000Z",
+          "unknown": true
+        },
+        "updatedBy": {
+          "ownerId": "owner-golden",
+          "runtimeId": "tauri",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "updatedAt": "2026-07-14T12:00:00.000Z"
+      }
+    },
+    {
+      "name": "unknown-state-field",
+      "valid": false,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "operation_state",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "stateRevision": 0,
+        "fencingGenerationHighWater": 0,
+        "leases": [],
+        "exclusiveIntent": null,
+        "updatedBy": {
+          "ownerId": "owner-golden",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "updatedAt": "2026-07-14T12:00:00.000Z",
+        "unknown": true
+      }
+    },
+    {
+      "name": "missing-owner-field",
+      "valid": false,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "registration_mutex",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "mutexId": "mutex-golden",
+        "owner": {
+          "ownerId": "owner-golden",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234
+        },
+        "acquiredAt": "2026-07-14T12:00:00.000Z",
+        "expiresAt": "2026-07-14T12:00:05.000Z",
+        "ttlMs": 5000
+      }
+    },
+    {
+      "name": "maximum-safe-state-and-fencing-authority",
+      "valid": true,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "operation_state",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "stateRevision": 9007199254740991,
+        "fencingGenerationHighWater": 9007199254740991,
+        "leases": [
+          {
+            "recordKind": "runtime_lease",
+            "leaseId": "lease-max-safe",
+            "owner": {
+              "ownerId": "owner-golden",
+              "runtimeId": "cli",
+              "hostId": "host-golden",
+              "processId": 1234,
+              "processStartedAt": "2026-07-14T12:00:00.000Z"
+            },
+            "fencingGeneration": 9007199254740991,
+            "acquiredAt": "2026-07-14T12:00:00.000Z",
+            "heartbeatAt": "2026-07-14T12:00:00.000Z",
+            "expiresAt": "2026-07-14T12:00:30.000Z",
+            "ttlMs": 30000
+          }
+        ],
+        "exclusiveIntent": null,
+        "updatedBy": {
+          "ownerId": "owner-golden",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "updatedAt": "2026-07-14T12:00:00.000Z"
+      }
+    },
+    {
+      "name": "state-revision-over-maximum-safe-integer",
+      "valid": false,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "operation_state",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "stateRevision": 9007199254740992,
+        "fencingGenerationHighWater": 0,
+        "leases": [],
+        "exclusiveIntent": null,
+        "updatedBy": {
+          "ownerId": "owner-golden",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "updatedAt": "2026-07-14T12:00:00.000Z"
+      }
+    },
+    {
+      "name": "fencing-high-water-over-maximum-safe-integer",
+      "valid": false,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "operation_state",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "stateRevision": 0,
+        "fencingGenerationHighWater": 9007199254740992,
+        "leases": [],
+        "exclusiveIntent": null,
+        "updatedBy": {
+          "ownerId": "owner-golden",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "updatedAt": "2026-07-14T12:00:00.000Z"
+      }
+    },
+    {
+      "name": "lease-fencing-over-maximum-safe-integer",
+      "valid": false,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "operation_state",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "stateRevision": 0,
+        "fencingGenerationHighWater": 9007199254740992,
+        "leases": [
+          {
+            "recordKind": "runtime_lease",
+            "leaseId": "lease-max-safe",
+            "owner": {
+              "ownerId": "owner-golden",
+              "runtimeId": "cli",
+              "hostId": "host-golden",
+              "processId": 1234,
+              "processStartedAt": "2026-07-14T12:00:00.000Z"
+            },
+            "fencingGeneration": 9007199254740992,
+            "acquiredAt": "2026-07-14T12:00:00.000Z",
+            "heartbeatAt": "2026-07-14T12:00:00.000Z",
+            "expiresAt": "2026-07-14T12:00:30.000Z",
+            "ttlMs": 30000
+          }
+        ],
+        "exclusiveIntent": null,
+        "updatedBy": {
+          "ownerId": "owner-golden",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "updatedAt": "2026-07-14T12:00:00.000Z"
+      }
+    },
+    {
+      "name": "ttl-over-maximum-safe-integer",
+      "valid": false,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "registration_mutex",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "mutexId": "mutex-golden",
+        "owner": {
+          "ownerId": "owner-golden",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "acquiredAt": "2026-07-14T12:00:00.000Z",
+        "expiresAt": "2026-07-14T12:00:05.000Z",
+        "ttlMs": 9007199254740992
+      }
+    },
+    {
+      "name": "maximum-u32-process-id",
+      "valid": true,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "registration_mutex",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "mutexId": "mutex-golden",
+        "owner": {
+          "ownerId": "owner-golden",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 4294967295,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "acquiredAt": "2026-07-14T12:00:00.000Z",
+        "expiresAt": "2026-07-14T12:00:05.000Z",
+        "ttlMs": 5000
+      }
+    },
+    {
+      "name": "process-id-over-u32",
+      "valid": false,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "registration_mutex",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "mutexId": "mutex-golden",
+        "owner": {
+          "ownerId": "owner-golden",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 4294967296,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "acquiredAt": "2026-07-14T12:00:00.000Z",
+        "expiresAt": "2026-07-14T12:00:05.000Z",
+        "ttlMs": 5000
+      }
+    },
+    {
+      "name": "invalid-iso-calendar-date",
+      "valid": false,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "registration_mutex",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "mutexId": "mutex-golden",
+        "owner": {
+          "ownerId": "owner-golden",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "acquiredAt": "2026-02-30T12:00:00.000Z",
+        "expiresAt": "2026-07-14T12:00:05.000Z",
+        "ttlMs": 5000
+      }
+    },
+    {
+      "name": "identifier-exactly-128-utf8-bytes",
+      "valid": true,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "registration_mutex",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "mutexId": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+        "owner": {
+          "ownerId": "owner-golden",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "acquiredAt": "2026-07-14T12:00:00.000Z",
+        "expiresAt": "2026-07-14T12:00:05.000Z",
+        "ttlMs": 5000
+      }
+    },
+    {
+      "name": "identifier-over-128-utf8-bytes",
+      "valid": false,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "registration_mutex",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "mutexId": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+        "owner": {
+          "ownerId": "owner-golden",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "acquiredAt": "2026-07-14T12:00:00.000Z",
+        "expiresAt": "2026-07-14T12:00:05.000Z",
+        "ttlMs": 5000
+      }
+    }
+  ]
+}

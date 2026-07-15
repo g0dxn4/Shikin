@@ -30,7 +30,7 @@ Automation context source inventory (kept here so future maintainers can audit e
 - recurring: direct `get-recurring-expected-vs-paid` tool execute from `cli/src/tools/recurring.ts` for the next 30 days (no CLI shell).
 - support.goals: SQL `SELECT g.id, g.name, g.target_amount, g.current_amount, g.deadline, g.account_id, g.notes, a.name AS account_name FROM goals g LEFT JOIN accounts a ON a.id = g.account_id ORDER BY g.deadline IS NULL ASC, g.deadline ASC, g.name ASC, g.id ASC`; mirrors existing `get-goal-status` table shape without invoking CLI. Display rows are capped after summaries are computed.
 - support.debt: SQL `SELECT id, name, currency, balance, credit_limit, statement_closing_day, payment_due_day FROM accounts WHERE type = 'credit_card' AND is_archived = 0 AND balance < 0 ORDER BY ABS(balance) DESC, name ASC, id ASC`; mirrors existing `get-debt-payoff-plan` source and its no-APR limitation.
-- support.investments: SQL `SELECT id, account_id, symbol, name, type, shares, avg_cost_basis, currency, notes FROM investments ORDER BY symbol ASC, id ASC`; no investment feature expansion or price fetching; discoverability points to existing `manage-investment` and `generate-portfolio-review` tools. Display rows are capped after summaries are computed.
+- support.investments: SQL `SELECT id, account_id, symbol, name, type, shares, avg_cost_basis, currency, notes FROM investments ORDER BY symbol ASC, id ASC`; no investment feature expansion or price fetching; discoverability points to `list-investments`, `manage-investment`, and `generate-portfolio-review` tools. Display rows are capped after summaries are computed.
 - recentAuditEntries: SQL `SELECT id, entity, entity_id, action, before_json, after_json, source, note, created_at FROM audit_log ORDER BY created_at DESC, id DESC LIMIT $1` via the shared audit formatter in this module.
 */
 
@@ -213,7 +213,11 @@ const SANITY_DEFAULT_LIMIT = 25
 const SANITY_DEFAULT_LARGE_TRANSACTION = 1000
 const GOAL_SUPPORT_TOOLS = ['create-goal', 'update-goal', 'get-goal-status'] as const
 const DEBT_SUPPORT_TOOLS = ['get-debt-payoff-plan'] as const
-const INVESTMENT_SUPPORT_TOOLS = ['manage-investment', 'generate-portfolio-review'] as const
+const INVESTMENT_SUPPORT_TOOLS = [
+  'list-investments',
+  'manage-investment',
+  'generate-portfolio-review',
+] as const
 const REDACTED_VALUE = '[REDACTED]'
 const REDACTED_KEY_PATTERN =
   /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key|name|title|description|notes?|source|url|value|summary|memo|content|pattern|tags|path|file|before_json|after_json)/i
@@ -997,6 +1001,7 @@ function getInvestmentSupport(redacted: boolean, warnings: ContextWarning[]) {
   const costBasisTotals = new Map<string, number>()
   const countByType = new Map<string, number>()
   const availableTools = [
+    'list-investments',
     'manage-investment',
     ...(stockPricesAvailable ? ['generate-portfolio-review'] : []),
   ]

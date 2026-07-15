@@ -3,6 +3,7 @@
 import { pathToFileURL } from 'node:url'
 import { Command } from 'commander'
 import { COMMAND_CATALOG_VERSION } from './contracts.js'
+import { APPLICATION_VERSION } from './version.js'
 import { tools, type ToolDefinition } from './tools.js'
 import { close, query } from './database.js'
 import {
@@ -41,7 +42,7 @@ type DescribedOption = ReturnType<typeof zodToOptions>[number] & {
 
 const OUTPUT_OPTION_KEYS = new Set(['json', 'pretty', 'quiet', 'redacted'])
 const SENSITIVE_KEY_PATTERN =
-  /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key|payer|project[_-]?reference|invoice[_-]?reference)/i
+  /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key|payer|project[_-]?reference|invoice[_-]?reference|notes?|description|source|account[_-]?name)/i
 
 function addOutputOptions(cmd: Command, options: { includeRedacted?: boolean } = {}): Command {
   const withBaseOptions = cmd
@@ -1906,7 +1907,7 @@ export function createProgram(toolDefinitions: ToolDefinition[] = tools): Comman
   const program = new Command()
     .name('shikin')
     .description('Shikin — control your finances from the command line')
-    .version('1.0.10')
+    .version(APPLICATION_VERSION)
 
   addOutputOptions(
     program

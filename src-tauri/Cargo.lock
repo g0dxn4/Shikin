@@ -4093,9 +4093,12 @@ name = "shikin"
 version = "1.0.10"
 dependencies = [
  "dirs",
+ "getrandom 0.3.4",
+ "libc",
  "log",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "tauri",
  "tauri-build",
@@ -4107,7 +4110,11 @@ dependencies = [
  "tauri-plugin-sql",
  "tauri-plugin-store",
  "tauri-plugin-updater",
+ "tempfile",
+ "time",
  "tokio",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

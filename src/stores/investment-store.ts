@@ -25,12 +25,22 @@ export interface InvestmentWithPrice extends Investment {
   lastPriceDate: string | null
 }
 
+interface CurrencyBreakdown {
+  marketValue: number
+  costBasis: number
+  gainLoss: number
+  count: number
+}
+
 interface PortfolioSummary {
   totalMarketValue: number
   totalCostBasis: number
   totalGainLoss: number
   totalGainLossPercent: number
   byType: Record<string, { marketValue: number; gainLoss: number; count: number }>
+  byCurrency: Record<string, CurrencyBreakdown>
+  currencies: string[]
+  isMixedCurrency: boolean
 }
 
 interface PricePoint {
@@ -63,6 +73,9 @@ const EMPTY_SUMMARY: PortfolioSummary = {
   totalGainLoss: 0,
   totalGainLossPercent: 0,
   byType: {},
+  byCurrency: {},
+  currencies: [],
+  isMixedCurrency: false,
 }
 
 export const useInvestmentStore = create<InvestmentState>((set, get) => ({
@@ -245,6 +258,7 @@ export const useInvestmentStore = create<InvestmentState>((set, get) => ({
     let totalMarketValue = 0
     let totalCostBasis = 0
     const byType: PortfolioSummary['byType'] = {}
+    const byCurrency: PortfolioSummary['byCurrency'] = {}
 
     for (const inv of investments) {
       const costBasis = Math.round(inv.shares * inv.avg_cost_basis)
@@ -260,11 +274,22 @@ export const useInvestmentStore = create<InvestmentState>((set, get) => ({
       byType[inv.type].marketValue += marketValue
       byType[inv.type].gainLoss += gainLoss
       byType[inv.type].count += 1
+
+      if (!byCurrency[inv.currency]) {
+        byCurrency[inv.currency] = { marketValue: 0, costBasis: 0, gainLoss: 0, count: 0 }
+      }
+      byCurrency[inv.currency].marketValue += marketValue
+      byCurrency[inv.currency].costBasis += costBasis
+      byCurrency[inv.currency].gainLoss += gainLoss
+      byCurrency[inv.currency].count += 1
     }
 
     const totalGainLoss = totalMarketValue - totalCostBasis
     const totalGainLossPercent =
       totalCostBasis > 0 ? Math.round((totalGainLoss / totalCostBasis) * 10000) / 100 : 0
+
+    const currencies = Object.keys(byCurrency).sort()
+    const isMixedCurrency = currencies.length > 1
 
     set({
       portfolioSummary: {
@@ -273,6 +298,9 @@ export const useInvestmentStore = create<InvestmentState>((set, get) => ({
         totalGainLoss,
         totalGainLossPercent,
         byType,
+        byCurrency,
+        currencies,
+        isMixedCurrency,
       },
     })
   },

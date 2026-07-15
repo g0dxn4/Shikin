@@ -1,0 +1,4562 @@
+{
+  "contractVersion": 1,
+  "latestMigration": "019_financial_semantics",
+  "migrationNames": [
+    "001_core_tables",
+    "003_credit_cards",
+    "004_category_rules",
+    "005_recurring_rules",
+    "006_goals",
+    "007_recaps",
+    "010_transaction_splits",
+    "011_net_worth_snapshots",
+    "012_account_balance_history",
+    "013_recurring_rules_currency",
+    "014_recurring_rules_currency_backfill",
+    "015_primary_account",
+    "016_cli_qol_foundation",
+    "017_investment_type_cetes",
+    "018_placeholder_transactions",
+    "019_financial_semantics"
+  ],
+  "migrationSqlFiles": [
+    "001_core_tables",
+    "003_credit_cards",
+    "011_net_worth_snapshots",
+    "015_primary_account",
+    "017_investment_type_cetes",
+    "018_placeholder_transactions",
+    "019_financial_semantics"
+  ],
+  "migrationSchemaObjects": {
+    "001_core_tables": {
+      "indexes": [
+        "idx_budget_periods_budget",
+        "idx_exchange_rates_currencies",
+        "idx_extension_data_extension",
+        "idx_investments_account",
+        "idx_investments_symbol",
+        "idx_stock_prices_symbol_date",
+        "idx_subcategories_category",
+        "idx_transactions_account",
+        "idx_transactions_category",
+        "idx_transactions_date",
+        "idx_transactions_type"
+      ],
+      "triggers": [],
+      "views": []
+    },
+    "003_credit_cards": {
+      "indexes": [],
+      "triggers": [],
+      "views": []
+    },
+    "011_net_worth_snapshots": {
+      "indexes": ["idx_net_worth_snapshots_date"],
+      "triggers": [],
+      "views": []
+    },
+    "015_primary_account": {
+      "indexes": [],
+      "triggers": [],
+      "views": []
+    },
+    "017_investment_type_cetes": {
+      "indexes": ["idx_investments_account", "idx_investments_symbol"],
+      "triggers": [],
+      "views": []
+    },
+    "018_placeholder_transactions": {
+      "indexes": [
+        "idx_transactions_placeholder_parent",
+        "idx_transactions_placeholder_resolved_by",
+        "idx_transactions_placeholder_status"
+      ],
+      "triggers": [],
+      "views": []
+    },
+    "019_financial_semantics": {
+      "indexes": [
+        "idx_accounts_mode",
+        "idx_receivables_status_due",
+        "idx_receivables_transaction",
+        "idx_receivables_transaction_unique",
+        "idx_reconciliations_account_date",
+        "idx_reconciliations_adjustment_unique",
+        "idx_reconciliations_batch",
+        "idx_reconciliations_batch_unique",
+        "idx_transactions_ledger_treatment",
+        "idx_transactions_matched",
+        "idx_transactions_matched_unique",
+        "idx_transactions_reconciliation",
+        "idx_transactions_reconciliation_unique",
+        "idx_transactions_reporting_treatment",
+        "idx_transactions_staging_batch"
+      ],
+      "triggers": [
+        "trg_accounts_snapshot_mode_update",
+        "trg_transactions_no_self_match_insert",
+        "trg_transactions_no_self_match_update",
+        "trg_transactions_snapshot_account_insert",
+        "trg_transactions_snapshot_account_update"
+      ],
+      "views": []
+    }
+  },
+  "readiness": {
+    "gui": {
+      "importMinimumTables": {
+        "_migrations": ["id", "name"],
+        "accounts": ["id", "name", "balance"],
+        "categories": ["id", "name", "type"],
+        "transactions": ["id", "account_id", "type", "amount", "date"]
+      },
+      "currentTables": {
+        "_migrations": ["id", "name", "applied_at"],
+        "accounts": [
+          "id",
+          "name",
+          "type",
+          "currency",
+          "balance",
+          "is_archived",
+          "is_primary",
+          "credit_limit",
+          "statement_closing_day",
+          "payment_due_day",
+          "account_mode"
+        ],
+        "categories": ["id", "name", "type", "sort_order"],
+        "subcategories": ["id", "category_id", "name"],
+        "transactions": [
+          "id",
+          "account_id",
+          "type",
+          "amount",
+          "date",
+          "status",
+          "source",
+          "note",
+          "recurring_rule_id",
+          "is_placeholder",
+          "placeholder_status",
+          "resolved_at",
+          "resolved_by_transaction_id",
+          "placeholder_reason",
+          "placeholder_parent_transaction_id",
+          "ledger_treatment",
+          "reporting_treatment",
+          "transaction_kind",
+          "staging_batch_id",
+          "reconciliation_id",
+          "matched_transaction_id",
+          "is_archived"
+        ],
+        "subscriptions": ["id", "name", "amount", "billing_cycle", "next_billing_date"],
+        "budgets": ["id", "name", "amount", "period"],
+        "budget_periods": ["id", "budget_id", "start_date", "end_date", "spent"],
+        "investments": ["id", "symbol", "name", "type", "shares"],
+        "stock_prices": ["id", "symbol", "price", "date"],
+        "exchange_rates": ["id", "from_currency", "to_currency", "rate", "date"],
+        "settings": ["key", "value", "updated_at"],
+        "extension_data": ["id", "extension_id", "key", "value"],
+        "category_rules": ["id", "pattern", "category_id"],
+        "recurring_rules": ["id", "description", "amount", "currency", "account_id", "next_date"],
+        "goals": ["id", "name", "target_amount", "current_amount"],
+        "recaps": ["id", "type", "period_start", "period_end", "summary"],
+        "transaction_splits": ["id", "transaction_id", "amount"],
+        "net_worth_snapshots": ["id", "date", "net_worth"],
+        "account_balance_history": ["id", "account_id", "date", "balance"],
+        "audit_log": [
+          "id",
+          "entity",
+          "entity_id",
+          "action",
+          "before_json",
+          "after_json",
+          "source",
+          "note",
+          "created_at"
+        ],
+        "cashflow_buckets": [
+          "id",
+          "name",
+          "description",
+          "target_amount",
+          "balance",
+          "currency",
+          "sort_order",
+          "is_active",
+          "created_at",
+          "updated_at"
+        ],
+        "cashflow_bucket_allocations": [
+          "id",
+          "bucket_id",
+          "transaction_id",
+          "amount",
+          "currency",
+          "allocation_date",
+          "source",
+          "note",
+          "created_at"
+        ],
+        "category_suggestions": [
+          "id",
+          "transaction_id",
+          "description",
+          "suggested_category_id",
+          "suggested_subcategory_id",
+          "confidence",
+          "status",
+          "source",
+          "note",
+          "created_at",
+          "reviewed_at"
+        ],
+        "credit_card_statements": [
+          "id",
+          "account_id",
+          "statement_start_date",
+          "statement_end_date",
+          "due_date",
+          "statement_balance",
+          "minimum_payment",
+          "paid_amount",
+          "currency",
+          "status",
+          "source",
+          "note",
+          "created_at",
+          "updated_at"
+        ],
+        "account_reconciliations": [
+          "id",
+          "account_id",
+          "reconciliation_date",
+          "actual_balance",
+          "stored_balance_before",
+          "ledger_balance_before",
+          "ledger_balance_after",
+          "adjustment_amount",
+          "adjustment_transaction_id",
+          "staging_batch_id",
+          "statement_start_date",
+          "statement_end_date",
+          "source",
+          "note",
+          "created_at"
+        ],
+        "receivables": [
+          "id",
+          "payer",
+          "amount",
+          "received_amount",
+          "currency",
+          "due_date",
+          "project_reference",
+          "invoice_reference",
+          "status",
+          "account_id",
+          "matched_transaction_id",
+          "notes",
+          "source",
+          "note",
+          "created_at",
+          "updated_at"
+        ]
+      }
+    },
+    "dataServer": {
+      "currentTables": {
+        "_migrations": ["id", "name", "applied_at"],
+        "accounts": [
+          "id",
+          "name",
+          "type",
+          "currency",
+          "balance",
+          "is_archived",
+          "is_primary",
+          "credit_limit",
+          "statement_closing_day",
+          "payment_due_day",
+          "account_mode"
+        ],
+        "categories": ["id", "name", "type", "sort_order"],
+        "subcategories": ["id", "category_id", "name"],
+        "transactions": [
+          "id",
+          "account_id",
+          "type",
+          "amount",
+          "date",
+          "status",
+          "source",
+          "note",
+          "recurring_rule_id",
+          "is_placeholder",
+          "placeholder_status",
+          "resolved_at",
+          "resolved_by_transaction_id",
+          "placeholder_reason",
+          "placeholder_parent_transaction_id",
+          "ledger_treatment",
+          "reporting_treatment",
+          "transaction_kind",
+          "staging_batch_id",
+          "reconciliation_id",
+          "matched_transaction_id",
+          "is_archived"
+        ],
+        "subscriptions": ["id", "name", "amount", "billing_cycle", "next_billing_date"],
+        "budgets": ["id", "name", "amount", "period"],
+        "budget_periods": ["id", "budget_id", "start_date", "end_date", "spent"],
+        "investments": ["id", "symbol", "name", "type", "shares"],
+        "stock_prices": ["id", "symbol", "price", "date"],
+        "exchange_rates": ["id", "from_currency", "to_currency", "rate", "date"],
+        "settings": ["key", "value", "updated_at"],
+        "extension_data": ["id", "extension_id", "key", "value"],
+        "category_rules": ["id", "pattern", "category_id"],
+        "recurring_rules": ["id", "description", "amount", "currency", "account_id", "next_date"],
+        "goals": ["id", "name", "target_amount", "current_amount"],
+        "recaps": ["id", "type", "period_start", "period_end", "summary"],
+        "transaction_splits": ["id", "transaction_id", "amount"],
+        "net_worth_snapshots": ["id", "date", "net_worth"],
+        "account_balance_history": ["id", "account_id", "date", "balance"],
+        "audit_log": [
+          "id",
+          "entity",
+          "entity_id",
+          "action",
+          "before_json",
+          "after_json",
+          "source",
+          "note",
+          "created_at"
+        ],
+        "cashflow_buckets": [
+          "id",
+          "name",
+          "description",
+          "target_amount",
+          "balance",
+          "currency",
+          "sort_order",
+          "is_active",
+          "created_at",
+          "updated_at"
+        ],
+        "cashflow_bucket_allocations": [
+          "id",
+          "bucket_id",
+          "transaction_id",
+          "amount",
+          "currency",
+          "allocation_date",
+          "source",
+          "note",
+          "created_at"
+        ],
+        "category_suggestions": [
+          "id",
+          "transaction_id",
+          "description",
+          "suggested_category_id",
+          "suggested_subcategory_id",
+          "confidence",
+          "status",
+          "source",
+          "note",
+          "created_at",
+          "reviewed_at"
+        ],
+        "credit_card_statements": [
+          "id",
+          "account_id",
+          "statement_start_date",
+          "statement_end_date",
+          "due_date",
+          "statement_balance",
+          "minimum_payment",
+          "paid_amount",
+          "currency",
+          "status",
+          "source",
+          "note",
+          "created_at",
+          "updated_at"
+        ],
+        "account_reconciliations": [
+          "id",
+          "account_id",
+          "reconciliation_date",
+          "actual_balance",
+          "stored_balance_before",
+          "ledger_balance_before",
+          "ledger_balance_after",
+          "adjustment_amount",
+          "adjustment_transaction_id",
+          "staging_batch_id",
+          "statement_start_date",
+          "statement_end_date",
+          "source",
+          "note",
+          "created_at"
+        ],
+        "receivables": [
+          "id",
+          "payer",
+          "amount",
+          "received_amount",
+          "currency",
+          "due_date",
+          "project_reference",
+          "invoice_reference",
+          "status",
+          "account_id",
+          "matched_transaction_id",
+          "notes",
+          "source",
+          "note",
+          "created_at",
+          "updated_at"
+        ]
+      }
+    },
+    "cli": {
+      "coreTables": ["_migrations", "accounts", "categories", "transactions", "settings"],
+      "coreColumns": {
+        "_migrations": ["id", "name", "applied_at"]
+      },
+      "cliQolColumns": {
+        "accounts": ["account_mode"],
+        "settings": ["key", "value", "updated_at"],
+        "transactions": [
+          "status",
+          "source",
+          "note",
+          "recurring_rule_id",
+          "is_placeholder",
+          "placeholder_status",
+          "resolved_at",
+          "resolved_by_transaction_id",
+          "placeholder_reason",
+          "placeholder_parent_transaction_id",
+          "ledger_treatment",
+          "reporting_treatment",
+          "transaction_kind",
+          "staging_batch_id",
+          "reconciliation_id",
+          "matched_transaction_id",
+          "is_archived"
+        ],
+        "audit_log": [
+          "id",
+          "entity",
+          "entity_id",
+          "action",
+          "before_json",
+          "after_json",
+          "source",
+          "note",
+          "created_at"
+        ],
+        "cashflow_buckets": [
+          "id",
+          "name",
+          "description",
+          "target_amount",
+          "balance",
+          "currency",
+          "sort_order",
+          "is_active",
+          "created_at",
+          "updated_at"
+        ],
+        "cashflow_bucket_allocations": [
+          "id",
+          "bucket_id",
+          "transaction_id",
+          "amount",
+          "currency",
+          "allocation_date",
+          "source",
+          "note",
+          "created_at"
+        ],
+        "category_suggestions": [
+          "id",
+          "transaction_id",
+          "description",
+          "suggested_category_id",
+          "suggested_subcategory_id",
+          "confidence",
+          "status",
+          "source",
+          "note",
+          "created_at",
+          "reviewed_at"
+        ],
+        "credit_card_statements": [
+          "id",
+          "account_id",
+          "statement_start_date",
+          "statement_end_date",
+          "due_date",
+          "statement_balance",
+          "minimum_payment",
+          "paid_amount",
+          "currency",
+          "status",
+          "source",
+          "note",
+          "created_at",
+          "updated_at"
+        ],
+        "account_reconciliations": [
+          "id",
+          "account_id",
+          "reconciliation_date",
+          "actual_balance",
+          "stored_balance_before",
+          "ledger_balance_before",
+          "ledger_balance_after",
+          "adjustment_amount",
+          "adjustment_transaction_id",
+          "staging_batch_id",
+          "statement_start_date",
+          "statement_end_date",
+          "source",
+          "note",
+          "created_at"
+        ],
+        "receivables": [
+          "id",
+          "payer",
+          "amount",
+          "received_amount",
+          "currency",
+          "due_date",
+          "project_reference",
+          "invoice_reference",
+          "status",
+          "account_id",
+          "matched_transaction_id",
+          "notes",
+          "source",
+          "note",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "creditCardColumns": ["credit_limit", "statement_closing_day", "payment_due_day"]
+    }
+  },
+  "currentSchema": {
+    "tables": [
+      {
+        "schema": "main",
+        "name": "_migrations",
+        "type": "table",
+        "sql": "create table _migrations ( id integer primary key , name text not null unique , applied_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "INTEGER",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "name",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "applied_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 3,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex__migrations_1",
+            "unique": true,
+            "origin": "u",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 1,
+                "name": "name",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "account_balance_history",
+        "type": "table",
+        "sql": "create table account_balance_history ( id text primary key , account_id text not null references accounts ( id ) on delete cascade , date text not null , balance integer not null , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "account_id",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "date",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "balance",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 5,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_account_balance_history_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "account_reconciliations",
+        "type": "table",
+        "sql": "create table account_reconciliations ( id text primary key , account_id text not null references accounts ( id ) on delete cascade , reconciliation_date text not null , actual_balance integer not null , stored_balance_before integer not null , ledger_balance_before integer not null , ledger_balance_after integer not null , adjustment_amount integer not null , adjustment_transaction_id text references transactions ( id ) on delete restrict , staging_batch_id text , statement_start_date text , statement_end_date text , source text , note text , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "account_id",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "reconciliation_date",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "actual_balance",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "stored_balance_before",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "ledger_balance_before",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 6,
+            "name": "ledger_balance_after",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 7,
+            "name": "adjustment_amount",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 8,
+            "name": "adjustment_transaction_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 9,
+            "name": "staging_batch_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 10,
+            "name": "statement_start_date",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 11,
+            "name": "statement_end_date",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 12,
+            "name": "source",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 13,
+            "name": "note",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 14,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 15,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_account_reconciliations_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "accounts",
+        "type": "table",
+        "sql": "create table accounts ( id text primary key , name text not null , type text not null check ( type in ( 'checking' , 'savings' , 'credit_card' , 'cash' , 'investment' , 'crypto' , 'other' ) ) , currency text not null default 'USD' , balance integer not null default 0 , icon text , color text , is_archived integer not null default 0 , is_primary integer not null default 0 , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , updated_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , credit_limit integer , statement_closing_day integer , payment_due_day integer , account_mode text not null default 'transactional' check ( account_mode in ( 'transactional' , 'snapshot_only' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "name",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "type",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "currency",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "'USD'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "balance",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "icon",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 6,
+            "name": "color",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 7,
+            "name": "is_archived",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 8,
+            "name": "is_primary",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 9,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 10,
+            "name": "updated_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 11,
+            "name": "credit_limit",
+            "type": "INTEGER",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 12,
+            "name": "statement_closing_day",
+            "type": "INTEGER",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 13,
+            "name": "payment_due_day",
+            "type": "INTEGER",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 14,
+            "name": "account_mode",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "'transactional'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 15,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_accounts_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "audit_log",
+        "type": "table",
+        "sql": "create table audit_log ( id text primary key , entity text not null , entity_id text , action text not null , before_json text , after_json text , source text , note text , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "entity",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "entity_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "action",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "before_json",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "after_json",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 6,
+            "name": "source",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 7,
+            "name": "note",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 8,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 9,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_audit_log_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "budget_periods",
+        "type": "table",
+        "sql": "create table budget_periods ( id text primary key , budget_id text not null references budgets ( id ) on delete cascade , start_date text not null , end_date text not null , spent integer not null default 0 , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "budget_id",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "start_date",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "end_date",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "spent",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 6,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_budget_periods_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "budgets",
+        "type": "table",
+        "sql": "create table budgets ( id text primary key , category_id text references categories ( id ) on delete cascade , name text not null , amount integer not null , period text not null check ( period in ( 'weekly' , 'monthly' , 'yearly' ) ) , is_active integer not null default 1 , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , updated_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "category_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "name",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "amount",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "period",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "is_active",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 6,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 7,
+            "name": "updated_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 8,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_budgets_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "cashflow_bucket_allocations",
+        "type": "table",
+        "sql": "create table cashflow_bucket_allocations ( id text primary key , bucket_id text not null references cashflow_buckets ( id ) on delete cascade , transaction_id text references transactions ( id ) on delete set null , amount integer not null , currency text not null default 'USD' , allocation_date text not null , source text , note text , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "bucket_id",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "transaction_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "amount",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "currency",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "'USD'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "allocation_date",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 6,
+            "name": "source",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 7,
+            "name": "note",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 8,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 9,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_cashflow_bucket_allocations_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "cashflow_buckets",
+        "type": "table",
+        "sql": "create table cashflow_buckets ( id text primary key , name text not null unique , description text , target_amount integer , balance integer not null default 0 , currency text not null default 'USD' , sort_order integer not null default 0 , is_active integer not null default 1 , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , updated_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "name",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "description",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "target_amount",
+            "type": "INTEGER",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "balance",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "currency",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "'USD'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 6,
+            "name": "sort_order",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 7,
+            "name": "is_active",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 8,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 9,
+            "name": "updated_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 10,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_cashflow_buckets_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          },
+          {
+            "name": "sqlite_autoindex_cashflow_buckets_2",
+            "unique": true,
+            "origin": "u",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 1,
+                "name": "name",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "categories",
+        "type": "table",
+        "sql": "create table categories ( id text primary key , name text not null unique , icon text , color text , type text not null check ( type in ( 'expense' , 'income' , 'transfer' ) ) , sort_order integer not null default 0 , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "name",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "icon",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "color",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "type",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "sort_order",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 6,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 7,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_categories_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          },
+          {
+            "name": "sqlite_autoindex_categories_2",
+            "unique": true,
+            "origin": "u",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 1,
+                "name": "name",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "category_rules",
+        "type": "table",
+        "sql": "create table category_rules ( id text primary key , pattern text not null , category_id text not null references categories ( id ) on delete cascade , subcategory_id text references subcategories ( id ) on delete set null , confidence real not null default 1 . 0 , hit_count integer not null default 0 , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , updated_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "pattern",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "category_id",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "subcategory_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "confidence",
+            "type": "REAL",
+            "notNull": true,
+            "defaultValue": "1 . 0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "hit_count",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 6,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 7,
+            "name": "updated_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 8,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_category_rules_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "category_suggestions",
+        "type": "table",
+        "sql": "create table category_suggestions ( id text primary key , transaction_id text references transactions ( id ) on delete set null , description text not null , suggested_category_id text references categories ( id ) on delete set null , suggested_subcategory_id text references subcategories ( id ) on delete set null , confidence real not null default 0 , status text not null default 'pending' check ( status in ( 'pending' , 'approved' , 'rejected' ) ) , source text , note text , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , reviewed_at text )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "transaction_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "description",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "suggested_category_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "suggested_subcategory_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "confidence",
+            "type": "REAL",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 6,
+            "name": "status",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "'pending'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 7,
+            "name": "source",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 8,
+            "name": "note",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 9,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 10,
+            "name": "reviewed_at",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 11,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_category_suggestions_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "credit_card_statements",
+        "type": "table",
+        "sql": "create table credit_card_statements ( id text primary key , account_id text not null references accounts ( id ) on delete cascade , statement_start_date text , statement_end_date text not null , due_date text not null , statement_balance integer not null default 0 , minimum_payment integer not null default 0 , paid_amount integer not null default 0 , currency text not null default 'USD' , status text not null default 'open' check ( status in ( 'open' , 'partial' , 'paid' , 'overdue' ) ) , source text , note text , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , updated_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "account_id",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "statement_start_date",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "statement_end_date",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "due_date",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "statement_balance",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 6,
+            "name": "minimum_payment",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 7,
+            "name": "paid_amount",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 8,
+            "name": "currency",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "'USD'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 9,
+            "name": "status",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "'open'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 10,
+            "name": "source",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 11,
+            "name": "note",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 12,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 13,
+            "name": "updated_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 14,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_credit_card_statements_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "exchange_rates",
+        "type": "table",
+        "sql": "create table exchange_rates ( id text primary key , from_currency text not null , to_currency text not null , rate real not null , date text not null , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , unique ( from_currency , to_currency , date ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "from_currency",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "to_currency",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "rate",
+            "type": "REAL",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "date",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 6,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_exchange_rates_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          },
+          {
+            "name": "sqlite_autoindex_exchange_rates_2",
+            "unique": true,
+            "origin": "u",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 1,
+                "name": "from_currency",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": 2,
+                "name": "to_currency",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 2,
+                "columnId": 4,
+                "name": "date",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 3,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "extension_data",
+        "type": "table",
+        "sql": "create table extension_data ( id text primary key , extension_id text not null , key text not null , value text not null , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , updated_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , unique ( extension_id , key ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "extension_id",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "key",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "value",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "updated_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 6,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_extension_data_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          },
+          {
+            "name": "sqlite_autoindex_extension_data_2",
+            "unique": true,
+            "origin": "u",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 1,
+                "name": "extension_id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": 2,
+                "name": "key",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 2,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "goals",
+        "type": "table",
+        "sql": "create table goals ( id text primary key , name text not null , target_amount integer not null , current_amount integer not null default 0 , deadline text , account_id text references accounts ( id ) , icon text default '🎯' , color text default '#bf5af2' , notes text , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , updated_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "name",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "target_amount",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "current_amount",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "deadline",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "account_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 6,
+            "name": "icon",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": "'🎯'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 7,
+            "name": "color",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": "'#bf5af2'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 8,
+            "name": "notes",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 9,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 10,
+            "name": "updated_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 11,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_goals_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "investments",
+        "type": "table",
+        "sql": "create table investments ( id text primary key , account_id text references accounts ( id ) on delete set null , symbol text not null , name text not null , type text not null check ( type in ( 'stock' , 'etf' , 'crypto' , 'bond' , 'mutual_fund' , 'cetes' , 'other' ) ) , shares real not null default 0 , avg_cost_basis integer not null default 0 , currency text not null default 'USD' , notes text , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , updated_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "account_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "symbol",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "name",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "type",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "shares",
+            "type": "REAL",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 6,
+            "name": "avg_cost_basis",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 7,
+            "name": "currency",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "'USD'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 8,
+            "name": "notes",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 9,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 10,
+            "name": "updated_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 11,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_investments_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "net_worth_snapshots",
+        "type": "table",
+        "sql": "create table net_worth_snapshots ( id text primary key , date text not null , total_assets integer not null default 0 , total_liabilities integer not null default 0 , net_worth integer not null default 0 , total_investments integer not null default 0 , breakdown_json text not null default '{}' , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "date",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "total_assets",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "total_liabilities",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "net_worth",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "total_investments",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 6,
+            "name": "breakdown_json",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "'{}'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 7,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 8,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_net_worth_snapshots_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "recaps",
+        "type": "table",
+        "sql": "create table recaps ( id text primary key , type text not null check ( type in ( 'weekly' , 'monthly' ) ) , period_start text not null , period_end text not null , title text not null , summary text not null , highlights_json text not null default '[]' , generated_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "type",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "period_start",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "period_end",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "title",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "summary",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 6,
+            "name": "highlights_json",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "'[]'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 7,
+            "name": "generated_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 8,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_recaps_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "receivables",
+        "type": "table",
+        "sql": "create table receivables ( id text primary key , payer text not null , amount integer not null check ( amount > 0 ) , received_amount integer not null default 0 check ( received_amount >= 0 and received_amount <= amount ) , currency text not null default 'USD' , due_date text not null , project_reference text , invoice_reference text , status text not null default 'open' check ( status in ( 'open' , 'partial' , 'received' , 'cancelled' ) ) , account_id text references accounts ( id ) on delete set null , matched_transaction_id text references transactions ( id ) on delete restrict , notes text , source text , note text , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , updated_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "payer",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "amount",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "received_amount",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "currency",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "'USD'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "due_date",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 6,
+            "name": "project_reference",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 7,
+            "name": "invoice_reference",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 8,
+            "name": "status",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "'open'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 9,
+            "name": "account_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 10,
+            "name": "matched_transaction_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 11,
+            "name": "notes",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 12,
+            "name": "source",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 13,
+            "name": "note",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 14,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 15,
+            "name": "updated_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 16,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_receivables_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "recurring_rules",
+        "type": "table",
+        "sql": "create table recurring_rules ( id text primary key , description text not null , amount integer not null , type text not null check ( type in ( 'expense' , 'income' , 'transfer' ) ) , frequency text not null check ( frequency in ( 'daily' , 'weekly' , 'biweekly' , 'monthly' , 'quarterly' , 'yearly' ) ) , next_date text not null , end_date text , account_id text not null references accounts ( id ) , to_account_id text references accounts ( id ) , category_id text references categories ( id ) , subcategory_id text references subcategories ( id ) , tags text default '' , notes text , active integer default 1 , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , updated_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , currency text )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "description",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "amount",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "type",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "frequency",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "next_date",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 6,
+            "name": "end_date",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 7,
+            "name": "account_id",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 8,
+            "name": "to_account_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 9,
+            "name": "category_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 10,
+            "name": "subcategory_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 11,
+            "name": "tags",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": "''",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 12,
+            "name": "notes",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 13,
+            "name": "active",
+            "type": "INTEGER",
+            "notNull": false,
+            "defaultValue": "1",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 14,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 15,
+            "name": "updated_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 16,
+            "name": "currency",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 17,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_recurring_rules_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "settings",
+        "type": "table",
+        "sql": "create table settings ( key text primary key , value text not null , updated_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "key",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "value",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "updated_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 3,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_settings_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "key",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "stock_prices",
+        "type": "table",
+        "sql": "create table stock_prices ( id text primary key , symbol text not null , price integer not null , currency text not null default 'USD' , date text not null , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , unique ( symbol , date ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "symbol",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "price",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "currency",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "'USD'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "date",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 6,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_stock_prices_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          },
+          {
+            "name": "sqlite_autoindex_stock_prices_2",
+            "unique": true,
+            "origin": "u",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 1,
+                "name": "symbol",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": 4,
+                "name": "date",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 2,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "subcategories",
+        "type": "table",
+        "sql": "create table subcategories ( id text primary key , category_id text not null references categories ( id ) on delete cascade , name text not null , icon text , sort_order integer not null default 0 , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , unique ( category_id , name ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "category_id",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "name",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "icon",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "sort_order",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 6,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_subcategories_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          },
+          {
+            "name": "sqlite_autoindex_subcategories_2",
+            "unique": true,
+            "origin": "u",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 1,
+                "name": "category_id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": 2,
+                "name": "name",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 2,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "subscriptions",
+        "type": "table",
+        "sql": "create table subscriptions ( id text primary key , account_id text references accounts ( id ) on delete set null , category_id text references categories ( id ) on delete set null , name text not null , amount integer not null , currency text not null default 'USD' , billing_cycle text not null check ( billing_cycle in ( 'weekly' , 'monthly' , 'quarterly' , 'yearly' ) ) , next_billing_date text not null , icon text , color text , url text , notes text , is_active integer not null default 1 , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , updated_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "account_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "category_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "name",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "amount",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "currency",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "'USD'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 6,
+            "name": "billing_cycle",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 7,
+            "name": "next_billing_date",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 8,
+            "name": "icon",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 9,
+            "name": "color",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 10,
+            "name": "url",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 11,
+            "name": "notes",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 12,
+            "name": "is_active",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 13,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 14,
+            "name": "updated_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 15,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_subscriptions_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "transaction_splits",
+        "type": "table",
+        "sql": "create table transaction_splits ( id text primary key , transaction_id text not null references transactions ( id ) on delete cascade , category_id text not null references categories ( id ) , subcategory_id text references subcategories ( id ) , amount integer not null , notes text , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "transaction_id",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "category_id",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "subcategory_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "amount",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "notes",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 6,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 7,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_transaction_splits_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "schema": "main",
+        "name": "transactions",
+        "type": "table",
+        "sql": "create table transactions ( id text primary key , account_id text not null references accounts ( id ) on delete cascade , category_id text references categories ( id ) on delete set null , subcategory_id text references subcategories ( id ) on delete set null , type text not null check ( type in ( 'expense' , 'income' , 'transfer' ) ) , amount integer not null , currency text not null default 'USD' , description text not null , notes text , date text not null , tags text default '[]' , is_recurring integer not null default 0 , transfer_to_account_id text references accounts ( id ) on delete set null , created_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , updated_at text not null default ( strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' ) ) , status text not null default 'posted' check ( status in ( 'pending' , 'posted' , 'cleared' ) ) , source text , note text , recurring_rule_id text references recurring_rules ( id ) on delete set null , is_placeholder integer not null default 0 , placeholder_status text , resolved_at text , resolved_by_transaction_id text , placeholder_reason text , placeholder_parent_transaction_id text , ledger_treatment text not null default 'normal' check ( ledger_treatment in ( 'normal' , 'staged_no_balance_impact' ) ) , reporting_treatment text not null default 'normal' check ( reporting_treatment in ( 'normal' , 'exclude_from_cashflow' ) ) , transaction_kind text not null default 'standard' check ( transaction_kind in ( 'standard' , 'reconciliation_bridge' , 'archived_transfer_mirror' ) ) , staging_batch_id text , reconciliation_id text references account_reconciliations ( id ) on delete restrict , matched_transaction_id text references transactions ( id ) on delete restrict , is_archived integer not null default 0 )",
+        "columns": [
+          {
+            "columnId": 0,
+            "name": "id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 1,
+            "hidden": 0
+          },
+          {
+            "columnId": 1,
+            "name": "account_id",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 2,
+            "name": "category_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 3,
+            "name": "subcategory_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 4,
+            "name": "type",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 5,
+            "name": "amount",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 6,
+            "name": "currency",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "'USD'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 7,
+            "name": "description",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 8,
+            "name": "notes",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 9,
+            "name": "date",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 10,
+            "name": "tags",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": "'[]'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 11,
+            "name": "is_recurring",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 12,
+            "name": "transfer_to_account_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 13,
+            "name": "created_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 14,
+            "name": "updated_at",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "strftime ( '%Y-%m-%dT%H:%M:%fZ' , 'now' )",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 15,
+            "name": "status",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "'posted'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 16,
+            "name": "source",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 17,
+            "name": "note",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 18,
+            "name": "recurring_rule_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 19,
+            "name": "is_placeholder",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 20,
+            "name": "placeholder_status",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 21,
+            "name": "resolved_at",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 22,
+            "name": "resolved_by_transaction_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 23,
+            "name": "placeholder_reason",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 24,
+            "name": "placeholder_parent_transaction_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 25,
+            "name": "ledger_treatment",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "'normal'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 26,
+            "name": "reporting_treatment",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "'normal'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 27,
+            "name": "transaction_kind",
+            "type": "TEXT",
+            "notNull": true,
+            "defaultValue": "'standard'",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 28,
+            "name": "staging_batch_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 29,
+            "name": "reconciliation_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 30,
+            "name": "matched_transaction_id",
+            "type": "TEXT",
+            "notNull": false,
+            "defaultValue": null,
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          },
+          {
+            "columnId": 31,
+            "name": "is_archived",
+            "type": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0",
+            "primaryKeyPosition": 0,
+            "hidden": 0
+          }
+        ],
+        "tableList": {
+          "columnCount": 32,
+          "withoutRowid": false,
+          "strict": false
+        },
+        "autoIndexes": [
+          {
+            "name": "sqlite_autoindex_transactions_1",
+            "unique": true,
+            "origin": "pk",
+            "partial": false,
+            "columns": [
+              {
+                "sequence": 0,
+                "columnId": 0,
+                "name": "id",
+                "descending": false,
+                "collation": "BINARY",
+                "key": true
+              },
+              {
+                "sequence": 1,
+                "columnId": -1,
+                "name": null,
+                "descending": false,
+                "collation": "BINARY",
+                "key": false
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "allowedSchemaObjects": {
+    "indexes": [
+      {
+        "name": "idx_account_balance_account",
+        "table": "account_balance_history",
+        "sql": "create index idx_account_balance_account on account_balance_history ( account_id )"
+      },
+      {
+        "name": "idx_account_balance_date",
+        "table": "account_balance_history",
+        "sql": "create unique index idx_account_balance_date on account_balance_history ( account_id , date )"
+      },
+      {
+        "name": "idx_accounts_mode",
+        "table": "accounts",
+        "sql": "create index idx_accounts_mode on accounts ( account_mode )"
+      },
+      {
+        "name": "idx_audit_log_created",
+        "table": "audit_log",
+        "sql": "create index idx_audit_log_created on audit_log ( created_at )"
+      },
+      {
+        "name": "idx_audit_log_entity",
+        "table": "audit_log",
+        "sql": "create index idx_audit_log_entity on audit_log ( entity , entity_id )"
+      },
+      {
+        "name": "idx_budget_periods_budget",
+        "table": "budget_periods",
+        "sql": "create index idx_budget_periods_budget on budget_periods ( budget_id )"
+      },
+      {
+        "name": "idx_cashflow_allocations_bucket",
+        "table": "cashflow_bucket_allocations",
+        "sql": "create index idx_cashflow_allocations_bucket on cashflow_bucket_allocations ( bucket_id )"
+      },
+      {
+        "name": "idx_cashflow_allocations_date",
+        "table": "cashflow_bucket_allocations",
+        "sql": "create index idx_cashflow_allocations_date on cashflow_bucket_allocations ( allocation_date )"
+      },
+      {
+        "name": "idx_cashflow_allocations_transaction",
+        "table": "cashflow_bucket_allocations",
+        "sql": "create index idx_cashflow_allocations_transaction on cashflow_bucket_allocations ( transaction_id )"
+      },
+      {
+        "name": "idx_cashflow_buckets_active",
+        "table": "cashflow_buckets",
+        "sql": "create index idx_cashflow_buckets_active on cashflow_buckets ( is_active )"
+      },
+      {
+        "name": "idx_category_rules_pattern",
+        "table": "category_rules",
+        "sql": "create index idx_category_rules_pattern on category_rules ( pattern )"
+      },
+      {
+        "name": "idx_category_rules_pattern_category",
+        "table": "category_rules",
+        "sql": "create unique index idx_category_rules_pattern_category on category_rules ( pattern , category_id )"
+      },
+      {
+        "name": "idx_category_suggestions_status",
+        "table": "category_suggestions",
+        "sql": "create index idx_category_suggestions_status on category_suggestions ( status )"
+      },
+      {
+        "name": "idx_category_suggestions_transaction",
+        "table": "category_suggestions",
+        "sql": "create index idx_category_suggestions_transaction on category_suggestions ( transaction_id )"
+      },
+      {
+        "name": "idx_credit_card_statements_account_period",
+        "table": "credit_card_statements",
+        "sql": "create unique index idx_credit_card_statements_account_period on credit_card_statements ( account_id , statement_end_date )"
+      },
+      {
+        "name": "idx_credit_card_statements_due",
+        "table": "credit_card_statements",
+        "sql": "create index idx_credit_card_statements_due on credit_card_statements ( due_date )"
+      },
+      {
+        "name": "idx_credit_card_statements_status",
+        "table": "credit_card_statements",
+        "sql": "create index idx_credit_card_statements_status on credit_card_statements ( status )"
+      },
+      {
+        "name": "idx_exchange_rates_currencies",
+        "table": "exchange_rates",
+        "sql": "create index idx_exchange_rates_currencies on exchange_rates ( from_currency , to_currency )"
+      },
+      {
+        "name": "idx_extension_data_extension",
+        "table": "extension_data",
+        "sql": "create index idx_extension_data_extension on extension_data ( extension_id )"
+      },
+      {
+        "name": "idx_goals_deadline",
+        "table": "goals",
+        "sql": "create index idx_goals_deadline on goals ( deadline )"
+      },
+      {
+        "name": "idx_investments_account",
+        "table": "investments",
+        "sql": "create index idx_investments_account on investments ( account_id )"
+      },
+      {
+        "name": "idx_investments_symbol",
+        "table": "investments",
+        "sql": "create index idx_investments_symbol on investments ( symbol )"
+      },
+      {
+        "name": "idx_net_worth_snapshots_date",
+        "table": "net_worth_snapshots",
+        "sql": "create unique index idx_net_worth_snapshots_date on net_worth_snapshots ( date )"
+      },
+      {
+        "name": "idx_recaps_generated",
+        "table": "recaps",
+        "sql": "create index idx_recaps_generated on recaps ( generated_at )"
+      },
+      {
+        "name": "idx_recaps_type",
+        "table": "recaps",
+        "sql": "create index idx_recaps_type on recaps ( type )"
+      },
+      {
+        "name": "idx_receivables_status_due",
+        "table": "receivables",
+        "sql": "create index idx_receivables_status_due on receivables ( status , due_date )"
+      },
+      {
+        "name": "idx_receivables_transaction",
+        "table": "receivables",
+        "sql": "create index idx_receivables_transaction on receivables ( matched_transaction_id )"
+      },
+      {
+        "name": "idx_receivables_transaction_unique",
+        "table": "receivables",
+        "sql": "create unique index idx_receivables_transaction_unique on receivables ( matched_transaction_id ) where matched_transaction_id is not null"
+      },
+      {
+        "name": "idx_reconciliations_account_date",
+        "table": "account_reconciliations",
+        "sql": "create index idx_reconciliations_account_date on account_reconciliations ( account_id , reconciliation_date )"
+      },
+      {
+        "name": "idx_reconciliations_adjustment_unique",
+        "table": "account_reconciliations",
+        "sql": "create unique index idx_reconciliations_adjustment_unique on account_reconciliations ( adjustment_transaction_id ) where adjustment_transaction_id is not null"
+      },
+      {
+        "name": "idx_reconciliations_batch",
+        "table": "account_reconciliations",
+        "sql": "create index idx_reconciliations_batch on account_reconciliations ( account_id , staging_batch_id )"
+      },
+      {
+        "name": "idx_reconciliations_batch_unique",
+        "table": "account_reconciliations",
+        "sql": "create unique index idx_reconciliations_batch_unique on account_reconciliations ( account_id , staging_batch_id ) where staging_batch_id is not null"
+      },
+      {
+        "name": "idx_recurring_rules_active",
+        "table": "recurring_rules",
+        "sql": "create index idx_recurring_rules_active on recurring_rules ( active )"
+      },
+      {
+        "name": "idx_recurring_rules_next_date",
+        "table": "recurring_rules",
+        "sql": "create index idx_recurring_rules_next_date on recurring_rules ( next_date )"
+      },
+      {
+        "name": "idx_stock_prices_symbol_date",
+        "table": "stock_prices",
+        "sql": "create index idx_stock_prices_symbol_date on stock_prices ( symbol , date )"
+      },
+      {
+        "name": "idx_subcategories_category",
+        "table": "subcategories",
+        "sql": "create index idx_subcategories_category on subcategories ( category_id )"
+      },
+      {
+        "name": "idx_transaction_splits_transaction",
+        "table": "transaction_splits",
+        "sql": "create index idx_transaction_splits_transaction on transaction_splits ( transaction_id )"
+      },
+      {
+        "name": "idx_transactions_account",
+        "table": "transactions",
+        "sql": "create index idx_transactions_account on transactions ( account_id )"
+      },
+      {
+        "name": "idx_transactions_category",
+        "table": "transactions",
+        "sql": "create index idx_transactions_category on transactions ( category_id )"
+      },
+      {
+        "name": "idx_transactions_date",
+        "table": "transactions",
+        "sql": "create index idx_transactions_date on transactions ( date )"
+      },
+      {
+        "name": "idx_transactions_ledger_treatment",
+        "table": "transactions",
+        "sql": "create index idx_transactions_ledger_treatment on transactions ( ledger_treatment )"
+      },
+      {
+        "name": "idx_transactions_matched",
+        "table": "transactions",
+        "sql": "create index idx_transactions_matched on transactions ( matched_transaction_id )"
+      },
+      {
+        "name": "idx_transactions_matched_unique",
+        "table": "transactions",
+        "sql": "create unique index idx_transactions_matched_unique on transactions ( matched_transaction_id ) where matched_transaction_id is not null"
+      },
+      {
+        "name": "idx_transactions_placeholder_parent",
+        "table": "transactions",
+        "sql": "create index idx_transactions_placeholder_parent on transactions ( placeholder_parent_transaction_id )"
+      },
+      {
+        "name": "idx_transactions_placeholder_resolved_by",
+        "table": "transactions",
+        "sql": "create index idx_transactions_placeholder_resolved_by on transactions ( resolved_by_transaction_id )"
+      },
+      {
+        "name": "idx_transactions_placeholder_status",
+        "table": "transactions",
+        "sql": "create index idx_transactions_placeholder_status on transactions ( is_placeholder , placeholder_status )"
+      },
+      {
+        "name": "idx_transactions_reconciliation",
+        "table": "transactions",
+        "sql": "create index idx_transactions_reconciliation on transactions ( reconciliation_id )"
+      },
+      {
+        "name": "idx_transactions_reconciliation_unique",
+        "table": "transactions",
+        "sql": "create unique index idx_transactions_reconciliation_unique on transactions ( reconciliation_id ) where reconciliation_id is not null"
+      },
+      {
+        "name": "idx_transactions_recurring_rule",
+        "table": "transactions",
+        "sql": "create index idx_transactions_recurring_rule on transactions ( recurring_rule_id )"
+      },
+      {
+        "name": "idx_transactions_reporting_treatment",
+        "table": "transactions",
+        "sql": "create index idx_transactions_reporting_treatment on transactions ( reporting_treatment )"
+      },
+      {
+        "name": "idx_transactions_staging_batch",
+        "table": "transactions",
+        "sql": "create index idx_transactions_staging_batch on transactions ( account_id , staging_batch_id )"
+      },
+      {
+        "name": "idx_transactions_status",
+        "table": "transactions",
+        "sql": "create index idx_transactions_status on transactions ( status )"
+      },
+      {
+        "name": "idx_transactions_type",
+        "table": "transactions",
+        "sql": "create index idx_transactions_type on transactions ( type )"
+      }
+    ],
+    "triggers": [
+      {
+        "name": "trg_accounts_snapshot_mode_update",
+        "table": "accounts",
+        "sql": "create trigger trg_accounts_snapshot_mode_update before update of account_mode on accounts for each row when new . account_mode = 'snapshot_only' and old . account_mode <> 'snapshot_only' and exists ( select 1 from transactions where account_id = old . id or transfer_to_account_id = old . id ) begin select raise ( abort , 'Accounts with transaction history cannot become snapshot-only' ) ; end"
+      },
+      {
+        "name": "trg_transactions_no_self_match_insert",
+        "table": "transactions",
+        "sql": "create trigger trg_transactions_no_self_match_insert before insert on transactions for each row when new . matched_transaction_id is not null and new . matched_transaction_id = new . id begin select raise ( abort , 'Transaction cannot match itself' ) ; end"
+      },
+      {
+        "name": "trg_transactions_no_self_match_update",
+        "table": "transactions",
+        "sql": "create trigger trg_transactions_no_self_match_update before update of matched_transaction_id on transactions for each row when new . matched_transaction_id is not null and new . matched_transaction_id = new . id begin select raise ( abort , 'Transaction cannot match itself' ) ; end"
+      },
+      {
+        "name": "trg_transactions_snapshot_account_insert",
+        "table": "transactions",
+        "sql": "create trigger trg_transactions_snapshot_account_insert before insert on transactions for each row when exists ( select 1 from accounts where account_mode = 'snapshot_only' and id in ( new . account_id , new . transfer_to_account_id ) ) begin select raise ( abort , 'Snapshot-only accounts cannot accept transaction ledger rows' ) ; end"
+      },
+      {
+        "name": "trg_transactions_snapshot_account_update",
+        "table": "transactions",
+        "sql": "create trigger trg_transactions_snapshot_account_update before update of account_id , transfer_to_account_id on transactions for each row when exists ( select 1 from accounts where account_mode = 'snapshot_only' and id in ( new . account_id , new . transfer_to_account_id ) ) begin select raise ( abort , 'Snapshot-only accounts cannot accept transaction ledger rows' ) ; end"
+      },
+      {
+        "name": "trg_transactions_status_insert_default",
+        "table": "transactions",
+        "sql": "create trigger trg_transactions_status_insert_default after insert on transactions for each row when new . status is null or trim ( new . status ) = '' begin update transactions set status = 'posted' where id = new . id ; end"
+      },
+      {
+        "name": "trg_transactions_status_insert_valid",
+        "table": "transactions",
+        "sql": "create trigger trg_transactions_status_insert_valid before insert on transactions for each row when new . status is not null and trim ( new . status ) != '' and new . status not in ( 'pending' , 'posted' , 'cleared' ) begin select raise ( abort , 'Invalid transaction status' ) ; end"
+      },
+      {
+        "name": "trg_transactions_status_update_default",
+        "table": "transactions",
+        "sql": "create trigger trg_transactions_status_update_default after update of status on transactions for each row when new . status is null or trim ( new . status ) = '' begin update transactions set status = 'posted' where id = new . id ; end"
+      },
+      {
+        "name": "trg_transactions_status_update_valid",
+        "table": "transactions",
+        "sql": "create trigger trg_transactions_status_update_valid before update of status on transactions for each row when new . status is not null and trim ( new . status ) != '' and new . status not in ( 'pending' , 'posted' , 'cleared' ) begin select raise ( abort , 'Invalid transaction status' ) ; end"
+      }
+    ],
+    "views": []
+  }
+}

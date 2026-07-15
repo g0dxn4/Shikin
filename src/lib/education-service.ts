@@ -84,7 +84,8 @@ const tips: EducationTip[] = [
     title: 'Index Funds vs. Active Management',
     content:
       'Index funds aim to match the performance of a market index at low cost, while actively managed funds try to outperform through stock selection. Research has shown that most actively managed funds underperform their benchmark index over the long term.',
-    learnMore: 'https://www.investopedia.com/ask/answers/040315/what-difference-between-index-fund-and-actively-managed-fund.asp',
+    learnMore:
+      'https://www.investopedia.com/ask/answers/040315/what-difference-between-index-fund-and-actively-managed-fund.asp',
   },
 
   // Debt
@@ -94,7 +95,8 @@ const tips: EducationTip[] = [
     title: 'Snowball vs. Avalanche Method',
     content:
       'The debt snowball method focuses on paying off the smallest balances first for psychological motivation, while the avalanche method targets the highest interest rates first to minimize total interest paid. Both approaches can be effective depending on individual preferences.',
-    learnMore: 'https://www.investopedia.com/articles/personal-finance/080716/debt-avalanche-vs-debt-snowball-which-best-you.asp',
+    learnMore:
+      'https://www.investopedia.com/articles/personal-finance/080716/debt-avalanche-vs-debt-snowball-which-best-you.asp',
   },
   {
     id: 'debt-good-vs-bad',

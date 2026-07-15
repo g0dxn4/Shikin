@@ -26,6 +26,21 @@
     "cetes": "CETES",
     "other": "Other"
   },
+  "filters": {
+    "all": "All"
+  },
+  "search": {
+    "placeholder": "Search symbol or name...",
+    "clear": "Clear search"
+  },
+  "priceSource": {
+    "label": "Price source",
+    "tooltip": "Crypto prices come from CoinGecko. Stocks, ETFs, bonds, funds, and CETES use Alpha Vantage or Finnhub when API keys are configured. Prices update automatically during market hours."
+  },
+  "currencyWarning": {
+    "title": "Mixed currencies",
+    "body": "Your portfolio includes holdings in multiple currencies. Totals below are not converted and should be read per-currency."
+  },
   "summary": {
     "portfolioValue": "Portfolio Value",
     "totalGainLoss": "Total Gain/Loss",
@@ -61,7 +76,9 @@
   },
   "empty": {
     "title": "No Investments Yet",
-    "description": "Add your first holding to track your portfolio."
+    "description": "Add your first holding to track your portfolio.",
+    "filter": "No holdings match your filters.",
+    "clearFilters": "Clear filters"
   },
   "toast": {
     "created": "Investment added",

@@ -22,7 +22,7 @@ describe('statement-parser', () => {
       expect(result).toHaveLength(2)
 
       expect(result[0].date).toBe('2024-01-15')
-      expect(result[0].amount).toBe(42.50)
+      expect(result[0].amount).toBe(42.5)
       expect(result[0].type).toBe('expense')
       expect(result[0].description).toBe('WHOLE FOODS')
 
@@ -109,7 +109,7 @@ PDirect Deposit
       expect(result).toHaveLength(2)
 
       expect(result[0].date).toBe('2024-01-15')
-      expect(result[0].amount).toBe(42.50)
+      expect(result[0].amount).toBe(42.5)
       expect(result[0].type).toBe('expense')
       expect(result[0].description).toBe('Whole Foods')
 

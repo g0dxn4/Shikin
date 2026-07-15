@@ -105,7 +105,7 @@ cli/
 ├── src/
 │   ├── cli.ts            # Commander CLI entry point
 │   ├── mcp-server.ts     # MCP server entry point
-│   ├── tools/            # Shared 90-tool CLI/MCP catalog
+│   ├── tools/            # Shared 91-tool CLI/MCP catalog
 │   └── database.ts       # better-sqlite3 data access
 ```
 
@@ -245,10 +245,12 @@ GitHub Actions workflow lives at `.github/workflows/ci.yml` and runs on pushes t
 
 It executes:
 
-- `pnpm lint`
-- `pnpm typecheck`
+- `pnpm release:preflight`
+- `pnpm check`
 - `pnpm test:run`
 - `pnpm build`
+- `pnpm build:cli`
+- Playwright e2e tests
 
 ---
 

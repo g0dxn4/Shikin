@@ -26,6 +26,9 @@ describe('investment-store', () => {
         totalGainLoss: 0,
         totalGainLossPercent: 0,
         byType: {},
+        byCurrency: {},
+        currencies: [],
+        isMixedCurrency: false,
       },
       priceHistory: new Map(),
       isLoading: false,
@@ -98,6 +101,16 @@ describe('investment-store', () => {
           count: 1,
         },
       },
+      byCurrency: {
+        USD: {
+          marketValue: 3000,
+          costBasis: 2000,
+          gainLoss: 1000,
+          count: 1,
+        },
+      },
+      currencies: ['USD'],
+      isMixedCurrency: false,
     })
 
     expect(useInvestmentStore.getState().isLoading).toBe(false)
@@ -192,5 +205,58 @@ describe('investment-store', () => {
 
     expect(mockExecute).toHaveBeenCalledWith('DELETE FROM investments WHERE id = ?', ['inv-1'])
     expect(mockQuery).toHaveBeenCalledTimes(1)
+  })
+
+  it('computes mixed-currency summary correctly', async () => {
+    mockQuery.mockResolvedValueOnce([
+      {
+        id: 'inv-1',
+        account_id: null,
+        symbol: 'AAPL',
+        name: 'Apple',
+        type: 'stock',
+        shares: 2,
+        avg_cost_basis: 1000,
+        currency: 'USD',
+        notes: null,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        latest_price: 1500,
+        latest_price_date: '2024-01-10',
+      },
+      {
+        id: 'inv-2',
+        account_id: null,
+        symbol: 'WALMEX.MX',
+        name: 'Walmart de México',
+        type: 'stock',
+        shares: 10,
+        avg_cost_basis: 5000,
+        currency: 'MXN',
+        notes: null,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        latest_price: 6000,
+        latest_price_date: '2024-01-10',
+      },
+    ])
+
+    await useInvestmentStore.getState().fetch()
+
+    const summary = useInvestmentStore.getState().portfolioSummary
+    expect(summary.isMixedCurrency).toBe(true)
+    expect(summary.currencies).toEqual(['MXN', 'USD'])
+    expect(summary.byCurrency).toEqual({
+      USD: { marketValue: 3000, costBasis: 2000, gainLoss: 1000, count: 1 },
+      MXN: { marketValue: 60000, costBasis: 50000, gainLoss: 10000, count: 1 },
+    })
+    expect(summary.totalMarketValue).toBe(63000)
+    expect(summary.totalCostBasis).toBe(52000)
+  })
+
+  it('updates lastPriceFetch via setLastPriceFetch', () => {
+    const now = '2024-06-01T12:00:00Z'
+    useInvestmentStore.getState().setLastPriceFetch(now)
+    expect(useInvestmentStore.getState().lastPriceFetch).toBe(now)
   })
 })

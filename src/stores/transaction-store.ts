@@ -133,7 +133,7 @@ async function resolveWritableTransactionAccount(
   const account = accounts[0]
   const accountReference = formatAccountReference(account.id ?? accountId, account.name)
 
-  if (account.is_archived === 1) {
+  if (account.is_archived !== 0) {
     throw new Error(
       `${label} ${accountReference} is archived. Unarchive it before using it for new writes.`
     )

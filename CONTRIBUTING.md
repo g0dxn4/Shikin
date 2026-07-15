@@ -12,15 +12,14 @@ Thanks for contributing.
 
 ## Before Opening a Pull Request
 
-- Run `pnpm lint`
-- Run `pnpm typecheck`
+- Run `pnpm check` (lint, typecheck, and format check)
 - Run `pnpm test:run`
 - Run `pnpm build` if your change affects app behavior or packaging
 - Run `pnpm release:preflight` when your change touches release versions, updater config, or the GitHub release flow
 
 ## CI and Releases
 
-- CI on `main` runs release preflight, lint, typecheck, unit tests, build, and e2e.
+- CI on `main` runs release preflight, `pnpm check`, unit tests, app/CLI builds, and e2e.
 - Create release tags only from tested `main` after `pnpm release:preflight` passes locally.
 - The GitHub release workflow creates a draft release first and publishes it only after signed artifacts and `latest.json` finish uploading.
 

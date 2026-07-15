@@ -26,6 +26,21 @@
     "cetes": "CETES",
     "other": "Otro"
   },
+  "filters": {
+    "all": "Todas"
+  },
+  "search": {
+    "placeholder": "Buscar símbolo o nombre...",
+    "clear": "Borrar búsqueda"
+  },
+  "priceSource": {
+    "label": "Fuente de precios",
+    "tooltip": "Los precios de cripto provienen de CoinGecko. Acciones, ETFs, bonos, fondos y CETES usan Alpha Vantage o Finnhub cuando hay claves API configuradas. Los precios se actualizan automáticamente durante horario de mercado."
+  },
+  "currencyWarning": {
+    "title": "Divisas mixtas",
+    "body": "Tu portafolio incluye tenencias en múltiples monedas. Los totales no están convertidos y deben leerse por moneda."
+  },
   "summary": {
     "portfolioValue": "Valor del Portafolio",
     "totalGainLoss": "Ganancia/Pérdida Total",
@@ -61,7 +76,9 @@
   },
   "empty": {
     "title": "Sin Inversiones",
-    "description": "Agrega tu primera tenencia para rastrear tu portafolio."
+    "description": "Agrega tu primera tenencia para rastrear tu portafolio.",
+    "filter": "Ninguna tenencia coincide con tus filtros.",
+    "clearFilters": "Borrar filtros"
   },
   "toast": {
     "created": "Inversión agregada",

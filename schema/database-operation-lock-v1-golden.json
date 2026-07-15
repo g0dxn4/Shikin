@@ -448,6 +448,354 @@
         "expiresAt": "2026-07-14T12:00:05.000Z",
         "ttlMs": 5000
       }
+    },
+    {
+      "name": "legacy-mutating-without-recovery-commitment",
+      "valid": true,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "operation_state",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "stateRevision": 2,
+        "fencingGenerationHighWater": 1,
+        "leases": [],
+        "exclusiveIntent": {
+          "recordKind": "exclusive_intent",
+          "operationId": "operation-commitment",
+          "operation": "restore",
+          "phase": "mutating",
+          "owner": {
+            "ownerId": "owner-commitment",
+            "runtimeId": "cli",
+            "hostId": "host-golden",
+            "processId": 1234,
+            "processStartedAt": "2026-07-14T12:00:00.000Z"
+          },
+          "fencingGeneration": 1,
+          "createdAt": "2026-07-14T12:00:00.000Z",
+          "updatedAt": "2026-07-14T12:00:01.000Z",
+          "metadata": {
+            "legacy": true
+          }
+        },
+        "updatedBy": {
+          "ownerId": "owner-commitment",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "updatedAt": "2026-07-14T12:00:01.000Z"
+      }
+    },
+    {
+      "name": "valid-exact-recovery-commitment",
+      "valid": true,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "operation_state",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "stateRevision": 2,
+        "fencingGenerationHighWater": 1,
+        "leases": [],
+        "exclusiveIntent": {
+          "recordKind": "exclusive_intent",
+          "operationId": "operation-commitment",
+          "operation": "restore",
+          "phase": "mutating",
+          "owner": {
+            "ownerId": "owner-commitment",
+            "runtimeId": "cli",
+            "hostId": "host-golden",
+            "processId": 1234,
+            "processStartedAt": "2026-07-14T12:00:00.000Z"
+          },
+          "fencingGeneration": 1,
+          "createdAt": "2026-07-14T12:00:00.000Z",
+          "updatedAt": "2026-07-14T12:00:01.000Z",
+          "metadata": {
+            "userLabel": "preserved",
+            "recovery.protocol": "shikin.database-operation-recovery-journal",
+            "recovery.operationId": "operation-commitment",
+            "recovery.stateRevision": 1,
+            "recovery.fencingGeneration": 1,
+            "recovery.commitmentSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "updatedBy": {
+          "ownerId": "owner-commitment",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "updatedAt": "2026-07-14T12:00:01.000Z"
+      }
+    },
+    {
+      "name": "partial-recovery-commitment",
+      "valid": false,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "operation_state",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "stateRevision": 2,
+        "fencingGenerationHighWater": 1,
+        "leases": [],
+        "exclusiveIntent": {
+          "recordKind": "exclusive_intent",
+          "operationId": "operation-commitment",
+          "operation": "restore",
+          "phase": "mutating",
+          "owner": {
+            "ownerId": "owner-commitment",
+            "runtimeId": "cli",
+            "hostId": "host-golden",
+            "processId": 1234,
+            "processStartedAt": "2026-07-14T12:00:00.000Z"
+          },
+          "fencingGeneration": 1,
+          "createdAt": "2026-07-14T12:00:00.000Z",
+          "updatedAt": "2026-07-14T12:00:01.000Z",
+          "metadata": {
+            "recovery.protocol": "shikin.database-operation-recovery-journal"
+          }
+        },
+        "updatedBy": {
+          "ownerId": "owner-commitment",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "updatedAt": "2026-07-14T12:00:01.000Z"
+      }
+    },
+    {
+      "name": "unknown-recovery-commitment-key",
+      "valid": false,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "operation_state",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "stateRevision": 2,
+        "fencingGenerationHighWater": 1,
+        "leases": [],
+        "exclusiveIntent": {
+          "recordKind": "exclusive_intent",
+          "operationId": "operation-commitment",
+          "operation": "restore",
+          "phase": "mutating",
+          "owner": {
+            "ownerId": "owner-commitment",
+            "runtimeId": "cli",
+            "hostId": "host-golden",
+            "processId": 1234,
+            "processStartedAt": "2026-07-14T12:00:00.000Z"
+          },
+          "fencingGeneration": 1,
+          "createdAt": "2026-07-14T12:00:00.000Z",
+          "updatedAt": "2026-07-14T12:00:01.000Z",
+          "metadata": {
+            "userLabel": "preserved",
+            "recovery.protocol": "shikin.database-operation-recovery-journal",
+            "recovery.operationId": "operation-commitment",
+            "recovery.stateRevision": 1,
+            "recovery.fencingGeneration": 1,
+            "recovery.commitmentSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "recovery.extra": true
+          }
+        },
+        "updatedBy": {
+          "ownerId": "owner-commitment",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "updatedAt": "2026-07-14T12:00:01.000Z"
+      }
+    },
+    {
+      "name": "recovery-commitment-before-mutation",
+      "valid": false,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "operation_state",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "stateRevision": 1,
+        "fencingGenerationHighWater": 1,
+        "leases": [],
+        "exclusiveIntent": {
+          "recordKind": "exclusive_intent",
+          "operationId": "operation-commitment",
+          "operation": "restore",
+          "phase": "exclusive",
+          "owner": {
+            "ownerId": "owner-commitment",
+            "runtimeId": "cli",
+            "hostId": "host-golden",
+            "processId": 1234,
+            "processStartedAt": "2026-07-14T12:00:00.000Z"
+          },
+          "fencingGeneration": 1,
+          "createdAt": "2026-07-14T12:00:00.000Z",
+          "updatedAt": "2026-07-14T12:00:01.000Z",
+          "metadata": {
+            "userLabel": "preserved",
+            "recovery.protocol": "shikin.database-operation-recovery-journal",
+            "recovery.operationId": "operation-commitment",
+            "recovery.stateRevision": 1,
+            "recovery.fencingGeneration": 1,
+            "recovery.commitmentSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "updatedBy": {
+          "ownerId": "owner-commitment",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "updatedAt": "2026-07-14T12:00:01.000Z"
+      }
+    },
+    {
+      "name": "invalid-recovery-commitment-protocol",
+      "valid": false,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "operation_state",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "stateRevision": 2,
+        "fencingGenerationHighWater": 1,
+        "leases": [],
+        "exclusiveIntent": {
+          "recordKind": "exclusive_intent",
+          "operationId": "operation-commitment",
+          "operation": "restore",
+          "phase": "mutating",
+          "owner": {
+            "ownerId": "owner-commitment",
+            "runtimeId": "cli",
+            "hostId": "host-golden",
+            "processId": 1234,
+            "processStartedAt": "2026-07-14T12:00:00.000Z"
+          },
+          "fencingGeneration": 1,
+          "createdAt": "2026-07-14T12:00:00.000Z",
+          "updatedAt": "2026-07-14T12:00:01.000Z",
+          "metadata": {
+            "userLabel": "preserved",
+            "recovery.protocol": "wrong",
+            "recovery.operationId": "operation-commitment",
+            "recovery.stateRevision": 1,
+            "recovery.fencingGeneration": 1,
+            "recovery.commitmentSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "updatedBy": {
+          "ownerId": "owner-commitment",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "updatedAt": "2026-07-14T12:00:01.000Z"
+      }
+    },
+    {
+      "name": "valid-exact-recovery-commitment-completed",
+      "valid": true,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "operation_state",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "stateRevision": 3,
+        "fencingGenerationHighWater": 1,
+        "leases": [],
+        "exclusiveIntent": {
+          "recordKind": "exclusive_intent",
+          "operationId": "operation-commitment",
+          "operation": "restore",
+          "phase": "completed",
+          "owner": {
+            "ownerId": "owner-commitment",
+            "runtimeId": "cli",
+            "hostId": "host-golden",
+            "processId": 1234,
+            "processStartedAt": "2026-07-14T12:00:00.000Z"
+          },
+          "fencingGeneration": 1,
+          "createdAt": "2026-07-14T12:00:00.000Z",
+          "updatedAt": "2026-07-14T12:00:01.000Z",
+          "metadata": {
+            "userLabel": "preserved",
+            "recovery.protocol": "shikin.database-operation-recovery-journal",
+            "recovery.operationId": "operation-commitment",
+            "recovery.stateRevision": 1,
+            "recovery.fencingGeneration": 1,
+            "recovery.commitmentSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "completedAt": "2026-07-14T12:00:02.000Z"
+        },
+        "updatedBy": {
+          "ownerId": "owner-commitment",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "updatedAt": "2026-07-14T12:00:02.000Z"
+      }
+    },
+    {
+      "name": "legacy-completed-without-recovery-commitment",
+      "valid": true,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "operation_state",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "stateRevision": 3,
+        "fencingGenerationHighWater": 1,
+        "leases": [],
+        "exclusiveIntent": {
+          "recordKind": "exclusive_intent",
+          "operationId": "operation-commitment",
+          "operation": "restore",
+          "phase": "completed",
+          "owner": {
+            "ownerId": "owner-commitment",
+            "runtimeId": "cli",
+            "hostId": "host-golden",
+            "processId": 1234,
+            "processStartedAt": "2026-07-14T12:00:00.000Z"
+          },
+          "fencingGeneration": 1,
+          "createdAt": "2026-07-14T12:00:00.000Z",
+          "updatedAt": "2026-07-14T12:00:01.000Z",
+          "metadata": {
+            "legacy": true
+          },
+          "completedAt": "2026-07-14T12:00:02.000Z"
+        },
+        "updatedBy": {
+          "ownerId": "owner-commitment",
+          "runtimeId": "cli",
+          "hostId": "host-golden",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "updatedAt": "2026-07-14T12:00:02.000Z"
+      }
     }
   ]
 }

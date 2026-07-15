@@ -258,11 +258,13 @@
       "to": "phase mutating",
       "preconditions": [
         "Caller follows the registry-mutex-serialized operation-state mutation protocol.",
-        "Intent owner evidence and fencingGeneration match the persisted intent.",
-        "The intent generation equals fencingGenerationHighWater."
+        "Intent owner evidence and fencingGeneration match the persisted exclusive intent, every runtime lease is drained, and the intent generation equals fencingGenerationHighWater.",
+        "The caller supplies an unused opaque prepared-mutation proof whose complete recovery journal was hash-verified before mutex acquisition and whose retained evidence is revalidated under the mutex.",
+        "No database file mutation begins unless the mutating state record and its recovery commitment are durably published."
       ],
       "effects": [
-        "Atomically publish the phase with stateRevision = previous.stateRevision + 1 before mutex release.",
+        "Atomically publish phase mutating, the exact five-field recovery commitment, and stateRevision = previous.stateRevision + 1 before mutex release.",
+        "Consume the opaque prepared proof immediately after immutable state-record rename; any failed or unsupported state-directory synchronization is committed, non-retryable, and grants no mutation authority.",
         "Only this fenced owner may mutate, replace, restore, or import database files."
       ]
     },
@@ -337,7 +339,7 @@
     },
     {
       "id": "drain-before-mutation",
-      "rule": "Exclusive mutation begins only after the intent is published and every runtime lease has drained or expired."
+      "rule": "Exclusive mutation begins only after every runtime lease has drained, complete journal evidence has been hash-verified before mutex acquisition, retained evidence has been revalidated under the mutex, and the commitment-bearing mutating state record is durably published."
     },
     {
       "id": "fencing-monotonicity",
@@ -437,6 +439,64 @@
         }
       }
     },
+    "intentMetadataWithoutRecoveryCommitment": {
+      "type": "object",
+      "propertyNames": {
+        "not": {
+          "pattern": "^recovery\\."
+        }
+      }
+    },
+    "intentMetadataWithRecoveryCommitment": {
+      "type": "object",
+      "required": [
+        "recovery.protocol",
+        "recovery.operationId",
+        "recovery.stateRevision",
+        "recovery.fencingGeneration",
+        "recovery.commitmentSha256"
+      ],
+      "propertyNames": {
+        "anyOf": [
+          {
+            "not": {
+              "pattern": "^recovery\\."
+            }
+          },
+          {
+            "enum": [
+              "recovery.protocol",
+              "recovery.operationId",
+              "recovery.stateRevision",
+              "recovery.fencingGeneration",
+              "recovery.commitmentSha256"
+            ]
+          }
+        ]
+      },
+      "properties": {
+        "recovery.protocol": {
+          "const": "shikin.database-operation-recovery-journal"
+        },
+        "recovery.operationId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "recovery.stateRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "recovery.fencingGeneration": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "recovery.commitmentSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
     "exclusiveIntent": {
       "type": "object",
       "additionalProperties": false,
@@ -498,6 +558,37 @@
           },
           "then": {
             "required": ["completedAt"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "phase": {
+                "enum": ["mutating", "completed"]
+              }
+            },
+            "required": ["phase"]
+          },
+          "then": {
+            "properties": {
+              "metadata": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/intentMetadataWithoutRecoveryCommitment"
+                  },
+                  {
+                    "$ref": "#/$defs/intentMetadataWithRecoveryCommitment"
+                  }
+                ]
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "metadata": {
+                "$ref": "#/$defs/intentMetadataWithoutRecoveryCommitment"
+              }
+            }
           }
         }
       ]

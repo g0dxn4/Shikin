@@ -152,16 +152,74 @@ describe('database operation lock core', () => {
     owner.releaseRuntimeLease(ownerLease)
     intent = owner.drainExclusiveIntent(intent)
     expect(intent.phase).toBe('exclusive')
-    intent = owner.beginExclusiveMutation(intent, prepareMutationProof(owner, intent).proof)
+    const commitmentRevision = owner.readOperationState().stateRevision
+    const prepared = prepareMutationProof(owner, intent)
+    intent = owner.beginExclusiveMutation(intent, prepared.proof)
+    const expectedCommitment = {
+      fixture: true,
+      'recovery.protocol': 'shikin.database-operation-recovery-journal',
+      'recovery.operationId': intent.operationId,
+      'recovery.stateRevision': commitmentRevision,
+      'recovery.fencingGeneration': intent.fencingGeneration,
+      'recovery.commitmentSha256': prepared.commitmentSha256,
+    }
+    expect(intent.metadata).toEqual(expectedCommitment)
     expect(owner.assertExclusiveAuthority(intent)).toEqual(intent)
     intent = owner.completeExclusiveMutation(intent)
-    expect(intent).toMatchObject({ phase: 'completed', completedAt: expect.any(String) })
+    expect(intent).toMatchObject({
+      phase: 'completed',
+      completedAt: expect.any(String),
+      metadata: expectedCommitment,
+    })
     expect(owner.clearExclusiveIntent(intent)).toBe(true)
     expect(owner.readOperationState()).toMatchObject({
       fencingGenerationHighWater: 3,
       exclusiveIntent: null,
       leases: [],
     })
+  })
+
+  it('rejects caller-owned recovery metadata and non-canonical metadata before publication', () => {
+    const root = tempRoot()
+    const owner = createLockAt(root, 'cli')
+    owner.registerRuntimeLease()
+    const before = owner.readOperationState()
+    for (const metadata of [
+      { 'recovery.protocol': 'caller-value' },
+      { 'recovery.future': true },
+    ]) {
+      expectLockError(
+        () => owner.acquireExclusiveIntent('restore', metadata),
+        'RESERVED_METADATA_KEY'
+      )
+      expect(owner.readOperationState()).toEqual(before)
+    }
+    for (const metadata of [{ amount: 1.5 }, { nested: { value: Number.NaN } }]) {
+      expectLockError(() => owner.acquireExclusiveIntent('restore', metadata), 'INVALID_OPERATION')
+      expect(owner.readOperationState()).toEqual(before)
+    }
+  })
+
+  it('rejects recovery commitment fields that do not bind their own persisted intent', () => {
+    const valid = goldenFixtures.cases.find(
+      (entry) => entry.name === 'valid-exact-recovery-commitment'
+    )
+    expect(validateDatabaseOperationRecord(valid.record)).toEqual(valid.record)
+    for (const update of [
+      (record) => {
+        record.exclusiveIntent.metadata['recovery.operationId'] = 'wrong-operation'
+      },
+      (record) => {
+        record.exclusiveIntent.metadata['recovery.fencingGeneration'] += 1
+      },
+      (record) => {
+        record.exclusiveIntent.metadata['recovery.stateRevision'] += 1
+      },
+    ]) {
+      const malformed = structuredClone(valid.record)
+      update(malformed)
+      expectLockError(() => validateDatabaseOperationRecord(malformed), 'STATE_CORRUPTION')
+    }
   })
 
   it.each(['registered', 'draining', 'exclusive'])(

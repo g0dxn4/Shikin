@@ -311,7 +311,7 @@ export class DatabaseOperationLock {
         `Unsupported database operation ${String(operation)}`
       )
     }
-    validateCallerIntentMetadata(metadata)
+    const metadataSnapshot = snapshotCallerIntentMetadata(metadata)
 
     const operationId = randomUUID()
     return cloneJson(
@@ -359,7 +359,9 @@ export class DatabaseOperationLock {
           fencingGeneration,
           createdAt: timestamp,
           updatedAt: timestamp,
-          ...(metadata === undefined ? {} : { metadata: cloneJson(metadata) }),
+          ...(metadataSnapshot === undefined
+            ? {}
+            : { metadata: cloneJson(metadataSnapshot) }),
         }
         return {
           state: {
@@ -1424,6 +1426,28 @@ function validateRecoveryCommitmentMetadata(intent) {
     throw protocolError('STATE_CORRUPTION', 'Recovery commitment metadata is malformed')
   }
   return true
+}
+
+function snapshotCallerIntentMetadata(metadata) {
+  normalizeCallerIntentMetadataValidation(metadata)
+  if (metadata === undefined) return undefined
+
+  let snapshot
+  try {
+    snapshot = JSON.parse(JSON.stringify(metadata))
+  } catch (error) {
+    throw protocolError('INVALID_OPERATION', 'Intent metadata could not be serialized', error)
+  }
+  normalizeCallerIntentMetadataValidation(snapshot)
+  return snapshot
+}
+
+function normalizeCallerIntentMetadataValidation(metadata) {
+  try {
+    validateCallerIntentMetadata(metadata)
+  } catch (error) {
+    throw normalizeError(error, 'INVALID_OPERATION')
+  }
 }
 
 function validateCallerIntentMetadata(metadata) {

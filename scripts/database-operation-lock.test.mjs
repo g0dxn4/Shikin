@@ -269,6 +269,116 @@ describe('database operation lock core', () => {
     }
   })
 
+  it(
+    'snapshots dynamic metadata before publication without wedging Linux journal preparation',
+    () => {
+      const root = tempRoot()
+      let mutexPublications = 0
+      let statePublications = 0
+      const owner = new DatabaseOperationLock({
+        rootDir: root,
+        databaseIdentity: DATABASE_IDENTITY,
+        runtimeId: 'cli',
+        testHooks: {
+          beforeMutexPublication() {
+            mutexPublications += 1
+          },
+          beforePublish() {
+            statePublications += 1
+          },
+        },
+      })
+      const lease = owner.registerRuntimeLease()
+      const before = owner.readOperationState()
+      const mutexPublicationsBefore = mutexPublications
+      const statePublicationsBefore = statePublications
+
+      const getterMetadata = (serialize) => {
+        let reads = 0
+        const metadata = {}
+        Object.defineProperty(metadata, 'value', {
+          enumerable: true,
+          get() {
+            reads += 1
+            return reads === 1 ? 0 : serialize()
+          },
+        })
+        return metadata
+      }
+      const toJsonMetadata = (serialize) => {
+        const metadata = {}
+        Object.defineProperty(metadata, 'toJSON', { value: serialize })
+        return metadata
+      }
+      const throwingProxyMetadata = new Proxy(
+        {},
+        {
+          ownKeys() {
+            throw new Error('proxy ownKeys failure')
+          },
+        }
+      )
+
+      for (const metadata of [
+        getterMetadata(() => -1),
+        getterMetadata(() => '\ud800'),
+        toJsonMetadata(() => ({ value: -1 })),
+        toJsonMetadata(() => ({ ['\udfff']: true })),
+        toJsonMetadata(() => ({ 'shikin.recovery.future': true, value: -1 })),
+        getterMetadata(() => {
+          throw new Error('serialization getter failure')
+        }),
+        toJsonMetadata(() => {
+          throw new Error('toJSON failure')
+        }),
+        throwingProxyMetadata,
+      ]) {
+        expectLockError(
+          () => owner.acquireExclusiveIntent('restore', metadata),
+          'INVALID_OPERATION'
+        )
+        expect(owner.readOperationState()).toEqual(before)
+        expect(mutexPublications).toBe(mutexPublicationsBefore)
+        expect(statePublications).toBe(statePublicationsBefore)
+      }
+      expectLockError(
+        () =>
+          owner.acquireExclusiveIntent(
+            'restore',
+            toJsonMetadata(() => ({ 'shikin.recovery.future': true }))
+          ),
+        'RESERVED_METADATA_KEY'
+      )
+      expect(owner.readOperationState()).toEqual(before)
+      expect(mutexPublications).toBe(mutexPublicationsBefore)
+      expect(statePublications).toBe(statePublicationsBefore)
+
+      let reads = 0
+      const validDynamicMetadata = {}
+      Object.defineProperty(validDynamicMetadata, 'value', {
+        enumerable: true,
+        get() {
+          reads += 1
+          if (reads > 2) throw new Error('caller metadata was read after snapshotting')
+          return reads === 1 ? 0 : 7
+        },
+      })
+      let intent = owner.acquireExclusiveIntent('restore', validDynamicMetadata)
+      expect(reads).toBe(2)
+      expect(intent.metadata).toEqual({ value: 7 })
+      if (process.platform !== 'linux') return
+      intent = owner.drainExclusiveIntent(intent)
+      owner.releaseRuntimeLease(lease)
+      intent = owner.drainExclusiveIntent(intent)
+      const prepared = prepareMutationProof(owner, intent)
+      expect(prepared).toMatchObject({
+        commitmentSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        durability: 'linux-fsync-complete',
+      })
+      expect(owner.readOperationState().exclusiveIntent.metadata).toEqual({ value: 7 })
+    }
+  )
+
   it.runIf(process.platform === 'linux')(
     'admits recursive nonnegative metadata through real journal preparation',
     () => {

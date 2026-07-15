@@ -425,11 +425,17 @@ describe('database operation lock core', () => {
     )
 
     const beginFirst = cancelableIntentFixture('exclusive')
+    const usedProof = prepareMutationProof(beginFirst.owner, beginFirst.intent)
     const mutating = beginFirst.owner.beginExclusiveMutation(
       beginFirst.intent,
-      prepareMutationProof(beginFirst.owner, beginFirst.intent).proof
+      usedProof.proof
     )
     const beforeRejectedCancel = beginFirst.owner.readOperationState()
+    expectLockError(
+      () => beginFirst.owner.beginExclusiveMutation(beginFirst.intent, usedProof.proof),
+      'INTENT_PHASE_INVALID'
+    )
+    expect(beginFirst.owner.readOperationState()).toEqual(beforeRejectedCancel)
     expectLockError(() => beginFirst.owner.cancelExclusiveIntent(mutating), 'INTENT_PHASE_INVALID')
     expect(beginFirst.owner.readOperationState()).toEqual(beforeRejectedCancel)
   })
@@ -524,6 +530,88 @@ describe('database operation lock core', () => {
       fenced: true,
       durabilityUncertain: true,
     })
+
+    armed = false
+    const failedSync = cancelableIntentFixture('exclusive', {
+      directorySync() {
+        if (armed) throw new Error('injected directory sync failure')
+      },
+    })
+    const failedSyncProof = prepareMutationProof(failedSync.owner, failedSync.intent)
+    armed = true
+    const syncError = expectLockError(
+      () => failedSync.owner.beginExclusiveMutation(failedSync.intent, failedSyncProof.proof),
+      'MUTATION_COMMIT_DURABILITY_UNCERTAIN'
+    )
+    expect(syncError.cause).toMatchObject({ code: 'FILESYSTEM_FAILURE' })
+    expect(failedSync.owner.readOperationState()).toMatchObject({
+      exclusiveIntent: { phase: 'mutating' },
+    })
+    expect(failedSync.owner.getLifecycleHealth()).toMatchObject({
+      fenced: true,
+      durabilityUncertain: true,
+    })
+  })
+
+  it('rejects retained-evidence tamper under the mutex without publishing mutating state', () => {
+    let armed = false
+    let artifactPath
+    const fixture = cancelableIntentFixture('exclusive', {
+      afterPrune() {
+        if (!armed) return
+        chmodSync(artifactPath, 0o600)
+        chmodSync(artifactPath, 0o400)
+      },
+    })
+    const prepared = prepareMutationProof(fixture.owner, fixture.intent)
+    const operations = join(
+      fixture.owner.getPaths().operationRoot,
+      'recovery-journal-v1',
+      'operations'
+    )
+    const operation = join(operations, readdirSync(operations)[0])
+    const artifacts = join(operation, 'artifacts')
+    artifactPath = join(artifacts, readdirSync(artifacts)[0])
+    const before = fixture.owner.readOperationState()
+    armed = true
+    const error = expectLockError(
+      () => fixture.owner.beginExclusiveMutation(fixture.intent, prepared.proof),
+      'RECOVERY_ARTIFACT_CORRUPTION'
+    )
+    expect(error.cause?.code).toBe('RECOVERY_ARTIFACT_CORRUPTION')
+    expect(fixture.owner.readOperationState()).toEqual(before)
+    expect(fixture.owner.getLifecycleHealth()).toMatchObject({
+      fenced: false,
+      durabilityUncertain: false,
+    })
+  })
+
+  it('applies intent and state precedence before proof lifecycle errors', () => {
+    const malformed = cancelableIntentFixture('exclusive')
+    const malformedProof = prepareMutationProof(malformed.owner, malformed.intent)
+    expectLockError(
+      () =>
+        malformed.owner.beginExclusiveMutation(
+          { ...malformed.intent, operationId: '' },
+          malformedProof.proof
+        ),
+      'STATE_CORRUPTION'
+    )
+
+    const cancelled = cancelableIntentFixture('exclusive')
+    expect(cancelled.owner.cancelExclusiveIntent(cancelled.intent)).toBe(true)
+    expectLockError(
+      () => cancelled.owner.beginExclusiveMutation(cancelled.intent, undefined),
+      'INTENT_FENCED'
+    )
+
+    const mutating = cancelableIntentFixture('exclusive')
+    const prepared = prepareMutationProof(mutating.owner, mutating.intent)
+    mutating.owner.beginExclusiveMutation(mutating.intent, prepared.proof)
+    expectLockError(
+      () => mutating.owner.beginExclusiveMutation(mutating.intent, undefined),
+      'INTENT_PHASE_INVALID'
+    )
   })
 
   it('returns mutation authority after durable fsync despite later committed maintenance failure', () => {
@@ -1252,6 +1340,31 @@ describe('database operation lock core', () => {
       const lease = live.registerRuntimeLease()
       expect(createLockAt(liveRoot, 'tauri').cleanupStaleRecords().removedLeaseIds).toEqual([])
       expect(live.releaseRuntimeLease(lease)).toBe(true)
+    }
+  )
+
+  it.runIf(process.platform !== 'linux')(
+    'cannot enter mutating or completed without creating recovery-journal side effects',
+    () => {
+      const fixture = cancelableIntentFixture('exclusive')
+      const recoveryRoot = join(
+        fixture.owner.getPaths().operationRoot,
+        'recovery-journal-v1'
+      )
+      const before = fixture.owner.readOperationState()
+      expect(existsSync(recoveryRoot)).toBe(false)
+      expectLockError(
+        () => fixture.owner.beginExclusiveMutation(fixture.intent, undefined),
+        'PREPARED_PROOF_INVALID'
+      )
+      expect(fixture.owner.readOperationState()).toEqual(before)
+      expect(fixture.owner.readOperationState().exclusiveIntent.phase).toBe('exclusive')
+      expect(existsSync(recoveryRoot)).toBe(false)
+      expectLockError(
+        () => fixture.owner.completeExclusiveMutation(fixture.intent),
+        'INTENT_FENCED'
+      )
+      expect(fixture.owner.readOperationState()).toEqual(before)
     }
   )
 

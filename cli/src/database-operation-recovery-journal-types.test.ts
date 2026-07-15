@@ -49,6 +49,8 @@ describe('recovery journal declarations', () => {
       PrepareMutationJournalOptions['writeArtifact']
     >().returns.toEqualTypeOf<ArtifactChecks>()
     expectTypeOf(verifyPreparedMutationProof).parameter(0).toEqualTypeOf<PreparedMutationProof>()
+    expectTypeOf<Record<string, never>>().not.toMatchTypeOf<PreparedMutationProof>()
+    expectTypeOf<Record<string, never>>().not.toMatchTypeOf<VerifiedPreparedMutationToken>()
     expectTypeOf(verifyPreparedMutationProof)
       .parameter(1)
       .toEqualTypeOf<VerifyPreparedMutationProofOptions>()

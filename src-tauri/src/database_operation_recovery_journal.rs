@@ -60,6 +60,36 @@ const ARTIFACT_CONTENT_DOMAIN: &[u8] =
     b"shikin.database-operation-recovery-journal/v1/artifact-content\0";
 const RECORD_DOMAIN: &[u8] = b"shikin.database-operation-recovery-journal/v1/record\0";
 
+#[cfg(test)]
+thread_local! {
+    static INTER_ARTIFACT_HASH_TEST_HOOK: std::cell::RefCell<
+        Option<Box<dyn FnMut() -> JournalResult<()>>>,
+    > = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_inter_artifact_hash_test_hook(
+    hook: Option<Box<dyn FnMut() -> JournalResult<()>>>,
+) {
+    INTER_ARTIFACT_HASH_TEST_HOOK.with(|slot| slot.replace(hook));
+}
+
+#[cfg(test)]
+fn run_inter_artifact_hash_test_hook() -> JournalResult<()> {
+    INTER_ARTIFACT_HASH_TEST_HOOK.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        match slot.as_mut() {
+            Some(hook) => hook(),
+            None => Ok(()),
+        }
+    })
+}
+
+#[cfg(not(test))]
+fn run_inter_artifact_hash_test_hook() -> JournalResult<()> {
+    Ok(())
+}
+
 #[derive(Debug)]
 pub(crate) struct JournalError {
     code: &'static str,
@@ -871,7 +901,7 @@ pub(crate) fn verify_prepared_mutation_proof(
         ));
     }
     let (evidence, retained_evidence) =
-        validate_and_retain_complete_operation(&paths, binding, || Ok(()))?;
+        validate_and_retain_complete_operation(&paths, binding, run_inter_artifact_hash_test_hook)?;
     if evidence.commitment_sha256 != proof.commitment_sha256
         || evidence.durability != proof.durability
     {
@@ -1124,6 +1154,13 @@ fn validate_complete_operation(
     paths: &JournalPaths,
     binding: &JournalIntentBinding,
 ) -> JournalResult<CompleteEvidence> {
+    #[cfg(test)]
+    return validate_complete_operation_with_hook(
+        paths,
+        binding,
+        run_inter_artifact_hash_test_hook,
+    );
+    #[cfg(not(test))]
     validate_complete_operation_with_hook(paths, binding, || Ok(()))
 }
 
@@ -3150,6 +3187,30 @@ mod tests {
         let prepared = prepare_mutation_journal(&root, &binding, write_artifact).unwrap();
         assert_eq!(prepared.commitment_sha256().len(), 64);
         assert_eq!(prepared.durability(), platform_durability());
+        let (_other_temp, other_root) = operation_root();
+        assert_eq!(
+            verify_prepared_mutation_proof(prepared.proof(), &other_root, &binding)
+                .unwrap_err()
+                .code(),
+            "PREPARED_PROOF_INVALID"
+        );
+        let mut wrong_revision = binding.clone();
+        wrong_revision.state_revision += 1;
+        assert_eq!(
+            verify_prepared_mutation_proof(prepared.proof(), &root, &wrong_revision)
+                .unwrap_err()
+                .code(),
+            "PREPARED_PROOF_INVALID"
+        );
+        let mut wrong_intent = binding.clone();
+        wrong_intent.intent_updated_at = "2026-07-14T12:00:03.000Z".into();
+        assert_eq!(
+            verify_prepared_mutation_proof(prepared.proof(), &root, &wrong_intent)
+                .unwrap_err()
+                .code(),
+            "PREPARED_PROOF_INVALID"
+        );
+
         let mut token = verify_prepared_mutation_proof(prepared.proof(), &root, &binding).unwrap();
         assert_eq!(
             revalidate_verified_prepared_mutation_token(&token, &binding)
@@ -3442,6 +3503,147 @@ mod tests {
         let bytes = fs::read(record_path).unwrap();
         let record: PreparedRecord = serde_json::from_slice(&bytes[..bytes.len() - 1]).unwrap();
         assert_eq!(record.created_at, binding.intent_created_at());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn retained_revalidation_rejects_immutable_identity_mode_link_time_and_layout_attacks() {
+        use std::os::unix::fs::PermissionsExt;
+
+        for attack in [
+            "artifact-file-replacement",
+            "artifact-directory-replacement",
+            "operation-directory-replacement",
+            "same-size-restored-time",
+            "mode-flip-restore",
+            "hard-link-count",
+            "artifact-sidecar",
+            "extra-record",
+            "extra-operation-entry",
+            "extra-recovery-entry",
+        ] {
+            let (_temp, root) = operation_root();
+            let binding = make_binding(&format!("operation-retained-{attack}"));
+            let prepared = prepare_mutation_journal(&root, &binding, write_artifact).unwrap();
+            let paths = journal_paths(&root, &binding);
+            let mut token =
+                verify_prepared_mutation_proof(prepared.proof(), &root, &binding).unwrap();
+            let artifact = paths.artifacts.join(
+                read_names(&paths.artifacts)
+                    .unwrap()
+                    .into_iter()
+                    .next()
+                    .unwrap(),
+            );
+            match attack {
+                "artifact-file-replacement" => {
+                    let replacement = root.join("artifact-replacement");
+                    fs::copy(&artifact, &replacement).unwrap();
+                    fs::set_permissions(&replacement, fs::Permissions::from_mode(0o400)).unwrap();
+                    fs::rename(replacement, &artifact).unwrap();
+                }
+                "artifact-directory-replacement" => {
+                    let old = root.join("old-artifacts");
+                    fs::rename(&paths.artifacts, &old).unwrap();
+                    copy_and_seal_fixture(&old, &paths.artifacts);
+                }
+                "operation-directory-replacement" => {
+                    let old = root.join("old-operation");
+                    fs::rename(&paths.operation, &old).unwrap();
+                    copy_and_seal_fixture(&old, &paths.operation);
+                }
+                "same-size-restored-time" => {
+                    let metadata = fs::metadata(&artifact).unwrap();
+                    let bytes = fs::read(&artifact).unwrap();
+                    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o600)).unwrap();
+                    let file = OpenOptions::new().write(true).open(&artifact).unwrap();
+                    fs::write(&artifact, bytes).unwrap();
+                    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o400)).unwrap();
+                    file.set_times(
+                        fs::FileTimes::new()
+                            .set_accessed(metadata.accessed().unwrap())
+                            .set_modified(metadata.modified().unwrap()),
+                    )
+                    .unwrap();
+                }
+                "mode-flip-restore" => {
+                    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o600)).unwrap();
+                    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o400)).unwrap();
+                }
+                "hard-link-count" => {
+                    fs::hard_link(&artifact, root.join("outside-hard-link")).unwrap();
+                }
+                "artifact-sidecar" => {
+                    fs::write(paths.artifacts.join("candidate.sqlite-wal"), b"sidecar").unwrap();
+                }
+                "extra-record" => {
+                    let extra = paths.records.join("extra-record");
+                    fs::write(&extra, b"extra").unwrap();
+                    fs::set_permissions(extra, fs::Permissions::from_mode(0o400)).unwrap();
+                }
+                "extra-operation-entry" => {
+                    fs::write(paths.operation.join("unexpected"), b"extra").unwrap();
+                }
+                "extra-recovery-entry" => {
+                    fs::write(paths.recovery_root.join("unexpected"), b"extra").unwrap();
+                }
+                _ => unreachable!(),
+            }
+            let expected = if matches!(
+                attack,
+                "same-size-restored-time" | "mode-flip-restore" | "hard-link-count"
+            ) {
+                "RECOVERY_ARTIFACT_CORRUPTION"
+            } else {
+                "RECOVERY_JOURNAL_CORRUPTION"
+            };
+            assert_eq!(
+                revalidate_verified_prepared_mutation_token(&token, &binding)
+                    .unwrap_err()
+                    .code(),
+                expected,
+                "{attack}"
+            );
+            release_verified_prepared_mutation_token(&mut token);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn failed_full_verification_drops_every_retained_descriptor_before_token_issuance() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let (_temp, root) = operation_root();
+        let binding = make_binding("operation-failed-retention");
+        prepare_mutation_journal(&root, &binding, write_artifact).unwrap();
+        let paths = journal_paths(&root, &binding);
+        let retained_for_root = || {
+            fs::read_dir("/proc/self/fd")
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter(|entry| {
+                    fs::read_link(entry.path()).ok().is_some_and(|path| {
+                        path.as_os_str()
+                            .as_bytes()
+                            .starts_with(root.as_os_str().as_bytes())
+                    })
+                })
+                .count()
+        };
+        assert_eq!(retained_for_root(), 0);
+        assert_eq!(
+            validate_complete_operation_with_hook(&paths, &binding, || {
+                Err(JournalError::new(
+                    "RECOVERY_VALIDATION_FAILED",
+                    "injected inter-hash failure",
+                ))
+            })
+            .unwrap_err()
+            .code(),
+            "RECOVERY_VALIDATION_FAILED"
+        );
+        assert_eq!(retained_for_root(), 0);
+        validate_complete_operation(&paths, &binding).unwrap();
     }
 
     #[cfg(target_os = "linux")]

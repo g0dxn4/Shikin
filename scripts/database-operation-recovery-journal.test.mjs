@@ -19,6 +19,7 @@ import {
   symlinkSync,
   truncateSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -431,6 +432,14 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
       () =>
         verifyPreparedMutationProof(prepared.proof, {
           ...options,
+          operationRoot: createOperationRoot(),
+        }),
+      'PREPARED_PROOF_INVALID'
+    )
+    expectError(
+      () =>
+        verifyPreparedMutationProof(prepared.proof, {
+          ...options,
           stateRevision: 13,
         }),
       'PREPARED_PROOF_INVALID'
@@ -440,6 +449,14 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
         verifyPreparedMutationProof(prepared.proof, {
           ...options,
           intent: { ...intent, updatedAt: '2026-07-14T12:00:03.000Z' },
+        }),
+      'PREPARED_PROOF_INVALID'
+    )
+    expectError(
+      () =>
+        verifyPreparedMutationProof(prepared.proof, {
+          ...options,
+          intent: { ...intent, metadata: { changed: true } },
         }),
       'PREPARED_PROOF_INVALID'
     )
@@ -510,6 +527,142 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
       () => revalidateVerifiedPreparedMutationToken(token, options),
       'RECOVERY_JOURNAL_CORRUPTION'
     )
+    releaseVerifiedPreparedMutationToken(token)
+  })
+
+  it('revalidates immutable files, directories, layouts, modes, links, and timestamps', () => {
+    const attacks = [
+      {
+        name: 'artifact file replacement',
+        code: 'RECOVERY_JOURNAL_CORRUPTION',
+        apply({ operationRoot, paths }) {
+          const artifact = join(paths.artifacts, readdirSync(paths.artifacts)[0])
+          const replacement = join(operationRoot, `replacement-${randomUUID()}`)
+          copyFileSync(artifact, replacement)
+          chmodSync(replacement, 0o400)
+          renameSync(replacement, artifact)
+        },
+      },
+      {
+        name: 'artifact directory replacement',
+        code: 'RECOVERY_JOURNAL_CORRUPTION',
+        apply({ operationRoot, paths }) {
+          const old = join(operationRoot, `old-artifacts-${randomUUID()}`)
+          renameSync(paths.artifacts, old)
+          cpSync(old, paths.artifacts, { recursive: true })
+          sealFixtureTree(paths.artifacts)
+        },
+      },
+      {
+        name: 'operation directory replacement',
+        code: 'RECOVERY_JOURNAL_CORRUPTION',
+        apply({ operationRoot, paths }) {
+          const old = join(operationRoot, `old-operation-${randomUUID()}`)
+          renameSync(paths.operation, old)
+          cpSync(old, paths.operation, { recursive: true })
+          sealFixtureTree(paths.operation)
+        },
+      },
+      {
+        name: 'same-size rewrite with restored mtime',
+        code: 'RECOVERY_ARTIFACT_CORRUPTION',
+        apply({ paths }) {
+          const artifact = join(paths.artifacts, readdirSync(paths.artifacts)[0])
+          const stat = lstatSync(artifact, { bigint: true })
+          const bytes = readFileSync(artifact)
+          chmodSync(artifact, 0o600)
+          writeFileSync(artifact, bytes)
+          chmodSync(artifact, 0o400)
+          utimesSync(
+            artifact,
+            Number(stat.atimeNs) / 1_000_000_000,
+            Number(stat.mtimeNs) / 1_000_000_000
+          )
+        },
+      },
+      {
+        name: 'mode flip and restore',
+        code: 'RECOVERY_ARTIFACT_CORRUPTION',
+        apply({ paths }) {
+          const artifact = join(paths.artifacts, readdirSync(paths.artifacts)[0])
+          chmodSync(artifact, 0o600)
+          chmodSync(artifact, 0o400)
+        },
+      },
+      {
+        name: 'hard-link count change',
+        code: 'RECOVERY_ARTIFACT_CORRUPTION',
+        apply({ operationRoot, paths }) {
+          const artifact = join(paths.artifacts, readdirSync(paths.artifacts)[0])
+          linkSync(artifact, join(operationRoot, `outside-hardlink-${randomUUID()}`))
+        },
+      },
+      {
+        name: 'artifact sidecar',
+        code: 'RECOVERY_JOURNAL_CORRUPTION',
+        apply({ paths }) {
+          writeFileSync(join(paths.artifacts, 'candidate.sqlite-wal'), 'sidecar')
+        },
+      },
+      {
+        name: 'extra record',
+        code: 'RECOVERY_JOURNAL_CORRUPTION',
+        apply({ paths }) {
+          const extra = join(paths.records, `extra-${randomUUID()}`)
+          writeFileSync(extra, 'extra')
+          chmodSync(extra, 0o400)
+        },
+      },
+      {
+        name: 'extra operation entry',
+        code: 'RECOVERY_JOURNAL_CORRUPTION',
+        apply({ paths }) {
+          writeFileSync(join(paths.operation, 'unexpected-entry'), 'extra')
+        },
+      },
+      {
+        name: 'extra recovery-root entry',
+        code: 'RECOVERY_JOURNAL_CORRUPTION',
+        apply({ paths }) {
+          const recoveryRoot = dirname(dirname(paths.operation))
+          writeFileSync(join(recoveryRoot, 'unexpected-entry'), 'extra')
+        },
+      },
+    ]
+
+    for (const attack of attacks) {
+      const operationRoot = createOperationRoot()
+      const intent = makeIntent('restore')
+      const prepared = prepareDefault(operationRoot, intent, 18)
+      const options = { operationRoot, stateRevision: 18, intent }
+      const token = verifyPreparedMutationProof(prepared.proof, options)
+      try {
+        attack.apply({ operationRoot, paths: preparedPaths(operationRoot, intent) })
+        expectError(
+          () => revalidateVerifiedPreparedMutationToken(token, options),
+          attack.code,
+          attack.name
+        )
+      } finally {
+        releaseVerifiedPreparedMutationToken(token)
+      }
+    }
+  })
+
+  it('closes every retained handle when full verification fails before token issuance', () => {
+    const operationRoot = createOperationRoot()
+    const intent = makeIntent('restore')
+    const prepared = prepareDefault(operationRoot, intent, 19)
+    const options = { operationRoot, stateRevision: 19, intent }
+    setRecoveryJournalInterArtifactHashTestHookForTest(() => {
+      throw new Error('injected inter-hash failure')
+    })
+    expect(() => verifyPreparedMutationProof(prepared.proof, options)).toThrow(
+      'injected inter-hash failure'
+    )
+    setRecoveryJournalInterArtifactHashTestHookForTest(undefined)
+    expect(retainedFileDescriptors(operationRoot)).toEqual([])
+    const token = verifyPreparedMutationProof(prepared.proof, options)
     releaseVerifiedPreparedMutationToken(token)
   })
 

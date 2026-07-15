@@ -2941,7 +2941,8 @@ mod tests {
     use super::*;
     #[cfg(target_os = "linux")]
     use crate::database_operation_recovery_journal::{
-        prepare_mutation_journal, ArtifactChecks, PreparedMutationJournal,
+        prepare_mutation_journal, set_inter_artifact_hash_test_hook, ArtifactChecks,
+        PreparedMutationJournal,
     };
     use tempfile::TempDir;
 
@@ -3683,6 +3684,11 @@ mod tests {
             .unwrap();
         let before = begin_first.read_operation_state().unwrap();
         assert_eq!(
+            error_code(begin_first.begin_exclusive_mutation(&intent, prepared.proof())),
+            "INTENT_PHASE_INVALID"
+        );
+        assert_eq!(begin_first.read_operation_state().unwrap(), before);
+        assert_eq!(
             error_code(begin_first.cancel_exclusive_intent(&mutating)),
             "INTENT_PHASE_INVALID"
         );
@@ -3798,6 +3804,60 @@ mod tests {
         assert!(!health.fenced);
         assert!(health.maintenance_degraded);
         assert!(!health.durability_uncertain);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn full_hash_verification_holds_no_mutex_even_beyond_mutex_ttl() {
+        let root = TempDir::new().unwrap();
+        let timing = Timing {
+            mutex_ttl_ms: 1_000,
+            ..Timing::default()
+        };
+        let mut owner = lock(&root, RuntimeId::Cli).with_timing(timing).unwrap();
+        let lease = owner.register_runtime_lease().unwrap();
+        let mut intent = owner
+            .acquire_exclusive_intent(DatabaseOperation::Restore, None)
+            .unwrap();
+        intent = owner.drain_exclusive_intent(&intent).unwrap();
+        owner.release_runtime_lease(&lease).unwrap();
+        intent = owner.drain_exclusive_intent(&intent).unwrap();
+        let prepared = prepare_proof(&mut owner, &intent);
+        let mutex_path = owner.paths.registration_mutex.clone();
+        set_inter_artifact_hash_test_hook(Some(Box::new(move || {
+            assert!(!mutex_path.exists());
+            std::thread::sleep(std::time::Duration::from_millis(1_100));
+            Ok(())
+        })));
+        let started = std::time::Instant::now();
+        let result = owner.begin_exclusive_mutation(&intent, prepared.proof());
+        set_inter_artifact_hash_test_hook(None);
+        assert_eq!(result.unwrap().phase, ExclusivePhase::Mutating);
+        assert!(started.elapsed() >= std::time::Duration::from_millis(1_000));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cancellation_during_hashing_is_rechecked_under_the_mutex() {
+        let root = TempDir::new().unwrap();
+        let (mut owner, _, _, _, intent) =
+            cancelable_intent_fixture(&root, ExclusivePhase::Exclusive);
+        let prepared = prepare_proof(&mut owner, &intent);
+        let mut racer = lock(&root, RuntimeId::Cli);
+        racer.owner = Some(intent.owner.clone());
+        let race_intent = intent.clone();
+        set_inter_artifact_hash_test_hook(Some(Box::new(move || {
+            assert!(racer.cancel_exclusive_intent(&race_intent).unwrap());
+            Ok(())
+        })));
+        let result = owner.begin_exclusive_mutation(&intent, prepared.proof());
+        set_inter_artifact_hash_test_hook(None);
+        assert_eq!(error_code(result), "INTENT_FENCED");
+        assert!(owner
+            .read_operation_state()
+            .unwrap()
+            .exclusive_intent
+            .is_none());
     }
 
     #[test]

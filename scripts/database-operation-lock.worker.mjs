@@ -1,4 +1,6 @@
+import { writeFileSync } from 'node:fs'
 import { DatabaseOperationLock } from './database-operation-lock.mjs'
+import { prepareMutationJournal } from './database-operation-recovery-journal.mjs'
 
 const [
   rootDir,
@@ -37,7 +39,22 @@ try {
       intent = lock.drainExclusiveIntent(intent)
     }
     if (['mutating', 'completed'].includes(targetPhase)) {
-      intent = lock.beginExclusiveMutation(intent)
+      const state = lock.readOperationState()
+      const prepared = prepareMutationJournal({
+        operationRoot: lock.getPaths().operationRoot,
+        stateRevision: state.stateRevision,
+        intent,
+        writeArtifact({ role, path }) {
+          writeFileSync(path, `${role}\0worker-journal`)
+          return {
+            integrityCheck: 'ok',
+            foreignKeyCheck: 'ok',
+            schemaContractCheck: 'ok',
+            sidecarCheck: 'ok',
+          }
+        },
+      })
+      intent = lock.beginExclusiveMutation(intent, prepared.proof)
     }
     if (targetPhase === 'completed') intent = lock.completeExclusiveMutation(intent)
     process.stdout.write(`${JSON.stringify({ intent, state: lock.readOperationState() })}\n`)

@@ -17,6 +17,13 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+import {
+  RecoveryJournalError,
+  consumeVerifiedPreparedMutationToken,
+  releaseVerifiedPreparedMutationToken,
+  revalidateVerifiedPreparedMutationToken,
+  verifyPreparedMutationProof,
+} from './database-operation-recovery-journal.mjs'
 
 export const DATABASE_OPERATION_PROTOCOL = 'shikin.database-operation-lock'
 export const DATABASE_OPERATION_PROTOCOL_VERSION = 1
@@ -385,23 +392,47 @@ export class DatabaseOperationLock {
     )
   }
 
-  beginExclusiveMutation(intent) {
-    this.#requireOperationalOwner()
+  beginExclusiveMutation(intent, proof) {
     const evidence = validateIntent(cloneJson(intent), this.databaseIdentity)
     this.#requireCallerOwner(evidence.owner, 'INTENT_FENCED')
-    return cloneJson(
-      this.#mutateState((previous, now) => {
-        const current = requireIntentAuthority(previous, evidence, ['exclusive'])
-        if (previous.leases.length !== 0) {
-          throw protocolError('RUNTIME_LEASES_ACTIVE', 'Runtime leases must drain before mutation')
-        }
-        if (current.fencingGeneration !== previous.fencingGenerationHighWater) {
-          throw protocolError('INTENT_FENCED', 'Exclusive intent is no longer the high-water owner')
-        }
-        const next = { ...current, phase: 'mutating', updatedAt: isoTime(now) }
-        return { state: { ...previous, exclusiveIntent: next }, value: next }
-      })
+    this.#requireOperationalOwner()
+    const advisoryBinding = requireMutationEntryBinding(
+      this.#readAuthoritativeState(),
+      evidence,
+      this.paths.operationRoot
     )
+    let token
+    let authoritativeBinding
+    try {
+      token = normalizeRecoveryJournalCall(() =>
+        verifyPreparedMutationProof(proof, advisoryBinding)
+      )
+      return cloneJson(
+        this.#mutateState(
+          (previous, now) => {
+            authoritativeBinding = requireMutationEntryBinding(
+              previous,
+              evidence,
+              this.paths.operationRoot
+            )
+            const current = previous.exclusiveIntent
+            const next = { ...current, phase: 'mutating', updatedAt: isoTime(now) }
+            return { state: { ...previous, exclusiveIntent: next }, value: next }
+          },
+          {
+            beforeFinalFence: () => {
+              normalizeRecoveryJournalCall(() =>
+                revalidateVerifiedPreparedMutationToken(token, authoritativeBinding)
+              )
+            },
+            onCommitted: () => consumeVerifiedPreparedMutationToken(token),
+            durabilityPolicy: 'required-for-mutation-authority',
+          }
+        )
+      )
+    } finally {
+      releaseVerifiedPreparedMutationToken(token)
+    }
   }
 
   completeExclusiveMutation(intent) {
@@ -698,16 +729,24 @@ export class DatabaseOperationLock {
     throw protocolError('STATE_READ_RACE', 'Operation state changed during every bounded read')
   }
 
-  #mutateState(mutator) {
+  #mutateState(mutator, options) {
     this.#requireOperationalOwner()
     this.#ensureOwner()
+    const publication = normalizeStatePublicationOptions(options)
     const mutex = this.#acquireMutex()
-    let committed = false
-    let durable = false
     let released = false
+    const releaseMutex = () => {
+      if (released) return
+      try {
+        released = this.#releaseMutex(mutex)
+      } catch (error) {
+        this.#recordMaintenanceFailure(error)
+      }
+    }
+
     let value
-    let next = null
-    let statePath = null
+    let next
+    let context
     try {
       const previous = this.#readAuthoritativeState()
       const now = this.#now()
@@ -717,11 +756,7 @@ export class DatabaseOperationLock {
       }
       value = cloneJson(mutation.value)
       if (mutation.changed === false) {
-        try {
-          released = this.#releaseMutex(mutex)
-        } catch (error) {
-          this.#recordMaintenanceFailure(error)
-        }
+        releaseMutex()
         return value
       }
       if (!isPlainRecord(mutation.state)) {
@@ -744,7 +779,7 @@ export class DatabaseOperationLock {
       const stageId = randomUUID()
       const stagePath = join(mutex.tokenPath, `staged-state-${stageId}.json`)
       writeJsonExclusive(stagePath, next)
-      const context = {
+      context = {
         mutex: cloneJson(mutex.record),
         mutexPath: this.paths.registrationMutex,
         tokenPath: mutex.tokenPath,
@@ -755,13 +790,32 @@ export class DatabaseOperationLock {
       this.testHooks?.beforePublish?.(Object.freeze({ ...context }))
       this.#pruneForPublication()
       this.testHooks?.afterPrune?.(Object.freeze({ ...context }))
+      publication.beforeFinalFence(Object.freeze({ ...context }))
       this.#revalidateMutex(mutex)
       const stateName = `operation-state-${String(next.stateRevision).padStart(20, '0')}-${randomUUID()}.json`
-      statePath = join(this.paths.stateRecords, stateName)
+      const statePath = join(this.paths.stateRecords, stateName)
       renameSync(stagePath, statePath)
-      committed = true
       this.lastCommittedStateRevision = next.stateRevision
       context.statePath = statePath
+    } catch (error) {
+      releaseMutex()
+      throw normalizeError(error)
+    }
+
+    let strictFailure = null
+    try {
+      publication.onCommitted(Object.freeze({ ...context }))
+    } catch (error) {
+      const failure = normalizeError(error)
+      this.#recordMaintenanceFailure(failure, true)
+      strictFailure = mutationCommitUncertain(
+        'Committed mutation-entry publication failed in its infallible commit callback',
+        failure
+      )
+    }
+
+    let durable = false
+    if (strictFailure === null) {
       try {
         this.testHooks?.afterRename?.(Object.freeze({ ...context }))
         const injectedDirectorySync = this.testHooks?.directorySync?.(
@@ -771,8 +825,20 @@ export class DatabaseOperationLock {
           throw protocolError('INVALID_OPTIONS', 'directorySync test hook must return a boolean')
         }
         const directorySynced = injectedDirectorySync ?? syncDirectory(this.paths.stateRecords)
-        durable = true
-        if (!directorySynced) {
+        if (directorySynced) {
+          durable = true
+        } else if (publication.durabilityPolicy === 'required-for-mutation-authority') {
+          const failure = protocolError(
+            'DIRECTORY_SYNC_UNSUPPORTED',
+            'State record is committed but directory fsync is unsupported'
+          )
+          this.#recordMaintenanceFailure(failure, true)
+          strictFailure = mutationCommitUncertain(
+            'Committed mutation-entry publication directory durability is unsupported',
+            failure
+          )
+        } else {
+          durable = true
           this.#recordMaintenanceFailure(
             protocolError(
               'DIRECTORY_SYNC_UNSUPPORTED',
@@ -780,42 +846,32 @@ export class DatabaseOperationLock {
             )
           )
         }
-        this.testHooks?.afterFsync?.(Object.freeze({ ...context }))
-      } catch (error) {
-        this.#recordMaintenanceFailure(error, !durable)
-      }
-      try {
-        released = this.#releaseMutex(mutex)
-        this.testHooks?.afterRelease?.(Object.freeze({ ...context, mutexReleased: released }))
-      } catch (error) {
-        this.#recordMaintenanceFailure(error)
-      }
-      return value
-    } catch (error) {
-      if (committed) {
-        this.#recordMaintenanceFailure(error, !durable)
-        try {
-          released = this.#releaseMutex(mutex)
-        } catch (releaseError) {
-          this.#recordMaintenanceFailure(releaseError)
+        if (strictFailure === null) {
+          this.testHooks?.afterFsync?.(Object.freeze({ ...context }))
         }
-        return value
-      }
-      try {
-        released = this.#releaseMutex(mutex)
-      } catch (releaseError) {
-        this.#recordMaintenanceFailure(releaseError)
-      }
-      throw normalizeError(error)
-    } finally {
-      if (!released && !committed) {
-        try {
-          this.#releaseMutex(mutex)
-        } catch (error) {
-          this.#recordMaintenanceFailure(error)
+      } catch (error) {
+        const failure = normalizeError(error)
+        this.#recordMaintenanceFailure(failure, !durable)
+        if (
+          !durable &&
+          publication.durabilityPolicy === 'required-for-mutation-authority'
+        ) {
+          strictFailure = mutationCommitUncertain(
+            'Committed mutation-entry publication directory durability is uncertain',
+            failure
+          )
         }
       }
     }
+
+    try {
+      released = this.#releaseMutex(mutex)
+      this.testHooks?.afterRelease?.(Object.freeze({ ...context, mutexReleased: released }))
+    } catch (error) {
+      this.#recordMaintenanceFailure(error)
+    }
+    if (strictFailure !== null) throw strictFailure
+    return value
   }
 
   #requireCallerOwner(owner, code) {
@@ -1061,6 +1117,73 @@ export class DatabaseOperationLock {
     this.lastFailure = normalizeError(error)
     this.stopHeartbeat()
   }
+}
+
+const EXISTING_STATE_PUBLICATION = Object.freeze({
+  beforeFinalFence: () => {},
+  onCommitted: () => {},
+  durabilityPolicy: 'existing-best-effort',
+})
+
+function normalizeStatePublicationOptions(options) {
+  if (options === undefined) return EXISTING_STATE_PUBLICATION
+  if (
+    !isPlainRecord(options) ||
+    Object.keys(options).length !== 3 ||
+    !Object.prototype.hasOwnProperty.call(options, 'beforeFinalFence') ||
+    !Object.prototype.hasOwnProperty.call(options, 'onCommitted') ||
+    !Object.prototype.hasOwnProperty.call(options, 'durabilityPolicy') ||
+    typeof options.beforeFinalFence !== 'function' ||
+    typeof options.onCommitted !== 'function' ||
+    !['existing-best-effort', 'required-for-mutation-authority'].includes(
+      options.durabilityPolicy
+    )
+  ) {
+    throw protocolError('INVALID_OPTIONS', 'State publication options are malformed')
+  }
+  return options
+}
+
+function requireMutationEntryBinding(state, evidence, operationRoot) {
+  const current = state.exclusiveIntent
+  if (current === null || !sameIntentAuthority(current, evidence)) {
+    throw protocolError('INTENT_FENCED', 'Exclusive intent authority no longer matches')
+  }
+  if (current.phase !== 'exclusive') {
+    throw protocolError(
+      'INTENT_PHASE_INVALID',
+      `Exclusive mutation cannot begin from persisted phase ${current.phase}`
+    )
+  }
+  if (state.leases.length !== 0) {
+    throw protocolError('RUNTIME_LEASES_ACTIVE', 'Runtime leases must drain before mutation')
+  }
+  if (current.fencingGeneration !== state.fencingGenerationHighWater) {
+    throw protocolError('INTENT_FENCED', 'Exclusive intent is no longer the high-water owner')
+  }
+  if (state.stateRevision >= Number.MAX_SAFE_INTEGER) {
+    throw protocolError('STATE_CORRUPTION', 'State revision cannot advance safely')
+  }
+  return Object.freeze({
+    operationRoot,
+    stateRevision: state.stateRevision,
+    intent: cloneJson(current),
+  })
+}
+
+function normalizeRecoveryJournalCall(action) {
+  try {
+    return action()
+  } catch (error) {
+    if (error instanceof RecoveryJournalError) {
+      throw protocolError(error.code, error.message, error)
+    }
+    throw normalizeError(error)
+  }
+}
+
+function mutationCommitUncertain(message, cause) {
+  return protocolError('MUTATION_COMMIT_DURABILITY_UNCERTAIN', message, cause)
 }
 
 export function validateDatabaseOperationRecord(value) {

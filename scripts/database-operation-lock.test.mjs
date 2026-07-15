@@ -28,6 +28,11 @@ import {
   DatabaseOperationLockError,
   validateDatabaseOperationRecord,
 } from './database-operation-lock.mjs'
+import {
+  prepareMutationJournal,
+  setRecoveryJournalInterArtifactHashTestHookForTest,
+  verifyPreparedMutationProof,
+} from './database-operation-recovery-journal.mjs'
 
 const roots = []
 const DATABASE_IDENTITY = SHIKIN_DATABASE_IDENTITY
@@ -42,6 +47,7 @@ addFormats(ajv)
 const validateContractRecord = ajv.compile(contractSchema)
 
 afterEach(() => {
+  setRecoveryJournalInterArtifactHashTestHookForTest(undefined)
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
@@ -146,7 +152,7 @@ describe('database operation lock core', () => {
     owner.releaseRuntimeLease(ownerLease)
     intent = owner.drainExclusiveIntent(intent)
     expect(intent.phase).toBe('exclusive')
-    intent = owner.beginExclusiveMutation(intent)
+    intent = owner.beginExclusiveMutation(intent, prepareMutationProof(owner, intent).proof)
     expect(owner.assertExclusiveAuthority(intent)).toEqual(intent)
     intent = owner.completeExclusiveMutation(intent)
     expect(intent).toMatchObject({ phase: 'completed', completedAt: expect.any(String) })
@@ -191,7 +197,7 @@ describe('database operation lock core', () => {
     (phase) => {
       const { owner, intent } = cancelableIntentFixture('exclusive')
       if (phase === 'mutating' || phase === 'completed') {
-        const mutating = owner.beginExclusiveMutation(intent)
+        const mutating = owner.beginExclusiveMutation(intent, prepareMutationProof(owner, intent).proof)
         if (phase === 'completed') owner.completeExclusiveMutation(mutating)
       } else {
         rewriteAuthoritativeState(owner, (state) => {
@@ -353,17 +359,174 @@ describe('database operation lock core', () => {
 
   it('orders cancel-then-begin and begin-then-cancel as a fenced state machine', () => {
     const cancelFirst = cancelableIntentFixture('exclusive')
+    const cancelledProof = prepareMutationProof(cancelFirst.owner, cancelFirst.intent)
     expect(cancelFirst.owner.cancelExclusiveIntent(cancelFirst.intent)).toBe(true)
     expectLockError(
-      () => cancelFirst.owner.beginExclusiveMutation(cancelFirst.intent),
+      () => cancelFirst.owner.beginExclusiveMutation(cancelFirst.intent, cancelledProof.proof),
       'INTENT_FENCED'
     )
 
     const beginFirst = cancelableIntentFixture('exclusive')
-    const mutating = beginFirst.owner.beginExclusiveMutation(beginFirst.intent)
+    const mutating = beginFirst.owner.beginExclusiveMutation(
+      beginFirst.intent,
+      prepareMutationProof(beginFirst.owner, beginFirst.intent).proof
+    )
     const beforeRejectedCancel = beginFirst.owner.readOperationState()
     expectLockError(() => beginFirst.owner.cancelExclusiveIntent(mutating), 'INTENT_PHASE_INVALID')
     expect(beginFirst.owner.readOperationState()).toEqual(beforeRejectedCancel)
+  })
+
+  it('requires an authentic proof after advisory state checks and preserves proof error codes', () => {
+    for (const suppliedProof of [undefined, {}, Object.freeze(Object.create(null))]) {
+      const { owner, intent } = cancelableIntentFixture('exclusive')
+      const before = owner.readOperationState()
+      expectLockError(
+        () => owner.beginExclusiveMutation(intent, suppliedProof),
+        'PREPARED_PROOF_INVALID'
+      )
+      expect(owner.readOperationState()).toEqual(before)
+    }
+
+    const { owner, intent } = cancelableIntentFixture('exclusive')
+    const prepared = prepareMutationProof(owner, intent)
+    const before = owner.readOperationState()
+    expectLockError(
+      () =>
+        owner.beginExclusiveMutation(
+          { ...intent, owner: { ...intent.owner, ownerId: `wrong-${intent.owner.ownerId}` } },
+          prepared.proof
+        ),
+      'INTENT_FENCED'
+    )
+    expect(owner.readOperationState()).toEqual(before)
+  })
+
+  it('reuses a proof after precommit failure and consumes it at rename before strict durability', () => {
+    let armed = false
+    const reusable = cancelableIntentFixture('exclusive', {
+      afterPrune() {
+        if (armed) throw new Error('precommit failure')
+      },
+    })
+    const reusableProof = prepareMutationProof(reusable.owner, reusable.intent)
+    const before = reusable.owner.readOperationState()
+    armed = true
+    expectLockError(
+      () => reusable.owner.beginExclusiveMutation(reusable.intent, reusableProof.proof),
+      'FILESYSTEM_FAILURE'
+    )
+    expect(reusable.owner.readOperationState()).toEqual(before)
+    armed = false
+    expect(
+      reusable.owner.beginExclusiveMutation(reusable.intent, reusableProof.proof)
+    ).toMatchObject({ phase: 'mutating' })
+
+    armed = false
+    const uncertain = cancelableIntentFixture('exclusive', {
+      afterRename() {
+        if (armed) throw new Error('post-rename pre-fsync failure')
+      },
+    })
+    const uncertainProof = prepareMutationProof(uncertain.owner, uncertain.intent)
+    const uncertainBinding = mutationProofBinding(uncertain.owner, uncertain.intent)
+    armed = true
+    const error = expectLockError(
+      () => uncertain.owner.beginExclusiveMutation(uncertain.intent, uncertainProof.proof),
+      'MUTATION_COMMIT_DURABILITY_UNCERTAIN'
+    )
+    expect(error.cause).toBeInstanceOf(DatabaseOperationLockError)
+    expect(uncertain.owner.readOperationState()).toMatchObject({
+      exclusiveIntent: { phase: 'mutating' },
+    })
+    expect(uncertain.owner.getLifecycleHealth()).toMatchObject({
+      fenced: true,
+      durabilityUncertain: true,
+    })
+    expectErrorCode(
+      () => verifyPreparedMutationProof(uncertainProof.proof, uncertainBinding),
+      'PREPARED_PROOF_USED'
+    )
+
+    armed = false
+    const unsupported = cancelableIntentFixture('exclusive', {
+      directorySync() {
+        return armed ? false : undefined
+      },
+    })
+    const unsupportedProof = prepareMutationProof(unsupported.owner, unsupported.intent)
+    armed = true
+    expectLockError(
+      () => unsupported.owner.beginExclusiveMutation(unsupported.intent, unsupportedProof.proof),
+      'MUTATION_COMMIT_DURABILITY_UNCERTAIN'
+    )
+    expect(unsupported.owner.readOperationState()).toMatchObject({
+      exclusiveIntent: { phase: 'mutating' },
+    })
+    expect(unsupported.owner.getLifecycleHealth()).toMatchObject({
+      fenced: true,
+      durabilityUncertain: true,
+    })
+  })
+
+  it('returns mutation authority after durable fsync despite later committed maintenance failure', () => {
+    let armed = false
+    const fixture = cancelableIntentFixture('exclusive', {
+      afterFsync() {
+        if (armed) throw new Error('durable postcommit maintenance')
+      },
+    })
+    const prepared = prepareMutationProof(fixture.owner, fixture.intent)
+    armed = true
+    expect(fixture.owner.beginExclusiveMutation(fixture.intent, prepared.proof)).toMatchObject({
+      phase: 'mutating',
+    })
+    expect(fixture.owner.getLifecycleHealth()).toMatchObject({
+      fenced: false,
+      maintenanceDegraded: true,
+      durabilityUncertain: false,
+    })
+  })
+
+  it('hashes only before the mutex even when full verification exceeds its TTL', () => {
+    const root = tempRoot()
+    const owner = new DatabaseOperationLock({
+      rootDir: root,
+      databaseIdentity: DATABASE_IDENTITY,
+      runtimeId: 'cli',
+      mutexTtlMs: 1_000,
+    })
+    const lease = owner.registerRuntimeLease()
+    let intent = owner.acquireExclusiveIntent('restore')
+    intent = owner.drainExclusiveIntent(intent)
+    owner.releaseRuntimeLease(lease)
+    intent = owner.drainExclusiveIntent(intent)
+    const prepared = prepareMutationProof(owner, intent)
+    let hashes = 0
+    setRecoveryJournalInterArtifactHashTestHookForTest(() => {
+      hashes += 1
+      expect(existsSync(owner.getPaths().registrationMutex)).toBe(false)
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_100)
+    })
+    const started = Date.now()
+    expect(owner.beginExclusiveMutation(intent, prepared.proof)).toMatchObject({
+      phase: 'mutating',
+    })
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1_000)
+    expect(hashes).toBe(1)
+  })
+
+  it('revalidates advisory state under the mutex after a cancellation during hashing', () => {
+    const fixture = cancelableIntentFixture('exclusive')
+    const prepared = prepareMutationProof(fixture.owner, fixture.intent)
+    setRecoveryJournalInterArtifactHashTestHookForTest(() => {
+      setRecoveryJournalInterArtifactHashTestHookForTest(undefined)
+      expect(fixture.owner.cancelExclusiveIntent(fixture.intent)).toBe(true)
+    })
+    expectLockError(
+      () => fixture.owner.beginExclusiveMutation(fixture.intent, prepared.proof),
+      'INTENT_FENCED'
+    )
+    expect(fixture.owner.readOperationState().exclusiveIntent).toBeNull()
   })
 
   it('requires one exact unexpired own lease without changing state on rejected admission', () => {
@@ -647,7 +810,7 @@ describe('database operation lock core', () => {
     expectLockError(() => malformedLock.readOperationState(), 'STATE_CORRUPTION')
   })
 
-  it.each(['registered', 'draining', 'exclusive', 'completed'])(
+  it.each(['registered', 'draining', 'exclusive'])(
     'fences and removes a dead %s intent exactly once',
     async (phase) => {
       const root = tempRoot()
@@ -691,7 +854,32 @@ describe('database operation lock core', () => {
     expect(cleaner.readOperationState().exclusiveIntent).toBeNull()
   })
 
-  it('never automatically clears a dead mutating intent', async () => {
+  it.runIf(process.platform === 'linux')(
+    'fences and removes a dead completed intent exactly once',
+    async () => {
+      const root = tempRoot()
+      const worker = await runWorker(
+        root,
+        'cli',
+        0,
+        join(root, 'forbidden-home'),
+        'intent:completed'
+      )
+      const cleaner = createLockAt(root, 'tauri')
+      const before = cleaner.readOperationState()
+      expect(cleaner.cleanupStaleRecords()).toEqual({
+        removedLeaseIds: [],
+        abandonedIntent: true,
+        stateRevision: before.stateRevision + 1,
+      })
+      expectLockError(
+        () => cleaner.assertExclusiveAuthority(worker.intent, 'completed'),
+        'INTENT_FENCED'
+      )
+    }
+  )
+
+  it.runIf(process.platform === 'linux')('never automatically clears a dead mutating intent', async () => {
     const root = tempRoot()
     await runWorker(root, 'cli', 0, join(root, 'forbidden-home'), 'intent:mutating')
     const cleaner = createLockAt(root, 'tauri')
@@ -1048,6 +1236,32 @@ function cancelableIntentFixture(phase, testHooks) {
   return { owner, peer, ownerLease, peerLease, intent }
 }
 
+function prepareMutationProof(lock, intent) {
+  const state = lock.readOperationState()
+  return prepareMutationJournal({
+    operationRoot: lock.getPaths().operationRoot,
+    stateRevision: state.stateRevision,
+    intent,
+    writeArtifact({ role, path }) {
+      writeFileSync(path, `${role}\0lock-test-journal`)
+      return {
+        integrityCheck: 'ok',
+        foreignKeyCheck: 'ok',
+        schemaContractCheck: 'ok',
+        sidecarCheck: 'ok',
+      }
+    },
+  })
+}
+
+function mutationProofBinding(lock, intent) {
+  return {
+    operationRoot: lock.getPaths().operationRoot,
+    stateRevision: lock.readOperationState().stateRevision,
+    intent,
+  }
+}
+
 function rewriteAuthoritativeState(lock, update) {
   const currentPath = highestStateFile(lock)
   const current = JSON.parse(readFileSync(currentPath, 'utf8'))
@@ -1077,6 +1291,17 @@ function expectLockError(action, code) {
   } catch (error) {
     expect(error).toBeInstanceOf(DatabaseOperationLockError)
     expect(error.code).toBe(code)
+    return error
+  }
+}
+
+function expectErrorCode(action, code) {
+  try {
+    action()
+    throw new Error(`expected ${code}`)
+  } catch (error) {
+    expect(error?.code).toBe(code)
+    return error
   }
 }
 

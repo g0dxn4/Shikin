@@ -1,3 +1,5 @@
+import type { PreparedMutationProof } from './database-operation-recovery-journal.mjs'
+
 export const DATABASE_OPERATION_PROTOCOL: 'shikin.database-operation-lock'
 export const DATABASE_OPERATION_PROTOCOL_VERSION: 1
 export const SHIKIN_DATABASE_IDENTITY: 'com.asf.shikin:shikin.db'
@@ -178,7 +180,10 @@ export class DatabaseOperationLock {
     metadata?: Record<string, unknown>
   ): ExclusiveIntent
   drainExclusiveIntent(intent: ExclusiveIntent): ExclusiveIntent
-  beginExclusiveMutation(intent: ExclusiveIntent): ExclusiveIntent
+  beginExclusiveMutation(
+    intent: ExclusiveIntent,
+    proof: PreparedMutationProof
+  ): ExclusiveIntent
   completeExclusiveMutation(intent: ExclusiveIntent): ExclusiveIntent
   clearExclusiveIntent(intent: ExclusiveIntent): boolean
   cancelExclusiveIntent(intent: ExclusiveIntent): boolean

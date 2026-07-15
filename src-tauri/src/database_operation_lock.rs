@@ -1,6 +1,7 @@
 #![allow(dead_code)] // Checkpoint A compiles/tests this core without runtime wiring.
 
 use std::{
+    cell::RefCell,
     collections::HashSet,
     error::Error,
     fmt,
@@ -22,6 +23,14 @@ use time::{
     OffsetDateTime, PrimitiveDateTime,
 };
 use uuid::Uuid;
+
+use crate::database_operation_recovery_journal::{
+    consume_verified_prepared_mutation_token, release_verified_prepared_mutation_token,
+    revalidate_verified_prepared_mutation_token, verify_prepared_mutation_proof,
+    JournalError as RecoveryJournalError, JournalIntentBinding, JournalIntentPhase,
+    JournalOwnerEvidence, JournalRuntimeId, PreparedMutationProof,
+    RecoveryOperation as JournalRecoveryOperation,
+};
 
 #[cfg(test)]
 use std::sync::{Arc, Barrier};
@@ -50,6 +59,7 @@ const TIMESTAMP_FORMAT: &[FormatItem<'static>] =
 struct LockError {
     code: &'static str,
     message: String,
+    source: Option<Box<dyn Error + Send + Sync>>,
 }
 
 impl LockError {
@@ -57,6 +67,19 @@ impl LockError {
         Self {
             code,
             message: message.into(),
+            source: None,
+        }
+    }
+
+    fn with_source(
+        code: &'static str,
+        message: impl Into<String>,
+        source: impl Error + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            source: Some(Box::new(source)),
         }
     }
 
@@ -66,7 +89,11 @@ impl LockError {
         } else {
             "FILESYSTEM_FAILURE"
         };
-        Self::new(code, format!("{context}: {error}"))
+        Self::with_source(code, format!("{context}: {error}"), error)
+    }
+
+    fn from_recovery_journal(error: RecoveryJournalError) -> Self {
+        Self::with_source(error.code(), error.to_string(), error)
     }
 }
 
@@ -76,7 +103,13 @@ impl fmt::Display for LockError {
     }
 }
 
-impl Error for LockError {}
+impl Error for LockError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.source
+            .as_deref()
+            .map(|source| source as &(dyn Error + 'static))
+    }
+}
 
 type LockResult<T> = Result<T, LockError>;
 
@@ -272,6 +305,25 @@ enum Mutation<T> {
 enum DirectorySync {
     Synced,
     Unsupported,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DurabilityPolicy {
+    ExistingBestEffort,
+    RequiredForMutationAuthority,
+}
+
+struct StatePublicationOptions<B, O> {
+    before_final_fence: B,
+    on_committed: O,
+    durability_policy: DurabilityPolicy,
+}
+
+#[derive(Clone, Debug)]
+struct StatePublicationContext {
+    stage_path: PathBuf,
+    state_path: Option<PathBuf>,
+    next_state: OperationState,
 }
 
 #[derive(Debug)]
@@ -661,30 +713,57 @@ impl DatabaseOperationLock {
     fn begin_exclusive_mutation(
         &mut self,
         evidence: &ExclusiveIntent,
+        proof: &PreparedMutationProof,
     ) -> LockResult<ExclusiveIntent> {
         validate_intent(evidence)?;
         self.require_owner(&evidence.owner, "INTENT_FENCED")?;
+        self.require_operational_owner()?;
+        let advisory = self.read_authoritative_state()?;
+        let advisory_binding =
+            mutation_entry_binding(&advisory, evidence, &self.paths.operation_root)?;
+        let token =
+            verify_prepared_mutation_proof(proof, &self.paths.operation_root, &advisory_binding)
+                .map_err(LockError::from_recovery_journal)?;
+        let token = RefCell::new(token);
+        let authoritative_binding = RefCell::new(None::<JournalIntentBinding>);
         let evidence = evidence.clone();
-        self.mutate_state(move |mut previous, now| {
-            if !previous.leases.is_empty() {
-                return Err(LockError::new(
-                    "RUNTIME_LEASES_ACTIVE",
-                    "leases must drain before mutation",
-                ));
-            }
-            let high_water = previous.fencing_generation_high_water;
-            let current = require_intent(&mut previous, &evidence, &[ExclusivePhase::Exclusive])?;
-            if current.fencing_generation != high_water {
-                return Err(LockError::new(
-                    "INTENT_FENCED",
-                    "intent is not high-water owner",
-                ));
-            }
-            current.phase = ExclusivePhase::Mutating;
-            current.updated_at = format_timestamp(now)?;
-            let value = current.clone();
-            Ok(Mutation::Change(Box::new(previous), value))
-        })
+        let operation_root = self.paths.operation_root.clone();
+        let result = self.mutate_state_with_options(
+            |mut previous, now| {
+                let binding = mutation_entry_binding(&previous, &evidence, &operation_root)?;
+                authoritative_binding.replace(Some(binding));
+                let current = previous
+                    .exclusive_intent
+                    .as_mut()
+                    .expect("mutation binding requires an intent");
+                current.phase = ExclusivePhase::Mutating;
+                current.updated_at = format_timestamp(now)?;
+                let value = current.clone();
+                Ok(Mutation::Change(Box::new(previous), value))
+            },
+            StatePublicationOptions {
+                before_final_fence: |_| {
+                    let binding = authoritative_binding.borrow();
+                    revalidate_verified_prepared_mutation_token(
+                        &token.borrow(),
+                        binding.as_ref().ok_or_else(|| {
+                            LockError::new(
+                                "PREPARED_PROOF_INVALID",
+                                "authoritative mutation binding is unavailable",
+                            )
+                        })?,
+                    )
+                    .map(|_| ())
+                    .map_err(LockError::from_recovery_journal)
+                },
+                on_committed: |_| {
+                    consume_verified_prepared_mutation_token(&mut token.borrow_mut());
+                },
+                durability_policy: DurabilityPolicy::RequiredForMutationAuthority,
+            },
+        );
+        release_verified_prepared_mutation_token(&mut token.borrow_mut());
+        result
     }
 
     fn complete_exclusive_mutation(
@@ -921,7 +1000,7 @@ impl DatabaseOperationLock {
         }
     }
 
-    fn record_maintenance_failure(&mut self, error: LockError, uncertain: bool) {
+    fn record_maintenance_failure(&mut self, error: &LockError, uncertain: bool) {
         self.maintenance_failures.push(error.to_string());
         if uncertain {
             self.durability_uncertain = true;
@@ -969,6 +1048,13 @@ impl DatabaseOperationLock {
         if self.fault_point == Some("directory_sync_unsupported") {
             return Ok(DirectorySync::Unsupported);
         }
+        #[cfg(test)]
+        if self.fault_point == Some("directory_sync_failure") {
+            return Err(LockError::new(
+                "FILESYSTEM_FAILURE",
+                "injected state-directory sync failure",
+            ));
+        }
         sync_directory(&self.paths.state_records)
     }
 
@@ -1002,9 +1088,34 @@ impl DatabaseOperationLock {
     where
         F: FnOnce(OperationState, i128) -> LockResult<Mutation<T>>,
     {
+        self.mutate_state_with_options(
+            mutator,
+            StatePublicationOptions {
+                before_final_fence: |_| Ok(()),
+                on_committed: |_| {},
+                durability_policy: DurabilityPolicy::ExistingBestEffort,
+            },
+        )
+    }
+
+    fn mutate_state_with_options<T, F, B, O>(
+        &mut self,
+        mutator: F,
+        options: StatePublicationOptions<B, O>,
+    ) -> LockResult<T>
+    where
+        F: FnOnce(OperationState, i128) -> LockResult<Mutation<T>>,
+        B: FnOnce(StatePublicationContext) -> LockResult<()>,
+        O: FnOnce(StatePublicationContext),
+    {
         self.require_operational_owner()?;
         let owner = self.ensure_owner()?;
         let guard = self.acquire_mutex()?;
+        let StatePublicationOptions {
+            before_final_fence,
+            on_committed,
+            durability_policy,
+        } = options;
         let prepared = (|| {
             let previous = self.read_authoritative_state()?;
             let now = self.now_ms()?;
@@ -1029,8 +1140,14 @@ impl DatabaseOperationLock {
                     let stage = self.stage_state(&guard, &next)?;
                     self.prune_for_publication()?;
                     self.inject_fault("after_prune")?;
+                    let context = StatePublicationContext {
+                        stage_path: stage.clone(),
+                        state_path: None,
+                        next_state: (*next).clone(),
+                    };
+                    before_final_fence(context.clone())?;
                     self.revalidate_mutex(&guard)?;
-                    Ok((Some((next, stage)), value))
+                    Ok((Some((next, stage, context)), value))
                 }
             }
         })();
@@ -1039,62 +1156,107 @@ impl DatabaseOperationLock {
             Ok(prepared) => prepared,
             Err(error) => {
                 if let Err(release_error) = self.release_mutex(&guard) {
-                    self.record_maintenance_failure(release_error, false);
+                    self.record_maintenance_failure(&release_error, false);
                 }
                 return Err(error);
             }
         };
-        let Some((next, stage)) = publication else {
+        let Some((next, stage, mut context)) = publication else {
             if let Err(error) = self.release_mutex(&guard) {
-                self.record_maintenance_failure(error, false);
+                self.record_maintenance_failure(&error, false);
             }
             return Ok(value);
         };
 
-        let _destination = match self.rename_staged_state(&guard, &stage, next.state_revision) {
+        let destination = match self.rename_staged_state(&guard, &stage, next.state_revision) {
             Ok(destination) => destination,
             Err(error) => {
                 if let Err(release_error) = self.release_mutex(&guard) {
-                    self.record_maintenance_failure(release_error, false);
+                    self.record_maintenance_failure(&release_error, false);
                 }
                 return Err(error);
             }
         };
         self.last_committed_state_revision = Some(next.state_revision);
+        context.state_path = Some(destination);
 
-        let mut durable = false;
-        let mut directory_sync = DirectorySync::Synced;
-        let durability_result = (|| {
-            self.inject_fault("after_rename")?;
-            directory_sync = self.sync_state_records_directory()?;
-            durable = true;
-            self.inject_fault("after_fsync")
-        })();
-        if directory_sync == DirectorySync::Unsupported {
-            self.record_maintenance_failure(
-                LockError::new(
-                    "DIRECTORY_SYNC_UNSUPPORTED",
-                    "State record is published but directory fsync is unsupported",
-                ),
-                false,
+        let mut strict_failure = None;
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            on_committed(context.clone());
+        }))
+        .is_err()
+        {
+            let failure = LockError::new(
+                "INTERNAL_FAILURE",
+                "committed state callback violated its infallible contract",
             );
+            self.record_maintenance_failure(&failure, true);
+            strict_failure = Some(LockError::with_source(
+                "MUTATION_COMMIT_DURABILITY_UNCERTAIN",
+                "committed mutation-entry publication failed in its infallible commit callback",
+                failure,
+            ));
         }
-        if let Err(error) = durability_result {
-            self.record_maintenance_failure(error, !durable);
+
+        if strict_failure.is_none() {
+            match self
+                .inject_fault("after_rename")
+                .and_then(|()| self.sync_state_records_directory())
+            {
+                Ok(DirectorySync::Synced) => {
+                    if let Err(error) = self.inject_fault("after_fsync") {
+                        self.record_maintenance_failure(&error, false);
+                    }
+                }
+                Ok(DirectorySync::Unsupported)
+                    if durability_policy == DurabilityPolicy::RequiredForMutationAuthority =>
+                {
+                    let failure = LockError::new(
+                        "DIRECTORY_SYNC_UNSUPPORTED",
+                        "state record is committed but directory fsync is unsupported",
+                    );
+                    self.record_maintenance_failure(&failure, true);
+                    strict_failure = Some(LockError::with_source(
+                        "MUTATION_COMMIT_DURABILITY_UNCERTAIN",
+                        "committed mutation-entry publication directory durability is unsupported",
+                        failure,
+                    ));
+                }
+                Ok(DirectorySync::Unsupported) => {
+                    let failure = LockError::new(
+                        "DIRECTORY_SYNC_UNSUPPORTED",
+                        "State record is published but directory fsync is unsupported",
+                    );
+                    self.record_maintenance_failure(&failure, false);
+                }
+                Err(error) => {
+                    self.record_maintenance_failure(&error, true);
+                    if durability_policy == DurabilityPolicy::RequiredForMutationAuthority {
+                        strict_failure = Some(LockError::with_source(
+                            "MUTATION_COMMIT_DURABILITY_UNCERTAIN",
+                            "committed mutation-entry publication directory durability is uncertain",
+                            error,
+                        ));
+                    }
+                }
+            }
         }
 
         match self.release_mutex(&guard) {
             Ok(_) => {
                 if let Err(error) = self.inject_fault("after_release") {
-                    self.record_maintenance_failure(error, false);
+                    self.record_maintenance_failure(&error, false);
                 }
             }
-            Err(error) => self.record_maintenance_failure(error, false),
+            Err(error) => self.record_maintenance_failure(&error, false),
         }
         #[cfg(test)]
         if let Some(barrier) = &self.after_release_barrier {
             barrier.wait();
             barrier.wait();
+        }
+        if let Some(error) = strict_failure {
+            return Err(error);
         }
         Ok(value)
     }
@@ -1493,6 +1655,81 @@ impl DatabaseOperationLock {
         }
         Ok(())
     }
+}
+
+fn mutation_entry_binding(
+    state: &OperationState,
+    evidence: &ExclusiveIntent,
+    operation_root: &Path,
+) -> LockResult<JournalIntentBinding> {
+    let current = state
+        .exclusive_intent
+        .as_ref()
+        .ok_or_else(|| LockError::new("INTENT_FENCED", "intent is absent"))?;
+    if !same_intent_authority(current, evidence) {
+        return Err(LockError::new(
+            "INTENT_FENCED",
+            "intent authority no longer matches",
+        ));
+    }
+    if current.phase != ExclusivePhase::Exclusive {
+        return Err(LockError::new(
+            "INTENT_PHASE_INVALID",
+            "persisted intent phase cannot begin mutation",
+        ));
+    }
+    if !state.leases.is_empty() {
+        return Err(LockError::new(
+            "RUNTIME_LEASES_ACTIVE",
+            "leases must drain before mutation",
+        ));
+    }
+    if current.fencing_generation != state.fencing_generation_high_water {
+        return Err(LockError::new(
+            "INTENT_FENCED",
+            "intent is not high-water owner",
+        ));
+    }
+    if state.state_revision >= MAX_JSON_SAFE_INTEGER {
+        return Err(LockError::new(
+            "STATE_CORRUPTION",
+            "state revision cannot advance safely",
+        ));
+    }
+    if operation_root.as_os_str().is_empty() {
+        return Err(LockError::new(
+            "INVALID_OPTIONS",
+            "operation root is unavailable",
+        ));
+    }
+    JournalIntentBinding::new(
+        SHIKIN_DATABASE_IDENTITY.into(),
+        state.state_revision,
+        current.operation_id.clone(),
+        match current.operation {
+            DatabaseOperation::Restore => JournalRecoveryOperation::Restore,
+            DatabaseOperation::Import => JournalRecoveryOperation::Import,
+        },
+        JournalOwnerEvidence::new(
+            current.owner.owner_id.clone(),
+            match current.owner.runtime_id {
+                RuntimeId::Cli => JournalRuntimeId::Cli,
+                RuntimeId::Mcp => JournalRuntimeId::Mcp,
+                RuntimeId::BrowserDataServer => JournalRuntimeId::BrowserDataServer,
+                RuntimeId::Tauri => JournalRuntimeId::Tauri,
+            },
+            current.owner.host_id.clone(),
+            current.owner.process_id,
+            current.owner.process_started_at.clone(),
+        )
+        .map_err(LockError::from_recovery_journal)?,
+        current.fencing_generation,
+        JournalIntentPhase::Exclusive,
+        current.created_at.clone(),
+        current.updated_at.clone(),
+        current.metadata.clone().map(JsonValue::Object),
+    )
+    .map_err(LockError::from_recovery_journal)
 }
 
 fn require_intent<'a>(
@@ -2526,6 +2763,10 @@ fn sha256_hex(input: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "linux")]
+    use crate::database_operation_recovery_journal::{
+        prepare_mutation_journal, ArtifactChecks, PreparedMutationJournal,
+    };
     use tempfile::TempDir;
 
     const IDENTITY: &str = SHIKIN_DATABASE_IDENTITY;
@@ -2544,6 +2785,20 @@ mod tests {
 
     fn error_code<T: fmt::Debug>(result: LockResult<T>) -> &'static str {
         result.unwrap_err().code
+    }
+
+    #[cfg(target_os = "linux")]
+    fn prepare_proof(
+        core: &mut DatabaseOperationLock,
+        intent: &ExclusiveIntent,
+    ) -> PreparedMutationJournal {
+        let state = core.read_operation_state().unwrap();
+        let binding = mutation_entry_binding(&state, intent, &core.paths.operation_root).unwrap();
+        prepare_mutation_journal(&core.paths.operation_root, &binding, |context| {
+            fs::write(context.path(), b"rust-lock-test-journal").unwrap();
+            Ok(ArtifactChecks::all_ok())
+        })
+        .unwrap()
     }
 
     fn highest_state_path(core: &DatabaseOperationLock) -> PathBuf {
@@ -2834,6 +3089,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn intent_blocks_registration_and_runs_all_phases() {
         let root = TempDir::new().unwrap();
@@ -2853,7 +3109,10 @@ mod tests {
         owner.release_runtime_lease(&lease).unwrap();
         intent = owner.drain_exclusive_intent(&intent).unwrap();
         assert_eq!(intent.phase, ExclusivePhase::Exclusive);
-        intent = owner.begin_exclusive_mutation(&intent).unwrap();
+        let prepared = prepare_proof(&mut owner, &intent);
+        intent = owner
+            .begin_exclusive_mutation(&intent, prepared.proof())
+            .unwrap();
         assert_eq!(intent.phase, ExclusivePhase::Mutating);
         assert_eq!(
             owner
@@ -2911,6 +3170,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn cancellation_uses_authority_before_persisted_forbidden_phase_precedence() {
         for phase in [
@@ -2922,7 +3182,10 @@ mod tests {
             let (mut owner, _, _, _, intent) =
                 cancelable_intent_fixture(&root, ExclusivePhase::Exclusive);
             if matches!(phase, ExclusivePhase::Mutating | ExclusivePhase::Completed) {
-                let mutating = owner.begin_exclusive_mutation(&intent).unwrap();
+                let prepared = prepare_proof(&mut owner, &intent);
+                let mutating = owner
+                    .begin_exclusive_mutation(&intent, prepared.proof())
+                    .unwrap();
                 if phase == ExclusivePhase::Completed {
                     owner.complete_exclusive_mutation(&mutating).unwrap();
                 }
@@ -3109,27 +3372,165 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn cancellation_orders_cancel_then_begin_and_begin_then_cancel() {
         let root = TempDir::new().unwrap();
         let (mut cancel_first, _, _, _, intent) =
             cancelable_intent_fixture(&root, ExclusivePhase::Exclusive);
+        let cancelled_proof = prepare_proof(&mut cancel_first, &intent);
         assert!(cancel_first.cancel_exclusive_intent(&intent).unwrap());
         assert_eq!(
-            error_code(cancel_first.begin_exclusive_mutation(&intent)),
+            error_code(cancel_first.begin_exclusive_mutation(&intent, cancelled_proof.proof())),
             "INTENT_FENCED"
         );
 
         let root = TempDir::new().unwrap();
         let (mut begin_first, _, _, _, intent) =
             cancelable_intent_fixture(&root, ExclusivePhase::Exclusive);
-        let mutating = begin_first.begin_exclusive_mutation(&intent).unwrap();
+        let prepared = prepare_proof(&mut begin_first, &intent);
+        let mutating = begin_first
+            .begin_exclusive_mutation(&intent, prepared.proof())
+            .unwrap();
         let before = begin_first.read_operation_state().unwrap();
         assert_eq!(
             error_code(begin_first.cancel_exclusive_intent(&mutating)),
             "INTENT_PHASE_INVALID"
         );
         assert_eq!(begin_first.read_operation_state().unwrap(), before);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn begin_requires_an_authentic_current_proof_and_preserves_journal_error_cause() {
+        let root = TempDir::new().unwrap();
+        let (mut owner, _, _, _, intent) =
+            cancelable_intent_fixture(&root, ExclusivePhase::Exclusive);
+        let prepared = prepare_proof(&mut owner, &intent);
+        let mut successor = owner.read_operation_state().unwrap();
+        successor.state_revision += 1;
+        publish_test_state(&owner, &successor);
+        let before = owner.read_operation_state().unwrap();
+        let error = owner
+            .begin_exclusive_mutation(&intent, prepared.proof())
+            .unwrap_err();
+        assert_eq!(error.code, "PREPARED_PROOF_INVALID");
+        assert!(error
+            .source()
+            .and_then(|source| source.downcast_ref::<RecoveryJournalError>())
+            .is_some());
+        assert_eq!(owner.read_operation_state().unwrap(), before);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn strict_mutation_publication_reuses_precommit_proof_and_consumes_every_commit() {
+        let root = TempDir::new().unwrap();
+        let (mut reusable, _, _, _, intent) =
+            cancelable_intent_fixture(&root, ExclusivePhase::Exclusive);
+        let prepared = prepare_proof(&mut reusable, &intent);
+        let before = reusable.read_operation_state().unwrap();
+        reusable.fault_point = Some("after_prune");
+        assert_eq!(
+            error_code(reusable.begin_exclusive_mutation(&intent, prepared.proof())),
+            "INJECTED_FAILURE"
+        );
+        assert_eq!(reusable.read_operation_state().unwrap(), before);
+        reusable.fault_point = None;
+        assert_eq!(
+            reusable
+                .begin_exclusive_mutation(&intent, prepared.proof())
+                .unwrap()
+                .phase,
+            ExclusivePhase::Mutating
+        );
+
+        for point in [
+            "after_rename",
+            "directory_sync_unsupported",
+            "directory_sync_failure",
+        ] {
+            let root = TempDir::new().unwrap();
+            let (mut committed, _, _, _, intent) =
+                cancelable_intent_fixture(&root, ExclusivePhase::Exclusive);
+            let prepared = prepare_proof(&mut committed, &intent);
+            let binding = mutation_entry_binding(
+                &committed.read_operation_state().unwrap(),
+                &intent,
+                &committed.paths.operation_root,
+            )
+            .unwrap();
+            committed.fault_point = Some(point);
+            let error = committed
+                .begin_exclusive_mutation(&intent, prepared.proof())
+                .unwrap_err();
+            assert_eq!(
+                error.code, "MUTATION_COMMIT_DURABILITY_UNCERTAIN",
+                "{point}"
+            );
+            assert!(error.source().is_some(), "{point}");
+            assert_eq!(
+                committed
+                    .read_operation_state()
+                    .unwrap()
+                    .exclusive_intent
+                    .unwrap()
+                    .phase,
+                ExclusivePhase::Mutating,
+                "{point}"
+            );
+            assert!(committed.lifecycle_health().fenced, "{point}");
+            assert_eq!(
+                verify_prepared_mutation_proof(
+                    prepared.proof(),
+                    &committed.paths.operation_root,
+                    &binding,
+                )
+                .unwrap_err()
+                .code(),
+                "PREPARED_PROOF_USED",
+                "{point}"
+            );
+        }
+
+        let root = TempDir::new().unwrap();
+        let (mut durable, _, _, _, intent) =
+            cancelable_intent_fixture(&root, ExclusivePhase::Exclusive);
+        let prepared = prepare_proof(&mut durable, &intent);
+        durable.fault_point = Some("after_fsync");
+        assert_eq!(
+            durable
+                .begin_exclusive_mutation(&intent, prepared.proof())
+                .unwrap()
+                .phase,
+            ExclusivePhase::Mutating
+        );
+        let health = durable.lifecycle_health();
+        assert!(!health.fenced);
+        assert!(health.maintenance_degraded);
+        assert!(!health.durability_uncertain);
+    }
+
+    #[test]
+    fn panicking_infallible_commit_callback_is_committed_and_internal_fatal() {
+        let root = TempDir::new().unwrap();
+        let mut core = lock(&root, RuntimeId::Cli);
+        core.register_runtime_lease().unwrap();
+        let before = core.read_operation_state().unwrap();
+        let result = core.mutate_state_with_options(
+            |previous, _| Ok(Mutation::Change(Box::new(previous), ())),
+            StatePublicationOptions {
+                before_final_fence: |_| Ok(()),
+                on_committed: |_| panic!("infallible callback violated"),
+                durability_policy: DurabilityPolicy::RequiredForMutationAuthority,
+            },
+        );
+        assert_eq!(error_code(result), "MUTATION_COMMIT_DURABILITY_UNCERTAIN");
+        assert_eq!(
+            core.read_operation_state().unwrap().state_revision,
+            before.state_revision + 1
+        );
+        assert!(core.lifecycle_health().fenced);
     }
 
     #[test]
@@ -3388,6 +3789,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn stale_cleanup_removes_every_dead_non_mutating_phase_once_but_preserves_mutating() {
         for phase in [
@@ -3414,7 +3816,10 @@ mod tests {
                 intent = owner.drain_exclusive_intent(&intent).unwrap();
             }
             if phase == ExclusivePhase::Completed {
-                intent = owner.begin_exclusive_mutation(&intent).unwrap();
+                let prepared = prepare_proof(&mut owner, &intent);
+                intent = owner
+                    .begin_exclusive_mutation(&intent, prepared.proof())
+                    .unwrap();
                 intent = owner.complete_exclusive_mutation(&intent).unwrap();
             }
             let path = highest_state_path(&owner);
@@ -3455,7 +3860,10 @@ mod tests {
         intent = owner.drain_exclusive_intent(&intent).unwrap();
         owner.release_runtime_lease(&lease).unwrap();
         intent = owner.drain_exclusive_intent(&intent).unwrap();
-        owner.begin_exclusive_mutation(&intent).unwrap();
+        let prepared = prepare_proof(&mut owner, &intent);
+        owner
+            .begin_exclusive_mutation(&intent, prepared.proof())
+            .unwrap();
         let path = highest_state_path(&owner);
         let mut state = owner.read_operation_state().unwrap();
         let stale = state.exclusive_intent.as_mut().unwrap();

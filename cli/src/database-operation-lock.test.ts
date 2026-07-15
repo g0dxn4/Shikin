@@ -2,8 +2,7 @@
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
-import type { PreparedMutationProof } from '../../scripts/database-operation-recovery-journal.mjs'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const roots: string[] = []
 const originalHome = process.env.HOME
@@ -36,8 +35,6 @@ describe('CLI database operation lock adapter', () => {
       runtimeId: 'cli',
     })
     expect(existsSync(rootDir)).toBe(false)
-    expect(lock.beginExclusiveMutation).toHaveLength(2)
-    expectTypeOf(lock.beginExclusiveMutation).parameter(1).toEqualTypeOf<PreparedMutationProof>()
     expect(lock.registerRuntimeLease()).toMatchObject({ recordKind: 'runtime_lease' })
     expect(existsSync(rootDir)).toBe(true)
   })

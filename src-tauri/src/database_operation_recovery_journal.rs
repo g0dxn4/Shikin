@@ -61,16 +61,18 @@ const ARTIFACT_CONTENT_DOMAIN: &[u8] =
 const RECORD_DOMAIN: &[u8] = b"shikin.database-operation-recovery-journal/v1/record\0";
 
 #[cfg(test)]
+type InterArtifactHashTestHook = Box<dyn FnMut() -> JournalResult<()>>;
+#[cfg(test)]
+type InterArtifactHashTestHookSlot = std::cell::RefCell<Option<InterArtifactHashTestHook>>;
+
+#[cfg(test)]
 thread_local! {
-    static INTER_ARTIFACT_HASH_TEST_HOOK: std::cell::RefCell<
-        Option<Box<dyn FnMut() -> JournalResult<()>>>,
-    > = const { std::cell::RefCell::new(None) };
+    static INTER_ARTIFACT_HASH_TEST_HOOK: InterArtifactHashTestHookSlot =
+        const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
-pub(crate) fn set_inter_artifact_hash_test_hook(
-    hook: Option<Box<dyn FnMut() -> JournalResult<()>>>,
-) {
+pub(crate) fn set_inter_artifact_hash_test_hook(hook: Option<InterArtifactHashTestHook>) {
     INTER_ARTIFACT_HASH_TEST_HOOK.with(|slot| slot.replace(hook));
 }
 
@@ -1030,6 +1032,25 @@ fn validate_binding(binding: &JournalIntentBinding) -> JournalResult<()> {
     }
 }
 
+#[cfg(all(test, not(target_os = "linux")))]
+pub(crate) fn forged_prepared_mutation_proof_for_unsupported_platform_test(
+    operation_root: &Path,
+    binding: &JournalIntentBinding,
+) -> PreparedMutationProof {
+    let paths = journal_paths(operation_root, binding);
+    PreparedMutationProof {
+        binding: binding.clone(),
+        operation_root: operation_root.to_path_buf(),
+        operation_path: paths.operation,
+        commitment_sha256: "a".repeat(64),
+        durability: JournalDurability::LinuxFsyncComplete,
+        lifecycle: Arc::new(Mutex::new(ProofLifecycle {
+            used: false,
+            active: false,
+        })),
+    }
+}
+
 fn mint_prepared(
     binding: &JournalIntentBinding,
     paths: &JournalPaths,
@@ -1431,24 +1452,6 @@ fn ensure_journal_parents(
         &[OPERATIONS_DIRECTORY.into()],
         "RECOVERY_JOURNAL_CORRUPTION",
     )?;
-    if path_exists(&paths.operation)? {
-        return Ok(vec![recovery_identity, operations_identity]);
-    }
-    for name in read_names(&paths.operations)? {
-        if !is_lower_hex_64(&name) {
-            return Err(JournalError::new(
-                "RECOVERY_JOURNAL_CORRUPTION",
-                "operations directory has unexpected entries",
-            ));
-        }
-        if name != paths.operation_key {
-            inspect_private_directory(
-                &paths.operations.join(name),
-                "operation directory",
-                "RECOVERY_JOURNAL_CORRUPTION",
-            )?;
-        }
-    }
     Ok(vec![recovery_identity, operations_identity])
 }
 
@@ -2702,7 +2705,7 @@ fn normalize_intent_metadata_value(value: &JsonValue) -> JournalResult<JsonValue
     }
 }
 
-fn canonical_safe_integer(number: &serde_json::Number) -> Option<u64> {
+pub(crate) fn canonical_safe_integer(number: &serde_json::Number) -> Option<u64> {
     if let Some(integer) = number.as_u64() {
         return (integer <= MAX_JSON_SAFE_INTEGER).then_some(integer);
     }
@@ -3334,6 +3337,22 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn preparation_ignores_malformed_unrelated_operation_siblings() {
+        let (_temp, root) = operation_root();
+        let first = make_binding("operation-unrelated-first");
+        prepare_mutation_journal(&root, &first, write_artifact).unwrap();
+        let operations = journal_paths(&root, &first).operations;
+        let malformed = operations.join("malformed-unrelated-sibling");
+        fs::write(&malformed, b"not an operation directory").unwrap();
+
+        let second = make_binding("operation-unrelated-second");
+        let prepared = prepare_mutation_journal(&root, &second, write_artifact).unwrap();
+        assert_eq!(prepared.durability(), JournalDurability::LinuxFsyncComplete);
+        assert_eq!(fs::read(&malformed).unwrap(), b"not an operation directory");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn every_existing_operation_shape_is_incomplete_without_callback_or_mutation() {
         use std::os::unix::fs::symlink;
 
@@ -3511,6 +3530,9 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         for attack in [
+            "operation-root-replacement",
+            "recovery-root-replacement",
+            "operations-root-replacement",
             "artifact-file-replacement",
             "artifact-directory-replacement",
             "operation-directory-replacement",
@@ -3536,6 +3558,21 @@ mod tests {
                     .unwrap(),
             );
             match attack {
+                "operation-root-replacement" => {
+                    let old = root.parent().unwrap().join("old-operation-root");
+                    fs::rename(&root, &old).unwrap();
+                    copy_and_seal_fixture(&old, &root);
+                }
+                "recovery-root-replacement" => {
+                    let old = root.join("old-recovery-root");
+                    fs::rename(&paths.recovery_root, &old).unwrap();
+                    copy_and_seal_fixture(&old, &paths.recovery_root);
+                }
+                "operations-root-replacement" => {
+                    let old = root.join("old-operations-root");
+                    fs::rename(&paths.operations, &old).unwrap();
+                    copy_and_seal_fixture(&old, &paths.operations);
+                }
                 "artifact-file-replacement" => {
                     let replacement = root.join("artifact-replacement");
                     fs::copy(&artifact, &replacement).unwrap();

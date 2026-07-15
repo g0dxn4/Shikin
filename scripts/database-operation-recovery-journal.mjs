@@ -781,15 +781,6 @@ function ensureJournalParents(paths, rootIdentity) {
     'after-operations-directory-create'
   )
   assertExactDirectoryEntries(paths.recoveryRoot, [OPERATIONS_DIRECTORY])
-  if (pathExists(paths.operation)) return [recoveryIdentity, operationsIdentity]
-  for (const name of safeDirectoryEntries(paths.operations, 'operations directory')) {
-    if (!LOWER_HEX_64.test(name)) {
-      throw journalError('RECOVERY_JOURNAL_CORRUPTION', 'Operations directory has unexpected entries')
-    }
-    if (name !== paths.operationKey) {
-      inspectPrivateDirectory(join(paths.operations, name), 'operation directory')
-    }
-  }
   return [recoveryIdentity, operationsIdentity]
 }
 

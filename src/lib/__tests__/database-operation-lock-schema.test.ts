@@ -8,6 +8,12 @@ import { describe, expect, it } from 'vitest'
 const schema = JSON.parse(
   readFileSync(resolve(process.cwd(), 'schema/database-operation-lock-v1.json'), 'utf8')
 ) as Record<string, unknown>
+const recoveryCommitmentFixtures = JSON.parse(
+  readFileSync(
+    resolve(process.cwd(), 'schema/database-operation-lock-recovery-commitment-v1-golden.json'),
+    'utf8'
+  )
+) as { cases: Array<{ name: string; valid: boolean; record: unknown }> }
 const ajv = new Ajv2020({ allErrors: true, discriminator: true, strict: false })
 addFormats(ajv)
 const validate = ajv.compile(schema)
@@ -202,6 +208,14 @@ function registrationMutex(mutexId: string, mutexOwner = owner) {
 }
 
 describe('database operation lock record schema', () => {
+  it('matches the additive recovery-commitment parity fixture', () => {
+    for (const fixture of recoveryCommitmentFixtures.cases) {
+      expect(validate(fixture.record), `${fixture.name}: ${JSON.stringify(validate.errors)}`).toBe(
+        fixture.valid
+      )
+    }
+  })
+
   it('validates multiple concurrent runtime leases and the separate registration mutex', () => {
     expect(validate(operationState()), JSON.stringify(validate.errors)).toBe(true)
     expect(validate(registrationMutex('mutex-1')), JSON.stringify(validate.errors)).toBe(true)

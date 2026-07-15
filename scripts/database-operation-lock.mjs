@@ -43,6 +43,8 @@ export const DEFAULT_DATABASE_OPERATION_TIMING = Object.freeze({
 const PRIVATE_DIRECTORY_MODE = 0o700
 const PRIVATE_FILE_MODE = 0o600
 const RECOVERY_JOURNAL_PROTOCOL = 'shikin.database-operation-recovery-journal'
+const RECOVERY_JOURNAL_VERSION = 1
+const RECOVERY_JOURNAL_DURABILITY = 'linux-fsync-complete'
 const MUTEX_MIN_TTL_MS = 1_000
 const MUTEX_MAX_TTL_MS = 15_000
 const LEASE_MIN_TTL_MS = 5_000
@@ -392,9 +394,9 @@ export class DatabaseOperationLock {
   }
 
   beginExclusiveMutation(intent, proof) {
+    this.#requireOperationalOwner()
     const evidence = validateIntent(cloneJson(intent), this.databaseIdentity)
     this.#requireCallerOwner(evidence.owner, 'INTENT_FENCED')
-    this.#requireOperationalOwner()
     const advisoryBinding = requireMutationEntryBinding(
       this.#readAuthoritativeState(),
       evidence,
@@ -422,11 +424,7 @@ export class DatabaseOperationLock {
               ...current,
               phase: 'mutating',
               updatedAt: isoTime(now),
-              metadata: metadataWithRecoveryCommitment(
-                current.metadata,
-                authoritativeBinding,
-                preparedCommitment
-              ),
+              metadata: metadataWithRecoveryCommitment(current.metadata, preparedCommitment),
             }
             return { state: { ...previous, exclusiveIntent: next }, value: next }
           },
@@ -841,10 +839,14 @@ export class DatabaseOperationLock {
         const injectedDirectorySync = this.testHooks?.directorySync?.(
           Object.freeze({ path: this.paths.stateRecords })
         )
-        if (injectedDirectorySync !== undefined && typeof injectedDirectorySync !== 'boolean') {
-          throw protocolError('INVALID_OPTIONS', 'directorySync test hook must return a boolean')
+        if (injectedDirectorySync !== undefined && injectedDirectorySync !== false) {
+          throw protocolError(
+            'INVALID_OPTIONS',
+            'directorySync test hook may only inject unsupported with false'
+          )
         }
-        const directorySynced = injectedDirectorySync ?? syncDirectory(this.paths.stateRecords)
+        const directorySynced =
+          injectedDirectorySync === false ? false : syncDirectory(this.paths.stateRecords)
         if (directorySynced) {
           durable = true
         } else if (publication.durabilityPolicy === 'required-for-mutation-authority') {
@@ -1304,7 +1306,7 @@ function validateState(value, expectedIdentity) {
   }
   if (value.exclusiveIntent !== null) {
     validateIntent(value.exclusiveIntent, expectedIdentity)
-    validateRecoveryCommitmentMetadata(value.exclusiveIntent, value.stateRevision)
+    validateRecoveryCommitmentMetadata(value.exclusiveIntent)
     if (value.exclusiveIntent.fencingGeneration > value.fencingGenerationHighWater) {
       throw protocolError('STATE_CORRUPTION', 'Intent generation exceeds fencing high-water')
     }
@@ -1387,18 +1389,20 @@ function validateIntent(value) {
 }
 
 const RECOVERY_COMMITMENT_KEYS = Object.freeze([
-  'recovery.protocol',
-  'recovery.operationId',
-  'recovery.stateRevision',
-  'recovery.fencingGeneration',
-  'recovery.commitmentSha256',
+  'shikin.recovery.protocol',
+  'shikin.recovery.version',
+  'shikin.recovery.recordSha256',
+  'shikin.recovery.durability',
+  'shikin.recovery.claimSequence',
 ])
 
-function validateRecoveryCommitmentMetadata(intent, containingStateRevision) {
+function validateRecoveryCommitmentMetadata(intent) {
   if (intent.metadata === undefined) return false
-  const recoveryKeys = Object.keys(intent.metadata).filter((key) => key.startsWith('recovery.'))
+  const recoveryKeys = Object.keys(intent.metadata).filter((key) =>
+    key.startsWith('shikin.recovery.')
+  )
   if (recoveryKeys.length === 0) return false
-  if (!['mutating', 'completed'].includes(intent.phase)) {
+  if (!['mutating', 'completed', 'abandoned'].includes(intent.phase)) {
     throw protocolError(
       'STATE_CORRUPTION',
       'Recovery commitment metadata is forbidden before mutation'
@@ -1409,23 +1413,14 @@ function validateRecoveryCommitmentMetadata(intent, containingStateRevision) {
     !RECOVERY_COMMITMENT_KEYS.every((key) =>
       Object.prototype.hasOwnProperty.call(intent.metadata, key)
     ) ||
-    intent.metadata['recovery.protocol'] !== RECOVERY_JOURNAL_PROTOCOL ||
-    intent.metadata['recovery.operationId'] !== intent.operationId ||
-    !Number.isSafeInteger(intent.metadata['recovery.stateRevision']) ||
-    intent.metadata['recovery.stateRevision'] < 0 ||
-    intent.metadata['recovery.fencingGeneration'] !== intent.fencingGeneration ||
-    !/^[0-9a-f]{64}$/.test(intent.metadata['recovery.commitmentSha256'])
+    intent.metadata['shikin.recovery.protocol'] !== RECOVERY_JOURNAL_PROTOCOL ||
+    intent.metadata['shikin.recovery.version'] !== RECOVERY_JOURNAL_VERSION ||
+    !/^[0-9a-f]{64}$/.test(intent.metadata['shikin.recovery.recordSha256']) ||
+    intent.metadata['shikin.recovery.durability'] !== RECOVERY_JOURNAL_DURABILITY ||
+    !Number.isSafeInteger(intent.metadata['shikin.recovery.claimSequence']) ||
+    intent.metadata['shikin.recovery.claimSequence'] < 0
   ) {
     throw protocolError('STATE_CORRUPTION', 'Recovery commitment metadata is malformed')
-  }
-  if (containingStateRevision !== undefined) {
-    const expectedAdvance = intent.phase === 'mutating' ? 1 : 2
-    if (intent.metadata['recovery.stateRevision'] + expectedAdvance !== containingStateRevision) {
-      throw protocolError(
-        'STATE_CORRUPTION',
-        'Recovery commitment state revision does not bind the persisted transition'
-      )
-    }
   }
   return true
 }
@@ -1435,7 +1430,7 @@ function validateCallerIntentMetadata(metadata) {
   if (!isPlainRecord(metadata)) {
     throw protocolError('INVALID_OPERATION', 'Intent metadata must be an object')
   }
-  const reserved = Object.keys(metadata).find((key) => key.startsWith('recovery.'))
+  const reserved = Object.keys(metadata).find((key) => key.startsWith('shikin.recovery.'))
   if (reserved !== undefined) {
     throw protocolError('RESERVED_METADATA_KEY', `Intent metadata key ${reserved} is reserved`)
   }
@@ -1459,7 +1454,14 @@ function validateCanonicalMetadataValue(value) {
     }
     return
   }
-  if (typeof value === 'number' && Number.isSafeInteger(value)) return
+  if (
+    typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    !Object.is(value, -0)
+  ) {
+    return
+  }
   if (Array.isArray(value)) {
     for (const item of value) validateCanonicalMetadataValue(item)
     return
@@ -1471,14 +1473,14 @@ function validateCanonicalMetadataValue(value) {
   throw protocolError('INVALID_OPERATION', 'Intent metadata is not canonical JSON')
 }
 
-function metadataWithRecoveryCommitment(metadata, binding, commitment) {
+function metadataWithRecoveryCommitment(metadata, commitment) {
   return {
     ...(metadata === undefined ? {} : cloneJson(metadata)),
-    'recovery.protocol': RECOVERY_JOURNAL_PROTOCOL,
-    'recovery.operationId': binding.intent.operationId,
-    'recovery.stateRevision': binding.stateRevision,
-    'recovery.fencingGeneration': binding.intent.fencingGeneration,
-    'recovery.commitmentSha256': commitment.commitmentSha256,
+    'shikin.recovery.protocol': RECOVERY_JOURNAL_PROTOCOL,
+    'shikin.recovery.version': RECOVERY_JOURNAL_VERSION,
+    'shikin.recovery.recordSha256': commitment.commitmentSha256,
+    'shikin.recovery.durability': RECOVERY_JOURNAL_DURABILITY,
+    'shikin.recovery.claimSequence': 0,
   }
 }
 

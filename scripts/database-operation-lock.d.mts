@@ -134,7 +134,7 @@ export interface DatabaseOperationLockOptions extends Partial<DatabaseOperationT
       readonly mutexPath: string
     }): void
     beforeMutexRestore?(context: { readonly quarantine: string; readonly mutexPath: string }): void
-    directorySync?(context: { readonly path: string }): boolean | undefined
+    directorySync?(context: { readonly path: string }): false | void
   }
 }
 

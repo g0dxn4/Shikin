@@ -25,11 +25,11 @@ use time::{
 use uuid::Uuid;
 
 use crate::database_operation_recovery_journal::{
-    consume_verified_prepared_mutation_token, release_verified_prepared_mutation_token,
-    revalidate_verified_prepared_mutation_token, verify_prepared_mutation_proof,
-    JournalError as RecoveryJournalError, JournalIntentBinding, JournalIntentPhase,
-    JournalOwnerEvidence, JournalRuntimeId, PreparedCommitment, PreparedMutationProof,
-    RecoveryOperation as JournalRecoveryOperation,
+    canonical_safe_integer, consume_verified_prepared_mutation_token,
+    release_verified_prepared_mutation_token, revalidate_verified_prepared_mutation_token,
+    verify_prepared_mutation_proof, JournalError as RecoveryJournalError, JournalIntentBinding,
+    JournalIntentPhase, JournalOwnerEvidence, JournalRuntimeId, PreparedCommitment,
+    PreparedMutationProof, RecoveryOperation as JournalRecoveryOperation,
 };
 
 #[cfg(test)]
@@ -37,6 +37,8 @@ use std::sync::{Arc, Barrier};
 
 const PROTOCOL: &str = "shikin.database-operation-lock";
 const RECOVERY_JOURNAL_PROTOCOL: &str = "shikin.database-operation-recovery-journal";
+const RECOVERY_JOURNAL_VERSION: u64 = 1;
+const RECOVERY_JOURNAL_DURABILITY: &str = "linux-fsync-complete";
 const PROTOCOL_VERSION: u8 = 1;
 pub(crate) const SHIKIN_DATABASE_IDENTITY: &str = "com.asf.shikin:shikin.db";
 const PRIVATE_DIR_MODE: u32 = 0o700;
@@ -366,6 +368,10 @@ struct DatabaseOperationLock {
     after_release_barrier: Option<Arc<Barrier>>,
     #[cfg(test)]
     release_quarantine_barrier: Option<Arc<Barrier>>,
+    #[cfg(test)]
+    after_proof_verification_barrier: Option<Arc<Barrier>>,
+    #[cfg(test)]
+    before_final_fence_barrier: Option<Arc<Barrier>>,
 }
 
 impl DatabaseOperationLock {
@@ -419,6 +425,10 @@ impl DatabaseOperationLock {
             after_release_barrier: None,
             #[cfg(test)]
             release_quarantine_barrier: None,
+            #[cfg(test)]
+            after_proof_verification_barrier: None,
+            #[cfg(test)]
+            before_final_fence_barrier: None,
         })
     }
 
@@ -608,8 +618,8 @@ impl DatabaseOperationLock {
         operation: DatabaseOperation,
         metadata: Option<JsonMap<String, JsonValue>>,
     ) -> LockResult<ExclusiveIntent> {
-        validate_caller_intent_metadata(metadata.as_ref())?;
         self.require_operational_owner()?;
+        validate_caller_intent_metadata(metadata.as_ref())?;
         let owner = self.ensure_owner()?;
         let current_lease = self.current_lease.clone();
         let operation_id = Uuid::new_v4().to_string();
@@ -717,15 +727,20 @@ impl DatabaseOperationLock {
         evidence: &ExclusiveIntent,
         proof: &PreparedMutationProof,
     ) -> LockResult<ExclusiveIntent> {
+        self.require_operational_owner()?;
         validate_intent(evidence)?;
         self.require_owner(&evidence.owner, "INTENT_FENCED")?;
-        self.require_operational_owner()?;
         let advisory = self.read_authoritative_state()?;
         let advisory_binding =
             mutation_entry_binding(&advisory, evidence, &self.paths.operation_root)?;
         let token =
             verify_prepared_mutation_proof(proof, &self.paths.operation_root, &advisory_binding)
                 .map_err(LockError::from_recovery_journal)?;
+        #[cfg(test)]
+        if let Some(barrier) = &self.after_proof_verification_barrier {
+            barrier.wait();
+            barrier.wait();
+        }
         let token = RefCell::new(token);
         let prepared_commitment =
             revalidate_verified_prepared_mutation_token(&token.borrow(), &advisory_binding)
@@ -745,7 +760,6 @@ impl DatabaseOperationLock {
                 current.updated_at = format_timestamp(now)?;
                 current.metadata = Some(metadata_with_recovery_commitment(
                     current.metadata.take(),
-                    &binding,
                     &prepared_commitment,
                 ));
                 let value = current.clone();
@@ -1154,6 +1168,7 @@ impl DatabaseOperationLock {
                     next.updated_at = format_timestamp(now)?;
                     validate_state(&next, &self.database_identity)?;
                     let stage = self.stage_state(&guard, &next)?;
+                    self.inject_fault("before_publish")?;
                     self.prune_for_publication()?;
                     self.inject_fault("after_prune")?;
                     let context = StatePublicationContext {
@@ -1161,6 +1176,11 @@ impl DatabaseOperationLock {
                         state_path: None,
                         next_state: (*next).clone(),
                     };
+                    #[cfg(test)]
+                    if let Some(barrier) = &self.before_final_fence_barrier {
+                        barrier.wait();
+                        barrier.wait();
+                    }
                     before_final_fence(context.clone())?;
                     self.revalidate_mutex(&guard)?;
                     Ok((Some((next, stage, context)), value))
@@ -1840,7 +1860,7 @@ fn validate_state(state: &OperationState, identity: &str) -> LockResult<()> {
     }
     if let Some(intent) = &state.exclusive_intent {
         validate_intent(intent)?;
-        validate_recovery_commitment_metadata(intent, Some(state.state_revision))?;
+        validate_recovery_commitment_metadata(intent)?;
         if intent.fencing_generation > state.fencing_generation_high_water {
             return Err(LockError::new(
                 "STATE_CORRUPTION",
@@ -1901,88 +1921,80 @@ fn validate_intent(intent: &ExclusiveIntent) -> LockResult<()> {
             "exclusive intent is malformed",
         ));
     }
-    validate_recovery_commitment_metadata(intent, None)?;
+    validate_recovery_commitment_metadata(intent)?;
     Ok(())
 }
 
 const RECOVERY_COMMITMENT_KEYS: [&str; 5] = [
-    "recovery.protocol",
-    "recovery.operationId",
-    "recovery.stateRevision",
-    "recovery.fencingGeneration",
-    "recovery.commitmentSha256",
+    "shikin.recovery.protocol",
+    "shikin.recovery.version",
+    "shikin.recovery.recordSha256",
+    "shikin.recovery.durability",
+    "shikin.recovery.claimSequence",
 ];
 
-fn validate_recovery_commitment_metadata(
-    intent: &ExclusiveIntent,
-    containing_state_revision: Option<u64>,
-) -> LockResult<bool> {
+fn validate_recovery_commitment_metadata(intent: &ExclusiveIntent) -> LockResult<bool> {
     let Some(metadata) = &intent.metadata else {
         return Ok(false);
     };
     let recovery_keys: Vec<&String> = metadata
         .keys()
-        .filter(|key| key.starts_with("recovery."))
+        .filter(|key| key.starts_with("shikin.recovery."))
         .collect();
     if recovery_keys.is_empty() {
         return Ok(false);
     }
     if !matches!(
         intent.phase,
-        ExclusivePhase::Mutating | ExclusivePhase::Completed
+        ExclusivePhase::Mutating | ExclusivePhase::Completed | ExclusivePhase::Abandoned
     ) {
         return Err(LockError::new(
             "STATE_CORRUPTION",
             "recovery commitment metadata is forbidden before mutation",
         ));
     }
-    let state_revision = metadata
-        .get("recovery.stateRevision")
-        .and_then(JsonValue::as_u64);
-    let fencing_generation = metadata
-        .get("recovery.fencingGeneration")
-        .and_then(JsonValue::as_u64);
-    let commitment = metadata
-        .get("recovery.commitmentSha256")
+    let record_sha256 = metadata
+        .get("shikin.recovery.recordSha256")
         .and_then(JsonValue::as_str);
+    let claim_sequence = metadata
+        .get("shikin.recovery.claimSequence")
+        .and_then(JsonValue::as_number)
+        .and_then(canonical_safe_integer);
+    let valid_record_sha256 = record_sha256
+        .map(|value| {
+            value.len() == 64
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+        .unwrap_or(false);
+    let valid_claim_sequence = claim_sequence
+        .map(|value| value <= MAX_JSON_SAFE_INTEGER)
+        .unwrap_or(false);
     if recovery_keys.len() != RECOVERY_COMMITMENT_KEYS.len()
         || !RECOVERY_COMMITMENT_KEYS
             .iter()
             .all(|key| metadata.contains_key(*key))
         || metadata
-            .get("recovery.protocol")
+            .get("shikin.recovery.protocol")
             .and_then(JsonValue::as_str)
             != Some(RECOVERY_JOURNAL_PROTOCOL)
         || metadata
-            .get("recovery.operationId")
+            .get("shikin.recovery.version")
+            .and_then(JsonValue::as_number)
+            .and_then(canonical_safe_integer)
+            != Some(RECOVERY_JOURNAL_VERSION)
+        || !valid_record_sha256
+        || metadata
+            .get("shikin.recovery.durability")
             .and_then(JsonValue::as_str)
-            != Some(intent.operation_id.as_str())
-        || state_revision.is_none_or(|revision| revision > MAX_JSON_SAFE_INTEGER)
-        || fencing_generation != Some(intent.fencing_generation)
-        || commitment.is_none_or(|value| {
-            value.len() != 64
-                || !value
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        })
+            != Some(RECOVERY_JOURNAL_DURABILITY)
+        || !valid_claim_sequence
     {
         return Err(LockError::new(
             "STATE_CORRUPTION",
             "recovery commitment metadata is malformed",
         ));
-    }
-    if let Some(containing) = containing_state_revision {
-        let advance = if intent.phase == ExclusivePhase::Mutating {
-            1
-        } else {
-            2
-        };
-        if state_revision.and_then(|revision| revision.checked_add(advance)) != Some(containing) {
-            return Err(LockError::new(
-                "STATE_CORRUPTION",
-                "recovery commitment state revision does not bind the persisted transition",
-            ));
-        }
     }
     Ok(true)
 }
@@ -1993,7 +2005,10 @@ fn validate_caller_intent_metadata(
     let Some(metadata) = metadata else {
         return Ok(());
     };
-    if let Some(key) = metadata.keys().find(|key| key.starts_with("recovery.")) {
+    if let Some(key) = metadata
+        .keys()
+        .find(|key| key.starts_with("shikin.recovery."))
+    {
         return Err(LockError::new(
             "RESERVED_METADATA_KEY",
             format!("intent metadata key {key} is reserved"),
@@ -2005,16 +2020,7 @@ fn validate_caller_intent_metadata(
 fn validate_canonical_metadata_value(value: &JsonValue) -> LockResult<()> {
     match value {
         JsonValue::Null | JsonValue::Bool(_) | JsonValue::String(_) => Ok(()),
-        JsonValue::Number(number)
-            if number
-                .as_u64()
-                .is_some_and(|value| value <= MAX_JSON_SAFE_INTEGER)
-                || number
-                    .as_i64()
-                    .is_some_and(|value| value.unsigned_abs() <= MAX_JSON_SAFE_INTEGER) =>
-        {
-            Ok(())
-        }
+        JsonValue::Number(number) if canonical_safe_integer(number).is_some() => Ok(()),
         JsonValue::Array(values) => {
             for value in values {
                 validate_canonical_metadata_value(value)?;
@@ -2036,30 +2042,26 @@ fn validate_canonical_metadata_value(value: &JsonValue) -> LockResult<()> {
 
 fn metadata_with_recovery_commitment(
     metadata: Option<JsonMap<String, JsonValue>>,
-    binding: &JournalIntentBinding,
     commitment: &PreparedCommitment,
 ) -> JsonMap<String, JsonValue> {
     let mut metadata = metadata.unwrap_or_default();
     metadata.insert(
-        "recovery.protocol".into(),
+        "shikin.recovery.protocol".into(),
         JsonValue::String(RECOVERY_JOURNAL_PROTOCOL.into()),
     );
     metadata.insert(
-        "recovery.operationId".into(),
-        JsonValue::String(binding.operation_id().into()),
+        "shikin.recovery.version".into(),
+        JsonValue::from(RECOVERY_JOURNAL_VERSION),
     );
     metadata.insert(
-        "recovery.stateRevision".into(),
-        JsonValue::from(binding.state_revision()),
-    );
-    metadata.insert(
-        "recovery.fencingGeneration".into(),
-        JsonValue::from(binding.fencing_generation()),
-    );
-    metadata.insert(
-        "recovery.commitmentSha256".into(),
+        "shikin.recovery.recordSha256".into(),
         JsonValue::String(commitment.sha256().into()),
     );
+    metadata.insert(
+        "shikin.recovery.durability".into(),
+        JsonValue::String(RECOVERY_JOURNAL_DURABILITY.into()),
+    );
+    metadata.insert("shikin.recovery.claimSequence".into(), JsonValue::from(0));
     metadata
 }
 
@@ -2939,6 +2941,11 @@ fn sha256_hex(input: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_os = "linux"))]
+    use crate::database_operation_recovery_journal::{
+        forged_prepared_mutation_proof_for_unsupported_platform_test, prepare_mutation_journal,
+        ArtifactChecks,
+    };
     #[cfg(target_os = "linux")]
     use crate::database_operation_recovery_journal::{
         prepare_mutation_journal, set_inter_artifact_hash_test_hook, ArtifactChecks,
@@ -2950,6 +2957,8 @@ mod tests {
     const LOCK_CONTRACT: &str = include_str!("../../schema/database-operation-lock-v1.json");
     const GOLDEN_FIXTURES: &str =
         include_str!("../../schema/database-operation-lock-v1-golden.json");
+    const RECOVERY_COMMITMENT_FIXTURES: &str =
+        include_str!("../../schema/database-operation-lock-recovery-commitment-v1-golden.json");
 
     fn lock(root: &TempDir, runtime: RuntimeId) -> DatabaseOperationLock {
         DatabaseOperationLock::new(
@@ -2976,6 +2985,40 @@ mod tests {
             Ok(ArtifactChecks::all_ok())
         })
         .unwrap()
+    }
+
+    #[cfg(target_os = "linux")]
+    fn retained_descriptor_count(operation_root: &Path) -> usize {
+        fs::read_dir("/proc/self/fd")
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                fs::read_link(entry.path())
+                    .ok()
+                    .is_some_and(|path| path.starts_with(operation_root))
+            })
+            .count()
+    }
+
+    #[cfg(target_os = "linux")]
+    fn first_prepared_artifact(core: &DatabaseOperationLock) -> PathBuf {
+        let operations = core
+            .paths
+            .operation_root
+            .join("recovery-journal-v1")
+            .join("operations");
+        let operation = fs::read_dir(operations)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        fs::read_dir(operation.join("artifacts"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path()
     }
 
     fn highest_state_path(core: &DatabaseOperationLock) -> PathBuf {
@@ -3148,26 +3191,28 @@ mod tests {
 
     #[test]
     fn shared_node_rust_negative_golden_fixtures_match_exact_json_semantics() {
-        let fixtures: JsonValue = serde_json::from_str(GOLDEN_FIXTURES).unwrap();
-        for fixture in fixtures["cases"].as_array().unwrap() {
-            let name = fixture["name"].as_str().unwrap();
-            let record = fixture["record"].clone();
-            let result = match record["recordKind"].as_str() {
-                Some("operation_state") => {
-                    parse_protocol_value::<OperationState>(record, "operation state")
-                        .and_then(|state| validate_state(&state, IDENTITY))
-                }
-                Some("registration_mutex") => {
-                    parse_protocol_value::<RegistrationMutex>(record, "registration mutex")
-                        .and_then(|mutex| validate_mutex(&mutex, IDENTITY))
-                }
-                _ => panic!("unknown golden record kind for {name}"),
-            };
-            assert_eq!(
-                result.is_ok(),
-                fixture["valid"].as_bool().unwrap(),
-                "{name}"
-            );
+        for fixture_source in [GOLDEN_FIXTURES, RECOVERY_COMMITMENT_FIXTURES] {
+            let fixtures: JsonValue = serde_json::from_str(fixture_source).unwrap();
+            for fixture in fixtures["cases"].as_array().unwrap() {
+                let name = fixture["name"].as_str().unwrap();
+                let record = fixture["record"].clone();
+                let result = match record["recordKind"].as_str() {
+                    Some("operation_state") => {
+                        parse_protocol_value::<OperationState>(record, "operation state")
+                            .and_then(|state| validate_state(&state, IDENTITY))
+                    }
+                    Some("registration_mutex") => {
+                        parse_protocol_value::<RegistrationMutex>(record, "registration mutex")
+                            .and_then(|mutex| validate_mutex(&mutex, IDENTITY))
+                    }
+                    _ => panic!("unknown golden record kind for {name}"),
+                };
+                assert_eq!(
+                    result.is_ok(),
+                    fixture["valid"].as_bool().unwrap(),
+                    "{name}"
+                );
+            }
         }
     }
 
@@ -3274,7 +3319,12 @@ mod tests {
         let mut other = lock(&root, RuntimeId::Mcp);
         let lease = owner.register_runtime_lease().unwrap();
         let mut caller_metadata = JsonMap::new();
-        caller_metadata.insert("fixture".into(), JsonValue::Bool(true));
+        caller_metadata.insert(
+            "fixture".into(),
+            serde_json::from_str(r#"[null,true,"value",0.0,1.0,1e0,9007199254740991,{"count":7}]"#)
+                .unwrap(),
+        );
+        caller_metadata.insert("recovery.callerOwned".into(), JsonValue::Bool(true));
         let mut intent = owner
             .acquire_exclusive_intent(DatabaseOperation::Restore, Some(caller_metadata))
             .unwrap();
@@ -3288,36 +3338,43 @@ mod tests {
         owner.release_runtime_lease(&lease).unwrap();
         intent = owner.drain_exclusive_intent(&intent).unwrap();
         assert_eq!(intent.phase, ExclusivePhase::Exclusive);
-        let commitment_revision = owner.read_operation_state().unwrap().state_revision;
         let prepared = prepare_proof(&mut owner, &intent);
         intent = owner
             .begin_exclusive_mutation(&intent, prepared.proof())
             .unwrap();
         assert_eq!(intent.phase, ExclusivePhase::Mutating);
         let metadata = intent.metadata.as_ref().unwrap();
-        assert_eq!(metadata.len(), 6);
-        assert_eq!(metadata["fixture"], JsonValue::Bool(true));
+        assert_eq!(metadata.len(), 7);
         assert_eq!(
-            metadata["recovery.protocol"],
+            metadata["fixture"],
+            serde_json::from_str::<JsonValue>(
+                r#"[null,true,"value",0.0,1.0,1e0,9007199254740991,{"count":7}]"#,
+            )
+            .unwrap()
+        );
+        assert_eq!(metadata["recovery.callerOwned"], JsonValue::Bool(true));
+        assert_eq!(
+            metadata["shikin.recovery.protocol"],
             JsonValue::String(RECOVERY_JOURNAL_PROTOCOL.into())
         );
         assert_eq!(
-            metadata["recovery.operationId"],
-            JsonValue::String(intent.operation_id.clone())
+            metadata["shikin.recovery.version"],
+            JsonValue::from(RECOVERY_JOURNAL_VERSION)
         );
         assert_eq!(
-            metadata["recovery.stateRevision"],
-            JsonValue::from(commitment_revision)
-        );
-        assert_eq!(
-            metadata["recovery.fencingGeneration"],
-            JsonValue::from(intent.fencing_generation)
-        );
-        assert_eq!(
-            metadata["recovery.commitmentSha256"],
+            metadata["shikin.recovery.recordSha256"],
             JsonValue::String(prepared.commitment_sha256().into())
         );
+        assert_eq!(
+            metadata["shikin.recovery.durability"],
+            JsonValue::String(RECOVERY_JOURNAL_DURABILITY.into())
+        );
+        assert_eq!(
+            metadata["shikin.recovery.claimSequence"],
+            JsonValue::from(0)
+        );
         let committed_metadata = intent.metadata.clone();
+        let committed_metadata_bytes = serde_json::to_vec(&intent.metadata).unwrap();
         assert_eq!(
             owner
                 .assert_exclusive_authority(&intent, ExclusivePhase::Mutating)
@@ -3327,6 +3384,10 @@ mod tests {
         intent = owner.complete_exclusive_mutation(&intent).unwrap();
         assert_eq!(intent.phase, ExclusivePhase::Completed);
         assert_eq!(intent.metadata, committed_metadata);
+        assert_eq!(
+            serde_json::to_vec(&intent.metadata).unwrap(),
+            committed_metadata_bytes
+        );
         owner.clear_exclusive_intent(&intent).unwrap();
         let state = owner.read_operation_state().unwrap();
         assert_eq!(state.state_revision, 8);
@@ -3339,7 +3400,7 @@ mod tests {
         let mut owner = lock(&root, RuntimeId::Cli);
         owner.register_runtime_lease().unwrap();
         let before = owner.read_operation_state().unwrap();
-        for key in ["recovery.protocol", "recovery.future"] {
+        for key in ["shikin.recovery.protocol", "shikin.recovery.future"] {
             let mut metadata = JsonMap::new();
             metadata.insert(key.into(), JsonValue::Bool(true));
             assert_eq!(
@@ -3353,9 +3414,12 @@ mod tests {
         for value in [
             JsonValue::from(1.5),
             JsonValue::from(MAX_JSON_SAFE_INTEGER + 1),
+            serde_json::json!([{"value": -1}]),
+            serde_json::from_str::<JsonValue>("-0").unwrap(),
+            serde_json::from_str::<JsonValue>("-0.0").unwrap(),
         ] {
             let mut metadata = JsonMap::new();
-            metadata.insert("value".into(), value);
+            metadata.insert("nested".into(), value);
             assert_eq!(
                 error_code(
                     owner.acquire_exclusive_intent(DatabaseOperation::Restore, Some(metadata))
@@ -3364,11 +3428,57 @@ mod tests {
             );
             assert_eq!(owner.read_operation_state().unwrap(), before);
         }
+
+        let mut generic = JsonMap::new();
+        generic.insert(
+            "recovery.protocol".into(),
+            JsonValue::String("caller-owned".into()),
+        );
+        generic.insert("value".into(), JsonValue::from(0));
+        assert_eq!(
+            owner
+                .acquire_exclusive_intent(DatabaseOperation::Import, Some(generic.clone()))
+                .unwrap()
+                .metadata,
+            Some(generic)
+        );
     }
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn recovery_commitment_validation_binds_all_fields_and_keeps_legacy_records_valid() {
+    fn self_fencing_precedes_malformed_intent_owner_and_reserved_metadata() {
+        let root = TempDir::new().unwrap();
+        let (mut owner, peer, _, _, intent) =
+            cancelable_intent_fixture(&root, ExclusivePhase::Exclusive);
+        let prepared = prepare_proof(&mut owner, &intent);
+        owner.fenced = true;
+
+        let mut reserved = JsonMap::new();
+        reserved.insert("shikin.recovery.future".into(), JsonValue::Bool(true));
+        assert_eq!(
+            error_code(
+                owner.acquire_exclusive_intent(DatabaseOperation::Restore, Some(reserved.clone()))
+            ),
+            "OWNER_SELF_FENCED"
+        );
+
+        let mut malformed = intent.clone();
+        malformed.operation_id.clear();
+        let mut wrong_owner = intent.clone();
+        wrong_owner.owner = peer.owner.unwrap();
+        let mut reserved_intent = intent.clone();
+        reserved_intent.metadata = Some(reserved);
+        for evidence in [malformed, wrong_owner, reserved_intent] {
+            assert_eq!(
+                error_code(owner.begin_exclusive_mutation(&evidence, prepared.proof())),
+                "OWNER_SELF_FENCED"
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn recovery_commitment_validation_accepts_exact_and_legacy_recovery_states() {
         let root = TempDir::new().unwrap();
         let (mut owner, _, _, _, intent) =
             cancelable_intent_fixture(&root, ExclusivePhase::Exclusive);
@@ -3379,43 +3489,30 @@ mod tests {
         let state = owner.read_operation_state().unwrap();
         validate_state(&state, IDENTITY).unwrap();
 
+        let mut abandoned = state.clone();
+        abandoned.exclusive_intent.as_mut().unwrap().phase = ExclusivePhase::Abandoned;
+        validate_state(&abandoned, IDENTITY).unwrap();
+
         let mut legacy = state.clone();
         legacy.exclusive_intent.as_mut().unwrap().metadata = Some(JsonMap::from_iter([(
-            "legacy".into(),
-            JsonValue::Bool(true),
+            "recovery.protocol".into(),
+            JsonValue::String("caller-owned".into()),
         )]));
         validate_state(&legacy, IDENTITY).unwrap();
 
-        for key in [
-            "recovery.operationId",
-            "recovery.stateRevision",
-            "recovery.fencingGeneration",
-        ] {
-            let mut malformed = state.clone();
-            let intent = malformed.exclusive_intent.as_mut().unwrap();
-            match key {
-                "recovery.operationId" => {
-                    intent
-                        .metadata
-                        .as_mut()
-                        .unwrap()
-                        .insert(key.into(), JsonValue::String("wrong-operation".into()));
-                }
-                _ => {
-                    let current = intent.metadata.as_ref().unwrap()[key].as_u64().unwrap();
-                    intent
-                        .metadata
-                        .as_mut()
-                        .unwrap()
-                        .insert(key.into(), JsonValue::from(current + 1));
-                }
-            }
-            assert_eq!(
-                error_code(validate_state(&malformed, IDENTITY)),
-                "STATE_CORRUPTION",
-                "{key}"
-            );
-        }
+        let mut malformed = state;
+        malformed
+            .exclusive_intent
+            .as_mut()
+            .unwrap()
+            .metadata
+            .as_mut()
+            .unwrap()
+            .insert("shikin.recovery.future".into(), JsonValue::Bool(true));
+        assert_eq!(
+            error_code(validate_state(&malformed, IDENTITY)),
+            "STATE_CORRUPTION"
+        );
     }
 
     #[test]
@@ -3695,6 +3792,84 @@ mod tests {
         assert_eq!(begin_first.read_operation_state().unwrap(), before);
     }
 
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn unsupported_platform_preparation_and_begin_publish_no_mutating_state() {
+        let root = TempDir::new().unwrap();
+        let (mut owner, _, _, _, intent) =
+            cancelable_intent_fixture(&root, ExclusivePhase::Exclusive);
+        let before = owner.read_operation_state().unwrap();
+        let binding =
+            mutation_entry_binding(&before, &intent, &owner.paths.operation_root).unwrap();
+        let recovery_root = owner.paths.operation_root.join("recovery-journal-v1");
+        let mut callbacks = 0;
+        let preparation = prepare_mutation_journal(&owner.paths.operation_root, &binding, |_| {
+            callbacks += 1;
+            Ok(ArtifactChecks::all_ok())
+        });
+        assert_eq!(
+            preparation.unwrap_err().code(),
+            "RECOVERY_DURABILITY_FAILURE"
+        );
+        assert_eq!(callbacks, 0);
+        assert!(!recovery_root.exists());
+
+        let forged = forged_prepared_mutation_proof_for_unsupported_platform_test(
+            &owner.paths.operation_root,
+            &binding,
+        );
+        assert_eq!(
+            error_code(owner.begin_exclusive_mutation(&intent, &forged)),
+            "RECOVERY_DURABILITY_FAILURE"
+        );
+        assert_eq!(owner.read_operation_state().unwrap(), before);
+        assert_eq!(
+            owner
+                .read_operation_state()
+                .unwrap()
+                .exclusive_intent
+                .unwrap()
+                .phase,
+            ExclusivePhase::Exclusive
+        );
+        assert!(!recovery_root.exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn two_begin_attempts_for_one_intent_and_proof_linearize() {
+        let root = TempDir::new().unwrap();
+        let (mut winner, _, _, _, intent) =
+            cancelable_intent_fixture(&root, ExclusivePhase::Exclusive);
+        let prepared = prepare_proof(&mut winner, &intent);
+        let barrier = Arc::new(Barrier::new(2));
+        winner.after_proof_verification_barrier = Some(Arc::clone(&barrier));
+        let mut contender = lock(&root, RuntimeId::Cli);
+        contender.owner = Some(intent.owner.clone());
+
+        let winner_result = thread::scope(|scope| {
+            let winner_handle =
+                scope.spawn(|| winner.begin_exclusive_mutation(&intent, prepared.proof()));
+            barrier.wait();
+            assert_eq!(
+                error_code(contender.begin_exclusive_mutation(&intent, prepared.proof())),
+                "PREPARED_PROOF_ACTIVE"
+            );
+            barrier.wait();
+            winner_handle.join().unwrap()
+        });
+        assert_eq!(winner_result.unwrap().phase, ExclusivePhase::Mutating);
+        assert_eq!(
+            contender
+                .read_operation_state()
+                .unwrap()
+                .exclusive_intent
+                .unwrap()
+                .phase,
+            ExclusivePhase::Mutating
+        );
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn begin_requires_an_authentic_current_proof_and_preserves_journal_error_cause() {
@@ -3804,6 +3979,146 @@ mod tests {
         assert!(!health.fenced);
         assert!(health.maintenance_degraded);
         assert!(!health.durability_uncertain);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn lock_precommit_exits_release_descriptors_and_preserve_reusable_proofs() {
+        for point in ["before_publish", "after_prune"] {
+            let root = TempDir::new().unwrap();
+            let (mut owner, _, _, _, intent) =
+                cancelable_intent_fixture(&root, ExclusivePhase::Exclusive);
+            let prepared = prepare_proof(&mut owner, &intent);
+            let binding = mutation_entry_binding(
+                &owner.read_operation_state().unwrap(),
+                &intent,
+                &owner.paths.operation_root,
+            )
+            .unwrap();
+            let baseline = retained_descriptor_count(&owner.paths.operation_root);
+            owner.fault_point = Some(point);
+            assert_eq!(
+                error_code(owner.begin_exclusive_mutation(&intent, prepared.proof())),
+                "INJECTED_FAILURE",
+                "{point}"
+            );
+            assert_eq!(
+                retained_descriptor_count(&owner.paths.operation_root),
+                baseline,
+                "{point}"
+            );
+            owner.fault_point = None;
+            let mut token = verify_prepared_mutation_proof(
+                prepared.proof(),
+                &owner.paths.operation_root,
+                &binding,
+            )
+            .unwrap();
+            release_verified_prepared_mutation_token(&mut token);
+            assert_eq!(
+                retained_descriptor_count(&owner.paths.operation_root),
+                baseline,
+                "{point} reusable"
+            );
+        }
+
+        let root = TempDir::new().unwrap();
+        let (mut retained_failure, _, _, _, intent) =
+            cancelable_intent_fixture(&root, ExclusivePhase::Exclusive);
+        let prepared = prepare_proof(&mut retained_failure, &intent);
+        let artifact = first_prepared_artifact(&retained_failure);
+        let baseline = retained_descriptor_count(&retained_failure.paths.operation_root);
+        let barrier = Arc::new(Barrier::new(2));
+        retained_failure.before_final_fence_barrier = Some(Arc::clone(&barrier));
+        let retained_result = thread::scope(|scope| {
+            let handle = scope
+                .spawn(|| retained_failure.begin_exclusive_mutation(&intent, prepared.proof()));
+            barrier.wait();
+            fs::set_permissions(&artifact, fs::Permissions::from_mode(0o600)).unwrap();
+            fs::set_permissions(&artifact, fs::Permissions::from_mode(0o400)).unwrap();
+            barrier.wait();
+            handle.join().unwrap()
+        });
+        assert_eq!(error_code(retained_result), "RECOVERY_ARTIFACT_CORRUPTION");
+        assert_eq!(
+            retained_descriptor_count(&retained_failure.paths.operation_root),
+            baseline
+        );
+
+        let root = TempDir::new().unwrap();
+        let (mut revision_owner, _, _, _, intent) =
+            cancelable_intent_fixture(&root, ExclusivePhase::Exclusive);
+        let prepared = prepare_proof(&mut revision_owner, &intent);
+        let binding = mutation_entry_binding(
+            &revision_owner.read_operation_state().unwrap(),
+            &intent,
+            &revision_owner.paths.operation_root,
+        )
+        .unwrap();
+        let baseline = retained_descriptor_count(&revision_owner.paths.operation_root);
+        let mut racer = lock(&root, RuntimeId::Cli);
+        racer.owner = Some(intent.owner.clone());
+        set_inter_artifact_hash_test_hook(Some(Box::new(move || {
+            racer
+                .mutate_state(|previous, _| Ok(Mutation::Change(Box::new(previous), ())))
+                .unwrap();
+            Ok(())
+        })));
+        let result = revision_owner.begin_exclusive_mutation(&intent, prepared.proof());
+        set_inter_artifact_hash_test_hook(None);
+        assert_eq!(error_code(result), "PREPARED_PROOF_INVALID");
+        assert_eq!(
+            retained_descriptor_count(&revision_owner.paths.operation_root),
+            baseline
+        );
+        let mut token = verify_prepared_mutation_proof(
+            prepared.proof(),
+            &revision_owner.paths.operation_root,
+            &binding,
+        )
+        .unwrap();
+        release_verified_prepared_mutation_token(&mut token);
+        assert_eq!(
+            retained_descriptor_count(&revision_owner.paths.operation_root),
+            baseline
+        );
+
+        let root = TempDir::new().unwrap();
+        let (mut cancel_owner, _, _, _, intent) =
+            cancelable_intent_fixture(&root, ExclusivePhase::Exclusive);
+        let prepared = prepare_proof(&mut cancel_owner, &intent);
+        let binding = mutation_entry_binding(
+            &cancel_owner.read_operation_state().unwrap(),
+            &intent,
+            &cancel_owner.paths.operation_root,
+        )
+        .unwrap();
+        let baseline = retained_descriptor_count(&cancel_owner.paths.operation_root);
+        let mut racer = lock(&root, RuntimeId::Cli);
+        racer.owner = Some(intent.owner.clone());
+        let race_intent = intent.clone();
+        set_inter_artifact_hash_test_hook(Some(Box::new(move || {
+            assert!(racer.cancel_exclusive_intent(&race_intent).unwrap());
+            Ok(())
+        })));
+        let result = cancel_owner.begin_exclusive_mutation(&intent, prepared.proof());
+        set_inter_artifact_hash_test_hook(None);
+        assert_eq!(error_code(result), "INTENT_FENCED");
+        assert_eq!(
+            retained_descriptor_count(&cancel_owner.paths.operation_root),
+            baseline
+        );
+        let mut token = verify_prepared_mutation_proof(
+            prepared.proof(),
+            &cancel_owner.paths.operation_root,
+            &binding,
+        )
+        .unwrap();
+        release_verified_prepared_mutation_token(&mut token);
+        assert_eq!(
+            retained_descriptor_count(&cancel_owner.paths.operation_root),
+            baseline
+        );
     }
 
     #[cfg(target_os = "linux")]

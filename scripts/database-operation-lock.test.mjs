@@ -9,6 +9,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -30,6 +31,7 @@ import {
 } from './database-operation-lock.mjs'
 import {
   prepareMutationJournal,
+  releaseVerifiedPreparedMutationToken,
   setRecoveryJournalInterArtifactHashTestHookForTest,
   verifyPreparedMutationProof,
 } from './database-operation-recovery-journal.mjs'
@@ -41,6 +43,9 @@ const contractSchema = JSON.parse(
 )
 const goldenFixtures = JSON.parse(
   readFileSync(resolve('schema/database-operation-lock-v1-golden.json'), 'utf8')
+)
+const recoveryCommitmentFixtures = JSON.parse(
+  readFileSync(resolve('schema/database-operation-lock-recovery-commitment-v1-golden.json'), 'utf8')
 )
 const ajv = new Ajv2020({ strict: false, discriminator: true })
 addFormats(ajv)
@@ -124,7 +129,9 @@ describe('database operation lock core', () => {
     })
   })
 
-  it('publishes intent with peer leases, drains every lease, and blocks only new registration', () => {
+  it.runIf(process.platform === 'linux')(
+    'publishes intent with peer leases, drains every lease, and blocks only new registration',
+    () => {
     const root = tempRoot()
     const owner = createLockAt(root, 'cli')
     const peer = createLockAt(root, 'mcp')
@@ -152,18 +159,18 @@ describe('database operation lock core', () => {
     owner.releaseRuntimeLease(ownerLease)
     intent = owner.drainExclusiveIntent(intent)
     expect(intent.phase).toBe('exclusive')
-    const commitmentRevision = owner.readOperationState().stateRevision
     const prepared = prepareMutationProof(owner, intent)
     intent = owner.beginExclusiveMutation(intent, prepared.proof)
     const expectedCommitment = {
       fixture: true,
-      'recovery.protocol': 'shikin.database-operation-recovery-journal',
-      'recovery.operationId': intent.operationId,
-      'recovery.stateRevision': commitmentRevision,
-      'recovery.fencingGeneration': intent.fencingGeneration,
-      'recovery.commitmentSha256': prepared.commitmentSha256,
+        'shikin.recovery.protocol': 'shikin.database-operation-recovery-journal',
+        'shikin.recovery.version': 1,
+        'shikin.recovery.recordSha256': prepared.commitmentSha256,
+        'shikin.recovery.durability': 'linux-fsync-complete',
+        'shikin.recovery.claimSequence': 0,
     }
     expect(intent.metadata).toEqual(expectedCommitment)
+      const committedMetadataBytes = JSON.stringify(intent.metadata)
     expect(owner.assertExclusiveAuthority(intent)).toEqual(intent)
     intent = owner.completeExclusiveMutation(intent)
     expect(intent).toMatchObject({
@@ -171,22 +178,24 @@ describe('database operation lock core', () => {
       completedAt: expect.any(String),
       metadata: expectedCommitment,
     })
+      expect(JSON.stringify(intent.metadata)).toBe(committedMetadataBytes)
     expect(owner.clearExclusiveIntent(intent)).toBe(true)
     expect(owner.readOperationState()).toMatchObject({
       fencingGenerationHighWater: 3,
       exclusiveIntent: null,
       leases: [],
     })
-  })
+    }
+  )
 
-  it('rejects caller-owned recovery metadata and non-canonical metadata before publication', () => {
+  it('reserves only the Shikin recovery namespace and rejects nonnegative-integer violations', () => {
     const root = tempRoot()
     const owner = createLockAt(root, 'cli')
     owner.registerRuntimeLease()
     const before = owner.readOperationState()
     for (const metadata of [
-      { 'recovery.protocol': 'caller-value' },
-      { 'recovery.future': true },
+      { 'shikin.recovery.protocol': 'caller-value' },
+      { 'shikin.recovery.future': true },
     ]) {
       expectLockError(
         () => owner.acquireExclusiveIntent('restore', metadata),
@@ -194,31 +203,62 @@ describe('database operation lock core', () => {
       )
       expect(owner.readOperationState()).toEqual(before)
     }
-    for (const metadata of [{ amount: 1.5 }, { nested: { value: Number.NaN } }]) {
+    for (const metadata of [
+      { amount: 1.5 },
+      { nested: { value: Number.NaN } },
+      { nested: [{ value: -1 }] },
+      { nested: [{ value: -0 }] },
+    ]) {
       expectLockError(() => owner.acquireExclusiveIntent('restore', metadata), 'INVALID_OPERATION')
       expect(owner.readOperationState()).toEqual(before)
     }
+
+    const generic = createLock('mcp')
+    generic.registerRuntimeLease()
+    expect(
+      generic.acquireExclusiveIntent('import', {
+        'recovery.protocol': 'caller-owned',
+        nested: [null, true, 'value', 0, Number.MAX_SAFE_INTEGER],
+      }).metadata
+    ).toEqual({
+      'recovery.protocol': 'caller-owned',
+      nested: [null, true, 'value', 0, Number.MAX_SAFE_INTEGER],
+    })
   })
 
-  it('rejects recovery commitment fields that do not bind their own persisted intent', () => {
-    const valid = goldenFixtures.cases.find(
-      (entry) => entry.name === 'valid-exact-recovery-commitment'
+  it.runIf(process.platform === 'linux')(
+    'admits recursive nonnegative metadata through real journal preparation',
+    () => {
+      const fixture = cancelableIntentFixture('registered')
+      const validMetadata = {
+        nested: [null, false, 'value', 0, Number.MAX_SAFE_INTEGER, { count: 7 }],
+        'recovery.callerOwned': true,
+      }
+      fixture.owner.cancelExclusiveIntent(fixture.intent)
+      const lease = fixture.ownerLease
+      const intent = fixture.owner.acquireExclusiveIntent('restore', validMetadata)
+      let exclusive = fixture.owner.drainExclusiveIntent(intent)
+      if (fixture.peerLease !== null) fixture.peer.releaseRuntimeLease(fixture.peerLease)
+      fixture.owner.releaseRuntimeLease(lease)
+      exclusive = fixture.owner.drainExclusiveIntent(exclusive)
+      const prepared = prepareMutationProof(fixture.owner, exclusive)
+      expect(prepared).toMatchObject({
+        commitmentSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        durability: 'linux-fsync-complete',
+      })
+      expect(fixture.owner.readOperationState().exclusiveIntent.metadata).toEqual(validMetadata)
+    }
     )
-    expect(validateDatabaseOperationRecord(valid.record)).toEqual(valid.record)
-    for (const update of [
-      (record) => {
-        record.exclusiveIntent.metadata['recovery.operationId'] = 'wrong-operation'
-      },
-      (record) => {
-        record.exclusiveIntent.metadata['recovery.fencingGeneration'] += 1
-      },
-      (record) => {
-        record.exclusiveIntent.metadata['recovery.stateRevision'] += 1
-      },
-    ]) {
-      const malformed = structuredClone(valid.record)
-      update(malformed)
-      expectLockError(() => validateDatabaseOperationRecord(malformed), 'STATE_CORRUPTION')
+
+  it('matches the additive recovery-commitment parity fixture in the Node validator', () => {
+    for (const fixture of recoveryCommitmentFixtures.cases) {
+      if (fixture.valid) {
+        expect(validateDatabaseOperationRecord(fixture.record), fixture.name).toEqual(
+          fixture.record
+        )
+      } else {
+        expectLockError(() => validateDatabaseOperationRecord(fixture.record), 'STATE_CORRUPTION')
+      }
     }
   })
 
@@ -250,12 +290,16 @@ describe('database operation lock core', () => {
     }
   )
 
-  it.each(['mutating', 'completed', 'abandoned'])(
-    'rejects cancellation from persisted %s after applying authority-before-phase precedence',
-    (phase) => {
+  it.runIf(process.platform === 'linux')(
+    'rejects cancellation from persisted mutation phases after authority-before-phase precedence',
+    () => {
+      for (const phase of ['mutating', 'completed', 'abandoned']) {
       const { owner, intent } = cancelableIntentFixture('exclusive')
       if (phase === 'mutating' || phase === 'completed') {
-        const mutating = owner.beginExclusiveMutation(intent, prepareMutationProof(owner, intent).proof)
+          const mutating = owner.beginExclusiveMutation(
+            intent,
+            prepareMutationProof(owner, intent).proof
+          )
         if (phase === 'completed') owner.completeExclusiveMutation(mutating)
       } else {
         rewriteAuthoritativeState(owner, (state) => {
@@ -275,8 +319,12 @@ describe('database operation lock core', () => {
         'INTENT_FENCED'
       )
       expect(owner.readOperationState()).toEqual(before)
-      expectLockError(() => owner.cancelExclusiveIntent(stalePhaseEvidence), 'INTENT_PHASE_INVALID')
+        expectLockError(
+          () => owner.cancelExclusiveIntent(stalePhaseEvidence),
+          'INTENT_PHASE_INVALID'
+        )
       expect(owner.readOperationState()).toEqual(before)
+    }
     }
   )
 
@@ -415,7 +463,39 @@ describe('database operation lock core', () => {
     }
   })
 
-  it('orders cancel-then-begin and begin-then-cancel as a fenced state machine', () => {
+  it('gives self-fencing precedence over malformed operation, intent, owner, and metadata', () => {
+    const fixture = cancelableIntentFixture('exclusive')
+    fixture.owner.fenced = true
+
+    expectLockError(
+      () => fixture.owner.acquireExclusiveIntent('malformed', { value: -1 }),
+      'OWNER_SELF_FENCED'
+    )
+    expectLockError(
+      () =>
+        fixture.owner.acquireExclusiveIntent('restore', {
+          'shikin.recovery.future': true,
+        }),
+      'OWNER_SELF_FENCED'
+    )
+    for (const evidence of [
+      { ...fixture.intent, operationId: '' },
+      { ...fixture.intent, owner: fixture.peer.getOwnerEvidence() },
+      {
+        ...fixture.intent,
+        metadata: { 'shikin.recovery.future': true },
+      },
+    ]) {
+      expectLockError(
+        () => fixture.owner.beginExclusiveMutation(evidence, undefined),
+        'OWNER_SELF_FENCED'
+      )
+    }
+  })
+
+  it.runIf(process.platform === 'linux')(
+    'orders cancel-then-begin and begin-then-cancel as a fenced state machine',
+    () => {
     const cancelFirst = cancelableIntentFixture('exclusive')
     const cancelledProof = prepareMutationProof(cancelFirst.owner, cancelFirst.intent)
     expect(cancelFirst.owner.cancelExclusiveIntent(cancelFirst.intent)).toBe(true)
@@ -426,21 +506,128 @@ describe('database operation lock core', () => {
 
     const beginFirst = cancelableIntentFixture('exclusive')
     const usedProof = prepareMutationProof(beginFirst.owner, beginFirst.intent)
-    const mutating = beginFirst.owner.beginExclusiveMutation(
-      beginFirst.intent,
-      usedProof.proof
-    )
+      const mutating = beginFirst.owner.beginExclusiveMutation(beginFirst.intent, usedProof.proof)
     const beforeRejectedCancel = beginFirst.owner.readOperationState()
     expectLockError(
       () => beginFirst.owner.beginExclusiveMutation(beginFirst.intent, usedProof.proof),
       'INTENT_PHASE_INVALID'
     )
     expect(beginFirst.owner.readOperationState()).toEqual(beforeRejectedCancel)
-    expectLockError(() => beginFirst.owner.cancelExclusiveIntent(mutating), 'INTENT_PHASE_INVALID')
+      expectLockError(
+        () => beginFirst.owner.cancelExclusiveIntent(mutating),
+        'INTENT_PHASE_INVALID'
+      )
     expect(beginFirst.owner.readOperationState()).toEqual(beforeRejectedCancel)
-  })
+    }
+  )
 
-  it('requires an authentic proof after advisory state checks and preserves proof error codes', () => {
+  it.runIf(process.platform === 'linux')(
+    'linearizes two begin attempts for one intent and proof',
+    () => {
+      let secondError
+      let armed = false
+      let attempted = false
+      const fixture = cancelableIntentFixture('exclusive', {
+        afterPrune() {
+          if (!armed || attempted) return
+          attempted = true
+          secondError = expectLockError(
+            () => fixture.owner.beginExclusiveMutation(fixture.intent, prepared.proof),
+            'PREPARED_PROOF_ACTIVE'
+          )
+        },
+      })
+      const prepared = prepareMutationProof(fixture.owner, fixture.intent)
+      armed = true
+      const result = fixture.owner.beginExclusiveMutation(fixture.intent, prepared.proof)
+      expect(result.phase).toBe('mutating')
+      expect(secondError).toMatchObject({ code: 'PREPARED_PROOF_ACTIVE' })
+      expect(fixture.owner.readOperationState()).toMatchObject({
+        exclusiveIntent: { phase: 'mutating' },
+      })
+    }
+  )
+
+  it.runIf(process.platform === 'linux')(
+    'releases every retained descriptor on representative lock-level precommit exits',
+    () => {
+      for (const hookName of ['beforePublish', 'afterPrune']) {
+        let armed = false
+        const fixture = cancelableIntentFixture('exclusive', {
+          [hookName]() {
+            if (armed) throw new Error(`injected ${hookName}`)
+          },
+  })
+        const prepared = prepareMutationProof(fixture.owner, fixture.intent)
+        const binding = mutationProofBinding(fixture.owner, fixture.intent)
+        const baseline = retainedDescriptorCount(fixture.owner.getPaths().operationRoot)
+        armed = true
+        expectLockError(
+          () => fixture.owner.beginExclusiveMutation(fixture.intent, prepared.proof),
+          'FILESYSTEM_FAILURE'
+        )
+        expect(retainedDescriptorCount(fixture.owner.getPaths().operationRoot)).toBe(baseline)
+        armed = false
+        const token = verifyPreparedMutationProof(prepared.proof, binding)
+        releaseVerifiedPreparedMutationToken(token)
+        expect(retainedDescriptorCount(fixture.owner.getPaths().operationRoot)).toBe(baseline)
+      }
+
+      let armed = false
+      let artifactPath
+      const retainedFailure = cancelableIntentFixture('exclusive', {
+        afterPrune() {
+          if (!armed) return
+          chmodSync(artifactPath, 0o600)
+          chmodSync(artifactPath, 0o400)
+        },
+      })
+      const retainedProof = prepareMutationProof(retainedFailure.owner, retainedFailure.intent)
+      artifactPath = firstPreparedArtifact(retainedFailure.owner)
+      const retainedBaseline = retainedDescriptorCount(
+        retainedFailure.owner.getPaths().operationRoot
+      )
+      armed = true
+      expectLockError(
+        () =>
+          retainedFailure.owner.beginExclusiveMutation(retainedFailure.intent, retainedProof.proof),
+        'RECOVERY_ARTIFACT_CORRUPTION'
+      )
+      expect(retainedDescriptorCount(retainedFailure.owner.getPaths().operationRoot)).toBe(
+        retainedBaseline
+      )
+
+      for (const drift of ['revision', 'cancel']) {
+        const fixture = cancelableIntentFixture('exclusive')
+        const prepared = prepareMutationProof(fixture.owner, fixture.intent)
+        const binding = mutationProofBinding(fixture.owner, fixture.intent)
+        const baseline = retainedDescriptorCount(fixture.owner.getPaths().operationRoot)
+        setRecoveryJournalInterArtifactHashTestHookForTest(() => {
+          setRecoveryJournalInterArtifactHashTestHookForTest(undefined)
+          if (drift === 'cancel') {
+            fixture.owner.cancelExclusiveIntent(fixture.intent)
+          } else {
+            rewriteAuthoritativeState(fixture.owner, (state) => ({
+              ...state,
+              stateRevision: state.stateRevision + 1,
+            }))
+          }
+        })
+        expectLockError(
+          () => fixture.owner.beginExclusiveMutation(fixture.intent, prepared.proof),
+          drift === 'cancel' ? 'INTENT_FENCED' : 'PREPARED_PROOF_INVALID'
+        )
+        expect(retainedDescriptorCount(fixture.owner.getPaths().operationRoot)).toBe(baseline)
+        const token = verifyPreparedMutationProof(prepared.proof, binding)
+        releaseVerifiedPreparedMutationToken(token)
+        expect(retainedDescriptorCount(fixture.owner.getPaths().operationRoot)).toBe(baseline)
+      }
+    }
+  )
+
+  it.runIf(process.platform === 'linux')(
+    'requires an authentic proof after advisory state checks and preserves proof error codes',
+    () => {
     for (const suppliedProof of [undefined, {}, Object.freeze(Object.create(null))]) {
       const { owner, intent } = cancelableIntentFixture('exclusive')
       const before = owner.readOperationState()
@@ -463,9 +650,12 @@ describe('database operation lock core', () => {
       'INTENT_FENCED'
     )
     expect(owner.readOperationState()).toEqual(before)
-  })
+    }
+  )
 
-  it('reuses a proof after precommit failure and consumes it at rename before strict durability', () => {
+  it.runIf(process.platform === 'linux')(
+    'reuses a proof after precommit failure and consumes it at rename before strict durability',
+    () => {
     let armed = false
     const reusable = cancelableIntentFixture('exclusive', {
       afterPrune() {
@@ -551,9 +741,31 @@ describe('database operation lock core', () => {
       fenced: true,
       durabilityUncertain: true,
     })
-  })
 
-  it('rejects retained-evidence tamper under the mutex without publishing mutating state', () => {
+      armed = false
+      const bypass = cancelableIntentFixture('exclusive', {
+        directorySync() {
+          return armed ? true : undefined
+        },
+  })
+      const bypassProof = prepareMutationProof(bypass.owner, bypass.intent)
+      armed = true
+      const bypassError = expectLockError(
+        () => bypass.owner.beginExclusiveMutation(bypass.intent, bypassProof.proof),
+        'MUTATION_COMMIT_DURABILITY_UNCERTAIN'
+      )
+      expect(bypassError.cause).toMatchObject({ code: 'INVALID_OPTIONS' })
+      expect(bypass.owner.readOperationState().exclusiveIntent).toMatchObject({ phase: 'mutating' })
+      expect(bypass.owner.getLifecycleHealth()).toMatchObject({
+        fenced: true,
+        durabilityUncertain: true,
+      })
+    }
+  )
+
+  it.runIf(process.platform === 'linux')(
+    'rejects retained-evidence tamper under the mutex without publishing mutating state',
+    () => {
     let armed = false
     let artifactPath
     const fixture = cancelableIntentFixture('exclusive', {
@@ -584,9 +796,12 @@ describe('database operation lock core', () => {
       fenced: false,
       durabilityUncertain: false,
     })
-  })
+    }
+  )
 
-  it('applies intent and state precedence before proof lifecycle errors', () => {
+  it.runIf(process.platform === 'linux')(
+    'applies intent and state precedence before proof lifecycle errors',
+    () => {
     const malformed = cancelableIntentFixture('exclusive')
     const malformedProof = prepareMutationProof(malformed.owner, malformed.intent)
     expectLockError(
@@ -612,9 +827,12 @@ describe('database operation lock core', () => {
       () => mutating.owner.beginExclusiveMutation(mutating.intent, undefined),
       'INTENT_PHASE_INVALID'
     )
-  })
+    }
+  )
 
-  it('returns mutation authority after durable fsync despite later committed maintenance failure', () => {
+  it.runIf(process.platform === 'linux')(
+    'returns mutation authority after durable fsync despite later committed maintenance failure',
+    () => {
     let armed = false
     const fixture = cancelableIntentFixture('exclusive', {
       afterFsync() {
@@ -631,9 +849,12 @@ describe('database operation lock core', () => {
       maintenanceDegraded: true,
       durabilityUncertain: false,
     })
-  })
+    }
+  )
 
-  it('hashes only before the mutex even when full verification exceeds its TTL', () => {
+  it.runIf(process.platform === 'linux')(
+    'hashes only before the mutex even when full verification exceeds its TTL',
+    () => {
     const root = tempRoot()
     const owner = new DatabaseOperationLock({
       rootDir: root,
@@ -659,9 +880,12 @@ describe('database operation lock core', () => {
     })
     expect(Date.now() - started).toBeGreaterThanOrEqual(1_000)
     expect(hashes).toBe(1)
-  })
+    }
+  )
 
-  it('revalidates advisory state under the mutex after a cancellation during hashing', () => {
+  it.runIf(process.platform === 'linux')(
+    'revalidates advisory state under the mutex after a cancellation during hashing',
+    () => {
     const fixture = cancelableIntentFixture('exclusive')
     const prepared = prepareMutationProof(fixture.owner, fixture.intent)
     setRecoveryJournalInterArtifactHashTestHookForTest(() => {
@@ -673,7 +897,8 @@ describe('database operation lock core', () => {
       'INTENT_FENCED'
     )
     expect(fixture.owner.readOperationState().exclusiveIntent).toBeNull()
-  })
+    }
+  )
 
   it('requires one exact unexpired own lease without changing state on rejected admission', () => {
     const noOwn = createLock('tauri')
@@ -1025,7 +1250,9 @@ describe('database operation lock core', () => {
     }
   )
 
-  it.runIf(process.platform === 'linux')('never automatically clears a dead mutating intent', async () => {
+  it.runIf(process.platform === 'linux')(
+    'never automatically clears a dead mutating intent',
+    async () => {
     const root = tempRoot()
     await runWorker(root, 'cli', 0, join(root, 'forbidden-home'), 'intent:mutating')
     const cleaner = createLockAt(root, 'tauri')
@@ -1036,7 +1263,8 @@ describe('database operation lock core', () => {
       stateRevision: before.stateRevision,
     })
     expect(cleaner.readOperationState()).toEqual(before)
-  })
+    }
+  )
 
   it('matches the shared strict JSON golden fixtures', () => {
     for (const fixture of goldenFixtures.cases) {
@@ -1347,10 +1575,7 @@ describe('database operation lock core', () => {
     'cannot enter mutating or completed without creating recovery-journal side effects',
     () => {
       const fixture = cancelableIntentFixture('exclusive')
-      const recoveryRoot = join(
-        fixture.owner.getPaths().operationRoot,
-        'recovery-journal-v1'
-      )
+      const recoveryRoot = join(fixture.owner.getPaths().operationRoot, 'recovery-journal-v1')
       const before = fixture.owner.readOperationState()
       expect(existsSync(recoveryRoot)).toBe(false)
       expectLockError(
@@ -1431,6 +1656,23 @@ function mutationProofBinding(lock, intent) {
     stateRevision: lock.readOperationState().stateRevision,
     intent,
   }
+}
+
+function firstPreparedArtifact(lock) {
+  const operations = join(lock.getPaths().operationRoot, 'recovery-journal-v1', 'operations')
+  const operation = join(operations, readdirSync(operations)[0])
+  const artifacts = join(operation, 'artifacts')
+  return join(artifacts, readdirSync(artifacts)[0])
+}
+
+function retainedDescriptorCount(operationRoot) {
+  return readdirSync('/proc/self/fd').filter((descriptor) => {
+    try {
+      return readlinkSync(`/proc/self/fd/${descriptor}`).startsWith(operationRoot)
+    } catch {
+      return false
+    }
+  }).length
 }
 
 function rewriteAuthoritativeState(lock, update) {

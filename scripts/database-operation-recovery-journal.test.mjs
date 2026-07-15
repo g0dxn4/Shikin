@@ -107,9 +107,10 @@ afterEach(() => {
 
 describe('recovery journal cross-platform contract', () => {
   it('strictly validates only the exact prepared mutation shape', () => {
-    expect(validateSchema(golden.preparedMutation.record), JSON.stringify(validateSchema.errors)).toBe(
-      true
-    )
+    expect(
+      validateSchema(golden.preparedMutation.record),
+      JSON.stringify(validateSchema.errors)
+    ).toBe(true)
     expect(validateSchema({ ...golden.preparedMutation.record, unexpected: true })).toBe(false)
     const missing = structuredClone(golden.preparedMutation.record)
     delete missing.previousRecordSha256
@@ -139,7 +140,9 @@ describe('recovery journal cross-platform contract', () => {
     const canonicalRecord = canonicalRecoveryJournalBytes(prepared.record)
     const candidate = Buffer.from(prepared.artifactBase64.candidate, 'base64')
     const rollback = Buffer.from(prepared.artifactBase64.rollback, 'base64')
-    expect(recoveryOperationKey(DATABASE_IDENTITY, prepared.operationId)).toBe(prepared.operationKey)
+    expect(recoveryOperationKey(DATABASE_IDENTITY, prepared.operationId)).toBe(
+      prepared.operationKey
+    )
     expect(recoveryArtifactKey(prepared.operationKey, prepared.nonce, 'candidate')).toBe(
       prepared.artifactKeys.candidate
     )
@@ -287,15 +290,20 @@ describe('recovery journal cross-platform contract', () => {
         'INVALID_RECOVERY_OPTIONS'
       )
       expectError(
-        () => verifyPreparedMutationProof({}, { operationRoot, stateRevision: 1, intent: makeIntent('restore') }),
+        () =>
+          verifyPreparedMutationProof(
+            {},
+            { operationRoot, stateRevision: 1, intent: makeIntent('restore') }
+          ),
         'PREPARED_PROOF_INVALID'
       )
     }
   )
 })
 
-describe.runIf(process.platform === 'linux')('Node prepared mutation journal', () => {
-  it('publishes exact artifacts and one canonical LF-terminated record, then verifies an opaque proof', () => {
+describe('Node prepared mutation journal', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('publishes exact artifacts and one canonical LF-terminated record, then verifies an opaque proof', () => {
     const operationRoot = createOperationRoot()
     const intent = makeIntent('restore')
     const contexts = []
@@ -331,9 +339,7 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     expect(readdirSync(paths.operation).sort()).toEqual(['artifacts', 'records'])
     expect(readdirSync(paths.artifacts).sort()).toHaveLength(2)
     const recordNames = readdirSync(paths.records)
-    expect(recordNames).toEqual([
-      `00000000000000000000-${prepared.commitmentSha256}.json`,
-    ])
+      expect(recordNames).toEqual([`00000000000000000000-${prepared.commitmentSha256}.json`])
     const recordBytes = readFileSync(join(paths.records, recordNames[0]))
     expect(recordBytes.subarray(-1).equals(Buffer.from('\n'))).toBe(true)
     expect(recordBytes.subarray(-2, -1).equals(Buffer.from('\n'))).toBe(false)
@@ -344,7 +350,9 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     expect(record).not.toHaveProperty('metadata')
     expect(record.createdAt).toBe(intent.createdAt)
     expect(record.schemaContract).toEqual(SHIKIN_SCHEMA_CONTRACT_IDENTITY)
-    expect(record.candidate.contentDigest).toBe(recoveryArtifactDigest('candidate', candidateBytes))
+      expect(record.candidate.contentDigest).toBe(
+        recoveryArtifactDigest('candidate', candidateBytes)
+      )
     expect(record.rollback.contentDigest).toBe(recoveryArtifactDigest('rollback', rollbackBytes))
     expect(statSync(join(paths.records, recordNames[0])).mode & 0o777).toBe(0o400)
     for (const name of readdirSync(paths.artifacts)) {
@@ -370,7 +378,8 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     releaseVerifiedPreparedMutationToken(token)
   })
 
-  it('never parses, resumes, deletes, or mints proof from an existing operation directory', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('never parses, resumes, deletes, or mints proof from an existing operation directory', () => {
     for (const kind of ['partial', 'complete', 'malicious']) {
       const operationRoot = createOperationRoot()
       const intent = makeIntent('import')
@@ -417,7 +426,8 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     }
   })
 
-  it('rejects proof forgery, JSON round trips, binding changes, and replay after consumption', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('rejects proof forgery, JSON round trips, binding changes, and replay after consumption', () => {
     const operationRoot = createOperationRoot()
     const intent = makeIntent('restore')
     const prepared = prepareDefault(operationRoot, intent, 12)
@@ -475,7 +485,8 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     expect(() => consumeVerifiedPreparedMutationToken({})).not.toThrow()
   })
 
-  it('retains exactly nine close-on-exec handles and releases or consumes them no-throw', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('retains exactly nine close-on-exec handles and releases or consumes them no-throw', () => {
     const operationRoot = createOperationRoot()
     const intent = makeIntent('restore')
     const prepared = prepareDefault(operationRoot, intent, 15)
@@ -508,7 +519,8 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     expectError(() => verifyPreparedMutationProof(prepared.proof, options), 'PREPARED_PROOF_USED')
   })
 
-  it('allows mutable shared-root metadata churn but rejects operation-specific layout changes', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('allows mutable shared-root metadata churn but rejects operation-specific layout changes', () => {
     const operationRoot = createOperationRoot()
     const intent = makeIntent('restore')
     const prepared = prepareDefault(operationRoot, intent, 16)
@@ -530,8 +542,59 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     releaseVerifiedPreparedMutationToken(token)
   })
 
-  it('revalidates immutable files, directories, layouts, modes, links, and timestamps', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('does not enumerate or inspect unrelated operation siblings during preparation', () => {
+      const operationRoot = createOperationRoot()
+      const firstIntent = makeIntent('restore')
+      prepareDefault(operationRoot, firstIntent, 16)
+      const operationsRoot = join(operationRoot, 'recovery-journal-v1', 'operations')
+      const malformedSibling = join(operationsRoot, 'malformed-unrelated-sibling')
+      writeFileSync(malformedSibling, 'not an operation directory')
+
+      const secondIntent = makeIntent('import')
+      const prepared = prepareDefault(operationRoot, secondIntent, 17)
+      expect(prepared).toMatchObject({
+        commitmentSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        durability: 'linux-fsync-complete',
+  })
+      expect(readFileSync(malformedSibling, 'utf8')).toBe('not an operation directory')
+  })
+
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('revalidates all retained root identities and immutable evidence', () => {
     const attacks = [
+        {
+          name: 'operation root replacement',
+          code: 'RECOVERY_JOURNAL_CORRUPTION',
+          apply({ operationRoot }) {
+            const old = join(dirname(operationRoot), `old-operation-root-${randomUUID()}`)
+            renameSync(operationRoot, old)
+            cpSync(old, operationRoot, { recursive: true })
+            sealFixtureTree(operationRoot)
+          },
+        },
+        {
+          name: 'recovery root replacement',
+          code: 'RECOVERY_JOURNAL_CORRUPTION',
+          apply({ operationRoot }) {
+            const recoveryRoot = join(operationRoot, 'recovery-journal-v1')
+            const old = join(operationRoot, `old-recovery-root-${randomUUID()}`)
+            renameSync(recoveryRoot, old)
+            cpSync(old, recoveryRoot, { recursive: true })
+            sealFixtureTree(recoveryRoot)
+          },
+        },
+        {
+          name: 'operations root replacement',
+          code: 'RECOVERY_JOURNAL_CORRUPTION',
+          apply({ operationRoot }) {
+            const operationsRoot = join(operationRoot, 'recovery-journal-v1', 'operations')
+            const old = join(operationRoot, `old-operations-root-${randomUUID()}`)
+            renameSync(operationsRoot, old)
+            cpSync(old, operationsRoot, { recursive: true })
+            sealFixtureTree(operationsRoot)
+          },
+        },
       {
         name: 'artifact file replacement',
         code: 'RECOVERY_JOURNAL_CORRUPTION',
@@ -649,7 +712,8 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     }
   })
 
-  it('closes every retained handle when full verification fails before token issuance', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('closes every retained handle when full verification fails before token issuance', () => {
     const operationRoot = createOperationRoot()
     const intent = makeIntent('restore')
     const prepared = prepareDefault(operationRoot, intent, 19)
@@ -666,7 +730,8 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     releaseVerifiedPreparedMutationToken(token)
   })
 
-  it('requires exact synchronous callback checks and an exclusive restore/import binding', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('requires exact synchronous callback checks and an exclusive restore/import binding', () => {
     for (const callback of [
       ({ path }) => {
         writeFileSync(path, 'artifact')
@@ -745,7 +810,8 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     )
   })
 
-  it('accepts 128 multibyte code points and rejects invalid Unicode or 129 code points', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('accepts 128 multibyte code points and rejects invalid Unicode or 129 code points', () => {
     const accepted = '😀'.repeat(128)
     const operationRoot = createOperationRoot()
     const intent = makeIntent('restore')
@@ -767,7 +833,8 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     }
   })
 
-  it('does not accept caller path components, noncanonical roots, or the wrong identity root', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('does not accept caller path components, noncanonical roots, or the wrong identity root', () => {
     const operationRoot = createOperationRoot()
     expectError(
       () =>
@@ -806,7 +873,8 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     )
   })
 
-  it('detects callback replacement, hardlinks, sidecars, unexpected entries, and unsafe privacy', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('detects callback replacement, hardlinks, sidecars, unexpected entries, and unsafe privacy', () => {
     let operationRoot = createOperationRoot()
     expectError(
       () =>
@@ -865,7 +933,8 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
           intent: makeIntent('restore'),
           writeArtifact({ role, path }) {
             writeFileSync(path, role)
-            if (role === 'candidate') writeFileSync(join(dirname(dirname(path)), 'unexpected'), 'x')
+              if (role === 'candidate')
+                writeFileSync(join(dirname(dirname(path)), 'unexpected'), 'x')
             return { ...OK_CHECKS }
           },
         }),
@@ -891,7 +960,8 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     }
   })
 
-  it('rejects symlinked roots and post-publication symlink or hardlink tampering', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('rejects symlinked roots and post-publication symlink or hardlink tampering', () => {
     const operationRoot = createOperationRoot()
     const intent = makeIntent('restore')
     const prepared = prepareDefault(operationRoot, intent, 1)
@@ -956,7 +1026,8 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     }
   })
 
-  it('detects artifact tampering and strict record hash, size, nonce, checks, and schema drift', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('detects artifact tampering and strict record hash, size, nonce, checks, and schema drift', () => {
     for (const testCase of [
       {
         name: 'nonce',
@@ -1032,7 +1103,8 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     )
   })
 
-  it('proof rereads reject partial, CRLF, hash-mismatched, and noncanonical records', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('proof rereads reject partial, CRLF, hash-mismatched, and noncanonical records', () => {
     const cases = [
       {
         name: 'partial',
@@ -1093,7 +1165,8 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     }
   })
 
-  it('validates shared static disk evidence without minting and ignores proof-only fields', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('validates shared static disk evidence without minting and ignores proof-only fields', () => {
     const operationRoot = createOperationRoot()
     cpSync(
       join(resolve(golden.onDiskEvidenceFixture.root), 'recovery-journal-v1'),
@@ -1139,7 +1212,8 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     )
   })
 
-  it('rejects over-cap sparse artifacts before hashing on initial write and reread', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('rejects over-cap sparse artifacts before hashing on initial write and reread', () => {
     let operationRoot = createOperationRoot()
     expectError(
       () =>
@@ -1167,12 +1241,14 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     truncateSync(candidate, 8 * 1024 * 1024 * 1024 + 1)
     chmodSync(candidate, 0o400)
     expectError(
-      () => verifyPreparedMutationProof(prepared.proof, { operationRoot, stateRevision: 2, intent }),
+        () =>
+          verifyPreparedMutationProof(prepared.proof, { operationRoot, stateRevision: 2, intent }),
       'RECOVERY_ARTIFACT_CORRUPTION'
     )
   })
 
-  it('retains both handles and rejects a sibling-window write even when bytes are restored', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('retains both handles and rejects a sibling-window write even when bytes are restored', () => {
     const operationRoot = createOperationRoot()
     const intent = makeIntent('restore')
     const prepared = prepareDefault(operationRoot, intent, 3)
@@ -1184,12 +1260,14 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
       chmodSync(candidate, 0o400)
     })
     expectError(
-      () => verifyPreparedMutationProof(prepared.proof, { operationRoot, stateRevision: 3, intent }),
+        () =>
+          verifyPreparedMutationProof(prepared.proof, { operationRoot, stateRevision: 3, intent }),
       'RECOVERY_ARTIFACT_CORRUPTION'
     )
   })
 
-  it('uses retained evidence for bounded no-hash revalidation before consumption', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('uses retained evidence for bounded no-hash revalidation before consumption', () => {
     const operationRoot = createOperationRoot()
     const intent = makeIntent('restore')
     const prepared = prepareDefault(operationRoot, intent, 4)
@@ -1210,7 +1288,8 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     releaseVerifiedPreparedMutationToken(token)
   })
 
-  it('fails closed on insecure existing journal directories', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('fails closed on insecure existing journal directories', () => {
     if (process.platform === 'win32') return
     const operationRoot = createOperationRoot()
     const recoveryRoot = join(operationRoot, 'recovery-journal-v1')
@@ -1222,8 +1301,9 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
   })
 })
 
-describe.runIf(process.platform === 'linux')('fault injection and restart disposition', () => {
-  it('throws only after real operations and applies the required retry disposition at every point', () => {
+describe('fault injection and restart disposition', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('throws only after real operations and applies the required retry disposition at every point', () => {
     const applicableFaults =
       process.platform === 'win32'
         ? ALL_FAULTS.filter((fault) => !POSIX_DIRECTORY_FAULTS.includes(fault))
@@ -1273,7 +1353,8 @@ describe.runIf(process.platform === 'linux')('fault injection and restart dispos
     }
   })
 
-  it('ignores the test fault variable outside NODE_ENV=test and rejects unknown test points', () => {
+  // prettier-ignore
+  it.runIf(process.platform === 'linux')('ignores the test fault variable outside NODE_ENV=test and rejects unknown test points', () => {
     const previousNodeEnv = process.env.NODE_ENV
     const previousFault = process.env.SHIKIN_RECOVERY_JOURNAL_TEST_FAULT
     try {

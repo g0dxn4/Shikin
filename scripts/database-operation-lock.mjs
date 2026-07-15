@@ -1415,6 +1415,7 @@ function validateRecoveryCommitmentMetadata(intent) {
     ) ||
     intent.metadata['shikin.recovery.protocol'] !== RECOVERY_JOURNAL_PROTOCOL ||
     intent.metadata['shikin.recovery.version'] !== RECOVERY_JOURNAL_VERSION ||
+    typeof intent.metadata['shikin.recovery.recordSha256'] !== 'string' ||
     !/^[0-9a-f]{64}$/.test(intent.metadata['shikin.recovery.recordSha256']) ||
     intent.metadata['shikin.recovery.durability'] !== RECOVERY_JOURNAL_DURABILITY ||
     !Number.isSafeInteger(intent.metadata['shikin.recovery.claimSequence']) ||
@@ -1430,28 +1431,32 @@ function validateCallerIntentMetadata(metadata) {
   if (!isPlainRecord(metadata)) {
     throw protocolError('INVALID_OPERATION', 'Intent metadata must be an object')
   }
+  validateCanonicalMetadataValue(metadata)
   const reserved = Object.keys(metadata).find((key) => key.startsWith('shikin.recovery.'))
   if (reserved !== undefined) {
     throw protocolError('RESERVED_METADATA_KEY', `Intent metadata key ${reserved} is reserved`)
   }
-  validateCanonicalMetadataValue(metadata)
+}
+
+function validateUnicodeString(value) {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1)
+      if (!(next >= 0xdc00 && next <= 0xdfff)) {
+        throw protocolError('INVALID_OPERATION', 'Intent metadata string is not valid Unicode')
+      }
+      index += 1
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      throw protocolError('INVALID_OPERATION', 'Intent metadata string is not valid Unicode')
+    }
+  }
 }
 
 function validateCanonicalMetadataValue(value) {
   if (value === null || typeof value === 'boolean') return
   if (typeof value === 'string') {
-    for (let index = 0; index < value.length; index += 1) {
-      const code = value.charCodeAt(index)
-      if (code >= 0xd800 && code <= 0xdbff) {
-        const next = value.charCodeAt(index + 1)
-        if (!(next >= 0xdc00 && next <= 0xdfff)) {
-          throw protocolError('INVALID_OPERATION', 'Intent metadata string is not valid Unicode')
-        }
-        index += 1
-      } else if (code >= 0xdc00 && code <= 0xdfff) {
-        throw protocolError('INVALID_OPERATION', 'Intent metadata string is not valid Unicode')
-      }
-    }
+    validateUnicodeString(value)
     return
   }
   if (
@@ -1467,7 +1472,10 @@ function validateCanonicalMetadataValue(value) {
     return
   }
   if (isPlainRecord(value)) {
-    for (const item of Object.values(value)) validateCanonicalMetadataValue(item)
+    for (const [key, item] of Object.entries(value)) {
+      validateUnicodeString(key)
+      validateCanonicalMetadataValue(item)
+    }
     return
   }
   throw protocolError('INVALID_OPERATION', 'Intent metadata is not canonical JSON')

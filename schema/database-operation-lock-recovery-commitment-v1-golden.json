@@ -444,6 +444,53 @@
       }
     },
     {
+      "name": "record-hash-singleton-array",
+      "valid": false,
+      "record": {
+        "protocol": "shikin.database-operation-lock",
+        "protocolVersion": 1,
+        "recordKind": "operation_state",
+        "databaseIdentity": "com.asf.shikin:shikin.db",
+        "stateRevision": 27,
+        "fencingGenerationHighWater": 1,
+        "leases": [],
+        "exclusiveIntent": {
+          "recordKind": "exclusive_intent",
+          "operationId": "operation-recovery-fixture",
+          "operation": "restore",
+          "phase": "mutating",
+          "owner": {
+            "ownerId": "owner-recovery-fixture",
+            "runtimeId": "cli",
+            "hostId": "host-recovery-fixture",
+            "processId": 1234,
+            "processStartedAt": "2026-07-14T12:00:00.000Z"
+          },
+          "fencingGeneration": 1,
+          "createdAt": "2026-07-14T12:00:00.000Z",
+          "updatedAt": "2026-07-14T12:00:01.000Z",
+          "metadata": {
+            "userLabel": "preserved",
+            "shikin.recovery.protocol": "shikin.database-operation-recovery-journal",
+            "shikin.recovery.version": 1,
+            "shikin.recovery.recordSha256": [
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            ],
+            "shikin.recovery.durability": "linux-fsync-complete",
+            "shikin.recovery.claimSequence": 0
+          }
+        },
+        "updatedBy": {
+          "ownerId": "owner-recovery-fixture",
+          "runtimeId": "cli",
+          "hostId": "host-recovery-fixture",
+          "processId": 1234,
+          "processStartedAt": "2026-07-14T12:00:00.000Z"
+        },
+        "updatedAt": "2026-07-14T12:00:02.000Z"
+      }
+    },
+    {
       "name": "wrong-record-hash",
       "valid": false,
       "record": {

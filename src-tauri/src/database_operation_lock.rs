@@ -2005,6 +2005,7 @@ fn validate_caller_intent_metadata(
     let Some(metadata) = metadata else {
         return Ok(());
     };
+    validate_canonical_metadata_value(&JsonValue::Object(metadata.clone()))?;
     if let Some(key) = metadata
         .keys()
         .find(|key| key.starts_with("shikin.recovery."))
@@ -2014,10 +2015,12 @@ fn validate_caller_intent_metadata(
             format!("intent metadata key {key} is reserved"),
         ));
     }
-    validate_canonical_metadata_value(&JsonValue::Object(metadata.clone()))
+    Ok(())
 }
 
 fn validate_canonical_metadata_value(value: &JsonValue) -> LockResult<()> {
+    // serde_json stores both object keys and string values as Rust Strings, which already
+    // guarantees the same valid-Unicode-scalar invariant that Node must check explicitly.
     match value {
         JsonValue::Null | JsonValue::Bool(_) | JsonValue::String(_) => Ok(()),
         JsonValue::Number(number) if canonical_safe_integer(number).is_some() => Ok(()),
@@ -2034,7 +2037,7 @@ fn validate_canonical_metadata_value(value: &JsonValue) -> LockResult<()> {
             Ok(())
         }
         _ => Err(LockError::new(
-            "INVALID_OPTIONS",
+            "INVALID_OPERATION",
             "intent metadata is not canonical JSON",
         )),
     }
@@ -3424,10 +3427,19 @@ mod tests {
                 error_code(
                     owner.acquire_exclusive_intent(DatabaseOperation::Restore, Some(metadata))
                 ),
-                "INVALID_OPTIONS"
+                "INVALID_OPERATION"
             );
             assert_eq!(owner.read_operation_state().unwrap(), before);
         }
+
+        let mut collision = JsonMap::new();
+        collision.insert("shikin.recovery.future".into(), JsonValue::Bool(true));
+        collision.insert("nested".into(), serde_json::json!({"value": -1}));
+        assert_eq!(
+            error_code(owner.acquire_exclusive_intent(DatabaseOperation::Restore, Some(collision))),
+            "INVALID_OPERATION"
+        );
+        assert_eq!(owner.read_operation_state().unwrap(), before);
 
         let mut generic = JsonMap::new();
         generic.insert(
@@ -3435,6 +3447,7 @@ mod tests {
             JsonValue::String("caller-owned".into()),
         );
         generic.insert("value".into(), JsonValue::from(0));
+        generic.insert("unicode-💰".into(), serde_json::json!({"ключ": "値"}));
         assert_eq!(
             owner
                 .acquire_exclusive_intent(DatabaseOperation::Import, Some(generic.clone()))

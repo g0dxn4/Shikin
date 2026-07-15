@@ -193,6 +193,11 @@ describe('database operation lock core', () => {
     const owner = createLockAt(root, 'cli')
     owner.registerRuntimeLease()
     const before = owner.readOperationState()
+    expectLockError(
+      () => owner.acquireExclusiveIntent('malformed', { 'shikin.recovery.future': true }),
+      'INVALID_OPERATION'
+    )
+    expect(owner.readOperationState()).toEqual(before)
     for (const metadata of [
       { 'shikin.recovery.protocol': 'caller-value' },
       { 'shikin.recovery.future': true },
@@ -212,6 +217,15 @@ describe('database operation lock core', () => {
       expectLockError(() => owner.acquireExclusiveIntent('restore', metadata), 'INVALID_OPERATION')
       expect(owner.readOperationState()).toEqual(before)
     }
+    expectLockError(
+      () =>
+        owner.acquireExclusiveIntent('restore', {
+          'shikin.recovery.future': true,
+          nested: { value: -1 },
+        }),
+      'INVALID_OPERATION'
+    )
+    expect(owner.readOperationState()).toEqual(before)
 
     const generic = createLock('mcp')
     generic.registerRuntimeLease()
@@ -224,6 +238,35 @@ describe('database operation lock core', () => {
       'recovery.protocol': 'caller-owned',
       nested: [null, true, 'value', 0, Number.MAX_SAFE_INTEGER],
     })
+  })
+
+  it('rejects lone-surrogate metadata keys and values before state publication', () => {
+    const root = tempRoot()
+    let publications = 0
+    const owner = new DatabaseOperationLock({
+      rootDir: root,
+      databaseIdentity: DATABASE_IDENTITY,
+      runtimeId: 'cli',
+      testHooks: {
+        beforePublish() {
+          publications += 1
+        },
+      },
+    })
+    owner.registerRuntimeLease()
+    const before = owner.readOperationState()
+    const publicationsBefore = publications
+
+    for (const metadata of [
+      { ['\ud800']: true },
+      { nested: { ['\udfff']: true } },
+      { value: '\ud800' },
+    ]) {
+      expectLockError(() => owner.acquireExclusiveIntent('restore', metadata), 'INVALID_OPERATION')
+      expect(owner.readOperationState()).toEqual(before)
+      expect(owner.readOperationState().stateRevision).toBe(before.stateRevision)
+      expect(publications).toBe(publicationsBefore)
+    }
   })
 
   it.runIf(process.platform === 'linux')(
@@ -250,8 +293,12 @@ describe('database operation lock core', () => {
     }
     )
 
-  it('matches the additive recovery-commitment parity fixture in the Node validator', () => {
+  it('matches the additive recovery-commitment parity fixture in Ajv and Node', () => {
     for (const fixture of recoveryCommitmentFixtures.cases) {
+      expect(
+        validateContractRecord(fixture.record),
+        `${fixture.name}: ${JSON.stringify(validateContractRecord.errors)}`
+      ).toBe(fixture.valid)
       if (fixture.valid) {
         expect(validateDatabaseOperationRecord(fixture.record), fixture.name).toEqual(
           fixture.record

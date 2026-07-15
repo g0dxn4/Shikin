@@ -9,6 +9,7 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  opendirSync,
   readdirSync,
   readSync,
   realpathSync,
@@ -71,6 +72,7 @@ const FAULT_POINTS = new Set([
 ])
 
 const proofState = new WeakMap()
+const verifiedTokenState = new WeakMap()
 let interArtifactHashTestHook
 
 export class RecoveryJournalError extends Error {
@@ -193,29 +195,90 @@ export function verifyPreparedMutationProof(proof, options) {
   const state = proofState.get(proof)
   if (!state) throw journalError('PREPARED_PROOF_INVALID', 'Prepared proof is not authentic')
   if (state.used) throw journalError('PREPARED_PROOF_USED', 'Prepared proof was already consumed')
+  if (state.active) {
+    throw journalError('PREPARED_PROOF_ACTIVE', 'Prepared proof already has an active verifier')
+  }
   try {
     const binding = validateVerificationOptions(options)
     if (!sameBinding(binding, state.binding)) {
       throw journalError('PREPARED_PROOF_INVALID', 'Prepared proof binding does not match')
     }
     requireLinuxDurability()
-    return rereadPreparedProofState(state, binding)
+    const paths = journalPaths(binding.operationRoot, binding.intent.operationId)
+    if (paths.operation !== state.paths.operation) {
+      throw journalError('PREPARED_PROOF_INVALID', 'Prepared proof path does not match')
+    }
+    const evidence = validateCompleteOperation(paths, binding, true)
+    if (
+      evidence.commitmentSha256 !== state.commitmentSha256 ||
+      evidence.durability !== state.durability
+    ) {
+      closeRetainedEvidence(evidence.retainedEvidence)
+      throw journalError('PREPARED_PROOF_INVALID', 'Prepared proof commitment does not match')
+    }
+    const token = Object.freeze(Object.create(null))
+    const tokenState = {
+      proof: state,
+      binding: cloneBinding(binding),
+      commitment: Object.freeze({
+        commitmentSha256: evidence.commitmentSha256,
+        durability: evidence.durability,
+      }),
+      retainedEvidence: evidence.retainedEvidence,
+      status: 'active',
+    }
+    state.active = true
+    verifiedTokenState.set(token, tokenState)
+    return token
   } catch (error) {
     throw normalizeError(error)
   }
 }
 
-export function markPreparedMutationProofUsed(proof) {
-  const state = proofState.get(proof)
-  if (!state) throw journalError('PREPARED_PROOF_INVALID', 'Prepared proof is not authentic')
-  if (state.used) throw journalError('PREPARED_PROOF_USED', 'Prepared proof was already consumed')
+export function revalidateVerifiedPreparedMutationToken(token, options) {
+  const tokenState = verifiedTokenState.get(token)
+  if (!tokenState) throw journalError('PREPARED_PROOF_INVALID', 'Verified token is not authentic')
+  if (tokenState.proof.used) {
+    throw journalError('PREPARED_PROOF_USED', 'Prepared proof was already consumed')
+  }
+  if (tokenState.status !== 'active' || !tokenState.proof.active) {
+    throw journalError('PREPARED_PROOF_INVALID', 'Verified token is not active')
+  }
   try {
+    const binding = validateVerificationOptions(options)
+    if (
+      !sameBinding(binding, tokenState.binding) ||
+      !sameBinding(binding, tokenState.proof.binding)
+    ) {
+      throw journalError('PREPARED_PROOF_INVALID', 'Verified token binding does not match')
+    }
     requireLinuxDurability()
-    rereadPreparedProofState(state, state.binding)
-    state.used = true
+    revalidateRetainedEvidence(tokenState.retainedEvidence)
+    return tokenState.commitment
   } catch (error) {
     throw normalizeError(error)
   }
+}
+
+export function releaseVerifiedPreparedMutationToken(token) {
+  const tokenState = verifiedTokenState.get(token)
+  if (!tokenState || tokenState.status !== 'active') return
+  tokenState.status = 'released'
+  tokenState.proof.active = false
+  const retainedEvidence = tokenState.retainedEvidence
+  tokenState.retainedEvidence = null
+  closeRetainedEvidence(retainedEvidence)
+}
+
+export function consumeVerifiedPreparedMutationToken(token) {
+  const tokenState = verifiedTokenState.get(token)
+  if (!tokenState || tokenState.status !== 'active') return
+  tokenState.status = 'consumed'
+  tokenState.proof.used = true
+  tokenState.proof.active = false
+  const retainedEvidence = tokenState.retainedEvidence
+  tokenState.retainedEvidence = null
+  closeRetainedEvidence(retainedEvidence)
 }
 
 // Deliberately does not mint a proof. It exists only so both implementations can
@@ -237,23 +300,6 @@ export function validatePreparedMutationEvidenceForTest(options) {
   }
 }
 
-function rereadPreparedProofState(state, binding) {
-  const rootIdentity = validateOperationRoot(binding.operationRoot)
-  const paths = journalPaths(binding.operationRoot, binding.intent.operationId)
-  if (paths.operation !== state.paths.operation) {
-    throw journalError('PREPARED_PROOF_INVALID', 'Prepared proof path does not match')
-  }
-  const evidence = validateCompleteOperation(paths, binding)
-  revalidateDirectoryIdentity(rootIdentity)
-  if (
-    evidence.commitmentSha256 !== state.commitmentSha256 ||
-    evidence.durability !== state.durability
-  ) {
-    throw journalError('PREPARED_PROOF_INVALID', 'Prepared proof commitment does not match')
-  }
-  return evidence.commitmentSha256
-}
-
 function mintPreparedMutation(binding, paths, evidence, durability) {
   const proof = Object.freeze(Object.create(null))
   const state = {
@@ -262,6 +308,7 @@ function mintPreparedMutation(binding, paths, evidence, durability) {
     commitmentSha256: evidence.commitmentSha256,
     durability,
     used: false,
+    active: false,
   }
   proofState.set(proof, state)
   return Object.freeze({
@@ -350,65 +397,93 @@ function writePreparedRecord(path, canonicalBytes) {
   }
 }
 
-function validateCompleteOperation(paths, binding) {
+function validateCompleteOperation(paths, binding, retainEvidence = false) {
   requireLinuxDurability()
-  const operationIdentity = inspectPrivateDirectory(paths.operation, 'operation directory')
-  assertExactDirectoryEntries(paths.operation, OPERATION_RECORD_ENTRIES)
-  const artifactsIdentity = inspectPrivateDirectory(paths.artifacts, 'artifacts directory')
-  const recordsIdentity = inspectPrivateDirectory(paths.records, 'records directory')
-  const recordEntries = safeDirectoryEntries(paths.records, 'records directory')
-  if (recordEntries.length !== 1 || !RECORD_NAME.test(recordEntries[0])) {
-    throw journalError(
+  let retainedEvidence
+  try {
+    retainedEvidence = {
+      directories: [
+        openRetainedDirectoryEvidence(paths.operationRoot, 'operation root', true),
+        openRetainedDirectoryEvidence(paths.recoveryRoot, 'recovery root', true),
+        openRetainedDirectoryEvidence(paths.operations, 'operations root', true),
+        openRetainedDirectoryEvidence(paths.operation, 'operation directory', false),
+        openRetainedDirectoryEvidence(paths.artifacts, 'artifacts directory', false),
+        openRetainedDirectoryEvidence(paths.records, 'records directory', false),
+      ],
+      files: [],
+      expectedLayouts: [],
+    }
+    assertExactDirectoryEntries(paths.recoveryRoot, [OPERATIONS_DIRECTORY])
+    assertExactDirectoryEntries(paths.operation, OPERATION_RECORD_ENTRIES)
+    const recordEntries = safeDirectoryEntries(paths.records, 'records directory')
+    if (recordEntries.length !== 1 || !RECORD_NAME.test(recordEntries[0])) {
+      throw journalError(
+        'RECOVERY_JOURNAL_CORRUPTION',
+        'Records directory must contain exactly one prepared record'
+      )
+    }
+    const recordName = recordEntries[0]
+    const commitmentFromName = RECORD_NAME.exec(recordName)[1]
+    const recordPath = join(paths.records, recordName)
+    const recordEvidence = openRetainedFileEvidence(
+      recordPath,
+      'prepared record',
       'RECOVERY_JOURNAL_CORRUPTION',
-      'Records directory must contain exactly one prepared record'
+      MAX_RECORD_BYTES,
+      true
     )
-  }
-  const recordName = recordEntries[0]
-  const commitmentFromName = RECORD_NAME.exec(recordName)[1]
-  const recordPath = join(paths.records, recordName)
-  const recordBytes = readSecureFile(
-    recordPath,
-    'prepared record',
-    MAX_RECORD_BYTES,
-    'RECOVERY_JOURNAL_CORRUPTION'
-  )
-  if (recordBytes.length < 2 || recordBytes[recordBytes.length - 1] !== 0x0a) {
-    throw journalError('RECOVERY_JOURNAL_CORRUPTION', 'Prepared record must end in exactly one LF')
-  }
-  const canonicalBytes = recordBytes.subarray(0, -1)
-  if (canonicalBytes[canonicalBytes.length - 1] === 0x0a || canonicalBytes.includes(0x0d)) {
-    throw journalError('RECOVERY_JOURNAL_CORRUPTION', 'Prepared record has a noncanonical terminator')
-  }
-  const commitmentSha256 = recoveryRecordHash(canonicalBytes)
-  if (commitmentSha256 !== commitmentFromName) {
-    throw journalError('RECOVERY_JOURNAL_CORRUPTION', 'Prepared record filename hash does not match')
-  }
-  let record
-  try {
-    record = JSON.parse(canonicalBytes.toString('utf8'))
-  } catch (error) {
-    throw journalError('RECOVERY_JOURNAL_CORRUPTION', 'Prepared record is malformed JSON', error)
-  }
-  validatePreparedRecord(record, binding, paths)
-  let recanonicalized
-  try {
-    recanonicalized = canonicalRecoveryJournalBytes(record)
-  } catch (error) {
-    throw journalError('RECOVERY_JOURNAL_CORRUPTION', 'Prepared record is not canonical JSON', error)
-  }
-  if (!canonicalBytes.equals(recanonicalized)) {
-    throw journalError('RECOVERY_JOURNAL_CORRUPTION', 'Prepared record bytes are noncanonical')
-  }
+    retainedEvidence.files.push(recordEvidence)
+    const recordBytes = readRetainedFileEvidence(
+      recordEvidence,
+      MAX_RECORD_BYTES,
+      'RECOVERY_JOURNAL_CORRUPTION'
+    )
+    if (recordBytes.length < 2 || recordBytes[recordBytes.length - 1] !== 0x0a) {
+      throw journalError('RECOVERY_JOURNAL_CORRUPTION', 'Prepared record must end in exactly one LF')
+    }
+    const canonicalBytes = recordBytes.subarray(0, -1)
+    if (canonicalBytes[canonicalBytes.length - 1] === 0x0a || canonicalBytes.includes(0x0d)) {
+      throw journalError('RECOVERY_JOURNAL_CORRUPTION', 'Prepared record has a noncanonical terminator')
+    }
+    const commitmentSha256 = recoveryRecordHash(canonicalBytes)
+    if (commitmentSha256 !== commitmentFromName) {
+      throw journalError('RECOVERY_JOURNAL_CORRUPTION', 'Prepared record filename hash does not match')
+    }
+    let record
+    try {
+      record = JSON.parse(canonicalBytes.toString('utf8'))
+    } catch (error) {
+      throw journalError('RECOVERY_JOURNAL_CORRUPTION', 'Prepared record is malformed JSON', error)
+    }
+    validatePreparedRecord(record, binding, paths)
+    let recanonicalized
+    try {
+      recanonicalized = canonicalRecoveryJournalBytes(record)
+    } catch (error) {
+      throw journalError('RECOVERY_JOURNAL_CORRUPTION', 'Prepared record is not canonical JSON', error)
+    }
+    if (!canonicalBytes.equals(recanonicalized)) {
+      throw journalError('RECOVERY_JOURNAL_CORRUPTION', 'Prepared record bytes are noncanonical')
+    }
 
-  const expectedArtifactNames = ROLES.map((role) => basename(record[role].path))
-  assertExactDirectoryEntries(paths.artifacts, expectedArtifactNames, true)
-  assertNoSqliteSidecars(paths.artifacts)
-  const openedArtifacts = []
-  try {
+    const expectedArtifactNames = ROLES.map((role) => basename(record[role].path))
+    assertExactDirectoryEntries(paths.artifacts, expectedArtifactNames, true)
+    assertNoSqliteSidecars(paths.artifacts)
     for (const role of ROLES) {
       const artifactPath = join(paths.operation, ...record[role].path.split('/'))
-      openedArtifacts.push(openArtifactEvidence(artifactPath, role, record[role].sizeBytes))
+      retainedEvidence.files.push(
+        openRetainedFileEvidence(
+          artifactPath,
+          `${role} artifact`,
+          'RECOVERY_ARTIFACT_CORRUPTION',
+          MAX_ARTIFACT_BYTES,
+          false,
+          role,
+          record[role].sizeBytes
+        )
+      )
     }
+    const openedArtifacts = retainedEvidence.files.filter((evidence) => evidence.role !== undefined)
     for (let index = 0; index < openedArtifacts.length; index += 1) {
       const opened = openedArtifacts[index]
       const artifact = hashOpenArtifact(
@@ -429,17 +504,25 @@ function validateCompleteOperation(paths, binding) {
       }
       if (index === 0) runInterArtifactHashTestHook(openedArtifacts)
     }
-    for (const opened of openedArtifacts) revalidateArtifactEvidence(opened)
+    retainedEvidence.expectedLayouts = [
+      Object.freeze({ path: paths.recoveryRoot, expected: [OPERATIONS_DIRECTORY], artifact: false }),
+      Object.freeze({ path: paths.operation, expected: OPERATION_RECORD_ENTRIES, artifact: false }),
+      Object.freeze({ path: paths.records, expected: [recordName], artifact: false }),
+      Object.freeze({ path: paths.artifacts, expected: expectedArtifactNames, artifact: true }),
+    ]
+    revalidateRetainedEvidence(retainedEvidence)
+    const result = {
+      commitmentSha256,
+      record,
+      durability: 'linux-fsync-complete',
+    }
+    if (retainEvidence) {
+      result.retainedEvidence = retainedEvidence
+      retainedEvidence = null
+    }
+    return result
   } finally {
-    for (const opened of openedArtifacts) closeSync(opened.descriptor)
-  }
-  for (const identity of [artifactsIdentity, recordsIdentity, operationIdentity]) {
-    revalidateDirectoryIdentity(identity)
-  }
-  return {
-    commitmentSha256,
-    record,
-    durability: 'linux-fsync-complete',
+    closeRetainedEvidence(retainedEvidence)
   }
 }
 
@@ -767,6 +850,312 @@ function revalidateDirectoryIdentity(identity) {
   const current = inspectPrivateDirectory(identity.path, 'journal directory')
   if (current.dev !== identity.dev || current.ino !== identity.ino) {
     throw journalError('RECOVERY_JOURNAL_CORRUPTION', 'Journal directory identity changed')
+  }
+}
+
+function openRetainedDirectoryEvidence(path, label, mutable) {
+  let descriptor
+  try {
+    const flags =
+      fsConstants.O_RDONLY |
+      (fsConstants.O_DIRECTORY ?? 0) |
+      (fsConstants.O_NOFOLLOW ?? 0)
+    descriptor = openSync(path, flags)
+    const openStat = fstatSync(descriptor, { bigint: true })
+    const pathStat = lstatSync(path, { bigint: true })
+    assertRetainedDirectoryStat(openStat, label)
+    assertRetainedDirectoryStat(pathStat, label)
+    if (pathStat.isSymbolicLink()) {
+      throw journalError('RECOVERY_JOURNAL_CORRUPTION', `${label} is a symlink`)
+    }
+    let real
+    try {
+      real = realpathSync(path)
+    } catch (error) {
+      throw journalError('RECOVERY_JOURNAL_CORRUPTION', `Could not canonicalize ${label}`, error)
+    }
+    if (comparablePath(real) !== comparablePath(resolve(path))) {
+      throw journalError(
+        'RECOVERY_JOURNAL_CORRUPTION',
+        `${label} is noncanonical or traverses a symlink`
+      )
+    }
+    const openSnapshot = retainedStatSnapshot(openStat, label)
+    const pathSnapshot = retainedStatSnapshot(pathStat, label)
+    if (
+      openSnapshot.dev !== pathSnapshot.dev ||
+      openSnapshot.ino !== pathSnapshot.ino ||
+      (!mutable && !sameRetainedSnapshot(openSnapshot, pathSnapshot))
+    ) {
+      throw journalError('RECOVERY_JOURNAL_CORRUPTION', `${label} path identity changed`)
+    }
+    const evidence = Object.freeze({
+      descriptor,
+      path,
+      label,
+      mutable,
+      code: 'RECOVERY_JOURNAL_CORRUPTION',
+      identity: Object.freeze({ dev: openSnapshot.dev, ino: openSnapshot.ino }),
+      snapshot: openSnapshot,
+      kind: 'directory',
+    })
+    descriptor = undefined
+    return evidence
+  } catch (error) {
+    if (error instanceof RecoveryJournalError) throw error
+    throw journalError('RECOVERY_JOURNAL_CORRUPTION', `Could not retain ${label}`, error)
+  } finally {
+    if (descriptor !== undefined) closeDescriptorNoThrow(descriptor)
+  }
+}
+
+function openRetainedFileEvidence(
+  path,
+  label,
+  code,
+  maximumBytes,
+  requireNonempty,
+  role,
+  expectedSizeBytes
+) {
+  let descriptor
+  try {
+    const opened = openExistingFile(path, label, code)
+    descriptor = opened.descriptor
+    const openStat = fstatSync(descriptor, { bigint: true })
+    const pathStat = lstatSync(path, { bigint: true })
+    assertRetainedFileStat(openStat, label, code)
+    assertRetainedFileStat(pathStat, label, code)
+    const openSnapshot = retainedStatSnapshot(openStat, label)
+    const pathSnapshot = retainedStatSnapshot(pathStat, label)
+    if (!sameRetainedSnapshot(openSnapshot, pathSnapshot)) {
+      throw journalError(code, `${label} path snapshot changed`)
+    }
+    if (
+      openSnapshot.size > BigInt(maximumBytes) ||
+      (requireNonempty && openSnapshot.size === 0n) ||
+      (expectedSizeBytes !== undefined && openSnapshot.size !== BigInt(expectedSizeBytes))
+    ) {
+      throw journalError(code, `${label} has an invalid retained size`)
+    }
+    const evidence = Object.freeze({
+      descriptor,
+      path,
+      label,
+      code,
+      identity: opened.identity,
+      snapshot: openSnapshot,
+      kind: 'file',
+      ...(role === undefined ? {} : { role, expectedSizeBytes }),
+    })
+    descriptor = undefined
+    return evidence
+  } catch (error) {
+    if (error instanceof RecoveryJournalError) throw error
+    throw journalError(code, `Could not retain ${label}`, error)
+  } finally {
+    if (descriptor !== undefined) closeDescriptorNoThrow(descriptor)
+  }
+}
+
+function retainedStatSnapshot(stat, label) {
+  if (
+    typeof stat.dev !== 'bigint' ||
+    typeof stat.ino !== 'bigint' ||
+    typeof stat.nlink !== 'bigint' ||
+    typeof stat.mode !== 'bigint' ||
+    typeof stat.size !== 'bigint' ||
+    typeof stat.mtimeNs !== 'bigint' ||
+    typeof stat.ctimeNs !== 'bigint' ||
+    stat.ino <= 0n ||
+    stat.nlink <= 0n
+  ) {
+    throw journalError(
+      'RECOVERY_DURABILITY_FAILURE',
+      `Stable nanosecond filesystem evidence is unavailable for ${label}`
+    )
+  }
+  return Object.freeze({
+    dev: stat.dev,
+    ino: stat.ino,
+    nlink: stat.nlink,
+    mode: stat.mode & 0o777n,
+    size: stat.size,
+    mtimeNs: stat.mtimeNs,
+    ctimeNs: stat.ctimeNs,
+  })
+}
+
+function assertRetainedDirectoryStat(stat, label) {
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw journalError('RECOVERY_JOURNAL_CORRUPTION', `${label} is not a retained directory`)
+  }
+  const snapshot = retainedStatSnapshot(stat, label)
+  if ((snapshot.mode & 0o077n) !== 0n) {
+    throw journalError('RECOVERY_JOURNAL_CORRUPTION', `${label} is not private`)
+  }
+}
+
+function assertRetainedFileStat(stat, label, code) {
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw journalError(code, `${label} is not a retained regular file`)
+  }
+  const snapshot = retainedStatSnapshot(stat, label)
+  if (snapshot.nlink !== 1n || snapshot.mode !== BigInt(PRIVATE_READ_ONLY_FILE_MODE)) {
+    throw journalError(code, `${label} is linked or is not sealed read-only`)
+  }
+}
+
+function sameRetainedSnapshot(left, right) {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.nlink === right.nlink &&
+    left.mode === right.mode &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  )
+}
+
+function revalidateRetainedEvidence(evidence) {
+  if (!evidence) {
+    throw journalError('PREPARED_PROOF_INVALID', 'Verified token has no retained evidence')
+  }
+  const reopened = []
+  try {
+    for (const retained of evidence.directories) {
+      const current = openRetainedDirectoryEvidence(
+        retained.path,
+        retained.label,
+        retained.mutable
+      )
+      reopened.push(current)
+      if (
+        current.identity.dev !== retained.identity.dev ||
+        current.identity.ino !== retained.identity.ino ||
+        (!retained.mutable && !sameRetainedSnapshot(current.snapshot, retained.snapshot))
+      ) {
+        throw journalError(retained.code, `${retained.label} retained evidence changed`)
+      }
+    }
+    for (const retained of evidence.files) {
+      const current = openRetainedFileEvidence(
+        retained.path,
+        retained.label,
+        retained.code,
+        retained.snapshot.size,
+        retained.snapshot.size > 0n,
+        retained.role,
+        retained.expectedSizeBytes
+      )
+      reopened.push(current)
+      if (!sameRetainedSnapshot(current.snapshot, retained.snapshot)) {
+        throw journalError(retained.code, `${retained.label} retained evidence changed`)
+      }
+    }
+    for (const layout of evidence.expectedLayouts) {
+      assertBoundedExactDirectoryEntries(layout.path, layout.expected, layout.artifact)
+    }
+    for (const retained of [...evidence.directories, ...evidence.files]) {
+      const current = fstatSync(retained.descriptor, { bigint: true })
+      if (retained.kind === 'directory') {
+        assertRetainedDirectoryStat(current, retained.label)
+        const snapshot = retainedStatSnapshot(current, retained.label)
+        if (
+          snapshot.dev !== retained.identity.dev ||
+          snapshot.ino !== retained.identity.ino ||
+          (!retained.mutable && !sameRetainedSnapshot(snapshot, retained.snapshot))
+        ) {
+          throw journalError(retained.code, `${retained.label} retained handle changed`)
+        }
+      } else {
+        assertRetainedFileStat(current, retained.label, retained.code)
+        if (!sameRetainedSnapshot(retainedStatSnapshot(current, retained.label), retained.snapshot)) {
+          throw journalError(retained.code, `${retained.label} retained handle changed`)
+        }
+      }
+    }
+  } catch (error) {
+    if (error instanceof RecoveryJournalError) throw error
+    throw journalError('RECOVERY_FILESYSTEM_FAILURE', 'Could not revalidate retained evidence', error)
+  } finally {
+    closeRetainedEvidence({ directories: reopened, files: [] })
+  }
+}
+
+function assertBoundedExactDirectoryEntries(path, expected, artifactDirectory) {
+  const directory = opendirSync(path)
+  const actual = []
+  try {
+    for (let index = 0; index <= expected.length; index += 1) {
+      const entry = directory.readSync()
+      if (entry === null) break
+      actual.push(entry.name)
+    }
+  } catch (error) {
+    throw journalError('RECOVERY_FILESYSTEM_FAILURE', 'Could not enumerate retained layout', error)
+  } finally {
+    try {
+      directory.closeSync()
+    } catch {
+      // Evidence release is deliberately no-throw.
+    }
+  }
+  const sortedActual = actual.sort()
+  const sortedExpected = [...expected].sort()
+  if (
+    sortedActual.length !== sortedExpected.length ||
+    sortedActual.some((entry, index) => entry !== sortedExpected[index])
+  ) {
+    const sidecar = artifactDirectory
+      ? sortedActual.find((entry) => /\.sqlite-(?:wal|shm|journal)$/.test(entry))
+      : undefined
+    throw journalError(
+      artifactDirectory ? 'RECOVERY_ARTIFACT_CORRUPTION' : 'RECOVERY_JOURNAL_CORRUPTION',
+      sidecar ? `SQLite sidecar ${sidecar} is forbidden` : 'Retained journal layout changed'
+    )
+  }
+}
+
+function readRetainedFileEvidence(evidence, maximumBytes, code) {
+  const size = evidence.snapshot.size
+  if (size <= 0n || size > BigInt(maximumBytes)) {
+    throw journalError(code, `${evidence.label} has an invalid size`)
+  }
+  const bytes = Buffer.alloc(Number(size))
+  let position = 0
+  while (position < bytes.length) {
+    const count = readSync(
+      evidence.descriptor,
+      bytes,
+      position,
+      bytes.length - position,
+      position
+    )
+    if (count <= 0) throw journalError(code, `${evidence.label} changed while reading`)
+    position += count
+  }
+  const current = fstatSync(evidence.descriptor, { bigint: true })
+  assertRetainedFileStat(current, evidence.label, code)
+  if (!sameRetainedSnapshot(retainedStatSnapshot(current, evidence.label), evidence.snapshot)) {
+    throw journalError(code, `${evidence.label} changed while reading`)
+  }
+  return bytes
+}
+
+function closeRetainedEvidence(evidence) {
+  if (!evidence) return
+  for (const item of [...(evidence.files ?? []), ...(evidence.directories ?? [])]) {
+    closeDescriptorNoThrow(item.descriptor)
+  }
+}
+
+function closeDescriptorNoThrow(descriptor) {
+  try {
+    closeSync(descriptor)
+  } catch {
+    // Release and consume mark lifecycle state before best-effort descriptor closure.
   }
 }
 

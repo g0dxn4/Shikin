@@ -2,6 +2,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import {
   chmodSync,
+  closeSync,
   copyFileSync,
   cpSync,
   linkSync,
@@ -10,6 +11,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -33,8 +35,10 @@ import {
   recoveryRecordHash,
 } from './database-operation-recovery-journal-canonical.mjs'
 import {
-  markPreparedMutationProofUsed,
+  consumeVerifiedPreparedMutationToken,
   prepareMutationJournal,
+  releaseVerifiedPreparedMutationToken,
+  revalidateVerifiedPreparedMutationToken,
   setRecoveryJournalInterArtifactHashTestHookForTest,
   validatePreparedMutationEvidenceForTest,
   verifyPreparedMutationProof,
@@ -345,9 +349,24 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     for (const name of readdirSync(paths.artifacts)) {
       expect(statSync(join(paths.artifacts, name)).mode & 0o777).toBe(0o400)
     }
-    expect(verifyPreparedMutationProof(prepared.proof, { operationRoot, stateRevision: 41, intent })).toBe(
-      prepared.commitmentSha256
-    )
+    const token = verifyPreparedMutationProof(prepared.proof, {
+      operationRoot,
+      stateRevision: 41,
+      intent,
+    })
+    expect(Object.isFrozen(token)).toBe(true)
+    expect(Reflect.ownKeys(token)).toEqual([])
+    expect(
+      revalidateVerifiedPreparedMutationToken(token, {
+        operationRoot,
+        stateRevision: 41,
+        intent,
+      })
+    ).toEqual({
+      commitmentSha256: prepared.commitmentSha256,
+      durability: 'linux-fsync-complete',
+    })
+    releaseVerifiedPreparedMutationToken(token)
   })
 
   it('never parses, resumes, deletes, or mints proof from an existing operation directory', () => {
@@ -424,10 +443,74 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
         }),
       'PREPARED_PROOF_INVALID'
     )
-    markPreparedMutationProofUsed(prepared.proof)
+    const token = verifyPreparedMutationProof(prepared.proof, options)
+    expectError(
+      () => verifyPreparedMutationProof(prepared.proof, options),
+      'PREPARED_PROOF_ACTIVE'
+    )
+    releaseVerifiedPreparedMutationToken(token)
+    releaseVerifiedPreparedMutationToken(token)
+    const reusable = verifyPreparedMutationProof(prepared.proof, options)
+    consumeVerifiedPreparedMutationToken(reusable)
+    consumeVerifiedPreparedMutationToken(reusable)
     expectError(() => verifyPreparedMutationProof(prepared.proof, options), 'PREPARED_PROOF_USED')
-    expectError(() => markPreparedMutationProofUsed(prepared.proof), 'PREPARED_PROOF_USED')
-    expectError(() => markPreparedMutationProofUsed({}), 'PREPARED_PROOF_INVALID')
+    expect(() => releaseVerifiedPreparedMutationToken({})).not.toThrow()
+    expect(() => consumeVerifiedPreparedMutationToken({})).not.toThrow()
+  })
+
+  it('retains exactly nine close-on-exec handles and releases or consumes them no-throw', () => {
+    const operationRoot = createOperationRoot()
+    const intent = makeIntent('restore')
+    const prepared = prepareDefault(operationRoot, intent, 15)
+    const options = { operationRoot, stateRevision: 15, intent }
+
+    const releasedToken = verifyPreparedMutationProof(prepared.proof, options)
+    let retained = retainedFileDescriptors(operationRoot)
+    expect(retained).toHaveLength(9)
+    const child = spawnSync(
+      process.execPath,
+      [
+        '-e',
+        `const fs=require('node:fs');const root=process.argv[1];const inherited=fs.readdirSync('/proc/self/fd').flatMap((fd)=>{try{const target=fs.readlinkSync('/proc/self/fd/'+fd);return target.startsWith(root)?[target]:[]}catch{return []}});process.stdout.write(JSON.stringify(inherited))`,
+        operationRoot,
+      ],
+      { encoding: 'utf8' }
+    )
+    expect(child.status, child.stderr).toBe(0)
+    expect(JSON.parse(child.stdout)).toEqual([])
+    closeSync(retained[0])
+    expect(() => releaseVerifiedPreparedMutationToken(releasedToken)).not.toThrow()
+    expect(retainedFileDescriptors(operationRoot)).toEqual([])
+
+    const consumedToken = verifyPreparedMutationProof(prepared.proof, options)
+    retained = retainedFileDescriptors(operationRoot)
+    expect(retained).toHaveLength(9)
+    closeSync(retained[0])
+    expect(() => consumeVerifiedPreparedMutationToken(consumedToken)).not.toThrow()
+    expect(retainedFileDescriptors(operationRoot)).toEqual([])
+    expectError(() => verifyPreparedMutationProof(prepared.proof, options), 'PREPARED_PROOF_USED')
+  })
+
+  it('allows mutable shared-root metadata churn but rejects operation-specific layout changes', () => {
+    const operationRoot = createOperationRoot()
+    const intent = makeIntent('restore')
+    const prepared = prepareDefault(operationRoot, intent, 16)
+    const options = { operationRoot, stateRevision: 16, intent }
+    const token = verifyPreparedMutationProof(prepared.proof, options)
+
+    const secondIntent = makeIntent('import')
+    prepareDefault(operationRoot, secondIntent, 17)
+    expect(revalidateVerifiedPreparedMutationToken(token, options)).toEqual({
+      commitmentSha256: prepared.commitmentSha256,
+      durability: 'linux-fsync-complete',
+    })
+
+    writeFileSync(join(preparedPaths(operationRoot, intent).operation, 'unexpected'), 'x')
+    expectError(
+      () => revalidateVerifiedPreparedMutationToken(token, options),
+      'RECOVERY_JOURNAL_CORRUPTION'
+    )
+    releaseVerifiedPreparedMutationToken(token)
   })
 
   it('requires exact synchronous callback checks and an exclusive restore/import binding', () => {
@@ -953,10 +1036,12 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     )
   })
 
-  it('rereads evidence when a proof is marked used', () => {
+  it('uses retained evidence for bounded no-hash revalidation before consumption', () => {
     const operationRoot = createOperationRoot()
     const intent = makeIntent('restore')
     const prepared = prepareDefault(operationRoot, intent, 4)
+    const options = { operationRoot, stateRevision: 4, intent }
+    const token = verifyPreparedMutationProof(prepared.proof, options)
     const paths = preparedPaths(operationRoot, intent)
     const rollback = join(
       paths.artifacts,
@@ -965,7 +1050,11 @@ describe.runIf(process.platform === 'linux')('Node prepared mutation journal', (
     chmodSync(rollback, 0o600)
     writeFileSync(rollback, 'changed before proof consumption')
     chmodSync(rollback, 0o400)
-    expectError(() => markPreparedMutationProofUsed(prepared.proof), 'RECOVERY_ARTIFACT_CORRUPTION')
+    expectError(
+      () => revalidateVerifiedPreparedMutationToken(token, options),
+      'RECOVERY_ARTIFACT_CORRUPTION'
+    )
+    releaseVerifiedPreparedMutationToken(token)
   })
 
   it('fails closed on insecure existing journal directories', () => {
@@ -1113,6 +1202,18 @@ function preparedPaths(operationRoot, intent) {
     artifacts: join(operation, 'artifacts'),
     records: join(operation, 'records'),
   }
+}
+
+function retainedFileDescriptors(operationRoot) {
+  return readdirSync('/proc/self/fd')
+    .map(Number)
+    .filter((descriptor) => {
+      try {
+        return readlinkSync(`/proc/self/fd/${descriptor}`).startsWith(operationRoot)
+      } catch {
+        return false
+      }
+    })
 }
 
 function sealFixtureTree(path) {

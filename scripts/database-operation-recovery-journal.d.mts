@@ -51,6 +51,16 @@ export interface PreparedMutationProof {
   readonly [preparedMutationProofBrand]: true
 }
 
+declare const verifiedPreparedMutationTokenBrand: unique symbol
+export interface VerifiedPreparedMutationToken {
+  readonly [verifiedPreparedMutationTokenBrand]: true
+}
+
+export interface PreparedCommitment {
+  readonly commitmentSha256: string
+  readonly durability: RecoveryJournalDurability
+}
+
 export interface PrepareMutationJournalOptions {
   operationRoot: string
   /** Proof-only binding field; it is not persisted in the prepared record. */
@@ -84,6 +94,12 @@ export function prepareMutationJournal(
 export function verifyPreparedMutationProof(
   proof: PreparedMutationProof,
   options: VerifyPreparedMutationProofOptions
-): string
+): VerifiedPreparedMutationToken
 
-export function markPreparedMutationProofUsed(proof: PreparedMutationProof): void
+export function revalidateVerifiedPreparedMutationToken(
+  token: VerifiedPreparedMutationToken,
+  options: VerifyPreparedMutationProofOptions
+): Readonly<PreparedCommitment>
+
+export function releaseVerifiedPreparedMutationToken(token: VerifiedPreparedMutationToken): void
+export function consumeVerifiedPreparedMutationToken(token: VerifiedPreparedMutationToken): void

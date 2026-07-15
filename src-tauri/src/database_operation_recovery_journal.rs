@@ -7,6 +7,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 #[cfg(unix)]
@@ -63,6 +64,7 @@ const RECORD_DOMAIN: &[u8] = b"shikin.database-operation-recovery-journal/v1/rec
 pub(crate) struct JournalError {
     code: &'static str,
     message: String,
+    source: Option<Box<dyn Error + Send + Sync>>,
 }
 
 impl JournalError {
@@ -70,15 +72,36 @@ impl JournalError {
         Self {
             code,
             message: message.into(),
+            source: None,
+        }
+    }
+
+    fn with_source(
+        code: &'static str,
+        message: impl Into<String>,
+        source: impl Error + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            source: Some(Box::new(source)),
         }
     }
 
     fn filesystem(context: &str, error: io::Error) -> Self {
-        Self::new("RECOVERY_FILESYSTEM_FAILURE", format!("{context}: {error}"))
+        Self::with_source(
+            "RECOVERY_FILESYSTEM_FAILURE",
+            format!("{context}: {error}"),
+            error,
+        )
     }
 
     fn durability(context: &str, error: io::Error) -> Self {
-        Self::new("RECOVERY_DURABILITY_FAILURE", format!("{context}: {error}"))
+        Self::with_source(
+            "RECOVERY_DURABILITY_FAILURE",
+            format!("{context}: {error}"),
+            error,
+        )
     }
 
     pub(crate) fn code(&self) -> &'static str {
@@ -92,7 +115,13 @@ impl fmt::Display for JournalError {
     }
 }
 
-impl Error for JournalError {}
+impl Error for JournalError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.source
+            .as_deref()
+            .map(|source| source as &(dyn Error + 'static))
+    }
+}
 
 pub(crate) type JournalResult<T> = Result<T, JournalError>;
 
@@ -443,13 +472,19 @@ impl JournalDurability {
 }
 
 #[derive(Debug)]
+struct ProofLifecycle {
+    used: bool,
+    active: bool,
+}
+
+#[derive(Debug)]
 pub(crate) struct PreparedMutationProof {
     binding: JournalIntentBinding,
     operation_root: PathBuf,
     operation_path: PathBuf,
     commitment_sha256: String,
     durability: JournalDurability,
-    used: bool,
+    lifecycle: Arc<Mutex<ProofLifecycle>>,
 }
 
 #[derive(Debug)]
@@ -464,10 +499,6 @@ impl PreparedMutationJournal {
         &self.proof
     }
 
-    pub(crate) fn proof_mut(&mut self) -> &mut PreparedMutationProof {
-        &mut self.proof
-    }
-
     pub(crate) fn commitment_sha256(&self) -> &str {
         &self.commitment_sha256
     }
@@ -477,7 +508,7 @@ impl PreparedMutationJournal {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PreparedCommitment {
     sha256: String,
     durability: JournalDurability,
@@ -491,6 +522,22 @@ impl PreparedCommitment {
     pub(crate) fn durability(&self) -> JournalDurability {
         self.durability
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum VerifiedTokenLifecycle {
+    Active,
+    Released,
+    Consumed,
+}
+
+#[derive(Debug)]
+pub(crate) struct VerifiedPreparedMutationToken {
+    proof_lifecycle: Arc<Mutex<ProofLifecycle>>,
+    binding: JournalIntentBinding,
+    commitment: PreparedCommitment,
+    retained_evidence: Option<RetainedOperationEvidence>,
+    lifecycle: VerifiedTokenLifecycle,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -596,6 +643,52 @@ struct OpenArtifactEvidence {
     snapshot: ArtifactSnapshot,
     role: ArtifactRole,
     expected_size: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RetainedStatSnapshot {
+    stable: StableIdentity,
+    links: u64,
+    mode: u32,
+    size: u64,
+    modified_seconds: i64,
+    modified_nanoseconds: i64,
+    changed_seconds: i64,
+    changed_nanoseconds: i64,
+}
+
+#[derive(Debug)]
+struct RetainedDirectoryEvidence {
+    file: File,
+    path: PathBuf,
+    label: String,
+    mutable: bool,
+    snapshot: RetainedStatSnapshot,
+}
+
+#[derive(Debug)]
+struct RetainedFileEvidence {
+    file: File,
+    path: PathBuf,
+    label: String,
+    code: &'static str,
+    role: Option<ArtifactRole>,
+    expected_size: Option<u64>,
+    snapshot: RetainedStatSnapshot,
+}
+
+#[derive(Debug)]
+struct RetainedLayout {
+    path: PathBuf,
+    expected: Vec<String>,
+    code: &'static str,
+}
+
+#[derive(Debug)]
+struct RetainedOperationEvidence {
+    directories: Vec<RetainedDirectoryEvidence>,
+    files: Vec<RetainedFileEvidence>,
+    layouts: Vec<RetainedLayout>,
 }
 
 #[derive(Debug)]
@@ -741,11 +834,18 @@ pub(crate) fn verify_prepared_mutation_proof(
     proof: &PreparedMutationProof,
     operation_root: &Path,
     binding: &JournalIntentBinding,
-) -> JournalResult<PreparedCommitment> {
-    if proof.used {
+) -> JournalResult<VerifiedPreparedMutationToken> {
+    let mut lifecycle = lock_proof_lifecycle(&proof.lifecycle);
+    if lifecycle.used {
         return Err(JournalError::new(
             "PREPARED_PROOF_USED",
             "prepared proof was already consumed",
+        ));
+    }
+    if lifecycle.active {
+        return Err(JournalError::new(
+            "PREPARED_PROOF_ACTIVE",
+            "prepared proof already has an active verifier",
         ));
     }
     validate_binding(binding)?;
@@ -763,7 +863,6 @@ pub(crate) fn verify_prepared_mutation_proof(
         ));
     }
     require_linux_durability()?;
-    let root_identity = validate_operation_root(operation_root)?;
     let paths = journal_paths(operation_root, binding);
     if proof.operation_path != paths.operation {
         return Err(JournalError::new(
@@ -771,8 +870,8 @@ pub(crate) fn verify_prepared_mutation_proof(
             "prepared proof operation path does not match",
         ));
     }
-    let evidence = validate_complete_operation(&paths, binding)?;
-    revalidate_directory_identity(&root_identity)?;
+    let (evidence, retained_evidence) =
+        validate_and_retain_complete_operation(&paths, binding, || Ok(()))?;
     if evidence.commitment_sha256 != proof.commitment_sha256
         || evidence.durability != proof.durability
     {
@@ -781,44 +880,87 @@ pub(crate) fn verify_prepared_mutation_proof(
             "prepared proof commitment does not match",
         ));
     }
-    Ok(PreparedCommitment {
-        sha256: evidence.commitment_sha256,
-        durability: evidence.durability,
+    lifecycle.active = true;
+    drop(lifecycle);
+    Ok(VerifiedPreparedMutationToken {
+        proof_lifecycle: Arc::clone(&proof.lifecycle),
+        binding: binding.clone(),
+        commitment: PreparedCommitment {
+            sha256: evidence.commitment_sha256,
+            durability: evidence.durability,
+        },
+        retained_evidence: Some(retained_evidence),
+        lifecycle: VerifiedTokenLifecycle::Active,
     })
 }
 
-pub(crate) fn mark_prepared_mutation_proof_used(
-    proof: &mut PreparedMutationProof,
-) -> JournalResult<()> {
-    if proof.used {
+pub(crate) fn revalidate_verified_prepared_mutation_token(
+    token: &VerifiedPreparedMutationToken,
+    binding: &JournalIntentBinding,
+) -> JournalResult<PreparedCommitment> {
+    let lifecycle = lock_proof_lifecycle(&token.proof_lifecycle);
+    if lifecycle.used {
         return Err(JournalError::new(
             "PREPARED_PROOF_USED",
             "prepared proof was already consumed",
         ));
     }
-    validate_binding(&proof.binding)?;
-    validate_operation_root_argument(&proof.operation_root)?;
+    if token.lifecycle != VerifiedTokenLifecycle::Active || !lifecycle.active {
+        return Err(JournalError::new(
+            "PREPARED_PROOF_INVALID",
+            "verified token is not active",
+        ));
+    }
+    drop(lifecycle);
+    validate_binding(binding)?;
+    if &token.binding != binding {
+        return Err(JournalError::new(
+            "PREPARED_PROOF_INVALID",
+            "verified token binding does not match",
+        ));
+    }
     require_linux_durability()?;
-    let root_identity = validate_operation_root(&proof.operation_root)?;
-    let paths = journal_paths(&proof.operation_root, &proof.binding);
-    if proof.operation_path != paths.operation {
-        return Err(JournalError::new(
+    revalidate_retained_operation_evidence(token.retained_evidence.as_ref().ok_or_else(|| {
+        JournalError::new(
             "PREPARED_PROOF_INVALID",
-            "prepared proof operation path does not match",
-        ));
+            "verified token has no retained evidence",
+        )
+    })?)?;
+    Ok(token.commitment.clone())
+}
+
+pub(crate) fn release_verified_prepared_mutation_token(token: &mut VerifiedPreparedMutationToken) {
+    if token.lifecycle != VerifiedTokenLifecycle::Active {
+        return;
     }
-    let evidence = validate_complete_operation(&paths, &proof.binding)?;
-    revalidate_directory_identity(&root_identity)?;
-    if evidence.commitment_sha256 != proof.commitment_sha256
-        || evidence.durability != proof.durability
+    token.lifecycle = VerifiedTokenLifecycle::Released;
+    lock_proof_lifecycle(&token.proof_lifecycle).active = false;
+    let _closed_after_state_change = token.retained_evidence.take();
+}
+
+pub(crate) fn consume_verified_prepared_mutation_token(token: &mut VerifiedPreparedMutationToken) {
+    if token.lifecycle != VerifiedTokenLifecycle::Active {
+        return;
+    }
+    token.lifecycle = VerifiedTokenLifecycle::Consumed;
     {
-        return Err(JournalError::new(
-            "PREPARED_PROOF_INVALID",
-            "prepared proof commitment does not match",
-        ));
+        let mut lifecycle = lock_proof_lifecycle(&token.proof_lifecycle);
+        lifecycle.used = true;
+        lifecycle.active = false;
     }
-    proof.used = true;
-    Ok(())
+    let _closed_after_state_change = token.retained_evidence.take();
+}
+
+impl Drop for VerifiedPreparedMutationToken {
+    fn drop(&mut self) {
+        release_verified_prepared_mutation_token(self);
+    }
+}
+
+fn lock_proof_lifecycle(lifecycle: &Arc<Mutex<ProofLifecycle>>) -> MutexGuard<'_, ProofLifecycle> {
+    lifecycle
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl PartialEq for JournalIntentBinding {
@@ -871,7 +1013,10 @@ fn mint_prepared(
             operation_path: paths.operation.clone(),
             commitment_sha256: evidence.commitment_sha256.clone(),
             durability,
-            used: false,
+            lifecycle: Arc::new(Mutex::new(ProofLifecycle {
+                used: false,
+                active: false,
+            })),
         },
         commitment_sha256: evidence.commitment_sha256,
         durability,
@@ -985,30 +1130,46 @@ fn validate_complete_operation(
 fn validate_complete_operation_with_hook<F>(
     paths: &JournalPaths,
     binding: &JournalIntentBinding,
-    mut between_artifact_hashes: F,
+    between_artifact_hashes: F,
 ) -> JournalResult<CompleteEvidence>
 where
     F: FnMut() -> JournalResult<()>,
 {
+    let (evidence, retained) =
+        validate_and_retain_complete_operation(paths, binding, between_artifact_hashes)?;
+    drop(retained);
+    Ok(evidence)
+}
+
+fn validate_and_retain_complete_operation<F>(
+    paths: &JournalPaths,
+    binding: &JournalIntentBinding,
+    mut between_artifact_hashes: F,
+) -> JournalResult<(CompleteEvidence, RetainedOperationEvidence)>
+where
+    F: FnMut() -> JournalResult<()>,
+{
     require_linux_durability()?;
-    let operation_identity = inspect_private_directory(
-        &paths.operation,
-        "operation directory",
+    let mut retained = RetainedOperationEvidence {
+        directories: vec![
+            open_retained_directory(&paths.operation_root, "operation root", true)?,
+            open_retained_directory(&paths.recovery_root, "recovery root", true)?,
+            open_retained_directory(&paths.operations, "operations root", true)?,
+            open_retained_directory(&paths.operation, "operation directory", false)?,
+            open_retained_directory(&paths.artifacts, "artifacts directory", false)?,
+            open_retained_directory(&paths.records, "records directory", false)?,
+        ],
+        files: Vec::new(),
+        layouts: Vec::new(),
+    };
+    assert_exact_entries(
+        &paths.recovery_root,
+        &[OPERATIONS_DIRECTORY.into()],
         "RECOVERY_JOURNAL_CORRUPTION",
     )?;
     assert_exact_entries(
         &paths.operation,
         &["artifacts".into(), "records".into()],
-        "RECOVERY_JOURNAL_CORRUPTION",
-    )?;
-    let artifacts_identity = inspect_private_directory(
-        &paths.artifacts,
-        "artifacts directory",
-        "RECOVERY_JOURNAL_CORRUPTION",
-    )?;
-    let records_identity = inspect_private_directory(
-        &paths.records,
-        "records directory",
         "RECOVERY_JOURNAL_CORRUPTION",
     )?;
     let record_names = read_names(&paths.records)?;
@@ -1025,11 +1186,21 @@ where
         )
     })?;
     let record_path = paths.records.join(&record_names[0]);
-    let bytes = read_secure_file(
+    retained.files.push(open_retained_file(
         &record_path,
-        MAX_RECORD_BYTES,
         "prepared record",
         "RECOVERY_JOURNAL_CORRUPTION",
+        MAX_RECORD_BYTES,
+        true,
+        None,
+        None,
+    )?);
+    let bytes = read_retained_file(
+        retained
+            .files
+            .last_mut()
+            .expect("record evidence was pushed"),
+        MAX_RECORD_BYTES,
     )?;
     if bytes.len() < 2 || bytes.last() != Some(&b'\n') || bytes[..bytes.len() - 1].ends_with(b"\n")
     {
@@ -1053,9 +1224,10 @@ where
         ));
     }
     let record: PreparedRecord = serde_json::from_slice(canonical).map_err(|error| {
-        JournalError::new(
+        JournalError::with_source(
             "RECOVERY_JOURNAL_CORRUPTION",
             format!("prepared record is malformed JSON: {error}"),
+            error,
         )
     })?;
     validate_record(&record, binding, paths)?;
@@ -1076,26 +1248,28 @@ where
         "RECOVERY_ARTIFACT_CORRUPTION",
     )?;
     assert_no_sidecars(&paths.artifacts)?;
-    let mut opened = ArtifactRole::all()
-        .into_iter()
-        .map(|role| {
-            let artifact = record.artifact(role);
-            open_artifact_evidence(
-                &artifact_path(paths, &artifact.path)?,
-                role,
-                artifact.size_bytes,
-            )
-        })
-        .collect::<JournalResult<Vec<_>>>()?;
-    for (index, evidence) in opened.iter_mut().enumerate() {
-        let role = evidence.role;
+    for role in ArtifactRole::all() {
+        let artifact = record.artifact(role);
+        retained.files.push(open_retained_file(
+            &artifact_path(paths, &artifact.path)?,
+            &format!("{} artifact", role.as_str()),
+            "RECOVERY_ARTIFACT_CORRUPTION",
+            MAX_ARTIFACT_BYTES,
+            false,
+            Some(role),
+            Some(artifact.size_bytes),
+        )?);
+    }
+    for index in 1..retained.files.len() {
+        let opened = &mut retained.files[index];
+        let role = opened.role.expect("artifact evidence has a role");
         let artifact = record.artifact(role);
         let (digest, size) = hash_open_artifact(
-            &mut evidence.file,
-            &evidence.path,
-            &evidence.identity,
+            &mut opened.file,
+            &opened.path,
+            &opened.snapshot.stable,
             role,
-            Some(evidence.expected_size),
+            opened.expected_size,
         )?;
         if digest != artifact.content_digest || size != artifact.size_bytes {
             return Err(JournalError::new(
@@ -1103,20 +1277,40 @@ where
                 format!("{} artifact digest or size does not match", role.as_str()),
             ));
         }
-        if index == 0 {
+        if index == 1 {
             between_artifact_hashes()?;
         }
     }
-    for evidence in &opened {
-        revalidate_artifact_evidence(evidence)?;
-    }
-    for identity in [&artifacts_identity, &records_identity, &operation_identity] {
-        revalidate_directory_identity(identity)?;
-    }
-    Ok(CompleteEvidence {
-        commitment_sha256,
-        durability: platform_durability(),
-    })
+    retained.layouts = vec![
+        RetainedLayout {
+            path: paths.recovery_root.clone(),
+            expected: vec![OPERATIONS_DIRECTORY.into()],
+            code: "RECOVERY_JOURNAL_CORRUPTION",
+        },
+        RetainedLayout {
+            path: paths.operation.clone(),
+            expected: vec!["artifacts".into(), "records".into()],
+            code: "RECOVERY_JOURNAL_CORRUPTION",
+        },
+        RetainedLayout {
+            path: paths.records.clone(),
+            expected: record_names,
+            code: "RECOVERY_JOURNAL_CORRUPTION",
+        },
+        RetainedLayout {
+            path: paths.artifacts.clone(),
+            expected: expected_artifacts,
+            code: "RECOVERY_ARTIFACT_CORRUPTION",
+        },
+    ];
+    revalidate_retained_operation_evidence(&retained)?;
+    Ok((
+        CompleteEvidence {
+            commitment_sha256,
+            durability: platform_durability(),
+        },
+        retained,
+    ))
 }
 
 fn validate_record(
@@ -1375,6 +1569,416 @@ fn revalidate_directory_identity(identity: &DirectoryIdentity) -> JournalResult<
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+fn open_retained_directory(
+    path: &Path,
+    label: &str,
+    mutable: bool,
+) -> JournalResult<RetainedDirectoryEvidence> {
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    let file = options.open(path).map_err(|error| {
+        JournalError::with_source(
+            "RECOVERY_JOURNAL_CORRUPTION",
+            format!("retain {label}: {error}"),
+            error,
+        )
+    })?;
+    let open_metadata = file.metadata().map_err(|error| {
+        JournalError::with_source(
+            "RECOVERY_JOURNAL_CORRUPTION",
+            format!("inspect retained {label}: {error}"),
+            error,
+        )
+    })?;
+    let path_metadata = fs::symlink_metadata(path).map_err(|error| {
+        JournalError::with_source(
+            "RECOVERY_JOURNAL_CORRUPTION",
+            format!("inspect retained path for {label}: {error}"),
+            error,
+        )
+    })?;
+    assert_retained_directory_metadata(&open_metadata, label)?;
+    assert_retained_directory_metadata(&path_metadata, label)?;
+    if path_metadata.file_type().is_symlink() {
+        return Err(JournalError::new(
+            "RECOVERY_JOURNAL_CORRUPTION",
+            format!("{label} is a symlink"),
+        ));
+    }
+    let canonical = fs::canonicalize(path).map_err(|error| {
+        JournalError::with_source(
+            "RECOVERY_JOURNAL_CORRUPTION",
+            format!("canonicalize {label}: {error}"),
+            error,
+        )
+    })?;
+    if !paths_equal(&canonical, path) {
+        return Err(JournalError::new(
+            "RECOVERY_JOURNAL_CORRUPTION",
+            format!("{label} is noncanonical or traverses a symlink"),
+        ));
+    }
+    let snapshot = retained_snapshot(&open_metadata, label)?;
+    let path_snapshot = retained_snapshot(&path_metadata, label)?;
+    if snapshot.stable != path_snapshot.stable || (!mutable && snapshot != path_snapshot) {
+        return Err(JournalError::new(
+            "RECOVERY_JOURNAL_CORRUPTION",
+            format!("{label} path identity changed"),
+        ));
+    }
+    Ok(RetainedDirectoryEvidence {
+        file,
+        path: path.to_path_buf(),
+        label: label.into(),
+        mutable,
+        snapshot,
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn open_retained_directory(
+    _path: &Path,
+    _label: &str,
+    _mutable: bool,
+) -> JournalResult<RetainedDirectoryEvidence> {
+    Err(JournalError::new(
+        "RECOVERY_DURABILITY_FAILURE",
+        "retained Linux directory evidence is unavailable",
+    ))
+}
+
+#[cfg(target_os = "linux")]
+#[allow(clippy::too_many_arguments)]
+fn open_retained_file(
+    path: &Path,
+    label: &str,
+    code: &'static str,
+    maximum_size: u64,
+    require_nonempty: bool,
+    role: Option<ArtifactRole>,
+    expected_size: Option<u64>,
+) -> JournalResult<RetainedFileEvidence> {
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    let file = options.open(path).map_err(|error| {
+        JournalError::with_source(code, format!("retain {label}: {error}"), error)
+    })?;
+    let open_metadata = file.metadata().map_err(|error| {
+        JournalError::with_source(code, format!("inspect retained {label}: {error}"), error)
+    })?;
+    let path_metadata = fs::symlink_metadata(path).map_err(|error| {
+        JournalError::with_source(
+            code,
+            format!("inspect retained path for {label}: {error}"),
+            error,
+        )
+    })?;
+    assert_retained_file_metadata(&open_metadata, label, code)?;
+    assert_retained_file_metadata(&path_metadata, label, code)?;
+    if path_metadata.file_type().is_symlink() {
+        return Err(JournalError::new(code, format!("{label} is a symlink")));
+    }
+    let snapshot = retained_snapshot(&open_metadata, label)?;
+    let path_snapshot = retained_snapshot(&path_metadata, label)?;
+    if snapshot != path_snapshot {
+        return Err(JournalError::new(
+            code,
+            format!("{label} path snapshot changed"),
+        ));
+    }
+    if snapshot.size > maximum_size
+        || (require_nonempty && snapshot.size == 0)
+        || expected_size.is_some_and(|expected| expected != snapshot.size)
+    {
+        return Err(JournalError::new(
+            code,
+            format!("{label} has an invalid retained size"),
+        ));
+    }
+    Ok(RetainedFileEvidence {
+        file,
+        path: path.to_path_buf(),
+        label: label.into(),
+        code,
+        role,
+        expected_size,
+        snapshot,
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+#[allow(clippy::too_many_arguments)]
+fn open_retained_file(
+    _path: &Path,
+    _label: &str,
+    _code: &'static str,
+    _maximum_size: u64,
+    _require_nonempty: bool,
+    _role: Option<ArtifactRole>,
+    _expected_size: Option<u64>,
+) -> JournalResult<RetainedFileEvidence> {
+    Err(JournalError::new(
+        "RECOVERY_DURABILITY_FAILURE",
+        "retained Linux file evidence is unavailable",
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn retained_snapshot(metadata: &fs::Metadata, label: &str) -> JournalResult<RetainedStatSnapshot> {
+    if metadata.ino() == 0
+        || metadata.nlink() == 0
+        || !(0..1_000_000_000).contains(&metadata.mtime_nsec())
+        || !(0..1_000_000_000).contains(&metadata.ctime_nsec())
+    {
+        return Err(JournalError::new(
+            "RECOVERY_DURABILITY_FAILURE",
+            format!("stable nanosecond filesystem evidence is unavailable for {label}"),
+        ));
+    }
+    Ok(RetainedStatSnapshot {
+        stable: StableIdentity {
+            first: metadata.dev(),
+            second: metadata.ino(),
+        },
+        links: metadata.nlink(),
+        mode: metadata.mode() & 0o777,
+        size: metadata.size(),
+        modified_seconds: metadata.mtime(),
+        modified_nanoseconds: metadata.mtime_nsec(),
+        changed_seconds: metadata.ctime(),
+        changed_nanoseconds: metadata.ctime_nsec(),
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn retained_snapshot(_metadata: &fs::Metadata, label: &str) -> JournalResult<RetainedStatSnapshot> {
+    Err(JournalError::new(
+        "RECOVERY_DURABILITY_FAILURE",
+        format!("stable nanosecond filesystem evidence is unavailable for {label}"),
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn assert_retained_directory_metadata(metadata: &fs::Metadata, label: &str) -> JournalResult<()> {
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(JournalError::new(
+            "RECOVERY_JOURNAL_CORRUPTION",
+            format!("{label} is not a retained directory"),
+        ));
+    }
+    let snapshot = retained_snapshot(metadata, label)?;
+    if snapshot.mode & 0o077 != 0 {
+        return Err(JournalError::new(
+            "RECOVERY_JOURNAL_CORRUPTION",
+            format!("{label} is not private"),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn assert_retained_directory_metadata(_metadata: &fs::Metadata, _label: &str) -> JournalResult<()> {
+    Err(JournalError::new(
+        "RECOVERY_DURABILITY_FAILURE",
+        "retained Linux directory evidence is unavailable",
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn assert_retained_file_metadata(
+    metadata: &fs::Metadata,
+    label: &str,
+    code: &'static str,
+) -> JournalResult<()> {
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(JournalError::new(
+            code,
+            format!("{label} is not a retained regular file"),
+        ));
+    }
+    let snapshot = retained_snapshot(metadata, label)?;
+    if snapshot.links != 1 || snapshot.mode != PRIVATE_READ_ONLY_FILE_MODE {
+        return Err(JournalError::new(
+            code,
+            format!("{label} is linked or is not sealed read-only"),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn assert_retained_file_metadata(
+    _metadata: &fs::Metadata,
+    _label: &str,
+    _code: &'static str,
+) -> JournalResult<()> {
+    Err(JournalError::new(
+        "RECOVERY_DURABILITY_FAILURE",
+        "retained Linux file evidence is unavailable",
+    ))
+}
+
+fn revalidate_retained_operation_evidence(
+    retained: &RetainedOperationEvidence,
+) -> JournalResult<()> {
+    let mut reopened_directories = Vec::with_capacity(retained.directories.len());
+    for evidence in &retained.directories {
+        let current = open_retained_directory(&evidence.path, &evidence.label, evidence.mutable)?;
+        if current.snapshot.stable != evidence.snapshot.stable
+            || (!evidence.mutable && current.snapshot != evidence.snapshot)
+        {
+            return Err(JournalError::new(
+                "RECOVERY_JOURNAL_CORRUPTION",
+                format!("{} retained evidence changed", evidence.label),
+            ));
+        }
+        reopened_directories.push(current);
+    }
+    let mut reopened_files = Vec::with_capacity(retained.files.len());
+    for evidence in &retained.files {
+        let current = open_retained_file(
+            &evidence.path,
+            &evidence.label,
+            evidence.code,
+            evidence.snapshot.size,
+            evidence.snapshot.size > 0,
+            evidence.role,
+            evidence.expected_size,
+        )?;
+        if current.snapshot != evidence.snapshot {
+            return Err(JournalError::new(
+                evidence.code,
+                format!("{} retained evidence changed", evidence.label),
+            ));
+        }
+        reopened_files.push(current);
+    }
+    for layout in &retained.layouts {
+        assert_bounded_exact_entries(&layout.path, &layout.expected, layout.code)?;
+    }
+    for evidence in &retained.directories {
+        let metadata = evidence.file.metadata().map_err(|error| {
+            JournalError::with_source(
+                "RECOVERY_JOURNAL_CORRUPTION",
+                format!("restat retained {}: {error}", evidence.label),
+                error,
+            )
+        })?;
+        assert_retained_directory_metadata(&metadata, &evidence.label)?;
+        let snapshot = retained_snapshot(&metadata, &evidence.label)?;
+        if snapshot.stable != evidence.snapshot.stable
+            || (!evidence.mutable && snapshot != evidence.snapshot)
+        {
+            return Err(JournalError::new(
+                "RECOVERY_JOURNAL_CORRUPTION",
+                format!("{} retained handle changed", evidence.label),
+            ));
+        }
+    }
+    for evidence in &retained.files {
+        let metadata = evidence.file.metadata().map_err(|error| {
+            JournalError::with_source(
+                evidence.code,
+                format!("restat retained {}: {error}", evidence.label),
+                error,
+            )
+        })?;
+        assert_retained_file_metadata(&metadata, &evidence.label, evidence.code)?;
+        if retained_snapshot(&metadata, &evidence.label)? != evidence.snapshot {
+            return Err(JournalError::new(
+                evidence.code,
+                format!("{} retained handle changed", evidence.label),
+            ));
+        }
+    }
+    drop(reopened_files);
+    drop(reopened_directories);
+    Ok(())
+}
+
+fn assert_bounded_exact_entries(
+    path: &Path,
+    expected: &[String],
+    code: &'static str,
+) -> JournalResult<()> {
+    let mut actual = fs::read_dir(path)
+        .map_err(|error| JournalError::filesystem("read retained layout", error))?
+        .take(expected.len() + 1)
+        .map(|entry| {
+            entry
+                .map_err(|error| JournalError::filesystem("read retained entry", error))?
+                .file_name()
+                .into_string()
+                .map_err(|_| JournalError::new(code, "retained entry name is not valid Unicode"))
+        })
+        .collect::<JournalResult<Vec<_>>>()?;
+    actual.sort();
+    let mut expected = expected.to_vec();
+    expected.sort();
+    if actual != expected {
+        return Err(JournalError::new(code, "retained journal layout changed"));
+    }
+    Ok(())
+}
+
+fn read_retained_file(
+    evidence: &mut RetainedFileEvidence,
+    maximum_size: u64,
+) -> JournalResult<Vec<u8>> {
+    if evidence.snapshot.size == 0 || evidence.snapshot.size > maximum_size {
+        return Err(JournalError::new(
+            evidence.code,
+            format!("{} has an invalid size", evidence.label),
+        ));
+    }
+    evidence
+        .file
+        .seek(SeekFrom::Start(0))
+        .map_err(|error| JournalError::filesystem("seek retained file", error))?;
+    let mut bytes = vec![0u8; evidence.snapshot.size as usize];
+    evidence.file.read_exact(&mut bytes).map_err(|error| {
+        JournalError::with_source(
+            evidence.code,
+            format!("read retained {}: {error}", evidence.label),
+            error,
+        )
+    })?;
+    let mut extra = [0u8; 1];
+    if evidence.file.read(&mut extra).map_err(|error| {
+        JournalError::with_source(
+            evidence.code,
+            format!("finish retained {} read: {error}", evidence.label),
+            error,
+        )
+    })? != 0
+    {
+        return Err(JournalError::new(
+            evidence.code,
+            format!("{} grew while reading", evidence.label),
+        ));
+    }
+    let metadata = evidence.file.metadata().map_err(|error| {
+        JournalError::with_source(
+            evidence.code,
+            format!("restat retained {}: {error}", evidence.label),
+            error,
+        )
+    })?;
+    assert_retained_file_metadata(&metadata, &evidence.label, evidence.code)?;
+    if retained_snapshot(&metadata, &evidence.label)? != evidence.snapshot {
+        return Err(JournalError::new(
+            evidence.code,
+            format!("{} changed while reading", evidence.label),
+        ));
+    }
+    Ok(bytes)
+}
+
 fn set_private_dir_mode(_path: &Path) -> JournalResult<()> {
     #[cfg(unix)]
     fs::set_permissions(_path, fs::Permissions::from_mode(PRIVATE_DIR_MODE))
@@ -1389,7 +1993,7 @@ fn open_exclusive_file(path: &Path) -> JournalResult<File> {
     {
         options
             .mode(PRIVATE_WRITABLE_FILE_MODE)
-            .custom_flags(libc::O_NOFOLLOW);
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
     }
     #[cfg(windows)]
     {
@@ -1414,7 +2018,7 @@ fn open_exclusive_file(path: &Path) -> JournalResult<File> {
 fn set_no_follow(options: &mut OpenOptions) {
     #[cfg(unix)]
     {
-        options.custom_flags(libc::O_NOFOLLOW);
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
     }
     #[cfg(windows)]
     {
@@ -2228,6 +2832,8 @@ fn inject_fault(point: FaultPoint) -> JournalResult<()> {
 mod tests {
     use super::*;
     use std::fs;
+    #[cfg(target_os = "linux")]
+    use std::os::fd::AsRawFd;
     use tempfile::TempDir;
 
     const IDENTITY_HASH: &str = "8360f587a9d73a4bf2c7e2fe0494b8a5ccdb35456850ea5733ace6ab06cc650d";
@@ -2533,27 +3139,6 @@ mod tests {
         assert_eq!(callbacks, 0);
         assert!(!absent_parent.exists());
 
-        let paths = journal_paths(&root, &binding);
-        let mut proof = PreparedMutationProof {
-            binding: binding.clone(),
-            operation_root: root.clone(),
-            operation_path: paths.operation,
-            commitment_sha256: "0".repeat(64),
-            durability: JournalDurability::LinuxFsyncComplete,
-            used: false,
-        };
-        assert_eq!(
-            verify_prepared_mutation_proof(&proof, &root, &binding)
-                .unwrap_err()
-                .code(),
-            "RECOVERY_DURABILITY_FAILURE"
-        );
-        assert_eq!(
-            mark_prepared_mutation_proof_used(&mut proof)
-                .unwrap_err()
-                .code(),
-            "RECOVERY_DURABILITY_FAILURE"
-        );
         assert!(!absent_parent.exists());
     }
 
@@ -2562,12 +3147,28 @@ mod tests {
     fn prepares_verifies_consumes_and_rejects_existing_evidence() {
         let (_temp, root) = operation_root();
         let binding = make_binding("operation-prepare");
-        let mut prepared = prepare_mutation_journal(&root, &binding, write_artifact).unwrap();
+        let prepared = prepare_mutation_journal(&root, &binding, write_artifact).unwrap();
         assert_eq!(prepared.commitment_sha256().len(), 64);
         assert_eq!(prepared.durability(), platform_durability());
-        let commitment = verify_prepared_mutation_proof(prepared.proof(), &root, &binding).unwrap();
-        assert_eq!(commitment.sha256(), prepared.commitment_sha256());
-        mark_prepared_mutation_proof_used(prepared.proof_mut()).unwrap();
+        let mut token = verify_prepared_mutation_proof(prepared.proof(), &root, &binding).unwrap();
+        assert_eq!(
+            revalidate_verified_prepared_mutation_token(&token, &binding)
+                .unwrap()
+                .sha256(),
+            prepared.commitment_sha256()
+        );
+        assert_eq!(
+            verify_prepared_mutation_proof(prepared.proof(), &root, &binding)
+                .unwrap_err()
+                .code(),
+            "PREPARED_PROOF_ACTIVE"
+        );
+        release_verified_prepared_mutation_token(&mut token);
+        release_verified_prepared_mutation_token(&mut token);
+        let mut consumed =
+            verify_prepared_mutation_proof(prepared.proof(), &root, &binding).unwrap();
+        consume_verified_prepared_mutation_token(&mut consumed);
+        consume_verified_prepared_mutation_token(&mut consumed);
         assert_eq!(
             verify_prepared_mutation_proof(prepared.proof(), &root, &binding)
                 .unwrap_err()
@@ -2583,6 +3184,91 @@ mod tests {
         .unwrap_err();
         assert_eq!(retry.code(), "RECOVERY_PREPARATION_INCOMPLETE");
         assert_eq!(callbacks, 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn retained_tokens_are_single_active_cloexec_and_poison_recovering() {
+        let (_temp, root) = operation_root();
+        let binding = make_binding("operation-token-lifecycle");
+        let prepared = prepare_mutation_journal(&root, &binding, write_artifact).unwrap();
+
+        let lifecycle = Arc::clone(&prepared.proof().lifecycle);
+        assert!(std::thread::spawn(move || {
+            let _guard = lifecycle.lock().unwrap();
+            panic!("poison proof lifecycle");
+        })
+        .join()
+        .is_err());
+
+        let mut token = verify_prepared_mutation_proof(prepared.proof(), &root, &binding).unwrap();
+        let retained = token.retained_evidence.as_ref().unwrap();
+        assert_eq!(retained.directories.len() + retained.files.len(), 9);
+        for descriptor in retained
+            .directories
+            .iter()
+            .map(|evidence| evidence.file.as_raw_fd())
+            .chain(
+                retained
+                    .files
+                    .iter()
+                    .map(|evidence| evidence.file.as_raw_fd()),
+            )
+        {
+            let flags = unsafe { libc::fcntl(descriptor, libc::F_GETFD) };
+            assert_ne!(flags, -1);
+            assert_ne!(flags & libc::FD_CLOEXEC, 0);
+        }
+        assert_eq!(
+            verify_prepared_mutation_proof(prepared.proof(), &root, &binding)
+                .unwrap_err()
+                .code(),
+            "PREPARED_PROOF_ACTIVE"
+        );
+        release_verified_prepared_mutation_token(&mut token);
+        assert!(token.retained_evidence.is_none());
+        drop(token);
+
+        let token = verify_prepared_mutation_proof(prepared.proof(), &root, &binding).unwrap();
+        drop(token);
+        let mut consumed =
+            verify_prepared_mutation_proof(prepared.proof(), &root, &binding).unwrap();
+        consume_verified_prepared_mutation_token(&mut consumed);
+        assert!(consumed.retained_evidence.is_none());
+        assert_eq!(
+            verify_prepared_mutation_proof(prepared.proof(), &root, &binding)
+                .unwrap_err()
+                .code(),
+            "PREPARED_PROOF_USED"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn mutable_shared_roots_allow_churn_but_immutable_layout_does_not() {
+        let (_temp, root) = operation_root();
+        let binding = make_binding("operation-mutable-root-first");
+        let prepared = prepare_mutation_journal(&root, &binding, write_artifact).unwrap();
+        let mut token = verify_prepared_mutation_proof(prepared.proof(), &root, &binding).unwrap();
+
+        let second_binding = make_binding("operation-mutable-root-second");
+        prepare_mutation_journal(&root, &second_binding, write_artifact).unwrap();
+        assert_eq!(
+            revalidate_verified_prepared_mutation_token(&token, &binding)
+                .unwrap()
+                .sha256(),
+            prepared.commitment_sha256()
+        );
+
+        let paths = journal_paths(&root, &binding);
+        fs::write(paths.operation.join("unexpected"), b"x").unwrap();
+        assert_eq!(
+            revalidate_verified_prepared_mutation_token(&token, &binding)
+                .unwrap_err()
+                .code(),
+            "RECOVERY_JOURNAL_CORRUPTION"
+        );
+        release_verified_prepared_mutation_token(&mut token);
     }
 
     #[cfg(target_os = "linux")]
@@ -2829,10 +3515,11 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn mark_used_rereads_and_rejects_tamper() {
+    fn retained_revalidation_rejects_tamper_without_rehashing() {
         let (_temp, root) = operation_root();
-        let binding = make_binding("operation-mark-reread");
-        let mut prepared = prepare_mutation_journal(&root, &binding, write_artifact).unwrap();
+        let binding = make_binding("operation-retained-reread");
+        let prepared = prepare_mutation_journal(&root, &binding, write_artifact).unwrap();
+        let mut token = verify_prepared_mutation_proof(prepared.proof(), &root, &binding).unwrap();
         let paths = journal_paths(&root, &binding);
         let rollback = paths.artifacts.join(
             read_names(&paths.artifacts)
@@ -2842,14 +3529,15 @@ mod tests {
                 .unwrap(),
         );
         fs::set_permissions(&rollback, fs::Permissions::from_mode(0o600)).unwrap();
-        fs::write(&rollback, b"tampered before consume").unwrap();
+        fs::write(&rollback, b"tampered before revalidation").unwrap();
         fs::set_permissions(&rollback, fs::Permissions::from_mode(0o400)).unwrap();
         assert_eq!(
-            mark_prepared_mutation_proof_used(prepared.proof_mut())
+            revalidate_verified_prepared_mutation_token(&token, &binding)
                 .unwrap_err()
                 .code(),
             "RECOVERY_ARTIFACT_CORRUPTION"
         );
+        release_verified_prepared_mutation_token(&mut token);
     }
 
     #[cfg(target_os = "linux")]

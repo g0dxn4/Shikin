@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://shikin.local/contracts/database-operation-recovery-journal-v1.json",
   "title": "Shikin prepared database mutation recovery journal record",
-  "description": "Durable, append-only recovery evidence prepared before a restore or import mutation. Milestone 4B0b-1 does not wire database runtime behavior.",
+  "description": "Durable, append-only recovery evidence prepared before a restore or import mutation. Proof verification retains filesystem evidence for the lock-owned mutation-entry protocol without wiring a database adapter.",
   "x-shikin-protocol": "shikin.database-operation-recovery-journal",
   "x-shikin-version": 1,
   "x-shikin-layout": {
@@ -42,10 +42,14 @@
   "x-shikin-max-artifact-bytes": 8589934592,
   "x-shikin-commit-point": "A proof may be returned only on Linux after the complete final record and both artifacts are flushed, sealed to mode 0400, required directory synchronization is complete, and a full reread verifies canonical bytes, names, hashes, opened sizes, identities, privacy, links, binding, and retained-handle size, mtime, and ctime snapshots across both artifact hashes.",
   "x-shikin-proof-boundary": {
-    "mutationAuthority": "A Milestone 4B0b-1 proof is evidence only and is not mutation authority.",
-    "futureLockConsumption": "A future database-operation lock integration must verify and consume the proof while holding the registration mutex.",
+    "mutationAuthority": "A prepared proof and its verified token are evidence only; mutation authority exists only after the lock durably publishes the bound commitment.",
+    "fullVerification": "Before taking the registration mutex, proof verification fully rereads and hashes the record and both artifacts, verifies every binding and layout invariant, and retains close-on-exec handles for the operation root, recovery root, operations root, operation, artifacts, records, record, candidate, and rollback paths.",
+    "tokenLifecycle": "Exactly one opaque verified token may be active per unused proof. Release is idempotent and keeps the proof unused; consume marks the proof used before no-retry handle closure.",
+    "mutexRevalidation": "Under the registration mutex, the lock performs bounded layout, reopened no-follow path identity, retained-handle identity, exact immutable snapshot, and second retained-handle checks without content reads or hashes.",
+    "mutableRoots": "The lock-owned operation root and shared recovery and operations roots require canonical retained identity, directory type, sane link evidence, and private mode, but do not compare size, mtime, ctime, or link-count equality because valid coordination and sibling preparation mutate them.",
+    "immutableEvidence": "The operation-specific operation, artifacts, and records directories and the prepared record and artifact files require exact identity, type, mode, link, size, mtime, ctime, and expected-layout continuity.",
     "adapterUse": "A future adapter must validate the committed artifact immediately before using it.",
-    "trustModel": "The same OS principal is trusted; this contract does not claim defense against a hostile same-user process."
+    "trustModel": "The same OS principal is trusted; retained continuity evidence does not claim defense against a hostile same-user process."
   },
   "type": "object",
   "additionalProperties": false,

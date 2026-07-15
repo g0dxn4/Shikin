@@ -1474,7 +1474,9 @@ function normalizeCallerIntentMetadataValidation(metadata) {
     validateCallerIntentMetadata(metadata)
   } catch (error) {
     if (error instanceof MetadataValidationError) {
-      throw protocolError(error.code, error.message, error)
+      // Do not expose the private validator error as a public cause: a caller
+      // could retain and rethrow it from a later getter or serialization trap.
+      throw protocolError(error.code, error.message)
     }
     throw protocolError('INVALID_OPERATION', 'Intent metadata could not be validated', error)
   }

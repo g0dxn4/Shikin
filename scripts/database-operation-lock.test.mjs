@@ -338,6 +338,32 @@ describe('database operation lock core', () => {
       const protocolErrorToJsonMetadata = toJsonMetadata(() => {
         throw callerProtocolError()
       })
+      let leakedValidationCause
+      try {
+        owner.acquireExclusiveIntent('restore', { value: -1 })
+      } catch (error) {
+        expect(error).toBeInstanceOf(DatabaseOperationLockError)
+        leakedValidationCause = error.cause
+      }
+      expect(leakedValidationCause).toBeUndefined()
+      const leakedCauseGetterMetadata = {}
+      Object.defineProperty(leakedCauseGetterMetadata, 'value', {
+        enumerable: true,
+        get() {
+          throw leakedValidationCause
+        },
+      })
+      const leakedCauseProxyMetadata = new Proxy(
+        {},
+        {
+          ownKeys() {
+            throw leakedValidationCause
+          },
+        }
+      )
+      const leakedCauseToJsonMetadata = toJsonMetadata(() => {
+        throw leakedValidationCause
+      })
 
       for (const metadata of [
         getterMetadata(() => -1),
@@ -355,6 +381,9 @@ describe('database operation lock core', () => {
         protocolErrorGetterMetadata,
         protocolErrorProxyMetadata,
         protocolErrorToJsonMetadata,
+        leakedCauseGetterMetadata,
+        leakedCauseProxyMetadata,
+        leakedCauseToJsonMetadata,
       ]) {
         expectLockError(
           () => owner.acquireExclusiveIntent('restore', metadata),

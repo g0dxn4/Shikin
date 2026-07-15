@@ -25,16 +25,33 @@ import {
   verifyPreparedMutationProof,
 } from './database-operation-recovery-journal.mjs'
 
+// Capture the serialization and reflection primordials before caller-controlled
+// metadata can mutate their ambient bindings or prototypes.
+const PrimordialArray = Array
+const PrimordialTypeError = TypeError
+const ArrayIsArray = Array.isArray
+const JsonParse = JSON.parse
+const JsonStringify = JSON.stringify
+const ObjectCreate = Object.create
+const ObjectDefineProperty = Object.defineProperty
+const ObjectFreeze = Object.freeze
+const ObjectGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor
+const ObjectGetPrototypeOf = Object.getPrototypeOf
+const ObjectHasOwn = Object.hasOwn
+const ObjectIs = Object.is
+const ObjectKeys = Object.keys
+const ObjectPrototype = Object.prototype
+
 export const DATABASE_OPERATION_PROTOCOL = 'shikin.database-operation-lock'
 export const DATABASE_OPERATION_PROTOCOL_VERSION = 1
 export const SHIKIN_DATABASE_IDENTITY = 'com.asf.shikin:shikin.db'
-export const DATABASE_OPERATION_RUNTIME_IDS = Object.freeze([
+export const DATABASE_OPERATION_RUNTIME_IDS = ObjectFreeze([
   'cli',
   'mcp',
   'browser-data-server',
   'tauri',
 ])
-export const DEFAULT_DATABASE_OPERATION_TIMING = Object.freeze({
+export const DEFAULT_DATABASE_OPERATION_TIMING = ObjectFreeze({
   mutexTtlMs: 5_000,
   leaseTtlMs: 30_000,
   heartbeatIntervalMs: 5_000,
@@ -136,7 +153,7 @@ export class DatabaseOperationLock {
     if (
       this.testHooks !== null &&
       (!isPlainRecord(this.testHooks) ||
-        Object.keys(this.testHooks).some(
+        ObjectKeys(this.testHooks).some(
           (key) => !allowedHooks.includes(key) || typeof this.testHooks[key] !== 'function'
         ))
     ) {
@@ -144,7 +161,7 @@ export class DatabaseOperationLock {
     }
 
     const identityHash = createHash('sha256').update(SHIKIN_DATABASE_IDENTITY).digest('hex')
-    this.paths = Object.freeze({
+    this.paths = ObjectFreeze({
       root: this.rootDir,
       hostIdentity: join(this.rootDir, 'machine-host-identity.json'),
       protocolRoot: join(this.rootDir, 'database-operation-lock-v1'),
@@ -547,7 +564,7 @@ export class DatabaseOperationLock {
     const maintenanceReason = maintenanceDegraded ? this.maintenanceFailures.join('; ') : null
     try {
       if (this.fenced) {
-        return Object.freeze({
+        return ObjectFreeze({
           healthy: false,
           fenced: true,
           registered: false,
@@ -561,7 +578,7 @@ export class DatabaseOperationLock {
         })
       }
       if (!this.currentLease) {
-        return Object.freeze({
+        return ObjectFreeze({
           healthy: false,
           fenced: false,
           registered: false,
@@ -576,7 +593,7 @@ export class DatabaseOperationLock {
       }
       const lease = this.assertRuntimeLeaseAuthority(this.currentLease)
       const state = this.#readAuthoritativeState()
-      return Object.freeze({
+      return ObjectFreeze({
         healthy: !maintenanceDegraded,
         fenced: false,
         registered: true,
@@ -592,7 +609,7 @@ export class DatabaseOperationLock {
       })
     } catch (error) {
       this.#selfFence(error)
-      return Object.freeze({
+      return ObjectFreeze({
         healthy: false,
         fenced: true,
         registered: false,
@@ -631,7 +648,7 @@ export class DatabaseOperationLock {
     this.#ensurePaths()
     const hostId = readOrCreateHostIdentity(this.paths.hostIdentity)
     const processStartedAt = currentProcessStartedAt()
-    this.owner = Object.freeze({
+    this.owner = ObjectFreeze({
       ownerId: this.ownerId,
       runtimeId: this.runtimeId,
       hostId,
@@ -690,7 +707,7 @@ export class DatabaseOperationLock {
         throw normalizeError(error)
       }
       this.testHooks?.afterStateDirectoryRead?.(
-        Object.freeze({ attempt, names: Object.freeze([...names]), path: this.paths.stateRecords })
+        ObjectFreeze({ attempt, names: ObjectFreeze([...names]), path: this.paths.stateRecords })
       )
       const records = []
       let retry = false
@@ -807,10 +824,10 @@ export class DatabaseOperationLock {
         statePath: null,
         nextState: cloneJson(next),
       }
-      this.testHooks?.beforePublish?.(Object.freeze({ ...context }))
+      this.testHooks?.beforePublish?.(ObjectFreeze({ ...context }))
       this.#pruneForPublication()
-      this.testHooks?.afterPrune?.(Object.freeze({ ...context }))
-      publication.beforeFinalFence(Object.freeze({ ...context }))
+      this.testHooks?.afterPrune?.(ObjectFreeze({ ...context }))
+      publication.beforeFinalFence(ObjectFreeze({ ...context }))
       this.#revalidateMutex(mutex)
       const stateName = `operation-state-${String(next.stateRevision).padStart(20, '0')}-${randomUUID()}.json`
       const statePath = join(this.paths.stateRecords, stateName)
@@ -824,7 +841,7 @@ export class DatabaseOperationLock {
 
     let strictFailure = null
     try {
-      publication.onCommitted(Object.freeze({ ...context }))
+      publication.onCommitted(ObjectFreeze({ ...context }))
     } catch (error) {
       const failure = normalizeError(error)
       this.#recordMaintenanceFailure(failure, true)
@@ -837,9 +854,9 @@ export class DatabaseOperationLock {
     let durable = false
     if (strictFailure === null) {
       try {
-        this.testHooks?.afterRename?.(Object.freeze({ ...context }))
+        this.testHooks?.afterRename?.(ObjectFreeze({ ...context }))
         const injectedDirectorySync = this.testHooks?.directorySync?.(
-          Object.freeze({ path: this.paths.stateRecords })
+          ObjectFreeze({ path: this.paths.stateRecords })
         )
         if (injectedDirectorySync !== undefined && injectedDirectorySync !== false) {
           throw protocolError(
@@ -871,7 +888,7 @@ export class DatabaseOperationLock {
           )
         }
         if (strictFailure === null) {
-          this.testHooks?.afterFsync?.(Object.freeze({ ...context }))
+          this.testHooks?.afterFsync?.(ObjectFreeze({ ...context }))
         }
       } catch (error) {
         const failure = normalizeError(error)
@@ -890,7 +907,7 @@ export class DatabaseOperationLock {
 
     try {
       released = this.#releaseMutex(mutex)
-      this.testHooks?.afterRelease?.(Object.freeze({ ...context, mutexReleased: released }))
+      this.testHooks?.afterRelease?.(ObjectFreeze({ ...context, mutexReleased: released }))
     } catch (error) {
       this.#recordMaintenanceFailure(error)
     }
@@ -953,7 +970,7 @@ export class DatabaseOperationLock {
       // candidate then makes the complete token child durable before publication.
       writeJsonExclusive(join(candidateTokenPath, 'mutex.json'), record)
       syncDirectory(candidatePath)
-      const publicationContext = Object.freeze({
+      const publicationContext = ObjectFreeze({
         candidatePath,
         mutexPath: this.paths.registrationMutex,
         tokenPath: join(this.paths.registrationMutex, `token-${mutexId}`),
@@ -1042,7 +1059,7 @@ export class DatabaseOperationLock {
       throw normalizeError(error)
     }
     this.testHooks?.afterMutexQuarantine?.(
-      Object.freeze({ quarantine, mutexPath: this.paths.registrationMutex })
+      ObjectFreeze({ quarantine, mutexPath: this.paths.registrationMutex })
     )
     const moved = inspectMutexDirectory(
       quarantine,
@@ -1143,7 +1160,7 @@ export class DatabaseOperationLock {
   }
 }
 
-const EXISTING_STATE_PUBLICATION = Object.freeze({
+const EXISTING_STATE_PUBLICATION = ObjectFreeze({
   beforeFinalFence: () => {},
   onCommitted: () => {},
   durabilityPolicy: 'existing-best-effort',
@@ -1153,10 +1170,10 @@ function normalizeStatePublicationOptions(options) {
   if (options === undefined) return EXISTING_STATE_PUBLICATION
   if (
     !isPlainRecord(options) ||
-    Object.keys(options).length !== 3 ||
-    !Object.prototype.hasOwnProperty.call(options, 'beforeFinalFence') ||
-    !Object.prototype.hasOwnProperty.call(options, 'onCommitted') ||
-    !Object.prototype.hasOwnProperty.call(options, 'durabilityPolicy') ||
+    ObjectKeys(options).length !== 3 ||
+    !ObjectHasOwn(options, 'beforeFinalFence') ||
+    !ObjectHasOwn(options, 'onCommitted') ||
+    !ObjectHasOwn(options, 'durabilityPolicy') ||
     typeof options.beforeFinalFence !== 'function' ||
     typeof options.onCommitted !== 'function' ||
     !['existing-best-effort', 'required-for-mutation-authority'].includes(
@@ -1188,7 +1205,7 @@ function requireMutationEntryBinding(state, evidence, operationRoot) {
   if (state.stateRevision >= Number.MAX_SAFE_INTEGER) {
     throw protocolError('STATE_CORRUPTION', 'State revision cannot advance safely')
   }
-  return Object.freeze({
+  return ObjectFreeze({
     operationRoot,
     stateRevision: state.stateRevision,
     intent: cloneJson(current),
@@ -1287,7 +1304,7 @@ function validateState(value, expectedIdentity) {
     value.stateRevision < 0 ||
     !Number.isSafeInteger(value.fencingGenerationHighWater) ||
     value.fencingGenerationHighWater < 0 ||
-    !Array.isArray(value.leases) ||
+    !ArrayIsArray(value.leases) ||
     !isIsoTime(value.updatedAt)
   ) {
     throw protocolError('STATE_CORRUPTION', 'Operation state record is malformed')
@@ -1390,7 +1407,7 @@ function validateIntent(value) {
   return value
 }
 
-const RECOVERY_COMMITMENT_KEYS = Object.freeze([
+const RECOVERY_COMMITMENT_KEYS = ObjectFreeze([
   'shikin.recovery.protocol',
   'shikin.recovery.version',
   'shikin.recovery.recordSha256',
@@ -1400,7 +1417,7 @@ const RECOVERY_COMMITMENT_KEYS = Object.freeze([
 
 function validateRecoveryCommitmentMetadata(intent) {
   if (intent.metadata === undefined) return false
-  const recoveryKeys = Object.keys(intent.metadata).filter((key) =>
+  const recoveryKeys = ObjectKeys(intent.metadata).filter((key) =>
     key.startsWith('shikin.recovery.')
   )
   if (recoveryKeys.length === 0) return false
@@ -1413,7 +1430,7 @@ function validateRecoveryCommitmentMetadata(intent) {
   if (
     recoveryKeys.length !== RECOVERY_COMMITMENT_KEYS.length ||
     !RECOVERY_COMMITMENT_KEYS.every((key) =>
-      Object.prototype.hasOwnProperty.call(intent.metadata, key)
+      ObjectHasOwn(intent.metadata, key)
     ) ||
     intent.metadata['shikin.recovery.protocol'] !== RECOVERY_JOURNAL_PROTOCOL ||
     intent.metadata['shikin.recovery.version'] !== RECOVERY_JOURNAL_VERSION ||
@@ -1428,13 +1445,23 @@ function validateRecoveryCommitmentMetadata(intent) {
   return true
 }
 
+class MetadataValidationError extends Error {
+  constructor(code, message) {
+    super(message)
+    this.name = 'MetadataValidationError'
+    this.code = code
+  }
+}
+
 function snapshotCallerIntentMetadata(metadata) {
   normalizeCallerIntentMetadataValidation(metadata)
   if (metadata === undefined) return undefined
 
   let snapshot
   try {
-    snapshot = JSON.parse(JSON.stringify(metadata))
+    // This is the single caller-controlled serialization. Its detached result is
+    // revalidated, then all later cloning and publication uses trap-free data.
+    snapshot = JsonParse(JsonStringify(metadata))
   } catch (error) {
     throw protocolError('INVALID_OPERATION', 'Intent metadata could not be serialized', error)
   }
@@ -1446,19 +1473,28 @@ function normalizeCallerIntentMetadataValidation(metadata) {
   try {
     validateCallerIntentMetadata(metadata)
   } catch (error) {
-    throw normalizeError(error, 'INVALID_OPERATION')
+    if (error instanceof MetadataValidationError) {
+      throw protocolError(error.code, error.message, error)
+    }
+    throw protocolError('INVALID_OPERATION', 'Intent metadata could not be validated', error)
   }
 }
 
 function validateCallerIntentMetadata(metadata) {
   if (metadata === undefined) return
   if (!isPlainRecord(metadata)) {
-    throw protocolError('INVALID_OPERATION', 'Intent metadata must be an object')
+    throw metadataValidationError('INVALID_OPERATION', 'Intent metadata must be an object')
   }
   validateCanonicalMetadataValue(metadata)
-  const reserved = Object.keys(metadata).find((key) => key.startsWith('shikin.recovery.'))
-  if (reserved !== undefined) {
-    throw protocolError('RESERVED_METADATA_KEY', `Intent metadata key ${reserved} is reserved`)
+  const keys = ObjectKeys(metadata)
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index]
+    if (key.startsWith('shikin.recovery.')) {
+      throw metadataValidationError(
+        'RESERVED_METADATA_KEY',
+        `Intent metadata key ${key} is reserved`
+      )
+    }
   }
 }
 
@@ -1468,11 +1504,17 @@ function validateUnicodeString(value) {
     if (code >= 0xd800 && code <= 0xdbff) {
       const next = value.charCodeAt(index + 1)
       if (!(next >= 0xdc00 && next <= 0xdfff)) {
-        throw protocolError('INVALID_OPERATION', 'Intent metadata string is not valid Unicode')
+        throw metadataValidationError(
+          'INVALID_OPERATION',
+          'Intent metadata string is not valid Unicode'
+        )
       }
       index += 1
     } else if (code >= 0xdc00 && code <= 0xdfff) {
-      throw protocolError('INVALID_OPERATION', 'Intent metadata string is not valid Unicode')
+      throw metadataValidationError(
+        'INVALID_OPERATION',
+        'Intent metadata string is not valid Unicode'
+      )
     }
   }
 }
@@ -1487,22 +1529,30 @@ function validateCanonicalMetadataValue(value) {
     typeof value === 'number' &&
     Number.isSafeInteger(value) &&
     value >= 0 &&
-    !Object.is(value, -0)
+    !ObjectIs(value, -0)
   ) {
     return
   }
-  if (Array.isArray(value)) {
-    for (const item of value) validateCanonicalMetadataValue(item)
-    return
-  }
-  if (isPlainRecord(value)) {
-    for (const [key, item] of Object.entries(value)) {
-      validateUnicodeString(key)
-      validateCanonicalMetadataValue(item)
+  if (ArrayIsArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      validateCanonicalMetadataValue(value[index])
     }
     return
   }
-  throw protocolError('INVALID_OPERATION', 'Intent metadata is not canonical JSON')
+  if (isPlainRecord(value)) {
+    const keys = ObjectKeys(value)
+    for (let index = 0; index < keys.length; index += 1) {
+      const key = keys[index]
+      validateUnicodeString(key)
+      validateCanonicalMetadataValue(value[key])
+    }
+    return
+  }
+  throw metadataValidationError('INVALID_OPERATION', 'Intent metadata is not canonical JSON')
+}
+
+function metadataValidationError(code, message) {
+  return new MetadataValidationError(code, message)
 }
 
 function metadataWithRecoveryCommitment(metadata, commitment) {
@@ -1578,7 +1628,7 @@ function inspectMutexDirectory(path, databaseIdentity, incompleteTtlMs, testHook
     if (error?.code === 'ENOENT') return { status: 'absent' }
     throw normalizeError(error)
   }
-  testHooks?.afterMutexRootStat?.(Object.freeze({ path, stat }))
+  testHooks?.afterMutexRootStat?.(ObjectFreeze({ path, stat }))
   if (!stat.isDirectory() || stat.isSymbolicLink()) {
     return {
       status: 'malformed',
@@ -1857,7 +1907,7 @@ function assertPrivateRegularFile(path) {
 function writeJsonExclusive(path, value) {
   const descriptor = openSync(path, 'wx', PRIVATE_FILE_MODE)
   try {
-    writeFileSync(descriptor, `${JSON.stringify(value)}\n`, 'utf8')
+    writeFileSync(descriptor, `${stringifyJsonData(value)}\n`, 'utf8')
     fsyncSync(descriptor)
   } finally {
     closeSync(descriptor)
@@ -1872,7 +1922,7 @@ function parseJsonFile(path, label) {
     throw protocolError('STATE_CORRUPTION', `${label} file has an invalid size`)
   }
   try {
-    return JSON.parse(source)
+    return JsonParse(source)
   } catch (error) {
     throw protocolError('STATE_CORRUPTION', `${label} file contains malformed JSON`, error)
   }
@@ -1902,7 +1952,7 @@ function restoreQuarantine(quarantine, fixedPath, testHooks = null) {
 }
 
 function restoreQuarantineIfPossible(quarantine, fixedPath, testHooks = null) {
-  testHooks?.beforeMutexRestore?.(Object.freeze({ quarantine, mutexPath: fixedPath }))
+  testHooks?.beforeMutexRestore?.(ObjectFreeze({ quarantine, mutexPath: fixedPath }))
   try {
     renameSync(quarantine, fixedPath)
     return true
@@ -1924,7 +1974,7 @@ function isDirectoryRenameCollision(error, destination) {
 
 function assertExactKeys(value, expected, label) {
   if (!isPlainRecord(value)) throw protocolError('STATE_CORRUPTION', `${label} is not an object`)
-  const actualKeys = Object.keys(value).sort()
+  const actualKeys = ObjectKeys(value).sort()
   const expectedKeys = [...expected].sort()
   if (
     actualKeys.length !== expectedKeys.length ||
@@ -1939,7 +1989,7 @@ function assertAllowedKeys(value, required, optional, label) {
   const allowed = new Set([...required, ...optional])
   if (
     required.some((key) => !(key in value)) ||
-    Object.keys(value).some((key) => !allowed.has(key))
+    ObjectKeys(value).some((key) => !allowed.has(key))
   ) {
     throw protocolError('STATE_CORRUPTION', `${label} has unknown or missing fields`)
   }
@@ -1984,13 +2034,86 @@ function sleep(milliseconds) {
 }
 
 function cloneJson(value) {
-  return value === undefined ? undefined : JSON.parse(JSON.stringify(value))
+  return value === undefined ? undefined : JsonParse(stringifyJsonData(value))
+}
+
+function stringifyJsonData(value) {
+  return JsonStringify(copyJsonDataWithoutTraps(value, []))
+}
+
+function copyJsonDataWithoutTraps(value, ancestors) {
+  if (value === null || typeof value !== 'object') {
+    if (typeof value === 'function' || typeof value === 'symbol') return undefined
+    return value
+  }
+  for (let index = 0; index < ancestors.length; index += 1) {
+    if (ancestors[index] === value) {
+      throw new PrimordialTypeError('Cannot serialize cyclic JSON data')
+    }
+  }
+  ObjectDefineProperty(ancestors, String(ancestors.length), {
+    configurable: true,
+    enumerable: true,
+    value,
+    writable: true,
+  })
+
+  try {
+    if (ArrayIsArray(value)) {
+      const lengthDescriptor = ObjectGetOwnPropertyDescriptor(value, 'length')
+      if (lengthDescriptor === undefined || !ObjectHasOwn(lengthDescriptor, 'value')) {
+        throw new PrimordialTypeError('JSON data arrays must have a data length')
+      }
+      const copy = new PrimordialArray(lengthDescriptor.value)
+      // Arrays cannot use a null prototype without changing their JSON behavior,
+      // so shadow any inherited or own toJSON before the captured stringifier runs.
+      ObjectDefineProperty(copy, 'toJSON', {
+        configurable: true,
+        value: undefined,
+      })
+      for (let index = 0; index < lengthDescriptor.value; index += 1) {
+        const descriptor = ObjectGetOwnPropertyDescriptor(value, String(index))
+        if (descriptor !== undefined && !ObjectHasOwn(descriptor, 'value')) {
+          throw new PrimordialTypeError('JSON data must not contain accessors')
+        }
+        ObjectDefineProperty(copy, String(index), {
+          configurable: true,
+          enumerable: true,
+          value:
+            descriptor === undefined
+              ? undefined
+              : copyJsonDataWithoutTraps(descriptor.value, ancestors),
+          writable: true,
+        })
+      }
+      return copy
+    }
+
+    const copy = ObjectCreate(null)
+    const keys = ObjectKeys(value)
+    for (let index = 0; index < keys.length; index += 1) {
+      const key = keys[index]
+      const descriptor = ObjectGetOwnPropertyDescriptor(value, key)
+      if (descriptor === undefined || !ObjectHasOwn(descriptor, 'value')) {
+        throw new PrimordialTypeError('JSON data must not contain accessors')
+      }
+      ObjectDefineProperty(copy, key, {
+        configurable: true,
+        enumerable: true,
+        value: copyJsonDataWithoutTraps(descriptor.value, ancestors),
+        writable: true,
+      })
+    }
+    return copy
+  } finally {
+    ancestors.length -= 1
+  }
 }
 
 function isPlainRecord(value) {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
-  const prototype = Object.getPrototypeOf(value)
-  return prototype === Object.prototype || prototype === null
+  if (value === null || typeof value !== 'object' || ArrayIsArray(value)) return false
+  const prototype = ObjectGetPrototypeOf(value)
+  return prototype === ObjectPrototype || prototype === null
 }
 
 function protocolError(code, message, cause) {

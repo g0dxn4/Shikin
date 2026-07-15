@@ -318,6 +318,26 @@ describe('database operation lock core', () => {
           },
         }
       )
+      const callerProtocolError = () =>
+        new DatabaseOperationLockError('RESERVED_METADATA_KEY', 'caller-owned protocol error')
+      const protocolErrorGetterMetadata = {}
+      Object.defineProperty(protocolErrorGetterMetadata, 'value', {
+        enumerable: true,
+        get() {
+          throw callerProtocolError()
+        },
+      })
+      const protocolErrorProxyMetadata = new Proxy(
+        {},
+        {
+          ownKeys() {
+            throw callerProtocolError()
+          },
+        }
+      )
+      const protocolErrorToJsonMetadata = toJsonMetadata(() => {
+        throw callerProtocolError()
+      })
 
       for (const metadata of [
         getterMetadata(() => -1),
@@ -332,6 +352,9 @@ describe('database operation lock core', () => {
           throw new Error('toJSON failure')
         }),
         throwingProxyMetadata,
+        protocolErrorGetterMetadata,
+        protocolErrorProxyMetadata,
+        protocolErrorToJsonMetadata,
       ]) {
         expectLockError(
           () => owner.acquireExclusiveIntent('restore', metadata),
@@ -376,6 +399,54 @@ describe('database operation lock core', () => {
         durability: 'linux-fsync-complete',
       })
       expect(owner.readOperationState().exclusiveIntent.metadata).toEqual({ value: 7 })
+    }
+  )
+
+  it.runIf(process.platform === 'linux')(
+    'isolates validated metadata from an inherited stateful toJSON before publication',
+    () => {
+      const root = tempRoot()
+      const owner = createLockAt(root, 'cli')
+      const lease = owner.registerRuntimeLease()
+      const originalToJson = Object.getOwnPropertyDescriptor(Object.prototype, 'toJSON')
+      let inheritedToJsonCalls = 0
+      let intent
+      const metadata = {}
+      Object.defineProperty(metadata, 'installToJson', {
+        enumerable: true,
+        get() {
+          Object.defineProperty(Object.prototype, 'toJSON', {
+            configurable: true,
+            writable: true,
+            value() {
+              inheritedToJsonCalls += 1
+              if (inheritedToJsonCalls === 1) return { value: 7 }
+              if (this?.value === 7) return { value: -1 }
+              return this
+            },
+          })
+          return 0
+        },
+      })
+
+      try {
+        intent = owner.acquireExclusiveIntent('restore', metadata)
+      } finally {
+        if (originalToJson === undefined) delete Object.prototype.toJSON
+        else Object.defineProperty(Object.prototype, 'toJSON', originalToJson)
+      }
+
+      expect(inheritedToJsonCalls).toBe(1)
+      expect(intent.metadata).toEqual({ value: 7 })
+      expect(owner.readOperationState().exclusiveIntent.metadata).toEqual({ value: 7 })
+      intent = owner.drainExclusiveIntent(intent)
+      owner.releaseRuntimeLease(lease)
+      intent = owner.drainExclusiveIntent(intent)
+      const prepared = prepareMutationProof(owner, intent)
+      expect(prepared).toMatchObject({
+        commitmentSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        durability: 'linux-fsync-complete',
+      })
     }
   )
 

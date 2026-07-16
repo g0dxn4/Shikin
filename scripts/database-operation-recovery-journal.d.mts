@@ -25,6 +25,26 @@ export interface RecoveryJournalExclusiveIntent {
   metadata?: Record<string, unknown>
 }
 
+export interface RecoveryJournalCommitment {
+  'shikin.recovery.protocol': 'shikin.database-operation-recovery-journal'
+  'shikin.recovery.version': 1
+  'shikin.recovery.recordSha256': string
+  'shikin.recovery.durability': 'linux-fsync-complete'
+  'shikin.recovery.claimSequence': number
+}
+
+export interface RecoveryJournalCommittedIntent {
+  recordKind: 'exclusive_intent'
+  operationId: string
+  operation: RecoveryOperation
+  phase: 'mutating' | 'abandoned'
+  owner: RecoveryJournalOwnerEvidence
+  fencingGeneration: number
+  createdAt: string
+  updatedAt: string
+  recoveryCommitment: RecoveryJournalCommitment
+}
+
 export interface RecoverySchemaContractIdentity {
   readonly rawBytesSha256: `sha256:${string}`
   readonly contractVersion: number
@@ -56,6 +76,11 @@ export interface VerifiedPreparedMutationToken {
   readonly [verifiedPreparedMutationTokenBrand]: true
 }
 
+declare const verifiedCommittedRecoveryEvidenceTokenBrand: unique symbol
+export interface VerifiedCommittedRecoveryEvidenceToken {
+  readonly [verifiedCommittedRecoveryEvidenceTokenBrand]: true
+}
+
 export interface PreparedCommitment {
   readonly commitmentSha256: string
   readonly durability: RecoveryJournalDurability
@@ -74,6 +99,12 @@ export interface VerifyPreparedMutationProofOptions {
   /** Proof-only binding field; it is not persisted in the prepared record. */
   stateRevision: number
   intent: RecoveryJournalExclusiveIntent
+}
+
+export interface VerifyCommittedRecoveryEvidenceOptions {
+  operationRoot: string
+  stateRevision: number
+  intent: RecoveryJournalCommittedIntent
 }
 
 export interface PreparedMutationJournal {
@@ -103,3 +134,16 @@ export function revalidateVerifiedPreparedMutationToken(
 
 export function releaseVerifiedPreparedMutationToken(token: VerifiedPreparedMutationToken): void
 export function consumeVerifiedPreparedMutationToken(token: VerifiedPreparedMutationToken): void
+
+export function verifyCommittedRecoveryEvidence(
+  options: VerifyCommittedRecoveryEvidenceOptions
+): VerifiedCommittedRecoveryEvidenceToken
+
+export function revalidateVerifiedCommittedRecoveryEvidenceToken(
+  token: VerifiedCommittedRecoveryEvidenceToken,
+  options: VerifyCommittedRecoveryEvidenceOptions
+): Readonly<PreparedCommitment>
+
+export function releaseVerifiedCommittedRecoveryEvidenceToken(
+  token: VerifiedCommittedRecoveryEvidenceToken
+): void

@@ -50,6 +50,9 @@ const MAX_JSON_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const HASH_CHUNK_SIZE: usize = 1024 * 1024;
 const MAX_RECORD_BYTES: u64 = 1024 * 1024;
 const MAX_ARTIFACT_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+const MAX_COMMITTED_BINDING_STRING_BYTES: usize = 16_384;
+const MAX_COMMITTED_BINDING_KEYS: usize = 24;
+const MAX_COMMITTED_BINDING_OBJECTS: usize = 3;
 const SCHEMA_CONTRACT_BYTES: &[u8] = include_bytes!("../../schema/shikin-contract.json");
 const EXPECTED_SCHEMA_CONTRACT_VERSION: u64 = 1;
 const EXPECTED_LATEST_MIGRATION: &str = "019_financial_semantics";
@@ -69,6 +72,7 @@ type InterArtifactHashTestHookSlot = std::cell::RefCell<Option<InterArtifactHash
 thread_local! {
     static INTER_ARTIFACT_HASH_TEST_HOOK: InterArtifactHashTestHookSlot =
         const { std::cell::RefCell::new(None) };
+    static COMMITTED_LAYOUT_ENTRY_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -181,6 +185,21 @@ pub(crate) enum JournalIntentPhase {
     Mutating,
     Completed,
     Abandoned,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CommittedRecoveryPhase {
+    Mutating,
+    Abandoned,
+}
+
+impl CommittedRecoveryPhase {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Mutating => "mutating",
+            Self::Abandoned => "abandoned",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -557,6 +576,30 @@ impl PreparedCommitment {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum VerificationMode {
+    Prepared,
+    Committed,
+}
+
+impl VerificationMode {
+    fn retained_io_error(
+        self,
+        code: &'static str,
+        context: &str,
+        error: io::Error,
+    ) -> JournalError {
+        match self {
+            Self::Prepared => JournalError::with_source(code, format!("{context}: {error}"), error),
+            Self::Committed => JournalError::filesystem(context, error),
+        }
+    }
+
+    fn preserves_filesystem_failure(self) -> bool {
+        matches!(self, Self::Committed)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum VerifiedTokenLifecycle {
     Active,
     Released,
@@ -570,6 +613,20 @@ pub(crate) struct VerifiedPreparedMutationToken {
     commitment: PreparedCommitment,
     retained_evidence: Option<RetainedOperationEvidence>,
     lifecycle: VerifiedTokenLifecycle,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CommittedEvidenceTokenLifecycle {
+    Active,
+    Released,
+}
+
+#[derive(Debug)]
+pub(crate) struct VerifiedCommittedRecoveryEvidenceToken {
+    binding: CommittedRecoveryEvidenceBinding,
+    commitment: PreparedCommitment,
+    retained_evidence: Option<RetainedOperationEvidence>,
+    lifecycle: CommittedEvidenceTokenLifecycle,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -694,6 +751,7 @@ struct RetainedDirectoryEvidence {
     file: File,
     path: PathBuf,
     label: String,
+    code: &'static str,
     mutable: bool,
     snapshot: RetainedStatSnapshot,
 }
@@ -718,6 +776,7 @@ struct RetainedLayout {
 
 #[derive(Debug)]
 struct RetainedOperationEvidence {
+    verification_mode: VerificationMode,
     directories: Vec<RetainedDirectoryEvidence>,
     files: Vec<RetainedFileEvidence>,
     layouts: Vec<RetainedLayout>,
@@ -989,6 +1048,71 @@ impl Drop for VerifiedPreparedMutationToken {
     }
 }
 
+pub(crate) fn verify_committed_recovery_evidence(
+    binding: &CommittedRecoveryEvidenceBinding,
+) -> JournalResult<VerifiedCommittedRecoveryEvidenceToken> {
+    validate_committed_binding(binding)?;
+    require_linux_durability()?;
+    let paths = journal_paths_for(&binding.operation_root, &binding.operation_id);
+    let (evidence, retained_evidence) = validate_and_retain_committed_recovery_operation(
+        &paths,
+        binding,
+        run_inter_artifact_hash_test_hook,
+    )?;
+    Ok(VerifiedCommittedRecoveryEvidenceToken {
+        binding: binding.clone(),
+        commitment: PreparedCommitment {
+            sha256: evidence.commitment_sha256,
+            durability: evidence.durability,
+        },
+        retained_evidence: Some(retained_evidence),
+        lifecycle: CommittedEvidenceTokenLifecycle::Active,
+    })
+}
+
+pub(crate) fn revalidate_verified_committed_recovery_evidence_token(
+    token: &VerifiedCommittedRecoveryEvidenceToken,
+    binding: &CommittedRecoveryEvidenceBinding,
+) -> JournalResult<PreparedCommitment> {
+    if token.lifecycle != CommittedEvidenceTokenLifecycle::Active {
+        return Err(JournalError::new(
+            "RECOVERY_EVIDENCE_TOKEN_RELEASED",
+            "committed recovery evidence token was released",
+        ));
+    }
+    validate_committed_binding(binding)?;
+    if &token.binding != binding {
+        return Err(JournalError::new(
+            "RECOVERY_EVIDENCE_BINDING_MISMATCH",
+            "committed recovery evidence token binding does not match",
+        ));
+    }
+    require_linux_durability()?;
+    revalidate_retained_operation_evidence(token.retained_evidence.as_ref().ok_or_else(|| {
+        JournalError::new(
+            "RECOVERY_EVIDENCE_TOKEN_RELEASED",
+            "committed recovery evidence token has no retained evidence",
+        )
+    })?)?;
+    Ok(token.commitment.clone())
+}
+
+pub(crate) fn release_verified_committed_recovery_evidence_token(
+    token: &mut VerifiedCommittedRecoveryEvidenceToken,
+) {
+    if token.lifecycle != CommittedEvidenceTokenLifecycle::Active {
+        return;
+    }
+    token.lifecycle = CommittedEvidenceTokenLifecycle::Released;
+    let _closed_after_state_change = token.retained_evidence.take();
+}
+
+impl Drop for VerifiedCommittedRecoveryEvidenceToken {
+    fn drop(&mut self) {
+        release_verified_committed_recovery_evidence_token(self);
+    }
+}
+
 fn lock_proof_lifecycle(lifecycle: &Arc<Mutex<ProofLifecycle>>) -> MutexGuard<'_, ProofLifecycle> {
     lifecycle
         .lock()
@@ -1012,6 +1136,92 @@ impl PartialEq for JournalIntentBinding {
 
 impl Eq for JournalIntentBinding {}
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct CommittedRecoveryCommitment {
+    protocol: String,
+    version: u64,
+    record_sha256: String,
+    durability: String,
+    claim_sequence: u64,
+}
+
+impl CommittedRecoveryCommitment {
+    pub(crate) fn new(
+        protocol: String,
+        version: u64,
+        record_sha256: String,
+        durability: String,
+        claim_sequence: u64,
+    ) -> JournalResult<Self> {
+        if protocol != PROTOCOL
+            || version != u64::from(PROTOCOL_VERSION)
+            || !is_lower_hex_64(&record_sha256)
+            || durability != "linux-fsync-complete"
+            || claim_sequence > MAX_JSON_SAFE_INTEGER
+        {
+            return Err(JournalError::new(
+                "RECOVERY_COMMITMENT_INVALID",
+                "committed recovery metadata is malformed",
+            ));
+        }
+        Ok(Self {
+            protocol,
+            version,
+            record_sha256,
+            durability,
+            claim_sequence,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct CommittedRecoveryEvidenceBinding {
+    operation_root: PathBuf,
+    database_identity: String,
+    state_revision: u64,
+    operation_id: String,
+    operation: RecoveryOperation,
+    phase: CommittedRecoveryPhase,
+    owner: JournalOwnerEvidence,
+    fencing_generation: u64,
+    created_at: String,
+    updated_at: String,
+    recovery_commitment: CommittedRecoveryCommitment,
+}
+
+impl CommittedRecoveryEvidenceBinding {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        operation_root: PathBuf,
+        database_identity: String,
+        state_revision: u64,
+        operation_id: String,
+        operation: RecoveryOperation,
+        phase: CommittedRecoveryPhase,
+        owner: JournalOwnerEvidence,
+        fencing_generation: u64,
+        created_at: String,
+        updated_at: String,
+        recovery_commitment: CommittedRecoveryCommitment,
+    ) -> JournalResult<Self> {
+        let binding = Self {
+            operation_root,
+            database_identity,
+            state_revision,
+            operation_id,
+            operation,
+            phase,
+            owner,
+            fencing_generation,
+            created_at,
+            updated_at,
+            recovery_commitment,
+        };
+        validate_committed_binding(&binding)?;
+        Ok(binding)
+    }
+}
+
 fn validate_binding(binding: &JournalIntentBinding) -> JournalResult<()> {
     if binding.database_identity != DATABASE_IDENTITY
         || binding.state_revision > MAX_JSON_SAFE_INTEGER
@@ -1030,6 +1240,104 @@ fn validate_binding(binding: &JournalIntentBinding) -> JournalResult<()> {
     } else {
         Ok(())
     }
+}
+
+fn validate_committed_binding(binding: &CommittedRecoveryEvidenceBinding) -> JournalResult<()> {
+    validate_operation_root_argument(&binding.operation_root)?;
+    if binding.database_identity != DATABASE_IDENTITY
+        || binding.state_revision > MAX_JSON_SAFE_INTEGER
+        || !valid_identifier(&binding.operation_id)
+        || !valid_timestamp(&binding.created_at)
+        || !valid_timestamp(&binding.updated_at)
+        || binding.owner.owner_id.is_empty()
+        || !valid_identifier(&binding.owner.owner_id)
+        || !valid_identifier(&binding.owner.host_id)
+        || binding.owner.process_id == 0
+        || !valid_timestamp(&binding.owner.process_started_at)
+    {
+        return Err(JournalError::new(
+            "INVALID_RECOVERY_OPTIONS",
+            "committed recovery binding is malformed",
+        ));
+    }
+    if binding.recovery_commitment.protocol != PROTOCOL
+        || binding.recovery_commitment.version != u64::from(PROTOCOL_VERSION)
+        || !is_lower_hex_64(&binding.recovery_commitment.record_sha256)
+        || binding.recovery_commitment.durability != "linux-fsync-complete"
+        || binding.recovery_commitment.claim_sequence > MAX_JSON_SAFE_INTEGER
+    {
+        return Err(JournalError::new(
+            "RECOVERY_COMMITMENT_INVALID",
+            "committed recovery metadata is malformed",
+        ));
+    }
+    validate_committed_binding_limits(binding)?;
+    if binding.fencing_generation == 0
+        || binding.fencing_generation > MAX_JSON_SAFE_INTEGER
+        || binding.fencing_generation <= binding.recovery_commitment.claim_sequence
+    {
+        return Err(JournalError::new(
+            "RECOVERY_LINEAGE_INVALID",
+            "committed recovery phase or generation lineage is invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_committed_binding_limits(
+    binding: &CommittedRecoveryEvidenceBinding,
+) -> JournalResult<()> {
+    const FIXED_KEY_COUNT: usize = 3 + 9 + 5 + 5;
+    if FIXED_KEY_COUNT > MAX_COMMITTED_BINDING_KEYS || MAX_COMMITTED_BINDING_OBJECTS != 3 {
+        return Err(JournalError::new(
+            "INVALID_RECOVERY_OPTIONS",
+            "committed recovery binding shape is too large",
+        ));
+    }
+    let operation_root = binding.operation_root.to_str().ok_or_else(|| {
+        JournalError::new(
+            "INVALID_RECOVERY_OPTIONS",
+            "committed recovery operation root must be UTF-8",
+        )
+    })?;
+    let runtime_id = match binding.owner.runtime_id {
+        JournalRuntimeId::Cli => "cli",
+        JournalRuntimeId::Mcp => "mcp",
+        JournalRuntimeId::BrowserDataServer => "browser-data-server",
+        JournalRuntimeId::Tauri => "tauri",
+    };
+    let strings = [
+        operation_root,
+        DATABASE_IDENTITY,
+        "exclusive_intent",
+        binding.operation_id.as_str(),
+        binding.operation.as_str(),
+        binding.phase.as_str(),
+        binding.owner.owner_id.as_str(),
+        runtime_id,
+        binding.owner.host_id.as_str(),
+        binding.owner.process_started_at.as_str(),
+        binding.created_at.as_str(),
+        binding.updated_at.as_str(),
+        binding.recovery_commitment.protocol.as_str(),
+        binding.recovery_commitment.record_sha256.as_str(),
+        binding.recovery_commitment.durability.as_str(),
+    ];
+    let total = strings.iter().try_fold(0usize, |total, value| {
+        total.checked_add(value.len()).ok_or_else(|| {
+            JournalError::new(
+                "INVALID_RECOVERY_OPTIONS",
+                "committed recovery binding string bytes overflowed",
+            )
+        })
+    })?;
+    if total > MAX_COMMITTED_BINDING_STRING_BYTES {
+        return Err(JournalError::new(
+            "INVALID_RECOVERY_OPTIONS",
+            "committed recovery binding exceeds the scalar string byte limit",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(all(test, not(target_os = "linux")))]
@@ -1094,6 +1402,7 @@ where
         path,
         "reserved artifact",
         "RECOVERY_ARTIFACT_CORRUPTION",
+        false,
     )?;
     let checks = match write_artifact(ArtifactWriteContext {
         role,
@@ -1125,6 +1434,7 @@ where
         &reserved,
         "artifact",
         "RECOVERY_ARTIFACT_CORRUPTION",
+        false,
     )?;
     flush_and_seal_file(
         &file,
@@ -1137,7 +1447,14 @@ where
         ArtifactRole::Candidate => FaultPoint::AfterCandidateArtifactFsync,
         ArtifactRole::Rollback => FaultPoint::AfterRollbackArtifactFsync,
     })?;
-    let (digest, size) = hash_open_artifact(&mut file, path, &reserved, role, None)?;
+    let (digest, size) = hash_open_artifact(
+        &mut file,
+        path,
+        &reserved,
+        role,
+        None,
+        VerificationMode::Prepared,
+    )?;
     Ok((digest, size, checks))
 }
 
@@ -1149,6 +1466,7 @@ fn write_prepared_record(path: &Path, canonical: &[u8]) -> JournalResult<()> {
         path,
         "reserved record",
         "RECOVERY_JOURNAL_CORRUPTION",
+        false,
     )?;
     file.write_all(canonical)
         .and_then(|()| file.write_all(b"\n"))
@@ -1160,6 +1478,7 @@ fn write_prepared_record(path: &Path, canonical: &[u8]) -> JournalResult<()> {
         &reserved,
         "record",
         "RECOVERY_JOURNAL_CORRUPTION",
+        false,
     )?;
     flush_and_seal_file(
         &file,
@@ -1169,6 +1488,21 @@ fn write_prepared_record(path: &Path, canonical: &[u8]) -> JournalResult<()> {
         "RECOVERY_JOURNAL_CORRUPTION",
     )?;
     inject_fault(FaultPoint::AfterRecordFsync)
+}
+
+#[derive(Clone, Copy)]
+enum CompleteRecordBinding<'a> {
+    Prepared(&'a JournalIntentBinding),
+    Committed(&'a CommittedRecoveryEvidenceBinding),
+}
+
+impl CompleteRecordBinding<'_> {
+    fn verification_mode(self) -> VerificationMode {
+        match self {
+            Self::Prepared(_) => VerificationMode::Prepared,
+            Self::Committed(_) => VerificationMode::Committed,
+        }
+    }
 }
 
 fn validate_complete_operation(
@@ -1202,35 +1536,130 @@ where
 fn validate_and_retain_complete_operation<F>(
     paths: &JournalPaths,
     binding: &JournalIntentBinding,
+    between_artifact_hashes: F,
+) -> JournalResult<(CompleteEvidence, RetainedOperationEvidence)>
+where
+    F: FnMut() -> JournalResult<()>,
+{
+    validate_and_retain_complete_operation_for(
+        paths,
+        CompleteRecordBinding::Prepared(binding),
+        between_artifact_hashes,
+    )
+}
+
+fn validate_and_retain_committed_recovery_operation<F>(
+    paths: &JournalPaths,
+    binding: &CommittedRecoveryEvidenceBinding,
+    between_artifact_hashes: F,
+) -> JournalResult<(CompleteEvidence, RetainedOperationEvidence)>
+where
+    F: FnMut() -> JournalResult<()>,
+{
+    validate_and_retain_complete_operation_for(
+        paths,
+        CompleteRecordBinding::Committed(binding),
+        between_artifact_hashes,
+    )
+}
+
+fn validate_and_retain_complete_operation_for<F>(
+    paths: &JournalPaths,
+    binding: CompleteRecordBinding<'_>,
     mut between_artifact_hashes: F,
 ) -> JournalResult<(CompleteEvidence, RetainedOperationEvidence)>
 where
     F: FnMut() -> JournalResult<()>,
 {
     require_linux_durability()?;
+    let verification_mode = binding.verification_mode();
+    let artifacts_directory_code = match verification_mode {
+        VerificationMode::Prepared => "RECOVERY_JOURNAL_CORRUPTION",
+        VerificationMode::Committed => "RECOVERY_ARTIFACT_CORRUPTION",
+    };
     let mut retained = RetainedOperationEvidence {
+        verification_mode,
         directories: vec![
-            open_retained_directory(&paths.operation_root, "operation root", true)?,
-            open_retained_directory(&paths.recovery_root, "recovery root", true)?,
-            open_retained_directory(&paths.operations, "operations root", true)?,
-            open_retained_directory(&paths.operation, "operation directory", false)?,
-            open_retained_directory(&paths.artifacts, "artifacts directory", false)?,
-            open_retained_directory(&paths.records, "records directory", false)?,
+            open_retained_directory(
+                &paths.operation_root,
+                "operation root",
+                "RECOVERY_JOURNAL_CORRUPTION",
+                true,
+                verification_mode,
+            )?,
+            open_retained_directory(
+                &paths.recovery_root,
+                "recovery root",
+                "RECOVERY_JOURNAL_CORRUPTION",
+                verification_mode == VerificationMode::Prepared,
+                verification_mode,
+            )?,
+            open_retained_directory(
+                &paths.operations,
+                "operations root",
+                "RECOVERY_JOURNAL_CORRUPTION",
+                true,
+                verification_mode,
+            )?,
+            open_retained_directory(
+                &paths.operation,
+                "operation directory",
+                "RECOVERY_JOURNAL_CORRUPTION",
+                false,
+                verification_mode,
+            )?,
+            open_retained_directory(
+                &paths.artifacts,
+                "artifacts directory",
+                artifacts_directory_code,
+                false,
+                verification_mode,
+            )?,
+            open_retained_directory(
+                &paths.records,
+                "records directory",
+                "RECOVERY_JOURNAL_CORRUPTION",
+                false,
+                verification_mode,
+            )?,
         ],
         files: Vec::new(),
         layouts: Vec::new(),
     };
-    assert_exact_entries(
-        &paths.recovery_root,
-        &[OPERATIONS_DIRECTORY.into()],
-        "RECOVERY_JOURNAL_CORRUPTION",
-    )?;
-    assert_exact_entries(
-        &paths.operation,
-        &["artifacts".into(), "records".into()],
-        "RECOVERY_JOURNAL_CORRUPTION",
-    )?;
-    let record_names = read_names(&paths.records)?;
+    let recovery_entries = [OPERATIONS_DIRECTORY.into()];
+    let operation_entries = ["artifacts".into(), "records".into()];
+    let record_names = match verification_mode {
+        VerificationMode::Prepared => {
+            assert_exact_entries(
+                &paths.recovery_root,
+                &recovery_entries,
+                "RECOVERY_JOURNAL_CORRUPTION",
+            )?;
+            assert_exact_entries(
+                &paths.operation,
+                &operation_entries,
+                "RECOVERY_JOURNAL_CORRUPTION",
+            )?;
+            read_names(&paths.records)?
+        }
+        VerificationMode::Committed => {
+            read_bounded_committed_layout(
+                &paths.recovery_root,
+                CommittedDirectoryRole::Recovery,
+                CommittedLayoutExpectation::Exact(&recovery_entries),
+            )?;
+            read_bounded_committed_layout(
+                &paths.operation,
+                CommittedDirectoryRole::Operation,
+                CommittedLayoutExpectation::Exact(&operation_entries),
+            )?;
+            read_bounded_committed_layout(
+                &paths.records,
+                CommittedDirectoryRole::Records,
+                CommittedLayoutExpectation::Count(1),
+            )?
+        }
+    };
     if record_names.len() != 1 {
         return Err(JournalError::new(
             "RECOVERY_JOURNAL_CORRUPTION",
@@ -1252,6 +1681,7 @@ where
         true,
         None,
         None,
+        verification_mode,
     )?);
     let bytes = read_retained_file(
         retained
@@ -1259,6 +1689,7 @@ where
             .last_mut()
             .expect("record evidence was pushed"),
         MAX_RECORD_BYTES,
+        verification_mode,
     )?;
     if bytes.len() < 2 || bytes.last() != Some(&b'\n') || bytes[..bytes.len() - 1].ends_with(b"\n")
     {
@@ -1281,6 +1712,14 @@ where
             "prepared record filename hash does not match",
         ));
     }
+    if let CompleteRecordBinding::Committed(committed) = binding {
+        if commitment_sha256 != committed.recovery_commitment.record_sha256 {
+            return Err(JournalError::new(
+                "RECOVERY_JOURNAL_CORRUPTION",
+                "prepared record does not match the committed recovery hash",
+            ));
+        }
+    }
     let record: PreparedRecord = serde_json::from_slice(canonical).map_err(|error| {
         JournalError::with_source(
             "RECOVERY_JOURNAL_CORRUPTION",
@@ -1288,7 +1727,12 @@ where
             error,
         )
     })?;
-    validate_record(&record, binding, paths)?;
+    match binding {
+        CompleteRecordBinding::Prepared(prepared) => validate_record(&record, prepared, paths)?,
+        CompleteRecordBinding::Committed(committed) => {
+            validate_committed_record(&record, committed, paths)?
+        }
+    }
     if canonical_record_bytes(&record)? != canonical {
         return Err(JournalError::new(
             "RECOVERY_JOURNAL_CORRUPTION",
@@ -1300,12 +1744,23 @@ where
         .iter()
         .map(|role| artifact_filename(record.artifact(*role)))
         .collect::<JournalResult<Vec<_>>>()?;
-    assert_exact_entries(
-        &paths.artifacts,
-        &expected_artifacts,
-        "RECOVERY_ARTIFACT_CORRUPTION",
-    )?;
-    assert_no_sidecars(&paths.artifacts)?;
+    match verification_mode {
+        VerificationMode::Prepared => {
+            assert_exact_entries(
+                &paths.artifacts,
+                &expected_artifacts,
+                "RECOVERY_ARTIFACT_CORRUPTION",
+            )?;
+            assert_no_sidecars(&paths.artifacts)?;
+        }
+        VerificationMode::Committed => {
+            read_bounded_committed_layout(
+                &paths.artifacts,
+                CommittedDirectoryRole::Artifacts,
+                CommittedLayoutExpectation::Exact(&expected_artifacts),
+            )?;
+        }
+    }
     for role in ArtifactRole::all() {
         let artifact = record.artifact(role);
         retained.files.push(open_retained_file(
@@ -1316,7 +1771,17 @@ where
             false,
             Some(role),
             Some(artifact.size_bytes),
+            verification_mode,
         )?);
+    }
+    if matches!(binding, CompleteRecordBinding::Committed(_)) {
+        assert_committed_retained_evidence_invariants(
+            &retained,
+            paths,
+            &record_path,
+            &expected_artifacts,
+            &record,
+        )?;
     }
     for index in 1..retained.files.len() {
         let opened = &mut retained.files[index];
@@ -1328,6 +1793,7 @@ where
             &opened.snapshot.stable,
             role,
             opened.expected_size,
+            verification_mode,
         )?;
         if digest != artifact.content_digest || size != artifact.size_bytes {
             return Err(JournalError::new(
@@ -1339,28 +1805,30 @@ where
             between_artifact_hashes()?;
         }
     }
-    retained.layouts = vec![
-        RetainedLayout {
-            path: paths.recovery_root.clone(),
-            expected: vec![OPERATIONS_DIRECTORY.into()],
-            code: "RECOVERY_JOURNAL_CORRUPTION",
-        },
-        RetainedLayout {
-            path: paths.operation.clone(),
-            expected: vec!["artifacts".into(), "records".into()],
-            code: "RECOVERY_JOURNAL_CORRUPTION",
-        },
-        RetainedLayout {
-            path: paths.records.clone(),
-            expected: record_names,
-            code: "RECOVERY_JOURNAL_CORRUPTION",
-        },
-        RetainedLayout {
-            path: paths.artifacts.clone(),
-            expected: expected_artifacts,
-            code: "RECOVERY_ARTIFACT_CORRUPTION",
-        },
-    ];
+    if verification_mode == VerificationMode::Prepared {
+        retained.layouts = vec![
+            RetainedLayout {
+                path: paths.recovery_root.clone(),
+                expected: vec![OPERATIONS_DIRECTORY.into()],
+                code: "RECOVERY_JOURNAL_CORRUPTION",
+            },
+            RetainedLayout {
+                path: paths.operation.clone(),
+                expected: vec!["artifacts".into(), "records".into()],
+                code: "RECOVERY_JOURNAL_CORRUPTION",
+            },
+            RetainedLayout {
+                path: paths.records.clone(),
+                expected: record_names,
+                code: "RECOVERY_JOURNAL_CORRUPTION",
+            },
+            RetainedLayout {
+                path: paths.artifacts.clone(),
+                expected: expected_artifacts,
+                code: "RECOVERY_ARTIFACT_CORRUPTION",
+            },
+        ];
+    }
     revalidate_retained_operation_evidence(&retained)?;
     Ok((
         CompleteEvidence {
@@ -1369,6 +1837,120 @@ where
         },
         retained,
     ))
+}
+
+fn assert_committed_retained_evidence_invariants(
+    evidence: &RetainedOperationEvidence,
+    paths: &JournalPaths,
+    record_path: &Path,
+    artifact_names: &[String],
+    record: &PreparedRecord,
+) -> JournalResult<()> {
+    if evidence.verification_mode != VerificationMode::Committed
+        || evidence.directories.len() != 6
+        || evidence.files.len() != 3
+        || !evidence.layouts.is_empty()
+        || artifact_names.len() != 2
+    {
+        return Err(JournalError::new(
+            "RECOVERY_EVIDENCE_TOKEN_INVALID",
+            "committed recovery evidence must retain exactly nine handles",
+        ));
+    }
+    let expected_directories = [
+        (
+            &paths.operation_root,
+            "operation root",
+            "RECOVERY_JOURNAL_CORRUPTION",
+            true,
+        ),
+        (
+            &paths.recovery_root,
+            "recovery root",
+            "RECOVERY_JOURNAL_CORRUPTION",
+            false,
+        ),
+        (
+            &paths.operations,
+            "operations root",
+            "RECOVERY_JOURNAL_CORRUPTION",
+            true,
+        ),
+        (
+            &paths.operation,
+            "operation directory",
+            "RECOVERY_JOURNAL_CORRUPTION",
+            false,
+        ),
+        (
+            &paths.artifacts,
+            "artifacts directory",
+            "RECOVERY_ARTIFACT_CORRUPTION",
+            false,
+        ),
+        (
+            &paths.records,
+            "records directory",
+            "RECOVERY_JOURNAL_CORRUPTION",
+            false,
+        ),
+    ];
+    for (retained, (path, label, code, mutable)) in evidence
+        .directories
+        .iter()
+        .zip(expected_directories.into_iter())
+    {
+        if &retained.path != path
+            || retained.label != label
+            || retained.code != code
+            || retained.mutable != mutable
+        {
+            return Err(JournalError::new(
+                "RECOVERY_EVIDENCE_TOKEN_INVALID",
+                "committed recovery directory evidence is incomplete or misbound",
+            ));
+        }
+    }
+    let expected_files = [
+        (
+            record_path.to_path_buf(),
+            "prepared record",
+            "RECOVERY_JOURNAL_CORRUPTION",
+            None,
+            None,
+        ),
+        (
+            paths.artifacts.join(&artifact_names[0]),
+            "candidate artifact",
+            "RECOVERY_ARTIFACT_CORRUPTION",
+            Some(ArtifactRole::Candidate),
+            Some(record.candidate.size_bytes),
+        ),
+        (
+            paths.artifacts.join(&artifact_names[1]),
+            "rollback artifact",
+            "RECOVERY_ARTIFACT_CORRUPTION",
+            Some(ArtifactRole::Rollback),
+            Some(record.rollback.size_bytes),
+        ),
+    ];
+    for (retained, (path, label, code, role, expected_size)) in
+        evidence.files.iter().zip(expected_files.into_iter())
+    {
+        if retained.path != path
+            || retained.label != label
+            || retained.code != code
+            || retained.role != role
+            || retained.expected_size != expected_size
+            || expected_size.is_some_and(|size| retained.snapshot.size != size)
+        {
+            return Err(JournalError::new(
+                "RECOVERY_EVIDENCE_TOKEN_INVALID",
+                "committed recovery file evidence is incomplete or misbound",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_record(
@@ -1409,6 +1991,85 @@ fn validate_record(
     record.checks.rollback.validate().map_err(|_| {
         JournalError::new(
             "RECOVERY_JOURNAL_CORRUPTION",
+            "rollback recorded checks are malformed",
+        )
+    })?;
+    for role in ArtifactRole::all() {
+        let artifact = record.artifact(role);
+        let key = artifact_key(&paths.operation_key, &record.nonce, role);
+        let expected_path = format!("artifacts/{}-{key}.sqlite", role.as_str());
+        if artifact.path != expected_path
+            || !is_sha256_digest(&artifact.content_digest)
+            || artifact.size_bytes > MAX_ARTIFACT_BYTES
+        {
+            return Err(JournalError::new(
+                "RECOVERY_JOURNAL_CORRUPTION",
+                format!("{} artifact record is malformed", role.as_str()),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_committed_record(
+    record: &PreparedRecord,
+    binding: &CommittedRecoveryEvidenceBinding,
+    paths: &JournalPaths,
+) -> JournalResult<()> {
+    if record.protocol != PROTOCOL
+        || record.protocol_version != PROTOCOL_VERSION
+        || record.record_kind != PreparedMutationKind::PreparedMutation
+        || record.sequence != 0
+        || record.previous_record_sha256.is_some()
+        || !is_lower_hex_64(&record.nonce)
+    {
+        return Err(JournalError::new(
+            "RECOVERY_JOURNAL_CORRUPTION",
+            "prepared record binding is malformed",
+        ));
+    }
+    if !valid_identifier(&record.owner.owner_id)
+        || !valid_identifier(&record.owner.host_id)
+        || record.owner.process_id == 0
+        || !valid_timestamp(&record.owner.process_started_at)
+    {
+        return Err(JournalError::new(
+            "RECOVERY_JOURNAL_CORRUPTION",
+            "prepared record owner is malformed",
+        ));
+    }
+    let expected_generation = record
+        .fencing_generation
+        .checked_add(binding.recovery_commitment.claim_sequence)
+        .filter(|generation| *generation <= MAX_JSON_SAFE_INTEGER);
+    if record.database_identity != DATABASE_IDENTITY
+        || record.operation_id != binding.operation_id
+        || record.operation != binding.operation
+        || record.created_at != binding.created_at
+        || record.fencing_generation == 0
+        || expected_generation != Some(binding.fencing_generation)
+        || (binding.recovery_commitment.claim_sequence == 0 && record.owner != binding.owner)
+    {
+        return Err(JournalError::new(
+            "RECOVERY_LINEAGE_INVALID",
+            "committed recovery evidence lineage does not match the immutable record",
+        ));
+    }
+    if record.schema_contract != trusted_schema_identity()? {
+        return Err(JournalError::new(
+            "RECOVERY_VALIDATION_FAILED",
+            "schema contract identity does not match trusted bytes",
+        ));
+    }
+    record.checks.candidate.validate().map_err(|_| {
+        JournalError::new(
+            "RECOVERY_VALIDATION_FAILED",
+            "candidate recorded checks are malformed",
+        )
+    })?;
+    record.checks.rollback.validate().map_err(|_| {
+        JournalError::new(
+            "RECOVERY_VALIDATION_FAILED",
             "rollback recorded checks are malformed",
         )
     })?;
@@ -1495,7 +2156,11 @@ fn validate_operation_root(path: &Path) -> JournalResult<DirectoryIdentity> {
 }
 
 fn journal_paths(operation_root: &Path, binding: &JournalIntentBinding) -> JournalPaths {
-    let operation_key = operation_key(DATABASE_IDENTITY, &binding.operation_id);
+    journal_paths_for(operation_root, &binding.operation_id)
+}
+
+fn journal_paths_for(operation_root: &Path, operation_id: &str) -> JournalPaths {
+    let operation_key = operation_key(DATABASE_IDENTITY, operation_id);
     let recovery_root = operation_root.join(RECOVERY_DIRECTORY);
     let operations = recovery_root.join(OPERATIONS_DIRECTORY);
     let operation = operations.join(&operation_key);
@@ -1613,51 +2278,38 @@ fn revalidate_directory_identity(identity: &DirectoryIdentity) -> JournalResult<
 fn open_retained_directory(
     path: &Path,
     label: &str,
+    code: &'static str,
     mutable: bool,
+    verification_mode: VerificationMode,
 ) -> JournalResult<RetainedDirectoryEvidence> {
     let mut options = OpenOptions::new();
     options
         .read(true)
         .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC);
     let file = options.open(path).map_err(|error| {
-        JournalError::with_source(
-            "RECOVERY_JOURNAL_CORRUPTION",
-            format!("retain {label}: {error}"),
-            error,
-        )
+        verification_mode.retained_io_error(code, &format!("retain {label}"), error)
     })?;
     let open_metadata = file.metadata().map_err(|error| {
-        JournalError::with_source(
-            "RECOVERY_JOURNAL_CORRUPTION",
-            format!("inspect retained {label}: {error}"),
-            error,
-        )
+        verification_mode.retained_io_error(code, &format!("inspect retained {label}"), error)
     })?;
     let path_metadata = fs::symlink_metadata(path).map_err(|error| {
-        JournalError::with_source(
-            "RECOVERY_JOURNAL_CORRUPTION",
-            format!("inspect retained path for {label}: {error}"),
+        verification_mode.retained_io_error(
+            code,
+            &format!("inspect retained path for {label}"),
             error,
         )
     })?;
-    assert_retained_directory_metadata(&open_metadata, label)?;
-    assert_retained_directory_metadata(&path_metadata, label)?;
+    assert_retained_directory_metadata(&open_metadata, label, code)?;
+    assert_retained_directory_metadata(&path_metadata, label, code)?;
     if path_metadata.file_type().is_symlink() {
-        return Err(JournalError::new(
-            "RECOVERY_JOURNAL_CORRUPTION",
-            format!("{label} is a symlink"),
-        ));
+        return Err(JournalError::new(code, format!("{label} is a symlink")));
     }
     let canonical = fs::canonicalize(path).map_err(|error| {
-        JournalError::with_source(
-            "RECOVERY_JOURNAL_CORRUPTION",
-            format!("canonicalize {label}: {error}"),
-            error,
-        )
+        verification_mode.retained_io_error(code, &format!("canonicalize {label}"), error)
     })?;
     if !paths_equal(&canonical, path) {
         return Err(JournalError::new(
-            "RECOVERY_JOURNAL_CORRUPTION",
+            code,
             format!("{label} is noncanonical or traverses a symlink"),
         ));
     }
@@ -1665,7 +2317,7 @@ fn open_retained_directory(
     let path_snapshot = retained_snapshot(&path_metadata, label)?;
     if snapshot.stable != path_snapshot.stable || (!mutable && snapshot != path_snapshot) {
         return Err(JournalError::new(
-            "RECOVERY_JOURNAL_CORRUPTION",
+            code,
             format!("{label} path identity changed"),
         ));
     }
@@ -1673,6 +2325,7 @@ fn open_retained_directory(
         file,
         path: path.to_path_buf(),
         label: label.into(),
+        code,
         mutable,
         snapshot,
     })
@@ -1682,7 +2335,9 @@ fn open_retained_directory(
 fn open_retained_directory(
     _path: &Path,
     _label: &str,
+    _code: &'static str,
     _mutable: bool,
+    _verification_mode: VerificationMode,
 ) -> JournalResult<RetainedDirectoryEvidence> {
     Err(JournalError::new(
         "RECOVERY_DURABILITY_FAILURE",
@@ -1700,21 +2355,22 @@ fn open_retained_file(
     require_nonempty: bool,
     role: Option<ArtifactRole>,
     expected_size: Option<u64>,
+    verification_mode: VerificationMode,
 ) -> JournalResult<RetainedFileEvidence> {
     let mut options = OpenOptions::new();
     options
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
     let file = options.open(path).map_err(|error| {
-        JournalError::with_source(code, format!("retain {label}: {error}"), error)
+        verification_mode.retained_io_error(code, &format!("retain {label}"), error)
     })?;
     let open_metadata = file.metadata().map_err(|error| {
-        JournalError::with_source(code, format!("inspect retained {label}: {error}"), error)
+        verification_mode.retained_io_error(code, &format!("inspect retained {label}"), error)
     })?;
     let path_metadata = fs::symlink_metadata(path).map_err(|error| {
-        JournalError::with_source(
+        verification_mode.retained_io_error(
             code,
-            format!("inspect retained path for {label}: {error}"),
+            &format!("inspect retained path for {label}"),
             error,
         )
     })?;
@@ -1761,6 +2417,7 @@ fn open_retained_file(
     _require_nonempty: bool,
     _role: Option<ArtifactRole>,
     _expected_size: Option<u64>,
+    _verification_mode: VerificationMode,
 ) -> JournalResult<RetainedFileEvidence> {
     Err(JournalError::new(
         "RECOVERY_DURABILITY_FAILURE",
@@ -1804,25 +2461,30 @@ fn retained_snapshot(_metadata: &fs::Metadata, label: &str) -> JournalResult<Ret
 }
 
 #[cfg(target_os = "linux")]
-fn assert_retained_directory_metadata(metadata: &fs::Metadata, label: &str) -> JournalResult<()> {
+fn assert_retained_directory_metadata(
+    metadata: &fs::Metadata,
+    label: &str,
+    code: &'static str,
+) -> JournalResult<()> {
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
         return Err(JournalError::new(
-            "RECOVERY_JOURNAL_CORRUPTION",
+            code,
             format!("{label} is not a retained directory"),
         ));
     }
     let snapshot = retained_snapshot(metadata, label)?;
     if snapshot.mode & 0o077 != 0 {
-        return Err(JournalError::new(
-            "RECOVERY_JOURNAL_CORRUPTION",
-            format!("{label} is not private"),
-        ));
+        return Err(JournalError::new(code, format!("{label} is not private")));
     }
     Ok(())
 }
 
 #[cfg(not(target_os = "linux"))]
-fn assert_retained_directory_metadata(_metadata: &fs::Metadata, _label: &str) -> JournalResult<()> {
+fn assert_retained_directory_metadata(
+    _metadata: &fs::Metadata,
+    _label: &str,
+    _code: &'static str,
+) -> JournalResult<()> {
     Err(JournalError::new(
         "RECOVERY_DURABILITY_FAILURE",
         "retained Linux directory evidence is unavailable",
@@ -1868,12 +2530,20 @@ fn revalidate_retained_operation_evidence(
 ) -> JournalResult<()> {
     let mut reopened_directories = Vec::with_capacity(retained.directories.len());
     for evidence in &retained.directories {
-        let current = open_retained_directory(&evidence.path, &evidence.label, evidence.mutable)?;
+        let current = open_retained_directory(
+            &evidence.path,
+            &evidence.label,
+            evidence.code,
+            evidence.mutable,
+            retained.verification_mode,
+        )?;
         if current.snapshot.stable != evidence.snapshot.stable
-            || (!evidence.mutable && current.snapshot != evidence.snapshot)
+            || (retained.verification_mode == VerificationMode::Prepared
+                && !evidence.mutable
+                && current.snapshot != evidence.snapshot)
         {
             return Err(JournalError::new(
-                "RECOVERY_JOURNAL_CORRUPTION",
+                evidence.code,
                 format!("{} retained evidence changed", evidence.label),
             ));
         }
@@ -1889,6 +2559,7 @@ fn revalidate_retained_operation_evidence(
             evidence.snapshot.size > 0,
             evidence.role,
             evidence.expected_size,
+            retained.verification_mode,
         )?;
         if current.snapshot != evidence.snapshot {
             return Err(JournalError::new(
@@ -1901,30 +2572,38 @@ fn revalidate_retained_operation_evidence(
     for layout in &retained.layouts {
         assert_bounded_exact_entries(&layout.path, &layout.expected, layout.code)?;
     }
+    for (evidence, current) in retained.directories.iter().zip(&reopened_directories) {
+        if !evidence.mutable && current.snapshot != evidence.snapshot {
+            return Err(JournalError::new(
+                evidence.code,
+                format!("{} retained evidence changed", evidence.label),
+            ));
+        }
+    }
     for evidence in &retained.directories {
         let metadata = evidence.file.metadata().map_err(|error| {
-            JournalError::with_source(
-                "RECOVERY_JOURNAL_CORRUPTION",
-                format!("restat retained {}: {error}", evidence.label),
+            retained.verification_mode.retained_io_error(
+                evidence.code,
+                &format!("restat retained {}", evidence.label),
                 error,
             )
         })?;
-        assert_retained_directory_metadata(&metadata, &evidence.label)?;
+        assert_retained_directory_metadata(&metadata, &evidence.label, evidence.code)?;
         let snapshot = retained_snapshot(&metadata, &evidence.label)?;
         if snapshot.stable != evidence.snapshot.stable
             || (!evidence.mutable && snapshot != evidence.snapshot)
         {
             return Err(JournalError::new(
-                "RECOVERY_JOURNAL_CORRUPTION",
+                evidence.code,
                 format!("{} retained handle changed", evidence.label),
             ));
         }
     }
     for evidence in &retained.files {
         let metadata = evidence.file.metadata().map_err(|error| {
-            JournalError::with_source(
+            retained.verification_mode.retained_io_error(
                 evidence.code,
-                format!("restat retained {}: {error}", evidence.label),
+                &format!("restat retained {}", evidence.label),
                 error,
             )
         })?;
@@ -1939,6 +2618,95 @@ fn revalidate_retained_operation_evidence(
     drop(reopened_files);
     drop(reopened_directories);
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum CommittedDirectoryRole {
+    Recovery,
+    Operation,
+    Records,
+    Artifacts,
+}
+
+impl CommittedDirectoryRole {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Recovery => "recovery",
+            Self::Operation => "operation",
+            Self::Records => "records",
+            Self::Artifacts => "artifacts",
+        }
+    }
+
+    fn corruption_code(self) -> &'static str {
+        match self {
+            Self::Artifacts => "RECOVERY_ARTIFACT_CORRUPTION",
+            Self::Recovery | Self::Operation | Self::Records => "RECOVERY_JOURNAL_CORRUPTION",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum CommittedLayoutExpectation<'a> {
+    Exact(&'a [String]),
+    Count(usize),
+}
+
+impl CommittedLayoutExpectation<'_> {
+    fn expected_count(self) -> usize {
+        match self {
+            Self::Exact(expected) => expected.len(),
+            Self::Count(expected) => expected,
+        }
+    }
+}
+
+fn read_bounded_committed_layout(
+    path: &Path,
+    role: CommittedDirectoryRole,
+    expectation: CommittedLayoutExpectation<'_>,
+) -> JournalResult<Vec<String>> {
+    let mut directory = fs::read_dir(path).map_err(|error| {
+        JournalError::filesystem(&format!("read committed {} layout", role.label()), error)
+    })?;
+    let mut actual = Vec::with_capacity(expectation.expected_count() + 1);
+    for _ in 0..=expectation.expected_count() {
+        let Some(entry) = directory.next() else {
+            break;
+        };
+        #[cfg(test)]
+        COMMITTED_LAYOUT_ENTRY_READS.with(|count| count.set(count.get() + 1));
+        let entry = entry.map_err(|error| {
+            JournalError::filesystem(
+                &format!("read committed {} layout entry", role.label()),
+                error,
+            )
+        })?;
+        let name = entry.file_name().into_string().map_err(|_| {
+            JournalError::new(
+                role.corruption_code(),
+                format!("committed {} entry name is not valid Unicode", role.label()),
+            )
+        })?;
+        actual.push(name);
+    }
+
+    let matches = match expectation {
+        CommittedLayoutExpectation::Exact(expected) => {
+            actual.sort();
+            let mut expected = expected.to_vec();
+            expected.sort();
+            actual == expected
+        }
+        CommittedLayoutExpectation::Count(expected) => actual.len() == expected,
+    };
+    if !matches {
+        return Err(JournalError::new(
+            role.corruption_code(),
+            format!("committed {} layout changed", role.label()),
+        ));
+    }
+    Ok(actual)
 }
 
 fn assert_bounded_exact_entries(
@@ -1969,6 +2737,7 @@ fn assert_bounded_exact_entries(
 fn read_retained_file(
     evidence: &mut RetainedFileEvidence,
     maximum_size: u64,
+    verification_mode: VerificationMode,
 ) -> JournalResult<Vec<u8>> {
     if evidence.snapshot.size == 0 || evidence.snapshot.size > maximum_size {
         return Err(JournalError::new(
@@ -1982,17 +2751,17 @@ fn read_retained_file(
         .map_err(|error| JournalError::filesystem("seek retained file", error))?;
     let mut bytes = vec![0u8; evidence.snapshot.size as usize];
     evidence.file.read_exact(&mut bytes).map_err(|error| {
-        JournalError::with_source(
+        verification_mode.retained_io_error(
             evidence.code,
-            format!("read retained {}: {error}", evidence.label),
+            &format!("read retained {}", evidence.label),
             error,
         )
     })?;
     let mut extra = [0u8; 1];
     if evidence.file.read(&mut extra).map_err(|error| {
-        JournalError::with_source(
+        verification_mode.retained_io_error(
             evidence.code,
-            format!("finish retained {} read: {error}", evidence.label),
+            &format!("finish retained {} read", evidence.label),
             error,
         )
     })? != 0
@@ -2003,9 +2772,9 @@ fn read_retained_file(
         ));
     }
     let metadata = evidence.file.metadata().map_err(|error| {
-        JournalError::with_source(
+        verification_mode.retained_io_error(
             evidence.code,
-            format!("restat retained {}: {error}", evidence.label),
+            &format!("restat retained {}", evidence.label),
             error,
         )
     })?;
@@ -2071,11 +2840,19 @@ fn inspect_open_regular_file(
     path: &Path,
     label: &str,
     code: &'static str,
+    preserve_filesystem_failure: bool,
 ) -> JournalResult<StableIdentity> {
-    let open = inspect_file(file)
-        .map_err(|error| JournalError::new(code, format!("inspect open {label}: {error}")))?;
-    let current = inspect_path(path, false)
-        .map_err(|error| JournalError::new(code, format!("inspect {label}: {error}")))?;
+    let classify = |action: &str, error| {
+        if preserve_filesystem_failure {
+            JournalError::filesystem(action, error)
+        } else {
+            JournalError::new(code, format!("{action}: {error}"))
+        }
+    };
+    let open =
+        inspect_file(file).map_err(|error| classify(&format!("inspect open {label}"), error))?;
+    let current =
+        inspect_path(path, false).map_err(|error| classify(&format!("inspect {label}"), error))?;
     if !open.is_file
         || !current.is_file
         || open.is_reparse
@@ -2093,7 +2870,7 @@ fn inspect_open_regular_file(
     #[cfg(unix)]
     {
         let metadata = fs::symlink_metadata(path)
-            .map_err(|error| JournalError::new(code, format!("inspect {label}: {error}")))?;
+            .map_err(|error| classify(&format!("inspect {label}"), error))?;
         if metadata.permissions().mode() & 0o077 != 0 {
             return Err(JournalError::new(code, format!("{label} is not private")));
         }
@@ -2107,8 +2884,10 @@ fn revalidate_open_regular_file(
     identity: &StableIdentity,
     label: &str,
     code: &'static str,
+    preserve_filesystem_failure: bool,
 ) -> JournalResult<()> {
-    if &inspect_open_regular_file(file, path, label, code)? != identity {
+    if &inspect_open_regular_file(file, path, label, code, preserve_filesystem_failure)? != identity
+    {
         return Err(JournalError::new(code, format!("{label} identity changed")));
     }
     Ok(())
@@ -2120,12 +2899,26 @@ fn revalidate_open_sealed_file(
     identity: &StableIdentity,
     label: &str,
     code: &'static str,
+    preserve_filesystem_failure: bool,
 ) -> JournalResult<()> {
-    revalidate_open_regular_file(file, path, identity, label, code)?;
+    revalidate_open_regular_file(
+        file,
+        path,
+        identity,
+        label,
+        code,
+        preserve_filesystem_failure,
+    )?;
     #[cfg(unix)]
     {
         let mode = fs::symlink_metadata(path)
-            .map_err(|error| JournalError::new(code, format!("inspect {label}: {error}")))?
+            .map_err(|error| {
+                if preserve_filesystem_failure {
+                    JournalError::filesystem(&format!("inspect {label}"), error)
+                } else {
+                    JournalError::new(code, format!("inspect {label}: {error}"))
+                }
+            })?
             .permissions()
             .mode()
             & 0o777;
@@ -2153,7 +2946,7 @@ fn flush_and_seal_file(
         .map_err(|error| JournalError::durability(&format!("seal {label}"), error))?;
     file.sync_all()
         .map_err(|error| JournalError::durability(&format!("flush sealed {label}"), error))?;
-    revalidate_open_sealed_file(file, path, identity, label, code)
+    revalidate_open_sealed_file(file, path, identity, label, code, false)
 }
 
 fn hash_open_artifact(
@@ -2162,6 +2955,7 @@ fn hash_open_artifact(
     identity: &StableIdentity,
     role: ArtifactRole,
     expected_size: Option<u64>,
+    verification_mode: VerificationMode,
 ) -> JournalResult<(String, u64)> {
     let size = file
         .metadata()
@@ -2206,6 +3000,7 @@ fn hash_open_artifact(
         identity,
         "artifact",
         "RECOVERY_ARTIFACT_CORRUPTION",
+        verification_mode.preserves_filesystem_failure(),
     )?;
     let final_size = file
         .metadata()
@@ -2234,14 +3029,20 @@ fn open_artifact_evidence(
             format!("open artifact: {error}"),
         )
     })?;
-    let identity =
-        inspect_open_regular_file(&file, path, "artifact", "RECOVERY_ARTIFACT_CORRUPTION")?;
+    let identity = inspect_open_regular_file(
+        &file,
+        path,
+        "artifact",
+        "RECOVERY_ARTIFACT_CORRUPTION",
+        false,
+    )?;
     revalidate_open_sealed_file(
         &file,
         path,
         &identity,
         "artifact",
         "RECOVERY_ARTIFACT_CORRUPTION",
+        false,
     )?;
     let snapshot = artifact_snapshot(&file)?;
     if snapshot.size > MAX_ARTIFACT_BYTES || snapshot.size != expected_size {
@@ -2284,6 +3085,7 @@ fn revalidate_artifact_evidence(evidence: &OpenArtifactEvidence) -> JournalResul
         &evidence.identity,
         "artifact",
         "RECOVERY_ARTIFACT_CORRUPTION",
+        false,
     )?;
     if artifact_snapshot(&evidence.file)? != evidence.snapshot {
         return Err(JournalError::new(
@@ -2309,8 +3111,8 @@ fn read_secure_file(
     let mut file = options
         .open(path)
         .map_err(|error| JournalError::new(code, format!("open {label}: {error}")))?;
-    let identity = inspect_open_regular_file(&file, path, label, code)?;
-    revalidate_open_sealed_file(&file, path, &identity, label, code)?;
+    let identity = inspect_open_regular_file(&file, path, label, code, false)?;
+    revalidate_open_sealed_file(&file, path, &identity, label, code, false)?;
     let size = file
         .metadata()
         .map_err(|error| JournalError::new(code, format!("stat {label}: {error}")))?
@@ -2332,7 +3134,7 @@ fn read_secure_file(
             format!("{label} grew while reading"),
         ));
     }
-    revalidate_open_sealed_file(&file, path, &identity, label, code)?;
+    revalidate_open_sealed_file(&file, path, &identity, label, code, false)?;
     Ok(bytes)
 }
 
@@ -2960,6 +3762,102 @@ mod tests {
         .unwrap()
     }
 
+    fn committed_commitment(
+        record_sha256: &str,
+        claim_sequence: u64,
+    ) -> CommittedRecoveryCommitment {
+        CommittedRecoveryCommitment::new(
+            PROTOCOL.into(),
+            u64::from(PROTOCOL_VERSION),
+            record_sha256.into(),
+            "linux-fsync-complete".into(),
+            claim_sequence,
+        )
+        .unwrap()
+    }
+
+    fn synthetic_operation_root(filler_length: usize) -> PathBuf {
+        let filler = "a".repeat(filler_length);
+        #[cfg(windows)]
+        {
+            if filler.is_empty() {
+                PathBuf::from(format!(r"C:\{IDENTITY_HASH}"))
+            } else {
+                PathBuf::from(format!(r"C:\{filler}\{IDENTITY_HASH}"))
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            if filler.is_empty() {
+                PathBuf::from(format!("/{IDENTITY_HASH}"))
+            } else {
+                PathBuf::from(format!("/{filler}/{IDENTITY_HASH}"))
+            }
+        }
+    }
+
+    fn committed_binding(
+        root: &Path,
+        source: &JournalIntentBinding,
+        record_sha256: &str,
+        claim_sequence: u64,
+        phase: CommittedRecoveryPhase,
+        current_owner: JournalOwnerEvidence,
+    ) -> CommittedRecoveryEvidenceBinding {
+        CommittedRecoveryEvidenceBinding::new(
+            root.to_path_buf(),
+            DATABASE_IDENTITY.into(),
+            source.state_revision,
+            source.operation_id.clone(),
+            source.operation,
+            phase,
+            current_owner,
+            source.fencing_generation + claim_sequence,
+            source.intent_created_at.clone(),
+            source.intent_updated_at.clone(),
+            committed_commitment(record_sha256, claim_sequence),
+        )
+        .unwrap()
+    }
+
+    #[cfg(target_os = "linux")]
+    fn retained_descriptor_count(root: &Path) -> usize {
+        use std::os::unix::ffi::OsStrExt;
+
+        fs::read_dir("/proc/self/fd")
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                fs::read_link(entry.path()).ok().is_some_and(|path| {
+                    path.as_os_str()
+                        .as_bytes()
+                        .starts_with(root.as_os_str().as_bytes())
+                })
+            })
+            .count()
+    }
+
+    #[cfg(target_os = "linux")]
+    fn rewrite_prepared_record(
+        paths: &JournalPaths,
+        mutate: impl FnOnce(&mut PreparedRecord),
+    ) -> String {
+        let old_name = read_names(&paths.records).unwrap().remove(0);
+        let old_path = paths.records.join(old_name);
+        let bytes = fs::read(&old_path).unwrap();
+        let mut record: PreparedRecord = serde_json::from_slice(&bytes[..bytes.len() - 1]).unwrap();
+        mutate(&mut record);
+        let canonical = canonical_record_bytes(&record).unwrap();
+        let hash = record_hash(&canonical);
+        fs::remove_file(old_path).unwrap();
+        let new_path = paths
+            .records
+            .join(format!("00000000000000000000-{hash}.json"));
+        fs::write(&new_path, [canonical.as_slice(), b"\n"].concat()).unwrap();
+        fs::set_permissions(new_path, fs::Permissions::from_mode(0o400)).unwrap();
+        hash
+    }
+
     #[test]
     fn cross_platform_golden_vectors_match_node_canonical_hashes_and_paths() {
         let golden: JsonValue = serde_json::from_str(include_str!(
@@ -3141,6 +4039,117 @@ mod tests {
         }
     }
 
+    #[test]
+    fn committed_binding_constructors_enforce_fixed_values_lineage_and_scalar_limits() {
+        for result in [
+            CommittedRecoveryCommitment::new(
+                "wrong".into(),
+                1,
+                "a".repeat(64),
+                "linux-fsync-complete".into(),
+                0,
+            ),
+            CommittedRecoveryCommitment::new(
+                PROTOCOL.into(),
+                2,
+                "a".repeat(64),
+                "linux-fsync-complete".into(),
+                0,
+            ),
+            CommittedRecoveryCommitment::new(
+                PROTOCOL.into(),
+                1,
+                "A".repeat(64),
+                "linux-fsync-complete".into(),
+                0,
+            ),
+            CommittedRecoveryCommitment::new(
+                PROTOCOL.into(),
+                1,
+                "a".repeat(64),
+                "unknown".into(),
+                0,
+            ),
+            CommittedRecoveryCommitment::new(
+                PROTOCOL.into(),
+                1,
+                "a".repeat(64),
+                "linux-fsync-complete".into(),
+                MAX_JSON_SAFE_INTEGER + 1,
+            ),
+        ] {
+            assert_eq!(result.unwrap_err().code(), "RECOVERY_COMMITMENT_INVALID");
+        }
+
+        let source = make_binding("operation-limit");
+        let base_root = synthetic_operation_root(0);
+        let base = committed_binding(
+            &base_root,
+            &source,
+            &"a".repeat(64),
+            0,
+            CommittedRecoveryPhase::Mutating,
+            source.owner.clone(),
+        );
+        let fixed_bytes = [
+            DATABASE_IDENTITY,
+            "exclusive_intent",
+            base.operation_id.as_str(),
+            base.operation.as_str(),
+            base.phase.as_str(),
+            base.owner.owner_id.as_str(),
+            "cli",
+            base.owner.host_id.as_str(),
+            base.owner.process_started_at.as_str(),
+            base.created_at.as_str(),
+            base.updated_at.as_str(),
+            base.recovery_commitment.protocol.as_str(),
+            base.recovery_commitment.record_sha256.as_str(),
+            base.recovery_commitment.durability.as_str(),
+        ]
+        .iter()
+        .map(|value| value.len())
+        .sum::<usize>();
+        let root_bytes = MAX_COMMITTED_BINDING_STRING_BYTES - fixed_bytes;
+        let root_overhead = synthetic_operation_root(1).to_str().unwrap().len() - 1;
+        let filler = root_bytes - root_overhead;
+        let at_limit_root = synthetic_operation_root(filler);
+        let at_limit = CommittedRecoveryEvidenceBinding::new(
+            at_limit_root.clone(),
+            DATABASE_IDENTITY.into(),
+            1,
+            source.operation_id.clone(),
+            source.operation,
+            CommittedRecoveryPhase::Mutating,
+            source.owner.clone(),
+            source.fencing_generation,
+            source.intent_created_at.clone(),
+            source.intent_updated_at.clone(),
+            committed_commitment(&"a".repeat(64), 0),
+        )
+        .unwrap();
+        validate_committed_binding(&at_limit).unwrap();
+        let over_limit_root = synthetic_operation_root(filler + 1);
+        assert_eq!(
+            CommittedRecoveryEvidenceBinding::new(
+                over_limit_root,
+                DATABASE_IDENTITY.into(),
+                1,
+                source.operation_id,
+                source.operation,
+                CommittedRecoveryPhase::Mutating,
+                source.owner,
+                source.fencing_generation,
+                source.intent_created_at,
+                source.intent_updated_at,
+                committed_commitment(&"a".repeat(64), 0),
+            )
+            .unwrap_err()
+            .code(),
+            "INVALID_RECOVERY_OPTIONS"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn cross_platform_private_directory_creation_helper_is_private_immediately() {
@@ -3179,6 +4188,20 @@ mod tests {
         assert_eq!(callbacks, 0);
         assert!(!absent_parent.exists());
 
+        let committed = committed_binding(
+            &root,
+            &binding,
+            &"a".repeat(64),
+            0,
+            CommittedRecoveryPhase::Mutating,
+            binding.owner.clone(),
+        );
+        assert_eq!(
+            verify_committed_recovery_evidence(&committed)
+                .unwrap_err()
+                .code(),
+            "RECOVERY_DURABILITY_FAILURE"
+        );
         assert!(!absent_parent.exists());
     }
 
@@ -3497,6 +4520,627 @@ mod tests {
             "RECOVERY_PREPARATION_INCOMPLETE"
         );
         assert_eq!(callbacks, 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn committed_verifier_matches_shared_fixture_for_initial_and_repeated_claims() {
+        let (_temp, root) = operation_root();
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../schema/fixtures/database-operation-recovery-journal-v1/recovery-journal-v1");
+        copy_and_seal_fixture(&fixture, &root.join(RECOVERY_DIRECTORY));
+        let source = fixture_binding("2031-08-15T13:14:15.000Z", serde_json::json!({}));
+        let hash = "3cab58449639e02aaa5eaa9c56a218f5dbeb0b2963ed2c43d0ef201436353666";
+
+        for (sequence, phase) in [
+            (0, CommittedRecoveryPhase::Mutating),
+            (1, CommittedRecoveryPhase::Mutating),
+            (2, CommittedRecoveryPhase::Abandoned),
+        ] {
+            let current_owner = if sequence == 0 {
+                source.owner.clone()
+            } else {
+                JournalOwnerEvidence::new(
+                    format!("claimed-owner-{sequence}"),
+                    JournalRuntimeId::Tauri,
+                    "claimed-host".into(),
+                    5252,
+                    "2026-07-14T12:00:00.000Z".into(),
+                )
+                .unwrap()
+            };
+            let binding = committed_binding(&root, &source, hash, sequence, phase, current_owner);
+            let mut first = verify_committed_recovery_evidence(&binding).unwrap();
+            let mut second = verify_committed_recovery_evidence(&binding).unwrap();
+            assert_eq!(retained_descriptor_count(&root), 18);
+            assert_eq!(
+                revalidate_verified_committed_recovery_evidence_token(&first, &binding)
+                    .unwrap()
+                    .sha256(),
+                hash
+            );
+            release_verified_committed_recovery_evidence_token(&mut first);
+            assert_eq!(retained_descriptor_count(&root), 9);
+            assert_eq!(
+                revalidate_verified_committed_recovery_evidence_token(&second, &binding)
+                    .unwrap()
+                    .durability(),
+                JournalDurability::LinuxFsyncComplete
+            );
+            release_verified_committed_recovery_evidence_token(&mut second);
+            assert_eq!(retained_descriptor_count(&root), 0);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn committed_tokens_are_recovery_only_cloexec_bounded_and_drop_safe() {
+        use std::{cell::Cell, rc::Rc};
+
+        let (_temp, root) = operation_root();
+        let source = make_binding("operation-committed-token");
+        let prepared = prepare_mutation_journal(&root, &source, write_artifact).unwrap();
+        let binding = committed_binding(
+            &root,
+            &source,
+            prepared.commitment_sha256(),
+            0,
+            CommittedRecoveryPhase::Mutating,
+            source.owner.clone(),
+        );
+        let hashes = Rc::new(Cell::new(0));
+        let observed = Rc::clone(&hashes);
+        set_inter_artifact_hash_test_hook(Some(Box::new(move || {
+            observed.set(observed.get() + 1);
+            Ok(())
+        })));
+        let mut token = verify_committed_recovery_evidence(&binding).unwrap();
+        assert_eq!(hashes.get(), 1);
+        let retained = token.retained_evidence.as_ref().unwrap();
+        assert_eq!(retained.directories.len() + retained.files.len(), 9);
+        assert!(retained.layouts.is_empty());
+        for descriptor in retained
+            .directories
+            .iter()
+            .map(|evidence| evidence.file.as_raw_fd())
+            .chain(
+                retained
+                    .files
+                    .iter()
+                    .map(|evidence| evidence.file.as_raw_fd()),
+            )
+        {
+            let flags = unsafe { libc::fcntl(descriptor, libc::F_GETFD) };
+            assert_ne!(flags, -1);
+            assert_ne!(flags & libc::FD_CLOEXEC, 0);
+        }
+        revalidate_verified_committed_recovery_evidence_token(&token, &binding).unwrap();
+        assert_eq!(hashes.get(), 1);
+
+        // The recovery token neither activates nor consumes the prepared-proof lifecycle.
+        let prepared_token =
+            verify_prepared_mutation_proof(prepared.proof(), &root, &source).unwrap();
+        drop(prepared_token);
+        let mut wrong_binding = binding.clone();
+        wrong_binding.state_revision += 1;
+        assert_eq!(
+            revalidate_verified_committed_recovery_evidence_token(&token, &wrong_binding)
+                .unwrap_err()
+                .code(),
+            "RECOVERY_EVIDENCE_BINDING_MISMATCH"
+        );
+        release_verified_committed_recovery_evidence_token(&mut token);
+        release_verified_committed_recovery_evidence_token(&mut token);
+        assert_eq!(retained_descriptor_count(&root), 0);
+        assert_eq!(
+            revalidate_verified_committed_recovery_evidence_token(&token, &binding)
+                .unwrap_err()
+                .code(),
+            "RECOVERY_EVIDENCE_TOKEN_RELEASED"
+        );
+        set_inter_artifact_hash_test_hook(None);
+
+        let dropped = verify_committed_recovery_evidence(&binding).unwrap();
+        assert_eq!(retained_descriptor_count(&root), 9);
+        drop(dropped);
+        assert_eq!(retained_descriptor_count(&root), 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn committed_initial_layout_scans_are_role_aware_bounded_and_classify_invalid_artifact_names() {
+        use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+        let temp = TempDir::new().unwrap();
+        let oversized = temp.path().join("oversized");
+        fs::create_dir(&oversized).unwrap();
+        for index in 0..128 {
+            fs::write(oversized.join(format!("entry-{index:03}")), b"x").unwrap();
+        }
+        let expected = ["entry-000".to_owned()];
+        COMMITTED_LAYOUT_ENTRY_READS.with(|count| count.set(0));
+        assert_eq!(
+            read_bounded_committed_layout(
+                &oversized,
+                CommittedDirectoryRole::Recovery,
+                CommittedLayoutExpectation::Exact(&expected),
+            )
+            .unwrap_err()
+            .code(),
+            "RECOVERY_JOURNAL_CORRUPTION"
+        );
+        assert_eq!(COMMITTED_LAYOUT_ENTRY_READS.with(std::cell::Cell::get), 2);
+
+        let (_temp, root) = operation_root();
+        let source = make_binding("operation-committed-invalid-artifact-name");
+        let prepared = prepare_mutation_journal(&root, &source, write_artifact).unwrap();
+        let paths = journal_paths(&root, &source);
+        let candidate = read_names(&paths.artifacts)
+            .unwrap()
+            .into_iter()
+            .find(|name| name.starts_with("candidate-"))
+            .unwrap();
+        fs::rename(
+            paths.artifacts.join(candidate),
+            paths
+                .artifacts
+                .join(OsString::from_vec(vec![b'i', b'n', b'v', 0xff])),
+        )
+        .unwrap();
+        let binding = committed_binding(
+            &root,
+            &source,
+            prepared.commitment_sha256(),
+            0,
+            CommittedRecoveryPhase::Mutating,
+            source.owner.clone(),
+        );
+        assert_eq!(
+            verify_committed_recovery_evidence(&binding)
+                .unwrap_err()
+                .code(),
+            "RECOVERY_ARTIFACT_CORRUPTION"
+        );
+        assert_eq!(retained_descriptor_count(&root), 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn committed_revalidation_never_enumerates_and_enforces_role_mutability_snapshots() {
+        use std::time::{Duration, SystemTime};
+
+        let (_temp, root) = operation_root();
+        let source = make_binding("operation-committed-no-revalidation-enumeration");
+        let prepared = prepare_mutation_journal(&root, &source, write_artifact).unwrap();
+        let binding = committed_binding(
+            &root,
+            &source,
+            prepared.commitment_sha256(),
+            0,
+            CommittedRecoveryPhase::Mutating,
+            source.owner.clone(),
+        );
+        COMMITTED_LAYOUT_ENTRY_READS.with(|count| count.set(0));
+        let mut token = verify_committed_recovery_evidence(&binding).unwrap();
+        let reads_after_initial = COMMITTED_LAYOUT_ENTRY_READS.with(std::cell::Cell::get);
+        assert_eq!(reads_after_initial, 6);
+        assert!(token.retained_evidence.as_ref().unwrap().layouts.is_empty());
+        let paths = journal_paths(&root, &source);
+        let sibling = paths.operations.join("allowed-operation-sibling");
+        fs::create_dir(&sibling).unwrap();
+        set_private_dir_mode(&sibling).unwrap();
+        revalidate_verified_committed_recovery_evidence_token(&token, &binding).unwrap();
+        assert_eq!(
+            COMMITTED_LAYOUT_ENTRY_READS.with(std::cell::Cell::get),
+            reads_after_initial
+        );
+        release_verified_committed_recovery_evidence_token(&mut token);
+
+        for attack in ["transient-entry", "timestamp"] {
+            let (_temp, root) = operation_root();
+            let source = make_binding(&format!("operation-committed-recovery-root-{attack}"));
+            let prepared = prepare_mutation_journal(&root, &source, write_artifact).unwrap();
+            let binding = committed_binding(
+                &root,
+                &source,
+                prepared.commitment_sha256(),
+                0,
+                CommittedRecoveryPhase::Mutating,
+                source.owner.clone(),
+            );
+            let mut token = verify_committed_recovery_evidence(&binding).unwrap();
+            let paths = journal_paths(&root, &source);
+            if attack == "transient-entry" {
+                let transient = paths.recovery_root.join("transient");
+                fs::write(&transient, b"x").unwrap();
+                fs::remove_file(transient).unwrap();
+            } else {
+                File::open(&paths.recovery_root)
+                    .unwrap()
+                    .set_times(
+                        fs::FileTimes::new()
+                            .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1)),
+                    )
+                    .unwrap();
+            }
+            assert_eq!(
+                revalidate_verified_committed_recovery_evidence_token(&token, &binding)
+                    .unwrap_err()
+                    .code(),
+                "RECOVERY_JOURNAL_CORRUPTION",
+                "{attack}"
+            );
+            release_verified_committed_recovery_evidence_token(&mut token);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn committed_verifier_rejects_hash_lineage_validation_and_artifact_failures() {
+        let (_temp, root) = operation_root();
+        let source = make_binding("operation-committed-errors");
+        let prepared = prepare_mutation_journal(&root, &source, write_artifact).unwrap();
+        let mut wrong_hash = committed_binding(
+            &root,
+            &source,
+            &"a".repeat(64),
+            0,
+            CommittedRecoveryPhase::Mutating,
+            source.owner.clone(),
+        );
+        assert_eq!(
+            verify_committed_recovery_evidence(&wrong_hash)
+                .unwrap_err()
+                .code(),
+            "RECOVERY_JOURNAL_CORRUPTION"
+        );
+        wrong_hash.recovery_commitment.record_sha256 = prepared.commitment_sha256().into();
+        wrong_hash.owner.owner_id = "wrong-initial-owner".into();
+        assert_eq!(
+            verify_committed_recovery_evidence(&wrong_hash)
+                .unwrap_err()
+                .code(),
+            "RECOVERY_LINEAGE_INVALID"
+        );
+        wrong_hash.owner = source.owner.clone();
+        wrong_hash.fencing_generation += 1;
+        assert_eq!(
+            verify_committed_recovery_evidence(&wrong_hash)
+                .unwrap_err()
+                .code(),
+            "RECOVERY_LINEAGE_INVALID"
+        );
+
+        let (_temp, root) = operation_root();
+        let mut maximum = make_binding("operation-committed-overflow");
+        maximum.fencing_generation = MAX_JSON_SAFE_INTEGER;
+        let prepared = prepare_mutation_journal(&root, &maximum, write_artifact).unwrap();
+        let overflow = CommittedRecoveryEvidenceBinding::new(
+            root,
+            DATABASE_IDENTITY.into(),
+            maximum.state_revision,
+            maximum.operation_id.clone(),
+            maximum.operation,
+            CommittedRecoveryPhase::Mutating,
+            maximum.owner.clone(),
+            MAX_JSON_SAFE_INTEGER,
+            maximum.intent_created_at.clone(),
+            maximum.intent_updated_at.clone(),
+            committed_commitment(prepared.commitment_sha256(), 1),
+        )
+        .unwrap();
+        assert_eq!(
+            verify_committed_recovery_evidence(&overflow)
+                .unwrap_err()
+                .code(),
+            "RECOVERY_LINEAGE_INVALID"
+        );
+
+        for attack in ["operation", "created", "database", "schema", "checks"] {
+            let (_temp, root) = operation_root();
+            let source = make_binding(&format!("operation-committed-{attack}"));
+            prepare_mutation_journal(&root, &source, write_artifact).unwrap();
+            let paths = journal_paths(&root, &source);
+            let hash = rewrite_prepared_record(&paths, |record| match attack {
+                "operation" => record.operation = RecoveryOperation::Import,
+                "created" => record.created_at = "2026-07-14T12:00:03.000Z".into(),
+                "database" => record.database_identity = "wrong.database".into(),
+                "schema" => record.schema_contract.latest_migration = "018_wrong".into(),
+                "checks" => record.checks.candidate.integrity_check = "failed".into(),
+                _ => unreachable!(),
+            });
+            let binding = committed_binding(
+                &root,
+                &source,
+                &hash,
+                0,
+                CommittedRecoveryPhase::Mutating,
+                source.owner.clone(),
+            );
+            let expected = if matches!(attack, "schema" | "checks") {
+                "RECOVERY_VALIDATION_FAILED"
+            } else {
+                "RECOVERY_LINEAGE_INVALID"
+            };
+            assert_eq!(
+                verify_committed_recovery_evidence(&binding)
+                    .unwrap_err()
+                    .code(),
+                expected,
+                "{attack}"
+            );
+            assert_eq!(retained_descriptor_count(&root), 0);
+        }
+
+        let (_temp, root) = operation_root();
+        let source = make_binding("operation-committed-artifact");
+        let prepared = prepare_mutation_journal(&root, &source, write_artifact).unwrap();
+        let paths = journal_paths(&root, &source);
+        let candidate = paths.artifacts.join(
+            read_names(&paths.artifacts)
+                .unwrap()
+                .into_iter()
+                .find(|name| name.starts_with("candidate-"))
+                .unwrap(),
+        );
+        fs::set_permissions(&candidate, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::write(&candidate, b"tampered").unwrap();
+        fs::set_permissions(&candidate, fs::Permissions::from_mode(0o400)).unwrap();
+        let binding = committed_binding(
+            &root,
+            &source,
+            prepared.commitment_sha256(),
+            0,
+            CommittedRecoveryPhase::Abandoned,
+            source.owner.clone(),
+        );
+        assert_eq!(
+            verify_committed_recovery_evidence(&binding)
+                .unwrap_err()
+                .code(),
+            "RECOVERY_ARTIFACT_CORRUPTION"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn verification_modes_preserve_prepared_and_committed_failed_artifact_open_codes() {
+        use std::os::unix::fs::symlink;
+
+        let (_temp, root) = operation_root();
+        let source = make_binding("operation-mode-specific-artifact-open");
+        let prepared = prepare_mutation_journal(&root, &source, write_artifact).unwrap();
+        let paths = journal_paths(&root, &source);
+        let candidate = paths.artifacts.join(
+            read_names(&paths.artifacts)
+                .unwrap()
+                .into_iter()
+                .find(|name| name.starts_with("candidate-"))
+                .unwrap(),
+        );
+        let outside = root.parent().unwrap().join("outside-artifact-open");
+        fs::copy(&candidate, &outside).unwrap();
+        fs::remove_file(&candidate).unwrap();
+        symlink(&outside, &candidate).unwrap();
+
+        assert_eq!(
+            verify_prepared_mutation_proof(prepared.proof(), &root, &source)
+                .unwrap_err()
+                .code(),
+            "RECOVERY_ARTIFACT_CORRUPTION"
+        );
+        let committed = committed_binding(
+            &root,
+            &source,
+            prepared.commitment_sha256(),
+            0,
+            CommittedRecoveryPhase::Mutating,
+            source.owner.clone(),
+        );
+        assert_eq!(
+            verify_committed_recovery_evidence(&committed)
+                .unwrap_err()
+                .code(),
+            "RECOVERY_FILESYSTEM_FAILURE"
+        );
+        assert_eq!(retained_descriptor_count(&root), 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn committed_revalidation_rejects_all_nine_path_replacements_and_closes_failures() {
+        for boundary in [
+            "operation-root",
+            "recovery-root",
+            "operations-root",
+            "operation",
+            "artifacts",
+            "records",
+            "record",
+            "candidate",
+            "rollback",
+        ] {
+            let (_temp, root) = operation_root();
+            let source = make_binding(&format!("operation-committed-path-{boundary}"));
+            let prepared = prepare_mutation_journal(&root, &source, write_artifact).unwrap();
+            let binding = committed_binding(
+                &root,
+                &source,
+                prepared.commitment_sha256(),
+                0,
+                CommittedRecoveryPhase::Mutating,
+                source.owner.clone(),
+            );
+            let mut token = verify_committed_recovery_evidence(&binding).unwrap();
+            let paths = journal_paths(&root, &source);
+            let artifact_names = read_names(&paths.artifacts).unwrap();
+            let target = match boundary {
+                "operation-root" => root.clone(),
+                "recovery-root" => paths.recovery_root.clone(),
+                "operations-root" => paths.operations.clone(),
+                "operation" => paths.operation.clone(),
+                "artifacts" => paths.artifacts.clone(),
+                "records" => paths.records.clone(),
+                "record" => paths
+                    .records
+                    .join(read_names(&paths.records).unwrap().remove(0)),
+                "candidate" => paths.artifacts.join(
+                    artifact_names
+                        .iter()
+                        .find(|name| name.starts_with("candidate-"))
+                        .unwrap(),
+                ),
+                "rollback" => paths.artifacts.join(
+                    artifact_names
+                        .iter()
+                        .find(|name| name.starts_with("rollback-"))
+                        .unwrap(),
+                ),
+                _ => unreachable!(),
+            };
+            let backup = root.parent().unwrap().join(format!("backup-{boundary}"));
+            fs::rename(&target, &backup).unwrap();
+            copy_and_seal_fixture(&backup, &target);
+            let expected_code = match boundary {
+                "artifacts" | "candidate" | "rollback" => "RECOVERY_ARTIFACT_CORRUPTION",
+                _ => "RECOVERY_JOURNAL_CORRUPTION",
+            };
+            assert_eq!(
+                revalidate_verified_committed_recovery_evidence_token(&token, &binding)
+                    .unwrap_err()
+                    .code(),
+                expected_code,
+                "{boundary}"
+            );
+            release_verified_committed_recovery_evidence_token(&mut token);
+        }
+
+        for layout_attack in ["artifact-sidecar", "artifact-extra", "operation-extra"] {
+            let (_temp, root) = operation_root();
+            let source = make_binding(&format!("operation-committed-layout-{layout_attack}"));
+            let prepared = prepare_mutation_journal(&root, &source, write_artifact).unwrap();
+            let binding = committed_binding(
+                &root,
+                &source,
+                prepared.commitment_sha256(),
+                0,
+                CommittedRecoveryPhase::Mutating,
+                source.owner.clone(),
+            );
+            let mut token = verify_committed_recovery_evidence(&binding).unwrap();
+            let paths = journal_paths(&root, &source);
+            let expected_code = match layout_attack {
+                "artifact-sidecar" => {
+                    fs::write(paths.artifacts.join("candidate.sqlite-wal"), b"sidecar").unwrap();
+                    "RECOVERY_ARTIFACT_CORRUPTION"
+                }
+                "artifact-extra" => {
+                    fs::write(paths.artifacts.join("unexpected"), b"extra").unwrap();
+                    "RECOVERY_ARTIFACT_CORRUPTION"
+                }
+                "operation-extra" => {
+                    fs::write(paths.operation.join("unexpected"), b"extra").unwrap();
+                    "RECOVERY_JOURNAL_CORRUPTION"
+                }
+                _ => unreachable!(),
+            };
+            assert_eq!(
+                revalidate_verified_committed_recovery_evidence_token(&token, &binding)
+                    .unwrap_err()
+                    .code(),
+                expected_code,
+                "{layout_attack}"
+            );
+            release_verified_committed_recovery_evidence_token(&mut token);
+        }
+
+        let (_temp, root) = operation_root();
+        let source = make_binding("operation-committed-retained-syscall");
+        let prepared = prepare_mutation_journal(&root, &source, write_artifact).unwrap();
+        let binding = committed_binding(
+            &root,
+            &source,
+            prepared.commitment_sha256(),
+            0,
+            CommittedRecoveryPhase::Mutating,
+            source.owner.clone(),
+        );
+        let mut token = verify_committed_recovery_evidence(&binding).unwrap();
+        let paths = journal_paths(&root, &source);
+        let rollback = paths.artifacts.join(
+            read_names(&paths.artifacts)
+                .unwrap()
+                .into_iter()
+                .find(|name| name.starts_with("rollback-"))
+                .unwrap(),
+        );
+        fs::rename(&rollback, root.join("missing-rollback")).unwrap();
+        assert_eq!(
+            revalidate_verified_committed_recovery_evidence_token(&token, &binding)
+                .unwrap_err()
+                .code(),
+            "RECOVERY_FILESYSTEM_FAILURE"
+        );
+        release_verified_committed_recovery_evidence_token(&mut token);
+
+        let (_temp, root) = operation_root();
+        let source = make_binding("operation-committed-hash-syscall");
+        let prepared = prepare_mutation_journal(&root, &source, write_artifact).unwrap();
+        let binding = committed_binding(
+            &root,
+            &source,
+            prepared.commitment_sha256(),
+            0,
+            CommittedRecoveryPhase::Mutating,
+            source.owner.clone(),
+        );
+        let paths = journal_paths(&root, &source);
+        let rollback = paths.artifacts.join(
+            read_names(&paths.artifacts)
+                .unwrap()
+                .into_iter()
+                .find(|name| name.starts_with("rollback-"))
+                .unwrap(),
+        );
+        let moved = root.join("missing-hash-rollback");
+        set_inter_artifact_hash_test_hook(Some(Box::new(move || {
+            fs::rename(&rollback, &moved)
+                .map_err(|error| JournalError::filesystem("move rollback test artifact", error))
+        })));
+        assert_eq!(
+            verify_committed_recovery_evidence(&binding)
+                .unwrap_err()
+                .code(),
+            "RECOVERY_FILESYSTEM_FAILURE"
+        );
+        set_inter_artifact_hash_test_hook(None);
+        assert_eq!(retained_descriptor_count(&root), 0);
+
+        let (_temp, root) = operation_root();
+        let source = make_binding("operation-committed-failed-retention");
+        let prepared = prepare_mutation_journal(&root, &source, write_artifact).unwrap();
+        let binding = committed_binding(
+            &root,
+            &source,
+            prepared.commitment_sha256(),
+            0,
+            CommittedRecoveryPhase::Mutating,
+            source.owner.clone(),
+        );
+        set_inter_artifact_hash_test_hook(Some(Box::new(|| {
+            Err(JournalError::new(
+                "RECOVERY_VALIDATION_FAILED",
+                "injected committed inter-hash failure",
+            ))
+        })));
+        assert_eq!(
+            verify_committed_recovery_evidence(&binding)
+                .unwrap_err()
+                .code(),
+            "RECOVERY_VALIDATION_FAILED"
+        );
+        set_inter_artifact_hash_test_hook(None);
+        assert_eq!(retained_descriptor_count(&root), 0);
     }
 
     #[cfg(target_os = "linux")]

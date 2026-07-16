@@ -87,6 +87,28 @@ export interface DatabaseOperationLockPaths {
   readonly registrationMutex: string
 }
 
+declare const recoveryMutationAuthorityBrand: unique symbol
+export interface RecoveryMutationAuthority {
+  readonly [recoveryMutationAuthorityBrand]: true
+}
+
+type RecoveryProcessEvidence = 'dead' | 'live' | 'unavailable' | 'unsupported' | 'reused'
+
+interface RecoveryProcessEvidenceTestHookContext {
+  readonly stage: 'before-committed-verification'
+  readonly owner: Readonly<OwnerEvidence>
+  readonly stateRevision: number
+  readonly mutexPath: string
+  readonly mutexExists: boolean
+}
+
+interface CommittedRecoveryVerificationTestHookContext {
+  readonly stage: 'after-committed-verification'
+  readonly stateRevision: number
+  readonly mutexPath: string
+  readonly mutexExists: boolean
+}
+
 export interface DatabaseOperationLockTestHookContext {
   readonly mutex: RegistrationMutexRecord
   readonly mutexPath: string
@@ -117,6 +139,8 @@ export interface DatabaseOperationLockOptions extends Partial<DatabaseOperationT
       readonly path: string
     }): void
     afterMutexRootStat?(context: { readonly path: string; readonly stat: unknown }): void
+    /** Test-only signal after observing a complete, non-stale held mutex. */
+    afterMutexContention?(context: { readonly mutexPath: string }): void
     beforeMutexPublication?(context: {
       readonly candidatePath: string
       readonly mutexPath: string
@@ -135,6 +159,12 @@ export interface DatabaseOperationLockOptions extends Partial<DatabaseOperationT
     }): void
     beforeMutexRestore?(context: { readonly quarantine: string; readonly mutexPath: string }): void
     directorySync?(context: { readonly path: string }): false | void
+    /** Test-only platform branch seam. Production adapters must not supply this. */
+    platform?(): NodeJS.Platform
+    /** Test-only bounded process-evidence seam. Production adapters must not supply this. */
+    processEvidence?(context: RecoveryProcessEvidenceTestHookContext): RecoveryProcessEvidence
+    /** Test-only post-verification race barrier. Production adapters must not supply this. */
+    afterCommittedRecoveryVerification?(context: CommittedRecoveryVerificationTestHookContext): void
   }
 }
 
@@ -180,10 +210,10 @@ export class DatabaseOperationLock {
     metadata?: Record<string, unknown>
   ): ExclusiveIntent
   drainExclusiveIntent(intent: ExclusiveIntent): ExclusiveIntent
-  beginExclusiveMutation(
-    intent: ExclusiveIntent,
-    proof: PreparedMutationProof
-  ): ExclusiveIntent
+  beginExclusiveMutation(intent: ExclusiveIntent, proof: PreparedMutationProof): ExclusiveIntent
+  claimRecoveryAuthority(): RecoveryMutationAuthority
+  assertRecoveryAuthority(authority: RecoveryMutationAuthority): ExclusiveIntent
+  releaseRecoveryAuthority(authority: RecoveryMutationAuthority): void
   completeExclusiveMutation(intent: ExclusiveIntent): ExclusiveIntent
   clearExclusiveIntent(intent: ExclusiveIntent): boolean
   cancelExclusiveIntent(intent: ExclusiveIntent): boolean

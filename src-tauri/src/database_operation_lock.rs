@@ -6,9 +6,9 @@ use std::{
     error::Error,
     fmt,
     fs::{self, File, OpenOptions},
-    io::{self, Write},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Child, Command, ExitStatus, Stdio},
     thread,
     time::{Duration as StdDuration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -26,10 +26,14 @@ use uuid::Uuid;
 
 use crate::database_operation_recovery_journal::{
     canonical_safe_integer, consume_verified_prepared_mutation_token,
-    release_verified_prepared_mutation_token, revalidate_verified_prepared_mutation_token,
-    verify_prepared_mutation_proof, JournalError as RecoveryJournalError, JournalIntentBinding,
+    release_verified_committed_recovery_evidence_token, release_verified_prepared_mutation_token,
+    revalidate_verified_committed_recovery_evidence_token,
+    revalidate_verified_prepared_mutation_token, verify_committed_recovery_evidence,
+    verify_prepared_mutation_proof, CommittedRecoveryCommitment, CommittedRecoveryEvidenceBinding,
+    CommittedRecoveryPhase, JournalError as RecoveryJournalError, JournalIntentBinding,
     JournalIntentPhase, JournalOwnerEvidence, JournalRuntimeId, PreparedCommitment,
     PreparedMutationProof, RecoveryOperation as JournalRecoveryOperation,
+    VerifiedCommittedRecoveryEvidenceToken,
 };
 
 #[cfg(test)]
@@ -344,11 +348,63 @@ enum MutexInspection {
     },
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RecoveryCommitmentData {
+    protocol: String,
+    version: u64,
+    record_sha256: String,
+    durability: String,
+    claim_sequence: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RecoveryAuthorityLifecycle {
+    Active,
+    Released,
+    Fenced,
+}
+
+struct RecoveryMutationAuthority {
+    token: Option<VerifiedCommittedRecoveryEvidenceToken>,
+    source_binding: CommittedRecoveryEvidenceBinding,
+    claimed_state: OperationState,
+    claimed_revision: u64,
+    claimed_owner: OwnerEvidence,
+    claimed_generation: u64,
+    claimed_sequence: u64,
+    origin_id: String,
+    lifecycle: RecoveryAuthorityLifecycle,
+}
+
+impl Drop for RecoveryMutationAuthority {
+    fn drop(&mut self) {
+        if let Some(mut token) = self.token.take() {
+            release_verified_committed_recovery_evidence_token(&mut token);
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RecoveryProcessEvidence {
+    Dead,
+    Live,
+    Unavailable,
+    Unsupported,
+    Reused,
+}
+
+#[derive(Clone, Debug)]
+struct DeadRecoveryOwnerProof {
+    source_state: OperationState,
+    source_owner: OwnerEvidence,
+}
+
 #[derive(Debug)]
 struct DatabaseOperationLock {
     database_identity: String,
     runtime_id: RuntimeId,
     owner_id: String,
+    recovery_authority_origin_id: String,
     paths: LockPaths,
     timing: Timing,
     max_state_records: usize,
@@ -372,6 +428,18 @@ struct DatabaseOperationLock {
     after_proof_verification_barrier: Option<Arc<Barrier>>,
     #[cfg(test)]
     before_final_fence_barrier: Option<Arc<Barrier>>,
+    #[cfg(test)]
+    committed_recovery_verification_barrier: Option<Arc<Barrier>>,
+    #[cfg(test)]
+    mutex_contention_barrier: Option<Arc<Barrier>>,
+    #[cfg(test)]
+    recovery_platform_linux: bool,
+    #[cfg(test)]
+    recovery_process_evidence: Option<RecoveryProcessEvidence>,
+    #[cfg(test)]
+    recovery_process_evidence_invocations: usize,
+    #[cfg(test)]
+    recovery_process_evidence_saw_mutex: bool,
 }
 
 impl DatabaseOperationLock {
@@ -399,6 +467,7 @@ impl DatabaseOperationLock {
             database_identity,
             runtime_id,
             owner_id: Uuid::new_v4().to_string(),
+            recovery_authority_origin_id: Uuid::new_v4().to_string(),
             paths: LockPaths {
                 host_identity: root_dir.join("machine-host-identity.json"),
                 state_records: operation_root.join("state-records"),
@@ -429,6 +498,18 @@ impl DatabaseOperationLock {
             after_proof_verification_barrier: None,
             #[cfg(test)]
             before_final_fence_barrier: None,
+            #[cfg(test)]
+            committed_recovery_verification_barrier: None,
+            #[cfg(test)]
+            mutex_contention_barrier: None,
+            #[cfg(test)]
+            recovery_platform_linux: cfg!(target_os = "linux"),
+            #[cfg(test)]
+            recovery_process_evidence: None,
+            #[cfg(test)]
+            recovery_process_evidence_invocations: 0,
+            #[cfg(test)]
+            recovery_process_evidence_saw_mutex: false,
         })
     }
 
@@ -579,7 +660,7 @@ impl DatabaseOperationLock {
             }
             previous.leases = retained;
             let should_remove_intent = previous.exclusive_intent.as_ref().is_some_and(|intent| {
-                intent.phase != ExclusivePhase::Mutating && previous.leases.is_empty()
+                !retain_intent_for_recovery(intent) && previous.leases.is_empty()
             });
             let mut abandoned = false;
             if should_remove_intent {
@@ -796,6 +877,219 @@ impl DatabaseOperationLock {
         result
     }
 
+    fn claim_recovery_authority(&mut self) -> LockResult<RecoveryMutationAuthority> {
+        self.require_operational_owner()?;
+        self.require_recovery_claim_linux()?;
+        let source_state = self.read_authoritative_state()?;
+        let source_commitment = require_recovery_claim_source(&source_state)?;
+        let next_revision =
+            increment_recovery_claim_counter(source_state.state_revision, "stateRevision")?;
+        let next_generation = increment_recovery_claim_counter(
+            source_state.fencing_generation_high_water,
+            "fencingGenerationHighWater",
+        )?;
+        let next_claim_sequence = increment_recovery_claim_counter(
+            source_commitment.claim_sequence,
+            "shikin.recovery.claimSequence",
+        )?;
+        let claimant = self.ensure_owner()?;
+        let dead_owner_proof = self.prove_recovery_owner_dead(&source_state, &claimant.host_id)?;
+        let source_binding = committed_recovery_binding(&source_state, &self.paths.operation_root)?;
+        let token = verify_committed_recovery_evidence(&source_binding)
+            .map_err(LockError::from_recovery_journal)?;
+        #[cfg(test)]
+        if let Some(barrier) = &self.committed_recovery_verification_barrier {
+            barrier.wait();
+            barrier.wait();
+        }
+        let token = RefCell::new(Some(token));
+        let claimed_state = RefCell::new(None::<OperationState>);
+        let claimant_for_mutation = claimant.clone();
+        let source_binding_for_fence = source_binding.clone();
+        self.mutate_state_with_options(
+            |mut previous, now| {
+                if previous != dead_owner_proof.source_state
+                    || previous
+                        .exclusive_intent
+                        .as_ref()
+                        .map(|intent| &intent.owner)
+                        != Some(&dead_owner_proof.source_owner)
+                {
+                    return Err(LockError::new(
+                        "RECOVERY_CLAIM_FENCED",
+                        "recovery source changed after committed verification",
+                    ));
+                }
+                let current = previous
+                    .exclusive_intent
+                    .as_mut()
+                    .expect("eligible recovery source has an intent");
+                current.phase = ExclusivePhase::Mutating;
+                current.owner = claimant_for_mutation.clone();
+                current.fencing_generation = next_generation;
+                current.updated_at = format_timestamp(now)?;
+                current.completed_at = None;
+                current
+                    .metadata
+                    .as_mut()
+                    .expect("eligible recovery source has metadata")
+                    .insert(
+                        "shikin.recovery.claimSequence".into(),
+                        JsonValue::from(next_claim_sequence),
+                    );
+                previous.fencing_generation_high_water = next_generation;
+                Ok(Mutation::Change(Box::new(previous), ()))
+            },
+            StatePublicationOptions {
+                before_final_fence: |context: StatePublicationContext| {
+                    let borrowed = token.borrow();
+                    revalidate_verified_committed_recovery_evidence_token(
+                        borrowed.as_ref().ok_or_else(|| {
+                            LockError::new(
+                                "RECOVERY_EVIDENCE_TOKEN_RELEASED",
+                                "committed recovery token is unavailable",
+                            )
+                        })?,
+                        &source_binding_for_fence,
+                    )
+                    .map_err(LockError::from_recovery_journal)?;
+                    claimed_state.replace(Some(context.next_state));
+                    Ok(())
+                },
+                on_committed: |_| {},
+                durability_policy: DurabilityPolicy::RequiredForMutationAuthority,
+            },
+        )?;
+        let claimed_state = claimed_state.into_inner().ok_or_else(|| {
+            LockError::new(
+                "RECOVERY_CLAIM_FENCED",
+                "published recovery claim state was not captured",
+            )
+        })?;
+        if claimed_state.state_revision != next_revision
+            || claimed_state
+                .exclusive_intent
+                .as_ref()
+                .map(|intent| &intent.owner)
+                != Some(&claimant)
+        {
+            return Err(LockError::new(
+                "RECOVERY_CLAIM_FENCED",
+                "published recovery claim did not match the staged successor",
+            ));
+        }
+        let token = token.into_inner().ok_or_else(|| {
+            LockError::new(
+                "RECOVERY_EVIDENCE_TOKEN_RELEASED",
+                "committed recovery token was not retained",
+            )
+        })?;
+        Ok(RecoveryMutationAuthority {
+            token: Some(token),
+            source_binding,
+            claimed_state,
+            claimed_revision: next_revision,
+            claimed_owner: claimant,
+            claimed_generation: next_generation,
+            claimed_sequence: next_claim_sequence,
+            origin_id: self.recovery_authority_origin_id.clone(),
+            lifecycle: RecoveryAuthorityLifecycle::Active,
+        })
+    }
+
+    fn assert_recovery_authority(
+        &mut self,
+        authority: &mut RecoveryMutationAuthority,
+    ) -> LockResult<ExclusiveIntent> {
+        if authority.origin_id != self.recovery_authority_origin_id {
+            return Err(LockError::new(
+                "RECOVERY_AUTHORITY_INVALID",
+                "recovery authority belongs to another lock",
+            ));
+        }
+        match authority.lifecycle {
+            RecoveryAuthorityLifecycle::Released => {
+                return Err(LockError::new(
+                    "RECOVERY_AUTHORITY_RELEASED",
+                    "recovery authority was released",
+                ))
+            }
+            RecoveryAuthorityLifecycle::Fenced => {
+                return Err(LockError::new(
+                    "RECOVERY_AUTHORITY_FENCED",
+                    "recovery authority was fenced",
+                ))
+            }
+            RecoveryAuthorityLifecycle::Active => {}
+        }
+        if self.fenced || self.durability_uncertain {
+            fence_recovery_authority(authority);
+            return Err(LockError::new(
+                "RECOVERY_AUTHORITY_FENCED",
+                "originating lock cannot exercise recovery authority",
+            ));
+        }
+        let state = match self.read_authoritative_state() {
+            Ok(state) => state,
+            Err(error) => {
+                fence_recovery_authority(authority);
+                return Err(error);
+            }
+        };
+        let current = state.exclusive_intent.as_ref();
+        let retained_match = state == authority.claimed_state
+            && state.state_revision == authority.claimed_revision
+            && current.map(|intent| &intent.owner) == Some(&authority.claimed_owner)
+            && current.map(|intent| intent.fencing_generation)
+                == Some(authority.claimed_generation)
+            && state.fencing_generation_high_water == authority.claimed_generation
+            && current.and_then(recovery_claim_sequence) == Some(authority.claimed_sequence)
+            && current.map(|intent| intent.phase) == Some(ExclusivePhase::Mutating);
+        if !retained_match {
+            fence_recovery_authority(authority);
+            return Err(LockError::new(
+                "RECOVERY_AUTHORITY_FENCED",
+                "persisted recovery claim no longer matches retained authority",
+            ));
+        }
+        let revalidation = authority
+            .token
+            .as_ref()
+            .ok_or_else(|| {
+                LockError::new(
+                    "RECOVERY_AUTHORITY_FENCED",
+                    "recovery authority token is unavailable",
+                )
+            })
+            .and_then(|token| {
+                revalidate_verified_committed_recovery_evidence_token(
+                    token,
+                    &authority.source_binding,
+                )
+                .map(|_| ())
+                .map_err(LockError::from_recovery_journal)
+            });
+        if let Err(error) = revalidation {
+            fence_recovery_authority(authority);
+            return Err(error);
+        }
+        Ok(current
+            .expect("retained recovery state has an intent")
+            .clone())
+    }
+
+    fn release_recovery_authority(&self, authority: &mut RecoveryMutationAuthority) {
+        if authority.origin_id != self.recovery_authority_origin_id
+            || authority.lifecycle != RecoveryAuthorityLifecycle::Active
+        {
+            return;
+        }
+        if let Some(mut token) = authority.token.take() {
+            release_verified_committed_recovery_evidence_token(&mut token);
+        }
+        authority.lifecycle = RecoveryAuthorityLifecycle::Released;
+    }
+
     fn complete_exclusive_mutation(
         &mut self,
         evidence: &ExclusiveIntent,
@@ -812,6 +1106,7 @@ impl DatabaseOperationLock {
                     "intent is not high-water owner",
                 ));
             }
+            require_ordinary_mutation_authority(current)?;
             let timestamp = format_timestamp(now)?;
             current.phase = ExclusivePhase::Completed;
             current.updated_at = timestamp.clone();
@@ -826,7 +1121,8 @@ impl DatabaseOperationLock {
         self.require_owner(&evidence.owner, "INTENT_FENCED")?;
         let evidence = evidence.clone();
         self.mutate_state(move |mut previous, _| {
-            require_intent(&mut previous, &evidence, &[ExclusivePhase::Completed])?;
+            let current = require_intent(&mut previous, &evidence, &[ExclusivePhase::Completed])?;
+            require_ordinary_mutation_authority(current)?;
             previous.exclusive_intent = None;
             Ok(Mutation::Change(Box::new(previous), true))
         })
@@ -911,6 +1207,7 @@ impl DatabaseOperationLock {
                 "intent authority, phase, or high-water evidence changed",
             ));
         }
+        require_ordinary_mutation_authority(&current)?;
         Ok(current)
     }
 
@@ -1063,6 +1360,93 @@ impl DatabaseOperationLock {
     fn with_release_quarantine_barrier(mut self, barrier: Arc<Barrier>) -> Self {
         self.release_quarantine_barrier = Some(barrier);
         self
+    }
+
+    #[cfg(test)]
+    fn with_committed_recovery_verification_barrier(mut self, barrier: Arc<Barrier>) -> Self {
+        self.committed_recovery_verification_barrier = Some(barrier);
+        self
+    }
+
+    #[cfg(test)]
+    fn with_mutex_contention_barrier(mut self, barrier: Arc<Barrier>) -> Self {
+        self.mutex_contention_barrier = Some(barrier);
+        self
+    }
+
+    #[cfg(test)]
+    fn with_recovery_platform_linux(mut self, supported: bool) -> Self {
+        self.recovery_platform_linux = supported;
+        self
+    }
+
+    #[cfg(test)]
+    fn with_recovery_process_evidence(mut self, evidence: RecoveryProcessEvidence) -> Self {
+        self.recovery_process_evidence = Some(evidence);
+        self
+    }
+
+    fn require_recovery_claim_linux(&self) -> LockResult<()> {
+        #[cfg(test)]
+        let supported = self.recovery_platform_linux;
+        #[cfg(not(test))]
+        let supported = cfg!(target_os = "linux");
+        if !supported {
+            return Err(LockError::new(
+                "RECOVERY_DURABILITY_FAILURE",
+                "recovery claims require Linux durability guarantees",
+            ));
+        }
+        Ok(())
+    }
+
+    fn prove_recovery_owner_dead(
+        &mut self,
+        source_state: &OperationState,
+        current_host_id: &str,
+    ) -> LockResult<DeadRecoveryOwnerProof> {
+        let source_owner = source_state
+            .exclusive_intent
+            .as_ref()
+            .expect("eligible recovery source has an owner")
+            .owner
+            .clone();
+        if source_owner.host_id != current_host_id {
+            return Err(LockError::new(
+                "RECOVERY_OWNER_NOT_DEAD",
+                "recovery source belongs to another host",
+            ));
+        }
+        #[cfg(test)]
+        let evidence = if let Some(evidence) = self.recovery_process_evidence {
+            self.recovery_process_evidence_invocations += 1;
+            self.recovery_process_evidence_saw_mutex |= self.paths.registration_mutex.exists();
+            evidence
+        } else {
+            inspect_recovery_process_evidence(&source_owner)?
+        };
+        #[cfg(not(test))]
+        let evidence = inspect_recovery_process_evidence(&source_owner)?;
+        match evidence {
+            RecoveryProcessEvidence::Dead | RecoveryProcessEvidence::Reused => {
+                Ok(DeadRecoveryOwnerProof {
+                    source_state: source_state.clone(),
+                    source_owner,
+                })
+            }
+            RecoveryProcessEvidence::Live => Err(LockError::new(
+                "RECOVERY_OWNER_NOT_DEAD",
+                "recovery source owner is still alive",
+            )),
+            RecoveryProcessEvidence::Unavailable => Err(LockError::new(
+                "PROCESS_EVIDENCE_UNAVAILABLE",
+                "recovery source process evidence is unavailable",
+            )),
+            RecoveryProcessEvidence::Unsupported => Err(LockError::new(
+                "PROCESS_EVIDENCE_UNSUPPORTED",
+                "recovery source process inspection is unsupported",
+            )),
+        }
     }
 
     fn inject_fault(&self, _point: &'static str) -> LockResult<()> {
@@ -1425,6 +1809,12 @@ impl DatabaseOperationLock {
                 if stale && self.quarantine_stale_mutex(&existing)? {
                     continue;
                 }
+                #[cfg(test)]
+                if !stale && matches!(&existing, MutexInspection::Complete { .. }) {
+                    if let Some(barrier) = self.mutex_contention_barrier.take() {
+                        barrier.wait();
+                    }
+                }
                 if Instant::now() >= deadline {
                     return Err(LockError::new(
                         "MUTEX_BUSY",
@@ -1766,6 +2156,167 @@ fn mutation_entry_binding(
         current.metadata.clone().map(JsonValue::Object),
     )
     .map_err(LockError::from_recovery_journal)
+}
+
+fn recovery_commitment_data(
+    intent: &ExclusiveIntent,
+) -> LockResult<Option<RecoveryCommitmentData>> {
+    if !validate_recovery_commitment_metadata(intent)? {
+        return Ok(None);
+    }
+    let metadata = intent
+        .metadata
+        .as_ref()
+        .expect("validated recovery commitment has metadata");
+    Ok(Some(RecoveryCommitmentData {
+        protocol: metadata["shikin.recovery.protocol"]
+            .as_str()
+            .expect("validated protocol")
+            .into(),
+        version: metadata["shikin.recovery.version"]
+            .as_number()
+            .and_then(canonical_safe_integer)
+            .expect("validated version"),
+        record_sha256: metadata["shikin.recovery.recordSha256"]
+            .as_str()
+            .expect("validated record hash")
+            .into(),
+        durability: metadata["shikin.recovery.durability"]
+            .as_str()
+            .expect("validated durability")
+            .into(),
+        claim_sequence: metadata["shikin.recovery.claimSequence"]
+            .as_number()
+            .and_then(canonical_safe_integer)
+            .expect("validated claim sequence"),
+    }))
+}
+
+fn recovery_claim_sequence(intent: &ExclusiveIntent) -> Option<u64> {
+    intent
+        .metadata
+        .as_ref()?
+        .get("shikin.recovery.claimSequence")?
+        .as_number()
+        .and_then(canonical_safe_integer)
+}
+
+fn require_recovery_claim_source(state: &OperationState) -> LockResult<RecoveryCommitmentData> {
+    let intent = state.exclusive_intent.as_ref();
+    let commitment = intent.map(recovery_commitment_data).transpose()?.flatten();
+    if !state.leases.is_empty()
+        || intent.is_none()
+        || !matches!(
+            intent.map(|value| value.phase),
+            Some(ExclusivePhase::Mutating | ExclusivePhase::Abandoned)
+        )
+        || intent
+            .and_then(|value| value.completed_at.as_ref())
+            .is_some()
+        || commitment.is_none()
+        || intent.map(|value| value.fencing_generation) != Some(state.fencing_generation_high_water)
+    {
+        return Err(LockError::new(
+            "RECOVERY_CLAIM_FENCED",
+            "persisted state is not eligible for recovery claim",
+        ));
+    }
+    Ok(commitment.expect("eligible recovery source has a commitment"))
+}
+
+fn committed_recovery_binding(
+    state: &OperationState,
+    operation_root: &Path,
+) -> LockResult<CommittedRecoveryEvidenceBinding> {
+    let intent = state
+        .exclusive_intent
+        .as_ref()
+        .ok_or_else(|| LockError::new("RECOVERY_CLAIM_FENCED", "recovery intent is absent"))?;
+    let commitment = recovery_commitment_data(intent)?
+        .ok_or_else(|| LockError::new("RECOVERY_CLAIM_FENCED", "recovery commitment is absent"))?;
+    let commitment = CommittedRecoveryCommitment::new(
+        commitment.protocol,
+        commitment.version,
+        commitment.record_sha256,
+        commitment.durability,
+        commitment.claim_sequence,
+    )
+    .map_err(LockError::from_recovery_journal)?;
+    CommittedRecoveryEvidenceBinding::new(
+        operation_root.to_path_buf(),
+        state.database_identity.clone(),
+        state.state_revision,
+        intent.operation_id.clone(),
+        match intent.operation {
+            DatabaseOperation::Restore => JournalRecoveryOperation::Restore,
+            DatabaseOperation::Import => JournalRecoveryOperation::Import,
+        },
+        match intent.phase {
+            ExclusivePhase::Mutating => CommittedRecoveryPhase::Mutating,
+            ExclusivePhase::Abandoned => CommittedRecoveryPhase::Abandoned,
+            _ => {
+                return Err(LockError::new(
+                    "RECOVERY_CLAIM_FENCED",
+                    "recovery intent phase is ineligible",
+                ))
+            }
+        },
+        JournalOwnerEvidence::new(
+            intent.owner.owner_id.clone(),
+            match intent.owner.runtime_id {
+                RuntimeId::Cli => JournalRuntimeId::Cli,
+                RuntimeId::Mcp => JournalRuntimeId::Mcp,
+                RuntimeId::BrowserDataServer => JournalRuntimeId::BrowserDataServer,
+                RuntimeId::Tauri => JournalRuntimeId::Tauri,
+            },
+            intent.owner.host_id.clone(),
+            intent.owner.process_id,
+            intent.owner.process_started_at.clone(),
+        )
+        .map_err(LockError::from_recovery_journal)?,
+        intent.fencing_generation,
+        intent.created_at.clone(),
+        intent.updated_at.clone(),
+        commitment,
+    )
+    .map_err(LockError::from_recovery_journal)
+}
+
+fn increment_recovery_claim_counter(value: u64, label: &str) -> LockResult<u64> {
+    if value >= MAX_JSON_SAFE_INTEGER {
+        return Err(LockError::new(
+            "COUNTER_OVERFLOW",
+            format!("{label} cannot exceed the JSON safe-integer limit"),
+        ));
+    }
+    Ok(value + 1)
+}
+
+fn require_ordinary_mutation_authority(intent: &ExclusiveIntent) -> LockResult<()> {
+    if recovery_claim_sequence(intent).unwrap_or(0) > 0 {
+        return Err(LockError::new(
+            "RECOVERY_AUTHORITY_REQUIRED",
+            "claimed mutation requires opaque recovery authority",
+        ));
+    }
+    Ok(())
+}
+
+fn retain_intent_for_recovery(intent: &ExclusiveIntent) -> bool {
+    let has_commitment = recovery_commitment_data(intent).ok().flatten().is_some();
+    intent.phase == ExclusivePhase::Mutating
+        || (intent.phase == ExclusivePhase::Abandoned && has_commitment)
+        || recovery_claim_sequence(intent).unwrap_or(0) > 0
+}
+
+fn fence_recovery_authority(authority: &mut RecoveryMutationAuthority) {
+    if authority.lifecycle != RecoveryAuthorityLifecycle::Active {
+        return;
+    }
+    if let Some(mut token) = authority.token.take() {
+        release_verified_committed_recovery_evidence_token(&mut token);
+    }
+    authority.lifecycle = RecoveryAuthorityLifecycle::Fenced;
 }
 
 fn require_intent<'a>(
@@ -2280,6 +2831,25 @@ fn owner_demonstrably_dead(
     }
 }
 
+fn inspect_recovery_process_evidence(owner: &OwnerEvidence) -> LockResult<RecoveryProcessEvidence> {
+    #[cfg(target_os = "linux")]
+    {
+        match linux_process_started_at(owner.process_id) {
+            Ok(started_at) if started_at == owner.process_started_at => {
+                Ok(RecoveryProcessEvidence::Live)
+            }
+            Ok(_) => Ok(RecoveryProcessEvidence::Reused),
+            Err(error) if error.code == "PROCESS_NOT_FOUND" => Ok(RecoveryProcessEvidence::Dead),
+            Err(_) => Ok(RecoveryProcessEvidence::Unavailable),
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = owner;
+        Ok(RecoveryProcessEvidence::Unsupported)
+    }
+}
+
 fn current_process_started_at() -> LockResult<String> {
     #[cfg(target_os = "linux")]
     {
@@ -2293,15 +2863,23 @@ fn current_process_started_at() -> LockResult<String> {
 
 #[cfg(target_os = "linux")]
 fn linux_process_started_at(process_id: u32) -> LockResult<String> {
+    let (boot_seconds, ticks_per_second) = linux_process_inspection_substrate()?;
     let source = match fs::read_to_string(format!("/proc/{process_id}/stat")) {
         Ok(source) => source,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Err(LockError::new(
+            return Err(LockError::with_source(
                 "PROCESS_NOT_FOUND",
                 "process does not exist",
+                error,
             ));
         }
-        Err(error) => return Err(LockError::io("read Linux process stat", error)),
+        Err(error) => {
+            return Err(LockError::with_source(
+                "PROCESS_EVIDENCE_UNAVAILABLE",
+                "could not read Linux process evidence",
+                error,
+            ))
+        }
     };
     let closing = source
         .rfind(')')
@@ -2312,18 +2890,122 @@ fn linux_process_started_at(process_id: u32) -> LockResult<String> {
         .ok_or_else(|| LockError::new("PROCESS_EVIDENCE_UNAVAILABLE", "missing start ticks"))?
         .parse::<i128>()
         .map_err(|error| LockError::new("PROCESS_EVIDENCE_UNAVAILABLE", error.to_string()))?;
-    let boot_source = fs::read_to_string("/proc/stat")
-        .map_err(|error| LockError::io("read Linux boot time", error))?;
+    if start_ticks < 0 {
+        return Err(LockError::new(
+            "PROCESS_EVIDENCE_UNAVAILABLE",
+            "negative Linux process start ticks",
+        ));
+    }
+    format_timestamp(boot_seconds * 1_000 + (start_ticks * 1_000 / ticks_per_second))
+}
+
+struct BoundedProcessOutput {
+    status: ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    timed_out: bool,
+}
+
+fn collect_child_output_bounded(
+    child: &mut Child,
+    timeout: StdDuration,
+) -> io::Result<BoundedProcessOutput> {
+    let deadline = Instant::now() + timeout;
+    let (status, timed_out) = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break (status, false),
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(StdDuration::from_millis(10));
+            }
+            Ok(None) => {
+                let kill_result = child.kill();
+                let wait_result = child.wait();
+                if let Err(error) = kill_result {
+                    if wait_result.is_err() {
+                        return Err(error);
+                    }
+                }
+                break (wait_result?, true);
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                if let Some(mut stdout) = child.stdout.take() {
+                    let mut discarded = Vec::new();
+                    let _ = stdout.read_to_end(&mut discarded);
+                }
+                if let Some(mut stderr) = child.stderr.take() {
+                    let mut discarded = Vec::new();
+                    let _ = stderr.read_to_end(&mut discarded);
+                }
+                return Err(error);
+            }
+        }
+    };
+    let mut stdout_bytes = Vec::new();
+    if let Some(mut stdout) = child.stdout.take() {
+        stdout.read_to_end(&mut stdout_bytes)?;
+    }
+    let mut stderr_bytes = Vec::new();
+    if let Some(mut stderr) = child.stderr.take() {
+        stderr.read_to_end(&mut stderr_bytes)?;
+    }
+    Ok(BoundedProcessOutput {
+        status,
+        stdout: stdout_bytes,
+        stderr: stderr_bytes,
+        timed_out,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_inspection_substrate() -> LockResult<(i128, i128)> {
+    let boot_source = fs::read_to_string("/proc/stat").map_err(|error| {
+        LockError::with_source(
+            "PROCESS_EVIDENCE_UNAVAILABLE",
+            "could not read Linux boot evidence",
+            error,
+        )
+    })?;
     let boot_seconds = boot_source
         .lines()
         .find_map(|line| line.strip_prefix("btime "))
         .ok_or_else(|| LockError::new("PROCESS_EVIDENCE_UNAVAILABLE", "missing boot time"))?
         .parse::<i128>()
         .map_err(|error| LockError::new("PROCESS_EVIDENCE_UNAVAILABLE", error.to_string()))?;
-    let ticks = Command::new("getconf")
+    if boot_seconds < 0 {
+        return Err(LockError::new(
+            "PROCESS_EVIDENCE_UNAVAILABLE",
+            "negative Linux boot time",
+        ));
+    }
+    let mut ticks_child = Command::new("getconf")
         .arg("CLK_TCK")
-        .output()
-        .map_err(|error| LockError::io("run getconf CLK_TCK", error))?;
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| {
+            LockError::with_source(
+                "PROCESS_EVIDENCE_UNAVAILABLE",
+                "could not run getconf CLK_TCK",
+                error,
+            )
+        })?;
+    let ticks = collect_child_output_bounded(&mut ticks_child, StdDuration::from_secs(5)).map_err(
+        |error| {
+            LockError::with_source(
+                "PROCESS_EVIDENCE_UNAVAILABLE",
+                "could not collect getconf CLK_TCK",
+                error,
+            )
+        },
+    )?;
+    if ticks.timed_out {
+        return Err(LockError::new(
+            "PROCESS_EVIDENCE_UNAVAILABLE",
+            "getconf CLK_TCK timed out",
+        ));
+    }
     if !ticks.status.success() {
         return Err(LockError::new(
             "PROCESS_EVIDENCE_UNAVAILABLE",
@@ -2341,7 +3023,7 @@ fn linux_process_started_at(process_id: u32) -> LockResult<String> {
             "invalid clock tick rate",
         ));
     }
-    format_timestamp(boot_seconds * 1_000 + (start_ticks * 1_000 / ticks_per_second))
+    Ok((boot_seconds, ticks_per_second))
 }
 
 #[cfg(all(unix, not(target_os = "linux")))]
@@ -2765,9 +3447,11 @@ fn is_directory_rename_collision(error: &io::Error, destination: &Path) -> bool 
     ) {
         return true;
     }
-    error.kind() == io::ErrorKind::PermissionDenied
-        && fs::symlink_metadata(destination)
-            .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+    matches!(
+        error.kind(),
+        io::ErrorKind::PermissionDenied | io::ErrorKind::NotFound
+    ) && fs::symlink_metadata(destination)
+        .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
 }
 
 fn read_entry_names(path: &Path) -> LockResult<Vec<String>> {
@@ -2954,6 +3638,8 @@ mod tests {
         prepare_mutation_journal, set_inter_artifact_hash_test_hook, ArtifactChecks,
         PreparedMutationJournal,
     };
+    #[cfg(target_os = "linux")]
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tempfile::TempDir;
 
     const IDENTITY: &str = SHIKIN_DATABASE_IDENTITY;
@@ -2972,8 +3658,11 @@ mod tests {
         .unwrap()
     }
 
-    fn error_code<T: fmt::Debug>(result: LockResult<T>) -> &'static str {
-        result.unwrap_err().code
+    fn error_code<T>(result: LockResult<T>) -> &'static str {
+        match result {
+            Ok(_) => panic!("expected lock operation to fail"),
+            Err(error) => error.code,
+        }
     }
 
     #[cfg(target_os = "linux")]
@@ -2988,6 +3677,63 @@ mod tests {
             Ok(ArtifactChecks::all_ok())
         })
         .unwrap()
+    }
+
+    #[cfg(target_os = "linux")]
+    fn recovery_claim_source(root: &TempDir, phase: ExclusivePhase) -> DatabaseOperationLock {
+        let mut source = lock(root, RuntimeId::Cli);
+        let lease = source.register_runtime_lease().unwrap();
+        let mut metadata = JsonMap::new();
+        metadata.insert("nested".into(), serde_json::json!({"preserved": [true, 7]}));
+        let mut intent = source
+            .acquire_exclusive_intent(DatabaseOperation::Restore, Some(metadata))
+            .unwrap();
+        intent = source.drain_exclusive_intent(&intent).unwrap();
+        source.release_runtime_lease(&lease).unwrap();
+        intent = source.drain_exclusive_intent(&intent).unwrap();
+        let prepared = prepare_proof(&mut source, &intent);
+        source
+            .begin_exclusive_mutation(&intent, prepared.proof())
+            .unwrap();
+        if phase == ExclusivePhase::Abandoned {
+            let mut state = source.read_operation_state().unwrap();
+            let timestamp = format_timestamp(source.now_ms().unwrap()).unwrap();
+            let current = state.exclusive_intent.as_mut().unwrap();
+            current.phase = ExclusivePhase::Abandoned;
+            current.updated_at = timestamp.clone();
+            state.updated_at = timestamp;
+            publish_test_state(&source, &state);
+        }
+        source
+    }
+
+    #[cfg(target_os = "linux")]
+    fn recovery_claimant(root: &TempDir, runtime: RuntimeId) -> DatabaseOperationLock {
+        lock(root, runtime).with_recovery_process_evidence(RecoveryProcessEvidence::Dead)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn snapshot_tree_bytes(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+        fn visit(root: &Path, path: &Path, entries: &mut Vec<(PathBuf, Vec<u8>)>) {
+            let mut children: Vec<PathBuf> = fs::read_dir(path)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .collect();
+            children.sort();
+            for child in children {
+                if child.is_dir() {
+                    visit(root, &child, entries);
+                } else {
+                    entries.push((
+                        child.strip_prefix(root).unwrap().to_path_buf(),
+                        fs::read(&child).unwrap(),
+                    ));
+                }
+            }
+        }
+        let mut entries = Vec::new();
+        visit(root, root, &mut entries);
+        entries
     }
 
     #[cfg(target_os = "linux")]
@@ -4166,6 +4912,49 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn committed_recovery_verification_holds_no_mutex_even_beyond_mutex_ttl() {
+        let root = TempDir::new().unwrap();
+        recovery_claim_source(&root, ExclusivePhase::Mutating);
+        let timing = Timing {
+            mutex_ttl_ms: 1_000,
+            ..Timing::default()
+        };
+        let mut claimant = recovery_claimant(&root, RuntimeId::Tauri)
+            .with_timing(timing)
+            .unwrap();
+        let mutex_path = claimant.paths.registration_mutex.clone();
+        let hash_calls = Arc::new(AtomicUsize::new(0));
+        let observed_calls = Arc::clone(&hash_calls);
+        set_inter_artifact_hash_test_hook(Some(Box::new(move || {
+            assert!(!mutex_path.exists());
+            if observed_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                thread::sleep(StdDuration::from_millis(1_100));
+            }
+            Ok(())
+        })));
+        let started = Instant::now();
+        let result = claimant.claim_recovery_authority();
+        set_inter_artifact_hash_test_hook(None);
+        let mut authority = result.unwrap();
+        assert!(hash_calls.load(Ordering::SeqCst) > 0);
+        assert!(started.elapsed() >= StdDuration::from_millis(1_000));
+        assert_eq!(
+            recovery_claim_sequence(
+                claimant
+                    .read_operation_state()
+                    .unwrap()
+                    .exclusive_intent
+                    .as_ref()
+                    .unwrap()
+            ),
+            Some(1)
+        );
+        assert!(claimant.assert_recovery_authority(&mut authority).is_ok());
+        claimant.release_recovery_authority(&mut authority);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn cancellation_during_hashing_is_rechecked_under_the_mutex() {
         let root = TempDir::new().unwrap();
         let (mut owner, _, _, _, intent) =
@@ -4353,6 +5142,23 @@ mod tests {
             vec!["mutex.json"]
         );
         assert!(successor.release_mutex(&successor_guard).unwrap());
+    }
+
+    #[test]
+    fn missing_quarantine_source_is_collision_only_when_successor_directory_exists() {
+        let root = TempDir::new().unwrap();
+        let quarantine = root.path().join("missing-quarantine");
+        let successor = root.path().join("registration-mutex");
+        fs::create_dir(&successor).unwrap();
+
+        assert!(!restore_quarantine_if_possible(&quarantine, &successor).unwrap());
+        assert!(successor.is_dir());
+
+        fs::remove_dir(&successor).unwrap();
+        assert_eq!(
+            error_code(restore_quarantine_if_possible(&quarantine, &successor)),
+            "NOT_FOUND"
+        );
     }
 
     #[test]
@@ -4552,6 +5358,704 @@ mod tests {
         let before = cleaner.read_operation_state().unwrap();
         assert!(!cleaner.cleanup_stale_records().unwrap().abandoned_intent);
         assert_eq!(cleaner.read_operation_state().unwrap(), before);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn recovery_claims_publish_exact_lineage_and_enforce_opaque_lifecycle() {
+        for phase in [ExclusivePhase::Mutating, ExclusivePhase::Abandoned] {
+            let root = TempDir::new().unwrap();
+            let source = recovery_claim_source(&root, phase);
+            let mut claimant = recovery_claimant(&root, RuntimeId::Tauri);
+            let before = claimant.read_operation_state().unwrap();
+            let journal_root = claimant.paths.operation_root.join("recovery-journal-v1");
+            let journal_bytes = snapshot_tree_bytes(&journal_root);
+            let sentinel = root.path().join("sentinel.sqlite");
+            fs::write(&sentinel, b"sentinel-database-bytes\0unchanged").unwrap();
+            let sentinel_bytes = fs::read(&sentinel).unwrap();
+            let descriptor_baseline = retained_descriptor_count(&claimant.paths.operation_root);
+            let mut authority = claimant.claim_recovery_authority().unwrap();
+            assert_eq!(
+                retained_descriptor_count(&claimant.paths.operation_root),
+                descriptor_baseline + 9
+            );
+            let claimed = claimant.read_operation_state().unwrap();
+            let claimed_intent = claimed.exclusive_intent.as_ref().unwrap();
+            assert_eq!(claimed.state_revision, before.state_revision + 1);
+            assert_eq!(
+                claimed.fencing_generation_high_water,
+                before.fencing_generation_high_water + 1
+            );
+            assert_eq!(claimed_intent.phase, ExclusivePhase::Mutating);
+            assert_eq!(claimed_intent.owner, claimant.owner_evidence().unwrap());
+            assert_eq!(
+                claimed_intent.fencing_generation,
+                claimed.fencing_generation_high_water
+            );
+            assert_eq!(
+                claimed_intent.created_at,
+                before.exclusive_intent.unwrap().created_at
+            );
+            assert_eq!(claimed_intent.updated_at, claimed.updated_at);
+            assert_eq!(recovery_claim_sequence(claimed_intent), Some(1));
+            assert_eq!(
+                claimed_intent.metadata.as_ref().unwrap()["nested"],
+                serde_json::json!({"preserved": [true, 7]})
+            );
+            assert_eq!(
+                claimant.assert_recovery_authority(&mut authority).unwrap(),
+                claimed_intent.clone()
+            );
+            assert_eq!(
+                error_code(
+                    claimant.assert_exclusive_authority(claimed_intent, ExclusivePhase::Mutating,)
+                ),
+                "RECOVERY_AUTHORITY_REQUIRED"
+            );
+            assert_eq!(
+                error_code(claimant.complete_exclusive_mutation(claimed_intent)),
+                "RECOVERY_AUTHORITY_REQUIRED"
+            );
+
+            let mut wrong_origin = lock(&root, RuntimeId::Mcp);
+            assert_eq!(
+                error_code(wrong_origin.assert_recovery_authority(&mut authority)),
+                "RECOVERY_AUTHORITY_INVALID"
+            );
+            wrong_origin.release_recovery_authority(&mut authority);
+            assert!(claimant.assert_recovery_authority(&mut authority).is_ok());
+            claimant.release_recovery_authority(&mut authority);
+            claimant.release_recovery_authority(&mut authority);
+            assert_eq!(
+                error_code(claimant.assert_recovery_authority(&mut authority)),
+                "RECOVERY_AUTHORITY_RELEASED"
+            );
+            assert_eq!(
+                retained_descriptor_count(&claimant.paths.operation_root),
+                descriptor_baseline
+            );
+            assert_eq!(snapshot_tree_bytes(&journal_root), journal_bytes);
+            assert_eq!(fs::read(&sentinel).unwrap(), sentinel_bytes);
+
+            let mut successor = recovery_claimant(&root, RuntimeId::BrowserDataServer);
+            let mut second_authority = successor.claim_recovery_authority().unwrap();
+            let second = successor.read_operation_state().unwrap();
+            assert_eq!(second.state_revision, claimed.state_revision + 1);
+            assert_eq!(
+                second.fencing_generation_high_water,
+                claimed.fencing_generation_high_water + 1
+            );
+            assert_eq!(
+                recovery_claim_sequence(second.exclusive_intent.as_ref().unwrap()),
+                Some(2)
+            );
+            assert!(successor
+                .assert_recovery_authority(&mut second_authority)
+                .is_ok());
+            successor.release_recovery_authority(&mut second_authority);
+            drop(source);
+        }
+
+        let high_water_root = TempDir::new().unwrap();
+        recovery_claim_source(&high_water_root, ExclusivePhase::Mutating);
+        let mut high_water_claimant = recovery_claimant(&high_water_root, RuntimeId::Tauri);
+        let mut high_water_authority = high_water_claimant.claim_recovery_authority().unwrap();
+        let mut high_water_state = high_water_claimant.read_operation_state().unwrap();
+        let high_water_intent = high_water_state.exclusive_intent.as_ref().unwrap().clone();
+        high_water_state.fencing_generation_high_water += 1;
+        publish_test_state(&high_water_claimant, &high_water_state);
+        assert_eq!(
+            error_code(high_water_claimant.complete_exclusive_mutation(&high_water_intent)),
+            "INTENT_FENCED"
+        );
+        assert_eq!(
+            error_code(
+                high_water_claimant
+                    .assert_exclusive_authority(&high_water_intent, ExclusivePhase::Mutating,)
+            ),
+            "INTENT_FENCED"
+        );
+        high_water_claimant.release_recovery_authority(&mut high_water_authority);
+
+        let clear_root = TempDir::new().unwrap();
+        recovery_claim_source(&clear_root, ExclusivePhase::Mutating);
+        let mut clear_claimant = recovery_claimant(&clear_root, RuntimeId::Tauri);
+        let mut clear_authority = clear_claimant.claim_recovery_authority().unwrap();
+        let mut completed = clear_claimant.read_operation_state().unwrap();
+        let timestamp = format_timestamp(clear_claimant.now_ms().unwrap()).unwrap();
+        let completed_intent = completed.exclusive_intent.as_mut().unwrap();
+        completed_intent.phase = ExclusivePhase::Completed;
+        completed_intent.completed_at = Some(timestamp.clone());
+        completed_intent.updated_at = timestamp.clone();
+        let completed_evidence = completed_intent.clone();
+        completed.updated_at = timestamp;
+        publish_test_state(&clear_claimant, &completed);
+        assert_eq!(
+            error_code(clear_claimant.clear_exclusive_intent(&completed_evidence)),
+            "RECOVERY_AUTHORITY_REQUIRED"
+        );
+        assert_eq!(
+            error_code(clear_claimant.assert_recovery_authority(&mut clear_authority)),
+            "RECOVERY_AUTHORITY_FENCED"
+        );
+
+        let drop_root = TempDir::new().unwrap();
+        recovery_claim_source(&drop_root, ExclusivePhase::Mutating);
+        let mut drop_claimant = recovery_claimant(&drop_root, RuntimeId::Tauri);
+        let drop_baseline = retained_descriptor_count(&drop_claimant.paths.operation_root);
+        {
+            let _authority = drop_claimant.claim_recovery_authority().unwrap();
+            assert_eq!(
+                retained_descriptor_count(&drop_claimant.paths.operation_root),
+                drop_baseline + 9
+            );
+        }
+        assert_eq!(
+            retained_descriptor_count(&drop_claimant.paths.operation_root),
+            drop_baseline
+        );
+
+        let source_text = include_str!("database_operation_lock.rs");
+        let authority_declaration = source_text
+            .split("struct RecoveryMutationAuthority")
+            .nth(1)
+            .unwrap()
+            .split("impl Drop")
+            .next()
+            .unwrap();
+        assert!(!authority_declaration.contains("pub "));
+        assert!(!authority_declaration.contains("derive(Clone"));
+    }
+
+    #[test]
+    fn recovery_claim_non_linux_gate_is_inert_and_preserves_self_fence_precedence() {
+        let inert_root = TempDir::new().unwrap();
+        let mut unsupported = lock(&inert_root, RuntimeId::Tauri)
+            .with_recovery_platform_linux(false)
+            .with_recovery_process_evidence(RecoveryProcessEvidence::Dead);
+        assert_eq!(
+            error_code(unsupported.claim_recovery_authority()),
+            "RECOVERY_DURABILITY_FAILURE"
+        );
+        assert!(unsupported.owner.is_none());
+        assert!(!unsupported.paths.protocol_root.exists());
+        assert_eq!(unsupported.recovery_process_evidence_invocations, 0);
+        unsupported.fenced = true;
+        assert_eq!(
+            error_code(unsupported.claim_recovery_authority()),
+            "OWNER_SELF_FENCED"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn recovery_claim_precedence_counters_and_process_evidence_are_fail_closed() {
+        for (evidence, code) in [
+            (RecoveryProcessEvidence::Live, "RECOVERY_OWNER_NOT_DEAD"),
+            (
+                RecoveryProcessEvidence::Unavailable,
+                "PROCESS_EVIDENCE_UNAVAILABLE",
+            ),
+            (
+                RecoveryProcessEvidence::Unsupported,
+                "PROCESS_EVIDENCE_UNSUPPORTED",
+            ),
+        ] {
+            let root = TempDir::new().unwrap();
+            recovery_claim_source(&root, ExclusivePhase::Mutating);
+            let mut claimant =
+                lock(&root, RuntimeId::Tauri).with_recovery_process_evidence(evidence);
+            let before = claimant.read_operation_state().unwrap();
+            assert_eq!(error_code(claimant.claim_recovery_authority()), code);
+            assert_eq!(claimant.recovery_process_evidence_invocations, 1);
+            assert!(!claimant.recovery_process_evidence_saw_mutex);
+            assert_eq!(claimant.read_operation_state().unwrap(), before);
+        }
+
+        for evidence in [
+            RecoveryProcessEvidence::Dead,
+            RecoveryProcessEvidence::Reused,
+        ] {
+            let root = TempDir::new().unwrap();
+            recovery_claim_source(&root, ExclusivePhase::Mutating);
+            let mut claimant = lock(&root, RuntimeId::Mcp).with_recovery_process_evidence(evidence);
+            let mut authority = claimant.claim_recovery_authority().unwrap();
+            assert_eq!(claimant.recovery_process_evidence_invocations, 1);
+            assert!(!claimant.recovery_process_evidence_saw_mutex);
+            claimant.release_recovery_authority(&mut authority);
+        }
+
+        let foreign_root = TempDir::new().unwrap();
+        let mut source = recovery_claim_source(&foreign_root, ExclusivePhase::Mutating);
+        let mut foreign_state = source.read_operation_state().unwrap();
+        foreign_state
+            .exclusive_intent
+            .as_mut()
+            .unwrap()
+            .owner
+            .host_id = format!("foreign-{}", Uuid::new_v4());
+        publish_test_state(&source, &foreign_state);
+        let mut foreign = recovery_claimant(&foreign_root, RuntimeId::Tauri);
+        assert_eq!(
+            error_code(foreign.claim_recovery_authority()),
+            "RECOVERY_OWNER_NOT_DEAD"
+        );
+        assert_eq!(foreign.recovery_process_evidence_invocations, 0);
+
+        let no_intent_root = TempDir::new().unwrap();
+        let mut no_intent = recovery_claimant(&no_intent_root, RuntimeId::Tauri);
+        assert_eq!(
+            error_code(no_intent.claim_recovery_authority()),
+            "RECOVERY_CLAIM_FENCED"
+        );
+        assert_eq!(no_intent.recovery_process_evidence_invocations, 0);
+
+        let registered_root = TempDir::new().unwrap();
+        let mut registered = lock(&registered_root, RuntimeId::Cli);
+        registered.register_runtime_lease().unwrap();
+        registered
+            .acquire_exclusive_intent(DatabaseOperation::Restore, None)
+            .unwrap();
+        let mut registered_claimant = recovery_claimant(&registered_root, RuntimeId::Tauri);
+        assert_eq!(
+            error_code(registered_claimant.claim_recovery_authority()),
+            "RECOVERY_CLAIM_FENCED"
+        );
+        assert_eq!(registered_claimant.recovery_process_evidence_invocations, 0);
+
+        for condition in ["wrong-phase", "completed-at", "legacy", "generation"] {
+            let root = TempDir::new().unwrap();
+            let mut source = recovery_claim_source(&root, ExclusivePhase::Mutating);
+            let mut state = source.read_operation_state().unwrap();
+            match condition {
+                "wrong-phase" => {
+                    state.exclusive_intent.as_mut().unwrap().phase = ExclusivePhase::Completed;
+                    state.exclusive_intent.as_mut().unwrap().completed_at =
+                        Some(format_timestamp(source.now_ms().unwrap()).unwrap());
+                }
+                "completed-at" => {
+                    state.exclusive_intent.as_mut().unwrap().completed_at =
+                        Some(format_timestamp(source.now_ms().unwrap()).unwrap());
+                }
+                "legacy" => {
+                    state
+                        .exclusive_intent
+                        .as_mut()
+                        .unwrap()
+                        .metadata
+                        .as_mut()
+                        .unwrap()
+                        .retain(|key, _| !key.starts_with("shikin.recovery."));
+                }
+                "generation" => state.fencing_generation_high_water += 1,
+                _ => unreachable!(),
+            }
+            publish_test_state(&source, &state);
+            let mut claimant = recovery_claimant(&root, RuntimeId::Tauri);
+            assert_eq!(
+                error_code(claimant.claim_recovery_authority()),
+                "RECOVERY_CLAIM_FENCED",
+                "{condition}"
+            );
+            assert_eq!(claimant.recovery_process_evidence_invocations, 0);
+        }
+
+        for counter in [
+            "stateRevision",
+            "fencingGenerationHighWater",
+            "claimSequence",
+        ] {
+            let root = TempDir::new().unwrap();
+            let mut source = recovery_claim_source(&root, ExclusivePhase::Mutating);
+            let mut state = source.read_operation_state().unwrap();
+            match counter {
+                "stateRevision" => state.state_revision = MAX_JSON_SAFE_INTEGER,
+                "fencingGenerationHighWater" => {
+                    state.fencing_generation_high_water = MAX_JSON_SAFE_INTEGER;
+                    state.exclusive_intent.as_mut().unwrap().fencing_generation =
+                        MAX_JSON_SAFE_INTEGER;
+                }
+                "claimSequence" => {
+                    state
+                        .exclusive_intent
+                        .as_mut()
+                        .unwrap()
+                        .metadata
+                        .as_mut()
+                        .unwrap()
+                        .insert(
+                            "shikin.recovery.claimSequence".into(),
+                            JsonValue::from(MAX_JSON_SAFE_INTEGER),
+                        );
+                }
+                _ => unreachable!(),
+            }
+            publish_test_state(&source, &state);
+            let mut claimant = recovery_claimant(&root, RuntimeId::Tauri);
+            assert_eq!(
+                error_code(claimant.claim_recovery_authority()),
+                "COUNTER_OVERFLOW",
+                "{counter}"
+            );
+            assert_eq!(claimant.recovery_process_evidence_invocations, 0);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn recovery_claim_exact_state_and_retained_evidence_fence_stale_authority() {
+        let root = TempDir::new().unwrap();
+        recovery_claim_source(&root, ExclusivePhase::Mutating);
+        let barrier = Arc::new(Barrier::new(2));
+        let mut claimant = recovery_claimant(&root, RuntimeId::Tauri)
+            .with_committed_recovery_verification_barrier(Arc::clone(&barrier));
+        let mut drift_writer = lock(&root, RuntimeId::Mcp);
+        let claim = thread::spawn(move || {
+            let result = claimant.claim_recovery_authority();
+            (claimant, result)
+        });
+        barrier.wait();
+        let mut drifted = drift_writer.read_operation_state().unwrap();
+        drifted
+            .exclusive_intent
+            .as_mut()
+            .unwrap()
+            .metadata
+            .as_mut()
+            .unwrap()
+            .insert("unrelated".into(), JsonValue::String("drift".into()));
+        publish_test_state(&drift_writer, &drifted);
+        barrier.wait();
+        let (mut claimant, result) = claim.join().unwrap();
+        assert_eq!(error_code(result), "RECOVERY_CLAIM_FENCED");
+        assert_eq!(retained_descriptor_count(&claimant.paths.operation_root), 0);
+        assert_eq!(claimant.read_operation_state().unwrap(), drifted);
+
+        let tamper_root = TempDir::new().unwrap();
+        let source = recovery_claim_source(&tamper_root, ExclusivePhase::Mutating);
+        let artifact = first_prepared_artifact(&source);
+        let barrier = Arc::new(Barrier::new(2));
+        let mut claimant = recovery_claimant(&tamper_root, RuntimeId::Tauri);
+        claimant.before_final_fence_barrier = Some(Arc::clone(&barrier));
+        let tamper = thread::spawn(move || {
+            let result = claimant.claim_recovery_authority();
+            (claimant, result)
+        });
+        barrier.wait();
+        fs::set_permissions(&artifact, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::write(&artifact, b"tampered").unwrap();
+        barrier.wait();
+        let (claimant, result) = tamper.join().unwrap();
+        assert_eq!(error_code(result), "RECOVERY_ARTIFACT_CORRUPTION");
+        assert_eq!(retained_descriptor_count(&claimant.paths.operation_root), 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn recovery_claim_strict_durability_and_assertion_failure_lifecycle_are_exact() {
+        for point in ["after_prune", "after_rename", "directory_sync_unsupported"] {
+            let root = TempDir::new().unwrap();
+            recovery_claim_source(&root, ExclusivePhase::Mutating);
+            let mut claimant = recovery_claimant(&root, RuntimeId::Tauri).with_fault(point);
+            let before = claimant.read_operation_state().unwrap();
+            let baseline = retained_descriptor_count(&claimant.paths.operation_root);
+            let result = claimant.claim_recovery_authority();
+            if point == "after_prune" {
+                assert_eq!(error_code(result), "INJECTED_FAILURE");
+                assert_eq!(claimant.read_operation_state().unwrap(), before);
+                assert!(!claimant.fenced);
+            } else {
+                assert_eq!(error_code(result), "MUTATION_COMMIT_DURABILITY_UNCERTAIN");
+                assert!(claimant.fenced);
+                assert!(claimant.durability_uncertain);
+                assert_eq!(
+                    recovery_claim_sequence(
+                        claimant
+                            .read_operation_state()
+                            .unwrap()
+                            .exclusive_intent
+                            .as_ref()
+                            .unwrap()
+                    ),
+                    Some(1)
+                );
+            }
+            assert_eq!(
+                retained_descriptor_count(&claimant.paths.operation_root),
+                baseline
+            );
+        }
+
+        let degraded_root = TempDir::new().unwrap();
+        recovery_claim_source(&degraded_root, ExclusivePhase::Mutating);
+        let mut degraded =
+            recovery_claimant(&degraded_root, RuntimeId::Tauri).with_fault("after_fsync");
+        let mut authority = degraded.claim_recovery_authority().unwrap();
+        assert!(!degraded.fenced);
+        assert!(!degraded.maintenance_failures.is_empty());
+        assert!(degraded.assert_recovery_authority(&mut authority).is_ok());
+        degraded.release_recovery_authority(&mut authority);
+
+        let fenced_root = TempDir::new().unwrap();
+        recovery_claim_source(&fenced_root, ExclusivePhase::Mutating);
+        let mut fenced = recovery_claimant(&fenced_root, RuntimeId::Tauri);
+        let mut authority = fenced.claim_recovery_authority().unwrap();
+        fenced.fenced = true;
+        assert_eq!(
+            error_code(fenced.assert_recovery_authority(&mut authority)),
+            "RECOVERY_AUTHORITY_FENCED"
+        );
+        assert_eq!(
+            error_code(fenced.assert_recovery_authority(&mut authority)),
+            "RECOVERY_AUTHORITY_FENCED"
+        );
+
+        let corrupt_root = TempDir::new().unwrap();
+        recovery_claim_source(&corrupt_root, ExclusivePhase::Mutating);
+        let mut corrupt = recovery_claimant(&corrupt_root, RuntimeId::Tauri);
+        let mut authority = corrupt.claim_recovery_authority().unwrap();
+        fs::write(highest_state_path(&corrupt), b"{malformed\n").unwrap();
+        assert_eq!(
+            error_code(corrupt.assert_recovery_authority(&mut authority)),
+            "STATE_CORRUPTION"
+        );
+        assert_eq!(
+            error_code(corrupt.assert_recovery_authority(&mut authority)),
+            "RECOVERY_AUTHORITY_FENCED"
+        );
+
+        let tamper_root = TempDir::new().unwrap();
+        let source = recovery_claim_source(&tamper_root, ExclusivePhase::Mutating);
+        let artifact = first_prepared_artifact(&source);
+        let mut tampered = recovery_claimant(&tamper_root, RuntimeId::Tauri);
+        let mut authority = tampered.claim_recovery_authority().unwrap();
+        fs::set_permissions(&artifact, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::write(&artifact, b"assertion-tamper").unwrap();
+        assert_eq!(
+            error_code(tampered.assert_recovery_authority(&mut authority)),
+            "RECOVERY_ARTIFACT_CORRUPTION"
+        );
+        assert_eq!(
+            error_code(tampered.assert_recovery_authority(&mut authority)),
+            "RECOVERY_AUTHORITY_FENCED"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn recovery_cleanup_retains_exact_abandoned_and_every_claimed_intent() {
+        let abandoned_root = TempDir::new().unwrap();
+        recovery_claim_source(&abandoned_root, ExclusivePhase::Abandoned);
+        let mut cleaner = lock(&abandoned_root, RuntimeId::Tauri);
+        let before = cleaner.read_operation_state().unwrap();
+        assert!(!cleaner.cleanup_stale_records().unwrap().abandoned_intent);
+        assert_eq!(cleaner.read_operation_state().unwrap(), before);
+
+        let claimed_root = TempDir::new().unwrap();
+        recovery_claim_source(&claimed_root, ExclusivePhase::Mutating);
+        let mut claimant = recovery_claimant(&claimed_root, RuntimeId::Tauri);
+        let mut authority = claimant.claim_recovery_authority().unwrap();
+        claimant.release_recovery_authority(&mut authority);
+        let mut claimed = claimant.read_operation_state().unwrap();
+        let timestamp = format_timestamp(claimant.now_ms().unwrap()).unwrap();
+        let intent = claimed.exclusive_intent.as_mut().unwrap();
+        intent.phase = ExclusivePhase::Completed;
+        intent.completed_at = Some(timestamp.clone());
+        intent.updated_at = timestamp.clone();
+        claimed.updated_at = timestamp;
+        publish_test_state(&claimant, &claimed);
+        let mut cleaner = lock(&claimed_root, RuntimeId::Mcp);
+        assert!(!cleaner.cleanup_stale_records().unwrap().abandoned_intent);
+        assert_eq!(cleaner.read_operation_state().unwrap(), claimed);
+
+        let race_root = TempDir::new().unwrap();
+        recovery_claim_source(&race_root, ExclusivePhase::Mutating);
+        let barrier = Arc::new(Barrier::new(2));
+        let mut contender = recovery_claimant(&race_root, RuntimeId::Tauri)
+            .with_committed_recovery_verification_barrier(Arc::clone(&barrier));
+        let claim = thread::spawn(move || {
+            let result = contender.claim_recovery_authority();
+            (contender, result)
+        });
+        barrier.wait();
+        let mut cleaner = lock(&race_root, RuntimeId::Mcp);
+        let source = cleaner.read_operation_state().unwrap();
+        assert!(!cleaner.cleanup_stale_records().unwrap().abandoned_intent);
+        assert_eq!(cleaner.read_operation_state().unwrap(), source);
+        barrier.wait();
+        let (contender, authority) = claim.join().unwrap();
+        let mut authority = authority.unwrap();
+        let claimed = cleaner.read_operation_state().unwrap();
+        assert_eq!(
+            recovery_claim_sequence(claimed.exclusive_intent.as_ref().unwrap()),
+            Some(1)
+        );
+        assert!(!cleaner.cleanup_stale_records().unwrap().abandoned_intent);
+        assert_eq!(cleaner.read_operation_state().unwrap(), claimed);
+        contender.release_recovery_authority(&mut authority);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cleanup_blocks_behind_claim_mutex_and_retains_published_recovery_anchor() {
+        let root = TempDir::new().unwrap();
+        recovery_claim_source(&root, ExclusivePhase::Mutating);
+        let barrier = Arc::new(Barrier::new(2));
+        let mut claimant = recovery_claimant(&root, RuntimeId::Tauri);
+        claimant.before_final_fence_barrier = Some(Arc::clone(&barrier));
+        let mutex_path = claimant.paths.registration_mutex.clone();
+        let claim = thread::spawn(move || {
+            let result = claimant.claim_recovery_authority();
+            (claimant, result)
+        });
+
+        barrier.wait();
+        let mutex_was_held = mutex_path.exists();
+        let mutex_contention = Arc::new(Barrier::new(2));
+        let mut cleaner = lock(&root, RuntimeId::Mcp)
+            .with_recovery_process_evidence(RecoveryProcessEvidence::Dead)
+            .with_mutex_contention_barrier(Arc::clone(&mutex_contention));
+        let cleanup = thread::spawn(move || {
+            let result = cleaner.cleanup_stale_records();
+            (cleaner, result)
+        });
+        mutex_contention.wait();
+        let cleanup_was_blocked = !cleanup.is_finished();
+
+        barrier.wait();
+        let (mut claimant, authority) = claim.join().unwrap();
+        let mut authority = authority.unwrap();
+        let (mut cleaner, cleanup_result) = cleanup.join().unwrap();
+        let cleanup_result = cleanup_result.unwrap();
+        let claimed = cleaner.read_operation_state().unwrap();
+
+        assert!(mutex_was_held);
+        assert!(cleanup_was_blocked);
+        assert!(!cleanup_result.abandoned_intent);
+        assert!(cleanup_result.removed_lease_ids.is_empty());
+        assert_eq!(cleanup_result.state_revision, claimed.state_revision);
+        assert_eq!(
+            recovery_claim_sequence(claimed.exclusive_intent.as_ref().unwrap()),
+            Some(1)
+        );
+        assert!(claimant.assert_recovery_authority(&mut authority).is_ok());
+        claimant.release_recovery_authority(&mut authority);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn node_rust_recovery_contention_fences_stale_token_and_hands_off_sequence_two() {
+        let root = TempDir::new().unwrap();
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let coordination_root = root.path().join("coordination");
+        let worker = repo_root.join("scripts/database-operation-lock.worker.mjs");
+        let mut source_child = Command::new("node")
+            .arg(&worker)
+            .arg(&coordination_root)
+            .arg(IDENTITY)
+            .arg("cli")
+            .arg("0")
+            .arg("intent:mutating")
+            .arg("1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let source =
+            collect_child_output_bounded(&mut source_child, StdDuration::from_secs(15)).unwrap();
+        assert!(!source.timed_out, "Node source worker timed out");
+        assert!(
+            source.status.success(),
+            "{}",
+            String::from_utf8_lossy(&source.stderr)
+        );
+
+        let barrier = Arc::new(Barrier::new(2));
+        let mut rust_contender = lock(&root, RuntimeId::Tauri)
+            .with_committed_recovery_verification_barrier(Arc::clone(&barrier));
+        let rust_claim = thread::spawn(move || {
+            let result = rust_contender.claim_recovery_authority();
+            (rust_contender, result)
+        });
+        barrier.wait();
+
+        let ready = root.path().join("node-claim-ready");
+        let release = root.path().join("node-claim-release");
+        let node_spawn = Command::new("node")
+            .arg(&worker)
+            .arg(&coordination_root)
+            .arg(IDENTITY)
+            .arg("mcp")
+            .arg("0")
+            .arg("claim-barrier")
+            .arg("1")
+            .env("SHIKIN_CLAIM_READY_MARKER", &ready)
+            .env("SHIKIN_CLAIM_RELEASE_MARKER", &release)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
+        let mut node_contender = match node_spawn {
+            Ok(child) => child,
+            Err(error) => {
+                barrier.wait();
+                let _ = rust_claim.join();
+                panic!("could not spawn Node contender: {error}");
+            }
+        };
+        let deadline = Instant::now() + StdDuration::from_secs(15);
+        while !ready.exists() && Instant::now() < deadline {
+            thread::sleep(StdDuration::from_millis(10));
+        }
+        let reached_barrier = ready.exists();
+        let release_result = if reached_barrier {
+            fs::write(&release, b"release\n")
+        } else {
+            Ok(())
+        };
+        let node_output = collect_child_output_bounded(
+            &mut node_contender,
+            if reached_barrier && release_result.is_ok() {
+                StdDuration::from_secs(15)
+            } else {
+                StdDuration::ZERO
+            },
+        );
+
+        barrier.wait();
+        let (rust_contender, stale_result) = rust_claim.join().unwrap();
+        let output = node_output.unwrap();
+        assert!(
+            reached_barrier,
+            "Node contender did not reach verification barrier"
+        );
+        release_result.unwrap();
+        assert!(!output.timed_out, "Node contender timed out");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let node_result: JsonValue = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(node_result["ok"], JsonValue::Bool(true));
+        assert_eq!(
+            node_result["state"]["exclusiveIntent"]["metadata"]["shikin.recovery.claimSequence"],
+            JsonValue::from(1)
+        );
+        assert_eq!(error_code(stale_result), "RECOVERY_CLAIM_FENCED");
+        assert_eq!(
+            retained_descriptor_count(&rust_contender.paths.operation_root),
+            0
+        );
+
+        let mut fresh_rust = lock(&root, RuntimeId::Tauri);
+        let mut authority = fresh_rust.claim_recovery_authority().unwrap();
+        let state = fresh_rust.read_operation_state().unwrap();
+        assert_eq!(
+            recovery_claim_sequence(state.exclusive_intent.as_ref().unwrap()),
+            Some(2)
+        );
+        assert!(fresh_rust.assert_recovery_authority(&mut authority).is_ok());
+        fresh_rust.release_recovery_authority(&mut authority);
     }
 
     #[test]

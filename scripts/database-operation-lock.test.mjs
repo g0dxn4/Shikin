@@ -1,6 +1,6 @@
 // @vitest-environment node
+import { execFileSync, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { spawn } from 'node:child_process'
 import { Worker } from 'node:worker_threads'
 import {
   chmodSync,
@@ -37,7 +37,13 @@ import {
 } from './database-operation-recovery-journal.mjs'
 
 const roots = []
+const managedChildren = new Set()
 const DATABASE_IDENTITY = SHIKIN_DATABASE_IDENTITY
+const MANAGED_CHILD_TIMEOUT_MS = 30_000
+const MANAGED_TEST_TIMEOUT_MS = 40_000
+const GETCONF_TIMEOUT_TEST_MAX_MS = 15_000
+const TYPESCRIPT_CHILD_TIMEOUT_MS = 15_000
+const TYPESCRIPT_TEST_TIMEOUT_MS = 20_000
 const contractSchema = JSON.parse(
   readFileSync(resolve('schema/database-operation-lock-v1.json'), 'utf8')
 )
@@ -51,10 +57,11 @@ const ajv = new Ajv2020({ strict: false, discriminator: true })
 addFormats(ajv)
 const validateContractRecord = ajv.compile(contractSchema)
 
-afterEach(() => {
+afterEach(async () => {
   setRecoveryJournalInterArtifactHashTestHookForTest(undefined)
+  await Promise.all(Array.from(managedChildren, (managed) => managed.shutdown()))
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
-})
+}, MANAGED_TEST_TIMEOUT_MS)
 
 describe('database operation lock core', () => {
   it('publishes state and mutex records that satisfy the immutable JSON contract', () => {
@@ -96,7 +103,12 @@ describe('database operation lock core', () => {
       stateRevision: 2,
       fencingGenerationHighWater: 1,
     })
-    expect(lock.getLifecycleHealth()).toMatchObject({ healthy: true, fenced: false })
+    expect(lock.getLifecycleHealth()).toMatchObject({
+      healthy: process.platform !== 'win32',
+      fenced: false,
+      maintenanceDegraded: process.platform === 'win32',
+      durabilityUncertain: false,
+    })
     const timer = lock.startHeartbeat(lease)
     expect(timer.hasRef()).toBe(false)
     lock.stopHeartbeat()
@@ -132,59 +144,59 @@ describe('database operation lock core', () => {
   it.runIf(process.platform === 'linux')(
     'publishes intent with peer leases, drains every lease, and blocks only new registration',
     () => {
-    const root = tempRoot()
-    const owner = createLockAt(root, 'cli')
-    const peer = createLockAt(root, 'mcp')
-    const blocked = createLockAt(root, 'browser-data-server')
-    let ownerLease = owner.registerRuntimeLease()
-    let peerLease = peer.registerRuntimeLease()
+      const root = tempRoot()
+      const owner = createLockAt(root, 'cli')
+      const peer = createLockAt(root, 'mcp')
+      const blocked = createLockAt(root, 'browser-data-server')
+      let ownerLease = owner.registerRuntimeLease()
+      let peerLease = peer.registerRuntimeLease()
 
-    let intent = owner.acquireExclusiveIntent('restore', { fixture: true })
-    expect(intent.phase).toBe('registered')
-    expect(owner.readOperationState()).toMatchObject({
-      stateRevision: 3,
-      fencingGenerationHighWater: 3,
-      leases: [{ leaseId: ownerLease.leaseId }, { leaseId: peerLease.leaseId }],
-    })
-    expect(owner.getLifecycleHealth()).toMatchObject({ shouldDrain: true, registered: true })
-    expect(peer.getLifecycleHealth()).toMatchObject({ shouldDrain: true, registered: true })
-    expectLockError(() => blocked.registerRuntimeLease(), 'EXCLUSIVE_INTENT_ACTIVE')
+      let intent = owner.acquireExclusiveIntent('restore', { fixture: true })
+      expect(intent.phase).toBe('registered')
+      expect(owner.readOperationState()).toMatchObject({
+        stateRevision: 3,
+        fencingGenerationHighWater: 3,
+        leases: [{ leaseId: ownerLease.leaseId }, { leaseId: peerLease.leaseId }],
+      })
+      expect(owner.getLifecycleHealth()).toMatchObject({ shouldDrain: true, registered: true })
+      expect(peer.getLifecycleHealth()).toMatchObject({ shouldDrain: true, registered: true })
+      expectLockError(() => blocked.registerRuntimeLease(), 'EXCLUSIVE_INTENT_ACTIVE')
 
-    ownerLease = owner.renewRuntimeLease(ownerLease)
-    peerLease = peer.renewRuntimeLease(peerLease)
-    intent = owner.drainExclusiveIntent(intent)
-    expect(intent.phase).toBe('draining')
-    peer.releaseRuntimeLease(peerLease)
-    expect(owner.drainExclusiveIntent(intent).phase).toBe('draining')
-    owner.releaseRuntimeLease(ownerLease)
-    intent = owner.drainExclusiveIntent(intent)
-    expect(intent.phase).toBe('exclusive')
-    const prepared = prepareMutationProof(owner, intent)
-    intent = owner.beginExclusiveMutation(intent, prepared.proof)
-    const expectedCommitment = {
-      fixture: true,
+      ownerLease = owner.renewRuntimeLease(ownerLease)
+      peerLease = peer.renewRuntimeLease(peerLease)
+      intent = owner.drainExclusiveIntent(intent)
+      expect(intent.phase).toBe('draining')
+      peer.releaseRuntimeLease(peerLease)
+      expect(owner.drainExclusiveIntent(intent).phase).toBe('draining')
+      owner.releaseRuntimeLease(ownerLease)
+      intent = owner.drainExclusiveIntent(intent)
+      expect(intent.phase).toBe('exclusive')
+      const prepared = prepareMutationProof(owner, intent)
+      intent = owner.beginExclusiveMutation(intent, prepared.proof)
+      const expectedCommitment = {
+        fixture: true,
         'shikin.recovery.protocol': 'shikin.database-operation-recovery-journal',
         'shikin.recovery.version': 1,
         'shikin.recovery.recordSha256': prepared.commitmentSha256,
         'shikin.recovery.durability': 'linux-fsync-complete',
         'shikin.recovery.claimSequence': 0,
-    }
-    expect(intent.metadata).toEqual(expectedCommitment)
+      }
+      expect(intent.metadata).toEqual(expectedCommitment)
       const committedMetadataBytes = JSON.stringify(intent.metadata)
-    expect(owner.assertExclusiveAuthority(intent)).toEqual(intent)
-    intent = owner.completeExclusiveMutation(intent)
-    expect(intent).toMatchObject({
-      phase: 'completed',
-      completedAt: expect.any(String),
-      metadata: expectedCommitment,
-    })
+      expect(owner.assertExclusiveAuthority(intent)).toEqual(intent)
+      intent = owner.completeExclusiveMutation(intent)
+      expect(intent).toMatchObject({
+        phase: 'completed',
+        completedAt: expect.any(String),
+        metadata: expectedCommitment,
+      })
       expect(JSON.stringify(intent.metadata)).toBe(committedMetadataBytes)
-    expect(owner.clearExclusiveIntent(intent)).toBe(true)
-    expect(owner.readOperationState()).toMatchObject({
-      fencingGenerationHighWater: 3,
-      exclusiveIntent: null,
-      leases: [],
-    })
+      expect(owner.clearExclusiveIntent(intent)).toBe(true)
+      expect(owner.readOperationState()).toMatchObject({
+        fencingGenerationHighWater: 3,
+        exclusiveIntent: null,
+        leases: [],
+      })
     }
   )
 
@@ -269,167 +281,161 @@ describe('database operation lock core', () => {
     }
   })
 
-  it(
-    'snapshots dynamic metadata before publication without wedging Linux journal preparation',
-    () => {
-      const root = tempRoot()
-      let mutexPublications = 0
-      let statePublications = 0
-      const owner = new DatabaseOperationLock({
-        rootDir: root,
-        databaseIdentity: DATABASE_IDENTITY,
-        runtimeId: 'cli',
-        testHooks: {
-          beforeMutexPublication() {
-            mutexPublications += 1
-          },
-          beforePublish() {
-            statePublications += 1
-          },
+  it('snapshots dynamic metadata before publication without wedging Linux journal preparation', () => {
+    const root = tempRoot()
+    let mutexPublications = 0
+    let statePublications = 0
+    const owner = new DatabaseOperationLock({
+      rootDir: root,
+      databaseIdentity: DATABASE_IDENTITY,
+      runtimeId: 'cli',
+      testHooks: {
+        beforeMutexPublication() {
+          mutexPublications += 1
         },
-      })
-      const lease = owner.registerRuntimeLease()
-      const before = owner.readOperationState()
-      const mutexPublicationsBefore = mutexPublications
-      const statePublicationsBefore = statePublications
-
-      const getterMetadata = (serialize) => {
-        let reads = 0
-        const metadata = {}
-        Object.defineProperty(metadata, 'value', {
-          enumerable: true,
-          get() {
-            reads += 1
-            return reads === 1 ? 0 : serialize()
-          },
-        })
-        return metadata
-      }
-      const toJsonMetadata = (serialize) => {
-        const metadata = {}
-        Object.defineProperty(metadata, 'toJSON', { value: serialize })
-        return metadata
-      }
-      const throwingProxyMetadata = new Proxy(
-        {},
-        {
-          ownKeys() {
-            throw new Error('proxy ownKeys failure')
-          },
-        }
-      )
-      const callerProtocolError = () =>
-        new DatabaseOperationLockError('RESERVED_METADATA_KEY', 'caller-owned protocol error')
-      const protocolErrorGetterMetadata = {}
-      Object.defineProperty(protocolErrorGetterMetadata, 'value', {
-        enumerable: true,
-        get() {
-          throw callerProtocolError()
+        beforePublish() {
+          statePublications += 1
         },
-      })
-      const protocolErrorProxyMetadata = new Proxy(
-        {},
-        {
-          ownKeys() {
-            throw callerProtocolError()
-          },
-        }
-      )
-      const protocolErrorToJsonMetadata = toJsonMetadata(() => {
-        throw callerProtocolError()
-      })
-      let leakedValidationCause
-      try {
-        owner.acquireExclusiveIntent('restore', { value: -1 })
-      } catch (error) {
-        expect(error).toBeInstanceOf(DatabaseOperationLockError)
-        leakedValidationCause = error.cause
-      }
-      expect(leakedValidationCause).toBeUndefined()
-      const leakedCauseGetterMetadata = {}
-      Object.defineProperty(leakedCauseGetterMetadata, 'value', {
-        enumerable: true,
-        get() {
-          throw leakedValidationCause
-        },
-      })
-      const leakedCauseProxyMetadata = new Proxy(
-        {},
-        {
-          ownKeys() {
-            throw leakedValidationCause
-          },
-        }
-      )
-      const leakedCauseToJsonMetadata = toJsonMetadata(() => {
-        throw leakedValidationCause
-      })
+      },
+    })
+    const lease = owner.registerRuntimeLease()
+    const before = owner.readOperationState()
+    const mutexPublicationsBefore = mutexPublications
+    const statePublicationsBefore = statePublications
 
-      for (const metadata of [
-        getterMetadata(() => -1),
-        getterMetadata(() => '\ud800'),
-        toJsonMetadata(() => ({ value: -1 })),
-        toJsonMetadata(() => ({ ['\udfff']: true })),
-        toJsonMetadata(() => ({ 'shikin.recovery.future': true, value: -1 })),
-        getterMetadata(() => {
-          throw new Error('serialization getter failure')
-        }),
-        toJsonMetadata(() => {
-          throw new Error('toJSON failure')
-        }),
-        throwingProxyMetadata,
-        protocolErrorGetterMetadata,
-        protocolErrorProxyMetadata,
-        protocolErrorToJsonMetadata,
-        leakedCauseGetterMetadata,
-        leakedCauseProxyMetadata,
-        leakedCauseToJsonMetadata,
-      ]) {
-        expectLockError(
-          () => owner.acquireExclusiveIntent('restore', metadata),
-          'INVALID_OPERATION'
-        )
-        expect(owner.readOperationState()).toEqual(before)
-        expect(mutexPublications).toBe(mutexPublicationsBefore)
-        expect(statePublications).toBe(statePublicationsBefore)
-      }
-      expectLockError(
-        () =>
-          owner.acquireExclusiveIntent(
-            'restore',
-            toJsonMetadata(() => ({ 'shikin.recovery.future': true }))
-          ),
-        'RESERVED_METADATA_KEY'
-      )
-      expect(owner.readOperationState()).toEqual(before)
-      expect(mutexPublications).toBe(mutexPublicationsBefore)
-      expect(statePublications).toBe(statePublicationsBefore)
-
+    const getterMetadata = (serialize) => {
       let reads = 0
-      const validDynamicMetadata = {}
-      Object.defineProperty(validDynamicMetadata, 'value', {
+      const metadata = {}
+      Object.defineProperty(metadata, 'value', {
         enumerable: true,
         get() {
           reads += 1
-          if (reads > 2) throw new Error('caller metadata was read after snapshotting')
-          return reads === 1 ? 0 : 7
+          return reads === 1 ? 0 : serialize()
         },
       })
-      let intent = owner.acquireExclusiveIntent('restore', validDynamicMetadata)
-      expect(reads).toBe(2)
-      expect(intent.metadata).toEqual({ value: 7 })
-      if (process.platform !== 'linux') return
-      intent = owner.drainExclusiveIntent(intent)
-      owner.releaseRuntimeLease(lease)
-      intent = owner.drainExclusiveIntent(intent)
-      const prepared = prepareMutationProof(owner, intent)
-      expect(prepared).toMatchObject({
-        commitmentSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
-        durability: 'linux-fsync-complete',
-      })
-      expect(owner.readOperationState().exclusiveIntent.metadata).toEqual({ value: 7 })
+      return metadata
     }
-  )
+    const toJsonMetadata = (serialize) => {
+      const metadata = {}
+      Object.defineProperty(metadata, 'toJSON', { value: serialize })
+      return metadata
+    }
+    const throwingProxyMetadata = new Proxy(
+      {},
+      {
+        ownKeys() {
+          throw new Error('proxy ownKeys failure')
+        },
+      }
+    )
+    const callerProtocolError = () =>
+      new DatabaseOperationLockError('RESERVED_METADATA_KEY', 'caller-owned protocol error')
+    const protocolErrorGetterMetadata = {}
+    Object.defineProperty(protocolErrorGetterMetadata, 'value', {
+      enumerable: true,
+      get() {
+        throw callerProtocolError()
+      },
+    })
+    const protocolErrorProxyMetadata = new Proxy(
+      {},
+      {
+        ownKeys() {
+          throw callerProtocolError()
+        },
+      }
+    )
+    const protocolErrorToJsonMetadata = toJsonMetadata(() => {
+      throw callerProtocolError()
+    })
+    let leakedValidationCause
+    try {
+      owner.acquireExclusiveIntent('restore', { value: -1 })
+    } catch (error) {
+      expect(error).toBeInstanceOf(DatabaseOperationLockError)
+      leakedValidationCause = error.cause
+    }
+    expect(leakedValidationCause).toBeUndefined()
+    const leakedCauseGetterMetadata = {}
+    Object.defineProperty(leakedCauseGetterMetadata, 'value', {
+      enumerable: true,
+      get() {
+        throw leakedValidationCause
+      },
+    })
+    const leakedCauseProxyMetadata = new Proxy(
+      {},
+      {
+        ownKeys() {
+          throw leakedValidationCause
+        },
+      }
+    )
+    const leakedCauseToJsonMetadata = toJsonMetadata(() => {
+      throw leakedValidationCause
+    })
+
+    for (const metadata of [
+      getterMetadata(() => -1),
+      getterMetadata(() => '\ud800'),
+      toJsonMetadata(() => ({ value: -1 })),
+      toJsonMetadata(() => ({ ['\udfff']: true })),
+      toJsonMetadata(() => ({ 'shikin.recovery.future': true, value: -1 })),
+      getterMetadata(() => {
+        throw new Error('serialization getter failure')
+      }),
+      toJsonMetadata(() => {
+        throw new Error('toJSON failure')
+      }),
+      throwingProxyMetadata,
+      protocolErrorGetterMetadata,
+      protocolErrorProxyMetadata,
+      protocolErrorToJsonMetadata,
+      leakedCauseGetterMetadata,
+      leakedCauseProxyMetadata,
+      leakedCauseToJsonMetadata,
+    ]) {
+      expectLockError(() => owner.acquireExclusiveIntent('restore', metadata), 'INVALID_OPERATION')
+      expect(owner.readOperationState()).toEqual(before)
+      expect(mutexPublications).toBe(mutexPublicationsBefore)
+      expect(statePublications).toBe(statePublicationsBefore)
+    }
+    expectLockError(
+      () =>
+        owner.acquireExclusiveIntent(
+          'restore',
+          toJsonMetadata(() => ({ 'shikin.recovery.future': true }))
+        ),
+      'RESERVED_METADATA_KEY'
+    )
+    expect(owner.readOperationState()).toEqual(before)
+    expect(mutexPublications).toBe(mutexPublicationsBefore)
+    expect(statePublications).toBe(statePublicationsBefore)
+
+    let reads = 0
+    const validDynamicMetadata = {}
+    Object.defineProperty(validDynamicMetadata, 'value', {
+      enumerable: true,
+      get() {
+        reads += 1
+        if (reads > 2) throw new Error('caller metadata was read after snapshotting')
+        return reads === 1 ? 0 : 7
+      },
+    })
+    let intent = owner.acquireExclusiveIntent('restore', validDynamicMetadata)
+    expect(reads).toBe(2)
+    expect(intent.metadata).toEqual({ value: 7 })
+    if (process.platform !== 'linux') return
+    intent = owner.drainExclusiveIntent(intent)
+    owner.releaseRuntimeLease(lease)
+    intent = owner.drainExclusiveIntent(intent)
+    const prepared = prepareMutationProof(owner, intent)
+    expect(prepared).toMatchObject({
+      commitmentSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      durability: 'linux-fsync-complete',
+    })
+    expect(owner.readOperationState().exclusiveIntent.metadata).toEqual({ value: 7 })
+  })
 
   it.runIf(process.platform === 'linux')(
     'isolates validated metadata from an inherited stateful toJSON before publication',
@@ -501,7 +507,7 @@ describe('database operation lock core', () => {
       })
       expect(fixture.owner.readOperationState().exclusiveIntent.metadata).toEqual(validMetadata)
     }
-    )
+  )
 
   it('matches the additive recovery-commitment parity fixture in Ajv and Node', () => {
     for (const fixture of recoveryCommitmentFixtures.cases) {
@@ -551,37 +557,37 @@ describe('database operation lock core', () => {
     'rejects cancellation from persisted mutation phases after authority-before-phase precedence',
     () => {
       for (const phase of ['mutating', 'completed', 'abandoned']) {
-      const { owner, intent } = cancelableIntentFixture('exclusive')
-      if (phase === 'mutating' || phase === 'completed') {
+        const { owner, intent } = cancelableIntentFixture('exclusive')
+        if (phase === 'mutating' || phase === 'completed') {
           const mutating = owner.beginExclusiveMutation(
             intent,
             prepareMutationProof(owner, intent).proof
           )
-        if (phase === 'completed') owner.completeExclusiveMutation(mutating)
-      } else {
-        rewriteAuthoritativeState(owner, (state) => {
-          state.exclusiveIntent.phase = 'abandoned'
-          return state
-        })
-      }
-      const before = owner.readOperationState()
-      const stalePhaseEvidence = { ...intent, phase: 'registered' }
+          if (phase === 'completed') owner.completeExclusiveMutation(mutating)
+        } else {
+          rewriteAuthoritativeState(owner, (state) => {
+            state.exclusiveIntent.phase = 'abandoned'
+            return state
+          })
+        }
+        const before = owner.readOperationState()
+        const stalePhaseEvidence = { ...intent, phase: 'registered' }
 
-      expectLockError(
-        () =>
-          owner.cancelExclusiveIntent({
-            ...stalePhaseEvidence,
-            operationId: `wrong-${intent.operationId}`,
-          }),
-        'INTENT_FENCED'
-      )
-      expect(owner.readOperationState()).toEqual(before)
+        expectLockError(
+          () =>
+            owner.cancelExclusiveIntent({
+              ...stalePhaseEvidence,
+              operationId: `wrong-${intent.operationId}`,
+            }),
+          'INTENT_FENCED'
+        )
+        expect(owner.readOperationState()).toEqual(before)
         expectLockError(
           () => owner.cancelExclusiveIntent(stalePhaseEvidence),
           'INTENT_PHASE_INVALID'
         )
-      expect(owner.readOperationState()).toEqual(before)
-    }
+        expect(owner.readOperationState()).toEqual(before)
+      }
     }
   )
 
@@ -753,28 +759,28 @@ describe('database operation lock core', () => {
   it.runIf(process.platform === 'linux')(
     'orders cancel-then-begin and begin-then-cancel as a fenced state machine',
     () => {
-    const cancelFirst = cancelableIntentFixture('exclusive')
-    const cancelledProof = prepareMutationProof(cancelFirst.owner, cancelFirst.intent)
-    expect(cancelFirst.owner.cancelExclusiveIntent(cancelFirst.intent)).toBe(true)
-    expectLockError(
-      () => cancelFirst.owner.beginExclusiveMutation(cancelFirst.intent, cancelledProof.proof),
-      'INTENT_FENCED'
-    )
+      const cancelFirst = cancelableIntentFixture('exclusive')
+      const cancelledProof = prepareMutationProof(cancelFirst.owner, cancelFirst.intent)
+      expect(cancelFirst.owner.cancelExclusiveIntent(cancelFirst.intent)).toBe(true)
+      expectLockError(
+        () => cancelFirst.owner.beginExclusiveMutation(cancelFirst.intent, cancelledProof.proof),
+        'INTENT_FENCED'
+      )
 
-    const beginFirst = cancelableIntentFixture('exclusive')
-    const usedProof = prepareMutationProof(beginFirst.owner, beginFirst.intent)
+      const beginFirst = cancelableIntentFixture('exclusive')
+      const usedProof = prepareMutationProof(beginFirst.owner, beginFirst.intent)
       const mutating = beginFirst.owner.beginExclusiveMutation(beginFirst.intent, usedProof.proof)
-    const beforeRejectedCancel = beginFirst.owner.readOperationState()
-    expectLockError(
-      () => beginFirst.owner.beginExclusiveMutation(beginFirst.intent, usedProof.proof),
-      'INTENT_PHASE_INVALID'
-    )
-    expect(beginFirst.owner.readOperationState()).toEqual(beforeRejectedCancel)
+      const beforeRejectedCancel = beginFirst.owner.readOperationState()
+      expectLockError(
+        () => beginFirst.owner.beginExclusiveMutation(beginFirst.intent, usedProof.proof),
+        'INTENT_PHASE_INVALID'
+      )
+      expect(beginFirst.owner.readOperationState()).toEqual(beforeRejectedCancel)
       expectLockError(
         () => beginFirst.owner.cancelExclusiveIntent(mutating),
         'INTENT_PHASE_INVALID'
       )
-    expect(beginFirst.owner.readOperationState()).toEqual(beforeRejectedCancel)
+      expect(beginFirst.owner.readOperationState()).toEqual(beforeRejectedCancel)
     }
   )
 
@@ -814,7 +820,7 @@ describe('database operation lock core', () => {
           [hookName]() {
             if (armed) throw new Error(`injected ${hookName}`)
           },
-  })
+        })
         const prepared = prepareMutationProof(fixture.owner, fixture.intent)
         const binding = mutationProofBinding(fixture.owner, fixture.intent)
         const baseline = retainedDescriptorCount(fixture.owner.getPaths().operationRoot)
@@ -885,126 +891,126 @@ describe('database operation lock core', () => {
   it.runIf(process.platform === 'linux')(
     'requires an authentic proof after advisory state checks and preserves proof error codes',
     () => {
-    for (const suppliedProof of [undefined, {}, Object.freeze(Object.create(null))]) {
+      for (const suppliedProof of [undefined, {}, Object.freeze(Object.create(null))]) {
+        const { owner, intent } = cancelableIntentFixture('exclusive')
+        const before = owner.readOperationState()
+        expectLockError(
+          () => owner.beginExclusiveMutation(intent, suppliedProof),
+          'PREPARED_PROOF_INVALID'
+        )
+        expect(owner.readOperationState()).toEqual(before)
+      }
+
       const { owner, intent } = cancelableIntentFixture('exclusive')
+      const prepared = prepareMutationProof(owner, intent)
       const before = owner.readOperationState()
       expectLockError(
-        () => owner.beginExclusiveMutation(intent, suppliedProof),
-        'PREPARED_PROOF_INVALID'
+        () =>
+          owner.beginExclusiveMutation(
+            { ...intent, owner: { ...intent.owner, ownerId: `wrong-${intent.owner.ownerId}` } },
+            prepared.proof
+          ),
+        'INTENT_FENCED'
       )
       expect(owner.readOperationState()).toEqual(before)
-    }
-
-    const { owner, intent } = cancelableIntentFixture('exclusive')
-    const prepared = prepareMutationProof(owner, intent)
-    const before = owner.readOperationState()
-    expectLockError(
-      () =>
-        owner.beginExclusiveMutation(
-          { ...intent, owner: { ...intent.owner, ownerId: `wrong-${intent.owner.ownerId}` } },
-          prepared.proof
-        ),
-      'INTENT_FENCED'
-    )
-    expect(owner.readOperationState()).toEqual(before)
     }
   )
 
   it.runIf(process.platform === 'linux')(
     'reuses a proof after precommit failure and consumes it at rename before strict durability',
     () => {
-    let armed = false
-    const reusable = cancelableIntentFixture('exclusive', {
-      afterPrune() {
-        if (armed) throw new Error('precommit failure')
-      },
-    })
-    const reusableProof = prepareMutationProof(reusable.owner, reusable.intent)
-    const before = reusable.owner.readOperationState()
-    armed = true
-    expectLockError(
-      () => reusable.owner.beginExclusiveMutation(reusable.intent, reusableProof.proof),
-      'FILESYSTEM_FAILURE'
-    )
-    expect(reusable.owner.readOperationState()).toEqual(before)
-    armed = false
-    expect(
-      reusable.owner.beginExclusiveMutation(reusable.intent, reusableProof.proof)
-    ).toMatchObject({ phase: 'mutating' })
+      let armed = false
+      const reusable = cancelableIntentFixture('exclusive', {
+        afterPrune() {
+          if (armed) throw new Error('precommit failure')
+        },
+      })
+      const reusableProof = prepareMutationProof(reusable.owner, reusable.intent)
+      const before = reusable.owner.readOperationState()
+      armed = true
+      expectLockError(
+        () => reusable.owner.beginExclusiveMutation(reusable.intent, reusableProof.proof),
+        'FILESYSTEM_FAILURE'
+      )
+      expect(reusable.owner.readOperationState()).toEqual(before)
+      armed = false
+      expect(
+        reusable.owner.beginExclusiveMutation(reusable.intent, reusableProof.proof)
+      ).toMatchObject({ phase: 'mutating' })
 
-    armed = false
-    const uncertain = cancelableIntentFixture('exclusive', {
-      afterRename() {
-        if (armed) throw new Error('post-rename pre-fsync failure')
-      },
-    })
-    const uncertainProof = prepareMutationProof(uncertain.owner, uncertain.intent)
-    const uncertainBinding = mutationProofBinding(uncertain.owner, uncertain.intent)
-    armed = true
-    const error = expectLockError(
-      () => uncertain.owner.beginExclusiveMutation(uncertain.intent, uncertainProof.proof),
-      'MUTATION_COMMIT_DURABILITY_UNCERTAIN'
-    )
-    expect(error.cause).toBeInstanceOf(DatabaseOperationLockError)
-    expect(uncertain.owner.readOperationState()).toMatchObject({
-      exclusiveIntent: { phase: 'mutating' },
-    })
-    expect(uncertain.owner.getLifecycleHealth()).toMatchObject({
-      fenced: true,
-      durabilityUncertain: true,
-    })
-    expectErrorCode(
-      () => verifyPreparedMutationProof(uncertainProof.proof, uncertainBinding),
-      'PREPARED_PROOF_USED'
-    )
+      armed = false
+      const uncertain = cancelableIntentFixture('exclusive', {
+        afterRename() {
+          if (armed) throw new Error('post-rename pre-fsync failure')
+        },
+      })
+      const uncertainProof = prepareMutationProof(uncertain.owner, uncertain.intent)
+      const uncertainBinding = mutationProofBinding(uncertain.owner, uncertain.intent)
+      armed = true
+      const error = expectLockError(
+        () => uncertain.owner.beginExclusiveMutation(uncertain.intent, uncertainProof.proof),
+        'MUTATION_COMMIT_DURABILITY_UNCERTAIN'
+      )
+      expect(error.cause).toBeInstanceOf(DatabaseOperationLockError)
+      expect(uncertain.owner.readOperationState()).toMatchObject({
+        exclusiveIntent: { phase: 'mutating' },
+      })
+      expect(uncertain.owner.getLifecycleHealth()).toMatchObject({
+        fenced: true,
+        durabilityUncertain: true,
+      })
+      expectErrorCode(
+        () => verifyPreparedMutationProof(uncertainProof.proof, uncertainBinding),
+        'PREPARED_PROOF_USED'
+      )
 
-    armed = false
-    const unsupported = cancelableIntentFixture('exclusive', {
-      directorySync() {
-        return armed ? false : undefined
-      },
-    })
-    const unsupportedProof = prepareMutationProof(unsupported.owner, unsupported.intent)
-    armed = true
-    expectLockError(
-      () => unsupported.owner.beginExclusiveMutation(unsupported.intent, unsupportedProof.proof),
-      'MUTATION_COMMIT_DURABILITY_UNCERTAIN'
-    )
-    expect(unsupported.owner.readOperationState()).toMatchObject({
-      exclusiveIntent: { phase: 'mutating' },
-    })
-    expect(unsupported.owner.getLifecycleHealth()).toMatchObject({
-      fenced: true,
-      durabilityUncertain: true,
-    })
+      armed = false
+      const unsupported = cancelableIntentFixture('exclusive', {
+        directorySync() {
+          return armed ? false : undefined
+        },
+      })
+      const unsupportedProof = prepareMutationProof(unsupported.owner, unsupported.intent)
+      armed = true
+      expectLockError(
+        () => unsupported.owner.beginExclusiveMutation(unsupported.intent, unsupportedProof.proof),
+        'MUTATION_COMMIT_DURABILITY_UNCERTAIN'
+      )
+      expect(unsupported.owner.readOperationState()).toMatchObject({
+        exclusiveIntent: { phase: 'mutating' },
+      })
+      expect(unsupported.owner.getLifecycleHealth()).toMatchObject({
+        fenced: true,
+        durabilityUncertain: true,
+      })
 
-    armed = false
-    const failedSync = cancelableIntentFixture('exclusive', {
-      directorySync() {
-        if (armed) throw new Error('injected directory sync failure')
-      },
-    })
-    const failedSyncProof = prepareMutationProof(failedSync.owner, failedSync.intent)
-    armed = true
-    const syncError = expectLockError(
-      () => failedSync.owner.beginExclusiveMutation(failedSync.intent, failedSyncProof.proof),
-      'MUTATION_COMMIT_DURABILITY_UNCERTAIN'
-    )
-    expect(syncError.cause).toMatchObject({ code: 'FILESYSTEM_FAILURE' })
-    expect(failedSync.owner.readOperationState()).toMatchObject({
-      exclusiveIntent: { phase: 'mutating' },
-    })
-    expect(failedSync.owner.getLifecycleHealth()).toMatchObject({
-      fenced: true,
-      durabilityUncertain: true,
-    })
+      armed = false
+      const failedSync = cancelableIntentFixture('exclusive', {
+        directorySync() {
+          if (armed) throw new Error('injected directory sync failure')
+        },
+      })
+      const failedSyncProof = prepareMutationProof(failedSync.owner, failedSync.intent)
+      armed = true
+      const syncError = expectLockError(
+        () => failedSync.owner.beginExclusiveMutation(failedSync.intent, failedSyncProof.proof),
+        'MUTATION_COMMIT_DURABILITY_UNCERTAIN'
+      )
+      expect(syncError.cause).toMatchObject({ code: 'FILESYSTEM_FAILURE' })
+      expect(failedSync.owner.readOperationState()).toMatchObject({
+        exclusiveIntent: { phase: 'mutating' },
+      })
+      expect(failedSync.owner.getLifecycleHealth()).toMatchObject({
+        fenced: true,
+        durabilityUncertain: true,
+      })
 
       armed = false
       const bypass = cancelableIntentFixture('exclusive', {
         directorySync() {
           return armed ? true : undefined
         },
-  })
+      })
       const bypassProof = prepareMutationProof(bypass.owner, bypass.intent)
       armed = true
       const bypassError = expectLockError(
@@ -1023,137 +1029,137 @@ describe('database operation lock core', () => {
   it.runIf(process.platform === 'linux')(
     'rejects retained-evidence tamper under the mutex without publishing mutating state',
     () => {
-    let armed = false
-    let artifactPath
-    const fixture = cancelableIntentFixture('exclusive', {
-      afterPrune() {
-        if (!armed) return
-        chmodSync(artifactPath, 0o600)
-        chmodSync(artifactPath, 0o400)
-      },
-    })
-    const prepared = prepareMutationProof(fixture.owner, fixture.intent)
-    const operations = join(
-      fixture.owner.getPaths().operationRoot,
-      'recovery-journal-v1',
-      'operations'
-    )
-    const operation = join(operations, readdirSync(operations)[0])
-    const artifacts = join(operation, 'artifacts')
-    artifactPath = join(artifacts, readdirSync(artifacts)[0])
-    const before = fixture.owner.readOperationState()
-    armed = true
-    const error = expectLockError(
-      () => fixture.owner.beginExclusiveMutation(fixture.intent, prepared.proof),
-      'RECOVERY_ARTIFACT_CORRUPTION'
-    )
-    expect(error.cause?.code).toBe('RECOVERY_ARTIFACT_CORRUPTION')
-    expect(fixture.owner.readOperationState()).toEqual(before)
-    expect(fixture.owner.getLifecycleHealth()).toMatchObject({
-      fenced: false,
-      durabilityUncertain: false,
-    })
+      let armed = false
+      let artifactPath
+      const fixture = cancelableIntentFixture('exclusive', {
+        afterPrune() {
+          if (!armed) return
+          chmodSync(artifactPath, 0o600)
+          chmodSync(artifactPath, 0o400)
+        },
+      })
+      const prepared = prepareMutationProof(fixture.owner, fixture.intent)
+      const operations = join(
+        fixture.owner.getPaths().operationRoot,
+        'recovery-journal-v1',
+        'operations'
+      )
+      const operation = join(operations, readdirSync(operations)[0])
+      const artifacts = join(operation, 'artifacts')
+      artifactPath = join(artifacts, readdirSync(artifacts)[0])
+      const before = fixture.owner.readOperationState()
+      armed = true
+      const error = expectLockError(
+        () => fixture.owner.beginExclusiveMutation(fixture.intent, prepared.proof),
+        'RECOVERY_ARTIFACT_CORRUPTION'
+      )
+      expect(error.cause?.code).toBe('RECOVERY_ARTIFACT_CORRUPTION')
+      expect(fixture.owner.readOperationState()).toEqual(before)
+      expect(fixture.owner.getLifecycleHealth()).toMatchObject({
+        fenced: false,
+        durabilityUncertain: false,
+      })
     }
   )
 
   it.runIf(process.platform === 'linux')(
     'applies intent and state precedence before proof lifecycle errors',
     () => {
-    const malformed = cancelableIntentFixture('exclusive')
-    const malformedProof = prepareMutationProof(malformed.owner, malformed.intent)
-    expectLockError(
-      () =>
-        malformed.owner.beginExclusiveMutation(
-          { ...malformed.intent, operationId: '' },
-          malformedProof.proof
-        ),
-      'STATE_CORRUPTION'
-    )
+      const malformed = cancelableIntentFixture('exclusive')
+      const malformedProof = prepareMutationProof(malformed.owner, malformed.intent)
+      expectLockError(
+        () =>
+          malformed.owner.beginExclusiveMutation(
+            { ...malformed.intent, operationId: '' },
+            malformedProof.proof
+          ),
+        'STATE_CORRUPTION'
+      )
 
-    const cancelled = cancelableIntentFixture('exclusive')
-    expect(cancelled.owner.cancelExclusiveIntent(cancelled.intent)).toBe(true)
-    expectLockError(
-      () => cancelled.owner.beginExclusiveMutation(cancelled.intent, undefined),
-      'INTENT_FENCED'
-    )
+      const cancelled = cancelableIntentFixture('exclusive')
+      expect(cancelled.owner.cancelExclusiveIntent(cancelled.intent)).toBe(true)
+      expectLockError(
+        () => cancelled.owner.beginExclusiveMutation(cancelled.intent, undefined),
+        'INTENT_FENCED'
+      )
 
-    const mutating = cancelableIntentFixture('exclusive')
-    const prepared = prepareMutationProof(mutating.owner, mutating.intent)
-    mutating.owner.beginExclusiveMutation(mutating.intent, prepared.proof)
-    expectLockError(
-      () => mutating.owner.beginExclusiveMutation(mutating.intent, undefined),
-      'INTENT_PHASE_INVALID'
-    )
+      const mutating = cancelableIntentFixture('exclusive')
+      const prepared = prepareMutationProof(mutating.owner, mutating.intent)
+      mutating.owner.beginExclusiveMutation(mutating.intent, prepared.proof)
+      expectLockError(
+        () => mutating.owner.beginExclusiveMutation(mutating.intent, undefined),
+        'INTENT_PHASE_INVALID'
+      )
     }
   )
 
   it.runIf(process.platform === 'linux')(
     'returns mutation authority after durable fsync despite later committed maintenance failure',
     () => {
-    let armed = false
-    const fixture = cancelableIntentFixture('exclusive', {
-      afterFsync() {
-        if (armed) throw new Error('durable postcommit maintenance')
-      },
-    })
-    const prepared = prepareMutationProof(fixture.owner, fixture.intent)
-    armed = true
-    expect(fixture.owner.beginExclusiveMutation(fixture.intent, prepared.proof)).toMatchObject({
-      phase: 'mutating',
-    })
-    expect(fixture.owner.getLifecycleHealth()).toMatchObject({
-      fenced: false,
-      maintenanceDegraded: true,
-      durabilityUncertain: false,
-    })
+      let armed = false
+      const fixture = cancelableIntentFixture('exclusive', {
+        afterFsync() {
+          if (armed) throw new Error('durable postcommit maintenance')
+        },
+      })
+      const prepared = prepareMutationProof(fixture.owner, fixture.intent)
+      armed = true
+      expect(fixture.owner.beginExclusiveMutation(fixture.intent, prepared.proof)).toMatchObject({
+        phase: 'mutating',
+      })
+      expect(fixture.owner.getLifecycleHealth()).toMatchObject({
+        fenced: false,
+        maintenanceDegraded: true,
+        durabilityUncertain: false,
+      })
     }
   )
 
   it.runIf(process.platform === 'linux')(
     'hashes only before the mutex even when full verification exceeds its TTL',
     () => {
-    const root = tempRoot()
-    const owner = new DatabaseOperationLock({
-      rootDir: root,
-      databaseIdentity: DATABASE_IDENTITY,
-      runtimeId: 'cli',
-      mutexTtlMs: 1_000,
-    })
-    const lease = owner.registerRuntimeLease()
-    let intent = owner.acquireExclusiveIntent('restore')
-    intent = owner.drainExclusiveIntent(intent)
-    owner.releaseRuntimeLease(lease)
-    intent = owner.drainExclusiveIntent(intent)
-    const prepared = prepareMutationProof(owner, intent)
-    let hashes = 0
-    setRecoveryJournalInterArtifactHashTestHookForTest(() => {
-      hashes += 1
-      expect(existsSync(owner.getPaths().registrationMutex)).toBe(false)
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_100)
-    })
-    const started = Date.now()
-    expect(owner.beginExclusiveMutation(intent, prepared.proof)).toMatchObject({
-      phase: 'mutating',
-    })
-    expect(Date.now() - started).toBeGreaterThanOrEqual(1_000)
-    expect(hashes).toBe(1)
+      const root = tempRoot()
+      const owner = new DatabaseOperationLock({
+        rootDir: root,
+        databaseIdentity: DATABASE_IDENTITY,
+        runtimeId: 'cli',
+        mutexTtlMs: 1_000,
+      })
+      const lease = owner.registerRuntimeLease()
+      let intent = owner.acquireExclusiveIntent('restore')
+      intent = owner.drainExclusiveIntent(intent)
+      owner.releaseRuntimeLease(lease)
+      intent = owner.drainExclusiveIntent(intent)
+      const prepared = prepareMutationProof(owner, intent)
+      let hashes = 0
+      setRecoveryJournalInterArtifactHashTestHookForTest(() => {
+        hashes += 1
+        expect(existsSync(owner.getPaths().registrationMutex)).toBe(false)
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_100)
+      })
+      const started = Date.now()
+      expect(owner.beginExclusiveMutation(intent, prepared.proof)).toMatchObject({
+        phase: 'mutating',
+      })
+      expect(Date.now() - started).toBeGreaterThanOrEqual(1_000)
+      expect(hashes).toBe(1)
     }
   )
 
   it.runIf(process.platform === 'linux')(
     'revalidates advisory state under the mutex after a cancellation during hashing',
     () => {
-    const fixture = cancelableIntentFixture('exclusive')
-    const prepared = prepareMutationProof(fixture.owner, fixture.intent)
-    setRecoveryJournalInterArtifactHashTestHookForTest(() => {
-      setRecoveryJournalInterArtifactHashTestHookForTest(undefined)
-      expect(fixture.owner.cancelExclusiveIntent(fixture.intent)).toBe(true)
-    })
-    expectLockError(
-      () => fixture.owner.beginExclusiveMutation(fixture.intent, prepared.proof),
-      'INTENT_FENCED'
-    )
-    expect(fixture.owner.readOperationState().exclusiveIntent).toBeNull()
+      const fixture = cancelableIntentFixture('exclusive')
+      const prepared = prepareMutationProof(fixture.owner, fixture.intent)
+      setRecoveryJournalInterArtifactHashTestHookForTest(() => {
+        setRecoveryJournalInterArtifactHashTestHookForTest(undefined)
+        expect(fixture.owner.cancelExclusiveIntent(fixture.intent)).toBe(true)
+      })
+      expectLockError(
+        () => fixture.owner.beginExclusiveMutation(fixture.intent, prepared.proof),
+        'INTENT_FENCED'
+      )
+      expect(fixture.owner.readOperationState().exclusiveIntent).toBeNull()
     }
   )
 
@@ -1196,27 +1202,31 @@ describe('database operation lock core', () => {
     expect(forgedOwner.readOperationState()).toEqual(before)
   })
 
-  it('preserves all leases under concurrent real worker-process registration', async () => {
-    const root = tempRoot()
-    const forbiddenHome = join(root, 'must-not-resolve-home')
-    const runtimeIds = ['cli', 'mcp', 'browser-data-server', 'tauri', 'cli', 'mcp']
-    const results = await Promise.all(
-      runtimeIds.map((runtimeId) => runWorker(root, runtimeId, 0, forbiddenHome))
-    )
-    const observer = createLockAt(root, 'tauri')
-    const state = observer.readOperationState()
+  it(
+    'preserves all leases under concurrent real worker-process registration',
+    async () => {
+      const root = tempRoot()
+      const forbiddenHome = join(root, 'must-not-resolve-home')
+      const runtimeIds = ['cli', 'mcp', 'browser-data-server', 'tauri', 'cli', 'mcp']
+      const results = await Promise.all(
+        runtimeIds.map((runtimeId) => runWorker(root, runtimeId, 0, forbiddenHome))
+      )
+      const observer = createLockAt(root, 'tauri')
+      const state = observer.readOperationState()
 
-    expect(state.stateRevision).toBe(runtimeIds.length)
-    expect(state.fencingGenerationHighWater).toBe(runtimeIds.length)
-    expect(state.leases).toHaveLength(runtimeIds.length)
-    expect(new Set(state.leases.map((lease) => lease.leaseId)).size).toBe(runtimeIds.length)
-    expect(new Set(state.leases.map((lease) => lease.owner.ownerId)).size).toBe(runtimeIds.length)
-    expect(new Set(state.leases.map((lease) => lease.owner.hostId)).size).toBe(1)
-    expect(results.map((result) => result.lease.leaseId).sort()).toEqual(
-      state.leases.map((lease) => lease.leaseId).sort()
-    )
-    expect(existsSync(forbiddenHome)).toBe(false)
-  })
+      expect(state.stateRevision).toBe(runtimeIds.length)
+      expect(state.fencingGenerationHighWater).toBe(runtimeIds.length)
+      expect(state.leases).toHaveLength(runtimeIds.length)
+      expect(new Set(state.leases.map((lease) => lease.leaseId)).size).toBe(runtimeIds.length)
+      expect(new Set(state.leases.map((lease) => lease.owner.ownerId)).size).toBe(runtimeIds.length)
+      expect(new Set(state.leases.map((lease) => lease.owner.hostId)).size).toBe(1)
+      expect(results.map((result) => result.lease.leaseId).sort()).toEqual(
+        state.leases.map((lease) => lease.leaseId).sort()
+      )
+      expect(existsSync(forbiddenHome)).toBe(false)
+    },
+    MANAGED_TEST_TIMEOUT_MS
+  )
 
   it('does not steal a live expired lease and lets its owner release it', () => {
     const root = tempRoot()
@@ -1238,16 +1248,20 @@ describe('database operation lock core', () => {
     expect(cleaner.readOperationState()).toMatchObject({ stateRevision: 2, leases: [] })
   })
 
-  it('reclaims an expired lease only after real dead-process evidence', async () => {
-    const root = tempRoot()
-    const worker = await runWorker(root, 'mcp', -40_000, join(root, 'forbidden-home'))
-    const cleaner = createLockAt(root, 'tauri')
-    const cleanup = cleaner.cleanupStaleRecords()
+  it(
+    'reclaims an expired lease only after real dead-process evidence',
+    async () => {
+      const root = tempRoot()
+      const worker = await runWorker(root, 'mcp', -40_000, join(root, 'forbidden-home'))
+      const cleaner = createLockAt(root, 'tauri')
+      const cleanup = cleaner.cleanupStaleRecords()
 
-    expect(cleanup.removedLeaseIds).toEqual([worker.lease.leaseId])
-    expect(cleanup.stateRevision).toBe(2)
-    expect(cleaner.readOperationState()).toMatchObject({ stateRevision: 2, leases: [] })
-  })
+      expect(cleanup.removedLeaseIds).toEqual([worker.lease.leaseId])
+      expect(cleanup.stateRevision).toBe(2)
+      expect(cleaner.readOperationState()).toMatchObject({ stateRevision: 2, leases: [] })
+    },
+    MANAGED_TEST_TIMEOUT_MS
+  )
 
   it('publishes only complete mutex candidates and recovers from a pre-publication crash', () => {
     const root = tempRoot()
@@ -1370,6 +1384,35 @@ describe('database operation lock core', () => {
     })
   })
 
+  it('treats a disappeared quarantine source as a collision only when a successor exists', () => {
+    const root = tempRoot()
+    const successorOwner = createLockAt(root, 'tauri').getOwnerEvidence()
+    let displacedQuarantine
+    let successorRecord
+    const holder = new DatabaseOperationLock({
+      rootDir: root,
+      databaseIdentity: DATABASE_IDENTITY,
+      runtimeId: 'cli',
+      testHooks: {
+        afterMutexQuarantine({ quarantine, mutexPath }) {
+          rmSync(quarantine, { recursive: true })
+          publishCompleteMutex(quarantine, mutexRecord(successorOwner, Date.now(), randomUUID()))
+          successorRecord = mutexRecord(successorOwner, Date.now(), randomUUID())
+          publishCompleteMutex(mutexPath, successorRecord)
+        },
+        beforeMutexRestore({ quarantine }) {
+          displacedQuarantine = `${quarantine}.displaced`
+          renameSync(quarantine, displacedQuarantine)
+        },
+      },
+    })
+
+    expect(holder.registerRuntimeLease()).toMatchObject({ recordKind: 'runtime_lease' })
+    expect(displacedQuarantine).toBeDefined()
+    expect(readCompleteMutex(displacedQuarantine)).toBeDefined()
+    expect(readCompleteMutex(holder.getPaths().registrationMutex)).toEqual(successorRecord)
+  })
+
   it('fences a delayed superseded mutex holder from publishing or removing its successor', () => {
     const root = tempRoot()
     const successor = createLockAt(root, 'tauri')
@@ -1467,20 +1510,25 @@ describe('database operation lock core', () => {
         stateRevision: before.stateRevision + 1,
       })
       expectLockError(() => cleaner.assertExclusiveAuthority(worker.intent, phase), 'INTENT_FENCED')
-    }
+    },
+    MANAGED_TEST_TIMEOUT_MS
   )
 
-  it('removes an already abandoned dead intent', async () => {
-    const root = tempRoot()
-    await runWorker(root, 'mcp', 0, join(root, 'forbidden-home'), 'intent:exclusive')
-    const cleaner = createLockAt(root, 'tauri')
-    const path = highestStateFile(cleaner)
-    const state = JSON.parse(readFileSync(path, 'utf8'))
-    state.exclusiveIntent.phase = 'abandoned'
-    writePrivateJson(path, state, false)
-    expect(cleaner.cleanupStaleRecords().abandonedIntent).toBe(true)
-    expect(cleaner.readOperationState().exclusiveIntent).toBeNull()
-  })
+  it(
+    'removes an already abandoned dead intent',
+    async () => {
+      const root = tempRoot()
+      await runWorker(root, 'mcp', 0, join(root, 'forbidden-home'), 'intent:exclusive')
+      const cleaner = createLockAt(root, 'tauri')
+      const path = highestStateFile(cleaner)
+      const state = JSON.parse(readFileSync(path, 'utf8'))
+      state.exclusiveIntent.phase = 'abandoned'
+      writePrivateJson(path, state, false)
+      expect(cleaner.cleanupStaleRecords().abandonedIntent).toBe(true)
+      expect(cleaner.readOperationState().exclusiveIntent).toBeNull()
+    },
+    MANAGED_TEST_TIMEOUT_MS
+  )
 
   it.runIf(process.platform === 'linux')(
     'fences and removes a dead completed intent exactly once',
@@ -1504,23 +1552,25 @@ describe('database operation lock core', () => {
         () => cleaner.assertExclusiveAuthority(worker.intent, 'completed'),
         'INTENT_FENCED'
       )
-    }
+    },
+    MANAGED_TEST_TIMEOUT_MS
   )
 
   it.runIf(process.platform === 'linux')(
     'never automatically clears a dead mutating intent',
     async () => {
-    const root = tempRoot()
-    await runWorker(root, 'cli', 0, join(root, 'forbidden-home'), 'intent:mutating')
-    const cleaner = createLockAt(root, 'tauri')
-    const before = cleaner.readOperationState()
-    expect(cleaner.cleanupStaleRecords()).toEqual({
-      removedLeaseIds: [],
-      abandonedIntent: false,
-      stateRevision: before.stateRevision,
-    })
-    expect(cleaner.readOperationState()).toEqual(before)
-    }
+      const root = tempRoot()
+      await runWorker(root, 'cli', 0, join(root, 'forbidden-home'), 'intent:mutating')
+      const cleaner = createLockAt(root, 'tauri')
+      const before = cleaner.readOperationState()
+      expect(cleaner.cleanupStaleRecords()).toEqual({
+        removedLeaseIds: [],
+        abandonedIntent: false,
+        stateRevision: before.stateRevision,
+      })
+      expect(cleaner.readOperationState()).toEqual(before)
+    },
+    MANAGED_TEST_TIMEOUT_MS
   )
 
   it('matches the shared strict JSON golden fixtures', () => {
@@ -1767,18 +1817,22 @@ describe('database operation lock core', () => {
     expect(turnedOver).toBe(true)
   })
 
-  it('survives repeated multi-process contention well beyond retention', async () => {
-    const root = tempRoot()
-    const results = await Promise.all(
-      ['cli', 'mcp', 'browser-data-server', 'tauri'].map((runtimeId) =>
-        runWorker(root, runtimeId, 0, join(root, `forbidden-${runtimeId}`), 'churn', 12)
+  it(
+    'survives repeated multi-process contention well beyond retention',
+    async () => {
+      const root = tempRoot()
+      const results = await Promise.all(
+        ['cli', 'mcp', 'browser-data-server', 'tauri'].map((runtimeId) =>
+          runWorker(root, runtimeId, 0, join(root, `forbidden-${runtimeId}`), 'churn', 12)
+        )
       )
-    )
-    const observer = createLockAt(root, 'tauri')
-    expect(results).toHaveLength(4)
-    expect(observer.readOperationState()).toMatchObject({ stateRevision: 96, leases: [] })
-    expect(readdirSync(observer.getPaths().stateRecords).length).toBeLessThanOrEqual(8)
-  })
+      const observer = createLockAt(root, 'tauri')
+      expect(results).toHaveLength(4)
+      expect(observer.readOperationState()).toMatchObject({ stateRevision: 96, leases: [] })
+      expect(readdirSync(observer.getPaths().stateRecords).length).toBeLessThanOrEqual(8)
+    },
+    MANAGED_TEST_TIMEOUT_MS
+  )
 
   it('rejects database aliases and symlink coordination roots without filesystem effects', () => {
     const inertRoot = join(tempRoot(), 'never-created')
@@ -1825,7 +1879,8 @@ describe('database operation lock core', () => {
       const lease = live.registerRuntimeLease()
       expect(createLockAt(liveRoot, 'tauri').cleanupStaleRecords().removedLeaseIds).toEqual([])
       expect(live.releaseRuntimeLease(lease)).toBe(true)
-    }
+    },
+    MANAGED_TEST_TIMEOUT_MS
   )
 
   it.runIf(process.platform !== 'linux')(
@@ -1850,6 +1905,919 @@ describe('database operation lock core', () => {
     }
   )
 
+  it.runIf(process.platform === 'linux')(
+    'claims mutating and abandoned committed sources with exact lineage and metadata preservation',
+    () => {
+      for (const phase of ['mutating', 'abandoned']) {
+        const fixture = recoveryClaimFixture(phase)
+        const before = fixture.claimant.readOperationState()
+        const journalRoot = join(fixture.claimant.getPaths().operationRoot, 'recovery-journal-v1')
+        const journalBytes = snapshotTreeBytes(journalRoot)
+        const sentinel = join(fixture.root, 'sentinel.sqlite')
+        writeFileSync(sentinel, 'sentinel-database-bytes\0unchanged')
+        const sentinelBytes = readFileSync(sentinel)
+        const beforeDescriptors = retainedDescriptorCount(fixture.claimant.getPaths().operationRoot)
+        const authority = fixture.claimant.claimRecoveryAuthority()
+        const claimed = fixture.claimant.readOperationState()
+        expect(Object.getPrototypeOf(authority)).toBeNull()
+        expect(Object.isFrozen(authority)).toBe(true)
+        expect(Object.keys(authority)).toEqual([])
+        expect(retainedDescriptorCount(fixture.claimant.getPaths().operationRoot)).toBe(
+          beforeDescriptors + 9
+        )
+        expect(claimed).toMatchObject({
+          stateRevision: before.stateRevision + 1,
+          fencingGenerationHighWater: before.fencingGenerationHighWater + 1,
+          leases: [],
+          exclusiveIntent: {
+            operationId: before.exclusiveIntent.operationId,
+            operation: before.exclusiveIntent.operation,
+            phase: 'mutating',
+            owner: fixture.claimant.getOwnerEvidence(),
+            fencingGeneration: before.fencingGenerationHighWater + 1,
+            createdAt: before.exclusiveIntent.createdAt,
+            metadata: {
+              nested: { preserved: [true, 7] },
+              'shikin.recovery.recordSha256':
+                before.exclusiveIntent.metadata['shikin.recovery.recordSha256'],
+              'shikin.recovery.claimSequence': 1,
+            },
+          },
+        })
+        expect(claimed.updatedAt).toBe(claimed.exclusiveIntent.updatedAt)
+        expect(fixture.claimant.assertRecoveryAuthority(authority)).toEqual(claimed.exclusiveIntent)
+        expect(validateContractRecord(claimed), JSON.stringify(validateContractRecord.errors)).toBe(
+          true
+        )
+        fixture.claimant.releaseRecoveryAuthority(authority)
+        expect(retainedDescriptorCount(fixture.claimant.getPaths().operationRoot)).toBe(
+          beforeDescriptors
+        )
+        expect(snapshotTreeBytes(journalRoot)).toEqual(journalBytes)
+        expect(readFileSync(sentinel)).toEqual(sentinelBytes)
+
+        const successor = recoveryClaimant(fixture.root, 'browser-data-server')
+        const secondAuthority = successor.claimRecoveryAuthority()
+        const second = successor.readOperationState()
+        expect(second).toMatchObject({
+          stateRevision: claimed.stateRevision + 1,
+          fencingGenerationHighWater: claimed.fencingGenerationHighWater + 1,
+          exclusiveIntent: {
+            fencingGeneration: claimed.fencingGenerationHighWater + 1,
+            metadata: { 'shikin.recovery.claimSequence': 2 },
+          },
+        })
+        expect(validateContractRecord(second), JSON.stringify(validateContractRecord.errors)).toBe(
+          true
+        )
+        successor.releaseRecoveryAuthority(secondAuthority)
+      }
+    },
+    MANAGED_TEST_TIMEOUT_MS
+  )
+
+  it.runIf(process.platform === 'linux')(
+    'enforces opaque authenticity, exact lifecycle precedence, and sequence-positive generic guards',
+    () => {
+      const fixture = recoveryClaimFixture('mutating')
+      const authority = fixture.claimant.claimRecoveryAuthority()
+      const intent = fixture.claimant.assertRecoveryAuthority(authority)
+      expect(fixture.claimant.recoveryAuthorityOrigin).toBeUndefined()
+      const other = recoveryClaimant(fixture.root, 'mcp')
+      const clone = (() => {
+        try {
+          return structuredClone(authority)
+        } catch {
+          return Object.create(null)
+        }
+      })()
+      for (const forged of [{}, Object.freeze(Object.create(null)), clone, new Proxy({}, {})]) {
+        expectLockError(
+          () => fixture.claimant.assertRecoveryAuthority(forged),
+          'RECOVERY_AUTHORITY_INVALID'
+        )
+        expect(() => fixture.claimant.releaseRecoveryAuthority(forged)).not.toThrow()
+      }
+      expectLockError(() => other.assertRecoveryAuthority(authority), 'RECOVERY_AUTHORITY_INVALID')
+      expect(() => other.releaseRecoveryAuthority(authority)).not.toThrow()
+      expect(fixture.claimant.assertRecoveryAuthority(authority)).toEqual(intent)
+      expectLockError(
+        () => fixture.claimant.assertExclusiveAuthority({ ...intent, metadata: undefined }),
+        'RECOVERY_AUTHORITY_REQUIRED'
+      )
+      expectLockError(
+        () => fixture.claimant.completeExclusiveMutation({ ...intent, metadata: undefined }),
+        'RECOVERY_AUTHORITY_REQUIRED'
+      )
+
+      const originalGet = WeakMap.prototype.get
+      const originalSet = WeakMap.prototype.set
+      let assertedAfterWeakMapMutation
+      try {
+        WeakMap.prototype.get = () => undefined
+        WeakMap.prototype.set = () => {
+          throw new Error('ambient WeakMap mutation')
+        }
+        assertedAfterWeakMapMutation = fixture.claimant.assertRecoveryAuthority(authority)
+      } finally {
+        WeakMap.prototype.get = originalGet
+        WeakMap.prototype.set = originalSet
+      }
+      expect(assertedAfterWeakMapMutation).toEqual(intent)
+
+      fixture.claimant.releaseRecoveryAuthority(authority)
+      fixture.claimant.releaseRecoveryAuthority(authority)
+      expectLockError(
+        () => fixture.claimant.assertRecoveryAuthority(authority),
+        'RECOVERY_AUTHORITY_RELEASED'
+      )
+
+      const highWaterFixture = recoveryClaimFixture('mutating')
+      const highWaterAuthority = highWaterFixture.claimant.claimRecoveryAuthority()
+      const highWaterIntent = highWaterFixture.claimant.readOperationState().exclusiveIntent
+      rewriteAuthoritativeState(highWaterFixture.claimant, (state) => {
+        state.fencingGenerationHighWater += 1
+        return state
+      })
+      expectLockError(
+        () => highWaterFixture.claimant.completeExclusiveMutation(highWaterIntent),
+        'INTENT_FENCED'
+      )
+      expectLockError(
+        () => highWaterFixture.claimant.assertExclusiveAuthority(highWaterIntent),
+        'INTENT_FENCED'
+      )
+      highWaterFixture.claimant.releaseRecoveryAuthority(highWaterAuthority)
+
+      const clearFixture = recoveryClaimFixture('mutating')
+      const clearAuthority = clearFixture.claimant.claimRecoveryAuthority()
+      const claimedIntent = clearFixture.claimant.readOperationState().exclusiveIntent
+      rewriteAuthoritativeState(clearFixture.claimant, (state) => {
+        const timestamp = new Date().toISOString()
+        state.exclusiveIntent.phase = 'completed'
+        state.exclusiveIntent.completedAt = timestamp
+        state.exclusiveIntent.updatedAt = timestamp
+        state.updatedAt = timestamp
+        return state
+      })
+      expectLockError(
+        () =>
+          clearFixture.claimant.clearExclusiveIntent({
+            ...claimedIntent,
+            phase: 'completed',
+            completedAt: new Date().toISOString(),
+          }),
+        'RECOVERY_AUTHORITY_REQUIRED'
+      )
+      expectLockError(
+        () => clearFixture.claimant.assertRecoveryAuthority(clearAuthority),
+        'RECOVERY_AUTHORITY_FENCED'
+      )
+      expectLockError(
+        () => clearFixture.claimant.assertRecoveryAuthority(clearAuthority),
+        'RECOVERY_AUTHORITY_FENCED'
+      )
+
+      const healthFixture = recoveryClaimFixture('mutating')
+      const healthAuthority = healthFixture.claimant.claimRecoveryAuthority()
+      healthFixture.claimant.fenced = true
+      expectLockError(
+        () => healthFixture.claimant.assertRecoveryAuthority(healthAuthority),
+        'RECOVERY_AUTHORITY_FENCED'
+      )
+      expectLockError(
+        () => healthFixture.claimant.assertRecoveryAuthority(healthAuthority),
+        'RECOVERY_AUTHORITY_FENCED'
+      )
+
+      const corruptFixture = recoveryClaimFixture('mutating')
+      const corruptAuthority = corruptFixture.claimant.claimRecoveryAuthority()
+      writeFileSync(highestStateFile(corruptFixture.claimant), '{malformed\n')
+      expectLockError(
+        () => corruptFixture.claimant.assertRecoveryAuthority(corruptAuthority),
+        'STATE_CORRUPTION'
+      )
+      expectLockError(
+        () => corruptFixture.claimant.assertRecoveryAuthority(corruptAuthority),
+        'RECOVERY_AUTHORITY_FENCED'
+      )
+
+      const tamperFixture = recoveryClaimFixture('mutating')
+      const tamperAuthority = tamperFixture.claimant.claimRecoveryAuthority()
+      const artifact = firstPreparedArtifact(tamperFixture.claimant)
+      chmodSync(artifact, 0o600)
+      writeFileSync(artifact, 'assertion-tamper')
+      expectLockError(
+        () => tamperFixture.claimant.assertRecoveryAuthority(tamperAuthority),
+        'RECOVERY_ARTIFACT_CORRUPTION'
+      )
+      expectLockError(
+        () => tamperFixture.claimant.assertRecoveryAuthority(tamperAuthority),
+        'RECOVERY_AUTHORITY_FENCED'
+      )
+    },
+    MANAGED_TEST_TIMEOUT_MS
+  )
+
+  it.runIf(process.platform === 'linux')(
+    'keeps recovery-only guards and cleanup anchors under ambient prototype mutation',
+    () => {
+      const guarded = recoveryClaimFixture('mutating')
+      const guardedAuthority = guarded.claimant.claimRecoveryAuthority()
+      const guardedIntent = guarded.claimant.readOperationState().exclusiveIntent
+
+      const completed = recoveryClaimFixture('mutating')
+      const completedAuthority = completed.claimant.claimRecoveryAuthority()
+      rewriteAuthoritativeState(completed.claimant, (state) => {
+        const timestamp = new Date().toISOString()
+        state.exclusiveIntent.phase = 'completed'
+        state.exclusiveIntent.completedAt = timestamp
+        state.exclusiveIntent.updatedAt = timestamp
+        state.updatedAt = timestamp
+        return state
+      })
+      const completedBefore = completed.claimant.readOperationState()
+      const completedIntent = completedBefore.exclusiveIntent
+
+      const committedAbandoned = recoveryClaimFixture('abandoned')
+      const abandonedBefore = committedAbandoned.claimant.readOperationState()
+
+      const leasedRoot = tempRoot()
+      const leaseOwner = createLockAt(leasedRoot, 'cli')
+      leaseOwner.registerRuntimeLease()
+      leaseOwner.acquireExclusiveIntent('restore', { prototypeRegression: true })
+      const leasedCleaner = new DatabaseOperationLock({
+        rootDir: leasedRoot,
+        databaseIdentity: DATABASE_IDENTITY,
+        runtimeId: 'mcp',
+        testHooks: { processEvidence: () => 'dead' },
+      })
+      const leasedBefore = leasedCleaner.readOperationState()
+
+      const originalFilter = Array.prototype.filter
+      const originalIncludes = Array.prototype.includes
+      const originalEvery = Array.prototype.every
+      const originalStartsWith = String.prototype.startsWith
+      let assertCode
+      let completeCode
+      let clearCode
+      let completedCleanup
+      let completedAfter
+      let abandonedCleanup
+      let abandonedAfter
+      let leasedCleanup
+      let leasedAfter
+      try {
+        Array.prototype.filter = () => []
+        Array.prototype.includes = () => true
+        Array.prototype.every = () => true
+        String.prototype.startsWith = () => false
+
+        try {
+          guarded.claimant.assertExclusiveAuthority(guardedIntent)
+        } catch (error) {
+          assertCode = error?.code
+        }
+        try {
+          guarded.claimant.completeExclusiveMutation(guardedIntent)
+        } catch (error) {
+          completeCode = error?.code
+        }
+        try {
+          completed.claimant.clearExclusiveIntent(completedIntent)
+        } catch (error) {
+          clearCode = error?.code
+        }
+        completedCleanup = completed.claimant.cleanupStaleRecords()
+        completedAfter = completed.claimant.readOperationState()
+        abandonedCleanup = committedAbandoned.claimant.cleanupStaleRecords()
+        abandonedAfter = committedAbandoned.claimant.readOperationState()
+        leasedCleanup = leasedCleaner.cleanupStaleRecords()
+        leasedAfter = leasedCleaner.readOperationState()
+      } finally {
+        Array.prototype.filter = originalFilter
+        Array.prototype.includes = originalIncludes
+        Array.prototype.every = originalEvery
+        String.prototype.startsWith = originalStartsWith
+      }
+
+      expect(assertCode).toBe('RECOVERY_AUTHORITY_REQUIRED')
+      expect(completeCode).toBe('RECOVERY_AUTHORITY_REQUIRED')
+      expect(clearCode).toBe('RECOVERY_AUTHORITY_REQUIRED')
+      expect(completedCleanup).toMatchObject({
+        abandonedIntent: false,
+        removedLeaseIds: [],
+        stateRevision: completedBefore.stateRevision,
+      })
+      expect(completedAfter).toEqual(completedBefore)
+      expect(abandonedCleanup).toMatchObject({
+        abandonedIntent: false,
+        removedLeaseIds: [],
+        stateRevision: abandonedBefore.stateRevision,
+      })
+      expect(abandonedAfter).toEqual(abandonedBefore)
+      expect(leasedCleanup).toMatchObject({
+        abandonedIntent: false,
+        removedLeaseIds: [],
+        stateRevision: leasedBefore.stateRevision,
+      })
+      expect(leasedAfter).toEqual(leasedBefore)
+
+      guarded.claimant.releaseRecoveryAuthority(guardedAuthority)
+      completed.claimant.releaseRecoveryAuthority(completedAuthority)
+    },
+    MANAGED_TEST_TIMEOUT_MS
+  )
+
+  it('fails the non-Linux recovery gate before owner, filesystem, process, or verifier work', () => {
+    const unsupportedRoot = tempRoot()
+    let processCalls = 0
+    let verificationCalls = 0
+    const unsupported = new DatabaseOperationLock({
+      rootDir: unsupportedRoot,
+      databaseIdentity: DATABASE_IDENTITY,
+      runtimeId: 'tauri',
+      testHooks: {
+        platform: () => 'darwin',
+        processEvidence: () => {
+          processCalls += 1
+          return 'dead'
+        },
+        afterCommittedRecoveryVerification: () => {
+          verificationCalls += 1
+        },
+      },
+    })
+    expectLockError(() => unsupported.claimRecoveryAuthority(), 'RECOVERY_DURABILITY_FAILURE')
+    expect(unsupported.owner).toBeNull()
+    expect(existsSync(unsupported.getPaths().protocolRoot)).toBe(false)
+    expect(processCalls).toBe(0)
+    expect(verificationCalls).toBe(0)
+    unsupported.fenced = true
+    expectLockError(() => unsupported.claimRecoveryAuthority(), 'OWNER_SELF_FENCED')
+  })
+
+  it.runIf(process.platform === 'linux')(
+    'applies claim eligibility, owner-evidence, and counter precedence without side effects',
+    () => {
+      for (const [evidence, code] of [
+        ['live', 'RECOVERY_OWNER_NOT_DEAD'],
+        ['unavailable', 'PROCESS_EVIDENCE_UNAVAILABLE'],
+        ['unsupported', 'PROCESS_EVIDENCE_UNSUPPORTED'],
+      ]) {
+        let calls = 0
+        const fixture = recoveryClaimFixture('mutating', {
+          processEvidence(context) {
+            calls += 1
+            expect(context.stage).toBe('before-committed-verification')
+            expect(context.mutexExists).toBe(false)
+            return evidence
+          },
+          afterCommittedRecoveryVerification() {
+            throw new Error('verification must not run')
+          },
+        })
+        const before = fixture.claimant.readOperationState()
+        const journalBefore = snapshotTreeBytes(fixture.claimant.getPaths().operationRoot)
+        expectLockError(() => fixture.claimant.claimRecoveryAuthority(), code)
+        expect(calls).toBe(1)
+        expect(fixture.claimant.readOperationState()).toEqual(before)
+        expect(snapshotTreeBytes(fixture.claimant.getPaths().operationRoot)).toEqual(journalBefore)
+      }
+
+      for (const evidence of ['dead', 'reused']) {
+        let calls = 0
+        let verified = 0
+        const fixture = recoveryClaimFixture('mutating', {
+          processEvidence(context) {
+            calls += 1
+            expect(context.mutexExists).toBe(false)
+            return evidence
+          },
+          afterCommittedRecoveryVerification(context) {
+            verified += 1
+            expect(context.mutexExists).toBe(false)
+          },
+        })
+        const authority = fixture.claimant.claimRecoveryAuthority()
+        expect(calls).toBe(1)
+        expect(verified).toBe(1)
+        fixture.claimant.releaseRecoveryAuthority(authority)
+      }
+
+      const foreign = recoveryClaimFixture('mutating', {
+        processEvidence() {
+          throw new Error('foreign owner must not inspect a PID')
+        },
+      })
+      rewriteAuthoritativeState(foreign.claimant, (state) => {
+        state.exclusiveIntent.owner.hostId = `foreign-${randomUUID()}`
+        return state
+      })
+      expectLockError(() => foreign.claimant.claimRecoveryAuthority(), 'RECOVERY_OWNER_NOT_DEAD')
+
+      const noIntent = recoveryClaimant(tempRoot(), 'tauri', {
+        processEvidence() {
+          throw new Error('ineligible state must not inspect a process')
+        },
+      })
+      expectLockError(() => noIntent.claimRecoveryAuthority(), 'RECOVERY_CLAIM_FENCED')
+
+      const registeredRoot = tempRoot()
+      const registered = createLockAt(registeredRoot, 'cli')
+      registered.registerRuntimeLease()
+      registered.acquireExclusiveIntent('restore')
+      const registeredClaimant = recoveryClaimant(registeredRoot, 'tauri', {
+        processEvidence() {
+          throw new Error('lease-bearing state must not inspect a process')
+        },
+      })
+      expectLockError(() => registeredClaimant.claimRecoveryAuthority(), 'RECOVERY_CLAIM_FENCED')
+
+      for (const condition of ['wrong-phase', 'completed-at', 'legacy', 'generation']) {
+        let inspections = 0
+        const fixture = recoveryClaimFixture('mutating', {
+          processEvidence() {
+            inspections += 1
+            return 'dead'
+          },
+        })
+        rewriteAuthoritativeState(fixture.claimant, (state) => {
+          if (condition === 'wrong-phase') {
+            state.exclusiveIntent.phase = 'completed'
+            state.exclusiveIntent.completedAt = new Date().toISOString()
+          }
+          if (condition === 'completed-at') {
+            state.exclusiveIntent.completedAt = new Date().toISOString()
+          }
+          if (condition === 'legacy') {
+            for (const key of Object.keys(state.exclusiveIntent.metadata)) {
+              if (key.startsWith('shikin.recovery.')) delete state.exclusiveIntent.metadata[key]
+            }
+          }
+          if (condition === 'generation') state.fencingGenerationHighWater += 1
+          return state
+        })
+        expectLockError(() => fixture.claimant.claimRecoveryAuthority(), 'RECOVERY_CLAIM_FENCED')
+        expect(inspections).toBe(0)
+      }
+
+      for (const counter of ['stateRevision', 'fencingGenerationHighWater', 'claimSequence']) {
+        let processInspections = 0
+        const fixture = recoveryClaimFixture('mutating', {
+          processEvidence() {
+            processInspections += 1
+            return 'dead'
+          },
+        })
+        rewriteAuthoritativeState(fixture.claimant, (state) => {
+          if (counter === 'stateRevision') state.stateRevision = Number.MAX_SAFE_INTEGER
+          if (counter === 'fencingGenerationHighWater') {
+            state.fencingGenerationHighWater = Number.MAX_SAFE_INTEGER
+            state.exclusiveIntent.fencingGeneration = Number.MAX_SAFE_INTEGER
+          }
+          if (counter === 'claimSequence') {
+            state.exclusiveIntent.metadata['shikin.recovery.claimSequence'] =
+              Number.MAX_SAFE_INTEGER
+          }
+          return state
+        })
+        expectLockError(() => fixture.claimant.claimRecoveryAuthority(), 'COUNTER_OVERFLOW')
+        expect(processInspections).toBe(0)
+      }
+    },
+    MANAGED_TEST_TIMEOUT_MS
+  )
+
+  it.runIf(process.platform === 'linux')(
+    'keeps an exact live recovery owner fenced under ambient liveness builtin mutation',
+    async () => {
+      const root = tempRoot()
+      await runWorker(root, 'cli', 0, join(root, 'forbidden-source'), 'intent:mutating')
+      const holder = spawnClaimBarrierWorker(root, 'tauri', 'live-owner', 'claim-hold')
+      try {
+        await holder.waitUntilReady()
+        const observer = createLockAt(root, 'browser-data-server')
+        const liveState = observer.readOperationState()
+        const liveOwner = liveState.exclusiveIntent.owner
+        expect(liveState.exclusiveIntent.metadata['shikin.recovery.claimSequence']).toBe(1)
+        expect(() => process.kill(liveOwner.processId, 0)).not.toThrow()
+
+        for (const mutation of [
+          'array-find',
+          'string-starts-with',
+          'string-split',
+          'string-slice',
+          'string-trim',
+          'string-last-index-of',
+          'number',
+          'number-is-finite',
+          'number-is-safe-integer',
+          'math-floor',
+          'date-constructor',
+          'date-get-time',
+          'date-parse',
+          'date-to-iso-string',
+          'node-read-file-sync',
+          'node-exec-file-sync',
+        ]) {
+          const result = await runWorker(
+            root,
+            'mcp',
+            0,
+            join(root, `forbidden-${mutation}`),
+            `claim-liveness-mutation:${mutation}`,
+            1,
+            { SHIKIN_LIVE_OWNER_STARTED_AT: liveOwner.processStartedAt }
+          )
+          expect(result, mutation).toMatchObject({
+            ok: false,
+            code: 'RECOVERY_OWNER_NOT_DEAD',
+          })
+          expect(observer.readOperationState(), mutation).toEqual(liveState)
+          expect(() => process.kill(liveOwner.processId, 0), mutation).not.toThrow()
+        }
+
+        writeFileSync(holder.release, 'release\n')
+        expect(await holder.result).toMatchObject({ ok: true })
+      } finally {
+        writeFileSync(holder.release, 'release\n')
+        await holder.shutdown()
+      }
+    },
+    MANAGED_TEST_TIMEOUT_MS
+  )
+
+  it.runIf(process.platform === 'linux')(
+    'bounds getconf liveness inspection without changing a live recovery claim',
+    async () => {
+      const root = tempRoot()
+      await runWorker(root, 'cli', 0, join(root, 'forbidden-source'), 'intent:mutating')
+      const holder = spawnClaimBarrierWorker(root, 'tauri', 'getconf-live-owner', 'claim-hold')
+      try {
+        await holder.waitUntilReady()
+        const observer = createLockAt(root, 'browser-data-server')
+        const before = observer.readOperationState()
+        const liveOwner = before.exclusiveIntent.owner
+        const fakeBin = join(root, `fake-getconf-${randomUUID()}`)
+        const started = Date.now()
+        const result = await runWorker(
+          root,
+          'mcp',
+          0,
+          join(root, 'forbidden-getconf-timeout'),
+          'claim-getconf-timeout',
+          1,
+          { SHIKIN_FAKE_GETCONF_BIN: fakeBin }
+        )
+        const elapsed = Date.now() - started
+
+        expect(result).toMatchObject({
+          ok: false,
+          code: 'PROCESS_EVIDENCE_UNAVAILABLE',
+          pathRestored: true,
+          fakeGetconfRemoved: true,
+        })
+        expect(elapsed).toBeLessThan(GETCONF_TIMEOUT_TEST_MAX_MS)
+        expect(existsSync(fakeBin)).toBe(false)
+        expect(observer.readOperationState()).toEqual(before)
+        expect(() => process.kill(liveOwner.processId, 0)).not.toThrow()
+
+        writeFileSync(holder.release, 'release\n')
+        expect(await holder.result).toMatchObject({ ok: true })
+      } finally {
+        writeFileSync(holder.release, 'release\n')
+        await holder.shutdown()
+      }
+    },
+    MANAGED_TEST_TIMEOUT_MS
+  )
+
+  it.runIf(process.platform === 'linux')(
+    'fences full-state drift, artifact tampering, and strict durability failures without leaking handles',
+    () => {
+      const precommit = recoveryClaimFixture('mutating', {
+        afterPrune() {
+          throw new Error('pre-rename claim failure')
+        },
+      })
+      const precommitBefore = precommit.claimant.readOperationState()
+      const precommitBaseline = retainedDescriptorCount(precommit.claimant.getPaths().operationRoot)
+      expectLockError(() => precommit.claimant.claimRecoveryAuthority(), 'FILESYSTEM_FAILURE')
+      expect(precommit.claimant.readOperationState()).toEqual(precommitBefore)
+      expect(precommit.claimant.getLifecycleHealth()).toMatchObject({ fenced: false })
+      expect(retainedDescriptorCount(precommit.claimant.getPaths().operationRoot)).toBe(
+        precommitBaseline
+      )
+
+      const drift = recoveryClaimFixture('mutating', {
+        afterCommittedRecoveryVerification() {
+          rewriteAuthoritativeState(drift.claimant, (state) => {
+            state.exclusiveIntent.metadata.nested.preserved.push('drift')
+            return state
+          })
+        },
+      })
+      const driftBaseline = retainedDescriptorCount(drift.claimant.getPaths().operationRoot)
+      expectLockError(() => drift.claimant.claimRecoveryAuthority(), 'RECOVERY_CLAIM_FENCED')
+      expect(retainedDescriptorCount(drift.claimant.getPaths().operationRoot)).toBe(driftBaseline)
+
+      const tampered = recoveryClaimFixture('mutating', {
+        beforePublish() {
+          const artifact = firstPreparedArtifact(tampered.claimant)
+          chmodSync(artifact, 0o600)
+          writeFileSync(artifact, 'tampered')
+        },
+      })
+      const tamperedBefore = tampered.claimant.readOperationState()
+      const tamperedBaseline = retainedDescriptorCount(tampered.claimant.getPaths().operationRoot)
+      expectLockError(
+        () => tampered.claimant.claimRecoveryAuthority(),
+        'RECOVERY_ARTIFACT_CORRUPTION'
+      )
+      expect(tampered.claimant.readOperationState()).toEqual(tamperedBefore)
+      expect(retainedDescriptorCount(tampered.claimant.getPaths().operationRoot)).toBe(
+        tamperedBaseline
+      )
+
+      for (const [hook, value] of [
+        [
+          'afterRename',
+          () => {
+            throw new Error('after rename')
+          },
+        ],
+        ['directorySync', () => false],
+      ]) {
+        const fixture = recoveryClaimFixture('mutating', { [hook]: value })
+        const baseline = retainedDescriptorCount(fixture.claimant.getPaths().operationRoot)
+        expectLockError(
+          () => fixture.claimant.claimRecoveryAuthority(),
+          'MUTATION_COMMIT_DURABILITY_UNCERTAIN'
+        )
+        expect(fixture.claimant.getLifecycleHealth()).toMatchObject({
+          fenced: true,
+          durabilityUncertain: true,
+        })
+        expect(fixture.claimant.readOperationState().exclusiveIntent.metadata).toMatchObject({
+          'shikin.recovery.claimSequence': 1,
+        })
+        expect(retainedDescriptorCount(fixture.claimant.getPaths().operationRoot)).toBe(baseline)
+      }
+
+      const degraded = recoveryClaimFixture('mutating', {
+        afterFsync() {
+          throw new Error('post-fsync maintenance')
+        },
+      })
+      const authority = degraded.claimant.claimRecoveryAuthority()
+      expect(degraded.claimant.getLifecycleHealth()).toMatchObject({
+        fenced: false,
+        maintenanceDegraded: true,
+      })
+      expect(degraded.claimant.assertRecoveryAuthority(authority).phase).toBe('mutating')
+      degraded.claimant.releaseRecoveryAuthority(authority)
+    },
+    MANAGED_TEST_TIMEOUT_MS
+  )
+
+  it.runIf(process.platform === 'linux')(
+    'hashes committed evidence outside a short mutex and retains cleanup-protected claims',
+    async () => {
+      const fixture = recoveryClaimFixture('mutating', {}, { mutexTtlMs: 1_000 })
+      let hashes = 0
+      setRecoveryJournalInterArtifactHashTestHookForTest(() => {
+        hashes += 1
+        expect(existsSync(fixture.claimant.getPaths().registrationMutex)).toBe(false)
+        if (hashes === 1) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_100)
+      })
+      const authority = fixture.claimant.claimRecoveryAuthority()
+      expect(hashes).toBeGreaterThan(0)
+      fixture.claimant.releaseRecoveryAuthority(authority)
+      setRecoveryJournalInterArtifactHashTestHookForTest(undefined)
+
+      const abandonedRoot = tempRoot()
+      await runWorker(
+        abandonedRoot,
+        'cli',
+        0,
+        join(abandonedRoot, 'forbidden-home'),
+        'intent:mutating'
+      )
+      const abandonedCleaner = createLockAt(abandonedRoot, 'mcp')
+      rewriteAuthoritativeState(abandonedCleaner, (state) => {
+        state.exclusiveIntent.phase = 'abandoned'
+        state.exclusiveIntent.updatedAt = new Date().toISOString()
+        state.updatedAt = state.exclusiveIntent.updatedAt
+        return state
+      })
+      const abandoned = abandonedCleaner.readOperationState()
+      expect(abandonedCleaner.cleanupStaleRecords()).toMatchObject({
+        abandonedIntent: false,
+        stateRevision: abandoned.stateRevision,
+      })
+      expect(abandonedCleaner.readOperationState()).toEqual(abandoned)
+
+      const root = tempRoot()
+      await runWorker(root, 'cli', 0, join(root, 'forbidden-home'), 'intent:mutating')
+      const claimant = await runWorker(root, 'tauri', 0, join(root, 'forbidden-home'), 'claim')
+      expect(claimant.ok).toBe(true)
+      const cleaner = createLockAt(root, 'mcp')
+      rewriteAuthoritativeState(cleaner, (state) => {
+        const timestamp = new Date().toISOString()
+        state.exclusiveIntent.phase = 'completed'
+        state.exclusiveIntent.completedAt = timestamp
+        state.exclusiveIntent.updatedAt = timestamp
+        state.updatedAt = timestamp
+        return state
+      })
+      const before = cleaner.readOperationState()
+      expect(cleaner.cleanupStaleRecords()).toMatchObject({
+        abandonedIntent: false,
+        stateRevision: before.stateRevision,
+      })
+      expect(cleaner.readOperationState()).toEqual(before)
+    },
+    MANAGED_TEST_TIMEOUT_MS
+  )
+
+  it.runIf(process.platform === 'linux')(
+    'retains recovery evidence when cleanup runs before claim publication',
+    async () => {
+      const root = tempRoot()
+      await runWorker(root, 'cli', 0, join(root, 'forbidden-home'), 'intent:mutating')
+      const contender = spawnClaimBarrierWorker(root, 'tauri', 'cleanup-race')
+      const cleaner = createLockAt(root, 'mcp')
+      try {
+        await contender.waitUntilReady()
+        const source = cleaner.readOperationState()
+        expect(cleaner.cleanupStaleRecords()).toMatchObject({
+          abandonedIntent: false,
+          stateRevision: source.stateRevision,
+        })
+        expect(cleaner.readOperationState()).toEqual(source)
+        writeFileSync(contender.release, 'release\n')
+        const claimed = await contender.result
+        expect(claimed).toMatchObject({
+          ok: true,
+          state: { exclusiveIntent: { metadata: { 'shikin.recovery.claimSequence': 1 } } },
+        })
+        const afterClaim = cleaner.readOperationState()
+        expect(cleaner.cleanupStaleRecords()).toMatchObject({
+          abandonedIntent: false,
+          stateRevision: afterClaim.stateRevision,
+        })
+        expect(cleaner.readOperationState()).toEqual(afterClaim)
+      } finally {
+        await contender.shutdown()
+      }
+    },
+    MANAGED_TEST_TIMEOUT_MS
+  )
+
+  it.runIf(process.platform === 'linux')(
+    'blocks cleanup behind a claim-held mutex and retains the published recovery anchor',
+    async () => {
+      const root = tempRoot()
+      await runWorker(root, 'cli', 0, join(root, 'forbidden-home'), 'intent:mutating')
+      const contender = spawnClaimBarrierWorker(
+        root,
+        'tauri',
+        'claim-first-cleanup-race',
+        'claim-mutex-barrier'
+      )
+      const cleanupContended = join(root, `cleanup-contended-${randomUUID()}`)
+      let cleanupPromise
+      let cleanupSettled = false
+      try {
+        await contender.waitUntilReady()
+        expect(existsSync(createLockAt(root, 'mcp').getPaths().registrationMutex)).toBe(true)
+        cleanupPromise = runWorker(root, 'mcp', 0, join(root, 'forbidden-home'), 'cleanup', 1, {
+          SHIKIN_MUTEX_CONTENTION_MARKER: cleanupContended,
+        })
+        cleanupPromise.then(
+          () => {
+            cleanupSettled = true
+          },
+          () => {
+            cleanupSettled = true
+          }
+        )
+        await waitForPath(cleanupContended)
+        expect(cleanupSettled).toBe(false)
+
+        writeFileSync(contender.release, 'release\n')
+        const claimed = await contender.result
+        expect(claimed).toMatchObject({
+          ok: true,
+          state: { exclusiveIntent: { metadata: { 'shikin.recovery.claimSequence': 1 } } },
+        })
+        const cleanup = await cleanupPromise
+        expect(cleanup).toMatchObject({
+          cleanup: { abandonedIntent: false, removedLeaseIds: [] },
+          state: {
+            exclusiveIntent: { metadata: { 'shikin.recovery.claimSequence': 1 } },
+          },
+        })
+        expect(cleanup.state.exclusiveIntent.operationId).toBe(
+          claimed.state.exclusiveIntent.operationId
+        )
+      } finally {
+        writeFileSync(contender.release, 'release\n')
+        await contender.shutdown()
+        if (cleanupPromise !== undefined) await cleanupPromise.catch(() => undefined)
+      }
+    },
+    MANAGED_TEST_TIMEOUT_MS
+  )
+
+  it.runIf(process.platform === 'linux')(
+    'lets one of two fully verified Node contenders win and fences the stale loser',
+    async () => {
+      const root = tempRoot()
+      await runWorker(root, 'cli', 0, join(root, 'forbidden-home'), 'intent:mutating')
+      const first = spawnClaimBarrierWorker(root, 'tauri', 'first')
+      const second = spawnClaimBarrierWorker(root, 'mcp', 'second')
+      try {
+        await Promise.all([first.waitUntilReady(), second.waitUntilReady()])
+        writeFileSync(first.release, 'release\n')
+        const winner = await first.result
+        expect(winner).toMatchObject({
+          ok: true,
+          state: { exclusiveIntent: { metadata: { 'shikin.recovery.claimSequence': 1 } } },
+        })
+        writeFileSync(second.release, 'release\n')
+        expect(await second.result).toMatchObject({ ok: false, code: 'RECOVERY_CLAIM_FENCED' })
+
+        const handoff = await runWorker(
+          root,
+          'browser-data-server',
+          0,
+          join(root, 'forbidden-home'),
+          'claim'
+        )
+        expect(handoff).toMatchObject({
+          ok: true,
+          state: { exclusiveIntent: { metadata: { 'shikin.recovery.claimSequence': 2 } } },
+        })
+      } finally {
+        await Promise.all([first.shutdown(), second.shutdown()])
+      }
+    },
+    MANAGED_TEST_TIMEOUT_MS
+  )
+
+  it(
+    'exposes only the opaque declaration API and accepts claimed states in the unchanged schema',
+    () => {
+      const declaration = readFileSync(resolve('scripts/database-operation-lock.d.mts'), 'utf8')
+      expect(declaration).toContain('declare const recoveryMutationAuthorityBrand: unique symbol')
+      expect(declaration).toContain('claimRecoveryAuthority(): RecoveryMutationAuthority')
+      expect(declaration).toContain(
+        'assertRecoveryAuthority(authority: RecoveryMutationAuthority): ExclusiveIntent'
+      )
+      expect(
+        declaration.match(/export interface RecoveryMutationAuthority \{([\s\S]*?)\n\}/)?.[1]
+      ).not.toContain('operationId')
+
+      const consumer = resolve(`scripts/.database-operation-lock-consumer-${randomUUID()}.mts`)
+      const config = resolve(`scripts/.database-operation-lock-consumer-${randomUUID()}.json`)
+      try {
+        writeFileSync(
+          consumer,
+          `import { DatabaseOperationLock, type RecoveryMutationAuthority } from './database-operation-lock.mjs'\n` +
+            `declare const lock: DatabaseOperationLock\n` +
+            `const authority: RecoveryMutationAuthority = lock.claimRecoveryAuthority()\n` +
+            `lock.assertRecoveryAuthority(authority)\nlock.releaseRecoveryAuthority(authority)\n`
+        )
+        writeFileSync(
+          config,
+          `${JSON.stringify({
+            compilerOptions: {
+              strict: true,
+              noEmit: true,
+              module: 'NodeNext',
+              moduleResolution: 'NodeNext',
+              lib: ['ES2022'],
+              skipLibCheck: true,
+              types: ['node'],
+            },
+            files: [consumer],
+          })}\n`
+        )
+        execFileSync(process.execPath, [resolve('node_modules/typescript/bin/tsc'), '-p', config], {
+          stdio: 'pipe',
+          timeout: TYPESCRIPT_CHILD_TIMEOUT_MS,
+          killSignal: 'SIGKILL',
+        })
+      } finally {
+        rmSync(consumer, { force: true })
+        rmSync(config, { force: true })
+      }
+    },
+    TYPESCRIPT_TEST_TIMEOUT_MS
+  )
+
   it('uses private directory/file modes for every generated coordination record', () => {
     if (process.platform === 'win32') return
     const lock = createLock('browser-data-server')
@@ -1861,6 +2829,106 @@ describe('database operation lock core', () => {
     expect(statSync(lock.getPaths().hostIdentity).mode & 0o777).toBe(0o600)
   })
 })
+
+function recoveryClaimFixture(phase = 'mutating', testHooks = {}, lockOptions = {}) {
+  const root = tempRoot()
+  const source = createLockAt(root, 'cli')
+  const lease = source.registerRuntimeLease()
+  let intent = source.acquireExclusiveIntent('restore', {
+    nested: { preserved: [true, 7] },
+  })
+  intent = source.drainExclusiveIntent(intent)
+  source.releaseRuntimeLease(lease)
+  intent = source.drainExclusiveIntent(intent)
+  intent = source.beginExclusiveMutation(intent, prepareMutationProof(source, intent).proof)
+  if (phase === 'abandoned') {
+    rewriteAuthoritativeState(source, (state) => {
+      state.exclusiveIntent.phase = 'abandoned'
+      state.exclusiveIntent.updatedAt = new Date().toISOString()
+      state.updatedAt = state.exclusiveIntent.updatedAt
+      return state
+    })
+  }
+  const claimant = recoveryClaimant(root, 'tauri', testHooks, lockOptions)
+  return { root, source, claimant, intent }
+}
+
+function recoveryClaimant(rootDir, runtimeId, testHooks = {}, lockOptions = {}) {
+  return new DatabaseOperationLock({
+    rootDir,
+    databaseIdentity: DATABASE_IDENTITY,
+    runtimeId,
+    ...lockOptions,
+    testHooks: {
+      processEvidence: () => 'dead',
+      ...testHooks,
+    },
+  })
+}
+
+function snapshotTreeBytes(root) {
+  const entries = []
+  const visit = (path, relative) => {
+    for (const name of readdirSync(path).sort()) {
+      const child = join(path, name)
+      const childRelative = relative === '' ? name : `${relative}/${name}`
+      const stat = statSync(child)
+      if (stat.isDirectory()) visit(child, childRelative)
+      else entries.push([childRelative, readFileSync(child).toString('base64')])
+    }
+  }
+  visit(root, '')
+  return entries
+}
+
+function waitForPath(path, timeoutMs = 15_000) {
+  const started = Date.now()
+  return new Promise((resolvePromise, reject) => {
+    const check = () => {
+      if (existsSync(path)) resolvePromise()
+      else if (Date.now() - started >= timeoutMs) reject(new Error(`timed out waiting for ${path}`))
+      else setTimeout(check, 10)
+    }
+    check()
+  })
+}
+
+function spawnClaimBarrierWorker(root, runtimeId, label, action = 'claim-barrier') {
+  const markerRoot = join(root, `claim-${label}-${randomUUID()}`)
+  mkdirSync(markerRoot, { mode: 0o700 })
+  const ready = join(markerRoot, 'ready')
+  const release = join(markerRoot, 'release')
+  const child = spawn(
+    process.execPath,
+    [
+      resolve('scripts/database-operation-lock.worker.mjs'),
+      root,
+      DATABASE_IDENTITY,
+      runtimeId,
+      '0',
+      action,
+      '1',
+    ],
+    {
+      env: {
+        ...process.env,
+        SHIKIN_CLAIM_READY_MARKER: ready,
+        SHIKIN_CLAIM_RELEASE_MARKER: release,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }
+  )
+  const managed = manageJsonChild(child, 'claim worker')
+  const waitUntilReady = async () => {
+    try {
+      await waitForPath(ready)
+    } catch (error) {
+      await managed.shutdown()
+      throw error
+    }
+  }
+  return { ready, release, result: managed.result, waitUntilReady, shutdown: managed.shutdown }
+}
 
 function createLock(runtimeId) {
   return createLockAt(tempRoot(), runtimeId)
@@ -2020,45 +3088,98 @@ function publishCompleteMutex(destination, record) {
   renameSync(candidate, destination)
 }
 
-function runWorker(root, runtimeId, clockOffset, forbiddenHome, action = 'register', count = 1) {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn(
-      process.execPath,
-      [
-        resolve('scripts/database-operation-lock.worker.mjs'),
-        root,
-        DATABASE_IDENTITY,
-        runtimeId,
-        String(clockOffset),
-        action,
-        String(count),
-      ],
-      {
-        env: {
-          ...process.env,
-          HOME: forbiddenHome,
-          XDG_DATA_HOME: join(forbiddenHome, 'xdg'),
-          APPDATA: join(forbiddenHome, 'appdata'),
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }
-    )
-    let stdout = ''
-    let stderr = ''
-    child.stdout.setEncoding('utf8')
-    child.stderr.setEncoding('utf8')
-    child.stdout.on('data', (chunk) => (stdout += chunk))
-    child.stderr.on('data', (chunk) => (stderr += chunk))
-    child.on('error', reject)
-    child.on('close', (code) => {
-      if (code !== 0) reject(new Error(`worker exited ${code}: ${stderr}`))
-      else {
-        try {
-          resolvePromise(JSON.parse(stdout.trim()))
-        } catch (error) {
-          reject(new Error(`worker returned malformed output: ${stdout}`, { cause: error }))
-        }
-      }
+function runWorker(
+  root,
+  runtimeId,
+  clockOffset,
+  forbiddenHome,
+  action = 'register',
+  count = 1,
+  workerEnvironment = {}
+) {
+  const child = spawn(
+    process.execPath,
+    [
+      resolve('scripts/database-operation-lock.worker.mjs'),
+      root,
+      DATABASE_IDENTITY,
+      runtimeId,
+      String(clockOffset),
+      action,
+      String(count),
+    ],
+    {
+      env: {
+        ...process.env,
+        HOME: forbiddenHome,
+        XDG_DATA_HOME: join(forbiddenHome, 'xdg'),
+        APPDATA: join(forbiddenHome, 'appdata'),
+        ...workerEnvironment,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }
+  )
+  return manageJsonChild(child, 'worker').result
+}
+
+function manageJsonChild(child, label, timeoutMs = MANAGED_CHILD_TIMEOUT_MS) {
+  let stdout = ''
+  let stderr = ''
+  let spawnError
+  let shutdownPromise
+  child.stdout.setEncoding('utf8')
+  child.stderr.setEncoding('utf8')
+  child.stdout.on('data', (chunk) => (stdout += chunk))
+  child.stderr.on('data', (chunk) => (stderr += chunk))
+  const closed = new Promise((resolvePromise) => {
+    child.once('error', (error) => {
+      spawnError = error
     })
+    child.once('close', (code, signal) => resolvePromise({ code, signal }))
   })
+  const result = (async () => {
+    let timeout
+    const timedOut = new Promise((resolvePromise) => {
+      timeout = setTimeout(() => resolvePromise(true), timeoutMs)
+    })
+    const outcome = await Promise.race([
+      closed.then((close) => ({ close })),
+      timedOut.then(() => ({ timedOut: true })),
+    ])
+    if (outcome.timedOut) {
+      child.kill('SIGKILL')
+      const close = await closed
+      throw new Error(
+        `${label} timed out after ${timeoutMs}ms and was reaped (${close.signal ?? close.code}): ${stderr}`
+      )
+    }
+    clearTimeout(timeout)
+    const { code, signal } = outcome.close
+    if (spawnError !== undefined) {
+      throw new Error(`${label} failed to spawn: ${spawnError.message}`, { cause: spawnError })
+    }
+    if (code !== 0) {
+      throw new Error(`${label} exited ${code ?? signal}: ${stderr}`)
+    }
+    try {
+      return JSON.parse(stdout.trim())
+    } catch (error) {
+      throw new Error(`${label} returned malformed output: ${stdout}`, { cause: error })
+    }
+  })()
+  result.catch(() => {})
+  const shutdown = () => {
+    if (shutdownPromise === undefined) {
+      shutdownPromise = (async () => {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+        await closed
+        await result.catch(() => undefined)
+      })()
+    }
+    return shutdownPromise
+  }
+  const managed = { result, shutdown }
+  managedChildren.add(managed)
+  closed.then(() => managedChildren.delete(managed))
+  return managed
 }

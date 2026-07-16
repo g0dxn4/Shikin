@@ -20,18 +20,30 @@ import { dirname, join, resolve } from 'node:path'
 import {
   RecoveryJournalError,
   consumeVerifiedPreparedMutationToken,
+  releaseVerifiedCommittedRecoveryEvidenceToken,
   releaseVerifiedPreparedMutationToken,
+  revalidateVerifiedCommittedRecoveryEvidenceToken,
   revalidateVerifiedPreparedMutationToken,
+  verifyCommittedRecoveryEvidence,
   verifyPreparedMutationProof,
 } from './database-operation-recovery-journal.mjs'
 
-// Capture the serialization and reflection primordials before caller-controlled
-// metadata can mutate their ambient bindings or prototypes.
+// Capture the serialization, reflection, time, liveness, and Node I/O primordials
+// before caller-controlled bindings or prototypes can be redirected.
 const PrimordialArray = Array
+const PrimordialDate = Date
+const PrimordialNumber = Number
 const PrimordialTypeError = TypeError
 const ArrayIsArray = Array.isArray
+const DateNow = Date.now
+const DateParse = Date.parse
 const JsonParse = JSON.parse
 const JsonStringify = JSON.stringify
+const MathFloor = Math.floor
+const MathTrunc = Math.trunc
+const NumberIsFinite = Number.isFinite
+const NumberIsSafeInteger = Number.isSafeInteger
+const NumberMaxSafeInteger = Number.MAX_SAFE_INTEGER
 const ObjectCreate = Object.create
 const ObjectDefineProperty = Object.defineProperty
 const ObjectFreeze = Object.freeze
@@ -41,6 +53,23 @@ const ObjectHasOwn = Object.hasOwn
 const ObjectIs = Object.is
 const ObjectKeys = Object.keys
 const ObjectPrototype = Object.prototype
+const FunctionCall = Function.prototype.call
+const ArrayPrototypeIncludes = FunctionCall.bind(Array.prototype.includes)
+const ArrayPrototypeSort = FunctionCall.bind(Array.prototype.sort)
+const DatePrototypeGetTime = FunctionCall.bind(Date.prototype.getTime)
+const DatePrototypeToISOString = FunctionCall.bind(Date.prototype.toISOString)
+const StringPrototypeLastIndexOf = FunctionCall.bind(String.prototype.lastIndexOf)
+const StringPrototypeSlice = FunctionCall.bind(String.prototype.slice)
+const StringPrototypeSplit = FunctionCall.bind(String.prototype.split)
+const StringPrototypeStartsWith = FunctionCall.bind(String.prototype.startsWith)
+const StringPrototypeTrim = FunctionCall.bind(String.prototype.trim)
+const WeakMapPrototypeGet = FunctionCall.bind(WeakMap.prototype.get)
+const WeakMapPrototypeSet = FunctionCall.bind(WeakMap.prototype.set)
+const NodeExecFileSync = execFileSync
+const NodeReadFileSync = readFileSync
+
+const recoveryAuthorityRecords = new WeakMap()
+const recoveryAuthorityOrigins = new WeakMap()
 
 export const DATABASE_OPERATION_PROTOCOL = 'shikin.database-operation-lock'
 export const DATABASE_OPERATION_PROTOCOL_VERSION = 1
@@ -69,6 +98,7 @@ const LEASE_MAX_TTL_MS = 300_000
 const HEARTBEAT_MIN_MS = 1_000
 const DEFAULT_ACQUIRE_TIMEOUT_MS = 15_000
 const DEFAULT_MAX_STATE_RECORDS = 8
+const LINUX_GETCONF_TIMEOUT_MS = 5_000
 const UUID_PATTERN_SOURCE =
   '[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}'
 const STATE_FILE_PATTERN = new RegExp(`^operation-state-(\\d{20})-(${UUID_PATTERN_SOURCE})\\.json$`)
@@ -78,6 +108,25 @@ const STAGED_MUTEX_PATTERN = new RegExp(`^staged-mutex-(${UUID_PATTERN_SOURCE})\
 const READ_RETRY_LIMIT = 16
 const sleepArray = new Int32Array(new SharedArrayBuffer(4))
 let linuxClockTicksPerSecond
+
+function appendOwnArrayValue(values, value) {
+  ObjectDefineProperty(values, values.length, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  })
+}
+
+function filterOwnArrayValues(values, predicate) {
+  const filtered = new PrimordialArray()
+  for (let index = 0; index < values.length; index += 1) {
+    if (!ObjectHasOwn(values, index)) continue
+    const value = values[index]
+    if (predicate(value, index)) appendOwnArrayValue(filtered, value)
+  }
+  return filtered
+}
 
 export class DatabaseOperationLockError extends Error {
   constructor(code, message, cause) {
@@ -102,7 +151,7 @@ export class DatabaseOperationLock {
         `databaseIdentity must be ${SHIKIN_DATABASE_IDENTITY}`
       )
     }
-    if (!DATABASE_OPERATION_RUNTIME_IDS.includes(options.runtimeId)) {
+    if (!ArrayPrototypeIncludes(DATABASE_OPERATION_RUNTIME_IDS, options.runtimeId)) {
       throw protocolError('INVALID_RUNTIME', `Unsupported runtime ID ${String(options.runtimeId)}`)
     }
 
@@ -110,13 +159,14 @@ export class DatabaseOperationLock {
     this.databaseIdentity = options.databaseIdentity
     this.runtimeId = options.runtimeId
     this.ownerId = randomUUID()
+    WeakMapPrototypeSet(recoveryAuthorityOrigins, this, ObjectFreeze(ObjectCreate(null)))
     this.mutexTtlMs = options.mutexTtlMs ?? DEFAULT_DATABASE_OPERATION_TIMING.mutexTtlMs
     this.leaseTtlMs = options.leaseTtlMs ?? DEFAULT_DATABASE_OPERATION_TIMING.leaseTtlMs
     this.heartbeatIntervalMs =
       options.heartbeatIntervalMs ?? DEFAULT_DATABASE_OPERATION_TIMING.heartbeatIntervalMs
     this.acquireTimeoutMs = options.acquireTimeoutMs ?? DEFAULT_ACQUIRE_TIMEOUT_MS
     this.maxStateRecords = options.maxStateRecords ?? DEFAULT_MAX_STATE_RECORDS
-    this.clock = options.clock ?? Date.now
+    this.clock = options.clock ?? DateNow
     this.testHooks = options.testHooks ?? null
     this.owner = null
     this.currentLease = null
@@ -128,10 +178,10 @@ export class DatabaseOperationLock {
     this.durabilityUncertain = false
 
     validateTiming(this)
-    if (!Number.isSafeInteger(this.acquireTimeoutMs) || this.acquireTimeoutMs < 0) {
+    if (!NumberIsSafeInteger(this.acquireTimeoutMs) || this.acquireTimeoutMs < 0) {
       throw protocolError('INVALID_TIMING', 'acquireTimeoutMs must be a non-negative integer')
     }
-    if (!Number.isSafeInteger(this.maxStateRecords) || this.maxStateRecords < 2) {
+    if (!NumberIsSafeInteger(this.maxStateRecords) || this.maxStateRecords < 2) {
       throw protocolError('INVALID_OPTIONS', 'maxStateRecords must be an integer of at least 2')
     }
     if (typeof this.clock !== 'function')
@@ -144,17 +194,22 @@ export class DatabaseOperationLock {
       'afterRelease',
       'afterStateDirectoryRead',
       'afterMutexRootStat',
+      'afterMutexContention',
       'beforeMutexPublication',
       'afterMutexPublication',
       'afterMutexQuarantine',
       'beforeMutexRestore',
       'directorySync',
+      'platform',
+      'processEvidence',
+      'afterCommittedRecoveryVerification',
     ]
     if (
       this.testHooks !== null &&
       (!isPlainRecord(this.testHooks) ||
         ObjectKeys(this.testHooks).some(
-          (key) => !allowedHooks.includes(key) || typeof this.testHooks[key] !== 'function'
+          (key) =>
+            !ArrayPrototypeIncludes(allowedHooks, key) || typeof this.testHooks[key] !== 'function'
         ))
     ) {
       throw protocolError('INVALID_OPTIONS', 'testHooks is malformed')
@@ -284,10 +339,10 @@ export class DatabaseOperationLock {
     this.#requireOperationalOwner()
     return this.#mutateState((previous, now) => {
       const removedLeaseIds = []
-      const leases = previous.leases.filter((lease) => {
+      const leases = filterOwnArrayValues(previous.leases, (lease) => {
         if (!isExpired(lease.expiresAt, now)) return true
         if (!this.#isOwnerDemonstrablyDead(lease.owner)) return true
-        removedLeaseIds.push(lease.leaseId)
+        appendOwnArrayValue(removedLeaseIds, lease.leaseId)
         return false
       })
       let exclusiveIntent = previous.exclusiveIntent
@@ -295,7 +350,7 @@ export class DatabaseOperationLock {
       let abandonedIntent = false
       if (
         exclusiveIntent !== null &&
-        exclusiveIntent.phase !== 'mutating' &&
+        !retainIntentForRecovery(exclusiveIntent) &&
         leases.length === 0 &&
         this.#isOwnerDemonstrablyDead(exclusiveIntent.owner)
       ) {
@@ -342,10 +397,13 @@ export class DatabaseOperationLock {
         if (this.currentLease === null) {
           throw protocolError('LEASE_REQUIRED', 'Exclusive intent requires one active owner lease')
         }
-        const persistedByOwnerId = previous.leases.filter(
+        const persistedByOwnerId = filterOwnArrayValues(
+          previous.leases,
           (lease) => lease.owner.ownerId === this.owner.ownerId
         )
-        const ownLeases = previous.leases.filter((lease) => sameOwner(lease.owner, this.owner))
+        const ownLeases = filterOwnArrayValues(previous.leases, (lease) =>
+          sameOwner(lease.owner, this.owner)
+        )
         if (ownLeases.length !== 1 || persistedByOwnerId.length !== 1) {
           throw protocolError(
             'LEASE_FENCED',
@@ -376,9 +434,7 @@ export class DatabaseOperationLock {
           fencingGeneration,
           createdAt: timestamp,
           updatedAt: timestamp,
-          ...(metadataSnapshot === undefined
-            ? {}
-            : { metadata: cloneJson(metadataSnapshot) }),
+          ...(metadataSnapshot === undefined ? {} : { metadata: cloneJson(metadataSnapshot) }),
         }
         return {
           state: {
@@ -472,6 +528,192 @@ export class DatabaseOperationLock {
     }
   }
 
+  claimRecoveryAuthority() {
+    this.#requireOperationalOwner()
+    const platform = this.testHooks?.platform?.() ?? process.platform
+    if (platform !== 'linux') {
+      throw protocolError(
+        'RECOVERY_DURABILITY_FAILURE',
+        'Recovery claims require Linux durability guarantees'
+      )
+    }
+
+    const sourceState = this.#readAuthoritativeState()
+    const sourceCommitment = requireRecoveryClaimSource(sourceState)
+    const nextRevision = incrementRecoveryClaimCounter(sourceState.stateRevision, 'stateRevision')
+    const nextGeneration = incrementRecoveryClaimCounter(
+      sourceState.fencingGenerationHighWater,
+      'fencingGenerationHighWater'
+    )
+    const nextClaimSequence = incrementRecoveryClaimCounter(
+      sourceCommitment.claimSequence,
+      'shikin.recovery.claimSequence'
+    )
+    const claimant = cloneJson(this.#ensureOwner())
+    const deadOwnerProof = this.#proveRecoveryOwnerDead(sourceState, claimant.hostId)
+    const sourceBinding = committedRecoveryBinding(sourceState, this.paths.operationRoot)
+    let token
+    let claimedState
+    let transferred = false
+    try {
+      token = normalizeRecoveryJournalCall(() => verifyCommittedRecoveryEvidence(sourceBinding))
+      this.testHooks?.afterCommittedRecoveryVerification?.(
+        ObjectFreeze({
+          stage: 'after-committed-verification',
+          stateRevision: sourceState.stateRevision,
+          mutexPath: this.paths.registrationMutex,
+          mutexExists: existsSync(this.paths.registrationMutex),
+        })
+      )
+      this.#mutateState(
+        (previous, now) => {
+          if (
+            !deepJsonEqual(previous, deadOwnerProof.sourceState) ||
+            !sameOwner(previous.exclusiveIntent?.owner, deadOwnerProof.sourceOwner)
+          ) {
+            throw protocolError(
+              'RECOVERY_CLAIM_FENCED',
+              'Recovery source state changed after committed verification'
+            )
+          }
+          const current = previous.exclusiveIntent
+          const timestamp = isoTime(now)
+          const nextIntent = {
+            ...current,
+            phase: 'mutating',
+            owner: cloneJson(claimant),
+            fencingGeneration: nextGeneration,
+            updatedAt: timestamp,
+            metadata: {
+              ...current.metadata,
+              'shikin.recovery.claimSequence': nextClaimSequence,
+            },
+          }
+          return {
+            state: {
+              ...previous,
+              fencingGenerationHighWater: nextGeneration,
+              exclusiveIntent: nextIntent,
+            },
+            value: null,
+          }
+        },
+        {
+          beforeFinalFence: (context) => {
+            normalizeRecoveryJournalCall(() =>
+              revalidateVerifiedCommittedRecoveryEvidenceToken(token, sourceBinding)
+            )
+            claimedState = cloneJson(context.nextState)
+          },
+          onCommitted: () => {},
+          durabilityPolicy: 'required-for-mutation-authority',
+        }
+      )
+      if (
+        claimedState === undefined ||
+        claimedState.stateRevision !== nextRevision ||
+        !deepJsonEqual(claimedState.exclusiveIntent?.owner, claimant)
+      ) {
+        throw protocolError(
+          'RECOVERY_CLAIM_FENCED',
+          'Published recovery claim state did not match the staged successor'
+        )
+      }
+      const authority = ObjectCreate(null)
+      WeakMapPrototypeSet(recoveryAuthorityRecords, authority, {
+        token,
+        sourceBinding,
+        claimedState,
+        claimedRevision: nextRevision,
+        claimedOwner: claimant,
+        claimedGeneration: nextGeneration,
+        claimedSequence: nextClaimSequence,
+        origin: WeakMapPrototypeGet(recoveryAuthorityOrigins, this),
+        status: 'active',
+      })
+      ObjectFreeze(authority)
+      transferred = true
+      return authority
+    } finally {
+      if (!transferred) releaseVerifiedCommittedRecoveryEvidenceToken(token)
+    }
+  }
+
+  assertRecoveryAuthority(authority) {
+    const record = WeakMapPrototypeGet(recoveryAuthorityRecords, authority)
+    if (
+      record === undefined ||
+      record.origin !== WeakMapPrototypeGet(recoveryAuthorityOrigins, this)
+    ) {
+      throw protocolError('RECOVERY_AUTHORITY_INVALID', 'Recovery authority is not authentic')
+    }
+    if (record.status === 'released') {
+      throw protocolError('RECOVERY_AUTHORITY_RELEASED', 'Recovery authority was released')
+    }
+    if (record.status === 'fenced') {
+      throw protocolError('RECOVERY_AUTHORITY_FENCED', 'Recovery authority was fenced')
+    }
+    if (this.fenced || this.durabilityUncertain) {
+      fenceRecoveryAuthority(record)
+      throw protocolError(
+        'RECOVERY_AUTHORITY_FENCED',
+        'The originating lock can no longer exercise recovery authority'
+      )
+    }
+
+    let state
+    try {
+      state = this.#readAuthoritativeState()
+    } catch (error) {
+      fenceRecoveryAuthority(record)
+      throw normalizeError(error)
+    }
+    const current = state.exclusiveIntent
+    if (
+      !deepJsonEqual(state, record.claimedState) ||
+      state.stateRevision !== record.claimedRevision ||
+      current === null ||
+      !sameOwner(current.owner, record.claimedOwner) ||
+      current.fencingGeneration !== record.claimedGeneration ||
+      state.fencingGenerationHighWater !== record.claimedGeneration ||
+      recoveryClaimSequence(current) !== record.claimedSequence ||
+      current.phase !== 'mutating'
+    ) {
+      fenceRecoveryAuthority(record)
+      throw protocolError(
+        'RECOVERY_AUTHORITY_FENCED',
+        'Persisted recovery claim no longer matches the retained authority'
+      )
+    }
+    try {
+      normalizeRecoveryJournalCall(() =>
+        revalidateVerifiedCommittedRecoveryEvidenceToken(record.token, record.sourceBinding)
+      )
+    } catch (error) {
+      fenceRecoveryAuthority(record)
+      throw error
+    }
+    return cloneJson(current)
+  }
+
+  releaseRecoveryAuthority(authority) {
+    try {
+      const record = WeakMapPrototypeGet(recoveryAuthorityRecords, authority)
+      if (
+        record === undefined ||
+        record.origin !== WeakMapPrototypeGet(recoveryAuthorityOrigins, this) ||
+        record.status !== 'active'
+      ) {
+        return
+      }
+      releaseVerifiedCommittedRecoveryEvidenceToken(record.token)
+      record.token = undefined
+      record.status = 'released'
+    } catch {
+      // Release is an idempotent, non-throwing local handle close.
+    }
+  }
+
   completeExclusiveMutation(intent) {
     this.#requireOperationalOwner()
     const evidence = validateIntent(cloneJson(intent), this.databaseIdentity)
@@ -482,6 +724,7 @@ export class DatabaseOperationLock {
         if (current.fencingGeneration !== previous.fencingGenerationHighWater) {
           throw protocolError('INTENT_FENCED', 'Exclusive intent is no longer the high-water owner')
         }
+        requireOrdinaryMutationAuthority(current)
         const timestamp = isoTime(now)
         const next = {
           ...current,
@@ -499,7 +742,8 @@ export class DatabaseOperationLock {
     const evidence = validateIntent(cloneJson(intent), this.databaseIdentity)
     this.#requireCallerOwner(evidence.owner, 'INTENT_FENCED')
     return this.#mutateState((previous) => {
-      requireIntentAuthority(previous, evidence, ['completed'])
+      const current = requireIntentAuthority(previous, evidence, ['completed'])
+      requireOrdinaryMutationAuthority(current)
       return { state: { ...previous, exclusiveIntent: null }, value: true }
     })
   }
@@ -513,7 +757,7 @@ export class DatabaseOperationLock {
       if (current === null || !sameIntentAuthority(current, evidence)) {
         throw protocolError('INTENT_FENCED', 'Exclusive intent authority no longer matches')
       }
-      if (!['registered', 'draining', 'exclusive'].includes(current.phase)) {
+      if (!ArrayPrototypeIncludes(['registered', 'draining', 'exclusive'], current.phase)) {
         throw protocolError(
           'INTENT_PHASE_INVALID',
           `Exclusive intent cannot be cancelled from persisted phase ${current.phase}`
@@ -556,6 +800,7 @@ export class DatabaseOperationLock {
     if (current.fencingGeneration !== state.fencingGenerationHighWater) {
       throw protocolError('INTENT_FENCED', 'Exclusive intent is no longer the high-water owner')
     }
+    requireOrdinaryMutationAuthority(current)
     return cloneJson(current)
   }
 
@@ -691,9 +936,9 @@ export class DatabaseOperationLock {
 
   #now() {
     const value = this.clock()
-    if (!Number.isFinite(value))
+    if (!NumberIsFinite(value))
       throw protocolError('CLOCK_FAILURE', 'Clock returned an invalid time')
-    return Math.trunc(value)
+    return MathTrunc(value)
   }
 
   #readAuthoritativeState() {
@@ -721,8 +966,8 @@ export class DatabaseOperationLock {
           assertPrivateRegularFile(path)
           const state = parseJsonFile(path, 'operation state')
           validateState(state, this.databaseIdentity)
-          const fileRevision = Number(match[1])
-          if (!Number.isSafeInteger(fileRevision) || fileRevision !== state.stateRevision) {
+          const fileRevision = PrimordialNumber(match[1])
+          if (!NumberIsSafeInteger(fileRevision) || fileRevision !== state.stateRevision) {
             throw protocolError(
               'STATE_CORRUPTION',
               `State filename revision does not match ${name}`
@@ -893,10 +1138,7 @@ export class DatabaseOperationLock {
       } catch (error) {
         const failure = normalizeError(error)
         this.#recordMaintenanceFailure(failure, !durable)
-        if (
-          !durable &&
-          publication.durabilityPolicy === 'required-for-mutation-authority'
-        ) {
+        if (!durable && publication.durabilityPolicy === 'required-for-mutation-authority') {
           strictFailure = mutationCommitUncertain(
             'Committed mutation-entry publication directory durability is uncertain',
             failure
@@ -939,6 +1181,11 @@ export class DatabaseOperationLock {
             ? isExpired(inspection.record.expiresAt, observedAt)
             : observedAt >= inspection.staleAt
         if (stale && this.#quarantineStaleMutex(inspection)) continue
+        if (!stale && inspection.status === 'complete') {
+          this.testHooks?.afterMutexContention?.(
+            ObjectFreeze({ mutexPath: this.paths.registrationMutex })
+          )
+        }
         if (observedAt >= deadline) {
           throw protocolError('MUTEX_BUSY', 'Timed out waiting for the registration mutex')
         }
@@ -1120,7 +1367,7 @@ export class DatabaseOperationLock {
       .map((name) => {
         const match = STATE_FILE_PATTERN.exec(name)
         if (!match) throw protocolError('STATE_CORRUPTION', `Unexpected state entry ${name}`)
-        return { name, revision: Number(match[1]) }
+        return { name, revision: PrimordialNumber(match[1]) }
       })
       .sort((left, right) => right.revision - left.revision || right.name.localeCompare(left.name))
     const retainedBeforePublication = Math.max(1, this.maxStateRecords - 1)
@@ -1132,6 +1379,56 @@ export class DatabaseOperationLock {
     if (records.length > retainedBeforePublication) syncDirectory(this.paths.stateRecords)
   }
 
+  #proveRecoveryOwnerDead(sourceState, currentHostId) {
+    const sourceOwner = sourceState.exclusiveIntent.owner
+    if (sourceOwner.hostId !== currentHostId) {
+      throw protocolError(
+        'RECOVERY_OWNER_NOT_DEAD',
+        'Recovery source owner belongs to another host'
+      )
+    }
+    const context = ObjectFreeze({
+      stage: 'before-committed-verification',
+      owner: ObjectFreeze(cloneJson(sourceOwner)),
+      stateRevision: sourceState.stateRevision,
+      mutexPath: this.paths.registrationMutex,
+      mutexExists: existsSync(this.paths.registrationMutex),
+    })
+    let evidence
+    if (this.testHooks?.processEvidence) {
+      evidence = this.testHooks.processEvidence(context)
+      if (
+        !ArrayPrototypeIncludes(['dead', 'live', 'unavailable', 'unsupported', 'reused'], evidence)
+      ) {
+        throw protocolError(
+          'INVALID_OPTIONS',
+          'processEvidence test hook returned an unsupported classification'
+        )
+      }
+    } else {
+      evidence = inspectLinuxRecoveryOwner(sourceOwner)
+    }
+    if (evidence === 'live') {
+      throw protocolError('RECOVERY_OWNER_NOT_DEAD', 'Recovery source owner is still alive')
+    }
+    if (evidence === 'unavailable') {
+      throw protocolError(
+        'PROCESS_EVIDENCE_UNAVAILABLE',
+        'Recovery source process evidence is unavailable'
+      )
+    }
+    if (evidence === 'unsupported') {
+      throw protocolError(
+        'PROCESS_EVIDENCE_UNSUPPORTED',
+        'Recovery source process inspection is unsupported'
+      )
+    }
+    return ObjectFreeze({
+      sourceState: cloneJson(sourceState),
+      sourceOwner: cloneJson(sourceOwner),
+    })
+  }
+
   #isOwnerDemonstrablyDead(owner) {
     validateOwner(owner)
     const currentHostId = readOrCreateHostIdentity(this.paths.hostIdentity)
@@ -1139,18 +1436,31 @@ export class DatabaseOperationLock {
     if (process.platform !== 'linux') {
       return nonLinuxProcessDemonstrablyAbsent(owner.processId)
     }
-    let startedAt
     try {
-      startedAt = linuxProcessStartedAt(owner.processId)
+      const evidence = inspectLinuxRecoveryOwner(owner)
+      if (evidence === 'unsupported') {
+        throw protocolError(
+          'PROCESS_EVIDENCE_UNSUPPORTED',
+          'Could not inspect stale owner process on this platform'
+        )
+      }
+      return evidence === 'dead' || evidence === 'reused'
     } catch (error) {
-      if (error?.code === 'ENOENT' || error?.code === 'ESRCH') return true
+      if (
+        error instanceof DatabaseOperationLockError &&
+        ArrayPrototypeIncludes(
+          ['PROCESS_EVIDENCE_UNAVAILABLE', 'PROCESS_EVIDENCE_UNSUPPORTED'],
+          error.code
+        )
+      ) {
+        throw error
+      }
       throw protocolError(
         'PROCESS_EVIDENCE_UNAVAILABLE',
         'Could not inspect stale owner process',
         error
       )
     }
-    return startedAt !== owner.processStartedAt
   }
 
   #selfFence(error) {
@@ -1176,7 +1486,8 @@ function normalizeStatePublicationOptions(options) {
     !ObjectHasOwn(options, 'durabilityPolicy') ||
     typeof options.beforeFinalFence !== 'function' ||
     typeof options.onCommitted !== 'function' ||
-    !['existing-best-effort', 'required-for-mutation-authority'].includes(
+    !ArrayPrototypeIncludes(
+      ['existing-best-effort', 'required-for-mutation-authority'],
       options.durabilityPolicy
     )
   ) {
@@ -1202,7 +1513,7 @@ function requireMutationEntryBinding(state, evidence, operationRoot) {
   if (current.fencingGeneration !== state.fencingGenerationHighWater) {
     throw protocolError('INTENT_FENCED', 'Exclusive intent is no longer the high-water owner')
   }
-  if (state.stateRevision >= Number.MAX_SAFE_INTEGER) {
+  if (state.stateRevision >= NumberMaxSafeInteger) {
     throw protocolError('STATE_CORRUPTION', 'State revision cannot advance safely')
   }
   return ObjectFreeze({
@@ -1256,21 +1567,21 @@ function initialState(databaseIdentity, owner, now) {
 
 function validateTiming(options) {
   if (
-    !Number.isSafeInteger(options.mutexTtlMs) ||
+    !NumberIsSafeInteger(options.mutexTtlMs) ||
     options.mutexTtlMs < MUTEX_MIN_TTL_MS ||
     options.mutexTtlMs > MUTEX_MAX_TTL_MS
   ) {
     throw protocolError('INVALID_TIMING', 'mutexTtlMs violates the protocol contract')
   }
   if (
-    !Number.isSafeInteger(options.leaseTtlMs) ||
+    !NumberIsSafeInteger(options.leaseTtlMs) ||
     options.leaseTtlMs < LEASE_MIN_TTL_MS ||
     options.leaseTtlMs > LEASE_MAX_TTL_MS
   ) {
     throw protocolError('INVALID_TIMING', 'leaseTtlMs violates the protocol contract')
   }
   if (
-    !Number.isSafeInteger(options.heartbeatIntervalMs) ||
+    !NumberIsSafeInteger(options.heartbeatIntervalMs) ||
     options.heartbeatIntervalMs < HEARTBEAT_MIN_MS ||
     options.heartbeatIntervalMs >= options.leaseTtlMs / 3
   ) {
@@ -1300,9 +1611,9 @@ function validateState(value, expectedIdentity) {
     value.protocolVersion !== DATABASE_OPERATION_PROTOCOL_VERSION ||
     value.recordKind !== 'operation_state' ||
     value.databaseIdentity !== expectedIdentity ||
-    !Number.isSafeInteger(value.stateRevision) ||
+    !NumberIsSafeInteger(value.stateRevision) ||
     value.stateRevision < 0 ||
-    !Number.isSafeInteger(value.fencingGenerationHighWater) ||
+    !NumberIsSafeInteger(value.fencingGenerationHighWater) ||
     value.fencingGenerationHighWater < 0 ||
     !ArrayIsArray(value.leases) ||
     !isIsoTime(value.updatedAt)
@@ -1330,7 +1641,10 @@ function validateState(value, expectedIdentity) {
       throw protocolError('STATE_CORRUPTION', 'Intent generation exceeds fencing high-water')
     }
     if (
-      ['exclusive', 'mutating', 'completed', 'abandoned'].includes(value.exclusiveIntent.phase) &&
+      ArrayPrototypeIncludes(
+        ['exclusive', 'mutating', 'completed', 'abandoned'],
+        value.exclusiveIntent.phase
+      ) &&
       value.leases.length !== 0
     ) {
       throw protocolError('STATE_CORRUPTION', 'Exclusive intent phase requires an empty lease set')
@@ -1357,12 +1671,12 @@ function validateLease(value) {
   if (
     value.recordKind !== 'runtime_lease' ||
     !isIdentifier(value.leaseId) ||
-    !Number.isSafeInteger(value.fencingGeneration) ||
+    !NumberIsSafeInteger(value.fencingGeneration) ||
     value.fencingGeneration < 1 ||
     !isIsoTime(value.acquiredAt) ||
     !isIsoTime(value.heartbeatAt) ||
     !isIsoTime(value.expiresAt) ||
-    !Number.isSafeInteger(value.ttlMs) ||
+    !NumberIsSafeInteger(value.ttlMs) ||
     value.ttlMs < LEASE_MIN_TTL_MS ||
     value.ttlMs > LEASE_MAX_TTL_MS
   ) {
@@ -1388,11 +1702,12 @@ function validateIntent(value) {
   if (
     value.recordKind !== 'exclusive_intent' ||
     !isIdentifier(value.operationId) ||
-    !['restore', 'import'].includes(value.operation) ||
-    !['registered', 'draining', 'exclusive', 'mutating', 'completed', 'abandoned'].includes(
+    !ArrayPrototypeIncludes(['restore', 'import'], value.operation) ||
+    !ArrayPrototypeIncludes(
+      ['registered', 'draining', 'exclusive', 'mutating', 'completed', 'abandoned'],
       value.phase
     ) ||
-    !Number.isSafeInteger(value.fencingGeneration) ||
+    !NumberIsSafeInteger(value.fencingGeneration) ||
     value.fencingGeneration < 1 ||
     !isIsoTime(value.createdAt) ||
     !isIsoTime(value.updatedAt) ||
@@ -1417,30 +1732,157 @@ const RECOVERY_COMMITMENT_KEYS = ObjectFreeze([
 
 function validateRecoveryCommitmentMetadata(intent) {
   if (intent.metadata === undefined) return false
-  const recoveryKeys = ObjectKeys(intent.metadata).filter((key) =>
-    key.startsWith('shikin.recovery.')
+  const metadataKeys = ObjectKeys(intent.metadata)
+  const recoveryKeys = filterOwnArrayValues(metadataKeys, (key) =>
+    StringPrototypeStartsWith(key, 'shikin.recovery.')
   )
   if (recoveryKeys.length === 0) return false
-  if (!['mutating', 'completed', 'abandoned'].includes(intent.phase)) {
+  if (!ArrayPrototypeIncludes(['mutating', 'completed', 'abandoned'], intent.phase)) {
     throw protocolError(
       'STATE_CORRUPTION',
       'Recovery commitment metadata is forbidden before mutation'
     )
   }
+  let hasEveryCommitmentKey = true
+  for (let index = 0; index < RECOVERY_COMMITMENT_KEYS.length; index += 1) {
+    if (!ObjectHasOwn(intent.metadata, RECOVERY_COMMITMENT_KEYS[index])) {
+      hasEveryCommitmentKey = false
+      break
+    }
+  }
   if (
     recoveryKeys.length !== RECOVERY_COMMITMENT_KEYS.length ||
-    !RECOVERY_COMMITMENT_KEYS.every((key) =>
-      ObjectHasOwn(intent.metadata, key)
-    ) ||
+    !hasEveryCommitmentKey ||
     intent.metadata['shikin.recovery.protocol'] !== RECOVERY_JOURNAL_PROTOCOL ||
     intent.metadata['shikin.recovery.version'] !== RECOVERY_JOURNAL_VERSION ||
     typeof intent.metadata['shikin.recovery.recordSha256'] !== 'string' ||
     !/^[0-9a-f]{64}$/.test(intent.metadata['shikin.recovery.recordSha256']) ||
     intent.metadata['shikin.recovery.durability'] !== RECOVERY_JOURNAL_DURABILITY ||
-    !Number.isSafeInteger(intent.metadata['shikin.recovery.claimSequence']) ||
+    !NumberIsSafeInteger(intent.metadata['shikin.recovery.claimSequence']) ||
     intent.metadata['shikin.recovery.claimSequence'] < 0
   ) {
     throw protocolError('STATE_CORRUPTION', 'Recovery commitment metadata is malformed')
+  }
+  return true
+}
+
+function recoveryCommitment(intent) {
+  if (!validateRecoveryCommitmentMetadata(intent)) return null
+  return ObjectFreeze({
+    protocol: intent.metadata['shikin.recovery.protocol'],
+    version: intent.metadata['shikin.recovery.version'],
+    recordSha256: intent.metadata['shikin.recovery.recordSha256'],
+    durability: intent.metadata['shikin.recovery.durability'],
+    claimSequence: intent.metadata['shikin.recovery.claimSequence'],
+  })
+}
+
+function recoveryClaimSequence(intent) {
+  return recoveryCommitment(intent)?.claimSequence ?? 0
+}
+
+function requireRecoveryClaimSource(state) {
+  const intent = state.exclusiveIntent
+  const commitment = intent === null ? null : recoveryCommitment(intent)
+  if (
+    state.leases.length !== 0 ||
+    intent === null ||
+    !ArrayPrototypeIncludes(['mutating', 'abandoned'], intent.phase) ||
+    intent.completedAt !== undefined ||
+    commitment === null ||
+    intent.fencingGeneration !== state.fencingGenerationHighWater
+  ) {
+    throw protocolError(
+      'RECOVERY_CLAIM_FENCED',
+      'Persisted operation state is not eligible for recovery claim'
+    )
+  }
+  return commitment
+}
+
+function committedRecoveryBinding(state, operationRoot) {
+  const intent = state.exclusiveIntent
+  const commitment = recoveryCommitment(intent)
+  return ObjectFreeze({
+    operationRoot,
+    stateRevision: state.stateRevision,
+    intent: ObjectFreeze({
+      recordKind: intent.recordKind,
+      operationId: intent.operationId,
+      operation: intent.operation,
+      phase: intent.phase,
+      owner: ObjectFreeze(cloneJson(intent.owner)),
+      fencingGeneration: intent.fencingGeneration,
+      createdAt: intent.createdAt,
+      updatedAt: intent.updatedAt,
+      recoveryCommitment: ObjectFreeze({
+        'shikin.recovery.protocol': commitment.protocol,
+        'shikin.recovery.version': commitment.version,
+        'shikin.recovery.recordSha256': commitment.recordSha256,
+        'shikin.recovery.durability': commitment.durability,
+        'shikin.recovery.claimSequence': commitment.claimSequence,
+      }),
+    }),
+  })
+}
+
+function incrementRecoveryClaimCounter(value, label) {
+  if (value >= NumberMaxSafeInteger) {
+    throw protocolError('COUNTER_OVERFLOW', `${label} cannot exceed the JSON safe-integer limit`)
+  }
+  return value + 1
+}
+
+function requireOrdinaryMutationAuthority(intent) {
+  if (recoveryClaimSequence(intent) > 0) {
+    throw protocolError(
+      'RECOVERY_AUTHORITY_REQUIRED',
+      'A claimed recovery mutation requires its opaque recovery authority'
+    )
+  }
+}
+
+function retainIntentForRecovery(intent) {
+  const commitment = recoveryCommitment(intent)
+  return (
+    intent.phase === 'mutating' ||
+    (intent.phase === 'abandoned' && commitment !== null) ||
+    (commitment?.claimSequence ?? 0) > 0
+  )
+}
+
+function fenceRecoveryAuthority(record) {
+  if (record.status !== 'active') return
+  try {
+    releaseVerifiedCommittedRecoveryEvidenceToken(record.token)
+  } finally {
+    record.token = undefined
+    record.status = 'fenced'
+  }
+}
+
+function deepJsonEqual(left, right) {
+  if (ObjectIs(left, right)) return true
+  if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') {
+    return false
+  }
+  const leftIsArray = ArrayIsArray(left)
+  if (leftIsArray !== ArrayIsArray(right)) return false
+  if (leftIsArray) {
+    if (left.length !== right.length) return false
+    for (let index = 0; index < left.length; index += 1) {
+      if (!deepJsonEqual(left[index], right[index])) return false
+    }
+    return true
+  }
+  const leftKeys = ObjectKeys(left)
+  const rightKeys = ObjectKeys(right)
+  if (leftKeys.length !== rightKeys.length) return false
+  ArrayPrototypeSort(leftKeys)
+  ArrayPrototypeSort(rightKeys)
+  for (let index = 0; index < leftKeys.length; index += 1) {
+    const key = leftKeys[index]
+    if (key !== rightKeys[index] || !deepJsonEqual(left[key], right[key])) return false
   }
   return true
 }
@@ -1491,7 +1933,7 @@ function validateCallerIntentMetadata(metadata) {
   const keys = ObjectKeys(metadata)
   for (let index = 0; index < keys.length; index += 1) {
     const key = keys[index]
-    if (key.startsWith('shikin.recovery.')) {
+    if (StringPrototypeStartsWith(key, 'shikin.recovery.')) {
       throw metadataValidationError(
         'RESERVED_METADATA_KEY',
         `Intent metadata key ${key} is reserved`
@@ -1529,7 +1971,7 @@ function validateCanonicalMetadataValue(value) {
   }
   if (
     typeof value === 'number' &&
-    Number.isSafeInteger(value) &&
+    NumberIsSafeInteger(value) &&
     value >= 0 &&
     !ObjectIs(value, -0)
   ) {
@@ -1592,7 +2034,7 @@ function validateMutex(value, expectedIdentity) {
     !isIdentifier(value.mutexId) ||
     !isIsoTime(value.acquiredAt) ||
     !isIsoTime(value.expiresAt) ||
-    !Number.isSafeInteger(value.ttlMs) ||
+    !NumberIsSafeInteger(value.ttlMs) ||
     value.ttlMs < MUTEX_MIN_TTL_MS ||
     value.ttlMs > MUTEX_MAX_TTL_MS
   ) {
@@ -1610,9 +2052,9 @@ function validateOwner(value) {
   )
   if (
     !isIdentifier(value.ownerId) ||
-    !DATABASE_OPERATION_RUNTIME_IDS.includes(value.runtimeId) ||
+    !ArrayPrototypeIncludes(DATABASE_OPERATION_RUNTIME_IDS, value.runtimeId) ||
     !isIdentifier(value.hostId) ||
-    !Number.isSafeInteger(value.processId) ||
+    !NumberIsSafeInteger(value.processId) ||
     value.processId < 1 ||
     value.processId > 0xffff_ffff ||
     !isIsoTime(value.processStartedAt)
@@ -1672,7 +2114,8 @@ function inspectMutexDirectory(path, databaseIdentity, incompleteTtlMs, testHook
       error: protocolError('MUTEX_CORRUPTION', 'Mutex token is not a directory'),
     }
   }
-  const unexpected = tokenEntries.filter(
+  const unexpected = filterOwnArrayValues(
+    tokenEntries,
     (entry) =>
       entry !== 'mutex.json' &&
       !STAGED_STATE_PATTERN.test(entry) &&
@@ -1685,7 +2128,7 @@ function inspectMutexDirectory(path, databaseIdentity, incompleteTtlMs, testHook
       error: protocolError('MUTEX_CORRUPTION', 'Mutex token has unexpected entries'),
     }
   }
-  if (!tokenEntries.includes('mutex.json')) {
+  if (!ArrayPrototypeIncludes(tokenEntries, 'mutex.json')) {
     return { status: 'incomplete', stat, staleAt: stat.mtimeMs + incompleteTtlMs }
   }
   try {
@@ -1708,7 +2151,7 @@ function requireIntentAuthority(state, evidence, phases) {
   if (
     current === null ||
     !sameIntentAuthority(current, evidence) ||
-    !phases.includes(current.phase)
+    !ArrayPrototypeIncludes(phases, current.phase)
   ) {
     throw protocolError(
       'INTENT_FENCED',
@@ -1719,7 +2162,7 @@ function requireIntentAuthority(state, evidence, phases) {
 }
 
 function incrementCancellationCounter(value, label) {
-  if (value >= Number.MAX_SAFE_INTEGER) {
+  if (value >= NumberMaxSafeInteger) {
     throw protocolError('COUNTER_OVERFLOW', `${label} cannot exceed the JSON safe-integer limit`)
   }
   return value + 1
@@ -1802,7 +2245,7 @@ function readOrCreateHostIdentity(path) {
 
 function currentProcessStartedAt() {
   if (process.platform === 'linux') return linuxProcessStartedAt(process.pid)
-  return isoTime(Date.now())
+  return isoTime(DateNow())
 }
 
 function nonLinuxProcessDemonstrablyAbsent(processId) {
@@ -1822,34 +2265,104 @@ function nonLinuxProcessDemonstrablyAbsent(processId) {
 }
 
 function linuxProcessStartedAt(processId) {
-  const statSource = readFileSync(`/proc/${processId}/stat`, 'utf8')
-  const closing = statSource.lastIndexOf(')')
-  if (closing < 0)
-    throw protocolError('PROCESS_EVIDENCE_UNAVAILABLE', 'Malformed Linux process stat')
-  const fields = statSource
-    .slice(closing + 2)
-    .trim()
-    .split(/\s+/)
-  const startTicks = Number(fields[19])
-  if (!Number.isSafeInteger(startTicks) || startTicks < 0) {
-    throw protocolError('PROCESS_EVIDENCE_UNAVAILABLE', 'Malformed Linux process start time')
+  const substrate = readLinuxProcessInspectionSubstrate()
+  let statSource
+  try {
+    statSource = NodeReadFileSync(`/proc/${processId}/stat`, 'utf8')
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ESRCH') {
+      throw protocolError('PROCESS_NOT_FOUND', 'Linux process does not exist', error)
+    }
+    throw protocolError(
+      'PROCESS_EVIDENCE_UNAVAILABLE',
+      'Could not read Linux process evidence',
+      error
+    )
   }
-  const bootLine = readFileSync('/proc/stat', 'utf8')
-    .split('\n')
-    .find((line) => line.startsWith('btime '))
-  const bootSeconds = Number(bootLine?.slice(6))
-  if (!Number.isSafeInteger(bootSeconds) || bootSeconds < 0) {
+  return parseLinuxProcessStartedAt(statSource, substrate)
+}
+
+function inspectLinuxRecoveryOwner(owner) {
+  try {
+    const startedAt = linuxProcessStartedAt(owner.processId)
+    return startedAt === owner.processStartedAt ? 'live' : 'reused'
+  } catch (error) {
+    if (error instanceof DatabaseOperationLockError && error.code === 'PROCESS_NOT_FOUND') {
+      return 'dead'
+    }
+    if (
+      error instanceof DatabaseOperationLockError &&
+      error.code === 'PROCESS_EVIDENCE_UNSUPPORTED'
+    ) {
+      return 'unsupported'
+    }
+    throw protocolError(
+      'PROCESS_EVIDENCE_UNAVAILABLE',
+      'Could not establish Linux process evidence',
+      error
+    )
+  }
+}
+
+function readLinuxProcessInspectionSubstrate() {
+  let bootSource
+  try {
+    bootSource = NodeReadFileSync('/proc/stat', 'utf8')
+  } catch (error) {
+    throw protocolError('PROCESS_EVIDENCE_UNAVAILABLE', 'Could not read Linux boot evidence', error)
+  }
+  const bootLines = StringPrototypeSplit(bootSource, '\n')
+  let bootLine
+  for (let index = 0; index < bootLines.length; index += 1) {
+    if (!ObjectHasOwn(bootLines, index)) continue
+    const line = bootLines[index]
+    if (StringPrototypeStartsWith(line, 'btime ')) {
+      bootLine = line
+      break
+    }
+  }
+  const bootSeconds = PrimordialNumber(
+    bootLine === undefined ? undefined : StringPrototypeSlice(bootLine, 6)
+  )
+  if (!NumberIsSafeInteger(bootSeconds) || bootSeconds < 0) {
     throw protocolError('PROCESS_EVIDENCE_UNAVAILABLE', 'Malformed Linux boot time')
   }
   if (linuxClockTicksPerSecond === undefined) {
-    linuxClockTicksPerSecond = Number(
-      execFileSync('getconf', ['CLK_TCK'], { encoding: 'utf8' }).trim()
-    )
+    try {
+      const ticksSource = NodeExecFileSync('getconf', ['CLK_TCK'], {
+        encoding: 'utf8',
+        timeout: LINUX_GETCONF_TIMEOUT_MS,
+        killSignal: 'SIGKILL',
+      })
+      linuxClockTicksPerSecond = PrimordialNumber(StringPrototypeTrim(ticksSource))
+    } catch (error) {
+      throw protocolError(
+        'PROCESS_EVIDENCE_UNAVAILABLE',
+        'Could not read Linux clock tick rate',
+        error
+      )
+    }
   }
-  if (!Number.isSafeInteger(linuxClockTicksPerSecond) || linuxClockTicksPerSecond < 1) {
+  if (!NumberIsSafeInteger(linuxClockTicksPerSecond) || linuxClockTicksPerSecond < 1) {
     throw protocolError('PROCESS_EVIDENCE_UNAVAILABLE', 'Invalid Linux clock tick rate')
   }
-  return isoTime(bootSeconds * 1000 + Math.floor((startTicks * 1000) / linuxClockTicksPerSecond))
+  return ObjectFreeze({ bootSeconds, ticksPerSecond: linuxClockTicksPerSecond })
+}
+
+function parseLinuxProcessStartedAt(statSource, substrate) {
+  const closing = StringPrototypeLastIndexOf(statSource, ')')
+  if (closing < 0) {
+    throw protocolError('PROCESS_EVIDENCE_UNAVAILABLE', 'Malformed Linux process stat')
+  }
+  const fieldSource = StringPrototypeTrim(StringPrototypeSlice(statSource, closing + 2))
+  const fields = StringPrototypeSplit(fieldSource, /\s+/)
+  const startTicks = PrimordialNumber(ObjectHasOwn(fields, 19) ? fields[19] : undefined)
+  if (!NumberIsSafeInteger(startTicks) || startTicks < 0) {
+    throw protocolError('PROCESS_EVIDENCE_UNAVAILABLE', 'Malformed Linux process start time')
+  }
+  return isoTime(
+    substrate.bootSeconds * 1000 + MathFloor((startTicks * 1000) / substrate.ticksPerSecond)
+  )
 }
 
 function ensureCanonicalPrivateRoot(path) {
@@ -1874,7 +2387,7 @@ function ensurePrivateDirectory(path, canonicalRoot) {
   const root = comparablePath(realpathSync(canonicalRoot))
   if (
     canonical !== root &&
-    !canonical.startsWith(`${root}${process.platform === 'win32' ? '\\' : '/'}`)
+    !StringPrototypeStartsWith(canonical, `${root}${process.platform === 'win32' ? '\\' : '/'}`)
   ) {
     throw protocolError('UNSAFE_PATH', `${path} escapes the canonical coordination root`)
   }
@@ -1937,7 +2450,8 @@ function syncDirectory(path) {
     fsyncSync(descriptor)
     return true
   } catch (error) {
-    if (['EINVAL', 'ENOTSUP', 'EISDIR', 'EPERM', 'EACCES'].includes(error?.code)) return false
+    if (ArrayPrototypeIncludes(['EINVAL', 'ENOTSUP', 'EISDIR', 'EPERM', 'EACCES'], error?.code))
+      return false
     throw error
   } finally {
     if (descriptor !== undefined) closeSync(descriptor)
@@ -1965,10 +2479,11 @@ function restoreQuarantineIfPossible(quarantine, fixedPath, testHooks = null) {
 }
 
 function isDirectoryRenameCollision(error, destination) {
-  if (['EEXIST', 'ENOTEMPTY'].includes(error?.code)) return true
-  if (!['EPERM', 'EACCES'].includes(error?.code)) return false
+  if (ArrayPrototypeIncludes(['EEXIST', 'ENOTEMPTY'], error?.code)) return true
+  if (!ArrayPrototypeIncludes(['EPERM', 'EACCES', 'ENOENT'], error?.code)) return false
   try {
-    return lstatSync(destination).isDirectory()
+    const destinationStat = lstatSync(destination)
+    return destinationStat.isDirectory() && !destinationStat.isSymbolicLink()
   } catch {
     return false
   }
@@ -2013,22 +2528,22 @@ function isIsoTime(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) {
     return false
   }
-  const parsed = Date.parse(value)
-  return Number.isFinite(parsed) && new Date(parsed).toISOString() === value
+  const parsed = DateParse(value)
+  return NumberIsFinite(parsed) && DatePrototypeToISOString(new PrimordialDate(parsed)) === value
 }
 
 function isExpired(expiresAt, now) {
-  const expires = Date.parse(expiresAt)
-  if (!Number.isFinite(expires))
+  const expires = DateParse(expiresAt)
+  if (!NumberIsFinite(expires))
     throw protocolError('STATE_CORRUPTION', 'Expiration time is malformed')
   return now >= expires
 }
 
 function isoTime(value) {
-  const date = new Date(value)
-  if (!Number.isFinite(date.getTime()))
+  const date = new PrimordialDate(value)
+  if (!NumberIsFinite(DatePrototypeGetTime(date)))
     throw protocolError('CLOCK_FAILURE', 'Could not format clock time')
-  return date.toISOString()
+  return DatePrototypeToISOString(date)
 }
 
 function sleep(milliseconds) {

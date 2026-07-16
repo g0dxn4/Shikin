@@ -1,0 +1,65 @@
+name: M4B0c Native Validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  recovery-claim:
+    name: Recovery claim (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: s
+    steps:
+      - name: Enable Windows long paths
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: .
+        run: git config --global core.longpaths true
+
+      - name: Checkout exact candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: 354bd38542dc3c61ecb7ab6df0f53d320fec2153
+          path: s
+
+      - name: Verify exact candidate
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "354bd38542dc3c61ecb7ab6df0f53d320fec2153"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 11.1.1
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: s/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Node lock state-machine tests
+        run: pnpm exec vitest run scripts/database-operation-lock.test.mjs --maxWorkers=1
+
+      - name: Node unsupported-platform recovery-journal contract
+        run: |
+          pnpm exec vitest run scripts/database-operation-recovery-journal.test.mjs -t "recovery journal cross-platform contract"
+          pnpm exec vitest run cli/src/database-operation-recovery-journal-types.test.ts
+
+      - name: Rust lock state-machine tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml database_operation_lock -- --test-threads=1
+
+      - name: Rust unsupported-platform recovery-journal contract
+        run: cargo test --manifest-path src-tauri/Cargo.toml database_operation_recovery_journal -- --test-threads=1

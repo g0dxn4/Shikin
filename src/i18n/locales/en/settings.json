@@ -101,7 +101,25 @@
     "closeToTrayLabel": "Keep running after close",
     "closeToTrayDescription": "When enabled, closing the window hides Shikin to the system tray instead of quitting.",
     "closeToTrayEnabled": "Shikin will keep running in the tray when closed",
-    "closeToTrayDisabled": "Shikin will quit when the window is closed"
+    "closeToTrayDisabled": "Shikin will quit when the window is closed",
+    "webServer": {
+      "label": "Hosted web access",
+      "description": "Run Shikin's web interface locally from this desktop app.",
+      "port": "Port",
+      "portHint": "Choose a port from {{min}} to {{max}}.",
+      "apply": "Apply",
+      "applying": "Applying...",
+      "running": "Running",
+      "stopped": "Stopped",
+      "statusPort": "Listening on {{port}}",
+      "invalidPort": "Choose a port from {{min}} to {{max}}.",
+      "applied": "Hosted web settings applied",
+      "applyError": "Could not apply hosted web settings",
+      "statusError": "Could not get hosted web server status",
+      "errorTitle": "Hosted web server issue",
+      "tailscaleTitle": "Share with your tailnet",
+      "tailscaleWarning": "This is tailnet-only. Run tailscale serve reset to stop exposure."
+    }
   },
   "updates": {
     "description": "Install signed desktop updates without leaving Shikin.",

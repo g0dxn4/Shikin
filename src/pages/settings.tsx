@@ -39,10 +39,18 @@ import {
   relaunchToApplyUpdate,
 } from '@/lib/updater'
 import { isTauri } from '@/lib/runtime'
+import { applyWebServerSettings, getWebServerStatus } from '@/lib/web-server'
 import type { AvailableUpdate } from '@/lib/updater'
+import type { WebServerStatus } from '@/lib/web-server'
 
 const CLOSE_TO_TRAY_KEY = 'close_to_tray_enabled'
 const DEFAULT_CLOSE_TO_TRAY_ENABLED = true
+const WEB_SERVER_ENABLED_KEY = 'web_server_enabled'
+const WEB_SERVER_PORT_KEY = 'web_server_port'
+const DEFAULT_WEB_SERVER_ENABLED = false
+const DEFAULT_WEB_SERVER_PORT = 8480
+const MIN_WEB_SERVER_PORT = 1024
+const MAX_WEB_SERVER_PORT = 65535
 
 export function SettingsPage() {
   const { t, i18n } = useTranslation('settings')
@@ -71,6 +79,16 @@ export function SettingsPage() {
   const [downloadTotalBytes, setDownloadTotalBytes] = useState<number | null>(null)
   const [closeToTrayEnabled, setCloseToTrayEnabled] = useState(DEFAULT_CLOSE_TO_TRAY_ENABLED)
   const [isSavingDesktopSettings, setIsSavingDesktopSettings] = useState(false)
+  const [webServerEnabled, setWebServerEnabled] = useState(DEFAULT_WEB_SERVER_ENABLED)
+  const [webServerPort, setWebServerPort] = useState(String(DEFAULT_WEB_SERVER_PORT))
+  const [webServerStatus, setWebServerStatus] = useState<WebServerStatus>({
+    running: false,
+    port: null,
+    error: null,
+  })
+  const [webServerError, setWebServerError] = useState<string | null>(null)
+  const [isLoadingWebServerSettings, setIsLoadingWebServerSettings] = useState(isTauri)
+  const [isApplyingWebServer, setIsApplyingWebServer] = useState(false)
   const [lastUpdateAction, setLastUpdateAction] = useState<'check' | 'install' | 'restart' | null>(
     null
   )
@@ -88,6 +106,10 @@ export function SettingsPage() {
     setPreferredCurrency,
   } = useCurrencyStore()
   const { accounts, fetch: fetchAccounts } = useAccountStore()
+  const webServerDisplayPort = isValidWebServerPort(Number(webServerPort))
+    ? webServerPort
+    : String(DEFAULT_WEB_SERVER_PORT)
+  const webServerMessage = webServerError ?? webServerStatus.error
 
   useEffect(() => {
     loadRules()
@@ -98,6 +120,20 @@ export function SettingsPage() {
         .then((version) => setCurrentVersion(version))
         .catch(() => {})
     }
+  }, [loadRules, loadRates, fetchAccounts])
+
+  useEffect(() => {
+    if (isTauri) {
+      void getWebServerStatus()
+        .then((status) => {
+          setWebServerStatus(status)
+          setWebServerError(status.error)
+        })
+        .catch((error) => {
+          setWebServerError(getErrorMessage(error, 'Could not get hosted web server status.'))
+        })
+    }
+
     load('settings.json')
       .then(async (store) => {
         setAlphaVantageKey(((await store.get('alpha_vantage_key')) as string) || '')
@@ -106,9 +142,22 @@ export function SettingsPage() {
         setCloseToTrayEnabled(
           typeof storedCloseToTray === 'boolean' ? storedCloseToTray : DEFAULT_CLOSE_TO_TRAY_ENABLED
         )
+        const storedWebServerEnabled = await store.get(WEB_SERVER_ENABLED_KEY)
+        setWebServerEnabled(
+          typeof storedWebServerEnabled === 'boolean'
+            ? storedWebServerEnabled
+            : DEFAULT_WEB_SERVER_ENABLED
+        )
+        const storedWebServerPort = await store.get(WEB_SERVER_PORT_KEY)
+        setWebServerPort(
+          isValidWebServerPort(storedWebServerPort)
+            ? String(storedWebServerPort)
+            : String(DEFAULT_WEB_SERVER_PORT)
+        )
       })
       .catch(() => {})
-  }, [loadRules, loadRates, fetchAccounts])
+      .finally(() => setIsLoadingWebServerSettings(false))
+  }, [])
 
   const handleCloseToTrayToggle = async () => {
     const nextValue = !closeToTrayEnabled
@@ -124,6 +173,43 @@ export function SettingsPage() {
       toast.error(getErrorMessage(error, tCommon('status.error')))
     } finally {
       setIsSavingDesktopSettings(false)
+    }
+  }
+
+  const handleApplyWebServer = async () => {
+    const port = Number(webServerPort)
+    if (!isValidWebServerPort(port)) {
+      const message = t('desktop.webServer.invalidPort', {
+        min: MIN_WEB_SERVER_PORT,
+        max: MAX_WEB_SERVER_PORT,
+      })
+      setWebServerError(message)
+      toast.error(message)
+      return
+    }
+
+    setIsApplyingWebServer(true)
+    setWebServerError(null)
+    try {
+      const status = await applyWebServerSettings({ enabled: webServerEnabled, port })
+      setWebServerStatus(status)
+      if (status.error) {
+        setWebServerError(status.error)
+        toast.error(status.error)
+        return
+      }
+
+      const store = await load('settings.json')
+      await store.set(WEB_SERVER_ENABLED_KEY, webServerEnabled)
+      await store.set(WEB_SERVER_PORT_KEY, port)
+      await store.save()
+      toast.success(t('desktop.webServer.applied'))
+    } catch (error) {
+      const message = getErrorMessage(error, t('desktop.webServer.applyError'))
+      setWebServerError(message)
+      toast.error(message)
+    } finally {
+      setIsApplyingWebServer(false)
     }
   }
 
@@ -375,6 +461,125 @@ export function SettingsPage() {
               />
             </button>
           </div>
+
+          {isTauri && (
+            <div className="border-border/60 space-y-4 rounded-[18px] border bg-white/[0.035] p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0 space-y-1">
+                  <Label
+                    htmlFor="web-server-switch"
+                    className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
+                  >
+                    {t('desktop.webServer.label')}
+                  </Label>
+                  <p className="text-muted-foreground text-xs">
+                    {t('desktop.webServer.description')}
+                  </p>
+                </div>
+                <button
+                  id="web-server-switch"
+                  type="button"
+                  role="switch"
+                  aria-checked={webServerEnabled}
+                  aria-label={t('desktop.webServer.label')}
+                  onClick={() => setWebServerEnabled((enabled) => !enabled)}
+                  disabled={isLoadingWebServerSettings || isApplyingWebServer}
+                  className={`focus-visible:ring-accent focus-visible:ring-offset-background relative h-8 w-14 shrink-0 rounded-full border p-1 transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+                    webServerEnabled
+                      ? 'border-accent/70 bg-accent shadow-[0_0_24px_rgba(124,92,255,0.28)]'
+                      : 'border-white/10 bg-white/10'
+                  }`}
+                >
+                  <span
+                    className={`block size-6 rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.35)] transition-transform ${
+                      webServerEnabled ? 'translate-x-6' : 'translate-x-0'
+                    }`}
+                    aria-hidden="true"
+                  />
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="min-w-[9rem] flex-1 space-y-1">
+                  <Label
+                    htmlFor="web-server-port"
+                    className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
+                  >
+                    {t('desktop.webServer.port')}
+                  </Label>
+                  <Input
+                    id="web-server-port"
+                    type="number"
+                    inputMode="numeric"
+                    min={MIN_WEB_SERVER_PORT}
+                    max={MAX_WEB_SERVER_PORT}
+                    step={1}
+                    value={webServerPort}
+                    onChange={(event) => setWebServerPort(event.target.value)}
+                    disabled={isLoadingWebServerSettings || isApplyingWebServer}
+                    aria-describedby="web-server-port-hint"
+                  />
+                  <p id="web-server-port-hint" className="text-muted-foreground text-[11px]">
+                    {t('desktop.webServer.portHint', {
+                      min: MIN_WEB_SERVER_PORT,
+                      max: MAX_WEB_SERVER_PORT,
+                    })}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    void handleApplyWebServer()
+                  }}
+                  disabled={isLoadingWebServerSettings || isApplyingWebServer}
+                >
+                  {isApplyingWebServer ? <Loader2 size={14} className="animate-spin" /> : null}
+                  {isApplyingWebServer
+                    ? t('desktop.webServer.applying')
+                    : t('desktop.webServer.apply')}
+                </Button>
+              </div>
+
+              <div
+                aria-live="polite"
+                aria-atomic="true"
+                className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
+              >
+                <span
+                  className={
+                    webServerStatus.running
+                      ? 'text-success font-semibold'
+                      : 'text-muted-foreground font-semibold'
+                  }
+                >
+                  {webServerStatus.running
+                    ? t('desktop.webServer.running')
+                    : t('desktop.webServer.stopped')}
+                </span>
+                {webServerStatus.running && webServerStatus.port !== null && (
+                  <span className="text-muted-foreground font-mono">
+                    {t('desktop.webServer.statusPort', { port: webServerStatus.port })}
+                  </span>
+                )}
+              </div>
+
+              {webServerMessage && (
+                <ErrorBanner title={t('desktop.webServer.errorTitle')} message={webServerMessage} />
+              )}
+
+              <div className="border-accent/15 bg-accent/[0.06] space-y-2 rounded-xl border px-3 py-3">
+                <p className="text-foreground text-xs font-medium">
+                  {t('desktop.webServer.tailscaleTitle')}
+                </p>
+                <code className="text-accent block overflow-x-auto rounded-lg bg-black/20 px-3 py-2 font-mono text-[11px]">
+                  tailscale serve --bg http://127.0.0.1:{webServerDisplayPort}
+                </code>
+                <p className="text-muted-foreground text-[11px] leading-relaxed">
+                  {t('desktop.webServer.tailscaleWarning')}
+                </p>
+              </div>
+            </div>
+          )}
         </section>
 
         <section className="liquid-card space-y-4 p-5 sm:p-6">
@@ -849,6 +1054,15 @@ export function SettingsPage() {
         onConfirm={handleConfirmImport}
       />
     </div>
+  )
+}
+
+function isValidWebServerPort(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= MIN_WEB_SERVER_PORT &&
+    value <= MAX_WEB_SERVER_PORT
   )
 }
 

@@ -14,6 +14,8 @@ export const mockGetCurrentAppVersion = vi.fn().mockResolvedValue('0.1.0')
 export const mockGetAvailableUpdate = vi.fn().mockResolvedValue(null)
 export const mockInstallUpdate = vi.fn().mockResolvedValue(undefined)
 export const mockRelaunchToApplyUpdate = vi.fn().mockResolvedValue(undefined)
+export const mockGetWebServerStatus = vi.fn()
+export const mockApplyWebServerSettings = vi.fn()
 
 const storageMocks = vi.hoisted(() => ({
   get: vi.fn(),
@@ -91,6 +93,11 @@ vi.mock('@/lib/updater', () => ({
   relaunchToApplyUpdate: (...args: unknown[]) => mockRelaunchToApplyUpdate(...args),
 }))
 
+vi.mock('@/lib/web-server', () => ({
+  getWebServerStatus: (...args: unknown[]) => mockGetWebServerStatus(...args),
+  applyWebServerSettings: (...args: unknown[]) => mockApplyWebServerSettings(...args),
+}))
+
 vi.mock('@/lib/storage', () => ({
   load: vi.fn().mockResolvedValue({
     get: storageMocks.get,
@@ -105,6 +112,8 @@ describe('SettingsPage', () => {
     storageMocks.get.mockResolvedValue('')
     storageMocks.set.mockResolvedValue(undefined)
     storageMocks.save.mockResolvedValue(undefined)
+    mockGetWebServerStatus.mockResolvedValue({ running: false, port: null, error: null })
+    mockApplyWebServerSettings.mockResolvedValue({ running: false, port: null, error: null })
   })
 
   it('renders General section', async () => {
@@ -174,6 +183,81 @@ describe('SettingsPage', () => {
       expect(mockToastError).toHaveBeenCalledWith('Desktop settings failed')
     })
     expect(mockToastSuccess).not.toHaveBeenCalledWith('desktop.closeToTrayDisabled')
+  })
+
+  it('loads persisted hosted web settings', async () => {
+    storageMocks.get.mockImplementation(async (key: string) => {
+      if (key === 'web_server_enabled') return true
+      if (key === 'web_server_port') return 9000
+      return ''
+    })
+    mockGetWebServerStatus.mockResolvedValue({ running: true, port: 9000, error: null })
+
+    render(<SettingsPage />)
+
+    const toggle = await screen.findByRole('switch', { name: 'desktop.webServer.label' })
+    await waitFor(() => expect(toggle).not.toBeDisabled())
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByLabelText('desktop.webServer.port')).toHaveValue(9000)
+  })
+
+  it('shows hosted web server status', async () => {
+    mockGetWebServerStatus.mockResolvedValue({ running: true, port: 8480, error: null })
+
+    render(<SettingsPage />)
+
+    expect(await screen.findByText('desktop.webServer.running')).toBeInTheDocument()
+    expect(screen.getByText('desktop.webServer.statusPort')).toBeInTheDocument()
+  })
+
+  it('applies hosted web settings before persisting them', async () => {
+    const user = userEvent.setup()
+    mockApplyWebServerSettings.mockResolvedValue({ running: true, port: 8480, error: null })
+
+    render(<SettingsPage />)
+
+    const toggle = await screen.findByRole('switch', { name: 'desktop.webServer.label' })
+    await waitFor(() => expect(toggle).not.toBeDisabled())
+    await user.click(toggle)
+    await user.click(screen.getByRole('button', { name: 'desktop.webServer.apply' }))
+
+    await waitFor(() => {
+      expect(mockApplyWebServerSettings).toHaveBeenCalledWith({ enabled: true, port: 8480 })
+    })
+    expect(storageMocks.set).toHaveBeenCalledWith('web_server_enabled', true)
+    expect(storageMocks.set).toHaveBeenCalledWith('web_server_port', 8480)
+    expect(storageMocks.save).toHaveBeenCalledOnce()
+    expect(mockToastSuccess).toHaveBeenCalledWith('desktop.webServer.applied')
+  })
+
+  it('rejects an invalid hosted web port before invoking the desktop command', async () => {
+    const user = userEvent.setup()
+
+    render(<SettingsPage />)
+
+    const portInput = await screen.findByLabelText('desktop.webServer.port')
+    await waitFor(() => expect(portInput).not.toBeDisabled())
+    await user.clear(portInput)
+    await user.type(portInput, '1023')
+    await user.click(screen.getByRole('button', { name: 'desktop.webServer.apply' }))
+
+    expect(mockApplyWebServerSettings).not.toHaveBeenCalled()
+    expect(await screen.findByText('desktop.webServer.invalidPort')).toBeInTheDocument()
+    expect(mockToastError).toHaveBeenCalledWith('desktop.webServer.invalidPort')
+  })
+
+  it('shows hosted web server command failures', async () => {
+    const user = userEvent.setup()
+    mockApplyWebServerSettings.mockRejectedValueOnce(new Error('Hosted web failed'))
+
+    render(<SettingsPage />)
+
+    const applyButton = await screen.findByRole('button', { name: 'desktop.webServer.apply' })
+    await waitFor(() => expect(applyButton).not.toBeDisabled())
+    await user.click(applyButton)
+
+    expect(await screen.findByText('Hosted web failed')).toBeInTheDocument()
+    expect(mockToastError).toHaveBeenCalledWith('Hosted web failed')
   })
 
   it('checks for updates and installs an available release', async () => {

@@ -3,9 +3,13 @@ mod database_snapshot;
 use std::{
     ffi::{OsStr, OsString},
     fs, io,
+    net::TcpListener,
     path::{Path, PathBuf},
-    process::{Command, ExitStatus},
-    sync::atomic::{AtomicBool, Ordering},
+    process::{Child, Command, ExitStatus},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex as StdMutex,
+    },
     time::{Duration, SystemTime},
 };
 
@@ -29,6 +33,11 @@ const MCP_BRIDGE_BIN: &str = "shikin-mcp";
 const SETTINGS_FILE_NAME: &str = "settings.json";
 const CLOSE_TO_TRAY_KEY: &str = "close_to_tray_enabled";
 const DEFAULT_CLOSE_TO_TRAY_ENABLED: bool = true;
+const WEB_SERVER_ENABLED_KEY: &str = "web_server_enabled";
+const WEB_SERVER_PORT_KEY: &str = "web_server_port";
+const DEFAULT_WEB_SERVER_ENABLED: bool = false;
+const DEFAULT_WEB_SERVER_PORT: u16 = 8480;
+const WEB_SERVER_STARTUP_CHECK_DELAY: Duration = Duration::from_millis(150);
 const MAIN_WINDOW_LABEL: &str = "main";
 const DATABASE_TRANSACTION_TTL: Duration = Duration::from_secs(120);
 const TRAY_MENU_SHOW_ID: &str = "show_shikin";
@@ -44,6 +53,32 @@ struct ShikinDbInner {
     connection: Option<SqliteConnection>,
     active_transaction_id: Option<String>,
     transaction_generation: u64,
+}
+
+#[derive(Default)]
+struct WebServerState {
+    inner: StdMutex<WebServerInner>,
+}
+
+#[derive(Default)]
+struct WebServerInner {
+    child: Option<Child>,
+    port: Option<u16>,
+    last_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WebServerStatus {
+    running: bool,
+    port: Option<u16>,
+    error: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct WebServerSettings {
+    enabled: bool,
+    port: u16,
 }
 
 #[derive(Deserialize)]
@@ -205,10 +240,59 @@ fn close_to_tray_enabled(identifier: &str) -> bool {
         .unwrap_or(DEFAULT_CLOSE_TO_TRAY_ENABLED)
 }
 
-fn run_node_script(script_path: &Path, args: &[OsString]) -> io::Result<i32> {
+fn valid_web_server_port(port: u64) -> Option<u16> {
+    (1024..=u16::MAX as u64)
+        .contains(&port)
+        .then_some(port as u16)
+}
+
+fn web_server_settings_from_json(settings: &serde_json::Value) -> WebServerSettings {
+    let enabled = settings
+        .get(WEB_SERVER_ENABLED_KEY)
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(DEFAULT_WEB_SERVER_ENABLED);
+    let port = settings
+        .get(WEB_SERVER_PORT_KEY)
+        .and_then(serde_json::Value::as_u64)
+        .and_then(valid_web_server_port)
+        .unwrap_or(DEFAULT_WEB_SERVER_PORT);
+
+    WebServerSettings { enabled, port }
+}
+
+fn web_server_settings(identifier: &str) -> WebServerSettings {
+    let Some(settings_path) = settings_file_path(identifier) else {
+        return WebServerSettings {
+            enabled: DEFAULT_WEB_SERVER_ENABLED,
+            port: DEFAULT_WEB_SERVER_PORT,
+        };
+    };
+
+    let Ok(contents) = fs::read_to_string(settings_path) else {
+        return WebServerSettings {
+            enabled: DEFAULT_WEB_SERVER_ENABLED,
+            port: DEFAULT_WEB_SERVER_PORT,
+        };
+    };
+
+    serde_json::from_str::<serde_json::Value>(&contents)
+        .map(|settings| web_server_settings_from_json(&settings))
+        .unwrap_or(WebServerSettings {
+            enabled: DEFAULT_WEB_SERVER_ENABLED,
+            port: DEFAULT_WEB_SERVER_PORT,
+        })
+}
+
+fn node_script_command(script_path: &Path, args: &[OsString]) -> Command {
     let mut command = Command::new("node");
     command.arg(script_path).args(args);
-    command.status().map(status_code)
+    command
+}
+
+fn run_node_script(script_path: &Path, args: &[OsString]) -> io::Result<i32> {
+    node_script_command(script_path, args)
+        .status()
+        .map(status_code)
 }
 
 fn bridge_command(kind: BridgeKind) -> Command {
@@ -245,6 +329,231 @@ fn run_bridge(kind: BridgeKind, args: &[OsString]) -> io::Result<i32> {
     let mut command = bridge_command(kind);
     command.args(args);
     command.status().map(status_code)
+}
+
+fn web_server_args(port: u16) -> Vec<OsString> {
+    vec![
+        OsString::from("web"),
+        OsString::from("--port"),
+        OsString::from(port.to_string()),
+    ]
+}
+
+fn spawn_web_server(port: u16) -> io::Result<Child> {
+    let args = web_server_args(port);
+
+    if let Some(script_path) = source_bridge_script(BridgeKind::Cli) {
+        match node_script_command(&script_path, &args).spawn() {
+            Ok(child) => return Ok(child),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+
+    if let Some(script_path) = installed_bridge_script(BridgeKind::Cli)? {
+        match node_script_command(&script_path, &args).spawn() {
+            Ok(child) => return Ok(child),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+
+    let mut command = bridge_command(BridgeKind::Cli);
+    command.args(args);
+    command.spawn()
+}
+
+fn validate_web_server_port(port: u64) -> Result<u16, String> {
+    valid_web_server_port(port)
+        .ok_or_else(|| "Hosted web server port must be between 1024 and 65535.".into())
+}
+
+fn preflight_web_server_port(port: u16) -> Result<(), String> {
+    TcpListener::bind(("127.0.0.1", port))
+        .map(drop)
+        .map_err(|error| format!("Port {port} is unavailable on 127.0.0.1: {error}"))
+}
+
+fn web_server_exit_message(status: ExitStatus) -> String {
+    match status.code() {
+        Some(code) => format!("Hosted web server exited during startup with exit code {code}."),
+        None => "Hosted web server exited during startup.".into(),
+    }
+}
+
+fn web_server_status(inner: &mut WebServerInner) -> WebServerStatus {
+    if let Some(wait_result) = inner.child.as_mut().map(Child::try_wait) {
+        match wait_result {
+            Ok(None) => {
+                return WebServerStatus {
+                    running: true,
+                    port: inner.port,
+                    error: inner.last_error.clone(),
+                };
+            }
+            Ok(Some(status)) => {
+                inner.child = None;
+                inner.port = None;
+                inner.last_error = Some(match status.code() {
+                    Some(code) => format!("Hosted web server exited with exit code {code}."),
+                    None => "Hosted web server exited.".into(),
+                });
+            }
+            Err(error) => {
+                inner.last_error =
+                    Some(format!("Could not read hosted web server status: {error}"));
+                return WebServerStatus {
+                    running: true,
+                    port: inner.port,
+                    error: inner.last_error.clone(),
+                };
+            }
+        }
+    }
+
+    WebServerStatus {
+        running: false,
+        port: None,
+        error: inner.last_error.clone(),
+    }
+}
+
+fn stop_web_server(inner: &mut WebServerInner) -> Result<(), String> {
+    let Some(mut child) = inner.child.take() else {
+        inner.port = None;
+        return Ok(());
+    };
+    let port = inner.port.take();
+
+    let stopped = match child.try_wait() {
+        Ok(Some(_)) => Ok(()),
+        Ok(None) => match child.kill() {
+            Ok(()) => child.wait().map(|_| ()),
+            Err(error) => match child.try_wait() {
+                Ok(Some(_)) => Ok(()),
+                Ok(None) | Err(_) => Err(error),
+            },
+        },
+        Err(error) => Err(error),
+    };
+
+    match stopped {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            inner.child = Some(child);
+            inner.port = port;
+            Err(format!("Could not stop hosted web server: {error}"))
+        }
+    }
+}
+
+fn start_web_server(inner: &mut WebServerInner, port: u16) -> Result<(), String> {
+    let mut child = spawn_web_server(port)
+        .map_err(|error| format!("Could not start hosted web server: {error}"))?;
+
+    std::thread::sleep(WEB_SERVER_STARTUP_CHECK_DELAY);
+    match child.try_wait() {
+        Ok(None) => {
+            inner.child = Some(child);
+            inner.port = Some(port);
+            inner.last_error = None;
+            Ok(())
+        }
+        Ok(Some(status)) => Err(web_server_exit_message(status)),
+        Err(error) => {
+            inner.child = Some(child);
+            inner.port = Some(port);
+            Err(format!(
+                "Could not verify hosted web server startup: {error}"
+            ))
+        }
+    }
+}
+
+fn apply_web_server_settings_to_state(
+    state: &WebServerState,
+    enabled: bool,
+    port: u64,
+) -> WebServerStatus {
+    let Ok(mut inner) = state.inner.lock() else {
+        return WebServerStatus {
+            running: false,
+            port: None,
+            error: Some("Hosted web server state is unavailable.".into()),
+        };
+    };
+
+    let port = match validate_web_server_port(port) {
+        Ok(port) => port,
+        Err(error) => {
+            inner.last_error = Some(error);
+            return web_server_status(&mut inner);
+        }
+    };
+
+    let current_status = web_server_status(&mut inner);
+    if !enabled {
+        if let Err(error) = stop_web_server(&mut inner) {
+            inner.last_error = Some(error);
+        } else {
+            inner.last_error = None;
+        }
+        return web_server_status(&mut inner);
+    }
+
+    if current_status.running && current_status.port == Some(port) {
+        inner.last_error = None;
+        return web_server_status(&mut inner);
+    }
+
+    if let Err(error) = preflight_web_server_port(port) {
+        inner.last_error = Some(error);
+        return web_server_status(&mut inner);
+    }
+
+    if let Err(error) = stop_web_server(&mut inner) {
+        inner.last_error = Some(error);
+        return web_server_status(&mut inner);
+    }
+
+    if let Err(error) = start_web_server(&mut inner, port) {
+        inner.last_error = Some(error);
+    }
+
+    web_server_status(&mut inner)
+}
+
+fn stop_web_server_on_exit(state: &WebServerState) {
+    let Ok(mut inner) = state.inner.lock() else {
+        eprintln!("warning: hosted web server state was unavailable during shutdown");
+        return;
+    };
+
+    if let Err(error) = stop_web_server(&mut inner) {
+        eprintln!("warning: {error}");
+    }
+}
+
+#[tauri::command]
+fn get_web_server_status(state: State<WebServerState>) -> WebServerStatus {
+    let Ok(mut inner) = state.inner.lock() else {
+        return WebServerStatus {
+            running: false,
+            port: None,
+            error: Some("Hosted web server state is unavailable.".into()),
+        };
+    };
+
+    web_server_status(&mut inner)
+}
+
+#[tauri::command]
+fn apply_web_server_settings(
+    enabled: bool,
+    port: u64,
+    state: State<WebServerState>,
+) -> WebServerStatus {
+    apply_web_server_settings_to_state(&state, enabled, port)
 }
 
 fn print_bridge_error(kind: BridgeKind, error: &io::Error) {
@@ -800,6 +1109,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(ShikinDbState::default())
+        .manage(WebServerState::default())
         .invoke_handler(tauri::generate_handler![
             shikin_db_tx_begin,
             shikin_db_tx_execute,
@@ -808,6 +1118,8 @@ pub fn run() {
             shikin_db_tx_rollback,
             database_snapshot::shikin_db_create_snapshot,
             database_snapshot::shikin_db_restore_snapshot,
+            get_web_server_status,
+            apply_web_server_settings,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -819,6 +1131,18 @@ pub fn run() {
             }
             if let Err(error) = setup_tray(app) {
                 eprintln!("warning: could not start Shikin tray support: {error}");
+            }
+
+            let settings = web_server_settings(APP_IDENTIFIER);
+            if settings.enabled {
+                let status = apply_web_server_settings_to_state(
+                    app.state::<WebServerState>().inner(),
+                    settings.enabled,
+                    settings.port.into(),
+                );
+                if let Some(error) = status.error {
+                    eprintln!("warning: could not start hosted web server: {error}");
+                }
             }
             Ok(())
         })
@@ -836,8 +1160,13 @@ pub fn run() {
                 }
             }
         })
-        .run(context)
-        .expect("error while running tauri application");
+        .build(context)
+        .expect("error while building Tauri application")
+        .run(|app_handle, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                stop_web_server_on_exit(app_handle.state::<WebServerState>().inner());
+            }
+        });
 }
 
 #[cfg(test)]
@@ -975,6 +1304,75 @@ mod tests {
                 kind: BridgeKind::Mcp,
                 args: os_args(&["--verbose"]),
             }
+        );
+    }
+
+    #[test]
+    fn defaults_web_server_settings_when_values_are_missing_or_invalid() {
+        assert_eq!(
+            web_server_settings_from_json(&serde_json::json!({})),
+            WebServerSettings {
+                enabled: false,
+                port: 8480,
+            }
+        );
+        assert_eq!(
+            web_server_settings_from_json(&serde_json::json!({
+                WEB_SERVER_ENABLED_KEY: "invalid",
+                WEB_SERVER_PORT_KEY: 1023,
+            })),
+            WebServerSettings {
+                enabled: false,
+                port: 8480,
+            }
+        );
+    }
+
+    #[test]
+    fn reads_web_server_settings_from_json() {
+        assert_eq!(
+            web_server_settings_from_json(&serde_json::json!({
+                WEB_SERVER_ENABLED_KEY: true,
+                WEB_SERVER_PORT_KEY: 9000,
+            })),
+            WebServerSettings {
+                enabled: true,
+                port: 9000,
+            }
+        );
+    }
+
+    #[test]
+    fn validates_web_server_port_range() {
+        assert_eq!(validate_web_server_port(1024), Ok(1024));
+        assert_eq!(validate_web_server_port(65535), Ok(65535));
+        assert!(validate_web_server_port(1023).is_err());
+        assert!(validate_web_server_port(65536).is_err());
+    }
+
+    #[test]
+    fn builds_web_server_cli_argument_shape() {
+        assert_eq!(web_server_args(8480), os_args(&["web", "--port", "8480"]));
+    }
+
+    #[test]
+    fn web_server_state_helpers_report_stopped_and_reject_invalid_ports() {
+        let state = WebServerState::default();
+
+        assert_eq!(
+            apply_web_server_settings_to_state(&state, false, 8480),
+            WebServerStatus {
+                running: false,
+                port: None,
+                error: None,
+            }
+        );
+        let invalid_port = apply_web_server_settings_to_state(&state, false, 1023);
+        assert!(!invalid_port.running);
+        assert_eq!(invalid_port.port, None);
+        assert_eq!(
+            invalid_port.error.as_deref(),
+            Some("Hosted web server port must be between 1024 and 65535.")
         );
     }
 

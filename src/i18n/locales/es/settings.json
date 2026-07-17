@@ -101,7 +101,25 @@
     "closeToTrayLabel": "Seguir ejecutando al cerrar",
     "closeToTrayDescription": "Cuando está activado, cerrar la ventana oculta Shikin en la bandeja del sistema en vez de salir.",
     "closeToTrayEnabled": "Shikin seguirá ejecutándose en la bandeja al cerrar",
-    "closeToTrayDisabled": "Shikin saldrá cuando se cierre la ventana"
+    "closeToTrayDisabled": "Shikin saldrá cuando se cierre la ventana",
+    "webServer": {
+      "label": "Acceso web alojado",
+      "description": "Ejecuta la interfaz web de Shikin localmente desde esta app de escritorio.",
+      "port": "Puerto",
+      "portHint": "Elige un puerto entre {{min}} y {{max}}.",
+      "apply": "Aplicar",
+      "applying": "Aplicando...",
+      "running": "En ejecución",
+      "stopped": "Detenido",
+      "statusPort": "Escuchando en {{port}}",
+      "invalidPort": "Elige un puerto entre {{min}} y {{max}}.",
+      "applied": "La configuración web alojada se aplicó",
+      "applyError": "No se pudo aplicar la configuración web alojada",
+      "statusError": "No se pudo obtener el estado del servidor web alojado",
+      "errorTitle": "Problema con el servidor web alojado",
+      "tailscaleTitle": "Comparte con tu tailnet",
+      "tailscaleWarning": "Esto solo está disponible en tu tailnet. Ejecuta tailscale serve reset para detener la exposición."
+    }
   },
   "updates": {
     "description": "Instala actualizaciones firmadas del escritorio sin salir de Shikin.",

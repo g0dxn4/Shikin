@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -54,6 +55,154 @@ function runNode(args, env) {
     )
   }
   return result.stdout.trim()
+}
+
+function findAvailablePort() {
+  return new Promise((resolvePort, reject) => {
+    const probe = createNetServer()
+    probe.once('error', reject)
+    probe.listen(0, '127.0.0.1', () => {
+      const address = probe.address()
+      probe.close((error) => {
+        if (error) reject(error)
+        else resolvePort(address.port)
+      })
+    })
+  })
+}
+
+function waitForDataServer(child, getStderr) {
+  return new Promise((resolveReady, reject) => {
+    const cleanup = () => {
+      clearTimeout(timeout)
+      child.stdout.off('data', onData)
+      child.off('error', onError)
+      child.off('exit', onExit)
+    }
+    const onData = (chunk) => {
+      if (!chunk.includes('Listening on')) return
+      cleanup()
+      resolveReady()
+    }
+    const onError = (error) => {
+      cleanup()
+      reject(error)
+    }
+    const onExit = (code, signal) => {
+      cleanup()
+      reject(
+        new Error(
+          `App data server exited before readiness with code ${code} signal ${signal ?? 'none'}\n${getStderr()}`
+        )
+      )
+    }
+    const timeout = setTimeout(() => {
+      cleanup()
+      reject(new Error(`App data server readiness timed out.\n${getStderr()}`))
+    }, 10_000)
+
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', onData)
+    child.once('error', onError)
+    child.once('exit', onExit)
+  })
+}
+
+async function stopChild(child) {
+  if (child.exitCode !== null) return
+  child.kill('SIGTERM')
+  await new Promise((resolveExit) => {
+    const timeout = setTimeout(() => {
+      child.kill('SIGKILL')
+      resolveExit()
+    }, 3_000)
+    child.once('exit', () => {
+      clearTimeout(timeout)
+      resolveExit()
+    })
+  })
+}
+
+async function requestDataServer(port, token, path, body) {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      origin: 'http://localhost:1420',
+      'x-shikin-bridge': token,
+    },
+    body: JSON.stringify(body),
+  })
+  const payload = await response.json()
+  if (!response.ok) {
+    throw new Error(`${path} failed with status ${response.status}: ${JSON.stringify(payload)}`)
+  }
+  return payload
+}
+
+async function smokeSharedDatabase(cliEntrypoint, isolatedEnv) {
+  const port = await findAvailablePort()
+  const token = `deploy-smoke-${process.pid}`
+  const serverEnv = {
+    ...isolatedEnv,
+    SHIKIN_DATA_SERVER_PORT: String(port),
+    SHIKIN_DATA_SERVER_BRIDGE_TOKEN: token,
+  }
+  const child = spawn(process.execPath, [join(root, 'scripts', 'data-server.mjs')], {
+    cwd: root,
+    env: serverEnv,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  let stderr = ''
+  child.stderr.setEncoding('utf8')
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk
+  })
+
+  try {
+    await waitForDataServer(child, () => stderr)
+
+    const created = JSON.parse(
+      runNode(
+        [
+          cliEntrypoint,
+          'create-account',
+          '--name',
+          'CLI Shared DB Smoke',
+          '--type',
+          'checking',
+          '--currency',
+          'MXN',
+          '--json',
+        ],
+        isolatedEnv
+      )
+    )
+    if (created?.account?.name !== 'CLI Shared DB Smoke') {
+      throw new Error(`Unexpected deployed CLI create response: ${JSON.stringify(created)}`)
+    }
+
+    const appRows = await requestDataServer(port, token, '/api/db/query', {
+      sql: 'SELECT name, currency FROM accounts WHERE name = $1',
+      params: ['CLI Shared DB Smoke'],
+    })
+    if (appRows.length !== 1 || appRows[0].currency !== 'MXN') {
+      throw new Error(`App backend did not observe the CLI account: ${JSON.stringify(appRows)}`)
+    }
+
+    await requestDataServer(port, token, '/api/db/execute', {
+      sql: 'INSERT INTO categories (id, name, type, sort_order) VALUES ($1, $2, $3, $4)',
+      params: ['shared-smoke-category', 'App Shared DB Smoke', 'expense', 999],
+    })
+    const categories = JSON.parse(
+      runNode([cliEntrypoint, 'list-categories', '--json'], isolatedEnv)
+    )
+    if (!categories.categories?.some((category) => category.name === 'App Shared DB Smoke')) {
+      throw new Error(`CLI did not observe the app backend category: ${JSON.stringify(categories)}`)
+    }
+  } finally {
+    await stopChild(child)
+  }
 }
 
 function smokeMcp(entrypoint, env) {
@@ -144,9 +293,10 @@ try {
   if (version !== rootPackage.version) {
     throw new Error(`Deployed CLI reported version ${version}; expected ${rootPackage.version}.`)
   }
+  await smokeSharedDatabase(cliEntrypoint, isolatedEnv)
   await smokeMcp(mcpEntrypoint, isolatedEnv)
 
-  console.log(`CLI deployment smoke passed with pnpm ${actualPnpmVersion}.`)
+  console.log(`CLI deployment and app shared-database smoke passed with pnpm ${actualPnpmVersion}.`)
 } finally {
   rmSync(tempRoot, { recursive: true, force: true })
 }

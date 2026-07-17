@@ -100,6 +100,7 @@ vi.mock('@/stores/currency-store', () => ({
   useCurrencyStore: () => ({
     preferredCurrency: 'USD',
     error: mockCurrencyError,
+    rates: {},
     convertToPreferred: (amountCentavos: number) => ({
       complete: true,
       preferredCurrency: 'USD',
@@ -136,6 +137,33 @@ vi.mock('@/stores/spending-insights-store', () => ({
   }),
 }))
 
+vi.mock('@/components/dashboard/use-dashboard-splits', () => ({
+  useDashboardSplits: () => ({ splits: [], isLoading: false, error: null }),
+}))
+
+vi.mock('@/components/ui/safe-chart', () => ({
+  SafeChart: (props: { children: React.ReactNode }) => <div>{props.children}</div>,
+}))
+
+vi.mock('recharts', () => ({
+  LineChart: () => null,
+  Line: () => null,
+  BarChart: () => null,
+  Bar: () => null,
+  ComposedChart: () => null,
+  XAxis: () => null,
+  YAxis: () => null,
+  Tooltip: () => null,
+  CartesianGrid: () => null,
+  Legend: () => null,
+  ResponsiveContainer: () => null,
+  PieChart: () => null,
+  Pie: () => null,
+  Cell: () => null,
+  AreaChart: () => null,
+  Area: () => null,
+}))
+
 describe('Dashboard', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -159,7 +187,7 @@ describe('Dashboard', () => {
     it('keeps dashboard intelligence visible', () => {
       render(<Dashboard />)
 
-      expect(screen.getByText('Spending intelligence')).toBeInTheDocument()
+      expect(screen.getAllByText('analytics.spendingPace').length).toBeGreaterThanOrEqual(1)
       expect(screen.getByText('Recent activity')).toBeInTheDocument()
       expect(screen.queryByText('empty.addAccount')).not.toBeInTheDocument()
     })
@@ -298,7 +326,6 @@ describe('Dashboard', () => {
       expect(warning).toHaveTextContent('currency.totalUnavailable')
       expect(warning).toHaveTextContent('currency.missingRates: EUR')
       expect(screen.queryByText('$3,000.00')).not.toBeInTheDocument()
-      expect(screen.getByText('currency.derivedUnavailable')).toBeInTheDocument()
     })
 
     it('does not render account preview cards', () => {
@@ -458,6 +485,7 @@ describe('Dashboard', () => {
         reporting_treatment: 'normal',
         transaction_kind: 'standard',
         is_archived: 0,
+        category_id: type === 'expense' ? 'cat-food' : null,
         category_color: '#f97316',
         category_name: type === 'expense' ? 'Food' : null,
         account_name: 'Checking',
@@ -473,6 +501,7 @@ describe('Dashboard', () => {
         transaction('posted-food', 'expense', 20_000),
         transaction('cleared-transport', 'expense', 10_000, today, {
           status: 'cleared',
+          category_id: 'cat-transport',
           category_name: 'Transport',
           category_color: '#38bdf8',
         }),
@@ -506,9 +535,8 @@ describe('Dashboard', () => {
       expect(screen.getByText('80%')).toBeInTheDocument()
       expect(screen.getByText('+$600.00 vs last month')).toBeInTheDocument()
       expect(screen.getByText('+$250.00 vs last month')).toBeInTheDocument()
-      expect(screen.getByTitle(`${dayjs().format('MMM')}: $300.00`)).toBeInTheDocument()
 
-      await user.click(screen.getByText('Categories'))
+      await user.click(screen.getByText('analytics.categories'))
 
       expect(
         screen.getByText('Food', { selector: 'span.truncate.font-semibold' }).parentElement
@@ -518,13 +546,6 @@ describe('Dashboard', () => {
         screen.getByText('Transport', { selector: 'span.truncate.font-semibold' }).parentElement
           ?.parentElement
       ).toHaveTextContent('Transport$100.00')
-
-      await user.click(screen.getByText('Movement'))
-
-      expect(
-        screen.getByText('Food', { selector: 'span.truncate.font-semibold' }).parentElement
-      ).toHaveTextContent('Food+$150.00')
-      expect(screen.getByText('+500%')).toBeInTheDocument()
     })
   })
 
@@ -542,6 +563,7 @@ describe('Dashboard', () => {
           amount: 10000,
           currency: 'USD',
           date: dayjs().format('YYYY-MM-DD'),
+          category_id: 'cat-food',
           category_color: '#f97316',
           category_name: 'Food',
           account_name: 'Checking',
@@ -553,6 +575,7 @@ describe('Dashboard', () => {
           amount: 2000,
           currency: 'USD',
           date: dayjs().format('YYYY-MM-DD'),
+          category_id: 'cat-transport',
           category_color: '#38bdf8',
           category_name: 'Transport',
           account_name: 'Checking',
@@ -564,6 +587,7 @@ describe('Dashboard', () => {
           amount: 6000,
           currency: 'USD',
           date: dayjs().subtract(1, 'month').format('YYYY-MM-DD'),
+          category_id: 'cat-food',
           category_color: '#f97316',
           category_name: 'Food',
           account_name: 'Checking',
@@ -572,20 +596,20 @@ describe('Dashboard', () => {
 
       render(<Dashboard />)
 
-      expect(screen.getByText('Spending graph')).toBeInTheDocument()
-      expect(screen.getByText('Trend')).toBeInTheDocument()
-      expect(screen.getByText('Categories')).toBeInTheDocument()
-      expect(screen.getByText('Movement')).toBeInTheDocument()
+      expect(screen.getAllByText('analytics.spendingPace').length).toBeGreaterThanOrEqual(1)
+      expect(screen.getByText('analytics.pace')).toBeInTheDocument()
+      expect(screen.getByText('analytics.trend')).toBeInTheDocument()
+      expect(screen.getByText('analytics.categories')).toBeInTheDocument()
       expect(screen.getAllByText('$120.00').length).toBeGreaterThanOrEqual(1)
 
-      await user.click(screen.getByText('Categories'))
+      await user.click(screen.getByText('analytics.categories'))
 
       expect(screen.getAllByText('Food').length).toBeGreaterThanOrEqual(1)
       expect(screen.getAllByText('Transport').length).toBeGreaterThanOrEqual(1)
 
-      await user.click(screen.getByText('Movement'))
+      await user.click(screen.getByText('analytics.trend'))
 
-      expect(screen.getByText('Month over month')).toBeInTheDocument()
+      expect(screen.getByText('analytics.income')).toBeInTheDocument()
     })
   })
 })

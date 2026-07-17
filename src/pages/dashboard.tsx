@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { TrendingUp, TrendingDown, Target, Plus, ArrowRight } from 'lucide-react'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
-import { isCashFlowEligible } from '@shikin/finance-core'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
@@ -17,12 +16,12 @@ import { useTransactionStore } from '@/stores/transaction-store'
 import { useGoalStore } from '@/stores/goal-store'
 import { useCurrencyStore } from '@/stores/currency-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
-import { useSpendingInsightsStore } from '@/stores/spending-insights-store'
 import { formatMoney } from '@/lib/money'
+import { buildDashboardAnalytics } from '@/lib/dashboard-analytics'
+import { useDashboardSplits } from '@/components/dashboard/use-dashboard-splits'
+import { SpendingAnalytics } from '@/components/dashboard/spending-analytics'
 
 dayjs.extend(relativeTime)
-
-type SpendingGraphMode = 'trend' | 'categories' | 'movement'
 
 export function Dashboard() {
   const { t } = useTranslation('dashboard')
@@ -44,12 +43,19 @@ export function Dashboard() {
   const {
     error: currencyError,
     preferredCurrency,
-    convertToPreferred,
+    rates,
     getTotalBalanceInPreferred,
     loadRates,
   } = useCurrencyStore()
-  const { loadComparisons: loadInsights } = useSpendingInsightsStore()
-  const [spendingGraphMode, setSpendingGraphMode] = useState<SpendingGraphMode>('trend')
+  const now = useMemo(() => dayjs(), [])
+  const splitDateRange = useMemo(
+    () => ({
+      start: now.subtract(11, 'month').startOf('month').format('YYYY-MM-DD'),
+      end: now.format('YYYY-MM-DD'),
+    }),
+    [now]
+  )
+  const { splits: dashboardSplits, isLoading: splitsLoading } = useDashboardSplits(splitDateRange)
 
   useEffect(() => {
     void fetchAccounts().catch(() => {})
@@ -57,13 +63,6 @@ export function Dashboard() {
     void fetchGoals().catch(() => {})
     void loadRates().catch(() => {})
   }, [fetchAccounts, fetchTransactions, fetchGoals, loadRates])
-
-  // Load spending insights after transactions are loaded.
-  useEffect(() => {
-    if (transactions.length > 0 && !txLoading) {
-      loadInsights()
-    }
-  }, [transactions.length, txLoading, loadInsights])
 
   const totalBalanceResult = useMemo(
     () => getTotalBalanceInPreferred(accounts),
@@ -88,158 +87,41 @@ export function Dashboard() {
         ].join(', ')
       : ''
 
-  const {
-    monthlyIncome,
-    monthlyExpenses,
-    previousIncome,
-    previousExpenses,
-    cashFlowComplete,
-    cashFlowMissingCurrencies,
-    spendingIntelligence,
-    monthlySpendingGraph,
-  } = useMemo(() => {
-    const now = dayjs()
-    const currentStart = now.startOf('month').format('YYYY-MM-DD')
-    const currentEnd = now.format('YYYY-MM-DD')
-    const previousMonth = now.subtract(1, 'month')
-    const previousStart = previousMonth.startOf('month').format('YYYY-MM-DD')
-    const previousEnd = previousMonth.endOf('month').format('YYYY-MM-DD')
-    const graphMonths = Array.from({ length: 6 }, (_, index) => {
-      const month = now.subtract(5 - index, 'month')
-      return {
-        key: month.format('YYYY-MM'),
-        label: month.format('MMM'),
-        start: month.startOf('month').format('YYYY-MM-DD'),
-        end: month.endOf('month').format('YYYY-MM-DD'),
-        amount: 0,
-        isCurrent: month.isSame(now, 'month'),
+  const ratesArray = useMemo(() => {
+    const result: { fromCurrency: string; toCurrency: string; rate: number }[] = []
+    for (const [pair, rate] of Object.entries(rates)) {
+      const parts = pair.split(':')
+      if (parts.length === 2 && Number.isFinite(rate) && rate > 0) {
+        result.push({ fromCurrency: parts[0], toCurrency: parts[1], rate })
       }
-    })
-    const graphMonthsByKey = new Map(graphMonths.map((month) => [month.key, month]))
-
-    let currentIncome = 0
-    let currentExpenses = 0
-    let lastIncome = 0
-    let lastExpenses = 0
-    const current = new Map<string, { name: string; color: string; amount: number }>()
-    const previous = new Map<string, { name: string; color: string; amount: number }>()
-    const incompleteCurrencies = new Set<string>()
-    const graphStart = graphMonths[0]?.start ?? currentStart
-
-    for (const tx of transactions) {
-      if (
-        !isCashFlowEligible({
-          type: tx.type,
-          status: tx.status ?? 'posted',
-          reportingTreatment: tx.reporting_treatment ?? 'normal',
-          transactionKind: tx.transaction_kind ?? 'standard',
-          isArchived: tx.is_archived ?? 0,
-        })
-      )
-        continue
-
-      if (tx.date < graphStart || tx.date > currentEnd) continue
-      const converted = convertToPreferred(tx.amount, tx.currency)
-      if (!converted.complete) {
-        incompleteCurrencies.add(tx.currency?.trim().toUpperCase() || t('currency.blankValue'))
-        continue
-      }
-      const amount = converted.amountCentavos
-
-      if (tx.date >= currentStart && tx.date <= currentEnd) {
-        if (tx.type === 'income') currentIncome += amount
-        else if (tx.type === 'expense') currentExpenses += amount
-      } else if (tx.date >= previousStart && tx.date <= previousEnd) {
-        if (tx.type === 'income') lastIncome += amount
-        else if (tx.type === 'expense') lastExpenses += amount
-      }
-
-      if (tx.type !== 'expense') continue
-
-      const graphMonth = graphMonthsByKey.get(tx.date.slice(0, 7))
-      if (graphMonth && tx.date >= graphMonth.start && tx.date <= graphMonth.end) {
-        graphMonth.amount += amount
-      }
-
-      let target: typeof current | typeof previous | null = null
-      if (tx.date >= currentStart && tx.date <= currentEnd) {
-        target = current
-      } else if (tx.date >= previousStart && tx.date <= previousEnd) {
-        target = previous
-      }
-
-      if (!target) continue
-
-      const key = tx.category_name || 'Uncategorized'
-      const color = tx.category_color || '#7C5CFF'
-      const existing = target.get(key)
-      target.set(key, {
-        name: key,
-        color,
-        amount: (existing?.amount ?? 0) + amount,
-      })
     }
+    return result
+  }, [rates])
 
-    const names = new Set([...current.keys(), ...previous.keys()])
-    const categories = [...names]
-      .map((name) => {
-        const currentAmount = current.get(name)?.amount ?? 0
-        const previousAmount = previous.get(name)?.amount ?? 0
-        const change = currentAmount - previousAmount
-        const changePercent =
-          previousAmount > 0
-            ? Math.round((change / previousAmount) * 100)
-            : currentAmount > 0
-              ? 100
-              : 0
+  const analytics = useMemo(
+    () =>
+      buildDashboardAnalytics({
+        transactions,
+        splits: dashboardSplits,
+        preferredCurrency,
+        rates: ratesArray,
+        now,
+      }),
+    [transactions, dashboardSplits, preferredCurrency, ratesArray, now]
+  )
 
-        return {
-          name,
-          color: current.get(name)?.color ?? previous.get(name)?.color ?? '#7C5CFF',
-          current: currentAmount,
-          previous: previousAmount,
-          change,
-          changePercent,
-        }
-      })
-      .sort((a, b) => b.current - a.current)
-
-    const currentTotal = categories.reduce((sum, category) => sum + category.current, 0)
-    const previousTotal = categories.reduce((sum, category) => sum + category.previous, 0)
-    const totalChange = currentTotal - previousTotal
-    const totalChangePercent =
-      previousTotal > 0
-        ? Math.round((totalChange / previousTotal) * 100)
-        : currentTotal > 0
-          ? 100
-          : 0
-    const maxCategorySpend = Math.max(1, ...categories.map((category) => category.current))
-    const months = graphMonths.map((month) => ({
-      key: month.key,
-      label: month.label,
-      amount: month.amount,
-      isCurrent: month.isCurrent,
-    }))
-    const maxAmount = Math.max(1, ...months.map((month) => month.amount))
-
-    return {
-      monthlyIncome: currentIncome,
-      monthlyExpenses: currentExpenses,
-      previousIncome: lastIncome,
-      previousExpenses: lastExpenses,
-      cashFlowComplete: incompleteCurrencies.size === 0,
-      cashFlowMissingCurrencies: [...incompleteCurrencies].sort(),
-      spendingIntelligence: {
-        categories,
-        currentTotal,
-        previousTotal,
-        totalChange,
-        totalChangePercent,
-        maxCategorySpend,
-      },
-      monthlySpendingGraph: { months, maxAmount },
-    }
-  }, [transactions, convertToPreferred, t])
+  const currentMonth = analytics.trend.months.find((m) => m.isCurrent)
+  const previousMonthKey = now.subtract(1, 'month').format('YYYY-MM')
+  const previousMonth = analytics.trend.months.find((m) => m.key === previousMonthKey)
+  const monthlyIncome = currentMonth?.income ?? 0
+  const monthlyExpenses = currentMonth?.expenses ?? 0
+  const previousIncome = previousMonth?.income ?? 0
+  const previousExpenses = previousMonth?.expenses ?? 0
+  const cashFlowDisplayable =
+    analytics.conversion.kind === 'complete' || analytics.conversion.kind === 'fallback'
+  const cashFlowDisplayCurrency = analytics.conversion.currency
+  const cashFlowMissingCurrencies =
+    analytics.conversion.kind === 'incomplete' ? analytics.conversion.missingCurrencies : []
 
   const savingsRate = useMemo(() => {
     if (monthlyIncome <= 0) return 0
@@ -324,14 +206,14 @@ export function Dashboard() {
             <div className="flex flex-col gap-2 text-sm font-bold sm:flex-row sm:items-center sm:justify-between">
               <span
                 className={
-                  cashFlowComplete
+                  cashFlowDisplayable
                     ? savingsRate >= 0
                       ? 'text-success'
                       : 'text-warning'
                     : 'text-warning'
                 }
               >
-                {cashFlowComplete ? (
+                {cashFlowDisplayable ? (
                   <>
                     <span>{savingsRate}%</span> savings rate
                   </>
@@ -348,11 +230,11 @@ export function Dashboard() {
             icon={<TrendingUp size={16} />}
             iconColor="text-success"
             label={t('cards.monthlyIncome')}
-            value={cashFlowComplete ? formatMoney(monthlyIncome, preferredCurrency) : '—'}
+            value={cashFlowDisplayable ? formatMoney(monthlyIncome, cashFlowDisplayCurrency) : '—'}
             valueColor="text-success"
             subtitle={
-              cashFlowComplete
-                ? `${incomeDelta >= 0 ? '+' : '-'}${formatMoney(Math.abs(incomeDelta), preferredCurrency)} vs last month`
+              cashFlowDisplayable
+                ? `${incomeDelta >= 0 ? '+' : '-'}${formatMoney(Math.abs(incomeDelta), cashFlowDisplayCurrency)} vs last month`
                 : `${t('currency.derivedUnavailable')}: ${cashFlowMissingCurrencies.join(', ')}`
             }
           />
@@ -360,11 +242,11 @@ export function Dashboard() {
             icon={<TrendingDown size={16} />}
             iconColor="text-warning"
             label={t('cards.monthlyExpenses')}
-            value={cashFlowComplete ? formatMoney(monthlyExpenses, preferredCurrency) : '—'}
+            value={cashFlowDisplayable ? formatMoney(monthlyExpenses, cashFlowDisplayCurrency) : '—'}
             valueColor="text-warning"
             subtitle={
-              cashFlowComplete
-                ? `${expenseDelta >= 0 ? '+' : '-'}${formatMoney(Math.abs(expenseDelta), preferredCurrency)} vs last month`
+              cashFlowDisplayable
+                ? `${expenseDelta >= 0 ? '+' : '-'}${formatMoney(Math.abs(expenseDelta), cashFlowDisplayCurrency)} vs last month`
                 : `${t('currency.derivedUnavailable')}: ${cashFlowMissingCurrencies.join(', ')}`
             }
           />
@@ -375,209 +257,20 @@ export function Dashboard() {
         <div className="liquid-card min-h-[572px] p-5">
           <div className="mb-5 flex items-center justify-between gap-3">
             <h2 className="font-heading text-[23px] font-bold tracking-tight">
-              Spending intelligence
+              {t('analytics.spendingPace')}
             </h2>
             <Link
               to="/spending-insights"
               className="text-muted-foreground hover:text-foreground text-xs font-semibold transition-colors"
             >
-              Insights
+              {t('charts.drilldownTransactions')}
             </Link>
           </div>
-          <div className="rounded-[22px] border border-white/[0.06] bg-white/[0.035] p-4">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <p className="text-muted-foreground text-xs font-bold tracking-[0.14em] uppercase">
-                Spending graph
-              </p>
-              <div className="flex rounded-full border border-white/[0.08] bg-black/20 p-1">
-                {(
-                  [
-                    ['trend', 'Trend'],
-                    ['categories', 'Categories'],
-                    ['movement', 'Movement'],
-                  ] as const
-                ).map(([mode, label]) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setSpendingGraphMode(mode)}
-                    className={cn(
-                      'rounded-full px-2.5 py-1 font-mono text-[10px] font-bold transition-colors',
-                      spendingGraphMode === mode
-                        ? 'bg-accent-hover text-white'
-                        : 'text-muted-foreground hover:text-foreground'
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
 
-            {!cashFlowComplete && (
-              <div
-                className="border-warning/30 bg-warning/8 text-warning flex min-h-[360px] items-center justify-center rounded-2xl border p-6 text-center text-sm"
-                role="alert"
-              >
-                {t('currency.derivedUnavailable')}: {cashFlowMissingCurrencies.join(', ')}
-              </div>
-            )}
-
-            {cashFlowComplete && spendingGraphMode === 'trend' && (
-              <div className="flex min-h-[360px] items-end justify-between gap-3 rounded-2xl border border-white/[0.04] bg-black/10 px-3 py-4">
-                {monthlySpendingGraph.months.map((month) => {
-                  const height = Math.max(
-                    month.amount > 0 ? 26 : 8,
-                    Math.round((month.amount / monthlySpendingGraph.maxAmount) * 290)
-                  )
-                  return (
-                    <div key={month.key} className="flex flex-1 flex-col items-center gap-3">
-                      <div className="flex h-[300px] w-full items-end justify-center">
-                        <div
-                          className={cn(
-                            'w-full max-w-[48px] rounded-t-2xl rounded-b-md transition-all',
-                            month.isCurrent ? 'bg-accent-hover' : 'bg-white/[0.14]'
-                          )}
-                          style={{ height }}
-                          title={`${month.label}: ${formatMoney(month.amount, preferredCurrency)}`}
-                        />
-                      </div>
-                      <div className="text-center">
-                        <p className="text-muted-foreground font-mono text-[10px] font-bold uppercase">
-                          {month.label}
-                        </p>
-                        <p className="font-mono text-[10px] font-bold">
-                          {formatMoney(month.amount, preferredCurrency)}
-                        </p>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-
-            {cashFlowComplete &&
-              spendingGraphMode === 'categories' &&
-              (spendingIntelligence.categories.some((category) => category.current > 0) ? (
-                <div className="min-h-[360px] space-y-3 rounded-2xl border border-white/[0.04] bg-black/10 p-4">
-                  {spendingIntelligence.categories
-                    .filter((category) => category.current > 0)
-                    .slice(0, 6)
-                    .map((category) => (
-                      <div key={category.name}>
-                        <div className="mb-1.5 flex items-center justify-between gap-3 text-sm">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span
-                              className="h-2.5 w-2.5 shrink-0 rounded-full"
-                              style={{ backgroundColor: category.color }}
-                            />
-                            <span className="truncate font-semibold">{category.name}</span>
-                          </div>
-                          <span className="font-mono text-xs font-bold">
-                            {formatMoney(category.current, preferredCurrency)}
-                          </span>
-                        </div>
-                        <div className="h-3 overflow-hidden rounded-full bg-white/[0.06]">
-                          <div
-                            className="h-full rounded-full"
-                            style={{
-                              width: `${Math.max(5, Math.round((category.current / spendingIntelligence.maxCategorySpend) * 100))}%`,
-                              backgroundColor: category.color,
-                            }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              ) : (
-                <SpendingGraphEmpty />
-              ))}
-
-            {cashFlowComplete &&
-              spendingGraphMode === 'movement' &&
-              (spendingIntelligence.categories.some((category) => category.current > 0) ? (
-                <div className="min-h-[360px] space-y-3 rounded-2xl border border-white/[0.04] bg-black/10 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-muted-foreground text-xs font-bold tracking-[0.14em] uppercase">
-                      Month over month
-                    </span>
-                    <span
-                      className={cn(
-                        'font-mono text-xs font-bold',
-                        spendingIntelligence.totalChange <= 0 ? 'text-success' : 'text-warning'
-                      )}
-                    >
-                      {spendingIntelligence.totalChangePercent >= 0 ? '+' : ''}
-                      {spendingIntelligence.totalChangePercent}%
-                    </span>
-                  </div>
-                  {spendingIntelligence.categories.slice(0, 6).map((category) => (
-                    <div key={category.name} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
-                      <div className="min-w-0">
-                        <div className="mb-1 flex items-center justify-between gap-2 text-xs">
-                          <span className="truncate font-semibold">{category.name}</span>
-                          <span
-                            className={cn(
-                              'font-mono font-bold',
-                              category.change <= 0 ? 'text-success' : 'text-warning'
-                            )}
-                          >
-                            {category.change >= 0 ? '+' : '-'}
-                            {formatMoney(Math.abs(category.change), preferredCurrency)}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <div className="h-2 overflow-hidden rounded-full bg-white/[0.06]">
-                            <div
-                              className="h-full rounded-full bg-white/[0.2]"
-                              style={{
-                                width: `${Math.max(4, Math.round((category.previous / spendingIntelligence.maxCategorySpend) * 100))}%`,
-                              }}
-                            />
-                          </div>
-                          <div className="h-2 overflow-hidden rounded-full bg-white/[0.06]">
-                            <div
-                              className="h-full rounded-full"
-                              style={{
-                                width: `${Math.max(4, Math.round((category.current / spendingIntelligence.maxCategorySpend) * 100))}%`,
-                                backgroundColor: category.color,
-                              }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  <div className="text-muted-foreground flex justify-end gap-4 font-mono text-[10px] font-bold uppercase">
-                    <span>Previous</span>
-                    <span>Current</span>
-                  </div>
-                </div>
-              ) : (
-                <SpendingGraphEmpty />
-              ))}
-          </div>
-
-          <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <p className="text-muted-foreground text-xs font-bold">Projected runway</p>
-              <p className="mt-2 font-mono text-2xl font-bold tracking-[-0.04em]">
-                {totalBalanceResult.complete && cashFlowComplete
-                  ? monthlyExpenses > 0
-                    ? `${Math.max(0, totalBalanceResult.amountCentavos / monthlyExpenses).toFixed(1)} months`
-                    : 'Stable'
-                  : t('currency.derivedUnavailable')}
-              </p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-xs font-bold">Safe to spend</p>
-              <p className="text-success mt-2 font-mono text-2xl font-bold tracking-[-0.04em]">
-                {cashFlowComplete
-                  ? formatMoney(Math.max(0, monthlyIncome - monthlyExpenses), preferredCurrency)
-                  : t('currency.derivedUnavailable')}
-              </p>
-            </div>
-          </div>
+          <SpendingAnalytics
+            analytics={analytics}
+            isLoading={txLoading || splitsLoading}
+          />
         </div>
 
         <div className="liquid-card min-h-[572px] p-5">
@@ -717,16 +410,6 @@ function MetricCard({
         {value}
       </p>
       {subtitle && <p className="text-muted-foreground mt-0.5 font-mono text-[10px]">{subtitle}</p>}
-    </div>
-  )
-}
-
-function SpendingGraphEmpty() {
-  return (
-    <div className="flex min-h-[278px] items-center justify-center rounded-2xl border border-dashed border-white/[0.08] bg-black/10 text-center">
-      <p className="text-muted-foreground max-w-sm text-sm">
-        Add a few categorized expenses and this graph will show what is driving your month.
-      </p>
     </div>
   )
 }

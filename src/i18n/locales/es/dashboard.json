@@ -30,6 +30,33 @@
     "drilldownTransactions": "Ver transacciones",
     "drilldownBudgets": "Ver presupuestos"
   },
+  "analytics": {
+    "pace": "Ritmo",
+    "trend": "Tendencia",
+    "categories": "Categorías",
+    "spendingPace": "Ritmo de gastos",
+    "spendingModes": "Modos de vista de gastos",
+    "paceChartLabel": "Ritmo acumulado de gastos del mes actual",
+    "trendChartLabel": "Tendencia de ingresos, gastos y neto en los últimos 12 meses",
+    "categoriesChartLabel": "Composición mensual de gastos por categoría",
+    "spentMtd": "Gastado MTD",
+    "projectedMonthEnd": "Fin de mes proyectado",
+    "priorAverage": "Promedio anterior",
+    "vsPriorAverage": "vs promedio anterior",
+    "viewBudgets": "Ver presupuestos",
+    "runRate": "Tasa de gasto",
+    "currentMonth": "Mes actual",
+    "previousMonth": "Mes anterior",
+    "priorMonthsAverage": "Promedio de meses anteriores",
+    "income": "Ingresos",
+    "expenses": "Gastos",
+    "net": "Neto",
+    "topCategories": "Categorías principales",
+    "other": "Otros",
+    "uncategorized": "Sin categoría",
+    "noEligibleData": "No hay datos de gastos elegibles para este período.",
+    "splitIntegrityNotice": "Los totales de división difieren de los totales de transacción para {{count}} transacción(es)."
+  },
   "quickActions": {
     "addTransaction": "Agregar Transacción"
   },

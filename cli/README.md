@@ -4,7 +4,7 @@ Shikin exposes the local finance engine through a CLI and an MCP server.
 
 ## Install
 
-For an installed desktop app, use the standalone CLI installer:
+For an installed desktop app on Linux or macOS, use the standalone CLI installer:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-cli.sh | sh
@@ -16,11 +16,10 @@ For source development from the repo root:
 
 ```bash
 pnpm install
-cd cli && pnpm install
-pnpm run build
+pnpm build:cli
 ```
 
-The desktop app owns the `shikin` command. The installer places the automation bridge under Shikin's app data directory, so it does not create a second user-facing CLI command.
+On Linux, the desktop launcher owns the `shikin` command and discovers support under Shikin's app data directory. On macOS, the installer writes a `shikin` helper under `~/.local/bin` because app-bundle executables are not normally on `PATH`; bare `shikin` opens the app, while commands route to installed CLI/MCP support.
 
 ## AI Skill Pack
 
@@ -54,20 +53,37 @@ shikin finance-sanity-check --days-ahead 14 --json
 shikin query-transactions --tag "tax prep" --json
 shikin undo --last --dry-run --json
 shikin diagnose
+shikin web --port 8480
 
-# Source/dev alternative
-pnpm exec tsx src/cli.ts list-accounts
-pnpm exec tsx src/cli.ts add-transaction --amount 12.50 --type expense --description "Lunch" --account-id acct_123
-pnpm exec tsx src/cli.ts manage-recurring-transaction --action create --description "Rent" --amount 1200 --type expense --frequency monthly --account-id acct_123
-pnpm exec tsx src/cli.ts diagnose
+# Source/dev alternative, after pnpm build:cli from the repository root
+node cli/dist/cli.js list-accounts
+node cli/dist/cli.js diagnose
+node cli/dist/cli.js web --port 8480
 ```
+
+## Private hosted web access
+
+`shikin web` serves the packaged production SPA and its data API from the same real Shikin database. It always binds to loopback and stays in the foreground:
+
+```bash
+shikin web --port 8480
+```
+
+For private HTTPS access from another device, configure Tailscale Serve once on the host:
+
+```bash
+tailscale serve --bg http://127.0.0.1:8480
+tailscale serve status
+```
+
+Use the tailnet-only URL printed by Tailscale. Run `tailscale serve reset` to remove the proxy. Do not use Tailscale Funnel, which exposes the service publicly. The desktop app can start this loopback server automatically from **Settings → General → Hosted web access**; the app must remain running. Hosted mode refuses database restore—stop it and use the desktop restore flow instead.
 
 Notes:
 
 - When multiple accounts exist, pass `--account-id` explicitly for commands that write transactions or recurring rules.
 - One-off transfers are supported with `--type transfer --account-id <source> --transfer-to-account-id <destination>`. Recurring transfer rules are still deferred.
 - Structured options must be valid JSON.
-- The CLI reads and writes the shared Shikin database in `~/.local/share/com.asf.shikin/shikin.db`.
+- The CLI reads and writes the shared Shikin database under the platform app-data directory: `~/.local/share/com.asf.shikin/shikin.db` on Linux and `~/Library/Application Support/com.asf.shikin/shikin.db` on macOS.
 - For isolated source/dev smoke tests, set `SHIKIN_RESPECT_XDG_DATA_HOME=1` with an absolute temp `XDG_DATA_HOME` such as `/tmp/opencode/shikin-smoke`; this keeps test data isolated and skips legacy HOME/AppConfig data moves into the temp directory.
 
 ## Automation Workflows
@@ -90,7 +106,7 @@ See [`../docs/reference/AUTOMATION-WORKFLOWS.md`](../docs/reference/AUTOMATION-W
 
 ## Tool Discovery and Reference
 
-- Tool commands come from the shared definitions in `src/tools/index.ts` and are mirrored in MCP; CLI-only built-ins such as `diagnose`, `tools`, `validate`, and `record` are registered separately.
+- Tool commands come from the shared definitions in `src/tools/index.ts` and are mirrored in MCP; CLI-only built-ins such as `diagnose`, `tools`, `validate`, `web`, and `record` are registered separately.
 - `shikin --help` lists every available CLI command and the required options when the desktop launcher can reach the CLI bridge.
 - `shikin diagnose` prints CLI/MCP surface counts plus available/unavailable tool names.
 - `shikin diagnose --deep` adds migration/integrity/balance diagnostics.

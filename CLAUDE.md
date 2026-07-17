@@ -46,6 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-
 shikin list-accounts
 shikin add-transaction --amount 5.50 --type expense --description "Coffee"
 shikin get-balance-overview
+shikin web --port 8480  # loopback-only hosted app; expose privately with Tailscale Serve
 shikin mcp
 
 # Source/dev alternatives
@@ -67,7 +68,7 @@ pnpm exec tsx src/mcp-server.ts
 }
 ```
 
-### 91 Shared CLI/MCP Tools
+### 91 Shared CLI/MCP Tools / 96 CLI Commands
 
 Transaction, Account, Category, Analytics, Budget, Goal, Subscription, Investment, Recurring, Notebook, Intelligence, Debt, Currency, Backup/Restore, Audit, and Assistant Context tools — all available end-to-end against local data.
 

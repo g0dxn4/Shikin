@@ -104,7 +104,7 @@
     "closeToTrayDisabled": "Shikin saldrá cuando se cierre la ventana",
     "webServer": {
       "label": "Acceso web alojado",
-      "description": "Ejecuta la interfaz web de Shikin localmente desde esta app de escritorio.",
+      "description": "Ejecuta la interfaz web de Shikin localmente con la app. Se requieren el soporte CLI instalado y Node.js.",
       "port": "Puerto",
       "portHint": "Elige un puerto entre {{min}} y {{max}}.",
       "apply": "Aplicar",

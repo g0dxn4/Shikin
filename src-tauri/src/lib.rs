@@ -3,14 +3,14 @@ mod database_snapshot;
 use std::{
     ffi::{OsStr, OsString},
     fs, io,
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus},
     sync::{
         atomic::{AtomicBool, Ordering},
         Mutex as StdMutex,
     },
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 #[cfg(unix)]
@@ -30,6 +30,7 @@ const APP_IDENTIFIER: &str = "com.asf.shikin";
 const CLI_SUPPORT_DIR: &str = "cli-support";
 const CLI_BRIDGE_BIN: &str = "shikin-bridge";
 const MCP_BRIDGE_BIN: &str = "shikin-mcp";
+const NODE_PATH_FILE_NAME: &str = "node-path";
 const SETTINGS_FILE_NAME: &str = "settings.json";
 const CLOSE_TO_TRAY_KEY: &str = "close_to_tray_enabled";
 const DEFAULT_CLOSE_TO_TRAY_ENABLED: bool = true;
@@ -37,7 +38,8 @@ const WEB_SERVER_ENABLED_KEY: &str = "web_server_enabled";
 const WEB_SERVER_PORT_KEY: &str = "web_server_port";
 const DEFAULT_WEB_SERVER_ENABLED: bool = false;
 const DEFAULT_WEB_SERVER_PORT: u16 = 8480;
-const WEB_SERVER_STARTUP_CHECK_DELAY: Duration = Duration::from_millis(150);
+const WEB_SERVER_STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
+const WEB_SERVER_STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const MAIN_WINDOW_LABEL: &str = "main";
 const DATABASE_TRANSACTION_TTL: Duration = Duration::from_secs(120);
 const TRAY_MENU_SHOW_ID: &str = "show_shikin";
@@ -283,8 +285,51 @@ fn web_server_settings(identifier: &str) -> WebServerSettings {
         })
 }
 
+fn is_executable_file(path: &Path) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+
+    #[cfg(unix)]
+    {
+        metadata.permissions().mode() & 0o111 != 0
+    }
+
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+fn installed_node_executable(script_path: &Path) -> Option<PathBuf> {
+    let support_dir = script_path.parent()?.parent()?;
+    let configured_path = fs::read_to_string(support_dir.join(NODE_PATH_FILE_NAME)).ok()?;
+    let configured_path = PathBuf::from(configured_path.trim());
+    (configured_path.is_absolute() && is_executable_file(&configured_path))
+        .then_some(configured_path)
+}
+
+fn node_executable(script_path: &Path) -> OsString {
+    if let Some(configured_path) = installed_node_executable(script_path) {
+        return configured_path.into_os_string();
+    }
+
+    #[cfg(target_os = "macos")]
+    for candidate in ["/opt/homebrew/bin/node", "/usr/local/bin/node"] {
+        let path = Path::new(candidate);
+        if is_executable_file(path) {
+            return path.as_os_str().to_owned();
+        }
+    }
+
+    OsString::from("node")
+}
+
 fn node_script_command(script_path: &Path, args: &[OsString]) -> Command {
-    let mut command = Command::new("node");
+    let mut command = Command::new(node_executable(script_path));
     command.arg(script_path).args(args);
     command
 }
@@ -450,23 +495,38 @@ fn stop_web_server(inner: &mut WebServerInner) -> Result<(), String> {
 fn start_web_server(inner: &mut WebServerInner, port: u16) -> Result<(), String> {
     let mut child = spawn_web_server(port)
         .map_err(|error| format!("Could not start hosted web server: {error}"))?;
+    let deadline = Instant::now() + WEB_SERVER_STARTUP_TIMEOUT;
 
-    std::thread::sleep(WEB_SERVER_STARTUP_CHECK_DELAY);
-    match child.try_wait() {
-        Ok(None) => {
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Err(web_server_exit_message(status)),
+            Ok(None) => {}
+            Err(error) => {
+                inner.child = Some(child);
+                inner.port = Some(port);
+                return Err(format!(
+                    "Could not verify hosted web server startup: {error}"
+                ));
+            }
+        }
+
+        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
             inner.child = Some(child);
             inner.port = Some(port);
             inner.last_error = None;
-            Ok(())
+            return Ok(());
         }
-        Ok(Some(status)) => Err(web_server_exit_message(status)),
-        Err(error) => {
-            inner.child = Some(child);
-            inner.port = Some(port);
-            Err(format!(
-                "Could not verify hosted web server startup: {error}"
-            ))
+
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "Hosted web server did not listen on 127.0.0.1:{port} within {} seconds.",
+                WEB_SERVER_STARTUP_TIMEOUT.as_secs()
+            ));
         }
+
+        std::thread::sleep(WEB_SERVER_STARTUP_POLL_INTERVAL);
     }
 }
 
@@ -1353,6 +1413,31 @@ mod tests {
     #[test]
     fn builds_web_server_cli_argument_shape() {
         assert_eq!(web_server_args(8480), os_args(&["web", "--port", "8480"]));
+    }
+
+    #[test]
+    fn uses_the_node_executable_recorded_with_installed_support() {
+        let root = temp_test_dir("installed-node-path");
+        let support_dir = root.join("cli-support");
+        let dist_dir = support_dir.join("dist");
+        let script_path = dist_dir.join("cli.js");
+        let node_path = root.join("node");
+        fs::create_dir_all(&dist_dir).unwrap();
+        fs::write(&script_path, "").unwrap();
+        fs::write(&node_path, "").unwrap();
+
+        #[cfg(unix)]
+        fs::set_permissions(&node_path, fs::Permissions::from_mode(0o700)).unwrap();
+
+        fs::write(
+            support_dir.join(NODE_PATH_FILE_NAME),
+            format!("{}\n", node_path.display()),
+        )
+        .unwrap();
+
+        let command = node_script_command(&script_path, &web_server_args(8480));
+        assert_eq!(command.get_program(), node_path.as_os_str());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -20,29 +20,29 @@
 
 ## Reference
 
-| Document                                  | Description                                                   |
-| ----------------------------------------- | ------------------------------------------------------------- |
-| [Database](reference/DATABASE.md)         | SQLite schema, conventions, migrations, example queries       |
-| [Backend Map](reference/BACKEND-MAP.md)   | Current CLI, MCP, local bridge, and backend entry-point map   |
+| Document                                                  | Description                                                             |
+| --------------------------------------------------------- | ----------------------------------------------------------------------- |
+| [Database](reference/DATABASE.md)                         | SQLite schema, conventions, migrations, example queries                 |
+| [Backend Map](reference/BACKEND-MAP.md)                   | Current CLI, MCP, local bridge, and backend entry-point map             |
 | [Automation Workflows](reference/AUTOMATION-WORKFLOWS.md) | Generic CLI/MCP finance workflows, provenance rules, and smoke coverage |
-| [Frontend Map](reference/FRONTEND-MAP.md) | Current routes, stores, dialogs, and frontend entry-point map |
-| [API](reference/API.md)                   | Local HTTP API specification (planned)                        |
-| [Extensions](reference/EXTENSIONS.md)     | Plugin system design, manifest format, permissions, hooks     |
-| [Changelog](../CHANGELOG.md)              | Recent shipped changes and release notes                      |
+| [Frontend Map](reference/FRONTEND-MAP.md)                 | Current routes, stores, dialogs, and frontend entry-point map           |
+| [API](reference/API.md)                                   | Local HTTP API specification (planned)                                  |
+| [Extensions](reference/EXTENSIONS.md)                     | Plugin system design, manifest format, permissions, hooks               |
+| [Changelog](../CHANGELOG.md)                              | Recent shipped changes and release notes                                |
 
 ## Quick Stats
 
-| Metric            | Count |
-| ----------------- | ----- |
-| Pages (routed)    | 18    |
-| Pages (total)     | 18    |
-| Zustand Stores    | 18    |
-| CLI/MCP Tools     | 91 shared / 95 CLI commands |
-| Service Files     | 26    |
-| Database Tables   | 21    |
-| i18n Namespaces   | 14    |
-| Languages         | 2     |
-| Sidebar Nav Items | 10    |
+| Metric            | Count                       |
+| ----------------- | --------------------------- |
+| Pages (routed)    | 18                          |
+| Pages (total)     | 18                          |
+| Zustand Stores    | 18                          |
+| CLI/MCP Tools     | 91 shared / 96 CLI commands |
+| Service Files     | 26                          |
+| Database Tables   | 21                          |
+| i18n Namespaces   | 14                          |
+| Languages         | 2                           |
+| Sidebar Nav Items | 10                          |
 
 ## Development (local only, gitignored)
 

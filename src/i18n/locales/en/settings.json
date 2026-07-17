@@ -104,7 +104,7 @@
     "closeToTrayDisabled": "Shikin will quit when the window is closed",
     "webServer": {
       "label": "Hosted web access",
-      "description": "Run Shikin's web interface locally from this desktop app.",
+      "description": "Run Shikin's web interface locally with the app. Installed CLI support and Node.js are required.",
       "port": "Port",
       "portHint": "Choose a port from {{min}} to {{max}}.",
       "apply": "Apply",

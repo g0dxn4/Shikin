@@ -1,10 +1,15 @@
 use std::{
     ffi::{CStr, CString},
-    fs,
+    fs::{self, OpenOptions},
+    io::Write,
     path::{Path, PathBuf},
+    process::Command,
     thread,
     time::Duration,
 };
+
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 
 use libsqlite3_sys::{
     sqlite3, sqlite3_backup_finish, sqlite3_backup_init, sqlite3_backup_step, sqlite3_errmsg,
@@ -20,6 +25,106 @@ use super::{
 
 const BACKUP_BUSY_RETRIES: usize = 100;
 const BACKUP_BUSY_DELAY: Duration = Duration::from_millis(25);
+const HOSTED_PROCESS_FILE_NAME: &str = ".shikin-web.pid";
+const RESTORE_LOCK_FILE_NAME: &str = "shikin.db.restore.lock";
+
+struct RestoreOperationLock {
+    path: PathBuf,
+}
+
+impl Drop for RestoreOperationLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn acquire_restore_operation_lock(app_data_dir: &Path) -> Result<RestoreOperationLock, String> {
+    let path = app_data_dir.join(RESTORE_LOCK_FILE_NAME);
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+
+    let mut file = options.open(&path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::AlreadyExists {
+            format!(
+                "Another database restore appears to be in progress ({}).",
+                path.display()
+            )
+        } else {
+            format!("Could not acquire database restore lock: {error}")
+        }
+    })?;
+    if let Err(error) = write!(file, "{{\"pid\":{}}}", std::process::id()) {
+        drop(file);
+        let _ = fs::remove_file(&path);
+        return Err(format!("Could not write database restore lock: {error}"));
+    }
+    drop(file);
+    set_private_file_mode(&path).map_err(|error| {
+        let _ = fs::remove_file(&path);
+        error.to_string()
+    })?;
+
+    Ok(RestoreOperationLock { path })
+}
+
+#[cfg(unix)]
+fn process_is_running(pid: u32) -> bool {
+    Command::new("/bin/kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(true)
+}
+
+#[cfg(windows)]
+fn process_is_running(pid: u32) -> bool {
+    let output = Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .output();
+    match output {
+        Ok(output) if output.status.success() => {
+            String::from_utf8_lossy(&output.stdout).contains(&format!("\",\"{pid}\",\""))
+        }
+        _ => true,
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn process_is_running(_pid: u32) -> bool {
+    true
+}
+
+fn assert_hosted_web_stopped(app_data_dir: &Path) -> Result<(), String> {
+    let marker_path = app_data_dir.join(HOSTED_PROCESS_FILE_NAME);
+    if !marker_path.exists() {
+        return Ok(());
+    }
+
+    let marker: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(&marker_path)
+            .map_err(|error| format!("Could not read hosted web process marker: {error}"))?,
+    )
+    .map_err(|error| format!("Hosted web process marker is invalid: {error}"))?;
+    let pid = marker
+        .get("pid")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|pid| u32::try_from(pid).ok())
+        .filter(|pid| *pid > 0)
+        .ok_or_else(|| "Hosted web process marker has no valid process id.".to_string())?;
+
+    if process_is_running(pid) {
+        return Err(
+            "Stop hosted web access before restoring the database. This prevents concurrent financial writes from being lost."
+                .to_string(),
+        );
+    }
+
+    fs::remove_file(&marker_path)
+        .map_err(|error| format!("Could not remove stale hosted web process marker: {error}"))?;
+    Ok(())
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -228,6 +333,8 @@ pub(crate) async fn shikin_db_restore_snapshot(
     }
 
     let (app_data_dir, database_path) = app_data_database_path(&app)?;
+    let _restore_lock = acquire_restore_operation_lock(&app_data_dir)?;
+    assert_hosted_web_stopped(&app_data_dir)?;
     let candidate = require_app_data_file(&app_data_dir, &candidate_path)?;
     validate_database(&candidate).await?;
 
@@ -270,6 +377,40 @@ mod tests {
     use super::*;
     use sqlx::Row;
     use std::{env, process};
+
+    fn temp_snapshot_dir(name: &str) -> PathBuf {
+        let root = env::temp_dir().join(format!(
+            "shikin-snapshot-{name}-{}-{}",
+            process::id(),
+            super::super::backup_suffix()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn restore_lock_is_exclusive_and_released_on_drop() {
+        let root = temp_snapshot_dir("restore-lock");
+        let lock = acquire_restore_operation_lock(&root).unwrap();
+        assert!(acquire_restore_operation_lock(&root).is_err());
+        drop(lock);
+        assert!(acquire_restore_operation_lock(&root).is_ok());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn restore_refuses_a_running_hosted_web_process() {
+        let root = temp_snapshot_dir("hosted-process");
+        fs::write(
+            root.join(HOSTED_PROCESS_FILE_NAME),
+            format!("{{\"pid\":{}}}", process::id()),
+        )
+        .unwrap();
+
+        let error = assert_hosted_web_stopped(&root).unwrap_err();
+        assert!(error.contains("Stop hosted web access"));
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn sqlite_online_backup_copies_wal_content() {

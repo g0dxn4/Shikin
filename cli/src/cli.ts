@@ -2547,6 +2547,7 @@ function unwrapSchema(schema: z.ZodTypeAny): z.ZodTypeAny {
 if (isDirectExecution()) {
   void program.parseAsync().catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : String(error))
+    close()
     process.exitCode = 1
   })
 }

@@ -39,6 +39,7 @@ Shikin is built to keep both:
 - **Portable AI Skill**: Optional `Skill.md` reference for AI tools that support file-based skills
 - **Shared Tool Definitions**: 91 shipped CLI/MCP tools run end-to-end against local data, including reconciliation, receivables, backup, guarded restore, audit, and automation-context tools
 - **Authoritative Discovery**: `shikin tools --json` includes command schemas plus catalog/schema version, compatibility, and required migration metadata
+- **Private Hosted Web**: `shikin web` serves the production app on loopback for private HTTPS access through Tailscale Serve
 - **No Built-in Chat Assistant**: Shikin is the local finance engine; external clients can automate it through CLI/MCP
 
 Current MVP limitations:
@@ -67,21 +68,21 @@ Current MVP limitations:
 
 ## Tech Stack
 
-| Layer      | Technology                       | Purpose                                               |
-| ---------- | -------------------------------- | ----------------------------------------------------- |
-| Runtime    | Tauri v2 + Browser + Vite        | Desktop app and web runtime                           |
-| Frontend   | React 19 + TypeScript            | UI and application logic                              |
-| Styling    | Tailwind CSS v4 + shadcn/ui      | Design system and components                          |
-| Routing    | React Router v7                  | Client-side navigation                                |
-| State      | Zustand (19 stores)              | Global state management                               |
-| Database   | SQLite (shared storage)          | 21 tables, migration-backed schema                    |
-| Settings   | Tauri Store / data-server bridge | Local key-value config storage                        |
-| Automation | CLI (`commander`) + MCP SDK      | Local automation surface (91 shared tools; 95 CLI commands including built-ins) |
-| Forms      | React Hook Form + Zod v4         | Form validation and parsing                           |
-| Charts     | Recharts                         | Financial visualizations                              |
-| PDF        | jsPDF                            | Report generation                                     |
-| i18n       | i18next + react-i18next          | Localization (en/es)                                  |
-| Build/Test | Vite + Vitest + Playwright       | Build pipeline and test tooling                       |
+| Layer      | Technology                       | Purpose                                                                         |
+| ---------- | -------------------------------- | ------------------------------------------------------------------------------- |
+| Runtime    | Tauri v2 + Browser + Vite        | Desktop app and web runtime                                                     |
+| Frontend   | React 19 + TypeScript            | UI and application logic                                                        |
+| Styling    | Tailwind CSS v4 + shadcn/ui      | Design system and components                                                    |
+| Routing    | React Router v7                  | Client-side navigation                                                          |
+| State      | Zustand (19 stores)              | Global state management                                                         |
+| Database   | SQLite (shared storage)          | 21 tables, migration-backed schema                                              |
+| Settings   | Tauri Store / data-server bridge | Local key-value config storage                                                  |
+| Automation | CLI (`commander`) + MCP SDK      | Local automation surface (91 shared tools; 96 CLI commands including built-ins) |
+| Forms      | React Hook Form + Zod v4         | Form validation and parsing                                                     |
+| Charts     | Recharts                         | Financial visualizations                                                        |
+| PDF        | jsPDF                            | Report generation                                                               |
+| i18n       | i18next + react-i18next          | Localization (en/es)                                                            |
+| Build/Test | Vite + Vitest + Playwright       | Build pipeline and test tooling                                                 |
 
 ---
 
@@ -129,7 +130,7 @@ curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --auto --no-cli
 ```
 
-To install CLI/MCP support separately later:
+To install CLI/MCP and hosted-web support separately later on Linux or macOS:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-cli.sh | sh
@@ -215,31 +216,50 @@ pnpm build:tauri  # Builds .deb + .AppImage (Linux), .dmg (macOS), .msi (Windows
 
 ## CLI & MCP Server
 
-Shikin exposes 91 shared CLI/MCP tools and 95 total CLI commands including CLI-only built-ins. All shipped tools are available end-to-end against the local database.
+Shikin exposes 91 shared CLI/MCP tools and 96 total CLI commands including CLI-only built-ins. All shipped tools are available end-to-end against the local database.
 Automation clients can use the same generic finance workflows as humans and scripts: dry-run-first money writes, credit-card payment previews, project-style transaction tags, subscription creation from existing payments, audit-backed undo, and `finance-sanity-check` for daily-review-style checks. Treat `--source` as an opaque provenance label, `--note` as an audit/changelog note, and transaction `--notes` as transaction details.
 
 ```bash
 # Install automation support for the installed desktop app.
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-cli.sh | sh
 
-# The desktop-owned `shikin` command is the user-facing entrypoint.
-shikin # open the app
+# `shikin` is the user-facing entrypoint on Linux and macOS.
+shikin # open the desktop app
 shikin list-accounts
 shikin add-transaction --amount 12.50 --type expense --description "Lunch"
 shikin get-spending-summary --period month
 shikin finance-sanity-check --days-ahead 14 --redacted
 shikin undo --last --dry-run
+shikin web --port 8480
 shikin mcp
 
-# CLI (source/dev alternative)
-cd cli && pnpm install && pnpm run build
-pnpm exec tsx src/cli.ts list-accounts
-pnpm exec tsx src/cli.ts add-transaction --amount 12.50 --type expense --description "Lunch"
-pnpm exec tsx src/cli.ts get-spending-summary --period month
+# CLI (source/dev alternative, from the repository root)
+pnpm build:cli
+node cli/dist/cli.js list-accounts
+node cli/dist/cli.js web --port 8480
 
 # MCP server (source/dev alternative)
-pnpm exec tsx src/mcp-server.ts
+node cli/dist/mcp-server.js
 ```
+
+### Private hosted web access with Tailscale
+
+Run the production web app on the machine that owns your Shikin database:
+
+```bash
+shikin web --port 8480
+```
+
+The server listens only on `127.0.0.1`. In another terminal, expose it privately to your tailnet with HTTPS:
+
+```bash
+tailscale serve --bg http://127.0.0.1:8480
+tailscale serve status
+```
+
+Open the `https://<machine>.<tailnet>.ts.net` URL printed by Tailscale from an authorized device. Stop exposure with `tailscale serve reset`. Do not use Tailscale Funnel for financial data; Funnel is public internet exposure.
+
+The desktop **Settings → General → Hosted web access** control can start and stop the same loopback server with the app and persist the chosen port. Keep Shikin running (or enabled in the tray) while using the hosted site. Database restore is intentionally unavailable from hosted mode; stop hosted access and restore from the desktop app.
 
 ### MCP Setup (Claude Desktop)
 
@@ -319,17 +339,17 @@ Shikin/
 
 ## Documentation
 
-| Document                                       | Description                                       |
-| ---------------------------------------------- | ------------------------------------------------- |
-| [Architecture](docs/guides/ARCHITECTURE.md)    | Historical browser-first architecture notes       |
-| [Backend Map](docs/reference/BACKEND-MAP.md)   | Current CLI, MCP, bridge, and local backend map   |
+| Document                                                       | Description                                                                     |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| [Architecture](docs/guides/ARCHITECTURE.md)                    | Historical browser-first architecture notes                                     |
+| [Backend Map](docs/reference/BACKEND-MAP.md)                   | Current CLI, MCP, bridge, and local backend map                                 |
 | [Automation Workflows](docs/reference/AUTOMATION-WORKFLOWS.md) | Generic CLI/MCP finance workflows added and hardened by the assistant-safe plan |
-| [Frontend Map](docs/reference/FRONTEND-MAP.md) | Current routes, stores, dialogs, and frontend map |
-| [Database](docs/reference/DATABASE.md)         | 21-table SQLite schema, conventions, migrations   |
-| [Ideas](docs/planning/IDEAS.md)                | Feature ideas backlog with priority tiers         |
-| [Contributing](docs/guides/CONTRIBUTING.md)    | Development setup and conventions                 |
-| [Roadmap](docs/planning/ROADMAP.md)            | Current roadmap and milestone status              |
-| [Changelog](CHANGELOG.md)                      | Recent shipped changes and release notes          |
+| [Frontend Map](docs/reference/FRONTEND-MAP.md)                 | Current routes, stores, dialogs, and frontend map                               |
+| [Database](docs/reference/DATABASE.md)                         | 21-table SQLite schema, conventions, migrations                                 |
+| [Ideas](docs/planning/IDEAS.md)                                | Feature ideas backlog with priority tiers                                       |
+| [Contributing](docs/guides/CONTRIBUTING.md)                    | Development setup and conventions                                               |
+| [Roadmap](docs/planning/ROADMAP.md)                            | Current roadmap and milestone status                                            |
+| [Changelog](CHANGELOG.md)                                      | Recent shipped changes and release notes                                        |
 
 ---
 

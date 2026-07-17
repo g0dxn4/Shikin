@@ -22,6 +22,7 @@ Use Shikin's desktop-owned `shikin` command and MCP server safely and consistent
 
 - `shikin` launches the desktop app.
 - `shikin <command>` runs finance CLI commands.
+- `shikin web --port 8480` serves the packaged app on loopback for private Tailscale Serve access.
 - `shikin mcp` starts the MCP stdio server.
 - The npm package must not own a public `shikin` binary. It installs support bridges used by the desktop-owned command.
 - Use `shikin --help` and `shikin diagnose --deep` for installed-user diagnostics.
@@ -87,7 +88,7 @@ The MCP server exposes the same shared tool catalog as the CLI and these resourc
 
 ## Representative Tool Surface
 
-Current catalog size is 91 shared CLI/MCP tools and 95 total CLI commands including CLI-only built-ins. All shipped tools are available end-to-end against the local database.
+Current catalog size is 91 shared CLI/MCP tools and 96 total CLI commands including CLI-only built-ins. All shipped tools are available end-to-end against the local database.
 The lists below are representative groups for orientation; use `shikin tools --json` for the authoritative command, argument, enum, catalog/schema version, compatibility, and required-migration metadata.
 
 Transaction tools:

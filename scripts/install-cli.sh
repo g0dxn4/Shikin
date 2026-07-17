@@ -26,7 +26,7 @@ fi
 usage() {
   printf '%s\n' 'Usage: install-cli.sh [--version VERSION] [--install-dir DIR] [--bin-dir DIR]'
   printf '%s\n' ''
-  printf '%s\n' 'Installs Shikin CLI/MCP automation support for the desktop-owned `shikin` command.'
+  printf '%s\n' 'Installs Shikin CLI/MCP automation and hosted-web support.'
   printf '%s\n' ''
   printf '%s\n' 'Options:'
   printf '%s\n' '  --version VERSION  Install CLI support from a release tag, for example 0.2.6 or v0.2.6'
@@ -110,7 +110,11 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-[ "$(uname -s)" = "Linux" ] || die 'this installer only supports Linux'
+PLATFORM="$(uname -s)"
+case "$PLATFORM" in
+  Linux | Darwin) ;;
+  *) die 'this installer supports Linux and macOS' ;;
+esac
 [ -n "${HOME:-}" ] || die 'HOME must be set'
 
 command_exists curl || die 'curl is required'
@@ -121,15 +125,21 @@ command_exists npm || die 'npm is required as a fallback when Corepack is unavai
 node -e "const major = Number(process.versions.node.split('.')[0]); process.exit(Number.isFinite(major) && major >= 18 ? 0 : 1)" \
   || die 'Node.js >= 18 is required'
 command_exists sed || die 'sed is required'
-command_exists sha256sum || die 'sha256sum is required'
+if ! command_exists sha256sum && ! command_exists shasum; then
+  die 'sha256sum or shasum is required'
+fi
 command_exists tar || die 'tar is required'
 command_exists tr || die 'tr is required'
 
-DATA_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}"
-case "$DATA_HOME" in
-  /*) ;;
-  *) DATA_HOME="${HOME}/.local/share" ;;
-esac
+if [ "$PLATFORM" = "Darwin" ]; then
+  DATA_HOME="${HOME}/Library/Application Support"
+else
+  DATA_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}"
+  case "$DATA_HOME" in
+    /*) ;;
+    *) DATA_HOME="${HOME}/.local/share" ;;
+  esac
+fi
 
 INSTALL_DIR="${INSTALL_DIR:-${DATA_HOME}/com.asf.shikin/cli-support}"
 BIN_DIR="${BIN_DIR:-${HOME}/.local/bin}"
@@ -178,8 +188,13 @@ curl -fL "$SOURCE_URL" -o "$ARCHIVE_FILE"
 curl -fL "$CHECKSUM_URL" -o "$CHECKSUM_FILE"
 [ -s "$ARCHIVE_FILE" ] || die 'downloaded source archive is empty'
 [ -s "$CHECKSUM_FILE" ] || die 'downloaded checksum is empty'
-(cd "$TMP_DIR" && sha256sum -c "${ASSET_NAME}.sha256") \
-  || die 'source archive checksum verification failed'
+if command_exists sha256sum; then
+  (cd "$TMP_DIR" && sha256sum -c "${ASSET_NAME}.sha256") \
+    || die 'source archive checksum verification failed'
+else
+  (cd "$TMP_DIR" && shasum -a 256 -c "${ASSET_NAME}.sha256") \
+    || die 'source archive checksum verification failed'
+fi
 
 mkdir -p "$SOURCE_DIR"
 tar -xzf "$ARCHIVE_FILE" -C "$SOURCE_DIR"
@@ -234,6 +249,14 @@ info 'Deploying self-contained production CLI support'
 [ -f "$STAGE_DIR/web/index.html" ] || die 'deployment omitted packaged web/index.html'
 [ -d "$STAGE_DIR/node_modules" ] || die 'deployment omitted production node_modules'
 
+NODE_BIN="$(command -v node)"
+case "$NODE_BIN" in
+  /*) ;;
+  *) die 'could not resolve Node.js to an absolute executable path' ;;
+esac
+printf '%s\n' "$NODE_BIN" >"$STAGE_DIR/node-path"
+chmod 600 "$STAGE_DIR/node-path"
+
 rm -rf "$INSTALL_DIR"
 mv "$STAGE_DIR" "$INSTALL_DIR"
 STAGE_DIR=""
@@ -246,12 +269,13 @@ write_node_shim() {
   name="$1"
   script_path="$2"
   shim_path="${BIN_DIR}/${name}"
+  quoted_node_path="$(shell_quote "$NODE_BIN")"
   quoted_script_path="$(shell_quote "$script_path")"
 
   mkdir -p "$BIN_DIR"
   {
     printf '%s\n' '#!/usr/bin/env sh'
-    printf "exec node '%s' \"\$@\"\n" "$quoted_script_path"
+    printf "exec '%s' '%s' \"\$@\"\n" "$quoted_node_path" "$quoted_script_path"
   } >"$shim_path"
   chmod +x "$shim_path"
 }
@@ -259,10 +283,35 @@ write_node_shim() {
 write_node_shim 'shikin-bridge' "${INSTALL_DIR}/dist/cli.js"
 write_node_shim 'shikin-mcp' "${INSTALL_DIR}/dist/mcp-server.js"
 
+if [ "$PLATFORM" = "Darwin" ]; then
+  SHIKIN_SHIM="${BIN_DIR}/shikin"
+  quoted_node_path="$(shell_quote "$NODE_BIN")"
+  quoted_cli_path="$(shell_quote "${INSTALL_DIR}/dist/cli.js")"
+  quoted_mcp_path="$(shell_quote "${INSTALL_DIR}/dist/mcp-server.js")"
+  mkdir -p "$BIN_DIR"
+  {
+    printf '%s\n' '#!/usr/bin/env sh'
+    printf '%s\n' 'if [ "$#" -eq 0 ]; then'
+    printf '%s\n' '  exec open -a Shikin'
+    printf '%s\n' 'fi'
+    printf '%s\n' 'if [ "${1:-}" = "mcp" ]; then'
+    printf '%s\n' '  shift'
+    printf "  exec '%s' '%s' \"\$@\"\n" "$quoted_node_path" "$quoted_mcp_path"
+    printf '%s\n' 'fi'
+    printf "exec '%s' '%s' \"\$@\"\n" "$quoted_node_path" "$quoted_cli_path"
+  } >"$SHIKIN_SHIM"
+  chmod +x "$SHIKIN_SHIM"
+fi
+
 case ":${PATH:-}:" in
   *":${BIN_DIR}:"*) ;;
   *) warn "${BIN_DIR} is not on PATH; direct shikin-bridge/shikin-mcp helpers may not work, but shikin commands still use the app data install" ;;
 esac
 
 info "CLI support installed under ${INSTALL_DIR}"
-info 'You can now run CLI commands through the desktop-owned `shikin` command, for example: shikin list-accounts'
+if [ "$PLATFORM" = "Darwin" ]; then
+  info "The macOS shikin helper was installed at ${BIN_DIR}/shikin"
+else
+  info 'The desktop-owned shikin command will use this support'
+fi
+info 'Try: shikin list-accounts or shikin web --port 8480'

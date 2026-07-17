@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -91,6 +91,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (serverProcess) await stopServer(serverProcess)
+  if (tempDataHomeDir) {
+    expect(existsSync(join(tempDataHomeDir, 'com.asf.shikin', '.shikin-web.pid'))).toBe(false)
+  }
   if (tempHomeDir) rmSync(tempHomeDir, { recursive: true, force: true })
 })
 
@@ -98,6 +101,35 @@ describe('hosted data-server', () => {
   it('prints Tailscale Serve and reset guidance without invoking Tailscale', () => {
     expect(serverOutput).toContain(`tailscale serve --bg ${serverUrl}`)
     expect(serverOutput).toContain('tailscale serve reset')
+  })
+
+  it('owns one hosted process marker and refuses a second hosted server', async () => {
+    const markerPath = join(tempDataHomeDir, 'com.asf.shikin', '.shikin-web.pid')
+    expect(JSON.parse(readFileSync(markerPath, 'utf8')).pid).toBe(serverProcess?.pid)
+
+    const secondPort = await getFreePort()
+    const secondProcess = spawn('node', [resolve(process.cwd(), 'scripts/data-server.mjs')], {
+      env: {
+        ...process.env,
+        HOME: tempHomeDir,
+        XDG_DATA_HOME: tempDataHomeDir,
+        SHIKIN_DATA_SERVER_PORT: String(secondPort),
+        SHIKIN_WEB_HOSTED: '1',
+        SHIKIN_WEB_STATIC_ROOT: tempWebRoot,
+      },
+      stdio: 'pipe',
+    })
+    let secondError = ''
+    secondProcess.stderr.setEncoding('utf8')
+    secondProcess.stderr.on('data', (chunk) => {
+      secondError += chunk
+    })
+    const exitCode = await new Promise<number | null>((resolveExit) =>
+      secondProcess.once('exit', resolveExit)
+    )
+
+    expect(exitCode).toBe(1)
+    expect(secondError).toContain('Hosted web access is already running')
   })
 
   it('serves static files, SPA fallbacks, cache policy, and security headers without CORS', async () => {
@@ -112,6 +144,10 @@ describe('hosted data-server', () => {
     expect(indexResponse.headers.get('cache-control')).toBe('no-cache')
     expect(indexResponse.headers.get('x-content-type-options')).toBe('nosniff')
     expect(indexResponse.headers.get('x-frame-options')).toBe('DENY')
+    expect(indexResponse.headers.get('content-security-policy')).toContain("frame-ancestors 'none'")
+    expect(indexResponse.headers.get('content-security-policy')).toContain(
+      'https://api.frankfurter.app'
+    )
     expect(indexResponse.headers.get('access-control-allow-origin')).toBeNull()
 
     expect(settingsResponse.status).toBe(200)

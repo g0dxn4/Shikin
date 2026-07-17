@@ -3,12 +3,16 @@ import dayjs from 'dayjs'
 import {
   readFileSync,
   writeFileSync,
+  openSync,
+  closeSync,
   existsSync,
   mkdirSync,
   unlinkSync,
+  rmSync,
   readdirSync,
   lstatSync,
   statSync,
+  realpathSync,
   createReadStream,
 } from 'node:fs'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
@@ -55,10 +59,70 @@ const DATA_DIR = prepareAppDataDir()
 const DB_PATH = join(DATA_DIR, 'shikin.db')
 const SETTINGS_PATH = join(DATA_DIR, 'settings.json')
 const NOTEBOOK_DIR = join(DATA_DIR, 'notebook')
+const HOSTED_PROCESS_PATH = join(DATA_DIR, '.shikin-web.pid')
+const RESTORE_LOCK_PATH = join(DATA_DIR, 'shikin.db.restore.lock')
 
 // Ensure directories exist
 ensurePrivateDirectory(DATA_DIR)
 ensurePrivateDirectory(NOTEBOOK_DIR)
+
+function processIsRunning(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return error?.code === 'EPERM'
+  }
+}
+
+function readHostedProcessId() {
+  try {
+    const marker = JSON.parse(readFileSync(HOSTED_PROCESS_PATH, 'utf8'))
+    return Number.isSafeInteger(marker?.pid) ? marker.pid : null
+  } catch {
+    return null
+  }
+}
+
+function acquireHostedProcessMarker() {
+  if (!HOSTED_MODE) return () => {}
+  if (existsSync(RESTORE_LOCK_PATH)) {
+    throw new Error('Cannot start hosted web access while a database restore is in progress.')
+  }
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let markerFd = null
+    try {
+      markerFd = openSync(HOSTED_PROCESS_PATH, 'wx', PRIVATE_FILE_MODE)
+      writeFileSync(
+        markerFd,
+        JSON.stringify({ pid: process.pid, port: PORT, startedAt: new Date().toISOString() })
+      )
+      closeSync(markerFd)
+      markerFd = null
+      hardenPathMode(HOSTED_PROCESS_PATH, PRIVATE_FILE_MODE)
+      return () => {
+        if (readHostedProcessId() === process.pid) {
+          rmSync(HOSTED_PROCESS_PATH, { force: true })
+        }
+      }
+    } catch (error) {
+      if (markerFd !== null) closeSync(markerFd)
+      if (error?.code !== 'EEXIST') throw error
+
+      const existingPid = readHostedProcessId()
+      if (existingPid !== null && processIsRunning(existingPid)) {
+        throw new Error(`Hosted web access is already running in process ${existingPid}.`)
+      }
+      rmSync(HOSTED_PROCESS_PATH, { force: true })
+    }
+  }
+
+  throw new Error('Could not acquire the hosted web process marker.')
+}
+
+const releaseHostedProcessMarker = acquireHostedProcessMarker()
 
 // ── Database Setup ─────────────────────────────────────────────────────────
 
@@ -1418,7 +1482,10 @@ function readBody(req) {
 }
 
 const HOSTED_SECURITY_HEADERS = {
+  'Content-Security-Policy':
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://www.alphavantage.co https://api.coingecko.com https://api.frankfurter.app https://finnhub.io https://newsapi.org https://house-stock-watcher-data.s3-us-west-2.amazonaws.com https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com https://github.com https://objects.githubusercontent.com; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
   'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Resource-Policy': 'same-origin',
   'Permissions-Policy': 'camera=(), geolocation=(), microphone=()',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'X-Content-Type-Options': 'nosniff',
@@ -1778,7 +1845,9 @@ function sendForbidden(res, message) {
           Vary: 'Origin',
         }
   )
-  res.end(HOSTED_MODE && res.req?.method === 'HEAD' ? undefined : JSON.stringify({ error: message }))
+  res.end(
+    HOSTED_MODE && res.req?.method === 'HEAD' ? undefined : JSON.stringify({ error: message })
+  )
 }
 
 const STATIC_MIME_TYPES = {
@@ -1827,7 +1896,21 @@ function resolveStaticPath(pathname) {
 
   try {
     const stats = lstatSync(staticPath)
-    return stats.isFile() && !stats.isSymbolicLink() ? staticPath : null
+    if (!stats.isFile() || stats.isSymbolicLink()) return null
+
+    const realStaticRoot = realpathSync(staticRoot)
+    const realStaticPath = realpathSync(staticPath)
+    const realConfinedPath = relative(realStaticRoot, realStaticPath)
+    if (
+      realConfinedPath === '..' ||
+      realConfinedPath.startsWith(`..${'/'}`) ||
+      realConfinedPath.startsWith(`..${'\\'}`) ||
+      isAbsolute(realConfinedPath)
+    ) {
+      return null
+    }
+
+    return realStaticPath
   } catch {
     return null
   }
@@ -1857,7 +1940,8 @@ function serveStaticFile(req, res, pathname) {
     : isHashedStaticAsset(pathname)
       ? 'public, max-age=31536000, immutable'
       : 'public, max-age=3600'
-  const mimeType = STATIC_MIME_TYPES[extname(staticPath).toLowerCase()] ?? 'application/octet-stream'
+  const mimeType =
+    STATIC_MIME_TYPES[extname(staticPath).toLowerCase()] ?? 'application/octet-stream'
 
   res.writeHead(
     200,
@@ -2238,6 +2322,7 @@ async function shutdown(signal) {
   try {
     db?.close()
   } finally {
+    releaseHostedProcessMarker()
     process.exit(0)
   }
 }

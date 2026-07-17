@@ -14,7 +14,7 @@ This is a practical backend map for the current repo layout. It is a documentati
   - Browser runtime DB/storage calls are funneled through `src/lib/database.ts`, `src/lib/storage.ts`, and `src/lib/virtual-fs.ts`.
 - **CLI mode**
   - `cli/src/cli.ts` registers every command from the shared catalog exported by `cli/src/tools/index.ts` and runs via Commander.
-- Current shared tool surface: **91 shared CLI/MCP tools** (from `cli/src/tools/index.ts`) and **95 CLI commands** including CLI-only built-ins, all available end-to-end against local data.
+- Current shared tool surface: **91 shared CLI/MCP tools** (from `cli/src/tools/index.ts`) and **96 CLI commands** including CLI-only built-ins, all available end-to-end against local data.
 - MVP limitation decisions: one-off transfer writes are supported in the app and CLI/MCP, but recurring transfer rules remain deferred; debt payoff uses inferred credit-card balances with APR fixed at 0% because account APR is not stored; browser subscription management is deferred while local subscription rows still feed forecasts and CLI/MCP analytics.
 - **MCP mode**
   - `cli/src/mcp-server.ts` registers the same `tools` and bootstraps MCP over stdio.

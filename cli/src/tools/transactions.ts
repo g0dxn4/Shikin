@@ -10,6 +10,7 @@ import {
   boundedText,
   isoDate,
   positiveMoneyAmount,
+  isAccountWriteEligible,
   resolveAccountId,
   crossCurrencyMoveMessage,
   unknownTransactionCurrencyFailure,
@@ -755,7 +756,7 @@ function resolveTransferDestination(transferToAccountId: string | undefined, sou
   }
 
   const destination = accounts[0]
-  if (destination.is_archived === 1) {
+  if (!isAccountWriteEligible(destination)) {
     return {
       success: false as const,
       message: `Transfer destination account ${transferToAccountId} is archived. Unarchive it before using it for new writes.`,
@@ -1168,6 +1169,7 @@ const addTransaction: ToolDefinition = {
 
       return {
         success: true,
+        dryRun: false,
         transaction: {
           id,
           accountId: resolvedAccount.id,
@@ -1554,6 +1556,7 @@ const updateTransaction: ToolDefinition = {
 
       return {
         success: true,
+        dryRun: false,
         transaction: {
           id: transactionId,
           amount: displayAmount,
@@ -1656,6 +1659,7 @@ const deleteTransaction: ToolDefinition = {
 
       return {
         success: true,
+        dryRun: false,
         message: `Deleted ${tx.type}: $${fromCentavos(tx.amount).toFixed(2)} "${tx.description}" from ${tx.date}`,
       }
     })
@@ -2730,6 +2734,7 @@ const createPlaceholderTransaction: ToolDefinition = {
       })
       return {
         success: true,
+        dryRun: false,
         transaction: publicTransactionSnapshot(tx),
         balanceImpact: formattedBalanceImpact,
         message: `Created unresolved placeholder transaction ${tx.id}.`,
@@ -2940,6 +2945,7 @@ const resolvePlaceholderTransaction: ToolDefinition = {
       })
       return {
         success: true,
+        dryRun: false,
         transaction: publicTransactionSnapshot(after),
         balanceImpact: formattedBalanceImpact,
         message: `Resolved placeholder transaction ${transactionId}.`,
@@ -3126,6 +3132,7 @@ const splitPlaceholderTransaction: ToolDefinition = {
       })
       return {
         success: true,
+        dryRun: false,
         placeholder: publicTransactionSnapshot(after),
         transactions: childTransactions.map(publicTransactionSnapshot),
         balanceImpact: formattedBalanceImpact,

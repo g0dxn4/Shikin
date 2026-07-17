@@ -1,11 +1,15 @@
 // @vitest-environment node
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { checkpointWal, importDatabaseBuffer } from '../../scripts/data-server-db.mjs'
+import {
+  checkpointWal,
+  exportDatabaseBuffer,
+  importDatabaseBuffer,
+} from '../../scripts/data-server-db.mjs'
 
 function createShikinDatabase(
   dbPath: string,
@@ -141,7 +145,33 @@ afterEach(() => {
 })
 
 describe('data-server database import hardening', () => {
-  it('atomically replaces the live database only after staged validation succeeds', () => {
+  it('exports a consistent online backup without copying the live WAL family', async () => {
+    const tempDir = createTempDir()
+    tempDirs.add(tempDir)
+
+    const livePath = join(tempDir, 'live.db')
+    const exportPath = join(tempDir, 'export.db')
+    const liveDb = createShikinDatabase(livePath, 'online backup account')
+
+    const bytes = await exportDatabaseBuffer({
+      db: liveDb,
+      dbPath: livePath,
+      tempDbPath: exportPath,
+    })
+    expect(existsSync(exportPath)).toBe(false)
+
+    const deliveredPath = join(tempDir, 'delivered.db')
+    writeFileSync(deliveredPath, bytes)
+    const deliveredDb = new Database(deliveredPath, { readonly: true, fileMustExist: true })
+    expect(deliveredDb.prepare('SELECT name FROM accounts WHERE id = ?').get('acct-1')).toEqual({
+      name: 'online backup account',
+    })
+    expect(deliveredDb.pragma('integrity_check', { simple: true })).toBe('ok')
+    deliveredDb.close()
+    liveDb.close()
+  })
+
+  it('restores through SQLite backup only after staged validation succeeds', async () => {
     const tempDir = createTempDir()
     tempDirs.add(tempDir)
 
@@ -155,12 +185,15 @@ describe('data-server database import hardening', () => {
 
     const buffer = readFileSync(importedPath)
 
-    importDatabaseBuffer({ db: liveDb, dbPath: livePath, buffer, tempDbPath: importCheckPath })
+    await importDatabaseBuffer({
+      db: liveDb,
+      dbPath: livePath,
+      buffer,
+      tempDbPath: importCheckPath,
+    })
 
     expect(() => liveDb.prepare('SELECT 1')).toThrow(/closed|not open/i)
     expect(existsSync(importCheckPath)).toBe(false)
-    expect(existsSync(`${livePath}-wal`)).toBe(false)
-    expect(existsSync(`${livePath}-shm`)).toBe(false)
 
     const replacedDb = new Database(livePath, { readonly: true, fileMustExist: true })
     expect(replacedDb.prepare('SELECT name FROM accounts WHERE id = ?').get('acct-1')).toEqual({
@@ -169,7 +202,7 @@ describe('data-server database import hardening', () => {
     replacedDb.close()
   })
 
-  it('rejects a corrupted sqlite buffer without replacing the live database', () => {
+  it('rejects a corrupted sqlite buffer without replacing the live database', async () => {
     const tempDir = createTempDir()
     tempDirs.add(tempDir)
 
@@ -182,14 +215,14 @@ describe('data-server database import hardening', () => {
     corruptedBuffer.write('SQLite format 3\0', 0, 'ascii')
 
     expect(corruptedBuffer.subarray(0, 16).toString('ascii')).toContain('SQLite format 3')
-    expect(() =>
+    await expect(
       importDatabaseBuffer({
         db: liveDb,
         dbPath: livePath,
         buffer: corruptedBuffer,
         tempDbPath: importCheckPath,
       })
-    ).toThrow(/integrity|malformed|database/i)
+    ).rejects.toThrow(/integrity|malformed|database/i)
 
     expect(existsSync(importCheckPath)).toBe(false)
     expect(liveDb.prepare('SELECT name FROM accounts WHERE id = ?').get('acct-1')).toEqual({
@@ -204,7 +237,7 @@ describe('data-server database import hardening', () => {
     unchangedDb.close()
   })
 
-  it('rejects healthy sqlite files that do not contain Shikin schema markers', () => {
+  it('rejects healthy sqlite files that do not contain Shikin schema markers', async () => {
     const tempDir = createTempDir()
     tempDirs.add(tempDir)
 
@@ -219,9 +252,9 @@ describe('data-server database import hardening', () => {
     const hadLiveWalBeforeImport = existsSync(`${livePath}-wal`)
     const buffer = readFileSync(importedPath)
 
-    expect(() =>
+    await expect(
       importDatabaseBuffer({ db: liveDb, dbPath: livePath, buffer, tempDbPath: importCheckPath })
-    ).toThrow(/not a Shikin database|migration metadata|required tables/i)
+    ).rejects.toThrow(/not a Shikin database|migration metadata|required tables/i)
 
     expect(existsSync(importCheckPath)).toBe(false)
     expect(existsSync(`${livePath}-wal`)).toBe(hadLiveWalBeforeImport)
@@ -237,7 +270,7 @@ describe('data-server database import hardening', () => {
     unchangedDb.close()
   })
 
-  it('rejects structurally valid sqlite files that are missing required Shikin columns', () => {
+  it('rejects structurally valid sqlite files that are missing required Shikin columns', async () => {
     const tempDir = createTempDir()
     tempDirs.add(tempDir)
 
@@ -251,9 +284,9 @@ describe('data-server database import hardening', () => {
 
     const buffer = readFileSync(importedPath)
 
-    expect(() =>
+    await expect(
       importDatabaseBuffer({ db: liveDb, dbPath: livePath, buffer, tempDbPath: importCheckPath })
-    ).toThrow(/missing required Shikin columns.*accounts.*balance/i)
+    ).rejects.toThrow(/missing required Shikin columns.*accounts.*balance/i)
 
     expect(existsSync(importCheckPath)).toBe(false)
     expect(liveDb.prepare('SELECT name FROM accounts WHERE id = ?').get('acct-1')).toEqual({
@@ -262,7 +295,7 @@ describe('data-server database import hardening', () => {
     liveDb.close()
   })
 
-  it('rejects Shikin-shaped sqlite files that lack the 001_core_tables migration marker', () => {
+  it('rejects Shikin-shaped sqlite files that lack the 001_core_tables migration marker', async () => {
     const tempDir = createTempDir()
     tempDirs.add(tempDir)
 
@@ -276,9 +309,9 @@ describe('data-server database import hardening', () => {
 
     const buffer = readFileSync(importedPath)
 
-    expect(() =>
+    await expect(
       importDatabaseBuffer({ db: liveDb, dbPath: livePath, buffer, tempDbPath: importCheckPath })
-    ).toThrow(/missing required Shikin migration metadata/i)
+    ).rejects.toThrow(/missing required Shikin migration metadata/i)
 
     expect(existsSync(importCheckPath)).toBe(false)
     expect(liveDb.prepare('SELECT name FROM accounts WHERE id = ?').get('acct-1')).toEqual({

@@ -4,10 +4,14 @@ const mockStore = vi.hoisted(() => {
   const data: Record<string, unknown> = {}
   return {
     get: vi.fn(async (key: string) => data[key] ?? null),
-    set: vi.fn(async (key: string, value: unknown) => { data[key] = value }),
+    set: vi.fn(async (key: string, value: unknown) => {
+      data[key] = value
+    }),
     save: vi.fn(async () => {}),
     _data: data,
-    _clear: () => { Object.keys(data).forEach((k) => delete data[k]) },
+    _clear: () => {
+      Object.keys(data).forEach((k) => delete data[k])
+    },
   }
 })
 

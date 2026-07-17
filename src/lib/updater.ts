@@ -1,8 +1,6 @@
 import { getVersion } from '@tauri-apps/api/app'
 import { check } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
-import { toast } from 'sonner'
-import { getErrorMessage } from './errors'
 import { isTauri } from './runtime'
 
 export type AvailableUpdate = NonNullable<Awaited<ReturnType<typeof check>>>
@@ -20,26 +18,6 @@ export async function getAvailableUpdate() {
   if (!update?.available) return null
 
   return update as AvailableUpdate
-}
-
-export async function checkForUpdates() {
-  if (!isTauri) return null
-
-  try {
-    const update = await getAvailableUpdate()
-    if (!update) return null
-
-    toast(`Update available: v${update.version}`, {
-      description: 'Open Settings and check for updates to download and install.',
-      duration: 10000,
-      id: 'app-update',
-    })
-
-    return update
-  } catch (error) {
-    console.error('Update check failed:', getErrorMessage(error))
-    return null
-  }
 }
 
 export async function installUpdate(

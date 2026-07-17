@@ -34,7 +34,7 @@ const PLUGIN_PERMISSION_PATTERN =
   /^(read|write):(accounts|transactions|categories|statements|audit|extension_data)$/
 const SUPPORTED_PLUGIN_MAIN_EXTENSIONS = new Set(['.js', '.mjs'])
 
-export const PLUGIN_ENABLEMENT_STATE_VERSION = 1
+const PLUGIN_ENABLEMENT_STATE_VERSION = 1
 
 const pluginPermissionSchema = z
   .string()
@@ -182,7 +182,7 @@ class PluginPermissionError extends Error {
   }
 }
 
-export function getExtensionsDirectory(env: NodeJS.ProcessEnv = process.env): string {
+function getExtensionsDirectory(env: NodeJS.ProcessEnv = process.env): string {
   const override = env.SHIKIN_EXTENSIONS_DIR?.trim()
   return override ? resolve(override) : join(getAppDataDir(env), 'extensions')
 }

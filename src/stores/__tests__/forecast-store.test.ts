@@ -44,7 +44,14 @@ describe('forecast-store', () => {
     })
 
     it('uses provided days parameter over selectedRange', async () => {
-      mockGenerateForecast.mockResolvedValueOnce({ points: [], currentBalance: 0, dailyBurnRate: 0, dailyIncome: 0, minBalance: { date: '', amount: 0 }, dangerDates: [] })
+      mockGenerateForecast.mockResolvedValueOnce({
+        points: [],
+        currentBalance: 0,
+        dailyBurnRate: 0,
+        dailyIncome: 0,
+        minBalance: { date: '', amount: 0 },
+        dangerDates: [],
+      })
 
       await useForecastStore.getState().generateForecast(90)
 
@@ -52,7 +59,14 @@ describe('forecast-store', () => {
     })
 
     it('sets isLoading during generation', async () => {
-      mockGenerateForecast.mockResolvedValueOnce({ points: [], currentBalance: 0, dailyBurnRate: 0, dailyIncome: 0, minBalance: { date: '', amount: 0 }, dangerDates: [] })
+      mockGenerateForecast.mockResolvedValueOnce({
+        points: [],
+        currentBalance: 0,
+        dailyBurnRate: 0,
+        dailyIncome: 0,
+        minBalance: { date: '', amount: 0 },
+        dangerDates: [],
+      })
 
       const promise = useForecastStore.getState().generateForecast()
       expect(useForecastStore.getState().isLoading).toBe(true)
@@ -71,7 +85,14 @@ describe('forecast-store', () => {
 
   describe('setRange', () => {
     it('updates selectedRange and triggers regeneration', async () => {
-      mockGenerateForecast.mockResolvedValueOnce({ points: [], currentBalance: 0, dailyBurnRate: 0, dailyIncome: 0, minBalance: { date: '', amount: 0 }, dangerDates: [] })
+      mockGenerateForecast.mockResolvedValueOnce({
+        points: [],
+        currentBalance: 0,
+        dailyBurnRate: 0,
+        dailyIncome: 0,
+        minBalance: { date: '', amount: 0 },
+        dangerDates: [],
+      })
 
       useForecastStore.getState().setRange(60)
 

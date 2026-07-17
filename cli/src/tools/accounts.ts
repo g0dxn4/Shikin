@@ -1,4 +1,9 @@
 import {
+  calculateReconciliationAdjustment,
+  signedLedgerDeltaForAccount,
+  type LedgerEntry,
+} from '@shikin/finance-core'
+import {
   z,
   query,
   execute,
@@ -13,6 +18,7 @@ import {
   moneyAmount,
   nonNegativeMoneyAmount,
   getAccountAliases,
+  isAccountWriteEligible,
   normalizeAccountAlias,
   normalizeCurrencyCode,
   removeAccountAliasesForAccount,
@@ -169,7 +175,7 @@ function findExactNameAccount(name: string): AccountUpsertMatch {
     'SELECT * FROM accounts WHERE LOWER(name) = LOWER($1) ORDER BY is_archived ASC, name ASC, id ASC LIMIT 3',
     [name]
   )
-  const activeMatches = matches.filter((row) => row.is_archived !== 1)
+  const activeMatches = matches.filter(isAccountWriteEligible)
 
   if (activeMatches.length === 1) {
     return { success: true, account: activeMatches[0], matchedBy: 'name' }
@@ -196,7 +202,7 @@ function resolveAccountForUpsert(input: {
   if (input.accountId) {
     const account = getAccountById(input.accountId)
     if (account) {
-      if (account.is_archived === 1) return archivedAccountResult(account)
+      if (!isAccountWriteEligible(account)) return archivedAccountResult(account)
       return { success: true, account, matchedBy: 'accountId' }
     }
 
@@ -221,7 +227,7 @@ function resolveAccountForUpsert(input: {
           message: `Account alias "${normalizedAlias}" points to missing account ${aliasedAccountId}.`,
         }
       }
-      if (account.is_archived === 1) return archivedAccountResult(account)
+      if (!isAccountWriteEligible(account)) return archivedAccountResult(account)
       return { success: true, account, matchedBy: 'alias' }
     }
   }
@@ -314,6 +320,115 @@ function accountCurrencyChangeFailure(
   return blockingReferenceCount > 0
     ? accountCurrencyChangeBlockedMessage(blockingReferenceCount)
     : null
+}
+
+type AccountUpdateFields = {
+  name?: string
+  type?: AccountType
+  currency?: string
+  balance?: number
+  creditLimit?: number
+  statementClosingDay?: number
+  paymentDueDay?: number
+  accountMode?: AccountRow['account_mode']
+}
+
+function prepareAccountUpdate(
+  account: AccountRow,
+  input: AccountUpdateFields,
+  onlyChangedValues: boolean
+) {
+  const currentMode = account.account_mode ?? 'transactional'
+  const nextMode = input.accountMode ?? currentMode
+  const requestedBalanceCentavos =
+    input.balance !== undefined ? toCentavos(input.balance) : account.balance
+  const updatedAccount: AccountRow = {
+    ...account,
+    name: input.name ?? account.name,
+    type: input.type ?? account.type,
+    currency: input.currency ?? account.currency,
+    balance: requestedBalanceCentavos,
+    credit_limit:
+      input.creditLimit !== undefined ? toCentavos(input.creditLimit) : account.credit_limit,
+    statement_closing_day: input.statementClosingDay ?? account.statement_closing_day,
+    payment_due_day: input.paymentDueDay ?? account.payment_due_day,
+    account_mode: nextMode,
+  }
+  const setClauses: string[] = []
+  const params: unknown[] = []
+  let paramIdx = 1
+  const addSet = (column: string, value: unknown) => {
+    setClauses.push(`${column} = $${paramIdx++}`)
+    params.push(value)
+  }
+  const shouldSet = (provided: boolean, changed: boolean) =>
+    provided && (!onlyChangedValues || changed)
+
+  if (shouldSet(input.name !== undefined, input.name !== account.name)) {
+    addSet('name', input.name)
+  }
+  if (shouldSet(input.type !== undefined, input.type !== account.type)) {
+    addSet('type', input.type)
+  }
+  if (shouldSet(input.accountMode !== undefined, input.accountMode !== currentMode)) {
+    addSet('account_mode', input.accountMode)
+  }
+  if (
+    shouldSet(
+      input.currency !== undefined,
+      normalizeCurrencyCode(input.currency) !== normalizeCurrencyCode(account.currency)
+    )
+  ) {
+    addSet('currency', input.currency)
+  }
+  if (
+    nextMode === 'snapshot_only' &&
+    shouldSet(input.balance !== undefined, requestedBalanceCentavos !== account.balance)
+  ) {
+    addSet('balance', requestedBalanceCentavos)
+  } else if (
+    currentMode === 'snapshot_only' &&
+    nextMode === 'transactional' &&
+    account.balance !== 0
+  ) {
+    addSet('balance', 0)
+  }
+  if (
+    shouldSet(
+      input.creditLimit !== undefined,
+      input.creditLimit !== undefined && toCentavos(input.creditLimit) !== account.credit_limit
+    )
+  ) {
+    addSet('credit_limit', toCentavos(input.creditLimit!))
+  }
+  if (
+    shouldSet(
+      input.statementClosingDay !== undefined,
+      input.statementClosingDay !== account.statement_closing_day
+    )
+  ) {
+    addSet('statement_closing_day', input.statementClosingDay)
+  }
+  if (
+    shouldSet(input.paymentDueDay !== undefined, input.paymentDueDay !== account.payment_due_day)
+  ) {
+    addSet('payment_due_day', input.paymentDueDay)
+  }
+
+  const needsBalanceReconciliation =
+    nextMode === 'transactional' &&
+    (currentMode === 'snapshot_only'
+      ? requestedBalanceCentavos !== 0 || requestedBalanceCentavos !== account.balance
+      : input.balance !== undefined && requestedBalanceCentavos !== account.balance)
+
+  return {
+    updatedAccount,
+    setClauses,
+    params,
+    nextParamIdx: paramIdx,
+    requestedBalanceCentavos,
+    needsBalanceReconciliation,
+  }
 }
 
 const listAccounts: ToolDefinition = {
@@ -461,13 +576,21 @@ const createAccount: ToolDefinition = {
           name,
           type,
           currency,
-          balanceCentavos,
+          accountMode === 'snapshot_only' ? balanceCentavos : 0,
           creditLimitCentavos,
           statementClosingDay ?? null,
           paymentDueDay ?? null,
           accountMode,
         ]
       )
+      if (accountMode === 'transactional' && balanceCentavos !== 0) {
+        reconcileTransactionalAccountBalance({
+          accountId: id,
+          currency,
+          observedBalance: balanceCentavos,
+          storedBalanceBefore: 0,
+        })
+      }
       writeAuditLog({
         entity: 'account',
         entityId: id,
@@ -574,40 +697,48 @@ const upsertAccount: ToolDefinition = {
     accountMode,
     dryRun,
   }) => {
-    const match = resolveAccountForUpsert({ accountId, account, alias, name })
-    if (!match.success) return match
-
     const normalizedAlias = alias ? normalizeAccountAlias(alias) : null
-    const existingAliasTarget = normalizedAlias ? getAccountAliases()[normalizedAlias] : null
-    const intendedAliasTarget = match.account ? match.account.id : (match.createId ?? null)
-    if (normalizedAlias && existingAliasTarget && existingAliasTarget !== intendedAliasTarget) {
-      return {
-        success: false,
-        reason: 'alias_conflict',
-        message: `Alias "${normalizedAlias}" already points to account ${existingAliasTarget}. Remove or choose a different alias before reassigning it.`,
-      }
+    const updateInput = {
+      name,
+      type,
+      currency,
+      balance,
+      creditLimit,
+      statementClosingDay,
+      paymentDueDay,
+      accountMode,
     }
 
-    if (!match.account) {
-      const id = match.createId ?? generateId()
-      const createdType: AccountType = type ?? 'checking'
-      const createdCurrency = currency ?? 'USD'
-      const balanceCentavos = toCentavos(balance ?? 0)
-      const creditLimitCentavos = creditLimit !== undefined ? toCentavos(creditLimit) : null
-      const createdAccount: AccountRow = {
-        id,
-        name: name ?? match.createName,
-        type: createdType,
-        currency: createdCurrency,
-        balance: balanceCentavos,
-        is_archived: 0,
-        credit_limit: creditLimitCentavos,
-        statement_closing_day: statementClosingDay ?? null,
-        payment_due_day: paymentDueDay ?? null,
-        account_mode: accountMode ?? 'transactional',
+    if (dryRun) {
+      const match = resolveAccountForUpsert({ accountId, account, alias, name })
+      if (!match.success) return match
+
+      const existingAliasTarget = normalizedAlias ? getAccountAliases()[normalizedAlias] : null
+      const intendedAliasTarget = match.account ? match.account.id : (match.createId ?? null)
+      if (normalizedAlias && existingAliasTarget && existingAliasTarget !== intendedAliasTarget) {
+        return {
+          success: false,
+          reason: 'alias_conflict',
+          message: `Alias "${normalizedAlias}" already points to account ${existingAliasTarget}. Remove or choose a different alias before reassigning it.`,
+        }
       }
 
-      if (dryRun) {
+      if (!match.account) {
+        const id = match.createId ?? generateId()
+        const balanceCentavos = toCentavos(balance ?? 0)
+        const createdAccount: AccountRow = {
+          id,
+          name: name ?? match.createName,
+          type: type ?? 'checking',
+          currency: currency ?? 'USD',
+          balance: balanceCentavos,
+          is_archived: 0,
+          credit_limit: creditLimit !== undefined ? toCentavos(creditLimit) : null,
+          statement_closing_day: statementClosingDay ?? null,
+          payment_due_day: paymentDueDay ?? null,
+          account_mode: accountMode ?? 'transactional',
+        }
+
         return {
           success: true,
           action: 'created' as const,
@@ -619,7 +750,67 @@ const upsertAccount: ToolDefinition = {
         }
       }
 
-      transaction(() => {
+      const existing = match.account
+      const currencyFailure = accountCurrencyChangeFailure(existing.id, existing.currency, currency)
+      if (currencyFailure) return { success: false, message: currencyFailure }
+      const modeFailure = accountModeChangeFailure(existing, accountMode)
+      if (modeFailure) return modeFailure
+
+      const prepared = prepareAccountUpdate(existing, updateInput, true)
+      const aliasWouldChange = Boolean(normalizedAlias && existingAliasTarget !== existing.id)
+      const changed =
+        prepared.setClauses.length > 0 || prepared.needsBalanceReconciliation || aliasWouldChange
+      return {
+        success: true,
+        action: 'updated' as const,
+        dryRun: true,
+        matchedBy: match.matchedBy,
+        changed,
+        wouldUpdate: {
+          accountId: existing.id,
+          before: accountAuditSnapshot(existing),
+          after: accountAuditSnapshot(prepared.updatedAccount),
+        },
+        wouldSetAlias: normalizedAlias
+          ? { alias: normalizedAlias, accountId: existing.id, changed: aliasWouldChange }
+          : null,
+        message: `Dry run: account "${prepared.updatedAccount.name}" would be updated.`,
+      }
+    }
+
+    return transaction(() => {
+      const match = resolveAccountForUpsert({ accountId, account, alias, name })
+      if (!match.success) return match
+
+      const existingAliasTarget = normalizedAlias ? getAccountAliases()[normalizedAlias] : null
+      if (!match.account) {
+        const intendedAliasTarget = match.createId ?? null
+        if (normalizedAlias && existingAliasTarget && existingAliasTarget !== intendedAliasTarget) {
+          return {
+            success: false,
+            reason: 'alias_conflict',
+            message: `Alias "${normalizedAlias}" already points to account ${existingAliasTarget}. Remove or choose a different alias before reassigning it.`,
+          }
+        }
+
+        const id = match.createId ?? generateId()
+        const createdType: AccountType = type ?? 'checking'
+        const createdCurrency = currency ?? 'USD'
+        const balanceCentavos = toCentavos(balance ?? 0)
+        const creditLimitCentavos = creditLimit !== undefined ? toCentavos(creditLimit) : null
+        const createdAccount: AccountRow = {
+          id,
+          name: name ?? match.createName,
+          type: createdType,
+          currency: createdCurrency,
+          balance: balanceCentavos,
+          is_archived: 0,
+          credit_limit: creditLimitCentavos,
+          statement_closing_day: statementClosingDay ?? null,
+          payment_due_day: paymentDueDay ?? null,
+          account_mode: accountMode ?? 'transactional',
+        }
+
         execute(
           `INSERT INTO accounts (id, name, type, currency, balance, is_archived, credit_limit, statement_closing_day, payment_due_day, account_mode)
            VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, $9)`,
@@ -628,21 +819,34 @@ const upsertAccount: ToolDefinition = {
             createdAccount.name,
             createdType,
             createdCurrency,
-            balanceCentavos,
+            createdAccount.account_mode === 'snapshot_only' ? balanceCentavos : 0,
             creditLimitCentavos,
             statementClosingDay ?? null,
             paymentDueDay ?? null,
             createdAccount.account_mode,
           ]
         )
+        if (createdAccount.account_mode === 'transactional' && balanceCentavos !== 0) {
+          reconcileTransactionalAccountBalance({
+            accountId: id,
+            currency: createdCurrency,
+            observedBalance: balanceCentavos,
+            storedBalanceBefore: 0,
+          })
+        }
         if (normalizedAlias) setAccountAlias(id, normalizedAlias)
+
+        const finalAccount = getAccountById(id)
+        if (!finalAccount || !isAccountWriteEligible(finalAccount)) {
+          throw new Error(`Account ${id} could not be read safely after creation.`)
+        }
         writeAuditLog({
           entity: 'account',
           entityId: id,
           action: 'create',
           before: null,
           after: {
-            account: accountAuditSnapshot(createdAccount),
+            account: accountAuditSnapshot(finalAccount),
             balanceChange: {
               previousBalanceCentavos: null,
               newBalanceCentavos: balanceCentavos,
@@ -651,148 +855,117 @@ const upsertAccount: ToolDefinition = {
             },
           },
         })
-      })
 
-      return {
-        success: true,
-        action: 'created' as const,
-        matchedBy: match.matchedBy,
-        account: accountAuditSnapshot(createdAccount),
-        alias: normalizedAlias,
-        message: `Created account "${createdAccount.name}".`,
-      }
-    }
-
-    const existing = match.account
-    const currencyFailure = accountCurrencyChangeFailure(existing.id, existing.currency, currency)
-    if (currencyFailure) {
-      return { success: false, message: currencyFailure }
-    }
-    const modeFailure = accountModeChangeFailure(existing, accountMode)
-    if (modeFailure) return modeFailure
-
-    const updatedAccount: AccountRow = {
-      ...existing,
-      name: name ?? existing.name,
-      type: type ?? existing.type,
-      currency: currency ?? existing.currency,
-      balance: balance !== undefined ? toCentavos(balance) : existing.balance,
-      credit_limit: creditLimit !== undefined ? toCentavos(creditLimit) : existing.credit_limit,
-      statement_closing_day: statementClosingDay ?? existing.statement_closing_day,
-      payment_due_day: paymentDueDay ?? existing.payment_due_day,
-      account_mode: accountMode ?? existing.account_mode,
-    }
-    const setClauses: string[] = []
-    const params: unknown[] = []
-    let paramIdx = 1
-    const addSet = (column: string, value: unknown) => {
-      setClauses.push(`${column} = $${paramIdx++}`)
-      params.push(value)
-    }
-
-    if (name !== undefined && name !== existing.name) addSet('name', name)
-    if (type !== undefined && type !== existing.type) addSet('type', type)
-    if (accountMode !== undefined && accountMode !== existing.account_mode) {
-      addSet('account_mode', accountMode)
-    }
-    if (
-      currency !== undefined &&
-      normalizeCurrencyCode(currency) !== normalizeCurrencyCode(existing.currency)
-    ) {
-      addSet('currency', currency)
-    }
-    if (balance !== undefined && toCentavos(balance) !== existing.balance) {
-      addSet('balance', toCentavos(balance))
-    }
-    if (creditLimit !== undefined && toCentavos(creditLimit) !== existing.credit_limit) {
-      addSet('credit_limit', toCentavos(creditLimit))
-    }
-    if (
-      statementClosingDay !== undefined &&
-      statementClosingDay !== existing.statement_closing_day
-    ) {
-      addSet('statement_closing_day', statementClosingDay)
-    }
-    if (paymentDueDay !== undefined && paymentDueDay !== existing.payment_due_day) {
-      addSet('payment_due_day', paymentDueDay)
-    }
-
-    const aliasWouldChange = Boolean(normalizedAlias && existingAliasTarget !== existing.id)
-
-    if (dryRun) {
-      return {
-        success: true,
-        action: 'updated' as const,
-        dryRun: true,
-        matchedBy: match.matchedBy,
-        changed: setClauses.length > 0 || aliasWouldChange,
-        wouldUpdate: {
-          accountId: existing.id,
-          before: accountAuditSnapshot(existing),
-          after: accountAuditSnapshot(updatedAccount),
-        },
-        wouldSetAlias: normalizedAlias
-          ? { alias: normalizedAlias, accountId: existing.id, changed: aliasWouldChange }
-          : null,
-        message: `Dry run: account "${updatedAccount.name}" would be updated.`,
-      }
-    }
-
-    if (setClauses.length > 0 || aliasWouldChange) {
-      transaction(() => {
-        const currentAccount = getAccountById(existing.id)
-        if (!currentAccount) throw new Error(`Account ${existing.id} disappeared during update.`)
-        const currentModeFailure = accountModeChangeFailure(currentAccount, accountMode)
-        if (currentModeFailure) throw new Error(currentModeFailure.message)
-        if (setClauses.length > 0) {
-          setClauses.push(`updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`)
-          params.push(existing.id)
-          const updateResult = execute(
-            `UPDATE accounts SET ${setClauses.join(', ')} WHERE id = $${paramIdx}`,
-            params
-          )
-          assertSingleRowUpdated(
-            updateResult,
-            `Account ${existing.id} could not be updated safely.`
-          )
+        return {
+          success: true,
+          action: 'created' as const,
+          matchedBy: match.matchedBy,
+          account: accountAuditSnapshot(finalAccount),
+          alias: normalizedAlias,
+          message: `Created account "${finalAccount.name}".`,
         }
-        if (normalizedAlias) setAccountAlias(existing.id, normalizedAlias)
-        const balanceChanged = updatedAccount.balance !== existing.balance
+      }
+
+      const existing = match.account
+      const currentAccount = getAccountById(existing.id)
+      if (!currentAccount) {
+        return { success: false, message: `Account ${existing.id} disappeared during update.` }
+      }
+      if (!isAccountWriteEligible(currentAccount)) return archivedAccountResult(currentAccount)
+
+      const currencyFailure = accountCurrencyChangeFailure(
+        currentAccount.id,
+        currentAccount.currency,
+        currency
+      )
+      if (currencyFailure) return { success: false, message: currencyFailure }
+      const modeFailure = accountModeChangeFailure(currentAccount, accountMode)
+      if (modeFailure) return modeFailure
+
+      const currentAliasTarget = normalizedAlias
+        ? (getAccountAliases()[normalizedAlias] ?? null)
+        : null
+      if (normalizedAlias && currentAliasTarget && currentAliasTarget !== currentAccount.id) {
+        return {
+          success: false,
+          reason: 'alias_conflict',
+          message: `Alias "${normalizedAlias}" already points to account ${currentAliasTarget}. Remove or choose a different alias before reassigning it.`,
+        }
+      }
+
+      const prepared = prepareAccountUpdate(currentAccount, updateInput, true)
+      const aliasWouldChange = Boolean(normalizedAlias && currentAliasTarget !== currentAccount.id)
+      const changed =
+        prepared.setClauses.length > 0 || prepared.needsBalanceReconciliation || aliasWouldChange
+
+      if (prepared.setClauses.length > 0) {
+        const updateClauses = [
+          ...prepared.setClauses,
+          `updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
+        ]
+        assertSingleRowUpdated(
+          execute(
+            `UPDATE accounts SET ${updateClauses.join(', ')} WHERE id = $${prepared.nextParamIdx} AND is_archived = 0`,
+            [...prepared.params, currentAccount.id]
+          ),
+          `Account ${currentAccount.id} could not be updated safely.`
+        )
+      }
+
+      if (prepared.needsBalanceReconciliation) {
+        reconcileTransactionalAccountBalance({
+          accountId: currentAccount.id,
+          currency: currency ?? currentAccount.currency,
+          observedBalance: prepared.requestedBalanceCentavos,
+          storedBalanceBefore: currentAccount.balance,
+        })
+      }
+
+      if (normalizedAlias) {
+        const aliasResult = setAccountAlias(currentAccount.id, normalizedAlias)
+        if (!aliasResult.success) throw new Error(aliasResult.message)
+      }
+      const finalAccount = getAccountById(currentAccount.id)
+      if (!finalAccount || !isAccountWriteEligible(finalAccount)) {
+        throw new Error(`Account ${currentAccount.id} could not be read safely after update.`)
+      }
+      if (changed) {
+        const balanceChanged = finalAccount.balance !== currentAccount.balance
         writeAuditLog({
           entity: 'account',
-          entityId: existing.id,
+          entityId: currentAccount.id,
           action: 'update',
           before: {
-            ...accountUpdateAuditPayload(existing, balanceChanged),
+            ...accountUpdateAuditPayload(currentAccount, balanceChanged),
             ...(normalizedAlias
               ? { alias: { alias: normalizedAlias, changed: aliasWouldChange } }
               : {}),
           },
           after: {
-            ...accountUpdateAuditPayload(updatedAccount, balanceChanged),
+            ...accountUpdateAuditPayload(finalAccount, balanceChanged),
             ...(normalizedAlias
               ? {
                   alias: {
                     alias: normalizedAlias,
-                    accountId: existing.id,
+                    accountId: currentAccount.id,
                     changed: aliasWouldChange,
                   },
                 }
               : {}),
           },
         })
-      })
-    }
+      }
 
-    return {
-      success: true,
-      action: 'updated' as const,
-      matchedBy: match.matchedBy,
-      changed: setClauses.length > 0 || aliasWouldChange,
-      account: accountAuditSnapshot(updatedAccount),
-      alias: normalizedAlias,
-      message: `Updated account "${updatedAccount.name}".`,
-    }
+      return {
+        success: true,
+        action: 'updated' as const,
+        matchedBy: match.matchedBy,
+        changed,
+        account: accountAuditSnapshot(finalAccount),
+        alias: normalizedAlias,
+        message: `Updated account "${finalAccount.name}".`,
+      }
+    })
   },
 }
 
@@ -846,112 +1019,109 @@ const updateAccount: ToolDefinition = {
     accountMode,
     dryRun,
   }) => {
-    const existing = await query<AccountRow>('SELECT * FROM accounts WHERE id = $1', [accountId])
-
-    if (existing.length === 0) {
-      return { success: false, message: `Account ${accountId} not found.` }
-    }
-
-    const account = existing[0]
-    if (account.is_archived === 1) return archivedAccountResult(account)
-    const setClauses: string[] = []
-    const params: unknown[] = []
-    let paramIdx = 1
-
-    const currencyFailure = accountCurrencyChangeFailure(accountId, account.currency, currency)
-    if (currencyFailure) return { success: false, message: currencyFailure }
-    const modeFailure = accountModeChangeFailure(account, accountMode)
-    if (modeFailure) return modeFailure
-
-    if (name !== undefined) {
-      setClauses.push(`name = $${paramIdx++}`)
-      params.push(name)
-    }
-    if (type !== undefined) {
-      setClauses.push(`type = $${paramIdx++}`)
-      params.push(type)
-    }
-    if (accountMode !== undefined) {
-      setClauses.push(`account_mode = $${paramIdx++}`)
-      params.push(accountMode)
-    }
-    if (currency !== undefined) {
-      setClauses.push(`currency = $${paramIdx++}`)
-      params.push(currency)
-    }
-    if (balance !== undefined) {
-      setClauses.push(`balance = $${paramIdx++}`)
-      params.push(toCentavos(balance))
-    }
-    if (creditLimit !== undefined) {
-      setClauses.push(`credit_limit = $${paramIdx++}`)
-      params.push(toCentavos(creditLimit))
-    }
-    if (statementClosingDay !== undefined) {
-      setClauses.push(`statement_closing_day = $${paramIdx++}`)
-      params.push(statementClosingDay)
-    }
-    if (paymentDueDay !== undefined) {
-      setClauses.push(`payment_due_day = $${paramIdx++}`)
-      params.push(paymentDueDay)
-    }
-
-    if (setClauses.length === 0) {
+    const hasFieldsToUpdate = [
+      name,
+      type,
+      currency,
+      balance,
+      creditLimit,
+      statementClosingDay,
+      paymentDueDay,
+      accountMode,
+    ].some((value) => value !== undefined)
+    if (!hasFieldsToUpdate) {
       return { success: false, message: 'No fields to update.' }
     }
 
-    const updatedAccount: AccountRow = {
-      ...account,
-      name: name ?? account.name,
-      type: type ?? account.type,
-      currency: currency ?? account.currency,
-      balance: balance !== undefined ? toCentavos(balance) : account.balance,
-      credit_limit: creditLimit !== undefined ? toCentavos(creditLimit) : account.credit_limit,
-      statement_closing_day: statementClosingDay ?? account.statement_closing_day,
-      payment_due_day: paymentDueDay ?? account.payment_due_day,
-      account_mode: accountMode ?? account.account_mode,
+    const updateInput = {
+      name,
+      type,
+      currency,
+      balance,
+      creditLimit,
+      statementClosingDay,
+      paymentDueDay,
+      accountMode,
     }
 
     if (dryRun) {
+      const existing = await query<AccountRow>('SELECT * FROM accounts WHERE id = $1', [accountId])
+      if (existing.length === 0) {
+        return { success: false, message: `Account ${accountId} not found.` }
+      }
+      const account = existing[0]
+      if (!isAccountWriteEligible(account)) return archivedAccountResult(account)
+      const currencyFailure = accountCurrencyChangeFailure(accountId, account.currency, currency)
+      if (currencyFailure) return { success: false, message: currencyFailure }
+      const modeFailure = accountModeChangeFailure(account, accountMode)
+      if (modeFailure) return modeFailure
+      const prepared = prepareAccountUpdate(account, updateInput, false)
       return {
         success: true,
         dryRun: true,
         wouldUpdate: {
           accountId,
           before: accountAuditSnapshot(account),
-          after: accountAuditSnapshot(updatedAccount),
+          after: accountAuditSnapshot(prepared.updatedAccount),
         },
-        message: `Dry run: account "${updatedAccount.name}" would be updated.`,
+        message: `Dry run: account "${prepared.updatedAccount.name}" would be updated.`,
       }
     }
 
-    setClauses.push(`updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`)
-    params.push(accountId)
-
-    transaction(() => {
+    return transaction(() => {
       const currentAccount = getAccountById(accountId)
-      if (!currentAccount) throw new Error(`Account ${accountId} disappeared during update.`)
-      const currentModeFailure = accountModeChangeFailure(currentAccount, accountMode)
-      if (currentModeFailure) throw new Error(currentModeFailure.message)
-      const updateResult = execute(
-        `UPDATE accounts SET ${setClauses.join(', ')} WHERE id = $${paramIdx}`,
-        params
+      if (!currentAccount) return { success: false, message: `Account ${accountId} not found.` }
+      if (!isAccountWriteEligible(currentAccount)) return archivedAccountResult(currentAccount)
+
+      const currencyFailure = accountCurrencyChangeFailure(
+        accountId,
+        currentAccount.currency,
+        currency
       )
-      assertSingleRowUpdated(updateResult, `Account ${accountId} could not be updated safely.`)
-      const balanceChanged = updatedAccount.balance !== account.balance
+      if (currencyFailure) return { success: false, message: currencyFailure }
+      const modeFailure = accountModeChangeFailure(currentAccount, accountMode)
+      if (modeFailure) return modeFailure
+
+      const prepared = prepareAccountUpdate(currentAccount, updateInput, false)
+      const updateClauses = [
+        ...prepared.setClauses,
+        `updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
+      ]
+      assertSingleRowUpdated(
+        execute(
+          `UPDATE accounts SET ${updateClauses.join(', ')} WHERE id = $${prepared.nextParamIdx} AND is_archived = 0`,
+          [...prepared.params, accountId]
+        ),
+        `Account ${accountId} could not be updated safely.`
+      )
+
+      if (prepared.needsBalanceReconciliation) {
+        reconcileTransactionalAccountBalance({
+          accountId,
+          currency: currency ?? currentAccount.currency,
+          observedBalance: prepared.requestedBalanceCentavos,
+          storedBalanceBefore: currentAccount.balance,
+        })
+      }
+
+      const finalAccount = getAccountById(accountId)
+      if (!finalAccount || !isAccountWriteEligible(finalAccount)) {
+        throw new Error(`Account ${accountId} could not be read safely after update.`)
+      }
+      const balanceChanged = finalAccount.balance !== currentAccount.balance
       writeAuditLog({
         entity: 'account',
         entityId: accountId,
         action: 'update',
-        before: accountUpdateAuditPayload(account, balanceChanged),
-        after: accountUpdateAuditPayload(updatedAccount, balanceChanged),
+        before: accountUpdateAuditPayload(currentAccount, balanceChanged),
+        after: accountUpdateAuditPayload(finalAccount, balanceChanged),
       })
-    })
 
-    return {
-      success: true,
-      message: `Updated account "${name ?? account.name}".`,
-    }
+      return {
+        success: true,
+        message: `Updated account "${finalAccount.name}".`,
+      }
+    })
   },
 }
 
@@ -986,7 +1156,7 @@ const setAccountAliasTool: ToolDefinition = {
       return { success: false, message: `Account ${accountId} not found.` }
     }
 
-    if (existing[0].is_archived === 1) return archivedAccountResult(existing[0])
+    if (!isAccountWriteEligible(existing[0])) return archivedAccountResult(existing[0])
 
     if (dryRun) {
       const normalizedAlias = normalizeAccountAlias(alias)
@@ -1102,24 +1272,77 @@ const balanceSnapshot: ToolDefinition = {
   },
 }
 
+type LedgerCandidateRow = {
+  id: string
+  type: string
+  amount: number
+  currency: string | null
+  status: string | null
+  ledger_treatment: string | null
+  transaction_kind: string | null
+  is_archived: number | null
+  account_id: string
+  source_account_id: string | null
+  source_currency: string | null
+  source_account_mode: string | null
+  transfer_to_account_id: string | null
+  destination_account_id: string | null
+  destination_currency: string | null
+  destination_account_mode: string | null
+}
+
 function getEffectiveLedgerBalance(accountId: string): number {
-  return (
-    query<{ balance: number }>(
-      `SELECT COALESCE(SUM(CASE
-         WHEN t.type = 'income' AND t.account_id = $1 THEN t.amount
-         WHEN t.type = 'expense' AND t.account_id = $2 THEN -t.amount
-         WHEN t.type = 'transfer' AND t.account_id = $3 THEN -t.amount
-         WHEN t.type = 'transfer' AND t.transfer_to_account_id = $4 THEN t.amount
-         ELSE 0
-       END), 0) AS balance
+  const rows = query<LedgerCandidateRow>(
+    `SELECT t.id, t.type, t.amount, t.currency, t.status, t.ledger_treatment, t.transaction_kind,
+            t.is_archived, t.account_id,
+            source.id AS source_account_id, source.currency AS source_currency,
+            source.account_mode AS source_account_mode,
+            t.transfer_to_account_id,
+            destination.id AS destination_account_id,
+            destination.currency AS destination_currency,
+            destination.account_mode AS destination_account_mode
        FROM transactions t
-       WHERE (t.account_id = $5 OR t.transfer_to_account_id = $6)
-         AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
-         AND COALESCE(t.ledger_treatment, 'normal') = 'normal'
-         AND COALESCE(t.is_archived, 0) = 0`,
-      [accountId, accountId, accountId, accountId, accountId, accountId]
-    )[0]?.balance ?? 0
+       LEFT JOIN accounts source ON source.id = t.account_id
+       LEFT JOIN accounts destination ON destination.id = t.transfer_to_account_id
+      WHERE t.account_id = $1 OR t.transfer_to_account_id = $2
+      ORDER BY t.id`,
+    [accountId, accountId]
   )
+
+  return rows.reduce((balance, row) => {
+    if (!row.source_account_id || row.source_currency === null) {
+      throw new Error(`Transaction ${row.id} has no valid source account context.`)
+    }
+    const entry: LedgerEntry = {
+      type: row.type as LedgerEntry['type'],
+      amountCentavos: row.amount,
+      currency: row.currency as LedgerEntry['currency'],
+      account: {
+        accountId: row.source_account_id,
+        currency: row.source_currency,
+        accountMode: row.source_account_mode as LedgerEntry['account']['accountMode'],
+      },
+      transferToAccount:
+        row.destination_account_id && row.destination_currency !== null
+          ? {
+              accountId: row.destination_account_id,
+              currency: row.destination_currency,
+              accountMode: row.destination_account_mode as LedgerEntry['account']['accountMode'],
+            }
+          : null,
+      status: row.status,
+      ledgerTreatment: row.ledger_treatment as LedgerEntry['ledgerTreatment'],
+      transactionKind: row.transaction_kind as LedgerEntry['transactionKind'],
+      isArchived: row.is_archived as LedgerEntry['isArchived'],
+    }
+    const result = signedLedgerDeltaForAccount(entry, accountId)
+    if (result.status !== 'applied') return balance
+    const next = balance + result.deltaCentavos
+    if (!Number.isSafeInteger(next)) {
+      throw new RangeError(`Effective ledger balance for account ${accountId} is outside range.`)
+    }
+    return next
+  }, 0)
 }
 
 function insertReconciliationRecord(input: {
@@ -1162,6 +1385,89 @@ function insertReconciliationRecord(input: {
       input.note ?? null,
     ]
   )
+}
+
+function reconcileTransactionalAccountBalance(input: {
+  accountId: string
+  currency: string
+  observedBalance: number
+  storedBalanceBefore: number
+  date?: string
+}) {
+  const ledgerBalanceBefore = getEffectiveLedgerBalance(input.accountId)
+  const adjustment = calculateReconciliationAdjustment({
+    accountMode: 'transactional',
+    observedBalanceCentavos: input.observedBalance,
+    effectiveLedgerBalanceCentavos: ledgerBalanceBefore,
+  })
+  if (adjustment.status !== 'ledger_adjustment') {
+    throw new Error('Transactional reconciliation policy returned an observed-only adjustment.')
+  }
+
+  const reconciliationId = generateId()
+  const reconciliationDate = input.date ?? dayjs().format('YYYY-MM-DD')
+  insertReconciliationRecord({
+    id: reconciliationId,
+    accountId: input.accountId,
+    date: reconciliationDate,
+    actualBalance: input.observedBalance,
+    storedBalanceBefore: input.storedBalanceBefore,
+    ledgerBalanceBefore,
+    ledgerBalanceAfter: input.observedBalance,
+    adjustmentAmount: adjustment.adjustmentCentavos,
+  })
+
+  let adjustmentTransactionId: string | null = null
+  if (adjustment.bridge) {
+    adjustmentTransactionId = generateId()
+    execute(
+      `INSERT INTO transactions (
+         id, account_id, category_id, transfer_to_account_id, type, amount, currency,
+         description, notes, status, source, note, ledger_treatment, reporting_treatment,
+         transaction_kind, reconciliation_id, is_archived, date
+       ) VALUES ($1, $2, NULL, NULL, $3, $4, $5, 'Balance reconciliation bridge', NULL,
+         'posted', NULL, NULL, 'normal', $6, $7, $8, 0, $9)`,
+      [
+        adjustmentTransactionId,
+        input.accountId,
+        adjustment.bridge.type,
+        adjustment.bridge.amountCentavos,
+        input.currency,
+        adjustment.bridge.reportingTreatment,
+        adjustment.bridge.transactionKind,
+        reconciliationId,
+        reconciliationDate,
+      ]
+    )
+    assertSingleRowUpdated(
+      execute('UPDATE account_reconciliations SET adjustment_transaction_id = $1 WHERE id = $2', [
+        adjustmentTransactionId,
+        reconciliationId,
+      ]),
+      `Reconciliation ${reconciliationId} could not be linked to its bridge.`
+    )
+  }
+
+  assertSingleRowUpdated(
+    execute(
+      "UPDATE accounts SET balance = $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2 AND is_archived = 0",
+      [input.observedBalance, input.accountId]
+    ),
+    `Account ${input.accountId} could not be reconciled safely.`
+  )
+  const verifiedLedgerBalance = getEffectiveLedgerBalance(input.accountId)
+  if (verifiedLedgerBalance !== input.observedBalance) {
+    throw new Error(
+      `Reconciliation verification failed: ledger ${verifiedLedgerBalance} did not match observed balance ${input.observedBalance}.`
+    )
+  }
+
+  return {
+    reconciliationId,
+    adjustmentTransactionId,
+    adjustmentCentavos: adjustment.adjustmentCentavos,
+    verifiedLedgerBalance,
+  }
 }
 
 const reconcile: ToolDefinition = {
@@ -1229,6 +1535,7 @@ const reconcile: ToolDefinition = {
     }
 
     const accountRow = rows[0]
+    if (!isAccountWriteEligible(accountRow)) return archivedAccountResult(accountRow)
     const actualCentavos = toCentavos(actualBalance)
     const ledgerBalanceCentavos = getEffectiveLedgerBalance(accountRow.id)
     const ledgerDifferenceCentavos = actualCentavos - ledgerBalanceCentavos
@@ -1293,6 +1600,9 @@ const reconcile: ToolDefinition = {
       if (!accountRow) {
         throw new Error(`Account ${resolvedAccount.id} disappeared during reconciliation.`)
       }
+      if (!isAccountWriteEligible(accountRow)) {
+        throw new Error(archivedAccountResult(accountRow).message)
+      }
       const ledgerBalanceCentavos = getEffectiveLedgerBalance(accountRow.id)
       const ledgerDifferenceCentavos = actualCentavos - ledgerBalanceCentavos
       const storedDifferenceCentavos = actualCentavos - accountRow.balance
@@ -1343,7 +1653,7 @@ const reconcile: ToolDefinition = {
         })
         assertSingleRowUpdated(
           execute(
-            "UPDATE accounts SET balance = $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
+            "UPDATE accounts SET balance = $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2 AND is_archived = 0",
             [actualCentavos, accountRow.id]
           ),
           `Account ${accountRow.id} could not be reconciled safely.`
@@ -1432,9 +1742,12 @@ const reconcile: ToolDefinition = {
         ]),
         `Reconciliation ${reconciliationId} could not be linked to its bridge.`
       )
-      execute(
-        "UPDATE accounts SET balance = $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
-        [actualCentavos, accountRow.id]
+      assertSingleRowUpdated(
+        execute(
+          "UPDATE accounts SET balance = $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2 AND is_archived = 0",
+          [actualCentavos, accountRow.id]
+        ),
+        `Account ${accountRow.id} could not be reconciled safely.`
       )
       const verifiedLedgerCentavos = getEffectiveLedgerBalance(accountRow.id)
       if (verifiedLedgerCentavos !== actualCentavos) {
@@ -1592,6 +1905,7 @@ const finalizeStagedStatementHistory: ToolDefinition = {
     if (!resolvedAccount.success) return { success: false, message: resolvedAccount.message }
     const accountRow = getAccountById(resolvedAccount.id)
     if (!accountRow) return { success: false, message: `Account ${resolvedAccount.id} not found.` }
+    if (!isAccountWriteEligible(accountRow)) return archivedAccountResult(accountRow)
     if ((accountRow.account_mode ?? 'transactional') !== 'transactional') {
       return {
         success: false,
@@ -1647,6 +1961,9 @@ const finalizeStagedStatementHistory: ToolDefinition = {
       const currentAccount = getAccountById(accountRow.id)
       if (!currentAccount)
         throw new Error(`Account ${accountRow.id} disappeared during finalization.`)
+      if (!isAccountWriteEligible(currentAccount)) {
+        throw new Error(archivedAccountResult(currentAccount).message)
+      }
       if ((currentAccount.account_mode ?? 'transactional') !== 'transactional') {
         throw new Error('Account mode changed after preview. Preview the staged batch again.')
       }
@@ -1739,7 +2056,7 @@ const finalizeStagedStatementHistory: ToolDefinition = {
       }
       assertSingleRowUpdated(
         execute(
-          "UPDATE accounts SET balance = $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
+          "UPDATE accounts SET balance = $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2 AND is_archived = 0",
           [actualCentavos, accountRow.id]
         ),
         `Account ${accountRow.id} could not be updated after finalization.`
@@ -1808,7 +2125,7 @@ const deleteAccount: ToolDefinition = {
     }
 
     const account = existing[0]
-    if (account.is_archived === 1) return archivedAccountResult(account)
+    if (!isAccountWriteEligible(account)) return archivedAccountResult(account)
 
     const getReferenceCounts = () => {
       const txCount = query<{ count: number }>(

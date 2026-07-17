@@ -4,6 +4,7 @@ import { Link } from 'react-router'
 import { TrendingUp, TrendingDown, Target, Plus, ArrowRight } from 'lucide-react'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
+import { isCashFlowEligible } from '@shikin/finance-core'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
@@ -23,10 +24,6 @@ dayjs.extend(relativeTime)
 
 type SpendingGraphMode = 'trend' | 'categories' | 'movement'
 
-function isPostedLedgerTransaction(tx: Pick<TransactionWithDetails, 'status'>): boolean {
-  return (tx.status ?? 'posted') !== 'pending'
-}
-
 export function Dashboard() {
   const { t } = useTranslation('dashboard')
   const { t: tTx } = useTranslation('transactions')
@@ -45,8 +42,9 @@ export function Dashboard() {
   } = useTransactionStore()
   const { goals, fetchError: goalsFetchError, fetch: fetchGoals } = useGoalStore()
   const {
-    preferredCurrency,
     error: currencyError,
+    preferredCurrency,
+    convertToPreferred,
     getTotalBalanceInPreferred,
     loadRates,
   } = useCurrencyStore()
@@ -67,25 +65,36 @@ export function Dashboard() {
     }
   }, [transactions.length, txLoading, loadInsights])
 
-  const totalBalance = useMemo(() => accounts.reduce((sum, a) => sum + a.balance, 0), [accounts])
-
-  // Check if accounts have mixed currencies
-  const hasMixedCurrencies = useMemo(() => {
-    const currencies = new Set(accounts.map((a) => a.currency))
-    return currencies.size > 1
-  }, [accounts])
-
-  // Converted total balance in preferred currency
-  const convertedTotalBalance = useMemo(() => {
-    if (!hasMixedCurrencies) return totalBalance
-    return getTotalBalanceInPreferred(accounts)
-  }, [hasMixedCurrencies, totalBalance, accounts, getTotalBalanceInPreferred])
+  const totalBalanceResult = useMemo(
+    () => getTotalBalanceInPreferred(accounts),
+    [accounts, getTotalBalanceInPreferred]
+  )
+  const invalidCurrencyDetails =
+    !totalBalanceResult.complete && totalBalanceResult.reason === 'invalid_currency_data'
+      ? [
+          ...(totalBalanceResult.invalidCurrencies ?? []).map((diagnostic) => {
+            const owner =
+              diagnostic.accountName ?? diagnostic.accountId ?? t('currency.preferredCurrency')
+            const value = diagnostic.value || t('currency.blankValue')
+            return `${owner} (${value})`
+          }),
+          ...(totalBalanceResult.invalidRates ?? []).map((diagnostic) =>
+            t('currency.invalidRate', {
+              from: diagnostic.fromCurrency || t('currency.blankValue'),
+              to: diagnostic.toCurrency || t('currency.blankValue'),
+              rate: diagnostic.rate || t('currency.blankValue'),
+            })
+          ),
+        ].join(', ')
+      : ''
 
   const {
     monthlyIncome,
     monthlyExpenses,
     previousIncome,
     previousExpenses,
+    cashFlowComplete,
+    cashFlowMissingCurrencies,
     spendingIntelligence,
     monthlySpendingGraph,
   } = useMemo(() => {
@@ -114,23 +123,42 @@ export function Dashboard() {
     let lastExpenses = 0
     const current = new Map<string, { name: string; color: string; amount: number }>()
     const previous = new Map<string, { name: string; color: string; amount: number }>()
+    const incompleteCurrencies = new Set<string>()
+    const graphStart = graphMonths[0]?.start ?? currentStart
 
     for (const tx of transactions) {
-      if (!isPostedLedgerTransaction(tx)) continue
+      if (
+        !isCashFlowEligible({
+          type: tx.type,
+          status: tx.status ?? 'posted',
+          reportingTreatment: tx.reporting_treatment ?? 'normal',
+          transactionKind: tx.transaction_kind ?? 'standard',
+          isArchived: tx.is_archived ?? 0,
+        })
+      )
+        continue
+
+      if (tx.date < graphStart || tx.date > currentEnd) continue
+      const converted = convertToPreferred(tx.amount, tx.currency)
+      if (!converted.complete) {
+        incompleteCurrencies.add(tx.currency?.trim().toUpperCase() || t('currency.blankValue'))
+        continue
+      }
+      const amount = converted.amountCentavos
 
       if (tx.date >= currentStart && tx.date <= currentEnd) {
-        if (tx.type === 'income') currentIncome += tx.amount
-        else if (tx.type === 'expense') currentExpenses += tx.amount
+        if (tx.type === 'income') currentIncome += amount
+        else if (tx.type === 'expense') currentExpenses += amount
       } else if (tx.date >= previousStart && tx.date <= previousEnd) {
-        if (tx.type === 'income') lastIncome += tx.amount
-        else if (tx.type === 'expense') lastExpenses += tx.amount
+        if (tx.type === 'income') lastIncome += amount
+        else if (tx.type === 'expense') lastExpenses += amount
       }
 
       if (tx.type !== 'expense') continue
 
       const graphMonth = graphMonthsByKey.get(tx.date.slice(0, 7))
       if (graphMonth && tx.date >= graphMonth.start && tx.date <= graphMonth.end) {
-        graphMonth.amount += tx.amount
+        graphMonth.amount += amount
       }
 
       let target: typeof current | typeof previous | null = null
@@ -148,7 +176,7 @@ export function Dashboard() {
       target.set(key, {
         name: key,
         color,
-        amount: (existing?.amount ?? 0) + tx.amount,
+        amount: (existing?.amount ?? 0) + amount,
       })
     }
 
@@ -199,6 +227,8 @@ export function Dashboard() {
       monthlyExpenses: currentExpenses,
       previousIncome: lastIncome,
       previousExpenses: lastExpenses,
+      cashFlowComplete: incompleteCurrencies.size === 0,
+      cashFlowMissingCurrencies: [...incompleteCurrencies].sort(),
       spendingIntelligence: {
         categories,
         currentTotal,
@@ -209,7 +239,7 @@ export function Dashboard() {
       },
       monthlySpendingGraph: { months, maxAmount },
     }
-  }, [transactions])
+  }, [transactions, convertToPreferred, t])
 
   const savingsRate = useMemo(() => {
     if (monthlyIncome <= 0) return 0
@@ -268,15 +298,46 @@ export function Dashboard() {
           <div className="flex h-full flex-col justify-between gap-12">
             <div>
               <p className="text-muted-foreground text-sm font-bold">Net Worth</p>
-              <p className="mt-10 font-mono text-4xl font-bold tracking-[-0.08em] sm:text-5xl md:text-[54px]">
-                {hasMixedCurrencies
-                  ? formatMoney(convertedTotalBalance, preferredCurrency)
-                  : formatMoney(totalBalance)}
-              </p>
+              {totalBalanceResult.complete ? (
+                <p className="mt-10 font-mono text-4xl font-bold tracking-[-0.08em] sm:text-5xl md:text-[54px]">
+                  {formatMoney(
+                    totalBalanceResult.amountCentavos,
+                    totalBalanceResult.preferredCurrency
+                  )}
+                </p>
+              ) : (
+                <div
+                  className="border-warning/30 bg-warning/8 mt-8 max-w-xl rounded-xl border px-4 py-3"
+                  role="alert"
+                >
+                  <p className="text-warning font-semibold">{t('currency.totalUnavailable')}</p>
+                  <p className="text-muted-foreground mt-1 text-sm">
+                    {totalBalanceResult.reason === 'invalid_currency_data'
+                      ? t('currency.invalidData', { details: invalidCurrencyDetails })
+                      : t('currency.missingRates', {
+                          currencies: totalBalanceResult.missingCurrencies.join(', '),
+                        })}
+                  </p>
+                </div>
+              )}
             </div>
             <div className="flex flex-col gap-2 text-sm font-bold sm:flex-row sm:items-center sm:justify-between">
-              <span className={savingsRate >= 0 ? 'text-success' : 'text-warning'}>
-                <span>{savingsRate}%</span> savings rate
+              <span
+                className={
+                  cashFlowComplete
+                    ? savingsRate >= 0
+                      ? 'text-success'
+                      : 'text-warning'
+                    : 'text-warning'
+                }
+              >
+                {cashFlowComplete ? (
+                  <>
+                    <span>{savingsRate}%</span> savings rate
+                  </>
+                ) : (
+                  t('currency.derivedUnavailable')
+                )}
               </span>
               <span className="text-muted-foreground text-xs font-semibold">Updated just now</span>
             </div>
@@ -287,17 +348,25 @@ export function Dashboard() {
             icon={<TrendingUp size={16} />}
             iconColor="text-success"
             label={t('cards.monthlyIncome')}
-            value={formatMoney(monthlyIncome)}
+            value={cashFlowComplete ? formatMoney(monthlyIncome, preferredCurrency) : '—'}
             valueColor="text-success"
-            subtitle={`${incomeDelta >= 0 ? '+' : '-'}${formatMoney(Math.abs(incomeDelta))} vs last month`}
+            subtitle={
+              cashFlowComplete
+                ? `${incomeDelta >= 0 ? '+' : '-'}${formatMoney(Math.abs(incomeDelta), preferredCurrency)} vs last month`
+                : `${t('currency.derivedUnavailable')}: ${cashFlowMissingCurrencies.join(', ')}`
+            }
           />
           <MetricCard
             icon={<TrendingDown size={16} />}
             iconColor="text-warning"
             label={t('cards.monthlyExpenses')}
-            value={formatMoney(monthlyExpenses)}
+            value={cashFlowComplete ? formatMoney(monthlyExpenses, preferredCurrency) : '—'}
             valueColor="text-warning"
-            subtitle={`${expenseDelta >= 0 ? '+' : '-'}${formatMoney(Math.abs(expenseDelta))} vs last month`}
+            subtitle={
+              cashFlowComplete
+                ? `${expenseDelta >= 0 ? '+' : '-'}${formatMoney(Math.abs(expenseDelta), preferredCurrency)} vs last month`
+                : `${t('currency.derivedUnavailable')}: ${cashFlowMissingCurrencies.join(', ')}`
+            }
           />
         </div>
       </div>
@@ -345,7 +414,16 @@ export function Dashboard() {
               </div>
             </div>
 
-            {spendingGraphMode === 'trend' && (
+            {!cashFlowComplete && (
+              <div
+                className="border-warning/30 bg-warning/8 text-warning flex min-h-[360px] items-center justify-center rounded-2xl border p-6 text-center text-sm"
+                role="alert"
+              >
+                {t('currency.derivedUnavailable')}: {cashFlowMissingCurrencies.join(', ')}
+              </div>
+            )}
+
+            {cashFlowComplete && spendingGraphMode === 'trend' && (
               <div className="flex min-h-[360px] items-end justify-between gap-3 rounded-2xl border border-white/[0.04] bg-black/10 px-3 py-4">
                 {monthlySpendingGraph.months.map((month) => {
                   const height = Math.max(
@@ -361,7 +439,7 @@ export function Dashboard() {
                             month.isCurrent ? 'bg-accent-hover' : 'bg-white/[0.14]'
                           )}
                           style={{ height }}
-                          title={`${month.label}: ${formatMoney(month.amount)}`}
+                          title={`${month.label}: ${formatMoney(month.amount, preferredCurrency)}`}
                         />
                       </div>
                       <div className="text-center">
@@ -369,7 +447,7 @@ export function Dashboard() {
                           {month.label}
                         </p>
                         <p className="font-mono text-[10px] font-bold">
-                          {formatMoney(month.amount)}
+                          {formatMoney(month.amount, preferredCurrency)}
                         </p>
                       </div>
                     </div>
@@ -378,7 +456,8 @@ export function Dashboard() {
               </div>
             )}
 
-            {spendingGraphMode === 'categories' &&
+            {cashFlowComplete &&
+              spendingGraphMode === 'categories' &&
               (spendingIntelligence.categories.some((category) => category.current > 0) ? (
                 <div className="min-h-[360px] space-y-3 rounded-2xl border border-white/[0.04] bg-black/10 p-4">
                   {spendingIntelligence.categories
@@ -395,7 +474,7 @@ export function Dashboard() {
                             <span className="truncate font-semibold">{category.name}</span>
                           </div>
                           <span className="font-mono text-xs font-bold">
-                            {formatMoney(category.current)}
+                            {formatMoney(category.current, preferredCurrency)}
                           </span>
                         </div>
                         <div className="h-3 overflow-hidden rounded-full bg-white/[0.06]">
@@ -414,7 +493,8 @@ export function Dashboard() {
                 <SpendingGraphEmpty />
               ))}
 
-            {spendingGraphMode === 'movement' &&
+            {cashFlowComplete &&
+              spendingGraphMode === 'movement' &&
               (spendingIntelligence.categories.some((category) => category.current > 0) ? (
                 <div className="min-h-[360px] space-y-3 rounded-2xl border border-white/[0.04] bg-black/10 p-4">
                   <div className="flex items-center justify-between gap-3">
@@ -443,7 +523,7 @@ export function Dashboard() {
                             )}
                           >
                             {category.change >= 0 ? '+' : '-'}
-                            {formatMoney(Math.abs(category.change))}
+                            {formatMoney(Math.abs(category.change), preferredCurrency)}
                           </span>
                         </div>
                         <div className="grid grid-cols-2 gap-1.5">
@@ -482,15 +562,19 @@ export function Dashboard() {
             <div>
               <p className="text-muted-foreground text-xs font-bold">Projected runway</p>
               <p className="mt-2 font-mono text-2xl font-bold tracking-[-0.04em]">
-                {monthlyExpenses > 0
-                  ? `${Math.max(0, convertedTotalBalance / monthlyExpenses).toFixed(1)} months`
-                  : 'Stable'}
+                {totalBalanceResult.complete && cashFlowComplete
+                  ? monthlyExpenses > 0
+                    ? `${Math.max(0, totalBalanceResult.amountCentavos / monthlyExpenses).toFixed(1)} months`
+                    : 'Stable'
+                  : t('currency.derivedUnavailable')}
               </p>
             </div>
             <div>
               <p className="text-muted-foreground text-xs font-bold">Safe to spend</p>
               <p className="text-success mt-2 font-mono text-2xl font-bold tracking-[-0.04em]">
-                {formatMoney(Math.max(0, monthlyIncome - monthlyExpenses))}
+                {cashFlowComplete
+                  ? formatMoney(Math.max(0, monthlyIncome - monthlyExpenses), preferredCurrency)
+                  : t('currency.derivedUnavailable')}
               </p>
             </div>
           </div>

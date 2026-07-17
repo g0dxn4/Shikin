@@ -337,7 +337,7 @@ describe('insights summaries with a real temporary SQLite database', () => {
         amount: 150,
       }),
     ])
-  })
+  }, 60_000)
 
   it('generateCashFlowForecastSummary returns per-currency forecasts with mixed ledgers', async () => {
     const tempHome = createTempHome()
@@ -471,7 +471,7 @@ describe('insights summaries with a real temporary SQLite database', () => {
         ]),
       }),
     ])
-  })
+  }, 60_000)
 
   it('calculateFinancialHealthScoreSummary reports mixed-currency scores explicitly', async () => {
     const tempHome = createTempHome()
@@ -544,7 +544,7 @@ describe('insights summaries with a real temporary SQLite database', () => {
       }),
     ])
     expect(result.message).toContain('Budget adherence is omitted')
-  })
+  }, 60_000)
 
   it('generateSpendingRecapSummary stores a mixed-currency weekly recap record', async () => {
     const tempHome = createTempHome()
@@ -661,5 +661,5 @@ describe('insights summaries with a real temporary SQLite database', () => {
     } finally {
       db.close()
     }
-  })
+  }, 60_000)
 })

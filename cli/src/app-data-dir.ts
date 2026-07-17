@@ -18,6 +18,7 @@ export const PRIVATE_FILE_MODE = 0o600
 const DB_FILE_NAME = 'shikin.db'
 const SQLITE_FILE_SUFFIXES = ['', '-wal', '-shm', '-journal']
 const SQLITE_SIDECAR_SUFFIXES = SQLITE_FILE_SUFFIXES.slice(1)
+const RESPECT_XDG_DATA_HOME_VALUE = '1'
 
 function isAbsolutePath(path: string, platform: NodeJS.Platform): boolean {
   return platform === 'win32' ? win32.isAbsolute(path) : isAbsolute(path)
@@ -87,6 +88,20 @@ export function getAppDataDir(
   platform: NodeJS.Platform = process.platform
 ): string {
   return joinPath(platform, getPlatformDataHome(env, platform), SHIKIN_APP_ID)
+}
+
+function shouldRespectConfiguredXdgDataHome(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform
+): boolean {
+  if (platform === 'darwin' || platform === 'win32') return false
+
+  const configuredDataHome = env.XDG_DATA_HOME
+  return (
+    env.SHIKIN_RESPECT_XDG_DATA_HOME === RESPECT_XDG_DATA_HOME_VALUE &&
+    Boolean(configuredDataHome) &&
+    isAbsolutePath(configuredDataHome || '', 'linux')
+  )
 }
 
 function getPlatformConfigHome(
@@ -327,8 +342,15 @@ export function prepareAppDataDir(
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform
 ): string {
-  const appDataDir = migrateLegacyAppDataDir(env, platform)
-  migrateAppConfigSqliteFamily(env, appDataDir, platform)
+  const respectConfiguredXdgDataHome = shouldRespectConfiguredXdgDataHome(env, platform)
+  const appDataDir = respectConfiguredXdgDataHome
+    ? getAppDataDir(env, platform)
+    : migrateLegacyAppDataDir(env, platform)
+
+  if (!respectConfiguredXdgDataHome) {
+    migrateAppConfigSqliteFamily(env, appDataDir, platform)
+  }
+
   ensurePrivateDirectory(appDataDir)
   return appDataDir
 }

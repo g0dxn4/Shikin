@@ -12,6 +12,7 @@ import {
 import { join, resolve } from 'node:path'
 import Database from 'better-sqlite3'
 import { ulid } from 'ulidx'
+import { advanceAnchoredRecurrence, advanceLegacyRecurrence } from '@shikin/finance-core'
 import {
   PRIVATE_DIR_MODE,
   PRIVATE_FILE_MODE,
@@ -19,7 +20,7 @@ import {
   hardenPathMode,
   prepareAppDataDir,
 } from './app-data-dir.mjs'
-import { checkpointWal, importDatabaseBuffer } from './data-server-db.mjs'
+import { exportDatabaseBuffer, importDatabaseBuffer } from './data-server-db.mjs'
 import {
   buildBridgeCorsHeaders,
   safePathNoSymlinks,
@@ -85,6 +86,7 @@ const CURRENT_SHIKIN_MIGRATIONS = [
   '017_investment_type_cetes',
   '018_placeholder_transactions',
   '019_financial_semantics',
+  '020_quote_recurrence_import_identity',
 ]
 
 const CURRENT_SHIKIN_SCHEMA = {
@@ -127,21 +129,33 @@ const CURRENT_SHIKIN_SCHEMA = {
     'reconciliation_id',
     'matched_transaction_id',
     'is_archived',
+    'import_source',
+    'import_external_id',
+    'import_fingerprint',
   ],
   subscriptions: ['id', 'name', 'amount', 'billing_cycle', 'next_billing_date'],
   budgets: ['id', 'name', 'amount', 'period'],
   budget_periods: ['id', 'budget_id', 'start_date', 'end_date', 'spent'],
   investments: ['id', 'symbol', 'name', 'type', 'shares'],
-  stock_prices: ['id', 'symbol', 'price', 'date'],
+  stock_prices: ['id', 'symbol', 'price', 'currency', 'quote_currency', 'date'],
   exchange_rates: ['id', 'from_currency', 'to_currency', 'rate', 'date'],
   settings: ['key', 'value', 'updated_at'],
   extension_data: ['id', 'extension_id', 'key', 'value'],
   category_rules: ['id', 'pattern', 'category_id'],
-  recurring_rules: ['id', 'description', 'amount', 'currency', 'account_id', 'next_date'],
+  recurring_rules: [
+    'id',
+    'description',
+    'amount',
+    'currency',
+    'account_id',
+    'next_date',
+    'anchor_kind',
+    'anchor_day',
+  ],
   goals: ['id', 'name', 'target_amount', 'current_amount'],
   recaps: ['id', 'type', 'period_start', 'period_end', 'summary'],
   transaction_splits: ['id', 'transaction_id', 'amount'],
-  net_worth_snapshots: ['id', 'date', 'net_worth'],
+  net_worth_snapshots: ['id', 'date', 'net_worth', 'currency'],
   account_balance_history: ['id', 'account_id', 'date', 'balance'],
   audit_log: [
     'id',
@@ -521,6 +535,9 @@ CREATE TABLE IF NOT EXISTS transactions (
   tags TEXT DEFAULT '[]',
   is_recurring INTEGER NOT NULL DEFAULT 0,
   transfer_to_account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+  import_source TEXT,
+  import_external_id TEXT,
+  import_fingerprint TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
@@ -582,6 +599,7 @@ CREATE TABLE IF NOT EXISTS stock_prices (
   symbol TEXT NOT NULL,
   price INTEGER NOT NULL,
   currency TEXT NOT NULL DEFAULT 'USD',
+  quote_currency TEXT NOT NULL DEFAULT 'USD',
   date TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   UNIQUE(symbol, date)
@@ -703,6 +721,8 @@ CREATE TABLE IF NOT EXISTS recurring_rules (
   tags TEXT DEFAULT '',
   notes TEXT,
   active INTEGER DEFAULT 1,
+  anchor_kind TEXT CHECK (anchor_kind IN ('fixed_day', 'end_of_month')),
+  anchor_day INTEGER CHECK (anchor_day BETWEEN 1 AND 31),
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
@@ -1223,6 +1243,43 @@ WHERE (currency IS NULL OR TRIM(currency) = '') AND account_id IS NOT NULL;
     applied.add('019_financial_semantics')
   }
 
+  if (!applied.has('020_quote_recurrence_import_identity')) {
+    ensureTableColumn(db, 'stock_prices', 'quote_currency', 'TEXT')
+    db.prepare(
+      `UPDATE stock_prices SET quote_currency = UPPER(COALESCE(NULLIF(TRIM(currency), ''), 'USD')) WHERE quote_currency IS NULL OR TRIM(quote_currency) = ''`
+    ).run()
+    ensureTableColumn(
+      db,
+      'recurring_rules',
+      'anchor_kind',
+      `TEXT CHECK (anchor_kind IN ('fixed_day', 'end_of_month'))`
+    )
+    ensureTableColumn(
+      db,
+      'recurring_rules',
+      'anchor_day',
+      'INTEGER CHECK (anchor_day BETWEEN 1 AND 31)'
+    )
+    ensureTableColumn(db, 'transactions', 'import_source', 'TEXT')
+    ensureTableColumn(db, 'transactions', 'import_external_id', 'TEXT')
+    ensureTableColumn(db, 'transactions', 'import_fingerprint', 'TEXT')
+    ensureTableColumn(db, 'net_worth_snapshots', 'currency', 'TEXT')
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_stock_prices_quote
+        ON stock_prices(symbol, quote_currency, date);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_import_external
+        ON transactions(account_id, import_source, import_external_id)
+        WHERE import_external_id IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_import_fingerprint
+        ON transactions(import_fingerprint)
+        WHERE import_fingerprint IS NOT NULL;
+    `)
+    db.prepare(
+      "INSERT OR IGNORE INTO _migrations (id, name) VALUES (20, '020_quote_recurrence_import_identity')"
+    ).run()
+    applied.add('020_quote_recurrence_import_identity')
+  }
+
   db.exec(`
     CREATE TRIGGER IF NOT EXISTS trg_transactions_snapshot_account_insert
     BEFORE INSERT ON transactions
@@ -1480,7 +1537,7 @@ function ensureNoActiveTransactions(operation) {
   }
 }
 
-function advanceRecurringDate(date, frequency) {
+function advanceRecurringDate(date, frequency, rule) {
   const d = dayjs(date)
   switch (frequency) {
     case 'daily':
@@ -1490,13 +1547,27 @@ function advanceRecurringDate(date, frequency) {
     case 'biweekly':
       return d.add(14, 'day').format('YYYY-MM-DD')
     case 'monthly':
-      return d.add(1, 'month').format('YYYY-MM-DD')
     case 'quarterly':
-      return d.add(3, 'month').format('YYYY-MM-DD')
-    case 'yearly':
-      return d.add(1, 'year').format('YYYY-MM-DD')
+    case 'yearly': {
+      if (rule.anchor_kind === 'end_of_month') {
+        return advanceAnchoredRecurrence(date, frequency, { kind: 'end_of_month' }).date
+      }
+      if (rule.anchor_kind === 'fixed_day' && Number.isInteger(rule.anchor_day)) {
+        return advanceAnchoredRecurrence(date, frequency, {
+          kind: 'day_of_month',
+          day: rule.anchor_day,
+        }).date
+      }
+      const legacy = advanceLegacyRecurrence(date, frequency)
+      if (legacy.status === 'unresolved') {
+        throw new Error(
+          `Recurring date ${date} needs an explicit fixed-day or end-of-month anchor. Edit and save the rule before materializing it.`
+        )
+      }
+      return legacy.date
+    }
     default:
-      return d.add(1, 'month').format('YYYY-MM-DD')
+      throw new Error(`Unsupported recurring frequency: ${frequency}`)
   }
 }
 
@@ -1608,7 +1679,7 @@ function materializeRecurringBatch() {
           break
         }
 
-        const newNextDate = advanceRecurringDate(occurrenceDate, rule.frequency)
+        const newNextDate = advanceRecurringDate(occurrenceDate, rule.frequency, rule)
         const shouldDeactivate = Boolean(rule.end_date && newNextDate > rule.end_date)
         const claimResult = db
           .prepare(
@@ -1676,6 +1747,286 @@ function sendForbidden(res, message) {
   res.end(JSON.stringify({ error: message }))
 }
 
+// ── Request Handlers ────────────────────────────────────────────────────────
+
+async function handleDbQuery(req, res) {
+  const body = await readBody(req)
+  const sql = convertParams(body.sql || '')
+  const params = body.params || []
+  const database = getDatabaseForRequest(body.transactionId)
+  const rows = database.prepare(sql).all(...params)
+  return sendJson(res, rows)
+}
+
+async function handleDbExecute(req, res) {
+  const body = await readBody(req)
+  const sql = convertParams(body.sql || '')
+  const params = body.params || []
+  const database = getDatabaseForRequest(body.transactionId)
+  const result = database.prepare(sql).run(...params)
+  return sendJson(res, {
+    rowsAffected: result.changes,
+    lastInsertId: Number(result.lastInsertRowid),
+  })
+}
+
+async function handleTransaction(req, res) {
+  const body = await readBody(req)
+
+  if (body.action === 'begin') {
+    return sendJson(res, { transactionId: beginServerTransaction() })
+  }
+
+  if (body.action === 'commit' || body.action === 'rollback') {
+    return sendJson(res, closeServerTransaction(body.transactionId, body.action))
+  }
+
+  return sendError(res, 'Unsupported transaction action', 400)
+}
+
+function handleRecurringMaterialization(res) {
+  return sendJson(res, materializeRecurringBatch())
+}
+
+function handleStoreGetAll(res) {
+  return sendJson(res, loadSettings())
+}
+
+function handleStoreGetKey(res, storeKeyMatch) {
+  const key = decodeURIComponent(storeKeyMatch[1])
+  const settings = loadSettings()
+  return sendJson(res, { value: settings[key] ?? null })
+}
+
+async function handleStorePutKey(req, res, storeKeyMatch) {
+  const key = decodeURIComponent(storeKeyMatch[1])
+  const body = await readBody(req)
+  const settings = loadSettings()
+  settings[key] = body.value
+  saveSettings(settings)
+  return sendJson(res, { ok: true })
+}
+
+function handleFsAppData(res) {
+  return sendJson(res, { path: DATA_DIR })
+}
+
+function handleFsJoin(res, url) {
+  const parts = url.searchParams.getAll('parts')
+  if (parts.length === 0) {
+    return sendError(res, 'Missing parts parameter', 400)
+  }
+  return sendJson(res, { path: join(...parts) })
+}
+
+function handleFsRead(res, url) {
+  const filePath = url.searchParams.get('path')
+  if (!filePath) return sendError(res, 'Missing path parameter', 400)
+  const safe = safePathNoSymlinks(DATA_DIR, filePath, { allowMissing: true })
+  if (!existsSync(safe)) return sendError(res, 'File not found', 404)
+  const content = readFileSync(safe, 'utf-8')
+  return sendJson(res, { content })
+}
+
+async function handleFsWrite(req, res) {
+  const body = await readBody(req)
+  if (!body.path) return sendError(res, 'Missing path', 400)
+  const safe = safePathNoSymlinks(DATA_DIR, body.path, { allowMissing: true })
+  // Ensure parent directory exists
+  const parentDir = resolve(safe, '..')
+  safePathNoSymlinks(DATA_DIR, parentDir, { allowMissing: true })
+  ensurePrivateDirectory(parentDir)
+  safePathNoSymlinks(DATA_DIR, parentDir)
+  safePathNoSymlinks(DATA_DIR, safe, { allowMissing: true })
+  writeFileSync(safe, body.content || '', { encoding: 'utf-8', mode: PRIVATE_FILE_MODE })
+  hardenPathMode(safe, PRIVATE_FILE_MODE)
+  safePathNoSymlinks(DATA_DIR, safe)
+  return sendJson(res, { ok: true })
+}
+
+function handleFsExists(res, url) {
+  const filePath = url.searchParams.get('path')
+  if (!filePath) return sendError(res, 'Missing path parameter', 400)
+  const safe = safePathNoSymlinks(DATA_DIR, filePath, { allowMissing: true })
+  return sendJson(res, { exists: existsSync(safe) })
+}
+
+function handleFsRemove(res, url) {
+  const filePath = url.searchParams.get('path')
+  if (!filePath) return sendError(res, 'Missing path parameter', 400)
+  const safe = safePathNoSymlinks(DATA_DIR, filePath, { allowMissing: true })
+  if (existsSync(safe)) unlinkSync(safe)
+  return sendJson(res, { ok: true })
+}
+
+function handleFsReadDirectory(res, url) {
+  const dirPath = url.searchParams.get('path')
+  if (!dirPath) return sendError(res, 'Missing path parameter', 400)
+  const safe = safePathNoSymlinks(DATA_DIR, dirPath, { allowMissing: true })
+  if (!existsSync(safe)) return sendJson(res, { entries: [] })
+  const entries = readdirSync(safe).map((name) => {
+    const fullPath = join(safe, name)
+    let isDirectory = false
+    try {
+      isDirectory = lstatSync(fullPath).isDirectory()
+    } catch {
+      /* ignore */
+    }
+    return { name, isDirectory }
+  })
+  return sendJson(res, { entries })
+}
+
+async function handleFsMakeDirectory(req, res) {
+  const body = await readBody(req)
+  if (!body.path) return sendError(res, 'Missing path', 400)
+  const safe = safePathNoSymlinks(DATA_DIR, body.path, { allowMissing: true })
+  mkdirSync(safe, { recursive: body.recursive !== false, mode: PRIVATE_DIR_MODE })
+  ensurePrivateDirectory(safe)
+  safePathNoSymlinks(DATA_DIR, safe)
+  return sendJson(res, { ok: true })
+}
+
+async function handleDbExport(res) {
+  ensureNoActiveTransactions('export the database')
+  const bytes = await exportDatabaseBuffer({ db, dbPath: DB_PATH })
+  res.writeHead(200, {
+    'Content-Type': 'application/octet-stream',
+    'Content-Length': bytes.length,
+    'Content-Disposition': 'attachment; filename="shikin.db"',
+    ...buildBridgeCorsHeaders(),
+  })
+  res.end(bytes)
+}
+
+async function handleDbImport(req, res) {
+  ensureNoActiveTransactions('import a database snapshot')
+  const buffer = await readBuffer(req, {
+    maxBytes: MAX_DB_IMPORT_BYTES,
+    label: 'Database import payload',
+  })
+
+  // Validate: SQLite files start with "SQLite format 3\0"
+  const header = buffer.slice(0, 16).toString('ascii')
+  if (!header.startsWith('SQLite format 3')) {
+    return sendError(res, 'Invalid SQLite database file', 400)
+  }
+
+  let importResult
+  try {
+    importResult = await importDatabaseBuffer({ db, dbPath: DB_PATH, buffer })
+    try {
+      db = openDatabase()
+      runMigrations()
+      if (importResult.backupPath && existsSync(importResult.backupPath)) {
+        try {
+          unlinkSync(importResult.backupPath)
+        } catch (cleanupError) {
+          console.warn(
+            `[data-server] Imported database successfully, but could not remove rollback backup: ${cleanupError.message}`
+          )
+        }
+      }
+    } catch (error) {
+      db?.close()
+      await importResult.restoreBackup()
+      db = openDatabase()
+      throw error
+    }
+  } catch (error) {
+    try {
+      db.prepare('SELECT 1').get()
+    } catch {
+      db = openDatabase()
+    }
+    throw error
+  }
+
+  return sendJson(res, { ok: true, message: 'Database imported successfully.' })
+}
+
+function dispatchRequest(req, res, url, path) {
+  const route = `${req.method} ${path}`
+
+  switch (route) {
+    // ── Database: Query ────────────────────────────────────────────
+    case 'POST /api/db/query':
+      return handleDbQuery(req, res)
+
+    // ── Database: Execute ──────────────────────────────────────────
+    case 'POST /api/db/execute':
+      return handleDbExecute(req, res)
+
+    // ── Database: Transaction lifecycle ───────────────────────────
+    case 'POST /api/db/transaction':
+      return handleTransaction(req, res)
+
+    // ── Recurring: Materialize server-side atomically ───────────────
+    case 'POST /api/recurring/materialize':
+      return handleRecurringMaterialization(res)
+
+    // ── Store: Get all ─────────────────────────────────────────────
+    case 'GET /api/store':
+      return handleStoreGetAll(res)
+  }
+
+  const storeKeyMatch = path.match(/^\/api\/store\/(.+)$/)
+  if (storeKeyMatch) {
+    if (req.method === 'GET') {
+      return handleStoreGetKey(res, storeKeyMatch)
+    }
+
+    if (req.method === 'PUT') {
+      return handleStorePutKey(req, res, storeKeyMatch)
+    }
+  }
+
+  switch (route) {
+    // ── FS: App data path ──────────────────────────────────────────
+    case 'GET /api/fs/appdata':
+      return handleFsAppData(res)
+
+    // ── FS: Join paths ─────────────────────────────────────────────
+    case 'GET /api/fs/join':
+      return handleFsJoin(res, url)
+
+    // ── FS: Read file ──────────────────────────────────────────────
+    case 'GET /api/fs/read':
+      return handleFsRead(res, url)
+
+    // ── FS: Write file ─────────────────────────────────────────────
+    case 'PUT /api/fs/write':
+      return handleFsWrite(req, res)
+
+    // ── FS: Check exists ───────────────────────────────────────────
+    case 'GET /api/fs/exists':
+      return handleFsExists(res, url)
+
+    // ── FS: Remove file ────────────────────────────────────────────
+    case 'DELETE /api/fs/remove':
+      return handleFsRemove(res, url)
+
+    // ── FS: Read directory ─────────────────────────────────────────
+    case 'GET /api/fs/readdir':
+      return handleFsReadDirectory(res, url)
+
+    // ── FS: Make directory ─────────────────────────────────────────
+    case 'POST /api/fs/mkdir':
+      return handleFsMakeDirectory(req, res)
+
+    // ── DB: Export (binary) ────────────────────────────────────────
+    case 'GET /api/db/export':
+      return handleDbExport(res)
+
+    // ── DB: Import (binary) ────────────────────────────────────────
+    case 'POST /api/db/import':
+      return handleDbImport(req, res)
+  }
+
+  // ── 404 ──────────────────────────────────────────────────────────
+  return sendError(res, 'Not found', 404)
+}
+
 // ── Server ─────────────────────────────────────────────────────────────────
 
 const server = createServer(async (req, res) => {
@@ -1695,225 +2046,7 @@ const server = createServer(async (req, res) => {
   if (bridgeError) return sendForbidden(res, bridgeError)
 
   try {
-    // ── Database: Query ──────────────────────────────────────────────
-    if (path === '/api/db/query' && req.method === 'POST') {
-      const body = await readBody(req)
-      const sql = convertParams(body.sql || '')
-      const params = body.params || []
-      const database = getDatabaseForRequest(body.transactionId)
-      const rows = database.prepare(sql).all(...params)
-      return sendJson(res, rows)
-    }
-
-    // ── Database: Execute ────────────────────────────────────────────
-    if (path === '/api/db/execute' && req.method === 'POST') {
-      const body = await readBody(req)
-      const sql = convertParams(body.sql || '')
-      const params = body.params || []
-      const database = getDatabaseForRequest(body.transactionId)
-      const result = database.prepare(sql).run(...params)
-      return sendJson(res, {
-        rowsAffected: result.changes,
-        lastInsertId: Number(result.lastInsertRowid),
-      })
-    }
-
-    // ── Database: Transaction lifecycle ─────────────────────────────
-    if (path === '/api/db/transaction' && req.method === 'POST') {
-      const body = await readBody(req)
-
-      if (body.action === 'begin') {
-        return sendJson(res, { transactionId: beginServerTransaction() })
-      }
-
-      if (body.action === 'commit' || body.action === 'rollback') {
-        return sendJson(res, closeServerTransaction(body.transactionId, body.action))
-      }
-
-      return sendError(res, 'Unsupported transaction action', 400)
-    }
-
-    // ── Recurring: Materialize server-side atomically ─────────────────
-    if (path === '/api/recurring/materialize' && req.method === 'POST') {
-      return sendJson(res, materializeRecurringBatch())
-    }
-
-    // ── Store: Get all ───────────────────────────────────────────────
-    if (path === '/api/store' && req.method === 'GET') {
-      return sendJson(res, loadSettings())
-    }
-
-    // ── Store: Get key ───────────────────────────────────────────────
-    const storeKeyMatch = path.match(/^\/api\/store\/(.+)$/)
-    if (storeKeyMatch && req.method === 'GET') {
-      const key = decodeURIComponent(storeKeyMatch[1])
-      const settings = loadSettings()
-      return sendJson(res, { value: settings[key] ?? null })
-    }
-
-    // ── Store: Put key ───────────────────────────────────────────────
-    if (storeKeyMatch && req.method === 'PUT') {
-      const key = decodeURIComponent(storeKeyMatch[1])
-      const body = await readBody(req)
-      const settings = loadSettings()
-      settings[key] = body.value
-      saveSettings(settings)
-      return sendJson(res, { ok: true })
-    }
-
-    // ── FS: App data path ────────────────────────────────────────────
-    if (path === '/api/fs/appdata' && req.method === 'GET') {
-      return sendJson(res, { path: DATA_DIR })
-    }
-
-    // ── FS: Join paths ───────────────────────────────────────────────
-    if (path === '/api/fs/join' && req.method === 'GET') {
-      const parts = url.searchParams.getAll('parts')
-      if (parts.length === 0) {
-        return sendError(res, 'Missing parts parameter', 400)
-      }
-      return sendJson(res, { path: join(...parts) })
-    }
-
-    // ── FS: Read file ────────────────────────────────────────────────
-    if (path === '/api/fs/read' && req.method === 'GET') {
-      const filePath = url.searchParams.get('path')
-      if (!filePath) return sendError(res, 'Missing path parameter', 400)
-      const safe = safePathNoSymlinks(DATA_DIR, filePath, { allowMissing: true })
-      if (!existsSync(safe)) return sendError(res, 'File not found', 404)
-      const content = readFileSync(safe, 'utf-8')
-      return sendJson(res, { content })
-    }
-
-    // ── FS: Write file ───────────────────────────────────────────────
-    if (path === '/api/fs/write' && req.method === 'PUT') {
-      const body = await readBody(req)
-      if (!body.path) return sendError(res, 'Missing path', 400)
-      const safe = safePathNoSymlinks(DATA_DIR, body.path, { allowMissing: true })
-      // Ensure parent directory exists
-      const parentDir = resolve(safe, '..')
-      safePathNoSymlinks(DATA_DIR, parentDir, { allowMissing: true })
-      ensurePrivateDirectory(parentDir)
-      safePathNoSymlinks(DATA_DIR, parentDir)
-      safePathNoSymlinks(DATA_DIR, safe, { allowMissing: true })
-      writeFileSync(safe, body.content || '', { encoding: 'utf-8', mode: PRIVATE_FILE_MODE })
-      hardenPathMode(safe, PRIVATE_FILE_MODE)
-      safePathNoSymlinks(DATA_DIR, safe)
-      return sendJson(res, { ok: true })
-    }
-
-    // ── FS: Check exists ─────────────────────────────────────────────
-    if (path === '/api/fs/exists' && req.method === 'GET') {
-      const filePath = url.searchParams.get('path')
-      if (!filePath) return sendError(res, 'Missing path parameter', 400)
-      const safe = safePathNoSymlinks(DATA_DIR, filePath, { allowMissing: true })
-      return sendJson(res, { exists: existsSync(safe) })
-    }
-
-    // ── FS: Remove file ──────────────────────────────────────────────
-    if (path === '/api/fs/remove' && req.method === 'DELETE') {
-      const filePath = url.searchParams.get('path')
-      if (!filePath) return sendError(res, 'Missing path parameter', 400)
-      const safe = safePathNoSymlinks(DATA_DIR, filePath, { allowMissing: true })
-      if (existsSync(safe)) unlinkSync(safe)
-      return sendJson(res, { ok: true })
-    }
-
-    // ── FS: Read directory ───────────────────────────────────────────
-    if (path === '/api/fs/readdir' && req.method === 'GET') {
-      const dirPath = url.searchParams.get('path')
-      if (!dirPath) return sendError(res, 'Missing path parameter', 400)
-      const safe = safePathNoSymlinks(DATA_DIR, dirPath, { allowMissing: true })
-      if (!existsSync(safe)) return sendJson(res, { entries: [] })
-      const entries = readdirSync(safe).map((name) => {
-        const fullPath = join(safe, name)
-        let isDirectory = false
-        try {
-          isDirectory = lstatSync(fullPath).isDirectory()
-        } catch {
-          /* ignore */
-        }
-        return { name, isDirectory }
-      })
-      return sendJson(res, { entries })
-    }
-
-    // ── FS: Make directory ───────────────────────────────────────────
-    if (path === '/api/fs/mkdir' && req.method === 'POST') {
-      const body = await readBody(req)
-      if (!body.path) return sendError(res, 'Missing path', 400)
-      const safe = safePathNoSymlinks(DATA_DIR, body.path, { allowMissing: true })
-      mkdirSync(safe, { recursive: body.recursive !== false, mode: PRIVATE_DIR_MODE })
-      ensurePrivateDirectory(safe)
-      safePathNoSymlinks(DATA_DIR, safe)
-      return sendJson(res, { ok: true })
-    }
-
-    // ── DB: Export (binary) ────────────────────────────────────────
-    if (path === '/api/db/export' && req.method === 'GET') {
-      ensureNoActiveTransactions('export the database')
-      // Checkpoint WAL to ensure all data is in main DB file
-      checkpointWal(db, { requireComplete: true })
-      const bytes = readFileSync(DB_PATH)
-      res.writeHead(200, {
-        'Content-Type': 'application/octet-stream',
-        'Content-Length': bytes.length,
-        'Content-Disposition': 'attachment; filename="shikin.db"',
-        ...buildBridgeCorsHeaders(),
-      })
-      res.end(bytes)
-      return
-    }
-
-    // ── DB: Import (binary) ────────────────────────────────────────
-    if (path === '/api/db/import' && req.method === 'POST') {
-      ensureNoActiveTransactions('import a database snapshot')
-      const buffer = await readBuffer(req, {
-        maxBytes: MAX_DB_IMPORT_BYTES,
-        label: 'Database import payload',
-      })
-
-      // Validate: SQLite files start with "SQLite format 3\0"
-      const header = buffer.slice(0, 16).toString('ascii')
-      if (!header.startsWith('SQLite format 3')) {
-        return sendError(res, 'Invalid SQLite database file', 400)
-      }
-
-      let importResult
-      try {
-        importResult = importDatabaseBuffer({ db, dbPath: DB_PATH, buffer })
-        try {
-          db = openDatabase()
-          runMigrations()
-          if (importResult.backupPath && existsSync(importResult.backupPath)) {
-            try {
-              unlinkSync(importResult.backupPath)
-            } catch (cleanupError) {
-              console.warn(
-                `[data-server] Imported database successfully, but could not remove rollback backup: ${cleanupError.message}`
-              )
-            }
-          }
-        } catch (error) {
-          db?.close()
-          importResult.restoreBackup()
-          db = openDatabase()
-          throw error
-        }
-      } catch (error) {
-        try {
-          db.prepare('SELECT 1').get()
-        } catch {
-          db = openDatabase()
-        }
-        throw error
-      }
-
-      return sendJson(res, { ok: true, message: 'Database imported successfully.' })
-    }
-
-    // ── 404 ──────────────────────────────────────────────────────────
-    sendError(res, 'Not found', 404)
+    await dispatchRequest(req, res, url, path)
   } catch (err) {
     console.error('[data-server] Error:', err.message)
     sendError(res, err.message, err.statusCode || 500)

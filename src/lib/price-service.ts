@@ -47,16 +47,26 @@ function getCryptoId(symbol: string): string {
   return CRYPTO_ID_MAP[symbol.toUpperCase()] || symbol.toLowerCase()
 }
 
-async function fetchCurrentPrice(symbol: string, type: InvestmentType): Promise<number> {
+export interface PriceQuote {
+  price: number
+  quoteCurrency: string
+}
+
+async function fetchCurrentPrice(
+  symbol: string,
+  type: InvestmentType,
+  preferredCurrency: string
+): Promise<PriceQuote> {
   if (type === 'crypto') {
-    return fetchCryptoPrice(symbol)
+    return fetchCryptoPrice(symbol, preferredCurrency)
   }
 
   if (!canTryMarketDataProvider(type)) {
     throw new Error(`No live price provider configured for ${type} assets`)
   }
 
-  return fetchMarketPrice(symbol)
+  const quoteCurrency = preferredCurrency.trim().toUpperCase() || 'USD'
+  return { price: await fetchMarketPrice(symbol), quoteCurrency }
 }
 
 function canTryMarketDataProvider(type: InvestmentType): boolean {
@@ -132,24 +142,27 @@ async function fetchFinnhubPrice(symbol: string, apiKey: string): Promise<number
   return toCentavos(price)
 }
 
-async function fetchCryptoPrice(symbol: string): Promise<number> {
+async function fetchCryptoPrice(symbol: string, preferredCurrency: string): Promise<PriceQuote> {
   const id = getCryptoId(symbol)
-  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd`
+  const quoteCurrency = preferredCurrency.trim().toUpperCase() || 'USD'
+  const quoteKey = quoteCurrency.toLowerCase()
+  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=${encodeURIComponent(quoteKey)}`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`CoinGecko error: ${res.status}`)
 
   const data = await res.json()
-  if (!data[id]?.usd) {
-    throw new Error(`No price data for ${symbol} (${id})`)
+  const price = parsePositivePrice(data[id]?.[quoteKey])
+  if (!price) {
+    throw new Error(`No ${quoteCurrency} price data for ${symbol} (${id})`)
   }
 
-  return toCentavos(data[id].usd)
+  return { price: toCentavos(price), quoteCurrency }
 }
 
 export async function fetchAllCurrentPrices(
   investments: Investment[]
-): Promise<Map<string, number>> {
-  const prices = new Map<string, number>()
+): Promise<Map<string, PriceQuote>> {
+  const prices = new Map<string, PriceQuote>()
   const seen = new Set<string>()
 
   for (const inv of investments) {
@@ -157,8 +170,8 @@ export async function fetchAllCurrentPrices(
     seen.add(inv.symbol)
 
     try {
-      const price = await fetchCurrentPrice(inv.symbol, inv.type)
-      prices.set(inv.symbol, price)
+      const quote = await fetchCurrentPrice(inv.symbol, inv.type, inv.currency)
+      prices.set(inv.symbol, quote)
       // Rate limit: small delay between requests
       await new Promise((r) => setTimeout(r, inv.type === 'crypto' ? 200 : 1200))
     } catch (err) {
@@ -169,26 +182,26 @@ export async function fetchAllCurrentPrices(
   return prices
 }
 
-export async function savePricesToDB(
-  prices: Map<string, number>,
-  currency: string | Map<string, string> = 'USD'
-): Promise<void> {
+export async function savePricesToDB(prices: Map<string, PriceQuote>): Promise<void> {
   const today = new Date().toISOString().split('T')[0]
 
-  for (const [symbol, price] of prices) {
-    const symbolCurrency = currency instanceof Map ? (currency.get(symbol) ?? 'USD') : currency
+  for (const [symbol, quote] of prices) {
+    const quoteCurrency = quote.quoteCurrency.trim().toUpperCase()
     const existing = await query<{ id: string }>(
       'SELECT id FROM stock_prices WHERE symbol = ? AND date = ?',
       [symbol, today]
     )
 
     if (existing.length > 0) {
-      await execute('UPDATE stock_prices SET price = ? WHERE id = ?', [price, existing[0].id])
+      await execute(
+        'UPDATE stock_prices SET price = ?, currency = ?, quote_currency = ? WHERE id = ?',
+        [quote.price, quoteCurrency, quoteCurrency, existing[0].id]
+      )
     } else {
       const id = generateId()
       await execute(
-        'INSERT INTO stock_prices (id, symbol, price, currency, date) VALUES (?, ?, ?, ?, ?)',
-        [id, symbol, price, symbolCurrency, today]
+        'INSERT INTO stock_prices (id, symbol, price, currency, quote_currency, date) VALUES (?, ?, ?, ?, ?, ?)',
+        [id, symbol, quote.price, quoteCurrency, quoteCurrency, today]
       )
     }
   }

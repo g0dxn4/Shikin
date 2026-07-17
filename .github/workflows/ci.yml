@@ -27,11 +27,8 @@ jobs:
       - name: Release preflight
         run: pnpm release:preflight
 
-      - name: Lint
-        run: pnpm lint
-
-      - name: Type check
-        run: pnpm typecheck
+      - name: Lint, type check, and format check
+        run: pnpm check
 
       - name: Unit tests
         run: pnpm test:run

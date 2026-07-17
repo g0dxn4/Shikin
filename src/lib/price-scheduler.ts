@@ -25,10 +25,6 @@ async function getInvestments(): Promise<Investment[]> {
   return query<Investment>('SELECT * FROM investments')
 }
 
-function getPriceCurrencyMap(investments: Investment[]) {
-  return new Map(investments.map((investment) => [investment.symbol, investment.currency]))
-}
-
 async function getLastPriceDate(symbol: string): Promise<string | null> {
   const rows = await query<{ date: string }>(
     'SELECT date FROM stock_prices WHERE symbol = ? ORDER BY date DESC LIMIT 1',
@@ -37,7 +33,7 @@ async function getLastPriceDate(symbol: string): Promise<string | null> {
   return rows.length > 0 ? rows[0].date : null
 }
 
-function isStale(lastDate: string | null, type: 'stock' | 'crypto'): boolean {
+export function isInvestmentPriceStale(lastDate: string | null, type: 'stock' | 'crypto'): boolean {
   if (!lastDate) return true
 
   const last = new Date(lastDate)
@@ -67,7 +63,7 @@ async function fetchStalePrices(): Promise<void> {
   for (const inv of investments) {
     const lastDate = await getLastPriceDate(inv.symbol)
     const isCrypto = inv.type === 'crypto'
-    if (isStale(lastDate, isCrypto ? 'crypto' : 'stock')) {
+    if (isInvestmentPriceStale(lastDate, isCrypto ? 'crypto' : 'stock')) {
       staleInvestments.push(inv)
     }
   }
@@ -80,7 +76,7 @@ async function fetchStalePrices(): Promise<void> {
 
   const prices = await fetchAllCurrentPrices(staleInvestments)
   if (prices.size > 0) {
-    await savePricesToDB(prices, getPriceCurrencyMap(staleInvestments))
+    await savePricesToDB(prices)
     const now = new Date().toISOString()
     useInvestmentStore.getState().setLastPriceFetch(now)
     await useInvestmentStore.getState().fetch()
@@ -97,7 +93,7 @@ function startStockScheduler(): void {
 
     const prices = await fetchAllCurrentPrices(stocks)
     if (prices.size > 0) {
-      await savePricesToDB(prices, getPriceCurrencyMap(stocks))
+      await savePricesToDB(prices)
       useInvestmentStore.getState().setLastPriceFetch(new Date().toISOString())
       await useInvestmentStore.getState().fetch()
     }
@@ -113,7 +109,7 @@ function startCryptoScheduler(): void {
 
     const prices = await fetchAllCurrentPrices(crypto)
     if (prices.size > 0) {
-      await savePricesToDB(prices, getPriceCurrencyMap(crypto))
+      await savePricesToDB(prices)
       useInvestmentStore.getState().setLastPriceFetch(new Date().toISOString())
       await useInvestmentStore.getState().fetch()
     }

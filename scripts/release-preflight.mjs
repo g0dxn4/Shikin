@@ -2,7 +2,7 @@
 
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(__dirname, '..')
@@ -13,8 +13,7 @@ const files = {
   tauriConfig: path.join(rootDir, 'src-tauri/tauri.conf.json'),
   cargoToml: path.join(rootDir, 'src-tauri/Cargo.toml'),
   cargoLock: path.join(rootDir, 'src-tauri/Cargo.lock'),
-  cli: path.join(rootDir, 'cli/src/cli.ts'),
-  mcpServer: path.join(rootDir, 'cli/src/mcp-server.ts'),
+  applicationVersion: path.join(rootDir, 'cli/src/version.ts'),
 }
 
 const semverPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
@@ -42,24 +41,46 @@ function parseCargoVersion(cargoToml) {
   return versionMatch[1]
 }
 
-function parseMcpServerVersion(mcpServerSource) {
-  const match = mcpServerSource.match(
-    /new\s+McpServer\(\s*\{[\s\S]*?\bversion\s*:\s*['"]([^'"]+)['"]/
+export function parseApplicationVersion(versionSource) {
+  const match = versionSource.match(
+    /^\s*export\s+const\s+APPLICATION_VERSION\s*=\s*(['"])([^'"]+)\1\s*;?\s*$/m
   )
   if (!match) {
-    throw new Error('Could not locate McpServer version in cli/src/mcp-server.ts')
+    throw new Error('Could not locate literal APPLICATION_VERSION in cli/src/version.ts')
   }
 
-  return match[1]
+  return match[2]
 }
 
-function parseCliVersion(cliSource) {
-  const match = cliSource.match(/\.version\(\s*['"]([^'"]+)['"]\s*\)/)
-  if (!match) {
-    throw new Error('Could not locate CLI version in cli/src/cli.ts')
+export function validateReleaseVersions(versions, tagVersion = null) {
+  const errors = []
+
+  for (const [source, version] of Object.entries(versions)) {
+    if (!version || typeof version !== 'string') {
+      errors.push(`${source} is missing a version string`)
+      continue
+    }
+
+    if (!semverPattern.test(version)) {
+      errors.push(`${source} has invalid semver version: "${version}"`)
+    }
   }
 
-  return match[1]
+  const uniqueVersions = [...new Set(Object.values(versions))]
+  if (uniqueVersions.length !== 1) {
+    const printed = Object.entries(versions)
+      .map(([source, version]) => `  - ${source}: ${version}`)
+      .join('\n')
+    errors.push(`Version mismatch detected across release files:\n${printed}`)
+  }
+
+  if (tagVersion && uniqueVersions.length === 1 && uniqueVersions[0] !== tagVersion) {
+    errors.push(
+      `Tag version mismatch: git tag is "${tagVersion}" but release files are "${uniqueVersions[0]}"`
+    )
+  }
+
+  return { errors, uniqueVersions }
 }
 
 function parseTagVersion() {
@@ -185,16 +206,14 @@ async function main() {
     tauriConfigRaw,
     cargoTomlRaw,
     cargoLockRaw,
-    cliRaw,
-    mcpServerRaw,
+    applicationVersionRaw,
   ] = await Promise.all([
     readFile(files.rootPackage, 'utf8'),
     readFile(files.cliPackage, 'utf8'),
     readFile(files.tauriConfig, 'utf8'),
     readFile(files.cargoToml, 'utf8'),
     readFile(files.cargoLock, 'utf8'),
-    readFile(files.cli, 'utf8'),
-    readFile(files.mcpServer, 'utf8'),
+    readFile(files.applicationVersion, 'utf8'),
   ])
 
   const rootPackage = JSON.parse(rootPackageRaw)
@@ -207,37 +226,12 @@ async function main() {
     'src-tauri/tauri.conf.json': tauriConfig.version,
     'src-tauri/Cargo.toml': parseCargoVersion(cargoTomlRaw),
     'src-tauri/Cargo.lock (package shikin)': parseCargoLockShikinVersion(cargoLockRaw),
-    'cli/src/cli.ts': parseCliVersion(cliRaw),
-    'cli/src/mcp-server.ts': parseMcpServerVersion(mcpServerRaw),
-  }
-
-  const errors = []
-
-  for (const [source, version] of Object.entries(versions)) {
-    if (!version || typeof version !== 'string') {
-      errors.push(`${source} is missing a version string`)
-      continue
-    }
-
-    if (!semverPattern.test(version)) {
-      errors.push(`${source} has invalid semver version: "${version}"`)
-    }
-  }
-
-  const uniqueVersions = [...new Set(Object.values(versions))]
-  if (uniqueVersions.length !== 1) {
-    const printed = Object.entries(versions)
-      .map(([source, version]) => `  - ${source}: ${version}`)
-      .join('\n')
-    errors.push(`Version mismatch detected across release files:\n${printed}`)
+    'cli/src/version.ts': parseApplicationVersion(applicationVersionRaw),
   }
 
   const tagVersion = parseTagVersion()
-  if (tagVersion && uniqueVersions.length === 1 && uniqueVersions[0] !== tagVersion) {
-    errors.push(
-      `Tag version mismatch: git tag is "${tagVersion}" but release files are "${uniqueVersions[0]}"`
-    )
-  }
+  const { errors: versionErrors, uniqueVersions } = validateReleaseVersions(versions, tagVersion)
+  const errors = [...versionErrors]
 
   const updaterConfig = tauriConfig?.plugins?.updater
   const endpoints = updaterConfig?.endpoints
@@ -285,7 +279,14 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  fail(error instanceof Error ? error.message : String(error))
-  process.exit(1)
-})
+export function isDirectExecution(importMetaUrl, entryPoint = process.argv[1]) {
+  if (!entryPoint) return false
+  return pathToFileURL(path.resolve(entryPoint)).href === importMetaUrl
+}
+
+if (isDirectExecution(import.meta.url)) {
+  main().catch((error) => {
+    fail(error instanceof Error ? error.message : String(error))
+    process.exit(1)
+  })
+}

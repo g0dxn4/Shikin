@@ -60,6 +60,14 @@ async function clearTransactionTestData() {
     params
   )
   await executeE2eSql(
+    `UPDATE transactions SET reconciliation_id = NULL WHERE account_id IN (${accountSelector})`,
+    [`${TEST_PREFIX}%`]
+  )
+  await executeE2eSql(
+    `DELETE FROM account_reconciliations WHERE account_id IN (${accountSelector})`,
+    [`${TEST_PREFIX}%`]
+  )
+  await executeE2eSql(
     `DELETE FROM transactions WHERE description LIKE ? OR account_id IN (${accountSelector})`,
     params
   )

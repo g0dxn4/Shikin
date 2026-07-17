@@ -1,4 +1,9 @@
 import { create } from 'zustand'
+import {
+  calculateReconciliationAdjustment,
+  signedLedgerDeltaForAccount,
+  type LedgerEntry,
+} from '@shikin/finance-core'
 import { query, execute, withTransaction } from '@/lib/database'
 import type { TransactionClient } from '@/lib/database'
 import { getErrorMessage } from '@/lib/errors'
@@ -93,6 +98,163 @@ function getCreditCardFields(data: AccountFormData) {
     creditLimit: data.creditLimit === undefined ? null : toCentavos(data.creditLimit),
     statementClosingDay: data.statementClosingDay ?? null,
     paymentDueDay: data.paymentDueDay ?? null,
+  }
+}
+
+type LedgerCandidateRow = {
+  id: string
+  type: string
+  amount: number
+  currency: string | null
+  status: string | null
+  ledger_treatment: string | null
+  transaction_kind: string | null
+  is_archived: number | null
+  account_id: string
+  source_account_id: string | null
+  source_currency: string | null
+  source_account_mode: string | null
+  transfer_to_account_id: string | null
+  destination_account_id: string | null
+  destination_currency: string | null
+  destination_account_mode: string | null
+}
+
+async function getEffectiveLedgerBalance(tx: TransactionClient, accountId: string) {
+  const rows = await tx.query<LedgerCandidateRow>(
+    `SELECT t.id, t.type, t.amount, t.currency, t.status, t.ledger_treatment, t.transaction_kind,
+            t.is_archived, t.account_id,
+            source.id AS source_account_id, source.currency AS source_currency,
+            source.account_mode AS source_account_mode,
+            t.transfer_to_account_id,
+            destination.id AS destination_account_id,
+            destination.currency AS destination_currency,
+            destination.account_mode AS destination_account_mode
+       FROM transactions t
+       LEFT JOIN accounts source ON source.id = t.account_id
+       LEFT JOIN accounts destination ON destination.id = t.transfer_to_account_id
+      WHERE t.account_id = ? OR t.transfer_to_account_id = ?
+      ORDER BY t.id`,
+    [accountId, accountId]
+  )
+
+  return rows.reduce((balance, row) => {
+    if (!row.source_account_id || row.source_currency === null) {
+      throw new Error(`Transaction ${row.id} has no valid source account context.`)
+    }
+    const entry: LedgerEntry = {
+      type: row.type as LedgerEntry['type'],
+      amountCentavos: row.amount,
+      currency: row.currency as LedgerEntry['currency'],
+      account: {
+        accountId: row.source_account_id,
+        currency: row.source_currency,
+        accountMode: row.source_account_mode as LedgerEntry['account']['accountMode'],
+      },
+      transferToAccount:
+        row.destination_account_id && row.destination_currency !== null
+          ? {
+              accountId: row.destination_account_id,
+              currency: row.destination_currency,
+              accountMode: row.destination_account_mode as LedgerEntry['account']['accountMode'],
+            }
+          : null,
+      status: row.status,
+      ledgerTreatment: row.ledger_treatment as LedgerEntry['ledgerTreatment'],
+      transactionKind: row.transaction_kind as LedgerEntry['transactionKind'],
+      isArchived: row.is_archived as LedgerEntry['isArchived'],
+    }
+    const result = signedLedgerDeltaForAccount(entry, accountId)
+    if (result.status !== 'applied') return balance
+    const next = balance + result.deltaCentavos
+    if (!Number.isSafeInteger(next)) {
+      throw new RangeError(`Effective ledger balance for account ${accountId} is outside range.`)
+    }
+    return next
+  }, 0)
+}
+
+async function reconcileTransactionalAccountBalance(
+  tx: TransactionClient,
+  input: {
+    accountId: string
+    currency: string
+    observedBalance: number
+    storedBalanceBefore: number
+    reconciliationDate: string
+    updatedAt: string
+  }
+) {
+  const ledgerBalanceBefore = await getEffectiveLedgerBalance(tx, input.accountId)
+  const adjustment = calculateReconciliationAdjustment({
+    accountMode: 'transactional',
+    observedBalanceCentavos: input.observedBalance,
+    effectiveLedgerBalanceCentavos: ledgerBalanceBefore,
+  })
+  const reconciliationId = generateId()
+
+  await tx.execute(
+    `INSERT INTO account_reconciliations (
+       id, account_id, reconciliation_date, actual_balance, stored_balance_before,
+       ledger_balance_before, ledger_balance_after, adjustment_amount,
+       adjustment_transaction_id, staging_batch_id, statement_start_date,
+       statement_end_date, source, note
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL)`,
+    [
+      reconciliationId,
+      input.accountId,
+      input.reconciliationDate,
+      input.observedBalance,
+      input.storedBalanceBefore,
+      ledgerBalanceBefore,
+      input.observedBalance,
+      adjustment.adjustmentCentavos,
+    ]
+  )
+
+  if (adjustment.bridge) {
+    const adjustmentTransactionId = generateId()
+    await tx.execute(
+      `INSERT INTO transactions (
+         id, account_id, category_id, transfer_to_account_id, type, amount, currency,
+         description, notes, status, source, note, ledger_treatment, reporting_treatment,
+         transaction_kind, reconciliation_id, is_archived, date
+       ) VALUES (?, ?, NULL, NULL, ?, ?, ?, 'Balance reconciliation bridge', NULL, 'posted',
+         NULL, NULL, 'normal', ?, ?, ?, 0, ?)`,
+      [
+        adjustmentTransactionId,
+        input.accountId,
+        adjustment.bridge.type,
+        adjustment.bridge.amountCentavos,
+        input.currency,
+        adjustment.bridge.reportingTreatment,
+        adjustment.bridge.transactionKind,
+        reconciliationId,
+        input.reconciliationDate,
+      ]
+    )
+    const linkResult = await tx.execute(
+      'UPDATE account_reconciliations SET adjustment_transaction_id = ? WHERE id = ?',
+      [adjustmentTransactionId, reconciliationId]
+    )
+    if (linkResult.rowsAffected !== 1) {
+      throw new Error(`Reconciliation ${reconciliationId} could not be linked to its bridge.`)
+    }
+  }
+
+  const accountUpdate = await tx.execute(
+    'UPDATE accounts SET balance = ?, updated_at = ? WHERE id = ? AND is_archived = 0',
+    [input.observedBalance, input.updatedAt, input.accountId]
+  )
+  if (accountUpdate.rowsAffected !== 1) {
+    throw new Error(`Account ${input.accountId} could not be reconciled safely.`)
+  }
+
+  const verifiedLedgerBalance = await getEffectiveLedgerBalance(tx, input.accountId)
+  if (verifiedLedgerBalance !== input.observedBalance) {
+    throw new Error(
+      `Reconciliation verification failed: ledger ${verifiedLedgerBalance} did not match observed balance ${input.observedBalance}.`
+    )
   }
 }
 
@@ -211,24 +373,40 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     try {
       const id = generateId()
       const now = new Date().toISOString()
+      const reconciliationDate = dayjs().format('YYYY-MM-DD')
       const creditFields = getCreditCardFields(data)
-      await execute(
-        `INSERT INTO accounts (id, name, type, currency, balance, credit_limit, statement_closing_day, payment_due_day, account_mode, is_archived, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-        [
-          id,
-          data.name,
-          data.type,
-          data.currency,
-          toCentavos(data.balance),
-          creditFields.creditLimit,
-          creditFields.statementClosingDay,
-          creditFields.paymentDueDay,
-          data.accountMode ?? 'transactional',
-          now,
-          now,
-        ]
-      )
+      const accountMode = data.accountMode ?? 'transactional'
+      const observedBalance = toCentavos(data.balance)
+      await withTransaction(async (tx) => {
+        await tx.execute(
+          `INSERT INTO accounts (id, name, type, currency, balance, credit_limit, statement_closing_day, payment_due_day, account_mode, is_archived, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+          [
+            id,
+            data.name,
+            data.type,
+            data.currency,
+            accountMode === 'snapshot_only' ? observedBalance : 0,
+            creditFields.creditLimit,
+            creditFields.statementClosingDay,
+            creditFields.paymentDueDay,
+            accountMode,
+            now,
+            now,
+          ]
+        )
+
+        if (accountMode === 'transactional' && observedBalance !== 0) {
+          await reconcileTransactionalAccountBalance(tx, {
+            accountId: id,
+            currency: data.currency,
+            observedBalance,
+            storedBalanceBefore: 0,
+            reconciliationDate,
+            updatedAt: now,
+          })
+        }
+      })
     } catch (error) {
       set({ error: getErrorMessage(error) })
       throw error
@@ -245,34 +423,32 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     set({ error: null })
     try {
       await withTransaction(async (tx) => {
-        const existing = await tx.query<Pick<Account, 'currency' | 'is_archived' | 'balance'>>(
-          'SELECT currency, is_archived, balance FROM accounts WHERE id = ? LIMIT 1',
+        const existing = await tx.query<
+          Pick<Account, 'currency' | 'is_archived' | 'balance' | 'account_mode'>
+        >(
+          'SELECT currency, is_archived, balance, account_mode FROM accounts WHERE id = ? LIMIT 1',
           [id]
         )
         if (existing.length === 0) {
           throw new Error(`Account ${id} not found.`)
         }
-        if (existing[0].is_archived === 1) {
+        if (existing[0].is_archived !== 0) {
           throw new Error(`Account ${id} is archived. Unarchive it before editing it.`)
         }
-        if (data.accountMode) {
-          const modes = await tx.query<Pick<Account, 'account_mode'>>(
-            'SELECT account_mode FROM accounts WHERE id = ? LIMIT 1',
-            [id]
+
+        const currentMode = existing[0].account_mode ?? 'transactional'
+        const nextMode = data.accountMode ?? currentMode
+        if (nextMode !== currentMode) {
+          const transactionRows = await tx.query<{ count: number }>(
+            `SELECT COUNT(*) AS count
+             FROM transactions
+             WHERE account_id = ? OR transfer_to_account_id = ?`,
+            [id, id]
           )
-          if (data.accountMode !== (modes[0]?.account_mode ?? 'transactional')) {
-            const transactionRows = await tx.query<{ count: number }>(
-              `SELECT COUNT(*) AS count
-               FROM transactions
-               WHERE (account_id = ? OR transfer_to_account_id = ?)
-                 AND COALESCE(is_archived, 0) = 0`,
-              [id, id]
+          if ((transactionRows[0]?.count ?? 0) > 0) {
+            throw new Error(
+              'Create a new account to change balance tracking mode after transactions exist.'
             )
-            if ((transactionRows[0]?.count ?? 0) > 0) {
-              throw new Error(
-                'Create a new account to change balance tracking mode after transactions exist.'
-              )
-            }
           }
         }
 
@@ -286,22 +462,53 @@ export const useAccountStore = create<AccountState>((set, get) => ({
         }
 
         const now = new Date().toISOString()
+        const requestedBalance = toCentavos(data.balance)
         const creditFields = getCreditCardFields(data)
-        await tx.execute(
-          `UPDATE accounts SET name = ?, type = ?, currency = ?, balance = ?, credit_limit = ?, statement_closing_day = ?, payment_due_day = ?, account_mode = COALESCE(?, account_mode), updated_at = ? WHERE id = ?`,
-          [
-            data.name,
-            data.type,
-            data.currency,
-            toCentavos(data.balance),
-            creditFields.creditLimit,
-            creditFields.statementClosingDay,
-            creditFields.paymentDueDay,
-            data.accountMode ?? null,
-            now,
-            id,
-          ]
-        )
+        const metadataParams = [
+          data.name,
+          data.type,
+          data.currency,
+          creditFields.creditLimit,
+          creditFields.statementClosingDay,
+          creditFields.paymentDueDay,
+          nextMode,
+          now,
+        ]
+
+        let metadataUpdate: { rowsAffected: number }
+        if (nextMode === 'snapshot_only') {
+          metadataUpdate = await tx.execute(
+            `UPDATE accounts SET name = ?, type = ?, currency = ?, credit_limit = ?, statement_closing_day = ?, payment_due_day = ?, account_mode = ?, updated_at = ?, balance = ? WHERE id = ? AND is_archived = 0`,
+            [...metadataParams, requestedBalance, id]
+          )
+        } else if (currentMode === 'snapshot_only') {
+          metadataUpdate = await tx.execute(
+            `UPDATE accounts SET name = ?, type = ?, currency = ?, credit_limit = ?, statement_closing_day = ?, payment_due_day = ?, account_mode = ?, updated_at = ?, balance = 0 WHERE id = ? AND is_archived = 0`,
+            [...metadataParams, id]
+          )
+        } else {
+          metadataUpdate = await tx.execute(
+            `UPDATE accounts SET name = ?, type = ?, currency = ?, credit_limit = ?, statement_closing_day = ?, payment_due_day = ?, account_mode = ?, updated_at = ? WHERE id = ? AND is_archived = 0`,
+            [...metadataParams, id]
+          )
+        }
+        if (metadataUpdate.rowsAffected !== 1) {
+          throw new Error(`Account ${id} could not be updated safely.`)
+        }
+
+        const balanceChanged = requestedBalance !== existing[0].balance
+        const modeNeedsOpeningProvenance =
+          currentMode === 'snapshot_only' && nextMode === 'transactional' && requestedBalance !== 0
+        if (nextMode === 'transactional' && (balanceChanged || modeNeedsOpeningProvenance)) {
+          await reconcileTransactionalAccountBalance(tx, {
+            accountId: id,
+            currency: data.currency,
+            observedBalance: requestedBalance,
+            storedBalanceBefore: existing[0].balance,
+            reconciliationDate: dayjs().format('YYYY-MM-DD'),
+            updatedAt: now,
+          })
+        }
       })
     } catch (error) {
       set({ error: getErrorMessage(error) })

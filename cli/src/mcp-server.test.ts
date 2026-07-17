@@ -37,7 +37,7 @@ describe('MCP tool registration', () => {
 
     const toolNames = registerTool.mock.calls.map(([name]) => name)
 
-    expect(tools).toHaveLength(90)
+    expect(tools).toHaveLength(91)
     expect(toolNames).toEqual(tools.map((tool) => tool.name))
     expect(toolNames).toEqual(
       expect.arrayContaining([
@@ -69,6 +69,8 @@ describe('MCP tool registration', () => {
         'get-spending-summary',
         'get-education-tip',
         'generate-portfolio-review',
+        'manage-investment',
+        'list-investments',
         'finalize-staged-statement-history',
         'match-transfer-transactions',
         'manage-receivable',

@@ -2,7 +2,7 @@ import { isTauri, DATA_SERVER_URL, withDataServerHeaders } from '@/lib/runtime'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type TauriDatabase = {
+export type TauriDatabase = {
   select<T>(sql: string, params?: unknown[]): Promise<T>
   execute(sql: string, params?: unknown[]): Promise<{ rowsAffected: number; lastInsertId: number }>
   close(): Promise<void>
@@ -12,7 +12,6 @@ type TauriFsModule = {
   exists: (path: string) => Promise<boolean>
   readFile: (path: string) => Promise<Uint8Array>
   remove: (path: string) => Promise<void>
-  rename: (oldPath: string, newPath: string) => Promise<void>
   writeFile: (path: string, data: Uint8Array, options?: { mode?: number }) => Promise<void>
 }
 
@@ -96,6 +95,9 @@ CREATE TABLE IF NOT EXISTS transactions (
   tags TEXT DEFAULT '[]',
   is_recurring INTEGER NOT NULL DEFAULT 0,
   transfer_to_account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+  import_source TEXT,
+  import_external_id TEXT,
+  import_fingerprint TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
@@ -157,6 +159,7 @@ CREATE TABLE IF NOT EXISTS stock_prices (
   symbol TEXT NOT NULL,
   price INTEGER NOT NULL,
   currency TEXT NOT NULL DEFAULT 'USD',
+  quote_currency TEXT NOT NULL DEFAULT 'USD',
   date TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   UNIQUE(symbol, date)
@@ -201,13 +204,6 @@ CREATE INDEX IF NOT EXISTS idx_exchange_rates_currencies ON exchange_rates(from_
 CREATE INDEX IF NOT EXISTS idx_extension_data_extension ON extension_data(extension_id);
 `
 
-const REQUIRED_SHIKIN_TABLES: Record<string, readonly string[]> = {
-  _migrations: ['id', 'name'],
-  accounts: ['id', 'name', 'balance'],
-  categories: ['id', 'name', 'type'],
-  transactions: ['id', 'account_id', 'type', 'amount', 'date'],
-}
-
 const CURRENT_SHIKIN_MIGRATIONS = [
   '001_core_tables',
   '003_credit_cards',
@@ -225,6 +221,7 @@ const CURRENT_SHIKIN_MIGRATIONS = [
   '017_investment_type_cetes',
   '018_placeholder_transactions',
   '019_financial_semantics',
+  '020_quote_recurrence_import_identity',
 ] as const
 
 const CURRENT_SHIKIN_SCHEMA: Record<string, readonly string[]> = {
@@ -267,21 +264,33 @@ const CURRENT_SHIKIN_SCHEMA: Record<string, readonly string[]> = {
     'reconciliation_id',
     'matched_transaction_id',
     'is_archived',
+    'import_source',
+    'import_external_id',
+    'import_fingerprint',
   ],
   subscriptions: ['id', 'name', 'amount', 'billing_cycle', 'next_billing_date'],
   budgets: ['id', 'name', 'amount', 'period'],
   budget_periods: ['id', 'budget_id', 'start_date', 'end_date', 'spent'],
   investments: ['id', 'symbol', 'name', 'type', 'shares'],
-  stock_prices: ['id', 'symbol', 'price', 'date'],
+  stock_prices: ['id', 'symbol', 'price', 'currency', 'quote_currency', 'date'],
   exchange_rates: ['id', 'from_currency', 'to_currency', 'rate', 'date'],
   settings: ['key', 'value', 'updated_at'],
   extension_data: ['id', 'extension_id', 'key', 'value'],
   category_rules: ['id', 'pattern', 'category_id'],
-  recurring_rules: ['id', 'description', 'amount', 'currency', 'account_id', 'next_date'],
+  recurring_rules: [
+    'id',
+    'description',
+    'amount',
+    'currency',
+    'account_id',
+    'next_date',
+    'anchor_kind',
+    'anchor_day',
+  ],
   goals: ['id', 'name', 'target_amount', 'current_amount'],
   recaps: ['id', 'type', 'period_start', 'period_end', 'summary'],
   transaction_splits: ['id', 'transaction_id', 'amount'],
-  net_worth_snapshots: ['id', 'date', 'net_worth'],
+  net_worth_snapshots: ['id', 'date', 'net_worth', 'currency'],
   account_balance_history: ['id', 'account_id', 'date', 'balance'],
   audit_log: [
     'id',
@@ -494,10 +503,6 @@ async function executeSqlBatch(db: TauriDatabase, sql: string): Promise<void> {
   }
 }
 
-function getFirstRowValue(row: Record<string, unknown> | undefined): unknown {
-  return row ? Object.values(row)[0] : undefined
-}
-
 function normalizeSqlDefinition(value: unknown): string {
   return String(value ?? '')
     .replace(/\s+/g, ' ')
@@ -617,21 +622,6 @@ async function recreateTauriTransactionStatusTriggers(db: TauriDatabase): Promis
   `)
 }
 
-async function checkpointTauriWal(
-  db: TauriDatabase,
-  { requireComplete = false } = {}
-): Promise<void> {
-  const rows = await db.select<Record<string, unknown>[]>('PRAGMA wal_checkpoint(TRUNCATE)')
-  const result = rows[0] ?? {}
-  const busy = Number(result.busy ?? 0)
-  const log = Number(result.log ?? -1)
-  const checkpointed = Number(result.checkpointed ?? -1)
-
-  if (requireComplete && (busy !== 0 || (log >= 0 && checkpointed >= 0 && checkpointed !== log))) {
-    throw new Error('Could not fully checkpoint the database WAL before continuing')
-  }
-}
-
 async function assertTauriTransactionStatusReady(db: TauriDatabase): Promise<void> {
   const columns = await db.select<Array<{ name: string; notnull?: number; dflt_value?: unknown }>>(
     'PRAGMA table_info(transactions)'
@@ -687,55 +677,6 @@ async function assertTauriTransactionStatusReady(db: TauriDatabase): Promise<voi
     ])
   ) {
     throw new Error('Database transaction status column is missing valid-status protection.')
-  }
-}
-
-async function validateTauriImportDatabase(db: TauriDatabase): Promise<void> {
-  const integrityRows = await db.select<Record<string, unknown>[]>('PRAGMA integrity_check')
-  const integrityCheck = String(getFirstRowValue(integrityRows[0]) ?? '')
-  if (integrityCheck !== 'ok') {
-    throw new Error(
-      `Imported SQLite database failed integrity check: ${integrityCheck || 'unknown'}`
-    )
-  }
-
-  const foreignKeyRows = await db.select<Record<string, unknown>[]>('PRAGMA foreign_key_check')
-  if (foreignKeyRows.length > 0) {
-    const firstViolation = foreignKeyRows[0]
-    throw new Error(
-      `Imported SQLite database failed foreign key check: ${JSON.stringify(firstViolation)}`
-    )
-  }
-
-  const tableRows = await db.select<{ name: string }[]>(
-    "SELECT name FROM sqlite_master WHERE type = 'table'"
-  )
-  const existingTables = new Set(tableRows.map((row) => row.name))
-  const missingTables = Object.keys(REQUIRED_SHIKIN_TABLES).filter(
-    (tableName) => !existingTables.has(tableName)
-  )
-  if (missingTables.length > 0) {
-    throw new Error(
-      `Imported SQLite database is not a Shikin database. Missing required tables: ${missingTables.join(', ')}`
-    )
-  }
-
-  for (const [tableName, requiredColumns] of Object.entries(REQUIRED_SHIKIN_TABLES)) {
-    const columns = await db.select<{ name: string }[]>(`PRAGMA table_info(${tableName})`)
-    const existingColumns = new Set(columns.map((column) => column.name))
-    const missingColumns = requiredColumns.filter((column) => !existingColumns.has(column))
-    if (missingColumns.length > 0) {
-      throw new Error(
-        `Imported SQLite database is missing required Shikin columns on ${tableName}: ${missingColumns.join(', ')}`
-      )
-    }
-  }
-
-  const coreMigration = await db.select<{ name: string }[]>(
-    "SELECT name FROM _migrations WHERE name = '001_core_tables' LIMIT 1"
-  )
-  if (coreMigration.length === 0) {
-    throw new Error('Imported SQLite database is missing required Shikin migration metadata')
   }
 }
 
@@ -910,6 +851,8 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
         tags TEXT DEFAULT '',
         notes TEXT,
         active INTEGER DEFAULT 1,
+        anchor_kind TEXT CHECK (anchor_kind IN ('fixed_day', 'end_of_month')),
+        anchor_day INTEGER CHECK (anchor_day BETWEEN 1 AND 31),
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
         updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
       )
@@ -1494,6 +1437,42 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
     applied.add('019_financial_semantics')
   }
 
+  if (!applied.has('020_quote_recurrence_import_identity')) {
+    await ensureTableColumn(db, 'stock_prices', 'quote_currency', 'TEXT')
+    await db.execute(
+      `UPDATE stock_prices SET quote_currency = UPPER(COALESCE(NULLIF(TRIM(currency), ''), 'USD')) WHERE quote_currency IS NULL OR TRIM(quote_currency) = ''`
+    )
+    await ensureTableColumn(
+      db,
+      'recurring_rules',
+      'anchor_kind',
+      `TEXT CHECK (anchor_kind IN ('fixed_day', 'end_of_month'))`
+    )
+    await ensureTableColumn(
+      db,
+      'recurring_rules',
+      'anchor_day',
+      'INTEGER CHECK (anchor_day BETWEEN 1 AND 31)'
+    )
+    await ensureTableColumn(db, 'transactions', 'import_source', 'TEXT')
+    await ensureTableColumn(db, 'transactions', 'import_external_id', 'TEXT')
+    await ensureTableColumn(db, 'transactions', 'import_fingerprint', 'TEXT')
+    await ensureTableColumn(db, 'net_worth_snapshots', 'currency', 'TEXT')
+    await db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_stock_prices_quote ON stock_prices(symbol, quote_currency, date)`
+    )
+    await db.execute(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_import_external ON transactions(account_id, import_source, import_external_id) WHERE import_external_id IS NOT NULL`
+    )
+    await db.execute(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_import_fingerprint ON transactions(import_fingerprint) WHERE import_fingerprint IS NOT NULL`
+    )
+    await db.execute(
+      "INSERT OR IGNORE INTO _migrations (id, name) VALUES (20, '020_quote_recurrence_import_identity')"
+    )
+    applied.add('020_quote_recurrence_import_identity')
+  }
+
   await db.execute(`
     CREATE TRIGGER IF NOT EXISTS trg_transactions_snapshot_account_insert
     BEFORE INSERT ON transactions
@@ -1768,13 +1747,15 @@ export async function materializeRecurringTransactionsBrowser(): Promise<{
 
 export async function exportDatabaseSnapshot(): Promise<Uint8Array> {
   if (isTauri) {
-    const database = await getTauriDb()
-    await checkpointTauriWal(database, { requireComplete: true })
-
-    // In Tauri mode, read the DB file directly via the filesystem plugin
-    const fsMod = await (import('@tauri-apps/plugin-fs') as Promise<TauriFsModule>)
-    const dbPath = await getTauriDbPath()
-    return await fsMod.readFile(dbPath)
+    return enqueueTauriDbOperation(async () => {
+      const fsMod = await (import('@tauri-apps/plugin-fs') as Promise<TauriFsModule>)
+      const snapshotPath = await invokeTauri<string>('shikin_db_create_snapshot')
+      try {
+        return await fsMod.readFile(snapshotPath)
+      } finally {
+        await removeIfExists(fsMod, snapshotPath)
+      }
+    })
   }
 
   // Browser mode: fetch raw binary from data server
@@ -1791,103 +1772,60 @@ export async function exportDatabaseSnapshot(): Promise<Uint8Array> {
 
 export async function importDatabaseSnapshot(data: Uint8Array): Promise<void> {
   if (isTauri) {
-    const header = new TextDecoder('ascii').decode(data.subarray(0, 16))
-    if (!header.startsWith('SQLite format 3')) {
-      throw new Error('Invalid SQLite database file')
-    }
-
-    const [{ default: Database }, fsMod] = await Promise.all([
-      import('@tauri-apps/plugin-sql'),
-      import('@tauri-apps/plugin-fs') as Promise<TauriFsModule>,
-    ])
-    const dbPath = await getTauriDbPath()
-    const importStamp = `${Date.now()}`
-    const tempPath = `${dbPath}.import-check-${importStamp}`
-    const backupPath = `${dbPath}.backup-${importStamp}`
-
-    await removeIfExists(fsMod, tempPath)
-    await removeIfExists(fsMod, `${tempPath}-wal`)
-    await removeIfExists(fsMod, `${tempPath}-shm`)
-    await removeIfExists(fsMod, `${tempPath}-journal`)
-    await fsMod.writeFile(tempPath, data, { mode: 0o600 })
-
-    let tempDb: TauriDatabase | null = null
-    try {
-      tempDb = (await Database.load(`sqlite:${tempPath}`)) as unknown as TauriDatabase
-      await enableTauriForeignKeys(tempDb)
-      await validateTauriImportDatabase(tempDb)
-    } finally {
-      await tempDb?.close()
-    }
-
-    let backupCreated = false
-    let importedDb: TauriDatabase | null = null
-
-    try {
-      let currentDb = tauriDb
-      let openedCurrentDb = false
-      if (!currentDb && (await fsMod.exists(dbPath))) {
-        currentDb = (await Database.load(await getTauriSqliteUrl())) as unknown as TauriDatabase
-        await enableTauriForeignKeys(currentDb)
-        openedCurrentDb = true
+    return enqueueTauriDbOperation(async () => {
+      const header = new TextDecoder('ascii').decode(data.subarray(0, 16))
+      if (!header.startsWith('SQLite format 3')) {
+        throw new Error('Invalid SQLite database file')
       }
 
-      if (currentDb) {
-        await checkpointTauriWal(currentDb, { requireComplete: true })
-        await currentDb.close()
-      }
-      if (openedCurrentDb || tauriDb) {
+      const fsMod = await (import('@tauri-apps/plugin-fs') as Promise<TauriFsModule>)
+      const dbPath = await getTauriDbPath()
+      const tempPath = `${dbPath}.import-check-${Date.now()}`
+      await removeIfExists(fsMod, tempPath)
+      await fsMod.writeFile(tempPath, data, { mode: 0o600 })
+
+      let restoreResult: { rollbackPath: string | null } | null = null
+      try {
+        const currentDb = tauriDb
         tauriDb = null
         tauriInitPromise = null
-      }
+        await currentDb?.close()
 
-      await removeIfExists(fsMod, `${dbPath}-wal`)
-      await removeIfExists(fsMod, `${dbPath}-shm`)
-      await removeIfExists(fsMod, `${dbPath}-journal`)
+        restoreResult = await invokeTauri<{ rollbackPath: string | null }>(
+          'shikin_db_restore_snapshot',
+          { candidatePath: tempPath }
+        )
+        await getTauriDb()
+      } catch (error) {
+        const failedDb = tauriDb
+        tauriDb = null
+        tauriInitPromise = null
+        await failedDb?.close().catch(() => {})
 
-      if (await fsMod.exists(dbPath)) {
-        await fsMod.rename(dbPath, backupPath)
-        backupCreated = true
-      }
-
-      await fsMod.rename(tempPath, dbPath)
-      importedDb = (await Database.load(await getTauriSqliteUrl())) as unknown as TauriDatabase
-      tauriDb = importedDb
-      await enableTauriForeignKeys(importedDb)
-      await runTauriMigrations(importedDb)
-      if (backupCreated) {
-        try {
-          await removeIfExists(fsMod, backupPath)
-        } catch (cleanupError) {
-          console.warn(
-            `Imported database successfully, but could not remove rollback backup: ${cleanupError instanceof Error ? cleanupError.message : cleanupError}`
-          )
+        if (restoreResult?.rollbackPath) {
+          try {
+            await invokeTauri('shikin_db_restore_snapshot', {
+              candidatePath: restoreResult.rollbackPath,
+            })
+            await getTauriDb()
+          } catch (rollbackError) {
+            const symptom = new Error(
+              `Database import failed and rollback could not be completed. Import error: ${error instanceof Error ? error.message : error}. Rollback error: ${rollbackError instanceof Error ? rollbackError.message : rollbackError}`
+            ) as Error & { cause?: unknown }
+            symptom.cause = rollbackError
+            throw symptom
+          }
+        } else {
+          await getTauriDb().catch(() => {})
         }
+        throw error
+      } finally {
+        await removeIfExists(fsMod, tempPath)
+        await removeIfExists(fsMod, `${tempPath}-wal`)
+        await removeIfExists(fsMod, `${tempPath}-shm`)
+        await removeIfExists(fsMod, `${tempPath}-journal`)
       }
-      return
-    } catch (error) {
-      await importedDb?.close()
-      tauriDb = null
-      tauriInitPromise = null
-
-      await removeIfExists(fsMod, `${dbPath}-wal`)
-      await removeIfExists(fsMod, `${dbPath}-shm`)
-      await removeIfExists(fsMod, `${dbPath}-journal`)
-
-      if (backupCreated) {
-        await removeIfExists(fsMod, dbPath)
-        if (await fsMod.exists(backupPath)) {
-          await fsMod.rename(backupPath, dbPath)
-        }
-      }
-
-      throw error
-    } finally {
-      await removeIfExists(fsMod, tempPath)
-      await removeIfExists(fsMod, `${tempPath}-wal`)
-      await removeIfExists(fsMod, `${tempPath}-shm`)
-      await removeIfExists(fsMod, `${tempPath}-journal`)
-    }
+    })
   }
 
   // Browser mode: POST binary to data server

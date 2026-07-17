@@ -92,6 +92,7 @@ describe('recurring-store', () => {
           updated_at: '2026-01-01T00:00:00Z',
           account_name: 'Checking',
           account_currency: 'USD',
+          account_is_archived: 0,
           category_name: 'Entertainment',
           category_color: '#8b5cf6',
         },
@@ -126,7 +127,7 @@ describe('recurring-store', () => {
   describe('create', () => {
     it('inserts rule with centavos and next_date', async () => {
       mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
-      mockQuery.mockResolvedValueOnce([{ currency: ' eur ' }])
+      mockQuery.mockResolvedValueOnce([{ currency: ' eur ', is_archived: 0 }])
       mockQuery.mockResolvedValueOnce([]) // re-fetch
 
       await useRecurringStore.getState().create({
@@ -134,6 +135,7 @@ describe('recurring-store', () => {
         amount: 1500,
         type: 'expense',
         frequency: 'monthly',
+        anchorKind: 'end_of_month',
         nextDate: '2026-04-01',
         endDate: null,
         accountId: '01ACC001',
@@ -156,11 +158,12 @@ describe('recurring-store', () => {
           '2026-04-01',
         ])
       )
+      expect(mockExecute.mock.calls[0]?.[1]?.slice(14, 16)).toEqual(['end_of_month', null])
     })
 
     it('does not reject when refresh fails after a committed write', async () => {
       mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
-      mockQuery.mockResolvedValueOnce([{ currency: 'EUR' }])
+      mockQuery.mockResolvedValueOnce([{ currency: 'EUR', is_archived: 0 }])
       mockQuery.mockRejectedValueOnce(new Error('refresh failed'))
 
       await expect(
@@ -185,7 +188,7 @@ describe('recurring-store', () => {
     })
 
     it('rejects recurring-rule creation when the linked account currency is invalid after normalization', async () => {
-      mockQuery.mockResolvedValueOnce([{ currency: '   ' }])
+      mockQuery.mockResolvedValueOnce([{ currency: '   ', is_archived: 0 }])
 
       await expect(
         useRecurringStore.getState().create({
@@ -282,7 +285,7 @@ describe('recurring-store', () => {
             updated_at: '2026-01-01T00:00:00Z',
           },
         ])
-        .mockResolvedValueOnce([{ currency: 'EUR' }])
+        .mockResolvedValueOnce([{ currency: 'EUR', is_archived: 0 }])
         .mockResolvedValueOnce([])
       mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
 
@@ -309,6 +312,52 @@ describe('recurring-store', () => {
       )
     })
 
+    it('preserves a fixed-day anchor when an unrelated field is edited after February', async () => {
+      mockQuery
+        .mockResolvedValueOnce([
+          {
+            id: '01RULE031',
+            description: 'Month-end bill',
+            amount: 10000,
+            currency: 'USD',
+            type: 'expense',
+            frequency: 'monthly',
+            next_date: '2026-02-28',
+            end_date: null,
+            account_id: '01ACC001',
+            to_account_id: null,
+            category_id: '01CAT001',
+            subcategory_id: null,
+            tags: '',
+            notes: null,
+            active: 1,
+            anchor_kind: 'fixed_day',
+            anchor_day: 31,
+            created_at: '2026-01-01T00:00:00Z',
+            updated_at: '2026-01-01T00:00:00Z',
+          },
+        ])
+        .mockResolvedValueOnce([])
+      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+
+      await useRecurringStore.getState().update('01RULE031', {
+        description: 'Renamed bill',
+        amount: 100,
+        type: 'expense',
+        frequency: 'monthly',
+        nextDate: '2026-02-28',
+        endDate: null,
+        accountId: '01ACC001',
+        toAccountId: null,
+        categoryId: '01CAT001',
+        subcategoryId: null,
+        tags: '',
+        notes: null,
+      })
+
+      expect(mockExecute.mock.calls[0]?.[1]?.slice(13, 15)).toEqual(['fixed_day', 31])
+    })
+
     it('rejects cross-currency recurring-rule moves', async () => {
       mockQuery
         .mockResolvedValueOnce([
@@ -332,7 +381,7 @@ describe('recurring-store', () => {
             updated_at: '2026-01-01T00:00:00Z',
           },
         ])
-        .mockResolvedValueOnce([{ currency: 'EUR' }])
+        .mockResolvedValueOnce([{ currency: 'EUR', is_archived: 0 }])
 
       await expect(
         useRecurringStore.getState().update('01RULE001', {
@@ -512,6 +561,8 @@ describe('recurring-store', () => {
             tags: '',
             notes: null,
             active: 1,
+            anchor_kind: 'fixed_day',
+            anchor_day: 1,
             created_at: '2026-01-01T00:00:00Z',
             updated_at: '2026-01-01T00:00:00Z',
           },
@@ -581,6 +632,7 @@ describe('recurring-store', () => {
           created_at: '2026-01-01T00:00:00Z',
           updated_at: '2026-01-01T00:00:00Z',
           account_currency: 'USD',
+          account_is_archived: 0,
         },
       ])
 
@@ -635,6 +687,7 @@ describe('recurring-store', () => {
           created_at: '2026-01-01T00:00:00Z',
           updated_at: '2026-01-01T00:00:00Z',
           account_currency: 'USD',
+          account_is_archived: 0,
         },
       ])
       mockExecute.mockResolvedValue({ rowsAffected: 1, lastInsertId: 0 })
@@ -682,6 +735,7 @@ describe('recurring-store', () => {
           created_at: '2026-01-01T00:00:00Z',
           updated_at: '2026-01-01T00:00:00Z',
           account_currency: 'EUR',
+          account_is_archived: 0,
         },
       ])
 
@@ -715,6 +769,7 @@ describe('recurring-store', () => {
           created_at: '2026-01-01T00:00:00Z',
           updated_at: '2026-01-01T00:00:00Z',
           account_currency: 'EUR',
+          account_is_archived: 0,
         },
       ])
 
@@ -748,6 +803,7 @@ describe('recurring-store', () => {
           created_at: '2026-01-01T00:00:00Z',
           updated_at: '2026-01-01T00:00:00Z',
           account_currency: 'USD',
+          account_is_archived: 0,
         },
       ])
 
@@ -766,6 +822,7 @@ describe('recurring-store', () => {
           amount: 1599,
           currency: 'EUR',
           account_currency: 'EUR',
+          account_is_archived: 0,
           type: 'expense',
           frequency: 'monthly',
           next_date: '2026-03-01',
@@ -822,6 +879,7 @@ describe('recurring-store', () => {
           amount: 1599,
           currency: 'EUR',
           account_currency: 'EUR',
+          account_is_archived: 0,
           type: 'expense',
           frequency: 'monthly',
           next_date: '2026-03-01',
@@ -877,6 +935,8 @@ describe('recurring-store', () => {
         tags: '',
         notes: null,
         active: 1,
+        anchor_kind: 'fixed_day' as const,
+        anchor_day: 1,
         created_at: '2026-01-01T00:00:00Z',
         updated_at: '2026-01-01T00:00:00Z',
       }

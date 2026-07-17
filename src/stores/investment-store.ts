@@ -19,18 +19,30 @@ interface InvestmentFormData {
 
 export interface InvestmentWithPrice extends Investment {
   currentPrice: number | null
+  currentPriceCurrency: string | null
   marketValue: number | null
   gainLoss: number | null
   gainLossPercent: number | null
   lastPriceDate: string | null
 }
 
+interface CurrencyBreakdown {
+  marketValue: number
+  costBasis: number
+  gainLoss: number
+  count: number
+}
+
 interface PortfolioSummary {
-  totalMarketValue: number
-  totalCostBasis: number
-  totalGainLoss: number
-  totalGainLossPercent: number
+  totalMarketValue: number | null
+  totalCostBasis: number | null
+  totalGainLoss: number | null
+  totalGainLossPercent: number | null
   byType: Record<string, { marketValue: number; gainLoss: number; count: number }>
+  byCurrency: Record<string, CurrencyBreakdown>
+  currencies: string[]
+  isMixedCurrency: boolean
+  totalsComplete: boolean
 }
 
 interface PricePoint {
@@ -63,6 +75,10 @@ const EMPTY_SUMMARY: PortfolioSummary = {
   totalGainLoss: 0,
   totalGainLossPercent: 0,
   byType: {},
+  byCurrency: {},
+  currencies: [],
+  isMixedCurrency: false,
+  totalsComplete: true,
 }
 
 export const useInvestmentStore = create<InvestmentState>((set, get) => ({
@@ -78,14 +94,19 @@ export const useInvestmentStore = create<InvestmentState>((set, get) => ({
     set({ isLoading: true, fetchError: null })
     try {
       const rows = await query<
-        Investment & { latest_price: number | null; latest_price_date: string | null }
+        Investment & {
+          latest_price: number | null
+          latest_price_currency: string | null
+          latest_price_date: string | null
+        }
       >(
         `SELECT i.*,
                 sp.price as latest_price,
+                sp.quote_currency as latest_price_currency,
                 sp.date as latest_price_date
          FROM investments i
          LEFT JOIN (
-           SELECT symbol, price, date,
+           SELECT symbol, price, quote_currency, date,
                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) as rn
            FROM stock_prices
          ) sp ON sp.symbol = i.symbol AND sp.rn = 1
@@ -94,10 +115,14 @@ export const useInvestmentStore = create<InvestmentState>((set, get) => ({
 
       const investments: InvestmentWithPrice[] = rows.map((row) => {
         const currentPrice = row.latest_price
+        const currentPriceCurrency = row.latest_price_currency
         const avgCostBasis = row.avg_cost_basis
         const marketValue = currentPrice !== null ? Math.round(row.shares * currentPrice) : null
         const costBasis = Math.round(row.shares * avgCostBasis)
-        const gainLoss = marketValue !== null ? marketValue - costBasis : null
+        const gainLoss =
+          marketValue !== null && currentPriceCurrency === row.currency
+            ? marketValue - costBasis
+            : null
         const gainLossPercent =
           gainLoss !== null && costBasis > 0
             ? Math.round((gainLoss / costBasis) * 10000) / 100
@@ -116,6 +141,7 @@ export const useInvestmentStore = create<InvestmentState>((set, get) => ({
           created_at: row.created_at,
           updated_at: row.updated_at,
           currentPrice,
+          currentPriceCurrency,
           marketValue,
           gainLoss,
           gainLossPercent,
@@ -245,11 +271,29 @@ export const useInvestmentStore = create<InvestmentState>((set, get) => ({
     let totalMarketValue = 0
     let totalCostBasis = 0
     const byType: PortfolioSummary['byType'] = {}
+    const byCurrency: PortfolioSummary['byCurrency'] = {}
+    const currenciesUsed = new Set<string>()
+
+    const ensureCurrency = (currency: string) => {
+      if (!byCurrency[currency]) {
+        byCurrency[currency] = { marketValue: 0, costBasis: 0, gainLoss: 0, count: 0 }
+      }
+      return byCurrency[currency]
+    }
 
     for (const inv of investments) {
       const costBasis = Math.round(inv.shares * inv.avg_cost_basis)
       const marketValue = inv.marketValue ?? costBasis
-      const gainLoss = marketValue - costBasis
+      const valuationCurrency = inv.currentPriceCurrency ?? inv.currency
+      const comparable = valuationCurrency === inv.currency
+      const gainLoss = comparable ? marketValue - costBasis : 0
+
+      currenciesUsed.add(inv.currency)
+      currenciesUsed.add(valuationCurrency)
+      ensureCurrency(inv.currency).costBasis += costBasis
+      ensureCurrency(inv.currency).count += 1
+      ensureCurrency(valuationCurrency).marketValue += marketValue
+      if (comparable) ensureCurrency(inv.currency).gainLoss += gainLoss
 
       totalMarketValue += marketValue
       totalCostBasis += costBasis
@@ -262,17 +306,29 @@ export const useInvestmentStore = create<InvestmentState>((set, get) => ({
       byType[inv.type].count += 1
     }
 
-    const totalGainLoss = totalMarketValue - totalCostBasis
+    const currencies = [...currenciesUsed].sort()
+    const totalsComplete = currencies.length <= 1
+    const isMixedCurrency = !totalsComplete
+    const comparableGainLoss = totalMarketValue - totalCostBasis
+    const totalGainLoss = totalsComplete ? comparableGainLoss : null
     const totalGainLossPercent =
-      totalCostBasis > 0 ? Math.round((totalGainLoss / totalCostBasis) * 10000) / 100 : 0
+      totalsComplete && totalCostBasis > 0
+        ? Math.round((comparableGainLoss / totalCostBasis) * 10000) / 100
+        : totalsComplete
+          ? 0
+          : null
 
     set({
       portfolioSummary: {
-        totalMarketValue,
-        totalCostBasis,
+        totalMarketValue: totalsComplete ? totalMarketValue : null,
+        totalCostBasis: totalsComplete ? totalCostBasis : null,
         totalGainLoss,
         totalGainLossPercent,
-        byType,
+        byType: totalsComplete ? byType : {},
+        byCurrency,
+        currencies,
+        isMixedCurrency,
+        totalsComplete,
       },
     })
   },

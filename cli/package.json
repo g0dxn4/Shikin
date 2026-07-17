@@ -8,12 +8,16 @@
     "shikin-bridge": "./dist/cli.js",
     "shikin-mcp": "./dist/mcp-server.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "tsup src/cli.ts src/mcp-server.ts --format esm --dts --clean",
+    "prebuild": "pnpm --filter @shikin/finance-core build",
+    "build": "tsup --config tsup.config.ts",
     "dev": "tsx src/cli.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.8.0",
     "commander": "^13.1.0",
     "dayjs": "^1.11.13",
@@ -21,6 +25,7 @@
     "zod": "^3.24.4"
   },
   "devDependencies": {
+    "@shikin/finance-core": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
     "tsup": "^8.5.0",
     "tsx": "^4.19.4",

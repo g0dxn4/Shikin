@@ -26,6 +26,8 @@ export function NetWorth() {
     totalLiabilities,
     totalInvestments,
     netWorth,
+    totalsComplete,
+    missingCurrencies,
     assetBreakdown,
     liabilityBreakdown,
     history,
@@ -88,6 +90,12 @@ export function NetWorth() {
         </div>
       </div>
 
+      {!totalsComplete && (
+        <div className="border-warning/30 bg-warning/10 text-warning rounded-xl border px-4 py-3 text-sm">
+          {t('netWorth.incompleteTotals', { currencies: missingCurrencies.join(', ') })}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.35fr_0.65fr]">
         <div className="liquid-hero relative min-h-[360px] overflow-hidden p-6 sm:p-8">
           <BarChart3
@@ -101,7 +109,7 @@ export function NetWorth() {
                 {t('netWorth.currentNetWorth')}
               </p>
               <p className="font-heading mt-2 text-4xl font-bold tracking-tight md:text-5xl">
-                {formatMoney(netWorth)}
+                {totalsComplete ? formatMoney(netWorth) : '—'}
               </p>
               {history.length > 1 && (
                 <div className="mt-3 flex items-center gap-2">
@@ -186,7 +194,7 @@ export function NetWorth() {
               {t('netWorth.assets')}
             </p>
             <p className="font-heading text-success mt-2 text-2xl font-bold tracking-tight">
-              {formatMoney(totalAssets)}
+              {totalsComplete ? formatMoney(totalAssets) : '—'}
             </p>
           </div>
           <div className="liquid-card p-5">
@@ -194,7 +202,7 @@ export function NetWorth() {
               {t('netWorth.liabilities')}
             </p>
             <p className="font-heading text-destructive mt-2 text-2xl font-bold tracking-tight">
-              {formatMoney(totalLiabilities)}
+              {totalsComplete ? formatMoney(totalLiabilities) : '—'}
             </p>
           </div>
           <div className="liquid-card p-5 sm:col-span-2 xl:col-span-1">
@@ -236,7 +244,7 @@ export function NetWorth() {
                 <h3 className="font-heading text-sm font-semibold">{t('netWorth.assets')}</h3>
               </div>
               <span className="font-heading text-success text-lg font-bold">
-                {formatMoney(totalAssets)}
+                {totalsComplete ? formatMoney(totalAssets) : '—'}
               </span>
             </div>
             {totalInvestments > 0 && (
@@ -247,7 +255,9 @@ export function NetWorth() {
             <div className="space-y-3">
               {assetBreakdown.map((asset) => {
                 const percent =
-                  totalAssetsAbs > 0 ? (Math.abs(asset.balance) / totalAssetsAbs) * 100 : 0
+                  totalsComplete && totalAssetsAbs > 0 && asset.convertedBalance !== null
+                    ? (asset.convertedBalance / totalAssetsAbs) * 100
+                    : 0
                 return (
                   <div key={asset.id} className="space-y-1">
                     <StatRow
@@ -275,15 +285,15 @@ export function NetWorth() {
                 <h3 className="font-heading text-sm font-semibold">{t('netWorth.liabilities')}</h3>
               </div>
               <span className="font-heading text-destructive text-lg font-bold">
-                {formatMoney(totalLiabilities)}
+                {totalsComplete ? formatMoney(totalLiabilities) : '—'}
               </span>
             </div>
             <div className="space-y-3">
               {liabilityBreakdown.length > 0 ? (
                 liabilityBreakdown.map((liability) => {
                   const percent =
-                    totalLiabilitiesAbs > 0
-                      ? (Math.abs(liability.balance) / totalLiabilitiesAbs) * 100
+                    totalsComplete && totalLiabilitiesAbs > 0 && liability.convertedBalance !== null
+                      ? (liability.convertedBalance / totalLiabilitiesAbs) * 100
                       : 0
                   return (
                     <div key={liability.id} className="space-y-1">

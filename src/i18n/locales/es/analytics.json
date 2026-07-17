@@ -10,7 +10,8 @@
     "noLiabilities": "Sin pasivos. Bien!",
     "addAccountsPrompt": "Agrega cuentas para ver el desglose de activos y pasivos.",
     "noHistory": "Sin historial todavia. Agrega cuentas para comenzar a rastrear tu patrimonio.",
-    "firstSnapshot": "Primer registro guardado. Vuelve manana para ver tendencias."
+    "firstSnapshot": "Primer registro guardado. Vuelve manana para ver tendencias.",
+    "incompleteTotals": "Los totales no están disponibles hasta que haya tipos de cambio para: {{currencies}}."
   },
   "spendingInsights": {
     "title": "Analisis de Gastos",
@@ -70,6 +71,11 @@
     "title": "Informes",
     "description": "Una vista operativa mensual desde tus cuentas, presupuestos y transacciones locales.",
     "cash": "Efectivo",
+    "cashUnavailable": "Total de efectivo no disponible. Faltan tipos de cambio para {{currencies}}.",
+    "cashInvalidData": "Total de efectivo no disponible. Datos de moneda no válidos para {{details}}.",
+    "invalidRate": "tipo de cambio {{from}} → {{to}} ({{rate}})",
+    "preferredCurrency": "Moneda preferida",
+    "blankCurrency": "moneda vacía",
     "income": "Ingresos",
     "expenses": "Gastos",
     "netFlow": "Flujo Neto",

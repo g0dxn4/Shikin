@@ -133,6 +133,9 @@ The core table. Every expense, income, and transfer is a transaction.
 | `resolved_by_transaction_id`        | TEXT    | Logical FK -> transactions(id)                 | Transaction that resolved this placeholder       |
 | `placeholder_reason`                | TEXT    | nullable                                       | Why the placeholder exists                       |
 | `placeholder_parent_transaction_id` | TEXT    | Logical FK -> transactions(id)                 | Parent placeholder for split child transactions  |
+| `import_source`                     | TEXT    | nullable                                       | Statement format/source used for persisted identity |
+| `import_external_id`                | TEXT    | nullable                                       | Bank-provided row identifier (for example OFX FITID) |
+| `import_fingerprint`                | TEXT    | nullable                                       | Deterministic fallback identity when no bank ID exists |
 | `created_at`                        | TEXT    | NOT NULL, auto                                 | ISO 8601 timestamp                               |
 | `updated_at`                        | TEXT    | NOT NULL, auto                                 | ISO 8601 timestamp                               |
 
@@ -223,7 +226,8 @@ Historical price data for investment tracking.
 | `id`         | TEXT    | PRIMARY KEY             | ULID                    |
 | `symbol`     | TEXT    | NOT NULL                | Ticker symbol           |
 | `price`      | INTEGER | NOT NULL                | Price in centavos       |
-| `currency`   | TEXT    | NOT NULL, DEFAULT 'USD' | ISO 4217 currency code  |
+| `currency`   | TEXT    | NOT NULL, DEFAULT 'USD' | Legacy quote currency field |
+| `quote_currency` | TEXT | nullable | Explicit currency returned by the price provider |
 | `date`       | TEXT    | NOT NULL                | Price date (YYYY-MM-DD) |
 | `created_at` | TEXT    | NOT NULL, auto          | ISO 8601 timestamp      |
 
@@ -306,6 +310,8 @@ Templates for recurring transactions that auto-generate on schedule.
 | `tags`           | TEXT    | DEFAULT ''                   | Tags                                                |
 | `notes`          | TEXT    | nullable                     | Notes                                               |
 | `active`         | INTEGER | DEFAULT 1                    | 0 = paused, 1 = active                              |
+| `anchor_kind`    | TEXT    | nullable, CHECK              | `fixed_day` or `end_of_month` scheduling intent    |
+| `anchor_day`     | INTEGER | nullable, 1-31               | Original day for fixed-day recurrence              |
 | `created_at`     | TEXT    | NOT NULL, auto               | ISO 8601 timestamp                                  |
 | `updated_at`     | TEXT    | NOT NULL, auto               | ISO 8601 timestamp                                  |
 

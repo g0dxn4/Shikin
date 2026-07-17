@@ -12,7 +12,7 @@ Use Shikin's desktop-owned `shikin` command and MCP server safely and consistent
 ## Safety Rules
 
 - Do not run write commands against the user's real finance database unless they explicitly ask for it.
-- For tests and smoke checks, set `XDG_DATA_HOME` to a temp directory under `/tmp/opencode` so Shikin uses an isolated database.
+- For tests and smoke checks, set `SHIKIN_RESPECT_XDG_DATA_HOME=1` with an absolute `XDG_DATA_HOME` under `/tmp/opencode` so Shikin uses an isolated database and does not auto-move legacy HOME/AppConfig data into the temp dir.
 - Initialize a temp database with `scripts/data-server.mjs`; it runs migrations and seeds default categories.
 - Prefer dry-run or preview modes before writes (`--dry-run`, `--apply` only after review, or tool-specific preview defaults).
 - Treat `source` as an opaque provenance label and `note` as audit/changelog metadata. Transaction `notes` are user-facing transaction details.
@@ -40,8 +40,8 @@ node cli/dist/mcp-server.js
 For temp-data smoke tests:
 
 ```bash
-XDG_DATA_HOME=/tmp/opencode/shikin-smoke node scripts/data-server.mjs
-XDG_DATA_HOME=/tmp/opencode/shikin-smoke node cli/dist/cli.js list-accounts
+SHIKIN_RESPECT_XDG_DATA_HOME=1 XDG_DATA_HOME=/tmp/opencode/shikin-smoke node scripts/data-server.mjs
+SHIKIN_RESPECT_XDG_DATA_HOME=1 XDG_DATA_HOME=/tmp/opencode/shikin-smoke node cli/dist/cli.js list-accounts
 ```
 
 `scripts/data-server.mjs` keeps serving after migrations, so automated tests should spawn it, wait for `[data-server] Listening`, then terminate it before running CLI/MCP checks.
@@ -87,7 +87,7 @@ The MCP server exposes the same shared tool catalog as the CLI and these resourc
 
 ## Representative Tool Surface
 
-Current catalog size is 90 shared CLI/MCP tools and 94 total CLI commands including CLI-only built-ins. All shipped tools are available end-to-end against the local database.
+Current catalog size is 91 shared CLI/MCP tools and 95 total CLI commands including CLI-only built-ins. All shipped tools are available end-to-end against the local database.
 The lists below are representative groups for orientation; use `shikin tools --json` for the authoritative command, argument, enum, catalog/schema version, compatibility, and required-migration metadata.
 
 Transaction tools:
@@ -131,6 +131,7 @@ Budget, planning, and health tools:
 Investment, subscription, and automation tools:
 
 - `manage-investment`
+- `list-investments`
 - `manage-receivable`, `list-receivables`, `match-receivable`, `unmatch-receivable`
 - `get-upcoming-bills`
 - `list-subscriptions`
@@ -143,14 +144,14 @@ Investment, subscription, and automation tools:
 - `get-forecasted-cash-flow`
 - `convert-currency`
 - `backup-database` (CLI also has alias `backup`)
-- `restore-database` (CLI also has alias `restore`; guarded restore refuses unsafe active handles)
+- `restore-database` (CLI alias: `restore`; previews by default, requires `apply:true` to replace data, and keeps a rollback backup)
 - `audit-list`
 - `audit-show`
 - `undo`
 - `finance-sanity-check`
 - `automation-context`
 
-Goal, debt, and investment support is discoverable through `setup-status` and `automation-context`. Investment support intentionally stays on the existing `manage-investment` and `generate-portfolio-review` tools; do not assume broader broker sync or price-fetching capabilities from this skill.
+Goal, debt, and investment support is discoverable through `setup-status` and `automation-context`. Investment support includes `manage-investment`, `list-investments`, and `generate-portfolio-review`; do not assume broker sync or automatic price fetching.
 
 Notebook tools:
 
@@ -184,4 +185,4 @@ pnpm typecheck
 pnpm lint
 ```
 
-For a high-confidence live smoke, use a temp `XDG_DATA_HOME`, initialize with `scripts/data-server.mjs`, run each CLI command through `node cli/dist/cli.js`, and connect to `node cli/dist/mcp-server.js` with an MCP stdio client to verify `listTools`, representative `callTool`, and resource reads.
+For a high-confidence live smoke, use `SHIKIN_RESPECT_XDG_DATA_HOME=1` plus a temp absolute `XDG_DATA_HOME`, initialize with `scripts/data-server.mjs`, run each CLI command through `node cli/dist/cli.js`, and connect to `node cli/dist/mcp-server.js` with an MCP stdio client to verify `listTools`, representative `callTool`, and resource reads.

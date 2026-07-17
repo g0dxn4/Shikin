@@ -10,6 +10,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { homedir, tmpdir } from 'node:os'
 import { join, win32 } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -22,6 +23,24 @@ function createTempDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix))
   tempDirs.push(dir)
   return dir
+}
+
+function prepareScriptAppDataDir(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = 'linux') {
+  const scriptUrl = new URL('../../scripts/app-data-dir.mjs', import.meta.url).href
+  const output = execFileSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `import { prepareAppDataDir } from ${JSON.stringify(scriptUrl)}; process.stdout.write(JSON.stringify({ appDataDir: prepareAppDataDir(process.env, ${JSON.stringify(platform)}) }));`,
+    ],
+    {
+      encoding: 'utf-8',
+      env: { ...process.env, ...env },
+    }
+  )
+
+  return JSON.parse(output) as { appDataDir: string }
 }
 
 afterEach(() => {
@@ -83,6 +102,56 @@ describe('XDG app data directory', () => {
     expect(prepareAppDataDir({ HOME: homeDir, XDG_DATA_HOME: xdgDataHome })).toBe(expectedDir)
     expect(existsSync(legacyDir)).toBe(false)
     expect(readFileSync(join(expectedDir, 'shikin.db'), 'utf-8')).toBe('legacy database')
+    expect(statSync(expectedDir).mode & 0o777).toBe(0o700)
+  })
+
+  it('respects absolute XDG_DATA_HOME without moving legacy HOME data when requested', () => {
+    const homeDir = createTempDir('shikin-home-')
+    const xdgDataHome = createTempDir('shikin-xdg-data-')
+    const legacyDir = join(homeDir, '.local', 'share', SHIKIN_APP_ID)
+    const appConfigDir = join(homeDir, '.config', SHIKIN_APP_ID)
+    const expectedDir = join(xdgDataHome, SHIKIN_APP_ID)
+    mkdirSync(legacyDir, { recursive: true })
+    mkdirSync(appConfigDir, { recursive: true })
+    writeFileSync(join(legacyDir, 'shikin.db'), 'legacy database')
+    writeFileSync(join(appConfigDir, 'shikin.db'), 'app config database')
+
+    expect(
+      prepareAppDataDir({
+        HOME: homeDir,
+        XDG_DATA_HOME: xdgDataHome,
+        SHIKIN_RESPECT_XDG_DATA_HOME: '1',
+      })
+    ).toBe(expectedDir)
+
+    expect(readFileSync(join(legacyDir, 'shikin.db'), 'utf-8')).toBe('legacy database')
+    expect(readFileSync(join(appConfigDir, 'shikin.db'), 'utf-8')).toBe('app config database')
+    expect(existsSync(join(expectedDir, 'shikin.db'))).toBe(false)
+    expect(statSync(expectedDir).mode & 0o777).toBe(0o700)
+  })
+
+  it('mirrors the XDG escape hatch in the script helper used by data-server flows', () => {
+    const homeDir = createTempDir('shikin-home-')
+    const xdgDataHome = createTempDir('shikin-xdg-data-')
+    const legacyDir = join(homeDir, '.local', 'share', SHIKIN_APP_ID)
+    const appConfigDir = join(homeDir, '.config', SHIKIN_APP_ID)
+    const expectedDir = join(xdgDataHome, SHIKIN_APP_ID)
+    mkdirSync(legacyDir, { recursive: true })
+    mkdirSync(appConfigDir, { recursive: true })
+    writeFileSync(join(legacyDir, 'shikin.db'), 'legacy database')
+    writeFileSync(join(appConfigDir, 'shikin.db'), 'app config database')
+
+    const result = prepareScriptAppDataDir({
+      HOME: homeDir,
+      XDG_DATA_HOME: xdgDataHome,
+      XDG_CONFIG_HOME: '',
+      SHIKIN_RESPECT_XDG_DATA_HOME: '1',
+    })
+
+    expect(result.appDataDir).toBe(expectedDir)
+    expect(readFileSync(join(legacyDir, 'shikin.db'), 'utf-8')).toBe('legacy database')
+    expect(readFileSync(join(appConfigDir, 'shikin.db'), 'utf-8')).toBe('app config database')
+    expect(existsSync(join(expectedDir, 'shikin.db'))).toBe(false)
     expect(statSync(expectedDir).mode & 0o777).toBe(0o700)
   })
 

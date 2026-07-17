@@ -142,14 +142,16 @@ if [ -n "$LOCAL_SKILL" ] && [ -f "$LOCAL_SKILL" ]; then
   SOURCE_FILE="$LOCAL_SKILL"
 else
   command_exists curl || die 'curl is required'
+  command_exists find || die 'find is required'
   command_exists head || die 'head is required'
   command_exists mktemp || die 'mktemp is required'
   command_exists sed || die 'sed is required'
+  command_exists sha256sum || die 'sha256sum is required'
+  command_exists tar || die 'tar is required'
   command_exists tr || die 'tr is required'
 
   TMP_DIR="$(mktemp -d)"
   RELEASE_JSON="${TMP_DIR}/release.json"
-  SOURCE_FILE="${TMP_DIR}/SKILL.md"
 
   if [ -n "$VERSION" ]; then
     case "$VERSION" in
@@ -165,8 +167,17 @@ else
     [ -n "$RELEASE_TAG" ] || die 'could not determine latest release tag'
   fi
 
-  curl -fsSL "https://raw.githubusercontent.com/${REPO}/${RELEASE_TAG}/skills/${SKILL_NAME}/SKILL.md" -o "$SOURCE_FILE"
-  [ -s "$SOURCE_FILE" ] || die 'downloaded skill file is empty'
+  ASSET_NAME="shikin-cli-source-${RELEASE_TAG}.tar.gz"
+  ARCHIVE_FILE="${TMP_DIR}/${ASSET_NAME}"
+  CHECKSUM_FILE="${ARCHIVE_FILE}.sha256"
+  SOURCE_URL="https://github.com/${REPO}/releases/download/${RELEASE_TAG}/${ASSET_NAME}"
+  curl -fL "$SOURCE_URL" -o "$ARCHIVE_FILE"
+  curl -fL "${SOURCE_URL}.sha256" -o "$CHECKSUM_FILE"
+  (cd "$TMP_DIR" && sha256sum -c "${ASSET_NAME}.sha256") \
+    || die 'source archive checksum verification failed'
+  tar -xzf "$ARCHIVE_FILE" -C "$TMP_DIR"
+  SOURCE_FILE="$(find "$TMP_DIR" -path "*/skills/${SKILL_NAME}/SKILL.md" -type f -print -quit)"
+  [ -n "$SOURCE_FILE" ] && [ -s "$SOURCE_FILE" ] || die 'downloaded archive omitted the skill file'
 fi
 
 DATA_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}"

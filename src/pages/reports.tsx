@@ -2,10 +2,12 @@ import { useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowDownRight, ArrowUpRight, BarChart3, PieChart, Receipt, Wallet } from 'lucide-react'
 import dayjs from 'dayjs'
+import { isCashFlowEligible } from '@shikin/finance-core'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatMoney } from '@/lib/money'
 import { useAccountStore } from '@/stores/account-store'
 import { useBudgetStore } from '@/stores/budget-store'
+import { useCurrencyStore } from '@/stores/currency-store'
 import { useTransactionStore } from '@/stores/transaction-store'
 
 function startOfCurrentMonth() {
@@ -20,6 +22,8 @@ export function ReportsPage() {
   const { t } = useTranslation('analytics')
   const { accounts, fetch: fetchAccounts, isLoading: accountsLoading } = useAccountStore()
   const { budgets, fetch: fetchBudgets, isLoading: budgetsLoading } = useBudgetStore()
+  const { preferredCurrency, convertToPreferred, getTotalBalanceInPreferred, loadRates } =
+    useCurrencyStore()
   const {
     transactions,
     fetch: fetchTransactions,
@@ -27,31 +31,55 @@ export function ReportsPage() {
   } = useTransactionStore()
 
   useEffect(() => {
-    void Promise.allSettled([fetchAccounts(), fetchBudgets(), fetchTransactions()])
-  }, [fetchAccounts, fetchBudgets, fetchTransactions])
+    void Promise.allSettled([fetchAccounts(), fetchBudgets(), fetchTransactions(), loadRates()])
+  }, [fetchAccounts, fetchBudgets, fetchTransactions, loadRates])
 
-  const { monthTransactionCount, income, expenses, topCategories } = useMemo(() => {
+  const {
+    monthTransactionCount,
+    income,
+    expenses,
+    topCategories,
+    cashFlowComplete,
+    cashFlowMissingCurrencies,
+  } = useMemo(() => {
     const monthStart = startOfCurrentMonth()
     const monthEnd = endOfCurrentMonth()
     const categoryTotals = new Map<string, { name: string; color: string; amount: number }>()
     let transactionCount = 0
     let totalIncome = 0
     let totalExpenses = 0
+    const incompleteCurrencies = new Set<string>()
 
     for (const tx of transactions) {
-      if (tx.date < monthStart || tx.date > monthEnd || tx.type === 'transfer') continue
+      if (tx.date < monthStart || tx.date > monthEnd) continue
+      if (
+        !isCashFlowEligible({
+          type: tx.type,
+          status: tx.status ?? 'posted',
+          reportingTreatment: tx.reporting_treatment ?? 'normal',
+          transactionKind: tx.transaction_kind ?? 'standard',
+          isArchived: tx.is_archived ?? 0,
+        })
+      )
+        continue
 
+      const converted = convertToPreferred(tx.amount, tx.currency)
+      if (!converted.complete) {
+        incompleteCurrencies.add(tx.currency?.trim().toUpperCase() || t('reports.blankCurrency'))
+        continue
+      }
+      const amount = converted.amountCentavos
       transactionCount += 1
       if (tx.type === 'income') {
-        totalIncome += tx.amount
+        totalIncome += amount
       } else if (tx.type === 'expense') {
-        totalExpenses += tx.amount
+        totalExpenses += amount
         const key = tx.category_name ?? t('reports.uncategorized')
         const existing = categoryTotals.get(key)
         categoryTotals.set(key, {
           name: key,
           color: existing?.color ?? tx.category_color ?? 'var(--accent)',
-          amount: (existing?.amount ?? 0) + tx.amount,
+          amount: (existing?.amount ?? 0) + amount,
         })
       }
     }
@@ -61,10 +89,33 @@ export function ReportsPage() {
       income: totalIncome,
       expenses: totalExpenses,
       topCategories: [...categoryTotals.values()].sort((a, b) => b.amount - a.amount).slice(0, 5),
+      cashFlowComplete: incompleteCurrencies.size === 0,
+      cashFlowMissingCurrencies: [...incompleteCurrencies].sort(),
     }
-  }, [transactions, t])
+  }, [transactions, convertToPreferred, t])
   const netFlow = income - expenses
-  const totalBalance = accounts.reduce((total, account) => total + account.balance, 0)
+  const totalBalanceResult = useMemo(
+    () => getTotalBalanceInPreferred(accounts),
+    [accounts, getTotalBalanceInPreferred]
+  )
+  const invalidCurrencyDetails =
+    !totalBalanceResult.complete && totalBalanceResult.reason === 'invalid_currency_data'
+      ? [
+          ...(totalBalanceResult.invalidCurrencies ?? []).map((diagnostic) => {
+            const owner =
+              diagnostic.accountName ?? diagnostic.accountId ?? t('reports.preferredCurrency')
+            const value = diagnostic.value || t('reports.blankCurrency')
+            return `${owner} (${value})`
+          }),
+          ...(totalBalanceResult.invalidRates ?? []).map((diagnostic) =>
+            t('reports.invalidRate', {
+              from: diagnostic.fromCurrency || t('reports.blankCurrency'),
+              to: diagnostic.toCurrency || t('reports.blankCurrency'),
+              rate: diagnostic.rate || t('reports.blankCurrency'),
+            })
+          ),
+        ].join(', ')
+      : ''
   const totalBudgeted = budgets.reduce((total, budget) => total + budget.amount, 0)
   const totalSpentAgainstBudgets = budgets.reduce((total, budget) => total + budget.spent, 0)
   const budgetUsage =
@@ -112,30 +163,55 @@ export function ReportsPage() {
                     netFlow >= 0 ? 'text-success' : 'text-warning'
                   }`}
                 >
-                  {formatMoney(netFlow)}
+                  {cashFlowComplete ? formatMoney(netFlow, preferredCurrency) : '—'}
                 </p>
               )}
               <p className="text-muted-foreground mt-3 max-w-xl text-sm">
-                {t('reports.currentMonth')}
+                {cashFlowComplete
+                  ? t('reports.currentMonth')
+                  : `${t('reports.cashUnavailable', { currencies: cashFlowMissingCurrencies.join(', ') })}`}
               </p>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <ReportMiniMetric
                 icon={<Wallet size={15} />}
                 label={t('reports.cash')}
-                value={isLoading ? null : formatMoney(totalBalance)}
+                value={
+                  isLoading ? null : totalBalanceResult.complete ? (
+                    formatMoney(
+                      totalBalanceResult.amountCentavos,
+                      totalBalanceResult.preferredCurrency
+                    )
+                  ) : (
+                    <span className="text-warning block text-sm leading-snug" role="alert">
+                      {totalBalanceResult.reason === 'invalid_currency_data'
+                        ? t('reports.cashInvalidData', { details: invalidCurrencyDetails })
+                        : t('reports.cashUnavailable', {
+                            currencies: totalBalanceResult.missingCurrencies.join(', '),
+                          })}
+                    </span>
+                  )
+                }
                 tone="accent"
               />
               <ReportMiniMetric
                 icon={<ArrowUpRight size={15} />}
                 label={t('reports.income')}
-                value={isLoading ? null : formatMoney(income)}
+                value={
+                  isLoading ? null : cashFlowComplete ? formatMoney(income, preferredCurrency) : '—'
+                }
                 tone="success"
               />
               <ReportMiniMetric
                 icon={<ArrowDownRight size={15} />}
                 label={t('reports.expenses')}
-                value={isLoading ? null : formatMoney(expenses)}
+                value={
+                  isLoading
+                    ? null
+                    : cashFlowComplete
+                      ? formatMoney(expenses, preferredCurrency)
+                      : '—'
+                }
                 tone="danger"
               />
             </div>
@@ -181,6 +257,10 @@ export function ReportsPage() {
               <Skeleton key={index} className="h-11 rounded-2xl" />
             ))}
           </div>
+        ) : !cashFlowComplete ? (
+          <p className="text-warning py-10 text-center text-sm" role="alert">
+            {t('reports.cashUnavailable', { currencies: cashFlowMissingCurrencies.join(', ') })}
+          </p>
         ) : topCategories.length === 0 ? (
           <p className="text-muted-foreground py-10 text-center text-sm">
             {t('reports.noSpending')}
@@ -203,7 +283,7 @@ export function ReportsPage() {
                       <span className="truncate font-medium">{category.name}</span>
                     </div>
                     <span className="font-heading font-semibold">
-                      {formatMoney(category.amount)}
+                      {formatMoney(category.amount, preferredCurrency)}
                     </span>
                   </div>
                   <div className="bg-secondary h-2 overflow-hidden rounded-full">
@@ -230,7 +310,7 @@ function ReportMiniMetric({
 }: {
   icon: React.ReactNode
   label: string
-  value: string | null
+  value: React.ReactNode | null
   tone: 'accent' | 'success' | 'danger'
 }) {
   const toneClass = {
@@ -245,7 +325,7 @@ function ReportMiniMetric({
         <span className={toneClass}>{icon}</span>
         <span className="font-mono text-[10px] tracking-wider uppercase">{label}</span>
       </div>
-      {value ? (
+      {value !== null ? (
         <p className="font-heading text-lg font-bold">{value}</p>
       ) : (
         <Skeleton className="h-6 w-28" />

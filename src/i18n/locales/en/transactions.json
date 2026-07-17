@@ -82,6 +82,9 @@
       "descriptionPlaceholder": "e.g. Monthly rent",
       "amount": "Amount",
       "frequency": "Frequency",
+      "scheduleDay": "Monthly schedule",
+      "sameDayOfMonth": "Same day of month",
+      "lastDayOfMonth": "Last day of month",
       "nextDate": "Next Date",
       "endDate": "End Date",
       "endDatePlaceholder": "Optional"

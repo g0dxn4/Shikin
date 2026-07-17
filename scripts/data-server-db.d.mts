@@ -1,5 +1,6 @@
 interface DatabaseLike {
   close(): void
+  backup(path: string): Promise<{ totalPages: number; remainingPages: number }>
   pragma(sql: string, options?: { simple?: boolean }): unknown
   prepare(sql: string): {
     all(): Array<Record<string, unknown>>
@@ -11,13 +12,18 @@ export function checkpointWal(
   database: DatabaseLike,
   options?: { requireComplete?: boolean }
 ): Record<string, unknown>
-export function ensureSqliteDatabaseBuffer(buffer: Buffer): void
-export function removeSqliteSidecarFiles(dbPath: string): void
-export function validateShikinDatabase(database: DatabaseLike): void
-export function validateImportedDatabaseBuffer(buffer: Buffer, tempDbPath: string): void
+export function validateDatabaseFile(dbPath: string, label?: string): void
+export function exportDatabaseBuffer(args: {
+  db: DatabaseLike
+  dbPath: string
+  tempDbPath?: string
+}): Promise<Buffer>
 export function importDatabaseBuffer(args: {
   db: DatabaseLike
   dbPath: string
   buffer: Buffer
   tempDbPath?: string
-}): void
+}): Promise<{
+  backupPath: string | null
+  restoreBackup: () => Promise<void>
+}>

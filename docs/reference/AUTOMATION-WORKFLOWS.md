@@ -2,7 +2,7 @@
 
 This reference captures the generic CLI/MCP finance workflows added or hardened by the assistant-safe workflow plan. The features are for any human, script, CLI user, MCP client, bot, or AI assistant. Shikin does not hardcode a specific assistant, Discord bot, or source label.
 
-Use `shikin tools --json` as the authoritative machine-readable contract. At the time of this update, Shikin exposes 90 shared CLI/MCP tools and 94 total CLI commands including CLI-only built-ins.
+Use `shikin tools --json` as the authoritative machine-readable contract. At the time of this update, Shikin exposes 91 shared CLI/MCP tools and 95 total CLI commands including CLI-only built-ins.
 
 ## Provenance And Notes
 
@@ -43,7 +43,7 @@ The plan added or tightened coverage for:
 - Finance sanity exact and fuzzy duplicate wrapper behavior.
 - Real SQLite parameter binding for tag filters and transaction hygiene queries.
 - Subscription-from-transaction validation and undo apply balance reversal.
-- Isolated dist CLI/MCP smoke tests against temporary SQLite databases under `XDG_DATA_HOME=/tmp/opencode/...`.
+- Isolated dist CLI/MCP smoke tests against temporary SQLite databases under `SHIKIN_RESPECT_XDG_DATA_HOME=1 XDG_DATA_HOME=/tmp/opencode/...`, which avoids moving legacy HOME/AppConfig data into the temp app-data directory.
 
 Recent hard smoke coverage exercised catalog discovery, strict record failure, transaction dry-run/apply, duplicate block/override, placeholders, tags/query, subscription-from-transaction, undo preview, finance sanity, credit-card cycle explanation, card payment dry-run, and MCP registration without touching the real user database.
 

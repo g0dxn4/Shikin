@@ -8,6 +8,7 @@ export interface ParsedTransaction {
   amount: number // Dollar amount (positive = income, negative = expense)
   description: string
   type: 'expense' | 'income'
+  externalId?: string
 }
 
 /**
@@ -30,6 +31,7 @@ export function parseOFX(content: string): ParsedTransaction[] {
     const amountRaw = extractOFXField(block, 'TRNAMT')
     const name = extractOFXField(block, 'NAME')
     const memo = extractOFXField(block, 'MEMO')
+    const externalId = extractOFXField(block, 'FITID')
 
     if (!dateRaw || !amountRaw) continue
 
@@ -47,6 +49,7 @@ export function parseOFX(content: string): ParsedTransaction[] {
       amount: Math.abs(amount),
       description,
       type: amount >= 0 ? 'income' : 'expense',
+      ...(externalId ? { externalId } : {}),
     })
   }
 

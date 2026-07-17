@@ -9,6 +9,7 @@ import { getErrorMessage } from '@/lib/errors'
 import { isTauri } from '@/lib/runtime'
 import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
+import { advanceAnchoredRecurrence, advanceLegacyRecurrence } from '@shikin/finance-core'
 import { useAccountStore } from './account-store'
 import { useTransactionStore } from './transaction-store'
 import type { RecurringRule } from '@/types/database'
@@ -36,6 +37,7 @@ export interface RecurringRuleFormData {
   subcategoryId: string | null
   tags: string
   notes: string | null
+  anchorKind?: 'fixed_day' | 'end_of_month'
 }
 
 interface RecurringState {
@@ -52,10 +54,27 @@ interface RecurringState {
   materializeTransactions: () => Promise<number>
 }
 
-/**
- * Advance a date by the given frequency.
- */
-function advanceDate(date: string, frequency: RecurringFrequency): string {
+type StoredRecurrenceAnchor = Pick<RecurringRule, 'anchor_kind' | 'anchor_day'>
+
+function deriveRecurrenceAnchor(
+  date: string,
+  frequency: RecurringFrequency,
+  anchorKind: RecurringRuleFormData['anchorKind']
+): StoredRecurrenceAnchor {
+  if (!['monthly', 'quarterly', 'yearly'].includes(frequency)) {
+    return { anchor_kind: null, anchor_day: null }
+  }
+  if (anchorKind === 'end_of_month') {
+    return { anchor_kind: 'end_of_month', anchor_day: null }
+  }
+  return { anchor_kind: 'fixed_day', anchor_day: dayjs(date).date() }
+}
+
+function advanceDate(
+  date: string,
+  frequency: RecurringFrequency,
+  anchor: StoredRecurrenceAnchor
+): string {
   const d = dayjs(date)
   switch (frequency) {
     case 'daily':
@@ -65,11 +84,25 @@ function advanceDate(date: string, frequency: RecurringFrequency): string {
     case 'biweekly':
       return d.add(14, 'day').format('YYYY-MM-DD')
     case 'monthly':
-      return d.add(1, 'month').format('YYYY-MM-DD')
     case 'quarterly':
-      return d.add(3, 'month').format('YYYY-MM-DD')
-    case 'yearly':
-      return d.add(1, 'year').format('YYYY-MM-DD')
+    case 'yearly': {
+      if (anchor.anchor_kind === 'end_of_month') {
+        return advanceAnchoredRecurrence(date, frequency, { kind: 'end_of_month' }).date
+      }
+      if (anchor.anchor_kind === 'fixed_day' && anchor.anchor_day !== null) {
+        return advanceAnchoredRecurrence(date, frequency, {
+          kind: 'day_of_month',
+          day: anchor.anchor_day,
+        }).date
+      }
+      const legacy = advanceLegacyRecurrence(date, frequency)
+      if (legacy.status === 'unresolved') {
+        throw new Error(
+          `Recurring date ${date} needs an explicit fixed-day or end-of-month anchor. Edit and save the rule before materializing it.`
+        )
+      }
+      return legacy.date
+    }
   }
 }
 
@@ -81,7 +114,7 @@ async function resolveAccountCurrency(accountId: string): Promise<CurrencyCode> 
   if (accounts.length === 0) {
     throw new Error(`Account ${accountId} not found.`)
   }
-  if (accounts[0].is_archived === 1) {
+  if (accounts[0].is_archived !== 0) {
     throw new Error(
       `Account ${accountId} is archived. Unarchive it before using it for new writes.`
     )
@@ -162,13 +195,14 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
       const now = new Date().toISOString()
       const amountCentavos = toCentavos(data.amount)
       const currency = normalizeRecurringCurrency(await resolveAccountCurrency(data.accountId))
+      const anchor = deriveRecurrenceAnchor(data.nextDate, data.frequency, data.anchorKind)
       if (currency === '') {
         throw new Error(invalidAccountCurrencyMessage(data.accountId))
       }
 
       await execute(
-        `INSERT INTO recurring_rules (id, description, amount, currency, type, frequency, next_date, end_date, account_id, to_account_id, category_id, subcategory_id, tags, notes, active, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+        `INSERT INTO recurring_rules (id, description, amount, currency, type, frequency, next_date, end_date, account_id, to_account_id, category_id, subcategory_id, tags, notes, active, anchor_kind, anchor_day, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
         [
           id,
           data.description,
@@ -184,6 +218,8 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
           data.subcategoryId,
           data.tags || '',
           data.notes,
+          anchor.anchor_kind,
+          anchor.anchor_day,
           now,
           now,
         ]
@@ -245,8 +281,17 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
         }
       }
 
+      const anchorIntent = data.anchorKind ?? rule.anchor_kind ?? 'fixed_day'
+      const scheduleChanged =
+        data.nextDate !== rule.next_date ||
+        data.frequency !== rule.frequency ||
+        (data.anchorKind !== undefined && data.anchorKind !== rule.anchor_kind)
+      const anchor =
+        !scheduleChanged && rule.anchor_kind
+          ? { anchor_kind: rule.anchor_kind, anchor_day: rule.anchor_day }
+          : deriveRecurrenceAnchor(data.nextDate, data.frequency, anchorIntent)
       await execute(
-        `UPDATE recurring_rules SET description = ?, amount = ?, currency = ?, type = ?, frequency = ?, next_date = ?, end_date = ?, account_id = ?, to_account_id = ?, category_id = ?, subcategory_id = ?, tags = ?, notes = ?, updated_at = ?
+        `UPDATE recurring_rules SET description = ?, amount = ?, currency = ?, type = ?, frequency = ?, next_date = ?, end_date = ?, account_id = ?, to_account_id = ?, category_id = ?, subcategory_id = ?, tags = ?, notes = ?, anchor_kind = ?, anchor_day = ?, updated_at = ?
          WHERE id = ?`,
         [
           data.description,
@@ -262,6 +307,8 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
           data.subcategoryId,
           data.tags || '',
           data.notes,
+          anchor.anchor_kind,
+          anchor.anchor_day,
           now,
           id,
         ]
@@ -364,7 +411,7 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
         throw new Error(unsupportedRecurringTransferMessage())
       }
 
-      const archivedAccountRule = dueRules.find((rule) => rule.account_is_archived === 1)
+      const archivedAccountRule = dueRules.find((rule) => rule.account_is_archived !== 0)
       if (archivedAccountRule) {
         throw new Error(
           `Recurring rule "${archivedAccountRule.description}" points at archived account ${archivedAccountRule.account_id}. Unarchive the account or pause the rule before materializing it.`
@@ -415,7 +462,7 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
               break
             }
 
-            const newNextDate = advanceDate(nextDate, rule.frequency as RecurringFrequency)
+            const newNextDate = advanceDate(nextDate, rule.frequency as RecurringFrequency, rule)
             const shouldDeactivate = !!rule.end_date && newNextDate > rule.end_date
             const claimResult = await tx.execute(
               "UPDATE recurring_rules SET active = ?, next_date = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND active = 1 AND next_date = ?",

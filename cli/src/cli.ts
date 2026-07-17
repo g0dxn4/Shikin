@@ -3,6 +3,7 @@
 import { pathToFileURL } from 'node:url'
 import { Command } from 'commander'
 import { COMMAND_CATALOG_VERSION } from './contracts.js'
+import { APPLICATION_VERSION } from './version.js'
 import { tools, type ToolDefinition } from './tools.js'
 import { close, query } from './database.js'
 import {
@@ -41,7 +42,7 @@ type DescribedOption = ReturnType<typeof zodToOptions>[number] & {
 
 const OUTPUT_OPTION_KEYS = new Set(['json', 'pretty', 'quiet', 'redacted'])
 const SENSITIVE_KEY_PATTERN =
-  /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key|payer|project[_-]?reference|invoice[_-]?reference)/i
+  /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key|payer|project[_-]?reference|invoice[_-]?reference|notes?|description|source|account[_-]?name)/i
 
 function addOutputOptions(cmd: Command, options: { includeRedacted?: boolean } = {}): Command {
   const withBaseOptions = cmd
@@ -543,6 +544,12 @@ function getCommandCatalog(toolDefinitions: ToolDefinition[]) {
   }
 }
 
+type ParsedValidateOption = {
+  name: string
+  value: unknown
+  consumesNext: boolean
+}
+
 function parseValidateArgs(args: string[], tool: ToolDefinition): Record<string, unknown> {
   const options = describeToolOptions(tool.schema)
   const optionByFlag = new Map(options.map((option) => [option.flag, option]))
@@ -554,61 +561,78 @@ function parseValidateArgs(args: string[], tool: ToolDefinition): Record<string,
       throw new Error(`Unexpected positional argument "${token}". Use --option value pairs.`)
     }
 
-    const inlineValueIndex = token.indexOf('=')
-    const rawFlag = token.slice(2, inlineValueIndex === -1 ? undefined : inlineValueIndex)
-    const inlineValue = inlineValueIndex === -1 ? undefined : token.slice(inlineValueIndex + 1)
-    const negated = rawFlag.startsWith('no-')
-    const baseFlag = negated ? rawFlag.slice(3) : rawFlag
+    const parsedOption = parseValidateOption(token, args[index + 1], optionByFlag, tool.name)
+    if (!parsedOption) continue
 
-    const option = optionByFlag.get(rawFlag)
-    if (OUTPUT_OPTION_KEYS.has(kebabToCamel(baseFlag)) && !option) {
-      continue
-    }
-
-    if (!option) {
-      throw new Error(`Unknown option --${rawFlag} for ${tool.name}.`)
-    }
-    const optionFlag = option.flag.startsWith('no-') ? option.flag.slice(3) : option.flag
-
-    if (negated && !option.isBoolean) {
-      throw new Error(`--no-${optionFlag} is only valid for boolean options.`)
-    }
-
-    if (option.isBoolean) {
-      const next = args[index + 1]
-      if (negated) {
-        input[option.name] = false
-      } else if (inlineValue !== undefined) {
-        input[option.name] = inlineValue
-      } else if (
-        option.defaultValue === undefined &&
-        typeof next === 'string' &&
-        !next.startsWith('--') &&
-        ['true', 'false'].includes(next.trim().toLowerCase())
-      ) {
-        input[option.name] = next
-        index++
-      } else {
-        input[option.name] = true
-      }
-      continue
-    }
-
-    if (inlineValue !== undefined) {
-      input[option.name] = inlineValue
-      continue
-    }
-
-    const next = args[index + 1]
-    if (next === undefined || next.startsWith('--')) {
-      throw new Error(`Missing value for --${optionFlag}.`)
-    }
-
-    input[option.name] = next
-    index++
+    input[parsedOption.name] = parsedOption.value
+    if (parsedOption.consumesNext) index++
   }
 
   return input
+}
+
+function parseValidateOption(
+  token: string,
+  next: string | undefined,
+  optionByFlag: Map<string, DescribedOption>,
+  toolName: string
+): ParsedValidateOption | null {
+  const inlineValueIndex = token.indexOf('=')
+  const rawFlag = token.slice(2, inlineValueIndex === -1 ? undefined : inlineValueIndex)
+  const inlineValue = inlineValueIndex === -1 ? undefined : token.slice(inlineValueIndex + 1)
+  const negated = rawFlag.startsWith('no-')
+  const baseFlag = negated ? rawFlag.slice(3) : rawFlag
+  const option = optionByFlag.get(rawFlag)
+
+  if (OUTPUT_OPTION_KEYS.has(kebabToCamel(baseFlag)) && !option) return null
+  if (!option) throw new Error(`Unknown option --${rawFlag} for ${toolName}.`)
+
+  const optionFlag = option.flag.startsWith('no-') ? option.flag.slice(3) : option.flag
+  if (negated && !option.isBoolean) {
+    throw new Error(`--no-${optionFlag} is only valid for boolean options.`)
+  }
+
+  return option.isBoolean
+    ? parseValidateBooleanOption(option, inlineValue, next, negated)
+    : parseValidateValueOption(option, inlineValue, next, optionFlag)
+}
+
+function parseValidateBooleanOption(
+  option: DescribedOption,
+  inlineValue: string | undefined,
+  next: string | undefined,
+  negated: boolean
+): ParsedValidateOption {
+  if (negated) return { name: option.name, value: false, consumesNext: false }
+  if (inlineValue !== undefined)
+    return { name: option.name, value: inlineValue, consumesNext: false }
+  if (option.defaultValue === undefined && isBooleanOptionValue(next)) {
+    return { name: option.name, value: next, consumesNext: true }
+  }
+  return { name: option.name, value: true, consumesNext: false }
+}
+
+function isBooleanOptionValue(value: string | undefined): value is string {
+  return (
+    typeof value === 'string' &&
+    !value.startsWith('--') &&
+    ['true', 'false'].includes(value.trim().toLowerCase())
+  )
+}
+
+function parseValidateValueOption(
+  option: DescribedOption,
+  inlineValue: string | undefined,
+  next: string | undefined,
+  optionFlag: string
+): ParsedValidateOption {
+  if (inlineValue !== undefined) {
+    return { name: option.name, value: inlineValue, consumesNext: false }
+  }
+  if (next === undefined || next.startsWith('--')) {
+    throw new Error(`Missing value for --${optionFlag}.`)
+  }
+  return { name: option.name, value: next, consumesNext: true }
 }
 
 function kebabToCamel(value: string): string {
@@ -760,90 +784,154 @@ const MONTHS: Record<string, number> = {
   diciembre: 12,
 }
 
+type RecordParseCandidates = {
+  amountCandidates: RecordAmountCandidate[]
+  typeCandidates: RecordTypeCandidate[]
+  dateCandidates: RecordDateCandidate[]
+  explicitDateCandidates: RecordDateCandidate[]
+  categoryCandidates: RecordTextCandidate[]
+  accountCandidates: RecordTextCandidate[]
+}
+
+type RecordCandidateSelection = {
+  selectedAmount: RecordAmountCandidate | null
+  selectedType: RecordTransactionType
+  selectedDate: RecordDateCandidate
+  selectedCategory: RecordTextCandidate | null
+  selectedAccount: RecordTextCandidate | null
+  parseWarnings: RecordParseWarning[]
+  ambiguityReasons: string[]
+  description: string | null
+  confidence: number
+}
+
 function parseRecordEntry(entry: string): ParsedRecordEntry {
+  const candidates = collectRecordParseCandidates(entry)
+  const selection = selectRecordParseCandidates(entry, candidates)
+
+  return {
+    raw: entry,
+    amount: selection.selectedAmount?.amount ?? null,
+    currency: selection.selectedAmount?.currency ?? null,
+    type: selection.selectedType,
+    description: selection.description,
+    category: selection.selectedCategory?.value ?? null,
+    account: selection.selectedAccount?.value ?? null,
+    date: selection.selectedDate.date,
+    confidence: selection.confidence,
+    confidenceLabel: recordConfidenceLabel(selection.confidence),
+    parseWarnings: selection.parseWarnings,
+    ambiguityReasons: selection.ambiguityReasons,
+    candidates: formatRecordCandidates(candidates, selection),
+    explicit: {
+      amount: selection.selectedAmount !== null,
+      type: hasSingleRecordType(candidates.typeCandidates),
+      date: selection.selectedDate.kind !== 'default_today',
+      category: selection.selectedCategory !== null,
+      account: selection.selectedAccount !== null,
+    },
+  }
+}
+
+function collectRecordParseCandidates(entry: string): RecordParseCandidates {
   const dateCandidates = findRecordDateCandidates(entry)
   const explicitDateCandidates = dateCandidates.filter(
     (candidate) => candidate.kind !== 'default_today'
   )
-  const nonAmountSpans = [...findUrlSpans(entry), ...explicitDateCandidates]
-  const amountCandidates = findRecordAmountCandidates(entry, nonAmountSpans)
-  const selectedAmount = amountCandidates[0] ?? null
-  const typeCandidates = findRecordTypeCandidates(entry)
-  const selectedType = chooseRecordType(typeCandidates)
-  const categoryCandidates = findRecordTextCandidates(
-    entry,
-    /\b(?:category|categoria)\s+(.+?)(?=\s+(?:account|cuenta|today|yesterday|tomorrow|hoy|ayer|manana|category|categoria)\b|$)/gi
-  )
-  const accountCandidates = findRecordTextCandidates(
-    entry,
-    /\b(?:account|cuenta)\s+(.+?)(?=\s+(?:category|categoria|today|yesterday|tomorrow|hoy|ayer|manana)\b|$)/gi
-  )
-  const selectedCategory = categoryCandidates[0] ?? null
-  const selectedAccount = accountCandidates[0] ?? null
-  const selectedDate = dateCandidates[0]
-  const parseWarnings = buildRecordParseWarnings({
-    amountCandidates,
-    typeCandidates,
+
+  return {
+    dateCandidates,
     explicitDateCandidates,
+    amountCandidates: findRecordAmountCandidates(entry, [
+      ...findUrlSpans(entry),
+      ...explicitDateCandidates,
+    ]),
+    typeCandidates: findRecordTypeCandidates(entry),
+    categoryCandidates: findRecordTextCandidates(
+      entry,
+      /\b(?:category|categoria)\s+(.+?)(?=\s+(?:account|cuenta|today|yesterday|tomorrow|hoy|ayer|manana|category|categoria)\b|$)/gi
+    ),
+    accountCandidates: findRecordTextCandidates(
+      entry,
+      /\b(?:account|cuenta)\s+(.+?)(?=\s+(?:category|categoria|today|yesterday|tomorrow|hoy|ayer|manana)\b|$)/gi
+    ),
+  }
+}
+
+function selectRecordParseCandidates(
+  entry: string,
+  candidates: RecordParseCandidates
+): RecordCandidateSelection {
+  const selectedAmount = candidates.amountCandidates[0] ?? null
+  const selectedType = chooseRecordType(candidates.typeCandidates)
+  const selectedDate = candidates.dateCandidates[0]
+  const selectedCategory = candidates.categoryCandidates[0] ?? null
+  const selectedAccount = candidates.accountCandidates[0] ?? null
+  const parseWarnings = buildRecordParseWarnings({
+    amountCandidates: candidates.amountCandidates,
+    typeCandidates: candidates.typeCandidates,
+    explicitDateCandidates: candidates.explicitDateCandidates,
     selectedAmount,
   })
-  const ambiguityReasons = buildRecordAmbiguityReasons(parseWarnings)
   const description = buildRecordDescription(entry, [
     ...(selectedAmount ? [selectedAmount] : []),
     ...(selectedCategory ? [selectedCategory] : []),
     ...(selectedAccount ? [selectedAccount] : []),
-    ...explicitDateCandidates,
+    ...candidates.explicitDateCandidates,
   ])
-  const confidence = calculateRecordParseConfidence({
-    amount: selectedAmount?.amount ?? null,
-    currency: selectedAmount?.currency ?? null,
-    description,
-    typeCandidates,
-    selectedCategory,
-    selectedAccount,
-    selectedDate,
-    parseWarnings,
-  })
 
   return {
-    raw: entry,
-    amount: selectedAmount?.amount ?? null,
-    currency: selectedAmount?.currency ?? null,
-    type: selectedType,
-    description,
-    category: selectedCategory?.value ?? null,
-    account: selectedAccount?.value ?? null,
-    date: selectedDate.date,
-    confidence,
-    confidenceLabel: confidence >= 0.8 ? 'high' : confidence >= 0.6 ? 'medium' : 'low',
+    selectedAmount,
+    selectedType,
+    selectedDate,
+    selectedCategory,
+    selectedAccount,
     parseWarnings,
-    ambiguityReasons,
-    candidates: {
-      amounts: amountCandidates.map((candidate, index) => ({
-        ...candidate,
-        selected: index === 0,
-      })),
-      types: typeCandidates.map((candidate) => ({
-        ...candidate,
-        selected: candidate.type === selectedType && hasSingleRecordType(typeCandidates),
-      })),
-      dates: dateCandidates.map((candidate, index) => ({ ...candidate, selected: index === 0 })),
-      categories: categoryCandidates.map((candidate, index) => ({
-        ...candidate,
-        selected: index === 0,
-      })),
-      accounts: accountCandidates.map((candidate, index) => ({
-        ...candidate,
-        selected: index === 0,
-      })),
-    },
-    explicit: {
-      amount: selectedAmount !== null,
-      type: hasSingleRecordType(typeCandidates),
-      date: selectedDate.kind !== 'default_today',
-      category: selectedCategory !== null,
-      account: selectedAccount !== null,
-    },
+    ambiguityReasons: buildRecordAmbiguityReasons(parseWarnings),
+    description,
+    confidence: calculateRecordParseConfidence({
+      amount: selectedAmount?.amount ?? null,
+      currency: selectedAmount?.currency ?? null,
+      description,
+      typeCandidates: candidates.typeCandidates,
+      selectedCategory,
+      selectedAccount,
+      selectedDate,
+      parseWarnings,
+    }),
+  }
+}
+
+function recordConfidenceLabel(confidence: number): 'low' | 'medium' | 'high' {
+  return confidence >= 0.8 ? 'high' : confidence >= 0.6 ? 'medium' : 'low'
+}
+
+function formatRecordCandidates(
+  candidates: RecordParseCandidates,
+  selection: RecordCandidateSelection
+): ParsedRecordEntry['candidates'] {
+  const hasSingleType = hasSingleRecordType(candidates.typeCandidates)
+  return {
+    amounts: candidates.amountCandidates.map((candidate, index) => ({
+      ...candidate,
+      selected: index === 0,
+    })),
+    types: candidates.typeCandidates.map((candidate) => ({
+      ...candidate,
+      selected: candidate.type === selection.selectedType && hasSingleType,
+    })),
+    dates: candidates.dateCandidates.map((candidate, index) => ({
+      ...candidate,
+      selected: index === 0,
+    })),
+    categories: candidates.categoryCandidates.map((candidate, index) => ({
+      ...candidate,
+      selected: index === 0,
+    })),
+    accounts: candidates.accountCandidates.map((candidate, index) => ({
+      ...candidate,
+      selected: index === 0,
+    })),
   }
 }
 
@@ -916,100 +1004,117 @@ function uniqueRecordTypes(candidates: RecordTypeCandidate[]): RecordTransaction
 }
 
 function findRecordDateCandidates(entry: string): RecordDateCandidate[] {
-  const candidates: RecordDateCandidate[] = []
-  const pushCandidate = (candidate: Omit<RecordDateCandidate, 'selected'>) => {
-    if (!candidates.some((existing) => spansOverlap(existing, candidate))) {
-      candidates.push({ ...candidate, selected: false })
+  const candidates = uniqueRecordDateCandidates([
+    ...findRelativeRecordDateCandidates(entry),
+    ...findIsoRecordDateCandidates(entry),
+    ...findEnglishRecordDateCandidates(entry),
+    ...findSpanishRecordDateCandidates(entry),
+  ])
+
+  return candidates.length > 0 ? candidates : [defaultRecordDateCandidate()]
+}
+
+function uniqueRecordDateCandidates(candidates: RecordDateCandidate[]): RecordDateCandidate[] {
+  return candidates.reduce<RecordDateCandidate[]>((unique, candidate) => {
+    if (!unique.some((existing) => spansOverlap(existing, candidate))) {
+      unique.push(candidate)
     }
-  }
+    return unique
+  }, [])
+}
 
-  for (const match of entry.matchAll(/\b(today|hoy)\b/gi)) {
-    pushCandidate({
-      start: match.index ?? 0,
-      end: (match.index ?? 0) + match[0].length,
-      date: relativeIsoDate(0),
-      source: match[0],
-      kind: 'relative',
-    })
-  }
-  for (const match of entry.matchAll(/\b(yesterday|ayer)\b/gi)) {
-    pushCandidate({
-      start: match.index ?? 0,
-      end: (match.index ?? 0) + match[0].length,
-      date: relativeIsoDate(-1),
-      source: match[0],
-      kind: 'relative',
-    })
-  }
-  for (const match of entry.matchAll(/\b(tomorrow|manana)\b/gi)) {
-    pushCandidate({
-      start: match.index ?? 0,
-      end: (match.index ?? 0) + match[0].length,
-      date: relativeIsoDate(1),
-      source: match[0],
-      kind: 'relative',
-    })
-  }
-  for (const match of entry.matchAll(/\b(\d{4})-(\d{2})-(\d{2})\b/g)) {
-    const date = normalizeRecordDate(Number(match[1]), Number(match[2]), Number(match[3]))
-    if (!date) continue
-    pushCandidate({
-      start: match.index ?? 0,
-      end: (match.index ?? 0) + match[0].length,
-      date,
-      source: match[0],
-      kind: 'iso',
-    })
-  }
-  for (const match of entry.matchAll(
-    /\b(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec)\s+(\d{1,2})(?:\s*[-]\s*(\d{1,2}))?\b/gi
-  )) {
-    const month = MONTHS[match[1].toLowerCase()]
-    const startDate = normalizeRecordDate(dayjs().year(), month, Number(match[2]))
-    if (!startDate) continue
-    const rangeEndDate = match[3]
-      ? normalizeRecordDate(dayjs().year(), month, Number(match[3]))
-      : null
-    pushCandidate({
-      start: match.index ?? 0,
-      end: (match.index ?? 0) + match[0].length,
-      date: startDate,
-      source: match[0],
-      kind: rangeEndDate ? 'date_range' : 'month_day',
-      ...(rangeEndDate ? { rangeEndDate } : {}),
-    })
-  }
-  for (const match of entry.matchAll(
-    /\b(\d{1,2})(?:\s*(?:al|-)\s*(\d{1,2}))?\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/gi
-  )) {
-    const month = MONTHS[match[3].toLowerCase()]
-    const startDate = normalizeRecordDate(dayjs().year(), month, Number(match[1]))
-    if (!startDate) continue
-    const rangeEndDate = match[2]
-      ? normalizeRecordDate(dayjs().year(), month, Number(match[2]))
-      : null
-    pushCandidate({
-      start: match.index ?? 0,
-      end: (match.index ?? 0) + match[0].length,
-      date: startDate,
-      source: match[0],
-      kind: rangeEndDate ? 'date_range' : 'month_day',
-      ...(rangeEndDate ? { rangeEndDate } : {}),
-    })
-  }
+function findRelativeRecordDateCandidates(entry: string): RecordDateCandidate[] {
+  const relativeDates: Array<{ pattern: RegExp; offsetDays: number }> = [
+    { pattern: /\b(today|hoy)\b/gi, offsetDays: 0 },
+    { pattern: /\b(yesterday|ayer)\b/gi, offsetDays: -1 },
+    { pattern: /\b(tomorrow|manana)\b/gi, offsetDays: 1 },
+  ]
 
-  if (candidates.length === 0) {
-    candidates.push({
-      start: 0,
-      end: 0,
-      date: relativeIsoDate(0),
-      source: 'default',
-      kind: 'default_today',
+  return relativeDates.flatMap(({ pattern, offsetDays }) =>
+    Array.from(entry.matchAll(pattern)).map((match) => ({
+      start: match.index ?? 0,
+      end: (match.index ?? 0) + match[0].length,
+      date: relativeIsoDate(offsetDays),
+      source: match[0],
+      kind: 'relative' as const,
       selected: false,
-    })
-  }
+    }))
+  )
+}
 
-  return candidates
+function findIsoRecordDateCandidates(entry: string): RecordDateCandidate[] {
+  return Array.from(entry.matchAll(/\b(\d{4})-(\d{2})-(\d{2})\b/g)).flatMap((match) => {
+    const date = normalizeRecordDate(Number(match[1]), Number(match[2]), Number(match[3]))
+    if (!date) return []
+
+    return [
+      {
+        start: match.index ?? 0,
+        end: (match.index ?? 0) + match[0].length,
+        date,
+        source: match[0],
+        kind: 'iso' as const,
+        selected: false,
+      },
+    ]
+  })
+}
+
+function findEnglishRecordDateCandidates(entry: string): RecordDateCandidate[] {
+  return findMonthDayRecordDateCandidates(
+    entry,
+    /\b(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec)\s+(\d{1,2})(?:\s*[-]\s*(\d{1,2}))?\b/gi,
+    (match) => ({ monthName: match[1], startDay: match[2], endDay: match[3] })
+  )
+}
+
+function findSpanishRecordDateCandidates(entry: string): RecordDateCandidate[] {
+  return findMonthDayRecordDateCandidates(
+    entry,
+    /\b(\d{1,2})(?:\s*(?:al|-)\s*(\d{1,2}))?\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/gi,
+    (match) => ({ monthName: match[3], startDay: match[1], endDay: match[2] })
+  )
+}
+
+function findMonthDayRecordDateCandidates(
+  entry: string,
+  pattern: RegExp,
+  getParts: (match: RegExpMatchArray) => {
+    monthName: string
+    startDay: string
+    endDay: string | undefined
+  }
+): RecordDateCandidate[] {
+  return Array.from(entry.matchAll(pattern)).flatMap((match) => {
+    const { monthName, startDay, endDay } = getParts(match)
+    const month = MONTHS[monthName.toLowerCase()]
+    const startDate = normalizeRecordDate(dayjs().year(), month, Number(startDay))
+    if (!startDate) return []
+
+    const rangeEndDate = endDay ? normalizeRecordDate(dayjs().year(), month, Number(endDay)) : null
+    return [
+      {
+        start: match.index ?? 0,
+        end: (match.index ?? 0) + match[0].length,
+        date: startDate,
+        source: match[0],
+        kind: rangeEndDate ? 'date_range' : 'month_day',
+        ...(rangeEndDate ? { rangeEndDate } : {}),
+        selected: false,
+      },
+    ]
+  })
+}
+
+function defaultRecordDateCandidate(): RecordDateCandidate {
+  return {
+    start: 0,
+    end: 0,
+    date: relativeIsoDate(0),
+    source: 'default',
+    kind: 'default_today',
+    selected: false,
+  }
 }
 
 function findRecordTextCandidates(entry: string, pattern: RegExp): RecordTextCandidate[] {
@@ -1291,45 +1396,99 @@ function recordParseMetadata(parsed: ParsedRecordEntry): Record<string, unknown>
   }
 }
 
+type RecordCommandFlags = {
+  apply: boolean
+  explicitDryRun: boolean
+  allowDuplicate: boolean
+}
+
+type PreparedRecordCommand = {
+  apply: boolean
+  allowDuplicate: boolean
+  transactionArgs: Record<string, unknown>
+  metadata: { source: string | null; note: string | null }
+  suggestedCommand: { command: string; args: Record<string, unknown> }
+  addTransaction: ToolDefinition | undefined
+}
+
+type RecordCommandPreparation =
+  | { success: true; preparation: PreparedRecordCommand }
+  | { success: false; result: Record<string, unknown> }
+
+type RecordPreview = {
+  normalizedPreview: Record<string, unknown>
+  duplicateCheck: TransactionDuplicateCheck | null
+}
+
+type RecordPreviewResult =
+  | { success: true; preview: RecordPreview }
+  | { success: false; result: Record<string, unknown> }
+
 async function executeRecordCommand(
   parsed: ParsedRecordEntry,
   options: Record<string, unknown>,
   toolDefinitions: ToolDefinition[]
 ) {
-  const apply = Boolean(options.apply)
-  const explicitDryRun = Boolean(options.dryRun)
-  const allowDuplicate = Boolean(options.allowDuplicate)
-  if (apply && explicitDryRun) {
+  const prepared = prepareRecordCommand(parsed, options, toolDefinitions)
+  if (!prepared.success) return prepared.result
+
+  if (!prepared.preparation.addTransaction) {
+    return createMissingRecordToolPreview(parsed, prepared.preparation)
+  }
+
+  const preview = await previewRecordCommand(parsed, prepared.preparation)
+  if (!preview.success) return preview.result
+
+  return completeRecordCommand(parsed, prepared.preparation, preview.preview)
+}
+
+function prepareRecordCommand(
+  parsed: ParsedRecordEntry,
+  options: Record<string, unknown>,
+  toolDefinitions: ToolDefinition[]
+): RecordCommandPreparation {
+  const flags = getRecordCommandFlags(options)
+  const validationError = validateRecordCommand(parsed, options, flags)
+  if (validationError) return { success: false, result: validationError }
+
+  const status = getRecordStatus(options)
+  const transactionArgs = buildRecordTransactionArgs(parsed, options, status, flags.allowDuplicate)
+
+  return {
+    success: true,
+    preparation: {
+      apply: flags.apply,
+      allowDuplicate: flags.allowDuplicate,
+      transactionArgs,
+      metadata: recordCommandMetadata(options),
+      suggestedCommand: {
+        command: 'add-transaction',
+        args: compactRecordArgs({ ...transactionArgs, dryRun: undefined }),
+      },
+      addTransaction: toolDefinitions.find((tool) => tool.name === 'add-transaction'),
+    },
+  }
+}
+
+function getRecordCommandFlags(options: Record<string, unknown>): RecordCommandFlags {
+  return {
+    apply: Boolean(options.apply),
+    explicitDryRun: Boolean(options.dryRun),
+    allowDuplicate: Boolean(options.allowDuplicate),
+  }
+}
+
+function validateRecordCommand(
+  parsed: ParsedRecordEntry,
+  options: Record<string, unknown>,
+  flags: RecordCommandFlags
+): Record<string, unknown> | null {
+  if (flags.apply && flags.explicitDryRun) {
     return errorResult('RECORD_FLAG_CONFLICT', 'Use either --apply or --dry-run, not both.')
   }
 
-  const parsePolicy = getRecordParsePolicy(options)
-  if (!parsePolicy.success) return parsePolicy.result
-
-  const strictAmbiguityReasons = getRecordStrictAmbiguityReasons(
-    parsed,
-    options,
-    parsePolicy.policy
-  )
-  if (strictAmbiguityReasons.length > 0) {
-    return errorResult(
-      'AMBIGUOUS_RECORD_PARSE',
-      'Natural-language record parse is ambiguous. Use explicit flags or relax strict parsing.',
-      {
-        parsed,
-        ...recordParseMetadata(parsed),
-        ambiguityReasons: strictAmbiguityReasons,
-        strict: parsePolicy.policy.strict,
-        minConfidence: parsePolicy.policy.minConfidence,
-        requirements: {
-          explicitAmount: parsePolicy.policy.requireExplicitAmount,
-          explicitType: parsePolicy.policy.requireExplicitType,
-          explicitAccount: parsePolicy.policy.requireExplicitAccount,
-        },
-        hint: 'Try shikin add-transaction with explicit --amount, --type, --description, and --account or --account-id.',
-      }
-    )
-  }
+  const parseValidationError = validateRecordParsePolicy(parsed, options)
+  if (parseValidationError) return parseValidationError
 
   if (parsed.amount === null || !parsed.description) {
     return errorResult(
@@ -1343,19 +1502,65 @@ async function executeRecordCommand(
     )
   }
 
-  const status = typeof options.status === 'string' ? options.status.trim() : undefined
-  if (status && !RECORD_STATUSES.has(status)) {
-    return errorResult('VALIDATION_ERROR', 'Validation error', {
-      issues: [
-        {
-          path: ['status'],
-          message: 'Status must be pending, posted, or cleared.',
-        },
-      ],
-    })
-  }
+  const status = getRecordStatus(options)
+  return status && !RECORD_STATUSES.has(status) ? invalidRecordStatusResult() : null
+}
 
-  const transactionArgs = compactRecordArgs({
+function validateRecordParsePolicy(
+  parsed: ParsedRecordEntry,
+  options: Record<string, unknown>
+): Record<string, unknown> | null {
+  const parsePolicy = getRecordParsePolicy(options)
+  if (!parsePolicy.success) return parsePolicy.result
+
+  const strictAmbiguityReasons = getRecordStrictAmbiguityReasons(
+    parsed,
+    options,
+    parsePolicy.policy
+  )
+  if (strictAmbiguityReasons.length === 0) return null
+
+  return errorResult(
+    'AMBIGUOUS_RECORD_PARSE',
+    'Natural-language record parse is ambiguous. Use explicit flags or relax strict parsing.',
+    {
+      parsed,
+      ...recordParseMetadata(parsed),
+      ambiguityReasons: strictAmbiguityReasons,
+      strict: parsePolicy.policy.strict,
+      minConfidence: parsePolicy.policy.minConfidence,
+      requirements: {
+        explicitAmount: parsePolicy.policy.requireExplicitAmount,
+        explicitType: parsePolicy.policy.requireExplicitType,
+        explicitAccount: parsePolicy.policy.requireExplicitAccount,
+      },
+      hint: 'Try shikin add-transaction with explicit --amount, --type, --description, and --account or --account-id.',
+    }
+  )
+}
+
+function getRecordStatus(options: Record<string, unknown>): string | undefined {
+  return typeof options.status === 'string' ? options.status.trim() : undefined
+}
+
+function invalidRecordStatusResult(): Record<string, unknown> {
+  return errorResult('VALIDATION_ERROR', 'Validation error', {
+    issues: [
+      {
+        path: ['status'],
+        message: 'Status must be pending, posted, or cleared.',
+      },
+    ],
+  })
+}
+
+function buildRecordTransactionArgs(
+  parsed: ParsedRecordEntry,
+  options: Record<string, unknown>,
+  status: string | undefined,
+  allowDuplicate: boolean
+): Record<string, unknown> {
+  return compactRecordArgs({
     amount: parsed.amount,
     type: parsed.type,
     description: parsed.description,
@@ -1370,133 +1575,230 @@ async function executeRecordCommand(
     account: typeof options.account === 'string' ? options.account : (parsed.account ?? undefined),
     accountId: typeof options.accountId === 'string' ? options.accountId : undefined,
   })
-  const metadata = {
+}
+
+function recordCommandMetadata(options: Record<string, unknown>): {
+  source: string | null
+  note: string | null
+} {
+  return {
     source: typeof options.source === 'string' ? options.source : null,
     note: typeof options.note === 'string' ? options.note : null,
   }
-  const suggestedCommand = {
-    command: 'add-transaction',
-    args: compactRecordArgs({ ...transactionArgs, dryRun: undefined }),
-  }
-  const addTransaction = toolDefinitions.find((tool) => tool.name === 'add-transaction')
+}
 
-  if (!addTransaction) {
-    return {
-      success: true,
-      dryRun: true,
-      parsed,
-      ...recordParseMetadata(parsed),
-      metadata,
-      requiresConfirmation: true,
-      suggestedCommand,
-      message:
-        'Preview only. Review the parsed fields, then run add-transaction with the suggested args to record it.',
-    }
+function createMissingRecordToolPreview(
+  parsed: ParsedRecordEntry,
+  preparation: PreparedRecordCommand
+): Record<string, unknown> {
+  return {
+    success: true,
+    dryRun: true,
+    parsed,
+    ...recordParseMetadata(parsed),
+    metadata: preparation.metadata,
+    requiresConfirmation: true,
+    suggestedCommand: preparation.suggestedCommand,
+    message:
+      'Preview only. Review the parsed fields, then run add-transaction with the suggested args to record it.',
   }
+}
 
-  const previewInput = compactRecordArgs({
-    ...addTransaction.schema.parse({ ...transactionArgs, dryRun: true }),
-    allowDuplicate: allowDuplicate ? true : undefined,
-  })
-  const previewResult = await addTransaction.execute(previewInput)
+async function previewRecordCommand(
+  parsed: ParsedRecordEntry,
+  preparation: PreparedRecordCommand
+): Promise<RecordPreviewResult> {
+  const addTransaction = requiredRecordTransactionTool(preparation, 'preview')
+  const previewResult = await addTransaction.execute(
+    buildRecordToolInput(addTransaction, preparation, true)
+  )
   const normalizedPreview = normalizeResult(previewResult) as Record<string, unknown>
+  const currencyError = getRecordPreviewCurrencyError(parsed, normalizedPreview)
+  if (currencyError) return { success: false, result: currencyError }
+
+  return {
+    success: true,
+    preview: {
+      normalizedPreview,
+      duplicateCheck: isFailureResult(normalizedPreview)
+        ? null
+        : findRecordDuplicateCheck(normalizedPreview, preparation.transactionArgs),
+    },
+  }
+}
+
+function getRecordPreviewCurrencyError(
+  parsed: ParsedRecordEntry,
+  normalizedPreview: Record<string, unknown>
+): Record<string, unknown> | null {
+  if (isFailureResult(normalizedPreview) || !parsed.currency) return null
+
   const previewCurrency = getRecordPreviewCurrency(normalizedPreview)
-  if (!isFailureResult(normalizedPreview) && parsed.currency) {
-    if (!previewCurrency) {
-      return errorResult(
-        'RECORD_CURRENCY_UNKNOWN',
-        `Record parsed currency ${parsed.currency}, but the resolved account currency is unknown.`,
-        {
-          parsed,
-          ...recordParseMetadata(parsed),
-          resolvedCurrency: previewCurrency,
-          hint: 'Repair the account currency or run add-transaction explicitly after choosing a valid account.',
-        }
-      )
-    }
-
-    if (parsed.currency !== previewCurrency) {
-      return errorResult(
-        'RECORD_CURRENCY_MISMATCH',
-        `Record parsed currency ${parsed.currency}, but the resolved account uses ${previewCurrency}.`,
-        {
-          parsed,
-          ...recordParseMetadata(parsed),
-          resolvedCurrency: previewCurrency,
-          hint: 'Use an account with the same currency or run add-transaction explicitly after converting the amount.',
-        }
-      )
-    }
+  if (!previewCurrency) {
+    return errorResult(
+      'RECORD_CURRENCY_UNKNOWN',
+      `Record parsed currency ${parsed.currency}, but the resolved account currency is unknown.`,
+      {
+        parsed,
+        ...recordParseMetadata(parsed),
+        resolvedCurrency: previewCurrency,
+        hint: 'Repair the account currency or run add-transaction explicitly after choosing a valid account.',
+      }
+    )
   }
 
-  const duplicateCheck = isFailureResult(normalizedPreview)
-    ? null
-    : findRecordDuplicateCheck(normalizedPreview, transactionArgs)
+  if (parsed.currency === previewCurrency) return null
 
-  if (!apply) {
-    return {
-      ...normalizedPreview,
-      ...(isFailureResult(normalizedPreview) ? {} : { dryRun: true, requiresConfirmation: true }),
+  return errorResult(
+    'RECORD_CURRENCY_MISMATCH',
+    `Record parsed currency ${parsed.currency}, but the resolved account uses ${previewCurrency}.`,
+    {
       parsed,
       ...recordParseMetadata(parsed),
-      metadata,
-      suggestedCommand,
-      ...(duplicateCheck?.match ? { duplicateCheck } : {}),
+      resolvedCurrency: previewCurrency,
+      hint: 'Use an account with the same currency or run add-transaction explicitly after converting the amount.',
     }
-  }
+  )
+}
 
-  if (isFailureResult(normalizedPreview)) {
+async function completeRecordCommand(
+  parsed: ParsedRecordEntry,
+  preparation: PreparedRecordCommand,
+  preview: RecordPreview
+): Promise<Record<string, unknown>> {
+  if (!preparation.apply) return createRecordPreviewResponse(parsed, preparation, preview)
+
+  if (isFailureResult(preview.normalizedPreview)) {
     return {
-      ...normalizedPreview,
+      ...preview.normalizedPreview,
       parsed,
       ...recordParseMetadata(parsed),
-      metadata,
-      suggestedCommand,
+      metadata: preparation.metadata,
+      suggestedCommand: preparation.suggestedCommand,
     }
   }
 
-  if (duplicateCheck?.match && !allowDuplicate) {
-    return {
-      success: false,
-      reason: transactionDuplicateReason(duplicateCheck.match.kind),
-      duplicate: duplicateCheck.match,
-      duplicateCheck,
-      parsed,
-      ...recordParseMetadata(parsed),
-      metadata,
-      suggestedCommand: {
-        ...suggestedCommand,
-        args: { ...suggestedCommand.args, allowDuplicate: true },
-      },
-      message:
-        duplicateCheck.match.kind === 'exact_duplicate'
-          ? `Exact duplicate transaction ${duplicateCheck.match.existingTransactionId} already exists. Re-run with --allow-duplicate to record it anyway.`
-          : `Potential duplicate transaction ${duplicateCheck.match.existingTransactionId} is within ${duplicateCheck.match.windowDays} days with similar description. Re-run with --allow-duplicate to record it anyway.`,
-    }
+  if (preview.duplicateCheck?.match && !preparation.allowDuplicate) {
+    return createRecordDuplicateResult(parsed, preparation, preview.duplicateCheck)
   }
 
-  const addInput = compactRecordArgs({
-    ...addTransaction.schema.parse({ ...transactionArgs, dryRun: false }),
-    allowDuplicate: allowDuplicate ? true : undefined,
+  return applyRecordCommand(parsed, preparation, preview.duplicateCheck)
+}
+
+function createRecordPreviewResponse(
+  parsed: ParsedRecordEntry,
+  preparation: PreparedRecordCommand,
+  preview: RecordPreview
+): Record<string, unknown> {
+  return {
+    ...preview.normalizedPreview,
+    ...(isFailureResult(preview.normalizedPreview)
+      ? {}
+      : { dryRun: true, requiresConfirmation: true }),
+    parsed,
+    ...recordParseMetadata(parsed),
+    metadata: preparation.metadata,
+    suggestedCommand: preparation.suggestedCommand,
+    ...(preview.duplicateCheck?.match ? { duplicateCheck: preview.duplicateCheck } : {}),
+  }
+}
+
+function createRecordDuplicateResult(
+  parsed: ParsedRecordEntry,
+  preparation: PreparedRecordCommand,
+  duplicateCheck: TransactionDuplicateCheck
+): Record<string, unknown> {
+  const duplicate = duplicateCheck.match
+  if (!duplicate) {
+    throw new Error('A duplicate check result requires a duplicate match.')
+  }
+
+  return {
+    success: false,
+    reason: transactionDuplicateReason(duplicate.kind),
+    duplicate,
+    duplicateCheck,
+    parsed,
+    ...recordParseMetadata(parsed),
+    metadata: preparation.metadata,
+    suggestedCommand: {
+      ...preparation.suggestedCommand,
+      args: { ...preparation.suggestedCommand.args, allowDuplicate: true },
+    },
+    message:
+      duplicate.kind === 'exact_duplicate'
+        ? `Exact duplicate transaction ${duplicate.existingTransactionId} already exists. Re-run with --allow-duplicate to record it anyway.`
+        : `Potential duplicate transaction ${duplicate.existingTransactionId} is within ${duplicate.windowDays} days with similar description. Re-run with --allow-duplicate to record it anyway.`,
+  }
+}
+
+async function applyRecordCommand(
+  parsed: ParsedRecordEntry,
+  preparation: PreparedRecordCommand,
+  duplicateCheck: TransactionDuplicateCheck | null
+): Promise<Record<string, unknown>> {
+  const addTransaction = requiredRecordTransactionTool(preparation, 'apply')
+  const result = await addTransaction.execute(
+    buildRecordToolInput(addTransaction, preparation, false)
+  )
+  return formatAppliedRecordResult(parsed, preparation, duplicateCheck, result)
+}
+
+function requiredRecordTransactionTool(
+  preparation: PreparedRecordCommand,
+  operation: 'apply' | 'preview'
+): ToolDefinition {
+  if (!preparation.addTransaction) {
+    throw new Error(`add-transaction tool is required to ${operation} a record command.`)
+  }
+  return preparation.addTransaction
+}
+
+function buildRecordToolInput(
+  addTransaction: ToolDefinition,
+  preparation: PreparedRecordCommand,
+  dryRun: boolean
+): Record<string, unknown> {
+  return compactRecordArgs({
+    ...addTransaction.schema.parse({ ...preparation.transactionArgs, dryRun }),
+    allowDuplicate: preparation.allowDuplicate ? true : undefined,
   })
-  const result = await addTransaction.execute(addInput)
+}
+
+function formatAppliedRecordResult(
+  parsed: ParsedRecordEntry,
+  preparation: PreparedRecordCommand,
+  duplicateCheck: TransactionDuplicateCheck | null,
+  result: unknown
+): Record<string, unknown> {
   const normalized = normalizeResult(result) as Record<string, unknown>
+  const duplicateOverride = recordDuplicateOverride(
+    duplicateCheck,
+    preparation.allowDuplicate,
+    normalized
+  )
 
   return {
     ...normalized,
     applied: !isFailureResult(normalized),
     parsed,
     ...recordParseMetadata(parsed),
-    ...(duplicateCheck?.match && allowDuplicate && !isFailureResult(normalized)
-      ? {
-          duplicateOverride: {
-            allowed: true,
-            reason: 'allow_duplicate',
-            duplicate: duplicateCheck.match,
-            duplicateCheck,
-          },
-        }
-      : {}),
+    ...(duplicateOverride ? { duplicateOverride } : {}),
+  }
+}
+
+function recordDuplicateOverride(
+  duplicateCheck: TransactionDuplicateCheck | null,
+  allowDuplicate: boolean,
+  result: Record<string, unknown>
+): Record<string, unknown> | null {
+  if (!duplicateCheck?.match || !allowDuplicate || isFailureResult(result)) return null
+
+  return {
+    allowed: true,
+    reason: 'allow_duplicate',
+    duplicate: duplicateCheck.match,
+    duplicateCheck,
   }
 }
 
@@ -1906,35 +2208,63 @@ export function createProgram(toolDefinitions: ToolDefinition[] = tools): Comman
   const program = new Command()
     .name('shikin')
     .description('Shikin — control your finances from the command line')
-    .version('1.0.10')
+    .version(APPLICATION_VERSION)
 
+  registerBuiltInCommands(program, toolDefinitions)
+  registerToolCommands(program, toolDefinitions)
+
+  return program
+}
+
+function registerBuiltInCommands(program: Command, toolDefinitions: ToolDefinition[]): void {
+  registerDiagnoseCommand(program, toolDefinitions)
+  registerToolsCommand(program, toolDefinitions)
+  registerValidateCommand(program, toolDefinitions)
+  registerRecordCommand(program, toolDefinitions)
+}
+
+function registerDiagnoseCommand(program: Command, toolDefinitions: ToolDefinition[]): void {
   addOutputOptions(
     program
       .command('diagnose')
       .description('Validate shared database connectivity and print CLI/MCP health details')
       .option('--deep', 'Run read-only integrity, foreign-key, migration, and balance checks')
-  ).action((options: Record<string, unknown>) => {
-    const outputOptions = getOutputOptions(options)
-    try {
-      writeOutput(getDiagnoseSummary(toolDefinitions, Boolean(options.deep)), outputOptions)
-    } catch (err) {
-      writeOutput(
-        errorResult('DIAGNOSE_FAILED', err instanceof Error ? err.message : String(err)),
-        outputOptions
-      )
-      process.exitCode = 1
-    } finally {
-      close()
-    }
-  })
+  ).action((options: Record<string, unknown>) => runDiagnoseCommand(options, toolDefinitions))
+}
 
+function runDiagnoseCommand(
+  options: Record<string, unknown>,
+  toolDefinitions: ToolDefinition[]
+): void {
+  const outputOptions = getOutputOptions(options)
+  try {
+    writeOutput(getDiagnoseSummary(toolDefinitions, Boolean(options.deep)), outputOptions)
+  } catch (err) {
+    writeOutput(
+      errorResult('DIAGNOSE_FAILED', err instanceof Error ? err.message : String(err)),
+      outputOptions
+    )
+    process.exitCode = 1
+  } finally {
+    close()
+  }
+}
+
+function registerToolsCommand(program: Command, toolDefinitions: ToolDefinition[]): void {
   addOutputOptions(
     program.command('tools').description('Return machine-readable command discovery metadata')
-  ).action((options: Record<string, unknown>) => {
-    writeOutput(getCommandCatalog(toolDefinitions), getOutputOptions(options))
-    close()
-  })
+  ).action((options: Record<string, unknown>) => runToolsCommand(options, toolDefinitions))
+}
 
+function runToolsCommand(
+  options: Record<string, unknown>,
+  toolDefinitions: ToolDefinition[]
+): void {
+  writeOutput(getCommandCatalog(toolDefinitions), getOutputOptions(options))
+  close()
+}
+
+function registerValidateCommand(program: Command, toolDefinitions: ToolDefinition[]): void {
   addOutputOptions(
     program
       .command('validate')
@@ -1945,13 +2275,24 @@ export function createProgram(toolDefinitions: ToolDefinition[] = tools): Comman
       .allowExcessArguments(true),
     { includeRedacted: false }
   ).action((commandName: string, args: string[] = [], options: Record<string, unknown>) => {
-    const outputOptions = getOutputOptions(options)
-    const result = validateToolInput(commandName, args, toolDefinitions)
-    writeOutput(result, outputOptions)
-    if (isFailureResult(normalizeResult(result))) process.exitCode = 1
-    close()
+    runValidateCommand(commandName, args, options, toolDefinitions)
   })
+}
 
+function runValidateCommand(
+  commandName: string,
+  args: string[],
+  options: Record<string, unknown>,
+  toolDefinitions: ToolDefinition[]
+): void {
+  const outputOptions = getOutputOptions(options)
+  const result = validateToolInput(commandName, args, toolDefinitions)
+  writeOutput(result, outputOptions)
+  if (isFailureResult(normalizeResult(result))) process.exitCode = 1
+  close()
+}
+
+function registerRecordCommand(program: Command, toolDefinitions: ToolDefinition[]): void {
   addOutputOptions(
     program
       .command('record')
@@ -1972,95 +2313,90 @@ export function createProgram(toolDefinitions: ToolDefinition[] = tools): Comman
       .option('--notes <value>', 'User transaction notes')
       .option('--source <value>', 'Automation source or origin label for transaction provenance')
       .option('--note <value>', 'Workflow changelog note for transaction provenance')
-  ).action(async (entryParts: string[], options: Record<string, unknown>) => {
-    const outputOptions = getOutputOptions(options)
-    const entry = entryParts.join(' ')
-    const parsed = parseRecordEntry(entry)
+  ).action((entryParts: string[], options: Record<string, unknown>) =>
+    runRecordCommand(entryParts, options, toolDefinitions)
+  )
+}
 
-    try {
-      const result = await executeRecordCommand(parsed, options, toolDefinitions)
-      writeOutput(result, outputOptions)
-      if (isFailureResult(normalizeResult(result))) process.exitCode = 1
-    } catch (err) {
-      writeOutput(errorFromUnknown(err), outputOptions)
-      process.exitCode = 1
-    } finally {
-      close()
-    }
-  })
+async function runRecordCommand(
+  entryParts: string[],
+  options: Record<string, unknown>,
+  toolDefinitions: ToolDefinition[]
+): Promise<void> {
+  const outputOptions = getOutputOptions(options)
+  const parsed = parseRecordEntry(entryParts.join(' '))
 
-  // Register each tool as a CLI command
-  for (const tool of toolDefinitions) {
-    const cmd = program.command(tool.name).description(tool.description)
-    addOutputOptions(cmd)
-
-    if (tool.name === 'query-transactions') {
-      cmd.alias('list-transactions')
-    }
-    if (tool.name === 'backup-database') {
-      cmd.alias('backup')
-    }
-    if (tool.name === 'restore-database') {
-      cmd.alias('restore')
-    }
-
-    const schemaShape = tool.schema.shape
-    if (schemaShape && Object.keys(schemaShape).length > 0) {
-      const options = zodToOptions(tool.schema)
-
-      for (const opt of options) {
-        if (OUTPUT_OPTION_KEYS.has(kebabToCamel(opt.flag))) {
-          continue
-        }
-
-        const placeholder = opt.isStructured ? '<json>' : '<value>'
-        const flagStr = opt.isBoolean
-          ? opt.defaultValue === true
-            ? `--no-${opt.flag}`
-            : opt.defaultValue === undefined
-              ? `--${opt.flag} [value]`
-              : `--${opt.flag}`
-          : `--${opt.flag} ${placeholder}`
-
-        cmd.option(flagStr, opt.description, opt.defaultValue as string)
-      }
-    }
-
-    cmd.action(async (opts: Record<string, unknown>) => {
-      const outputOptions = getOutputOptions(opts)
-      try {
-        if (tool.cliUnavailableMessage) {
-          writeOutput(
-            errorResult('UNAVAILABLE_ERROR', tool.cliUnavailableMessage, {
-              error: tool.cliUnavailableMessage,
-              errorType: 'unavailable_error',
-            }),
-            outputOptions
-          )
-          process.exitCode = 1
-          return
-        }
-
-        // Convert CLI string values to proper types based on schema
-        const input = coerceInput(opts, tool.schema)
-        const parsed = tool.schema.parse(input)
-        const result = await tool.execute(parsed)
-
-        writeOutput(result, outputOptions)
-
-        if (isFailureResult(normalizeResult(result))) {
-          process.exitCode = 1
-        }
-      } catch (err) {
-        writeOutput(errorFromUnknown(err), outputOptions)
-        process.exitCode = 1
-      } finally {
-        close()
-      }
-    })
+  try {
+    const result = await executeRecordCommand(parsed, options, toolDefinitions)
+    writeOutput(result, outputOptions)
+    if (isFailureResult(normalizeResult(result))) process.exitCode = 1
+  } catch (err) {
+    writeOutput(errorFromUnknown(err), outputOptions)
+    process.exitCode = 1
+  } finally {
+    close()
   }
+}
 
-  return program
+function registerToolCommands(program: Command, toolDefinitions: ToolDefinition[]): void {
+  for (const tool of toolDefinitions) registerToolCommand(program, tool)
+}
+
+function registerToolCommand(program: Command, tool: ToolDefinition): void {
+  const cmd = program.command(tool.name).description(tool.description)
+  addOutputOptions(cmd)
+
+  for (const alias of getToolAliases(tool)) cmd.alias(alias)
+  registerToolOptions(cmd, tool)
+  cmd.action((opts: Record<string, unknown>) => runToolCommand(tool, opts))
+}
+
+function registerToolOptions(cmd: Command, tool: ToolDefinition): void {
+  const schemaShape = tool.schema.shape
+  if (!schemaShape || Object.keys(schemaShape).length === 0) return
+
+  for (const option of zodToOptions(tool.schema)) {
+    if (OUTPUT_OPTION_KEYS.has(kebabToCamel(option.flag))) continue
+    cmd.option(getToolOptionFlag(option), option.description, option.defaultValue as string)
+  }
+}
+
+function getToolOptionFlag(option: ReturnType<typeof zodToOptions>[number]): string {
+  if (!option.isBoolean) return `--${option.flag} ${option.isStructured ? '<json>' : '<value>'}`
+  if (option.defaultValue === true) return `--no-${option.flag}`
+  return option.defaultValue === undefined ? `--${option.flag} [value]` : `--${option.flag}`
+}
+
+async function runToolCommand(tool: ToolDefinition, opts: Record<string, unknown>): Promise<void> {
+  const outputOptions = getOutputOptions(opts)
+  try {
+    if (tool.cliUnavailableMessage) {
+      writeOutput(
+        errorResult('UNAVAILABLE_ERROR', tool.cliUnavailableMessage, {
+          error: tool.cliUnavailableMessage,
+          errorType: 'unavailable_error',
+        }),
+        outputOptions
+      )
+      process.exitCode = 1
+      return
+    }
+
+    const input = coerceInput(opts, tool.schema)
+    const parsed = tool.schema.parse(input)
+    const result = await tool.execute(parsed)
+
+    writeOutput(result, outputOptions)
+
+    if (isFailureResult(normalizeResult(result))) {
+      process.exitCode = 1
+    }
+  } catch (err) {
+    writeOutput(errorFromUnknown(err), outputOptions)
+    process.exitCode = 1
+  } finally {
+    close()
+  }
 }
 
 const program = createProgram()

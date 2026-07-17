@@ -228,9 +228,13 @@ export function SettingsPage() {
     try {
       const backupBytes = await exportDatabaseSnapshot()
       setPreImportBackupBytes(backupBytes)
-    } catch {
-      // Continue even if backup fails - user can still proceed
+    } catch (error) {
       setPreImportBackupBytes(null)
+      if (importDbInputRef.current) importDbInputRef.current.value = ''
+      toast.error(
+        getErrorMessage(error, 'Could not create the required pre-import backup. Import cancelled.')
+      )
+      return
     }
 
     setPendingImportFile(file)

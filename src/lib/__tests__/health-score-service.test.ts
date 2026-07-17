@@ -35,16 +35,18 @@ describe('health-score-service', () => {
    * the query calls interleave unpredictably. We use mockImplementation
    * that responds based on the SQL content instead of call order.
    */
-  function setupQueryMock(overrides: {
-    income?: number
-    expenses?: number
-    budgets?: { id: string; amount: number; category_id: string; period: string }[]
-    budgetSpent?: number
-    ccDebt?: number
-    savings?: number
-    expenses3mo?: number
-    monthlyExpenses?: number[]
-  } = {}) {
+  function setupQueryMock(
+    overrides: {
+      income?: number
+      expenses?: number
+      budgets?: { id: string; amount: number; category_id: string; period: string }[]
+      budgetSpent?: number
+      ccDebt?: number
+      savings?: number
+      expenses3mo?: number
+      monthlyExpenses?: number[]
+    } = {}
+  ) {
     const {
       income = 500000,
       expenses = 300000,

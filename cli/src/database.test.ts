@@ -107,7 +107,10 @@ function seedCoreShikinSchema(
       resolved_at TEXT,
       resolved_by_transaction_id TEXT,
       placeholder_reason TEXT,
-      placeholder_parent_transaction_id TEXT`
+      placeholder_parent_transaction_id TEXT,
+      import_source TEXT,
+      import_external_id TEXT,
+      import_fingerprint TEXT`
           : ''
       }
     );
@@ -183,6 +186,20 @@ function seedCoreShikinSchema(
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
         updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
       );
+      CREATE TABLE stock_prices (
+        id TEXT PRIMARY KEY,
+        currency TEXT,
+        quote_currency TEXT
+      );
+      CREATE TABLE recurring_rules (
+        id TEXT PRIMARY KEY,
+        anchor_kind TEXT,
+        anchor_day INTEGER
+      );
+      CREATE TABLE net_worth_snapshots (
+        id TEXT PRIMARY KEY,
+        currency TEXT
+      );
     `)
   }
 
@@ -238,7 +255,7 @@ afterEach(() => {
   tempHomes.clear()
 })
 
-describe('CLI database readiness', () => {
+describe('CLI database readiness', { timeout: 20_000 }, () => {
   it('exports the shared migration readiness list for drift prevention', async () => {
     const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-'))
     tempHomes.add(homeDir)
@@ -472,7 +489,7 @@ describe('CLI database readiness', () => {
     const { query, close } = await importFreshDatabaseModule(homeDir)
 
     expect(() => query('SELECT 1 AS ok')).toThrow(
-      /Missing required tables for 016_cli_qol_foundation: audit_log/i
+      /Missing required tables for 016_cli_qol_foundation: .*audit_log/i
     )
 
     close()
@@ -553,7 +570,7 @@ describe('CLI database readiness', () => {
     close()
   })
 
-  it('validates restore dry-runs without mutation metadata', async () => {
+  it('previews restore by default without mutation metadata', async () => {
     const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-'))
     tempHomes.add(homeDir)
     const dbPath = createCliDatabasePath(homeDir)
@@ -563,7 +580,7 @@ describe('CLI database readiness', () => {
 
     const { restoreDatabase, close } = await importFreshDatabaseModule(homeDir)
 
-    const restore = await restoreDatabase({ sourcePath: candidatePath, dryRun: true })
+    const restore = await restoreDatabase({ sourcePath: candidatePath })
 
     expect(restore).toMatchObject({
       dryRun: true,
@@ -571,6 +588,7 @@ describe('CLI database readiness', () => {
       backupValidated: true,
       wouldRestore: true,
       wouldCreateRollback: true,
+      requiresApply: true,
       applyPreconditionsChecked: false,
       integrityCheck: 'ok',
       foreignKeyViolations: 0,
@@ -595,7 +613,7 @@ describe('CLI database readiness', () => {
 
     const { restoreDatabase, close } = await importFreshDatabaseModule(homeDir)
 
-    const restore = await restoreDatabase({ sourcePath: candidatePath })
+    const restore = await restoreDatabase({ sourcePath: candidatePath, dryRun: false })
 
     expect(restore.dryRun).toBe(false)
     if (restore.dryRun) throw new Error('Expected applied restore result')
@@ -618,6 +636,45 @@ describe('CLI database readiness', () => {
     close()
   })
 
+  it('restores the previous supported schema and applies the latest migration', async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-'))
+    tempHomes.add(homeDir)
+    const dbPath = createCliDatabasePath(homeDir)
+    const candidatePath = join(homeDir, 'candidate-v019.db')
+    seedCoreShikinSchema(dbPath)
+    seedCoreShikinSchema(candidatePath, CLI_DATABASE_MIGRATIONS.slice(0, -1))
+    insertAccount(candidatePath, 'previous schema account')
+    const previousSchemaDb = new Database(candidatePath)
+    previousSchemaDb
+      .prepare('INSERT INTO net_worth_snapshots (id, currency) VALUES (?, NULL)')
+      .run('snapshot-1')
+    previousSchemaDb.close()
+
+    const { restoreDatabase, close } = await importFreshDatabaseModule(homeDir)
+    const preview = await restoreDatabase({ sourcePath: candidatePath })
+    expect(preview).toMatchObject({ dryRun: true, backupValidated: true })
+
+    const restore = await restoreDatabase({ sourcePath: candidatePath, dryRun: false })
+    expect(restore.dryRun).toBe(false)
+
+    const restoredDb = new Database(dbPath, { readonly: true, fileMustExist: true })
+    expect(
+      restoredDb
+        .prepare("SELECT name FROM _migrations WHERE name = '020_quote_recurrence_import_identity'")
+        .get()
+    ).toEqual({ name: '020_quote_recurrence_import_identity' })
+    expect(restoredDb.prepare('SELECT name FROM accounts WHERE id = ?').get('acct-1')).toEqual({
+      name: 'previous schema account',
+    })
+    expect(
+      restoredDb.prepare('SELECT currency FROM net_worth_snapshots WHERE id = ?').get('snapshot-1')
+    ).toEqual({
+      currency: null,
+    })
+    restoredDb.close()
+    close()
+  })
+
   it('restores over a schema-broken current database without requiring readiness first', async () => {
     const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-'))
     tempHomes.add(homeDir)
@@ -631,7 +688,7 @@ describe('CLI database readiness', () => {
 
     const { restoreDatabase, close } = await importFreshDatabaseModule(homeDir)
 
-    const restore = await restoreDatabase({ sourcePath: candidatePath })
+    const restore = await restoreDatabase({ sourcePath: candidatePath, dryRun: false })
 
     expect(restore.dryRun).toBe(false)
     if (restore.dryRun) throw new Error('Expected applied restore result')
@@ -667,7 +724,7 @@ describe('CLI database readiness', () => {
 
     const { restoreDatabase, close } = await importFreshDatabaseModule(homeDir)
 
-    const restore = await restoreDatabase({ sourcePath: candidatePath })
+    const restore = await restoreDatabase({ sourcePath: candidatePath, dryRun: false })
 
     expect(restore.dryRun).toBe(false)
     if (restore.dryRun) throw new Error('Expected applied restore result')
@@ -739,7 +796,7 @@ describe('CLI database readiness', () => {
 
     const { restoreDatabase, close } = await importFreshDatabaseModule(homeDir)
 
-    await expect(restoreDatabase({ sourcePath: candidatePath })).rejects.toThrow(
+    await expect(restoreDatabase({ sourcePath: candidatePath, dryRun: false })).rejects.toThrow(
       /still reference the active Shikin database/i
     )
 

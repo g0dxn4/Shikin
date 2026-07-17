@@ -1,5 +1,17 @@
 import { randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import {
+  REAL_DATA_OPT_IN,
+  isolatedAppDataEnvironment,
+  shouldUseRealAppData,
+} from './dev-environment.mjs'
+
+const require = createRequire(import.meta.url)
+const viteEntry = join(dirname(require.resolve('vite/package.json')), 'bin', 'vite.js')
 
 const bridgeToken =
   process.env.SHIKIN_DATA_SERVER_BRIDGE_TOKEN ||
@@ -33,9 +45,18 @@ function resolveDataServerPort(dataServerUrl) {
 
 const dataServerUrl = resolveDataServerUrl()
 const dataServerPort = resolveDataServerPort(dataServerUrl)
+const useRealData = shouldUseRealAppData()
+const isolatedDataRoot = useRealData ? null : mkdtempSync(join(tmpdir(), 'shikin-dev-data-'))
+
+if (useRealData) {
+  console.warn(`Shikin dev server is using your real app data (${REAL_DATA_OPT_IN}=1).`)
+} else {
+  console.log(`Shikin dev server is using isolated temporary data: ${isolatedDataRoot}`)
+}
 
 const sharedEnv = {
   ...process.env,
+  ...(isolatedDataRoot ? isolatedAppDataEnvironment(isolatedDataRoot) : {}),
   SHIKIN_DATA_SERVER_PORT: dataServerPort,
   SHIKIN_DATA_SERVER_BRIDGE_TOKEN: bridgeToken,
   VITE_DATA_SERVER_URL: dataServerUrl,
@@ -43,8 +64,8 @@ const sharedEnv = {
 }
 
 const children = [
-  spawn('node', ['scripts/data-server.mjs'], { stdio: 'inherit', env: sharedEnv }),
-  spawn('pnpm', ['exec', 'vite'], { stdio: 'inherit', env: sharedEnv }),
+  spawn(process.execPath, ['scripts/data-server.mjs'], { stdio: 'inherit', env: sharedEnv }),
+  spawn(process.execPath, [viteEntry], { stdio: 'inherit', env: sharedEnv }),
 ]
 
 let shuttingDown = false
@@ -64,6 +85,9 @@ function shutdown(code = 0) {
       if (child.exitCode === null) {
         child.kill('SIGKILL')
       }
+    }
+    if (isolatedDataRoot) {
+      rmSync(isolatedDataRoot, { recursive: true, force: true })
     }
     process.exit(code)
   }, 500).unref()

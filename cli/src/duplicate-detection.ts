@@ -1,8 +1,8 @@
 import dayjs from 'dayjs'
 import { query } from './database.js'
 
-export const TRANSACTION_DUPLICATE_WINDOW_DAYS = 7
-export const TRANSACTION_DUPLICATE_SIMILARITY_THRESHOLD = 0.86
+const TRANSACTION_DUPLICATE_WINDOW_DAYS = 7
+const TRANSACTION_DUPLICATE_SIMILARITY_THRESHOLD = 0.86
 
 export type TransactionDuplicateKind = 'exact_duplicate' | 'potential_duplicate'
 
@@ -74,7 +74,7 @@ type DuplicateCandidateRow = {
   note: string | null
 }
 
-export function normalizeTransactionDescriptionForDuplicate(description: string): string {
+function normalizeTransactionDescriptionForDuplicate(description: string): string {
   return description
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')

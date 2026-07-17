@@ -9,6 +9,7 @@ describe('statement-parser', () => {
 <TRNTYPE>DEBIT
 <DTPOSTED>20240115
 <TRNAMT>-42.50
+<FITID>bank-row-42
 <NAME>WHOLE FOODS
 </STMTTRN>
 <STMTTRN>
@@ -22,9 +23,10 @@ describe('statement-parser', () => {
       expect(result).toHaveLength(2)
 
       expect(result[0].date).toBe('2024-01-15')
-      expect(result[0].amount).toBe(42.50)
+      expect(result[0].amount).toBe(42.5)
       expect(result[0].type).toBe('expense')
       expect(result[0].description).toBe('WHOLE FOODS')
+      expect(result[0].externalId).toBe('bank-row-42')
 
       expect(result[1].date).toBe('2024-01-31')
       expect(result[1].amount).toBe(3000)
@@ -109,7 +111,7 @@ PDirect Deposit
       expect(result).toHaveLength(2)
 
       expect(result[0].date).toBe('2024-01-15')
-      expect(result[0].amount).toBe(42.50)
+      expect(result[0].amount).toBe(42.5)
       expect(result[0].type).toBe('expense')
       expect(result[0].description).toBe('Whole Foods')
 

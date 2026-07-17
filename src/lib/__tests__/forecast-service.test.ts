@@ -21,9 +21,9 @@ describe('forecast-service', () => {
     subscriptions: { amount: number; billing_cycle: string; is_active: number }[] = []
   ) {
     mockQuery
-      .mockResolvedValueOnce([{ total: balance }])      // account balance
-      .mockResolvedValueOnce(dailyAverages)              // daily income/expense averages
-      .mockResolvedValueOnce(subscriptions)              // subscriptions
+      .mockResolvedValueOnce([{ total: balance }]) // account balance
+      .mockResolvedValueOnce(dailyAverages) // daily income/expense averages
+      .mockResolvedValueOnce(subscriptions) // subscriptions
   }
 
   it('returns correct number of forecast points (days + 1 for today)', async () => {
@@ -65,9 +65,7 @@ describe('forecast-service', () => {
 
   it('calculates danger dates when projected balance goes below threshold', async () => {
     // Start with $100, spend $50/day, no income
-    setupMocks(10000, [
-      { type: 'expense', avg_daily: 5000 },
-    ])
+    setupMocks(10000, [{ type: 'expense', avg_daily: 5000 }])
     const result = await generateCashFlowForecast(5, 0) // danger when balance < 0
     // Day 0: 10000, Day 1: 5000, Day 2: 0, Day 3: -5000
     expect(result.dangerDates.length).toBeGreaterThan(0)
@@ -86,9 +84,7 @@ describe('forecast-service', () => {
 
   it('tracks minimum balance across forecast', async () => {
     // Balance goes down then stays
-    setupMocks(20000, [
-      { type: 'expense', avg_daily: 5000 },
-    ])
+    setupMocks(20000, [{ type: 'expense', avg_daily: 5000 }])
     const result = await generateCashFlowForecast(10)
     // Balance decreases each day, min should be at last day
     expect(result.minBalance.amount).toBeLessThan(20000)

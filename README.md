@@ -32,12 +32,12 @@ Shikin is built to keep both:
 - **Investments**: Portfolio tracking with live prices (Alpha Vantage for stocks, CoinGecko for crypto).
 - **Multi-Currency**: Live exchange rates via frankfurter.app with preferred currency conversion.
 
-### CLI & MCP Server — 90 Shared Tools
+### CLI & MCP Server — 91 Shared Tools
 
 - **CLI**: `shikin add-transaction --amount 5.50 --type expense --description "Coffee"`
 - **MCP Server**: Connect Claude Code, Claude Desktop, Cursor, or any MCP-compatible client
 - **Portable AI Skill**: Optional `Skill.md` reference for AI tools that support file-based skills
-- **Shared Tool Definitions**: 90 shipped CLI/MCP tools run end-to-end against local data, including reconciliation, receivables, backup, guarded restore, audit, and automation-context tools
+- **Shared Tool Definitions**: 91 shipped CLI/MCP tools run end-to-end against local data, including reconciliation, receivables, backup, guarded restore, audit, and automation-context tools
 - **Authoritative Discovery**: `shikin tools --json` includes command schemas plus catalog/schema version, compatibility, and required migration metadata
 - **No Built-in Chat Assistant**: Shikin is the local finance engine; external clients can automate it through CLI/MCP
 
@@ -76,7 +76,7 @@ Current MVP limitations:
 | State      | Zustand (19 stores)              | Global state management                               |
 | Database   | SQLite (shared storage)          | 21 tables, migration-backed schema                    |
 | Settings   | Tauri Store / data-server bridge | Local key-value config storage                        |
-| Automation | CLI (`commander`) + MCP SDK      | Local automation surface (90 shared tools; 94 CLI commands including built-ins) |
+| Automation | CLI (`commander`) + MCP SDK      | Local automation surface (91 shared tools; 95 CLI commands including built-ins) |
 | Forms      | React Hook Form + Zod v4         | Form validation and parsing                           |
 | Charts     | Recharts                         | Financial visualizations                              |
 | PDF        | jsPDF                            | Report generation                                     |
@@ -177,6 +177,8 @@ See `CONTRIBUTING.md` for the quick contributor workflow and `docs/guides/CONTRI
 pnpm dev          # Web mode: Vite :1420 + data-server :1480
 ```
 
+Browser development uses an isolated temporary database by default. To work against your real app data intentionally, set `SHIKIN_BROWSER_USE_REAL_DATA=1` before starting the dev server.
+
 Then open `http://localhost:1420`.
 
 ### Build Desktop App (Tauri)
@@ -206,14 +208,14 @@ pnpm build:tauri  # Builds .deb + .AppImage (Linux), .dmg (macOS), .msi (Windows
 ## Release Hygiene
 
 - Run `pnpm release:preflight` before creating any release tag.
-- CI validates release preflight, lint, typecheck, unit tests, build, and e2e before release promotion.
+- CI validates release preflight, `pnpm check`, unit tests, app/CLI builds, and e2e before release promotion.
 - The tag-driven release workflow creates a draft GitHub Release first, uploads signed artifacts plus `latest.json`, then publishes only after artifact generation completes.
 
 ---
 
 ## CLI & MCP Server
 
-Shikin exposes 90 shared CLI/MCP tools and 94 total CLI commands including CLI-only built-ins. All shipped tools are available end-to-end against the local database.
+Shikin exposes 91 shared CLI/MCP tools and 95 total CLI commands including CLI-only built-ins. All shipped tools are available end-to-end against the local database.
 Automation clients can use the same generic finance workflows as humans and scripts: dry-run-first money writes, credit-card payment previews, project-style transaction tags, subscription creation from existing payments, audit-backed undo, and `finance-sanity-check` for daily-review-style checks. Treat `--source` as an opaque provenance label, `--note` as an audit/changelog note, and transaction `--notes` as transaction details.
 
 ```bash
@@ -265,10 +267,11 @@ curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-
 
 ## Data Safety
 
-- Export a local backup from **Settings > Data**.
-- Import a previously exported backup from the same section.
-- Import bank statements (OFX/QFX/QIF) from **Transactions > Import Statement**.
-- Backups are SQLite snapshot files (`.db`) for browser-local data recovery/migration.
+- Export a local backup from **Settings > Data**. Exports use SQLite's online backup API, so WAL-backed databases are copied consistently.
+- Import a previously exported backup from the same section. Shikin validates it first and creates a rollback snapshot before applying it.
+- CLI/MCP restore previews by default; applying a restore requires `apply:true` (legacy explicit `dryRun:false` remains supported with a warning).
+- Import bank statements (OFX/QFX/QIF) from **Transactions > Import Statement**. Bank-provided IDs are persisted for reliable duplicate detection.
+- Backups are portable SQLite snapshot files (`.db`).
 
 ---
 
@@ -305,7 +308,7 @@ Shikin/
 │   ├── stores/               # 18 Zustand stores
 │   ├── i18n/                 # 14 namespaces, 2 languages (en/es)
 │   └── types/                # TypeScript type definitions
-├── cli/                      # CLI + MCP server (90 shared tools)
+├── cli/                      # CLI + MCP server (91 shared tools)
 ├── skills/                   # Portable AI skill packs distributed by Shikin
 ├── docs/                     # Project documentation
 ├── e2e/                      # Playwright end-to-end tests

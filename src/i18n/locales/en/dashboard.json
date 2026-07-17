@@ -15,6 +15,15 @@
     "incomeVsLastMonth": "Income vs last month",
     "expensesVsLastMonth": "Expenses vs last month"
   },
+  "currency": {
+    "totalUnavailable": "Net worth unavailable",
+    "missingRates": "Missing exchange rates for {{currencies}}. Refresh rates to calculate a complete total.",
+    "invalidData": "Invalid currency data for {{details}}. Repair the affected account or rate before calculating a total.",
+    "invalidRate": "exchange rate {{from}} → {{to}} ({{rate}})",
+    "preferredCurrency": "Preferred currency",
+    "blankValue": "blank currency",
+    "derivedUnavailable": "Unavailable until exchange rates are complete"
+  },
   "charts": {
     "spending": "Monthly Spending",
     "categories": "By Category",

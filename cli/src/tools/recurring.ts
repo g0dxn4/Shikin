@@ -1,4 +1,9 @@
 import {
+  advanceAnchoredRecurrence,
+  advanceLegacyRecurrence,
+  type RecurrenceAnchor,
+} from '@shikin/finance-core'
+import {
   z,
   query,
   execute,
@@ -39,6 +44,8 @@ type RecurringRuleRow = {
   account_currency?: string | null
   account_is_archived?: number | null
   account_mode?: 'transactional' | 'snapshot_only' | null
+  anchor_kind: 'fixed_day' | 'end_of_month' | null
+  anchor_day: number | null
 }
 
 type CountRow = { count: number }
@@ -66,6 +73,49 @@ type RecurringOccurrence = {
   dueDate: string
   amount: number
   currency: string
+}
+
+function deriveRecurrenceAnchor(
+  date: string,
+  frequency: string,
+  anchorKind: 'fixed_day' | 'end_of_month'
+): {
+  anchor_kind: RecurringRuleRow['anchor_kind']
+  anchor_day: number | null
+} {
+  if (!['monthly', 'quarterly', 'yearly'].includes(frequency)) {
+    return { anchor_kind: null, anchor_day: null }
+  }
+  if (anchorKind === 'end_of_month') {
+    return { anchor_kind: 'end_of_month', anchor_day: null }
+  }
+  return { anchor_kind: 'fixed_day', anchor_day: dayjs(date).date() }
+}
+
+function advanceRecurringDate(
+  date: string,
+  frequency: string,
+  rule: Pick<RecurringRuleRow, 'anchor_kind' | 'anchor_day'>
+): string {
+  if (!['monthly', 'quarterly', 'yearly'].includes(frequency)) {
+    return advanceDate(date, frequency)
+  }
+  let anchor: RecurrenceAnchor | null = null
+  if (rule.anchor_kind === 'end_of_month') anchor = { kind: 'end_of_month' }
+  if (rule.anchor_kind === 'fixed_day' && rule.anchor_day !== null) {
+    anchor = { kind: 'day_of_month', day: rule.anchor_day }
+  }
+  if (anchor) {
+    return advanceAnchoredRecurrence(date, frequency as 'monthly' | 'quarterly' | 'yearly', anchor)
+      .date
+  }
+  const legacy = advanceLegacyRecurrence(date, frequency as 'monthly' | 'quarterly' | 'yearly')
+  if (legacy.status === 'unresolved') {
+    throw new Error(
+      `Recurring date ${date} needs an explicit fixed-day or end-of-month anchor. Update and save the rule before materializing it.`
+    )
+  }
+  return legacy.date
 }
 
 async function countLinkedRecurringTransactions(ruleId: string) {
@@ -136,7 +186,7 @@ function buildRecurringOccurrences(
     let occurrenceDate = rule.next_date
     let guard = 0
     while (occurrenceDate < startDate && (!rule.end_date || occurrenceDate <= rule.end_date)) {
-      occurrenceDate = advanceDate(occurrenceDate, rule.frequency)
+      occurrenceDate = advanceRecurringDate(occurrenceDate, rule.frequency, rule)
       guard += 1
       if (guard > 5000) break
     }
@@ -148,7 +198,7 @@ function buildRecurringOccurrences(
         amount: rule.amount,
         currency,
       })
-      occurrenceDate = advanceDate(occurrenceDate, rule.frequency)
+      occurrenceDate = advanceRecurringDate(occurrenceDate, rule.frequency, rule)
       guard += 1
       if (guard > 5000) break
     }
@@ -222,6 +272,524 @@ function currencyTotalsSnapshot(totals: Map<string, number>) {
     }))
 }
 
+type RecurringRuleActionInput = {
+  action: 'create' | 'update' | 'delete' | 'list' | 'toggle'
+  ruleId?: string
+  description?: string
+  amount?: number
+  type?: 'expense' | 'income' | 'transfer'
+  frequency?: 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly'
+  nextDate?: string
+  anchorKind?: 'fixed_day' | 'end_of_month'
+  endDate?: string
+  category?: string
+  notes?: string
+  accountId?: string
+  dryRun?: boolean
+}
+
+function requireRecurringRuleId(
+  action: 'update' | 'delete' | 'toggle',
+  ruleId: string | undefined
+): { success: true; ruleId: string } | { success: false; message: string } {
+  if (!ruleId) {
+    return { success: false, message: `ruleId is required for ${action}.` }
+  }
+  return { success: true, ruleId }
+}
+
+async function findRecurringRule(ruleId: string): Promise<RecurringRuleRow | null> {
+  const existing = await query<RecurringRuleRow>('SELECT * FROM recurring_rules WHERE id = $1', [
+    ruleId,
+  ])
+  return existing.length === 0 ? null : existing[0]
+}
+
+async function listRecurringRules() {
+  const rules = await query<RecurringRuleRow>(
+    `SELECT r.*, a.name as account_name, c.name as category_name
+     FROM recurring_rules r
+     LEFT JOIN accounts a ON r.account_id = a.id
+     LEFT JOIN categories c ON r.category_id = c.id
+     ORDER BY r.active DESC, r.next_date ASC`
+  )
+
+  if (rules.length === 0) {
+    return { success: true, rules: [], message: 'No recurring rules found.' }
+  }
+
+  return {
+    success: true,
+    rules: rules.map((r) => ({
+      id: r.id,
+      description: r.description,
+      amount: fromCentavos(r.amount),
+      type: r.type,
+      frequency: r.frequency,
+      nextDate: r.next_date,
+      endDate: r.end_date,
+      active: !!r.active,
+      anchorKind: r.anchor_kind,
+      anchorDay: r.anchor_day,
+      account: r.account_name,
+      category: r.category_name,
+    })),
+    message: `Found ${rules.length} recurring rule(s).`,
+  }
+}
+
+type RecurringRuleCreationPlan = {
+  success: true
+  id: string
+  description: string
+  amount: number
+  amountCentavos: number
+  type: 'expense' | 'income'
+  frequency: NonNullable<RecurringRuleActionInput['frequency']>
+  nextDate: string
+  endDate: string | null
+  accountId: string
+  categoryId: string | null
+  notes: string | null
+  currency: string
+  hasCurrencyColumn: boolean
+  anchor: ReturnType<typeof deriveRecurrenceAnchor>
+}
+
+function planRecurringRuleCreation(
+  input: RecurringRuleActionInput
+): RecurringRuleCreationPlan | RecurringRuleActionFailure {
+  const {
+    description,
+    amount,
+    type,
+    frequency,
+    nextDate,
+    anchorKind,
+    endDate,
+    category,
+    notes,
+    accountId,
+  } = input
+
+  if (!description || !amount || !type || !frequency) {
+    return {
+      success: false,
+      message: 'description, amount, type, and frequency are required to create a recurring rule.',
+    }
+  }
+  if (type === 'transfer') return unsupportedRecurringTransferFailure()
+
+  const resolvedCategory = resolveCategoryId(category)
+  if (!resolvedCategory.success) {
+    return { success: false, message: resolvedCategory.message }
+  }
+
+  const resolvedAccount = resolveAccountId(accountId)
+  if (!resolvedAccount.success) {
+    return { success: false, message: resolvedAccount.message }
+  }
+  const currency = normalizeCurrencyCode(resolvedAccount.currency)
+  if (currency === '') {
+    return { success: false, message: invalidAccountCurrencyMessage(resolvedAccount.id) }
+  }
+
+  const id = generateId()
+  const amountCentavos = toCentavos(amount)
+  const resolvedNextDate = nextDate || dayjs().format('YYYY-MM-DD')
+  const hasCurrencyColumn = recurringRulesHasCurrencyColumn()
+  const anchor = deriveRecurrenceAnchor(resolvedNextDate, frequency, anchorKind ?? 'fixed_day')
+
+  return {
+    success: true,
+    id,
+    description,
+    amount,
+    amountCentavos,
+    type,
+    frequency,
+    nextDate: resolvedNextDate,
+    endDate: endDate ?? null,
+    accountId: resolvedAccount.id,
+    categoryId: resolvedCategory.id,
+    notes: notes ?? null,
+    currency,
+    hasCurrencyColumn,
+    anchor,
+  }
+}
+
+async function insertRecurringRule(
+  plan: RecurringRuleCreationPlan,
+  hasCurrencyColumn: boolean
+): Promise<void> {
+  await execute(
+    hasCurrencyColumn
+      ? `INSERT INTO recurring_rules (id, description, amount, type, frequency, next_date, end_date, account_id, category_id, notes, currency, anchor_kind, anchor_day)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
+      : `INSERT INTO recurring_rules (id, description, amount, type, frequency, next_date, end_date, account_id, category_id, notes, anchor_kind, anchor_day)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+    hasCurrencyColumn
+      ? [
+          plan.id,
+          plan.description,
+          plan.amountCentavos,
+          plan.type,
+          plan.frequency,
+          plan.nextDate,
+          plan.endDate,
+          plan.accountId,
+          plan.categoryId,
+          plan.notes,
+          plan.currency,
+          plan.anchor.anchor_kind,
+          plan.anchor.anchor_day,
+        ]
+      : [
+          plan.id,
+          plan.description,
+          plan.amountCentavos,
+          plan.type,
+          plan.frequency,
+          plan.nextDate,
+          plan.endDate,
+          plan.accountId,
+          plan.categoryId,
+          plan.notes,
+          plan.anchor.anchor_kind,
+          plan.anchor.anchor_day,
+        ]
+  )
+}
+
+async function createRecurringRule(input: RecurringRuleActionInput) {
+  const plan = planRecurringRuleCreation(input)
+  if (!plan.success) return plan
+
+  if (input.dryRun) {
+    return {
+      success: true,
+      dryRun: true,
+      wouldCreate: {
+        id: plan.id,
+        description: plan.description,
+        amount: plan.amount,
+        amountCentavos: plan.amountCentavos,
+        type: plan.type,
+        frequency: plan.frequency,
+        nextDate: plan.nextDate,
+        endDate: plan.endDate,
+        accountId: plan.accountId,
+        categoryId: plan.categoryId,
+        notes: plan.notes,
+        currency: plan.currency,
+        anchorKind: plan.anchor.anchor_kind,
+        anchorDay: plan.anchor.anchor_day,
+      },
+      message: `Dry run: ${plan.frequency} recurring ${plan.type} "${plan.description}" would be created starting ${plan.nextDate}.`,
+    }
+  }
+
+  await insertRecurringRule(plan, plan.hasCurrencyColumn)
+
+  return {
+    success: true,
+    rule: {
+      id: plan.id,
+      description: plan.description,
+      amount: plan.amount,
+      type: plan.type,
+      frequency: plan.frequency,
+      nextDate: plan.nextDate,
+    },
+    message: `Created ${plan.frequency} recurring ${plan.type}: "$${plan.amount.toFixed(2)} — ${plan.description}" starting ${plan.nextDate}.`,
+  }
+}
+
+type RecurringRuleActionFailure = {
+  success: false
+  message: string
+  reason?: string
+}
+
+type RecurringRuleUpdatePlan = {
+  setClauses: string[]
+  params: unknown[]
+  parameterIndex: number
+  resolvedAccount: { success: true; id: string; currency: string } | null
+  updatedCategoryId: string | null
+}
+
+function addRecurringRuleUpdateClause(
+  plan: RecurringRuleUpdatePlan,
+  column: string,
+  value: unknown
+): void {
+  plan.setClauses.push(`${column} = $${plan.parameterIndex++}`)
+  plan.params.push(value)
+}
+
+function appendRecurringRuleValueUpdates(
+  plan: RecurringRuleUpdatePlan,
+  input: RecurringRuleActionInput,
+  rule: RecurringRuleRow
+): RecurringRuleActionFailure | null {
+  const { description, amount, type, frequency, nextDate, anchorKind, endDate, notes } = input
+
+  if (description !== undefined) addRecurringRuleUpdateClause(plan, 'description', description)
+  if (amount !== undefined) addRecurringRuleUpdateClause(plan, 'amount', toCentavos(amount))
+  if (type !== undefined) {
+    if (type === 'transfer') return unsupportedRecurringTransferFailure()
+    addRecurringRuleUpdateClause(plan, 'type', type)
+  }
+  if (frequency !== undefined) addRecurringRuleUpdateClause(plan, 'frequency', frequency)
+  if (nextDate !== undefined) addRecurringRuleUpdateClause(plan, 'next_date', nextDate)
+  if (nextDate !== undefined || frequency !== undefined || anchorKind !== undefined) {
+    const anchor = deriveRecurrenceAnchor(
+      nextDate ?? rule.next_date,
+      frequency ?? rule.frequency,
+      anchorKind ?? rule.anchor_kind ?? 'fixed_day'
+    )
+    addRecurringRuleUpdateClause(plan, 'anchor_kind', anchor.anchor_kind)
+    addRecurringRuleUpdateClause(plan, 'anchor_day', anchor.anchor_day)
+  }
+  if (endDate !== undefined) addRecurringRuleUpdateClause(plan, 'end_date', endDate)
+  if (notes !== undefined) addRecurringRuleUpdateClause(plan, 'notes', notes)
+
+  return null
+}
+
+function appendRecurringRuleReferenceUpdates(
+  plan: RecurringRuleUpdatePlan,
+  input: RecurringRuleActionInput,
+  rule: RecurringRuleRow,
+  sourceCurrency: string
+): RecurringRuleActionFailure | null {
+  if (input.category !== undefined) {
+    const resolvedCategory = resolveCategoryId(input.category)
+    if (!resolvedCategory.success) return { success: false, message: resolvedCategory.message }
+    addRecurringRuleUpdateClause(plan, 'category_id', resolvedCategory.id)
+    plan.updatedCategoryId = resolvedCategory.id
+  }
+
+  if (input.accountId !== undefined) {
+    const resolvedAccount = resolveAccountId(input.accountId)
+    if (!resolvedAccount.success) return { success: false, message: resolvedAccount.message }
+
+    if (
+      rule.account_id !== resolvedAccount.id &&
+      sourceCurrency !== normalizeCurrencyCode(resolvedAccount.currency)
+    ) {
+      return {
+        success: false,
+        message: crossCurrencyMoveMessage(
+          'recurring rule',
+          sourceCurrency,
+          resolvedAccount.currency
+        ),
+      }
+    }
+
+    addRecurringRuleUpdateClause(plan, 'account_id', resolvedAccount.id)
+    plan.resolvedAccount = resolvedAccount
+  }
+
+  if (recurringRulesHasCurrencyColumn()) {
+    const isMovingAccounts =
+      plan.resolvedAccount?.success && plan.resolvedAccount.id !== rule.account_id
+    if (isMovingAccounts) addRecurringRuleUpdateClause(plan, 'currency', sourceCurrency)
+  }
+
+  return null
+}
+
+function buildUpdatedRecurringRule(
+  input: RecurringRuleActionInput,
+  rule: RecurringRuleRow,
+  plan: RecurringRuleUpdatePlan,
+  sourceCurrency: string
+) {
+  return {
+    id: rule.id,
+    description: input.description ?? rule.description,
+    amount: input.amount !== undefined ? input.amount : fromCentavos(rule.amount),
+    amountCentavos: input.amount !== undefined ? toCentavos(input.amount) : rule.amount,
+    type: input.type ?? rule.type,
+    frequency: input.frequency ?? rule.frequency,
+    nextDate: input.nextDate ?? rule.next_date,
+    endDate: input.endDate !== undefined ? input.endDate : rule.end_date,
+    accountId: plan.resolvedAccount?.success ? plan.resolvedAccount.id : rule.account_id,
+    categoryId: plan.updatedCategoryId,
+    notes: input.notes !== undefined ? input.notes : rule.notes,
+    active: Boolean(rule.active),
+    currency: sourceCurrency,
+  }
+}
+
+async function updateRecurringRule(input: RecurringRuleActionInput) {
+  const ruleIdResult = requireRecurringRuleId('update', input.ruleId)
+  if (!ruleIdResult.success) return ruleIdResult
+  const { ruleId } = ruleIdResult
+
+  const rule = await findRecurringRule(ruleId)
+  if (!rule) {
+    return { success: false, message: `Recurring rule ${ruleId} not found.` }
+  }
+  if (normalizeCurrencyCode(rule.currency) === '') {
+    return unknownRecurringRuleCurrencyFailure(rule)
+  }
+
+  const sourceCurrency = normalizeCurrencyCode(rule.currency)
+  const plan: RecurringRuleUpdatePlan = {
+    setClauses: [],
+    params: [],
+    parameterIndex: 1,
+    resolvedAccount: null,
+    updatedCategoryId: rule.category_id,
+  }
+  const valueFailure = appendRecurringRuleValueUpdates(plan, input, rule)
+  if (valueFailure) return valueFailure
+  const referenceFailure = appendRecurringRuleReferenceUpdates(plan, input, rule, sourceCurrency)
+  if (referenceFailure) return referenceFailure
+
+  if (plan.setClauses.length === 0) {
+    return { success: false, message: 'No fields to update.' }
+  }
+
+  const updatedRule = buildUpdatedRecurringRule(input, rule, plan, sourceCurrency)
+  const identityChanged =
+    updatedRule.type !== rule.type || updatedRule.accountId !== rule.account_id
+  if (identityChanged) {
+    const linkedTransactionCount = await countLinkedRecurringTransactions(rule.id)
+    if (linkedTransactionCount > 0) {
+      return {
+        success: false,
+        message: `Recurring rule ${rule.id} has ${linkedTransactionCount} linked transaction${linkedTransactionCount === 1 ? '' : 's'}. Clear or migrate those links before changing the rule account or type.`,
+      }
+    }
+  }
+
+  if (input.dryRun) {
+    return {
+      success: true,
+      dryRun: true,
+      wouldUpdate: {
+        ruleId,
+        before: {
+          id: rule.id,
+          description: rule.description,
+          amount: fromCentavos(rule.amount),
+          amountCentavos: rule.amount,
+          type: rule.type,
+          frequency: rule.frequency,
+          nextDate: rule.next_date,
+          endDate: rule.end_date,
+          accountId: rule.account_id,
+          categoryId: rule.category_id,
+          notes: rule.notes,
+          active: Boolean(rule.active),
+          currency: sourceCurrency,
+        },
+        after: updatedRule,
+      },
+      message: `Dry run: recurring rule "${updatedRule.description}" would be updated.`,
+    }
+  }
+
+  plan.setClauses.push(`updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`)
+  plan.params.push(ruleId)
+
+  await execute(
+    `UPDATE recurring_rules SET ${plan.setClauses.join(', ')} WHERE id = $${plan.parameterIndex}`,
+    plan.params
+  )
+
+  return {
+    success: true,
+    message: `Updated recurring rule "${input.description ?? rule.description}".`,
+  }
+}
+
+async function deleteRecurringRule(input: RecurringRuleActionInput) {
+  const ruleIdResult = requireRecurringRuleId('delete', input.ruleId)
+  if (!ruleIdResult.success) return ruleIdResult
+  const { ruleId } = ruleIdResult
+  const { dryRun } = input
+
+  const rule = await findRecurringRule(ruleId)
+  if (!rule) {
+    return { success: false, message: `Recurring rule ${ruleId} not found.` }
+  }
+
+  const linkedTransactionCount = await countLinkedRecurringTransactions(ruleId)
+
+  if (dryRun) {
+    return {
+      success: true,
+      dryRun: true,
+      wouldDelete: {
+        id: rule.id,
+        description: rule.description,
+        amount: fromCentavos(rule.amount),
+        type: rule.type,
+        frequency: rule.frequency,
+        nextDate: rule.next_date,
+        active: Boolean(rule.active),
+        linkedTransactionCount,
+      },
+      message: `Dry run: recurring rule "${rule.description}" would be deleted${linkedTransactionCount > 0 ? ` after unlinking ${linkedTransactionCount} linked transaction${linkedTransactionCount === 1 ? '' : 's'}` : ''}.`,
+    }
+  }
+
+  transaction(() => {
+    execute('UPDATE transactions SET recurring_rule_id = NULL WHERE recurring_rule_id = $1', [
+      ruleId,
+    ])
+    execute('DELETE FROM recurring_rules WHERE id = $1', [ruleId])
+  })
+
+  return {
+    success: true,
+    message: `Deleted recurring rule "${rule.description}"${linkedTransactionCount > 0 ? ` and unlinked ${linkedTransactionCount} transaction${linkedTransactionCount === 1 ? '' : 's'}` : ''}.`,
+  }
+}
+
+async function toggleRecurringRule(input: RecurringRuleActionInput) {
+  const ruleIdResult = requireRecurringRuleId('toggle', input.ruleId)
+  if (!ruleIdResult.success) return ruleIdResult
+  const { ruleId } = ruleIdResult
+  const { dryRun } = input
+
+  const rule = await findRecurringRule(ruleId)
+  if (!rule) {
+    return { success: false, message: `Recurring rule ${ruleId} not found.` }
+  }
+
+  const newActive = rule.active ? 0 : 1
+  if (dryRun) {
+    return {
+      success: true,
+      dryRun: true,
+      wouldToggle: {
+        id: rule.id,
+        description: rule.description,
+        previousActive: Boolean(rule.active),
+        newActive: Boolean(newActive),
+      },
+      message: `Dry run: recurring rule "${rule.description}" would be ${newActive ? 'activated' : 'paused'}.`,
+    }
+  }
+  await execute(
+    "UPDATE recurring_rules SET active = $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
+    [newActive, ruleId]
+  )
+
+  return {
+    success: true,
+    message: `${newActive ? 'Activated' : 'Paused'} recurring rule "${rule.description}".`,
+  }
+}
+
 const manageRecurringTransaction: ToolDefinition = {
   name: 'manage-recurring-transaction',
   description:
@@ -242,6 +810,10 @@ const manageRecurringTransaction: ToolDefinition = {
       .optional()
       .describe('How often this recurs'),
     nextDate: z.string().optional().describe('Next occurrence date in YYYY-MM-DD format'),
+    anchorKind: z
+      .enum(['fixed_day', 'end_of_month'])
+      .optional()
+      .describe('For monthly/quarterly/yearly rules, keep the calendar day or use month-end'),
     endDate: z.string().optional().describe('Optional end date in YYYY-MM-DD format'),
     category: z.string().optional().describe('Category name to match'),
     notes: z.string().optional().describe('Optional notes'),
@@ -256,566 +828,174 @@ const manageRecurringTransaction: ToolDefinition = {
       .default(false)
       .describe('Validate and preview create/update/delete/toggle actions without writing them'),
   }),
-  execute: async ({
-    action,
-    ruleId,
-    description,
-    amount,
-    type,
-    frequency,
-    nextDate,
-    endDate,
-    category,
-    notes,
-    accountId,
-    dryRun,
-  }) => {
-    if (action === 'list') {
-      const rules = await query<RecurringRuleRow>(
-        `SELECT r.*, a.name as account_name, c.name as category_name
-         FROM recurring_rules r
-         LEFT JOIN accounts a ON r.account_id = a.id
-         LEFT JOIN categories c ON r.category_id = c.id
-         ORDER BY r.active DESC, r.next_date ASC`
-      )
-
-      if (rules.length === 0) {
-        return { success: true, rules: [], message: 'No recurring rules found.' }
-      }
-
-      return {
-        success: true,
-        rules: rules.map((r) => ({
-          id: r.id,
-          description: r.description,
-          amount: fromCentavos(r.amount),
-          type: r.type,
-          frequency: r.frequency,
-          nextDate: r.next_date,
-          endDate: r.end_date,
-          active: !!r.active,
-          account: r.account_name,
-          category: r.category_name,
-        })),
-        message: `Found ${rules.length} recurring rule(s).`,
-      }
+  execute: async (input: RecurringRuleActionInput) => {
+    switch (input.action) {
+      case 'list':
+        return listRecurringRules()
+      case 'create':
+        return createRecurringRule(input)
+      case 'update':
+        return updateRecurringRule(input)
+      case 'delete':
+        return deleteRecurringRule(input)
+      case 'toggle':
+        return toggleRecurringRule(input)
+      default:
+        return { success: false, message: `Unknown action: ${input.action}` }
     }
-
-    if (action === 'create') {
-      if (!description || !amount || !type || !frequency) {
-        return {
-          success: false,
-          message:
-            'description, amount, type, and frequency are required to create a recurring rule.',
-        }
-      }
-
-      if (type === 'transfer') {
-        return unsupportedRecurringTransferFailure()
-      }
-
-      const resolvedCategory = resolveCategoryId(category)
-      if (!resolvedCategory.success) {
-        return {
-          success: false,
-          message: resolvedCategory.message,
-        }
-      }
-
-      const resolvedAccount = resolveAccountId(accountId)
-      if (!resolvedAccount.success) {
-        return {
-          success: false,
-          message: resolvedAccount.message,
-        }
-      }
-      const recurringRuleCurrency = normalizeCurrencyCode(resolvedAccount.currency)
-      if (recurringRuleCurrency === '') {
-        return {
-          success: false,
-          message: invalidAccountCurrencyMessage(resolvedAccount.id),
-        }
-      }
-
-      const id = generateId()
-      const amountCentavos = toCentavos(amount)
-      const resolvedNextDate = nextDate || dayjs().format('YYYY-MM-DD')
-      const hasCurrencyColumn = recurringRulesHasCurrencyColumn()
-
-      if (dryRun) {
-        return {
-          success: true,
-          dryRun: true,
-          wouldCreate: {
-            id,
-            description,
-            amount,
-            amountCentavos,
-            type,
-            frequency,
-            nextDate: resolvedNextDate,
-            endDate: endDate ?? null,
-            accountId: resolvedAccount.id,
-            categoryId: resolvedCategory.id,
-            notes: notes ?? null,
-            currency: recurringRuleCurrency,
-          },
-          message: `Dry run: ${frequency} recurring ${type} "${description}" would be created starting ${resolvedNextDate}.`,
-        }
-      }
-
-      await execute(
-        hasCurrencyColumn
-          ? `INSERT INTO recurring_rules (id, description, amount, type, frequency, next_date, end_date, account_id, category_id, notes, currency)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
-          : `INSERT INTO recurring_rules (id, description, amount, type, frequency, next_date, end_date, account_id, category_id, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        hasCurrencyColumn
-          ? [
-              id,
-              description,
-              amountCentavos,
-              type,
-              frequency,
-              resolvedNextDate,
-              endDate ?? null,
-              resolvedAccount.id,
-              resolvedCategory.id,
-              notes ?? null,
-              recurringRuleCurrency,
-            ]
-          : [
-              id,
-              description,
-              amountCentavos,
-              type,
-              frequency,
-              resolvedNextDate,
-              endDate ?? null,
-              resolvedAccount.id,
-              resolvedCategory.id,
-              notes ?? null,
-            ]
-      )
-
-      return {
-        success: true,
-        rule: { id, description, amount, type, frequency, nextDate: resolvedNextDate },
-        message: `Created ${frequency} recurring ${type}: "$${amount.toFixed(2)} — ${description}" starting ${resolvedNextDate}.`,
-      }
-    }
-
-    if (action === 'update') {
-      if (!ruleId) {
-        return { success: false, message: 'ruleId is required for update.' }
-      }
-
-      const existing = await query<RecurringRuleRow>(
-        'SELECT * FROM recurring_rules WHERE id = $1',
-        [ruleId]
-      )
-      if (existing.length === 0) {
-        return { success: false, message: `Recurring rule ${ruleId} not found.` }
-      }
-
-      const rule = existing[0]
-      if (normalizeCurrencyCode(rule.currency) === '') {
-        return unknownRecurringRuleCurrencyFailure(rule)
-      }
-
-      const setClauses: string[] = []
-      const params: unknown[] = []
-      let paramIdx = 1
-      let resolvedAccount:
-        | { success: true; id: string; currency: string }
-        | { success: false; message: string }
-        | null = null
-      const sourceCurrency = normalizeCurrencyCode(rule.currency)
-      let updatedCategoryId = rule.category_id
-
-      if (description !== undefined) {
-        setClauses.push(`description = $${paramIdx++}`)
-        params.push(description)
-      }
-      if (amount !== undefined) {
-        setClauses.push(`amount = $${paramIdx++}`)
-        params.push(toCentavos(amount))
-      }
-      if (type !== undefined) {
-        if (type === 'transfer') {
-          return unsupportedRecurringTransferFailure()
-        }
-        setClauses.push(`type = $${paramIdx++}`)
-        params.push(type)
-      }
-      if (frequency !== undefined) {
-        setClauses.push(`frequency = $${paramIdx++}`)
-        params.push(frequency)
-      }
-      if (nextDate !== undefined) {
-        setClauses.push(`next_date = $${paramIdx++}`)
-        params.push(nextDate)
-      }
-      if (endDate !== undefined) {
-        setClauses.push(`end_date = $${paramIdx++}`)
-        params.push(endDate)
-      }
-      if (notes !== undefined) {
-        setClauses.push(`notes = $${paramIdx++}`)
-        params.push(notes)
-      }
-
-      if (category !== undefined) {
-        const resolvedCategory = resolveCategoryId(category)
-        if (!resolvedCategory.success) {
-          return { success: false, message: resolvedCategory.message }
-        }
-        setClauses.push(`category_id = $${paramIdx++}`)
-        params.push(resolvedCategory.id)
-        updatedCategoryId = resolvedCategory.id
-      }
-
-      if (accountId !== undefined) {
-        resolvedAccount = resolveAccountId(accountId)
-        if (!resolvedAccount.success) {
-          return { success: false, message: resolvedAccount.message }
-        }
-
-        if (
-          rule.account_id !== resolvedAccount.id &&
-          sourceCurrency !== normalizeCurrencyCode(resolvedAccount.currency)
-        ) {
-          return {
-            success: false,
-            message: crossCurrencyMoveMessage(
-              'recurring rule',
-              sourceCurrency,
-              resolvedAccount.currency
-            ),
-          }
-        }
-
-        setClauses.push(`account_id = $${paramIdx++}`)
-        params.push(resolvedAccount.id)
-      }
-
-      if (recurringRulesHasCurrencyColumn()) {
-        const isMovingAccounts = resolvedAccount?.success && resolvedAccount.id !== rule.account_id
-        if (isMovingAccounts) {
-          setClauses.push(`currency = $${paramIdx++}`)
-          params.push(sourceCurrency)
-        }
-      }
-
-      if (setClauses.length === 0) {
-        return { success: false, message: 'No fields to update.' }
-      }
-
-      const updatedRule = {
-        id: rule.id,
-        description: description ?? rule.description,
-        amount: amount !== undefined ? amount : fromCentavos(rule.amount),
-        amountCentavos: amount !== undefined ? toCentavos(amount) : rule.amount,
-        type: type ?? rule.type,
-        frequency: frequency ?? rule.frequency,
-        nextDate: nextDate ?? rule.next_date,
-        endDate: endDate !== undefined ? endDate : rule.end_date,
-        accountId: resolvedAccount?.success ? resolvedAccount.id : rule.account_id,
-        categoryId: updatedCategoryId,
-        notes: notes !== undefined ? notes : rule.notes,
-        active: Boolean(rule.active),
-        currency: sourceCurrency,
-      }
-
-      const identityChanged =
-        updatedRule.type !== rule.type || updatedRule.accountId !== rule.account_id
-      if (identityChanged) {
-        const linkedTransactionCount = await countLinkedRecurringTransactions(rule.id)
-        if (linkedTransactionCount > 0) {
-          return {
-            success: false,
-            message: `Recurring rule ${rule.id} has ${linkedTransactionCount} linked transaction${linkedTransactionCount === 1 ? '' : 's'}. Clear or migrate those links before changing the rule account or type.`,
-          }
-        }
-      }
-
-      if (dryRun) {
-        return {
-          success: true,
-          dryRun: true,
-          wouldUpdate: {
-            ruleId,
-            before: {
-              id: rule.id,
-              description: rule.description,
-              amount: fromCentavos(rule.amount),
-              amountCentavos: rule.amount,
-              type: rule.type,
-              frequency: rule.frequency,
-              nextDate: rule.next_date,
-              endDate: rule.end_date,
-              accountId: rule.account_id,
-              categoryId: rule.category_id,
-              notes: rule.notes,
-              active: Boolean(rule.active),
-              currency: sourceCurrency,
-            },
-            after: updatedRule,
-          },
-          message: `Dry run: recurring rule "${updatedRule.description}" would be updated.`,
-        }
-      }
-
-      setClauses.push(`updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`)
-      params.push(ruleId)
-
-      await execute(
-        `UPDATE recurring_rules SET ${setClauses.join(', ')} WHERE id = $${paramIdx}`,
-        params
-      )
-
-      return {
-        success: true,
-        message: `Updated recurring rule "${description ?? rule.description}".`,
-      }
-    }
-
-    if (action === 'delete') {
-      if (!ruleId) {
-        return { success: false, message: 'ruleId is required for delete.' }
-      }
-
-      const existing = await query<RecurringRuleRow>(
-        'SELECT * FROM recurring_rules WHERE id = $1',
-        [ruleId]
-      )
-      if (existing.length === 0) {
-        return { success: false, message: `Recurring rule ${ruleId} not found.` }
-      }
-
-      const linkedTransactionCount = await countLinkedRecurringTransactions(ruleId)
-
-      if (dryRun) {
-        return {
-          success: true,
-          dryRun: true,
-          wouldDelete: {
-            id: existing[0].id,
-            description: existing[0].description,
-            amount: fromCentavos(existing[0].amount),
-            type: existing[0].type,
-            frequency: existing[0].frequency,
-            nextDate: existing[0].next_date,
-            active: Boolean(existing[0].active),
-            linkedTransactionCount,
-          },
-          message: `Dry run: recurring rule "${existing[0].description}" would be deleted${linkedTransactionCount > 0 ? ` after unlinking ${linkedTransactionCount} linked transaction${linkedTransactionCount === 1 ? '' : 's'}` : ''}.`,
-        }
-      }
-
-      transaction(() => {
-        execute('UPDATE transactions SET recurring_rule_id = NULL WHERE recurring_rule_id = $1', [
-          ruleId,
-        ])
-        execute('DELETE FROM recurring_rules WHERE id = $1', [ruleId])
-      })
-
-      return {
-        success: true,
-        message: `Deleted recurring rule "${existing[0].description}"${linkedTransactionCount > 0 ? ` and unlinked ${linkedTransactionCount} transaction${linkedTransactionCount === 1 ? '' : 's'}` : ''}.`,
-      }
-    }
-
-    if (action === 'toggle') {
-      if (!ruleId) {
-        return { success: false, message: 'ruleId is required for toggle.' }
-      }
-
-      const existing = await query<RecurringRuleRow>(
-        'SELECT * FROM recurring_rules WHERE id = $1',
-        [ruleId]
-      )
-      if (existing.length === 0) {
-        return { success: false, message: `Recurring rule ${ruleId} not found.` }
-      }
-
-      const newActive = existing[0].active ? 0 : 1
-      if (dryRun) {
-        return {
-          success: true,
-          dryRun: true,
-          wouldToggle: {
-            id: existing[0].id,
-            description: existing[0].description,
-            previousActive: Boolean(existing[0].active),
-            newActive: Boolean(newActive),
-          },
-          message: `Dry run: recurring rule "${existing[0].description}" would be ${newActive ? 'activated' : 'paused'}.`,
-        }
-      }
-      await execute(
-        "UPDATE recurring_rules SET active = $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2",
-        [newActive, ruleId]
-      )
-
-      return {
-        success: true,
-        message: `${newActive ? 'Activated' : 'Paused'} recurring rule "${existing[0].description}".`,
-      }
-    }
-
-    return { success: false, message: `Unknown action: ${action}` }
   },
 }
 
 // ---------------------------------------------------------------------------
 // 34. materialize-recurring
 // ---------------------------------------------------------------------------
+async function materializeDueRecurringRules() {
+  const today = dayjs().format('YYYY-MM-DD')
+
+  // Find due recurring rules
+  const dueRules = await query<RecurringRuleRow>(
+    `SELECT r.*, a.name as account_name, a.currency as account_currency,
+            a.is_archived as account_is_archived, a.account_mode
+     FROM recurring_rules r
+     LEFT JOIN accounts a ON r.account_id = a.id
+     WHERE r.active = 1 AND r.next_date <= $1`,
+    [today]
+  )
+
+  if (dueRules.length === 0) {
+    return {
+      success: true,
+      created: 0,
+      message: 'No recurring transactions were due.',
+    }
+  }
+
+  const unsupportedTransferRule = dueRules.find((rule) => rule.type === 'transfer')
+  if (unsupportedTransferRule) {
+    return unsupportedRecurringTransferFailure()
+  }
+
+  const archivedAccountRule = dueRules.find((rule) => rule.account_is_archived !== 0)
+  if (archivedAccountRule) {
+    return {
+      success: false,
+      reason: 'account_archived',
+      message: `Recurring rule "${archivedAccountRule.description}" points at archived account ${archivedAccountRule.account_id}. Unarchive the account or pause the rule before materializing it.`,
+    }
+  }
+
+  const snapshotAccountRule = dueRules.find(
+    (rule) => (rule.account_mode ?? 'transactional') === 'snapshot_only'
+  )
+  if (snapshotAccountRule) {
+    return {
+      success: false,
+      reason: 'snapshot_only_account',
+      message: `Recurring rule "${snapshotAccountRule.description}" points at snapshot-only account ${snapshotAccountRule.account_id}. Snapshot-only accounts do not accept transaction ledger writes.`,
+    }
+  }
+
+  const unknownCurrencyRule = dueRules.find((rule) => normalizeCurrencyCode(rule.currency) === '')
+  if (unknownCurrencyRule) {
+    return unknownRecurringRuleCurrencyFailure(unknownCurrencyRule)
+  }
+
+  const accountCurrencyMismatchRule = dueRules.find((rule) => {
+    const ruleCurrency = normalizeCurrencyCode(rule.currency)
+    const accountCurrency = normalizeCurrencyCode(rule.account_currency)
+    return ruleCurrency !== '' && (accountCurrency === '' || ruleCurrency !== accountCurrency)
+  })
+  if (accountCurrencyMismatchRule) {
+    return {
+      success: false,
+      reason: 'rule_account_currency_mismatch',
+      message: `Recurring rule "${accountCurrencyMismatchRule.description}" has stored currency ${accountCurrencyMismatchRule.currency} but the linked account is now ${accountCurrencyMismatchRule.account_currency}. Repair or recreate the rule before materializing it.`,
+    }
+  }
+
+  let created = 0
+
+  for (const rule of dueRules) {
+    const createdForRule = transaction(() => {
+      let occurrenceDate = rule.next_date
+      let createdWithinRule = 0
+
+      while (occurrenceDate <= today) {
+        if (rule.end_date && occurrenceDate > rule.end_date) {
+          const deactivateResult = execute(
+            "UPDATE recurring_rules SET active = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $1 AND active = 1 AND next_date = $2",
+            [rule.id, occurrenceDate]
+          )
+          if (deactivateResult.rowsAffected !== 1) {
+            return createdWithinRule
+          }
+          return createdWithinRule
+        }
+
+        const newNextDate = advanceRecurringDate(occurrenceDate, rule.frequency, rule)
+        const shouldDeactivate = Boolean(rule.end_date && newNextDate > rule.end_date)
+        const claimResult = execute(
+          "UPDATE recurring_rules SET active = $1, next_date = $2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $3 AND active = 1 AND next_date = $4",
+          [shouldDeactivate ? 0 : 1, newNextDate, rule.id, occurrenceDate]
+        )
+        if (claimResult.rowsAffected !== 1) {
+          return createdWithinRule
+        }
+
+        const txId = generateId()
+
+        execute(
+          `INSERT INTO transactions (id, account_id, category_id, type, amount, currency, description, notes, date, is_recurring, status, recurring_rule_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, 'posted', $10)`,
+          [
+            txId,
+            rule.account_id,
+            rule.category_id,
+            rule.type,
+            rule.amount,
+            normalizeCurrencyCode(rule.currency),
+            rule.description,
+            rule.notes,
+            occurrenceDate,
+            rule.id,
+          ]
+        )
+
+        const balanceChange = rule.type === 'income' ? rule.amount : -rule.amount
+        execute(
+          "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2 AND COALESCE(account_mode, 'transactional') = 'transactional'",
+          [balanceChange, rule.account_id]
+        )
+
+        createdWithinRule += 1
+        occurrenceDate = newNextDate
+        if (shouldDeactivate) {
+          return createdWithinRule
+        }
+      }
+
+      return createdWithinRule
+    })
+
+    created += createdForRule
+  }
+
+  return {
+    success: true,
+    created,
+    message:
+      created > 0
+        ? `Created ${created} transaction(s) from recurring rules.`
+        : 'No recurring transactions were due.',
+  }
+}
+
 const materializeRecurring: ToolDefinition = {
   name: 'materialize-recurring',
   description:
     'Manually trigger materialization of due recurring transactions. Creates actual transactions for any recurring rules whose next_date has passed.',
   schema: z.object({}),
-  execute: async () => {
-    const today = dayjs().format('YYYY-MM-DD')
-
-    // Find due recurring rules
-    const dueRules = await query<RecurringRuleRow>(
-      `SELECT r.*, a.name as account_name, a.currency as account_currency,
-              a.is_archived as account_is_archived, a.account_mode
-       FROM recurring_rules r
-       LEFT JOIN accounts a ON r.account_id = a.id
-       WHERE r.active = 1 AND r.next_date <= $1`,
-      [today]
-    )
-
-    if (dueRules.length === 0) {
-      return {
-        success: true,
-        created: 0,
-        message: 'No recurring transactions were due.',
-      }
-    }
-
-    const unsupportedTransferRule = dueRules.find((rule) => rule.type === 'transfer')
-    if (unsupportedTransferRule) {
-      return unsupportedRecurringTransferFailure()
-    }
-
-    const archivedAccountRule = dueRules.find((rule) => rule.account_is_archived === 1)
-    if (archivedAccountRule) {
-      return {
-        success: false,
-        reason: 'account_archived',
-        message: `Recurring rule "${archivedAccountRule.description}" points at archived account ${archivedAccountRule.account_id}. Unarchive the account or pause the rule before materializing it.`,
-      }
-    }
-
-    const snapshotAccountRule = dueRules.find(
-      (rule) => (rule.account_mode ?? 'transactional') === 'snapshot_only'
-    )
-    if (snapshotAccountRule) {
-      return {
-        success: false,
-        reason: 'snapshot_only_account',
-        message: `Recurring rule "${snapshotAccountRule.description}" points at snapshot-only account ${snapshotAccountRule.account_id}. Snapshot-only accounts do not accept transaction ledger writes.`,
-      }
-    }
-
-    const unknownCurrencyRule = dueRules.find((rule) => normalizeCurrencyCode(rule.currency) === '')
-    if (unknownCurrencyRule) {
-      return unknownRecurringRuleCurrencyFailure(unknownCurrencyRule)
-    }
-
-    const accountCurrencyMismatchRule = dueRules.find((rule) => {
-      const ruleCurrency = normalizeCurrencyCode(rule.currency)
-      const accountCurrency = normalizeCurrencyCode(rule.account_currency)
-      return ruleCurrency !== '' && (accountCurrency === '' || ruleCurrency !== accountCurrency)
-    })
-    if (accountCurrencyMismatchRule) {
-      return {
-        success: false,
-        reason: 'rule_account_currency_mismatch',
-        message: `Recurring rule "${accountCurrencyMismatchRule.description}" has stored currency ${accountCurrencyMismatchRule.currency} but the linked account is now ${accountCurrencyMismatchRule.account_currency}. Repair or recreate the rule before materializing it.`,
-      }
-    }
-
-    let created = 0
-
-    for (const rule of dueRules) {
-      const createdForRule = transaction(() => {
-        let occurrenceDate = rule.next_date
-        let createdWithinRule = 0
-
-        while (occurrenceDate <= today) {
-          if (rule.end_date && occurrenceDate > rule.end_date) {
-            const deactivateResult = execute(
-              "UPDATE recurring_rules SET active = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $1 AND active = 1 AND next_date = $2",
-              [rule.id, occurrenceDate]
-            )
-            if (deactivateResult.rowsAffected !== 1) {
-              return createdWithinRule
-            }
-            return createdWithinRule
-          }
-
-          const newNextDate = advanceDate(occurrenceDate, rule.frequency)
-          const shouldDeactivate = Boolean(rule.end_date && newNextDate > rule.end_date)
-          const claimResult = execute(
-            "UPDATE recurring_rules SET active = $1, next_date = $2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $3 AND active = 1 AND next_date = $4",
-            [shouldDeactivate ? 0 : 1, newNextDate, rule.id, occurrenceDate]
-          )
-          if (claimResult.rowsAffected !== 1) {
-            return createdWithinRule
-          }
-
-          const txId = generateId()
-
-          execute(
-            `INSERT INTO transactions (id, account_id, category_id, type, amount, currency, description, notes, date, is_recurring, status, recurring_rule_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, 'posted', $10)`,
-            [
-              txId,
-              rule.account_id,
-              rule.category_id,
-              rule.type,
-              rule.amount,
-              normalizeCurrencyCode(rule.currency),
-              rule.description,
-              rule.notes,
-              occurrenceDate,
-              rule.id,
-            ]
-          )
-
-          const balanceChange = rule.type === 'income' ? rule.amount : -rule.amount
-          execute(
-            "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2 AND COALESCE(account_mode, 'transactional') = 'transactional'",
-            [balanceChange, rule.account_id]
-          )
-
-          createdWithinRule += 1
-          occurrenceDate = newNextDate
-          if (shouldDeactivate) {
-            return createdWithinRule
-          }
-        }
-
-        return createdWithinRule
-      })
-
-      created += createdForRule
-    }
-
-    return {
-      success: true,
-      created,
-      message:
-        created > 0
-          ? `Created ${created} transaction(s) from recurring rules.`
-          : 'No recurring transactions were due.',
-    }
-  },
+  execute: materializeDueRecurringRules,
 }
 
 // ---------------------------------------------------------------------------

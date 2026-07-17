@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { query, execute } from '@/lib/database'
 import { generateId } from '@/lib/ulid'
 import type { Account, Investment } from '@/types/database'
+import { useCurrencyStore } from './currency-store'
 import dayjs from 'dayjs'
 
 // ── Types ────────��─────────────────────────────────────────────────────────
@@ -12,6 +13,7 @@ interface AccountBreakdown {
   type: string
   currency: string
   balance: number // centavos
+  convertedBalance: number | null
 }
 
 interface NetWorthSnapshot {
@@ -22,6 +24,7 @@ interface NetWorthSnapshot {
   net_worth: number
   total_investments: number
   breakdown_json: string
+  currency: string | null
   created_at: string
 }
 
@@ -38,6 +41,9 @@ interface NetWorthState {
   totalLiabilities: number
   totalInvestments: number
   netWorth: number
+  totalsComplete: boolean
+  preferredCurrency: string
+  missingCurrencies: string[]
   assetBreakdown: AccountBreakdown[]
   liabilityBreakdown: AccountBreakdown[]
 
@@ -68,6 +74,9 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
   totalLiabilities: 0,
   totalInvestments: 0,
   netWorth: 0,
+  totalsComplete: true,
+  preferredCurrency: 'USD',
+  missingCurrencies: [],
   assetBreakdown: [],
   liabilityBreakdown: [],
   history: [],
@@ -78,12 +87,29 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
       'SELECT * FROM accounts WHERE is_archived = 0 ORDER BY type, name'
     )
 
-    const investments = await query<Investment & { latest_price: number | null }>(
+    const investments = await query<
+      Investment & { latest_price: number | null; latest_price_currency: string | null }
+    >(
       `SELECT i.*,
-              (SELECT sp.price FROM stock_prices sp WHERE sp.symbol = i.symbol ORDER BY sp.date DESC LIMIT 1) as latest_price
+              (SELECT sp.price FROM stock_prices sp WHERE sp.symbol = i.symbol ORDER BY sp.date DESC LIMIT 1) as latest_price,
+              (SELECT sp.quote_currency FROM stock_prices sp WHERE sp.symbol = i.symbol ORDER BY sp.date DESC LIMIT 1) as latest_price_currency
        FROM investments i
        ORDER BY i.name`
     )
+
+    await useCurrencyStore
+      .getState()
+      .loadRates()
+      .catch(() => {})
+    const currencyState = useCurrencyStore.getState()
+    const missingCurrencies = new Set<string>()
+    const convert = (amountCentavos: number, currency: string): number | null => {
+      const result = currencyState.convertToPreferred(amountCentavos, currency)
+      if (result.complete) return result.amountCentavos
+      for (const missing of result.missingCurrencies) missingCurrencies.add(missing)
+      if (result.reason === 'invalid_currency_data') missingCurrencies.add(currency || 'unknown')
+      return null
+    }
 
     let totalAssets = 0
     let totalLiabilities = 0
@@ -98,30 +124,41 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
         type: acc.type,
         currency: acc.currency,
         balance: acc.balance,
+        convertedBalance: null,
       }
 
+      const convertedBalance = convert(Math.abs(acc.balance), acc.currency)
+      item.convertedBalance = convertedBalance
       if (acc.type === 'credit_card') {
-        totalLiabilities += Math.abs(acc.balance)
+        if (convertedBalance !== null) totalLiabilities += convertedBalance
         liabilityBreakdown.push(item)
       } else {
-        totalAssets += acc.balance
+        if (convertedBalance !== null) {
+          totalAssets += acc.balance < 0 ? -convertedBalance : convertedBalance
+        }
         assetBreakdown.push(item)
       }
     }
 
     for (const inv of investments) {
       const currentPrice = inv.latest_price ?? inv.avg_cost_basis
+      const priceCurrency = inv.latest_price_currency ?? inv.currency
       const value = Math.round(inv.shares * currentPrice)
-      totalInvestments += value
+      const convertedValue = convert(value, priceCurrency)
+      if (convertedValue !== null) totalInvestments += convertedValue
     }
 
+    const totalsComplete = missingCurrencies.size === 0
     totalAssets += totalInvestments
 
     set({
-      totalAssets,
-      totalLiabilities,
-      totalInvestments,
-      netWorth: totalAssets - totalLiabilities,
+      totalAssets: totalsComplete ? totalAssets : 0,
+      totalLiabilities: totalsComplete ? totalLiabilities : 0,
+      totalInvestments: totalsComplete ? totalInvestments : 0,
+      netWorth: totalsComplete ? totalAssets - totalLiabilities : 0,
+      totalsComplete,
+      preferredCurrency: currencyState.preferredCurrency,
+      missingCurrencies: [...missingCurrencies].sort(),
       assetBreakdown,
       liabilityBreakdown,
     })
@@ -135,7 +172,10 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
       totalInvestments,
       assetBreakdown,
       liabilityBreakdown,
+      totalsComplete,
+      preferredCurrency,
     } = get()
+    if (!totalsComplete) return
     const today = dayjs().format('YYYY-MM-DD')
 
     const breakdown = JSON.stringify({
@@ -156,15 +196,32 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
     if (existing.length > 0) {
       await execute(
         `UPDATE net_worth_snapshots
-         SET total_assets = ?, total_liabilities = ?, net_worth = ?, total_investments = ?, breakdown_json = ?
+         SET total_assets = ?, total_liabilities = ?, net_worth = ?, total_investments = ?, breakdown_json = ?, currency = ?
          WHERE date = ?`,
-        [totalAssets, totalLiabilities, netWorth, totalInvestments, breakdown, today]
+        [
+          totalAssets,
+          totalLiabilities,
+          netWorth,
+          totalInvestments,
+          breakdown,
+          preferredCurrency,
+          today,
+        ]
       )
     } else {
       await execute(
-        `INSERT INTO net_worth_snapshots (id, date, total_assets, total_liabilities, net_worth, total_investments, breakdown_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [generateId(), today, totalAssets, totalLiabilities, netWorth, totalInvestments, breakdown]
+        `INSERT INTO net_worth_snapshots (id, date, total_assets, total_liabilities, net_worth, total_investments, breakdown_json, currency)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          generateId(),
+          today,
+          totalAssets,
+          totalLiabilities,
+          netWorth,
+          totalInvestments,
+          breakdown,
+          preferredCurrency,
+        ]
       )
     }
   },
@@ -190,8 +247,8 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
     }
 
     const rows = await query<NetWorthSnapshot>(
-      'SELECT * FROM net_worth_snapshots WHERE date >= ? ORDER BY date ASC',
-      [startDate]
+      'SELECT * FROM net_worth_snapshots WHERE date >= ? AND currency = ? ORDER BY date ASC',
+      [startDate, get().preferredCurrency]
     )
 
     const history: NetWorthChartPoint[] = rows.map((r) => ({

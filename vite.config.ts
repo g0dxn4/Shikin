@@ -3,10 +3,10 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-// @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST
 
-// https://vite.dev/config/
+// Tailwind's Vite adapter currently resolves its bundled Vite types separately.
+// @ts-expect-error Compatible at runtime; the duplicate Vite type identities are not assignable.
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -20,11 +20,7 @@ export default defineConfig(async () => ({
       output: {
         manualChunks: {
           'vendor-react': ['react', 'react-dom', 'react-router'],
-          'vendor-ui': [
-            '@radix-ui/react-dialog',
-            '@radix-ui/react-select',
-            '@radix-ui/react-slot',
-          ],
+          'vendor-ui': ['@radix-ui/react-dialog', '@radix-ui/react-select', '@radix-ui/react-slot'],
           'vendor-forms': ['react-hook-form', '@hookform/resolvers', 'zod'],
           'vendor-utils': ['dayjs', 'zustand', 'sonner'],
         },

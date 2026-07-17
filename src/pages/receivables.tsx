@@ -58,7 +58,7 @@ const receivableSchema = z.object({
   notes: z.string().optional().or(z.literal('')),
 })
 
-export type ReceivableFormValues = z.infer<typeof receivableSchema>
+type ReceivableFormValues = z.infer<typeof receivableSchema>
 
 function statusBadgeClass(status: ReceivableWithDetails['status']): string {
   switch (status) {

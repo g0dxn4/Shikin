@@ -8,8 +8,15 @@
   ],
   "ignoreDependencies": [
     "@modelcontextprotocol/sdk",
+    "@shikin/finance-core",
     "@tauri-apps/plugin-fs",
     "@tauri-apps/plugin-store"
+  ],
+  "ignoreExports": [
+    {
+      "file": "cli/src/database.ts",
+      "exports": ["getAppDataDirectory", "getDatabasePath", "getDatabaseBackupDirectory"]
+    }
   ],
   "ignorePatterns": ["coverage/**", "playwright-report/**", "dist/**", "src-tauri/target/**"],
   "rules": {

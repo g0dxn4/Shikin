@@ -40,6 +40,7 @@ const recurringRuleSchema = z.object({
   accountId: z.string().min(1),
   categoryId: z.string().nullable(),
   frequency: z.enum(FREQUENCIES),
+  anchorKind: z.enum(['fixed_day', 'end_of_month']),
   nextDate: z.string().min(1),
   endDate: z.string().nullable(),
   tags: z.string(),
@@ -84,6 +85,7 @@ export function RecurringRuleDialog() {
       accountId: '',
       categoryId: null,
       frequency: 'monthly',
+      anchorKind: 'fixed_day',
       nextDate: dayjs().format('YYYY-MM-DD'),
       endDate: null,
       tags: '',
@@ -95,6 +97,7 @@ export function RecurringRuleDialog() {
   const accountValue = watch('accountId')
   const categoryValue = watch('categoryId')
   const frequencyValue = watch('frequency')
+  const anchorKindValue = watch('anchorKind')
 
   const filteredCategories = useMemo(
     () => categories.filter((category) => category.type === typeValue),
@@ -120,6 +123,7 @@ export function RecurringRuleDialog() {
       accountId: rule?.account_id ?? '',
       categoryId: rule?.category_id ?? null,
       frequency: (rule?.frequency as RecurringFrequency | undefined) ?? 'monthly',
+      anchorKind: rule?.anchor_kind ?? 'fixed_day',
       nextDate: rule?.next_date ?? dayjs().format('YYYY-MM-DD'),
       endDate: rule?.end_date ?? null,
       tags: rule?.tags ?? '',
@@ -303,6 +307,28 @@ export function RecurringRuleDialog() {
               )}
             </div>
           </div>
+
+          {['monthly', 'quarterly', 'yearly'].includes(frequencyValue) && (
+            <div className="space-y-1.5">
+              <Label htmlFor="rec-anchor-kind">{t('recurring.form.scheduleDay')}</Label>
+              <Select
+                value={anchorKindValue}
+                onValueChange={(value) =>
+                  setValue('anchorKind', value as RecurringRuleValues['anchorKind'], {
+                    shouldDirty: true,
+                  })
+                }
+              >
+                <SelectTrigger id="rec-anchor-kind">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fixed_day">{t('recurring.form.sameDayOfMonth')}</SelectItem>
+                  <SelectItem value="end_of_month">{t('recurring.form.lastDayOfMonth')}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? '...' : tCommon('actions.save')}

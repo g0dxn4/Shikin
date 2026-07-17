@@ -18,6 +18,9 @@ describe('net-worth-store', () => {
       totalLiabilities: 0,
       totalInvestments: 0,
       netWorth: 0,
+      totalsComplete: true,
+      preferredCurrency: 'USD',
+      missingCurrencies: [],
       assetBreakdown: [],
       liabilityBreakdown: [],
       history: [],
@@ -78,7 +81,7 @@ describe('net-worth-store', () => {
         type: 'cetes',
         shares: 3,
         avg_cost_basis: 2000,
-        currency: 'MXN',
+        currency: 'USD',
         notes: null,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
@@ -92,6 +95,31 @@ describe('net-worth-store', () => {
       totalInvestments: 6000,
       totalAssets: 6000,
       netWorth: 6000,
+    })
+  })
+
+  it('marks totals unavailable when an exchange rate is missing', async () => {
+    mockQuery.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        id: 'inv-cetes',
+        account_id: null,
+        symbol: 'CETES-28',
+        name: 'CETES 28 días',
+        type: 'cetes',
+        shares: 3,
+        avg_cost_basis: 2000,
+        currency: 'MXN',
+        latest_price: null,
+      },
+    ])
+
+    await useNetWorthStore.getState().calculateCurrent()
+
+    expect(useNetWorthStore.getState()).toMatchObject({
+      totalsComplete: false,
+      totalInvestments: 0,
+      netWorth: 0,
+      missingCurrencies: ['MXN'],
     })
   })
 

@@ -52,6 +52,61 @@ type ImportDuplicateMatch =
     }
   | null
 
+type ImportTransactionsExecutionInput = {
+  file: string
+  accountId?: string
+  account?: string
+  apply: boolean
+  dryRun: boolean
+  allowDuplicate: boolean
+  source: string
+  ledgerTreatment: 'normal' | 'staged_no_balance_impact'
+  reportingTreatment: 'normal' | 'exclude_from_cashflow'
+  stagingBatchId?: string
+}
+
+type ResolvedImportAccount = {
+  id: string
+  currency: string
+}
+
+type ImportValidationIssue = {
+  row: number | null
+  lineNumber: number | null
+  messages: string[]
+}
+
+type ImportRowOutput = Record<string, unknown>
+
+type CsvImportPlan = {
+  dataRows: CsvRow[]
+  headers: string[]
+  unsupportedHeaders: string[]
+  errors: ImportValidationIssue[]
+  previewRows: ImportRowOutput[]
+}
+
+type CsvImportPlanResult =
+  | { kind: 'empty' }
+  | {
+      kind: 'plan'
+      plan: CsvImportPlan
+    }
+
+type ImportRowPlan = {
+  row: ImportRowOutput
+  error?: ImportValidationIssue
+}
+
+type ImportApplyResult = {
+  appliedRows: ImportRowOutput[]
+  applyErrors: ImportValidationIssue[]
+}
+
+type ImportRowApplyOutcome =
+  | { kind: 'row'; row: ImportRowOutput }
+  | { kind: 'error'; error: ImportValidationIssue }
+
 type ExportTableSpec = {
   name: string
   columns: string[]
@@ -890,6 +945,511 @@ function potentialDuplicateFields(duplicate: ImportDuplicateMatch): Record<strin
   }
 }
 
+function validateImportTransactionsRequest({
+  apply,
+  dryRun,
+  ledgerTreatment,
+  stagingBatchId,
+}: Pick<
+  ImportTransactionsExecutionInput,
+  'apply' | 'dryRun' | 'ledgerTreatment' | 'stagingBatchId'
+>) {
+  if (apply && dryRun) {
+    return {
+      success: false as const,
+      reason: 'import_flag_conflict',
+      message: 'Use either apply or dryRun, not both.',
+    }
+  }
+
+  if (ledgerTreatment === 'staged_no_balance_impact' && !stagingBatchId) {
+    return {
+      success: false as const,
+      reason: 'staging_batch_required',
+      message: 'stagingBatchId is required when importing staged statement history.',
+    }
+  }
+
+  return null
+}
+
+function importSupportedColumns() {
+  return {
+    required: [...REQUIRED_IMPORT_COLUMNS],
+    optional: ['type', 'category', 'notes', 'status', 'currency', 'source', 'note', 'externalId'],
+  }
+}
+
+function importAccountOutput(account: ResolvedImportAccount) {
+  return { id: account.id, currency: account.currency }
+}
+
+async function readCsvImportFile(
+  file: string
+): Promise<{ success: true; text: string } | { success: false; result: Record<string, unknown> }> {
+  try {
+    return { success: true, text: await readFile(file, 'utf8') }
+  } catch (error) {
+    return {
+      success: false,
+      result: {
+        success: false,
+        reason: 'csv_file_read_failed',
+        file,
+        message: `Could not read CSV file "${file}".`,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    }
+  }
+}
+
+function createCsvImportPlan(text: string): CsvImportPlanResult {
+  const parsedCsv = parseCsv(text)
+  if (parsedCsv.rows.length === 0) return { kind: 'empty' }
+
+  const [headerRow, ...dataRows] = parsedCsv.rows
+  const headers = headerRow.fields.map(normalizeHeader)
+  const duplicateHeaders = headers.filter((header, index) => headers.indexOf(header) !== index)
+  const missingRequired = REQUIRED_IMPORT_COLUMNS.filter((column) => !headers.includes(column))
+  const unsupportedHeaders = headers.filter(
+    (header) => header && !SUPPORTED_IMPORT_COLUMNS.has(header)
+  )
+  const errors: ImportValidationIssue[] = parsedCsv.errors.map((error) => ({
+    row: null,
+    lineNumber: error.lineNumber,
+    messages: [error.message],
+  }))
+
+  if (missingRequired.length > 0) {
+    errors.push({
+      row: null,
+      lineNumber: headerRow.lineNumber,
+      messages: [`Missing required CSV columns: ${missingRequired.join(', ')}.`],
+    })
+  }
+  if (duplicateHeaders.length > 0) {
+    errors.push({
+      row: null,
+      lineNumber: headerRow.lineNumber,
+      messages: [`Duplicate CSV columns: ${[...new Set(duplicateHeaders)].join(', ')}.`],
+    })
+  }
+
+  return {
+    kind: 'plan',
+    plan: { dataRows, headers, unsupportedHeaders, errors, previewRows: [] },
+  }
+}
+
+async function planCsvImportRow({
+  row,
+  rowNumber,
+  headers,
+  account,
+  defaultSource,
+  ledgerTreatment,
+  reportingTreatment,
+  stagingBatchId,
+  allowDuplicate,
+  importTool,
+}: {
+  row: CsvRow
+  rowNumber: number
+  headers: string[]
+  account: ResolvedImportAccount
+  defaultSource: string
+  ledgerTreatment: 'normal' | 'staged_no_balance_impact'
+  reportingTreatment: 'normal' | 'exclude_from_cashflow'
+  stagingBatchId?: string
+  allowDuplicate: boolean
+  importTool: ToolDefinition
+}): Promise<ImportRowPlan> {
+  const built = buildImportRowInput({
+    row,
+    headers,
+    accountId: account.id,
+    accountCurrency: account.currency,
+    defaultSource,
+    ledgerTreatment,
+    reportingTreatment,
+    stagingBatchId,
+  })
+  if (!built.success) {
+    const error = { row: rowNumber, lineNumber: row.lineNumber, messages: built.errors }
+    return {
+      error,
+      row: {
+        row: rowNumber,
+        lineNumber: row.lineNumber,
+        status: 'invalid',
+        errors: built.errors,
+      },
+    }
+  }
+
+  const parsedInput = importTool.schema.safeParse(built.input)
+  if (!parsedInput.success) {
+    const messages = parsedInput.error.issues.map((issue) => issue.message)
+    const error = { row: rowNumber, lineNumber: row.lineNumber, messages }
+    return {
+      error,
+      row: {
+        row: rowNumber,
+        lineNumber: row.lineNumber,
+        status: 'invalid',
+        errors: messages,
+      },
+    }
+  }
+
+  const validatedInput = parsedInput.data as ImportTransactionInput
+  const duplicate = findDuplicateImportTransaction(validatedInput, built.externalId)
+  if (duplicate && !allowDuplicate) {
+    return {
+      row: {
+        row: rowNumber,
+        lineNumber: row.lineNumber,
+        status: 'skipped',
+        reason: duplicate.kind === 'duplicate' ? 'duplicate' : duplicate.kind,
+        externalId: built.externalId,
+        existingTransactionId: duplicate.id,
+        duplicate: importDuplicateDetails(duplicate),
+        input: importInputForOutput(validatedInput),
+        message:
+          duplicate.kind === 'duplicate' || duplicate.kind === 'exact_duplicate'
+            ? 'Matching transaction already exists; row would be skipped.'
+            : 'Potential matching transaction exists; row would be skipped unless allowDuplicate is true.',
+      },
+    }
+  }
+
+  const dryRunResult = await importTool.execute({
+    ...validatedInput,
+    allowDuplicate: allowDuplicate ? true : undefined,
+  })
+  if (dryRunResult?.success === false) {
+    const messages = [String(dryRunResult.message ?? 'Row failed validation.')]
+    const error = { row: rowNumber, lineNumber: row.lineNumber, messages }
+    return {
+      error,
+      row: {
+        row: rowNumber,
+        lineNumber: row.lineNumber,
+        status: 'invalid',
+        errors: messages,
+      },
+    }
+  }
+
+  return {
+    row: {
+      row: rowNumber,
+      lineNumber: row.lineNumber,
+      status: 'valid',
+      externalId: built.externalId,
+      input: importInputForOutput(validatedInput),
+      ...(allowDuplicate && duplicate
+        ? {
+            reason: 'duplicate_override',
+            duplicateOverride: importDuplicateOverride(duplicate),
+          }
+        : potentialDuplicateFields(duplicate)),
+      preview: dryRunResult.wouldCreate ?? dryRunResult,
+    },
+  }
+}
+
+async function planCsvImportRows({
+  dataRows,
+  headers,
+  account,
+  defaultSource,
+  ledgerTreatment,
+  reportingTreatment,
+  stagingBatchId,
+  allowDuplicate,
+  importTool,
+}: {
+  dataRows: CsvRow[]
+  headers: string[]
+  account: ResolvedImportAccount
+  defaultSource: string
+  ledgerTreatment: 'normal' | 'staged_no_balance_impact'
+  reportingTreatment: 'normal' | 'exclude_from_cashflow'
+  stagingBatchId?: string
+  allowDuplicate: boolean
+  importTool: ToolDefinition
+}): Promise<{ previewRows: ImportRowOutput[]; errors: ImportValidationIssue[] }> {
+  const previewRows: ImportRowOutput[] = []
+  const errors: ImportValidationIssue[] = []
+
+  for (const [index, row] of dataRows.entries()) {
+    const plannedRow = await planCsvImportRow({
+      row,
+      rowNumber: index + 2,
+      headers,
+      account,
+      defaultSource,
+      ledgerTreatment,
+      reportingTreatment,
+      stagingBatchId,
+      allowDuplicate,
+      importTool,
+    })
+    previewRows.push(plannedRow.row)
+    if (plannedRow.error) errors.push(plannedRow.error)
+  }
+
+  return { previewRows, errors }
+}
+
+async function planCsvImport({
+  text,
+  account,
+  defaultSource,
+  ledgerTreatment,
+  reportingTreatment,
+  stagingBatchId,
+  allowDuplicate,
+  importTool,
+}: {
+  text: string
+  account: ResolvedImportAccount
+  defaultSource: string
+  ledgerTreatment: 'normal' | 'staged_no_balance_impact'
+  reportingTreatment: 'normal' | 'exclude_from_cashflow'
+  stagingBatchId?: string
+  allowDuplicate: boolean
+  importTool: ToolDefinition
+}): Promise<CsvImportPlanResult> {
+  const planResult = createCsvImportPlan(text)
+  if (planResult.kind === 'empty' || planResult.plan.errors.length > 0) return planResult
+
+  const plannedRows = await planCsvImportRows({
+    dataRows: planResult.plan.dataRows,
+    headers: planResult.plan.headers,
+    account,
+    defaultSource,
+    ledgerTreatment,
+    reportingTreatment,
+    stagingBatchId,
+    allowDuplicate,
+    importTool,
+  })
+  planResult.plan.previewRows.push(...plannedRows.previewRows)
+  planResult.plan.errors.push(...plannedRows.errors)
+  return planResult
+}
+
+function previewImportSummary(plan: CsvImportPlan) {
+  return {
+    totalRows: plan.dataRows.length,
+    validRows: plan.previewRows.filter((row) => row.status === 'valid').length,
+    invalidRows: plan.errors.filter((error) => error.row !== null).length,
+    skippedRows: plan.previewRows.filter((row) => row.status === 'skipped').length,
+    importedRows: 0,
+  }
+}
+
+function formatCsvValidationFailure({
+  previewOnly,
+  apply,
+  file,
+  account,
+  plan,
+}: {
+  previewOnly: boolean
+  apply: boolean
+  file: string
+  account: ResolvedImportAccount
+  plan: CsvImportPlan
+}) {
+  return {
+    success: false,
+    reason: 'csv_validation_failed',
+    dryRun: previewOnly,
+    applyRequested: Boolean(apply),
+    file,
+    account: importAccountOutput(account),
+    supportedColumns: importSupportedColumns(),
+    ignoredColumns: plan.unsupportedHeaders,
+    summary: previewImportSummary(plan),
+    rows: plan.previewRows,
+    errors: plan.errors,
+    message: `CSV import has ${plan.errors.length} validation error(s). No rows were imported.`,
+  }
+}
+
+function formatCsvPreviewResult({
+  file,
+  account,
+  plan,
+}: {
+  file: string
+  account: ResolvedImportAccount
+  plan: CsvImportPlan
+}) {
+  return {
+    success: true,
+    dryRun: true,
+    applyRequired: true,
+    file,
+    account: importAccountOutput(account),
+    supportedColumns: importSupportedColumns(),
+    ignoredColumns: plan.unsupportedHeaders,
+    summary: {
+      ...previewImportSummary(plan),
+      invalidRows: 0,
+    },
+    rows: plan.previewRows,
+    message: `Previewed ${plan.previewRows.length} transaction row(s). Re-run with --apply to import.`,
+  }
+}
+
+function previouslySkippedImportRow(previewRow: ImportRowOutput): ImportRowOutput {
+  return {
+    row: previewRow.row,
+    lineNumber: previewRow.lineNumber,
+    status: 'skipped',
+    reason: previewRow.reason ?? 'duplicate',
+    externalId: previewRow.externalId ?? null,
+    existingTransactionId: previewRow.existingTransactionId,
+    duplicate: previewRow.duplicate,
+    message: 'Matching transaction already exists; row was skipped.',
+  }
+}
+
+async function applyCsvImportRow({
+  previewRow,
+  allowDuplicate,
+  importTool,
+}: {
+  previewRow: ImportRowOutput
+  allowDuplicate: boolean
+  importTool: ToolDefinition
+}): Promise<ImportRowApplyOutcome> {
+  const input = previewRow.input as ImportTransactionInput
+  const externalId = typeof previewRow.externalId === 'string' ? previewRow.externalId : null
+  const duplicate = findDuplicateImportTransaction(input, externalId)
+  if (duplicate && !allowDuplicate) {
+    return {
+      kind: 'row',
+      row: {
+        row: previewRow.row,
+        lineNumber: previewRow.lineNumber,
+        status: 'skipped',
+        reason: duplicate.kind === 'duplicate' ? 'duplicate' : duplicate.kind,
+        externalId,
+        existingTransactionId: duplicate.id,
+        duplicate: importDuplicateDetails(duplicate),
+        message:
+          duplicate.kind === 'duplicate' || duplicate.kind === 'exact_duplicate'
+            ? 'Matching transaction already exists; row was skipped.'
+            : 'Potential matching transaction exists; row was skipped because allowDuplicate is false.',
+      },
+    }
+  }
+
+  const result = await importTool.execute({
+    ...input,
+    dryRun: false,
+    allowDuplicate: allowDuplicate ? true : undefined,
+  })
+  if (result?.success === false) {
+    return {
+      kind: 'error',
+      error: {
+        row: previewRow.row as number,
+        lineNumber: previewRow.lineNumber as number,
+        messages: [String(result.message ?? 'Row failed during import.')],
+      },
+    }
+  }
+
+  return {
+    kind: 'row',
+    row: {
+      row: previewRow.row,
+      lineNumber: previewRow.lineNumber,
+      externalId: previewRow.externalId,
+      status: 'imported',
+      ...(allowDuplicate && duplicate
+        ? {
+            reason: 'duplicate_override',
+            duplicateOverride: importDuplicateOverride(duplicate),
+          }
+        : potentialDuplicateFields(duplicate)),
+      transaction: result.transaction ?? result,
+    },
+  }
+}
+
+async function applyCsvImportPlan({
+  previewRows,
+  allowDuplicate,
+  importTool,
+}: {
+  previewRows: ImportRowOutput[]
+  allowDuplicate: boolean
+  importTool: ToolDefinition
+}): Promise<ImportApplyResult> {
+  const appliedRows: ImportRowOutput[] = []
+  const applyErrors: ImportValidationIssue[] = []
+
+  for (const previewRow of previewRows) {
+    if (previewRow.status === 'skipped') {
+      appliedRows.push(previouslySkippedImportRow(previewRow))
+      continue
+    }
+
+    const outcome = await applyCsvImportRow({ previewRow, allowDuplicate, importTool })
+    if (outcome.kind === 'error') {
+      applyErrors.push(outcome.error)
+      continue
+    }
+    appliedRows.push(outcome.row)
+  }
+
+  return { appliedRows, applyErrors }
+}
+
+function formatCsvApplyResult({
+  file,
+  account,
+  plan,
+  appliedRows,
+  applyErrors,
+}: {
+  file: string
+  account: ResolvedImportAccount
+  plan: CsvImportPlan
+  appliedRows: ImportRowOutput[]
+  applyErrors: ImportValidationIssue[]
+}) {
+  const importedRows = appliedRows.filter((row) => row.status === 'imported').length
+
+  return {
+    success: applyErrors.length === 0,
+    ...(applyErrors.length > 0 ? { reason: 'csv_apply_failed' } : {}),
+    dryRun: false,
+    file,
+    account: importAccountOutput(account),
+    summary: {
+      totalRows: plan.dataRows.length,
+      validRows: plan.previewRows.filter((row) => row.status === 'valid').length,
+      invalidRows: applyErrors.length,
+      skippedRows: appliedRows.filter((row) => row.status === 'skipped').length,
+      importedRows,
+    },
+    rows: appliedRows,
+    errors: applyErrors,
+    message:
+      applyErrors.length === 0
+        ? `Imported ${importedRows} transaction row(s).`
+        : `Imported ${importedRows} transaction row(s); ${applyErrors.length} row(s) failed during apply.`,
+  }
+}
+
 function escapeCsvValue(value: unknown): string {
   if (value === null || value === undefined) return ''
   const rawText = String(value)
@@ -998,31 +1558,46 @@ const backupDatabaseTool: ToolDefinition = {
 const restoreDatabaseTool: ToolDefinition = {
   name: 'restore-database',
   description:
-    'Validate and restore a Shikin SQLite database backup, creating a rollback backup before replacement. Apply mode requires Linux /proc handle checks; dry-run validation is safe on all platforms.',
+    'Preview a Shikin SQLite restore by default. Pass apply:true to restore after validation and create a rollback backup.',
   schema: z.object({
     file: boundedText(
       'Database backup file',
       'Path to a Shikin SQLite backup file to restore',
       4096
     ),
+    apply: z.boolean().optional().describe('Apply the restore after validation'),
     dryRun: z
       .boolean()
       .optional()
-      .default(false)
-      .describe('Validate the backup without replacing the active database'),
+      .describe('Legacy preview flag. Explicit false still applies for one compatibility cycle.'),
   }),
-  execute: async ({ file, dryRun }) => {
+  execute: async ({ file, apply, dryRun }) => {
+    if (apply === true && dryRun === true) {
+      return {
+        success: false,
+        reason: 'restore_apply_conflict',
+        message: 'Use either apply:true or dryRun:true, not both.',
+      }
+    }
+
+    const legacyApply = apply !== true && dryRun === false
+    const shouldApply = apply === true || legacyApply
+
     try {
-      const restore = await restoreDatabase({ sourcePath: file, dryRun })
+      const restore = await restoreDatabase({ sourcePath: file, dryRun: !shouldApply })
       const rollbackPath = !restore.dryRun ? restore.rollbackPath : undefined
       return {
         success: true,
         dryRun: restore.dryRun,
+        requiresApply: restore.dryRun,
         sourcePath: restore.sourcePath,
         ...(rollbackPath ? { rollbackPath } : {}),
+        ...(legacyApply
+          ? { warning: 'dryRun:false is deprecated; use apply:true for future restores.' }
+          : {}),
         restore,
         message: restore.dryRun
-          ? `Validated database backup ${restore.sourcePath}; no restore was applied.`
+          ? `Validated database backup ${restore.sourcePath}; no restore was applied. Re-run with apply:true to restore it.`
           : `Restored database from ${restore.sourcePath}. Rollback backup: ${restore.rollbackPath ?? 'none'}.`,
       }
     } catch (error) {
@@ -1156,32 +1731,26 @@ const importTransactions: ToolDefinition = {
       128
     ).optional(),
   }),
-  execute: async ({
-    file,
-    accountId,
-    account,
-    apply,
-    dryRun,
-    allowDuplicate,
-    source,
-    ledgerTreatment,
-    reportingTreatment,
-    stagingBatchId,
-  }) => {
-    if (apply && dryRun) {
-      return {
-        success: false,
-        reason: 'import_flag_conflict',
-        message: 'Use either apply or dryRun, not both.',
-      }
-    }
-    if (ledgerTreatment === 'staged_no_balance_impact' && !stagingBatchId) {
-      return {
-        success: false,
-        reason: 'staging_batch_required',
-        message: 'stagingBatchId is required when importing staged statement history.',
-      }
-    }
+  execute: async (input: ImportTransactionsExecutionInput) => {
+    const {
+      file,
+      accountId,
+      account,
+      apply,
+      dryRun,
+      allowDuplicate,
+      source,
+      ledgerTreatment,
+      reportingTreatment,
+      stagingBatchId,
+    } = input
+    const requestFailure = validateImportTransactionsRequest({
+      apply,
+      dryRun,
+      ledgerTreatment,
+      stagingBatchId,
+    })
+    if (requestFailure) return requestFailure
 
     if (!addTransactionTool) {
       return {
@@ -1194,21 +1763,20 @@ const importTransactions: ToolDefinition = {
     const resolvedAccount = resolveAccountId(accountId, account)
     if (!resolvedAccount.success) return resolvedAccount
 
-    let text: string
-    try {
-      text = await readFile(file, 'utf8')
-    } catch (error) {
-      return {
-        success: false,
-        reason: 'csv_file_read_failed',
-        file,
-        message: `Could not read CSV file "${file}".`,
-        error: error instanceof Error ? error.message : String(error),
-      }
-    }
+    const fileContents = await readCsvImportFile(file)
+    if (!fileContents.success) return fileContents.result
 
-    const parsedCsv = parseCsv(text)
-    if (parsedCsv.rows.length === 0) {
+    const planResult = await planCsvImport({
+      text: fileContents.text,
+      account: resolvedAccount,
+      defaultSource: source,
+      ledgerTreatment,
+      reportingTreatment,
+      stagingBatchId,
+      allowDuplicate,
+      importTool: addTransactionTool,
+    })
+    if (planResult.kind === 'empty') {
       return {
         success: false,
         reason: 'csv_empty',
@@ -1216,286 +1784,31 @@ const importTransactions: ToolDefinition = {
       }
     }
 
-    const [headerRow, ...dataRows] = parsedCsv.rows
-    const headers = headerRow.fields.map(normalizeHeader)
-    const headerErrors = parsedCsv.errors.map((error) => ({ ...error, row: null }))
-    const duplicateHeaders = headers.filter((header, index) => headers.indexOf(header) !== index)
-    const missingRequired = REQUIRED_IMPORT_COLUMNS.filter((column) => !headers.includes(column))
-    const unsupportedHeaders = headers.filter(
-      (header) => header && !SUPPORTED_IMPORT_COLUMNS.has(header)
-    )
-    const errors: Array<{ row: number | null; lineNumber: number | null; messages: string[] }> = [
-      ...headerErrors.map((error) => ({
-        row: error.row,
-        lineNumber: error.lineNumber,
-        messages: [error.message],
-      })),
-    ]
-
-    if (missingRequired.length > 0) {
-      errors.push({
-        row: null,
-        lineNumber: headerRow.lineNumber,
-        messages: [`Missing required CSV columns: ${missingRequired.join(', ')}.`],
-      })
-    }
-    if (duplicateHeaders.length > 0) {
-      errors.push({
-        row: null,
-        lineNumber: headerRow.lineNumber,
-        messages: [`Duplicate CSV columns: ${[...new Set(duplicateHeaders)].join(', ')}.`],
-      })
-    }
-
-    const previewRows: Array<Record<string, unknown>> = []
-    if (errors.length === 0) {
-      for (const [index, row] of dataRows.entries()) {
-        const rowNumber = index + 2
-        const built = buildImportRowInput({
-          row,
-          headers,
-          accountId: resolvedAccount.id,
-          accountCurrency: resolvedAccount.currency,
-          defaultSource: source,
-          ledgerTreatment,
-          reportingTreatment,
-          stagingBatchId,
-        })
-        if (!built.success) {
-          errors.push({ row: rowNumber, lineNumber: row.lineNumber, messages: built.errors })
-          previewRows.push({
-            row: rowNumber,
-            lineNumber: row.lineNumber,
-            status: 'invalid',
-            errors: built.errors,
-          })
-          continue
-        }
-
-        const parsedInput = addTransactionTool.schema.safeParse(built.input)
-        if (!parsedInput.success) {
-          const messages = parsedInput.error.issues.map((issue) => issue.message)
-          errors.push({ row: rowNumber, lineNumber: row.lineNumber, messages })
-          previewRows.push({
-            row: rowNumber,
-            lineNumber: row.lineNumber,
-            status: 'invalid',
-            errors: messages,
-          })
-          continue
-        }
-
-        const validatedInput = parsedInput.data as ImportTransactionInput
-        const duplicate = findDuplicateImportTransaction(validatedInput, built.externalId)
-        if (duplicate && !allowDuplicate) {
-          previewRows.push({
-            row: rowNumber,
-            lineNumber: row.lineNumber,
-            status: 'skipped',
-            reason: duplicate.kind === 'duplicate' ? 'duplicate' : duplicate.kind,
-            externalId: built.externalId,
-            existingTransactionId: duplicate.id,
-            duplicate: importDuplicateDetails(duplicate),
-            input: importInputForOutput(validatedInput),
-            message:
-              duplicate.kind === 'duplicate' || duplicate.kind === 'exact_duplicate'
-                ? 'Matching transaction already exists; row would be skipped.'
-                : 'Potential matching transaction exists; row would be skipped unless allowDuplicate is true.',
-          })
-          continue
-        }
-
-        const dryRunResult = await addTransactionTool.execute({
-          ...validatedInput,
-          allowDuplicate: allowDuplicate ? true : undefined,
-        })
-        if (dryRunResult?.success === false) {
-          const messages = [String(dryRunResult.message ?? 'Row failed validation.')]
-          errors.push({ row: rowNumber, lineNumber: row.lineNumber, messages })
-          previewRows.push({
-            row: rowNumber,
-            lineNumber: row.lineNumber,
-            status: 'invalid',
-            errors: messages,
-          })
-          continue
-        }
-
-        previewRows.push({
-          row: rowNumber,
-          lineNumber: row.lineNumber,
-          status: 'valid',
-          externalId: built.externalId,
-          input: importInputForOutput(validatedInput),
-          ...(allowDuplicate && duplicate
-            ? {
-                reason: 'duplicate_override',
-                duplicateOverride: importDuplicateOverride(duplicate),
-              }
-            : potentialDuplicateFields(duplicate)),
-          preview: dryRunResult.wouldCreate ?? dryRunResult,
-        })
-      }
-    }
-
+    const { plan } = planResult
     const previewOnly = !apply || dryRun
-    if (errors.length > 0) {
-      return {
-        success: false,
-        reason: 'csv_validation_failed',
-        dryRun: previewOnly,
-        applyRequested: Boolean(apply),
+    if (plan.errors.length > 0) {
+      return formatCsvValidationFailure({
+        previewOnly,
+        apply,
         file,
-        account: { id: resolvedAccount.id, currency: resolvedAccount.currency },
-        supportedColumns: {
-          required: [...REQUIRED_IMPORT_COLUMNS],
-          optional: [
-            'type',
-            'category',
-            'notes',
-            'status',
-            'currency',
-            'source',
-            'note',
-            'externalId',
-          ],
-        },
-        ignoredColumns: unsupportedHeaders,
-        summary: {
-          totalRows: dataRows.length,
-          validRows: previewRows.filter((row) => row.status === 'valid').length,
-          invalidRows: errors.filter((error) => error.row !== null).length,
-          skippedRows: previewRows.filter((row) => row.status === 'skipped').length,
-          importedRows: 0,
-        },
-        rows: previewRows,
-        errors,
-        message: `CSV import has ${errors.length} validation error(s). No rows were imported.`,
-      }
-    }
-
-    if (previewOnly) {
-      return {
-        success: true,
-        dryRun: true,
-        applyRequired: true,
-        file,
-        account: { id: resolvedAccount.id, currency: resolvedAccount.currency },
-        supportedColumns: {
-          required: [...REQUIRED_IMPORT_COLUMNS],
-          optional: [
-            'type',
-            'category',
-            'notes',
-            'status',
-            'currency',
-            'source',
-            'note',
-            'externalId',
-          ],
-        },
-        ignoredColumns: unsupportedHeaders,
-        summary: {
-          totalRows: dataRows.length,
-          validRows: previewRows.filter((row) => row.status === 'valid').length,
-          invalidRows: 0,
-          skippedRows: previewRows.filter((row) => row.status === 'skipped').length,
-          importedRows: 0,
-        },
-        rows: previewRows,
-        message: `Previewed ${previewRows.length} transaction row(s). Re-run with --apply to import.`,
-      }
-    }
-
-    const appliedRows: Array<Record<string, unknown>> = []
-    const applyErrors: Array<{
-      row: number | null
-      lineNumber: number | null
-      messages: string[]
-    }> = []
-    for (const previewRow of previewRows) {
-      if (previewRow.status === 'skipped') {
-        appliedRows.push({
-          row: previewRow.row,
-          lineNumber: previewRow.lineNumber,
-          status: 'skipped',
-          reason: previewRow.reason ?? 'duplicate',
-          externalId: previewRow.externalId ?? null,
-          existingTransactionId: previewRow.existingTransactionId,
-          duplicate: previewRow.duplicate,
-          message: 'Matching transaction already exists; row was skipped.',
-        })
-        continue
-      }
-
-      const input = previewRow.input as ImportTransactionInput
-      const externalId = typeof previewRow.externalId === 'string' ? previewRow.externalId : null
-      const duplicate = findDuplicateImportTransaction(input, externalId)
-      if (duplicate && !allowDuplicate) {
-        appliedRows.push({
-          row: previewRow.row,
-          lineNumber: previewRow.lineNumber,
-          status: 'skipped',
-          reason: duplicate.kind === 'duplicate' ? 'duplicate' : duplicate.kind,
-          externalId,
-          existingTransactionId: duplicate.id,
-          duplicate: importDuplicateDetails(duplicate),
-          message:
-            duplicate.kind === 'duplicate' || duplicate.kind === 'exact_duplicate'
-              ? 'Matching transaction already exists; row was skipped.'
-              : 'Potential matching transaction exists; row was skipped because allowDuplicate is false.',
-        })
-        continue
-      }
-
-      const result = await addTransactionTool.execute({
-        ...input,
-        dryRun: false,
-        allowDuplicate: allowDuplicate ? true : undefined,
-      })
-      if (result?.success === false) {
-        applyErrors.push({
-          row: previewRow.row as number,
-          lineNumber: previewRow.lineNumber as number,
-          messages: [String(result.message ?? 'Row failed during import.')],
-        })
-        continue
-      }
-      appliedRows.push({
-        row: previewRow.row,
-        lineNumber: previewRow.lineNumber,
-        externalId: previewRow.externalId,
-        status: 'imported',
-        ...(allowDuplicate && duplicate
-          ? {
-              reason: 'duplicate_override',
-              duplicateOverride: importDuplicateOverride(duplicate),
-            }
-          : potentialDuplicateFields(duplicate)),
-        transaction: result.transaction ?? result,
+        account: resolvedAccount,
+        plan,
       })
     }
+    if (previewOnly) return formatCsvPreviewResult({ file, account: resolvedAccount, plan })
 
-    return {
-      success: applyErrors.length === 0,
-      ...(applyErrors.length > 0 ? { reason: 'csv_apply_failed' } : {}),
-      dryRun: false,
+    const { appliedRows, applyErrors } = await applyCsvImportPlan({
+      previewRows: plan.previewRows,
+      allowDuplicate,
+      importTool: addTransactionTool,
+    })
+    return formatCsvApplyResult({
       file,
-      account: { id: resolvedAccount.id, currency: resolvedAccount.currency },
-      summary: {
-        totalRows: dataRows.length,
-        validRows: previewRows.filter((row) => row.status === 'valid').length,
-        invalidRows: applyErrors.length,
-        skippedRows: appliedRows.filter((row) => row.status === 'skipped').length,
-        importedRows: appliedRows.filter((row) => row.status === 'imported').length,
-      },
-      rows: appliedRows,
-      errors: applyErrors,
-      message:
-        applyErrors.length === 0
-          ? `Imported ${appliedRows.filter((row) => row.status === 'imported').length} transaction row(s).`
-          : `Imported ${appliedRows.filter((row) => row.status === 'imported').length} transaction row(s); ${applyErrors.length} row(s) failed during apply.`,
-    }
+      account: resolvedAccount,
+      plan,
+      appliedRows,
+      applyErrors,
+    })
   },
 }
 

@@ -9,7 +9,6 @@ import {
   readdirSync,
   readlinkSync,
   realpathSync,
-  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -193,6 +192,7 @@ export type DatabaseRestoreDryRunResult = {
   backupValidated: true
   wouldRestore: true
   wouldCreateRollback: boolean
+  requiresApply: true
   applyPreconditionsChecked: false
   applyMayStillFailReasons: string[]
   sizeBytes: number
@@ -208,7 +208,7 @@ export type DatabaseRestoreAppliedResult = DatabaseRestoreMetadata & {
 
 export type DatabaseRestoreResult = DatabaseRestoreDryRunResult | DatabaseRestoreAppliedResult
 
-export type ActiveDatabaseHandle = {
+type ActiveDatabaseHandle = {
   pid: number
   fd: string
   path: string
@@ -230,7 +230,7 @@ type RestoreCandidate = {
   foreignKeyViolations: number
 }
 
-export class DatabaseRestoreBlockedError extends Error {
+class DatabaseRestoreBlockedError extends Error {
   readonly code:
     | 'RESTORE_ACTIVE_HANDLES'
     | 'RESTORE_UNSUPPORTED_PLATFORM'
@@ -254,7 +254,7 @@ export class DatabaseRestoreBlockedError extends Error {
   }
 }
 
-export class DatabaseRestoreSourceError extends Error {
+class DatabaseRestoreSourceError extends Error {
   readonly code = 'RESTORE_SOURCE_HAS_SIDECARS'
   readonly sidecars: string[]
 
@@ -492,9 +492,91 @@ function metadataWarning(action: string, error: unknown): string {
   return `${action} succeeded, but metadata could not be recorded: ${error instanceof Error ? error.message : String(error)}`
 }
 
+function assertSupportedRestoreSchema(db: Database.Database, dbPath: string): void {
+  const existingTables = getTableNames(db)
+  const missingTables = REQUIRED_CORE_TABLES.filter((tableName) => !existingTables.has(tableName))
+  if (missingTables.length > 0) {
+    throw new Error(
+      `Backup is not a supported Shikin database (${dbPath}); missing: ${missingTables.join(', ')}`
+    )
+  }
+
+  assertCoreSchemaReady(db, dbPath)
+  assertCliQolSchemaReady(db, dbPath)
+  const appliedMigrations = new Set(
+    (db.prepare('SELECT name FROM _migrations').all() as Array<{ name: string }>).map(
+      (row) => row.name
+    )
+  )
+  const previousMigrations = REQUIRED_MIGRATIONS.slice(0, -1)
+  const missingMigrations = previousMigrations.filter(
+    (migration) => !appliedMigrations.has(migration)
+  )
+  if (missingMigrations.length > 0) {
+    throw new Error(
+      `Backup is too old or incomplete for automatic restore (${dbPath}); missing migrations: ${missingMigrations.join(', ')}`
+    )
+  }
+}
+
+function addColumnIfMissing(
+  db: Database.Database,
+  tableName: string,
+  columnName: string,
+  definition: string
+): void {
+  if (!getColumnNames(db, tableName).has(columnName)) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`)
+  }
+}
+
+function applyRestoreCompatibleMigrations(db: Database.Database): void {
+  const latestMigration = REQUIRED_MIGRATIONS.at(-1)
+  if (latestMigration !== '020_quote_recurrence_import_identity') return
+  const applied = new Set(
+    (db.prepare('SELECT name FROM _migrations').all() as Array<{ name: string }>).map(
+      (row) => row.name
+    )
+  )
+  if (applied.has(latestMigration)) return
+
+  db.transaction(() => {
+    addColumnIfMissing(db, 'transactions', 'import_source', 'TEXT')
+    addColumnIfMissing(db, 'transactions', 'import_external_id', 'TEXT')
+    addColumnIfMissing(db, 'transactions', 'import_fingerprint', 'TEXT')
+    addColumnIfMissing(db, 'stock_prices', 'quote_currency', 'TEXT')
+    addColumnIfMissing(
+      db,
+      'recurring_rules',
+      'anchor_kind',
+      "TEXT CHECK (anchor_kind IN ('fixed_day', 'end_of_month'))"
+    )
+    addColumnIfMissing(
+      db,
+      'recurring_rules',
+      'anchor_day',
+      'INTEGER CHECK (anchor_day BETWEEN 1 AND 31)'
+    )
+    addColumnIfMissing(db, 'net_worth_snapshots', 'currency', 'TEXT')
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_transactions_import_identity
+        ON transactions(account_id, import_source, import_external_id);
+      CREATE INDEX IF NOT EXISTS idx_transactions_import_fingerprint
+        ON transactions(account_id, import_fingerprint);
+      UPDATE stock_prices
+      SET quote_currency = UPPER(currency)
+      WHERE quote_currency IS NULL AND currency IS NOT NULL AND TRIM(currency) <> '';
+    `)
+    db.prepare(
+      "INSERT OR IGNORE INTO _migrations (id, name, applied_at) VALUES (20, '020_quote_recurrence_import_identity', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+    ).run()
+  })()
+}
+
 function validateDatabaseFile(
   dbPath: string,
-  label: string
+  label: string,
+  options: { allowPreviousSchema?: boolean } = {}
 ): Omit<RestoreCandidate, 'sourcePath' | 'tempPath' | 'sizeBytes'> {
   assertSqliteHeader(dbPath)
 
@@ -514,7 +596,11 @@ function validateDatabaseFile(
       )
     }
 
-    assertShikinSchemaReady(db, label)
+    if (options.allowPreviousSchema) {
+      assertSupportedRestoreSchema(db, label)
+    } else {
+      assertShikinSchemaReady(db, label)
+    }
 
     return { integrityCheck: 'ok', foreignKeyViolations: 0 }
   } finally {
@@ -530,7 +616,9 @@ function stageRestoreCandidate(sourcePath: string): RestoreCandidate {
   try {
     copyFileSync(resolvedSourcePath, tempPath)
     hardenPathMode(tempPath, PRIVATE_FILE_MODE)
-    const validation = validateDatabaseFile(tempPath, resolvedSourcePath)
+    const validation = validateDatabaseFile(tempPath, resolvedSourcePath, {
+      allowPreviousSchema: true,
+    })
 
     return {
       sourcePath: resolvedSourcePath,
@@ -548,6 +636,34 @@ function stageRestoreCandidate(sourcePath: string): RestoreCandidate {
 function cleanupRestoreCandidate(candidate: RestoreCandidate): void {
   rmSync(candidate.tempPath, { force: true })
   removeSqliteSidecarFiles(candidate.tempPath)
+}
+
+async function backupDatabasePath(sourcePath: string, destinationPath: string): Promise<void> {
+  const sourceDb = new Database(sourcePath, { readonly: true, fileMustExist: true })
+  try {
+    sourceDb.pragma('busy_timeout = 5000')
+    await sourceDb.backup(destinationPath)
+    hardenPathMode(destinationPath, PRIVATE_FILE_MODE)
+  } finally {
+    sourceDb.close()
+  }
+}
+
+async function createRollbackBackup(rollbackPath: string): Promise<void> {
+  rmSync(rollbackPath, { force: true })
+  removeSqliteSidecarFiles(rollbackPath)
+
+  try {
+    await backupDatabasePath(DB_PATH, rollbackPath)
+  } catch (error) {
+    const code = sqliteErrorCode(error)
+    if (code !== 'SQLITE_NOTADB' && code !== 'SQLITE_CORRUPT') throw error
+
+    // A corrupt current database cannot be opened by SQLite's backup API. With
+    // external handles already ruled out, preserve its bytes for manual recovery.
+    copyFileSync(DB_PATH, rollbackPath)
+    hardenPathMode(rollbackPath, PRIVATE_FILE_MODE)
+  }
 }
 
 function normalizeProcFdTarget(target: string): string {
@@ -577,7 +693,7 @@ function readProcessCommand(pid: number): string {
   }
 }
 
-export function listActiveDatabaseHandles(dbPath = DB_PATH): ActiveDatabaseHandle[] {
+function listActiveDatabaseHandles(dbPath = DB_PATH): ActiveDatabaseHandle[] {
   if (process.platform !== 'linux' || !existsSync('/proc')) return []
 
   const targetPaths = comparableSqliteFamilyPaths(dbPath)
@@ -1005,7 +1121,7 @@ export async function backupDatabase(): Promise<DatabaseBackupMetadata> {
 
 export async function restoreDatabase({
   sourcePath,
-  dryRun = false,
+  dryRun = true,
 }: {
   sourcePath: string
   dryRun?: boolean
@@ -1020,6 +1136,7 @@ export async function restoreDatabase({
         backupValidated: true,
         wouldRestore: true,
         wouldCreateRollback: existsSync(DB_PATH),
+        requiresApply: true,
         applyPreconditionsChecked: false,
         applyMayStillFailReasons: [
           'restore_unsupported_platform',
@@ -1042,16 +1159,12 @@ export async function restoreDatabase({
   let replacementCreated = false
   let restoreMetadataWarning: string | undefined
 
-  const restoreRollback = () => {
+  const restoreRollback = async () => {
     close()
-    removeSqliteSidecarFiles(DB_PATH)
 
     if (rollbackCreated && rollbackPath && existsSync(rollbackPath)) {
-      const rollbackCandidatePath = `${DB_PATH}.rollback-candidate-${process.pid}-${Date.now()}`
-      copyFileSync(rollbackPath, rollbackCandidatePath)
-      hardenPathMode(rollbackCandidatePath, PRIVATE_FILE_MODE)
-      renameSync(rollbackCandidatePath, DB_PATH)
-      hardenPathMode(DB_PATH, PRIVATE_FILE_MODE)
+      removeSqliteSidecarFiles(DB_PATH)
+      await backupDatabasePath(rollbackPath, DB_PATH)
       return
     }
 
@@ -1076,24 +1189,24 @@ export async function restoreDatabase({
     if (existsSync(DB_PATH)) {
       ensurePrivateDirectory(BACKUP_DIR)
       rollbackPath = uniqueBackupPath('rollback-shikin', new Date())
-      copyFileSync(DB_PATH, rollbackPath)
-      hardenPathMode(rollbackPath, PRIVATE_FILE_MODE)
+      await createRollbackBackup(rollbackPath)
       rollbackCreated = true
       writeRestoreLockState({
-        stage: 'ready-to-replace',
+        stage: 'ready-to-restore',
         rollbackPath,
         candidatePath: candidate.tempPath,
       })
     }
 
-    renameSync(candidate.tempPath, DB_PATH)
+    removeSqliteSidecarFiles(DB_PATH)
+    await backupDatabasePath(candidate.tempPath, DB_PATH)
     replacementCreated = true
-    hardenPathMode(DB_PATH, PRIVATE_FILE_MODE)
 
     const restoredDb = openDb()
     try {
       restoredDb.pragma('journal_mode = WAL')
       restoredDb.pragma('foreign_keys = ON')
+      applyRestoreCompatibleMigrations(restoredDb)
       validateDatabaseFile(DB_PATH, DB_PATH)
       try {
         recordRestoreMetadata(restoredDb, {
@@ -1122,7 +1235,7 @@ export async function restoreDatabase({
   } catch (error) {
     if (rollbackCreated || replacementCreated) {
       try {
-        restoreRollback()
+        await restoreRollback()
       } catch (rollbackError) {
         throw new Error(
           `Database restore failed and automatic rollback could not be completed. Manual recovery: copy ${rollbackPath ?? 'the rollback backup'} to ${DB_PATH}. Restore error: ${error instanceof Error ? error.message : String(error)}. Rollback error: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,

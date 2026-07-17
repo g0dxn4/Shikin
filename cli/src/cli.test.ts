@@ -235,7 +235,7 @@ describe('CLI command execution', () => {
     })
     expect(output.database).toMatchObject({
       requiredMigrations: [...CLI_DATABASE_MIGRATIONS],
-      latestRequiredMigration: '019_financial_semantics',
+      latestRequiredMigration: '020_quote_recurrence_import_identity',
       migrationCount: CLI_DATABASE_MIGRATIONS.length,
       expectsCurrent016FoundationSchema: true,
       foundationMigration: '016_cli_qol_foundation',
@@ -302,8 +302,8 @@ describe('CLI command execution', () => {
     await program.parseAsync(['node', 'shikin', 'tools', '--json'])
 
     const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
-    expect(output.catalogVersion).toBe('2026-07-14.financial-semantics')
-    expect(output.toolCount).toBe(90)
+    expect(output.catalogVersion).toBe(COMMAND_CATALOG_VERSION)
+    expect(output.toolCount).toBe(91)
     const commandByName = new Map(
       output.commands.map((command: { name: string }) => [command.name, command])
     )
@@ -362,6 +362,16 @@ describe('CLI command execution', () => {
       'list-receivables': ['status', 'overdue', 'accountId', 'account', 'search'],
       'match-receivable': ['receivableId', 'transactionId', 'apply', 'source', 'note'],
       'unmatch-receivable': ['receivableId', 'apply', 'source', 'note'],
+      'manage-investment': [
+        'action',
+        'investmentId',
+        'accountId',
+        'account',
+        'dryRun',
+        'source',
+        'note',
+      ],
+      'list-investments': ['type', 'accountId', 'account', 'symbol', 'search', 'redacted'],
       undo: ['apply', 'dryRun', 'source', 'note'],
       'finance-sanity-check': ['redacted', 'limit'],
     }
@@ -1405,6 +1415,7 @@ describe('CLI command execution', () => {
         { name: '017_investment_type_cetes' },
         { name: '018_placeholder_transactions' },
         { name: '019_financial_semantics' },
+        { name: '020_quote_recurrence_import_identity' },
       ])
       .mockReturnValueOnce([{ count: 2 }])
       .mockReturnValueOnce([{ count: 14 }])
@@ -1467,7 +1478,7 @@ describe('CLI command execution', () => {
           database: {
             ready: true,
             migrationCount: CLI_DATABASE_MIGRATIONS.length,
-            latestMigration: '019_financial_semantics',
+            latestMigration: '020_quote_recurrence_import_identity',
             accountCount: 2,
             categoryCount: 14,
             transactionCount: 42,

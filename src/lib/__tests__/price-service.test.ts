@@ -72,7 +72,7 @@ describe('price-service', () => {
     await vi.runAllTimersAsync()
     const prices = await pricesPromise
 
-    expect(prices.get('WALMEX.MX')).toBe(7234)
+    expect(prices.get('WALMEX.MX')).toEqual({ price: 7234, quoteCurrency: 'MXN' })
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(String(fetchMock.mock.calls[0][0])).toContain('alphavantage.co')
     expect(String(fetchMock.mock.calls[1][0])).toContain('finnhub.io')
@@ -92,30 +92,26 @@ describe('price-service', () => {
     )
   })
 
-  it('saves refreshed prices with each holding currency', async () => {
+  it('saves refreshed prices with their provider quote currency', async () => {
     mockQuery.mockResolvedValue([])
     mockExecute.mockResolvedValue({ rowsAffected: 1, lastInsertId: 1 })
 
     await savePricesToDB(
       new Map([
-        ['WALMEX.MX', 7234],
-        ['AAPL', 15000],
-      ]),
-      new Map([
-        ['WALMEX.MX', 'MXN'],
-        ['AAPL', 'USD'],
+        ['WALMEX.MX', { price: 7234, quoteCurrency: 'USD' }],
+        ['AAPL', { price: 15000, quoteCurrency: 'USD' }],
       ])
     )
 
     expect(mockExecute).toHaveBeenNthCalledWith(
       1,
       expect.stringContaining('INSERT INTO stock_prices'),
-      ['price-id', 'WALMEX.MX', 7234, 'MXN', expect.any(String)]
+      ['price-id', 'WALMEX.MX', 7234, 'USD', 'USD', expect.any(String)]
     )
     expect(mockExecute).toHaveBeenNthCalledWith(
       2,
       expect.stringContaining('INSERT INTO stock_prices'),
-      ['price-id', 'AAPL', 15000, 'USD', expect.any(String)]
+      ['price-id', 'AAPL', 15000, 'USD', 'USD', expect.any(String)]
     )
   })
 })

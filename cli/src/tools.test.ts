@@ -104,6 +104,8 @@ const getFinancialHealthScore = tools.find((tool) => tool.name === 'get-financia
 const getSpendingRecap = tools.find((tool) => tool.name === 'get-spending-recap')!
 const getEducationTip = tools.find((tool) => tool.name === 'get-education-tip')!
 const generatePortfolioReview = tools.find((tool) => tool.name === 'generate-portfolio-review')!
+const manageInvestment = tools.find((tool) => tool.name === 'manage-investment')!
+const listInvestments = tools.find((tool) => tool.name === 'list-investments')!
 const convertCurrency = tools.find((tool) => tool.name === 'convert-currency')!
 const createBudget = tools.find((tool) => tool.name === 'create-budget')!
 const upsertBudget = tools.find((tool) => tool.name === 'upsert-budget')!
@@ -195,7 +197,7 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('uses the explicit accountId for add-transaction', async () => {
-    mockQuery.mockReturnValueOnce([{ id: 'acct-2', currency: 'EUR' }])
+    mockQuery.mockReturnValueOnce([{ id: 'acct-2', currency: 'EUR', is_archived: 0 }])
 
     const input = addTransaction.schema.parse({
       amount: 10,
@@ -244,7 +246,9 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('validates recurringRuleId during add-transaction dry-runs', async () => {
-    mockQuery.mockReturnValueOnce([{ id: 'acct-1', currency: 'USD' }]).mockReturnValueOnce([])
+    mockQuery
+      .mockReturnValueOnce([{ id: 'acct-1', currency: 'USD', is_archived: 0 }])
+      .mockReturnValueOnce([])
 
     const input = addTransaction.schema.parse({
       amount: 10,
@@ -384,6 +388,41 @@ describe('CLI tool validation regressions', () => {
     expect(mockExecute).not.toHaveBeenCalled()
   })
 
+  it('creates placeholder transactions with dryRun false on actual writes', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (
+        sql.includes(
+          'SELECT id, currency, is_archived, account_mode FROM accounts WHERE id = $1 LIMIT 1'
+        )
+      ) {
+        return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
+      }
+      if (sql.includes('SELECT id, balance FROM accounts')) {
+        return [{ id: 'acct-1', balance: 5000 }]
+      }
+      return []
+    })
+
+    const result = await createPlaceholderTransaction.execute(
+      createPlaceholderTransaction.schema.parse({
+        amount: 23.45,
+        description: 'Unknown card charge',
+        accountId: 'acct-1',
+      })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      dryRun: false,
+      transaction: { id: 'tx_test_123', isPlaceholder: true },
+    })
+    expect(mockTransaction).toHaveBeenCalledTimes(1)
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO transactions'),
+      expect.any(Array)
+    )
+  })
+
   it('lists placeholder transactions with status metadata', async () => {
     mockQuery.mockReturnValueOnce([
       {
@@ -501,6 +540,59 @@ describe('CLI tool validation regressions', () => {
     expect(mockExecute).not.toHaveBeenCalled()
   })
 
+  it('resolves placeholders with dryRun false on actual writes', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('SELECT * FROM transactions WHERE id = $1 LIMIT 1')) {
+        return [
+          {
+            id: 'ph-1',
+            account_id: 'acct-1',
+            category_id: null,
+            transfer_to_account_id: null,
+            type: 'expense',
+            amount: 2000,
+            currency: 'USD',
+            description: 'Unknown charge',
+            notes: null,
+            status: 'posted',
+            source: null,
+            note: null,
+            recurring_rule_id: null,
+            is_placeholder: 1,
+            placeholder_status: 'unresolved',
+            resolved_at: null,
+            resolved_by_transaction_id: null,
+            placeholder_reason: null,
+            placeholder_parent_transaction_id: null,
+            date: '2026-05-10',
+          },
+        ]
+      }
+      if (sql.includes('SELECT id, balance FROM accounts')) {
+        return [{ id: 'acct-1', balance: 5000 }]
+      }
+      return []
+    })
+
+    const result = await resolvePlaceholderTransaction.execute(
+      resolvePlaceholderTransaction.schema.parse({
+        transactionId: 'ph-1',
+        description: 'Cafe receipt',
+      })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      dryRun: false,
+      transaction: { id: 'ph-1', placeholderStatus: 'resolved' },
+    })
+    expect(mockTransaction).toHaveBeenCalledTimes(1)
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE transactions'),
+      expect.any(Array)
+    )
+  })
+
   it('requires placeholder split amounts to match exactly', async () => {
     mockQuery.mockReturnValueOnce([
       {
@@ -543,9 +635,67 @@ describe('CLI tool validation regressions', () => {
     expect(mockExecute).not.toHaveBeenCalled()
   })
 
+  it('splits placeholders with dryRun false on actual writes', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('SELECT * FROM transactions WHERE id = $1 LIMIT 1')) {
+        return [
+          {
+            id: 'ph-1',
+            account_id: 'acct-1',
+            category_id: null,
+            transfer_to_account_id: null,
+            type: 'expense',
+            amount: 2000,
+            currency: 'USD',
+            description: 'Unknown charge',
+            notes: null,
+            status: 'posted',
+            source: null,
+            note: null,
+            recurring_rule_id: null,
+            is_placeholder: 1,
+            placeholder_status: 'unresolved',
+            resolved_at: null,
+            resolved_by_transaction_id: null,
+            placeholder_reason: null,
+            placeholder_parent_transaction_id: null,
+            date: '2026-05-10',
+          },
+        ]
+      }
+      if (sql.includes('SELECT id, balance FROM accounts')) {
+        return [{ id: 'acct-1', balance: 5000 }]
+      }
+      return []
+    })
+
+    const result = await splitPlaceholderTransaction.execute(
+      splitPlaceholderTransaction.schema.parse({
+        transactionId: 'ph-1',
+        splits: [{ amount: 8 }, { amount: 12 }],
+      })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      dryRun: false,
+      placeholder: { id: 'ph-1', placeholderStatus: 'split' },
+      transactions: [{ amount: 8 }, { amount: 12 }],
+    })
+    expect(mockTransaction).toHaveBeenCalledTimes(1)
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE transactions'),
+      expect.any(Array)
+    )
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO transactions'),
+      expect.any(Array)
+    )
+  })
+
   it('rejects recurringRuleId links for a different account', async () => {
     mockQuery
-      .mockReturnValueOnce([{ id: 'acct-1', currency: 'USD' }])
+      .mockReturnValueOnce([{ id: 'acct-1', currency: 'USD', is_archived: 0 }])
       .mockReturnValueOnce([
         { id: 'rule-1', account_id: 'acct-2', type: 'expense', currency: 'USD' },
       ])
@@ -568,24 +718,29 @@ describe('CLI tool validation regressions', () => {
     expect(mockExecute).not.toHaveBeenCalled()
   })
 
-  it('rejects archived explicit accounts for new transactions', async () => {
-    mockQuery.mockReturnValueOnce([{ id: 'acct-archived', currency: 'USD', is_archived: 1 }])
+  it.each([1, 2, null, undefined])(
+    'rejects explicit account is_archived flag %s for new writes',
+    async (isArchived) => {
+      mockQuery.mockReturnValueOnce([
+        { id: 'acct-archived', currency: 'USD', is_archived: isArchived },
+      ])
 
-    const input = addTransaction.schema.parse({
-      amount: 10,
-      type: 'expense',
-      description: 'Coffee',
-      accountId: 'acct-archived',
-    })
+      const input = addTransaction.schema.parse({
+        amount: 10,
+        type: 'expense',
+        description: 'Coffee',
+        accountId: 'acct-archived',
+      })
 
-    const result = await addTransaction.execute(input)
+      const result = await addTransaction.execute(input)
 
-    expect(result).toEqual({
-      success: false,
-      message: 'Account acct-archived is archived. Unarchive it before using it for new writes.',
-    })
-    expect(mockExecute).not.toHaveBeenCalled()
-  })
+      expect(result).toEqual({
+        success: false,
+        message: 'Account acct-archived is archived. Unarchive it before using it for new writes.',
+      })
+      expect(mockExecute).not.toHaveBeenCalled()
+    }
+  )
 
   it('blocks direct add-transaction duplicates unless allowDuplicate is explicit', async () => {
     mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
@@ -812,6 +967,7 @@ describe('CLI tool validation regressions', () => {
 
     expect(result).toMatchObject({
       success: true,
+      dryRun: false,
       transaction: {
         id: 'tx_test_123',
         source: 'opaque-workflow-source',
@@ -925,6 +1081,7 @@ describe('CLI tool validation regressions', () => {
     )
     expect(result).toMatchObject({
       success: true,
+      dryRun: false,
       transaction: {
         id: 'tx_test_123',
         accountId: 'acct-1',
@@ -1004,8 +1161,8 @@ describe('CLI tool validation regressions', () => {
 
   it('creates transfer transactions and updates both account balances', async () => {
     mockQuery
-      .mockReturnValueOnce([{ id: 'acct-checking', currency: 'USD' }])
-      .mockReturnValueOnce([{ id: 'acct-savings', currency: 'USD' }])
+      .mockReturnValueOnce([{ id: 'acct-checking', currency: 'USD', is_archived: 0 }])
+      .mockReturnValueOnce([{ id: 'acct-savings', currency: 'USD', is_archived: 0 }])
 
     const input = addTransaction.schema.parse({
       amount: 25,
@@ -1062,7 +1219,7 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('requires a destination account for transfer creation', async () => {
-    mockQuery.mockReturnValueOnce([{ id: 'acct-checking', currency: 'USD' }])
+    mockQuery.mockReturnValueOnce([{ id: 'acct-checking', currency: 'USD', is_archived: 0 }])
 
     const input = addTransaction.schema.parse({
       amount: 25,
@@ -1082,8 +1239,8 @@ describe('CLI tool validation regressions', () => {
 
   it('rejects cross-currency transfer creation', async () => {
     mockQuery
-      .mockReturnValueOnce([{ id: 'acct-usd', currency: 'USD' }])
-      .mockReturnValueOnce([{ id: 'acct-eur', currency: 'EUR' }])
+      .mockReturnValueOnce([{ id: 'acct-usd', currency: 'USD', is_archived: 0 }])
+      .mockReturnValueOnce([{ id: 'acct-eur', currency: 'EUR', is_archived: 0 }])
 
     const input = addTransaction.schema.parse({
       amount: 25,
@@ -1105,7 +1262,7 @@ describe('CLI tool validation regressions', () => {
 
   it('rejects archived transfer destination accounts', async () => {
     mockQuery
-      .mockReturnValueOnce([{ id: 'acct-usd', currency: 'USD' }])
+      .mockReturnValueOnce([{ id: 'acct-usd', currency: 'USD', is_archived: 0 }])
       .mockReturnValueOnce([{ id: 'acct-old', currency: 'USD', is_archived: 1 }])
 
     const input = addTransaction.schema.parse({
@@ -1852,6 +2009,48 @@ describe('CLI tool validation regressions', () => {
     expect(mockExecute).not.toHaveBeenCalled()
   })
 
+  it('performs every authoritative non-dry-run upsert read inside its transaction', async () => {
+    let transactionStarted = false
+    const authorityReads: string[] = []
+    const accountRow = {
+      id: 'acct-1',
+      name: 'Checking',
+      type: 'checking',
+      currency: 'USD',
+      balance: 0,
+      is_archived: 0,
+      credit_limit: null,
+      statement_closing_day: null,
+      payment_due_day: null,
+      account_mode: 'transactional',
+    }
+    mockTransaction.mockImplementation((fn: () => unknown) => {
+      transactionStarted = true
+      return fn()
+    })
+    mockQuery.mockImplementation((sql: string) => {
+      expect(transactionStarted).toBe(true)
+      authorityReads.push(sql)
+      if (sql.includes('SELECT * FROM accounts WHERE id = $1 LIMIT 1')) return [accountRow]
+      if (sql.includes('FROM transactions') && sql.includes('COUNT(*)')) return [{ count: 1 }]
+      if (sql.includes('COUNT(*) as count')) return [{ count: 0 }]
+      if (sql.includes('SELECT balance FROM accounts')) return [{ balance: 0 }]
+      return []
+    })
+
+    const result = await upsertAccount.execute(
+      upsertAccount.schema.parse({ accountId: 'acct-1', currency: 'EUR' })
+    )
+
+    expect(mockTransaction).toHaveBeenCalledTimes(1)
+    expect(authorityReads[0]).toContain('SELECT * FROM accounts WHERE id = $1 LIMIT 1')
+    expect(result).toMatchObject({
+      success: false,
+      message: expect.stringContaining('1 linked monetary reference'),
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
   it('rejects aliases for archived accounts', async () => {
     mockQuery.mockReturnValueOnce([
       {
@@ -1929,7 +2128,9 @@ describe('CLI tool validation regressions', () => {
       statement_closing_day: null,
       payment_due_day: null,
     }
-    mockQuery.mockReturnValueOnce([accountRow]).mockReturnValueOnce([accountRow])
+    mockQuery
+      .mockReturnValueOnce([accountRow])
+      .mockReturnValueOnce([{ ...accountRow, name: 'Everyday Checking', type: 'savings' }])
 
     const result = await updateAccount.execute(
       updateAccount.schema.parse({
@@ -2373,6 +2574,7 @@ describe('CLI tool validation regressions', () => {
 
     expect(result).toMatchObject({
       success: true,
+      dryRun: false,
       mode: 'transfer',
       transactions: [
         expect.objectContaining({
@@ -2411,6 +2613,7 @@ describe('CLI tool validation regressions', () => {
         'Operator confirmed duplicate',
       ])
     )
+    expect(mockTransaction).toHaveBeenCalledTimes(1)
   })
 
   it('records cleanup card payments with category and latest statement update', async () => {
@@ -2491,6 +2694,7 @@ describe('CLI tool validation regressions', () => {
 
     expect(result).toMatchObject({
       success: true,
+      dryRun: false,
       mode: 'cleanup-expense',
       transactions: [expect.objectContaining({ type: 'expense', categoryId: 'cat-fees' })],
       updatedStatements: [
@@ -2508,6 +2712,7 @@ describe('CLI tool validation regressions', () => {
       expect.stringContaining('UPDATE credit_card_statements'),
       [10000, 'paid', 'bank-import', null, 'stmt-1']
     )
+    expect(mockTransaction).toHaveBeenCalledTimes(1)
   })
 
   it('requires statements for statement-only card payment mode', async () => {
@@ -2941,6 +3146,7 @@ describe('CLI tool validation regressions', () => {
         source: null,
         note: null,
         account_name: 'Rewards Card',
+        account_is_archived: 0,
       },
     ])
 
@@ -3134,6 +3340,7 @@ describe('CLI tool validation regressions', () => {
           currency: 'USD',
           account_name: 'Checking',
           account_currency: 'USD',
+          account_is_archived: 0,
           category_name: null,
         },
         {
@@ -3151,6 +3358,7 @@ describe('CLI tool validation regressions', () => {
           currency: 'USD',
           account_name: 'Checking',
           account_currency: 'USD',
+          account_is_archived: 0,
           category_name: null,
         },
       ])
@@ -3617,6 +3825,40 @@ describe('CLI tool validation regressions', () => {
     expect(mockExecute).not.toHaveBeenCalled()
   })
 
+  it('creates subscriptions with dryRun false on actual writes', async () => {
+    mockQuery
+      .mockReturnValueOnce([{ id: 'acct-1', currency: 'USD', is_archived: 0 }])
+      .mockReturnValueOnce([{ id: 'cat-streaming', name: 'Streaming' }])
+
+    const result = await createSubscription.execute(
+      createSubscription.schema.parse({
+        name: 'Netflix',
+        amount: 15.99,
+        nextBillingDate: '2026-06-01',
+        accountId: 'acct-1',
+        categoryId: 'cat-streaming',
+      })
+    )
+
+    expect(mockTransaction).toHaveBeenCalledTimes(1)
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('INSERT INTO subscriptions'),
+      expect.arrayContaining(['tx_test_123', 'acct-1', 'cat-streaming', 'Netflix', 1599])
+    )
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('INSERT INTO audit_log'),
+      expect.arrayContaining(['subscription', 'tx_test_123', 'create'])
+    )
+    expect(result).toMatchObject({
+      success: true,
+      action: 'created',
+      dryRun: false,
+      subscription: { accountId: 'acct-1', categoryId: 'cat-streaming', amount: 15.99 },
+    })
+  })
+
   it('previews subscription creation from transaction defaults', async () => {
     mockQuery
       .mockReturnValueOnce([
@@ -3701,6 +3943,7 @@ describe('CLI tool validation regressions', () => {
     expect(result).toMatchObject({
       success: true,
       action: 'created',
+      dryRun: false,
       linkedTransactionId: 'tx-sub-source',
       subscription: {
         accountId: 'acct-2',
@@ -3737,6 +3980,7 @@ describe('CLI tool validation regressions', () => {
         'Created from existing payment',
       ])
     )
+    expect(mockTransaction).toHaveBeenCalledTimes(1)
   })
 
   it('validates subscription-from-transaction overrides and rejects transfers', async () => {
@@ -4030,53 +4274,72 @@ describe('CLI tool validation regressions', () => {
       kind: 'manual' as const,
     }
     mockBackupDatabase.mockResolvedValueOnce(backup)
-    mockRestoreDatabase.mockResolvedValueOnce({
+    const previewRestore = {
+      sourcePath: backup.path,
+      validatedAt: '2026-05-07T12:02:00.000Z',
+      backupValidated: true as const,
+      wouldRestore: true as const,
+      wouldCreateRollback: true,
+      requiresApply: true as const,
+      applyPreconditionsChecked: false as const,
+      applyMayStillFailReasons: [],
+      sizeBytes: 4096,
+      dryRun: true as const,
+      integrityCheck: 'ok',
+      foreignKeyViolations: 0,
+    }
+    const appliedRestore = {
       sourcePath: backup.path,
       restoredAt: '2026-05-07T12:01:00.000Z',
       rollbackPath: '/tmp/shikin-backups/rollback-shikin-20260507T120100000Z.db',
       sizeBytes: 4096,
-      dryRun: false,
+      dryRun: false as const,
       integrityCheck: 'ok',
       foreignKeyViolations: 0,
-    })
-    mockRestoreDatabase.mockResolvedValueOnce({
-      sourcePath: backup.path,
-      validatedAt: '2026-05-07T12:02:00.000Z',
-      wouldRestore: true,
-      wouldCreateRollback: true,
-      sizeBytes: 4096,
-      dryRun: true,
-      integrityCheck: 'ok',
-      foreignKeyViolations: 0,
-    })
+    }
+    mockRestoreDatabase
+      .mockResolvedValueOnce(previewRestore)
+      .mockResolvedValueOnce(appliedRestore)
+      .mockResolvedValueOnce(appliedRestore)
 
     const backupResult = await backupDatabaseTool.execute(backupDatabaseTool.schema.parse({}))
-    const restoreResult = await restoreDatabaseTool.execute(
+    const previewResult = await restoreDatabaseTool.execute(
       restoreDatabaseTool.schema.parse({ file: backup.path })
     )
-    const restoreDryRunResult = await restoreDatabaseTool.execute(
-      restoreDatabaseTool.schema.parse({ file: backup.path, dryRun: true })
+    const applyResult = await restoreDatabaseTool.execute(
+      restoreDatabaseTool.schema.parse({ file: backup.path, apply: true })
+    )
+    const legacyApplyResult = await restoreDatabaseTool.execute(
+      restoreDatabaseTool.schema.parse({ file: backup.path, dryRun: false })
     )
 
     expect(backupResult).toMatchObject({ success: true, path: backup.path, backup })
     expect(mockBackupDatabase).toHaveBeenCalledTimes(1)
-    expect(mockRestoreDatabase).toHaveBeenCalledWith({ sourcePath: backup.path, dryRun: false })
-    expect(restoreResult).toMatchObject({
-      success: true,
+    expect(mockRestoreDatabase).toHaveBeenNthCalledWith(1, {
       sourcePath: backup.path,
-      rollbackPath: '/tmp/shikin-backups/rollback-shikin-20260507T120100000Z.db',
+      dryRun: true,
     })
-    expect(restoreDryRunResult).toMatchObject({
+    expect(mockRestoreDatabase).toHaveBeenNthCalledWith(2, {
+      sourcePath: backup.path,
+      dryRun: false,
+    })
+    expect(previewResult).toMatchObject({
       success: true,
       dryRun: true,
+      requiresApply: true,
       sourcePath: backup.path,
-      restore: {
-        validatedAt: '2026-05-07T12:02:00.000Z',
-        wouldRestore: true,
-        wouldCreateRollback: true,
-      },
+      restore: { validatedAt: '2026-05-07T12:02:00.000Z' },
     })
-    expect(restoreDryRunResult).not.toHaveProperty('rollbackPath')
+    expect(previewResult).not.toHaveProperty('rollbackPath')
+    expect(applyResult).toMatchObject({
+      success: true,
+      dryRun: false,
+      rollbackPath: '/tmp/shikin-backups/rollback-shikin-20260507T120100000Z.db',
+    })
+    expect(legacyApplyResult).toMatchObject({
+      success: true,
+      warning: expect.stringMatching(/deprecated/i),
+    })
   })
 
   it('reports stale balance snapshots, recent backups, and automation context readiness', async () => {
@@ -5439,6 +5702,7 @@ describe('CLI tool validation regressions', () => {
             currency: 'USD',
             account_name: 'Main Checking',
             account_currency: 'USD',
+            account_is_archived: 0,
             category_name: 'Rent',
           },
         ]
@@ -6527,6 +6791,447 @@ describe('CLI tool validation regressions', () => {
     expect(mockWriteNote).toHaveBeenCalledTimes(1)
   })
 
+  it('previews manage-investment adds with account name resolution and stable snapshots', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('SELECT value FROM settings')) return []
+      if (sql.includes('WHERE id = $1 OR LOWER(name) = LOWER($2)')) {
+        return [{ id: 'acct-broker', name: 'Brokerage', currency: 'USD', is_archived: 0 }]
+      }
+      if (sql.includes('SELECT name FROM accounts WHERE id = $1')) {
+        return [{ name: 'Brokerage' }]
+      }
+      return []
+    })
+
+    const result = await manageInvestment.execute(
+      manageInvestment.schema.parse({
+        action: 'add',
+        name: 'Vanguard S&P 500 ETF',
+        symbol: 'voo',
+        type: 'etf',
+        shares: 2.5,
+        avgCost: 400.12,
+        currentPrice: 410,
+        account: 'Brokerage',
+        notes: 'Long-term index fund',
+        dryRun: true,
+      })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      action: 'added',
+      dryRun: true,
+      wouldCreate: {
+        accountId: 'acct-broker',
+        accountName: 'Brokerage',
+        symbol: 'VOO',
+        name: 'Vanguard S&P 500 ETF',
+        type: 'etf',
+        shares: 2.5,
+        avgCost: 400.12,
+        avgCostCentavos: 40012,
+        costBasisCentavos: 100030,
+        currency: 'USD',
+        notes: 'Long-term index fund',
+        currentPrice: 410,
+        currentPriceCentavos: 41000,
+        priceCurrency: 'USD',
+        marketValueCentavos: 102500,
+        gainLossCentavos: 2470,
+      },
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('adds manage-investment holdings atomically with audit provenance and dryRun false', async () => {
+    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('SELECT name FROM accounts WHERE id = $1')) {
+        return [{ name: 'Brokerage' }]
+      }
+      if (sql.includes('FROM accounts WHERE id = $1') && params?.[0] === 'acct-broker') {
+        return [{ id: 'acct-broker', currency: 'USD', is_archived: 0 }]
+      }
+      return []
+    })
+
+    const result = await manageInvestment.execute(
+      manageInvestment.schema.parse({
+        action: 'add',
+        name: 'Apple Inc.',
+        symbol: 'aapl',
+        shares: 1,
+        avgCost: 150,
+        currentPrice: 160,
+        accountId: 'acct-broker',
+        source: 'broker-import',
+        note: 'Initial position import',
+      })
+    )
+
+    expect(mockTransaction).toHaveBeenCalledTimes(1)
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('INSERT INTO investments'),
+      expect.arrayContaining([
+        'tx_test_123',
+        'acct-broker',
+        'AAPL',
+        'Apple Inc.',
+        'stock',
+        1,
+        15000,
+        'USD',
+      ])
+    )
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('INSERT OR REPLACE INTO stock_prices'),
+      expect.arrayContaining(['AAPL', 16000, 'USD', expect.any(String), expect.any(String)])
+    )
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('INSERT INTO audit_log'),
+      expect.arrayContaining([
+        'investment',
+        'tx_test_123',
+        'add',
+        'broker-import',
+        'Initial position import',
+      ])
+    )
+    expect(result).toMatchObject({
+      success: true,
+      action: 'added',
+      dryRun: false,
+      investment: {
+        id: 'tx_test_123',
+        accountId: 'acct-broker',
+        accountName: 'Brokerage',
+        symbol: 'AAPL',
+        avgCost: 150,
+        avgCostCentavos: 15000,
+        currentPrice: 160,
+        currentPriceCentavos: 16000,
+      },
+    })
+  })
+
+  it('previews manage-investment updates without writing', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('FROM investments i')) {
+        return [
+          {
+            id: 'inv-1',
+            account_id: 'acct-broker',
+            account_name: 'Brokerage',
+            symbol: 'AAPL',
+            name: 'Apple Inc.',
+            type: 'stock',
+            shares: 1,
+            avg_cost_basis: 15000,
+            currency: 'USD',
+            notes: null,
+            created_at: '2026-01-01T00:00:00.000Z',
+            updated_at: '2026-01-01T00:00:00.000Z',
+            latest_price: 16000,
+            latest_price_currency: 'USD',
+            latest_price_date: '2026-05-01',
+          },
+        ]
+      }
+      return []
+    })
+
+    const result = await manageInvestment.execute(
+      manageInvestment.schema.parse({
+        action: 'update',
+        investmentId: 'inv-1',
+        shares: 1.5,
+        notes: 'Added fractional share',
+        dryRun: true,
+      })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      action: 'updated',
+      dryRun: true,
+      wouldUpdate: {
+        investmentId: 'inv-1',
+        before: { shares: 1, costBasisCentavos: 15000, notes: null },
+        after: { shares: 1.5, costBasisCentavos: 22500, notes: 'Added fractional share' },
+      },
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('updates manage-investment holdings atomically with alias resolution, price history, and audit provenance', async () => {
+    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM investments i')) {
+        return [
+          {
+            id: 'inv-1',
+            account_id: 'acct-old',
+            account_name: 'Old Brokerage',
+            symbol: 'AAPL',
+            name: 'Apple Inc.',
+            type: 'stock',
+            shares: 1,
+            avg_cost_basis: 15000,
+            currency: 'USD',
+            notes: null,
+            created_at: '2026-01-01T00:00:00.000Z',
+            updated_at: '2026-01-01T00:00:00.000Z',
+            latest_price: 16000,
+            latest_price_currency: 'USD',
+            latest_price_date: '2026-05-01',
+          },
+        ]
+      }
+      if (sql.includes('SELECT value FROM settings')) {
+        return [{ value: JSON.stringify({ brokerage: 'acct-broker' }) }]
+      }
+      if (sql.includes('SELECT name FROM accounts WHERE id = $1')) {
+        return [{ name: 'Brokerage' }]
+      }
+      if (sql.includes('FROM accounts WHERE id = $1') && params?.[0] === 'acct-broker') {
+        return [{ id: 'acct-broker', currency: 'USD', is_archived: 0 }]
+      }
+      return []
+    })
+
+    const result = await manageInvestment.execute(
+      manageInvestment.schema.parse({
+        action: 'update',
+        investmentId: 'inv-1',
+        account: 'brokerage',
+        shares: 2,
+        currentPrice: 175.25,
+        source: 'broker-sync',
+        note: 'Rebalanced lots',
+      })
+    )
+
+    expect(mockTransaction).toHaveBeenCalledTimes(1)
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('UPDATE investments SET'),
+      expect.arrayContaining(['acct-broker', 2, expect.any(String), 'inv-1'])
+    )
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('INSERT OR REPLACE INTO stock_prices'),
+      expect.arrayContaining(['AAPL', 17525, 'USD'])
+    )
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('INSERT INTO audit_log'),
+      expect.arrayContaining(['investment', 'inv-1', 'update', 'broker-sync', 'Rebalanced lots'])
+    )
+    expect(result).toMatchObject({
+      success: true,
+      action: 'updated',
+      dryRun: false,
+      investment: {
+        id: 'inv-1',
+        accountId: 'acct-broker',
+        accountName: 'Brokerage',
+        shares: 2,
+        currentPrice: 175.25,
+        currentPriceCentavos: 17525,
+      },
+    })
+  })
+
+  it('previews and deletes manage-investment holdings with audit snapshots', async () => {
+    const investmentRow = {
+      id: 'inv-1',
+      account_id: 'acct-broker',
+      account_name: 'Brokerage',
+      symbol: 'AAPL',
+      name: 'Apple Inc.',
+      type: 'stock',
+      shares: 1,
+      avg_cost_basis: 15000,
+      currency: 'USD',
+      notes: 'legacy',
+      created_at: '2026-01-01T00:00:00.000Z',
+      updated_at: '2026-01-01T00:00:00.000Z',
+      latest_price: null,
+      latest_price_currency: null,
+      latest_price_date: null,
+    }
+    mockQuery.mockImplementation((sql: string) =>
+      sql.includes('FROM investments i') ? [investmentRow] : []
+    )
+
+    const preview = await manageInvestment.execute(
+      manageInvestment.schema.parse({ action: 'delete', investmentId: 'inv-1', dryRun: true })
+    )
+
+    expect(preview).toMatchObject({
+      success: true,
+      action: 'deleted',
+      dryRun: true,
+      wouldDelete: { id: 'inv-1', symbol: 'AAPL', notes: 'legacy' },
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+
+    mockExecute.mockClear()
+    mockTransaction.mockClear()
+
+    const result = await manageInvestment.execute(
+      manageInvestment.schema.parse({
+        action: 'delete',
+        investmentId: 'inv-1',
+        source: 'operator',
+        note: 'Closed position',
+      })
+    )
+
+    expect(mockTransaction).toHaveBeenCalledTimes(1)
+    expect(mockExecute).toHaveBeenNthCalledWith(1, 'DELETE FROM investments WHERE id = $1', [
+      'inv-1',
+    ])
+    expect(mockExecute).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('INSERT INTO audit_log'),
+      expect.arrayContaining(['investment', 'inv-1', 'delete', 'operator', 'Closed position'])
+    )
+    expect(result).toMatchObject({
+      success: true,
+      action: 'deleted',
+      dryRun: false,
+      investment: { id: 'inv-1', symbol: 'AAPL', notes: 'legacy' },
+    })
+  })
+
+  it('lists investments with filters, price fields, and redaction', async () => {
+    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes('SELECT value FROM settings')) {
+        return [{ value: JSON.stringify({ brokerage: 'acct-broker' }) }]
+      }
+      if (sql.includes('FROM accounts WHERE id = $1') && params?.[0] === 'acct-broker') {
+        return [{ id: 'acct-broker', currency: 'USD', is_archived: 0 }]
+      }
+      if (sql.includes('SELECT name FROM accounts WHERE id = $1')) {
+        return [{ name: 'Brokerage' }]
+      }
+      if (sql.includes('FROM investments i')) {
+        return [
+          {
+            id: 'inv-1',
+            account_id: 'acct-broker',
+            account_name: 'Brokerage',
+            symbol: 'VOO',
+            name: 'Vanguard S&P 500 ETF',
+            type: 'etf',
+            shares: 2,
+            avg_cost_basis: 40000,
+            currency: 'USD',
+            notes: 'core holding',
+            created_at: '2026-01-01T00:00:00.000Z',
+            updated_at: '2026-01-02T00:00:00.000Z',
+            latest_price: 41000,
+            latest_price_currency: 'USD',
+            latest_price_date: '2026-05-01',
+          },
+        ]
+      }
+      return []
+    })
+
+    const result = await listInvestments.execute(
+      listInvestments.schema.parse({
+        type: 'etf',
+        account: 'brokerage',
+        symbol: 'voo',
+        search: 'vanguard',
+        redacted: true,
+      })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      count: 1,
+      redacted: true,
+      filters: { type: 'etf', accountId: 'acct-broker', symbol: 'VOO', search: 'vanguard' },
+      investments: [
+        {
+          id: 'inv-1',
+          accountId: 'acct-broker',
+          accountName: '[REDACTED]',
+          symbol: 'VOO',
+          name: '[REDACTED]',
+          notes: '[REDACTED]',
+          currentPrice: 410,
+          currentPriceCentavos: 41000,
+          marketValue: 820,
+          marketValueCentavos: 82000,
+          gainLoss: 20,
+          gainLossCentavos: 2000,
+        },
+      ],
+    })
+    expect(mockExecute).not.toHaveBeenCalled()
+    const listQueryCall = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes('FROM investments i')
+    )
+    expect(listQueryCall?.[1]).toEqual([
+      'etf',
+      'acct-broker',
+      'VOO',
+      '%vanguard%',
+      '%vanguard%',
+      '%vanguard%',
+      100,
+    ])
+  })
+
+  it('does not report gain or loss when investment and quote currencies differ', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('FROM investments i')) {
+        return [
+          {
+            id: 'inv-mxn',
+            account_id: null,
+            account_name: null,
+            symbol: 'WALMEX.MX',
+            name: 'Walmart de México',
+            type: 'stock',
+            shares: 2,
+            avg_cost_basis: 7000,
+            currency: 'MXN',
+            notes: null,
+            created_at: '2026-01-01T00:00:00.000Z',
+            updated_at: '2026-01-02T00:00:00.000Z',
+            latest_price: 7200,
+            latest_price_currency: 'USD',
+            latest_price_date: '2026-05-01',
+          },
+        ]
+      }
+      return []
+    })
+
+    const result = await listInvestments.execute(listInvestments.schema.parse({}))
+
+    expect(result).toMatchObject({
+      success: true,
+      investments: [
+        {
+          currency: 'MXN',
+          priceCurrency: 'USD',
+          marketValueCentavos: 14400,
+          gainLoss: null,
+          gainLossCentavos: null,
+          gainLossPercent: null,
+        },
+      ],
+    })
+  })
+
   it('returns account-not-found and performs no writes for missing explicit accountId', async () => {
     mockQuery.mockReturnValueOnce([])
 
@@ -6776,7 +7481,7 @@ describe('CLI tool validation regressions', () => {
           notes: 'old notes',
         },
       ])
-      .mockReturnValueOnce([{ id: 'acct-2', currency: 'EUR' }])
+      .mockReturnValueOnce([{ id: 'acct-2', currency: 'EUR', is_archived: 0 }])
 
     const result = await updateTransaction.execute(
       updateTransaction.schema.parse({ transactionId: 'tx-1', accountId: 'acct-2' })
@@ -6937,7 +7642,7 @@ describe('CLI tool validation regressions', () => {
 
   it('uses the explicit accountId when creating a recurring rule', async () => {
     mockQuery
-      .mockReturnValueOnce([{ id: 'acct-2', currency: ' usd ' }])
+      .mockReturnValueOnce([{ id: 'acct-2', currency: ' usd ', is_archived: 0 }])
       .mockReturnValueOnce([{ name: 'currency' }])
 
     const input = manageRecurringTransaction.schema.parse({
@@ -6946,6 +7651,7 @@ describe('CLI tool validation regressions', () => {
       amount: 1000,
       type: 'expense',
       frequency: 'monthly',
+      anchorKind: 'end_of_month',
       accountId: 'acct-2',
     })
 
@@ -6957,19 +7663,17 @@ describe('CLI tool validation regressions', () => {
     )
     expect(mockExecute).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO recurring_rules'),
-      [
+      expect.arrayContaining([
         'tx_test_123',
         'Rent',
         100000,
         'expense',
         'monthly',
-        expect.any(String),
-        null,
         'acct-2',
-        null,
-        null,
         'USD',
-      ]
+        'end_of_month',
+        null,
+      ])
     )
     expect(result).toMatchObject({
       success: true,
@@ -6997,7 +7701,7 @@ describe('CLI tool validation regressions', () => {
         },
       ])
       .mockReturnValueOnce([{ id: 'cat-rent', name: 'Rent' }])
-      .mockReturnValueOnce([{ id: 'acct-2', currency: 'USD' }])
+      .mockReturnValueOnce([{ id: 'acct-2', currency: 'USD', is_archived: 0 }])
       .mockReturnValueOnce([{ name: 'currency' }])
 
     const input = manageRecurringTransaction.schema.parse({
@@ -7034,7 +7738,7 @@ describe('CLI tool validation regressions', () => {
           currency: 'USD',
         },
       ])
-      .mockReturnValueOnce([{ id: 'acct-2', currency: 'BRL' }])
+      .mockReturnValueOnce([{ id: 'acct-2', currency: 'BRL', is_archived: 0 }])
 
     const result = await manageRecurringTransaction.execute(
       manageRecurringTransaction.schema.parse({
@@ -7065,7 +7769,7 @@ describe('CLI tool validation regressions', () => {
           currency: null,
         },
       ])
-      .mockReturnValueOnce([{ id: 'acct-2', currency: 'USD' }])
+      .mockReturnValueOnce([{ id: 'acct-2', currency: 'USD', is_archived: 0 }])
 
     const result = await manageRecurringTransaction.execute(
       manageRecurringTransaction.schema.parse({
@@ -7309,6 +8013,7 @@ describe('CLI tool validation regressions', () => {
         account_id: 'acct-1',
         currency: 'CAD',
         account_currency: 'CAD',
+        account_is_archived: 0,
         category_id: 'cat-1',
         type: 'expense',
         amount: 1250,
@@ -7395,6 +8100,7 @@ describe('CLI tool validation regressions', () => {
         account_id: 'acct-1',
         currency: ' cad ',
         account_currency: 'CAD',
+        account_is_archived: 0,
         category_id: 'cat-1',
         type: 'expense',
         amount: 1250,
@@ -7484,7 +8190,7 @@ describe('CLI tool validation regressions', () => {
 
   it('rejects recurring-rule creation when the linked account currency is invalid after normalization', async () => {
     mockQuery
-      .mockReturnValueOnce([{ id: 'acct-2', currency: '   ' }])
+      .mockReturnValueOnce([{ id: 'acct-2', currency: '   ', is_archived: 0 }])
       .mockReturnValueOnce([{ name: 'currency' }])
 
     const input = manageRecurringTransaction.schema.parse({
@@ -7514,6 +8220,7 @@ describe('CLI tool validation regressions', () => {
         account_id: 'acct-1',
         currency: null,
         account_currency: 'USD',
+        account_is_archived: 0,
         category_id: 'cat-1',
         type: 'expense',
         amount: 1250,
@@ -7543,6 +8250,7 @@ describe('CLI tool validation regressions', () => {
         account_id: 'acct-1',
         currency: 'USD',
         account_currency: 'USD',
+        account_is_archived: 0,
         to_account_id: 'acct-2',
         category_id: null,
         type: 'transfer',
@@ -7574,6 +8282,7 @@ describe('CLI tool validation regressions', () => {
         account_id: 'acct-1',
         currency: 'USD',
         account_currency: 'EUR',
+        account_is_archived: 0,
         category_id: 'cat-1',
         type: 'expense',
         amount: 1250,
@@ -7603,6 +8312,7 @@ describe('CLI tool validation regressions', () => {
         account_id: 'acct-1',
         currency: 'CAD',
         account_currency: 'CAD',
+        account_is_archived: 0,
         category_id: 'cat-1',
         type: 'expense',
         amount: 1250,
@@ -7640,6 +8350,7 @@ describe('CLI tool validation regressions', () => {
         account_id: 'acct-1',
         currency: 'USD',
         account_currency: 'USD',
+        account_is_archived: 0,
         category_id: 'cat-1',
         type: 'expense',
         amount: 1250,
@@ -7685,6 +8396,7 @@ describe('CLI tool validation regressions', () => {
         account_id: 'acct-1',
         currency: 'USD',
         account_currency: 'USD',
+        account_is_archived: 0,
         category_id: 'cat-1',
         type: 'expense',
         amount: 1250,
@@ -7770,6 +8482,7 @@ describe('CLI tool validation regressions', () => {
     )
     expect(result).toMatchObject({
       success: true,
+      dryRun: false,
       transaction: {
         id: 'tx-1',
         amount: 12,
@@ -7928,6 +8641,7 @@ describe('CLI tool validation regressions', () => {
     )
     expect(result).toEqual({
       success: true,
+      dryRun: false,
       message: 'Deleted expense: $10.00 "Coffee" from 2026-04-14',
     })
   })
@@ -8048,6 +8762,7 @@ describe('CLI tool validation regressions', () => {
     )
     expect(result).toEqual({
       success: true,
+      dryRun: false,
       message: 'Deleted transfer: $25.00 "Move cash" from 2026-04-14',
     })
   })

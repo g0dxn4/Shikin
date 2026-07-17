@@ -309,6 +309,10 @@ type ResolvedAccountRow = {
   account_mode?: 'transactional' | 'snapshot_only' | null
 }
 
+export function isAccountWriteEligible(account: { is_archived: unknown }): boolean {
+  return account.is_archived === 0
+}
+
 function resolvedAccount(row: ResolvedAccountRow) {
   return {
     success: true as const,
@@ -344,7 +348,7 @@ function resolveAccountAlias(account: string) {
     }
   }
 
-  if (accounts[0].is_archived === 1) {
+  if (!isAccountWriteEligible(accounts[0])) {
     return archivedAccountFailure(`alias "${normalizedAlias}"`)
   }
 
@@ -365,7 +369,7 @@ function resolveAccountReference(account: string) {
       [account, account]
     ) ?? []
 
-  const activeAccounts = accounts.filter((row) => row.is_archived !== 1)
+  const activeAccounts = accounts.filter(isAccountWriteEligible)
 
   if (activeAccounts.length === 1) {
     return resolvedAccount(activeAccounts[0])
@@ -400,7 +404,7 @@ export function resolveAccountId(accountId?: string, account?: string) {
       return { success: false as const, message: `Account ${accountId} not found.` }
     }
 
-    if (accounts[0].is_archived === 1) {
+    if (!isAccountWriteEligible(accounts[0])) {
       return archivedAccountFailure(accountId)
     }
 
@@ -471,21 +475,8 @@ export function unknownTransactionCurrencyFailure(tx: { id: string; description?
   }
 }
 
-export function unavailableToolResult(message: string) {
-  return {
-    success: false as const,
-    message,
-    error: message,
-    errorType: 'unavailable_error' as const,
-  }
-}
-
 export function normalizeCurrencyCode(value: string | null | undefined) {
   return typeof value === 'string' ? value.trim().toUpperCase() : ''
-}
-
-export function recurringRuleAccountCurrencyChangeBlockedMessage(ruleCount: number) {
-  return `Cannot change this account currency while ${ruleCount} recurring rule(s) still point at the account. Repair, move, or recreate those recurring rules first so scheduled amounts do not silently change meaning.`
 }
 
 export function invalidAccountCurrencyMessage(accountId: string) {

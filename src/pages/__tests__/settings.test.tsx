@@ -411,7 +411,7 @@ describe('SettingsPage', () => {
   })
 
   describe('destructive import confirmation', () => {
-    it('opens confirmation even when pre-import backup export fails', async () => {
+    it('cancels import when the required pre-import backup fails', async () => {
       const user = userEvent.setup()
       mockExportDatabaseSnapshot.mockRejectedValueOnce(new Error('backup failed'))
 
@@ -422,8 +422,9 @@ describe('SettingsPage', () => {
 
       await user.upload(fileInput, file)
 
-      expect(await screen.findByText('Destructive Import Confirmation')).toBeInTheDocument()
-      expect(mockExportDatabaseSnapshot).toHaveBeenCalledOnce()
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('backup failed'))
+      expect(screen.queryByText('Destructive Import Confirmation')).not.toBeInTheDocument()
+      expect(mockImportDatabaseSnapshot).not.toHaveBeenCalled()
     })
 
     it('shows confirmation dialog when import file is selected', async () => {

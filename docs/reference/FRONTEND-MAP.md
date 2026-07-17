@@ -170,8 +170,8 @@ Practical map of the current React frontend for hardening and follow-up work.
 - **E2E (Playwright, `e2e/*.spec.ts`):**
   - navigation/layout/dashboard/settings/accounts/transactions/budgets/i18n/responsive.
 - **Notably thinner coverage (current):**
-  - No dedicated page tests for goals, debt-payoff, forecast, net-worth, spending-insights/heatmap.
-  - No dedicated store tests for `budget-store`, `investment-store`, `net-worth-store`, `recap-store`, `spending-insights-store`.
+  - Forecast, net-worth, and spending-insights/heatmap pages have less direct page coverage than core workflows.
+  - `recap-store` and `spending-insights-store` have less direct store coverage than the financial CRUD stores.
 
 ### Browser bridge regression coverage (frontend hardening workflow)
 

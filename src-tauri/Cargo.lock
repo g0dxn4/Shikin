@@ -4093,6 +4093,7 @@ name = "shikin"
 version = "1.0.10"
 dependencies = [
  "dirs",
+ "libsqlite3-sys",
  "log",
  "serde",
  "serde_json",

@@ -4,10 +4,14 @@ const mockStore = vi.hoisted(() => {
   const data: Record<string, unknown> = {}
   return {
     get: vi.fn(async (key: string) => data[key] ?? null),
-    set: vi.fn(async (key: string, value: unknown) => { data[key] = value }),
+    set: vi.fn(async (key: string, value: unknown) => {
+      data[key] = value
+    }),
     save: vi.fn(async () => {}),
     _data: data,
-    _clear: () => { Object.keys(data).forEach((k) => delete data[k]) },
+    _clear: () => {
+      Object.keys(data).forEach((k) => delete data[k])
+    },
   }
 })
 
@@ -30,9 +34,21 @@ const mockScore = {
   grade: 'B' as const,
   subscores: [
     { name: 'Savings', score: 80, weight: 0.3, description: 'Savings rate', tip: 'Save more' },
-    { name: 'Spending', score: 70, weight: 0.25, description: 'Spending patterns', tip: 'Track spending' },
+    {
+      name: 'Spending',
+      score: 70,
+      weight: 0.25,
+      description: 'Spending patterns',
+      tip: 'Track spending',
+    },
     { name: 'Debt', score: 90, weight: 0.2, description: 'Debt management', tip: 'Keep it up' },
-    { name: 'Budget', score: 65, weight: 0.15, description: 'Budget adherence', tip: 'Stick to budget' },
+    {
+      name: 'Budget',
+      score: 65,
+      weight: 0.15,
+      description: 'Budget adherence',
+      tip: 'Stick to budget',
+    },
     { name: 'Goals', score: 75, weight: 0.1, description: 'Goal progress', tip: 'Stay focused' },
   ],
   trend: 'improving' as const,
@@ -73,9 +89,7 @@ describe('health-store', () => {
     })
 
     it('updates existing snapshot for same month', async () => {
-      const existingHistory = [
-        { date: new Date().toISOString(), score: 70 },
-      ]
+      const existingHistory = [{ date: new Date().toISOString(), score: 70 }]
       useHealthStore.setState({ history: existingHistory, _historyLoaded: true })
 
       const updatedScore = { ...mockScore, overall: 82 }
@@ -93,10 +107,7 @@ describe('health-store', () => {
 
       await useHealthStore.getState().calculateScore()
 
-      expect(mockStore.set).toHaveBeenCalledWith(
-        'health_score_history',
-        expect.any(Array)
-      )
+      expect(mockStore.set).toHaveBeenCalledWith('health_score_history', expect.any(Array))
     })
 
     it('keeps only last 12 months of history', async () => {

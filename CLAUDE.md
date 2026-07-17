@@ -17,7 +17,7 @@ shikin/
 - **Frontend**: React 19 + TypeScript + Tailwind v4 + shadcn/ui
 - **Desktop**: Tauri v2 (Rust)
 - **Database**: SQLite via shared storage (`~/.local/share/com.asf.shikin/`)
-- **CLI/MCP**: 90 shared CLI/MCP tools via commander CLI + MCP server, all available end-to-end
+- **CLI/MCP**: 91 shared CLI/MCP tools via commander CLI + MCP server, all available end-to-end
 - **State**: Zustand stores
 - **Testing**: Vitest + Testing Library + Playwright (e2e)
 - **Package Manager**: pnpm
@@ -29,10 +29,11 @@ pnpm install
 pnpm dev              # starts scripts/dev.mjs orchestration:
                       # - browser data-server on 127.0.0.1:1480
                       # - Vite on 1420
-                      # per-run bridge token is injected into SHIKIN_DATA_SERVER_BRIDGE_TOKEN / VITE_DATA_SERVER_BRIDGE_TOKEN
+                      # browser development uses a temporary isolated database by default
+                      # set SHIKIN_BROWSER_USE_REAL_DATA=1 to opt into the real app database
 pnpm build:tauri      # Build Tauri desktop binary
-pnpm test:run         # Unit tests (339 tests, 40 files)
-pnpm lint && pnpm typecheck  # Lint + type check
+pnpm test:run         # Unit and integration tests
+pnpm check            # Lint + type check + format check
 ```
 
 ## CLI & MCP Server
@@ -66,7 +67,7 @@ pnpm exec tsx src/mcp-server.ts
 }
 ```
 
-### 90 Shared CLI/MCP Tools
+### 91 Shared CLI/MCP Tools
 
 Transaction, Account, Category, Analytics, Budget, Goal, Subscription, Investment, Recurring, Notebook, Intelligence, Debt, Currency, Backup/Restore, Audit, and Assistant Context tools — all available end-to-end against local data.
 
@@ -84,7 +85,7 @@ sudo dpkg -i src-tauri/target/release/bundle/deb/Shikin_*.deb
 
 ## Releasing & Auto-Updates
 
-1. Bump release versions in all required files: `package.json`, `cli/package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` (`shikin` package entry), and `cli/src/mcp-server.ts`
+1. Bump release versions in all required files: `package.json`, `cli/package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` (`shikin` package entry), and `cli/src/version.ts`
 2. Run `pnpm release:preflight` before tagging to verify version parity + updater config assumptions (including JS/Rust Tauri plugin major/minor parity)
 3. Tag and push only after preflight passes: `git tag vX.X.X && git push origin vX.X.X`
 4. GitHub Actions builds, signs, publishes to GitHub Releases
@@ -104,8 +105,8 @@ sudo dpkg -i src-tauri/target/release/bundle/deb/Shikin_*.deb
 
 ## CI/CD
 
-- **CI** (`.github/workflows/ci.yml`): release preflight → lint → typecheck → unit tests → build → e2e
-- **Release** (`.github/workflows/release.yml`): release preflight → lint → typecheck → tests → cross-platform Tauri build + sign + publish
+- **CI** (`.github/workflows/ci.yml`): release preflight → `pnpm check` → unit tests → app/CLI builds → e2e
+- **Release** (`.github/workflows/release.yml`): release preflight → `pnpm check` → tests → CLI build → cross-platform Tauri app build + sign + publish
 
 ## Key Conventions
 

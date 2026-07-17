@@ -1,10 +1,12 @@
+mod database_snapshot;
+
 use std::{
     ffi::{OsStr, OsString},
     fs, io,
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
     sync::atomic::{AtomicBool, Ordering},
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 
 #[cfg(unix)]
@@ -28,6 +30,7 @@ const SETTINGS_FILE_NAME: &str = "settings.json";
 const CLOSE_TO_TRAY_KEY: &str = "close_to_tray_enabled";
 const DEFAULT_CLOSE_TO_TRAY_ENABLED: bool = true;
 const MAIN_WINDOW_LABEL: &str = "main";
+const DATABASE_TRANSACTION_TTL: Duration = Duration::from_secs(120);
 const TRAY_MENU_SHOW_ID: &str = "show_shikin";
 const TRAY_MENU_QUIT_ID: &str = "quit_shikin";
 
@@ -40,6 +43,7 @@ struct ShikinDbState {
 struct ShikinDbInner {
     connection: Option<SqliteConnection>,
     active_transaction_id: Option<String>,
+    transaction_generation: u64,
 }
 
 #[derive(Deserialize)]
@@ -478,7 +482,27 @@ async fn shikin_db_tx_begin(
     execute_on_shikin_connection(&mut connection, "BEGIN IMMEDIATE".to_string(), vec![]).await?;
 
     guard.connection = Some(connection);
-    guard.active_transaction_id = Some(transaction_id);
+    guard.active_transaction_id = Some(transaction_id.clone());
+    guard.transaction_generation = guard.transaction_generation.wrapping_add(1);
+    let generation = guard.transaction_generation;
+    drop(guard);
+
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(DATABASE_TRANSACTION_TTL).await;
+        let state = app.state::<ShikinDbState>();
+        let mut guard = state.inner.lock().await;
+        if guard.active_transaction_id.as_deref() != Some(transaction_id.as_str())
+            || guard.transaction_generation != generation
+        {
+            return;
+        }
+        if let Some(connection) = guard.connection.as_mut() {
+            let _ = execute_on_shikin_connection(connection, "ROLLBACK".to_string(), vec![]).await;
+        }
+        guard.active_transaction_id = None;
+        guard.connection = None;
+    });
+
     Ok(())
 }
 
@@ -737,13 +761,15 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
             TRAY_MENU_QUIT_ID => app.exit(0),
             _ => {}
         })
-        .on_tray_icon_event(|tray, event| match event {
-            TrayIconEvent::Click {
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
-            } => show_main_window(tray.app_handle()),
-            _ => {}
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
         });
 
     if let Some(icon) = app.default_window_icon().cloned() {
@@ -780,6 +806,8 @@ pub fn run() {
             shikin_db_tx_query,
             shikin_db_tx_commit,
             shikin_db_tx_rollback,
+            database_snapshot::shikin_db_create_snapshot,
+            database_snapshot::shikin_db_restore_snapshot,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

@@ -2,7 +2,7 @@
 import { pathToFileURL } from 'node:url'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { COMMAND_CATALOG_VERSION } from './contracts.js'
+import { APPLICATION_VERSION } from './version.js'
 import { z } from 'zod'
 import { tools, type ToolDefinition } from './tools.js'
 import { query, close } from './database.js'
@@ -357,7 +357,7 @@ export function registerMcpResources(server: Pick<McpServer, 'resource'>): void 
 export function createMcpServer(toolDefinitions: ToolDefinition[] = tools): McpServer {
   const server = new McpServer({
     name: 'shikin',
-    version: COMMAND_CATALOG_VERSION,
+    version: APPLICATION_VERSION,
   })
 
   registerMcpTools(server, toolDefinitions)

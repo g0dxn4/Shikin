@@ -48,14 +48,14 @@ jobs:
       - name: Release preflight
         run: pnpm release:preflight
 
-      - name: Lint
-        run: pnpm lint
-
-      - name: Type check
-        run: pnpm typecheck
+      - name: Lint, type check, and format check
+        run: pnpm check
 
       - name: Unit tests
         run: pnpm test:run
+
+      - name: CLI build
+        run: pnpm build:cli
 
   build:
     needs: checks
@@ -128,6 +128,19 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Publish checksummed CLI source workspace
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          asset="shikin-cli-source-${GITHUB_REF_NAME}.tar.gz"
+          git archive --format=tar.gz --prefix="Shikin-${GITHUB_REF_NAME#v}/" -o "$asset" "$GITHUB_SHA"
+          sha256sum "$asset" > "${asset}.sha256"
+          gh release upload "$GITHUB_REF_NAME" "$asset" "${asset}.sha256" \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
       - name: Verify draft release assets are complete
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -148,7 +161,8 @@ jobs:
           )
           release = json.loads(result.stdout)
           asset_names = {asset['name'] for asset in release['assets']}
-          missing_assets = {'latest.json'} - asset_names
+          source_asset = f'shikin-cli-source-{tag}.tar.gz'
+          missing_assets = {'latest.json', source_asset, f'{source_asset}.sha256'} - asset_names
 
           if not release['isDraft']:
             print('Release is already published before finalization step.', file=sys.stderr)

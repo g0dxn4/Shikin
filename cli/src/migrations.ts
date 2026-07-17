@@ -15,4 +15,5 @@ export const CLI_DATABASE_MIGRATIONS = [
   '017_investment_type_cetes',
   '018_placeholder_transactions',
   '019_financial_semantics',
+  '020_quote_recurrence_import_identity',
 ] as const

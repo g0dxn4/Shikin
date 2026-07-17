@@ -10,11 +10,7 @@ vi.mock('@/lib/ulid', () => ({
 }))
 
 import { query, execute } from '@/lib/database'
-import {
-  suggestCategory,
-  learnFromTransaction,
-  normalizePattern,
-} from '../auto-categorize'
+import { suggestCategory, learnFromTransaction, normalizePattern } from '../auto-categorize'
 
 const mockQuery = vi.mocked(query)
 const mockExecute = vi.mocked(execute)
@@ -106,9 +102,9 @@ describe('auto-categorize', () => {
     })
 
     it('returns null when no match found', async () => {
-      mockQuery.mockResolvedValueOnce([])  // no exact
-      mockQuery.mockResolvedValueOnce([])  // no partial
-      mockQuery.mockResolvedValueOnce([])  // no historical
+      mockQuery.mockResolvedValueOnce([]) // no exact
+      mockQuery.mockResolvedValueOnce([]) // no partial
+      mockQuery.mockResolvedValueOnce([]) // no historical
 
       const result = await suggestCategory('Random Unknown Merchant')
       expect(result).toBeNull()

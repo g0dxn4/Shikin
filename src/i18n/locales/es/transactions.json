@@ -82,6 +82,9 @@
       "descriptionPlaceholder": "ej. Renta mensual",
       "amount": "Monto",
       "frequency": "Frecuencia",
+      "scheduleDay": "Programación mensual",
+      "sameDayOfMonth": "Mismo día del mes",
+      "lastDayOfMonth": "Último día del mes",
       "nextDate": "Próxima Fecha",
       "endDate": "Fecha Final",
       "endDatePlaceholder": "Opcional"

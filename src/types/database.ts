@@ -17,8 +17,6 @@ export type LedgerTreatment = 'normal' | 'staged_no_balance_impact'
 export type ReportingTreatment = 'normal' | 'exclude_from_cashflow'
 export type TransactionKind = 'standard' | 'reconciliation_bridge' | 'archived_transfer_mirror'
 export type PlaceholderTransactionStatus = 'unresolved' | 'resolved' | 'split' | 'cancelled'
-export type CategorySuggestionStatus = 'pending' | 'approved' | 'rejected'
-export type CreditCardStatementStatus = 'open' | 'partial' | 'paid' | 'overdue'
 
 export interface Account {
   id: ULID
@@ -79,26 +77,11 @@ export interface Transaction {
   resolved_by_transaction_id?: ULID | null
   placeholder_reason?: string | null
   placeholder_parent_transaction_id?: ULID | null
+  import_source?: string | null
+  import_external_id?: string | null
+  import_fingerprint?: string | null
   created_at: DateTimeStr
   updated_at: DateTimeStr
-}
-
-export interface AccountReconciliation {
-  id: ULID
-  account_id: ULID
-  reconciliation_date: DateStr
-  actual_balance: Money
-  stored_balance_before: Money
-  ledger_balance_before: Money
-  ledger_balance_after: Money
-  adjustment_amount: Money
-  adjustment_transaction_id: ULID | null
-  staging_batch_id: string | null
-  statement_start_date: DateStr | null
-  statement_end_date: DateStr | null
-  source: string | null
-  note: string | null
-  created_at: DateTimeStr
 }
 
 export interface Receivable {
@@ -166,6 +149,7 @@ export interface StockPrice {
   symbol: string
   price: Money
   currency: CurrencyCode
+  quote_currency: CurrencyCode
   date: DateStr
   created_at: DateTimeStr
 }
@@ -186,6 +170,8 @@ export interface RecurringRule {
   tags: string
   notes: string | null
   active: number
+  anchor_kind: 'fixed_day' | 'end_of_month' | null
+  anchor_day: number | null
   created_at: DateTimeStr
   updated_at: DateTimeStr
 }
@@ -211,74 +197,6 @@ export interface CategoryRule {
   subcategory_id: ULID | null
   confidence: number
   hit_count: number
-  created_at: DateTimeStr
-  updated_at: DateTimeStr
-}
-
-export interface AuditLog {
-  id: ULID
-  entity: string
-  entity_id: string | null
-  action: string
-  before_json: string | null
-  after_json: string | null
-  source: string | null
-  note: string | null
-  created_at: DateTimeStr
-}
-
-export interface CashflowBucket {
-  id: ULID
-  name: string
-  description: string | null
-  target_amount: Money | null
-  balance: Money
-  currency: CurrencyCode
-  sort_order: number
-  is_active: number
-  created_at: DateTimeStr
-  updated_at: DateTimeStr
-}
-
-export interface CashflowBucketAllocation {
-  id: ULID
-  bucket_id: ULID
-  transaction_id: ULID | null
-  amount: Money
-  currency: CurrencyCode
-  allocation_date: DateStr
-  source: string | null
-  note: string | null
-  created_at: DateTimeStr
-}
-
-export interface CategorySuggestion {
-  id: ULID
-  transaction_id: ULID | null
-  description: string
-  suggested_category_id: ULID | null
-  suggested_subcategory_id: ULID | null
-  confidence: number
-  status: CategorySuggestionStatus
-  source: string | null
-  note: string | null
-  created_at: DateTimeStr
-  reviewed_at: DateTimeStr | null
-}
-
-export interface CreditCardStatement {
-  id: ULID
-  account_id: ULID
-  statement_start_date: DateStr | null
-  statement_end_date: DateStr
-  due_date: DateStr
-  statement_balance: Money
-  minimum_payment: Money
-  paid_amount: Money
-  currency: CurrencyCode
-  status: CreditCardStatementStatus
-  source: string | null
-  note: string | null
   created_at: DateTimeStr
   updated_at: DateTimeStr
 }

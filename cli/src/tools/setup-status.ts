@@ -297,7 +297,7 @@ const setupStatus: ToolDefinition = {
         details: {
           available: hasInvestmentSupport,
           availableTools: [
-            ...(hasInvestmentSupport ? ['manage-investment'] : []),
+            ...(hasInvestmentSupport ? ['list-investments', 'manage-investment'] : []),
             ...(hasInvestmentSupport && hasStockPriceSupport ? ['generate-portfolio-review'] : []),
           ],
           stockPricesAvailable: hasStockPriceSupport,
@@ -305,7 +305,7 @@ const setupStatus: ToolDefinition = {
             'Stored holdings and portfolio review only; this setup check does not expand investment features.',
         },
         hint: hasInvestmentSupport
-          ? 'Run shikin manage-investment for holdings or shikin generate-portfolio-review for a stored-holdings review.'
+          ? 'Run shikin list-investments to inspect holdings, shikin manage-investment to change them, or shikin generate-portfolio-review for a stored-holdings review.'
           : 'Run the current Shikin database migrations so investment support is available.',
       },
       {

@@ -1,4 +1,4 @@
-import { existsSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import Database from 'better-sqlite3'
 import { PRIVATE_FILE_MODE, hardenPathMode } from './app-data-dir.mjs'
 
@@ -77,37 +77,60 @@ function validateShikinDatabase(database) {
   }
 }
 
-function validateImportedDatabaseBuffer(buffer, tempDbPath) {
-  ensureSqliteDatabaseBuffer(buffer)
-
-  if (existsSync(tempDbPath)) {
-    unlinkSync(tempDbPath)
-  }
-  removeSqliteSidecarFiles(tempDbPath)
-  writeFileSync(tempDbPath, buffer, { mode: PRIVATE_FILE_MODE })
-  hardenPathMode(tempDbPath, PRIVATE_FILE_MODE)
-
-  let tempDb
+function validateDatabaseFile(dbPath, label = dbPath) {
+  let database
   try {
-    tempDb = new Database(tempDbPath, { readonly: true, fileMustExist: true })
-    const integrityCheck = tempDb.pragma('integrity_check', { simple: true })
+    database = new Database(dbPath, { readonly: true, fileMustExist: true })
+    const integrityCheck = database.pragma('integrity_check', { simple: true })
     if (integrityCheck !== 'ok') {
-      throw new Error(`Imported SQLite database failed integrity check: ${integrityCheck}`)
+      throw new Error(`SQLite database failed integrity check (${label}): ${integrityCheck}`)
     }
-    tempDb.pragma('foreign_keys = ON')
-    const foreignKeyViolations = tempDb.pragma('foreign_key_check')
+    database.pragma('foreign_keys = ON')
+    const foreignKeyViolations = database.pragma('foreign_key_check')
     if (foreignKeyViolations.length > 0) {
       throw new Error(
-        `Imported SQLite database failed foreign key check: ${JSON.stringify(foreignKeyViolations[0])}`
+        `SQLite database failed foreign key check (${label}): ${JSON.stringify(foreignKeyViolations[0])}`
       )
     }
-    validateShikinDatabase(tempDb)
+    validateShikinDatabase(database)
   } finally {
-    tempDb?.close()
+    database?.close()
   }
 }
 
-export function importDatabaseBuffer({
+function validateImportedDatabaseBuffer(buffer, tempDbPath) {
+  ensureSqliteDatabaseBuffer(buffer)
+
+  if (existsSync(tempDbPath)) unlinkSync(tempDbPath)
+  removeSqliteSidecarFiles(tempDbPath)
+  writeFileSync(tempDbPath, buffer, { mode: PRIVATE_FILE_MODE })
+  hardenPathMode(tempDbPath, PRIVATE_FILE_MODE)
+  validateDatabaseFile(tempDbPath, 'import candidate')
+}
+
+async function backupInto(sourceDatabase, destinationPath) {
+  if (existsSync(destinationPath)) unlinkSync(destinationPath)
+  removeSqliteSidecarFiles(destinationPath)
+  await sourceDatabase.backup(destinationPath)
+  hardenPathMode(destinationPath, PRIVATE_FILE_MODE)
+}
+
+export async function exportDatabaseBuffer({
+  db,
+  dbPath,
+  tempDbPath = `${dbPath}.export-${process.pid}-${Date.now()}`,
+}) {
+  try {
+    await backupInto(db, tempDbPath)
+    validateDatabaseFile(tempDbPath, 'export snapshot')
+    return readFileSync(tempDbPath)
+  } finally {
+    if (existsSync(tempDbPath)) unlinkSync(tempDbPath)
+    removeSqliteSidecarFiles(tempDbPath)
+  }
+}
+
+export async function importDatabaseBuffer({
   db,
   dbPath,
   buffer,
@@ -116,36 +139,43 @@ export function importDatabaseBuffer({
   const backupPath = `${dbPath}.backup-${Date.now()}`
   let backupCreated = false
 
-  function restoreBackup() {
+  async function restoreBackup() {
     if (!backupCreated || !existsSync(backupPath)) return
     removeSqliteSidecarFiles(dbPath)
-    if (existsSync(dbPath)) {
-      unlinkSync(dbPath)
+    const rollbackDb = new Database(backupPath, { readonly: true, fileMustExist: true })
+    try {
+      await rollbackDb.backup(dbPath)
+      hardenPathMode(dbPath, PRIVATE_FILE_MODE)
+    } finally {
+      rollbackDb.close()
     }
-    renameSync(backupPath, dbPath)
-    hardenPathMode(dbPath, PRIVATE_FILE_MODE)
   }
 
   try {
     validateImportedDatabaseBuffer(buffer, tempDbPath)
     checkpointWal(db, { requireComplete: true })
-    db.close()
-    removeSqliteSidecarFiles(dbPath)
     if (existsSync(dbPath)) {
-      renameSync(dbPath, backupPath)
+      await backupInto(db, backupPath)
       backupCreated = true
     }
-    renameSync(tempDbPath, dbPath)
-    hardenPathMode(dbPath, PRIVATE_FILE_MODE)
+    db.close()
+    removeSqliteSidecarFiles(dbPath)
 
+    const candidateDb = new Database(tempDbPath, { readonly: true, fileMustExist: true })
+    try {
+      await candidateDb.backup(dbPath)
+      hardenPathMode(dbPath, PRIVATE_FILE_MODE)
+    } finally {
+      candidateDb.close()
+    }
+
+    validateDatabaseFile(dbPath, 'restored database')
     return { backupPath: backupCreated ? backupPath : null, restoreBackup }
   } catch (error) {
-    restoreBackup()
+    await restoreBackup()
     throw error
   } finally {
-    if (existsSync(tempDbPath)) {
-      unlinkSync(tempDbPath)
-    }
+    if (existsSync(tempDbPath)) unlinkSync(tempDbPath)
     removeSqliteSidecarFiles(tempDbPath)
   }
 }

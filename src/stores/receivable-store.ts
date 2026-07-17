@@ -7,7 +7,7 @@ import type { Receivable } from '@/types/database'
 import type { CurrencyCode } from '@/types/common'
 import dayjs from 'dayjs'
 
-export type ReceivableStatus = Receivable['status']
+type ReceivableStatus = Receivable['status']
 
 export interface ReceivableWithDetails extends Receivable {
   accountName: string | null
@@ -16,7 +16,7 @@ export interface ReceivableWithDetails extends Receivable {
   remainingAmount: number
 }
 
-export interface ReceivableFormData {
+interface ReceivableFormData {
   payer: string
   amount: number
   currency: CurrencyCode
@@ -102,7 +102,7 @@ export const useReceivableStore = create<ReceivableState>((set, get) => ({
             'SELECT currency, is_archived FROM accounts WHERE id = ? LIMIT 1',
             [data.accountId]
           )
-          if (!accounts[0] || accounts[0].is_archived === 1) {
+          if (!accounts[0] || accounts[0].is_archived !== 0) {
             throw new Error('The linked account is unavailable or archived.')
           }
           if (accounts[0].currency.trim().toUpperCase() !== data.currency.trim().toUpperCase()) {
@@ -171,7 +171,7 @@ export const useReceivableStore = create<ReceivableState>((set, get) => ({
             'SELECT currency, is_archived FROM accounts WHERE id = ? LIMIT 1',
             [data.accountId]
           )
-          if (!accounts[0] || accounts[0].is_archived === 1) {
+          if (!accounts[0] || accounts[0].is_archived !== 0) {
             throw new Error('The linked account is unavailable or archived.')
           }
           if (accounts[0].currency.trim().toUpperCase() !== normalizedCurrency) {

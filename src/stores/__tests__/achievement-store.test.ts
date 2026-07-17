@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const { mockCheckAchievements, mockComputeStreak, mockGetAllAchievements, mockDismissAchievement } = vi.hoisted(() => ({
-  mockCheckAchievements: vi.fn(),
-  mockComputeStreak: vi.fn(),
-  mockGetAllAchievements: vi.fn(),
-  mockDismissAchievement: vi.fn(),
-}))
+const { mockCheckAchievements, mockComputeStreak, mockGetAllAchievements, mockDismissAchievement } =
+  vi.hoisted(() => ({
+    mockCheckAchievements: vi.fn(),
+    mockComputeStreak: vi.fn(),
+    mockGetAllAchievements: vi.fn(),
+    mockDismissAchievement: vi.fn(),
+  }))
 
 vi.mock('@/lib/achievement-service', () => ({
   checkAchievements: mockCheckAchievements,
@@ -60,7 +61,11 @@ describe('achievement-store', () => {
         ],
       })
 
-      mockComputeStreak.mockResolvedValueOnce({ currentStreak: 3, longestStreak: 3, lastLoggedDate: null })
+      mockComputeStreak.mockResolvedValueOnce({
+        currentStreak: 3,
+        longestStreak: 3,
+        lastLoggedDate: null,
+      })
       mockCheckAchievements.mockResolvedValueOnce([
         { id: 'savings_star', unlockedAt: '2026-03-17T00:00:00Z', dismissed: false },
       ])
@@ -76,12 +81,14 @@ describe('achievement-store', () => {
 
     it('filters out dismissed entries from preserved newlyUnlocked', async () => {
       useAchievementStore.setState({
-        newlyUnlocked: [
-          { id: 'first_steps', unlockedAt: '2026-03-10T00:00:00Z', dismissed: true },
-        ],
+        newlyUnlocked: [{ id: 'first_steps', unlockedAt: '2026-03-10T00:00:00Z', dismissed: true }],
       })
 
-      mockComputeStreak.mockResolvedValueOnce({ currentStreak: 1, longestStreak: 1, lastLoggedDate: null })
+      mockComputeStreak.mockResolvedValueOnce({
+        currentStreak: 1,
+        longestStreak: 1,
+        lastLoggedDate: null,
+      })
       mockCheckAchievements.mockResolvedValueOnce([])
       mockGetAllAchievements.mockReturnValueOnce([])
 
@@ -91,7 +98,11 @@ describe('achievement-store', () => {
     })
 
     it('sets isLoading during check', async () => {
-      mockComputeStreak.mockResolvedValueOnce({ currentStreak: 0, longestStreak: 0, lastLoggedDate: null })
+      mockComputeStreak.mockResolvedValueOnce({
+        currentStreak: 0,
+        longestStreak: 0,
+        lastLoggedDate: null,
+      })
       mockCheckAchievements.mockResolvedValueOnce([])
       mockGetAllAchievements.mockReturnValueOnce([])
 

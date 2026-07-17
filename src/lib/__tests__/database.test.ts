@@ -35,6 +35,7 @@ function mockTauriDatabaseModules() {
     '017_investment_type_cetes',
     '018_placeholder_transactions',
     '019_financial_semantics',
+    '020_quote_recurrence_import_identity',
   ].map((name) => ({ name }))
   const tableRows = [
     '_migrations',
@@ -100,6 +101,12 @@ function mockTauriDatabaseModules() {
     'staging_batch_id',
     'reconciliation_id',
     'matched_transaction_id',
+    'import_source',
+    'import_external_id',
+    'import_fingerprint',
+    'quote_currency',
+    'anchor_kind',
+    'anchor_day',
     'billing_cycle',
     'next_billing_date',
     'period',

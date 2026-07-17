@@ -10,7 +10,8 @@
     "noLiabilities": "No liabilities. Nice!",
     "addAccountsPrompt": "Add accounts to see your asset and liability breakdown.",
     "noHistory": "No history yet. Add accounts to start tracking net worth.",
-    "firstSnapshot": "First snapshot recorded. Come back tomorrow for trend data."
+    "firstSnapshot": "First snapshot recorded. Come back tomorrow for trend data.",
+    "incompleteTotals": "Totals are unavailable until exchange rates are available for: {{currencies}}."
   },
   "spendingInsights": {
     "title": "Spending Insights",
@@ -70,6 +71,11 @@
     "title": "Reports",
     "description": "A monthly operating view from your local accounts, budgets, and transactions.",
     "cash": "Cash",
+    "cashUnavailable": "Cash total unavailable. Missing exchange rates for {{currencies}}.",
+    "cashInvalidData": "Cash total unavailable. Invalid currency data for {{details}}.",
+    "invalidRate": "exchange rate {{from}} → {{to}} ({{rate}})",
+    "preferredCurrency": "Preferred currency",
+    "blankCurrency": "blank currency",
     "income": "Income",
     "expenses": "Expenses",
     "netFlow": "Net Flow",

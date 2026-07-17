@@ -167,10 +167,7 @@ export function calculatePayoffPlan(
 /**
  * Compare snowball and avalanche strategies side-by-side.
  */
-export function compareStrategies(
-  debts: Debt[],
-  extraPayment: Money = 0
-): StrategyComparison {
+export function compareStrategies(debts: Debt[], extraPayment: Money = 0): StrategyComparison {
   const snowball = calculatePayoffPlan(debts, 'snowball', extraPayment)
   const avalanche = calculatePayoffPlan(debts, 'avalanche', extraPayment)
 

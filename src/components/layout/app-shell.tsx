@@ -112,7 +112,10 @@ export function AppShell() {
   }))
 
   useEffect(() => {
-    mainRef.current?.focus()
+    const main = mainRef.current
+    if (!main) return
+    main.scrollTop = 0
+    main.focus({ preventScroll: true })
   }, [pathname])
 
   return (
@@ -127,6 +130,7 @@ export function AppShell() {
       <div className="flex min-h-0 flex-1 gap-0 overflow-hidden p-0 md:gap-2 md:p-2">
         <Sidebar />
         <main
+          key={pathname}
           id="main-content"
           ref={mainRef}
           tabIndex={-1}

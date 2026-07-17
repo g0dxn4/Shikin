@@ -36,7 +36,12 @@ export function SpendingTrendPanel({ trend, displayCurrency, notice }: SpendingT
         </div>
       )}
 
-      <div className="h-72" role="img" aria-label={t('analytics.trendChartLabel')}>
+      <div
+        className="h-72"
+        role="img"
+        aria-label={t('analytics.trendChartLabel')}
+        aria-describedby="spending-trend-data"
+      >
         <SafeChart>
           <ComposedChart data={data}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
@@ -81,6 +86,28 @@ export function SpendingTrendPanel({ trend, displayCurrency, notice }: SpendingT
         </SafeChart>
       </div>
 
+      <table id="spending-trend-data" className="sr-only">
+        <caption>{t('analytics.trendChartLabel')}</caption>
+        <thead>
+          <tr>
+            <th>{t('analytics.month')}</th>
+            <th>{t('analytics.income')}</th>
+            <th>{t('analytics.expenses')}</th>
+            <th>{t('analytics.net')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((month) => (
+            <tr key={month.key}>
+              <th>{month.label}</th>
+              <td>{formatMoney(month.income, displayCurrency)}</td>
+              <td>{formatMoney(month.expenses, displayCurrency)}</td>
+              <td>{formatMoney(month.net, displayCurrency)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
       <div className="grid grid-cols-3 gap-3">
         <MetricPill
           label={t('analytics.income')}
@@ -100,26 +127,18 @@ export function SpendingTrendPanel({ trend, displayCurrency, notice }: SpendingT
       </div>
 
       {!hasData && (
-        <p className="text-muted-foreground text-center text-sm">
-          {t('analytics.noEligibleData')}
-        </p>
+        <p className="text-muted-foreground text-center text-sm">{t('analytics.noEligibleData')}</p>
       )}
     </div>
   )
 }
 
-function MetricPill({
-  label,
-  value,
-  color,
-}: {
-  label: string
-  value: string
-  color?: string
-}) {
+function MetricPill({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <div className="rounded-2xl border border-white/[0.06] bg-white/[0.035] p-3">
-      <p className="text-muted-foreground text-[10px] font-bold tracking-wider uppercase">{label}</p>
+      <p className="text-muted-foreground text-[10px] font-bold tracking-wider uppercase">
+        {label}
+      </p>
       <p className={cn('font-heading mt-1 text-lg font-bold tracking-tight', color)}>{value}</p>
     </div>
   )

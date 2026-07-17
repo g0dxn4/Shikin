@@ -39,6 +39,8 @@
     "paceChartLabel": "Cumulative spending pace for current month",
     "trendChartLabel": "Income, expenses, and net trend over the last 12 months",
     "categoriesChartLabel": "Monthly spending composition by category",
+    "day": "Day",
+    "month": "Month",
     "spentMtd": "Spent MTD",
     "projectedMonthEnd": "Projected month end",
     "priorAverage": "Prior average",
@@ -55,6 +57,7 @@
     "other": "Other",
     "uncategorized": "Uncategorized",
     "noEligibleData": "No eligible spending data for this period.",
+    "categoriesUnavailable": "Category analytics are unavailable until transaction splits can be loaded",
     "splitIntegrityNotice": "Split totals differ from transaction totals for {{count}} transaction(s)."
   },
   "quickActions": {

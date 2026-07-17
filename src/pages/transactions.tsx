@@ -79,6 +79,7 @@ type ReviewProtectionKey =
   | 'review.protected.linked'
   | 'review.protected.workflow'
   | 'review.protected.transfer'
+  | 'review.protected.placeholderLifecycle'
 
 function formatDateHeader(date: string): string {
   const d = dayjs(date)
@@ -108,16 +109,26 @@ function getTransactionSource(transaction: TransactionWithDetails): string {
   return transaction.source ?? transaction.import_source ?? 'manual'
 }
 
-function getReviewReasons(transaction: TransactionWithDetails): ReviewReason[] {
+function getLedgerAccountLabel(transaction: TransactionWithDetails): string {
+  const source = transaction.account_name ?? '—'
+  if (transaction.type !== 'transfer') return source
+  return `${source} → ${transaction.transfer_to_account_name ?? '—'}`
+}
+
+function getReviewReasons(transaction: TransactionWithDetails, hasSplits: boolean): ReviewReason[] {
   const reasons: ReviewReason[] = []
   if (
     (transaction.type === 'expense' || transaction.type === 'income') &&
-    transaction.category_id === null
+    transaction.category_id === null &&
+    !hasSplits
   ) {
     reasons.push('needs-category')
   }
   if (getTransactionStatus(transaction) === 'pending') reasons.push('pending')
-  if (transaction.is_placeholder === 1 && transaction.placeholder_status === 'unresolved') {
+  if (
+    transaction.is_placeholder === 1 &&
+    (transaction.placeholder_status ?? 'unresolved') === 'unresolved'
+  ) {
     reasons.push('placeholder')
   }
   if (transaction.ledger_treatment === 'staged_no_balance_impact') reasons.push('staged')
@@ -135,6 +146,12 @@ function getReviewProtectionKey(
   if (transaction.matched_transaction_id) return 'review.protected.linked'
   if ((transaction.transaction_kind ?? 'standard') !== 'standard')
     return 'review.protected.workflow'
+  if (
+    transaction.is_placeholder === 1 &&
+    (transaction.placeholder_status ?? 'unresolved') !== 'unresolved'
+  ) {
+    return 'review.protected.placeholderLifecycle'
+  }
   if (transaction.type === 'transfer') return 'review.protected.transfer'
   return null
 }
@@ -184,6 +201,7 @@ export function Transactions() {
     remove,
     isSplit,
     updateReviewFields,
+    splitCategoryIdsByTransaction,
   } = useTransactionStore()
   const { accounts, archivedAccounts, fetch: fetchAccounts } = useAccountStore()
   const { categories, fetch: fetchCategories } = useCategoryStore()
@@ -247,8 +265,20 @@ export function Transactions() {
 
     return transactions.filter((transaction) => {
       if (typeFilter !== 'all' && transaction.type !== typeFilter) return false
-      if (accountFilter !== 'all' && transaction.account_id !== accountFilter) return false
-      if (categoryFilter !== 'all' && transaction.category_id !== categoryFilter) return false
+      if (
+        accountFilter !== 'all' &&
+        transaction.account_id !== accountFilter &&
+        transaction.transfer_to_account_id !== accountFilter
+      ) {
+        return false
+      }
+      if (categoryFilter !== 'all') {
+        const splitCategoryIds = splitCategoryIdsByTransaction.get(transaction.id)
+        const matchesCategory = splitCategoryIds
+          ? splitCategoryIds.has(categoryFilter)
+          : transaction.category_id === categoryFilter
+        if (!matchesCategory) return false
+      }
       if (statusFilter !== 'all' && getTransactionStatus(transaction) !== statusFilter) return false
       if (currencyFilter !== 'all' && transaction.currency !== currencyFilter) return false
 
@@ -268,6 +298,7 @@ export function Transactions() {
         transaction.description.toLowerCase().includes(query) ||
         transaction.category_name?.toLowerCase().includes(query) ||
         transaction.account_name?.toLowerCase().includes(query) ||
+        transaction.transfer_to_account_name?.toLowerCase().includes(query) ||
         getTransactionSource(transaction).toLowerCase().includes(query)
       )
     })
@@ -279,41 +310,45 @@ export function Transactions() {
     customTo,
     dateRange,
     deferredSearchQuery,
+    splitCategoryIdsByTransaction,
     statusFilter,
     transactions,
     typeFilter,
   ])
 
   const reviewTransactions = useMemo(
-    () => filteredTransactions.filter((transaction) => getReviewReasons(transaction).length > 0),
-    [filteredTransactions]
+    () =>
+      filteredTransactions.filter(
+        (transaction) => getReviewReasons(transaction, isSplit(transaction.id)).length > 0
+      ),
+    [filteredTransactions, isSplit]
   )
   const filteredReviewTransactions = useMemo(
     () =>
       reviewFilter === 'all'
         ? reviewTransactions
         : reviewTransactions.filter((transaction) =>
-            getReviewReasons(transaction).includes(reviewFilter)
+            getReviewReasons(transaction, isSplit(transaction.id)).includes(reviewFilter)
           ),
-    [reviewFilter, reviewTransactions]
+    [isSplit, reviewFilter, reviewTransactions]
   )
   const reviewCounts = useMemo(
     () => ({
       all: reviewTransactions.length,
       'needs-category': reviewTransactions.filter((transaction) =>
-        getReviewReasons(transaction).includes('needs-category')
+        getReviewReasons(transaction, isSplit(transaction.id)).includes('needs-category')
       ).length,
       pending: reviewTransactions.filter((transaction) =>
-        getReviewReasons(transaction).includes('pending')
+        getReviewReasons(transaction, isSplit(transaction.id)).includes('pending')
       ).length,
       placeholder: reviewTransactions.filter((transaction) =>
-        getReviewReasons(transaction).includes('placeholder')
+        getReviewReasons(transaction, isSplit(transaction.id)).includes('placeholder')
       ).length,
       staged: reviewTransactions.filter((transaction) =>
-        getReviewReasons(transaction).includes('staged')
+        getReviewReasons(transaction, isSplit(transaction.id)).includes('staged')
       ).length,
     }),
-    [reviewTransactions]
+    [isSplit, reviewTransactions]
   )
 
   const orderedTransactions = useMemo(() => {
@@ -695,6 +730,7 @@ export function Transactions() {
             <LedgerView
               transactions={visibleTransactions}
               sort={ledgerSort}
+              isSplit={isSplit}
               onSort={handleLedgerSort}
               onEdit={(id) => openTransactionDialog(id)}
               onDelete={setDeleteId}
@@ -964,12 +1000,14 @@ function FilterSelect({
 function LedgerView({
   transactions,
   sort,
+  isSplit,
   onSort,
   onEdit,
   onDelete,
 }: {
   transactions: TransactionWithDetails[]
   sort: { field: LedgerSortField; direction: SortDirection }
+  isSplit: (id: string) => boolean
   onSort: (field: LedgerSortField) => void
   onEdit: (id: string) => void
   onDelete: (id: string) => void
@@ -1015,11 +1053,12 @@ function LedgerView({
                       transaction={transaction}
                       onEdit={() => onEdit(transaction.id)}
                       onDelete={() => onDelete(transaction.id)}
+                      canEdit={!isSplit(transaction.id)}
                       compact
                     />
                   </div>
                 </td>
-                <td className="px-3 py-3 text-xs">{transaction.account_name ?? '—'}</td>
+                <td className="px-3 py-3 text-xs">{getLedgerAccountLabel(transaction)}</td>
                 <td className="px-3 py-3 text-xs">{transaction.category_name ?? '—'}</td>
                 <td className="px-3 py-3">
                   <StatusBadge transaction={transaction} />
@@ -1028,12 +1067,12 @@ function LedgerView({
                   <SourceBadge transaction={transaction} />
                 </td>
                 <td className="text-destructive px-3 py-3 text-right font-mono text-xs whitespace-nowrap">
-                  {transaction.type === 'expense'
+                  {transaction.type === 'expense' || transaction.type === 'transfer'
                     ? formatMoney(transaction.amount, transaction.currency)
                     : '—'}
                 </td>
                 <td className="text-success px-4 py-3 text-right font-mono text-xs whitespace-nowrap">
-                  {transaction.type === 'income'
+                  {transaction.type === 'income' || transaction.type === 'transfer'
                     ? formatMoney(transaction.amount, transaction.currency)
                     : '—'}
                 </td>
@@ -1050,13 +1089,14 @@ function LedgerView({
                 <p className="truncate text-sm font-medium">{transaction.description}</p>
                 <p className="text-muted-foreground mt-1 text-xs">
                   {dayjs(transaction.date).format('MMM D, YYYY')} ·{' '}
-                  {transaction.account_name ?? '—'}
+                  {getLedgerAccountLabel(transaction)}
                 </p>
               </div>
               <TransactionActions
                 transaction={transaction}
                 onEdit={() => onEdit(transaction.id)}
                 onDelete={() => onDelete(transaction.id)}
+                canEdit={!isSplit(transaction.id)}
               />
             </div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
@@ -1072,7 +1112,7 @@ function LedgerView({
               <LedgerDetail
                 label={t('ledger.debit')}
                 value={
-                  transaction.type === 'expense'
+                  transaction.type === 'expense' || transaction.type === 'transfer'
                     ? formatMoney(transaction.amount, transaction.currency)
                     : '—'
                 }
@@ -1080,7 +1120,7 @@ function LedgerView({
               <LedgerDetail
                 label={t('ledger.credit')}
                 value={
-                  transaction.type === 'income'
+                  transaction.type === 'income' || transaction.type === 'transfer'
                     ? formatMoney(transaction.amount, transaction.currency)
                     : '—'
                 }
@@ -1220,7 +1260,7 @@ function ReviewView({
             </div>
 
             <div className="mt-3 flex flex-wrap gap-1.5">
-              {getReviewReasons(transaction).map((reason) => (
+              {getReviewReasons(transaction, hasSplits).map((reason) => (
                 <Badge key={reason} variant="secondary" className="text-[10px]">
                   {t(`review.reasons.${reason}`)}
                 </Badge>
@@ -1420,7 +1460,12 @@ function TransactionRow({
         <span className="text-muted-foreground hidden font-mono text-[10px] sm:inline">
           {dayjs(transaction.date).format('MMM D')}
         </span>
-        <TransactionActions transaction={transaction} onEdit={onEdit} onDelete={onDelete} />
+        <TransactionActions
+          transaction={transaction}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          canEdit={!hasSplits}
+        />
       </div>
 
       {expanded && (
@@ -1465,11 +1510,13 @@ function TransactionActions({
   transaction,
   onEdit,
   onDelete,
+  canEdit = true,
   compact = false,
 }: {
   transaction: TransactionWithDetails
   onEdit: () => void
   onDelete: () => void
+  canEdit?: boolean
   compact?: boolean
 }) {
   return (
@@ -1479,15 +1526,17 @@ function TransactionActions({
         compact && 'md:opacity-100'
       )}
     >
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7"
-        onClick={onEdit}
-        aria-label={`Edit ${transaction.description}`}
-      >
-        <Pencil size={12} />
-      </Button>
+      {canEdit && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={onEdit}
+          aria-label={`Edit ${transaction.description}`}
+        >
+          <Pencil size={12} />
+        </Button>
+      )}
       <Button
         variant="ghost"
         size="icon"

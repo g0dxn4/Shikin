@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts'
 import { formatMoney } from '@/lib/money'
 import { CHART_TOOLTIP_STYLE, CHART_ITEM_STYLE, CHART_LABEL_STYLE } from '@/lib/constants'
 import type { PaceResult } from '@/lib/dashboard-analytics'
@@ -38,7 +38,12 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
         </div>
       )}
 
-      <div className="h-72" role="img" aria-label={t('analytics.paceChartLabel')}>
+      <div
+        className="h-72"
+        role="img"
+        aria-label={t('analytics.paceChartLabel')}
+        aria-describedby="spending-pace-data"
+      >
         <SafeChart>
           <LineChart data={data}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
@@ -65,6 +70,7 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
                 return [formatMoney(Number(value), displayCurrency), name]
               }}
             />
+            <Legend wrapperStyle={{ fontSize: 11, color: '#A9A9B4' }} />
             {hasPrevious && (
               <Line
                 type="monotone"
@@ -116,6 +122,36 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
         </SafeChart>
       </div>
 
+      <table id="spending-pace-data" className="sr-only">
+        <caption>{t('analytics.paceChartLabel')}</caption>
+        <thead>
+          <tr>
+            <th>{t('analytics.day')}</th>
+            <th>{t('analytics.currentMonth')}</th>
+            <th>{t('analytics.previousMonth')}</th>
+            <th>{t('analytics.priorMonthsAverage')}</th>
+            <th>{t('analytics.runRate')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((point) => (
+            <tr key={point.day}>
+              <th>{point.day}</th>
+              <td>{point.current === null ? '—' : formatMoney(point.current, displayCurrency)}</td>
+              <td>
+                {point.previous === null ? '—' : formatMoney(point.previous, displayCurrency)}
+              </td>
+              <td>
+                {point.priorAverage === null
+                  ? '—'
+                  : formatMoney(point.priorAverage, displayCurrency)}
+              </td>
+              <td>{point.runRate === null ? '—' : formatMoney(point.runRate, displayCurrency)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <MetricPill
           label={t('analytics.spentMtd')}
@@ -156,7 +192,9 @@ function MetricPill({
 }) {
   return (
     <div className="rounded-2xl border border-white/[0.06] bg-white/[0.035] p-3">
-      <p className="text-muted-foreground text-[10px] font-bold tracking-wider uppercase">{label}</p>
+      <p className="text-muted-foreground text-[10px] font-bold tracking-wider uppercase">
+        {label}
+      </p>
       <p className={cn('font-heading mt-1 text-lg font-bold tracking-tight', color)}>
         {prefix}
         {value}

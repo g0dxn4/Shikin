@@ -136,8 +136,12 @@ describe('buildDashboardAnalytics', () => {
     const transactions: DashboardTransaction[] = []
     for (let i = 0; i < 12; i++) {
       const month = dayjs('2024-06-15').subtract(i, 'month')
-      transactions.push(makeTransaction(`inc-${i}`, 'income', 100000 + i * 1000, 'USD', month.format('YYYY-MM-15')))
-      transactions.push(makeTransaction(`exp-${i}`, 'expense', 20000 + i * 500, 'USD', month.format('YYYY-MM-10')))
+      transactions.push(
+        makeTransaction(`inc-${i}`, 'income', 100000 + i * 1000, 'USD', month.format('YYYY-MM-15'))
+      )
+      transactions.push(
+        makeTransaction(`exp-${i}`, 'expense', 20000 + i * 500, 'USD', month.format('YYYY-MM-10'))
+      )
     }
 
     const result = buildDashboardAnalytics({
@@ -195,6 +199,47 @@ describe('buildDashboardAnalytics', () => {
     expect(result.conversion.currency).toBe('MXN')
     expect(result.pace.spentMTD).toBe(150000)
     expect(result.trend.months.find((m) => m.isCurrent)?.expenses).toBe(150000)
+  })
+
+  it('keeps out-of-range currencies from disabling current dashboard analytics', () => {
+    const result = buildDashboardAnalytics({
+      transactions: [
+        makeTransaction('current', 'expense', 10000, 'USD', '2024-06-10'),
+        makeTransaction('ancient', 'expense', 10000, 'MXN', '2010-01-01'),
+      ],
+      splits: [],
+      preferredCurrency: 'USD',
+      rates: [],
+      now: FIXED_NOW,
+    })
+
+    expect(result.cashFlowConversion.kind).toBe('complete')
+    expect(result.pace.conversion.kind).toBe('complete')
+    expect(result.trend.conversion.kind).toBe('complete')
+    expect(result.categories.conversion.kind).toBe('complete')
+    expect(result.pace.spentMTD).toBe(10000)
+  })
+
+  it('isolates conversion gaps to the displayed panel horizons', () => {
+    const result = buildDashboardAnalytics({
+      transactions: [
+        makeTransaction('current', 'expense', 10000, 'USD', '2024-06-10'),
+        makeTransaction('previous', 'expense', 10000, 'USD', '2024-05-10'),
+        makeTransaction('prior-1', 'expense', 10000, 'USD', '2024-04-10'),
+        makeTransaction('prior-2', 'expense', 10000, 'USD', '2024-03-10'),
+        makeTransaction('prior-3', 'expense', 10000, 'USD', '2024-02-10'),
+        makeTransaction('older-visible', 'expense', 10000, 'MXN', '2023-09-10'),
+      ],
+      splits: [],
+      preferredCurrency: 'USD',
+      rates: [],
+      now: FIXED_NOW,
+    })
+
+    expect(result.cashFlowConversion.kind).toBe('complete')
+    expect(result.pace.conversion.kind).toBe('complete')
+    expect(result.trend.conversion.kind).toBe('incomplete')
+    expect(result.categories.conversion.kind).toBe('incomplete')
   })
 
   it('fails closed on mixed currencies with missing rates', () => {

@@ -39,6 +39,8 @@
     "paceChartLabel": "Ritmo acumulado de gastos del mes actual",
     "trendChartLabel": "Tendencia de ingresos, gastos y neto en los últimos 12 meses",
     "categoriesChartLabel": "Composición mensual de gastos por categoría",
+    "day": "Día",
+    "month": "Mes",
     "spentMtd": "Gastado MTD",
     "projectedMonthEnd": "Fin de mes proyectado",
     "priorAverage": "Promedio anterior",
@@ -55,6 +57,7 @@
     "other": "Otros",
     "uncategorized": "Sin categoría",
     "noEligibleData": "No hay datos de gastos elegibles para este período.",
+    "categoriesUnavailable": "El análisis por categoría no está disponible hasta cargar las divisiones de transacciones",
     "splitIntegrityNotice": "Los totales de división difieren de los totales de transacción para {{count}} transacción(es)."
   },
   "quickActions": {

@@ -34,6 +34,7 @@ const mockFetchTransactions = vi.fn().mockResolvedValue(undefined)
 const mockOpenTransactionDialog = vi.fn()
 const mockFetchGoals = vi.fn().mockResolvedValue(undefined)
 const mockLoadRates = vi.fn().mockResolvedValue(undefined)
+const mockRetrySplits = vi.fn()
 
 vi.mock('@/stores/ui-store', () => ({
   useUIStore: () => ({
@@ -47,6 +48,7 @@ let mockAccountError: string | null = null
 let mockTransactionError: string | null = null
 let mockGoalError: string | null = null
 let mockCurrencyError: string | null = null
+let mockSplitsError: string | null = null
 let mockTotalBalanceResult:
   | {
       complete: true
@@ -138,7 +140,12 @@ vi.mock('@/stores/spending-insights-store', () => ({
 }))
 
 vi.mock('@/components/dashboard/use-dashboard-splits', () => ({
-  useDashboardSplits: () => ({ splits: [], isLoading: false, error: null }),
+  useDashboardSplits: () => ({
+    splits: [],
+    isLoading: false,
+    error: mockSplitsError,
+    retry: mockRetrySplits,
+  }),
 }))
 
 vi.mock('@/components/ui/safe-chart', () => ({
@@ -167,13 +174,27 @@ vi.mock('recharts', () => ({
 describe('Dashboard', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.localStorage.clear()
     mockAccounts = []
     mockTransactions = []
     mockAccountError = null
     mockTransactionError = null
     mockGoalError = null
     mockCurrencyError = null
+    mockSplitsError = null
     mockTotalBalanceResult = null
+  })
+
+  it('fails category analytics closed when split allocations cannot be loaded', async () => {
+    const user = userEvent.setup()
+    mockSplitsError = 'Split query failed'
+
+    render(<Dashboard />)
+    await user.click(screen.getByText('analytics.categories'))
+
+    expect(screen.getByText(/analytics.categoriesUnavailable/)).toBeInTheDocument()
+    expect(screen.getAllByText(/Split query failed/).length).toBeGreaterThan(0)
+    expect(screen.queryByLabelText('analytics.categoriesChartLabel')).not.toBeInTheDocument()
   })
 
   it('calls fetchAccounts and fetchTransactions on mount', () => {
@@ -601,15 +622,20 @@ describe('Dashboard', () => {
       expect(screen.getByText('analytics.trend')).toBeInTheDocument()
       expect(screen.getByText('analytics.categories')).toBeInTheDocument()
       expect(screen.getAllByText('$120.00').length).toBeGreaterThanOrEqual(1)
+      expect(screen.getByRole('table', { name: 'analytics.paceChartLabel' })).toBeInTheDocument()
 
       await user.click(screen.getByText('analytics.categories'))
 
+      expect(
+        screen.getByRole('table', { name: 'analytics.categoriesChartLabel' })
+      ).toBeInTheDocument()
       expect(screen.getAllByText('Food').length).toBeGreaterThanOrEqual(1)
       expect(screen.getAllByText('Transport').length).toBeGreaterThanOrEqual(1)
 
       await user.click(screen.getByText('analytics.trend'))
 
-      expect(screen.getByText('analytics.income')).toBeInTheDocument()
+      expect(screen.getByRole('table', { name: 'analytics.trendChartLabel' })).toBeInTheDocument()
+      expect(screen.getAllByText('analytics.income').length).toBeGreaterThan(0)
     })
   })
 })

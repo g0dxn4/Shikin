@@ -18,6 +18,7 @@ vi.mock('@/lib/ulid', () => ({
 }))
 
 vi.mock('@/lib/split-service', () => ({
+  getSplitCategoryMembership: vi.fn().mockResolvedValue(new Map()),
   getSplitTransactionIds: vi.fn().mockResolvedValue(new Set()),
   getSplits: vi.fn().mockResolvedValue([]),
   createSplits: vi.fn().mockResolvedValue(undefined),
@@ -81,6 +82,8 @@ describe('transaction-store', () => {
     )
     useTransactionStore.setState({
       transactions: [],
+      splitTransactionIds: new Set(),
+      splitCategoryIdsByTransaction: new Map(),
       isLoading: false,
       fetchError: null,
       error: null,
@@ -643,6 +646,26 @@ describe('transaction-store', () => {
       expect(mockExecute).not.toHaveBeenCalled()
     })
 
+    it('rejects generic edits for split parents before changing balances or allocations', async () => {
+      mockQuery.mockResolvedValueOnce([reviewTransaction({ has_splits: 1 })])
+
+      await expect(
+        useTransactionStore.getState().update('01TX001', {
+          amount: 30,
+          type: 'expense',
+          description: 'Split parent changed',
+          categoryId: null,
+          accountId: '01ACC001',
+          transferToAccountId: null,
+          currency: 'USD',
+          date: '2024-01-15',
+          notes: null,
+        })
+      ).rejects.toThrow('Split transactions require their dedicated split workflow.')
+
+      expect(mockExecute).not.toHaveBeenCalled()
+    })
+
     it('does nothing if transaction not found', async () => {
       useTransactionStore.setState({ transactions: [] })
       mockQuery.mockResolvedValueOnce([])
@@ -754,6 +777,22 @@ describe('transaction-store', () => {
         )
       }
     )
+
+    it('rejects completed placeholder lifecycle rows before an inline review mutation', async () => {
+      mockQuery.mockResolvedValueOnce([
+        reviewTransaction({ is_placeholder: 1, placeholder_status: 'split' }),
+      ])
+
+      await expect(
+        useTransactionStore.getState().updateReviewFields('01TX001', { categoryId: '01CAT002' })
+      ).rejects.toThrow('Completed placeholder lifecycle rows require their dedicated workflow.')
+
+      expect(mockExecute).not.toHaveBeenCalled()
+      expect(mockQuery).not.toHaveBeenCalledWith(
+        'SELECT id FROM transaction_splits WHERE transaction_id = ? LIMIT 1',
+        ['01TX001']
+      )
+    })
 
     it('rejects split rows instead of using the inline review update', async () => {
       mockQuery

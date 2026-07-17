@@ -6,7 +6,11 @@ import { generateId } from '@/lib/ulid'
 import { fromCentavos, toCentavos } from '@/lib/money'
 import { learnFromTransaction } from '@/lib/auto-categorize'
 import { useAccountStore } from './account-store'
-import { createSplits, getSplits as fetchSplits, getSplitTransactionIds } from '@/lib/split-service'
+import {
+  createSplits,
+  getSplits as fetchSplits,
+  getSplitCategoryMembership,
+} from '@/lib/split-service'
 import type { SplitInput } from '@/lib/split-service'
 import type { Account, Transaction, TransactionSplitWithCategory } from '@/types/database'
 import type { TransactionType, CurrencyCode } from '@/types/common'
@@ -250,6 +254,7 @@ type TransactionForMutation = Transaction & {
   is_receivable_payment?: number
   is_reconciliation_adjustment?: number
   is_finalized_statement?: number
+  has_splits?: number
 }
 
 async function getTransactionForMutation(
@@ -265,7 +270,10 @@ async function getTransactionForMutation(
               EXISTS(
                 SELECT 1 FROM account_reconciliations ar
                 WHERE ar.account_id = t.account_id AND ar.staging_batch_id = t.staging_batch_id
-              ) AS is_finalized_statement
+              ) AS is_finalized_statement,
+              EXISTS(
+                SELECT 1 FROM transaction_splits ts WHERE ts.transaction_id = t.id
+              ) AS has_splits
        FROM transactions t
        LEFT JOIN accounts a ON a.id = t.account_id
        LEFT JOIN accounts ta ON ta.id = t.transfer_to_account_id
@@ -282,6 +290,12 @@ function assertMutableTransaction(transaction: TransactionForMutation): void {
   }
   if ((transaction.transaction_kind ?? 'standard') !== 'standard') {
     throw new Error('This financial record requires its dedicated workflow.')
+  }
+  if (
+    transaction.is_placeholder === 1 &&
+    (transaction.placeholder_status ?? 'unresolved') !== 'unresolved'
+  ) {
+    throw new Error('Completed placeholder lifecycle rows require their dedicated workflow.')
   }
   if (
     transaction.matched_transaction_id ||
@@ -319,6 +333,9 @@ async function updateTransactionWithData(
   const existing = currentTransaction ?? (await getTransactionForMutation(tx, id))
   if (!existing) return false
   assertMutableTransaction(existing)
+  if (existing.has_splits) {
+    throw new Error('Split transactions require their dedicated split workflow.')
+  }
 
   const now = new Date().toISOString()
   const newAmountCentavos = toCentavos(data.amount)
@@ -427,6 +444,7 @@ export interface TransactionWithDetails extends Transaction {
 interface TransactionState {
   transactions: TransactionWithDetails[]
   splitTransactionIds: Set<string>
+  splitCategoryIdsByTransaction: Map<string, Set<string>>
   isLoading: boolean
   fetchError: string | null
   error: string | null
@@ -444,6 +462,7 @@ interface TransactionState {
 export const useTransactionStore = create<TransactionState>((set, get) => ({
   transactions: [],
   splitTransactionIds: new Set<string>(),
+  splitCategoryIdsByTransaction: new Map<string, Set<string>>(),
   isLoading: false,
   fetchError: null,
   error: null,
@@ -451,7 +470,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   fetch: async () => {
     set({ isLoading: true, fetchError: null })
     try {
-      const [transactions, splitIds] = await Promise.all([
+      const [transactions, splitCategoryIdsByTransaction] = await Promise.all([
         query<TransactionWithDetails>(
           `SELECT t.*, a.name as account_name, c.name as category_name, c.color as category_color,
                   ta.name as transfer_to_account_name,
@@ -468,9 +487,14 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
            WHERE COALESCE(t.is_archived, 0) = 0
            ORDER BY t.date DESC, t.created_at DESC`
         ),
-        getSplitTransactionIds(),
+        getSplitCategoryMembership(),
       ])
-      set({ transactions, splitTransactionIds: splitIds, fetchError: null })
+      set({
+        transactions,
+        splitTransactionIds: new Set(splitCategoryIdsByTransaction.keys()),
+        splitCategoryIdsByTransaction,
+        fetchError: null,
+      })
     } catch (error) {
       set({ fetchError: getErrorMessage(error) })
       throw error

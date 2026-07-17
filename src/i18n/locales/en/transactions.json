@@ -128,7 +128,8 @@
       "finalized": "This finalized statement row cannot be changed inline.",
       "linked": "This linked financial record requires its dedicated workflow.",
       "workflow": "This financial record requires its dedicated workflow.",
-      "transfer": "Transfers require their dedicated edit workflow."
+      "transfer": "Transfers require their dedicated edit workflow.",
+      "placeholderLifecycle": "Completed placeholder lifecycle rows require their dedicated workflow."
     },
     "navigation": {
       "label": "Review navigation",

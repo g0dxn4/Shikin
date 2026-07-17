@@ -55,7 +55,12 @@ export function Dashboard() {
     }),
     [now]
   )
-  const { splits: dashboardSplits, isLoading: splitsLoading } = useDashboardSplits(splitDateRange)
+  const {
+    splits: dashboardSplits,
+    isLoading: splitsLoading,
+    error: splitsFetchError,
+    retry: retrySplits,
+  } = useDashboardSplits(splitDateRange)
 
   useEffect(() => {
     void fetchAccounts().catch(() => {})
@@ -118,10 +123,13 @@ export function Dashboard() {
   const previousIncome = previousMonth?.income ?? 0
   const previousExpenses = previousMonth?.expenses ?? 0
   const cashFlowDisplayable =
-    analytics.conversion.kind === 'complete' || analytics.conversion.kind === 'fallback'
-  const cashFlowDisplayCurrency = analytics.conversion.currency
+    analytics.cashFlowConversion.kind === 'complete' ||
+    analytics.cashFlowConversion.kind === 'fallback'
+  const cashFlowDisplayCurrency = analytics.cashFlowConversion.currency
   const cashFlowMissingCurrencies =
-    analytics.conversion.kind === 'incomplete' ? analytics.conversion.missingCurrencies : []
+    analytics.cashFlowConversion.kind === 'incomplete'
+      ? analytics.cashFlowConversion.missingCurrencies
+      : []
 
   const savingsRate = useMemo(() => {
     if (monthlyIncome <= 0) return 0
@@ -138,6 +146,7 @@ export function Dashboard() {
       ? `Transactions: ${transactionsFetchError}`
       : null,
     goalsFetchError ? `Goals: ${goalsFetchError}` : null,
+    splitsFetchError ? `Transaction splits: ${splitsFetchError}` : null,
     currencyError ? `Exchange rates: ${currencyError}` : null,
   ]
 
@@ -171,6 +180,7 @@ export function Dashboard() {
         title="Some dashboard data couldn’t be loaded"
         messages={dashboardErrors}
         onRetry={() => {
+          retrySplits()
           void Promise.allSettled([fetchAccounts(), fetchTransactions(), fetchGoals(), loadRates()])
         }}
       />
@@ -242,7 +252,9 @@ export function Dashboard() {
             icon={<TrendingDown size={16} />}
             iconColor="text-warning"
             label={t('cards.monthlyExpenses')}
-            value={cashFlowDisplayable ? formatMoney(monthlyExpenses, cashFlowDisplayCurrency) : '—'}
+            value={
+              cashFlowDisplayable ? formatMoney(monthlyExpenses, cashFlowDisplayCurrency) : '—'
+            }
             valueColor="text-warning"
             subtitle={
               cashFlowDisplayable
@@ -260,7 +272,7 @@ export function Dashboard() {
               {t('analytics.spendingPace')}
             </h2>
             <Link
-              to="/spending-insights"
+              to="/transactions"
               className="text-muted-foreground hover:text-foreground text-xs font-semibold transition-colors"
             >
               {t('charts.drilldownTransactions')}
@@ -270,6 +282,7 @@ export function Dashboard() {
           <SpendingAnalytics
             analytics={analytics}
             isLoading={txLoading || splitsLoading}
+            categoriesError={splitsFetchError}
           />
         </div>
 

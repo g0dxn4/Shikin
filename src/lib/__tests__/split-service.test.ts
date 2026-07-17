@@ -10,7 +10,13 @@ vi.mock('@/lib/ulid', () => ({
 }))
 
 import { query, execute } from '@/lib/database'
-import { createSplits, getSplits, deleteSplits, isSplit } from '../split-service'
+import {
+  createSplits,
+  getSplits,
+  deleteSplits,
+  isSplit,
+  getSplitCategoryMembership,
+} from '../split-service'
 
 const mockQuery = vi.mocked(query)
 const mockExecute = vi.mocked(execute)
@@ -119,6 +125,22 @@ describe('split-service', () => {
       mockQuery.mockResolvedValueOnce([])
       const result = await getSplits('tx-none')
       expect(result).toEqual([])
+    })
+  })
+
+  describe('getSplitCategoryMembership', () => {
+    it('groups category membership by transaction without losing duplicate rows', async () => {
+      mockQuery.mockResolvedValueOnce([
+        { transaction_id: 'tx1', category_id: 'cat1' },
+        { transaction_id: 'tx1', category_id: 'cat2' },
+        { transaction_id: 'tx1', category_id: 'cat1' },
+        { transaction_id: 'tx2', category_id: null },
+      ])
+
+      const result = await getSplitCategoryMembership()
+
+      expect(result.get('tx1')).toEqual(new Set(['cat1', 'cat2']))
+      expect(result.get('tx2')).toEqual(new Set())
     })
   })
 

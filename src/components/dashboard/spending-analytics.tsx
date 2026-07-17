@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
-import { formatMoney } from '@/lib/money'
 import { Button } from '@/components/ui/button'
 import { Link } from 'react-router'
 import type { DashboardAnalyticsResult } from '@/lib/dashboard-analytics'
@@ -37,9 +36,14 @@ function writeStoredMode(mode: SpendingMode): void {
 interface SpendingAnalyticsProps {
   analytics: DashboardAnalyticsResult | null
   isLoading: boolean
+  categoriesError?: string | null
 }
 
-export function SpendingAnalytics({ analytics, isLoading }: SpendingAnalyticsProps) {
+export function SpendingAnalytics({
+  analytics,
+  isLoading,
+  categoriesError = null,
+}: SpendingAnalyticsProps) {
   const { t } = useTranslation('dashboard')
   const [mode, setMode] = useState<SpendingMode>(() => readStoredMode() ?? 'pace')
 
@@ -54,9 +58,6 @@ export function SpendingAnalytics({ analytics, isLoading }: SpendingAnalyticsPro
     ['categories', t('analytics.categories')],
   ]
 
-  const conversionNotice = analytics ? formatDashboardNotice(analytics.conversion) : null
-  const displayCurrency = analytics?.conversion.currency ?? 'USD'
-
   if (isLoading || !analytics) {
     return (
       <div className="rounded-[22px] border border-white/[0.06] bg-white/[0.035] p-4">
@@ -70,7 +71,7 @@ export function SpendingAnalytics({ analytics, isLoading }: SpendingAnalyticsPro
                 key={tabMode}
                 type="button"
                 disabled
-                className="rounded-full px-2.5 py-1 font-mono text-[10px] font-bold text-muted-foreground"
+                className="text-muted-foreground rounded-full px-2.5 py-1 font-mono text-[10px] font-bold"
               >
                 {tabs.find(([m]) => m === tabMode)?.[1]}
               </button>
@@ -82,7 +83,26 @@ export function SpendingAnalytics({ analytics, isLoading }: SpendingAnalyticsPro
     )
   }
 
-  const hasEligibleData = analytics.pace.spentMTD > 0 || analytics.trend.totalExpenses > 0
+  const conversion =
+    mode === 'pace'
+      ? analytics.pace.conversion
+      : mode === 'trend'
+        ? analytics.trend.conversion
+        : analytics.categories.conversion
+  const conversionNotice = formatDashboardNotice(conversion)
+  const displayCurrency = conversion.currency
+  const hasEligibleData =
+    mode === 'pace'
+      ? analytics.pace.points.some(
+          (point) =>
+            (point.current ?? 0) > 0 || (point.previous ?? 0) > 0 || (point.priorAverage ?? 0) > 0
+        )
+      : mode === 'trend'
+        ? analytics.trend.totalExpenses > 0 || analytics.trend.totalIncome > 0
+        : analytics.categories.months.some((month) =>
+            Object.values(month.byCategoryId).some((amount) => amount > 0)
+          )
+  const categoriesUnavailable = mode === 'categories' && categoriesError
 
   return (
     <div className="rounded-[22px] border border-white/[0.06] bg-white/[0.035] p-4">
@@ -115,7 +135,16 @@ export function SpendingAnalytics({ analytics, isLoading }: SpendingAnalyticsPro
         </div>
       </div>
 
-      {analytics.conversion.kind === 'incomplete' && !hasEligibleData && (
+      {categoriesUnavailable && (
+        <div
+          className="border-warning/30 bg-warning/8 text-warning rounded-2xl border p-4 text-center text-sm"
+          role="alert"
+        >
+          {t('analytics.categoriesUnavailable')}: {categoriesError}
+        </div>
+      )}
+
+      {!categoriesUnavailable && conversion.kind === 'incomplete' && !hasEligibleData && (
         <div
           className="border-warning/30 bg-warning/8 text-warning rounded-2xl border p-4 text-center text-sm"
           role="status"
@@ -124,7 +153,7 @@ export function SpendingAnalytics({ analytics, isLoading }: SpendingAnalyticsPro
         </div>
       )}
 
-      {analytics.conversion.kind === 'incomplete' && hasEligibleData && (
+      {!categoriesUnavailable && conversion.kind === 'incomplete' && hasEligibleData && (
         <div
           className="border-warning/30 bg-warning/8 text-warning rounded-2xl border p-4 text-center text-sm"
           role="alert"
@@ -133,76 +162,38 @@ export function SpendingAnalytics({ analytics, isLoading }: SpendingAnalyticsPro
         </div>
       )}
 
-      {(analytics.conversion.kind === 'complete' || analytics.conversion.kind === 'fallback') && (
-        <div role="tabpanel">
-          {mode === 'pace' && (
-            <SpendingPacePanel
-              pace={analytics.pace}
-              displayCurrency={displayCurrency}
-              notice={conversionNotice}
-            />
-          )}
-          {mode === 'trend' && (
-            <SpendingTrendPanel
-              trend={analytics.trend}
-              displayCurrency={displayCurrency}
-              notice={conversionNotice}
-            />
-          )}
-          {mode === 'categories' && (
-            <SpendingCategoriesPanel
-              categories={analytics.categories}
-              displayCurrency={displayCurrency}
-              notice={conversionNotice}
-            />
-          )}
-        </div>
-      )}
+      {!categoriesUnavailable &&
+        (conversion.kind === 'complete' || conversion.kind === 'fallback') && (
+          <div role="tabpanel">
+            {mode === 'pace' && (
+              <SpendingPacePanel
+                pace={analytics.pace}
+                displayCurrency={displayCurrency}
+                notice={conversionNotice}
+              />
+            )}
+            {mode === 'trend' && (
+              <SpendingTrendPanel
+                trend={analytics.trend}
+                displayCurrency={displayCurrency}
+                notice={conversionNotice}
+              />
+            )}
+            {mode === 'categories' && (
+              <SpendingCategoriesPanel
+                categories={analytics.categories}
+                displayCurrency={displayCurrency}
+                notice={conversionNotice}
+              />
+            )}
+          </div>
+        )}
 
-      <div className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-          <div>
-            <p className="text-muted-foreground text-xs font-bold">{t('analytics.spentMtd')}</p>
-            <p className="font-mono text-lg font-bold">
-              {formatMoneyForDisplay(analytics.pace.spentMTD, displayCurrency, analytics.conversion.kind)}
-            </p>
-          </div>
-          <div>
-            <p className="text-muted-foreground text-xs font-bold">{t('analytics.projectedMonthEnd')}</p>
-            <p className="font-mono text-lg font-bold">
-              {formatMoneyForDisplay(analytics.pace.projectedMonthEnd, displayCurrency, analytics.conversion.kind)}
-            </p>
-          </div>
-          <div>
-            <p className="text-muted-foreground text-xs font-bold">{t('analytics.vsPriorAverage')}</p>
-            <p
-              className={cn(
-                'font-mono text-lg font-bold',
-                analytics.pace.vsPriorAverage >= 0 ? 'text-destructive' : 'text-success'
-              )}
-            >
-              {analytics.pace.vsPriorAverage >= 0 ? '+' : '−'}
-              {formatMoneyForDisplay(
-                Math.abs(analytics.pace.vsPriorAverage),
-                displayCurrency,
-                analytics.conversion.kind
-              )}
-            </p>
-          </div>
-        </div>
+      <div className="mt-5 flex justify-end">
         <Button variant="outline" size="sm" asChild>
           <Link to="/budgets">{t('analytics.viewBudgets')}</Link>
         </Button>
       </div>
     </div>
   )
-}
-
-function formatMoneyForDisplay(
-  centavos: number,
-  currency: string,
-  kind: 'complete' | 'fallback' | 'incomplete'
-): string {
-  if (kind === 'incomplete') return '—'
-  return formatMoney(centavos, currency)
 }

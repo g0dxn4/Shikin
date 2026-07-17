@@ -73,7 +73,12 @@ export function SpendingCategoriesPanel({
         </div>
       )}
 
-      <div className="h-72" role="img" aria-label={t('analytics.categoriesChartLabel')}>
+      <div
+        className="h-72"
+        role="img"
+        aria-label={t('analytics.categoriesChartLabel')}
+        aria-describedby="spending-categories-data"
+      >
         <SafeChart>
           <BarChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
@@ -123,6 +128,30 @@ export function SpendingCategoriesPanel({
         </SafeChart>
       </div>
 
+      <table id="spending-categories-data" className="sr-only">
+        <caption>{t('analytics.categoriesChartLabel')}</caption>
+        <thead>
+          <tr>
+            <th>{t('analytics.month')}</th>
+            {orderedCategoryIds.map((categoryId) => (
+              <th key={categoryId}>{categories.categoryMeta[categoryId]?.name ?? categoryId}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {chartData.map((month) => (
+            <tr key={String(month.key)}>
+              <th>{month.label}</th>
+              {orderedCategoryIds.map((categoryId) => (
+                <td key={categoryId}>
+                  {formatMoney(Number(month[categoryId] ?? 0), displayCurrency)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
       <div className="space-y-3">
         <p className="text-muted-foreground text-xs font-bold tracking-wider uppercase">
           {t('analytics.topCategories')}
@@ -132,7 +161,10 @@ export function SpendingCategoriesPanel({
         ) : (
           <div className="space-y-2">
             {categories.currentMonthBreakdown.map((item) => (
-              <div key={item.categoryId} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3">
+              <div
+                key={item.categoryId}
+                className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3"
+              >
                 <div className="flex min-w-0 items-center gap-2">
                   <span
                     className="h-2.5 w-2.5 shrink-0 rounded-full"
@@ -143,7 +175,7 @@ export function SpendingCategoriesPanel({
                 <span className="font-mono text-xs font-bold">
                   {formatMoney(item.amount, displayCurrency)}
                 </span>
-                <span className="text-muted-foreground font-mono w-12 text-right text-xs font-bold">
+                <span className="text-muted-foreground w-12 text-right font-mono text-xs font-bold">
                   {item.percent}%
                 </span>
               </div>
@@ -153,9 +185,7 @@ export function SpendingCategoriesPanel({
       </div>
 
       {!hasChartData && (
-        <p className="text-muted-foreground text-center text-sm">
-          {t('analytics.noEligibleData')}
-        </p>
+        <p className="text-muted-foreground text-center text-sm">{t('analytics.noEligibleData')}</p>
       )}
     </div>
   )

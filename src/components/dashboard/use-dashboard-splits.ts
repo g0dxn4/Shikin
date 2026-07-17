@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { getDashboardSplitRows } from '@/lib/dashboard-splits'
 import { getErrorMessage } from '@/lib/errors'
 import type { DashboardSplit } from '@/lib/dashboard-analytics'
@@ -7,6 +7,7 @@ export interface UseDashboardSplitsResult {
   splits: DashboardSplit[]
   isLoading: boolean
   error: string | null
+  retry: () => void
 }
 
 export function useDashboardSplits(
@@ -15,6 +16,8 @@ export function useDashboardSplits(
   const [splits, setSplits] = useState<DashboardSplit[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [retryToken, setRetryToken] = useState(0)
+  const retry = useCallback(() => setRetryToken((token) => token + 1), [])
 
   useEffect(() => {
     if (!dateRange) return
@@ -46,7 +49,7 @@ export function useDashboardSplits(
     return () => {
       cancelled = true
     }
-  }, [dateRange])
+  }, [dateRange, retryToken])
 
-  return { splits, isLoading, error }
+  return { splits, isLoading, error, retry }
 }

@@ -63,6 +63,7 @@ let mockCategories: unknown[] = []
 let mockIsLoading = false
 let mockTransactionFetchError: string | null = null
 let mockIsSplit = vi.fn().mockReturnValue(false)
+let mockSplitCategoryIdsByTransaction = new Map<string, Set<string>>()
 
 vi.mock('@/stores/ui-store', () => ({
   useUIStore: () => ({
@@ -96,7 +97,8 @@ vi.mock('@/stores/transaction-store', () => ({
     remove: mockRemove,
     updateReviewFields: mockUpdateReviewFields,
     isSplit: mockIsSplit,
-    splitTransactionIds: new Set(),
+    splitTransactionIds: new Set(mockSplitCategoryIdsByTransaction.keys()),
+    splitCategoryIdsByTransaction: mockSplitCategoryIdsByTransaction,
     getSplits: vi.fn().mockResolvedValue([]),
   }),
 }))
@@ -115,6 +117,7 @@ describe('Transactions', () => {
     mockIsLoading = false
     mockTransactionFetchError = null
     mockIsSplit = vi.fn().mockReturnValue(false)
+    mockSplitCategoryIdsByTransaction = new Map()
   })
 
   it('calls fetch on mount', () => {
@@ -327,6 +330,115 @@ describe('Transactions', () => {
 
     await user.click(screen.getByRole('button', { name: 'filters.clear' }))
     expect(screen.getAllByText('EUR groceries')).toHaveLength(2)
+  })
+
+  it('uses split categories for filtering without re-queuing or generically editing a split parent', async () => {
+    const user = userEvent.setup()
+    mockCategories = [
+      { id: 'cat-parent', name: 'Stale parent category', type: 'expense' },
+      { id: 'cat-food', name: 'Food', type: 'expense' },
+    ]
+    mockTransactions = [
+      {
+        id: 'tx-split',
+        account_id: 'acc-usd',
+        description: 'Split groceries',
+        type: 'expense',
+        amount: 5000,
+        currency: 'USD',
+        date: dayjs().format('YYYY-MM-DD'),
+        category_id: 'cat-parent',
+        category_name: 'Stale parent category',
+        account_name: 'Checking',
+        status: 'posted',
+      },
+    ]
+    mockIsSplit = vi.fn((id: string) => id === 'tx-split')
+    mockSplitCategoryIdsByTransaction = new Map([['tx-split', new Set(['cat-food'])]])
+
+    render(<Transactions />)
+
+    await user.selectOptions(screen.getByLabelText('filters.category'), 'cat-parent')
+    expect(screen.queryByText('Split groceries')).not.toBeInTheDocument()
+
+    await user.selectOptions(screen.getByLabelText('filters.category'), 'cat-food')
+    expect(screen.getByText('Split groceries')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Edit Split groceries')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'views.ledger' }))
+    expect(screen.queryByLabelText('Edit Split groceries')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'views.review' }))
+    expect(screen.getByText('review.empty')).toBeInTheDocument()
+  })
+
+  it('shows both transfer endpoints and keeps destination-account ledger activity visible', async () => {
+    const user = userEvent.setup()
+    mockAccounts = [
+      {
+        id: 'acc-source',
+        name: 'Checking',
+        currency: 'USD',
+        is_archived: 0,
+        account_mode: 'transactional',
+      },
+      {
+        id: 'acc-destination',
+        name: 'Savings',
+        currency: 'USD',
+        is_archived: 0,
+        account_mode: 'transactional',
+      },
+    ]
+    mockTransactions = [
+      {
+        id: 'tx-transfer',
+        account_id: 'acc-source',
+        transfer_to_account_id: 'acc-destination',
+        description: 'Move to savings',
+        type: 'transfer',
+        amount: 5000,
+        currency: 'USD',
+        date: dayjs().format('YYYY-MM-DD'),
+        category_id: null,
+        account_name: 'Checking',
+        transfer_to_account_name: 'Savings',
+        status: 'posted',
+      },
+    ]
+
+    render(<Transactions />)
+    await user.click(screen.getByRole('tab', { name: 'views.ledger' }))
+    await user.selectOptions(screen.getByLabelText('filters.account'), 'acc-destination')
+
+    expect(screen.getAllByText(/Checking → Savings/).length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText('$50.00')).toHaveLength(4)
+  })
+
+  it('keeps completed placeholder lifecycle rows out of inline review editing', async () => {
+    const user = userEvent.setup()
+    mockTransactions = [
+      {
+        id: 'tx-placeholder',
+        account_id: 'acc-usd',
+        description: 'Completed placeholder',
+        type: 'expense',
+        amount: 500,
+        currency: 'USD',
+        date: dayjs().format('YYYY-MM-DD'),
+        category_id: null,
+        account_name: 'Checking',
+        status: 'pending',
+        is_placeholder: 1,
+        placeholder_status: 'split',
+      },
+    ]
+
+    render(<Transactions />)
+    await user.click(screen.getByRole('tab', { name: 'views.review' }))
+
+    expect(screen.getByText('review.protected.placeholderLifecycle')).toBeInTheDocument()
+    expect(screen.queryByLabelText('review-category-tx-placeholder')).not.toBeInTheDocument()
   })
 
   it('queues attention reasons, updates review fields, and keeps protected rows out of inline editing', async () => {

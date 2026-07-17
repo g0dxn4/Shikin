@@ -27,11 +27,7 @@ export type DashboardTransaction = Pick<
 
 export type DashboardSplit = Pick<
   TransactionSplitWithCategory,
-  | 'transaction_id'
-  | 'category_id'
-  | 'category_name'
-  | 'category_color'
-  | 'amount'
+  'transaction_id' | 'category_id' | 'category_name' | 'category_color' | 'amount'
 > & {
   date: string
 }
@@ -126,6 +122,7 @@ export interface CategoriesResult {
 export interface DashboardAnalyticsResult {
   preferredCurrency: string
   conversion: ConversionState
+  cashFlowConversion: ConversionState
   pace: PaceResult
   trend: TrendResult
   categories: CategoriesResult
@@ -231,7 +228,10 @@ function convertAmounts(
 
   if (state.kind === 'complete') {
     const validAmounts = amounts
-      .map((a) => ({ currency: safeNormalizeCurrency(a.currency), amountCentavos: a.amountCentavos }))
+      .map((a) => ({
+        currency: safeNormalizeCurrency(a.currency),
+        amountCentavos: a.amountCentavos,
+      }))
       .filter((a): a is { currency: string; amountCentavos: number } => a.currency !== null)
     const totals = aggregateCentavosByCurrency(validAmounts)
     const result = convertCurrencyTotals(totals, state.currency, rates)
@@ -291,9 +291,7 @@ function averageConvertedCumulative(
   return activePriorMonths.length > 0 ? Math.round(sum / activePriorMonths.length) : 0
 }
 
-export function buildDashboardAnalytics(
-  input: DashboardAnalyticsInput
-): DashboardAnalyticsResult {
+export function buildDashboardAnalytics(input: DashboardAnalyticsInput): DashboardAnalyticsResult {
   const { transactions, splits, preferredCurrency, rates, now } = input
 
   // Split index by transaction id.
@@ -306,13 +304,6 @@ export function buildDashboardAnalytics(
 
   const eligibleTransactions = transactions.filter(isEligibleForCashFlow)
   const eligibleExpenses = eligibleTransactions.filter((tx) => tx.type === 'expense')
-
-  // Global conversion state from every eligible cash-flow amount.
-  const allEligibleAmounts = eligibleTransactions.map((tx) => ({
-    currency: tx.currency,
-    amountCentavos: tx.amount,
-  }))
-  const globalConversion = buildConversionState(allEligibleAmounts, preferredCurrency, rates)
 
   // ── Pace ───────────────────────────────────────────────────────────────
   const currentMonthStart = now.startOf('month')
@@ -334,6 +325,59 @@ export function buildDashboardAnalytics(
       activePriorMonths.push({ start: candidateStart })
     }
   }
+
+  const paceMonthKeys = new Set([
+    currentMonthKey,
+    previousMonthStart.format('YYYY-MM'),
+    ...activePriorMonths.map(({ start }) => start.format('YYYY-MM')),
+  ])
+  const paceAmounts = eligibleExpenses
+    .filter((tx) => {
+      const txDate = dayjs(tx.date)
+      if (!txDate.isValid() || !paceMonthKeys.has(txDate.format('YYYY-MM'))) return false
+      return txDate.format('YYYY-MM') !== currentMonthKey || txDate.date() <= todayDay
+    })
+    .map((tx) => ({ currency: tx.currency, amountCentavos: tx.amount }))
+  const paceConversion = buildConversionState(paceAmounts, preferredCurrency, rates)
+
+  const trendStart = currentMonthStart.subtract(11, 'month')
+  const displayedTransactions = eligibleTransactions.filter((tx) => {
+    const txDate = dayjs(tx.date)
+    if (!txDate.isValid()) return false
+    if (txDate.isBefore(trendStart, 'day')) return false
+    if (txDate.isAfter(now, 'day')) return false
+    return true
+  })
+  const trendConversion = buildConversionState(
+    displayedTransactions.map((tx) => ({ currency: tx.currency, amountCentavos: tx.amount })),
+    preferredCurrency,
+    rates
+  )
+  const categoriesConversion = buildConversionState(
+    displayedTransactions
+      .filter((tx) => tx.type === 'expense')
+      .map((tx) => ({ currency: tx.currency, amountCentavos: tx.amount })),
+    preferredCurrency,
+    rates
+  )
+
+  const currentAndPreviousMonthKeys = new Set([
+    currentMonthKey,
+    previousMonthStart.format('YYYY-MM'),
+  ])
+  const cashFlowConversion = buildConversionState(
+    eligibleTransactions
+      .filter((tx) => {
+        const txDate = dayjs(tx.date)
+        if (!txDate.isValid() || !currentAndPreviousMonthKeys.has(txDate.format('YYYY-MM'))) {
+          return false
+        }
+        return txDate.format('YYYY-MM') !== currentMonthKey || txDate.date() <= todayDay
+      })
+      .map((tx) => ({ currency: tx.currency, amountCentavos: tx.amount })),
+    preferredCurrency,
+    rates
+  )
 
   const spentMTDAmounts = cumulativeAmountsUpToDay(eligibleExpenses, currentMonthStart, todayDay)
   const { centavos: spentMTD } = convertAmounts(spentMTDAmounts, preferredCurrency, rates)
@@ -359,9 +403,7 @@ export function buildDashboardAnalytics(
   const pacePoints: PacePoint[] = []
   for (let day = 1; day <= daysInMonth; day++) {
     const currentRaw =
-      day <= todayDay
-        ? cumulativeAmountsUpToDay(eligibleExpenses, currentMonthStart, day)
-        : null
+      day <= todayDay ? cumulativeAmountsUpToDay(eligibleExpenses, currentMonthStart, day) : null
 
     const previousRaw =
       day <= previousMonthDays
@@ -370,14 +412,21 @@ export function buildDashboardAnalytics(
 
     const priorAverageRaw =
       activePriorMonths.length > 0
-        ? averageConvertedCumulative(eligibleExpenses, activePriorMonths, day, preferredCurrency, rates)
+        ? averageConvertedCumulative(
+            eligibleExpenses,
+            activePriorMonths,
+            day,
+            preferredCurrency,
+            rates
+          )
         : 0
 
     const runRateRaw = Math.round((projectedMonthEnd / daysInMonth) * day)
 
     pacePoints.push({
       day,
-      current: currentRaw !== null ? convertAmounts(currentRaw, preferredCurrency, rates).centavos : null,
+      current:
+        currentRaw !== null ? convertAmounts(currentRaw, preferredCurrency, rates).centavos : null,
       previous: convertAmounts(previousRaw, preferredCurrency, rates).centavos,
       priorAverage: priorAverageRaw,
       runRate: runRateRaw,
@@ -423,7 +472,7 @@ export function buildDashboardAnalytics(
       expenses,
       income,
       net: income - expenses,
-      conversion: globalConversion,
+      conversion: trendConversion,
     })
   }
 
@@ -432,14 +481,20 @@ export function buildDashboardAnalytics(
   const totalNet = totalIncome - totalExpenses
 
   // ── Categories ──────────────────────────────────────────────────────────
-  const categoryAmountsByMonth = new Map<string, Map<string, Array<{ currency: string; amountCentavos: number }>>>()
+  const categoryAmountsByMonth = new Map<
+    string,
+    Map<string, Array<{ currency: string; amountCentavos: number }>>
+  >()
   const categoryMeta = new Map<string, CategoryMeta>()
   const splitIntegrityNotices: SplitIntegrityNotice[] = []
 
   for (let i = 11; i >= 0; i--) {
     const monthStart = currentMonthStart.subtract(i, 'month')
     const key = monthStart.format('YYYY-MM')
-    categoryAmountsByMonth.set(key, new Map<string, Array<{ currency: string; amountCentavos: number }>>())
+    categoryAmountsByMonth.set(
+      key,
+      new Map<string, Array<{ currency: string; amountCentavos: number }>>()
+    )
   }
 
   for (const tx of eligibleExpenses) {
@@ -462,7 +517,8 @@ export function buildDashboardAnalytics(
       }
       for (const split of txSplits) {
         const categoryId = split.category_id ?? UNCATEGORIZED_ID
-        const displayName = split.category_name ?? (categoryId === UNCATEGORIZED_ID ? 'Uncategorized' : categoryId)
+        const displayName =
+          split.category_name ?? (categoryId === UNCATEGORIZED_ID ? 'Uncategorized' : categoryId)
         categoryMeta.set(categoryId, { name: displayName, color: split.category_color })
         const list = monthMap.get(categoryId) ?? []
         list.push({ currency: tx.currency, amountCentavos: split.amount })
@@ -483,7 +539,9 @@ export function buildDashboardAnalytics(
   for (let i = 11; i >= 0; i--) {
     const monthStart = currentMonthStart.subtract(i, 'month')
     const key = monthStart.format('YYYY-MM')
-    const monthMap = categoryAmountsByMonth.get(key) ?? new Map<string, Array<{ currency: string; amountCentavos: number }>>()
+    const monthMap =
+      categoryAmountsByMonth.get(key) ??
+      new Map<string, Array<{ currency: string; amountCentavos: number }>>()
     const convertedMap: Record<string, number> = {}
     for (const [categoryId, amounts] of monthMap.entries()) {
       const { centavos } = convertAmounts(amounts, preferredCurrency, rates)
@@ -557,7 +615,8 @@ export function buildDashboardAnalytics(
 
   return {
     preferredCurrency,
-    conversion: globalConversion,
+    conversion: trendConversion,
+    cashFlowConversion,
     pace: {
       currentMonth: currentMonthKey,
       daysInMonth,
@@ -567,14 +626,14 @@ export function buildDashboardAnalytics(
       projectedMonthEnd,
       priorAverageTotal,
       vsPriorAverage,
-      conversion: globalConversion,
+      conversion: paceConversion,
     },
     trend: {
       months: trendMonths,
       totalIncome,
       totalExpenses,
       totalNet,
-      conversion: globalConversion,
+      conversion: trendConversion,
     },
     categories: {
       months: categoryMonths,
@@ -583,14 +642,12 @@ export function buildDashboardAnalytics(
       otherCategoryId: OTHER_CATEGORY_ID,
       currentMonthBreakdown,
       splitIntegrityNotices: convertedIntegrityNotices,
-      conversion: globalConversion,
+      conversion: categoriesConversion,
     },
   }
 }
 
-export function formatDashboardNotice(
-  conversion: ConversionState
-): string | null {
+export function formatDashboardNotice(conversion: ConversionState): string | null {
   if (conversion.kind === 'fallback') {
     return `Showing ${conversion.currency}; ${conversion.missingTarget} conversion unavailable`
   }

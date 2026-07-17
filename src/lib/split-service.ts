@@ -86,11 +86,25 @@ export async function isSplit(transactionId: string): Promise<boolean> {
 }
 
 /**
+ * Get split-category membership for all transactions in one query.
+ */
+export async function getSplitCategoryMembership(): Promise<Map<string, Set<string>>> {
+  const rows = await query<{ transaction_id: string; category_id: string | null }>(
+    'SELECT transaction_id, category_id FROM transaction_splits'
+  )
+  const membership = new Map<string, Set<string>>()
+  for (const row of rows) {
+    const categories = membership.get(row.transaction_id) ?? new Set<string>()
+    if (row.category_id) categories.add(row.category_id)
+    membership.set(row.transaction_id, categories)
+  }
+  return membership
+}
+
+/**
  * Get all transaction IDs that have splits (for batch checking).
  */
 export async function getSplitTransactionIds(): Promise<Set<string>> {
-  const rows = await query<{ transaction_id: string }>(
-    'SELECT DISTINCT transaction_id FROM transaction_splits'
-  )
-  return new Set(rows.map((r) => r.transaction_id))
+  const membership = await getSplitCategoryMembership()
+  return new Set(membership.keys())
 }

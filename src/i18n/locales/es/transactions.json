@@ -128,7 +128,8 @@
       "finalized": "Esta fila de estado de cuenta finalizada no puede modificarse en línea.",
       "linked": "Este registro financiero vinculado requiere su flujo dedicado.",
       "workflow": "Este registro financiero requiere su flujo dedicado.",
-      "transfer": "Las transferencias requieren su flujo de edición dedicado."
+      "transfer": "Las transferencias requieren su flujo de edición dedicado.",
+      "placeholderLifecycle": "Los marcadores completados requieren su flujo de ciclo de vida dedicado."
     },
     "navigation": {
       "label": "Navegación de revisión",

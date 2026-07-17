@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import dayjs from 'dayjs'
 import { Transactions } from '../transactions'
@@ -50,15 +50,39 @@ vi.mock('@/components/transactions/statement-import-dialog', () => ({
 
 const mockFetch = vi.fn().mockResolvedValue(undefined)
 const mockRemove = vi.fn()
+const mockUpdateReviewFields = vi.fn().mockResolvedValue(undefined)
 const mockOpenTransactionDialog = vi.fn()
+const mockOpenRecurringDialog = vi.fn()
+const mockAccountFetch = vi.fn().mockResolvedValue(undefined)
+const mockCategoryFetch = vi.fn().mockResolvedValue(undefined)
 
 let mockTransactions: unknown[] = []
+let mockAccounts: unknown[] = []
+let mockArchivedAccounts: unknown[] = []
+let mockCategories: unknown[] = []
 let mockIsLoading = false
 let mockTransactionFetchError: string | null = null
+let mockIsSplit = vi.fn().mockReturnValue(false)
 
 vi.mock('@/stores/ui-store', () => ({
   useUIStore: () => ({
     openTransactionDialog: mockOpenTransactionDialog,
+    openRecurringDialog: mockOpenRecurringDialog,
+  }),
+}))
+
+vi.mock('@/stores/account-store', () => ({
+  useAccountStore: () => ({
+    accounts: mockAccounts,
+    archivedAccounts: mockArchivedAccounts,
+    fetch: mockAccountFetch,
+  }),
+}))
+
+vi.mock('@/stores/category-store', () => ({
+  useCategoryStore: () => ({
+    categories: mockCategories,
+    fetch: mockCategoryFetch,
   }),
 }))
 
@@ -70,7 +94,8 @@ vi.mock('@/stores/transaction-store', () => ({
     error: null,
     fetch: mockFetch,
     remove: mockRemove,
-    isSplit: vi.fn().mockReturnValue(false),
+    updateReviewFields: mockUpdateReviewFields,
+    isSplit: mockIsSplit,
     splitTransactionIds: new Set(),
     getSplits: vi.fn().mockResolvedValue([]),
   }),
@@ -79,10 +104,17 @@ vi.mock('@/stores/transaction-store', () => ({
 describe('Transactions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.localStorage.clear()
+    mockFetch.mockResolvedValue(undefined)
     mockRemove.mockReset()
+    mockUpdateReviewFields.mockResolvedValue(undefined)
     mockTransactions = []
+    mockAccounts = []
+    mockArchivedAccounts = []
+    mockCategories = []
     mockIsLoading = false
     mockTransactionFetchError = null
+    mockIsSplit = vi.fn().mockReturnValue(false)
   })
 
   it('calls fetch on mount', () => {
@@ -118,13 +150,17 @@ describe('Transactions', () => {
     expect(screen.getByTestId('statement-import-dialog')).toBeInTheDocument()
   })
 
-  it('keeps search open and removes filter and recurring controls', () => {
+  it('renders practical shared filters and keeps recurring actions available', () => {
     render(<Transactions />)
 
     expect(screen.getByPlaceholderText('actions.search...')).toBeInTheDocument()
-    expect(screen.getAllByText('All')).toHaveLength(1)
-    expect(screen.queryByText('actions.filter')).not.toBeInTheDocument()
-    expect(screen.queryByText('tabs.recurring')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'types.all' })).toBeInTheDocument()
+    expect(screen.getByLabelText('filters.dateRange')).toBeInTheDocument()
+    expect(screen.getByLabelText('filters.account')).toBeInTheDocument()
+    expect(screen.getByLabelText('filters.category')).toBeInTheDocument()
+    expect(screen.getByLabelText('filters.status')).toBeInTheDocument()
+    expect(screen.getByLabelText('filters.currency')).toBeInTheDocument()
+    expect(screen.getByText('recurring.addRule')).toBeInTheDocument()
   })
 
   it('renders dedicated load error state instead of empty transactions CTA', () => {
@@ -172,7 +208,7 @@ describe('Transactions', () => {
     expect(screen.getByText('Yesterday')).toBeInTheDocument()
   })
 
-  it('filters to uncategorized transactions from the filter bar', async () => {
+  it('filters the review queue to transactions that need a category', async () => {
     const user = userEvent.setup()
     mockTransactions = [
       {
@@ -198,15 +234,219 @@ describe('Transactions', () => {
         category_color: '#ff0000',
         category_name: 'Food',
         account_name: 'Checking',
+        status: 'posted',
+      },
+      {
+        id: 'tx-3',
+        description: 'Pending transfer',
+        type: 'transfer',
+        amount: 300,
+        currency: 'USD',
+        date: dayjs().format('YYYY-MM-DD'),
+        category_id: null,
+        category_color: null,
+        category_name: null,
+        account_name: 'Checking',
+        status: 'pending',
       },
     ]
 
     render(<Transactions />)
 
-    await user.click(screen.getByText('form.categoryNone (1)'))
+    await user.click(screen.getByRole('tab', { name: 'views.review' }))
+    await user.click(screen.getByRole('button', { name: 'review.filters.needs-category (1)' }))
 
     expect(screen.getByText('Imported Coffee')).toBeInTheDocument()
-    expect(screen.queryByText('Categorized Lunch')).not.toBeInTheDocument()
+    expect(screen.queryByText('Pending transfer')).not.toBeInTheDocument()
+  })
+
+  it('persists accessible view selection and keeps shared filters across views', async () => {
+    const user = userEvent.setup()
+    mockAccounts = [
+      {
+        id: 'acc-usd',
+        name: 'Checking',
+        currency: 'USD',
+        is_archived: 0,
+        account_mode: 'transactional',
+      },
+      {
+        id: 'acc-eur',
+        name: 'Euro account',
+        currency: 'EUR',
+        is_archived: 0,
+        account_mode: 'transactional',
+      },
+    ]
+    mockCategories = [{ id: 'cat-food', name: 'Food', type: 'expense' }]
+    mockTransactions = [
+      {
+        id: 'tx-usd',
+        account_id: 'acc-usd',
+        description: 'USD groceries',
+        type: 'expense',
+        amount: 500,
+        currency: 'USD',
+        date: dayjs().format('YYYY-MM-DD'),
+        category_id: 'cat-food',
+        category_name: 'Food',
+        category_color: null,
+        account_name: 'Checking',
+      },
+      {
+        id: 'tx-eur',
+        account_id: 'acc-eur',
+        description: 'EUR groceries',
+        type: 'expense',
+        amount: 500,
+        currency: 'EUR',
+        date: dayjs().format('YYYY-MM-DD'),
+        category_id: 'cat-food',
+        category_name: 'Food',
+        category_color: null,
+        account_name: 'Euro account',
+      },
+    ]
+
+    render(<Transactions />)
+
+    await user.selectOptions(screen.getByLabelText('filters.account'), 'acc-usd')
+    await user.selectOptions(screen.getByLabelText('filters.currency'), 'USD')
+    expect(screen.getByText('USD groceries')).toBeInTheDocument()
+    expect(screen.queryByText('EUR groceries')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'views.ledger' }))
+    expect(screen.getByRole('tab', { name: 'views.ledger' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    expect(screen.getByRole('table')).toBeInTheDocument()
+    expect(screen.getAllByText('USD groceries')).toHaveLength(2)
+    expect(screen.queryByText('EUR groceries')).not.toBeInTheDocument()
+    expect(window.localStorage.getItem('shikin.transactions.view')).toBe('ledger')
+
+    await user.click(screen.getByRole('button', { name: 'filters.clear' }))
+    expect(screen.getAllByText('EUR groceries')).toHaveLength(2)
+  })
+
+  it('queues attention reasons, updates review fields, and keeps protected rows out of inline editing', async () => {
+    const user = userEvent.setup()
+    mockAccounts = [
+      {
+        id: 'acc-usd',
+        name: 'Checking',
+        currency: 'USD',
+        is_archived: 0,
+        account_mode: 'transactional',
+      },
+      {
+        id: 'acc-archived',
+        name: 'Archived',
+        currency: 'USD',
+        is_archived: 1,
+        account_mode: 'transactional',
+      },
+      {
+        id: 'acc-snapshot',
+        name: 'Snapshot',
+        currency: 'USD',
+        is_archived: 0,
+        account_mode: 'snapshot_only',
+      },
+    ]
+    mockCategories = [
+      { id: 'cat-food', name: 'Food', type: 'expense' },
+      { id: 'cat-salary', name: 'Salary', type: 'income' },
+    ]
+    mockTransactions = [
+      {
+        id: 'tx-review',
+        account_id: 'acc-usd',
+        description: 'Needs category',
+        type: 'expense',
+        amount: 500,
+        currency: 'USD',
+        date: dayjs().format('YYYY-MM-DD'),
+        category_id: null,
+        category_name: null,
+        category_color: null,
+        account_name: 'Checking',
+      },
+      {
+        id: 'tx-protected',
+        account_id: 'acc-usd',
+        description: 'Finalized import',
+        type: 'expense',
+        amount: 800,
+        currency: 'USD',
+        date: dayjs().format('YYYY-MM-DD'),
+        category_id: null,
+        category_name: null,
+        category_color: null,
+        account_name: 'Checking',
+        is_finalized_statement: 1,
+        source: 'statement-import',
+      },
+    ]
+
+    render(<Transactions />)
+    await user.click(screen.getByRole('tab', { name: 'views.review' }))
+
+    expect(screen.getAllByText('review.reasons.needs-category')).toHaveLength(2)
+    expect(screen.getByText('review.protected.finalized')).toBeInTheDocument()
+    expect(screen.queryByLabelText('review-category-tx-protected')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Delete Finalized import')).not.toBeInTheDocument()
+
+    await user.selectOptions(screen.getByLabelText('review.category'), 'cat-food')
+    await waitFor(() => {
+      expect(mockUpdateReviewFields).toHaveBeenCalledWith('tx-review', { categoryId: 'cat-food' })
+    })
+
+    const reviewAccount = screen.getByLabelText('review.account') as HTMLSelectElement
+    expect(Array.from(reviewAccount.options).map((option) => option.value)).toEqual(['acc-usd'])
+  })
+
+  it('moves review focus with J and K outside form controls', async () => {
+    const user = userEvent.setup()
+    mockTransactions = [
+      {
+        id: 'tx-first',
+        account_id: 'acc-usd',
+        description: 'First review item',
+        type: 'expense',
+        amount: 100,
+        currency: 'USD',
+        date: dayjs().format('YYYY-MM-DD'),
+        category_id: null,
+        category_name: null,
+        category_color: null,
+        account_name: 'Checking',
+      },
+      {
+        id: 'tx-second',
+        account_id: 'acc-usd',
+        description: 'Second review item',
+        type: 'expense',
+        amount: 100,
+        currency: 'USD',
+        date: dayjs().format('YYYY-MM-DD'),
+        category_id: null,
+        category_name: null,
+        category_color: null,
+        account_name: 'Checking',
+      },
+    ]
+
+    render(<Transactions />)
+    await user.click(screen.getByRole('tab', { name: 'views.review' }))
+
+    fireEvent.keyDown(document, { key: 'j' })
+    await waitFor(() => expect(document.activeElement).toHaveTextContent('Second review item'))
+
+    const categorySelect = screen.getAllByLabelText('review.category')[1]
+    categorySelect.focus()
+    fireEvent.keyDown(categorySelect, { key: 'k' })
+    expect(document.activeElement).toBe(categorySelect)
   })
 
   it('renders transaction rows with description and colored amount', () => {

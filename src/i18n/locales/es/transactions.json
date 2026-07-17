@@ -58,7 +58,85 @@
   "noMatching": "No se encontraron transacciones",
   "filters": {
     "allResults": "Todos los resultados",
-    "uncategorized": "Sin categoria ({{count}})"
+    "uncategorized": "Sin categoria ({{count}})",
+    "search": "Buscar transacciones",
+    "type": "Tipo de transacción",
+    "dateRange": "Rango de fechas",
+    "from": "Fecha desde",
+    "to": "Fecha hasta",
+    "account": "Cuenta",
+    "category": "Categoría",
+    "status": "Estado",
+    "currency": "Moneda",
+    "clear": "Limpiar filtros",
+    "dates": {
+      "all": "Todas las fechas",
+      "month": "Mes actual",
+      "30-days": "Últimos 30 días",
+      "90-days": "Últimos 90 días",
+      "custom": "Rango personalizado"
+    }
+  },
+  "views": {
+    "label": "Vistas de transacciones",
+    "timeline": "Cronología",
+    "ledger": "Libro mayor",
+    "review": "Revisar"
+  },
+  "status": {
+    "posted": "Registrada",
+    "pending": "Pendiente",
+    "cleared": "Conciliada"
+  },
+  "source": {
+    "manual": "Manual"
+  },
+  "ledger": {
+    "date": "Fecha",
+    "description": "Descripción",
+    "account": "Cuenta",
+    "category": "Categoría",
+    "status": "Estado",
+    "source": "Origen",
+    "debit": "Débito",
+    "credit": "Crédito"
+  },
+  "review": {
+    "queueLabel": "Cola de revisión",
+    "empty": "No hay transacciones que requieran atención con estos filtros.",
+    "category": "Categoría",
+    "account": "Cuenta",
+    "updated": "Se actualizó {{description}}",
+    "reviewSplit": "Revisar división",
+    "filters": {
+      "all": "Todas",
+      "needs-category": "Necesita categoría",
+      "pending": "Pendientes",
+      "placeholder": "Pendientes de resolver",
+      "staged": "En preparación"
+    },
+    "reasons": {
+      "needs-category": "Necesita categoría",
+      "pending": "Transacción pendiente",
+      "placeholder": "Marcador sin resolver",
+      "staged": "En preparación — sin impacto en saldo"
+    },
+    "protected": {
+      "split": "Esta transacción dividida debe revisarse mediante su flujo de división dedicado.",
+      "receivable": "Este pago por cobrar debe modificarse mediante el flujo de cuentas por cobrar.",
+      "reconciliation": "Este ajuste de conciliación requiere su flujo dedicado.",
+      "finalized": "Esta fila de estado de cuenta finalizada no puede modificarse en línea.",
+      "linked": "Este registro financiero vinculado requiere su flujo dedicado.",
+      "workflow": "Este registro financiero requiere su flujo dedicado.",
+      "transfer": "Las transferencias requieren su flujo de edición dedicado."
+    },
+    "navigation": {
+      "label": "Navegación de revisión",
+      "previous": "Anterior",
+      "next": "Siguiente",
+      "position": "{{current}} de {{total}}",
+      "empty": "No hay elementos para revisar"
+    }
   },
   "pagination": {
     "summary": "Mostrando {{shown}} de {{total}} transacciones coincidentes",

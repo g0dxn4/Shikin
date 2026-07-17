@@ -109,14 +109,18 @@ test.describe('Transactions', () => {
     await expect(page.getByText(/Add your first transaction/)).toBeVisible()
   })
 
-  test('filter controls are present', async ({ page }) => {
+  test('multi-view and filter controls are present', async ({ page }) => {
     await page.goto('/transactions')
     await page.waitForLoadState('networkidle')
 
     await expect(page.getByPlaceholder(/Search/i)).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Timeline' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Ledger' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Review' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'All' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Expense' })).toBeVisible()
-    await expect(page.getByRole('button', { name: /No category/i })).toBeVisible()
+    await expect(page.getByLabel('Date range')).toBeVisible()
+    await expect(page.getByLabel('Account')).toBeVisible()
   })
 
   test('page structure has correct layout', async ({ page }) => {

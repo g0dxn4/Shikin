@@ -58,7 +58,85 @@
   "noMatching": "No matching transactions",
   "filters": {
     "allResults": "All results",
-    "uncategorized": "Uncategorized ({{count}})"
+    "uncategorized": "Uncategorized ({{count}})",
+    "search": "Search transactions",
+    "type": "Transaction type",
+    "dateRange": "Date range",
+    "from": "From date",
+    "to": "To date",
+    "account": "Account",
+    "category": "Category",
+    "status": "Status",
+    "currency": "Currency",
+    "clear": "Clear filters",
+    "dates": {
+      "all": "All dates",
+      "month": "Current month",
+      "30-days": "Last 30 days",
+      "90-days": "Last 90 days",
+      "custom": "Custom range"
+    }
+  },
+  "views": {
+    "label": "Transaction views",
+    "timeline": "Timeline",
+    "ledger": "Ledger",
+    "review": "Review"
+  },
+  "status": {
+    "posted": "Posted",
+    "pending": "Pending",
+    "cleared": "Cleared"
+  },
+  "source": {
+    "manual": "Manual"
+  },
+  "ledger": {
+    "date": "Date",
+    "description": "Description",
+    "account": "Account",
+    "category": "Category",
+    "status": "Status",
+    "source": "Source",
+    "debit": "Debit",
+    "credit": "Credit"
+  },
+  "review": {
+    "queueLabel": "Review queue",
+    "empty": "No transactions need attention with these filters.",
+    "category": "Category",
+    "account": "Account",
+    "updated": "Updated {{description}}",
+    "reviewSplit": "Review split",
+    "filters": {
+      "all": "All",
+      "needs-category": "Needs category",
+      "pending": "Pending",
+      "placeholder": "Placeholder",
+      "staged": "Staged"
+    },
+    "reasons": {
+      "needs-category": "Needs category",
+      "pending": "Pending transaction",
+      "placeholder": "Unresolved placeholder",
+      "staged": "Staged — no balance impact"
+    },
+    "protected": {
+      "split": "This split transaction must be reviewed through its dedicated split path.",
+      "receivable": "This receivable payment must be changed through the receivable workflow.",
+      "reconciliation": "This reconciliation adjustment requires its dedicated workflow.",
+      "finalized": "This finalized statement row cannot be changed inline.",
+      "linked": "This linked financial record requires its dedicated workflow.",
+      "workflow": "This financial record requires its dedicated workflow.",
+      "transfer": "Transfers require their dedicated edit workflow."
+    },
+    "navigation": {
+      "label": "Review navigation",
+      "previous": "Previous",
+      "next": "Next",
+      "position": "{{current}} of {{total}}",
+      "empty": "No review items"
+    }
   },
   "pagination": {
     "summary": "Showing {{shown}} of {{total}} matching transactions",

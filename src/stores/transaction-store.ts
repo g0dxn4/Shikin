@@ -3,7 +3,7 @@ import { query, withTransaction } from '@/lib/database'
 import type { TransactionClient } from '@/lib/database'
 import { getErrorMessage } from '@/lib/errors'
 import { generateId } from '@/lib/ulid'
-import { toCentavos } from '@/lib/money'
+import { fromCentavos, toCentavos } from '@/lib/money'
 import { learnFromTransaction } from '@/lib/auto-categorize'
 import { useAccountStore } from './account-store'
 import { createSplits, getSplits as fetchSplits, getSplitTransactionIds } from '@/lib/split-service'
@@ -26,6 +26,11 @@ interface TransactionFormData {
 
 interface MutationOptions {
   skipRefresh?: boolean
+}
+
+export interface ReviewFieldUpdate {
+  categoryId?: string | null
+  accountId?: string
 }
 
 type BalanceImpactInput = {
@@ -304,12 +309,119 @@ function assertSingleRowAffected(result: { rowsAffected: number }, message: stri
   }
 }
 
+async function updateTransactionWithData(
+  tx: TransactionClient,
+  id: string,
+  data: TransactionFormData,
+  currentTransaction?: TransactionForMutation,
+  options?: { preserveLegacyStatus?: boolean }
+): Promise<boolean> {
+  const existing = currentTransaction ?? (await getTransactionForMutation(tx, id))
+  if (!existing) return false
+  assertMutableTransaction(existing)
+
+  const now = new Date().toISOString()
+  const newAmountCentavos = toCentavos(data.amount)
+  const oldIsTransfer = existing.type === 'transfer' && !!existing.transfer_to_account_id
+  const newIsTransfer = data.type === 'transfer'
+  const newStatus =
+    options?.preserveLegacyStatus && (existing.status === undefined || existing.status === null)
+      ? null
+      : (data.status ?? existing.status ?? 'posted')
+  const { sourceAccount, transferDestination, currency } = await resolveTransactionWriteAccounts(
+    tx,
+    data
+  )
+  assertTransactionLedgerAccount(sourceAccount)
+  assertTransactionLedgerAccount(transferDestination)
+  if (existing.source_account_mode === 'snapshot_only') {
+    throw new Error(
+      `Account ${existing.account_id} is snapshot-only and cannot accept transaction ledger rows.`
+    )
+  }
+  if (existing.transfer_account_mode === 'snapshot_only') {
+    throw new Error(
+      `Account ${existing.transfer_to_account_id} is snapshot-only and cannot accept transaction ledger rows.`
+    )
+  }
+  const identityChanged =
+    sourceAccount.id !== existing.account_id ||
+    data.type !== existing.type ||
+    normalizeCurrency(currency) !== normalizeCurrency(existing.currency)
+
+  if (identityChanged) {
+    await assertRecurringRuleCompatible(tx, existing.recurring_rule_id, {
+      accountId: sourceAccount.id,
+      type: data.type,
+      currency,
+    })
+  }
+
+  await applyBalanceImpact(
+    tx,
+    {
+      type: existing.type,
+      amount: existing.amount,
+      accountId: existing.account_id,
+      transferToAccountId: oldIsTransfer ? existing.transfer_to_account_id : null,
+      status: existing.status,
+      ledgerTreatment: existing.ledger_treatment,
+      isArchived: existing.is_archived,
+      sourceAccountMode: existing.source_account_mode,
+      transferAccountMode: existing.transfer_account_mode,
+    },
+    now,
+    -1
+  )
+
+  const updateResult = await tx.execute(
+    `UPDATE transactions SET account_id = ?, category_id = ?, transfer_to_account_id = ?, type = ?, amount = ?, currency = ?, description = ?, notes = ?, status = ?, date = ?, updated_at = ?
+      WHERE id = ?`,
+    [
+      sourceAccount.id,
+      newIsTransfer ? null : data.categoryId,
+      transferDestination?.id ?? null,
+      data.type,
+      newAmountCentavos,
+      currency,
+      data.description,
+      data.notes,
+      newStatus,
+      data.date,
+      now,
+      id,
+    ]
+  )
+  assertSingleRowAffected(updateResult, `Transaction ${id} could not be updated safely.`)
+
+  await applyBalanceImpact(
+    tx,
+    {
+      type: data.type,
+      amount: newAmountCentavos,
+      accountId: sourceAccount.id,
+      transferToAccountId: transferDestination?.id ?? null,
+      status: newStatus,
+      ledgerTreatment: existing.ledger_treatment,
+      isArchived: existing.is_archived,
+      sourceAccountMode: sourceAccount.accountMode,
+      transferAccountMode: transferDestination?.accountMode,
+    },
+    now,
+    1
+  )
+  return true
+}
+
 /** Transaction row with joined display names */
 export interface TransactionWithDetails extends Transaction {
   account_name?: string
   transfer_to_account_name?: string
   category_name?: string
   category_color?: string
+  is_receivable_payment?: number
+  is_reconciliation_adjustment?: number
+  is_finalized_statement?: number
 }
 
 interface TransactionState {
@@ -322,6 +434,7 @@ interface TransactionState {
   add: (data: TransactionFormData, options?: MutationOptions) => Promise<void>
   addWithSplits: (data: TransactionFormData, splits: SplitInput[]) => Promise<void>
   update: (id: string, data: TransactionFormData) => Promise<void>
+  updateReviewFields: (id: string, fields: ReviewFieldUpdate) => Promise<void>
   remove: (id: string) => Promise<void>
   getById: (id: string) => TransactionWithDetails | undefined
   getSplits: (id: string) => Promise<TransactionSplitWithCategory[]>
@@ -341,7 +454,13 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       const [transactions, splitIds] = await Promise.all([
         query<TransactionWithDetails>(
           `SELECT t.*, a.name as account_name, c.name as category_name, c.color as category_color,
-                  ta.name as transfer_to_account_name
+                  ta.name as transfer_to_account_name,
+                  EXISTS(SELECT 1 FROM receivables r WHERE r.matched_transaction_id = t.id) AS is_receivable_payment,
+                  EXISTS(SELECT 1 FROM account_reconciliations ar WHERE ar.adjustment_transaction_id = t.id) AS is_reconciliation_adjustment,
+                  EXISTS(
+                    SELECT 1 FROM account_reconciliations ar
+                    WHERE ar.account_id = t.account_id AND ar.staging_batch_id = t.staging_batch_id
+                  ) AS is_finalized_statement
            FROM transactions t
            LEFT JOIN accounts a ON t.account_id = a.id
            LEFT JOIN categories c ON t.category_id = c.id
@@ -426,97 +545,53 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   update: async (id, data) => {
     set({ error: null })
     try {
+      const changed = await withTransaction((tx) => updateTransactionWithData(tx, id, data))
+      if (!changed) return
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
+
+    await Promise.allSettled([get().fetch(), useAccountStore.getState().fetch()])
+  },
+
+  updateReviewFields: async (id, fields) => {
+    set({ error: null })
+    try {
       const changed = await withTransaction(async (tx) => {
         const existing = await getTransactionForMutation(tx, id)
         if (!existing) return false
         assertMutableTransaction(existing)
-
-        const now = new Date().toISOString()
-        const newAmountCentavos = toCentavos(data.amount)
-        const oldIsTransfer = existing.type === 'transfer' && !!existing.transfer_to_account_id
-        const newIsTransfer = data.type === 'transfer'
-        const newStatus = data.status ?? existing.status ?? 'posted'
-        const { sourceAccount, transferDestination, currency } =
-          await resolveTransactionWriteAccounts(tx, data)
-        assertTransactionLedgerAccount(sourceAccount)
-        assertTransactionLedgerAccount(transferDestination)
-        if (existing.source_account_mode === 'snapshot_only') {
-          throw new Error(
-            `Account ${existing.account_id} is snapshot-only and cannot accept transaction ledger rows.`
-          )
+        if (existing.type === 'transfer') {
+          throw new Error('Transfers require their dedicated edit workflow.')
         }
-        if (existing.transfer_account_mode === 'snapshot_only') {
-          throw new Error(
-            `Account ${existing.transfer_to_account_id} is snapshot-only and cannot accept transaction ledger rows.`
-          )
+        const splits = await tx.query<{ id: string }>(
+          'SELECT id FROM transaction_splits WHERE transaction_id = ? LIMIT 1',
+          [id]
+        )
+        if (splits.length > 0) {
+          throw new Error('Split transactions require their dedicated review workflow.')
         }
-        const identityChanged =
-          sourceAccount.id !== existing.account_id ||
-          data.type !== existing.type ||
-          normalizeCurrency(currency) !== normalizeCurrency(existing.currency)
+        if (fields.categoryId === undefined && fields.accountId === undefined) return false
 
-        if (identityChanged) {
-          await assertRecurringRuleCompatible(tx, existing.recurring_rule_id, {
-            accountId: sourceAccount.id,
-            type: data.type,
-            currency,
-          })
-        }
-
-        await applyBalanceImpact(
+        return updateTransactionWithData(
           tx,
+          id,
           {
+            amount: fromCentavos(existing.amount),
             type: existing.type,
-            amount: existing.amount,
-            accountId: existing.account_id,
-            transferToAccountId: oldIsTransfer ? existing.transfer_to_account_id : null,
-            status: existing.status,
-            ledgerTreatment: existing.ledger_treatment,
-            isArchived: existing.is_archived,
-            sourceAccountMode: existing.source_account_mode,
-            transferAccountMode: existing.transfer_account_mode,
+            description: existing.description,
+            categoryId: fields.categoryId === undefined ? existing.category_id : fields.categoryId,
+            accountId: fields.accountId ?? existing.account_id,
+            transferToAccountId: existing.transfer_to_account_id,
+            currency: existing.currency,
+            date: existing.date,
+            notes: existing.notes,
+            status: existing.status ?? null,
           },
-          now,
-          -1
+          existing,
+          { preserveLegacyStatus: true }
         )
-
-        const updateResult = await tx.execute(
-          `UPDATE transactions SET account_id = ?, category_id = ?, transfer_to_account_id = ?, type = ?, amount = ?, currency = ?, description = ?, notes = ?, status = ?, date = ?, updated_at = ?
-            WHERE id = ?`,
-          [
-            sourceAccount.id,
-            newIsTransfer ? null : data.categoryId,
-            transferDestination?.id ?? null,
-            data.type,
-            newAmountCentavos,
-            currency,
-            data.description,
-            data.notes,
-            newStatus,
-            data.date,
-            now,
-            id,
-          ]
-        )
-        assertSingleRowAffected(updateResult, `Transaction ${id} could not be updated safely.`)
-
-        await applyBalanceImpact(
-          tx,
-          {
-            type: data.type,
-            amount: newAmountCentavos,
-            accountId: sourceAccount.id,
-            transferToAccountId: transferDestination?.id ?? null,
-            status: newStatus,
-            ledgerTreatment: existing.ledger_treatment,
-            isArchived: existing.is_archived,
-            sourceAccountMode: sourceAccount.accountMode,
-            transferAccountMode: transferDestination?.accountMode,
-          },
-          now,
-          1
-        )
-        return true
       })
       if (!changed) return
     } catch (error) {

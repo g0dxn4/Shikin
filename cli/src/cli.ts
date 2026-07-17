@@ -13,6 +13,7 @@ import {
 } from './duplicate-detection.js'
 import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
 import { toCentavos } from './money.js'
+import { startWebHost, WEB_DEFAULT_PORT } from './web-host.js'
 import { z } from 'zod'
 import dayjs from 'dayjs'
 
@@ -319,6 +320,25 @@ function getCommandCatalog(toolDefinitions: ToolDefinition[]) {
       ],
       options: [],
       outputOptions: validateOutputOptions,
+    },
+    {
+      name: 'web',
+      kind: 'builtin',
+      validateable: false,
+      description: 'Serve the packaged Shikin web app and data API on loopback for Tailscale Serve',
+      aliases: [],
+      arguments: [],
+      options: [
+        {
+          name: 'port',
+          flag: 'port',
+          type: 'number',
+          required: false,
+          defaultValue: WEB_DEFAULT_PORT,
+          description: 'Loopback port to serve (1024-65535)',
+        },
+      ],
+      outputOptions: [],
     },
     {
       name: 'record',
@@ -2220,6 +2240,7 @@ function registerBuiltInCommands(program: Command, toolDefinitions: ToolDefiniti
   registerDiagnoseCommand(program, toolDefinitions)
   registerToolsCommand(program, toolDefinitions)
   registerValidateCommand(program, toolDefinitions)
+  registerWebCommand(program)
   registerRecordCommand(program, toolDefinitions)
 }
 
@@ -2290,6 +2311,16 @@ function runValidateCommand(
   writeOutput(result, outputOptions)
   if (isFailureResult(normalizeResult(result))) process.exitCode = 1
   close()
+}
+
+function registerWebCommand(program: Command): void {
+  program
+    .command('web')
+    .description('Serve the packaged Shikin web app and data API on loopback for Tailscale Serve')
+    .option('--port <port>', 'Loopback port to serve (1024-65535)', String(WEB_DEFAULT_PORT))
+    .action(async (options: { port?: string }) => {
+      await startWebHost(options.port)
+    })
 }
 
 function registerRecordCommand(program: Command, toolDefinitions: ToolDefinition[]): void {
@@ -2514,7 +2545,10 @@ function unwrapSchema(schema: z.ZodTypeAny): z.ZodTypeAny {
 }
 
 if (isDirectExecution()) {
-  program.parse()
+  void program.parseAsync().catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exitCode = 1
+  })
 }
 
 function isDirectExecution(): boolean {

@@ -8,8 +8,10 @@ import {
   unlinkSync,
   readdirSync,
   lstatSync,
+  statSync,
+  createReadStream,
 } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { extname, isAbsolute, join, relative, resolve } from 'node:path'
 import Database from 'better-sqlite3'
 import { ulid } from 'ulidx'
 import { advanceAnchoredRecurrence, advanceLegacyRecurrence } from '@shikin/finance-core'
@@ -26,6 +28,7 @@ import {
   safePathNoSymlinks,
   validateBridgePreflight,
   validateBridgeRequest,
+  validateHostedRequest,
 } from './data-server-security.mjs'
 
 // ── Configuration ──────────────────────────────────────────────────────────
@@ -34,6 +37,20 @@ const PORT_ENV = process.env.SHIKIN_DATA_SERVER_PORT
 const parsedPort = Number.parseInt(PORT_ENV || '', 10)
 const PORT =
   Number.isInteger(parsedPort) && parsedPort > 0 && parsedPort <= 65535 ? parsedPort : 1480
+const HOSTED_MODE = process.env.SHIKIN_WEB_HOSTED === '1'
+const STATIC_ROOT = HOSTED_MODE ? process.env.SHIKIN_WEB_STATIC_ROOT : null
+
+if (HOSTED_MODE && !STATIC_ROOT) {
+  throw new Error('Hosted web mode requires SHIKIN_WEB_STATIC_ROOT.')
+}
+
+if (STATIC_ROOT) {
+  const staticRootStats = statSync(STATIC_ROOT)
+  if (!staticRootStats.isDirectory()) {
+    throw new Error(`Hosted web static root is not a directory: ${STATIC_ROOT}`)
+  }
+}
+
 const DATA_DIR = prepareAppDataDir()
 const DB_PATH = join(DATA_DIR, 'shikin.db')
 const SETTINGS_PATH = join(DATA_DIR, 'settings.json')
@@ -1400,14 +1417,26 @@ function readBody(req) {
   )
 }
 
+const HOSTED_SECURITY_HEADERS = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Permissions-Policy': 'camera=(), geolocation=(), microphone=()',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+}
+
+function buildResponseHeaders(headers = {}) {
+  return HOSTED_MODE ? { ...HOSTED_SECURITY_HEADERS, ...headers } : buildBridgeCorsHeaders(headers)
+}
+
 function sendJson(res, data, status = 200) {
   res.writeHead(
     status,
-    buildBridgeCorsHeaders({
+    buildResponseHeaders({
       'Content-Type': 'application/json',
     })
   )
-  res.end(JSON.stringify(data))
+  res.end(HOSTED_MODE && res.req?.method === 'HEAD' ? undefined : JSON.stringify(data))
 }
 
 function sendError(res, message, status = 500) {
@@ -1740,11 +1769,113 @@ function materializeRecurringBatch() {
 }
 
 function sendForbidden(res, message) {
-  res.writeHead(403, {
-    'Content-Type': 'application/json',
-    Vary: 'Origin',
+  res.writeHead(
+    403,
+    HOSTED_MODE
+      ? buildResponseHeaders({ 'Content-Type': 'application/json' })
+      : {
+          'Content-Type': 'application/json',
+          Vary: 'Origin',
+        }
+  )
+  res.end(HOSTED_MODE && res.req?.method === 'HEAD' ? undefined : JSON.stringify({ error: message }))
+}
+
+const STATIC_MIME_TYPES = {
+  '.css': 'text/css; charset=utf-8',
+  '.gif': 'image/gif',
+  '.html': 'text/html; charset=utf-8',
+  '.ico': 'image/x-icon',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.js': 'application/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.txt': 'text/plain; charset=utf-8',
+  '.webmanifest': 'application/manifest+json',
+  '.webp': 'image/webp',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+}
+
+function resolveStaticPath(pathname) {
+  if (!STATIC_ROOT || pathname.includes('\0')) return null
+
+  let decodedPath
+  try {
+    decodedPath = decodeURIComponent(pathname)
+  } catch {
+    return null
+  }
+
+  if (decodedPath.split(/[\\/]+/).includes('..')) return null
+
+  const staticRoot = resolve(STATIC_ROOT)
+  const staticPath = resolve(staticRoot, `.${decodedPath}`)
+  const confinedPath = relative(staticRoot, staticPath)
+  if (
+    confinedPath === '..' ||
+    confinedPath.startsWith(`..${'/'}`) ||
+    confinedPath.startsWith(`..${'\\'}`) ||
+    isAbsolute(confinedPath)
+  ) {
+    return null
+  }
+
+  try {
+    const stats = lstatSync(staticPath)
+    return stats.isFile() && !stats.isSymbolicLink() ? staticPath : null
+  } catch {
+    return null
+  }
+}
+
+function isHashedStaticAsset(pathname) {
+  return /-[A-Za-z0-9_-]{8,}\.[^/]+$/.test(pathname)
+}
+
+function isStaticAssetPath(pathname) {
+  return pathname.startsWith('/assets/') || extname(pathname) !== ''
+}
+
+function serveStaticFile(req, res, pathname) {
+  const staticPath = resolveStaticPath(pathname)
+  if (!staticPath) {
+    if (isStaticAssetPath(pathname)) {
+      return sendError(res, 'Not found', 404)
+    }
+    return serveStaticFile(req, res, '/index.html')
+  }
+
+  const stats = statSync(staticPath)
+  const isIndex = staticPath === resolve(STATIC_ROOT, 'index.html')
+  const cacheControl = isIndex
+    ? 'no-cache'
+    : isHashedStaticAsset(pathname)
+      ? 'public, max-age=31536000, immutable'
+      : 'public, max-age=3600'
+  const mimeType = STATIC_MIME_TYPES[extname(staticPath).toLowerCase()] ?? 'application/octet-stream'
+
+  res.writeHead(
+    200,
+    buildResponseHeaders({
+      'Cache-Control': cacheControl,
+      'Content-Length': stats.size,
+      'Content-Type': mimeType,
+    })
+  )
+  if (req.method === 'HEAD') return res.end()
+
+  const stream = createReadStream(staticPath)
+  stream.on('error', (error) => {
+    console.error('[data-server] Static file error:', error.message)
+    if (!res.headersSent) sendError(res, 'Unable to read static file', 500)
+    else res.destroy(error)
   })
-  res.end(JSON.stringify({ error: message }))
+  return stream.pipe(res)
 }
 
 // ── Request Handlers ────────────────────────────────────────────────────────
@@ -1890,16 +2021,26 @@ async function handleFsMakeDirectory(req, res) {
 async function handleDbExport(res) {
   ensureNoActiveTransactions('export the database')
   const bytes = await exportDatabaseBuffer({ db, dbPath: DB_PATH })
-  res.writeHead(200, {
-    'Content-Type': 'application/octet-stream',
-    'Content-Length': bytes.length,
-    'Content-Disposition': 'attachment; filename="shikin.db"',
-    ...buildBridgeCorsHeaders(),
-  })
-  res.end(bytes)
+  res.writeHead(
+    200,
+    buildResponseHeaders({
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': bytes.length,
+      'Content-Disposition': 'attachment; filename="shikin.db"',
+    })
+  )
+  res.end(HOSTED_MODE && res.req?.method === 'HEAD' ? undefined : bytes)
 }
 
 async function handleDbImport(req, res) {
+  if (HOSTED_MODE) {
+    return sendError(
+      res,
+      'Database import and restore are unavailable while hosted access is running. Stop hosted access and use the desktop app.',
+      409
+    )
+  }
+
   ensureNoActiveTransactions('import a database snapshot')
   const buffer = await readBuffer(req, {
     maxBytes: MAX_DB_IMPORT_BYTES,
@@ -1946,7 +2087,8 @@ async function handleDbImport(req, res) {
 }
 
 function dispatchRequest(req, res, url, path) {
-  const route = `${req.method} ${path}`
+  const requestMethod = HOSTED_MODE && req.method === 'HEAD' ? 'GET' : req.method
+  const route = `${requestMethod} ${path}`
 
   switch (route) {
     // ── Database: Query ────────────────────────────────────────────
@@ -2030,8 +2172,11 @@ function dispatchRequest(req, res, url, path) {
 // ── Server ─────────────────────────────────────────────────────────────────
 
 const server = createServer(async (req, res) => {
-  // CORS preflight
-  if (req.method === 'OPTIONS') {
+  const url = new URL(req.url, `http://localhost:${PORT}`)
+  const path = url.pathname
+  const isApiRequest = path === '/api' || path.startsWith('/api/')
+
+  if (!HOSTED_MODE && req.method === 'OPTIONS') {
     const preflightError = validateBridgePreflight(req)
     if (preflightError) return sendForbidden(res, preflightError)
 
@@ -2039,11 +2184,23 @@ const server = createServer(async (req, res) => {
     return res.end()
   }
 
-  const url = new URL(req.url, `http://localhost:${PORT}`)
-  const path = url.pathname
+  if (HOSTED_MODE && isApiRequest) {
+    const hostedRequestError = validateHostedRequest(req)
+    if (hostedRequestError) return sendForbidden(res, hostedRequestError)
+  }
 
-  const bridgeError = validateBridgeRequest(req)
-  if (bridgeError) return sendForbidden(res, bridgeError)
+  if (!HOSTED_MODE) {
+    const bridgeError = validateBridgeRequest(req)
+    if (bridgeError) return sendForbidden(res, bridgeError)
+  }
+
+  if (HOSTED_MODE && !isApiRequest) {
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      const rawPath = String(req.url || '/').split(/[?#]/, 1)[0] || '/'
+      return serveStaticFile(req, res, rawPath)
+    }
+    return sendError(res, 'Not found', 404)
+  }
 
   try {
     await dispatchRequest(req, res, url, path)
@@ -2053,7 +2210,50 @@ const server = createServer(async (req, res) => {
   }
 })
 
+let shuttingDown = false
+
+async function shutdown(signal) {
+  if (shuttingDown) return
+  shuttingDown = true
+  console.log(`[data-server] Received ${signal}; shutting down.`)
+
+  for (const [transactionId, transactionEntry] of activeTransactions) {
+    clearTimeout(transactionEntry.timeout)
+    try {
+      transactionEntry.db.exec('ROLLBACK')
+    } catch {
+      // Best-effort cleanup for active transactions during process shutdown.
+    } finally {
+      activeTransactions.delete(transactionId)
+      transactionEntry.db.close()
+    }
+  }
+
+  for (const { timeout } of closedTransactions.values()) {
+    clearTimeout(timeout)
+  }
+  closedTransactions.clear()
+
+  await new Promise((resolveClose) => server.close(resolveClose))
+  try {
+    db?.close()
+  } finally {
+    process.exit(0)
+  }
+}
+
+process.once('SIGINT', () => {
+  void shutdown('SIGINT')
+})
+process.once('SIGTERM', () => {
+  void shutdown('SIGTERM')
+})
+
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[data-server] Listening on http://127.0.0.1:${PORT}`)
   console.log(`[data-server] Data directory: ${DATA_DIR}`)
+  if (HOSTED_MODE) {
+    console.log(`tailscale serve --bg http://127.0.0.1:${PORT}`)
+    console.log('Stop hosted access with: tailscale serve reset')
+  }
 })

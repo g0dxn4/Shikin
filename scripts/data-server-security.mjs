@@ -10,6 +10,22 @@ function hasAllowedOrigin(headers) {
   return headers?.origin === BRIDGE_ALLOWED_ORIGIN
 }
 
+function getHeaderValue(headers, name) {
+  const value = headers?.[name]
+  return Array.isArray(value) ? value[0] : value
+}
+
+function getHostedRequestHosts(headers) {
+  return [getHeaderValue(headers, 'host'), getHeaderValue(headers, 'x-forwarded-host')]
+    .flatMap((value) => String(value || '').split(','))
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean)
+}
+
+function isMutationMethod(method) {
+  return !['GET', 'HEAD', 'OPTIONS'].includes(String(method || '').toUpperCase())
+}
+
 export function getBridgeToken(env = process.env) {
   return env[BRIDGE_TOKEN_ENV] || ''
 }
@@ -89,6 +105,38 @@ export function validateBridgePreflight(req) {
 
   if (!requestedHeaders.includes(BRIDGE_HEADER_NAME)) {
     return 'Missing required bridge preflight header'
+  }
+
+  return null
+}
+
+/**
+ * Hosted mode is reached only through a loopback reverse proxy. A supplied
+ * Origin must still name the same public host the proxy received so a page on
+ * another site cannot issue state-changing requests on a user's tailnet.
+ */
+export function validateHostedRequest(req) {
+  const origin = getHeaderValue(req.headers, 'origin')
+  const mutation = isMutationMethod(req.method)
+
+  if (!origin) {
+    return mutation ? 'Missing Origin header for hosted mutation request' : null
+  }
+
+  let originHost
+  try {
+    const originUrl = new URL(origin)
+    if (!['http:', 'https:'].includes(originUrl.protocol) || originUrl.pathname !== '/') {
+      throw new Error('invalid origin')
+    }
+    originHost = originUrl.host.toLowerCase()
+  } catch {
+    return 'Invalid Origin header'
+  }
+
+  const requestHosts = getHostedRequestHosts(req.headers)
+  if (!requestHosts.includes(originHost)) {
+    return 'Forbidden origin. Origin host must match Host or X-Forwarded-Host'
   }
 
   return null

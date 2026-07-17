@@ -1,4 +1,5 @@
 interface BridgeRequestLike {
+  method?: string
   headers?: Record<string, string | string[] | undefined>
 }
 
@@ -10,4 +11,5 @@ export function getBridgeToken(env?: Record<string, string | undefined>): string
 export function safePath(base: string, userPath: string): string
 export function validateBridgeRequest(req: BridgeRequestLike, expectedToken?: string): string | null
 export function validateBridgePreflight(req: BridgeRequestLike): string | null
+export function validateHostedRequest(req: BridgeRequestLike): string | null
 export function buildBridgeCorsHeaders(extraHeaders?: Record<string, string>): Record<string, string>

@@ -8,6 +8,7 @@ import {
   safePath,
   validateBridgePreflight,
   validateBridgeRequest,
+  validateHostedRequest,
 } from '../../scripts/data-server-security.mjs'
 
 function createRequest(headers: Record<string, string> = {}) {
@@ -50,6 +51,37 @@ describe('data server security helpers', () => {
         }),
         token
       )
+    ).toContain('Forbidden origin')
+  })
+
+  it('requires a matching origin for hosted mutations while permitting origin-less reads', () => {
+    expect(
+      validateHostedRequest(
+        createRequest({
+          host: 'shikin.tailnet.ts.net',
+          origin: 'https://shikin.tailnet.ts.net',
+        })
+      )
+    ).toBeNull()
+    expect(
+      validateHostedRequest({
+        method: 'POST',
+        headers: {
+          host: '127.0.0.1:8480',
+          origin: 'https://shikin.tailnet.ts.net',
+          'x-forwarded-host': 'shikin.tailnet.ts.net',
+        },
+      })
+    ).toBeNull()
+    expect(validateHostedRequest({ method: 'GET', headers: { host: '127.0.0.1:8480' } })).toBeNull()
+    expect(validateHostedRequest({ method: 'POST', headers: { host: '127.0.0.1:8480' } })).toBe(
+      'Missing Origin header for hosted mutation request'
+    )
+    expect(
+      validateHostedRequest({
+        method: 'GET',
+        headers: { host: '127.0.0.1:8480', origin: 'https://wrong-origin.example' },
+      })
     ).toContain('Forbidden origin')
   })
 

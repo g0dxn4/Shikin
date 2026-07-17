@@ -18,6 +18,13 @@ afterEach(() => {
 })
 
 describe('browser bridge headers', () => {
+  it('does not send an empty bridge header when no token is configured', async () => {
+    vi.stubEnv('VITE_DATA_SERVER_BRIDGE_TOKEN', '')
+    const { withDataServerHeaders } = await import('@/lib/runtime')
+
+    expect(withDataServerHeaders({ Accept: 'application/json' }).has('X-Shikin-Bridge')).toBe(false)
+  })
+
   it('database browser requests include the per-run bridge token', async () => {
     vi.stubEnv('VITE_DATA_SERVER_BRIDGE_TOKEN', 'db-test-token')
     const fetchMock = vi.fn(

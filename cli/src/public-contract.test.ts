@@ -35,19 +35,19 @@ describe('public automation contract', () => {
     const catalog = JSON.parse(String(log.mock.calls[0]?.[0])) as Record<string, unknown>
 
     expect(builtInTools).toHaveLength(91)
-    expect(program.commands).toHaveLength(95)
+    expect(program.commands).toHaveLength(96)
     expect(builtInTools.map((tool) => tool.name).sort()).toEqual(inventory.tools)
     expect(program.commands.map((command) => command.name()).sort()).toEqual(inventory.commands)
     expect(program.version()).toBe('1.0.10')
     expect(APPLICATION_VERSION).toBe('1.0.10')
-    expect(COMMAND_CATALOG_VERSION).toBe('2026-07-16.restore-preview')
+    expect(COMMAND_CATALOG_VERSION).toBe('2026-07-17.web-mode')
     expect(EXPOSED_CATALOG_VERSION).toBe(COMMAND_CATALOG_VERSION)
     expect(COMMAND_CATALOG_VERSION).not.toBe(APPLICATION_VERSION)
     expect(catalog).toMatchObject({
       success: true,
       catalogVersion: COMMAND_CATALOG_VERSION,
       schemaVersion: 'cli-tools-json.v1',
-      commandCount: 95,
+      commandCount: 96,
       toolCount: 91,
     })
   })

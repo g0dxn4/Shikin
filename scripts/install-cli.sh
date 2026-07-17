@@ -231,6 +231,7 @@ info 'Deploying self-contained production CLI support'
 [ -f "$STAGE_DIR/package.json" ] || die 'deployment omitted package.json'
 [ -f "$STAGE_DIR/dist/cli.js" ] || die 'deployment omitted dist/cli.js'
 [ -f "$STAGE_DIR/dist/mcp-server.js" ] || die 'deployment omitted dist/mcp-server.js'
+[ -f "$STAGE_DIR/web/index.html" ] || die 'deployment omitted packaged web/index.html'
 [ -d "$STAGE_DIR/node_modules" ] || die 'deployment omitted production node_modules'
 
 rm -rf "$INSTALL_DIR"

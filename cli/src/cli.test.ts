@@ -219,6 +219,7 @@ describe('CLI command execution', () => {
     const validateCommand = output.commands.find(
       (command: { name: string }) => command.name === 'validate'
     )
+    const webCommand = output.commands.find((command: { name: string }) => command.name === 'web')
 
     expect(output.success).toBe(true)
     expect(output.catalogVersion).toBe(COMMAND_CATALOG_VERSION)
@@ -266,6 +267,19 @@ describe('CLI command execution', () => {
       'pretty',
       'quiet',
     ])
+    expect(webCommand).toMatchObject({
+      kind: 'builtin',
+      validateable: false,
+      options: [
+        {
+          name: 'port',
+          flag: 'port',
+          type: 'number',
+          required: false,
+          defaultValue: 8480,
+        },
+      ],
+    })
     expect(logSpy.mock.calls[0]?.[0]).not.toContain('\n')
     expect(close).toHaveBeenCalledTimes(1)
   })

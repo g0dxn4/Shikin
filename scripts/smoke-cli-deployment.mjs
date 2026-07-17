@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -109,29 +109,31 @@ function waitForDataServer(child, getStderr) {
 }
 
 async function stopChild(child) {
-  if (child.exitCode !== null) return
+  if (child.exitCode !== null) return { code: child.exitCode, signal: child.signalCode }
+
   child.kill('SIGTERM')
-  await new Promise((resolveExit) => {
+  return new Promise((resolveExit) => {
     const timeout = setTimeout(() => {
       child.kill('SIGKILL')
-      resolveExit()
+      resolveExit({ code: child.exitCode, signal: child.signalCode })
     }, 3_000)
-    child.once('exit', () => {
+    child.once('exit', (code, signal) => {
       clearTimeout(timeout)
-      resolveExit()
+      resolveExit({ code, signal })
     })
   })
 }
 
-async function requestDataServer(port, token, path, body) {
+async function requestHostedApi(port, path, body, options = {}) {
+  const origin = options.origin ?? `http://127.0.0.1:${port}`
   const response = await fetch(`http://127.0.0.1:${port}${path}`, {
-    method: 'POST',
+    method: options.method ?? 'POST',
     headers: {
-      'content-type': 'application/json',
-      origin: 'http://localhost:1420',
-      'x-shikin-bridge': token,
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      ...(origin ? { origin } : {}),
+      ...(options.headers ?? {}),
     },
-    body: JSON.stringify(body),
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   })
   const payload = await response.json()
   if (!response.ok) {
@@ -140,17 +142,31 @@ async function requestDataServer(port, token, path, body) {
   return payload
 }
 
-async function smokeSharedDatabase(cliEntrypoint, isolatedEnv) {
-  const port = await findAvailablePort()
-  const token = `deploy-smoke-${process.pid}`
-  const serverEnv = {
-    ...isolatedEnv,
-    SHIKIN_DATA_SERVER_PORT: String(port),
-    SHIKIN_DATA_SERVER_BRIDGE_TOKEN: token,
+function assertPackagedWebAssets(webRoot) {
+  const indexPath = join(webRoot, 'index.html')
+  if (!existsSync(indexPath)) throw new Error('Deployed CLI package omitted web/index.html.')
+
+  const index = readFileSync(indexPath, 'utf8')
+  const assetPaths = [...index.matchAll(/(?:src|href)="([^"?#]+)"/g)]
+    .map((match) => match[1])
+    .filter((path) => path.startsWith('/assets/'))
+  if (assetPaths.length === 0) throw new Error('Packaged web/index.html does not reference any assets.')
+
+  for (const assetPath of assetPaths) {
+    if (!existsSync(join(webRoot, assetPath))) {
+      throw new Error(`Packaged web asset is missing: ${assetPath}`)
+    }
   }
-  const child = spawn(process.execPath, [join(root, 'scripts', 'data-server.mjs')], {
+
+  return assetPaths
+}
+
+async function smokeHostedWeb(cliEntrypoint, deployedWebRoot, isolatedEnv) {
+  const packagedAssets = assertPackagedWebAssets(deployedWebRoot)
+  const port = await findAvailablePort()
+  const child = spawn(process.execPath, [cliEntrypoint, 'web', '--port', String(port)], {
     cwd: root,
-    env: serverEnv,
+    env: isolatedEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   let stderr = ''
@@ -161,6 +177,20 @@ async function smokeSharedDatabase(cliEntrypoint, isolatedEnv) {
 
   try {
     await waitForDataServer(child, () => stderr)
+
+    for (const path of ['/', '/settings']) {
+      const response = await fetch(`http://127.0.0.1:${port}${path}`)
+      const html = await response.text()
+      if (!response.ok || !html.includes('<div id="root">')) {
+        throw new Error(`Hosted web path ${path} did not serve the production SPA.`)
+      }
+    }
+    for (const assetPath of packagedAssets) {
+      const response = await fetch(`http://127.0.0.1:${port}${assetPath}`)
+      if (!response.ok) {
+        throw new Error(`Hosted web asset ${assetPath} did not serve successfully.`)
+      }
+    }
 
     const created = JSON.parse(
       runNode(
@@ -182,26 +212,43 @@ async function smokeSharedDatabase(cliEntrypoint, isolatedEnv) {
       throw new Error(`Unexpected deployed CLI create response: ${JSON.stringify(created)}`)
     }
 
-    const appRows = await requestDataServer(port, token, '/api/db/query', {
+    const webRows = await requestHostedApi(port, '/api/db/query', {
       sql: 'SELECT name, currency FROM accounts WHERE name = $1',
       params: ['CLI Shared DB Smoke'],
     })
-    if (appRows.length !== 1 || appRows[0].currency !== 'MXN') {
-      throw new Error(`App backend did not observe the CLI account: ${JSON.stringify(appRows)}`)
+    if (webRows.length !== 1 || webRows[0].currency !== 'MXN') {
+      throw new Error(`Hosted web API did not observe the CLI account: ${JSON.stringify(webRows)}`)
     }
 
-    await requestDataServer(port, token, '/api/db/execute', {
+    await requestHostedApi(port, '/api/db/execute', {
       sql: 'INSERT INTO categories (id, name, type, sort_order) VALUES ($1, $2, $3, $4)',
-      params: ['shared-smoke-category', 'App Shared DB Smoke', 'expense', 999],
+      params: ['shared-smoke-category', 'Web Shared DB Smoke', 'expense', 999],
     })
     const categories = JSON.parse(
       runNode([cliEntrypoint, 'list-categories', '--json'], isolatedEnv)
     )
-    if (!categories.categories?.some((category) => category.name === 'App Shared DB Smoke')) {
-      throw new Error(`CLI did not observe the app backend category: ${JSON.stringify(categories)}`)
+    if (!categories.categories?.some((category) => category.name === 'Web Shared DB Smoke')) {
+      throw new Error(`CLI did not observe the hosted web category: ${JSON.stringify(categories)}`)
+    }
+
+    const wrongOrigin = await fetch(`http://127.0.0.1:${port}/api/db/query`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: 'https://wrong-origin.example',
+      },
+      body: JSON.stringify({ sql: 'SELECT 1', params: [] }),
+    })
+    if (wrongOrigin.status !== 403) {
+      throw new Error(`Hosted web API accepted a wrong Origin with status ${wrongOrigin.status}.`)
     }
   } finally {
-    await stopChild(child)
+    const stopped = await stopChild(child)
+    if (stopped.code !== 0 || stopped.signal !== null) {
+      throw new Error(
+        `Hosted web server did not stop cleanly (code ${stopped.code}, signal ${stopped.signal ?? 'none'}).`
+      )
+    }
   }
 }
 
@@ -265,7 +312,14 @@ try {
   const packageFile = join(deployDir, 'package.json')
   const cliEntrypoint = join(deployDir, 'dist', 'cli.js')
   const mcpEntrypoint = join(deployDir, 'dist', 'mcp-server.js')
-  const requiredPaths = [packageFile, cliEntrypoint, mcpEntrypoint, join(deployDir, 'node_modules')]
+  const deployedWebRoot = join(deployDir, 'web')
+  const requiredPaths = [
+    packageFile,
+    cliEntrypoint,
+    mcpEntrypoint,
+    join(deployedWebRoot, 'index.html'),
+    join(deployDir, 'node_modules'),
+  ]
   for (const requiredPath of requiredPaths) {
     try {
       readFileSync(requiredPath)
@@ -293,10 +347,10 @@ try {
   if (version !== rootPackage.version) {
     throw new Error(`Deployed CLI reported version ${version}; expected ${rootPackage.version}.`)
   }
-  await smokeSharedDatabase(cliEntrypoint, isolatedEnv)
+  await smokeHostedWeb(cliEntrypoint, deployedWebRoot, isolatedEnv)
   await smokeMcp(mcpEntrypoint, isolatedEnv)
 
-  console.log(`CLI deployment and app shared-database smoke passed with pnpm ${actualPnpmVersion}.`)
+  console.log(`CLI deployment and hosted web shared-database smoke passed with pnpm ${actualPnpmVersion}.`)
 } finally {
   rmSync(tempRoot, { recursive: true, force: true })
 }

@@ -9,10 +9,11 @@
     "shikin-mcp": "./dist/mcp-server.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "web"
   ],
   "scripts": {
-    "prebuild": "pnpm --filter @shikin/finance-core build",
+    "prebuild": "pnpm --dir .. build && node ../scripts/copy-web-to-cli.mjs",
     "build": "tsup --config tsup.config.ts",
     "dev": "tsx src/cli.ts"
   },

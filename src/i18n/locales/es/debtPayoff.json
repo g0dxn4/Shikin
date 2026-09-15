@@ -3,32 +3,35 @@
   "strategy": {
     "title": "Estrategia de Pago",
     "avalanche": "Avalancha",
-    "avalancheDesc": "Mayor APR primero — ahorra m\u00e1s en intereses",
+    "avalancheDesc": "Mayor APR primero — ahorra más en intereses",
     "snowball": "Bola de Nieve",
-    "snowballDesc": "Saldo menor primero — victorias r\u00e1pidas para motivaci\u00f3n"
+    "snowballDesc": "Saldo menor primero — victorias rápidas para motivación"
   },
   "extraPayment": {
     "title": "Pago Extra Mensual",
     "perMonth": "/mes",
-    "description": "Monto extra sobre los pagos m\u00ednimos para acelerar el pago"
+    "description": "Monto extra sobre los pagos mínimos para acelerar el pago"
   },
   "comparison": {
     "avalancheMonths": "Tiempo Avalancha",
     "snowballMonths": "Tiempo Bola de Nieve",
     "months": "meses",
-    "totalInterest": "Inter\u00e9s total",
-    "interestSaved": "Inter\u00e9s Ahorrado",
+    "totalInterest": "Interés total",
+    "interestSaved": "Interés Ahorrado",
     "fewerMonths": "menos meses con avalancha",
     "sameTimeline": "Mismo plazo para ambas estrategias"
   },
   "summary": {
     "totalDebt": "Deuda Total",
-    "monthlyMin": "M\u00ednimos Mensuales",
+    "monthlyMin": "Mínimos Mensuales",
     "debtFreeDate": "Fecha Libre de Deudas",
-    "totalInterest": "Inter\u00e9s Total"
+    "totalInterest": "Interés Total",
+    "notRepaid": "No se amortiza en 50 años"
   },
   "chart": {
-    "title": "Saldo en el Tiempo"
+    "title": "Saldo en el Tiempo",
+    "data": "Ver datos del gráfico",
+    "month": "Mes"
   },
   "payoffOrder": {
     "title": "Orden de Pago"
@@ -38,21 +41,30 @@
   },
   "debtCard": {
     "apr": "TAE",
-    "minPayment": "M\u00edn",
+    "minPayment": "Mín",
     "manual": "Manual"
   },
   "addDebt": {
     "button": "Agregar Deuda Manual",
     "title": "Agregar una Deuda",
     "name": "Nombre",
-    "namePlaceholder": "ej. Pr\u00e9stamo Estudiantil",
+    "namePlaceholder": "ej. Préstamo Estudiantil",
     "balance": "Saldo ($)",
     "apr": "TAE (%)",
-    "minPayment": "Pago M\u00ednimo ($)",
+    "minPayment": "Pago Mínimo ($)",
     "submit": "Agregar Deuda"
   },
   "empty": {
     "title": "No se encontraron deudas",
-    "description": "Agrega cuentas de tarjetas de cr\u00e9dito con saldos o ingresa manualmente deudas como pr\u00e9stamos estudiantiles, de auto o personales para ver tu plan de pago."
+    "description": "Agrega cuentas de tarjetas de crédito con saldos o ingresa manualmente deudas como préstamos estudiantiles, de auto o personales para ver tu plan de pago."
+  },
+  "scope": {
+    "currency": "Moneda",
+    "description": "Planes separados por moneda · sin conversiones implícitas",
+    "manual": "Las deudas manuales son escenarios en USD y no modifican cuentas.",
+    "unknown": "Se omiten las deudas cuya moneda no está disponible hasta cargar sus cuentas."
+  },
+  "error": {
+    "load": "No se pudieron cargar las deudas"
   }
 }

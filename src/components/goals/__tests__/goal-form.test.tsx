@@ -113,10 +113,10 @@ describe('GoalForm', () => {
       render(<GoalForm onSubmit={vi.fn()} />)
 
       const firstIcon = screen.getAllByRole('radio', { name: /form\.selectIcon/ })[0]
-      expect(firstIcon).toHaveClass('h-10', 'w-10')
+      expect(firstIcon).toHaveClass('h-11', 'w-11')
 
       const firstColor = screen.getAllByRole('radio', { name: /form\.selectColor/ })[0]
-      expect(firstColor).toHaveClass('h-10', 'w-10')
+      expect(firstColor).toHaveClass('h-11', 'w-11')
     })
   })
 })

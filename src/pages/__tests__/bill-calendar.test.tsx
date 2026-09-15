@@ -1,11 +1,14 @@
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { useCurrencyStore } from '@/stores/currency-store'
+import { query } from '@/lib/database'
+vi.mock('@/lib/database', () => ({ query: vi.fn().mockResolvedValue([]), execute: vi.fn() }))
+import { beforeEach, describe, it, expect, vi } from 'vitest'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { BillCalendar } from '../bill-calendar'
 
 const recurringStoreMock = vi.hoisted(() => ({
-  fetch: vi.fn(),
+  fetch: vi.fn().mockResolvedValue(undefined),
   rules: [
     {
       id: 'rule-1',
@@ -48,19 +51,28 @@ vi.mock('@/stores/recurring-store', () => ({
   }),
 }))
 
-function renderBillCalendar() {
-  return render(
-    <MemoryRouter>
-      <BillCalendar />
-    </MemoryRouter>
+async function renderBillCalendar() {
+  return act(async () =>
+    render(
+      <MemoryRouter>
+        <BillCalendar />
+      </MemoryRouter>
+    )
   )
 }
 
-describe('BillCalendar', () => {
-  it('renders calendar grid and navigation', () => {
-    renderBillCalendar()
+const originalRule = recurringStoreMock.rules[0]
 
-    expect(screen.getByText('title')).toBeInTheDocument()
+describe('BillCalendar', () => {
+  beforeEach(() => {
+    recurringStoreMock.rules = [originalRule]
+    vi.mocked(query).mockResolvedValue([])
+    useCurrencyStore.setState({ preferredCurrency: 'USD', rates: {}, invalidRates: [] })
+  })
+  it('renders calendar grid and navigation', async () => {
+    await renderBillCalendar()
+
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: /listView/i })).toHaveAttribute('href', '/bills')
     expect(screen.getByRole('button', { name: 'prevMonth' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'nextMonth' })).toBeInTheDocument()
@@ -70,7 +82,7 @@ describe('BillCalendar', () => {
 
   it('navigates to previous and next months', async () => {
     const user = userEvent.setup()
-    renderBillCalendar()
+    await renderBillCalendar()
 
     const prevBtn = screen.getByRole('button', { name: 'prevMonth' })
     const nextBtn = screen.getByRole('button', { name: 'nextMonth' })
@@ -87,11 +99,53 @@ describe('BillCalendar', () => {
     expect(nextMonth).not.toBe(prevMonth)
   })
 
-  it('renders localized day headers', () => {
-    renderBillCalendar()
+  it('renders localized day headers', async () => {
+    await renderBillCalendar()
 
     const headers = screen.getAllByRole('columnheader')
     expect(headers.length).toBe(7)
     expect(headers[0]).toHaveTextContent('dayLabels.sunday')
+  })
+  it('selects a calendar day with keyboard-operable buttons and resets selection on month navigation', async () => {
+    const user = userEvent.setup()
+    await renderBillCalendar()
+    const dateButtons = screen
+      .getAllByRole('button')
+      .filter((button) => button.hasAttribute('aria-pressed'))
+    await user.click(dateButtons[0])
+    expect(dateButtons[0]).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'schedule.allDays' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'nextMonth' }))
+    expect(screen.queryByRole('button', { name: 'schedule.allDays' })).not.toBeInTheDocument()
+  })
+  it('converts scheduled and actually paid bills, withholding missing-rate totals', async () => {
+    recurringStoreMock.rules.push({
+      ...originalRule,
+      id: 'eur',
+      description: 'Euro bill',
+      amount: 10000,
+      currency: 'EUR',
+    })
+    useCurrencyStore.setState({ rates: { 'EUR:USD': 2 } })
+    vi.mocked(query).mockResolvedValue([
+      {
+        id: 'paid-rent',
+        recurring_rule_id: originalRule.id,
+        date: originalRule.next_date,
+        type: 'expense',
+        status: ' ',
+        amount: originalRule.amount,
+        currency: 'USD',
+        description: 'Rent payment',
+      },
+    ])
+    await renderBillCalendar()
+    const total = screen.getByText('thisMonth').parentElement!
+    const paid = screen.getAllByText('paid')[0].parentElement!
+    expect(within(total).getByText('$1,400.00')).toBeInTheDocument()
+    expect(within(paid).getByText('$1,200.00')).toBeInTheDocument()
+    act(() => useCurrencyStore.setState({ rates: {} }))
+    expect(within(total).queryByText('$1,400.00')).not.toBeInTheDocument()
+    expect(within(total).getByText('—')).toBeInTheDocument()
   })
 })

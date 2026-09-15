@@ -1,188 +1,213 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
-import { ChevronLeft, ChevronRight, Calendar, CheckCircle, Clock } from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
+import dayjs from 'dayjs'
 import { Button } from '@/components/ui/button'
+import { PageToolbar, NativePanel, MetricStrip, MetricItem } from '@/components/ui/native-layout'
+import { ErrorBanner } from '@/components/ui/error-banner'
 import { formatMoney } from '@/lib/money'
+import { query } from '@/lib/database'
 import { useRecurringStore } from '@/stores/recurring-store'
-
-function toDateKey(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
-    date.getDate()
-  ).padStart(2, '0')}`
-}
+import { useCurrencyStore } from '@/stores/currency-store'
+import { buildBillSchedule } from '@/components/bill-calendar/schedule'
+import type { Transaction } from '@/types/database'
 
 export function BillCalendar() {
   const { t } = useTranslation(['billCalendar', 'common'])
   const [monthOffset, setMonthOffset] = useState(0)
-  const { rules, isLoading, fetch } = useRecurringStore()
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const { rules, isLoading, fetchError, fetch } = useRecurringStore()
+  const { convertToPreferred, preferredCurrency } = useCurrencyStore()
+  const [payments, setPayments] = useState<{ month: string; rows: Transaction[] } | null>(null)
+  const [paymentError, setPaymentError] = useState<string | null>(null)
+  const [retry, setRetry] = useState(0)
+  const currentMonth = dayjs().startOf('month').add(monthOffset, 'month')
+  const monthKey = currentMonth.format('YYYY-MM')
+  const monthName = currentMonth
+    .toDate()
+    .toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+  const todayKey = dayjs().format('YYYY-MM-DD')
+  const totalDays = currentMonth.daysInMonth()
+  const startDay = currentMonth.day()
 
   useEffect(() => {
-    void fetch()
+    void fetch().catch(() => {})
   }, [fetch])
-
-  const now = new Date()
-  const currentMonth = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1)
-  const monthName = currentMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
-  const startDay = currentMonth.getDay()
-  const totalDays = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate()
-  const today = monthOffset === 0 ? now.getDate() : null
-  const monthKey = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}`
-  const todayKey = toDateKey(now)
-  const { monthBills, remainingBills, monthTotal, billsByDate } = useMemo(() => {
-    const monthBills: typeof rules = []
-    const remainingBills: typeof rules = []
-    const grouped = new Map<string, typeof rules>()
-    let monthTotal = 0
-
-    for (const rule of rules) {
-      if (rule.active !== 1 || rule.type !== 'expense' || !rule.next_date.startsWith(monthKey)) {
-        continue
-      }
-
-      monthBills.push(rule)
-      monthTotal += rule.amount
-
-      if (rule.next_date >= todayKey) {
-        remainingBills.push(rule)
-      }
-
-      const bills = grouped.get(rule.next_date) ?? []
-      bills.push(rule)
-      grouped.set(rule.next_date, bills)
+  useEffect(() => {
+    let active = true
+    query<Transaction>(
+      `SELECT * FROM transactions WHERE recurring_rule_id IS NOT NULL AND date >= ? AND date <= ?`,
+      [`${monthKey}-01`, dayjs(`${monthKey}-01`).endOf('month').format('YYYY-MM-DD')]
+    )
+      .then((rows) => {
+        if (active) {
+          setPayments({ month: monthKey, rows })
+          setPaymentError(null)
+        }
+      })
+      .catch((error) => {
+        if (active) setPaymentError(String(error))
+      })
+    return () => {
+      active = false
     }
+  }, [monthKey, rules, retry])
 
-    return { monthBills, remainingBills, monthTotal, billsByDate: grouped }
-  }, [rules, monthKey, todayKey])
-
+  const { bills, unresolved } = useMemo(
+    () => buildBillSchedule(rules, payments?.month === monthKey ? payments.rows : [], monthKey),
+    [rules, payments, monthKey]
+  )
+  const paid = bills.filter((bill) => bill.paid)
+  const remaining = bills.filter((bill) => !bill.paid)
+  const visibleBills = selectedDate ? bills.filter((bill) => bill.date === selectedDate) : bills
+  const ready = !isLoading && payments?.month === monthKey && !paymentError && !fetchError
+  const moneyTotal = (items: typeof bills) => {
+    let total = 0
+    const missing = new Set<string>()
+    let complete = true
+    for (const bill of items) {
+      const result = convertToPreferred(bill.amount, bill.currency)
+      if (result.complete) total += result.amountCentavos
+      else {
+        complete = false
+        result.missingCurrencies.forEach((currency) => missing.add(currency))
+      }
+    }
+    return {
+      value: ready && complete && !unresolved ? formatMoney(total, preferredCurrency) : '—',
+      detail: !complete
+        ? t('currency.missing', { currencies: [...missing].join(', ') })
+        : preferredCurrency,
+    }
+  }
+  const days = Array.from({ length: Math.ceil((startDay + totalDays) / 7) * 7 }, (_, index) => {
+    const day = index - startDay + 1
+    return day > 0 && day <= totalDays ? day : null
+  })
+  const moveMonth = (direction: number) => {
+    setMonthOffset((offset) => offset + direction)
+    setSelectedDate(null)
+  }
   const dayHeaders = [
-    t('dayLabels.sunday'),
-    t('dayLabels.monday'),
-    t('dayLabels.tuesday'),
-    t('dayLabels.wednesday'),
-    t('dayLabels.thursday'),
-    t('dayLabels.friday'),
-    t('dayLabels.saturday'),
-  ]
-
-  const days: (number | null)[] = []
-  for (let i = 0; i < startDay; i++) {
-    days.push(null)
-  }
-  for (let d = 1; d <= totalDays; d++) {
-    days.push(d)
-  }
-  while (days.length % 7 !== 0) {
-    days.push(null)
-  }
+    'sunday',
+    'monday',
+    'tuesday',
+    'wednesday',
+    'thursday',
+    'friday',
+    'saturday',
+  ] as const
 
   return (
-    <div className="animate-fade-in-up page-content">
-      <div className="liquid-card page-header p-5">
-        <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
-        <Button variant="ghost" asChild className="w-full sm:w-auto">
-          <Link to="/bills">
-            <ChevronLeft size={16} aria-hidden="true" />
-            {t('listView')}
-          </Link>
-        </Button>
-      </div>
-
-      {/* Month navigation */}
-      <div className="flex items-center gap-4">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={t('prevMonth')}
-          onClick={() => setMonthOffset((o) => o - 1)}
-        >
-          <ChevronLeft size={16} aria-hidden="true" />
-        </Button>
-        <h2 className="font-heading text-lg font-semibold" aria-live="polite">
-          {monthName}
-        </h2>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={t('nextMonth')}
-          onClick={() => setMonthOffset((o) => o + 1)}
-        >
-          <ChevronRight size={16} aria-hidden="true" />
-        </Button>
-      </div>
-
-      {/* Two-panel layout */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
-        {/* Calendar Table */}
-        <div className="liquid-card p-5">
-          {isLoading && rules.length === 0 ? (
-            <div
-              className="text-muted-foreground flex h-80 items-center justify-center text-sm"
-              role="status"
+    <div className="page-content">
+      <PageToolbar
+        leading={
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={t('prevMonth')}
+              onClick={() => moveMonth(-1)}
             >
+              <ChevronLeft size={16} />
+            </Button>
+            <h2 className="text-sm font-semibold" aria-live="polite">
+              {monthName}
+            </h2>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={t('nextMonth')}
+              onClick={() => moveMonth(1)}
+            >
+              <ChevronRight size={16} />
+            </Button>
+          </div>
+        }
+        actions={
+          <Button variant="outline" asChild>
+            <Link to="/bills">{t('listView')}</Link>
+          </Button>
+        }
+      />
+      <ErrorBanner
+        title={t('error.load')}
+        message={fetchError || paymentError}
+        onRetry={() => {
+          void fetch().catch(() => {})
+          setRetry((value) => value + 1)
+        }}
+      />
+      <MetricStrip>
+        <MetricItem label={t('thisMonth')} {...moneyTotal(bills)} />
+        <MetricItem label={t('paid')} {...moneyTotal(paid)} />
+        <MetricItem label={t('remaining')} {...moneyTotal(remaining)} />
+        <MetricItem
+          label={t('scheduledCount', { count: bills.length })}
+          value={ready ? bills.length : '—'}
+        />
+      </MetricStrip>
+      {unresolved && <p className="text-warning text-xs">{t('schedule.unresolved')}</p>}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)]">
+        <NativePanel className="p-2 sm:p-4">
+          {isLoading && !rules.length ? (
+            <p className="text-muted-foreground p-8 text-sm" role="status">
               {t('common:status.loading')}
-            </div>
+            </p>
           ) : (
-            <table className="w-full table-fixed border-separate border-spacing-1">
+            <table className="w-full table-fixed border-collapse">
               <caption className="sr-only">{monthName}</caption>
               <thead>
                 <tr>
-                  {dayHeaders.map((day, i) => (
+                  {dayHeaders.map((day) => (
                     <th
-                      key={i}
                       scope="col"
-                      className="text-muted-foreground py-2 text-center font-mono text-[10px] tracking-wider uppercase"
+                      key={day}
+                      className="text-muted-foreground py-3 text-center text-xs font-medium"
                     >
-                      {day}
+                      {t(`dayLabels.${day}`)}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {Array.from({ length: days.length / 7 }, (_, weekIndex) => (
-                  <tr key={weekIndex}>
-                    {days.slice(weekIndex * 7, weekIndex * 7 + 7).map((day, dayIndex) => {
-                      const isToday = day === today
-                      const dateKey = day ? `${monthKey}-${String(day).padStart(2, '0')}` : null
-                      const billsForDay = dateKey ? (billsByDate.get(dateKey) ?? []) : []
-
+                {Array.from({ length: days.length / 7 }, (_, week) => (
+                  <tr key={week}>
+                    {days.slice(week * 7, week * 7 + 7).map((day, index) => {
+                      const date = day ? `${monthKey}-${String(day).padStart(2, '0')}` : ''
+                      const due = bills.filter((bill) => bill.date === date)
                       return (
-                        <td
-                          key={day ? dateKey : `empty-${weekIndex}-${dayIndex}`}
-                          className="h-16 p-0 align-top sm:h-20"
-                        >
-                          <div
-                            aria-label={day ? `${monthName} ${day}` : undefined}
-                            aria-current={isToday ? 'date' : undefined}
-                            className={`relative flex h-full flex-col items-start rounded-lg p-1.5 text-xs transition-colors ${
-                              day ? 'hover:bg-white/[0.03]' : ''
-                            } ${isToday ? 'ring-accent bg-accent/5 ring-1' : ''}`}
-                          >
-                            {day && (
+                        <td key={index} className="border-border h-24 border p-0 align-top sm:h-28">
+                          {day && (
+                            <button
+                              type="button"
+                              aria-label={`${monthName} ${day}, ${t('scheduledCount', { count: due.length })}`}
+                              aria-current={date === todayKey ? 'date' : undefined}
+                              aria-pressed={selectedDate === date}
+                              onClick={() => setSelectedDate(date)}
+                              className={`hover:bg-muted focus-visible:ring-ring flex h-full w-full min-w-0 flex-col gap-1 overflow-hidden p-1.5 text-left focus-visible:ring-2 focus-visible:ring-inset ${selectedDate === date ? 'bg-primary/10 ring-primary ring-1 ring-inset' : ''}`}
+                            >
                               <span
-                                className={`font-mono text-[11px] ${
-                                  isToday ? 'text-accent font-semibold' : 'text-muted-foreground'
-                                }`}
+                                className={`text-xs tabular-nums ${date === todayKey ? 'text-primary font-bold' : 'text-muted-foreground'}`}
                               >
                                 {day}
                               </span>
-                            )}
-                            {billsForDay.length > 0 && (
-                              <div
-                                className="mt-auto flex w-full flex-col gap-1 overflow-hidden"
-                                aria-label={t('scheduledCount', { count: billsForDay.length })}
-                              >
-                                {billsForDay.slice(0, 3).map((bill) => (
-                                  <span
-                                    key={bill.id}
-                                    className="text-foreground truncate rounded-full border border-white/[0.08] bg-white/[0.05] px-1.5 py-0.5 text-[10px] leading-none"
-                                  >
-                                    {bill.description}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                          </div>
+                              {due.slice(0, 2).map((bill) => (
+                                <span
+                                  key={bill.id}
+                                  className={`block w-full truncate rounded px-1 py-0.5 text-[10px] ${bill.paid ? 'bg-success/10 text-success' : 'bg-primary/10 text-primary'}`}
+                                >
+                                  {bill.description}
+                                </span>
+                              ))}
+                              {due.length > 2 && (
+                                <span className="text-muted-foreground text-[10px]">
+                                  +{due.length - 2}
+                                </span>
+                              )}
+                            </button>
+                          )}
                         </td>
                       )
                     })}
@@ -191,66 +216,39 @@ export function BillCalendar() {
               </tbody>
             </table>
           )}
-        </div>
-
-        <div className="liquid-card p-5">
-          <div className="mb-4 flex items-center gap-3">
-            <div className="bg-accent-muted flex h-12 w-12 items-center justify-center rounded-2xl">
-              <Calendar size={24} className="text-primary" aria-hidden="true" />
-            </div>
-            <div>
-              <h3 className="font-heading text-sm font-semibold">{t('upcomingBills')}</h3>
-              <p className="text-muted-foreground text-xs">{t('upcomingDescription')}</p>
-            </div>
+        </NativePanel>
+        <NativePanel className="p-4">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-base font-semibold">
+              {selectedDate ? dayjs(selectedDate).format('MMM D, YYYY') : t('upcomingBills')}
+            </h3>
+            {selectedDate && (
+              <Button variant="ghost" size="sm" onClick={() => setSelectedDate(null)}>
+                {t('schedule.allDays')}
+              </Button>
+            )}
           </div>
-          {remainingBills.length === 0 ? (
-            <p className="text-muted-foreground rounded-2xl border border-white/[0.06] bg-white/[0.03] px-4 py-6 text-center text-xs">
-              {t('noBills')}
-            </p>
+          <p className="text-muted-foreground mb-4 text-xs">{t('schedule.description')}</p>
+          {visibleBills.length === 0 ? (
+            <p className="text-muted-foreground py-6 text-sm">{t('noBills')}</p>
           ) : (
-            <div className="space-y-3">
-              {remainingBills.slice(0, 6).map((bill) => (
-                <div key={bill.id} className="flex items-center justify-between gap-3">
+            <div className="divide-border max-h-[32rem] divide-y overflow-auto">
+              {visibleBills.map((bill) => (
+                <div key={bill.id} className="flex justify-between gap-3 py-3">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold">{bill.description}</p>
-                    <p className="text-muted-foreground text-xs">
-                      {new Date(bill.next_date).toLocaleDateString()}
+                    <p className="text-sm font-medium break-words">{bill.description}</p>
+                    <p className="text-muted-foreground mt-1 text-xs">
+                      {dayjs(bill.date).format('MMM D')} · {t(bill.paid ? 'paid' : 'remaining')}
                     </p>
                   </div>
-                  <span className="font-heading text-sm font-semibold">
-                    {formatMoney(bill.amount, bill.currency ?? 'USD')}
+                  <span className="shrink-0 text-sm tabular-nums">
+                    {formatMoney(bill.amount, bill.currency)}
                   </span>
                 </div>
               ))}
             </div>
           )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div className="liquid-card p-4">
-          <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <Calendar size={16} className="text-accent" aria-hidden="true" />
-            <span className="font-mono text-[10px] tracking-wider uppercase">{t('thisMonth')}</span>
-          </div>
-          <p className="font-heading text-xl font-bold">{formatMoney(monthTotal)}</p>
-        </div>
-        <div className="liquid-card p-4">
-          <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <CheckCircle size={16} className="text-success" aria-hidden="true" />
-            <span className="font-mono text-[10px] tracking-wider uppercase">{t('paid')}</span>
-          </div>
-          <p className="font-heading text-xl font-bold">
-            {monthBills.length - remainingBills.length}
-          </p>
-        </div>
-        <div className="liquid-card p-4">
-          <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <Clock size={16} className="text-warning" aria-hidden="true" />
-            <span className="font-mono text-[10px] tracking-wider uppercase">{t('remaining')}</span>
-          </div>
-          <p className="font-heading text-xl font-bold">{remainingBills.length}</p>
-        </div>
+        </NativePanel>
       </div>
     </div>
   )

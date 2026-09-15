@@ -72,7 +72,7 @@ describe('Goals', () => {
 
   it('renders title', () => {
     render(<Goals />)
-    expect(screen.getByText('title')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
   })
 
   describe('failure/retry boundary behavior', () => {
@@ -205,7 +205,7 @@ describe('Goals', () => {
 
       render(<Goals />)
 
-      expect(screen.getByText('hero.featuredGoal')).toBeInTheDocument()
+      expect(screen.getByText('form.currentAmount')).toBeInTheDocument()
       expect(screen.getByText('hero.aggregateProgress')).toBeInTheDocument()
       expect(screen.getAllByText('2 hero.goalCount').length).toBeGreaterThan(0)
     })

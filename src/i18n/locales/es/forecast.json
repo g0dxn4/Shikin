@@ -5,7 +5,9 @@
     "title": "Proyeccion de Balance",
     "projected": "Proyectado",
     "optimistic": "Optimista",
-    "pessimistic": "Pesimista"
+    "pessimistic": "Pesimista",
+    "data": "Ver datos del gráfico",
+    "date": "Fecha"
   },
   "metrics": {
     "currentBalance": "Balance Actual",
@@ -34,5 +36,18 @@
     "balanceBelowZero": "Se proyecta que el balance sea negativo el {{date}}",
     "lowestPoint": "Punto mas bajo: {{amount}} el {{date}}",
     "noDanger": "Sin advertencias — el flujo de caja se ve saludable"
+  },
+  "scope": {
+    "account": "Cuenta",
+    "allAccounts": "Todas las cuentas activas",
+    "description": "Importes en {{currency}}. Historial de 90 días de la cuenta seleccionada y suscripciones activas; los escenarios usan el 80 % / 120 % del gasto previsto."
+  },
+  "currency": {
+    "unavailable": "Pronóstico no disponible",
+    "missing": "No se muestran totales parciales. Revisa los tipos de cambio y las monedas: {{currencies}}."
+  },
+  "error": {
+    "load": "No se pudo cargar el pronóstico",
+    "subscriptions": "No se pudieron cargar las suscripciones"
   }
 }

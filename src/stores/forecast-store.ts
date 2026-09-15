@@ -8,6 +8,8 @@ interface ForecastState {
   isLoading: boolean
   error: string | null
   selectedRange: ForecastRange
+  accountId: string | undefined
+  setAccount: (accountId: string | undefined) => void
   dangerThreshold: number
 
   setRange: (range: ForecastRange) => void
@@ -25,6 +27,11 @@ export const useForecastStore = create<ForecastState>((set, get) => ({
   error: null,
   selectedRange: 30,
   dangerThreshold: 0,
+  accountId: undefined,
+  setAccount: (accountId) => {
+    set({ accountId })
+    void get().generateForecast()
+  },
 
   setRange: (range) => {
     set({ selectedRange: range })
@@ -38,9 +45,11 @@ export const useForecastStore = create<ForecastState>((set, get) => ({
   generateForecast: async (days) => {
     const range = days ?? get().selectedRange
     const requestId = ++forecastRequestId
-    set({ isLoading: true, error: null })
+    set({ isLoading: true, error: null, forecast: null })
     try {
-      const forecast = await generateCashFlowForecast(range, get().dangerThreshold)
+      const forecast = await generateCashFlowForecast(range, get().dangerThreshold, {
+        accountId: get().accountId,
+      })
       if (requestId === forecastRequestId) {
         set({ forecast })
       }
@@ -57,13 +66,13 @@ export const useForecastStore = create<ForecastState>((set, get) => ({
 
   getMinBalanceDate: () => {
     const { forecast } = get()
-    if (!forecast) return null
+    if (!forecast?.complete) return null
     return forecast.minBalance
   },
 
   getDangerDates: () => {
     const { forecast } = get()
-    if (!forecast) return []
+    if (!forecast?.complete) return []
     return forecast.dangerDates
   },
 }))

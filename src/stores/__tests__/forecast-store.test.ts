@@ -19,6 +19,7 @@ describe('forecast-store', () => {
       error: null,
       selectedRange: 30,
       dangerThreshold: 0,
+      accountId: undefined,
     })
   })
 
@@ -39,7 +40,7 @@ describe('forecast-store', () => {
 
       await useForecastStore.getState().generateForecast()
 
-      expect(mockGenerateForecast).toHaveBeenCalledWith(30, 0) // default range and threshold
+      expect(mockGenerateForecast).toHaveBeenCalledWith(30, 0, { accountId: undefined }) // default range and threshold
       expect(useForecastStore.getState().forecast).toEqual(mockForecast)
     })
 
@@ -55,7 +56,7 @@ describe('forecast-store', () => {
 
       await useForecastStore.getState().generateForecast(90)
 
-      expect(mockGenerateForecast).toHaveBeenCalledWith(90, 0)
+      expect(mockGenerateForecast).toHaveBeenCalledWith(90, 0, { accountId: undefined })
     })
 
     it('sets isLoading during generation', async () => {
@@ -98,7 +99,7 @@ describe('forecast-store', () => {
 
       expect(useForecastStore.getState().selectedRange).toBe(60)
       // setRange triggers generateForecast internally
-      expect(mockGenerateForecast).toHaveBeenCalledWith(60, 0)
+      expect(mockGenerateForecast).toHaveBeenCalledWith(60, 0, { accountId: undefined })
     })
   })
 
@@ -114,6 +115,9 @@ describe('forecast-store', () => {
     it('returns the min balance date from forecast', () => {
       useForecastStore.setState({
         forecast: {
+          complete: true,
+          currency: 'USD',
+          missingCurrencies: [],
           points: [],
           currentBalance: 500000,
           dailyBurnRate: 20000,
@@ -137,6 +141,9 @@ describe('forecast-store', () => {
     it('returns dates where balance goes below threshold', () => {
       useForecastStore.setState({
         forecast: {
+          complete: true,
+          currency: 'USD',
+          missingCurrencies: [],
           points: [],
           currentBalance: 100000,
           dailyBurnRate: 50000,
@@ -158,6 +165,9 @@ describe('forecast-store', () => {
     it('returns empty array when no danger dates', () => {
       useForecastStore.setState({
         forecast: {
+          complete: true,
+          currency: 'USD',
+          missingCurrencies: [],
           points: [],
           currentBalance: 1000000,
           dailyBurnRate: 1000,
@@ -169,5 +179,57 @@ describe('forecast-store', () => {
 
       expect(useForecastStore.getState().getDangerDates()).toEqual([])
     })
+  })
+})
+
+describe('forecast scope and asynchronous results', () => {
+  it('retains the account scope when changing horizons', async () => {
+    useForecastStore.setState({ accountId: undefined, selectedRange: 30, dangerThreshold: 0 })
+    mockGenerateForecast.mockResolvedValue({
+      complete: true,
+      points: [],
+      currency: 'USD',
+      missingCurrencies: [],
+    })
+    useForecastStore.getState().setAccount('checking-eur')
+    expect(mockGenerateForecast).toHaveBeenLastCalledWith(30, 0, { accountId: 'checking-eur' })
+    useForecastStore.getState().setRange(90)
+    expect(mockGenerateForecast).toHaveBeenLastCalledWith(90, 0, { accountId: 'checking-eur' })
+  })
+
+  it('does not expose incomplete minimum balances or danger dates', () => {
+    useForecastStore.setState({
+      forecast: {
+        complete: false,
+        currency: 'USD',
+        missingCurrencies: ['EUR'],
+        points: [],
+        currentBalance: 100,
+        dailyBurnRate: 0,
+        dailyIncome: 0,
+        minBalance: { date: '2026-01-01', amount: 100 },
+        dangerDates: ['2026-01-01'],
+      },
+    })
+    expect(useForecastStore.getState().getMinBalanceDate()).toBeNull()
+    expect(useForecastStore.getState().getDangerDates()).toEqual([])
+  })
+
+  it('ignores older results after a scope change', async () => {
+    let resolveOld!: (result: unknown) => void
+    mockGenerateForecast.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveOld = resolve
+        })
+    )
+    const old = useForecastStore.getState().generateForecast()
+    const latest = { complete: true, currency: 'EUR', missingCurrencies: [], points: [] }
+    mockGenerateForecast.mockResolvedValueOnce(latest)
+    useForecastStore.getState().setAccount('new-account')
+    await Promise.resolve()
+    resolveOld({ complete: true, currency: 'USD', points: [] })
+    await old
+    expect(useForecastStore.getState().forecast).toEqual(latest)
   })
 })

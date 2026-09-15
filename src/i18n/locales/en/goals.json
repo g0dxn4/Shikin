@@ -17,8 +17,8 @@
   "form": {
     "name": "Goal Name",
     "namePlaceholder": "e.g. Emergency Fund",
-    "targetAmount": "Target Amount",
-    "currentAmount": "Current Amount",
+    "targetAmount": "Target Amount (USD)",
+    "currentAmount": "Current Amount (USD)",
     "deadline": "Target Date",
     "account": "Linked Account",
     "accountPlaceholder": "Select an account (optional)",
@@ -58,7 +58,7 @@
     "title": "Active goals"
   },
   "automation": {
-    "title": "Automation",
+    "title": "Contribution plan",
     "subtitle": "A practical saving pace based on your goal data.",
     "monthlyMove": "Move {{amount}} each month toward {{goal}} to stay on pace.",
     "keepPace": "{{goal}} is already funded or does not need a monthly pace yet. Keep it visible and update progress when money moves.",
@@ -84,5 +84,10 @@
   "dashboard": {
     "title": "Savings Goals",
     "viewAll": "View All"
+  },
+  "scope": "Goals and recorded contributions in USD · not net worth",
+  "contributions": {
+    "update": "Update contribution",
+    "note": "The monthly pace is guidance. Updating a goal does not schedule transfers or move money."
   }
 }

@@ -3,6 +3,14 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Budgets } from '../budgets'
 
+vi.mock('@/components/budgets/use-budget-display', () => ({
+  useBudgetDisplay: (budgets: Array<Record<string, unknown>>) => ({
+    budgets: budgets.map((budget) => ({ ...budget, complete: true, currency: 'USD' })),
+    complete: true,
+    error: null,
+  }),
+}))
+
 // ResizeObserver polyfill for jsdom
 globalThis.ResizeObserver = class {
   observe() {}
@@ -72,7 +80,7 @@ describe('Budgets', () => {
 
   it('renders title', () => {
     render(<Budgets />)
-    expect(screen.getByText('title')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
   })
 
   describe('failure/retry boundary behavior', () => {
@@ -200,7 +208,7 @@ describe('Budgets', () => {
 
       expect(screen.getByText('hero.totalBudgeted')).toBeInTheDocument()
       expect(screen.getByText('hero.totalSpent')).toBeInTheDocument()
-      expect(screen.getByText('hero.safeToSpend')).toBeInTheDocument()
+      expect(screen.getByText('hero.totalRemaining')).toBeInTheDocument()
       expect(screen.getByText('progress.title')).toBeInTheDocument()
       expect(screen.getByText('intelligence.title')).toBeInTheDocument()
       expect(screen.getByText('2 hero.budgetCount')).toBeInTheDocument()

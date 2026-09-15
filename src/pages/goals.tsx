@@ -1,3 +1,5 @@
+import dayjs from 'dayjs'
+import { PageToolbar, MetricStrip, MetricItem } from '@/components/ui/native-layout'
 import { useEffect, useState, useMemo, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Target, Plus, Pencil, Trash2, Sparkles, CalendarClock } from 'lucide-react'
@@ -22,9 +24,9 @@ const ConfirmDialog = lazy(() =>
 const GOALS_PAGE_SIZE = 20
 
 function getProgressColor(percent: number): string {
-  if (percent >= 75) return '#34D399'
-  if (percent >= 40) return '#F59E0B'
-  return '#F87171'
+  if (percent >= 75) return 'var(--color-success)'
+  if (percent >= 40) return 'var(--color-warning)'
+  return 'var(--color-destructive)'
 }
 
 type GoalDayTextKey = 'card.noDeadline' | 'card.daysLeft' | 'card.dueToday' | 'card.overdue'
@@ -40,8 +42,10 @@ function GoalRow({
   goal,
   onEdit,
   onDelete,
+  onSelect,
 }: {
   goal: GoalWithProgress
+  onSelect: () => void
   onEdit: () => void
   onDelete: () => void
 }) {
@@ -52,19 +56,26 @@ function GoalRow({
 
   return (
     <div
-      className={`group rounded-[24px] border border-white/[0.06] bg-white/[0.03] p-4 transition-colors hover:bg-white/[0.05] ${isCompleted ? 'border-success/30' : ''}`}
+      className={`group border-border bg-muted/50 hover:bg-muted/50 rounded-xl border p-4 transition-colors ${isCompleted ? 'border-success/30' : ''}`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <div
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-lg"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg"
             style={{ backgroundColor: `${goal.color || '#7C5CFF'}20` }}
           >
             {goal.icon || '🎯'}
           </div>
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
-              <h3 className="font-heading truncate text-base font-semibold">{goal.name}</h3>
+              <h3 className="min-w-0 truncate text-base font-semibold">
+                <button
+                  className="hover:text-primary focus-visible:ring-ring rounded text-left focus-visible:ring-2"
+                  onClick={onSelect}
+                >
+                  {goal.name}
+                </button>
+              </h3>
               <Badge variant="secondary" className="shrink-0 text-[10px]">
                 {goal.progress}%
               </Badge>
@@ -78,7 +89,7 @@ function GoalRow({
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8"
+            className="h-11 w-11 sm:h-10 sm:w-10"
             onClick={onEdit}
             aria-label={`${tCommon('actions.edit')} ${goal.name}`}
           >
@@ -87,7 +98,7 @@ function GoalRow({
           <Button
             variant="ghost"
             size="icon"
-            className="text-destructive hover:text-destructive h-8 w-8"
+            className="text-destructive hover:text-destructive h-11 w-11 sm:h-10 sm:w-10"
             onClick={onDelete}
             aria-label={`${tCommon('actions.delete')} ${goal.name}`}
           >
@@ -96,7 +107,7 @@ function GoalRow({
         </div>
       </div>
 
-      <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-white/5" aria-hidden="true">
+      <div className="bg-muted/50 mt-4 h-2 w-full overflow-hidden rounded-full" aria-hidden="true">
         <div
           className="h-full rounded-full transition-all duration-500 motion-reduce:transition-none"
           style={{ width: `${Math.min(goal.progress, 100)}%`, backgroundColor: progressColor }}
@@ -108,7 +119,7 @@ function GoalRow({
           <span className="text-foreground font-medium">{formatMoney(goal.current_amount)}</span>{' '}
           {t('card.of')} {formatMoney(goal.target_amount)}
         </p>
-        <p className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
+        <p className="text-muted-foreground text-[10px] tracking-wider uppercase tabular-nums">
           {isCompleted ? t('card.completed') : getDaysText(goal, t)}
         </p>
       </div>
@@ -157,7 +168,9 @@ export function Goals() {
 
   const visibleOrderedGoals = orderedGoals.slice(0, visibleGoalCount)
 
-  const automationGoal = featuredGoal ?? orderedGoals[0] ?? null
+  const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null)
+  const automationGoal =
+    goals.find((goal) => goal.id === selectedGoalId) ?? featuredGoal ?? orderedGoals[0] ?? null
 
   const handleDelete = async () => {
     if (!deleteId) return
@@ -178,19 +191,16 @@ export function Goals() {
   }, [fetch])
 
   return (
-    <div className="animate-fade-in-up page-content">
-      <div className="liquid-card page-header min-h-[72px] p-3 sm:p-4">
-        <div>
-          <h1 className="font-heading text-2xl font-bold tracking-tight md:text-[28px]">
-            {t('title')}
-          </h1>
-          <p className="text-muted-foreground mt-1 text-sm font-medium">{t('subtitle')}</p>
-        </div>
-        <Button onClick={() => openGoalDialog()}>
-          <Plus size={16} />
-          {t('addGoal')}
-        </Button>
-      </div>
+    <div className="page-content">
+      <PageToolbar
+        leading={<p className="text-muted-foreground text-xs">{t('scope')}</p>}
+        actions={
+          <Button onClick={() => openGoalDialog()}>
+            <Plus size={16} />
+            {t('addGoal')}
+          </Button>
+        }
+      />
 
       <ErrorBanner
         title={t('error.load')}
@@ -203,7 +213,7 @@ export function Goals() {
       {isLoading ? (
         <div role="status" aria-busy="true">
           <span className="sr-only">{tCommon('status.loading')}</span>
-          <div className="liquid-hero space-y-6 p-7">
+          <div className="native-panel space-y-6 p-7">
             <Skeleton className="h-8 w-56" />
             <Skeleton className="h-12 w-80" />
             <Skeleton className="h-2 w-full" />
@@ -211,7 +221,7 @@ export function Goals() {
           </div>
           <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,0.95fr)_minmax(360px,1fr)]">
             {Array.from({ length: 2 }).map((_, i) => (
-              <div key={i} className="liquid-card space-y-4 p-5">
+              <div key={i} className="native-panel space-y-4 p-5">
                 <Skeleton className="h-6 w-36" />
                 <Skeleton className="h-20 w-full" />
                 <Skeleton className="h-20 w-full" />
@@ -228,11 +238,11 @@ export function Goals() {
           }}
         />
       ) : goals.length === 0 ? (
-        <div className="liquid-card flex flex-col items-center justify-center py-16 text-center">
+        <div className="native-panel flex flex-col items-center justify-center py-16 text-center">
           <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
             <Target size={28} className="text-primary" />
           </div>
-          <h2 className="font-heading mb-2 text-lg font-semibold">{t('empty.title')}</h2>
+          <h2 className="mb-2 text-lg font-semibold">{t('empty.title')}</h2>
           <p className="text-muted-foreground mb-4 text-sm">{t('empty.description')}</p>
           <Button onClick={() => openGoalDialog()}>
             <Plus size={16} />
@@ -241,68 +251,27 @@ export function Goals() {
         </div>
       ) : (
         <>
-          {featuredGoal && (
-            <div className="liquid-hero min-h-[280px] overflow-hidden p-7 sm:p-8">
-              <div className="flex h-full flex-col justify-between gap-8">
-                <div>
-                  <p className="text-muted-foreground font-mono text-[10px] tracking-[0.3em] uppercase">
-                    {t('hero.featuredGoal')}
-                  </p>
-                  <h2 className="font-heading mt-3 text-3xl font-bold tracking-tight">
-                    {featuredGoal.name}
-                  </h2>
-                  <p className="mt-5 font-mono text-3xl font-bold tracking-tight sm:text-4xl">
-                    {formatMoney(featuredGoal.current_amount)} /{' '}
-                    {formatMoney(featuredGoal.target_amount)}
-                  </p>
-                </div>
-
-                <div>
-                  <div
-                    className="h-3.5 w-full overflow-hidden rounded-full bg-white/10"
-                    role="progressbar"
-                    aria-valuenow={featuredGoal.progress}
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-label={`${t('card.progressLabel')}: ${featuredGoal.progress}%`}
-                  >
-                    <div
-                      className="h-full rounded-full bg-[#BFA4FF] transition-all duration-700 motion-reduce:transition-none"
-                      style={{ width: `${Math.min(featuredGoal.progress, 100)}%` }}
-                    />
-                  </div>
-                  <div className="mt-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-                    <p className="text-muted-foreground text-base font-bold">
-                      {featuredGoal.deadline
-                        ? `${t('hero.expectedCompletion')}: ${new Date(featuredGoal.deadline).toLocaleDateString()}`
-                        : getDaysText(featuredGoal, t)}
-                    </p>
-                    <div className="rounded-3xl border border-white/[0.08] bg-white/[0.06] p-4 sm:min-w-[220px]">
-                      <p className="text-muted-foreground text-xs font-bold tracking-[0.14em] uppercase">
-                        {t('hero.aggregateProgress')}
-                      </p>
-                      <p
-                        className="font-heading mt-1 text-3xl font-bold"
-                        style={{ color: getProgressColor(aggregateProgress) }}
-                      >
-                        {aggregateProgress}%
-                      </p>
-                      <p className="text-muted-foreground mt-1 text-xs">
-                        {goals.length} {t('hero.goalCount')}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+          <MetricStrip>
+            <MetricItem
+              label={t('form.currentAmount')}
+              value={formatMoney(goals.reduce((sum, goal) => sum + goal.current_amount, 0))}
+            />
+            <MetricItem
+              label={t('form.targetAmount')}
+              value={formatMoney(goals.reduce((sum, goal) => sum + goal.target_amount, 0))}
+            />
+            <MetricItem label={t('hero.aggregateProgress')} value={`${aggregateProgress}%`} />
+            <MetricItem
+              label={t('active.title')}
+              value={goals.filter((goal) => goal.progress < 100).length}
+              detail={`${goals.length} ${t('hero.goalCount')}`}
+            />
+          </MetricStrip>
 
           <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,0.95fr)_minmax(360px,1fr)]">
-            <section className="liquid-card min-h-[340px] p-5 sm:p-6">
+            <section className="native-panel p-5 sm:p-6">
               <div className="mb-5 flex items-center justify-between gap-3">
-                <h2 className="font-heading text-2xl font-bold tracking-tight">
-                  {t('active.title')}
-                </h2>
+                <h2 className="text-base font-semibold">{t('active.title')}</h2>
                 <Badge variant="secondary" className="text-[10px]">
                   {goals.length} {t('hero.goalCount')}
                 </Badge>
@@ -312,6 +281,7 @@ export function Goals() {
                   <GoalRow
                     key={goal.id}
                     goal={goal}
+                    onSelect={() => setSelectedGoalId(goal.id)}
                     onEdit={() => openGoalDialog(goal.id)}
                     onDelete={() => setDeleteId(goal.id)}
                   />
@@ -335,27 +305,25 @@ export function Goals() {
               />
             </section>
 
-            <section className="liquid-card min-h-[340px] p-5 sm:p-6">
-              <div className="mb-8 flex items-center justify-between gap-3">
+            <section className="native-panel p-5 sm:p-6">
+              <div className="mb-4 flex items-center justify-between gap-3">
                 <div>
-                  <h2 className="font-heading text-2xl font-bold tracking-tight">
-                    {t('automation.title')}
-                  </h2>
+                  <h2 className="text-base font-semibold">{t('automation.title')}</h2>
                   <p className="text-muted-foreground mt-1 text-sm">{t('automation.subtitle')}</p>
                 </div>
-                <div className="bg-accent-muted text-primary flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl">
+                <div className="bg-accent-muted text-primary flex h-11 w-11 shrink-0 items-center justify-center rounded-xl">
                   <Sparkles size={20} />
                 </div>
               </div>
 
-              <div className="rounded-[28px] border border-white/[0.08] bg-white/[0.04] p-5">
+              <div className="border-border bg-muted/50 rounded-xl border p-5">
                 <div className="mb-4 flex items-center gap-3">
                   <CalendarClock size={18} className="text-primary" />
-                  <p className="font-heading text-lg font-bold">
+                  <p className="text-lg font-bold">
                     {automationGoal ? automationGoal.name : t('automation.noGoal')}
                   </p>
                 </div>
-                <p className="text-muted-foreground text-base leading-relaxed font-semibold">
+                <p className="text-muted-foreground text-sm leading-relaxed">
                   {automationGoal && automationGoal.monthlyNeeded > 0
                     ? t('automation.monthlyMove', {
                         amount: formatMoney(automationGoal.monthlyNeeded),
@@ -367,12 +335,22 @@ export function Goals() {
                 </p>
               </div>
 
+              {automationGoal && (
+                <Button
+                  className="mt-4"
+                  variant="outline"
+                  onClick={() => openGoalDialog(automationGoal.id)}
+                >
+                  {t('contributions.update')}
+                </Button>
+              )}
+              <p className="text-muted-foreground mt-3 text-xs">{t('contributions.note')}</p>
               <div className="mt-5 grid grid-cols-2 gap-3">
-                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
+                <div className="border-border bg-muted/50 rounded-xl border p-4">
                   <p className="text-muted-foreground text-xs font-bold">
                     {t('automation.remaining')}
                   </p>
-                  <p className="mt-1 font-mono text-lg font-bold">
+                  <p className="mt-1 text-lg font-bold tabular-nums">
                     {automationGoal
                       ? formatMoney(
                           Math.max(0, automationGoal.target_amount - automationGoal.current_amount)
@@ -380,12 +358,14 @@ export function Goals() {
                       : formatMoney(0)}
                   </p>
                 </div>
-                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
+                <div className="border-border bg-muted/50 rounded-xl border p-4">
                   <p className="text-muted-foreground text-xs font-bold">
                     {t('automation.deadline')}
                   </p>
                   <p className="mt-1 text-sm font-bold">
-                    {automationGoal ? getDaysText(automationGoal, t) : t('card.noDeadline')}
+                    {automationGoal?.deadline
+                      ? dayjs(automationGoal.deadline).format('MMM D, YYYY')
+                      : t('card.noDeadline')}
                   </p>
                 </div>
               </div>

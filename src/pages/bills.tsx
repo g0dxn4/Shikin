@@ -1,7 +1,10 @@
+import { PageToolbar, MetricStrip, MetricItem } from '@/components/ui/native-layout'
+import { ErrorBanner } from '@/components/ui/error-banner'
+import { useCurrencyStore } from '@/stores/currency-store'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
-import { CalendarClock, CheckCircle, Clock, Plus, Receipt, Repeat } from 'lucide-react'
+import { CalendarClock, CheckCircle, Plus, Receipt } from 'lucide-react'
 import dayjs from 'dayjs'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -45,22 +48,22 @@ function BillRow({ rule }: { rule: RecurringRuleWithDetails }) {
     <div className="soft-divider grid gap-3 border-b py-4 last:border-b-0 sm:grid-cols-[1fr_auto] sm:items-center">
       <div className="flex items-start gap-3">
         <div
-          className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.05]"
+          className="border-border bg-muted/50 mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border"
           style={{ color: rule.category_color ?? 'var(--accent)' }}
         >
           <Receipt size={18} aria-hidden="true" />
         </div>
         <div className="min-w-0">
-          <h3 className="font-heading truncate text-sm font-semibold">{rule.description}</h3>
+          <h3 className="truncate text-sm font-semibold">{rule.description}</h3>
           <p className="text-muted-foreground mt-1 text-xs">
             {rule.category_name ?? t('uncategorized')} · {rule.account_name ?? t('unknownAccount')}
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
-            <span className="text-muted-foreground rounded-full border border-white/[0.08] bg-white/[0.04] px-2 py-1 font-mono text-[10px] tracking-wider uppercase">
+            <span className="text-muted-foreground border-border bg-muted/50 rounded-full border px-2 py-1 text-[10px] tracking-wider uppercase tabular-nums">
               {rule.frequency}
             </span>
             <span
-              className={`rounded-full border px-2 py-1 font-mono text-[10px] tracking-wider uppercase ${
+              className={`rounded-full border px-2 py-1 text-[10px] tracking-wider uppercase tabular-nums ${
                 isOverdue
                   ? 'text-destructive border-red-400/20 bg-red-400/[0.08]'
                   : isSoon
@@ -78,8 +81,8 @@ function BillRow({ rule }: { rule: RecurringRuleWithDetails }) {
         </div>
       </div>
       <div className="text-left sm:text-right">
-        <p className="font-heading text-lg font-bold tracking-tight">
-          {formatMoney(rule.amount, rule.currency ?? 'USD')}
+        <p className="text-lg font-bold tracking-tight">
+          {formatMoney(rule.amount, rule.currency ?? rule.account_currency ?? 'USD')}
         </p>
         <p className="text-muted-foreground mt-1 text-xs">
           {dayjs(rule.next_date).format('MMM D, YYYY')}
@@ -92,103 +95,143 @@ function BillRow({ rule }: { rule: RecurringRuleWithDetails }) {
 export function BillsPage() {
   const { t } = useTranslation('billCalendar')
   const { t: tCommon } = useTranslation('common')
-  const { rules, isLoading, fetch } = useRecurringStore()
+  const { rules, isLoading, fetchError, fetch } = useRecurringStore()
   const { openRecurringDialog } = useUIStore()
   const [visibleBillCount, setVisibleBillCount] = useState(BILLS_PAGE_SIZE)
 
+  const { convertToPreferred, preferredCurrency, rates, invalidRates } = useCurrencyStore()
+  const [status, setStatus] = useState('all')
+
   useEffect(() => {
-    void fetch()
+    void fetch().catch(() => {})
   }, [fetch])
 
-  const { bills, dueThisMonth, dueSoon, overdue, monthlyTotal } = useMemo(() => {
-    const today = dayjs()
-    const todayStart = today.startOf('day')
-    const activeBills: RecurringRuleWithDetails[] = []
-    const thisMonth: RecurringRuleWithDetails[] = []
-    const soon: RecurringRuleWithDetails[] = []
-    const pastDue: RecurringRuleWithDetails[] = []
-    let total = 0
+  const { bills, dueThisMonth, dueSoon, overdue, monthlyTotal, missingCurrencies, complete } =
+    useMemo(() => {
+      const today = dayjs()
+      const todayStart = today.startOf('day')
+      const activeBills: RecurringRuleWithDetails[] = []
+      const thisMonth: RecurringRuleWithDetails[] = []
+      const soon: RecurringRuleWithDetails[] = []
+      const pastDue: RecurringRuleWithDetails[] = []
+      let total = 0
+      let complete = true
+      const missing = new Set<string>()
 
-    for (const rule of rules) {
-      if (rule.active !== 1 || rule.type !== 'expense') continue
+      for (const rule of rules) {
+        if (
+          rule.active !== 1 ||
+          rule.type !== 'expense' ||
+          rule.account_is_archived === 1 ||
+          (rule.end_date && rule.next_date > rule.end_date)
+        )
+          continue
 
-      activeBills.push(rule)
-      total += monthlyEquivalent(rule)
+        activeBills.push(rule)
+        const result = convertToPreferred(
+          monthlyEquivalent(rule),
+          rule.currency ?? rule.account_currency ?? 'USD'
+        )
+        if (result.complete) total += result.amountCentavos
+        else {
+          complete = false
+          result.missingCurrencies.forEach((currency) => missing.add(currency))
+        }
 
-      const dueDate = dayjs(rule.next_date)
-      const dueIn = dueDate.startOf('day').diff(todayStart, 'day')
-      if (dueDate.isSame(today, 'month')) thisMonth.push(rule)
-      if (dueIn <= 30) soon.push(rule)
-      if (dueIn < 0) pastDue.push(rule)
-    }
+        const dueDate = dayjs(rule.next_date)
+        const dueIn = dueDate.startOf('day').diff(todayStart, 'day')
+        if (dueDate.isSame(today, 'month')) thisMonth.push(rule)
+        if (dueIn >= 0 && dueIn <= 30) soon.push(rule)
+        if (dueIn < 0) pastDue.push(rule)
+      }
 
-    activeBills.sort((a, b) => a.next_date.localeCompare(b.next_date))
+      activeBills.sort((a, b) => a.next_date.localeCompare(b.next_date))
 
-    return {
-      bills: activeBills,
-      dueThisMonth: thisMonth,
-      dueSoon: soon,
-      overdue: pastDue,
-      monthlyTotal: total,
-    }
-  }, [rules])
+      return {
+        bills: activeBills,
+        dueThisMonth: thisMonth,
+        dueSoon: soon,
+        overdue: pastDue,
+        monthlyTotal: total,
+        complete,
+        missingCurrencies: [...missing],
+      }
+      // Rates are read by the stable store converter.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [rules, convertToPreferred, rates, invalidRates, preferredCurrency])
 
-  const visibleBills = bills.slice(0, visibleBillCount)
+  const filteredBills = status === 'overdue' ? overdue : status === 'soon' ? dueSoon : bills
+  const visibleBills = filteredBills.slice(0, visibleBillCount)
 
   return (
-    <div className="page-content animate-fade-in-up">
-      <div className="liquid-card page-header p-5">
-        <div className="flex items-center gap-3">
-          <Receipt size={24} className="text-accent" aria-hidden="true" />
-          <div>
-            <h1 className="font-heading text-2xl font-bold">{t('bills.title')}</h1>
-            <p className="text-muted-foreground mt-1 text-sm">{t('bills.description')}</p>
+    <div className="page-content">
+      <PageToolbar
+        leading={
+          <label className="text-muted-foreground flex items-center gap-2 text-xs">
+            {t('filter.label')}
+            <select
+              className="bg-background text-foreground border-border min-h-10 rounded-lg border px-3"
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value)
+                setVisibleBillCount(BILLS_PAGE_SIZE)
+              }}
+            >
+              {(['all', 'soon', 'overdue'] as const).map((value) => (
+                <option key={value} value={value}>
+                  {t(`filter.${value}`)}
+                </option>
+              ))}
+            </select>
+          </label>
+        }
+        actions={
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+            <Button variant="ghost" asChild className="w-full sm:w-auto">
+              <Link to="/bill-calendar">
+                <CalendarClock size={16} aria-hidden="true" />
+                {t('bills.calendarView')}
+              </Link>
+            </Button>
+            <Button className="w-full sm:w-auto" onClick={() => openRecurringDialog()}>
+              <Plus size={16} aria-hidden="true" />
+              {t('bills.addRecurring')}
+            </Button>
           </div>
-        </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-          <Button variant="ghost" asChild className="w-full sm:w-auto">
-            <Link to="/bill-calendar">
-              <CalendarClock size={16} aria-hidden="true" />
-              {t('bills.calendarView')}
-            </Link>
-          </Button>
-          <Button className="w-full sm:w-auto" onClick={() => openRecurringDialog()}>
-            <Plus size={16} aria-hidden="true" />
-            {t('bills.addRecurring')}
-          </Button>
-        </div>
-      </div>
+        }
+      />
+      <ErrorBanner
+        title={t('error.load')}
+        message={fetchError}
+        onRetry={() => {
+          void fetch().catch(() => {})
+        }}
+      />
+      <MetricStrip>
+        <MetricItem
+          label={t('monthlyRunRate')}
+          value={
+            isLoading
+              ? '—'
+              : complete
+                ? formatMoney(monthlyTotal, preferredCurrency)
+                : t('currency.unavailable')
+          }
+          detail={
+            !complete
+              ? t('currency.missing', { currencies: missingCurrencies.join(', ') })
+              : preferredCurrency
+          }
+        />
+        <MetricItem label={t('thisMonth')} value={isLoading ? '—' : dueThisMonth.length} />
+        <MetricItem label={t('filter.soon')} value={isLoading ? '—' : dueSoon.length} />
+        <MetricItem label={t('filter.overdue')} value={isLoading ? '—' : overdue.length} />
+      </MetricStrip>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div className="liquid-hero p-5">
-          <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <Repeat size={16} className="text-accent" aria-hidden="true" />
-            <span className="font-mono text-[10px] tracking-wider uppercase">
-              {t('monthlyRunRate')}
-            </span>
-          </div>
-          <p className="font-heading text-2xl font-bold">{formatMoney(monthlyTotal)}</p>
-        </div>
-        <div className="metric-card">
-          <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <CalendarClock size={16} className="text-primary" aria-hidden="true" />
-            <span className="font-mono text-[10px] tracking-wider uppercase">{t('thisMonth')}</span>
-          </div>
-          <p className="font-heading text-2xl font-bold">{dueThisMonth.length}</p>
-        </div>
-        <div className="metric-card">
-          <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <Clock size={16} className="text-warning" aria-hidden="true" />
-            <span className="font-mono text-[10px] tracking-wider uppercase">{t('remaining')}</span>
-          </div>
-          <p className="font-heading text-2xl font-bold">{dueSoon.length}</p>
-        </div>
-      </div>
-
-      <div className="liquid-card p-5">
+      <div className="native-panel p-5">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <h2 className="font-heading text-lg font-semibold">{t('upcomingBills')}</h2>
+            <h2 className="text-lg font-semibold">{t('upcomingBills')}</h2>
             <p className="text-muted-foreground mt-1 text-xs">{t('bills.upcomingDescription')}</p>
           </div>
           {overdue.length === 0 && bills.length > 0 && (
@@ -200,17 +243,19 @@ export function BillsPage() {
         </div>
 
         {isLoading ? (
-          <div className="space-y-3">
+          <div className="space-y-3" role="status" aria-busy="true">
             {Array.from({ length: 4 }).map((_, index) => (
-              <Skeleton key={index} className="h-16 rounded-2xl" />
+              <Skeleton key={index} className="h-16 rounded-xl" />
             ))}
           </div>
-        ) : bills.length === 0 ? (
+        ) : filteredBills.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-14 text-center">
-            <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-3xl">
+            <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-xl">
               <Receipt size={28} className="text-primary" aria-hidden="true" />
             </div>
-            <h3 className="font-heading mb-2 text-lg font-semibold">{t('bills.emptyTitle')}</h3>
+            <h3 className="mb-2 text-lg font-semibold">
+              {t(bills.length ? 'filter.empty' : 'bills.emptyTitle')}
+            </h3>
             <p className="text-muted-foreground max-w-md text-sm">{t('bills.emptyDescription')}</p>
           </div>
         ) : (
@@ -220,13 +265,13 @@ export function BillsPage() {
             ))}
             <ShowMorePagination
               shown={visibleBills.length}
-              total={bills.length}
+              total={filteredBills.length}
               summaryLabel={tCommon('pagination.summary', {
                 shown: visibleBills.length,
-                total: bills.length,
+                total: filteredBills.length,
               })}
               showMoreLabel={tCommon('pagination.showMore', {
-                count: Math.min(BILLS_PAGE_SIZE, bills.length - visibleBills.length),
+                count: Math.min(BILLS_PAGE_SIZE, filteredBills.length - visibleBills.length),
               })}
               onShowMore={() => setVisibleBillCount((count) => count + BILLS_PAGE_SIZE)}
               className="mt-4"

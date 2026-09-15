@@ -5,7 +5,9 @@
     "title": "Balance Projection",
     "projected": "Projected",
     "optimistic": "Optimistic",
-    "pessimistic": "Pessimistic"
+    "pessimistic": "Pessimistic",
+    "data": "View chart data",
+    "date": "Date"
   },
   "metrics": {
     "currentBalance": "Current Balance",
@@ -34,5 +36,18 @@
     "balanceBelowZero": "Balance projected to go negative on {{date}}",
     "lowestPoint": "Lowest point: {{amount}} on {{date}}",
     "noDanger": "No warnings — cash flow looks healthy"
+  },
+  "scope": {
+    "account": "Account",
+    "allAccounts": "All active accounts",
+    "description": "Amounts in {{currency}}. Selected-account 90-day history and active subscriptions; scenarios use 80% / 120% of expected expenses."
+  },
+  "currency": {
+    "unavailable": "Forecast unavailable",
+    "missing": "Partial totals are not shown. Check exchange rates and currency data: {{currencies}}."
+  },
+  "error": {
+    "load": "Could not load forecast",
+    "subscriptions": "Could not load subscriptions"
   }
 }

@@ -19,14 +19,15 @@
     "namePlaceholder": "e.g. Groceries Budget",
     "category": "Category",
     "categoryPlaceholder": "Select a category",
-    "amount": "Budget Amount",
+    "amount": "Budget Amount (USD)",
     "period": "Period",
     "categoriesError": "Categories couldn't be loaded"
   },
   "periods": {
     "weekly": "Weekly",
     "monthly": "Monthly",
-    "yearly": "Yearly"
+    "yearly": "Yearly",
+    "all": "All periods"
   },
   "card": {
     "spent": "Spent",
@@ -79,5 +80,10 @@
   "empty": {
     "title": "No budgets yet",
     "description": "Create your first budget to start tracking your spending limits."
+  },
+  "scope": "USD plans · displayed in {{currency}} · current periods",
+  "currency": {
+    "unavailable": "Totals unavailable",
+    "description": "Complete spending data and valid exchange rates are required to display progress."
   }
 }

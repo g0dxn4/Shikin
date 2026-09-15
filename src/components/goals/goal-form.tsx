@@ -158,7 +158,7 @@ export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormP
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="goal-target-amount">{t('form.targetAmount')}</Label>
           <Input
@@ -220,7 +220,7 @@ export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormP
         </Select>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label id="goal-icon-label">{t('form.icon')}</Label>
           <div
@@ -247,10 +247,10 @@ export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormP
                 aria-label={t('form.selectIcon', { icon: ic })}
                 aria-checked={iconValue === ic}
                 tabIndex={iconValue === ic ? 0 : -1}
-                className={`flex h-10 w-10 items-center justify-center rounded-lg text-base transition-colors ${
+                className={`flex h-11 w-11 items-center justify-center rounded-lg text-base transition-colors ${
                   iconValue === ic
-                    ? 'bg-white/10 ring-1 ring-white/20'
-                    : 'bg-white/5 hover:bg-white/10'
+                    ? 'bg-muted/50 ring-ring ring-1'
+                    : 'bg-muted/50 hover:bg-muted/50'
                 }`}
               >
                 {ic}
@@ -285,8 +285,8 @@ export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormP
                 aria-label={t('form.selectColor', { color: c })}
                 aria-checked={colorValue === c}
                 tabIndex={colorValue === c ? 0 : -1}
-                className={`h-10 w-10 rounded-lg transition-transform ${
-                  colorValue === c ? 'scale-110 ring-2 ring-white/30' : 'hover:scale-105'
+                className={`h-11 w-11 rounded-lg transition-transform ${
+                  colorValue === c ? 'ring-ring scale-110 ring-2' : 'hover:scale-105'
                 }`}
                 style={{ backgroundColor: c }}
               />

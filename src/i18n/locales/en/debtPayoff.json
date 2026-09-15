@@ -25,10 +25,13 @@
     "totalDebt": "Total Debt",
     "monthlyMin": "Monthly Minimums",
     "debtFreeDate": "Debt-Free Date",
-    "totalInterest": "Total Interest"
+    "totalInterest": "Total Interest",
+    "notRepaid": "Not repaid within 50 years"
   },
   "chart": {
-    "title": "Balance Over Time"
+    "title": "Balance Over Time",
+    "data": "View chart data",
+    "month": "Month"
   },
   "payoffOrder": {
     "title": "Payoff Order"
@@ -54,5 +57,14 @@
   "empty": {
     "title": "No debts found",
     "description": "Add credit card accounts with balances or manually enter debts like student loans, auto loans, or personal loans to see your payoff plan."
+  },
+  "scope": {
+    "currency": "Currency",
+    "description": "Separate plans by currency · no implied conversions",
+    "manual": "Manual debts are USD scenarios and do not modify accounts.",
+    "unknown": "Debts with unavailable currency metadata are omitted until their accounts load."
+  },
+  "error": {
+    "load": "Could not load debts"
   }
 }

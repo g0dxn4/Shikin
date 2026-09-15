@@ -17,8 +17,8 @@
   "form": {
     "name": "Nombre de la Meta",
     "namePlaceholder": "ej. Fondo de Emergencia",
-    "targetAmount": "Monto Objetivo",
-    "currentAmount": "Monto Actual",
+    "targetAmount": "Monto Objetivo (USD)",
+    "currentAmount": "Monto Actual (USD)",
     "deadline": "Fecha Objetivo",
     "account": "Cuenta Vinculada",
     "accountPlaceholder": "Seleccionar una cuenta (opcional)",
@@ -58,7 +58,7 @@
     "title": "Metas activas"
   },
   "automation": {
-    "title": "Automatización",
+    "title": "Plan de aportes",
     "subtitle": "Un ritmo de ahorro práctico basado en tus metas.",
     "monthlyMove": "Mueve {{amount}} cada mes hacia {{goal}} para mantener el ritmo.",
     "keepPace": "{{goal}} ya está financiada o aún no necesita un ritmo mensual. Mantenla visible y actualiza el progreso cuando muevas dinero.",
@@ -84,5 +84,10 @@
   "dashboard": {
     "title": "Metas de Ahorro",
     "viewAll": "Ver Todas"
+  },
+  "scope": "Metas y aportes registrados en USD · no son el patrimonio neto",
+  "contributions": {
+    "update": "Actualizar aporte",
+    "note": "El ritmo mensual es una recomendación. Actualizar una meta no programa transferencias ni mueve dinero."
   }
 }

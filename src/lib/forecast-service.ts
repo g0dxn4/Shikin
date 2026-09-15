@@ -1,5 +1,8 @@
 import { query } from '@/lib/database'
 import dayjs from 'dayjs'
+import { isCashFlowEligible } from '@shikin/finance-core'
+import { useCurrencyStore } from '@/stores/currency-store'
+import type { Account, Transaction } from '@/types/database'
 
 /** A single point in the cash flow forecast */
 export interface ForecastPoint {
@@ -11,6 +14,9 @@ export interface ForecastPoint {
 
 /** Full forecast result */
 export interface CashFlowForecast {
+  complete: boolean
+  currency: string
+  missingCurrencies: string[]
   points: ForecastPoint[]
   currentBalance: number
   dailyBurnRate: number
@@ -19,15 +25,21 @@ export interface CashFlowForecast {
   dangerDates: string[]
 }
 
-interface DailyAggregate {
-  type: string
-  avg_daily: number
+interface DailyAggregate extends Pick<
+  Transaction,
+  'type' | 'status' | 'reporting_treatment' | 'transaction_kind' | 'is_archived' | 'currency'
+> {
+  amount: number
 }
 
 interface SubscriptionRow {
   amount: number
+  currency: string
   billing_cycle: string
-  is_active: number
+}
+
+export interface ForecastScope {
+  accountId?: string
 }
 
 /**
@@ -42,55 +54,82 @@ interface SubscriptionRow {
  */
 export async function generateCashFlowForecast(
   days: number = 30,
-  dangerThreshold: number = 0
+  dangerThreshold: number = 0,
+  scope: ForecastScope = {}
 ): Promise<CashFlowForecast> {
-  // 1. Current total balance across all non-archived accounts
-  const balanceResult = await query<{ total: number }>(
-    `SELECT COALESCE(SUM(balance), 0) as total FROM accounts WHERE is_archived = 0`
+  const params = scope.accountId ? [scope.accountId] : []
+  const accounts = await query<Account>(
+    `SELECT * FROM accounts WHERE is_archived = 0${scope.accountId ? ' AND id = ?' : ''}`,
+    params
   )
-  const currentBalance = balanceResult[0]?.total ?? 0
 
-  // 2. Get average daily income and expenses from last 90 days
   const ninetyDaysAgo = dayjs().subtract(90, 'day').format('YYYY-MM-DD')
   const today = dayjs().format('YYYY-MM-DD')
-
+  // Group only identical eligibility/currency dimensions, then use the canonical helper.
   const dailyAverages = await query<DailyAggregate>(
-    `SELECT type, CAST(SUM(amount) AS REAL) / 90.0 as avg_daily
-     FROM transactions
-      WHERE date >= ? AND date <= ? AND type IN ('expense', 'income')
-        AND COALESCE(reporting_treatment, 'normal') = 'normal'
-        AND COALESCE(is_archived, 0) = 0
-        AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
-     GROUP BY type`,
-    [ninetyDaysAgo, today]
+    `SELECT t.type, t.currency, t.status, t.reporting_treatment, t.transaction_kind, t.is_archived,
+            SUM(t.amount) AS amount
+     FROM transactions t JOIN accounts a ON a.id = t.account_id
+     WHERE t.date >= ? AND t.date <= ? AND a.is_archived = 0
+       ${scope.accountId ? 'AND t.account_id = ?' : ''}
+     GROUP BY t.type, t.currency, t.status, t.reporting_treatment, t.transaction_kind, t.is_archived`,
+    [ninetyDaysAgo, today, ...params]
+  )
+  // 3. Factor in subscriptions as additional known expenses
+  const subscriptions = await query<SubscriptionRow>(
+    `SELECT s.amount, s.currency, s.billing_cycle FROM subscriptions s LEFT JOIN accounts a ON a.id = s.account_id WHERE s.is_active = 1 AND (s.account_id IS NULL OR a.is_archived = 0)${scope.accountId ? ' AND s.account_id = ?' : ''}`,
+    params
   )
 
+  // Snapshot conversion preferences for this read; never mix currencies or publish partial totals.
+  const { convertToPreferred, preferredCurrency } = useCurrencyStore.getState()
+  const missingCurrencies = new Set<string>()
+  let complete = true
+  const convert = (amount: number, currency: string) => {
+    const result = convertToPreferred(amount, currency)
+    if (result.complete) return result.amountCentavos
+    complete = false
+    result.missingCurrencies.forEach((code) => missingCurrencies.add(code))
+    if (!result.missingCurrencies.length) missingCurrencies.add(currency || '?')
+    return 0
+  }
+  const currentBalance = accounts.reduce(
+    (sum, account) => sum + convert(account.balance, account.currency),
+    0
+  )
   let avgDailyExpense = 0
   let avgDailyIncome = 0
   for (const row of dailyAverages) {
-    if (row.type === 'expense') avgDailyExpense = row.avg_daily
-    if (row.type === 'income') avgDailyIncome = row.avg_daily
+    if (
+      !isCashFlowEligible({
+        type: row.type,
+        status: row.status,
+        reportingTreatment: row.reporting_treatment,
+        transactionKind: row.transaction_kind,
+        isArchived: row.is_archived,
+      })
+    )
+      continue
+    const daily = convert(row.amount, row.currency) / 90
+    if (row.type === 'expense') avgDailyExpense += daily
+    if (row.type === 'income') avgDailyIncome += daily
   }
-
-  // 3. Factor in subscriptions as additional known expenses
-  const subscriptions = await query<SubscriptionRow>(
-    `SELECT amount, billing_cycle, is_active FROM subscriptions WHERE is_active = 1`
-  )
 
   let dailySubscriptionCost = 0
   for (const sub of subscriptions) {
+    const amount = convert(sub.amount, sub.currency)
     switch (sub.billing_cycle) {
       case 'weekly':
-        dailySubscriptionCost += sub.amount / 7
+        dailySubscriptionCost += amount / 7
         break
       case 'monthly':
-        dailySubscriptionCost += sub.amount / 30
+        dailySubscriptionCost += amount / 30
         break
       case 'quarterly':
-        dailySubscriptionCost += sub.amount / 90
+        dailySubscriptionCost += amount / 90
         break
       case 'yearly':
-        dailySubscriptionCost += sub.amount / 365
+        dailySubscriptionCost += amount / 365
         break
     }
   }
@@ -108,7 +147,7 @@ export async function generateCashFlowForecast(
   let runningProjected = currentBalance
   let runningOptimistic = currentBalance
   let runningPessimistic = currentBalance
-  let minBalance = { date: '', amount: currentBalance }
+  let minBalance = { date: today, amount: currentBalance }
   const dangerDates: string[] = []
 
   for (let i = 0; i <= days; i++) {
@@ -137,7 +176,10 @@ export async function generateCashFlowForecast(
   }
 
   return {
-    points,
+    complete,
+    currency: preferredCurrency,
+    missingCurrencies: [...missingCurrencies].sort(),
+    points: complete ? points : [],
     currentBalance,
     dailyBurnRate: Math.round(effectiveDailyExpense),
     dailyIncome: Math.round(avgDailyIncome),

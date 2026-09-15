@@ -1,3 +1,6 @@
+import { useBudgetDisplay, type DisplayBudget } from '@/components/budgets/use-budget-display'
+import { useCurrencyStore } from '@/stores/currency-store'
+import { PageToolbar, MetricStrip, MetricItem } from '@/components/ui/native-layout'
 import { useEffect, useState, useMemo, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, Lightbulb, PiggyBank, Plus, Pencil, Trash2 } from 'lucide-react'
@@ -9,7 +12,7 @@ import { ErrorBanner } from '@/components/ui/error-banner'
 import { ErrorState } from '@/components/ui/error-state'
 import { ShowMorePagination } from '@/components/shared/show-more-pagination'
 import { useUIStore } from '@/stores/ui-store'
-import { useBudgetStore, type BudgetWithStatus } from '@/stores/budget-store'
+import { useBudgetStore } from '@/stores/budget-store'
 import { formatMoney } from '@/lib/money'
 import { getErrorMessage } from '@/lib/errors'
 
@@ -22,10 +25,10 @@ const ConfirmDialog = lazy(() =>
 const BUDGETS_PAGE_SIZE = 20
 
 function getProgressColor(percent: number): string {
-  if (percent > 100) return '#F87171'
-  if (percent > 80) return '#F87171'
-  if (percent > 60) return '#F59E0B'
-  return '#34D399'
+  if (percent > 100) return 'var(--color-destructive)'
+  if (percent > 80) return 'var(--color-destructive)'
+  if (percent > 60) return 'var(--color-warning)'
+  return 'var(--color-success)'
 }
 
 function cents(value: number | null | undefined): number {
@@ -37,33 +40,36 @@ function CompactBudgetRow({
   onEdit,
   onDelete,
 }: {
-  budget: BudgetWithStatus
+  budget: DisplayBudget
   onEdit: () => void
   onDelete: () => void
 }) {
   const { t } = useTranslation('budgets')
   const { t: tCommon } = useTranslation('common')
-  const displayPercent = Math.min(budget.percentUsed, 100)
+  const displayPercent = Math.max(0, Math.min(budget.percentUsed, 100))
   const progressColor = getProgressColor(budget.percentUsed)
+  const money = (value: number) => (budget.complete ? formatMoney(value, budget.currency) : '—')
   const amount = cents(budget.amount)
   const spent = cents(budget.spent)
   const remaining = cents(budget.remaining)
 
   return (
-    <div className="group rounded-[22px] border border-white/[0.06] bg-white/[0.03] p-4 transition-colors hover:bg-white/[0.05]">
+    <div className="group border-border bg-muted/50 hover:bg-muted/50 rounded-xl border p-4 transition-colors">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-heading truncate text-base font-bold">{budget.categoryName}</p>
-          <p className="text-muted-foreground mt-1 truncate text-xs font-medium">{budget.name}</p>
+          <p className="truncate text-base font-bold">{budget.categoryName}</p>
+          <p className="text-muted-foreground mt-1 truncate text-xs font-medium">
+            <span>{budget.name}</span> · {t(`periods.${budget.period}`)}
+          </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <Badge variant="secondary" className="text-[10px]" style={{ color: progressColor }}>
-            {budget.percentUsed}%
+            {budget.complete ? `${budget.percentUsed}%` : '—'}
           </Badge>
           <Button
             variant="ghost"
             size="icon"
-            className="text-muted-foreground hover:text-foreground h-8 w-8"
+            className="text-muted-foreground hover:text-foreground h-11 w-11 sm:h-10 sm:w-10"
             onClick={onEdit}
             aria-label={`${tCommon('actions.edit')} ${budget.name}`}
           >
@@ -72,7 +78,7 @@ function CompactBudgetRow({
           <Button
             variant="ghost"
             size="icon"
-            className="text-destructive/80 hover:text-destructive h-8 w-8"
+            className="text-destructive/80 hover:text-destructive h-11 w-11 sm:h-10 sm:w-10"
             onClick={onDelete}
             aria-label={`${tCommon('actions.delete')} ${budget.name}`}
           >
@@ -81,27 +87,27 @@ function CompactBudgetRow({
         </div>
       </div>
       <div
-        className="h-2.5 overflow-hidden rounded-full bg-white/[0.07]"
-        role="progressbar"
-        aria-valuenow={budget.percentUsed}
+        className="bg-muted/50 h-2.5 overflow-hidden rounded-full"
+        role={budget.complete ? 'progressbar' : undefined}
+        aria-valuenow={budget.complete ? displayPercent : undefined}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-label={`${budget.name}: ${budget.percentUsed}%`}
+        aria-label={`${budget.name}: ${budget.complete ? `${budget.percentUsed}%` : '—'}`}
       >
         <div
           className="h-full rounded-full transition-all duration-500 motion-reduce:transition-none"
-          style={{ width: `${displayPercent}%`, background: progressColor }}
+          style={{ width: `${budget.complete ? displayPercent : 0}%`, background: progressColor }}
         />
       </div>
-      <div className="text-muted-foreground mt-3 flex items-center justify-between gap-3 text-xs">
+      <div className="text-muted-foreground mt-3 flex flex-wrap items-center justify-between gap-3 text-xs">
         <span>
-          <span className="text-foreground font-semibold">{formatMoney(spent)}</span> {t('card.of')}{' '}
-          {formatMoney(amount)}
+          <span className="text-foreground font-semibold">{money(spent)}</span> {t('card.of')}{' '}
+          {money(amount)}
         </span>
         <span className={remaining < 0 ? 'text-destructive' : 'text-success'}>
           {remaining < 0
-            ? `${formatMoney(Math.abs(remaining))} ${t('card.overBudget')}`
-            : `${formatMoney(remaining)} ${t('card.remaining')}`}
+            ? `${money(Math.abs(remaining))} ${t('card.overBudget')}`
+            : `${money(remaining)} ${t('card.remaining')}`}
         </span>
       </div>
     </div>
@@ -112,7 +118,16 @@ export function Budgets() {
   const { t } = useTranslation('budgets')
   const { t: tCommon } = useTranslation('common')
   const { openBudgetDialog } = useUIStore()
-  const { budgets, isLoading, fetchError, fetch, remove } = useBudgetStore()
+  const { budgets: storedBudgets, isLoading, fetchError, fetch, remove } = useBudgetStore()
+  const { budgets, error: displayError } = useBudgetDisplay(storedBudgets)
+  const { preferredCurrency } = useCurrencyStore()
+  const [period, setPeriod] = useState('all')
+  const scopedBudgets = useMemo(
+    () => (period === 'all' ? budgets : budgets.filter((budget) => budget.period === period)),
+    [budgets, period]
+  )
+  const complete = scopedBudgets.every((budget) => budget.complete)
+  const money = (amount: number) => (complete ? formatMoney(amount, preferredCurrency) : '—')
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [visibleBudgetCount, setVisibleBudgetCount] = useState(BUDGETS_PAGE_SIZE)
@@ -120,16 +135,23 @@ export function Budgets() {
   const hasInitialLoadError = !!fetchError && budgets.length === 0
 
   const summary = useMemo(() => {
-    const totalBudgeted = budgets.reduce((sum, b) => sum + cents(b.amount), 0)
-    const totalSpent = budgets.reduce((sum, b) => sum + cents(b.spent), 0)
-    const totalRemaining = budgets.reduce((sum, b) => sum + Math.max(0, cents(b.remaining)), 0)
+    const totalBudgeted = scopedBudgets.reduce((sum, b) => sum + cents(b.amount), 0)
+    const totalSpent = scopedBudgets.reduce((sum, b) => sum + cents(b.spent), 0)
+    const totalRemaining = scopedBudgets.reduce(
+      (sum, b) => sum + Math.max(0, cents(b.remaining)),
+      0
+    )
     const rawRemaining = totalBudgeted - totalSpent
     const avgPercent =
-      budgets.length > 0
-        ? Math.round(budgets.reduce((sum, b) => sum + b.percentUsed, 0) / budgets.length)
+      scopedBudgets.length > 0
+        ? Math.round(
+            scopedBudgets.reduce((sum, b) => sum + b.percentUsed, 0) / scopedBudgets.length
+          )
         : 0
-    const overBudgetCount = budgets.filter((b) => b.percentUsed > 100).length
-    const warningCount = budgets.filter((b) => b.percentUsed > 80 && b.percentUsed <= 100).length
+    const overBudgetCount = scopedBudgets.filter((b) => b.percentUsed > 100).length
+    const warningCount = scopedBudgets.filter(
+      (b) => b.percentUsed > 80 && b.percentUsed <= 100
+    ).length
     return {
       totalBudgeted,
       totalSpent,
@@ -139,29 +161,29 @@ export function Budgets() {
       overBudgetCount,
       warningCount,
     }
-  }, [budgets])
+  }, [scopedBudgets])
 
   const progressBudgets = useMemo(
-    () => [...budgets].sort((a, b) => b.percentUsed - a.percentUsed),
-    [budgets]
+    () => [...scopedBudgets].sort((a, b) => b.percentUsed - a.percentUsed),
+    [scopedBudgets]
   )
 
   const visibleProgressBudgets = progressBudgets.slice(0, visibleBudgetCount)
 
   const intelligence = useMemo(() => {
-    const overBudget = budgets.find((budget) => budget.percentUsed > 100)
+    const overBudget = scopedBudgets.find((budget) => budget.percentUsed > 100)
     if (overBudget) {
       return {
         tone: 'danger' as const,
         title: t('intelligence.overTitle'),
         message: t('intelligence.overMessage', {
           category: overBudget.categoryName,
-          amount: formatMoney(Math.abs(overBudget.remaining)),
+          amount: formatMoney(Math.abs(overBudget.remaining), preferredCurrency),
         }),
       }
     }
 
-    const nearLimit = budgets.find((budget) => budget.percentUsed > 80)
+    const nearLimit = scopedBudgets.find((budget) => budget.percentUsed > 80)
     if (nearLimit) {
       return {
         tone: 'warning' as const,
@@ -169,7 +191,7 @@ export function Budgets() {
         message: t('intelligence.warningMessage', {
           category: nearLimit.categoryName,
           percent: nearLimit.percentUsed,
-          amount: formatMoney(Math.max(0, nearLimit.remaining)),
+          amount: formatMoney(Math.max(0, nearLimit.remaining), preferredCurrency),
         }),
       }
     }
@@ -178,10 +200,10 @@ export function Budgets() {
       tone: 'safe' as const,
       title: t('intelligence.safeTitle'),
       message: t('intelligence.safeMessage', {
-        amount: formatMoney(summary.totalRemaining),
+        amount: formatMoney(summary.totalRemaining, preferredCurrency),
       }),
     }
-  }, [budgets, summary.totalRemaining, t])
+  }, [scopedBudgets, summary.totalRemaining, t, preferredCurrency])
 
   useEffect(() => {
     void fetch().catch(() => {})
@@ -202,23 +224,44 @@ export function Budgets() {
   }
 
   return (
-    <div className="animate-fade-in-up page-content">
-      <div className="liquid-card page-header min-h-[72px] p-3 sm:p-4">
-        <div>
-          <h1 className="font-heading text-2xl font-bold tracking-tight md:text-[28px]">
-            {t('title')}
-          </h1>
-          <p className="text-muted-foreground mt-1 text-sm font-medium">{t('subtitle')}</p>
-        </div>
-        <Button onClick={() => openBudgetDialog()}>
-          <Plus size={16} />
-          {t('addBudget')}
-        </Button>
-      </div>
+    <div className="page-content">
+      <PageToolbar
+        leading={
+          <label className="text-muted-foreground flex items-center gap-2 text-xs">
+            {t('form.period')}
+            <select
+              className="bg-background text-foreground border-border min-h-10 rounded-lg border px-3"
+              value={period}
+              onChange={(event) => {
+                setPeriod(event.target.value)
+                setVisibleBudgetCount(BUDGETS_PAGE_SIZE)
+              }}
+            >
+              {(['all', 'weekly', 'monthly', 'yearly'] as const).map((value) => (
+                <option key={value} value={value}>
+                  {t(`periods.${value}`)}
+                </option>
+              ))}
+            </select>
+            <span>{t('scope', { currency: preferredCurrency })}</span>
+          </label>
+        }
+        actions={
+          <Button onClick={() => openBudgetDialog()}>
+            <Plus size={16} />
+            {t('addBudget')}
+          </Button>
+        }
+      />
 
+      {storedBudgets.length > 0 && !complete && (
+        <p role="status" className="text-warning text-xs">
+          {t('currency.unavailable')}
+        </p>
+      )}
       <ErrorBanner
         title={t('error.load')}
-        message={!hasInitialLoadError ? fetchError : null}
+        message={displayError || (!hasInitialLoadError ? fetchError : null)}
         onRetry={() => {
           void fetch().catch(() => {})
         }}
@@ -227,14 +270,14 @@ export function Budgets() {
       {isLoading ? (
         <div role="status" aria-busy="true">
           <span className="sr-only">{tCommon('status.loading')}</span>
-          <div className="liquid-card space-y-2 p-6">
+          <div className="native-panel space-y-2 p-6">
             <Skeleton className="h-3 w-20" />
             <Skeleton className="h-9 w-40" />
             <Skeleton className="h-3 w-24" />
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="liquid-card space-y-3 p-5">
+              <div key={i} className="native-panel space-y-3 p-5">
                 <Skeleton className="h-4 w-24" />
                 <Skeleton className="h-4 w-16" />
                 <Skeleton className="h-8 w-20" />
@@ -253,11 +296,11 @@ export function Budgets() {
           }}
         />
       ) : budgets.length === 0 ? (
-        <div className="liquid-card flex flex-col items-center justify-center py-16 text-center">
+        <div className="native-panel flex flex-col items-center justify-center py-16 text-center">
           <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
             <PiggyBank size={28} className="text-primary" />
           </div>
-          <h2 className="font-heading mb-2 text-lg font-semibold">{t('empty.title')}</h2>
+          <h2 className="mb-2 text-lg font-semibold">{t('empty.title')}</h2>
           <p className="text-muted-foreground mb-4 text-sm">{t('empty.description')}</p>
           <Button onClick={() => openBudgetDialog()}>
             <Plus size={16} />
@@ -266,66 +309,24 @@ export function Budgets() {
         </div>
       ) : (
         <>
-          <div className="liquid-hero min-h-[220px] overflow-hidden p-7 sm:p-8">
-            <div className="flex h-full flex-col justify-between gap-8 lg:flex-row lg:items-end">
-              <div>
-                <p className="text-muted-foreground text-base font-bold">{t('hero.safeToSpend')}</p>
-                <p
-                  className="mt-6 font-mono text-4xl font-bold tracking-[-0.08em] sm:text-5xl md:text-[54px]"
-                  style={{ color: summary.rawRemaining < 0 ? '#F87171' : '#34D399' }}
-                >
-                  {formatMoney(Math.max(0, summary.rawRemaining))}
-                </p>
-                <p className="text-muted-foreground mt-4 text-sm font-medium">
-                  {summary.rawRemaining < 0
-                    ? t('hero.overPlan', { amount: formatMoney(Math.abs(summary.rawRemaining)) })
-                    : t('hero.safeDescription', { count: budgets.length })}
-                </p>
-              </div>
-              <div className="rounded-[24px] border border-white/[0.08] bg-white/[0.05] p-5 lg:min-w-[320px]">
-                <p className="font-heading text-2xl font-bold tracking-tight">
-                  {summary.avgPercent}% {t('hero.used')}
-                </p>
-                <div className="mt-4 h-3 overflow-hidden rounded-full bg-white/[0.08]">
-                  <div
-                    className="h-full rounded-full"
-                    style={{
-                      width: `${Math.min(summary.avgPercent, 100)}%`,
-                      background: getProgressColor(summary.avgPercent),
-                    }}
-                  />
-                </div>
-                <div className="text-muted-foreground mt-4 grid grid-cols-3 gap-3 text-xs">
-                  <span>
-                    <strong className="text-foreground block">
-                      {formatMoney(summary.totalBudgeted)}
-                    </strong>
-                    {t('hero.totalBudgeted')}
-                  </span>
-                  <span>
-                    <strong className="text-foreground block">
-                      {formatMoney(summary.totalSpent)}
-                    </strong>
-                    {t('hero.totalSpent')}
-                  </span>
-                  <span>
-                    <strong className="text-foreground block">{summary.overBudgetCount}</strong>
-                    {t('hero.overCount')}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
+          <MetricStrip>
+            <MetricItem label={t('hero.totalBudgeted')} value={money(summary.totalBudgeted)} />
+            <MetricItem label={t('hero.totalSpent')} value={money(summary.totalSpent)} />
+            <MetricItem label={t('hero.totalRemaining')} value={money(summary.rawRemaining)} />
+            <MetricItem
+              label={t('hero.overCount')}
+              value={complete ? summary.overBudgetCount : '—'}
+              detail={complete ? `${summary.avgPercent}% ${t('hero.used')}` : undefined}
+            />
+          </MetricStrip>
 
-          <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.85fr)]">
-            <div className="liquid-card min-h-[420px] p-5 sm:p-6">
-              <div className="mb-5 flex items-center justify-between gap-3">
-                <h2 className="font-heading text-[23px] font-bold tracking-tight">
-                  {t('progress.title')}
-                </h2>
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+            <div className="native-panel p-5 sm:p-6">
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-base font-semibold">{t('progress.title')}</h2>
                 <div className="flex items-center gap-2">
                   <Badge variant="secondary" className="text-[10px]">
-                    {budgets.length} {t('hero.budgetCount')}
+                    {scopedBudgets.length} {t('hero.budgetCount')}
                   </Badge>
                   <Button size="sm" variant="secondary" onClick={() => openBudgetDialog()}>
                     <Plus size={13} />
@@ -361,23 +362,23 @@ export function Budgets() {
               />
             </div>
 
-            <div className="liquid-card min-h-[420px] p-5 sm:p-6">
-              <div className="mb-8 flex items-center gap-3">
+            <div className="native-panel p-5 sm:p-6">
+              <div className="mb-4 flex items-center gap-3">
                 <div
-                  className="flex h-10 w-10 items-center justify-center rounded-2xl"
+                  className="flex h-11 w-11 items-center justify-center rounded-xl sm:h-10 sm:w-10"
                   style={{
                     background:
                       intelligence.tone === 'danger'
-                        ? 'rgba(248, 113, 113, 0.14)'
+                        ? 'color-mix(in srgb, var(--color-destructive) 12%, transparent)'
                         : intelligence.tone === 'warning'
-                          ? 'rgba(245, 158, 11, 0.14)'
-                          : 'rgba(52, 211, 153, 0.14)',
+                          ? 'color-mix(in srgb, var(--color-warning) 12%, transparent)'
+                          : 'color-mix(in srgb, var(--color-success) 12%, transparent)',
                     color:
                       intelligence.tone === 'danger'
-                        ? '#F87171'
+                        ? 'var(--color-destructive)'
                         : intelligence.tone === 'warning'
-                          ? '#F59E0B'
-                          : '#34D399',
+                          ? 'var(--color-warning)'
+                          : 'var(--color-success)',
                   }}
                 >
                   {intelligence.tone === 'safe' ? (
@@ -386,26 +387,28 @@ export function Budgets() {
                     <AlertTriangle size={18} />
                   )}
                 </div>
-                <h2 className="font-heading text-[23px] font-bold tracking-tight">
-                  {t('intelligence.title')}
-                </h2>
+                <h2 className="text-base font-semibold">{t('intelligence.title')}</h2>
               </div>
-              <p className="font-heading text-2xl leading-snug font-bold tracking-tight">
-                {intelligence.title}
+              <p className="text-base leading-snug font-semibold">
+                {complete ? intelligence.title : t('currency.unavailable')}
               </p>
-              <p className="text-muted-foreground mt-4 text-base leading-relaxed font-medium">
-                {intelligence.message}
+              <p className="text-muted-foreground mt-4 text-sm leading-relaxed">
+                {complete ? intelligence.message : t('currency.description')}
               </p>
-              <div className="mt-8 grid grid-cols-2 gap-3">
-                <div className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4">
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div className="border-border bg-muted/50 rounded-xl border p-4">
                   <p className="text-muted-foreground text-xs font-bold">{t('status.warning')}</p>
-                  <p className="font-mono text-2xl font-bold">{summary.warningCount}</p>
+                  <p className="text-2xl font-bold tabular-nums">
+                    {complete ? summary.warningCount : '—'}
+                  </p>
                 </div>
-                <div className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4">
+                <div className="border-border bg-muted/50 rounded-xl border p-4">
                   <p className="text-muted-foreground text-xs font-bold">
                     {t('status.overBudget')}
                   </p>
-                  <p className="font-mono text-2xl font-bold">{summary.overBudgetCount}</p>
+                  <p className="text-2xl font-bold tabular-nums">
+                    {complete ? summary.overBudgetCount : '—'}
+                  </p>
                 </div>
               </div>
             </div>

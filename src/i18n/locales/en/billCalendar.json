@@ -34,5 +34,24 @@
     "thursday": "Thu",
     "friday": "Fri",
     "saturday": "Sat"
+  },
+  "filter": {
+    "label": "Status",
+    "all": "All statuses",
+    "soon": "Next 30 days",
+    "overdue": "Overdue",
+    "empty": "No bills with this status"
+  },
+  "error": {
+    "load": "Could not load bills"
+  },
+  "currency": {
+    "unavailable": "Unavailable",
+    "missing": "Total unavailable: check exchange rates and currency data ({{currencies}})."
+  },
+  "schedule": {
+    "allDays": "Whole month",
+    "description": "Select a day. Paid amounts come from recorded transactions, not elapsed due dates.",
+    "unresolved": "Some legacy rules have ambiguous dates. Only the next known date is shown; review their recurrence anchor in Bills."
   }
 }

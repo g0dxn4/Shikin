@@ -1,3 +1,5 @@
+import { act } from '@testing-library/react'
+import { useCurrencyStore } from '@/stores/currency-store'
 import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -5,7 +7,7 @@ import { MemoryRouter } from 'react-router'
 import { BillsPage } from '../bills'
 
 const recurringStoreMock = vi.hoisted(() => ({
-  fetch: vi.fn(),
+  fetch: vi.fn().mockResolvedValue(undefined),
   rules: [
     {
       id: 'rule-1',
@@ -51,6 +53,7 @@ vi.mock('@/stores/recurring-store', () => ({
 
 describe('BillsPage', () => {
   beforeEach(() => {
+    useCurrencyStore.setState({ preferredCurrency: 'USD', rates: {}, invalidRates: [] })
     recurringStoreMock.fetch.mockClear()
     recurringStoreMock.rules = [
       {
@@ -85,7 +88,7 @@ describe('BillsPage', () => {
         <BillsPage />
       </MemoryRouter>
     )
-    expect(screen.getByText('bills.title')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: /bills\.calendarView/i })).toHaveAttribute(
       'href',
       '/bill-calendar'
@@ -136,5 +139,43 @@ describe('BillsPage', () => {
     await user.click(screen.getByRole('button', { name: /pagination\.showMore/i }))
 
     expect(screen.getByText('Bill 20')).toBeInTheDocument()
+  })
+  it('converts mixed-currency run rates and withholds totals when a rate disappears', () => {
+    recurringStoreMock.rules.push({
+      ...recurringStoreMock.rules[0],
+      id: 'eur',
+      description: 'EUR bill',
+      amount: 10000,
+      currency: 'EUR',
+    })
+    useCurrencyStore.setState({ rates: { 'EUR:USD': 2 } })
+    render(
+      <MemoryRouter>
+        <BillsPage />
+      </MemoryRouter>
+    )
+    expect(screen.getByText('$1,400.00')).toBeInTheDocument()
+    expect(screen.getByText('€100.00')).toBeInTheDocument()
+    act(() => useCurrencyStore.setState({ rates: {} }))
+    expect(screen.queryByText('$1,400.00')).not.toBeInTheDocument()
+    expect(screen.getByText('currency.unavailable')).toBeInTheDocument()
+  })
+
+  it('filters due statuses without removing the recurring-rule list actions', async () => {
+    recurringStoreMock.rules.push({
+      ...recurringStoreMock.rules[0],
+      id: 'overdue',
+      description: 'Old bill',
+      next_date: '2020-01-01',
+    })
+    render(
+      <MemoryRouter>
+        <BillsPage />
+      </MemoryRouter>
+    )
+    await userEvent.setup().selectOptions(screen.getByRole('combobox'), 'overdue')
+    expect(screen.getByText('Old bill')).toBeInTheDocument()
+    expect(screen.queryByText('Rent')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'bills.addRecurring' })).toBeInTheDocument()
   })
 })

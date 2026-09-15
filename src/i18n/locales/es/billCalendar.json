@@ -34,5 +34,24 @@
     "thursday": "Jue",
     "friday": "Vie",
     "saturday": "Sáb"
+  },
+  "filter": {
+    "label": "Estado",
+    "all": "Todos los estados",
+    "soon": "Próximos 30 días",
+    "overdue": "Vencidos",
+    "empty": "No hay facturas con este estado"
+  },
+  "error": {
+    "load": "No se pudieron cargar las facturas"
+  },
+  "currency": {
+    "unavailable": "No disponible",
+    "missing": "Total no disponible: revisa los tipos de cambio y las monedas ({{currencies}})."
+  },
+  "schedule": {
+    "allDays": "Todo el mes",
+    "description": "Selecciona un día. Los pagos se basan en transacciones registradas, no en fechas vencidas.",
+    "unresolved": "Algunas reglas antiguas tienen fechas ambiguas. Solo se muestra la próxima fecha conocida; revisa su anclaje en Facturas."
   }
 }

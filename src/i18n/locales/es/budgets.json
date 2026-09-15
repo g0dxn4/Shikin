@@ -19,14 +19,15 @@
     "namePlaceholder": "ej. Presupuesto de Alimentos",
     "category": "Categoría",
     "categoryPlaceholder": "Seleccionar una categoría",
-    "amount": "Monto del Presupuesto",
+    "amount": "Monto del Presupuesto (USD)",
     "period": "Período",
     "categoriesError": "No se pudieron cargar las categorías"
   },
   "periods": {
     "weekly": "Semanal",
     "monthly": "Mensual",
-    "yearly": "Anual"
+    "yearly": "Anual",
+    "all": "Todos los períodos"
   },
   "card": {
     "spent": "Gastado",
@@ -79,5 +80,10 @@
   "empty": {
     "title": "Sin presupuestos aún",
     "description": "Crea tu primer presupuesto para comenzar a rastrear tus límites de gasto."
+  },
+  "scope": "Planes en USD · importes en {{currency}} · períodos actuales",
+  "currency": {
+    "unavailable": "Totales no disponibles",
+    "description": "Se necesitan los gastos completos y tipos de cambio válidos para mostrar el progreso."
   }
 }

@@ -1,6 +1,6 @@
 # Native frontend integration
 
-Status: plan approved after P1–P5 corrections; shared foundation implementation next.
+Status: complete — all 19 screens integrated, review findings resolved, and final validation passed. Local commits only; nothing installed, released, or pushed.
 
 ## Outcome and completion bar
 
@@ -184,4 +184,23 @@ Do not claim checks that have not run. Any baseline fixture failure is tracked s
 - P4: fixed in plan — exact protected counts/rows, explicit startup completion and cache/history allowlist.
 - P5: fixed in plan — legacy fallback, appearance-only writes and byte-preserving custom-theme test specified.
 - Planning gate: APPROVED by Sol high after verifying P1–P5 corrections.
-- Implementation phases / integrated gate / final validation: pending.
+- Shared foundation and all four page groups: integrated, with preserved local commits and no production storage/schema/mutation changes.
+- R1: fixed — the paginated query consumes legacy transaction-store refreshes through its existing invalidation event, covering startup recurrence without editing financial mutation bodies. Race/cleanup regressions pass.
+- R2: fixed — all five affected views subscribe to mutable currency inputs; deferred rates, preference changes and invalid-rate updates recompute or withhold totals appropriately.
+- R3: fixed — Overview uses the existing net-worth calculation, including unlinked holdings, and refreshes after account/investment changes. A live synthetic $12.34 expense immediately updated net worth from $70,767.34 to $70,755.00 without navigation/reload.
+- R3-1: fixed — module-level serialization at the shared read-only net-worth calculation boundary survives unmount/remount and coordinates every caller. Caller errors propagate without poisoning subsequent reads. Actual-store remount/error regressions pass; financial calculation rules and snapshot/write methods remain unchanged.
+- V1: fixed — category bars scale against the true maximum of an unsorted input; zero spending is not inflated. Unit and live visual checks passed.
+- Integrated Sol high review: complete. Named findings were corrected and checked through bounded delta-only follow-ups; the final R3-1 closure reported no material findings. Earlier reviewer sessions had been cleaned up, so their continuations were explicitly limited to the same named findings rather than new broad reviews. No open material findings remain.
+
+## Execution results
+
+- Baseline after the isolated CLI fixture correction: 100 files / 1,196 tests passed.
+- Integrated application before final review fixes: `pnpm check`, 115 files / 1,275 tests, `pnpm build`, and `pnpm build:cli` passed. The CLI deployment/hosted shared-database smoke uses temporary data.
+- Full Chromium and WebKit E2E suites each passed 79 cases, with 13 intentional viewport-specific skips. Initial stale test selectors/translated heading expectations were corrected without weakening data assertions. After the final shared-read change, all 12 affected dashboard/preservation cases passed again in each engine.
+- Preservation E2E now mounts and visits all 19 routes, exercises real transaction paging/filtering, toggles appearance, reloads, and asserts exact protected table counts and canonical fixture equality on desktop and mobile.
+- Visual browser audits covered all 19 routes at 1280×800, 1440×900, 1920×1080 and 390×844 in both native appearances: 152 route/appearance/viewport combinations, each with one visible page heading, no document overflow, and no browser exceptions. Synthetic fixtures only.
+- Final integrated checks: `pnpm check`, **116 files / 1,292 tests**, frontend build, `pnpm build:cli` deployment/hosted shared-database smoke, and `pnpm exec tauri build --no-bundle` all passed.
+- Protected schemas, data-location code, finance-core calculations, CLI/MCP contracts and existing financial mutation bodies were not changed. The final net-worth-store exception is read coordination only; its calculation body and snapshot/write methods are unchanged.
+- Linux desktop compilation passed with `pnpm exec tauri build --no-bundle`. The resulting application was **not launched against user storage**, installed, released, or pushed.
+- WebKit 26 was tested with Playwright's matching browser build. Missing host libraries were extracted into a temporary test-only runtime; no system package installation was performed.
+- Non-blocking build diagnostics: Vite reports the existing >500KB chunk/dynamic-import warnings. No dependency or bundling refactor is included.

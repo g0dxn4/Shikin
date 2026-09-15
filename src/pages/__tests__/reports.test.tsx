@@ -48,14 +48,31 @@ let mockTotalBalanceResult:
     }
   | null = null
 
+let mockBudgetDisplayComplete = true
+let mockBudgetDisplayError: string | null = null
+
+vi.mock('@/components/budgets/use-budget-display', () => ({
+  useBudgetDisplay: (stored: Array<{ amount: number; spent: number }>) => ({
+    budgets: stored.map((budget) => ({
+      ...budget,
+      complete: mockBudgetDisplayComplete,
+      currency: 'USD',
+    })),
+    complete: mockBudgetDisplayComplete,
+    error: mockBudgetDisplayError,
+  }),
+}))
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, options?: { currencies?: string; details?: string }) =>
+    t: (key: string, options?: { currencies?: string; details?: string; message?: string }) =>
       options?.currencies
         ? `${key}: ${options.currencies}`
         : options?.details
           ? `${key}: ${options.details}`
-          : key,
+          : options?.message
+            ? `${key}: ${options.message}`
+            : key,
     i18n: { language: 'en', changeLanguage: vi.fn() },
   }),
 }))
@@ -131,6 +148,8 @@ describe('ReportsPage', () => {
       transaction('tx-income', 'income', 500_000),
     ]
     mockTotalBalanceResult = null
+    mockBudgetDisplayComplete = true
+    mockBudgetDisplayError = null
     mockConvertToPreferred = (amountCentavos) => ({
       complete: true,
       preferredCurrency: 'USD',
@@ -239,5 +258,25 @@ describe('ReportsPage', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('reports.cashUnavailable: EUR')
     expect(screen.queryByText('$3,000.00')).not.toBeInTheDocument()
+  })
+
+  it('withholds budget health when converted budget totals are incomplete', () => {
+    mockBudgetDisplayComplete = false
+
+    render(<ReportsPage />)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('reports.budgetUnavailable')
+    expect(screen.queryByText('25%')).not.toBeInTheDocument()
+    expect(screen.queryByText('$1,000.00')).not.toBeInTheDocument()
+  })
+
+  it('shows a budget-health read error instead of stored raw sums', () => {
+    mockBudgetDisplayComplete = false
+    mockBudgetDisplayError = 'Read failed'
+
+    render(<ReportsPage />)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('reports.budgetReadError: Read failed')
+    expect(screen.queryByText('25%')).not.toBeInTheDocument()
   })
 })

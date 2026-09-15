@@ -4,6 +4,7 @@ import dayjs from 'dayjs'
 import { isCashFlowEligible } from '@shikin/finance-core'
 import { Skeleton } from '@/components/ui/skeleton'
 import { MetricItem, MetricStrip, NativePanel } from '@/components/ui/native-layout'
+import { useBudgetDisplay } from '@/components/budgets/use-budget-display'
 import { formatMoney } from '@/lib/money'
 import { useAccountStore } from '@/stores/account-store'
 import { useBudgetStore } from '@/stores/budget-store'
@@ -116,10 +117,17 @@ export function ReportsPage() {
           ),
         ].join(', ')
       : ''
-  const totalBudgeted = budgets.reduce((total, budget) => total + budget.amount, 0)
-  const totalSpentAgainstBudgets = budgets.reduce((total, budget) => total + budget.spent, 0)
+  const {
+    budgets: displayBudgets,
+    complete: budgetsComplete,
+    error: budgetsDisplayError,
+  } = useBudgetDisplay(budgets)
+  const totalBudgeted = displayBudgets.reduce((total, budget) => total + budget.amount, 0)
+  const totalSpentAgainstBudgets = displayBudgets.reduce((total, budget) => total + budget.spent, 0)
   const budgetUsage =
-    totalBudgeted > 0 ? Math.round((totalSpentAgainstBudgets / totalBudgeted) * 100) : 0
+    budgetsComplete && totalBudgeted > 0
+      ? Math.round((totalSpentAgainstBudgets / totalBudgeted) * 100)
+      : 0
   const isLoading = accountsLoading || budgetsLoading || transactionsLoading
   const periodLabel = dayjs().format('MMMM YYYY')
 
@@ -245,27 +253,41 @@ export function ReportsPage() {
         <NativePanel className="p-5 sm:p-6">
           <h2 className="text-base font-semibold">{t('reports.budgetHealth')}</h2>
           <p className="text-muted-foreground mt-1 text-xs">{t('reports.budgetDescription')}</p>
-          <div className="my-6 flex justify-center">
-            <div className="border-border bg-muted flex h-28 w-28 items-center justify-center rounded-full border">
-              <span className="text-3xl font-semibold tabular-nums">{budgetUsage}%</span>
-            </div>
-          </div>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between gap-3">
-              <span className="text-muted-foreground">{t('reports.budgeted')}</span>
-              <span className="font-semibold tabular-nums">{formatMoney(totalBudgeted)}</span>
-            </div>
-            <div className="flex justify-between gap-3">
-              <span className="text-muted-foreground">{t('reports.spent')}</span>
-              <span className="font-semibold tabular-nums">
-                {formatMoney(totalSpentAgainstBudgets)}
-              </span>
-            </div>
-            <div className="flex justify-between gap-3">
-              <span className="text-muted-foreground">{t('reports.transactions')}</span>
-              <span className="font-semibold tabular-nums">{monthTransactionCount}</span>
-            </div>
-          </div>
+          {budgetsDisplayError ? (
+            <p className="text-warning py-10 text-center text-sm" role="alert">
+              {t('reports.budgetReadError', { message: budgetsDisplayError })}
+            </p>
+          ) : !budgetsComplete ? (
+            <p className="text-warning py-10 text-center text-sm" role="alert">
+              {t('reports.budgetUnavailable')}
+            </p>
+          ) : (
+            <>
+              <div className="my-6 flex justify-center">
+                <div className="border-border bg-muted flex h-28 w-28 items-center justify-center rounded-full border">
+                  <span className="text-3xl font-semibold tabular-nums">{budgetUsage}%</span>
+                </div>
+              </div>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted-foreground">{t('reports.budgeted')}</span>
+                  <span className="font-semibold tabular-nums">
+                    {formatMoney(totalBudgeted, preferredCurrency)}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted-foreground">{t('reports.spent')}</span>
+                  <span className="font-semibold tabular-nums">
+                    {formatMoney(totalSpentAgainstBudgets, preferredCurrency)}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted-foreground">{t('reports.transactions')}</span>
+                  <span className="font-semibold tabular-nums">{monthTransactionCount}</span>
+                </div>
+              </div>
+            </>
+          )}
         </NativePanel>
       </div>
     </div>

@@ -37,6 +37,9 @@
     "change": "Cambio",
     "noData": "Sin datos de gastos para esta comparacion.",
     "vs3MonthAvg": "vs promedio 3 meses",
+    "incompleteTotals": "El analisis de gastos no está disponible hasta que haya tipos de cambio para: {{currencies}}.",
+    "invalidData": "El analisis de gastos no está disponible por datos de moneda no válidos para {{details}}.",
+    "loadError": "No se pudo cargar el analisis de gastos",
     "severity": {
       "alert": "Alerta",
       "warning": "Advertencia",
@@ -106,6 +109,8 @@
     "budgeted": "Presupuestado",
     "spent": "Gastado",
     "transactions": "Transacciones",
-    "uncategorized": "Sin categoria"
+    "uncategorized": "Sin categoria",
+    "budgetUnavailable": "La salud del presupuesto no está disponible hasta completar los totales convertidos.",
+    "budgetReadError": "La salud del presupuesto no está disponible. {{message}}"
   }
 }

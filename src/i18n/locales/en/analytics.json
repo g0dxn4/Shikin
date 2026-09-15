@@ -37,6 +37,9 @@
     "change": "Change",
     "noData": "No spending data for this comparison.",
     "vs3MonthAvg": "vs 3-month avg",
+    "incompleteTotals": "Spending insights are unavailable until exchange rates are available for: {{currencies}}.",
+    "invalidData": "Spending insights are unavailable because of invalid currency data for {{details}}.",
+    "loadError": "Couldn’t load spending insights",
     "severity": {
       "alert": "Alert",
       "warning": "Warning",
@@ -106,6 +109,8 @@
     "budgeted": "Budgeted",
     "spent": "Spent",
     "transactions": "Transactions",
-    "uncategorized": "Uncategorized"
+    "uncategorized": "Uncategorized",
+    "budgetUnavailable": "Budget health is unavailable until converted budget totals are complete.",
+    "budgetReadError": "Budget health is unavailable. {{message}}"
   }
 }

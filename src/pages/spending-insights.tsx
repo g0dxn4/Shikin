@@ -13,9 +13,11 @@ import {
 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
+import { ErrorState } from '@/components/ui/error-state'
 import { NativePanel, PageToolbar } from '@/components/ui/native-layout'
 import { useSpendingInsightsStore } from '@/stores/spending-insights-store'
 import type { SpendingComparison, SpendingInsight } from '@/stores/spending-insights-store'
+import { useCurrencyStore } from '@/stores/currency-store'
 import { formatMoney } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import dayjs from 'dayjs'
@@ -34,12 +36,22 @@ export function SpendingInsights() {
     yoyPreviousTotal,
     insights,
     isLoading,
+    complete,
+    currency,
+    missingCurrencies,
+    reason,
+    error,
     loadComparisons,
   } = useSpendingInsightsStore()
+  const { preferredCurrency, rates, invalidRates, loadRates } = useCurrencyStore()
 
   useEffect(() => {
-    loadComparisons()
-  }, [loadComparisons])
+    void loadRates().catch(() => {})
+  }, [loadRates])
+
+  useEffect(() => {
+    void loadComparisons()
+  }, [loadComparisons, preferredCurrency, rates, invalidRates])
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'insights', label: t('spendingInsights.tabs.insights'), icon: <Lightbulb size={14} /> },
@@ -90,32 +102,49 @@ export function SpendingInsights() {
         ))}
       </div>
 
-      <div role="region" aria-label={tabs.find((item) => item.id === tab)?.label}>
-        {tab === 'insights' && <InsightsTab insights={insights} />}
-        {tab === 'mom' && (
-          <ComparisonTab
-            comparisons={momComparisons}
-            currentTotal={momCurrentTotal}
-            previousTotal={momPreviousTotal}
-            currentLabel={dayjs().format('MMMM YYYY')}
-            previousLabel={dayjs().subtract(1, 'month').format('MMMM YYYY')}
-          />
-        )}
-        {tab === 'yoy' && (
-          <ComparisonTab
-            comparisons={yoyComparisons}
-            currentTotal={yoyCurrentTotal}
-            previousTotal={yoyPreviousTotal}
-            currentLabel={dayjs().format('MMMM YYYY')}
-            previousLabel={dayjs().subtract(1, 'year').format('MMMM YYYY')}
-          />
-        )}
-      </div>
+      {error ? (
+        <ErrorState title={t('spendingInsights.loadError')} description={error} />
+      ) : !complete ? (
+        <div
+          className="border-warning/30 bg-warning/10 text-warning rounded-xl border px-4 py-3 text-sm"
+          role="alert"
+        >
+          {reason === 'invalid_currency_data'
+            ? t('spendingInsights.invalidData', { details: missingCurrencies.join(', ') })
+            : t('spendingInsights.incompleteTotals', {
+                currencies: missingCurrencies.join(', '),
+              })}
+        </div>
+      ) : (
+        <div role="region" aria-label={tabs.find((item) => item.id === tab)?.label}>
+          {tab === 'insights' && <InsightsTab insights={insights} currency={currency} />}
+          {tab === 'mom' && (
+            <ComparisonTab
+              comparisons={momComparisons}
+              currentTotal={momCurrentTotal}
+              previousTotal={momPreviousTotal}
+              currentLabel={dayjs().format('MMMM YYYY')}
+              previousLabel={dayjs().subtract(1, 'month').format('MMMM YYYY')}
+              currency={currency}
+            />
+          )}
+          {tab === 'yoy' && (
+            <ComparisonTab
+              comparisons={yoyComparisons}
+              currentTotal={yoyCurrentTotal}
+              previousTotal={yoyPreviousTotal}
+              currentLabel={dayjs().format('MMMM YYYY')}
+              previousLabel={dayjs().subtract(1, 'year').format('MMMM YYYY')}
+              currency={currency}
+            />
+          )}
+        </div>
+      )}
     </div>
   )
 }
 
-function InsightsTab({ insights }: { insights: SpendingInsight[] }) {
+function InsightsTab({ insights, currency }: { insights: SpendingInsight[]; currency: string }) {
   const { t } = useTranslation('analytics')
   if (insights.length === 0) {
     return (
@@ -131,13 +160,13 @@ function InsightsTab({ insights }: { insights: SpendingInsight[] }) {
   return (
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
       {insights.map((insight) => (
-        <InsightCard key={insight.id} insight={insight} />
+        <InsightCard key={insight.id} insight={insight} currency={currency} />
       ))}
     </div>
   )
 }
 
-function InsightCard({ insight }: { insight: SpendingInsight }) {
+function InsightCard({ insight, currency }: { insight: SpendingInsight; currency: string }) {
   const { t } = useTranslation('analytics')
   const severityStyles = {
     alert: 'border-destructive/20 bg-destructive/5',
@@ -191,7 +220,7 @@ function InsightCard({ insight }: { insight: SpendingInsight }) {
               )}
             >
               {insight.type === 'decrease' ? '-' : '+'}
-              {formatMoney(Math.round(Math.abs(insight.amount)))}
+              {formatMoney(Math.round(Math.abs(insight.amount)), currency)}
             </Badge>
             <span className="text-muted-foreground font-mono text-[10px]">
               {t('spendingInsights.vs3MonthAvg')}
@@ -209,12 +238,14 @@ function ComparisonTab({
   previousTotal,
   currentLabel,
   previousLabel,
+  currency,
 }: {
   comparisons: SpendingComparison[]
   currentTotal: number
   previousTotal: number
   currentLabel: string
   previousLabel: string
+  currency: string
 }) {
   const { t } = useTranslation('analytics')
   const totalChange = currentTotal - previousTotal
@@ -236,7 +267,7 @@ function ComparisonTab({
                 )}
               >
                 {totalChange > 0 ? '+' : ''}
-                {formatMoney(Math.round(totalChange))}
+                {formatMoney(Math.round(totalChange), currency)}
               </span>
               <Badge
                 variant="outline"
@@ -255,11 +286,11 @@ function ComparisonTab({
           <div className="text-right">
             <div className="text-muted-foreground text-xs">{currentLabel}</div>
             <div className="font-semibold tabular-nums">
-              {formatMoney(Math.round(currentTotal))}
+              {formatMoney(Math.round(currentTotal), currency)}
             </div>
             <div className="text-muted-foreground text-xs">{previousLabel}</div>
             <div className="text-muted-foreground text-sm tabular-nums">
-              {formatMoney(Math.round(previousTotal))}
+              {formatMoney(Math.round(previousTotal), currency)}
             </div>
           </div>
         </div>
@@ -280,7 +311,7 @@ function ComparisonTab({
             </div>
 
             {comparisons.map((comp) => (
-              <ComparisonRow key={comp.categoryName} comp={comp} />
+              <ComparisonRow key={comp.categoryName} comp={comp} currency={currency} />
             ))}
           </div>
         </NativePanel>
@@ -289,7 +320,7 @@ function ComparisonTab({
   )
 }
 
-function ComparisonRow({ comp }: { comp: SpendingComparison }) {
+function ComparisonRow({ comp, currency }: { comp: SpendingComparison; currency: string }) {
   const isIncrease = comp.change > 0
   const isDecrease = comp.change < 0
   const isSignificant = Math.abs(comp.changePercent) > 20
@@ -303,9 +334,11 @@ function ComparisonRow({ comp }: { comp: SpendingComparison }) {
         />
         <span className="truncate text-sm">{comp.categoryName}</span>
       </div>
-      <span className="text-right font-mono text-sm">{formatMoney(Math.round(comp.current))}</span>
+      <span className="text-right font-mono text-sm">
+        {formatMoney(Math.round(comp.current), currency)}
+      </span>
       <span className="text-muted-foreground text-right font-mono text-sm">
-        {formatMoney(Math.round(comp.previous))}
+        {formatMoney(Math.round(comp.previous), currency)}
       </span>
       <div className="flex items-center justify-end gap-1">
         {comp.change !== 0 ? (

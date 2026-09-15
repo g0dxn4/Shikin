@@ -5,6 +5,10 @@ import { SpendingInsights } from '../spending-insights'
 
 const mockLoadComparisons = vi.fn()
 
+const mockLoadRates = vi.fn().mockResolvedValue(undefined)
+const mockRates: Record<string, number> = {}
+const mockInvalidRates: Array<{ fromCurrency: string; toCurrency: string; rate: string }> = []
+
 let mockState = {
   momComparisons: [
     {
@@ -34,12 +38,26 @@ let mockState = {
     },
   ],
   isLoading: false,
+  complete: true,
+  currency: 'USD',
+  missingCurrencies: [] as string[],
+  reason: null as 'missing_exchange_rates' | 'invalid_currency_data' | 'read_error' | null,
+  error: null as string | null,
 }
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
     i18n: { language: 'en', changeLanguage: vi.fn() },
+  }),
+}))
+
+vi.mock('@/stores/currency-store', () => ({
+  useCurrencyStore: () => ({
+    preferredCurrency: 'USD',
+    rates: mockRates,
+    invalidRates: mockInvalidRates,
+    loadRates: mockLoadRates,
   }),
 }))
 
@@ -56,6 +74,10 @@ describe('SpendingInsights', () => {
     mockState = {
       ...mockState,
       isLoading: false,
+      complete: true,
+      error: null,
+      reason: null,
+      missingCurrencies: [],
       yoyComparisons: [],
     }
   })
@@ -73,5 +95,23 @@ describe('SpendingInsights', () => {
 
     await user.click(screen.getByText('spendingInsights.tabs.yoy'))
     expect(screen.getByText('spendingInsights.noData')).toBeInTheDocument()
+    expect(mockLoadRates).toHaveBeenCalled()
+  })
+
+  it('shows a missing-rate state instead of zero totals or fake insights', () => {
+    mockState = {
+      ...mockState,
+      complete: false,
+      reason: 'missing_exchange_rates',
+      missingCurrencies: ['EUR'],
+      momCurrentTotal: 0,
+      insights: [],
+    }
+
+    render(<SpendingInsights />)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('spendingInsights.incompleteTotals')
+    expect(screen.queryByText('Food is up 40% vs your 3-month average')).not.toBeInTheDocument()
+    expect(screen.queryByText('$0.00')).not.toBeInTheDocument()
   })
 })

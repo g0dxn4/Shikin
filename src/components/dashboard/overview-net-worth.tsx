@@ -66,7 +66,7 @@ export function OverviewNetWorth({
   const firstPoint = history[0]
   const lastPoint = history.length > 1 ? history[history.length - 1] : null
   const changeAmount = lastPoint && firstPoint ? lastPoint.netWorth - firstPoint.netWorth : 0
-  const hasChange = history.length > 1
+  const hasChange = currentComplete && history.length > 1
 
   return (
     <NativePanel

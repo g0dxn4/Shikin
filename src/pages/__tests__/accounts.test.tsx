@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { Accounts } from '../accounts'
@@ -523,6 +523,30 @@ describe('Accounts', () => {
 
     expect(screen.getByText('metrics.net')).toBeInTheDocument()
     expect(screen.getAllByText('$3,500.00').length).toBeGreaterThan(0)
+  })
+
+  it('reacts to deferred rates, preferred-currency switches, and invalid-rate updates', async () => {
+    mockAccounts = [
+      { id: 'acc-usd', name: 'Checking', type: 'checking', currency: 'USD', balance: 10000 },
+      { id: 'acc-eur', name: 'Savings', type: 'savings', currency: 'EUR', balance: 10000 },
+    ]
+
+    renderAccounts()
+    expect(screen.getByText('currency.missingRates')).toBeInTheDocument()
+
+    act(() => useCurrencyStore.setState({ rates: { 'EUR:USD': 2 } }))
+    expect(screen.getAllByText('$300.00').length).toBeGreaterThan(0)
+
+    act(() => useCurrencyStore.setState({ preferredCurrency: 'EUR', rates: { 'USD:EUR': 0.5 } }))
+    expect(screen.getAllByText('€150.00').length).toBeGreaterThan(0)
+
+    act(() =>
+      useCurrencyStore.setState({
+        invalidRates: [{ fromCurrency: 'USD', toCurrency: 'EUR', rate: '0' }],
+      })
+    )
+    expect(screen.getByText('currency.invalidData')).toBeInTheDocument()
+    expect(screen.queryByText('€150.00')).not.toBeInTheDocument()
   })
 
   it('does not raw-sum mixed currencies when a rate is missing', () => {

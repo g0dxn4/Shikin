@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Receivables } from '../receivables'
 import { useCurrencyStore } from '@/stores/currency-store'
@@ -195,6 +195,35 @@ describe('Receivables', () => {
       expect(screen.getByText('summary.overdue')).toBeInTheDocument()
       expect(screen.getByText('summary.received')).toBeInTheDocument()
       expect(screen.getByText('$3,000.00')).toBeInTheDocument()
+    })
+
+    it('reacts to deferred rates, preferred-currency switches, and invalid-rate updates', () => {
+      mockReceivables = [
+        makeReceivable({
+          currency: 'EUR',
+          amount: 10000,
+          received_amount: 0,
+          remainingAmount: 10000,
+        }),
+      ]
+
+      render(<Receivables />)
+      expect(screen.getByText('currency.missingRates')).toBeInTheDocument()
+
+      act(() => useCurrencyStore.setState({ rates: { 'EUR:USD': 2 } }))
+      expect(screen.getByText('$200.00')).toBeInTheDocument()
+
+      act(() => useCurrencyStore.setState({ preferredCurrency: 'EUR', rates: {} }))
+      expect(screen.getAllByText('€100.00').length).toBeGreaterThan(0)
+      expect(screen.queryByText('€200.00')).not.toBeInTheDocument()
+
+      act(() =>
+        useCurrencyStore.setState({
+          invalidRates: [{ fromCurrency: 'USD', toCurrency: 'EUR', rate: '0' }],
+        })
+      )
+      expect(screen.getByText('currency.invalidData')).toBeInTheDocument()
+      expect(screen.getAllByText('€100.00')).toHaveLength(1)
     })
 
     it('does not raw-sum mixed-currency outstanding totals when a rate is missing', () => {

@@ -12,8 +12,8 @@ import { getErrorMessage } from '@/lib/errors'
 import {
   aggregateHeatmapSpending,
   fetchHeatmapLedgerRows,
-  type HeatmapAggregation,
   type HeatmapConvertedTransaction,
+  type HeatmapLedgerRow,
 } from '@/lib/spending-heatmap'
 import { buildTransactionsHref } from '@/lib/transaction-query-href'
 import { useCurrencyStore } from '@/stores/currency-store'
@@ -50,12 +50,14 @@ function getDateRange(period: string): { start: string; end: string } {
 export function SpendingHeatmap() {
   const { t } = useTranslation('analytics')
   const [timeRange, setTimeRange] = useState('3months')
-  const [aggregation, setAggregation] = useState<HeatmapAggregation | null>(null)
+  const [ledgerRows, setLedgerRows] = useState<HeatmapLedgerRow[] | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [reloadToken, setReloadToken] = useState(0)
   const loadCountRef = useRef(0)
-  const { preferredCurrency, convertToPreferred, loadRates } = useCurrencyStore()
+  const { preferredCurrency, rates, invalidRates, convertToPreferred, loadRates } =
+    useCurrencyStore()
 
   const { start, end } = useMemo(() => getDateRange(timeRange), [timeRange])
   const timeOptions = useMemo(
@@ -79,19 +81,28 @@ export function SpendingHeatmap() {
       try {
         const rows = await fetchHeatmapLedgerRows(start, end)
         if (loadId !== loadCountRef.current) return
-        setAggregation(aggregateHeatmapSpending(rows, preferredCurrency, convertToPreferred))
+        setLedgerRows(rows)
         setLoadError(null)
         setIsLoading(false)
       } catch (error) {
         if (loadId !== loadCountRef.current) return
         setLoadError(getErrorMessage(error))
-        setAggregation(null)
+        setLedgerRows(null)
         setIsLoading(false)
       }
     }
 
     void load()
-  }, [start, end, preferredCurrency, convertToPreferred])
+  }, [start, end, reloadToken])
+
+  const aggregation = useMemo(() => {
+    // The stable converter reads rates and diagnostics from the current store state.
+    void rates
+    void invalidRates
+    return ledgerRows
+      ? aggregateHeatmapSpending(ledgerRows, preferredCurrency, convertToPreferred)
+      : null
+  }, [ledgerRows, preferredCurrency, rates, invalidRates, convertToPreferred])
 
   const spendMap = useMemo(
     () => aggregation?.dailyTotals ?? new Map<string, number>(),
@@ -239,20 +250,9 @@ export function SpendingHeatmap() {
           title={t('spendingHeatmap.loadError')}
           description={loadError}
           onRetry={() => {
-            loadCountRef.current += 1
             setIsLoading(true)
             setLoadError(null)
-            void fetchHeatmapLedgerRows(start, end)
-              .then((rows) => {
-                setAggregation(
-                  aggregateHeatmapSpending(rows, preferredCurrency, convertToPreferred)
-                )
-                setIsLoading(false)
-              })
-              .catch((error) => {
-                setLoadError(getErrorMessage(error))
-                setIsLoading(false)
-              })
+            setReloadToken((token) => token + 1)
           }}
         />
       </div>
@@ -270,6 +270,7 @@ export function SpendingHeatmap() {
             options={timeOptions}
             selected={timeRange}
             onChange={(value) => {
+              setIsLoading(true)
               setTimeRange(value)
               setSelectedDate(null)
             }}

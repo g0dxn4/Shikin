@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import dayjs from 'dayjs'
 import { Dashboard } from '../dashboard'
@@ -44,6 +44,14 @@ let mockNetWorthHistory: Array<{
   assets: number
   liabilities: number
 }> = []
+let mockNetWorth = 0
+let mockNetWorthComplete = true
+let mockNetWorthCurrency = 'USD'
+let mockNetWorthMissingCurrencies: string[] = []
+let mockNetWorthLoading = false
+let mockPreferredCurrency = 'USD'
+let mockRates: Record<string, number> = {}
+let mockInvalidRates: Array<{ fromCurrency: string; toCurrency: string; rate: string }> = []
 
 vi.mock('@/stores/ui-store', () => ({
   useUIStore: () => ({
@@ -58,26 +66,6 @@ let mockTransactionError: string | null = null
 let mockGoalError: string | null = null
 let mockCurrencyError: string | null = null
 let mockSplitsError: string | null = null
-let mockTotalBalanceResult:
-  | {
-      complete: true
-      preferredCurrency: string
-      amountCentavos: number
-      missingCurrencies: readonly []
-    }
-  | {
-      complete: false
-      preferredCurrency: string
-      missingCurrencies: string[]
-      reason: 'missing_exchange_rates' | 'invalid_currency_data'
-      invalidCurrencies?: Array<{
-        accountId: string | null
-        accountName: string | null
-        value: string
-      }>
-      invalidRates?: Array<{ fromCurrency: string; toCurrency: string; rate: string }>
-    }
-  | null = null
 
 vi.mock('@/stores/account-store', () => ({
   useAccountStore: () => ({
@@ -109,22 +97,10 @@ vi.mock('@/stores/goal-store', () => ({
 
 vi.mock('@/stores/currency-store', () => ({
   useCurrencyStore: () => ({
-    preferredCurrency: 'USD',
+    preferredCurrency: mockPreferredCurrency,
     error: mockCurrencyError,
-    rates: {},
-    convertToPreferred: (amountCentavos: number) => ({
-      complete: true,
-      preferredCurrency: 'USD',
-      amountCentavos,
-      missingCurrencies: [],
-    }),
-    getTotalBalanceInPreferred: (accounts: Array<{ balance: number }>) =>
-      mockTotalBalanceResult ?? {
-        complete: true,
-        preferredCurrency: 'USD',
-        amountCentavos: accounts.reduce((sum, account) => sum + account.balance, 0),
-        missingCurrencies: [],
-      },
+    rates: mockRates,
+    invalidRates: mockInvalidRates,
     loadRates: mockLoadRates,
   }),
 }))
@@ -151,14 +127,15 @@ vi.mock('@/stores/spending-insights-store', () => ({
 vi.mock('@/stores/net-worth-store', () => ({
   useNetWorthStore: () => ({
     history: mockNetWorthHistory,
-    isLoading: false,
+    isLoading: mockNetWorthLoading,
     loadHistory: mockLoadHistory,
     calculateCurrent: mockCalculateCurrent,
-    totalsComplete: true,
-    netWorth: 0,
+    totalsComplete: mockNetWorthComplete,
+    netWorth: mockNetWorth,
+    preferredCurrency: mockNetWorthCurrency,
     totalAssets: 0,
     totalLiabilities: 0,
-    missingCurrencies: [],
+    missingCurrencies: mockNetWorthMissingCurrencies,
   }),
 }))
 
@@ -205,8 +182,17 @@ describe('Dashboard', () => {
     mockGoalError = null
     mockCurrencyError = null
     mockSplitsError = null
-    mockTotalBalanceResult = null
     mockNetWorthHistory = []
+    mockNetWorth = 0
+    mockNetWorthComplete = true
+    mockNetWorthCurrency = 'USD'
+    mockNetWorthMissingCurrencies = []
+    mockNetWorthLoading = false
+    mockPreferredCurrency = 'USD'
+    mockRates = {}
+    mockInvalidRates = []
+    mockCalculateCurrent.mockReset()
+    mockCalculateCurrent.mockImplementation(() => new Promise<void>(() => {}))
   })
 
   it('fails category analytics closed when split allocations cannot be loaded', async () => {
@@ -325,52 +311,40 @@ describe('Dashboard', () => {
       ]
     })
 
-    it('shows the complete preferred-currency total in the hero card', () => {
+    it('shows the complete net-worth-store calculation in the hero card', async () => {
+      mockNetWorth = 195000
+      mockCalculateCurrent.mockResolvedValue(undefined)
+
       render(<Dashboard />)
 
-      // Total = 150000 + 50000 - 10000 + 5000 = 195000 cents = $1,950.00
-      expect(screen.getByText('$1,950.00')).toBeInTheDocument()
-      expect(screen.queryByRole('alert', { name: /currency\.totalUnavailable/ })).toBeNull()
+      expect(await screen.findByText('$1,950.00')).toBeInTheDocument()
+      expect(screen.queryByRole('alert')).toBeNull()
     })
 
-    it('renders accessible invalid-currency diagnostics without a scalar total', () => {
-      mockTotalBalanceResult = {
-        complete: false,
-        preferredCurrency: 'USD',
-        missingCurrencies: [],
-        reason: 'invalid_currency_data',
-        invalidCurrencies: [{ accountId: 'acc-broken', accountName: 'Broken savings', value: '' }],
-        invalidRates: [{ fromCurrency: '', toCurrency: 'USD', rate: '1' }],
-      }
+    it('withholds a previously complete current value when invalid rates arrive', async () => {
+      mockNetWorth = 195000
+      mockCalculateCurrent.mockResolvedValue(undefined)
+      const { rerender } = render(<Dashboard />)
+      expect(await screen.findByText('$1,950.00')).toBeInTheDocument()
 
-      render(<Dashboard />)
+      mockInvalidRates = [{ fromCurrency: 'EUR', toCurrency: 'USD', rate: '0' }]
+      rerender(<Dashboard />)
 
-      const warning = screen.getByRole('alert')
-      expect(warning).toHaveTextContent('currency.totalUnavailable')
-      expect(warning).toHaveTextContent(
-        'currency.invalidData: Broken savings (currency.blankValue), currency.invalidRate'
-      )
+      expect(screen.getByRole('alert')).toHaveTextContent('currency.totalUnavailable')
       expect(screen.queryByText('$1,950.00')).not.toBeInTheDocument()
     })
 
-    it('shows an accessible missing-rate warning without a false scalar total', () => {
-      mockAccounts = [
-        { id: 'acc-usd', name: 'Checking', type: 'checking', currency: 'USD', balance: 100000 },
-        { id: 'acc-eur', name: 'Euro', type: 'savings', currency: 'EUR', balance: 200000 },
-      ]
-      mockTotalBalanceResult = {
-        complete: false,
-        preferredCurrency: 'USD',
-        missingCurrencies: ['EUR'],
-        reason: 'missing_exchange_rates',
-      }
+    it('withholds an incomplete current net worth and identifies missing rates', async () => {
+      mockNetWorthComplete = false
+      mockCalculateCurrent.mockResolvedValue(undefined)
+      mockNetWorthMissingCurrencies = ['EUR']
 
       render(<Dashboard />)
 
-      const warning = screen.getByRole('alert')
+      const warning = await screen.findByRole('alert')
       expect(warning).toHaveTextContent('currency.totalUnavailable')
       expect(warning).toHaveTextContent('currency.missingRates: EUR')
-      expect(screen.queryByText('$3,000.00')).not.toBeInTheDocument()
+      expect(screen.queryByText('$1,950.00')).not.toBeInTheDocument()
     })
 
     it('does not render account preview cards', () => {
@@ -382,25 +356,15 @@ describe('Dashboard', () => {
       expect(screen.queryByText('Extra')).not.toBeInTheDocument()
     })
 
-    it('renders zero and negative complete net worth without inventing a mixed total', () => {
-      mockTotalBalanceResult = {
-        complete: true,
-        preferredCurrency: 'USD',
-        amountCentavos: 0,
-        missingCurrencies: [],
-      }
+    it('renders zero and negative complete net worth without inventing a mixed total', async () => {
+      mockCalculateCurrent.mockResolvedValue(undefined)
       const { unmount } = render(<Dashboard />)
-      expect(screen.getAllByText('$0.00').length).toBeGreaterThanOrEqual(1)
+      expect(await screen.findAllByText('$0.00')).not.toHaveLength(0)
       unmount()
 
-      mockTotalBalanceResult = {
-        complete: true,
-        preferredCurrency: 'USD',
-        amountCentavos: -1250,
-        missingCurrencies: [],
-      }
+      mockNetWorth = -1250
       render(<Dashboard />)
-      expect(screen.getByText('-$12.50')).toBeInTheDocument()
+      expect(await screen.findByText('-$12.50')).toBeInTheDocument()
     })
   })
 
@@ -528,6 +492,54 @@ describe('Dashboard', () => {
       expect(screen.getAllByText('$2,000.00').length).toBeGreaterThanOrEqual(1)
       // Savings rate: (5000-2000)/5000*100 = 60%
       expect(screen.getByText('60%')).toBeInTheDocument()
+    })
+
+    it('recomputes dashboard cash flow after deferred rates and a preferred-currency switch', () => {
+      mockTransactions = [
+        {
+          id: 'tx-usd-income',
+          description: 'USD income',
+          type: 'income',
+          amount: 10000,
+          currency: 'USD',
+          date: dayjs().format('YYYY-MM-DD'),
+          status: 'posted',
+          reporting_treatment: 'normal',
+          transaction_kind: 'standard',
+          is_archived: 0,
+          category_color: null,
+          category_name: null,
+          account_name: 'Dollar account',
+        },
+        {
+          id: 'tx-eur-income',
+          description: 'EUR income',
+          type: 'income',
+          amount: 10000,
+          currency: 'EUR',
+          date: dayjs().format('YYYY-MM-DD'),
+          status: 'posted',
+          reporting_treatment: 'normal',
+          transaction_kind: 'standard',
+          is_archived: 0,
+          category_color: null,
+          category_name: null,
+          account_name: 'Euro account',
+        },
+      ]
+
+      const { rerender } = render(<Dashboard />)
+      expect(screen.getAllByText(/currency\.derivedUnavailable: EUR/).length).toBeGreaterThan(0)
+
+      mockRates = { 'EUR:USD': 2 }
+      rerender(<Dashboard />)
+      expect(screen.getAllByText('$300.00').length).toBeGreaterThan(0)
+
+      mockPreferredCurrency = 'EUR'
+      mockRates = { 'USD:EUR': 0.5 }
+      rerender(<Dashboard />)
+      expect(screen.getAllByText('€150.00').length).toBeGreaterThan(0)
+      expect(screen.queryByText('€300.00')).not.toBeInTheDocument()
     })
 
     it('applies migration-019 cash-flow eligibility to every aggregate', async () => {
@@ -681,6 +693,49 @@ describe('Dashboard', () => {
 
       expect(screen.getByRole('table', { name: 'analytics.trendChartLabel' })).toBeInTheDocument()
       expect(screen.getAllByText('analytics.income').length).toBeGreaterThan(0)
+    })
+  })
+
+  describe('net worth current calculation', () => {
+    it('withholds stale data while pending, then keeps a $10k unlinked holding in headline and chart current value', async () => {
+      let resolveCalculation: (() => void) | undefined
+      mockNetWorth = 195000
+      mockNetWorthHistory = [
+        { date: '2026-01-01', netWorth: 195000, assets: 195000, liabilities: 0 },
+        { date: '2026-02-01', netWorth: 1195000, assets: 1195000, liabilities: 0 },
+      ]
+      mockCalculateCurrent.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveCalculation = resolve
+          })
+      )
+
+      const { rerender } = render(<Dashboard />)
+
+      const pendingWarning = screen.getByRole('alert')
+      expect(pendingWarning).toHaveTextContent('currency.totalUnavailable')
+      expect(pendingWarning.previousElementSibling).toHaveTextContent('overview.netWorth')
+
+      // The complete calculation includes a valid $10,000 holding with no accountId.
+      mockNetWorth = 1195000
+      rerender(<Dashboard />)
+      await act(async () => resolveCalculation?.())
+
+      await waitFor(() => {
+        expect(screen.getAllByText('$11,950.00')).toHaveLength(2)
+      })
+    })
+
+    it('withholds a stale current amount when calculation fails', async () => {
+      mockNetWorth = 500000
+      mockCalculateCurrent.mockRejectedValueOnce(new Error('Net worth query failed'))
+
+      render(<Dashboard />)
+
+      const warning = await screen.findByRole('alert')
+      expect(warning).toHaveTextContent('Net worth query failed')
+      expect(screen.queryByText('$5,000.00')).not.toBeInTheDocument()
     })
   })
 

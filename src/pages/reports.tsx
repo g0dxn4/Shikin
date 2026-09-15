@@ -23,8 +23,14 @@ export function ReportsPage() {
   const { t } = useTranslation('analytics')
   const { accounts, fetch: fetchAccounts, isLoading: accountsLoading } = useAccountStore()
   const { budgets, fetch: fetchBudgets, isLoading: budgetsLoading } = useBudgetStore()
-  const { preferredCurrency, convertToPreferred, getTotalBalanceInPreferred, loadRates } =
-    useCurrencyStore()
+  const {
+    preferredCurrency,
+    rates,
+    invalidRates,
+    convertToPreferred,
+    getTotalBalanceInPreferred,
+    loadRates,
+  } = useCurrencyStore()
   const {
     transactions,
     fetch: fetchTransactions,
@@ -43,6 +49,10 @@ export function ReportsPage() {
     cashFlowComplete,
     cashFlowMissingCurrencies,
   } = useMemo(() => {
+    // Currency actions are stable Zustand methods that read these mutable store fields.
+    void preferredCurrency
+    void rates
+    void invalidRates
     const monthStart = startOfCurrentMonth()
     const monthEnd = endOfCurrentMonth()
     const categoryTotals = new Map<string, { name: string; color: string; amount: number }>()
@@ -93,12 +103,15 @@ export function ReportsPage() {
       cashFlowComplete: incompleteCurrencies.size === 0,
       cashFlowMissingCurrencies: [...incompleteCurrencies].sort(),
     }
-  }, [transactions, convertToPreferred, t])
+  }, [transactions, preferredCurrency, rates, invalidRates, convertToPreferred, t])
   const netFlow = income - expenses
-  const totalBalanceResult = useMemo(
-    () => getTotalBalanceInPreferred(accounts),
-    [accounts, getTotalBalanceInPreferred]
-  )
+  const totalBalanceResult = useMemo(() => {
+    // The stable store action reads these values when invoked.
+    void preferredCurrency
+    void rates
+    void invalidRates
+    return getTotalBalanceInPreferred(accounts)
+  }, [accounts, preferredCurrency, rates, invalidRates, getTotalBalanceInPreferred])
   const invalidCurrencyDetails =
     !totalBalanceResult.complete && totalBalanceResult.reason === 'invalid_currency_data'
       ? [

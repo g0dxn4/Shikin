@@ -18,6 +18,7 @@ import { useCurrencyStore } from '@/stores/currency-store'
 import { useNetWorthStore } from '@/stores/net-worth-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import { formatMoney } from '@/lib/money'
+import { getErrorMessage } from '@/lib/errors'
 import { buildDashboardAnalytics } from '@/lib/dashboard-analytics'
 import { useDashboardSplits } from '@/components/dashboard/use-dashboard-splits'
 import { SpendingAnalytics } from '@/components/dashboard/spending-analytics'
@@ -31,7 +32,6 @@ export function Dashboard() {
   const { t: tAnalytics } = useTranslation('analytics')
   const { openTransactionDialog } = useUIStore()
   const {
-    accounts,
     isLoading: accountsLoading,
     fetchError: accountsFetchError,
     fetch: fetchAccounts,
@@ -47,11 +47,24 @@ export function Dashboard() {
     error: currencyError,
     preferredCurrency,
     rates,
-    getTotalBalanceInPreferred,
+    invalidRates,
     loadRates,
   } = useCurrencyStore()
-  const { history, loadHistory, calculateCurrent } = useNetWorthStore()
+  const {
+    history,
+    isLoading: netWorthLoading,
+    netWorth,
+    totalsComplete: netWorthComplete,
+    preferredCurrency: netWorthCurrency,
+    missingCurrencies: netWorthMissingCurrencies,
+    loadHistory,
+    calculateCurrent,
+  } = useNetWorthStore()
   const [historyPeriod, setHistoryPeriod] = useState<NetWorthPeriod>('6m')
+  const [netWorthCalculation, setNetWorthCalculation] = useState<{
+    preferredCurrency: string | null
+    error: string | null
+  }>({ preferredCurrency: null, error: null })
   const now = useMemo(() => dayjs(), [])
   const splitDateRange = useMemo(
     () => ({
@@ -75,35 +88,27 @@ export function Dashboard() {
   }, [fetchAccounts, fetchTransactions, fetchGoals, loadRates])
 
   useEffect(() => {
-    void calculateCurrent().catch(() => {})
-  }, [calculateCurrent])
+    let active = true
+    void calculateCurrent()
+      .then(() => {
+        if (active) setNetWorthCalculation({ preferredCurrency, error: null })
+      })
+      .catch((error) => {
+        if (active) {
+          setNetWorthCalculation({
+            preferredCurrency,
+            error: getErrorMessage(error),
+          })
+        }
+      })
+    return () => {
+      active = false
+    }
+  }, [calculateCurrent, preferredCurrency])
 
   useEffect(() => {
     void loadHistory(historyPeriod).catch(() => {})
-  }, [loadHistory, historyPeriod])
-
-  const totalBalanceResult = useMemo(
-    () => getTotalBalanceInPreferred(accounts),
-    [accounts, getTotalBalanceInPreferred]
-  )
-  const invalidCurrencyDetails =
-    !totalBalanceResult.complete && totalBalanceResult.reason === 'invalid_currency_data'
-      ? [
-          ...(totalBalanceResult.invalidCurrencies ?? []).map((diagnostic) => {
-            const owner =
-              diagnostic.accountName ?? diagnostic.accountId ?? t('currency.preferredCurrency')
-            const value = diagnostic.value || t('currency.blankValue')
-            return `${owner} (${value})`
-          }),
-          ...(totalBalanceResult.invalidRates ?? []).map((diagnostic) =>
-            t('currency.invalidRate', {
-              from: diagnostic.fromCurrency || t('currency.blankValue'),
-              to: diagnostic.toCurrency || t('currency.blankValue'),
-              rate: diagnostic.rate || t('currency.blankValue'),
-            })
-          ),
-        ].join(', ')
-      : ''
+  }, [loadHistory, historyPeriod, netWorthCurrency])
 
   const ratesArray = useMemo(() => {
     const result: { fromCurrency: string; toCurrency: string; rate: number }[] = []
@@ -177,7 +182,15 @@ export function Dashboard() {
 
   const hasTransactionsLoadError = !!transactionsFetchError && recentTransactions.length === 0
   const isLoading = accountsLoading || txLoading
-  const historyCurrency = preferredCurrency
+  const netWorthCalculationCurrent = netWorthCalculation.preferredCurrency === preferredCurrency
+  const currentNetWorthComplete =
+    netWorthCalculationCurrent &&
+    netWorthCurrency === preferredCurrency &&
+    !netWorthLoading &&
+    !netWorthCalculation.error &&
+    invalidRates.length === 0 &&
+    netWorthComplete
+  const historyCurrency = netWorthCurrency
   const lastHistoryDate = history.length > 0 ? history[history.length - 1]?.date : null
 
   if (isLoading) {
@@ -205,19 +218,16 @@ export function Dashboard() {
       />
 
       <OverviewNetWorth
-        currentComplete={totalBalanceResult.complete}
-        currentAmount={totalBalanceResult.complete ? totalBalanceResult.amountCentavos : 0}
-        currentCurrency={
-          totalBalanceResult.complete ? totalBalanceResult.preferredCurrency : preferredCurrency
-        }
+        currentComplete={currentNetWorthComplete}
+        currentAmount={currentNetWorthComplete ? netWorth : 0}
+        currentCurrency={netWorthCurrency}
         unavailableMessage={
-          totalBalanceResult.complete
-            ? undefined
-            : totalBalanceResult.reason === 'invalid_currency_data'
-              ? t('currency.invalidData', { details: invalidCurrencyDetails })
-              : t('currency.missingRates', {
-                  currencies: totalBalanceResult.missingCurrencies.join(', '),
-                })
+          (netWorthCalculationCurrent ? netWorthCalculation.error : null) ??
+          (!netWorthComplete
+            ? t('currency.missingRates', {
+                currencies: netWorthMissingCurrencies.join(', '),
+              })
+            : undefined)
         }
         income={cashFlowDisplayable ? formatMoney(monthlyIncome, cashFlowDisplayCurrency) : '—'}
         incomeDetail={

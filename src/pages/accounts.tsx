@@ -95,6 +95,8 @@ export function Accounts() {
   const convertToPreferred = useCurrencyStore((s) => s.convertToPreferred)
   const getTotalBalanceInPreferred = useCurrencyStore((s) => s.getTotalBalanceInPreferred)
   const preferredCurrency = useCurrencyStore((s) => s.preferredCurrency)
+  const rates = useCurrencyStore((s) => s.rates)
+  const invalidRates = useCurrencyStore((s) => s.invalidRates)
 
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [archiveId, setArchiveId] = useState<string | null>(null)
@@ -147,16 +149,24 @@ export function Accounts() {
     () => liquidAccounts.filter((account) => account.type !== 'credit_card'),
     [liquidAccounts]
   )
-  const pageTotals = useMemo(
-    () =>
-      buildAccountsLiquidTotals({
-        liquidAccounts,
-        convertToPreferred,
-        getTotalBalanceInPreferred: (accounts) => getTotalBalanceInPreferred(accounts as Account[]),
-        preferredCurrency,
-      }),
-    [liquidAccounts, convertToPreferred, getTotalBalanceInPreferred, preferredCurrency]
-  )
+  const pageTotals = useMemo(() => {
+    // Currency actions are stable Zustand methods that read these mutable store fields.
+    void rates
+    void invalidRates
+    return buildAccountsLiquidTotals({
+      liquidAccounts,
+      convertToPreferred,
+      getTotalBalanceInPreferred: (accounts) => getTotalBalanceInPreferred(accounts as Account[]),
+      preferredCurrency,
+    })
+  }, [
+    liquidAccounts,
+    convertToPreferred,
+    getTotalBalanceInPreferred,
+    preferredCurrency,
+    rates,
+    invalidRates,
+  ])
   const primaryAccount = useMemo(
     () =>
       depositAccounts.find((account) => account.is_primary === 1) ??

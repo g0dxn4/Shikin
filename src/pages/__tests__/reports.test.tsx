@@ -11,6 +11,9 @@ const mockLoadRates = vi.fn().mockResolvedValue(undefined)
 let mockAccounts: Array<Record<string, unknown>> = []
 let mockBudgets: Array<Record<string, unknown>> = []
 let mockTransactions: Array<Record<string, unknown>> = []
+let mockPreferredCurrency = 'USD'
+let mockRates: Record<string, number> = {}
+let mockInvalidRates: Array<{ fromCurrency: string; toCurrency: string; rate: string }> = []
 let mockConvertToPreferred: (
   amountCentavos: number,
   currency: string
@@ -25,7 +28,7 @@ let mockConvertToPreferred: (
       complete: false
       preferredCurrency: string
       missingCurrencies: string[]
-      reason: 'missing_exchange_rates'
+      reason: 'missing_exchange_rates' | 'invalid_currency_data'
     }
 let mockTotalBalanceResult:
   | {
@@ -101,18 +104,23 @@ vi.mock('@/stores/transaction-store', () => ({
   }),
 }))
 
+const stableConvertToPreferred = (amountCentavos: number, currency: string) =>
+  mockConvertToPreferred(amountCentavos, currency)
+const stableGetTotalBalanceInPreferred = (accounts: Array<{ balance: number }>) =>
+  mockTotalBalanceResult ?? {
+    complete: true as const,
+    preferredCurrency: mockPreferredCurrency,
+    amountCentavos: accounts.reduce((sum, account) => sum + account.balance, 0),
+    missingCurrencies: [] as const,
+  }
+
 vi.mock('@/stores/currency-store', () => ({
   useCurrencyStore: () => ({
-    preferredCurrency: 'USD',
-    convertToPreferred: (amountCentavos: number, currency: string) =>
-      mockConvertToPreferred(amountCentavos, currency),
-    getTotalBalanceInPreferred: (accounts: Array<{ balance: number }>) =>
-      mockTotalBalanceResult ?? {
-        complete: true,
-        preferredCurrency: 'USD',
-        amountCentavos: accounts.reduce((sum, account) => sum + account.balance, 0),
-        missingCurrencies: [],
-      },
+    preferredCurrency: mockPreferredCurrency,
+    rates: mockRates,
+    invalidRates: mockInvalidRates,
+    convertToPreferred: stableConvertToPreferred,
+    getTotalBalanceInPreferred: stableGetTotalBalanceInPreferred,
     loadRates: mockLoadRates,
   }),
 }))
@@ -148,6 +156,9 @@ describe('ReportsPage', () => {
       transaction('tx-income', 'income', 500_000),
     ]
     mockTotalBalanceResult = null
+    mockPreferredCurrency = 'USD'
+    mockRates = {}
+    mockInvalidRates = []
     mockBudgetDisplayComplete = true
     mockBudgetDisplayError = null
     mockConvertToPreferred = (amountCentavos) => ({
@@ -184,6 +195,88 @@ describe('ReportsPage', () => {
     render(<ReportsPage />)
 
     expect(screen.getAllByText('$300.00').length).toBeGreaterThan(0)
+  })
+
+  it('recomputes stable converter results after deferred rates, currency switches, and invalid-rate updates', () => {
+    mockTransactions = [transaction('tx-eur', 'expense', 10_000, { currency: 'EUR' })]
+    mockConvertToPreferred = (amountCentavos, currency) => {
+      if (mockInvalidRates.length > 0) {
+        return {
+          complete: false,
+          preferredCurrency: mockPreferredCurrency,
+          missingCurrencies: [],
+          reason: 'invalid_currency_data',
+        }
+      }
+      if (currency === mockPreferredCurrency) {
+        return {
+          complete: true,
+          preferredCurrency: mockPreferredCurrency,
+          amountCentavos,
+          missingCurrencies: [],
+        }
+      }
+      const rate = mockRates[`${currency}:${mockPreferredCurrency}`]
+      return rate
+        ? {
+            complete: true,
+            preferredCurrency: mockPreferredCurrency,
+            amountCentavos: Math.round(amountCentavos * rate),
+            missingCurrencies: [] as const,
+          }
+        : {
+            complete: false,
+            preferredCurrency: mockPreferredCurrency,
+            missingCurrencies: [currency],
+            reason: 'missing_exchange_rates',
+          }
+    }
+
+    mockTotalBalanceResult = {
+      complete: false,
+      preferredCurrency: 'USD',
+      missingCurrencies: ['EUR'],
+      reason: 'missing_exchange_rates',
+    }
+    const { rerender } = render(<ReportsPage />)
+    expect(screen.getAllByText('reports.cashUnavailable: EUR').length).toBeGreaterThan(0)
+
+    mockRates = { 'EUR:USD': 2 }
+    mockTotalBalanceResult = {
+      complete: true,
+      preferredCurrency: 'USD',
+      amountCentavos: 50000,
+      missingCurrencies: [],
+    }
+    rerender(<ReportsPage />)
+    expect(screen.getAllByText('$200.00').length).toBeGreaterThan(0)
+    expect(screen.getByText('$500.00')).toBeInTheDocument()
+
+    mockPreferredCurrency = 'EUR'
+    mockRates = {}
+    mockTotalBalanceResult = {
+      complete: true,
+      preferredCurrency: 'EUR',
+      amountCentavos: 25000,
+      missingCurrencies: [],
+    }
+    rerender(<ReportsPage />)
+    expect(screen.getAllByText('€100.00').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('€250.00').length).toBeGreaterThan(0)
+    expect(screen.queryByText('€200.00')).not.toBeInTheDocument()
+
+    mockInvalidRates = [{ fromCurrency: 'USD', toCurrency: 'EUR', rate: '0' }]
+    mockTotalBalanceResult = {
+      complete: false,
+      preferredCurrency: 'EUR',
+      missingCurrencies: [],
+      reason: 'invalid_currency_data',
+      invalidRates: mockInvalidRates,
+    }
+    rerender(<ReportsPage />)
+    expect(screen.getAllByText(/reports\.cashUnavailable/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/reports\.cashInvalidData/)).toBeInTheDocument()
+    expect(screen.queryByText('€100.00')).not.toBeInTheDocument()
   })
 
   it('uses migration-019 eligibility for income, expense, count, net flow, and categories', () => {

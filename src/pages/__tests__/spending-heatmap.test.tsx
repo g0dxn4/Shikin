@@ -1,24 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import dayjs from 'dayjs'
 import { SpendingHeatmap } from '../spending-heatmap'
 import type { HeatmapLedgerRow } from '@/lib/spending-heatmap'
+import { useCurrencyStore } from '@/stores/currency-store'
 
 const mockFetchRows = vi.fn()
 const mockLoadRates = vi.fn().mockResolvedValue(undefined)
-
-let mockConvert: (
-  amountCentavos: number,
-  currency: string
-) => {
-  complete: boolean
-  amountCentavos?: number
-  missingCurrencies?: string[]
-  reason?: 'missing_exchange_rates' | 'invalid_currency_data'
-}
-
-const mockConvertToPreferred = (amountCentavos: number, currency: string) =>
-  mockConvert(amountCentavos, currency)
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -44,14 +32,6 @@ vi.mock('@/lib/database', () => ({
   query: (...args: unknown[]) => mockFetchRows(...args),
 }))
 
-vi.mock('@/stores/currency-store', () => ({
-  useCurrencyStore: () => ({
-    preferredCurrency: 'USD',
-    convertToPreferred: mockConvertToPreferred,
-    loadRates: mockLoadRates,
-  }),
-}))
-
 function row(overrides: Partial<HeatmapLedgerRow> = {}): HeatmapLedgerRow {
   return {
     id: 'tx-1',
@@ -75,16 +55,12 @@ function row(overrides: Partial<HeatmapLedgerRow> = {}): HeatmapLedgerRow {
 describe('SpendingHeatmap page', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockConvert = (amountCentavos, currency) => {
-      if (currency === 'USD') {
-        return { complete: true, amountCentavos, missingCurrencies: [] }
-      }
-      return {
-        complete: false,
-        missingCurrencies: [currency],
-        reason: 'missing_exchange_rates',
-      }
-    }
+    useCurrencyStore.setState({
+      preferredCurrency: 'USD',
+      rates: {},
+      invalidRates: [],
+      loadRates: mockLoadRates,
+    })
     mockFetchRows.mockResolvedValue([row()])
   })
 
@@ -117,6 +93,32 @@ describe('SpendingHeatmap page', () => {
       'href',
       expect.stringContaining('type=expense&category=cat-food')
     )
+  })
+
+  it('reaggregates deferred rates and currency changes without refetching ledger rows', async () => {
+    mockFetchRows.mockResolvedValue([row({ currency: 'EUR', amount: 2500 })])
+
+    render(<SpendingHeatmap />)
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('spendingHeatmap.incompleteTotals: EUR')
+    })
+
+    act(() => useCurrencyStore.setState({ rates: { 'EUR:USD': 2 } }))
+    await waitFor(() => expect(screen.getAllByText('$50.00').length).toBeGreaterThan(0))
+
+    act(() => useCurrencyStore.setState({ preferredCurrency: 'EUR', rates: {} }))
+    await waitFor(() => expect(screen.getAllByText('€25.00').length).toBeGreaterThan(0))
+
+    act(() =>
+      useCurrencyStore.setState({
+        invalidRates: [{ fromCurrency: 'USD', toCurrency: 'EUR', rate: '0' }],
+      })
+    )
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('spendingHeatmap.invalidData')
+    })
+    expect(screen.queryByText('€25.00')).not.toBeInTheDocument()
+    expect(mockFetchRows).toHaveBeenCalledTimes(1)
   })
 
   it('omits heatmap totals when mixed currencies are missing rates', async () => {

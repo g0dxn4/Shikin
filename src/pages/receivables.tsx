@@ -434,6 +434,8 @@ export function Receivables() {
     useReceivableStore()
   const convertToPreferred = useCurrencyStore((s) => s.convertToPreferred)
   const preferredCurrency = useCurrencyStore((s) => s.preferredCurrency)
+  const rates = useCurrencyStore((s) => s.rates)
+  const invalidRates = useCurrencyStore((s) => s.invalidRates)
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -450,15 +452,16 @@ export function Receivables() {
 
   const hasInitialLoadError = !!fetchError && receivables.length === 0
 
-  const summary = useMemo(
-    () =>
-      buildReceivablesStatusTotals({
-        receivables,
-        convertToPreferred,
-        preferredCurrency,
-      }),
-    [receivables, convertToPreferred, preferredCurrency]
-  )
+  const summary = useMemo(() => {
+    // Currency actions are stable Zustand methods that read these mutable store fields.
+    void rates
+    void invalidRates
+    return buildReceivablesStatusTotals({
+      receivables,
+      convertToPreferred,
+      preferredCurrency,
+    })
+  }, [receivables, convertToPreferred, preferredCurrency, rates, invalidRates])
 
   const filterCounts = useMemo(() => {
     return {

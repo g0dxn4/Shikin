@@ -13,6 +13,25 @@ function getDataServerUrl() {
   return `http://localhost:${process.env.SHIKIN_DATA_SERVER_PORT || '1480'}`
 }
 
+async function queryE2eSql<T extends Record<string, unknown>>(
+  sql: string,
+  params: unknown[] = []
+): Promise<T[]> {
+  const response = await fetch(`${getDataServerUrl()}/api/db/query`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: 'http://localhost:1420',
+      'X-Shikin-Bridge': BRIDGE_TOKEN,
+    },
+    body: JSON.stringify({ sql, params }),
+  })
+  if (!response.ok) {
+    throw new Error(`E2E query failed (${response.status}): ${await response.text()}`)
+  }
+  return response.json() as Promise<T[]>
+}
+
 async function executeE2eSql(sql: string, params: unknown[] = []) {
   let lastError: unknown
 
@@ -94,7 +113,7 @@ test.describe('Transactions', () => {
 
   test('renders page title and add button', async ({ page }) => {
     await page.goto('/transactions')
-    await page.waitForLoadState('networkidle')
+    await expect(page.locator('[data-startup-state="ready"]')).toBeVisible()
 
     await expect(page.getByRole('heading', { level: 1, name: 'Transactions' })).toBeVisible()
     // The add button contains "+ Add Transaction" text
@@ -103,7 +122,7 @@ test.describe('Transactions', () => {
 
   test('shows empty state without data', async ({ page }) => {
     await page.goto('/transactions')
-    await page.waitForLoadState('networkidle')
+    await expect(page.locator('[data-startup-state="ready"]')).toBeVisible()
 
     await expect(page.getByText('No transactions yet')).toBeVisible()
     await expect(page.getByText(/Add your first transaction/)).toBeVisible()
@@ -111,7 +130,7 @@ test.describe('Transactions', () => {
 
   test('multi-view and filter controls are present', async ({ page }) => {
     await page.goto('/transactions')
-    await page.waitForLoadState('networkidle')
+    await expect(page.locator('[data-startup-state="ready"]')).toBeVisible()
 
     await expect(page.getByPlaceholder(/Search/i)).toBeVisible()
     await expect(page.getByRole('tab', { name: 'Timeline' })).toBeVisible()
@@ -125,7 +144,7 @@ test.describe('Transactions', () => {
 
   test('page structure has correct layout', async ({ page }) => {
     await page.goto('/transactions')
-    await page.waitForLoadState('networkidle')
+    await expect(page.locator('[data-startup-state="ready"]')).toBeVisible()
 
     // Page should have the animate-fade-in-up wrapper
     await expect(page.locator('.animate-fade-in-up')).toBeVisible()
@@ -136,7 +155,7 @@ test.describe('Transactions', () => {
 
   test('creates, edits, and persists an expense transaction', async ({ page }) => {
     await page.goto('/accounts')
-    await page.waitForLoadState('networkidle')
+    await expect(page.locator('[data-startup-state="ready"]')).toBeVisible()
 
     await page
       .getByRole('button', { name: /Add Account/i })
@@ -151,7 +170,7 @@ test.describe('Transactions', () => {
     await expect(page.getByText(qaName('Checking')).first()).toBeVisible()
 
     await page.goto('/transactions')
-    await page.waitForLoadState('networkidle')
+    await expect(page.locator('[data-startup-state="ready"]')).toBeVisible()
     await page
       .getByRole('button', { name: /Add Transaction/i })
       .first()
@@ -177,10 +196,40 @@ test.describe('Transactions', () => {
     await expect(page.getByText(qaName('Lunch Edited'))).toBeVisible()
     await expect(page.getByText('-$45.67')).toBeVisible()
 
-    await page.reload()
-    await page.waitForLoadState('networkidle')
+    const accountId = (
+      await queryE2eSql<{ id: string }>('SELECT id FROM accounts WHERE name = ?', [
+        qaName('Checking'),
+      ])
+    )[0]?.id
+    expect(accountId).toBeTruthy()
+    await expect
+      .poll(
+        async () =>
+          (
+            await queryE2eSql<{ balance: number }>('SELECT balance FROM accounts WHERE id = ?', [
+              accountId,
+            ])
+          )[0]?.balance
+      )
+      .toBe(5433)
 
+    await page.reload()
+    await expect(page.locator('[data-startup-state="ready"]')).toBeVisible()
     await expect(page.getByText(qaName('Lunch Edited'))).toBeVisible()
     await expect(page.getByText('-$45.67')).toBeVisible()
+
+    await page.getByLabel(`Delete ${qaName('Lunch Edited')}`).click()
+    await page.getByRole('button', { name: 'Delete' }).last().click()
+    await expect(page.getByText(qaName('Lunch Edited'))).not.toBeVisible()
+    await expect
+      .poll(
+        async () =>
+          (
+            await queryE2eSql<{ balance: number }>('SELECT balance FROM accounts WHERE id = ?', [
+              accountId,
+            ])
+          )[0]?.balance
+      )
+      .toBe(10000)
   })
 })

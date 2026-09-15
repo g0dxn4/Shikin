@@ -256,7 +256,7 @@ export function TransactionForm({
   }, [isDirty, isSplitMode, onDirtyChange, splitRows])
 
   return (
-    <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-5">
+    <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-5" noValidate>
       <ErrorBanner
         title="Prerequisite data couldn’t be loaded"
         messages={[
@@ -394,7 +394,7 @@ export function TransactionForm({
             {showSuggestion && (
               <div className="animate-fade-in flex items-center gap-1.5 pt-1">
                 <span className="text-muted-foreground text-[11px]">{t('form.suggested')}:</span>
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-white/[0.04] px-2.5 py-0.5 text-[11px]">
+                <span className="border-border bg-muted/50 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px]">
                   {suggestedCategory.color && (
                     <span
                       className="inline-block h-2 w-2 shrink-0 rounded-full"

@@ -151,13 +151,13 @@ export function RecurringRuleDialog() {
 
   return (
     <Dialog open={recurringDialogOpen} onOpenChange={(open) => !open && closeRecurringDialog()}>
-      <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto">
+      <DialogContent className="border-border bg-surface max-h-[90vh] max-w-lg overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEditing ? t('recurring.editRule') : t('recurring.addRule')}</DialogTitle>
           <DialogDescription>{t('recurring.empty.description')}</DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5" noValidate>
           <div className="space-y-1.5">
             <Label htmlFor="rec-type">{t('form.type')}</Label>
             <Select

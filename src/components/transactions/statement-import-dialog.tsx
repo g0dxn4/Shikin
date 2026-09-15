@@ -25,6 +25,7 @@ import { parseStatement, type ParsedTransaction } from '@/lib/statement-parser'
 import { importStatementFile } from '@/lib/statement-import'
 import { cn } from '@/lib/utils'
 import { getErrorMessage } from '@/lib/errors'
+import { invalidateTransactionPage } from '@/lib/transaction-query-events'
 
 interface StatementImportDialogProps {
   open: boolean
@@ -100,6 +101,7 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
 
     try {
       const result = await importStatementFile(selectedFile, accountId)
+      if (result.imported > 0) invalidateTransactionPage('import')
 
       if (result.errors.length > 0) {
         if (result.imported === 0) {
@@ -153,7 +155,7 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="border-border bg-surface max-w-2xl">
         <DialogHeader>
           <DialogTitle className="font-heading">{t('import.title')}</DialogTitle>
           <DialogDescription>{t('import.description')}</DialogDescription>
@@ -193,11 +195,12 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
                 onChange={handleFileSelect}
                 className="hidden"
               />
-              <div
+              <button
+                type="button"
                 onClick={() => fileInputRef.current?.click()}
                 className={cn(
-                  'flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed p-8 transition-colors',
-                  'hover:border-accent/40 hover:bg-accent/5 border-white/10',
+                  'border-border flex w-full cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed p-8 transition-colors',
+                  'hover:border-accent/40 hover:bg-accent/5 focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
                   selectedFile && !parseError && 'border-accent/30 bg-accent/5'
                 )}
               >
@@ -226,7 +229,7 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
                     </span>
                   </>
                 )}
-              </div>
+              </button>
             </div>
           </div>
         )}
@@ -261,8 +264,7 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
                 {parsedTransactions.map((tx, i) => (
                   <div
                     key={i}
-                    className="grid grid-cols-[100px_1fr_100px_80px] gap-2 rounded-lg px-3 py-2"
-                    style={{ backgroundColor: 'rgba(10,10,10,0.6)' }}
+                    className="bg-muted/45 grid grid-cols-[100px_1fr_100px_80px] gap-2 rounded-lg px-3 py-2"
                   >
                     <span className="text-muted-foreground font-mono text-xs">{tx.date}</span>
                     <span className="truncate text-sm">{tx.description}</span>

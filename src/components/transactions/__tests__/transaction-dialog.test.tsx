@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { TransactionDialog } from '../transaction-dialog'
-import type { TransactionWithDetails } from '@/stores/transaction-store'
+import type { TransactionPageRow } from '@/lib/transaction-query'
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -36,7 +36,8 @@ vi.mock('@/components/shared/confirm-dialog', () => ({
 const mockCloseTransactionDialog = vi.fn()
 const mockAdd = vi.fn()
 const mockUpdate = vi.fn()
-const mockGetById = vi.fn()
+const mockGetTransactionById = vi.fn()
+const mockInvalidateTransactionPage = vi.fn()
 
 let mockEditingTransactionId: string | null = null
 
@@ -51,9 +52,17 @@ vi.mock('@/stores/ui-store', () => ({
 vi.mock('@/stores/transaction-store', () => ({
   useTransactionStore: () => ({
     add: mockAdd,
+    addWithSplits: vi.fn(),
     update: mockUpdate,
-    getById: mockGetById,
   }),
+}))
+
+vi.mock('@/lib/transaction-query', () => ({
+  getTransactionById: (id: string) => mockGetTransactionById(id),
+}))
+
+vi.mock('@/lib/transaction-query-events', () => ({
+  invalidateTransactionPage: (reason: string) => mockInvalidateTransactionPage(reason),
 }))
 
 vi.mock('@/stores/account-store', () => ({
@@ -74,7 +83,7 @@ vi.mock('@/stores/category-store', () => ({
   }),
 }))
 
-const mockTransaction: TransactionWithDetails = {
+const mockTransaction: TransactionPageRow = {
   id: 'tx-edit',
   account_id: 'acc-1',
   category_id: null,
@@ -91,12 +100,14 @@ const mockTransaction: TransactionWithDetails = {
   created_at: '2024-06-15T00:00:00Z',
   updated_at: '2024-06-15T00:00:00Z',
   account_name: 'Checking',
+  has_splits: 0,
 }
 
 describe('TransactionDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockEditingTransactionId = null
+    mockGetTransactionById.mockResolvedValue(mockTransaction)
   })
 
   it('prevents dialog closure while mutation is in flight', async () => {
@@ -110,13 +121,11 @@ describe('TransactionDialog', () => {
 
     // Use edit mode so form is pre-filled with valid data
     mockEditingTransactionId = 'tx-edit'
-    mockGetById.mockReturnValue(mockTransaction)
-
     render(<TransactionDialog />)
 
-    // Submit the form
+    // Submit only after the bounded by-ID lookup has loaded the current row.
     const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+    await user.click(await screen.findByRole('button', { name: 'actions.save' }))
 
     // Verify the button shows loading state (dialog should stay open)
     await waitFor(() => {
@@ -152,9 +161,8 @@ describe('TransactionDialog', () => {
   it('renders dialog with create mode title', () => {
     render(<TransactionDialog />)
 
-    // Title and description both render "addTransaction"
-    const elements = screen.getAllByText('addTransaction')
-    expect(elements.length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('addTransaction')).toBeInTheDocument()
+    expect(screen.getByText('dialog.addDescription')).toBeInTheDocument()
   })
 
   it('renders DialogContent with overflow classes', () => {
@@ -172,18 +180,66 @@ describe('TransactionDialog', () => {
 
     // Use edit mode so form is pre-filled with valid data
     mockEditingTransactionId = 'tx-edit'
-    mockGetById.mockReturnValue(mockTransaction)
     mockUpdate.mockResolvedValueOnce(undefined)
 
     render(<TransactionDialog />)
 
-    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+    await user.click(await screen.findByRole('button', { name: 'actions.save' }))
 
     await waitFor(() => {
       expect(mockUpdate).toHaveBeenCalledWith('tx-edit', expect.any(Object))
       expect(toast.success).toHaveBeenCalledWith('toast.updated')
       expect(mockCloseTransactionDialog).toHaveBeenCalled()
+      expect(mockInvalidateTransactionPage).toHaveBeenCalledWith('edit')
     })
+  })
+
+  it('loads a page-2 edit target by ID while the global transaction store is empty', async () => {
+    let resolveLookup!: (transaction: TransactionPageRow) => void
+    mockEditingTransactionId = 'page-2-row'
+    mockGetTransactionById.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveLookup = resolve))
+    )
+
+    render(<TransactionDialog />)
+
+    expect(mockGetTransactionById).toHaveBeenCalledWith('page-2-row')
+    expect(screen.queryByRole('button', { name: 'actions.save' })).not.toBeInTheDocument()
+
+    await act(async () =>
+      resolveLookup({ ...mockTransaction, id: 'page-2-row', description: 'Actual page two row' })
+    )
+
+    expect(await screen.findByDisplayValue('Actual page two row')).toBeInTheDocument()
+  })
+
+  it('does not render or enable an editable default form when lookup returns not found', async () => {
+    mockEditingTransactionId = 'missing-row'
+    mockGetTransactionById.mockResolvedValueOnce(null)
+
+    render(<TransactionDialog />)
+
+    expect(await screen.findByText('dialog.notFound')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'actions.save' })).not.toBeInTheDocument()
+  })
+
+  it('invalidates filtered page queries after a new transaction succeeds', async () => {
+    const user = userEvent.setup()
+    mockAdd.mockResolvedValueOnce(undefined)
+
+    render(<TransactionDialog />)
+
+    await user.type(screen.getByLabelText('form.amount'), '12.34')
+    await user.type(screen.getByLabelText('form.description'), 'New matching record')
+    const nativeAccountSelect = [...document.querySelectorAll('select')].find((select) =>
+      [...select.options].some((option) => option.text === 'Checking')
+    )
+    if (!nativeAccountSelect) throw new Error('Expected account select')
+    fireEvent.change(nativeAccountSelect, { target: { value: 'acc-1' } })
+    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+
+    await waitFor(() => expect(mockAdd).toHaveBeenCalled())
+    expect(mockInvalidateTransactionPage).toHaveBeenCalledWith('add')
   })
 
   it('shows error toast when update throws', async () => {
@@ -191,12 +247,11 @@ describe('TransactionDialog', () => {
     const user = userEvent.setup()
 
     mockEditingTransactionId = 'tx-edit'
-    mockGetById.mockReturnValue(mockTransaction)
     mockUpdate.mockRejectedValueOnce(new Error('DB error'))
 
     render(<TransactionDialog />)
 
-    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+    await user.click(await screen.findByRole('button', { name: 'actions.save' }))
 
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith('DB error')

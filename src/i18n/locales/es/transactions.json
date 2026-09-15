@@ -75,7 +75,8 @@
       "30-days": "Últimos 30 días",
       "90-days": "Últimos 90 días",
       "custom": "Rango personalizado"
-    }
+    },
+    "searchPlaceholder": "Buscar comercio, categoría, cuenta o nota"
   },
   "views": {
     "label": "Vistas de transacciones",
@@ -99,7 +100,9 @@
     "status": "Estado",
     "source": "Origen",
     "debit": "Débito",
-    "credit": "Crédito"
+    "credit": "Crédito",
+    "amount": "Monto",
+    "actions": "Acciones"
   },
   "review": {
     "queueLabel": "Cola de revisión",
@@ -141,7 +144,13 @@
   },
   "pagination": {
     "summary": "Mostrando {{shown}} de {{total}} transacciones coincidentes",
-    "showMore": "Mostrar {{count}} mas"
+    "showMore": "Mostrar {{count}} mas",
+    "label": "Páginas de transacciones",
+    "range": "{{from}}–{{to}} de {{total}} transacciones",
+    "previous": "Página anterior",
+    "next": "Página siguiente",
+    "page": "Página {{page}}",
+    "rows": "Filas"
   },
   "viewAll": "Ver Todas",
   "recentTransactions": "Transacciones Recientes",
@@ -230,5 +239,33 @@
     "error": "Error al importar",
     "partialError": "Se importaron {{imported}} transacciones con {{errorCount}} errores",
     "fileTypes": "Soportados: .ofx, .qfx, .qif"
+  },
+  "summary": {
+    "label": "Resumen de resultados de transacciones",
+    "results": "Registros coincidentes",
+    "resultsDetail": "En todas las páginas",
+    "review": "Necesitan revisión",
+    "reviewDetail": "Con los filtros actuales",
+    "currencies": "Monedas",
+    "currenciesDetail": "Disponibles en el libro mayor"
+  },
+  "loadError": {
+    "title": "No se pudieron cargar las transacciones"
+  },
+  "dialog": {
+    "addDescription": "Registra un ingreso, gasto, transferencia o división.",
+    "editDescription": "Cargar el registro actual evita editar datos obsoletos.",
+    "loading": "Cargando transacción",
+    "notFound": "Transacción no encontrada",
+    "notFoundDescription": "Este registro puede haberse eliminado o archivado.",
+    "loadError": "No se pudo cargar esta transacción",
+    "retry": "Intentar de nuevo",
+    "discardTitle": "¿Descartar cambios?",
+    "discardDescription": "Hay cambios sin guardar. ¿Cerrar el formulario sin guardarlos?",
+    "discard": "Descartar"
+  },
+  "detail": {
+    "notes": "Notas",
+    "reference": "Referencia"
   }
 }

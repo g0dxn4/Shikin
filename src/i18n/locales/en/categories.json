@@ -59,5 +59,10 @@
     "deleted": "Category deleted",
     "saveFailed": "Failed to save category",
     "deleteFailed": "Failed to delete category. Remove or reassign linked data first."
+  },
+  "summary": {
+    "label": "Category summary",
+    "total": "Total categories",
+    "detail": "Shared across your finance workflows"
   }
 }

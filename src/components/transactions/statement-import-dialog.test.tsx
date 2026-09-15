@@ -3,11 +3,14 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { StatementImportDialog } from './statement-import-dialog'
 
-const { mockImportStatementFile, mockParseStatement, mockToastError } = vi.hoisted(() => ({
-  mockImportStatementFile: vi.fn(),
-  mockParseStatement: vi.fn(),
-  mockToastError: vi.fn(),
-}))
+const { mockImportStatementFile, mockParseStatement, mockToastError, mockInvalidate } = vi.hoisted(
+  () => ({
+    mockImportStatementFile: vi.fn(),
+    mockParseStatement: vi.fn(),
+    mockToastError: vi.fn(),
+    mockInvalidate: vi.fn(),
+  })
+)
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -27,6 +30,10 @@ vi.mock('@/lib/statement-parser', () => ({
 
 vi.mock('@/lib/statement-import', () => ({
   importStatementFile: mockImportStatementFile,
+}))
+
+vi.mock('@/lib/transaction-query-events', () => ({
+  invalidateTransactionPage: mockInvalidate,
 }))
 
 vi.mock('@/stores/account-store', () => ({
@@ -120,5 +127,25 @@ describe('StatementImportDialog', () => {
     await user.click(screen.getByRole('button', { name: 'import.cancel' }))
     expect(screen.getByText('retry.ofx')).toBeVisible()
     expect(screen.getByRole('button', { name: 'import.preview' })).toBeEnabled()
+    expect(mockInvalidate).not.toHaveBeenCalled()
+  })
+
+  it('invalidates the page query after imported rows commit', async () => {
+    const user = userEvent.setup()
+    mockParseStatement.mockReturnValue([
+      { date: '2026-07-14', amount: 12.5, description: 'Imported', type: 'expense' },
+    ])
+    mockImportStatementFile.mockResolvedValue({ imported: 1, skipped: 0, errors: [] })
+    const file = new File(['statement'], 'success.ofx', { type: 'application/xml' })
+    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue('statement') })
+
+    const { container } = render(<StatementImportDialog open={true} onOpenChange={vi.fn()} />)
+    const input = container.querySelector('input[type="file"]')
+    if (!(input instanceof HTMLInputElement)) throw new Error('Expected statement file input')
+    fireEvent.change(input, { target: { files: [file] } })
+    await user.click(await screen.findByRole('button', { name: 'import.preview' }))
+    await user.click(screen.getByRole('button', { name: 'import.confirm' }))
+
+    await waitFor(() => expect(mockInvalidate).toHaveBeenCalledWith('import'))
   })
 })

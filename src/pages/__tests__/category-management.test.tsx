@@ -91,9 +91,10 @@ describe('CategoryManagement', () => {
     mockIsLoading = false
   })
 
-  it('renders title and add button', () => {
+  it('uses the shell title and renders a compact native toolbar', () => {
     render(<CategoryManagement />)
-    expect(screen.getByText('Categories')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
+    expect(screen.getByText('Management')).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: /Add Category/i }).length).toBeGreaterThanOrEqual(
       1
     )

@@ -48,6 +48,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { ErrorState } from '@/components/ui/error-state'
+import { MetricItem, MetricStrip, NativePanel, PageToolbar } from '@/components/ui/native-layout'
 import { ShowMorePagination } from '@/components/shared/show-more-pagination'
 import {
   Select,
@@ -359,46 +360,27 @@ export function CategoryManagement() {
   }
 
   return (
-    <div className="animate-fade-in-up page-content">
-      <div className="liquid-card page-header min-h-[72px] p-3 sm:p-4">
-        <div>
-          <h1 className="font-heading text-2xl font-bold tracking-tight md:text-[28px]">
-            {t('title')}
-          </h1>
-          <p className="text-muted-foreground mt-1 text-sm font-medium">{t('subtitle')}</p>
-        </div>
-        <Button onClick={startAdd}>
-          <Plus size={16} />
-          {t('addCategory')}
-        </Button>
-      </div>
+    <div className="animate-fade-in-up page-content space-y-4">
+      <PageToolbar
+        leading={<p className="text-muted-foreground text-sm">{t('subtitle')}</p>}
+        actions={
+          <Button size="sm" onClick={startAdd}>
+            <Plus size={16} />
+            {t('addCategory')}
+          </Button>
+        }
+      />
 
-      <div className="liquid-hero overflow-hidden p-6 sm:p-7">
-        <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
-          <div>
-            <p className="text-muted-foreground text-sm font-bold tracking-[0.14em] uppercase">
-              {t('hero.kicker')}
-            </p>
-            <p className="font-heading mt-4 text-4xl font-bold tracking-tight sm:text-5xl">
-              {categories.length}
-            </p>
-            <p className="text-muted-foreground mt-3 max-w-xl text-sm font-medium">
-              {t('hero.description')}
-            </p>
-          </div>
-          <div className="grid min-w-full grid-cols-3 gap-3 lg:min-w-[420px]">
-            {counts.map(({ type, count }) => (
-              <div
-                key={type}
-                className="rounded-2xl border border-white/[0.08] bg-white/[0.05] p-4"
-              >
-                <p className="text-muted-foreground text-xs font-bold">{t(`types.${type}`)}</p>
-                <p className="font-mono text-2xl font-bold">{count}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
+      <MetricStrip aria-label={t('summary.label')}>
+        <MetricItem
+          label={t('summary.total')}
+          value={categories.length}
+          detail={t('summary.detail')}
+        />
+        {counts.map(({ type, count }) => (
+          <MetricItem key={type} label={t(`types.${type}`)} value={count} />
+        ))}
+      </MetricStrip>
 
       <ErrorBanner
         title={t('loadError')}
@@ -419,7 +401,7 @@ export function CategoryManagement() {
           }}
         />
       ) : categories.length === 0 ? (
-        <div className="liquid-card flex flex-col items-center justify-center py-16 text-center">
+        <NativePanel className="flex flex-col items-center justify-center py-16 text-center">
           <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-3xl">
             <LayoutGrid size={28} className="text-primary" />
           </div>
@@ -429,7 +411,7 @@ export function CategoryManagement() {
             <Plus size={16} />
             {t('addCategory')}
           </Button>
-        </div>
+        </NativePanel>
       ) : (
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
           {TYPE_OPTIONS.map((type) => {
@@ -437,11 +419,7 @@ export function CategoryManagement() {
             const visibleCount = visibleCategoryCounts[type] ?? CATEGORIES_PAGE_SIZE
             const visibleCategories = typedCategories.slice(0, visibleCount)
             return (
-              <section
-                key={type}
-                className="liquid-card min-h-[360px] p-5"
-                aria-label={t(`types.${type}`)}
-              >
+              <NativePanel key={type} className="min-h-[360px] p-5" aria-label={t(`types.${type}`)}>
                 <div className="mb-5 flex items-center justify-between gap-3">
                   <div>
                     <h2 className="font-heading text-xl font-bold tracking-tight">
@@ -457,7 +435,7 @@ export function CategoryManagement() {
                     <div
                       key={cat.id}
                       role="listitem"
-                      className="group rounded-[20px] border border-white/[0.06] bg-white/[0.03] p-3 transition-colors hover:bg-white/[0.05]"
+                      className="group border-border bg-surface hover:bg-muted/45 rounded-lg border p-3 transition-colors"
                     >
                       <div className="flex items-center gap-3">
                         <button
@@ -503,7 +481,7 @@ export function CategoryManagement() {
                     </div>
                   ))}
                   {typedCategories.length === 0 && (
-                    <div className="rounded-[20px] border border-dashed border-white/[0.08] p-4 text-center">
+                    <div className="border-border rounded-lg border border-dashed p-4 text-center">
                       <p className="text-muted-foreground text-sm">{t('empty.group')}</p>
                     </div>
                   )}
@@ -529,14 +507,14 @@ export function CategoryManagement() {
                   }
                   className="mt-4"
                 />
-              </section>
+              </NativePanel>
             )
           })}
         </div>
       )}
 
       <Dialog open={showForm} onOpenChange={(open) => !open && closeForm()}>
-        <DialogContent className="liquid-card max-h-[90vh] overflow-y-auto border-white/[0.08] sm:max-w-2xl">
+        <DialogContent className="border-border bg-surface max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <div className="mb-2 flex items-center gap-3">
               <div
@@ -653,7 +631,7 @@ export function CategoryManagement() {
                 type="button"
                 aria-labelledby="category-icon-label category-icon-current"
                 onClick={() => setIsIconPickerOpen(true)}
-                className="focus-visible:ring-ring flex w-full items-center justify-between gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.03] p-3 text-left transition-colors hover:bg-white/[0.05] focus-visible:ring-2 focus-visible:outline-none"
+                className="focus-visible:ring-ring border-border bg-surface hover:bg-muted/45 flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
               >
                 <span className="flex min-w-0 items-center gap-3">
                   <span
@@ -690,7 +668,7 @@ export function CategoryManagement() {
       </Dialog>
 
       <Dialog open={isIconPickerOpen} onOpenChange={setIsIconPickerOpen}>
-        <DialogContent className="liquid-card max-h-[82vh] overflow-hidden border-white/[0.08] sm:max-w-xl">
+        <DialogContent className="border-border bg-surface max-h-[82vh] overflow-hidden sm:max-w-xl">
           <DialogHeader>
             <DialogTitle className="font-heading text-xl">{t('iconPicker.title')}</DialogTitle>
             <DialogDescription>{t('iconPicker.description')}</DialogDescription>
@@ -729,10 +707,10 @@ export function CategoryManagement() {
                     className={`focus-visible:ring-ring flex items-center gap-3 rounded-2xl border p-3 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none ${
                       isSelected
                         ? 'border-primary/50 bg-primary/10 text-foreground'
-                        : 'text-muted-foreground hover:text-foreground border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.05]'
+                        : 'text-muted-foreground hover:text-foreground border-border bg-surface hover:bg-muted/45'
                     }`}
                   >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/[0.06]">
+                    <span className="bg-muted flex h-9 w-9 shrink-0 items-center justify-center rounded-xl">
                       <CategoryIcon name={iconName} size={16} />
                     </span>
                     <span className="min-w-0">
@@ -749,7 +727,7 @@ export function CategoryManagement() {
             </div>
 
             {filteredIcons.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-white/[0.08] p-6 text-center">
+              <div className="border-border rounded-lg border border-dashed p-6 text-center">
                 <p className="text-muted-foreground text-sm">{t('iconPicker.noResults')}</p>
               </div>
             )}
@@ -777,7 +755,7 @@ export function CategoryManagement() {
 function CategorySkeleton() {
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_400px]">
-      <div className="liquid-card space-y-3 p-5">
+      <NativePanel className="space-y-3 p-5">
         {Array.from({ length: 5 }).map((_, i) => (
           <div key={i} className="flex items-center gap-3 px-2 py-2">
             <Skeleton className="h-7 w-7 rounded-lg" />
@@ -788,8 +766,8 @@ function CategorySkeleton() {
             </div>
           </div>
         ))}
-      </div>
-      <div className="liquid-card space-y-6 p-5">
+      </NativePanel>
+      <NativePanel className="space-y-6 p-5">
         <div className="flex items-center gap-2">
           <Skeleton className="h-8 w-8 rounded-lg" />
           <Skeleton className="h-5 w-28" />
@@ -803,7 +781,7 @@ function CategorySkeleton() {
           <Skeleton className="h-10 w-full" />
         </div>
         <Skeleton className="h-10 w-full" />
-      </div>
+      </NativePanel>
     </div>
   )
 }

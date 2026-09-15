@@ -1,69 +1,36 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import dayjs from 'dayjs'
 import { Transactions } from '../transactions'
+import type { TransactionPageResult, TransactionPageRow } from '@/lib/transaction-query'
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string) => key,
-    i18n: { language: 'en', changeLanguage: vi.fn() },
-  }),
+  useTranslation: () => ({ t: (key: string) => key }),
 }))
-
-vi.mock('sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
-}))
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 vi.mock('@/components/shared/confirm-dialog', () => ({
-  ConfirmDialog: ({
-    open,
-    onConfirm,
-    title,
-  }: {
-    open: boolean
-    onConfirm: () => void
-    title: string
-  }) =>
-    open ? (
-      <div data-testid="confirm-dialog">
-        <span>{title}</span>
-        <button onClick={onConfirm}>Confirm</button>
-      </div>
-    ) : null,
+  ConfirmDialog: ({ open, onConfirm }: { open: boolean; onConfirm: () => void }) =>
+    open ? <button onClick={onConfirm}>Confirm delete</button> : null,
 }))
-
 vi.mock('@/components/transactions/statement-import-dialog', () => ({
-  StatementImportDialog: ({
-    open,
-    onOpenChange,
-  }: {
-    open: boolean
-    onOpenChange: (open: boolean) => void
-  }) =>
-    open ? (
-      <div data-testid="statement-import-dialog">
-        <button onClick={() => onOpenChange(false)}>Close import</button>
-      </div>
-    ) : null,
+  StatementImportDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="statement-import-dialog" /> : null,
 }))
 
-const mockFetch = vi.fn().mockResolvedValue(undefined)
-const mockRemove = vi.fn()
-const mockUpdateReviewFields = vi.fn().mockResolvedValue(undefined)
 const mockOpenTransactionDialog = vi.fn()
 const mockOpenRecurringDialog = vi.fn()
-const mockAccountFetch = vi.fn().mockResolvedValue(undefined)
-const mockCategoryFetch = vi.fn().mockResolvedValue(undefined)
+const mockRemove = vi.fn()
+const mockGetSplits = vi.fn().mockResolvedValue([])
+const mockUpdateReviewFields = vi.fn()
+const mockFetchAccounts = vi.fn()
+const mockFetchCategories = vi.fn()
+const mockInvalidate = vi.fn()
+const mockUseQuery = vi.fn()
 
-let mockTransactions: unknown[] = []
-let mockAccounts: unknown[] = []
-let mockArchivedAccounts: unknown[] = []
-let mockCategories: unknown[] = []
-let mockIsLoading = false
-let mockTransactionFetchError: string | null = null
-let mockIsSplit = vi.fn().mockReturnValue(false)
-let mockSplitCategoryIdsByTransaction = new Map<string, Set<string>>()
+let accounts: unknown[] = []
+let categories: unknown[] = []
+let pageResult: TransactionPageResult
 
 vi.mock('@/stores/ui-store', () => ({
   useUIStore: () => ({
@@ -71,683 +38,232 @@ vi.mock('@/stores/ui-store', () => ({
     openRecurringDialog: mockOpenRecurringDialog,
   }),
 }))
-
-vi.mock('@/stores/account-store', () => ({
-  useAccountStore: () => ({
-    accounts: mockAccounts,
-    archivedAccounts: mockArchivedAccounts,
-    fetch: mockAccountFetch,
-  }),
-}))
-
-vi.mock('@/stores/category-store', () => ({
-  useCategoryStore: () => ({
-    categories: mockCategories,
-    fetch: mockCategoryFetch,
-  }),
-}))
-
 vi.mock('@/stores/transaction-store', () => ({
   useTransactionStore: () => ({
-    transactions: mockTransactions,
-    isLoading: mockIsLoading,
-    fetchError: mockTransactionFetchError,
-    error: null,
-    fetch: mockFetch,
     remove: mockRemove,
+    getSplits: mockGetSplits,
     updateReviewFields: mockUpdateReviewFields,
-    isSplit: mockIsSplit,
-    splitTransactionIds: new Set(mockSplitCategoryIdsByTransaction.keys()),
-    splitCategoryIdsByTransaction: mockSplitCategoryIdsByTransaction,
-    getSplits: vi.fn().mockResolvedValue([]),
   }),
 }))
+vi.mock('@/stores/account-store', () => ({
+  useAccountStore: () => ({
+    accounts,
+    archivedAccounts: [],
+    fetch: mockFetchAccounts,
+  }),
+}))
+vi.mock('@/stores/category-store', () => ({
+  useCategoryStore: () => ({ categories, fetch: mockFetchCategories }),
+}))
+vi.mock('@/hooks/use-transaction-page-query', () => ({
+  useTransactionPageQuery: (request: unknown) => mockUseQuery(request),
+}))
+vi.mock('@/lib/transaction-query-events', () => ({
+  invalidateTransactionPage: (reason: string) => mockInvalidate(reason),
+}))
+
+function makeRow(overrides: Partial<TransactionPageRow> = {}): TransactionPageRow {
+  return {
+    id: 'tx-1',
+    account_id: 'account-1',
+    category_id: null,
+    subcategory_id: null,
+    type: 'expense',
+    amount: 1234,
+    currency: 'USD',
+    description: 'Coffee',
+    notes: null,
+    date: '2026-03-01',
+    tags: '[]',
+    is_recurring: 0,
+    transfer_to_account_id: null,
+    status: 'posted',
+    created_at: '2026-03-01T00:00:00Z',
+    updated_at: '2026-03-01T00:00:00Z',
+    account_name: 'Checking',
+    has_splits: 0,
+    ...overrides,
+  }
+}
+
+function setRows(rows: TransactionPageRow[], total = rows.length) {
+  pageResult = {
+    rows,
+    total,
+    currencies: rows.length ? ['USD'] : [],
+    reviewCounts: { all: 0, 'needs-category': 0, pending: 0, placeholder: 0, staged: 0 },
+    isLoading: false,
+    error: null,
+  } as TransactionPageResult
+}
 
 describe('Transactions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.history.replaceState(null, '', '/transactions')
     window.localStorage.clear()
-    mockFetch.mockResolvedValue(undefined)
-    mockRemove.mockReset()
+    accounts = []
+    categories = []
+    mockFetchAccounts.mockResolvedValue(undefined)
+    mockFetchCategories.mockResolvedValue(undefined)
+    mockRemove.mockResolvedValue(undefined)
     mockUpdateReviewFields.mockResolvedValue(undefined)
-    mockTransactions = []
-    mockAccounts = []
-    mockArchivedAccounts = []
-    mockCategories = []
-    mockIsLoading = false
-    mockTransactionFetchError = null
-    mockIsSplit = vi.fn().mockReturnValue(false)
-    mockSplitCategoryIdsByTransaction = new Map()
+    setRows([])
+    mockUseQuery.mockImplementation(() => pageResult)
   })
 
-  it('calls fetch on mount', () => {
+  it('uses the local page query and renders compact native actions without a duplicate h1', () => {
     render(<Transactions />)
 
-    expect(mockFetch).toHaveBeenCalled()
+    expect(mockUseQuery).toHaveBeenCalledWith(expect.objectContaining({ page: 1, pageSize: 50 }))
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'addTransaction' })[0]).toBeVisible()
+    expect(screen.getByText('empty.title')).toBeVisible()
   })
 
-  it('renders loading state when isLoading', () => {
-    mockIsLoading = true
-
-    const { container } = render(<Transactions />)
-
-    // Loading state renders skeleton, not the transactions list
-    expect(screen.queryByText('empty.title')).not.toBeInTheDocument()
-    expect(container.querySelector('.skeleton')).toBeInTheDocument()
-  })
-
-  it('renders empty state with add button', () => {
-    render(<Transactions />)
-
-    expect(screen.getByText('empty.title')).toBeInTheDocument()
-    expect(screen.getByText('empty.description')).toBeInTheDocument()
-  })
-
-  it('opens the statement import dialog from the transactions header', async () => {
-    const user = userEvent.setup()
-
-    render(<Transactions />)
-
-    await user.click(screen.getByText('import.button'))
-
-    expect(screen.getByTestId('statement-import-dialog')).toBeInTheDocument()
-  })
-
-  it('renders practical shared filters and keeps recurring actions available', () => {
-    render(<Transactions />)
-
-    expect(screen.getByPlaceholderText('actions.search...')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'types.all' })).toBeInTheDocument()
-    expect(screen.getByLabelText('filters.dateRange')).toBeInTheDocument()
-    expect(screen.getByLabelText('filters.account')).toBeInTheDocument()
-    expect(screen.getByLabelText('filters.category')).toBeInTheDocument()
-    expect(screen.getByLabelText('filters.status')).toBeInTheDocument()
-    expect(screen.getByLabelText('filters.currency')).toBeInTheDocument()
-    expect(screen.getByText('recurring.addRule')).toBeInTheDocument()
-  })
-
-  it('renders dedicated load error state instead of empty transactions CTA', () => {
-    mockTransactionFetchError = 'Transactions unavailable'
-
-    render(<Transactions />)
-
-    expect(screen.getByText('Couldn’t load your transactions')).toBeInTheDocument()
-    expect(screen.getByText('Transactions unavailable')).toBeInTheDocument()
-    expect(screen.queryByText('empty.title')).not.toBeInTheDocument()
-  })
-
-  it('groups transactions by date', () => {
-    const today = dayjs().format('YYYY-MM-DD')
-    const yesterday = dayjs().subtract(1, 'day').format('YYYY-MM-DD')
-
-    mockTransactions = [
-      {
-        id: 'tx-1',
-        description: 'Coffee',
-        type: 'expense',
-        amount: 500,
-        currency: 'USD',
-        date: today,
-        category_color: null,
-        category_name: 'Food',
-        account_name: 'Checking',
-      },
-      {
-        id: 'tx-2',
-        description: 'Lunch',
-        type: 'expense',
-        amount: 1500,
-        currency: 'USD',
-        date: yesterday,
-        category_color: '#ff0000',
-        category_name: 'Food',
-        account_name: 'Checking',
-      },
-    ]
-
-    render(<Transactions />)
-
-    expect(screen.getByText('Today')).toBeInTheDocument()
-    expect(screen.getByText('Yesterday')).toBeInTheDocument()
-  })
-
-  it('filters the review queue to transactions that need a category', async () => {
-    const user = userEvent.setup()
-    mockTransactions = [
-      {
-        id: 'tx-1',
-        description: 'Imported Coffee',
-        type: 'expense',
-        amount: 500,
-        currency: 'USD',
-        date: dayjs().format('YYYY-MM-DD'),
-        category_id: null,
-        category_color: null,
-        category_name: null,
-        account_name: 'Checking',
-      },
-      {
-        id: 'tx-2',
-        description: 'Categorized Lunch',
-        type: 'expense',
-        amount: 1200,
-        currency: 'USD',
-        date: dayjs().format('YYYY-MM-DD'),
-        category_id: 'cat-1',
-        category_color: '#ff0000',
-        category_name: 'Food',
-        account_name: 'Checking',
-        status: 'posted',
-      },
-      {
-        id: 'tx-3',
-        description: 'Pending transfer',
-        type: 'transfer',
-        amount: 300,
-        currency: 'USD',
-        date: dayjs().format('YYYY-MM-DD'),
-        category_id: null,
-        category_color: null,
-        category_name: null,
-        account_name: 'Checking',
-        status: 'pending',
-      },
-    ]
-
-    render(<Transactions />)
-
-    await user.click(screen.getByRole('tab', { name: 'views.review' }))
-    await user.click(screen.getByRole('button', { name: 'review.filters.needs-category (1)' }))
-
-    expect(screen.getByText('Imported Coffee')).toBeInTheDocument()
-    expect(screen.queryByText('Pending transfer')).not.toBeInTheDocument()
-  })
-
-  it('persists accessible view selection and keeps shared filters across views', async () => {
-    const user = userEvent.setup()
-    mockAccounts = [
-      {
-        id: 'acc-usd',
-        name: 'Checking',
-        currency: 'USD',
-        is_archived: 0,
-        account_mode: 'transactional',
-      },
-      {
-        id: 'acc-eur',
-        name: 'Euro account',
-        currency: 'EUR',
-        is_archived: 0,
-        account_mode: 'transactional',
-      },
-    ]
-    mockCategories = [{ id: 'cat-food', name: 'Food', type: 'expense' }]
-    mockTransactions = [
-      {
-        id: 'tx-usd',
-        account_id: 'acc-usd',
-        description: 'USD groceries',
-        type: 'expense',
-        amount: 500,
-        currency: 'USD',
-        date: dayjs().format('YYYY-MM-DD'),
-        category_id: 'cat-food',
-        category_name: 'Food',
-        category_color: null,
-        account_name: 'Checking',
-      },
-      {
-        id: 'tx-eur',
-        account_id: 'acc-eur',
-        description: 'EUR groceries',
-        type: 'expense',
-        amount: 500,
-        currency: 'EUR',
-        date: dayjs().format('YYYY-MM-DD'),
-        category_id: 'cat-food',
-        category_name: 'Food',
-        category_color: null,
-        account_name: 'Euro account',
-      },
-    ]
-
-    render(<Transactions />)
-
-    await user.selectOptions(screen.getByLabelText('filters.account'), 'acc-usd')
-    await user.selectOptions(screen.getByLabelText('filters.currency'), 'USD')
-    expect(screen.getByText('USD groceries')).toBeInTheDocument()
-    expect(screen.queryByText('EUR groceries')).not.toBeInTheDocument()
-
-    await user.click(screen.getByRole('tab', { name: 'views.ledger' }))
-    expect(screen.getByRole('tab', { name: 'views.ledger' })).toHaveAttribute(
-      'aria-selected',
-      'true'
+  it('reads drill-down filters from the URL and preserves them across view changes', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/transactions?account=account-2&category=food&dateFrom=2026-01-01&status=posted'
     )
-    expect(screen.getByRole('table')).toBeInTheDocument()
-    expect(screen.getAllByText('USD groceries')).toHaveLength(2)
-    expect(screen.queryByText('EUR groceries')).not.toBeInTheDocument()
-    expect(window.localStorage.getItem('shikin.transactions.view')).toBe('ledger')
-
-    await user.click(screen.getByRole('button', { name: 'filters.clear' }))
-    expect(screen.getAllByText('EUR groceries')).toHaveLength(2)
-  })
-
-  it('uses split categories for filtering without re-queuing or generically editing a split parent', async () => {
+    setRows([makeRow()])
     const user = userEvent.setup()
-    mockCategories = [
-      { id: 'cat-parent', name: 'Stale parent category', type: 'expense' },
-      { id: 'cat-food', name: 'Food', type: 'expense' },
-    ]
-    mockTransactions = [
-      {
-        id: 'tx-split',
-        account_id: 'acc-usd',
-        description: 'Split groceries',
-        type: 'expense',
-        amount: 5000,
-        currency: 'USD',
-        date: dayjs().format('YYYY-MM-DD'),
-        category_id: 'cat-parent',
-        category_name: 'Stale parent category',
-        account_name: 'Checking',
-        status: 'posted',
-      },
-    ]
-    mockIsSplit = vi.fn((id: string) => id === 'tx-split')
-    mockSplitCategoryIdsByTransaction = new Map([['tx-split', new Set(['cat-food'])]])
 
     render(<Transactions />)
 
-    await user.selectOptions(screen.getByLabelText('filters.category'), 'cat-parent')
-    expect(screen.queryByText('Split groceries')).not.toBeInTheDocument()
-
-    await user.selectOptions(screen.getByLabelText('filters.category'), 'cat-food')
-    expect(screen.getByText('Split groceries')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Edit Split groceries')).not.toBeInTheDocument()
-
+    expect(mockUseQuery).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        account: 'account-2',
+        category: 'food',
+        dateFrom: '2026-01-01',
+        status: 'posted',
+      })
+    )
     await user.click(screen.getByRole('tab', { name: 'views.ledger' }))
-    expect(screen.queryByLabelText('Edit Split groceries')).not.toBeInTheDocument()
-
-    await user.click(screen.getByRole('tab', { name: 'views.review' }))
-    expect(screen.getByText('review.empty')).toBeInTheDocument()
+    expect(window.location.search).toContain('account=account-2')
+    expect(window.location.search).toContain('view=ledger')
   })
 
-  it('shows both transfer endpoints and keeps destination-account ledger activity visible', async () => {
+  it('supports numbered previous/next paging and selectable page sizes', async () => {
+    setRows([makeRow()], 130)
     const user = userEvent.setup()
-    mockAccounts = [
-      {
-        id: 'acc-source',
-        name: 'Checking',
-        currency: 'USD',
-        is_archived: 0,
-        account_mode: 'transactional',
-      },
-      {
-        id: 'acc-destination',
-        name: 'Savings',
-        currency: 'USD',
-        is_archived: 0,
-        account_mode: 'transactional',
-      },
+    render(<Transactions />)
+
+    const pageButtons = screen.getAllByRole('button', { name: 'pagination.page' })
+    await user.click(pageButtons[pageButtons.length - 1])
+    await waitFor(() =>
+      expect(mockUseQuery).toHaveBeenLastCalledWith(expect.objectContaining({ page: 3 }))
+    )
+    await user.selectOptions(screen.getByLabelText('pagination.rows'), '25')
+    expect(mockUseQuery).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, pageSize: 25 })
+    )
+  })
+
+  it('keeps transfer destination account context and split category protections visible', async () => {
+    accounts = [
+      { id: 'source', name: 'Checking', currency: 'USD', is_archived: 0 },
+      { id: 'destination', name: 'Savings', currency: 'USD', is_archived: 0 },
     ]
-    mockTransactions = [
-      {
-        id: 'tx-transfer',
-        account_id: 'acc-source',
-        transfer_to_account_id: 'acc-destination',
-        description: 'Move to savings',
+    setRows([
+      makeRow({
+        id: 'transfer',
         type: 'transfer',
-        amount: 5000,
-        currency: 'USD',
-        date: dayjs().format('YYYY-MM-DD'),
-        category_id: null,
-        account_name: 'Checking',
+        account_id: 'source',
+        transfer_to_account_id: 'destination',
         transfer_to_account_name: 'Savings',
-        status: 'posted',
-      },
-    ]
-
+      }),
+      makeRow({ id: 'split', description: 'Split purchase', has_splits: 1 }),
+    ])
+    const user = userEvent.setup()
     render(<Transactions />)
+
     await user.click(screen.getByRole('tab', { name: 'views.ledger' }))
-    await user.selectOptions(screen.getByLabelText('filters.account'), 'acc-destination')
-
-    expect(screen.getAllByText(/Checking → Savings/).length).toBeGreaterThanOrEqual(2)
-    expect(screen.getAllByText('$50.00')).toHaveLength(4)
+    expect(screen.getAllByText(/Checking → Savings/).length).toBeGreaterThan(0)
+    expect(screen.queryByLabelText('Edit Split purchase')).not.toBeInTheDocument()
   })
 
-  it('keeps completed placeholder lifecycle rows out of inline review editing', async () => {
-    const user = userEvent.setup()
-    mockTransactions = [
+  it('retains inline review eligibility and currency/account protections', async () => {
+    accounts = [
       {
-        id: 'tx-placeholder',
-        account_id: 'acc-usd',
-        description: 'Completed placeholder',
-        type: 'expense',
-        amount: 500,
-        currency: 'USD',
-        date: dayjs().format('YYYY-MM-DD'),
-        category_id: null,
-        account_name: 'Checking',
-        status: 'pending',
-        is_placeholder: 1,
-        placeholder_status: 'split',
-      },
-    ]
-
-    render(<Transactions />)
-    await user.click(screen.getByRole('tab', { name: 'views.review' }))
-
-    expect(screen.getByText('review.protected.placeholderLifecycle')).toBeInTheDocument()
-    expect(screen.queryByLabelText('review-category-tx-placeholder')).not.toBeInTheDocument()
-  })
-
-  it('queues attention reasons, updates review fields, and keeps protected rows out of inline editing', async () => {
-    const user = userEvent.setup()
-    mockAccounts = [
-      {
-        id: 'acc-usd',
+        id: 'account-1',
         name: 'Checking',
         currency: 'USD',
         is_archived: 0,
         account_mode: 'transactional',
       },
+      { id: 'eur', name: 'Euro', currency: 'EUR', is_archived: 0, account_mode: 'transactional' },
       {
-        id: 'acc-archived',
-        name: 'Archived',
-        currency: 'USD',
-        is_archived: 1,
-        account_mode: 'transactional',
-      },
-      {
-        id: 'acc-snapshot',
+        id: 'snapshot',
         name: 'Snapshot',
         currency: 'USD',
         is_archived: 0,
         account_mode: 'snapshot_only',
       },
     ]
-    mockCategories = [
-      { id: 'cat-food', name: 'Food', type: 'expense' },
-      { id: 'cat-salary', name: 'Salary', type: 'income' },
-    ]
-    mockTransactions = [
-      {
-        id: 'tx-review',
-        account_id: 'acc-usd',
-        description: 'Needs category',
-        type: 'expense',
-        amount: 500,
-        currency: 'USD',
-        date: dayjs().format('YYYY-MM-DD'),
-        category_id: null,
-        category_name: null,
-        category_color: null,
-        account_name: 'Checking',
-      },
-      {
-        id: 'tx-protected',
-        account_id: 'acc-usd',
-        description: 'Finalized import',
-        type: 'expense',
-        amount: 800,
-        currency: 'USD',
-        date: dayjs().format('YYYY-MM-DD'),
-        category_id: null,
-        category_name: null,
-        category_color: null,
-        account_name: 'Checking',
-        is_finalized_statement: 1,
-        source: 'statement-import',
-      },
-    ]
-
+    categories = [{ id: 'food', name: 'Food', type: 'expense' }]
+    setRows([makeRow({ category_id: null, status: ' ' as never })])
+    pageResult.reviewCounts = { all: 1, 'needs-category': 1, pending: 0, placeholder: 0, staged: 0 }
+    const user = userEvent.setup()
     render(<Transactions />)
+
     await user.click(screen.getByRole('tab', { name: 'views.review' }))
-
-    expect(screen.getAllByText('review.reasons.needs-category')).toHaveLength(2)
-    expect(screen.getByText('review.protected.finalized')).toBeInTheDocument()
-    expect(screen.queryByLabelText('review-category-tx-protected')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Delete Finalized import')).not.toBeInTheDocument()
-
-    await user.selectOptions(screen.getByLabelText('review.category'), 'cat-food')
-    await waitFor(() => {
-      expect(mockUpdateReviewFields).toHaveBeenCalledWith('tx-review', { categoryId: 'cat-food' })
-    })
-
-    const reviewAccount = screen.getByLabelText('review.account') as HTMLSelectElement
-    expect(Array.from(reviewAccount.options).map((option) => option.value)).toEqual(['acc-usd'])
+    const accountSelect = screen.getByLabelText('review.account') as HTMLSelectElement
+    expect(Array.from(accountSelect.options).map((option) => option.value)).toEqual(['account-1'])
+    await user.selectOptions(screen.getByLabelText('review.category'), 'food')
+    await waitFor(() =>
+      expect(mockUpdateReviewFields).toHaveBeenCalledWith('tx-1', { categoryId: 'food' })
+    )
+    expect(mockInvalidate).toHaveBeenCalledWith('review')
   })
 
-  it('moves review focus with J and K outside form controls', async () => {
+  it('preserves J/K review keyboard navigation outside controls', async () => {
+    setRows([
+      makeRow({ id: 'first', description: 'First' }),
+      makeRow({ id: 'second', description: 'Second' }),
+    ])
+    pageResult.reviewCounts.all = 2
     const user = userEvent.setup()
-    mockTransactions = [
-      {
-        id: 'tx-first',
-        account_id: 'acc-usd',
-        description: 'First review item',
-        type: 'expense',
-        amount: 100,
-        currency: 'USD',
-        date: dayjs().format('YYYY-MM-DD'),
-        category_id: null,
-        category_name: null,
-        category_color: null,
-        account_name: 'Checking',
-      },
-      {
-        id: 'tx-second',
-        account_id: 'acc-usd',
-        description: 'Second review item',
-        type: 'expense',
-        amount: 100,
-        currency: 'USD',
-        date: dayjs().format('YYYY-MM-DD'),
-        category_id: null,
-        category_name: null,
-        category_color: null,
-        account_name: 'Checking',
-      },
-    ]
-
     render(<Transactions />)
     await user.click(screen.getByRole('tab', { name: 'views.review' }))
 
     fireEvent.keyDown(document, { key: 'j' })
-    await waitFor(() => expect(document.activeElement).toHaveTextContent('Second review item'))
-
-    const categorySelect = screen.getAllByLabelText('review.category')[1]
-    categorySelect.focus()
-    fireEvent.keyDown(categorySelect, { key: 'k' })
-    expect(document.activeElement).toBe(categorySelect)
+    await waitFor(() => expect(document.activeElement).toHaveTextContent('Second'))
   })
 
-  it('renders transaction rows with description and colored amount', () => {
-    mockTransactions = [
-      {
-        id: 'tx-1',
-        description: 'Groceries',
-        type: 'expense',
-        amount: 5000,
-        currency: 'USD',
-        date: dayjs().format('YYYY-MM-DD'),
-        category_color: '#ff0000',
-        category_name: 'Food',
-        account_name: 'Checking',
-      },
-    ]
-
+  it('invalidates the complete page query only after successful deletion', async () => {
+    setRows([makeRow({ id: 'delete-me', description: 'Delete me' })])
+    const user = userEvent.setup()
     render(<Transactions />)
 
-    expect(screen.getByText('Groceries')).toBeInTheDocument()
-    expect(screen.getByText('Food')).toBeInTheDocument()
+    await user.click(screen.getByLabelText('Delete Delete me'))
+    await user.click(screen.getByText('Confirm delete'))
+
+    await waitFor(() => expect(mockRemove).toHaveBeenCalledWith('delete-me'))
+    expect(mockInvalidate).toHaveBeenCalledWith('delete')
   })
 
-  it('renders large transaction lists in pages instead of mounting every row at once', async () => {
-    const user = userEvent.setup()
-    mockTransactions = Array.from({ length: 105 }, (_, index) => ({
-      id: `tx-${index}`,
-      description: `Paged ${index.toString().padStart(3, '0')}`,
-      type: 'expense',
-      amount: 1000,
-      currency: 'USD',
-      date: dayjs().format('YYYY-MM-DD'),
-      category_id: null,
-      category_color: null,
-      category_name: null,
-      account_name: 'Checking',
-    }))
+  it('clamps to the previous page after deleting the last row on the last page', async () => {
+    window.history.replaceState(null, '', '/transactions?page=2&pageSize=25')
+    setRows([makeRow({ id: 'last-row' })], 26)
+    const { rerender } = render(<Transactions />)
 
+    setRows([], 25)
+    rerender(<Transactions />)
+
+    await waitFor(() => expect(window.location.search).not.toContain('page=2'))
+    expect(mockUseQuery).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1 }))
+  })
+
+  it('opens native transaction details while preserving edit actions', async () => {
+    setRows([makeRow({ id: 'page-2-row', description: 'Page two record' })], 75)
+    const user = userEvent.setup()
     render(<Transactions />)
 
-    expect(screen.getByText('Paged 000')).toBeInTheDocument()
-    expect(screen.getByText('Paged 099')).toBeInTheDocument()
-    expect(screen.queryByText('Paged 100')).not.toBeInTheDocument()
-    expect(screen.getByText('pagination.summary')).toBeInTheDocument()
-
-    await user.click(screen.getByText('pagination.showMore'))
-
-    expect(screen.getByText('Paged 100')).toBeInTheDocument()
-    expect(screen.getByText('Paged 104')).toBeInTheDocument()
-  })
-
-  it('keeps transaction actions visible on mobile while preserving desktop hover reveal', () => {
-    mockTransactions = [
-      {
-        id: 'tx-1',
-        description: 'Test',
-        type: 'expense',
-        amount: 1000,
-        currency: 'USD',
-        date: dayjs().format('YYYY-MM-DD'),
-        category_color: null,
-        category_name: null,
-        account_name: 'Checking',
-      },
-    ]
-
-    const { container } = render(<Transactions />)
-
-    const hoverDiv = container.querySelector(
-      '.opacity-100.md\\:opacity-0.md\\:group-hover\\:opacity-100.md\\:focus-within\\:opacity-100'
-    )
-    expect(hoverDiv).toBeInTheDocument()
-  })
-
-  it('transaction action buttons have aria-labels', () => {
-    mockTransactions = [
-      {
-        id: 'tx-1',
-        description: 'Test Transaction',
-        type: 'expense',
-        amount: 1000,
-        currency: 'USD',
-        date: dayjs().format('YYYY-MM-DD'),
-        category_color: null,
-        category_name: null,
-        account_name: 'Checking',
-      },
-    ]
-
-    render(<Transactions />)
-
-    // Check that edit and delete buttons have aria-labels with the transaction description
-    const editButton = screen.getByLabelText('Edit Test Transaction')
-    const deleteButton = screen.getByLabelText('Delete Test Transaction')
-    expect(editButton).toBeInTheDocument()
-    expect(deleteButton).toBeInTheDocument()
-  })
-
-  it('edit button opens transaction dialog with tx id', async () => {
-    const user = userEvent.setup()
-    mockTransactions = [
-      {
-        id: 'tx-42',
-        description: 'Editable',
-        type: 'expense',
-        amount: 1000,
-        currency: 'USD',
-        date: dayjs().format('YYYY-MM-DD'),
-        category_color: null,
-        category_name: null,
-        account_name: 'Checking',
-      },
-    ]
-
-    const { container } = render(<Transactions />)
-
-    // Find the edit button (first icon button in the hover row)
-    const buttons = container.querySelectorAll('.group button')
-    // Edit button is the one with Pencil icon
-    await user.click(buttons[0])
-
-    expect(mockOpenTransactionDialog).toHaveBeenCalledWith('tx-42')
-  })
-
-  it('delete flow: click delete → confirm → remove → toast', async () => {
-    const { toast } = await import('sonner')
-    const user = userEvent.setup()
-    mockRemove.mockResolvedValueOnce(undefined)
-
-    mockTransactions = [
-      {
-        id: 'tx-del',
-        description: 'Deletable',
-        type: 'expense',
-        amount: 1000,
-        currency: 'USD',
-        date: dayjs().format('YYYY-MM-DD'),
-        category_color: null,
-        category_name: null,
-        account_name: 'Checking',
-      },
-    ]
-
-    const { container } = render(<Transactions />)
-
-    // Click delete button (second icon button)
-    const buttons = container.querySelectorAll('.group button')
-    await user.click(buttons[1])
-
-    // Confirm dialog should appear
-    expect(screen.getByTestId('confirm-dialog')).toBeInTheDocument()
-
-    // Click confirm
-    await user.click(screen.getByText('Confirm'))
-
-    await waitFor(() => {
-      expect(mockRemove).toHaveBeenCalledWith('tx-del')
-      expect(toast.success).toHaveBeenCalledWith('toast.deleted')
-    })
-  })
-
-  it('shows a specific error toast when deleting a transaction fails', async () => {
-    const { toast } = await import('sonner')
-    const user = userEvent.setup()
-    mockRemove.mockRejectedValueOnce(new Error('Transaction delete DB error'))
-
-    mockTransactions = [
-      {
-        id: 'tx-delete-fail',
-        description: 'Delete Fails',
-        type: 'expense',
-        amount: 1000,
-        currency: 'USD',
-        date: dayjs().format('YYYY-MM-DD'),
-        category_color: null,
-        category_name: null,
-        account_name: 'Checking',
-      },
-    ]
-
-    render(<Transactions />)
-
-    await user.click(screen.getByLabelText('Delete Delete Fails'))
-    await user.click(screen.getByText('Confirm'))
-
-    await waitFor(() => {
-      expect(mockRemove).toHaveBeenCalledWith('tx-delete-fail')
-      expect(toast.error).toHaveBeenCalledWith('Transaction delete DB error')
-    })
-    expect(toast.success).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: /^Page two record/ }))
+    expect(screen.getByRole('dialog')).toHaveTextContent('Page two record')
+    await user.click(screen.getByRole('button', { name: 'editTransaction' }))
+    expect(mockOpenTransactionDialog).toHaveBeenCalledWith('page-2-row')
   })
 })

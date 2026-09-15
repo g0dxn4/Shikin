@@ -75,7 +75,8 @@
       "30-days": "Last 30 days",
       "90-days": "Last 90 days",
       "custom": "Custom range"
-    }
+    },
+    "searchPlaceholder": "Search merchant, category, account, or note"
   },
   "views": {
     "label": "Transaction views",
@@ -99,7 +100,9 @@
     "status": "Status",
     "source": "Source",
     "debit": "Debit",
-    "credit": "Credit"
+    "credit": "Credit",
+    "amount": "Amount",
+    "actions": "Actions"
   },
   "review": {
     "queueLabel": "Review queue",
@@ -141,7 +144,13 @@
   },
   "pagination": {
     "summary": "Showing {{shown}} of {{total}} matching transactions",
-    "showMore": "Show {{count}} more"
+    "showMore": "Show {{count}} more",
+    "label": "Transaction pages",
+    "range": "{{from}}–{{to}} of {{total}} transactions",
+    "previous": "Previous page",
+    "next": "Next page",
+    "page": "Page {{page}}",
+    "rows": "Rows"
   },
   "viewAll": "View All",
   "recentTransactions": "Recent Transactions",
@@ -230,5 +239,33 @@
     "error": "Import failed",
     "partialError": "Imported {{imported}} transactions with {{errorCount}} errors",
     "fileTypes": "Supported: .ofx, .qfx, .qif"
+  },
+  "summary": {
+    "label": "Transaction result summary",
+    "results": "Matching records",
+    "resultsDetail": "Across all result pages",
+    "review": "Needs review",
+    "reviewDetail": "Across current filters",
+    "currencies": "Currencies",
+    "currenciesDetail": "Available in the ledger"
+  },
+  "loadError": {
+    "title": "Couldn’t load transactions"
+  },
+  "dialog": {
+    "addDescription": "Record an income, expense, transfer, or split.",
+    "editDescription": "Loading the current ledger record protects against editing stale data.",
+    "loading": "Loading transaction",
+    "notFound": "Transaction not found",
+    "notFoundDescription": "This record may have been removed or archived.",
+    "loadError": "Couldn’t load this transaction",
+    "retry": "Try again",
+    "discardTitle": "Discard changes?",
+    "discardDescription": "You have unsaved changes. Close this form without saving?",
+    "discard": "Discard"
+  },
+  "detail": {
+    "notes": "Notes",
+    "reference": "Reference"
   }
 }

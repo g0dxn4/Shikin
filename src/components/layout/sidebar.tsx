@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { NavLink, useLocation } from 'react-router'
+import { Link, useLocation } from 'react-router'
 import { ChevronLeft, ChevronRight, Moon, Palette, Sun } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
@@ -57,7 +57,7 @@ export function Sidebar() {
           const Icon = group.icon
           const label = t(group.labelKey, group.fallbackLabel)
           return (
-            <NavLink
+            <Link
               key={group.id}
               to={group.homePath}
               title={sidebarCollapsed ? label : undefined}
@@ -71,7 +71,7 @@ export function Sidebar() {
             >
               <Icon size={17} aria-hidden="true" />
               {!sidebarCollapsed ? <span>{label}</span> : null}
-            </NavLink>
+            </Link>
           )
         })}
       </nav>

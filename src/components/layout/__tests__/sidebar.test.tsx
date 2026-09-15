@@ -29,7 +29,7 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('react-router', () => ({
   useLocation: () => ({ pathname: mockPathname }),
-  NavLink: ({
+  Link: ({
     children,
     to,
     className,

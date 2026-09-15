@@ -145,9 +145,9 @@ export function AccountForm({ account, onSubmit, isLoading, onDirtyChange }: Acc
       </div>
 
       {typeValue === 'credit_card' && (
-        <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
+        <div className="border-border bg-muted/40 rounded-lg border p-4">
           <div className="mb-3">
-            <p className="font-heading text-sm font-semibold">{t('form.creditDetails')}</p>
+            <p className="text-sm font-semibold">{t('form.creditDetails')}</p>
             <p className="text-muted-foreground text-xs">{t('form.creditDetailsDescription')}</p>
           </div>
 

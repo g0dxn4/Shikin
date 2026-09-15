@@ -39,7 +39,8 @@
   },
   "currencyWarning": {
     "title": "Divisas mixtas",
-    "body": "Tu portafolio incluye tenencias en múltiples monedas. Los totales no están convertidos y deben leerse por moneda."
+    "body": "Tu portafolio incluye tenencias en múltiples monedas. Los totales no están convertidos y deben leerse por moneda.",
+    "totalsUnavailable": "Total convertido no disponible"
   },
   "summary": {
     "portfolioValue": "Valor del Portafolio",
@@ -53,7 +54,8 @@
   "chart": {
     "portfolioValue": "Valor del Portafolio",
     "allocation": "Asignación",
-    "noData": "Sin datos de precios aún"
+    "noData": "Sin datos de precios aún",
+    "range": "Rango del historial del portafolio"
   },
   "holdings": {
     "title": "Tenencias",

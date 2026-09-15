@@ -8,6 +8,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react'
+import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import {
   Landmark,
@@ -21,6 +22,7 @@ import {
   Archive,
   Star,
   CreditCard,
+  Receipt,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts'
@@ -30,6 +32,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { ErrorState } from '@/components/ui/error-state'
+import { ProgressBar } from '@/components/ui/progress-bar'
 import {
   Dialog,
   DialogContent,
@@ -47,11 +50,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { MetricItem, MetricStrip, NativePanel, PageToolbar } from '@/components/ui/native-layout'
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
 import { useTransactionStore } from '@/stores/transaction-store'
+import { useCurrencyStore } from '@/stores/currency-store'
 import { getErrorMessage } from '@/lib/errors'
 import { formatMoney, fromCentavos, toCentavos } from '@/lib/money'
+import { CHART_AXIS_COLOR, CHART_TOOLTIP_STYLE } from '@/lib/constants'
+import {
+  buildAccountsLiquidTotals,
+  type ConvertedTotal,
+} from '@/lib/accounts-group-converted-totals'
 import type { Account } from '@/types/database'
 import dayjs from 'dayjs'
 
@@ -60,6 +70,11 @@ const ConfirmDialog = lazy(() =>
     default: m.ConfirmDialog,
   }))
 )
+
+function formatConverted(total: ConvertedTotal): string {
+  if (!total.complete) return '—'
+  return formatMoney(total.amountCentavos, total.preferredCurrency)
+}
 
 export function Accounts() {
   const { t } = useTranslation('accounts')
@@ -77,6 +92,9 @@ export function Accounts() {
     unarchive,
     setPrimary,
   } = useAccountStore()
+  const convertToPreferred = useCurrencyStore((s) => s.convertToPreferred)
+  const getTotalBalanceInPreferred = useCurrencyStore((s) => s.getTotalBalanceInPreferred)
+  const preferredCurrency = useCurrencyStore((s) => s.preferredCurrency)
 
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [archiveId, setArchiveId] = useState<string | null>(null)
@@ -129,21 +147,15 @@ export function Accounts() {
     () => liquidAccounts.filter((account) => account.type !== 'credit_card'),
     [liquidAccounts]
   )
-  const creditAccounts = useMemo(
-    () => liquidAccounts.filter((account) => account.type === 'credit_card'),
-    [liquidAccounts]
-  )
-  const totalBalance = useMemo(
-    () => liquidAccounts.reduce((sum, account) => sum + account.balance, 0),
-    [liquidAccounts]
-  )
-  const depositBalance = useMemo(
-    () => depositAccounts.reduce((sum, account) => sum + account.balance, 0),
-    [depositAccounts]
-  )
-  const creditDebt = useMemo(
-    () => creditAccounts.reduce((sum, account) => sum + Math.max(0, -account.balance), 0),
-    [creditAccounts]
+  const pageTotals = useMemo(
+    () =>
+      buildAccountsLiquidTotals({
+        liquidAccounts,
+        convertToPreferred,
+        getTotalBalanceInPreferred: (accounts) => getTotalBalanceInPreferred(accounts as Account[]),
+        preferredCurrency,
+      }),
+    [liquidAccounts, convertToPreferred, getTotalBalanceInPreferred, preferredCurrency]
   )
   const primaryAccount = useMemo(
     () =>
@@ -163,27 +175,25 @@ export function Accounts() {
     [paymentSourceAccounts, paymentSourceId]
   )
 
-  const accountMix = useMemo(
+  const mixItems = useMemo(
     () => [
-      {
-        label: 'Checking',
-        value: liquidAccounts
-          .filter((account) => account.type === 'checking')
-          .reduce((sum, account) => sum + Math.max(0, account.balance), 0),
-      },
-      {
-        label: 'Savings',
-        value: liquidAccounts
-          .filter((account) => account.type === 'savings')
-          .reduce((sum, account) => sum + Math.max(0, account.balance), 0),
-      },
-      {
-        label: 'Credit cards',
-        value: creditDebt,
-      },
+      { key: 'checking' as const, label: t('mix.checking'), total: pageTotals.mix.checking },
+      { key: 'savings' as const, label: t('mix.savings'), total: pageTotals.mix.savings },
+      { key: 'credit' as const, label: t('mix.credit'), total: pageTotals.mix.credit },
     ],
-    [creditDebt, liquidAccounts]
+    [pageTotals.mix.checking, pageTotals.mix.credit, pageTotals.mix.savings, t]
   )
+  const mixMax =
+    pageTotals.mix.checking.complete &&
+    pageTotals.mix.savings.complete &&
+    pageTotals.mix.credit.complete
+      ? Math.max(
+          1,
+          pageTotals.mix.checking.amountCentavos +
+            pageTotals.mix.savings.amountCentavos +
+            pageTotals.mix.credit.amountCentavos
+        )
+      : null
 
   const handleDelete = async () => {
     if (!deleteId) return
@@ -316,21 +326,15 @@ export function Accounts() {
   const hasInitialLoadError = !!fetchError && accounts.length === 0
 
   return (
-    <div className="animate-fade-in-up page-content">
-      <div className="liquid-card page-header p-5">
-        <div>
-          <p className="text-muted-foreground font-mono text-[10px] tracking-[0.3em] uppercase">
-            {t('subtitle')}
-          </p>
-          <h1 className="font-heading mt-1 text-2xl font-bold tracking-tight md:text-3xl">
-            {t('title')}
-          </h1>
-        </div>
-        <Button onClick={() => openAccountDialog()}>
-          <Plus size={16} />
-          {t('addAccount')}
-        </Button>
-      </div>
+    <div className="page-content">
+      <PageToolbar
+        actions={
+          <Button onClick={() => openAccountDialog()}>
+            <Plus size={16} />
+            {t('addAccount')}
+          </Button>
+        }
+      />
 
       <ErrorBanner
         title="Couldn’t load account data"
@@ -351,169 +355,188 @@ export function Accounts() {
           }}
         />
       ) : accounts.length === 0 && archivedAccounts.length === 0 ? (
-        <div className="liquid-card flex flex-col items-center justify-center py-16 text-center">
-          <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-3xl">
+        <NativePanel className="flex flex-col items-center justify-center px-6 py-16 text-center">
+          <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-xl">
             <Landmark size={28} className="text-primary" />
           </div>
-          <h2 className="font-heading mb-2 text-lg font-semibold">{t('empty.title')}</h2>
+          <h2 className="mb-2 text-lg font-semibold">{t('empty.title')}</h2>
           <p className="text-muted-foreground mb-4 max-w-sm text-sm">{t('empty.description')}</p>
           <Button onClick={() => openAccountDialog()}>
             <Plus size={16} />
             {t('addAccount')}
           </Button>
-        </div>
+        </NativePanel>
       ) : (
         <>
           {accounts.length > 0 ? (
             <>
-              <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.72fr)]">
-                <div className="liquid-hero p-6 sm:p-7">
-                  <div className="flex h-full min-h-64 flex-col justify-between">
-                    <div>
-                      <p className="text-muted-foreground mb-2 font-mono text-[10px] tracking-[0.28em] uppercase">
-                        Primary cash account
-                      </p>
-                      <h2 className="font-heading text-lg font-semibold text-white">
-                        {primaryAccount?.name ?? 'No card or cash account'}
-                      </h2>
-                    </div>
-                    <div>
-                      <p className="font-mono text-4xl font-bold tracking-tight text-white md:text-5xl">
-                        {formatMoney(
-                          primaryAccount?.balance ?? totalBalance,
-                          primaryAccount?.currency
-                        )}
-                      </p>
-                      <p className="text-muted-foreground mt-4 font-mono text-xs tracking-[0.22em] uppercase">
-                        {primaryAccount
-                          ? `${t(`types.${primaryAccount.type}`)} · ${primaryAccount.currency}`
-                          : 'Bank accounts and credit cards'}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="liquid-card p-6 sm:p-7">
-                  <p className="text-muted-foreground mb-2 font-mono text-[10px] tracking-[0.28em] uppercase">
-                    Cards and cash
+              {pageTotals.conversionIssue ? (
+                <div
+                  className="border-warning/30 bg-warning/10 text-warning rounded-lg border px-4 py-3 text-sm"
+                  role="alert"
+                >
+                  <p className="font-semibold">{t('currency.unavailable')}</p>
+                  <p className="text-muted-foreground mt-1">
+                    {pageTotals.conversionIssue.reason === 'invalid_currency_data'
+                      ? t('currency.invalidData')
+                      : t('currency.missingRates', {
+                          currencies: pageTotals.conversionIssue.missingCurrencies.join(', '),
+                        })}
                   </p>
-                  <h2 className="font-heading text-2xl font-bold tracking-tight">Account mix</h2>
-                  <div className="mt-7 space-y-4">
-                    {accountMix.map((item) => (
-                      <div key={item.label}>
+                  {pageTotals.groupedNet.length > 0 && (
+                    <p className="text-muted-foreground mt-2 text-xs">
+                      {t('currency.grouped')}:{' '}
+                      {pageTotals.groupedNet
+                        .map((group) => `${formatMoney(group.amountCentavos, group.currency)}`)
+                        .join(' · ')}
+                    </p>
+                  )}
+                </div>
+              ) : null}
+
+              <MetricStrip>
+                <MetricItem
+                  label={t('metrics.net')}
+                  value={formatConverted(pageTotals.net)}
+                  detail={
+                    pageTotals.net.complete
+                      ? pageTotals.net.preferredCurrency
+                      : t('currency.unavailable')
+                  }
+                />
+                <MetricItem
+                  label={t('metrics.assets')}
+                  value={formatConverted(pageTotals.assets)}
+                  detail={primaryAccount?.name}
+                />
+                <MetricItem
+                  label={t('metrics.liabilities')}
+                  value={formatConverted(pageTotals.liabilities)}
+                  detail={t('mix.credit')}
+                />
+                <MetricItem
+                  label={t('metrics.count')}
+                  value={String(pageTotals.accountCount)}
+                  detail={t('metrics.active', { count: liquidAccounts.length })}
+                />
+              </MetricStrip>
+
+              <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.75fr)]">
+                <NativePanel className="overflow-hidden p-0">
+                  <div className="border-border flex flex-col gap-1 border-b px-5 py-4 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <h2 className="text-base font-semibold">{t('list.title')}</h2>
+                      <p className="text-muted-foreground text-sm">{t('list.subtitle')}</p>
+                    </div>
+                    <p className="text-muted-foreground text-xs tabular-nums">
+                      {t('metrics.active', { count: liquidAccounts.length })}
+                    </p>
+                  </div>
+                  {liquidAccounts.length > 0 ? (
+                    <div className="divide-border divide-y">
+                      {liquidAccounts.map((account) => (
+                        <AccountCard
+                          key={account.id}
+                          account={account}
+                          isExpanded={expandedId === account.id}
+                          onToggleExpand={() => toggleExpand(account.id)}
+                          onEdit={() => openAccountDialog(account.id)}
+                          onSetPrimary={() => handleSetPrimary(account.id)}
+                          isSettingPrimary={settingPrimaryId === account.id}
+                          onPayCreditCard={
+                            account.type === 'credit_card' && account.balance < 0
+                              ? () => openPaymentDialog(account)
+                              : undefined
+                          }
+                          onArchive={() => setArchiveId(account.id)}
+                          onDelete={() => setDeleteId(account.id)}
+                          t={t}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="px-5 py-6">
+                      <h3 className="text-sm font-semibold">{t('list.empty')}</h3>
+                      <p className="text-muted-foreground mt-1 text-sm">
+                        {t('list.emptyDescription')}
+                      </p>
+                    </div>
+                  )}
+                </NativePanel>
+
+                <NativePanel className="p-5">
+                  <h2 className="text-base font-semibold">{t('mix.title')}</h2>
+                  <p className="text-muted-foreground mt-1 text-sm">{t('mix.subtitle')}</p>
+                  <div className="mt-5 space-y-4">
+                    {mixItems.map((item) => (
+                      <div key={item.key}>
                         <div className="mb-2 flex items-center justify-between gap-4">
-                          <span className="text-sm font-semibold text-white">{item.label}</span>
-                          <span className="font-mono text-sm font-semibold text-white">
-                            {formatMoney(item.value)}
+                          <span className="text-sm font-medium">{item.label}</span>
+                          <span className="text-sm font-semibold tabular-nums">
+                            {formatConverted(item.total)}
                           </span>
                         </div>
-                        <div className="h-2 overflow-hidden rounded-full bg-white/[0.06]">
+                        <div className="bg-muted h-2 overflow-hidden rounded-full">
                           <div
-                            className="h-full rounded-full bg-[#7C5CFF]"
+                            className="bg-accent h-full rounded-full"
                             style={{
-                              width: `${Math.max(
-                                item.value > 0 ? 8 : 0,
-                                Math.min(
-                                  100,
-                                  Math.round(
-                                    (item.value / Math.max(1, depositBalance + creditDebt)) * 100
-                                  )
-                                )
-                              )}%`,
+                              width: `${
+                                mixMax && item.total.complete
+                                  ? Math.max(
+                                      item.total.amountCentavos > 0 ? 8 : 0,
+                                      Math.min(
+                                        100,
+                                        Math.round((item.total.amountCentavos / mixMax) * 100)
+                                      )
+                                    )
+                                  : 0
+                              }%`,
                             }}
                           />
                         </div>
                       </div>
                     ))}
                   </div>
-                  <div className="soft-divider mt-7 grid grid-cols-2 gap-3 border-t pt-5">
+                  <div className="border-border mt-6 grid grid-cols-2 gap-3 border-t pt-4">
                     <div>
-                      <p className="text-muted-foreground text-xs">Spendable</p>
-                      <p className="font-mono text-lg font-bold">{formatMoney(depositBalance)}</p>
+                      <p className="text-muted-foreground text-xs">{t('mix.spendable')}</p>
+                      <p className="mt-1 text-lg font-semibold tabular-nums">
+                        {formatConverted(pageTotals.assets)}
+                      </p>
                     </div>
                     <div>
-                      <p className="text-muted-foreground text-xs">Card debt</p>
-                      <p className="text-warning font-mono text-lg font-bold">
-                        {formatMoney(creditDebt)}
+                      <p className="text-muted-foreground text-xs">{t('mix.cardDebt')}</p>
+                      <p className="text-warning mt-1 text-lg font-semibold tabular-nums">
+                        {formatConverted(pageTotals.liabilities)}
                       </p>
                     </div>
                   </div>
-                </div>
-              </div>
-
-              <div className="liquid-card overflow-hidden p-1">
-                <div className="flex flex-col gap-1 px-5 pt-5 pb-4 sm:flex-row sm:items-end sm:justify-between">
-                  <div>
-                    <h2 className="font-heading text-xl font-bold tracking-tight">All accounts</h2>
-                    <p className="text-muted-foreground text-sm">
-                      Bank accounts, debit balances, cash, and credit cards.
-                    </p>
-                  </div>
-                  <p className="font-mono text-xs tracking-[0.22em] text-[#BFA4FF] uppercase">
-                    {liquidAccounts.length} active
-                  </p>
-                </div>
-                {liquidAccounts.length > 0 ? (
-                  <div className="grid grid-cols-1 gap-2 p-2 xl:grid-cols-2">
-                    {liquidAccounts.map((account) => (
-                      <AccountCard
-                        key={account.id}
-                        account={account}
-                        isExpanded={expandedId === account.id}
-                        onToggleExpand={() => toggleExpand(account.id)}
-                        onEdit={() => openAccountDialog(account.id)}
-                        onSetPrimary={() => handleSetPrimary(account.id)}
-                        isSettingPrimary={settingPrimaryId === account.id}
-                        onPayCreditCard={
-                          account.type === 'credit_card' && account.balance < 0
-                            ? () => openPaymentDialog(account)
-                            : undefined
-                        }
-                        onArchive={() => setArchiveId(account.id)}
-                        onDelete={() => setDeleteId(account.id)}
-                        t={t}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="px-5 pb-5">
-                    <div className="rounded-[22px] border border-dashed border-white/[0.12] p-5">
-                      <h3 className="font-heading text-base font-semibold">
-                        No card or cash accounts
-                      </h3>
-                      <p className="text-muted-foreground mt-1 text-sm">
-                        Add a checking, savings, cash, or credit-card account for everyday tracking.
-                      </p>
-                    </div>
-                  </div>
-                )}
+                </NativePanel>
               </div>
 
               {separatedInvestmentAccountCount > 0 && (
-                <div className="liquid-card border-dashed p-5">
-                  <h2 className="font-heading text-base font-semibold">
-                    Investments stay separate
-                  </h2>
+                <NativePanel className="p-5">
+                  <h2 className="text-base font-semibold">{t('list.investmentsSeparate')}</h2>
                   <p className="text-muted-foreground mt-1 text-sm">
-                    {separatedInvestmentAccountCount} investment or crypto account
-                    {separatedInvestmentAccountCount === 1 ? '' : 's'} should be managed from the
-                    Investments area, not mixed with bank and card balances.
+                    {t('list.investmentsSeparateDescription', {
+                      count: separatedInvestmentAccountCount,
+                    })}
                   </p>
-                </div>
+                </NativePanel>
               )}
             </>
           ) : (
-            <div className="liquid-card border-dashed p-5">
-              <h2 className="font-heading text-base font-semibold">{t('noActive.title')}</h2>
+            <NativePanel className="p-5">
+              <h2 className="text-base font-semibold">{t('noActive.title')}</h2>
               <p className="text-muted-foreground mt-1 text-sm">{t('noActive.description')}</p>
-            </div>
+            </NativePanel>
           )}
 
           {archivedLiquidAccounts.length > 0 && (
-            <div className="space-y-4">
+            <NativePanel className="space-y-4 p-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <h2 className="font-heading text-lg font-semibold">{t('archived.title')}</h2>
+                  <h2 className="text-base font-semibold">{t('archived.title')}</h2>
                   <p className="text-muted-foreground text-sm">{t('archived.description')}</p>
                 </div>
                 <Button
@@ -530,7 +553,7 @@ export function Accounts() {
                 </Button>
               </div>
               {showArchived && (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="divide-border border-border divide-y rounded-lg border">
                   {archivedLiquidAccounts.map((account) => (
                     <AccountCard
                       key={account.id}
@@ -550,7 +573,7 @@ export function Accounts() {
                   ))}
                 </div>
               )}
-            </div>
+            </NativePanel>
           )}
         </>
       )}
@@ -660,8 +683,6 @@ export function Accounts() {
   )
 }
 
-// ── Account Card with Balance History ─────────────────────────────────────
-
 function AccountCard({
   account,
   isExpanded,
@@ -697,7 +718,7 @@ function AccountCard({
     isExpanded && !balanceHistory.get(account.id)
   )
 
-  const accentColor = account.color || '#7C5CFF'
+  const accentColor = account.color || 'var(--color-accent)'
   const isCreditCard = account.type === 'credit_card'
   const canSetPrimary =
     !archived && !isCreditCard && account.type !== 'investment' && account.type !== 'crypto'
@@ -727,117 +748,108 @@ function AccountCard({
   }, [history])
 
   return (
-    <div
-      className={`liquid-card group relative overflow-hidden transition-all duration-200 hover:translate-y-[-2px] motion-reduce:transition-none ${archived ? 'border-dashed border-white/[0.08]' : ''}`}
+    <article
+      className={`group relative px-5 py-4 ${archived ? 'bg-muted/30' : ''}`}
       style={{ borderLeft: `3px solid ${accentColor}` }}
     >
-      <div className="p-5">
-        <div className="mb-3 flex items-start justify-between">
-          <div>
-            <h3 className="font-heading text-base font-semibold">{account.name}</h3>
-            <Badge variant="secondary" className="mt-1 text-[10px]">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-base font-semibold">{account.name}</h3>
+            <Badge variant="secondary" className="text-xs">
               {t(`types.${account.type}`)}
             </Badge>
             {isPrimary && (
-              <Badge
-                variant="outline"
-                className="mt-1 ml-1 border-[#BFA4FF]/40 text-[10px] text-[#BFA4FF]"
-              >
+              <Badge variant="outline" className="text-accent border-accent/40 text-xs">
                 Primary
               </Badge>
             )}
             {archived && (
-              <Badge variant="outline" className="mt-1 ml-1 border-white/10 text-[10px]">
+              <Badge variant="outline" className="text-xs">
                 {t('archived.badge')}
               </Badge>
             )}
           </div>
-          <div className="flex gap-1 opacity-100 transition-opacity md:opacity-40 md:group-focus-within:opacity-100 md:group-hover:opacity-100">
-            {canSetPrimary && onSetPrimary && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={onSetPrimary}
-                disabled={isPrimary || isSettingPrimary}
-                aria-label={
-                  isPrimary ? `${account.name} is primary` : `Set ${account.name} as primary`
-                }
-              >
-                <Star size={12} className={isPrimary ? 'fill-[#BFA4FF] text-[#BFA4FF]' : ''} />
-              </Button>
-            )}
+          <p className="mt-2 text-2xl font-semibold tracking-tight tabular-nums">
+            {formatMoney(account.balance, account.currency)}
+          </p>
+          <p className="text-muted-foreground mt-1 text-xs tabular-nums">{account.currency}</p>
+        </div>
+        <div className="flex gap-1 opacity-100 transition-opacity md:opacity-40 md:group-focus-within:opacity-100 md:group-hover:opacity-100">
+          {canSetPrimary && onSetPrimary && (
             <Button
               variant="ghost"
               size="icon"
-              onClick={onArchive}
-              aria-label={`${archiveLabel ?? t('archiveAccount')} ${account.name}`}
+              onClick={onSetPrimary}
+              disabled={isPrimary || isSettingPrimary}
+              aria-label={
+                isPrimary ? `${account.name} is primary` : `Set ${account.name} as primary`
+              }
             >
-              {archiveIcon ?? <Archive size={12} />}
+              <Star size={12} className={isPrimary ? 'fill-accent text-accent' : ''} />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onEdit}
-              aria-label={`Edit ${account.name}`}
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onArchive}
+            aria-label={`${archiveLabel ?? t('archiveAccount')} ${account.name}`}
+          >
+            {archiveIcon ?? <Archive size={12} />}
+          </Button>
+          <Button variant="ghost" size="icon" onClick={onEdit} aria-label={`Edit ${account.name}`}>
+            <Pencil size={12} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-destructive hover:text-destructive"
+            onClick={onDelete}
+            aria-label={`Delete ${account.name}`}
+          >
+            <Trash2 size={12} />
+          </Button>
+        </div>
+      </div>
+
+      {isCreditCard && creditLimit !== null && (
+        <div className="bg-muted/40 border-border mt-4 grid grid-cols-3 gap-2 rounded-lg border p-3">
+          <div>
+            <p className="text-muted-foreground text-xs">{t('credit.limit')}</p>
+            <p className="mt-1 text-xs font-semibold tabular-nums">
+              {formatMoney(creditLimit, account.currency)}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground text-xs">{t('credit.available')}</p>
+            <p
+              className={`mt-1 text-xs font-semibold tabular-nums ${availableCredit !== null && availableCredit < 0 ? 'text-destructive' : 'text-success'}`}
             >
-              <Pencil size={12} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="text-destructive hover:text-destructive"
-              onClick={onDelete}
-              aria-label={`Delete ${account.name}`}
-            >
-              <Trash2 size={12} />
-            </Button>
+              {formatMoney(availableCredit ?? 0, account.currency)}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground text-xs">{t('credit.dates')}</p>
+            <p className="mt-1 text-xs font-semibold tabular-nums">
+              {account.statement_closing_day ? `C ${account.statement_closing_day}` : 'C --'} /{' '}
+              {account.payment_due_day ? `D ${account.payment_due_day}` : 'D --'}
+            </p>
           </div>
         </div>
-        <p className="font-heading text-3xl font-bold tracking-tight">
-          {formatMoney(account.balance, account.currency)}
-        </p>
-        <p className="text-muted-foreground mt-1 font-mono text-[10px] tracking-wider">
-          {account.currency}
-        </p>
+      )}
 
-        {isCreditCard && creditLimit !== null && (
-          <div className="mt-4 grid grid-cols-3 gap-2 rounded-2xl border border-white/[0.05] bg-white/[0.02] p-3">
-            <div>
-              <p className="text-muted-foreground text-[9px] tracking-wider uppercase">
-                {t('credit.limit')}
-              </p>
-              <p className="mt-1 font-mono text-xs font-semibold">
-                {formatMoney(creditLimit, account.currency)}
-              </p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-[9px] tracking-wider uppercase">
-                {t('credit.available')}
-              </p>
-              <p
-                className={`mt-1 font-mono text-xs font-semibold ${availableCredit !== null && availableCredit < 0 ? 'text-destructive' : 'text-success'}`}
-              >
-                {formatMoney(availableCredit ?? 0, account.currency)}
-              </p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-[9px] tracking-wider uppercase">
-                {t('credit.dates')}
-              </p>
-              <p className="mt-1 font-mono text-xs font-semibold">
-                {account.statement_closing_day ? `C ${account.statement_closing_day}` : 'C --'} /{' '}
-                {account.payment_due_day ? `D ${account.payment_due_day}` : 'D --'}
-              </p>
-            </div>
-          </div>
-        )}
-
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" asChild>
+          <Link to={`/transactions?account=${account.id}`}>
+            <Receipt size={14} />
+            {t('viewTransactions')}
+          </Link>
+        </Button>
         {isCreditCard && onPayCreditCard && (
           <Button
             type="button"
             variant="outline"
             size="sm"
-            className="mt-3 w-full justify-center"
             onClick={onPayCreditCard}
             aria-label={`Pay ${account.name}`}
           >
@@ -845,72 +857,61 @@ function AccountCard({
             {t('credit.pay')}
           </Button>
         )}
-
-        {/* Credit card utilization bar */}
-        {utilization !== null && (
-          <div className="mt-3">
-            <div className="mb-1 flex items-center justify-between">
-              <span className="text-muted-foreground text-[10px]">{t('utilization.label')}</span>
-              <span className="flex items-center gap-1.5">
-                <span
-                  className={`font-mono text-[10px] font-medium ${
-                    utilization > 75
-                      ? 'text-destructive'
-                      : utilization > 50
-                        ? 'text-warning'
-                        : 'text-success'
-                  }`}
-                >
-                  {utilization}%
-                </span>
-                <span
-                  className={`rounded-full px-1.5 py-0.5 text-[9px] font-medium tracking-wider uppercase ${
-                    utilization > 75
-                      ? 'bg-destructive/10 text-destructive'
-                      : utilization > 50
-                        ? 'bg-warning/10 text-warning'
-                        : 'bg-success/10 text-success'
-                  }`}
-                >
-                  {utilization > 75
-                    ? t('utilization.high')
-                    : utilization > 50
-                      ? t('utilization.moderate')
-                      : t('utilization.low')}
-                </span>
-              </span>
-            </div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/5">
-              <div
-                className="h-full rounded-full transition-all duration-300"
-                style={{
-                  width: `${utilization}%`,
-                  backgroundColor:
-                    utilization > 75
-                      ? 'var(--color-destructive)'
-                      : utilization > 50
-                        ? 'var(--color-warning)'
-                        : 'var(--color-success)',
-                }}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Expand toggle */}
-        <button
-          onClick={onToggleExpand}
-          className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 mt-3 flex w-full items-center justify-center gap-1 rounded-md py-2 text-[10px] transition-colors focus-visible:ring-2 focus-visible:outline-none"
-        >
-          <TrendingUp size={10} />
-          {isExpanded ? t('history.hide') : t('history.show')}
-          {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-        </button>
       </div>
 
-      {/* Expanded balance history chart */}
+      {utilization !== null && (
+        <div className="mt-3">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-muted-foreground text-xs">{t('utilization.label')}</span>
+            <span className="flex items-center gap-1.5">
+              <span
+                className={`text-xs font-medium tabular-nums ${
+                  utilization > 75
+                    ? 'text-destructive'
+                    : utilization > 50
+                      ? 'text-warning'
+                      : 'text-success'
+                }`}
+              >
+                {utilization}%
+              </span>
+              <span
+                className={`rounded-full px-1.5 py-0.5 text-xs font-medium ${
+                  utilization > 75
+                    ? 'bg-destructive/10 text-destructive'
+                    : utilization > 50
+                      ? 'bg-warning/10 text-warning'
+                      : 'bg-success/10 text-success'
+                }`}
+              >
+                {utilization > 75
+                  ? t('utilization.high')
+                  : utilization > 50
+                    ? t('utilization.moderate')
+                    : t('utilization.low')}
+              </span>
+            </span>
+          </div>
+          <ProgressBar
+            value={utilization}
+            size="sm"
+            color={utilization > 75 ? 'destructive' : utilization > 50 ? 'warning' : 'success'}
+            ariaLabel={t('utilization.label')}
+          />
+        </div>
+      )}
+
+      <button
+        onClick={onToggleExpand}
+        className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 mt-3 flex min-h-11 w-full items-center justify-center gap-1 rounded-md py-2 text-xs transition-colors focus-visible:ring-2 focus-visible:outline-none"
+      >
+        <TrendingUp size={12} />
+        {isExpanded ? t('history.hide') : t('history.show')}
+        {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+      </button>
+
       {isExpanded && (
-        <div className="soft-divider border-t px-5 pt-3 pb-5">
+        <div className="border-border border-t pt-3 pb-1">
           {historyLoading ? (
             <Skeleton className="h-32 w-full" />
           ) : chartData.length > 1 ? (
@@ -928,7 +929,7 @@ function AccountCard({
                 <AreaChart data={chartData}>
                   <defs>
                     <linearGradient id={`grad-${account.id}`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={accentColor} stopOpacity={0.3} />
+                      <stop offset="5%" stopColor={accentColor} stopOpacity={0.28} />
                       <stop offset="95%" stopColor={accentColor} stopOpacity={0} />
                     </linearGradient>
                   </defs>
@@ -936,25 +937,23 @@ function AccountCard({
                     dataKey="date"
                     axisLine={false}
                     tickLine={false}
-                    tick={{ fill: '#A9A9B4', fontSize: 11 }}
+                    tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
                     tickFormatter={(d) => dayjs(d).format('M/D')}
                   />
                   <YAxis
                     axisLine={false}
                     tickLine={false}
-                    tick={{ fill: '#A9A9B4', fontSize: 11 }}
-                    tickFormatter={(v) => (v >= 1000 ? `$${(v / 1000).toFixed(0)}k` : `$${v}`)}
+                    tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
+                    tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`)}
                     width={40}
                   />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#0a0a0a',
-                      border: '1px solid rgba(255,255,255,0.06)',
-                      borderRadius: '8px',
-                      fontSize: '11px',
-                    }}
+                    contentStyle={CHART_TOOLTIP_STYLE}
                     labelFormatter={(d) => dayjs(d).format('MMM D, YYYY')}
-                    formatter={(value) => [`$${Number(value).toLocaleString()}`, 'Balance']}
+                    formatter={(value) => [
+                      formatMoney(toCentavos(Number(value)), account.currency),
+                      t('history.show'),
+                    ]}
                   />
                   <Area
                     type="monotone"
@@ -976,29 +975,34 @@ function AccountCard({
           )}
         </div>
       )}
-    </div>
+    </article>
   )
 }
 
 function AccountsSkeleton() {
   return (
     <>
-      <div className="liquid-card space-y-2 p-6">
-        <Skeleton className="h-3 w-20" />
-        <Skeleton className="h-9 w-40" />
-        <Skeleton className="h-3 w-24" />
-      </div>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="liquid-card space-y-3 p-5">
-            <div className="space-y-1">
-              <Skeleton className="h-4 w-28" />
-              <Skeleton className="h-4 w-16" />
-            </div>
-            <Skeleton className="h-8 w-32" />
-            <Skeleton className="h-3 w-10" />
+      <div className="metric-strip">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="metric-item space-y-2">
+            <Skeleton className="h-3 w-20" />
+            <Skeleton className="h-7 w-28" />
           </div>
         ))}
+      </div>
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.75fr)]">
+        <NativePanel className="space-y-3 p-5">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="space-y-2">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-8 w-32" />
+            </div>
+          ))}
+        </NativePanel>
+        <NativePanel className="space-y-3 p-5">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-24 w-full" />
+        </NativePanel>
       </div>
     </>
   )

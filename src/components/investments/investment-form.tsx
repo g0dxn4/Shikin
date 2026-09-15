@@ -238,7 +238,7 @@ export function InvestmentForm({
         <textarea
           id="notes"
           placeholder={t('form.notesPlaceholder')}
-          className="glass-input text-foreground min-h-[80px] w-full resize-none px-3 py-2 text-sm"
+          className="border-input bg-surface text-foreground placeholder:text-muted-foreground focus-visible:ring-ring min-h-[80px] w-full resize-none rounded-lg border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
           {...register('notes')}
         />
       </div>

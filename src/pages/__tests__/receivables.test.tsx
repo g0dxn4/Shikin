@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Receivables } from '../receivables'
+import { useCurrencyStore } from '@/stores/currency-store'
 
 // ResizeObserver polyfill for jsdom
 globalThis.ResizeObserver = class {
@@ -104,11 +105,13 @@ describe('Receivables', () => {
     mockReceivables = []
     mockFetchError = null
     mockIsLoading = false
+    useCurrencyStore.setState({ preferredCurrency: 'USD', rates: {}, invalidRates: [] })
   })
 
-  it('renders title', () => {
+  it('renders add action without a promotional page title', () => {
     render(<Receivables />)
-    expect(screen.getByText('title')).toBeInTheDocument()
+    expect(screen.getAllByText('addReceivable').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
   })
 
   describe('failure/retry boundary behavior', () => {
@@ -191,6 +194,33 @@ describe('Receivables', () => {
       expect(screen.getByText('summary.outstanding')).toBeInTheDocument()
       expect(screen.getByText('summary.overdue')).toBeInTheDocument()
       expect(screen.getByText('summary.received')).toBeInTheDocument()
+      expect(screen.getByText('$3,000.00')).toBeInTheDocument()
+    })
+
+    it('does not raw-sum mixed-currency outstanding totals when a rate is missing', () => {
+      mockReceivables = [
+        makeReceivable({
+          id: 'recv-usd',
+          payer: 'USD Client',
+          currency: 'USD',
+          remainingAmount: 300000,
+        }),
+        makeReceivable({
+          id: 'recv-eur',
+          payer: 'EUR Client',
+          currency: 'EUR',
+          remainingAmount: 100000,
+          received_amount: 0,
+          amount: 100000,
+        }),
+      ]
+
+      render(<Receivables />)
+
+      expect(screen.getAllByText('currency.unavailable').length).toBeGreaterThan(0)
+      expect(screen.getByText('currency.missingRates')).toBeInTheDocument()
+      expect(screen.queryByText('$4,000.00')).not.toBeInTheDocument()
+      expect(screen.getAllByText('—').length).toBeGreaterThan(0)
     })
   })
 

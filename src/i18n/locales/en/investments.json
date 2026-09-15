@@ -39,7 +39,8 @@
   },
   "currencyWarning": {
     "title": "Mixed currencies",
-    "body": "Your portfolio includes holdings in multiple currencies. Totals below are not converted and should be read per-currency."
+    "body": "Your portfolio includes holdings in multiple currencies. Totals below are not converted and should be read per-currency.",
+    "totalsUnavailable": "Converted total unavailable"
   },
   "summary": {
     "portfolioValue": "Portfolio Value",
@@ -53,7 +54,8 @@
   "chart": {
     "portfolioValue": "Portfolio Value",
     "allocation": "Allocation",
-    "noData": "No price data yet"
+    "noData": "No price data yet",
+    "range": "Portfolio history range"
   },
   "holdings": {
     "title": "Holdings",

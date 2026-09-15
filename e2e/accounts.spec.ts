@@ -26,8 +26,7 @@ test.describe('Accounts', () => {
     await page.goto('/accounts')
     await page.waitForLoadState('networkidle')
 
-    // There should be an add button in the empty state card
-    const emptyStateCard = page.locator('.liquid-card').filter({ hasText: 'No accounts yet' })
+    const emptyStateCard = page.locator('.native-panel').filter({ hasText: 'No accounts yet' })
     await expect(emptyStateCard).toBeVisible()
     await expect(emptyStateCard.getByRole('button', { name: /Add Account/i })).toBeVisible()
   })
@@ -37,6 +36,6 @@ test.describe('Accounts', () => {
     await page.waitForLoadState('networkidle')
 
     await expect(page.locator('.page-content')).toBeVisible()
-    await expect(page.locator('.page-header')).toBeVisible()
+    await expect(page.locator('.page-toolbar')).toBeVisible()
   })
 })

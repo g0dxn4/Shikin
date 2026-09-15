@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useTranslation } from 'react-i18next'
-import { Wallet, Plus, Pencil, Ban, Trash2, AlertCircle, CheckCircle2, Clock } from 'lucide-react'
+import { Wallet, Plus, Pencil, Ban, Trash2, Clock } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { ErrorState } from '@/components/ui/error-state'
 import { FilterPills } from '@/components/ui/filter-pills'
+import { ProgressBar } from '@/components/ui/progress-bar'
 import { ShowMorePagination } from '@/components/shared/show-more-pagination'
 import {
   Dialog,
@@ -28,11 +29,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { MetricItem, MetricStrip, NativePanel, PageToolbar } from '@/components/ui/native-layout'
 import { useReceivableStore, type ReceivableWithDetails } from '@/stores/receivable-store'
 import { useAccountStore } from '@/stores/account-store'
+import { useCurrencyStore } from '@/stores/currency-store'
 import { formatMoney, fromCentavos } from '@/lib/money'
 import { getErrorMessage } from '@/lib/errors'
 import { SUPPORTED_CURRENCIES } from '@/lib/constants'
+import {
+  buildReceivablesStatusTotals,
+  type ConvertedTotal,
+} from '@/lib/accounts-group-converted-totals'
 import dayjs from 'dayjs'
 
 const ConfirmDialog = lazy(() =>
@@ -60,16 +67,21 @@ const receivableSchema = z.object({
 
 type ReceivableFormValues = z.infer<typeof receivableSchema>
 
+function formatConverted(total: ConvertedTotal): string {
+  if (!total.complete) return '—'
+  return formatMoney(total.amountCentavos, total.preferredCurrency)
+}
+
 function statusBadgeClass(status: ReceivableWithDetails['status']): string {
   switch (status) {
     case 'open':
-      return 'border-white/10 bg-white/5 text-white/70'
+      return 'text-muted-foreground'
     case 'partial':
       return 'border-warning/30 bg-warning/10 text-warning'
     case 'received':
       return 'border-success/30 bg-success/10 text-success'
     case 'cancelled':
-      return 'border-white/10 bg-white/[0.02] text-white/30 line-through'
+      return 'text-muted-foreground line-through'
   }
 }
 
@@ -86,59 +98,11 @@ function getDueText(
   return `${t('card.due')} ${receivable.due_date}`
 }
 
-function getProgressColor(percent: number): string {
-  if (percent >= 100) return '#34D399'
-  if (percent >= 50) return '#F59E0B'
-  return '#7C5CFF'
+function getProgressColor(percent: number): 'accent' | 'success' | 'warning' {
+  if (percent >= 100) return 'success'
+  if (percent >= 50) return 'warning'
+  return 'accent'
 }
-
-// ── Summary Metrics ──────────────────────────────────────────────────────────
-
-function SummaryMetrics({
-  outstanding,
-  overdue,
-  received,
-}: {
-  outstanding: number
-  overdue: number
-  received: number
-}) {
-  const { t } = useTranslation('receivables')
-
-  return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-      <div className="liquid-hero p-4">
-        <div className="bg-accent/10 mb-2 flex h-8 w-8 items-center justify-center rounded-lg">
-          <Wallet size={16} className="text-accent" />
-        </div>
-        <p className="text-xs font-medium tracking-wider text-white/40 uppercase">
-          {t('summary.outstanding')}
-        </p>
-        <p className="font-heading mt-1 text-xl font-bold">{formatMoney(outstanding)}</p>
-      </div>
-      <div className="liquid-card p-4">
-        <div className="bg-warning/10 mb-2 flex h-8 w-8 items-center justify-center rounded-lg">
-          <AlertCircle size={16} className="text-warning" />
-        </div>
-        <p className="text-xs font-medium tracking-wider text-white/40 uppercase">
-          {t('summary.overdue')}
-        </p>
-        <p className="font-heading text-warning mt-1 text-xl font-bold">{formatMoney(overdue)}</p>
-      </div>
-      <div className="liquid-card p-4">
-        <div className="bg-success/10 mb-2 flex h-8 w-8 items-center justify-center rounded-lg">
-          <CheckCircle2 size={16} className="text-success" />
-        </div>
-        <p className="text-xs font-medium tracking-wider text-white/40 uppercase">
-          {t('summary.received')}
-        </p>
-        <p className="font-heading text-success mt-1 text-xl font-bold">{formatMoney(received)}</p>
-      </div>
-    </div>
-  )
-}
-
-// ── Receivable Row ───────────────────────────────────────────────────────────
 
 function ReceivableRow({
   receivable,
@@ -155,57 +119,56 @@ function ReceivableRow({
   const { t: tCommon } = useTranslation('common')
 
   const isCancelled = receivable.status === 'cancelled'
+  const isMatched = Boolean(receivable.matched_transaction_id)
   const progress =
     receivable.amount > 0
       ? Math.min(100, Math.round((receivable.received_amount / receivable.amount) * 100))
       : 0
 
   return (
-    <div
-      className={`group rounded-[24px] border border-white/[0.06] bg-white/[0.03] p-4 transition-colors hover:bg-white/[0.05] ${
-        receivable.isOverdue ? 'border-warning/20' : ''
-      } ${isCancelled ? 'opacity-50' : ''}`}
+    <article
+      className={`group border-border rounded-lg border p-4 ${
+        receivable.isOverdue ? 'border-warning/40' : ''
+      } ${isCancelled ? 'opacity-60' : ''}`}
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="bg-accent/10 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl">
-            <Wallet size={18} className="text-accent" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex min-w-0 items-center gap-2">
-              <h3 className="font-heading truncate text-base font-semibold">{receivable.payer}</h3>
-              <Badge
-                variant="secondary"
-                className={`shrink-0 text-[10px] ${statusBadgeClass(receivable.status)}`}
-              >
-                {t(`filters.${receivable.status}`)}
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h3 className="truncate text-base font-semibold">{receivable.payer}</h3>
+            <Badge
+              variant="secondary"
+              className={`shrink-0 text-xs ${statusBadgeClass(receivable.status)}`}
+            >
+              {t(`filters.${receivable.status}`)}
+            </Badge>
+            {isMatched && (
+              <Badge variant="outline" className="text-xs">
+                {t('card.matched')}
               </Badge>
-            </div>
-            <p className="mt-0.5 font-mono text-lg font-bold">
-              {formatMoney(receivable.amount, receivable.currency)}
-            </p>
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/40">
-              <span
-                className={`flex items-center gap-1 ${receivable.isOverdue ? 'text-warning' : ''}`}
-              >
-                <Clock size={11} />
-                {getDueText(receivable, t)}
-              </span>
-              {receivable.accountName && <span className="truncate">{receivable.accountName}</span>}
-              {receivable.invoice_reference && (
-                <span className="font-mono tracking-wider uppercase">
-                  {receivable.invoice_reference}
-                </span>
-              )}
-              {receivable.project_reference && <span>{receivable.project_reference}</span>}
-            </div>
+            )}
+          </div>
+          <p className="mt-1 text-lg font-semibold tabular-nums">
+            {formatMoney(receivable.amount, receivable.currency)}
+          </p>
+          <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            <span
+              className={`flex items-center gap-1 ${receivable.isOverdue ? 'text-warning' : ''}`}
+            >
+              <Clock size={11} />
+              {getDueText(receivable, t)}
+            </span>
+            {receivable.accountName && <span className="truncate">{receivable.accountName}</span>}
+            {receivable.invoice_reference && (
+              <span className="uppercase tabular-nums">{receivable.invoice_reference}</span>
+            )}
+            {receivable.project_reference && <span>{receivable.project_reference}</span>}
           </div>
         </div>
         <div className="flex shrink-0 gap-1 opacity-100 transition-opacity motion-reduce:transition-none md:opacity-50 md:group-focus-within:opacity-100 md:group-hover:opacity-100">
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8"
+            className="h-11 w-11 md:h-8 md:w-8"
             onClick={onEdit}
             aria-label={`${tCommon('actions.edit')} ${receivable.payer}`}
           >
@@ -215,7 +178,7 @@ function ReceivableRow({
             <Button
               variant="ghost"
               size="icon"
-              className="text-warning hover:text-warning h-8 w-8"
+              className="text-warning hover:text-warning h-11 w-11 md:h-8 md:w-8"
               onClick={onCancel}
               aria-label={`${t('cancelReceivable')} ${receivable.payer}`}
             >
@@ -225,7 +188,7 @@ function ReceivableRow({
           <Button
             variant="ghost"
             size="icon"
-            className="text-destructive hover:text-destructive h-8 w-8"
+            className="text-destructive hover:text-destructive h-11 w-11 md:h-8 md:w-8"
             onClick={onDelete}
             aria-label={`${tCommon('actions.delete')} ${receivable.payer}`}
           >
@@ -236,39 +199,31 @@ function ReceivableRow({
 
       {!isCancelled && (
         <>
-          <div
-            className="mt-4 h-2 w-full overflow-hidden rounded-full bg-white/5"
-            role="progressbar"
-            aria-valuenow={progress}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-label={`${t('card.progressLabel')}: ${progress}%`}
-          >
-            <div
-              className="h-full rounded-full transition-all duration-500 motion-reduce:transition-none"
-              style={{ width: `${progress}%`, backgroundColor: getProgressColor(progress) }}
+          <div className="mt-4">
+            <ProgressBar
+              value={progress}
+              color={getProgressColor(progress)}
+              ariaLabel={`${t('card.progressLabel')}: ${progress}%`}
             />
           </div>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <p className="text-white/40">
-              <span className="text-foreground font-medium">
+            <p className="text-muted-foreground">
+              <span className="text-foreground font-medium tabular-nums">
                 {formatMoney(receivable.received_amount, receivable.currency)}
               </span>{' '}
               {t('card.of')} {formatMoney(receivable.amount, receivable.currency)}
             </p>
             {receivable.remainingAmount > 0 && (
-              <p className="font-mono text-[10px] tracking-wider text-white/40 uppercase">
+              <p className="text-muted-foreground text-xs tabular-nums">
                 {formatMoney(receivable.remainingAmount, receivable.currency)} {t('card.remaining')}
               </p>
             )}
           </div>
         </>
       )}
-    </div>
+    </article>
   )
 }
-
-// ── Receivable Form ──────────────────────────────────────────────────────────
 
 interface ReceivableFormProps {
   receivable?: ReceivableWithDetails
@@ -315,6 +270,7 @@ function ReceivableForm({ receivable, onSubmit, isLoading, onDirtyChange }: Rece
   const accountValue = watch('accountId')
   const currencyValue = watch('currency')
   const isAccountSelectDisabled = accountsLoading || !!accountsFetchError
+  const isMatched = Boolean(receivable?.matched_transaction_id)
 
   useEffect(() => {
     onDirtyChange?.(isDirty)
@@ -325,6 +281,11 @@ function ReceivableForm({ receivable, onSubmit, isLoading, onDirtyChange }: Rece
   return (
     <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-5">
       <ErrorBanner title={t('form.accountsError')} message={accountsFetchError} />
+      {isMatched && (
+        <p className="text-muted-foreground border-border bg-muted/40 rounded-lg border px-3 py-2 text-xs">
+          {t('form.matchedNote')}
+        </p>
+      )}
 
       <div className="space-y-1.5">
         <Label htmlFor="receivable-payer">{t('form.payer')}</Label>
@@ -466,13 +427,13 @@ function ReceivableForm({ receivable, onSubmit, isLoading, onDirtyChange }: Rece
   )
 }
 
-// ── Main Page ────────────────────────────────────────────────────────────────
-
 export function Receivables() {
   const { t } = useTranslation('receivables')
   const { t: tCommon } = useTranslation('common')
   const { receivables, isLoading, fetchError, fetch, create, update, cancel, remove, getById } =
     useReceivableStore()
+  const convertToPreferred = useCurrencyStore((s) => s.convertToPreferred)
+  const preferredCurrency = useCurrencyStore((s) => s.preferredCurrency)
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -489,13 +450,15 @@ export function Receivables() {
 
   const hasInitialLoadError = !!fetchError && receivables.length === 0
 
-  const summary = useMemo(() => {
-    const active = receivables.filter((r) => r.status !== 'cancelled')
-    const outstanding = active.reduce((sum, r) => sum + r.remainingAmount, 0)
-    const overdue = active.filter((r) => r.isOverdue).reduce((sum, r) => sum + r.remainingAmount, 0)
-    const received = active.reduce((sum, r) => sum + r.received_amount, 0)
-    return { outstanding, overdue, received }
-  }, [receivables])
+  const summary = useMemo(
+    () =>
+      buildReceivablesStatusTotals({
+        receivables,
+        convertToPreferred,
+        preferredCurrency,
+      }),
+    [receivables, convertToPreferred, preferredCurrency]
+  )
 
   const filterCounts = useMemo(() => {
     return {
@@ -618,19 +581,29 @@ export function Receivables() {
   const editingReceivable = editingId ? getById(editingId) : undefined
 
   return (
-    <div className="animate-fade-in-up page-content">
-      <div className="liquid-card page-header min-h-[72px] p-3 sm:p-4">
-        <div>
-          <h1 className="font-heading text-2xl font-bold tracking-tight md:text-[28px]">
-            {t('title')}
-          </h1>
-          <p className="text-muted-foreground mt-1 text-sm font-medium">{t('subtitle')}</p>
-        </div>
-        <Button onClick={openCreateDialog}>
-          <Plus size={16} />
-          {t('addReceivable')}
-        </Button>
-      </div>
+    <div className="page-content">
+      <PageToolbar
+        leading={
+          receivables.length > 0 ? (
+            <FilterPills
+              options={filterOptions}
+              selected={statusFilter}
+              onChange={(val) => {
+                setStatusFilter(val as StatusFilter)
+                setVisibleCount(RECEIVABLES_PAGE_SIZE)
+              }}
+              ariaLabel={t('filters.label')}
+              className="flex-wrap"
+            />
+          ) : null
+        }
+        actions={
+          <Button onClick={openCreateDialog}>
+            <Plus size={16} />
+            {t('addReceivable')}
+          </Button>
+        }
+      />
 
       <ErrorBanner
         title={t('error.load')}
@@ -643,22 +616,21 @@ export function Receivables() {
       {isLoading ? (
         <div role="status" aria-busy="true">
           <span className="sr-only">{tCommon('status.loading')}</span>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="metric-strip">
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="liquid-card space-y-3 p-4">
-                <Skeleton className="h-8 w-8" />
+              <div key={i} className="metric-item space-y-2">
                 <Skeleton className="h-3 w-20" />
                 <Skeleton className="h-6 w-24" />
               </div>
             ))}
           </div>
-          <div className="mt-4 space-y-3">
+          <div className="mt-3 space-y-3">
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="liquid-card space-y-4 p-4">
+              <NativePanel key={i} className="space-y-4 p-4">
                 <Skeleton className="h-6 w-48" />
                 <Skeleton className="h-4 w-32" />
                 <Skeleton className="h-2 w-full" />
-              </div>
+              </NativePanel>
             ))}
           </div>
         </div>
@@ -671,40 +643,68 @@ export function Receivables() {
           }}
         />
       ) : receivables.length === 0 ? (
-        <div className="liquid-card flex flex-col items-center justify-center py-16 text-center">
-          <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
+        <NativePanel className="flex flex-col items-center justify-center px-6 py-16 text-center">
+          <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-xl">
             <Wallet size={28} className="text-primary" />
           </div>
-          <h2 className="font-heading mb-2 text-lg font-semibold">{t('empty.title')}</h2>
+          <h2 className="mb-2 text-lg font-semibold">{t('empty.title')}</h2>
           <p className="text-muted-foreground mb-4 text-sm">{t('empty.description')}</p>
           <Button onClick={openCreateDialog}>
             <Plus size={16} />
             {t('addReceivable')}
           </Button>
-        </div>
+        </NativePanel>
       ) : (
-        <div className="space-y-6">
-          <SummaryMetrics
-            outstanding={summary.outstanding}
-            overdue={summary.overdue}
-            received={summary.received}
-          />
+        <div className="space-y-4">
+          {summary.conversionIssue ? (
+            <div
+              className="border-warning/30 bg-warning/10 text-warning rounded-lg border px-4 py-3 text-sm"
+              role="alert"
+            >
+              <p className="font-semibold">{t('currency.unavailable')}</p>
+              <p className="text-muted-foreground mt-1">
+                {summary.conversionIssue.reason === 'invalid_currency_data'
+                  ? t('currency.invalidData')
+                  : t('currency.missingRates', {
+                      currencies: summary.conversionIssue.missingCurrencies.join(', '),
+                    })}
+              </p>
+              {summary.groupedOutstanding.length > 0 && (
+                <p className="text-muted-foreground mt-2 text-xs">
+                  {t('currency.grouped')}:{' '}
+                  {summary.groupedOutstanding
+                    .map((group) => formatMoney(group.amountCentavos, group.currency))
+                    .join(' · ')}
+                </p>
+              )}
+            </div>
+          ) : null}
 
-          <FilterPills
-            options={filterOptions}
-            selected={statusFilter}
-            onChange={(val) => {
-              setStatusFilter(val as StatusFilter)
-              setVisibleCount(RECEIVABLES_PAGE_SIZE)
-            }}
-            ariaLabel={t('filters.label')}
-          />
+          <MetricStrip>
+            <MetricItem
+              label={t('summary.outstanding')}
+              value={formatConverted(summary.outstanding)}
+              detail={
+                summary.outstanding.complete
+                  ? summary.outstanding.preferredCurrency
+                  : t('currency.unavailable')
+              }
+            />
+            <MetricItem
+              label={t('summary.overdue')}
+              value={<span className="text-warning">{formatConverted(summary.overdue)}</span>}
+            />
+            <MetricItem
+              label={t('summary.received')}
+              value={<span className="text-success">{formatConverted(summary.received)}</span>}
+            />
+          </MetricStrip>
 
           <div className="space-y-3">
             {visibleReceivables.length === 0 ? (
-              <div className="liquid-card flex items-center justify-center py-12 text-center">
+              <NativePanel className="flex items-center justify-center py-12 text-center">
                 <p className="text-muted-foreground text-sm">{tCommon('status.empty')}</p>
-              </div>
+              </NativePanel>
             ) : (
               visibleReceivables.map((receivable) => (
                 <ReceivableRow
@@ -736,7 +736,6 @@ export function Receivables() {
         </div>
       )}
 
-      {/* Create / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={(open) => !open && handleDialogClose()}>
         <DialogContent className="max-h-[90vh] max-w-md overflow-y-auto">
           <DialogHeader>
@@ -755,7 +754,6 @@ export function Receivables() {
         </DialogContent>
       </Dialog>
 
-      {/* Discard confirmation */}
       <Suspense fallback={null}>
         <ConfirmDialog
           open={confirmDiscardOpen}
@@ -773,7 +771,6 @@ export function Receivables() {
         />
       </Suspense>
 
-      {/* Cancel confirmation */}
       <Suspense fallback={null}>
         <ConfirmDialog
           open={!!cancelId}
@@ -788,7 +785,6 @@ export function Receivables() {
         />
       </Suspense>
 
-      {/* Delete confirmation */}
       <Suspense fallback={null}>
         <ConfirmDialog
           open={!!deleteId}

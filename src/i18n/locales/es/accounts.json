@@ -73,6 +73,37 @@
     "paymentCurrencyMismatch": "Los pagos de tarjeta deben usar cuentas en la misma moneda.",
     "noSource": "No hay cuenta de efectivo en la misma moneda con fondos disponibles."
   },
+  "viewTransactions": "Ver transacciones",
+  "metrics": {
+    "net": "Todas las cuentas",
+    "assets": "Activos",
+    "liabilities": "Pasivos",
+    "count": "Cuentas",
+    "active": "{{count}} activas"
+  },
+  "mix": {
+    "title": "Mezcla de activos y pasivos",
+    "subtitle": "Composición en tu moneda preferida",
+    "checking": "Corriente",
+    "savings": "Ahorros",
+    "credit": "Tarjetas de crédito",
+    "spendable": "Disponible",
+    "cardDebt": "Deuda de tarjetas"
+  },
+  "list": {
+    "title": "Cuentas",
+    "subtitle": "Cuentas bancarias, efectivo y tarjetas de crédito.",
+    "empty": "Sin cuentas de efectivo o tarjetas",
+    "emptyDescription": "Agrega una cuenta corriente, de ahorros, efectivo o tarjeta para el seguimiento diario.",
+    "investmentsSeparate": "Las inversiones se mantienen aparte",
+    "investmentsSeparateDescription": "{{count}} cuenta(s) de inversión o cripto deben gestionarse en Inversiones, no mezclarse con saldos bancarios y de tarjetas."
+  },
+  "currency": {
+    "unavailable": "Total no disponible",
+    "missingRates": "Faltan tipos de cambio para {{currencies}}",
+    "invalidData": "Algunas cuentas tienen datos de moneda inválidos",
+    "grouped": "Se muestra por moneda porque el total convertido no está disponible"
+  },
   "empty": {
     "title": "Sin cuentas aún",
     "description": "Agrega tu primera cuenta para comenzar a rastrear tus finanzas."

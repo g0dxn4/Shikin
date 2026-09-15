@@ -32,7 +32,8 @@
     "notes": "Notes",
     "notesPlaceholder": "Any additional notes...",
     "accountsError": "Accounts couldn't be loaded",
-    "receivedExceedsAmount": "Received amount cannot exceed the total amount"
+    "receivedExceedsAmount": "Received amount cannot exceed the total amount",
+    "matchedNote": "This receivable is matched to a transaction. Store provenance protections still apply to received amounts and the linked transaction."
   },
   "summary": {
     "outstanding": "Outstanding",
@@ -56,7 +57,14 @@
     "of": "of",
     "noAccount": "No account linked",
     "cancelled": "Cancelled",
-    "progressLabel": "Received progress"
+    "progressLabel": "Received progress",
+    "matched": "Matched"
+  },
+  "currency": {
+    "unavailable": "Total unavailable",
+    "missingRates": "Missing exchange rates for {{currencies}}",
+    "invalidData": "Some receivables have invalid currency data",
+    "grouped": "Shown by currency because a converted total is unavailable"
   },
   "error": {
     "load": "Couldn't load receivables",

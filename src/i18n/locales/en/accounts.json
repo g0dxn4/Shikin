@@ -73,6 +73,37 @@
     "paymentCurrencyMismatch": "Credit card payments must use accounts in the same currency.",
     "noSource": "No same-currency cash account with available funds."
   },
+  "viewTransactions": "View transactions",
+  "metrics": {
+    "net": "All accounts",
+    "assets": "Assets",
+    "liabilities": "Liabilities",
+    "count": "Accounts",
+    "active": "{{count}} active"
+  },
+  "mix": {
+    "title": "Asset and liability mix",
+    "subtitle": "Composition in your preferred currency",
+    "checking": "Checking",
+    "savings": "Savings",
+    "credit": "Credit cards",
+    "spendable": "Spendable",
+    "cardDebt": "Card debt"
+  },
+  "list": {
+    "title": "Accounts",
+    "subtitle": "Bank accounts, cash, and credit cards.",
+    "empty": "No card or cash accounts",
+    "emptyDescription": "Add a checking, savings, cash, or credit-card account for everyday tracking.",
+    "investmentsSeparate": "Investments stay separate",
+    "investmentsSeparateDescription": "{{count}} investment or crypto account(s) should be managed from Investments, not mixed with bank and card balances."
+  },
+  "currency": {
+    "unavailable": "Total unavailable",
+    "missingRates": "Missing exchange rates for {{currencies}}",
+    "invalidData": "Some accounts have invalid currency data",
+    "grouped": "Shown by currency because a converted total is unavailable"
+  },
   "empty": {
     "title": "No accounts yet",
     "description": "Add your first account to start tracking your finances."

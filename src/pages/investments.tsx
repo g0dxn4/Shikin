@@ -8,7 +8,6 @@ import {
   Trash2,
   RefreshCw,
   AlertTriangle,
-  Wallet,
   Search,
   Info,
   X,
@@ -21,7 +20,9 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { ErrorState } from '@/components/ui/error-state'
+import { Input } from '@/components/ui/input'
 import { ShowMorePagination } from '@/components/shared/show-more-pagination'
+import { MetricItem, MetricStrip, NativePanel, PageToolbar } from '@/components/ui/native-layout'
 import { useUIStore } from '@/stores/ui-store'
 import { useInvestmentStore, type InvestmentWithPrice } from '@/stores/investment-store'
 import { useAccountStore } from '@/stores/account-store'
@@ -29,6 +30,7 @@ import { formatMoney, fromCentavos } from '@/lib/money'
 import { getErrorMessage } from '@/lib/errors'
 import { fetchAllCurrentPrices, savePricesToDB } from '@/lib/price-service'
 import { isInvestmentPriceStale } from '@/lib/price-scheduler'
+import { CHART_AXIS_COLOR, CHART_TOOLTIP_STYLE } from '@/lib/constants'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -64,13 +66,13 @@ const ASSET_TYPES: { key: string; labelKey: string }[] = [
 type AssetFilter = (typeof ASSET_TYPES)[number]['key']
 
 const TYPE_COLORS: Record<string, string> = {
-  stock: '#7C5CFF',
-  etf: '#5ac8fa',
-  crypto: '#ffd60a',
-  bond: '#30d158',
-  mutual_fund: '#ff9f0a',
-  cetes: '#00c7be',
-  other: '#71717a',
+  stock: '#276fd6',
+  etf: '#4b8e63',
+  crypto: '#b57542',
+  bond: '#8265a8',
+  mutual_fund: '#c06565',
+  cetes: '#6695a9',
+  other: '#73777e',
 }
 
 type SortField = 'value' | 'gainLoss' | 'name' | 'type'
@@ -106,7 +108,6 @@ export function Investments() {
     void fetchAccounts().catch(() => {})
   }, [fetchInvestments, fetchAccounts])
 
-  // Fetch price history for chart when investments load
   useEffect(() => {
     if (investments.length > 0) {
       const symbols = [...new Set(investments.map((i) => i.symbol))]
@@ -149,7 +150,6 @@ export function Investments() {
     }
   }
 
-  // Portfolio value chart data
   const chartData = useMemo(() => {
     if (!portfolioSummary.totalsComplete || priceHistory.size === 0 || investments.length === 0)
       return []
@@ -165,7 +165,6 @@ export function Investments() {
     const maxDays = daysMap[timeRange]
     const cutoff = dayjs().subtract(maxDays, 'day').format('YYYY-MM-DD')
 
-    // Collect all dates across all symbols
     const dateSet = new Set<string>()
     priceHistory.forEach((points) => {
       points.forEach((p) => {
@@ -222,7 +221,6 @@ export function Investments() {
     })
   }, [priceHistory, investments, timeRange, portfolioSummary.totalsComplete])
 
-  // Allocation chart data
   const allocationData = useMemo(() => {
     if (!portfolioSummary.totalsComplete) return []
     const { byType } = portfolioSummary
@@ -233,7 +231,6 @@ export function Investments() {
     }))
   }, [portfolioSummary])
 
-  // Filtered and sorted holdings
   const filteredInvestments = useMemo(() => {
     let result = [...investments]
     if (assetFilter !== 'all') {
@@ -267,44 +264,61 @@ export function Investments() {
 
   const visibleInvestments = sortedInvestments.slice(0, visibleInvestmentCount)
 
-  // Reset pagination when filters or search change
   useEffect(() => {
     setVisibleInvestmentCount(INVESTMENTS_PAGE_SIZE)
   }, [assetFilter, searchQuery, sortField])
 
   const hasInitialLoadError = !!fetchError && investments.length === 0
+  const gainLoss = portfolioSummary.totalGainLoss ?? 0
+
+  const toolbar = (
+    <PageToolbar
+      actions={
+        <>
+          <Button variant="secondary" onClick={handleRefresh} disabled={isRefreshing}>
+            <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
+            {t('summary.refresh')}
+          </Button>
+          <Button onClick={() => openInvestmentDialog()}>
+            <Plus size={16} />
+            {t('addInvestment')}
+          </Button>
+        </>
+      }
+    />
+  )
 
   if (isLoading) {
     return (
-      <div className="animate-fade-in-up page-content">
-        <div className="liquid-card p-5">
-          <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
-        </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="page-content">
+        {toolbar}
+        <div className="metric-strip">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="liquid-card space-y-3 p-5">
+            <div key={i} className="metric-item space-y-2">
               <Skeleton className="h-3 w-24" />
-              <Skeleton className="h-8 w-32" />
+              <Skeleton className="h-7 w-32" />
             </div>
           ))}
         </div>
-        <div className="liquid-card space-y-3 p-6">
+        <NativePanel className="space-y-3 p-5">
           <Skeleton className="h-4 w-32" />
           <Skeleton className="h-60 w-full" />
-        </div>
+        </NativePanel>
       </div>
     )
   }
 
   if (investments.length === 0) {
     return (
-      <div className="animate-fade-in-up page-content">
-        <div className="liquid-card page-header p-5">
-          <div>
-            <h1 className="font-heading text-2xl font-bold">{t('title')}</h1>
-            <p className="text-muted-foreground mt-1 text-sm font-medium">{t('subtitle')}</p>
-          </div>
-        </div>
+      <div className="page-content">
+        <PageToolbar
+          actions={
+            <Button onClick={() => openInvestmentDialog()}>
+              <Plus size={16} />
+              {t('addInvestment')}
+            </Button>
+          }
+        />
         {hasInitialLoadError ? (
           <ErrorState
             title="Couldn’t load your investments"
@@ -314,17 +328,17 @@ export function Investments() {
             }}
           />
         ) : (
-          <div className="liquid-card flex flex-col items-center justify-center py-16 text-center">
-            <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-3xl">
+          <NativePanel className="flex flex-col items-center justify-center px-6 py-16 text-center">
+            <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-xl">
               <TrendingUp size={28} className="text-primary" />
             </div>
-            <h2 className="font-heading mb-2 text-lg font-semibold">{t('empty.title')}</h2>
+            <h2 className="mb-2 text-lg font-semibold">{t('empty.title')}</h2>
             <p className="text-muted-foreground mb-4 text-sm">{t('empty.description')}</p>
             <Button onClick={() => openInvestmentDialog()}>
               <Plus size={16} />
               {t('addInvestment')}
             </Button>
-          </div>
+          </NativePanel>
         )}
         <Suspense>
           <InvestmentDialog />
@@ -334,24 +348,8 @@ export function Investments() {
   }
 
   return (
-    <div className="animate-fade-in-up page-content">
-      {/* Header */}
-      <div className="liquid-card page-header p-5">
-        <div>
-          <h1 className="font-heading text-2xl font-bold tracking-tight">{t('title')}</h1>
-          <p className="text-muted-foreground mt-1 text-sm font-medium">{t('subtitle')}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={handleRefresh} disabled={isRefreshing}>
-            <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
-            {t('summary.refresh')}
-          </Button>
-          <Button onClick={() => openInvestmentDialog()}>
-            <Plus size={16} />
-            {t('addInvestment')}
-          </Button>
-        </div>
-      </div>
+    <div className="page-content">
+      {toolbar}
 
       <ErrorBanner
         title="Couldn’t load investments"
@@ -361,111 +359,89 @@ export function Investments() {
         }}
       />
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="liquid-hero p-5">
-          <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <span className="text-accent-hover">
-              <TrendingUp size={16} />
-            </span>
-            <span className="font-mono text-[10px] tracking-wider uppercase">
-              {t('summary.portfolioValue')}
-            </span>
+      {portfolioSummary.isMixedCurrency && (
+        <div className="border-warning/30 bg-warning/10 rounded-lg border px-4 py-3" role="status">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={16} className="text-warning mt-0.5" />
+            <div>
+              <p className="text-warning text-sm font-semibold">{t('currencyWarning.title')}</p>
+              <p className="text-muted-foreground mt-1 text-sm">{t('currencyWarning.body')}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {portfolioSummary.currencies.map((currency) => {
+                  const data = portfolioSummary.byCurrency[currency]
+                  if (!data) return null
+                  return (
+                    <span
+                      key={currency}
+                      className="border-border bg-muted inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs tabular-nums"
+                    >
+                      <span className="text-muted-foreground">{currency}</span>
+                      <span>{formatMoney(data.marketValue, currency)}</span>
+                    </span>
+                  )
+                })}
+              </div>
+            </div>
           </div>
-          <p className="font-mono text-2xl font-bold tracking-tight text-white">
-            {portfolioSummary.totalsComplete
-              ? formatMoney(portfolioSummary.totalMarketValue ?? 0)
-              : '—'}
-          </p>
         </div>
+      )}
 
-        <div className="liquid-card p-5">
-          <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <span
-              className={
-                (portfolioSummary.totalGainLoss ?? 0) >= 0 ? 'text-success' : 'text-destructive'
-              }
-            >
-              {(portfolioSummary.totalGainLoss ?? 0) >= 0 ? (
-                <TrendingUp size={16} />
-              ) : (
-                <TrendingDown size={16} />
-              )}
-            </span>
-            <span className="font-mono text-[10px] tracking-wider uppercase">
-              {t('summary.totalGainLoss')}
-            </span>
-          </div>
-          <p
-            className={`font-mono text-2xl font-bold tracking-tight ${
-              (portfolioSummary.totalGainLoss ?? 0) >= 0 ? 'text-success' : 'text-destructive'
-            }`}
-          >
-            {portfolioSummary.totalsComplete ? (
-              <>
-                {(portfolioSummary.totalGainLoss ?? 0) >= 0 ? '+' : ''}
-                {formatMoney(portfolioSummary.totalGainLoss ?? 0)}
-                <span className="ml-2 text-base">
+      <MetricStrip>
+        <MetricItem
+          label={t('summary.portfolioValue')}
+          value={
+            portfolioSummary.totalsComplete
+              ? formatMoney(portfolioSummary.totalMarketValue ?? 0)
+              : '—'
+          }
+          detail={
+            portfolioSummary.totalsComplete ? undefined : t('currencyWarning.totalsUnavailable')
+          }
+        />
+        <MetricItem
+          label={t('summary.totalGainLoss')}
+          value={
+            portfolioSummary.totalsComplete ? (
+              <span className={gainLoss >= 0 ? 'text-success' : 'text-destructive'}>
+                {gainLoss >= 0 ? '+' : ''}
+                {formatMoney(gainLoss)}
+                <span className="ml-2 text-sm font-medium">
                   ({(portfolioSummary.totalGainLossPercent ?? 0) >= 0 ? '+' : ''}
                   {(portfolioSummary.totalGainLossPercent ?? 0).toFixed(2)}%)
                 </span>
-              </>
+              </span>
             ) : (
               '—'
-            )}
-          </p>
-        </div>
-
-        <div className="liquid-card p-5">
-          <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <span className="text-primary">
-              <Wallet size={16} />
-            </span>
-            <span className="font-mono text-[10px] tracking-wider uppercase">
-              {t('summary.costBasis')}
-            </span>
-          </div>
-          <p className="font-mono text-2xl font-bold tracking-tight">
-            {portfolioSummary.totalsComplete
+            )
+          }
+        />
+        <MetricItem
+          label={t('summary.costBasis')}
+          value={
+            portfolioSummary.totalsComplete
               ? formatMoney(portfolioSummary.totalCostBasis ?? 0)
-              : '—'}
-          </p>
-        </div>
+              : '—'
+          }
+        />
+        <MetricItem
+          label={t('summary.lastUpdated')}
+          value={lastPriceFetch ? dayjs(lastPriceFetch).fromNow() : t('summary.never')}
+          detail={t('summary.pricesSynced')}
+        />
+      </MetricStrip>
 
-        <div className="liquid-card p-5">
-          <div className="text-muted-foreground mb-2 flex items-center gap-2">
-            <span className="text-primary">
-              <RefreshCw size={16} />
-            </span>
-            <span className="font-mono text-[10px] tracking-wider uppercase">
-              {t('summary.lastUpdated')}
-            </span>
-          </div>
-          <p className="font-heading mt-1 text-2xl font-bold">
-            {lastPriceFetch ? dayjs(lastPriceFetch).fromNow() : t('summary.never')}
-          </p>
-          <p className="text-accent-hover mt-2 text-sm font-semibold">
-            {t('summary.pricesSynced')}
-          </p>
-        </div>
-      </div>
-
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {/* Portfolio Value Chart */}
-        <div className="liquid-card col-span-1 p-6 lg:col-span-2">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="font-heading text-xl font-bold">{t('chart.portfolioValue')}</h2>
-            <div className="flex gap-1">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <NativePanel className="p-5 lg:col-span-2">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-base font-semibold">{t('chart.portfolioValue')}</h2>
+            <div className="flex flex-wrap gap-1" role="group" aria-label={t('chart.range')}>
               {TIME_RANGES.map((range) => (
                 <button
                   key={range}
+                  type="button"
                   onClick={() => setTimeRange(range)}
-                  className={`rounded-full px-2.5 py-1 font-mono text-[10px] font-bold transition-colors ${
-                    timeRange === range
-                      ? 'text-accent-hover bg-white/[0.1]'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
+                  aria-pressed={timeRange === range}
+                  className={`filter-pill ${timeRange === range ? 'filter-pill-active' : ''}`}
                 >
                   {range}
                 </button>
@@ -477,30 +453,25 @@ export function Investments() {
               <AreaChart data={chartData}>
                 <defs>
                   <linearGradient id="valueGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#7C5CFF" stopOpacity={0.3} />
-                    <stop offset="100%" stopColor="#7C5CFF" stopOpacity={0} />
+                    <stop offset="0%" stopColor="var(--color-accent)" stopOpacity={0.28} />
+                    <stop offset="100%" stopColor="var(--color-accent)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <XAxis
                   dataKey="date"
-                  tick={{ fill: '#71717a', fontSize: 10 }}
+                  tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
                   tickLine={false}
                   axisLine={false}
                   tickFormatter={(d) => dayjs(d).format('MMM D')}
                 />
                 <YAxis
-                  tick={{ fill: '#71717a', fontSize: 10 }}
+                  tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
                   tickLine={false}
                   axisLine={false}
-                  tickFormatter={(v) => `$${(fromCentavos(v) / 1000).toFixed(1)}k`}
+                  tickFormatter={(v) => `${(fromCentavos(v) / 1000).toFixed(1)}k`}
                 />
                 <Tooltip
-                  contentStyle={{
-                    background: 'rgba(16,16,22,0.95)',
-                    border: '1px solid rgba(255,255,255,0.12)',
-                    borderRadius: '16px',
-                    fontSize: '12px',
-                  }}
+                  contentStyle={CHART_TOOLTIP_STYLE}
                   formatter={(value: number | undefined) => [formatMoney(value ?? 0), 'Value']}
                   labelFormatter={(label) => dayjs(label).format('MMM D, YYYY')}
                 />
@@ -508,7 +479,7 @@ export function Investments() {
                   type="monotone"
                   dataKey="value"
                   isAnimationActive={false}
-                  stroke="#7C5CFF"
+                  stroke="var(--color-accent)"
                   strokeWidth={2}
                   fill="url(#valueGradient)"
                 />
@@ -519,11 +490,10 @@ export function Investments() {
               <p className="text-muted-foreground text-sm">{t('chart.noData')}</p>
             </div>
           )}
-        </div>
+        </NativePanel>
 
-        {/* Allocation Donut */}
-        <div className="liquid-card p-6">
-          <h2 className="font-heading mb-4 text-xl font-bold">{t('chart.allocation')}</h2>
+        <NativePanel className="p-5">
+          <h2 className="mb-4 text-base font-semibold">{t('chart.allocation')}</h2>
           {allocationData.length > 0 ? (
             <div className="flex flex-col items-center">
               <SafeChart height={200}>
@@ -543,21 +513,16 @@ export function Investments() {
                     ))}
                   </Pie>
                   <Tooltip
-                    contentStyle={{
-                      background: 'rgba(16,16,22,0.95)',
-                      border: '1px solid rgba(255,255,255,0.12)',
-                      borderRadius: '16px',
-                      fontSize: '12px',
-                    }}
+                    contentStyle={CHART_TOOLTIP_STYLE}
                     formatter={(value: number | undefined) => [formatMoney(value ?? 0), '']}
                   />
                 </PieChart>
               </SafeChart>
-              <div className="soft-divider mt-3 flex flex-wrap justify-center gap-3 border-t pt-4">
+              <div className="border-border mt-3 flex flex-wrap justify-center gap-3 border-t pt-4">
                 {allocationData.map((entry) => (
                   <div key={entry.name} className="flex items-center gap-1.5">
                     <div className="h-2 w-2 rounded-full" style={{ background: entry.color }} />
-                    <span className="text-muted-foreground text-[10px] capitalize">
+                    <span className="text-muted-foreground text-xs capitalize">
                       {t(`types.${entry.name}` as 'types.stock')}
                     </span>
                   </div>
@@ -569,32 +534,29 @@ export function Investments() {
               <p className="text-muted-foreground text-sm">{t('chart.noData')}</p>
             </div>
           )}
-        </div>
+        </NativePanel>
       </div>
 
-      {/* Holdings */}
-      <div className="liquid-card p-6">
+      <NativePanel className="p-5">
         <div className="mb-4 flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-heading text-xl font-bold">{t('holdings.title')}</h2>
-            <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-base font-semibold">{t('holdings.title')}</h2>
+            <div className="flex flex-wrap items-center gap-2">
               <span
                 className="text-muted-foreground inline-flex cursor-help items-center gap-1"
                 title={t('priceSource.tooltip')}
               >
                 <Info size={12} />
-                <span className="font-mono text-[10px]">{t('priceSource.label')}</span>
+                <span className="text-xs">{t('priceSource.label')}</span>
               </span>
-              <div className="flex gap-1">
+              <div className="flex flex-wrap gap-1">
                 {(['value', 'gainLoss', 'name', 'type'] as SortField[]).map((field) => (
                   <button
                     key={field}
+                    type="button"
                     onClick={() => setSortField(field)}
-                    className={`rounded-full px-2.5 py-1 font-mono text-[10px] font-bold transition-colors ${
-                      sortField === field
-                        ? 'text-accent-hover bg-white/[0.1]'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
+                    aria-pressed={sortField === field}
+                    className={`filter-pill ${sortField === field ? 'filter-pill-active' : ''}`}
                   >
                     {t(`holdings.sort.${field}`)}
                   </button>
@@ -603,79 +565,47 @@ export function Investments() {
             </div>
           </div>
 
-          {/* Asset type filter chips */}
           <div className="flex flex-wrap gap-2">
             {ASSET_TYPES.map((asset) => (
               <button
                 key={asset.key}
+                type="button"
                 onClick={() => setAssetFilter(asset.key)}
-                className={`rounded-full px-3 py-1 font-mono text-[10px] font-bold transition-colors ${
-                  assetFilter === asset.key
-                    ? 'text-accent-hover bg-white/[0.1]'
-                    : 'text-muted-foreground hover:text-foreground bg-white/[0.04]'
-                }`}
+                aria-pressed={assetFilter === asset.key}
+                className={`filter-pill ${assetFilter === asset.key ? 'filter-pill-active' : ''}`}
               >
                 {t(asset.labelKey as 'filters.all')}
               </button>
             ))}
           </div>
 
-          {/* Search */}
           <div className="relative">
             <Search
               size={14}
-              className="text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2"
+              className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 -translate-y-1/2"
             />
-            <input
-              type="text"
+            <Input
+              type="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={t('search.placeholder')}
-              className="w-full rounded-xl border border-white/[0.08] bg-white/[0.04] py-2 pr-8 pl-9 font-mono text-xs text-white placeholder:text-white/40 focus:ring-1 focus:ring-white/20 focus:outline-none"
+              className="pr-9 pl-9"
             />
             {searchQuery && (
               <button
+                type="button"
                 onClick={() => setSearchQuery('')}
-                className="text-muted-foreground absolute top-1/2 right-2 -translate-y-1/2 hover:text-white"
+                className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
                 aria-label={t('search.clear')}
               >
                 <X size={14} />
               </button>
             )}
           </div>
-
-          {/* Mixed-currency warning */}
-          {portfolioSummary.isMixedCurrency && (
-            <div className="border-warning/20 bg-warning/10 flex items-start gap-2 rounded-lg border px-3 py-2">
-              <AlertTriangle size={14} className="text-warning mt-0.5" />
-              <div>
-                <p className="text-warning text-xs font-semibold">{t('currencyWarning.title')}</p>
-                <p className="text-muted-foreground text-[10px]">{t('currencyWarning.body')}</p>
-                <div className="mt-1 flex flex-wrap gap-2">
-                  {portfolioSummary.currencies.map((currency) => {
-                    const data = portfolioSummary.byCurrency[currency]
-                    if (!data) return null
-                    return (
-                      <span
-                        key={currency}
-                        className="inline-flex items-center gap-1 rounded-full border border-white/[0.08] bg-white/[0.04] px-2 py-0.5 font-mono text-[10px]"
-                      >
-                        <span className="text-muted-foreground">{currency}</span>
-                        <span className="text-white">
-                          {formatMoney(data.marketValue, currency)}
-                        </span>
-                      </span>
-                    )
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* Desktop table */}
         <div className="hidden md:block">
-          <div className="soft-divider text-muted-foreground grid grid-cols-8 gap-4 border-y px-2 py-3 font-mono text-[10px] tracking-wider uppercase">
+          <div className="text-muted-foreground border-border grid grid-cols-8 gap-4 border-y px-2 py-3 text-xs tracking-wide uppercase">
             <span className="col-span-2">{t('holdings.header.name')}</span>
             <span>{t('holdings.header.type')}</span>
             <span className="text-right">{t('holdings.header.shares')}</span>
@@ -701,7 +631,6 @@ export function Investments() {
           </div>
         </div>
 
-        {/* Mobile cards */}
         <div className="space-y-3 md:hidden">
           {visibleInvestments.map((inv) => (
             <HoldingCard
@@ -723,11 +652,12 @@ export function Investments() {
             <Search size={24} className="text-muted-foreground mb-3" />
             <p className="text-muted-foreground text-sm">{t('empty.filter')}</p>
             <button
+              type="button"
               onClick={() => {
                 setAssetFilter('all')
                 setSearchQuery('')
               }}
-              className="text-accent-hover mt-2 text-xs font-semibold hover:underline"
+              className="text-accent mt-2 text-sm font-semibold hover:underline"
             >
               {t('empty.clearFilters')}
             </button>
@@ -750,7 +680,7 @@ export function Investments() {
           onShowMore={() => setVisibleInvestmentCount((count) => count + INVESTMENTS_PAGE_SIZE)}
           className="mt-4"
         />
-      </div>
+      </NativePanel>
 
       <Suspense>
         <InvestmentDialog />
@@ -786,11 +716,11 @@ function HoldingRow({
   const gainPositive = (inv.gainLoss ?? 0) >= 0
 
   return (
-    <div className="soft-divider group grid grid-cols-8 items-center gap-4 border-b px-2 py-3 transition-colors last:border-b-0 hover:bg-white/[0.03]">
+    <div className="group border-border hover:bg-muted/50 grid grid-cols-8 items-center gap-4 border-b px-2 py-3 last:border-b-0">
       <div className="col-span-2 flex items-center gap-2">
         <div>
-          <p className="font-heading text-sm font-semibold">{inv.symbol}</p>
-          <p className="text-muted-foreground text-[10px]">{inv.name}</p>
+          <p className="text-sm font-semibold">{inv.symbol}</p>
+          <p className="text-muted-foreground text-xs">{inv.name}</p>
         </div>
         {isStale && (
           <span title={t('holdings.stale')}>
@@ -799,24 +729,20 @@ function HoldingRow({
         )}
       </div>
       <div>
-        <Badge
-          variant="secondary"
-          className="border-white/[0.08] bg-white/[0.06] text-[10px]"
-          style={{ color: TYPE_COLORS[inv.type] }}
-        >
+        <Badge variant="secondary" className="text-xs" style={{ color: TYPE_COLORS[inv.type] }}>
           {t(`types.${inv.type}`)}
         </Badge>
       </div>
-      <p className="text-right font-mono text-sm">{inv.shares.toLocaleString()}</p>
-      <p className="text-right font-mono text-sm">
+      <p className="text-right text-sm tabular-nums">{inv.shares.toLocaleString()}</p>
+      <p className="text-right text-sm tabular-nums">
         {formatMoney(inv.avg_cost_basis, inv.currency)}
       </p>
-      <p className="text-right font-mono text-sm">
+      <p className="text-right text-sm tabular-nums">
         {inv.currentPrice !== null
           ? formatMoney(inv.currentPrice, inv.currentPriceCurrency ?? inv.currency)
           : '—'}
       </p>
-      <p className="text-right font-mono text-sm font-semibold">
+      <p className="text-right text-sm font-semibold tabular-nums">
         {inv.marketValue !== null
           ? formatMoney(inv.marketValue, inv.currentPriceCurrency ?? inv.currency)
           : '—'}
@@ -824,7 +750,7 @@ function HoldingRow({
       <div className="flex items-center justify-end gap-2">
         <div className="text-right">
           <p
-            className={`font-mono text-sm font-semibold ${gainPositive ? 'text-success' : 'text-destructive'}`}
+            className={`text-sm font-semibold tabular-nums ${gainPositive ? 'text-success' : 'text-destructive'}`}
           >
             {inv.gainLoss !== null ? (
               <>
@@ -837,7 +763,7 @@ function HoldingRow({
           </p>
           {inv.gainLossPercent !== null && (
             <p
-              className={`flex items-center justify-end gap-0.5 font-mono text-[10px] ${gainPositive ? 'text-success' : 'text-destructive'}`}
+              className={`flex items-center justify-end gap-0.5 text-xs tabular-nums ${gainPositive ? 'text-success' : 'text-destructive'}`}
             >
               {gainPositive ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
               {gainPositive ? '+' : ''}
@@ -886,21 +812,17 @@ function HoldingCard({
   const gainPositive = (inv.gainLoss ?? 0) >= 0
 
   return (
-    <div className="liquid-card p-4">
+    <div className="border-border rounded-lg border p-4">
       <div className="mb-3 flex items-start justify-between">
         <div className="flex items-center gap-2">
           <div>
-            <p className="font-heading text-base font-semibold">
+            <p className="text-base font-semibold">
               {inv.symbol}
               {isStale && <AlertTriangle size={12} className="text-warning ml-1 inline" />}
             </p>
-            <p className="text-muted-foreground text-[10px]">{inv.name}</p>
+            <p className="text-muted-foreground text-xs">{inv.name}</p>
           </div>
-          <Badge
-            variant="secondary"
-            className="border-white/[0.08] bg-white/[0.06] text-[10px]"
-            style={{ color: TYPE_COLORS[inv.type] }}
-          >
+          <Badge variant="secondary" className="text-xs" style={{ color: TYPE_COLORS[inv.type] }}>
             {t(`types.${inv.type}`)}
           </Badge>
         </div>
@@ -908,7 +830,7 @@ function HoldingCard({
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7"
+            className="h-11 w-11 md:h-7 md:w-7"
             onClick={onEdit}
             aria-label={`Edit ${inv.symbol}`}
           >
@@ -917,7 +839,7 @@ function HoldingCard({
           <Button
             variant="ghost"
             size="icon"
-            className="text-destructive hover:text-destructive h-7 w-7"
+            className="text-destructive hover:text-destructive h-11 w-11 md:h-7 md:w-7"
             onClick={onDelete}
             aria-label={`Delete ${inv.symbol}`}
           >
@@ -927,31 +849,31 @@ function HoldingCard({
       </div>
       <div className="grid grid-cols-2 gap-2 text-sm">
         <div>
-          <p className="text-muted-foreground text-[10px]">{t('holdings.header.shares')}</p>
-          <p className="font-mono">{inv.shares.toLocaleString()}</p>
+          <p className="text-muted-foreground text-xs">{t('holdings.header.shares')}</p>
+          <p className="tabular-nums">{inv.shares.toLocaleString()}</p>
         </div>
         <div>
-          <p className="text-muted-foreground text-[10px]">{t('holdings.header.avgCost')}</p>
-          <p className="font-mono">{formatMoney(inv.avg_cost_basis, inv.currency)}</p>
+          <p className="text-muted-foreground text-xs">{t('holdings.header.avgCost')}</p>
+          <p className="tabular-nums">{formatMoney(inv.avg_cost_basis, inv.currency)}</p>
         </div>
         <div>
-          <p className="text-muted-foreground text-[10px]">{t('holdings.header.value')}</p>
-          <p className="font-mono font-semibold">
+          <p className="text-muted-foreground text-xs">{t('holdings.header.value')}</p>
+          <p className="font-semibold tabular-nums">
             {inv.marketValue !== null
               ? formatMoney(inv.marketValue, inv.currentPriceCurrency ?? inv.currency)
               : '—'}
           </p>
         </div>
         <div>
-          <p className="text-muted-foreground text-[10px]">{t('holdings.header.gainLoss')}</p>
+          <p className="text-muted-foreground text-xs">{t('holdings.header.gainLoss')}</p>
           <p
-            className={`font-mono font-semibold ${gainPositive ? 'text-success' : 'text-destructive'}`}
+            className={`font-semibold tabular-nums ${gainPositive ? 'text-success' : 'text-destructive'}`}
           >
             {inv.gainLoss !== null ? (
               <>
                 {gainPositive ? '+' : ''}
                 {formatMoney(inv.gainLoss, inv.currency)}
-                <span className="ml-1 text-[10px]">
+                <span className="ml-1 text-xs">
                   ({gainPositive ? '+' : ''}
                   {inv.gainLossPercent?.toFixed(2)}%)
                 </span>

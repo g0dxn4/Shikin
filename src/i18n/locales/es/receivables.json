@@ -32,7 +32,8 @@
     "notes": "Notas",
     "notesPlaceholder": "Cualquier nota adicional...",
     "accountsError": "No se pudieron cargar las cuentas",
-    "receivedExceedsAmount": "El monto recibido no puede exceder el monto total"
+    "receivedExceedsAmount": "El monto recibido no puede exceder el monto total",
+    "matchedNote": "Este cobro está conciliado con una transacción. Las protecciones de procedencia del almacén siguen aplicando al monto recibido y a la transacción vinculada."
   },
   "summary": {
     "outstanding": "Pendiente",
@@ -56,7 +57,14 @@
     "of": "de",
     "noAccount": "Sin cuenta vinculada",
     "cancelled": "Cancelado",
-    "progressLabel": "Progreso de recepción"
+    "progressLabel": "Progreso de recepción",
+    "matched": "Conciliado"
+  },
+  "currency": {
+    "unavailable": "Total no disponible",
+    "missingRates": "Faltan tipos de cambio para {{currencies}}",
+    "invalidData": "Algunos cobros tienen datos de moneda inválidos",
+    "grouped": "Se muestra por moneda porque el total convertido no está disponible"
   },
   "error": {
     "load": "No se pudieron cargar los cobros",

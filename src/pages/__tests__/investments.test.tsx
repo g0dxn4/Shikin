@@ -133,10 +133,11 @@ describe('Investments', () => {
     }
   })
 
-  it('renders title', () => {
+  it('renders add action without a promotional page title', () => {
     render(<Investments />)
 
-    expect(screen.getByText('title')).toBeInTheDocument()
+    expect(screen.getAllByText('addInvestment').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
   })
 
   it('renders empty state text', () => {
@@ -214,7 +215,7 @@ describe('Investments', () => {
 
     expect(screen.queryByText('Couldn\u2019t load investments')).not.toBeInTheDocument()
     expect(screen.queryByText('Price history unavailable')).not.toBeInTheDocument()
-    expect(screen.getByText('title')).toBeInTheDocument()
+    expect(screen.getByText('holdings.title')).toBeInTheDocument()
   })
 
   describe('failure/retry boundary behavior', () => {
@@ -568,6 +569,8 @@ describe('Investments', () => {
     expect(screen.getByText('currencyWarning.body')).toBeInTheDocument()
     expect(screen.getByText('MXN')).toBeInTheDocument()
     expect(screen.getByText('USD')).toBeInTheDocument()
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+    expect(screen.queryByText('$630.00')).not.toBeInTheDocument()
   })
 
   it('shows price source label', () => {

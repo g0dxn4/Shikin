@@ -1,7 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router'
 import { Accounts } from '../accounts'
+import { useCurrencyStore } from '@/stores/currency-store'
+
+function renderAccounts() {
+  return render(
+    <MemoryRouter>
+      <Accounts />
+    </MemoryRouter>
+  )
+}
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -86,10 +96,11 @@ describe('Accounts', () => {
     mockArchivedAccounts = []
     mockIsLoading = false
     mockFetchError = null
+    useCurrencyStore.setState({ preferredCurrency: 'USD', rates: {}, invalidRates: [] })
   })
 
   it('calls fetch on mount', () => {
-    render(<Accounts />)
+    renderAccounts()
 
     expect(mockFetch).toHaveBeenCalled()
   })
@@ -97,7 +108,7 @@ describe('Accounts', () => {
   it('renders loading state', () => {
     mockIsLoading = true
 
-    const { container } = render(<Accounts />)
+    const { container } = renderAccounts()
 
     // Loading state renders skeleton, not the account cards
     expect(screen.queryByText('empty.title')).not.toBeInTheDocument()
@@ -105,7 +116,7 @@ describe('Accounts', () => {
   })
 
   it('renders empty state with add button', () => {
-    render(<Accounts />)
+    renderAccounts()
 
     expect(screen.getByText('empty.title')).toBeInTheDocument()
     expect(screen.getByText('empty.description')).toBeInTheDocument()
@@ -114,7 +125,7 @@ describe('Accounts', () => {
   it('renders dedicated load error state instead of empty CTA', () => {
     mockFetchError = 'Accounts unavailable'
 
-    render(<Accounts />)
+    renderAccounts()
 
     expect(screen.getByText('Couldn’t load your accounts')).toBeInTheDocument()
     expect(screen.getByText('Accounts unavailable')).toBeInTheDocument()
@@ -127,7 +138,7 @@ describe('Accounts', () => {
       { id: 'acc-2', name: 'Savings', type: 'savings', currency: 'EUR', balance: 100000 },
     ]
 
-    render(<Accounts />)
+    renderAccounts()
 
     expect(screen.getAllByText('Checking').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Savings').length).toBeGreaterThan(0)
@@ -136,13 +147,14 @@ describe('Accounts', () => {
     expect(screen.getByText('EUR')).toBeInTheDocument()
   })
 
-  it('cards have hover:translate-y-[-2px] class', () => {
+  it('renders accounts on native panels without a promotional page header', () => {
     mockAccounts = [{ id: 'acc-1', name: 'Test', type: 'checking', currency: 'USD', balance: 0 }]
 
-    const { container } = render(<Accounts />)
+    const { container } = renderAccounts()
 
-    const card = container.querySelector('.hover\\:translate-y-\\[-2px\\]')
-    expect(card).toBeInTheDocument()
+    expect(container.querySelector('.native-panel')).toBeInTheDocument()
+    expect(container.querySelector('.page-toolbar')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
   })
 
   it('edit button calls openAccountDialog with id', async () => {
@@ -151,7 +163,7 @@ describe('Accounts', () => {
       { id: 'acc-edit', name: 'Editable', type: 'checking', currency: 'USD', balance: 0 },
     ]
 
-    render(<Accounts />)
+    renderAccounts()
 
     await user.click(screen.getByLabelText('Edit Editable'))
 
@@ -167,7 +179,7 @@ describe('Accounts', () => {
       { id: 'acc-del', name: 'Deletable', type: 'checking', currency: 'USD', balance: 0 },
     ]
 
-    render(<Accounts />)
+    renderAccounts()
 
     await user.click(screen.getByLabelText('Delete Deletable'))
 
@@ -196,7 +208,7 @@ describe('Accounts', () => {
       },
     ]
 
-    render(<Accounts />)
+    renderAccounts()
 
     await user.click(screen.getByLabelText('Delete Delete Fails'))
     await user.click(screen.getByText('Confirm'))
@@ -216,7 +228,7 @@ describe('Accounts', () => {
       { id: 'acc-archive', name: 'Archive Me', type: 'checking', currency: 'USD', balance: 0 },
     ]
 
-    render(<Accounts />)
+    renderAccounts()
 
     await user.click(screen.getByLabelText('archiveAccount Archive Me'))
 
@@ -244,7 +256,7 @@ describe('Accounts', () => {
       },
     ]
 
-    render(<Accounts />)
+    renderAccounts()
 
     await user.click(screen.getByLabelText('archiveAccount Archive Fails'))
     await user.click(screen.getByText('Confirm'))
@@ -270,7 +282,7 @@ describe('Accounts', () => {
       },
     ]
 
-    render(<Accounts />)
+    renderAccounts()
 
     await user.click(await screen.findByLabelText('unarchiveAccount Restore Fails'))
 
@@ -294,7 +306,7 @@ describe('Accounts', () => {
       },
     ]
 
-    render(<Accounts />)
+    renderAccounts()
 
     expect(screen.getAllByText('Daily Checking').length).toBeGreaterThan(0)
     expect(screen.getByText('Primary')).toBeInTheDocument()
@@ -308,7 +320,7 @@ describe('Accounts', () => {
       { id: 'acc-primary', name: 'Daily Checking', type: 'checking', currency: 'USD', balance: 0 },
     ]
 
-    render(<Accounts />)
+    renderAccounts()
 
     await user.click(screen.getByLabelText('Set Daily Checking as primary'))
 
@@ -332,7 +344,7 @@ describe('Accounts', () => {
       },
     ]
 
-    render(<Accounts />)
+    renderAccounts()
 
     await user.click(screen.getByLabelText('Set Primary Fails as primary'))
 
@@ -348,7 +360,7 @@ describe('Accounts', () => {
       { id: 'acc-card', name: 'Credit Card', type: 'credit_card', currency: 'USD', balance: -1000 },
     ]
 
-    render(<Accounts />)
+    renderAccounts()
 
     expect(screen.queryByLabelText('Set Credit Card as primary')).not.toBeInTheDocument()
   })
@@ -367,7 +379,7 @@ describe('Accounts', () => {
       },
     ]
 
-    render(<Accounts />)
+    renderAccounts()
 
     expect(screen.getByText('credit.limit')).toBeInTheDocument()
     expect(screen.getByText('credit.available')).toBeInTheDocument()
@@ -400,7 +412,7 @@ describe('Accounts', () => {
       },
     ]
 
-    render(<Accounts />)
+    renderAccounts()
 
     await user.click(screen.getByLabelText('Pay Travel Card'))
     await user.clear(screen.getByLabelText('credit.amount'))
@@ -447,7 +459,7 @@ describe('Accounts', () => {
       },
     ]
 
-    render(<Accounts />)
+    renderAccounts()
 
     await user.click(screen.getByLabelText('Pay Travel Card'))
     await user.clear(screen.getByLabelText('credit.amount'))
@@ -468,7 +480,7 @@ describe('Accounts', () => {
       { id: 'acc-2', name: 'Old Account', type: 'checking', currency: 'USD', balance: 0 },
     ]
 
-    render(<Accounts />)
+    renderAccounts()
 
     expect(screen.getByText('archived.title')).toBeInTheDocument()
     expect(screen.queryByText('Old Account')).not.toBeInTheDocument()
@@ -483,7 +495,7 @@ describe('Accounts', () => {
       { id: 'acc-archived', name: 'Archived Only', type: 'checking', currency: 'USD', balance: 0 },
     ]
 
-    render(<Accounts />)
+    renderAccounts()
 
     expect(screen.getByText('noActive.title')).toBeInTheDocument()
     expect(screen.getByText('Archived Only')).toBeInTheDocument()
@@ -493,11 +505,51 @@ describe('Accounts', () => {
   it('keeps account actions visible on mobile while preserving desktop hover reveal', () => {
     mockAccounts = [{ id: 'acc-1', name: 'Test', type: 'checking', currency: 'USD', balance: 0 }]
 
-    const { container } = render(<Accounts />)
+    const { container } = renderAccounts()
 
     const hoverDiv = container.querySelector(
       '.opacity-100.md\\:opacity-40.md\\:group-hover\\:opacity-100.md\\:group-focus-within\\:opacity-100'
     )
     expect(hoverDiv).toBeInTheDocument()
+  })
+
+  it('shows a converted same-currency net instead of mixing display currencies', () => {
+    mockAccounts = [
+      { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 250000 },
+      { id: 'acc-2', name: 'Savings', type: 'savings', currency: 'USD', balance: 100000 },
+    ]
+
+    renderAccounts()
+
+    expect(screen.getByText('metrics.net')).toBeInTheDocument()
+    expect(screen.getAllByText('$3,500.00').length).toBeGreaterThan(0)
+  })
+
+  it('does not raw-sum mixed currencies when a rate is missing', () => {
+    mockAccounts = [
+      { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 250000 },
+      { id: 'acc-2', name: 'Savings', type: 'savings', currency: 'EUR', balance: 100000 },
+    ]
+
+    renderAccounts()
+
+    expect(screen.getAllByText('currency.unavailable').length).toBeGreaterThan(0)
+    expect(screen.getByText('currency.missingRates')).toBeInTheDocument()
+    expect(screen.queryByText('$3,500.00')).not.toBeInTheDocument()
+    expect(screen.getAllByText('$2,500.00').length).toBeGreaterThan(0)
+    expect(screen.getByText('EUR')).toBeInTheDocument()
+  })
+
+  it('links an account to the transactions ledger filter', () => {
+    mockAccounts = [
+      { id: 'acc-ledger', name: 'Daily Checking', type: 'checking', currency: 'USD', balance: 0 },
+    ]
+
+    renderAccounts()
+
+    expect(screen.getByRole('link', { name: 'viewTransactions' })).toHaveAttribute(
+      'href',
+      '/transactions?account=acc-ledger'
+    )
   })
 })

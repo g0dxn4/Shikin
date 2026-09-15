@@ -22,12 +22,14 @@ const PRIMARY_GROUP_IDS = new Set(['overview', 'transactions', 'accounts'])
 export function BottomNav({ activeHref }: BottomNavProps) {
   const { t } = useTranslation('common')
   const primaryGroups = NAVIGATION_GROUPS.filter((group) => PRIMARY_GROUP_IDS.has(group.id))
-  const moreActive = !primaryGroups.some((group) => group.homePath === activeHref)
+  const moreActive = !primaryGroups.some((group) =>
+    group.routes.some((route) => route.path === activeHref)
+  )
 
   return (
     <nav className="native-bottom-nav md:hidden" aria-label={t('navigation.mobile')}>
       {primaryGroups.map((group) => {
-        const active = group.homePath === activeHref
+        const active = group.routes.some((route) => route.path === activeHref)
         const Icon = group.icon
         const label = t(group.labelKey, group.fallbackLabel)
         return (

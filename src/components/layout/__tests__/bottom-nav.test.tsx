@@ -38,10 +38,28 @@ describe('BottomNav', () => {
     expect(within(nav).getByRole('button', { name: 'More pages' })).toBeInTheDocument()
   })
 
-  it('marks More active for a contextual route outside the three primary destinations', () => {
+  it.each([
+    ['/categories', 'Transactions'],
+    ['/investments', 'Accounts'],
+    ['/receivables', 'Accounts'],
+  ])('keeps the primary group active on %s', (path, group) => {
     render(
       <MemoryRouter>
-        <BottomNav activeHref="/categories" />
+        <BottomNav activeHref={path} />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByRole('link', { name: group })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('link', { name: group })).toHaveClass('bottom-nav-link-active')
+    expect(screen.getByRole('button', { name: 'More pages' })).not.toHaveClass(
+      'bottom-nav-link-active'
+    )
+  })
+
+  it('marks More active for a route outside the three primary groups', () => {
+    render(
+      <MemoryRouter>
+        <BottomNav activeHref="/reports" />
       </MemoryRouter>
     )
 

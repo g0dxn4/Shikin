@@ -79,6 +79,24 @@ test.describe('desktop native navigation', () => {
 test.describe('mobile native navigation', () => {
   test.skip(({ isMobile }) => !isMobile, 'Mobile navigation is hidden on desktop')
 
+  test('keeps primary groups active on their contextual pages', async ({ page }) => {
+    const bottomNav = page.getByRole('navigation', { name: 'Mobile primary navigation' })
+    for (const [path, group] of [
+      ['/categories', 'Transactions'],
+      ['/investments', 'Accounts'],
+      ['/receivables', 'Accounts'],
+    ]) {
+      await page.goto(path)
+      await expect(bottomNav.getByRole('link', { name: group })).toHaveAttribute(
+        'aria-current',
+        'page'
+      )
+      await expect(bottomNav.getByRole('button', { name: 'More pages' })).not.toHaveClass(
+        /bottom-nav-link-active/
+      )
+    }
+  })
+
   test('shows three primary destinations and grouped More with all routes', async ({ page }) => {
     const bottomNav = page.getByRole('navigation', { name: 'Mobile primary navigation' })
     await expect(bottomNav.getByRole('link')).toHaveCount(3)

@@ -1,6 +1,12 @@
 export const TRANSACTION_PAGE_INVALIDATION_EVENT = 'shikin:transaction-page-invalidate'
 
-export type TransactionPageInvalidationReason = 'add' | 'edit' | 'delete' | 'review' | 'import'
+export type TransactionPageInvalidationReason =
+  | 'add'
+  | 'edit'
+  | 'delete'
+  | 'review'
+  | 'import'
+  | 'store-refresh'
 
 /** The single public invalidation entrypoint for transaction page reads. */
 export function invalidateTransactionPage(reason: TransactionPageInvalidationReason): void {

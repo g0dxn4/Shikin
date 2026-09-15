@@ -5,7 +5,11 @@ import {
   type TransactionPageResult,
 } from '@/lib/transaction-query'
 import { getErrorMessage } from '@/lib/errors'
-import { TRANSACTION_PAGE_INVALIDATION_EVENT } from '@/lib/transaction-query-events'
+import {
+  invalidateTransactionPage,
+  TRANSACTION_PAGE_INVALIDATION_EVENT,
+} from '@/lib/transaction-query-events'
+import { useTransactionStore } from '@/stores/transaction-store'
 
 const EMPTY_RESULT: TransactionPageResult = {
   rows: [],
@@ -30,7 +34,15 @@ export function useTransactionPageQuery(request: TransactionPageRequest) {
   useEffect(() => {
     const handleInvalidation = () => setRevision((value) => value + 1)
     window.addEventListener(TRANSACTION_PAGE_INVALIDATION_EVENT, handleInvalidation)
-    return () => window.removeEventListener(TRANSACTION_PAGE_INVALIDATION_EVENT, handleInvalidation)
+    const unsubscribe = useTransactionStore.subscribe((state, previousState) => {
+      if (state.transactions !== previousState.transactions) {
+        invalidateTransactionPage('store-refresh')
+      }
+    })
+    return () => {
+      unsubscribe()
+      window.removeEventListener(TRANSACTION_PAGE_INVALIDATION_EVENT, handleInvalidation)
+    }
   }, [])
 
   useEffect(() => {

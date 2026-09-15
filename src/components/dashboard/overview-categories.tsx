@@ -32,7 +32,7 @@ export function OverviewCategories({
   const { t } = useTranslation('dashboard')
   const [showAll, setShowAll] = useState(false)
   const visible = showAll ? items : items.slice(0, PREVIEW_COUNT)
-  const maxAmount = items[0]?.amount || 1
+  const maxAmount = Math.max(1, ...items.map((item) => item.amount))
 
   return (
     <NativePanel className="p-5 sm:p-6" aria-labelledby="overview-categories-heading">
@@ -68,7 +68,7 @@ export function OverviewCategories({
               dateFrom,
               dateTo,
             })
-            const width = maxAmount > 0 ? Math.max(2, (item.amount / maxAmount) * 100) : 0
+            const width = Math.max(0, (item.amount / maxAmount) * 100)
             return (
               <Link
                 key={item.categoryId}

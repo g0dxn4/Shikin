@@ -68,6 +68,13 @@ interface NetWorthState {
 // ── Store ───────────────────────────────���──────────────────────────────���───
 
 let netWorthRequestId = 0
+let netWorthReadQueue: Promise<void> = Promise.resolve()
+
+function enqueueRead(task: () => Promise<void>): Promise<void> {
+  const pending = netWorthReadQueue.then(task)
+  netWorthReadQueue = pending.catch(() => {})
+  return pending
+}
 
 export const useNetWorthStore = create<NetWorthState>((set, get) => ({
   totalAssets: 0,
@@ -82,87 +89,88 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
   history: [],
   isLoading: false,
 
-  calculateCurrent: async () => {
-    const accounts = await query<Account>(
-      'SELECT * FROM accounts WHERE is_archived = 0 ORDER BY type, name'
-    )
+  calculateCurrent: () =>
+    enqueueRead(async () => {
+      const accounts = await query<Account>(
+        'SELECT * FROM accounts WHERE is_archived = 0 ORDER BY type, name'
+      )
 
-    const investments = await query<
-      Investment & { latest_price: number | null; latest_price_currency: string | null }
-    >(
-      `SELECT i.*,
+      const investments = await query<
+        Investment & { latest_price: number | null; latest_price_currency: string | null }
+      >(
+        `SELECT i.*,
               (SELECT sp.price FROM stock_prices sp WHERE sp.symbol = i.symbol ORDER BY sp.date DESC LIMIT 1) as latest_price,
               (SELECT sp.quote_currency FROM stock_prices sp WHERE sp.symbol = i.symbol ORDER BY sp.date DESC LIMIT 1) as latest_price_currency
        FROM investments i
        ORDER BY i.name`
-    )
+      )
 
-    await useCurrencyStore
-      .getState()
-      .loadRates()
-      .catch(() => {})
-    const currencyState = useCurrencyStore.getState()
-    const missingCurrencies = new Set<string>()
-    const convert = (amountCentavos: number, currency: string): number | null => {
-      const result = currencyState.convertToPreferred(amountCentavos, currency)
-      if (result.complete) return result.amountCentavos
-      for (const missing of result.missingCurrencies) missingCurrencies.add(missing)
-      if (result.reason === 'invalid_currency_data') missingCurrencies.add(currency || 'unknown')
-      return null
-    }
-
-    let totalAssets = 0
-    let totalLiabilities = 0
-    let totalInvestments = 0
-    const assetBreakdown: AccountBreakdown[] = []
-    const liabilityBreakdown: AccountBreakdown[] = []
-
-    for (const acc of accounts) {
-      const item: AccountBreakdown = {
-        id: acc.id,
-        name: acc.name,
-        type: acc.type,
-        currency: acc.currency,
-        balance: acc.balance,
-        convertedBalance: null,
+      await useCurrencyStore
+        .getState()
+        .loadRates()
+        .catch(() => {})
+      const currencyState = useCurrencyStore.getState()
+      const missingCurrencies = new Set<string>()
+      const convert = (amountCentavos: number, currency: string): number | null => {
+        const result = currencyState.convertToPreferred(amountCentavos, currency)
+        if (result.complete) return result.amountCentavos
+        for (const missing of result.missingCurrencies) missingCurrencies.add(missing)
+        if (result.reason === 'invalid_currency_data') missingCurrencies.add(currency || 'unknown')
+        return null
       }
 
-      const convertedBalance = convert(Math.abs(acc.balance), acc.currency)
-      item.convertedBalance = convertedBalance
-      if (acc.type === 'credit_card') {
-        if (convertedBalance !== null) totalLiabilities += convertedBalance
-        liabilityBreakdown.push(item)
-      } else {
-        if (convertedBalance !== null) {
-          totalAssets += acc.balance < 0 ? -convertedBalance : convertedBalance
+      let totalAssets = 0
+      let totalLiabilities = 0
+      let totalInvestments = 0
+      const assetBreakdown: AccountBreakdown[] = []
+      const liabilityBreakdown: AccountBreakdown[] = []
+
+      for (const acc of accounts) {
+        const item: AccountBreakdown = {
+          id: acc.id,
+          name: acc.name,
+          type: acc.type,
+          currency: acc.currency,
+          balance: acc.balance,
+          convertedBalance: null,
         }
-        assetBreakdown.push(item)
+
+        const convertedBalance = convert(Math.abs(acc.balance), acc.currency)
+        item.convertedBalance = convertedBalance
+        if (acc.type === 'credit_card') {
+          if (convertedBalance !== null) totalLiabilities += convertedBalance
+          liabilityBreakdown.push(item)
+        } else {
+          if (convertedBalance !== null) {
+            totalAssets += acc.balance < 0 ? -convertedBalance : convertedBalance
+          }
+          assetBreakdown.push(item)
+        }
       }
-    }
 
-    for (const inv of investments) {
-      const currentPrice = inv.latest_price ?? inv.avg_cost_basis
-      const priceCurrency = inv.latest_price_currency ?? inv.currency
-      const value = Math.round(inv.shares * currentPrice)
-      const convertedValue = convert(value, priceCurrency)
-      if (convertedValue !== null) totalInvestments += convertedValue
-    }
+      for (const inv of investments) {
+        const currentPrice = inv.latest_price ?? inv.avg_cost_basis
+        const priceCurrency = inv.latest_price_currency ?? inv.currency
+        const value = Math.round(inv.shares * currentPrice)
+        const convertedValue = convert(value, priceCurrency)
+        if (convertedValue !== null) totalInvestments += convertedValue
+      }
 
-    const totalsComplete = missingCurrencies.size === 0
-    totalAssets += totalInvestments
+      const totalsComplete = missingCurrencies.size === 0
+      totalAssets += totalInvestments
 
-    set({
-      totalAssets: totalsComplete ? totalAssets : 0,
-      totalLiabilities: totalsComplete ? totalLiabilities : 0,
-      totalInvestments: totalsComplete ? totalInvestments : 0,
-      netWorth: totalsComplete ? totalAssets - totalLiabilities : 0,
-      totalsComplete,
-      preferredCurrency: currencyState.preferredCurrency,
-      missingCurrencies: [...missingCurrencies].sort(),
-      assetBreakdown,
-      liabilityBreakdown,
-    })
-  },
+      set({
+        totalAssets: totalsComplete ? totalAssets : 0,
+        totalLiabilities: totalsComplete ? totalLiabilities : 0,
+        totalInvestments: totalsComplete ? totalInvestments : 0,
+        netWorth: totalsComplete ? totalAssets - totalLiabilities : 0,
+        totalsComplete,
+        preferredCurrency: currencyState.preferredCurrency,
+        missingCurrencies: [...missingCurrencies].sort(),
+        assetBreakdown,
+        liabilityBreakdown,
+      })
+    }),
 
   takeSnapshot: async () => {
     const {

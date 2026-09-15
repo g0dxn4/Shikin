@@ -743,13 +743,11 @@ describe('Dashboard', () => {
       expect(mockCalculateCurrent).toHaveBeenCalledTimes(2)
     })
 
-    it('serializes rapid recalculations, skips obsolete queued inputs, and withholds stale results', async () => {
+    it('starts each rapid revision and only publishes the latest completion', async () => {
       const pending: Array<{
         resolve: () => void
         promise: Promise<void>
       }> = []
-      let running = 0
-      let maximumRunning = 0
       mockAccounts = [{ id: 'acc-1', balance: 100000 }]
       mockNetWorth = 1195000
       mockCalculateCurrent.mockImplementation(() => {
@@ -758,11 +756,7 @@ describe('Dashboard', () => {
           resolve = resolvePromise
         })
         pending.push({ resolve, promise })
-        running += 1
-        maximumRunning = Math.max(maximumRunning, running)
-        return promise.finally(() => {
-          running -= 1
-        })
+        return promise
       })
 
       const { rerender } = render(<Dashboard />)
@@ -776,20 +770,18 @@ describe('Dashboard', () => {
 
       expect(screen.queryByText('$11,950.00')).not.toBeInTheDocument()
       expect(screen.getByRole('alert')).toHaveTextContent('currency.totalUnavailable')
-      expect(mockCalculateCurrent).toHaveBeenCalledTimes(1)
+      expect(mockCalculateCurrent).toHaveBeenCalledTimes(3)
 
       await act(async () => pending[0].resolve())
-      await waitFor(() => expect(mockCalculateCurrent).toHaveBeenCalledTimes(2))
-      expect(maximumRunning).toBe(1)
+      await act(async () => pending[1].resolve())
       expect(screen.queryByText('$13,950.00')).not.toBeInTheDocument()
 
-      await act(async () => pending[1].resolve())
+      await act(async () => pending[2].resolve())
       expect(await screen.findByText('$13,950.00')).toBeInTheDocument()
-      expect(mockCalculateCurrent).toHaveBeenCalledTimes(2)
-      expect(maximumRunning).toBe(1)
+      expect(mockCalculateCurrent).toHaveBeenCalledTimes(3)
     })
 
-    it('does not start obsolete queued work or publish an error after unmount', async () => {
+    it('does not publish a pending calculation error after unmount', async () => {
       let rejectFirst: ((error: Error) => void) | undefined
       mockAccounts = [{ id: 'acc-1', balance: 100000 }]
       mockCalculateCurrent.mockImplementationOnce(
@@ -807,7 +799,7 @@ describe('Dashboard', () => {
       unmount()
       await act(async () => rejectFirst?.(new Error('Late net worth failure')))
 
-      expect(mockCalculateCurrent).toHaveBeenCalledTimes(1)
+      expect(mockCalculateCurrent).toHaveBeenCalledTimes(2)
     })
 
     it('withholds stale data while pending, then keeps a $10k unlinked holding in headline and chart current value', async () => {

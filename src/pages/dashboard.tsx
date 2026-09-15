@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { Target, Plus, ArrowRight } from 'lucide-react'
@@ -70,7 +70,6 @@ export function Dashboard() {
     investments: typeof investments | null
     error: string | null
   }>({ preferredCurrency: null, accounts: null, investments: null, error: null })
-  const netWorthCalculationQueue = useRef<Promise<void>>(Promise.resolve())
   const now = useMemo(() => dayjs(), [])
   const splitDateRange = useMemo(
     () => ({
@@ -95,14 +94,13 @@ export function Dashboard() {
 
   useEffect(() => {
     let active = true
-    netWorthCalculationQueue.current = netWorthCalculationQueue.current.then(async () => {
-      if (!active) return
-      try {
-        await calculateCurrent()
+    void calculateCurrent()
+      .then(() => {
         if (active) {
           setNetWorthCalculation({ preferredCurrency, accounts, investments, error: null })
         }
-      } catch (error) {
+      })
+      .catch((error) => {
         if (active) {
           setNetWorthCalculation({
             preferredCurrency,
@@ -111,8 +109,7 @@ export function Dashboard() {
             error: getErrorMessage(error),
           })
         }
-      }
-    })
+      })
     return () => {
       active = false
     }

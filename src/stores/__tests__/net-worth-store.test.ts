@@ -1,3 +1,5 @@
+import { createElement, useEffect } from 'react'
+import { render, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/database', () => ({
@@ -9,6 +11,41 @@ import { query } from '@/lib/database'
 import { useNetWorthStore } from '../net-worth-store'
 
 const mockQuery = vi.mocked(query)
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
+function account(balance: number) {
+  return {
+    id: `acct-${balance}`,
+    name: 'Checking',
+    type: 'checking',
+    currency: 'USD',
+    balance,
+    icon: null,
+    color: null,
+    is_archived: 0,
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-01-01T00:00:00Z',
+  }
+}
+
+function NetWorthCalculationCaller() {
+  const calculateCurrent = useNetWorthStore((state) => state.calculateCurrent)
+
+  useEffect(() => {
+    void calculateCurrent().catch(() => {})
+  }, [calculateCurrent])
+
+  return null
+}
 
 describe('net-worth-store', () => {
   beforeEach(() => {
@@ -191,5 +228,49 @@ describe('net-worth-store', () => {
     expect(useNetWorthStore.getState().assetBreakdown).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: 'acct-brokerage', balance: 50000 })])
     )
+  })
+
+  it('serializes calculations across unmounted and remounted callers', async () => {
+    const firstAccounts = deferred<ReturnType<typeof account>[]>()
+    mockQuery
+      .mockImplementationOnce(() => firstAccounts.promise)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([account(20000)])
+      .mockResolvedValueOnce([])
+
+    const firstCaller = render(createElement(NetWorthCalculationCaller))
+    await waitFor(() => expect(mockQuery).toHaveBeenCalledTimes(1))
+    firstCaller.unmount()
+
+    render(createElement(NetWorthCalculationCaller))
+    await Promise.resolve()
+
+    expect(mockQuery).toHaveBeenCalledTimes(1)
+
+    firstAccounts.resolve([account(10000)])
+
+    await waitFor(() => expect(mockQuery).toHaveBeenCalledTimes(4))
+    await waitFor(() => expect(useNetWorthStore.getState().netWorth).toBe(20000))
+  })
+
+  it('propagates a calculation failure without poisoning later queued reads', async () => {
+    const failedAccounts = deferred<ReturnType<typeof account>[]>()
+    mockQuery
+      .mockImplementationOnce(() => failedAccounts.promise)
+      .mockResolvedValueOnce([account(30000)])
+      .mockResolvedValueOnce([])
+
+    const failed = useNetWorthStore.getState().calculateCurrent()
+    const later = useNetWorthStore.getState().calculateCurrent()
+    const failedExpectation = expect(failed).rejects.toThrow('Account query failed')
+
+    await waitFor(() => expect(mockQuery).toHaveBeenCalledTimes(1))
+    failedAccounts.reject(new Error('Account query failed'))
+
+    await failedExpectation
+    await later
+
+    expect(mockQuery).toHaveBeenCalledTimes(3)
+    expect(useNetWorthStore.getState().netWorth).toBe(30000)
   })
 })

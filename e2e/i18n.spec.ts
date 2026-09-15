@@ -47,10 +47,10 @@ test.describe('i18n', () => {
 
     // Switch to Spanish first
     await page.selectOption('select', 'es')
-    await expect(page.getByRole('heading').first()).toContainText('Configuración')
+    await expect(page.getByRole('heading', { level: 1, name: 'Preferencias' })).toBeVisible()
 
     // Switch back to English
     await page.selectOption('select', 'en')
-    await expect(page.getByRole('heading').first()).toContainText('Settings')
+    await expect(page.getByRole('heading', { level: 1, name: 'Preferences' })).toBeVisible()
   })
 })

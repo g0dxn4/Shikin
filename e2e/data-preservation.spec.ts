@@ -240,24 +240,52 @@ test.describe('read-only app data preservation', () => {
   test('full app reads, transaction paging, reload, and appearance changes preserve finance rows exactly', async ({
     page,
   }) => {
+    test.setTimeout(60000)
     const before = await captureProtectedState()
 
     await page.goto('/transactions?search=PRESERVE-P2B&view=ledger&sort=description&direction=asc')
     await expect(page.locator('[data-startup-state="ready"]')).toBeVisible()
-    await expect(page.getByText(`${PREFIX} Ledger 001`)).toBeVisible()
+    await expect(
+      page.getByRole('button', { name: new RegExp(`^${PREFIX} Ledger 001(?: |$)`) })
+    ).toBeVisible()
     await page.getByRole('button', { name: 'Next page' }).click()
     await expect(page).toHaveURL(/page=2/)
-    await expect(page.getByText(`${PREFIX} Split Ledger`)).toBeVisible()
+    await expect(
+      page.getByRole('button', { name: new RegExp(`^${PREFIX} Split Ledger(?: |$)`) })
+    ).toBeVisible()
     await page.getByRole('tab', { name: 'Timeline' }).click()
     await page.getByRole('tab', { name: 'Ledger' }).click()
     await page.getByLabel('Account').selectOption(IDS.savings)
-    await expect(page.getByText(`${PREFIX} Transfer Ledger`)).toBeVisible()
+    await expect(
+      page.getByRole('button', { name: new RegExp(`^${PREFIX} Transfer Ledger(?: |$)`) })
+    ).toBeVisible()
     await page.getByLabel('Currency').selectOption('USD')
     await page.getByLabel('Account').selectOption('all')
     await page.getByLabel('Status').selectOption('pending')
     await page.getByRole('tab', { name: 'Review' }).click()
 
-    for (const path of ['/', '/accounts', '/budgets', '/insights', '/settings', '/transactions']) {
+    for (const path of [
+      '/',
+      '/transactions',
+      '/categories',
+      '/accounts',
+      '/investments',
+      '/receivables',
+      '/budgets',
+      '/goals',
+      '/bills',
+      '/bill-calendar',
+      '/debt-payoff',
+      '/forecast',
+      '/insights',
+      '/reports',
+      '/net-worth',
+      '/spending-insights',
+      '/spending-heatmap',
+      '/settings',
+      '/extensions',
+      '/transactions',
+    ]) {
       await page.goto(path)
       await expect(page.locator('[data-startup-state="ready"]')).toBeVisible()
     }
@@ -267,7 +295,13 @@ test.describe('read-only app data preservation', () => {
       await page.getByRole('button', { name: /Collapse sidebar|Expand sidebar/i }).click()
     } else {
       await page.goto('/settings')
-      await page.getByRole('radio', { name: /Native dark/i }).click()
+      const darkAppearance = page.getByRole('radio', { name: /^Dark / })
+      const wasDark = (await darkAppearance.getAttribute('aria-checked')) === 'true'
+      await page.getByRole('radio', { name: wasDark ? /^Light / : /^Dark / }).click()
+      await expect(page.locator('html')).toHaveAttribute(
+        'data-appearance',
+        wasDark ? 'native-light' : 'native-dark'
+      )
     }
     await page.reload()
     await expect(page.locator('[data-startup-state="ready"]')).toBeVisible()

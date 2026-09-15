@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 import { Menu } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import {
   Sheet,
@@ -10,98 +11,92 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
-
-interface NavItem {
-  icon: React.ReactNode
-  label: string
-  href: string
-  activeHrefs?: string[]
-}
+import { NAVIGATION_GROUPS } from './navigation-model'
 
 interface BottomNavProps {
-  items: NavItem[]
-  moreItems?: NavItem[]
   activeHref: string
 }
 
-export function BottomNav({ items, moreItems = [], activeHref }: BottomNavProps) {
-  const isItemActive = (item: NavItem) =>
-    item.href === activeHref || item.activeHrefs?.includes(activeHref)
-  const moreActive = moreItems.some(isItemActive)
+const PRIMARY_GROUP_IDS = new Set(['overview', 'transactions', 'accounts'])
+
+export function BottomNav({ activeHref }: BottomNavProps) {
+  const { t } = useTranslation('common')
+  const primaryGroups = NAVIGATION_GROUPS.filter((group) => PRIMARY_GROUP_IDS.has(group.id))
+  const moreActive = !primaryGroups.some((group) => group.homePath === activeHref)
 
   return (
-    <nav
-      className="bg-surface/85 fixed right-4 bottom-4 left-4 z-50 flex h-16 items-center justify-around rounded-full border border-white/[0.12] px-2 pb-[env(safe-area-inset-bottom)] shadow-2xl shadow-black/40 backdrop-blur-2xl md:hidden"
-      aria-label="Mobile primary navigation"
-    >
-      {items.map((item) => {
-        const isActive = isItemActive(item)
+    <nav className="native-bottom-nav md:hidden" aria-label={t('navigation.mobile')}>
+      {primaryGroups.map((group) => {
+        const active = group.homePath === activeHref
+        const Icon = group.icon
+        const label = t(group.labelKey, group.fallbackLabel)
         return (
           <Link
-            key={item.href}
-            to={item.href}
-            className={cn(
-              'focus-visible:ring-ring flex h-11 min-w-12 flex-col items-center justify-center gap-0.5 rounded-full px-2 text-[10px] font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none',
-              isActive
-                ? 'text-accent-hover bg-white/[0.1]'
-                : 'text-muted-foreground hover:text-foreground'
-            )}
-            {...(isActive ? { 'aria-current': 'page' } : {})}
+            key={group.id}
+            to={group.homePath}
+            className={cn('bottom-nav-link', active && 'bottom-nav-link-active')}
+            {...(active ? { 'aria-current': 'page' as const } : {})}
           >
-            {item.icon}
-            <span>{item.label}</span>
+            <Icon size={20} aria-hidden="true" />
+            <span>{label}</span>
           </Link>
         )
       })}
-      {moreItems.length > 0 && (
-        <Sheet>
-          <SheetTrigger asChild>
-            <button
-              type="button"
-              aria-label="More pages"
-              className={cn(
-                'focus-visible:ring-ring flex h-11 min-w-12 flex-col items-center justify-center gap-0.5 rounded-full px-2 text-[10px] font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none',
-                moreActive
-                  ? 'text-accent-hover bg-white/[0.1]'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              <Menu size={20} aria-hidden="true" />
-              <span>More</span>
-            </button>
-          </SheetTrigger>
-          <SheetContent
-            side="bottom"
-            className="bg-surface/95 rounded-t-[28px] border-white/[0.1] px-4 pb-8 backdrop-blur-2xl"
-          >
-            <SheetHeader>
-              <SheetTitle>More pages</SheetTitle>
-              <SheetDescription>Open the rest of Shikin&apos;s pages on mobile.</SheetDescription>
-            </SheetHeader>
-            <nav className="mt-4 grid grid-cols-2 gap-2" aria-label="Mobile more navigation">
-              {moreItems.map((item) => {
-                const isActive = isItemActive(item)
 
-                return (
-                  <SheetClose key={item.href} asChild>
-                    <Link
-                      to={item.href}
-                      className={cn(
-                        'liquid-card focus-visible:ring-ring flex items-center gap-3 rounded-2xl px-4 py-3 text-sm transition-colors focus-visible:ring-2 focus-visible:outline-none',
-                        isActive ? 'text-accent-hover' : 'text-foreground'
-                      )}
-                      {...(isActive ? { 'aria-current': 'page' } : {})}
-                    >
-                      {item.icon}
-                      <span>{item.label}</span>
-                    </Link>
-                  </SheetClose>
-                )
-              })}
-            </nav>
-          </SheetContent>
-        </Sheet>
-      )}
+      <Sheet>
+        <SheetTrigger asChild>
+          <button
+            type="button"
+            aria-label={t('navigation.more')}
+            className={cn('bottom-nav-link', moreActive && 'bottom-nav-link-active')}
+          >
+            <Menu size={20} aria-hidden="true" />
+            <span>{t('navigation.moreShort')}</span>
+          </button>
+        </SheetTrigger>
+        <SheetContent
+          side="bottom"
+          className="max-h-[82dvh] overflow-y-auto rounded-t-2xl px-4 pb-[calc(1.25rem+env(safe-area-inset-bottom))]"
+        >
+          <SheetHeader className="pr-10 text-left">
+            <SheetTitle>{t('navigation.allDestinations')}</SheetTitle>
+            <SheetDescription>{t('navigation.allDestinationsDescription')}</SheetDescription>
+          </SheetHeader>
+          <nav className="mt-5 space-y-5" aria-label={t('navigation.more')}>
+            {NAVIGATION_GROUPS.map((group) => (
+              <section key={group.id} aria-labelledby={`mobile-nav-${group.id}`}>
+                <h3
+                  id={`mobile-nav-${group.id}`}
+                  className="text-muted-foreground mb-2 px-1 text-xs font-semibold"
+                >
+                  {t(group.labelKey, group.fallbackLabel)}
+                </h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {group.routes.map((route) => {
+                    const active = route.path === activeHref
+                    const Icon = route.icon
+                    return (
+                      <SheetClose key={route.path} asChild>
+                        <Link
+                          to={route.path}
+                          className={cn(
+                            'mobile-destination',
+                            active && 'mobile-destination-active'
+                          )}
+                          {...(active ? { 'aria-current': 'page' as const } : {})}
+                        >
+                          <Icon size={17} aria-hidden="true" />
+                          <span>{t(route.labelKey, route.fallbackLabel)}</span>
+                        </Link>
+                      </SheetClose>
+                    )
+                  })}
+                </div>
+              </section>
+            ))}
+          </nav>
+        </SheetContent>
+      </Sheet>
     </nav>
   )
 }

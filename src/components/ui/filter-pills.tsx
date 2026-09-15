@@ -25,12 +25,7 @@ export function FilterPills({
             type="button"
             onClick={() => onChange(option.value)}
             aria-pressed={isActive}
-            className={cn(
-              'rounded-full px-4 py-1.5 font-mono text-xs transition-colors',
-              isActive
-                ? 'bg-accent text-accent-foreground'
-                : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
-            )}
+            className={cn('filter-pill', isActive && 'filter-pill-active')}
           >
             {option.label}
             {option.count !== undefined && (

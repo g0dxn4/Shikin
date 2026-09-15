@@ -1,0 +1,34 @@
+{
+  "title": "Extensiones",
+  "description": "Herramientas e integraciones locales disponibles con tus datos de Shikin.",
+  "capabilitiesTitle": "Capacidades disponibles",
+  "capabilitiesDescription": "Abre el flujo o ajuste existente para cada capacidad.",
+  "status": { "ready": "Lista", "configure": "Configurar" },
+  "items": {
+    "csvImport": {
+      "title": "Importar extractos",
+      "description": "Importa CSV bancarios, asigna campos y revisa filas antes de llevarlas a tu libro mayor.",
+      "action": "Abrir importaciones"
+    },
+    "mcp": {
+      "title": "CLI y servidor MCP",
+      "description": "Usa los comandos locales de Shikin desde terminales y clientes compatibles con MCP.",
+      "action": "Ver configuración"
+    },
+    "marketData": {
+      "title": "Claves de mercado",
+      "description": "Configura Alpha Vantage o Finnhub para actualizar precios de inversiones.",
+      "action": "Configurar claves"
+    },
+    "localData": {
+      "title": "Datos locales y respaldos",
+      "description": "Exporta o importa tus datos SQLite locales con la confirmación de seguridad existente.",
+      "action": "Abrir ajustes de datos"
+    },
+    "updates": {
+      "title": "Actualizaciones firmadas",
+      "description": "Busca, instala y reinicia con versiones de escritorio firmadas.",
+      "action": "Revisar actualizaciones"
+    }
+  }
+}

@@ -1,13 +1,14 @@
 {
   "app": {
-    "name": "Shikin"
+    "name": "Shikin",
+    "tagline": "Finanzas personales"
   },
   "sidebar": {
     "expand": "Expandir barra lateral",
-    "collapse": "Colapsar barra lateral"
+    "collapse": "Contraer barra lateral"
   },
   "nav": {
-    "dashboard": "Inicio",
+    "dashboard": "Resumen",
     "transactions": "Transacciones",
     "accounts": "Cuentas",
     "budgets": "Presupuestos",
@@ -25,7 +26,11 @@
     "spendingInsights": "Analisis de Gastos",
     "spendingHeatmap": "Mapa de Calor",
     "forecast": "Proyeccion",
-    "settings": "Configuracion"
+    "settings": "Configuracion",
+    "overview": "Resumen",
+    "planning": "Planificación",
+    "preferences": "Preferencias",
+    "billCalendar": "Calendario de facturas"
   },
   "actions": {
     "save": "Guardar",
@@ -42,9 +47,9 @@
   },
   "status": {
     "loading": "Cargando...",
-    "error": "Algo sali\u00f3 mal",
-    "empty": "Sin datos a\u00fan",
-    "success": "\u00c9xito"
+    "error": "Algo salió mal",
+    "empty": "Sin datos aún",
+    "success": "Éxito"
   },
   "pagination": {
     "summary": "Mostrando {{shown}} de {{total}}",
@@ -52,24 +57,24 @@
   },
   "updates": {
     "prompt": {
-      "badge": "Actualizaci\u00f3n de escritorio firmada",
-      "title": "Shikin v{{version}} est\u00e1 lista",
-      "description": "Instala la versi\u00f3n firmada y reinicia en un solo paso. Tus datos financieros locales permanecen en este dispositivo.",
-      "readyTitle": "Versi\u00f3n {{version}} instalada",
-      "readyDescription": "Reinicia Shikin para usar la versi\u00f3n actualizada.",
-      "availableStatus": "Versi\u00f3n verificada encontrada",
+      "badge": "Actualización de escritorio firmada",
+      "title": "Shikin v{{version}} está lista",
+      "description": "Instala la versión firmada y reinicia en un solo paso. Tus datos financieros locales permanecen en este dispositivo.",
+      "readyTitle": "Versión {{version}} instalada",
+      "readyDescription": "Reinicia Shikin para usar la versión actualizada.",
+      "availableStatus": "Versión verificada encontrada",
       "downloadingStatus": "Descargando e instalando",
       "readyStatus": "Lista para reiniciar",
       "restartingStatus": "Reiniciando Shikin",
       "signedStatus": "Firmada con la clave configurada del actualizador de Shikin.",
-      "errorTitle": "La actualizaci\u00f3n necesita atenci\u00f3n",
+      "errorTitle": "La actualización necesita atención",
       "updateNow": "Actualizar y reiniciar",
       "installing": "Actualizando...",
       "restartNow": "Reiniciar ahora",
       "restarting": "Reiniciando...",
-      "dismiss": "Descartar aviso de actualizaci\u00f3n",
+      "dismiss": "Descartar aviso de actualización",
       "downloadProgress": "{{downloaded}} de {{total}} descargados",
-      "downloadProgressAria": "Progreso de descarga de la actualizaci\u00f3n"
+      "downloadProgressAria": "Progreso de descarga de la actualización"
     }
   },
   "extensions": {
@@ -109,5 +114,31 @@
         "action": "Revisar ajustes"
       }
     }
+  },
+  "groups": {
+    "overview": "Resumen",
+    "transactions": "Transacciones",
+    "accounts": "Cuentas",
+    "planning": "Planificación",
+    "insights": "Análisis",
+    "settings": "Configuración"
+  },
+  "navigation": {
+    "primary": "Navegación principal",
+    "main": "Navegación principal",
+    "mobile": "Navegación principal móvil",
+    "more": "Más páginas",
+    "moreShort": "Más",
+    "allDestinations": "Todos los destinos",
+    "allDestinationsDescription": "Todas las páginas de Shikin, agrupadas por sección.",
+    "section": "Navegación de la sección {{section}}",
+    "skipToContent": "Saltar al contenido principal"
+  },
+  "appearance": {
+    "label": "Apariencia",
+    "light": "Clara",
+    "dark": "Oscura",
+    "custom": "Personalizada",
+    "switch": "Cambiar a apariencia {{appearance}}"
   }
 }

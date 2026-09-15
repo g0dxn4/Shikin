@@ -1,158 +1,125 @@
+import { useEffect, useState } from 'react'
 import { NavLink, useLocation } from 'react-router'
+import { ChevronLeft, ChevronRight, Moon, Palette, Sun } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import {
-  LayoutDashboard,
-  ArrowLeftRight,
-  Landmark,
-  PiggyBank,
-  BarChart3,
-  Settings,
-  PanelLeftClose,
-  PanelLeft,
-  Sparkles,
-  LayoutGrid,
-  TrendingUp,
-  Wallet,
-} from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/ui-store'
-import { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from '@/lib/constants'
-
-interface SidebarNavItem {
-  path: string
-  icon: LucideIcon
-  labelKey: string
-  label: string
-  activePaths?: string[]
-}
-
-const navItems: SidebarNavItem[] = [
-  { path: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard', label: 'Dashboard' },
-  {
-    path: '/transactions',
-    icon: ArrowLeftRight,
-    labelKey: 'nav.transactions',
-    label: 'Transactions',
-    activePaths: ['/transactions', '/bills', '/bill-calendar'],
-  },
-  {
-    path: '/accounts',
-    icon: Landmark,
-    labelKey: 'nav.accounts',
-    label: 'Accounts',
-    activePaths: ['/accounts'],
-  },
-  {
-    path: '/investments',
-    icon: TrendingUp,
-    labelKey: 'nav.investments',
-    label: 'Investments',
-  },
-  { path: '/budgets', icon: PiggyBank, labelKey: 'nav.budgets', label: 'Budgets' },
-  { path: '/categories', icon: LayoutGrid, labelKey: 'nav.categories', label: 'Categories' },
-  {
-    path: '/goals',
-    icon: Sparkles,
-    labelKey: 'nav.goals',
-    label: 'Goals',
-    activePaths: ['/goals', '/debt-payoff'],
-  },
-  {
-    path: '/receivables',
-    icon: Wallet,
-    labelKey: 'nav.receivables',
-    label: 'Receivables',
-  },
-  {
-    path: '/insights',
-    icon: BarChart3,
-    labelKey: 'nav.insights',
-    label: 'Insights',
-    activePaths: [
-      '/insights',
-      '/reports',
-      '/forecast',
-      '/net-worth',
-      '/spending-insights',
-      '/spending-heatmap',
-    ],
-  },
-  { path: '/settings', icon: Settings, labelKey: 'nav.settings', label: 'Settings' },
-]
+import { SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_WIDTH } from '@/lib/constants'
+import {
+  getAppliedAppearance,
+  setAppearance,
+  subscribeAppearance,
+  type Appearance,
+} from '@/lib/theme'
+import { NAVIGATION_GROUPS } from './navigation-model'
 
 export function Sidebar() {
-  const { t } = useTranslation()
+  const { t } = useTranslation('common')
   const { pathname } = useLocation()
   const { sidebarCollapsed, toggleSidebar } = useUIStore()
+  const [appearance, setLocalAppearance] = useState<Appearance>(() => getAppliedAppearance())
+
+  useEffect(() => subscribeAppearance(setLocalAppearance), [])
+
+  const switchNativeAppearance = () => {
+    const next = appearance === 'native-dark' ? 'native-light' : 'native-dark'
+    void setAppearance(next)
+  }
 
   return (
     <aside
-      aria-label="Sidebar"
-      className="glass-sidebar hidden h-full shrink-0 flex-col overflow-hidden transition-[width] duration-200 ease-out md:flex"
+      aria-label={t('navigation.primary')}
+      data-collapsed={sidebarCollapsed ? 'true' : 'false'}
+      className="native-sidebar hidden h-full shrink-0 flex-col overflow-hidden md:flex"
       style={{ width: sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH }}
     >
-      {/* Header */}
       <div
-        className={cn(
-          'flex h-14 items-center px-4',
-          sidebarCollapsed ? 'justify-center' : 'justify-between'
-        )}
+        className={cn('flex h-16 shrink-0 items-center px-3', sidebarCollapsed && 'justify-center')}
       >
-        {!sidebarCollapsed && (
-          <div className="flex items-center gap-2.5">
-            <div className="bg-background/80 ring-border/60 flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl ring-1">
-              <img
-                src="/icon.png"
-                alt=""
-                aria-hidden="true"
-                draggable={false}
-                className="h-full w-full object-cover"
-              />
-            </div>
-            <span className="gradient-text font-heading text-xl font-bold">Shikin</span>
-          </div>
-        )}
-        <button
-          onClick={toggleSidebar}
-          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          aria-expanded={!sidebarCollapsed}
-          className="text-muted-foreground hover:text-foreground focus-visible:ring-ring rounded-xl p-1.5 transition-colors hover:bg-white/[0.08] focus-visible:ring-2 focus-visible:outline-none"
-        >
-          {sidebarCollapsed ? <PanelLeft size={18} /> : <PanelLeftClose size={18} />}
-        </button>
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="brand-mark" aria-hidden="true">
+            S
+          </span>
+          {!sidebarCollapsed ? (
+            <span className="min-w-0">
+              <strong className="block text-[15px] leading-tight font-semibold">Shikin</strong>
+              <span className="text-muted-foreground block text-[11px] leading-tight">
+                {t('app.tagline')}
+              </span>
+            </span>
+          ) : null}
+        </div>
       </div>
 
-      {/* Main Navigation */}
-      <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-1" aria-label="Main navigation">
-        {!sidebarCollapsed && (
-          <div className="text-text-muted px-2.5 py-1.5 text-[10px] font-semibold tracking-[0.18em] uppercase">
-            Finance
-          </div>
-        )}
-        {navItems.map(({ path, icon: Icon, labelKey, label, activePaths }) => {
-          const isSectionActive = activePaths ? activePaths.includes(pathname) : pathname === path
-
+      <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-2" aria-label={t('navigation.main')}>
+        {NAVIGATION_GROUPS.map((group) => {
+          const active = group.routes.some((route) => route.path === pathname)
+          const Icon = group.icon
+          const label = t(group.labelKey, group.fallbackLabel)
           return (
             <NavLink
-              key={path}
-              to={path}
-              aria-label={sidebarCollapsed ? t(labelKey, label) : undefined}
-              aria-current={isSectionActive ? 'page' : undefined}
-              className={({ isActive }) =>
-                cn(
-                  'sidebar-link',
-                  (isActive || isSectionActive) && 'sidebar-link-active',
-                  sidebarCollapsed && 'justify-center px-0'
-                )
-              }
+              key={group.id}
+              to={group.homePath}
+              title={sidebarCollapsed ? label : undefined}
+              aria-label={sidebarCollapsed ? label : undefined}
+              aria-current={active ? 'page' : undefined}
+              className={cn(
+                'sidebar-link',
+                active && 'sidebar-link-active',
+                sidebarCollapsed && 'justify-center px-0'
+              )}
             >
-              <Icon size={18} aria-hidden="true" />
-              {!sidebarCollapsed && <span>{t(labelKey, label)}</span>}
+              <Icon size={17} aria-hidden="true" />
+              {!sidebarCollapsed ? <span>{label}</span> : null}
             </NavLink>
           )
         })}
       </nav>
+
+      <div className="native-sidebar-footer space-y-1 p-2">
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          aria-label={sidebarCollapsed ? t('sidebar.expand') : t('sidebar.collapse')}
+          aria-expanded={!sidebarCollapsed}
+          className={cn('sidebar-footer-button', sidebarCollapsed && 'justify-center px-0')}
+        >
+          {sidebarCollapsed ? (
+            <ChevronRight size={17} aria-hidden="true" />
+          ) : (
+            <ChevronLeft size={17} aria-hidden="true" />
+          )}
+          {!sidebarCollapsed ? <span>{t('sidebar.collapse')}</span> : null}
+        </button>
+        <button
+          type="button"
+          onClick={switchNativeAppearance}
+          aria-label={t('appearance.switch', {
+            appearance: appearance === 'native-dark' ? t('appearance.light') : t('appearance.dark'),
+          })}
+          className={cn('sidebar-footer-button', sidebarCollapsed && 'justify-center px-0')}
+        >
+          {appearance === 'native-dark' ? (
+            <Moon size={16} aria-hidden="true" />
+          ) : appearance === 'custom' ? (
+            <Palette size={16} aria-hidden="true" />
+          ) : (
+            <Sun size={16} aria-hidden="true" />
+          )}
+          {!sidebarCollapsed ? (
+            <>
+              <span className="flex-1 text-left">{t('appearance.label')}</span>
+              <strong className="text-foreground text-xs font-semibold">
+                {appearance === 'native-dark'
+                  ? t('appearance.dark')
+                  : appearance === 'custom'
+                    ? t('appearance.custom')
+                    : t('appearance.light')}
+              </strong>
+            </>
+          ) : null}
+        </button>
+      </div>
     </aside>
   )
 }

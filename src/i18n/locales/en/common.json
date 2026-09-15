@@ -1,13 +1,14 @@
 {
   "app": {
-    "name": "Shikin"
+    "name": "Shikin",
+    "tagline": "Personal finance"
   },
   "sidebar": {
     "expand": "Expand sidebar",
     "collapse": "Collapse sidebar"
   },
   "nav": {
-    "dashboard": "Dashboard",
+    "dashboard": "Overview",
     "transactions": "Transactions",
     "accounts": "Accounts",
     "budgets": "Budgets",
@@ -25,7 +26,11 @@
     "spendingInsights": "Spending Insights",
     "spendingHeatmap": "Heatmap",
     "forecast": "Forecast",
-    "settings": "Settings"
+    "settings": "Settings",
+    "overview": "Overview",
+    "planning": "Planning",
+    "preferences": "Preferences",
+    "billCalendar": "Bill calendar"
   },
   "actions": {
     "save": "Save",
@@ -109,5 +114,31 @@
         "action": "Review app settings"
       }
     }
+  },
+  "groups": {
+    "overview": "Overview",
+    "transactions": "Transactions",
+    "accounts": "Accounts",
+    "planning": "Planning",
+    "insights": "Insights",
+    "settings": "Settings"
+  },
+  "navigation": {
+    "primary": "Primary navigation",
+    "main": "Main navigation",
+    "mobile": "Mobile primary navigation",
+    "more": "More pages",
+    "moreShort": "More",
+    "allDestinations": "All destinations",
+    "allDestinationsDescription": "Every Shikin page, grouped by section.",
+    "section": "{{section}} section navigation",
+    "skipToContent": "Skip to main content"
+  },
+  "appearance": {
+    "label": "Appearance",
+    "light": "Light",
+    "dark": "Dark",
+    "custom": "Custom",
+    "switch": "Switch to {{appearance}} appearance"
   }
 }

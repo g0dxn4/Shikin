@@ -1,115 +1,41 @@
 import { lazy, Suspense, useEffect, useRef } from 'react'
-import { Outlet, useLocation } from 'react-router'
-import {
-  LayoutDashboard,
-  ArrowLeftRight,
-  Landmark,
-  PiggyBank,
-  BarChart3,
-  Settings,
-  Sparkles,
-  LayoutGrid,
-  TrendingUp,
-  Wallet,
-} from 'lucide-react'
+import { NavLink, Outlet, useLocation } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { Sidebar } from './sidebar'
-import { BottomNav } from '@/components/layout/bottom-nav'
+import { BottomNav } from './bottom-nav'
+import { getNavigationGroup, getNavigationRoute } from './navigation-model'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { TauriTitleBar } from '@/components/layout/tauri-title-bar'
-
-const mobilePrimaryNavItems = [
-  { icon: <LayoutDashboard size={20} />, labelKey: 'nav.dashboard', label: 'Dashboard', href: '/' },
-  {
-    icon: <ArrowLeftRight size={20} />,
-    labelKey: 'nav.transactions',
-    label: 'Transactions',
-    href: '/transactions',
-    activeHrefs: ['/bills', '/bill-calendar'],
-  },
-  {
-    icon: <Landmark size={20} />,
-    labelKey: 'nav.accounts',
-    label: 'Accounts',
-    href: '/accounts',
-  },
-  {
-    icon: <BarChart3 size={20} />,
-    labelKey: 'nav.insights',
-    label: 'Insights',
-    href: '/insights',
-    activeHrefs: ['/reports', '/forecast', '/net-worth', '/spending-insights', '/spending-heatmap'],
-  },
-]
-
-const mobileMoreNavItems = [
-  { icon: <PiggyBank size={20} />, labelKey: 'nav.budgets', label: 'Budgets', href: '/budgets' },
-  {
-    icon: <TrendingUp size={20} />,
-    labelKey: 'nav.investments',
-    label: 'Investments',
-    href: '/investments',
-  },
-  {
-    icon: <LayoutGrid size={20} />,
-    labelKey: 'nav.categories',
-    label: 'Categories',
-    href: '/categories',
-  },
-  {
-    icon: <Sparkles size={20} />,
-    labelKey: 'nav.goals',
-    label: 'Goals',
-    href: '/goals',
-    activeHrefs: ['/debt-payoff'],
-  },
-  {
-    icon: <Wallet size={20} />,
-    labelKey: 'nav.receivables',
-    label: 'Receivables',
-    href: '/receivables',
-  },
-  { icon: <Settings size={20} />, labelKey: 'nav.settings', label: 'Settings', href: '/settings' },
-]
+import { cn } from '@/lib/utils'
 
 const AccountDialog = lazy(() =>
-  import('@/components/accounts/account-dialog').then((m) => ({
-    default: m.AccountDialog,
+  import('@/components/accounts/account-dialog').then((module) => ({
+    default: module.AccountDialog,
   }))
 )
 const TransactionDialog = lazy(() =>
-  import('@/components/transactions/transaction-dialog').then((m) => ({
-    default: m.TransactionDialog,
+  import('@/components/transactions/transaction-dialog').then((module) => ({
+    default: module.TransactionDialog,
   }))
 )
 const RecurringRuleDialog = lazy(() =>
-  import('@/components/transactions/recurring-rule-dialog').then((m) => ({
-    default: m.RecurringRuleDialog,
+  import('@/components/transactions/recurring-rule-dialog').then((module) => ({
+    default: module.RecurringRuleDialog,
   }))
 )
 const BudgetDialog = lazy(() =>
-  import('@/components/budgets/budget-dialog').then((m) => ({
-    default: m.BudgetDialog,
-  }))
+  import('@/components/budgets/budget-dialog').then((module) => ({ default: module.BudgetDialog }))
 )
 const GoalDialog = lazy(() =>
-  import('@/components/goals/goal-dialog').then((m) => ({
-    default: m.GoalDialog,
-  }))
+  import('@/components/goals/goal-dialog').then((module) => ({ default: module.GoalDialog }))
 )
 
 export function AppShell() {
   const { t } = useTranslation('common')
   const { pathname } = useLocation()
   const mainRef = useRef<HTMLElement>(null)
-  const primaryItems = mobilePrimaryNavItems.map((item) => ({
-    ...item,
-    label: t(item.labelKey, item.label),
-  }))
-  const moreItems = mobileMoreNavItems.map((item) => ({
-    ...item,
-    label: t(item.labelKey, item.label),
-  }))
+  const route = getNavigationRoute(pathname)
+  const group = getNavigationGroup(pathname)
 
   useEffect(() => {
     const main = mainRef.current
@@ -122,27 +48,52 @@ export function AppShell() {
     <div className="bg-background flex h-screen flex-col overflow-hidden">
       <a
         href="#main-content"
-        className="bg-accent text-accent-foreground sr-only fixed top-4 left-4 z-[60] rounded px-3 py-2 focus:not-sr-only"
+        className="bg-primary text-primary-foreground sr-only fixed top-4 left-4 z-[70] rounded-lg px-3 py-2 focus:not-sr-only"
       >
-        Skip to main content
+        {t('navigation.skipToContent')}
       </a>
       <TauriTitleBar />
-      <div className="flex min-h-0 flex-1 gap-0 overflow-hidden p-0 md:gap-2 md:p-2">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
-        <main
-          key={pathname}
-          id="main-content"
-          ref={mainRef}
-          tabIndex={-1}
-          className="grid-bg focus-visible:ring-ring min-h-0 flex-1 overflow-y-auto focus-visible:ring-2 focus-visible:outline-none md:rounded-[24px] md:border md:border-white/[0.06]"
-        >
-          <div className="w-full p-3 pb-24 sm:p-4 md:p-3 md:pb-3">
-            <Suspense fallback={<LoadingSpinner className="h-full" />}>
-              <Outlet />
-            </Suspense>
-          </div>
-        </main>
-        <BottomNav items={primaryItems} moreItems={moreItems} activeHref={pathname} />
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <header className="native-topbar">
+            <h1 className="truncate text-[15px] font-semibold sm:text-base">
+              {t(route.labelKey, route.fallbackLabel)}
+            </h1>
+          </header>
+          {group.routes.length > 1 ? (
+            <nav
+              className="native-subnav"
+              aria-label={t('navigation.section', {
+                section: t(group.labelKey, group.fallbackLabel),
+              })}
+            >
+              {group.routes.map((item) => (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  className={({ isActive }) => cn('subnav-link', isActive && 'subnav-link-active')}
+                >
+                  {t(item.labelKey, item.fallbackLabel)}
+                </NavLink>
+              ))}
+            </nav>
+          ) : null}
+          <main
+            key={pathname}
+            id="main-content"
+            ref={mainRef}
+            tabIndex={-1}
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain focus:outline-none"
+          >
+            <div className="route-content mx-auto w-full max-w-[1320px] p-4 pb-24 sm:p-5 sm:pb-24 lg:p-7 lg:pb-8">
+              <Suspense fallback={<LoadingSpinner className="min-h-64" />}>
+                <Outlet />
+              </Suspense>
+            </div>
+          </main>
+        </div>
+        <BottomNav activeHref={pathname} />
       </div>
       <Suspense>
         <AccountDialog />

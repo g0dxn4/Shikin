@@ -90,7 +90,17 @@
         "modern": "Modern",
         "editorial": "Editorial"
       }
-    }
+    },
+    "appearance": "Appearance",
+    "nativeLight": "Light",
+    "nativeLightDescription": "Quiet daylight surfaces",
+    "nativeDark": "Dark",
+    "nativeDarkDescription": "Low-glare graphite surfaces",
+    "custom": "Saved custom",
+    "customDescription": "Your preserved theme settings",
+    "advanced": "Advanced custom appearance",
+    "filtersLabel": "Filter custom themes",
+    "allPresets": "All custom themes"
   },
   "language": {
     "label": "Language",
@@ -174,11 +184,13 @@
     "importSuccess": "Backup imported",
     "importError": "Failed to import backup",
     "reset": "Reset All Data",
-    "resetWarning": "This will permanently delete all your data. This action cannot be undone."
+    "resetWarning": "This will permanently delete all your data. This action cannot be undone.",
+    "description": "Export a backup or import a database snapshot. Imports require confirmation and replace the current database."
   },
   "dataApis": {
     "description": "Optional API keys for refreshing investment prices. Alpha Vantage is tried first, then Finnhub; use provider symbols such as WALMEX.MX when supported.",
     "alphaVantageHint": "Free tier: 25 requests/day. Supports many US and some international/MX symbols.",
     "finnhubHint": "Free tier: 60 requests/min. Used as a fallback for supported stock, ETF, fund, bond, or CETES-style symbols."
-  }
+  },
+  "settingsDescription": "Language, currency, updates, backups, and local app controls."
 }

@@ -115,6 +115,30 @@ describe('App startup orchestration', () => {
     consoleWarnSpy.mockRestore()
   })
 
+  it('stays pending until the startup timer runs, then becomes ready after all tasks settle', async () => {
+    let resolveRecurring: (() => void) | undefined
+    mockMaterializeTransactions.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRecurring = resolve
+        })
+    )
+
+    const { container } = render(<App />)
+    const startupRoot = container.querySelector('[data-startup-state]')
+    expect(startupRoot).toHaveAttribute('data-startup-state', 'pending')
+
+    await waitFor(() => {
+      expect(startupRoot).toHaveAttribute('data-startup-state', 'running')
+    })
+    expect(startupRoot).not.toHaveAttribute('data-startup-state', 'ready')
+
+    resolveRecurring?.()
+    await waitFor(() => {
+      expect(startupRoot).toHaveAttribute('data-startup-state', 'ready')
+    })
+  })
+
   it('surfaces startup failures and skips dependent account tasks when accounts fail', async () => {
     mockMaterializeTransactions.mockRejectedValueOnce(new Error('Recurring down'))
     mockAutoRefreshRates.mockRejectedValueOnce(new Error('Rates down'))
@@ -134,6 +158,10 @@ describe('App startup orchestration', () => {
     expect(mockRefreshNetWorth).not.toHaveBeenCalled()
     expect(mockInitPriceScheduler).toHaveBeenCalledTimes(1)
     expect(mockGetAvailableUpdate).toHaveBeenCalledTimes(1)
+    expect(document.querySelector('[data-startup-state]')).toHaveAttribute(
+      'data-startup-state',
+      'error'
+    )
   })
 
   it('retries startup tasks and clears the banner after recovery', async () => {
@@ -159,6 +187,10 @@ describe('App startup orchestration', () => {
     await waitFor(() => {
       expect(screen.queryByText('Startup tasks need attention')).not.toBeInTheDocument()
     })
+    expect(document.querySelector('[data-startup-state]')).toHaveAttribute(
+      'data-startup-state',
+      'ready'
+    )
   })
 
   it('aggregates dependent startup failures and clears them after retry', async () => {

@@ -69,6 +69,7 @@ const CategoryManagement = lazy(() =>
 export default function App() {
   const [startupErrors, setStartupErrors] = useState<Record<string, string>>({})
   const [startupInProgress, setStartupInProgress] = useState(false)
+  const [startupCompleted, setStartupCompleted] = useState(false)
   const [startupUpdate, setStartupUpdate] = useState<AvailableUpdate | null>(null)
   const [updatePromptDismissed, setUpdatePromptDismissed] = useState(false)
   const [updatePhase, setUpdatePhase] = useState<OneClickUpdatePhase>('available')
@@ -184,6 +185,7 @@ export default function App() {
   const runStartupTasks = useCallback(() => {
     if (startupInFlightRef.current) return
     startupInFlightRef.current = true
+    setStartupCompleted(false)
     setStartupInProgress(true)
 
     const recurringTask = materializeTransactions()
@@ -219,6 +221,7 @@ export default function App() {
     void Promise.allSettled([recurringTask, rateTask, accountTask]).finally(() => {
       startupInFlightRef.current = false
       setStartupInProgress(false)
+      setStartupCompleted(true)
     })
 
     void checkStartupUpdate()
@@ -246,11 +249,18 @@ export default function App() {
   }, [runStartupTasks])
 
   const startupMessages = Object.values(startupErrors)
+  const startupState = startupInProgress
+    ? 'running'
+    : !startupCompleted
+      ? 'pending'
+      : startupMessages.length > 0
+        ? 'error'
+        : 'ready'
 
   return (
     <ErrorBoundary>
       <BrowserRouter>
-        <div className="relative min-h-screen">
+        <div className="relative min-h-screen" data-startup-state={startupState}>
           {startupMessages.length > 0 && (
             <div className="pointer-events-none sticky top-0 z-50 px-4 pt-4 sm:fixed sm:inset-x-0 sm:top-4 sm:pt-0">
               <div className="pointer-events-auto mx-auto max-w-3xl">
@@ -312,11 +322,14 @@ export default function App() {
       </BrowserRouter>
       <Toaster
         position="bottom-right"
+        theme="system"
         toastOptions={{
           style: {
-            background: '#18181B',
-            border: '1px solid #FFFFFF12',
-            color: '#FAFAFA',
+            background: 'var(--color-popover)',
+            border: '1px solid var(--color-border)',
+            color: 'var(--color-popover-foreground)',
+            borderRadius: 'var(--radius-lg)',
+            boxShadow: 'var(--shadow-dialog)',
           },
         }}
       />

@@ -1,43 +1,49 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Sidebar } from '../sidebar'
-
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string) => key,
-    i18n: { language: 'en', changeLanguage: vi.fn() },
-  }),
-}))
+import { SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_WIDTH } from '@/lib/constants'
 
 const mockToggleSidebar = vi.fn()
 let mockSidebarCollapsed = false
+let mockPathname = '/'
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string, fallback?: unknown) =>
+      (typeof fallback === 'string' ? fallback : undefined) ??
+      ({
+        'navigation.primary': 'Primary navigation',
+        'navigation.main': 'Main navigation',
+        'sidebar.expand': 'Expand sidebar',
+        'sidebar.collapse': 'Collapse sidebar',
+        'app.tagline': 'Personal finance',
+        'appearance.label': 'Appearance',
+        'appearance.light': 'Light',
+        'appearance.dark': 'Dark',
+        'appearance.custom': 'Custom',
+      }[key] ||
+        key),
+  }),
+}))
 
 vi.mock('react-router', () => ({
-  useLocation: () => ({ pathname: '/' }),
+  useLocation: () => ({ pathname: mockPathname }),
   NavLink: ({
     children,
     to,
     className,
-    'aria-label': ariaLabel,
+    ...props
   }: {
-    children: React.ReactNode | ((props: { isActive: boolean }) => React.ReactNode)
+    children: React.ReactNode
     to: string
-    className: string | ((args: { isActive: boolean }) => string)
-    'aria-label'?: string
-  }) => {
-    const resolvedChildren =
-      typeof children === 'function' ? children({ isActive: false }) : children
-    return (
-      <a
-        href={to}
-        className={typeof className === 'function' ? className({ isActive: false }) : className}
-        aria-label={ariaLabel}
-      >
-        {resolvedChildren}
-      </a>
-    )
-  },
+    className: string
+    [key: string]: unknown
+  }) => (
+    <a href={to} className={className} {...props}>
+      {children}
+    </a>
+  ),
 }))
 
 vi.mock('@/stores/ui-store', () => ({
@@ -47,102 +53,71 @@ vi.mock('@/stores/ui-store', () => ({
   }),
 }))
 
+vi.mock('@/lib/theme', () => ({
+  getAppliedAppearance: () => 'native-light',
+  subscribeAppearance: () => () => {},
+  setAppearance: vi.fn(),
+}))
+
 describe('Sidebar', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockSidebarCollapsed = false
+    mockPathname = '/'
   })
 
-  it('expanded: shows "Shikin" brand text and nav labels', () => {
+  it('renders the six desktop navigation groups', () => {
     render(<Sidebar />)
 
-    expect(screen.getByText('Shikin')).toBeInTheDocument()
-    expect(screen.getByText('nav.dashboard')).toBeInTheDocument()
-    expect(screen.getByText('nav.transactions')).toBeInTheDocument()
-    expect(screen.getByText('nav.accounts')).toBeInTheDocument()
-    expect(screen.getByText('nav.investments')).toBeInTheDocument()
-    expect(screen.getByText('nav.budgets')).toBeInTheDocument()
-    expect(screen.getByText('nav.categories')).toBeInTheDocument()
-    expect(screen.getByText('nav.goals')).toBeInTheDocument()
-    expect(screen.getByText('nav.receivables')).toBeInTheDocument()
-    expect(screen.getByText('nav.insights')).toBeInTheDocument()
-    expect(screen.getByText('nav.settings')).toBeInTheDocument()
+    expect(screen.getAllByRole('link')).toHaveLength(6)
+    for (const label of [
+      'Overview',
+      'Transactions',
+      'Accounts',
+      'Planning',
+      'Insights',
+      'Settings',
+    ]) {
+      expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
+    }
   })
 
-  it('collapsed: hides brand text and nav labels', () => {
+  it('uses the approved expanded and collapsed widths', () => {
+    const { rerender } = render(<Sidebar />)
+    expect(screen.getByLabelText('Primary navigation')).toHaveStyle({ width: `${SIDEBAR_WIDTH}px` })
+
     mockSidebarCollapsed = true
+    rerender(<Sidebar />)
+    expect(screen.getByLabelText('Primary navigation')).toHaveStyle({
+      width: `${SIDEBAR_COLLAPSED_WIDTH}px`,
+    })
+  })
 
-    render(<Sidebar />)
+  it('shows labels when expanded and accessible icon links when collapsed', () => {
+    const { rerender } = render(<Sidebar />)
+    expect(screen.getByText('Shikin')).toBeInTheDocument()
+    expect(screen.getByText('Overview')).toBeInTheDocument()
 
+    mockSidebarCollapsed = true
+    rerender(<Sidebar />)
     expect(screen.queryByText('Shikin')).not.toBeInTheDocument()
-    expect(screen.queryByText('nav.dashboard')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Overview')).toHaveAttribute('href', '/')
   })
 
-  it('renders all nav links', () => {
-    render(<Sidebar />)
-
-    const links = screen.getAllByRole('link')
-    expect(links.length).toBe(10)
-  })
-
-  it('collapse button calls toggleSidebar', async () => {
+  it('uses a labelled footer collapse control', async () => {
     const user = userEvent.setup()
     render(<Sidebar />)
 
-    // The collapse button is the button in the header area
-    const collapseBtn = screen.getAllByRole('button')[0]
-    await user.click(collapseBtn)
-
-    expect(mockToggleSidebar).toHaveBeenCalled()
+    const button = screen.getByRole('button', { name: 'Collapse sidebar' })
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+    await user.click(button)
+    expect(mockToggleSidebar).toHaveBeenCalledOnce()
   })
 
-  it('Settings link points to /settings', () => {
+  it('marks a group active for one of its contextual routes', () => {
+    mockPathname = '/spending-heatmap'
     render(<Sidebar />)
 
-    const settingsLink = screen.getByText('nav.settings').closest('a')
-    expect(settingsLink).toHaveAttribute('href', '/settings')
-  })
-
-  it('Insights link points to /insights', () => {
-    render(<Sidebar />)
-
-    const insightsLink = screen.getByText('nav.insights').closest('a')
-    expect(insightsLink).toHaveAttribute('href', '/insights')
-  })
-
-  describe('accessibility', () => {
-    it('toggle button has aria-label and aria-expanded', () => {
-      render(<Sidebar />)
-
-      const toggleBtn = screen.getByLabelText('Collapse sidebar')
-      expect(toggleBtn).toHaveAttribute('aria-expanded', 'true')
-    })
-
-    it('collapsed toggle button has aria-label for expand', () => {
-      mockSidebarCollapsed = true
-      render(<Sidebar />)
-
-      const toggleBtn = screen.getByLabelText('Expand sidebar')
-      expect(toggleBtn).toHaveAttribute('aria-expanded', 'false')
-    })
-
-    it('navigation has aria-label', () => {
-      render(<Sidebar />)
-
-      const nav = screen.getByRole('navigation', { name: 'Main navigation' })
-      expect(nav).toBeInTheDocument()
-    })
-
-    it('collapsed nav links have aria-labels', () => {
-      mockSidebarCollapsed = true
-      render(<Sidebar />)
-
-      // When collapsed, nav links should have aria-labels for screen reader accessibility
-      // Check specific links we know should have aria-labels
-      const dashboardLink = screen.getByLabelText('nav.dashboard')
-      const settingsLink = screen.getByLabelText('nav.settings')
-      expect(dashboardLink).toHaveAttribute('href', '/')
-      expect(settingsLink).toHaveAttribute('href', '/settings')
-    })
+    expect(screen.getByRole('link', { name: 'Insights' })).toHaveAttribute('aria-current', 'page')
   })
 })

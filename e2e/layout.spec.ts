@@ -22,23 +22,23 @@ test.describe('desktop layout', () => {
   test('sidebar collapse toggle works', async ({ page }) => {
     const sidebar = page.locator('aside').first()
 
-    await expect(sidebar.getByText('Dashboard')).toBeVisible()
+    await expect(sidebar.getByText('Overview')).toBeVisible()
 
-    const collapseButton = sidebar.locator('button').first()
+    const collapseButton = sidebar.getByRole('button', { name: 'Collapse sidebar' })
     await collapseButton.click()
 
-    await expect(sidebar.getByText('Dashboard')).not.toBeVisible()
+    await expect(sidebar.getByText('Overview')).not.toBeVisible()
   })
 
   test('sidebar expand restores labels', async ({ page }) => {
     const sidebar = page.locator('aside').first()
-    const toggleButton = sidebar.locator('button').first()
+    const toggleButton = sidebar.getByRole('button', { name: 'Collapse sidebar' })
 
     await toggleButton.click()
-    await expect(sidebar.getByText('Dashboard')).not.toBeVisible()
+    await expect(sidebar.getByText('Overview')).not.toBeVisible()
 
-    await toggleButton.click()
-    await expect(sidebar.getByText('Dashboard')).toBeVisible()
+    await sidebar.getByRole('button', { name: 'Expand sidebar' }).click()
+    await expect(sidebar.getByText('Overview')).toBeVisible()
     await expect(sidebar.getByText('Transactions')).toBeVisible()
   })
 
@@ -64,7 +64,7 @@ test.describe('mobile layout', () => {
   })
 
   test('bottom nav is visible on mobile', async ({ page }) => {
-    const bottomNav = page.locator('nav.fixed')
+    const bottomNav = page.getByRole('navigation', { name: 'Mobile primary navigation' })
     await expect(bottomNav).toBeVisible()
   })
 

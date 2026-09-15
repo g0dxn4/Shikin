@@ -1,64 +1,73 @@
-import { describe, expect, it } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { BottomNav } from '../bottom-nav'
 
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string, fallback?: string) =>
+      fallback ??
+      ({
+        'navigation.mobile': 'Mobile primary navigation',
+        'navigation.more': 'More pages',
+        'navigation.moreShort': 'More',
+        'navigation.allDestinations': 'All destinations',
+        'navigation.allDestinationsDescription': 'Every page',
+      }[key] ||
+        key),
+  }),
+}))
+
 describe('BottomNav', () => {
-  it('renders a More trigger when extra mobile pages are provided', () => {
+  it('renders Overview, Transactions, Accounts, and More', () => {
     render(
       <MemoryRouter>
-        <BottomNav
-          items={[{ icon: <span>D</span>, label: 'Dashboard', href: '/' }]}
-          moreItems={[{ icon: <span>B</span>, label: 'Budgets', href: '/budgets' }]}
-          activeHref="/"
-        />
+        <BottomNav activeHref="/" />
       </MemoryRouter>
     )
 
-    expect(screen.getByLabelText('More pages')).toBeInTheDocument()
-    expect(screen.getByText('More')).toBeInTheDocument()
+    const nav = screen.getByRole('navigation', { name: 'Mobile primary navigation' })
+    expect(within(nav).getAllByRole('link')).toHaveLength(3)
+    expect(within(nav).getByRole('link', { name: 'Overview' })).toHaveAttribute(
+      'aria-current',
+      'page'
+    )
+    expect(within(nav).getByRole('link', { name: 'Transactions' })).toBeInTheDocument()
+    expect(within(nav).getByRole('link', { name: 'Accounts' })).toBeInTheDocument()
+    expect(within(nav).getByRole('button', { name: 'More pages' })).toBeInTheDocument()
   })
 
-  it('marks the More trigger active when a hidden route is selected', () => {
+  it('marks More active for a contextual route outside the three primary destinations', () => {
     render(
       <MemoryRouter>
-        <BottomNav
-          items={[{ icon: <span>D</span>, label: 'Dashboard', href: '/' }]}
-          moreItems={[{ icon: <span>B</span>, label: 'Budgets', href: '/budgets' }]}
-          activeHref="/budgets"
-        />
+        <BottomNav activeHref="/categories" />
       </MemoryRouter>
     )
 
-    expect(screen.getByLabelText('More pages')).toHaveClass('text-accent-hover')
+    expect(screen.getByRole('button', { name: 'More pages' })).toHaveClass('bottom-nav-link-active')
   })
 
-  it('active primary link exposes aria-current="page"', () => {
+  it('exposes all 19 routes in grouped More navigation', async () => {
+    const user = userEvent.setup()
     render(
       <MemoryRouter>
-        <BottomNav
-          items={[{ icon: <span aria-hidden="true">D</span>, label: 'Dashboard', href: '/' }]}
-          activeHref="/"
-        />
+        <BottomNav activeHref="/bill-calendar" />
       </MemoryRouter>
     )
 
-    const activeLink = screen.getByRole('link', { name: 'Dashboard' })
-    expect(activeLink).toHaveAttribute('aria-current', 'page')
-  })
-
-  it('has mobile primary navigation aria-label', () => {
-    render(
-      <MemoryRouter>
-        <BottomNav
-          items={[{ icon: <span>D</span>, label: 'Dashboard', href: '/' }]}
-          activeHref="/"
-        />
-      </MemoryRouter>
+    await user.click(screen.getByRole('button', { name: 'More pages' }))
+    const dialog = await screen.findByRole('dialog')
+    const destinations = within(dialog).getAllByRole('link')
+    expect(destinations).toHaveLength(19)
+    expect(within(dialog).getByRole('heading', { name: 'Planning' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('link', { name: 'Bill calendar' })).toHaveAttribute(
+      'aria-current',
+      'page'
     )
-
-    expect(
-      screen.getByRole('navigation', { name: 'Mobile primary navigation' })
-    ).toBeInTheDocument()
+    expect(within(dialog).getByRole('link', { name: 'Extensions' })).toHaveAttribute(
+      'href',
+      '/extensions'
+    )
   })
 })

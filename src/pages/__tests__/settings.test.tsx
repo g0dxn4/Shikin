@@ -116,9 +116,11 @@ describe('SettingsPage', () => {
     mockApplyWebServerSettings.mockResolvedValue({ running: false, port: null, error: null })
   })
 
-  it('renders General section', async () => {
+  it('renders native settings content without a redundant route heading', async () => {
     render(<SettingsPage />)
 
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
+    expect(screen.getByText('settingsDescription')).toBeInTheDocument()
     expect(screen.getByText('sections.general')).toBeInTheDocument()
     expect(await screen.findByText('0.1.0')).toBeInTheDocument()
   })

@@ -11,6 +11,19 @@ export type ThemeTokens = {
   fontPreset: 'current' | 'modern' | 'editorial'
 }
 
+export type Appearance = 'native-light' | 'native-dark' | 'custom'
+
+export interface AppearancePreference {
+  appearance: Appearance
+  customTheme: ThemeTokens
+}
+
+export const APPEARANCE_KEY = 'appearance'
+export const THEME_KEY = 'theme'
+
+const APPEARANCE_EVENT = 'shikin:appearance-change'
+const VALID_APPEARANCES = new Set<Appearance>(['native-light', 'native-dark', 'custom'])
+
 const COLOR_RE =
   /^(#[0-9a-fA-F]{3,8}|rgba?\(\s*\d{1,3}%?(\s*,\s*\d{1,3}%?){2}(\s*,\s*(0|1|0?\.\d+))?\s*\))$/
 const ALLOWED_RADII = new Set(['0px', '8px', '12px', '16px'])
@@ -26,7 +39,7 @@ export const defaultTheme: ThemeTokens = {
   fontPreset: 'current',
 }
 
-export const presetThemes: Record<string, ThemeTokens> = {
+export const presetThemes = {
   default: defaultTheme,
   midnight: {
     background: '#0f172a',
@@ -178,7 +191,7 @@ export const presetThemes: Record<string, ThemeTokens> = {
     radiusMd: '12px',
     fontPreset: 'editorial',
   },
-}
+} satisfies Record<string, ThemeTokens>
 
 export function isValidTheme(theme: unknown): theme is ThemeTokens {
   if (!theme || typeof theme !== 'object') return false
@@ -195,34 +208,127 @@ export function isValidTheme(theme: unknown): theme is ThemeTokens {
   )
 }
 
+function parseStoredTheme(raw: unknown): ThemeTokens | null {
+  if (!raw) return null
+
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+    return isValidTheme(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
 export async function loadSavedTheme(): Promise<ThemeTokens> {
   try {
     const store = await load()
-    const raw = (await store.get('theme')) as string | null
-    if (raw) {
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
-      if (isValidTheme(parsed)) {
-        return parsed
-      }
+    return parseStoredTheme(await store.get(THEME_KEY)) ?? defaultTheme
+  } catch {
+    // Ignore unavailable/invalid saved payload and fall back to the legacy default.
+    return defaultTheme
+  }
+}
+
+/**
+ * Reads appearance without writing either preference. A valid legacy theme remains selected when
+ * the newer appearance key is absent; a completely new install starts in native light.
+ */
+export async function loadAppearancePreference(): Promise<AppearancePreference> {
+  try {
+    const store = await load()
+    const [rawAppearance, rawTheme] = await Promise.all([
+      store.get(APPEARANCE_KEY),
+      store.get(THEME_KEY),
+    ])
+    const customTheme = parseStoredTheme(rawTheme)
+    const appearance = VALID_APPEARANCES.has(rawAppearance as Appearance)
+      ? (rawAppearance as Appearance)
+      : customTheme
+        ? 'custom'
+        : 'native-light'
+
+    return {
+      appearance: appearance === 'custom' && !customTheme ? 'native-light' : appearance,
+      customTheme: customTheme ?? defaultTheme,
     }
   } catch {
-    // Ignore invalid saved payload and fall back to default theme
+    return { appearance: 'native-light', customTheme: defaultTheme }
   }
-  return defaultTheme
 }
 
 export async function saveTheme(theme: ThemeTokens): Promise<void> {
   if (!isValidTheme(theme)) return
   const store = await load()
-  await store.set('theme', JSON.stringify(theme))
+  await store.set(THEME_KEY, JSON.stringify(theme))
+}
+
+/** Writes only the independent appearance selector; the saved custom theme is never rewritten. */
+export async function saveAppearance(appearance: Appearance): Promise<void> {
+  if (!VALID_APPEARANCES.has(appearance)) return
+  const store = await load()
+  await store.set(APPEARANCE_KEY, appearance)
+}
+
+const CUSTOM_PROPERTIES = [
+  '--color-background',
+  '--color-surface',
+  '--color-surface-elevated',
+  '--color-foreground',
+  '--color-accent',
+  '--color-accent-hover',
+  '--color-accent-muted',
+  '--color-accent-foreground',
+  '--color-primary',
+  '--color-primary-foreground',
+  '--color-muted-foreground',
+  '--color-border',
+  '--color-border-hover',
+  '--color-border-accent',
+  '--color-ring',
+  '--color-chart-1',
+  '--radius-sm',
+  '--radius-md',
+  '--radius-lg',
+  '--radius-xl',
+  '--radius-2xl',
+  '--font-heading',
+  '--font-sans',
+  '--font-mono',
+] as const
+
+function announceAppearance(appearance: Appearance) {
+  window.dispatchEvent(new CustomEvent<Appearance>(APPEARANCE_EVENT, { detail: appearance }))
+}
+
+function requiresDarkControls(background: string) {
+  if (!background.startsWith('#')) return true
+  const hex = background.slice(1)
+  const normalized = hex.length === 3 ? [...hex].map((value) => value + value).join('') : hex
+  if (normalized.length < 6) return true
+  const red = Number.parseInt(normalized.slice(0, 2), 16)
+  const green = Number.parseInt(normalized.slice(2, 4), 16)
+  const blue = Number.parseInt(normalized.slice(4, 6), 16)
+  return red * 0.299 + green * 0.587 + blue * 0.114 < 150
+}
+
+export function applyNativeAppearance(appearance: 'native-light' | 'native-dark') {
+  const root = document.documentElement
+  CUSTOM_PROPERTIES.forEach((property) => root.style.removeProperty(property))
+  root.dataset.appearance = appearance
+  root.style.colorScheme = appearance === 'native-dark' ? 'dark' : 'light'
+  root.classList.toggle('dark', appearance === 'native-dark')
+  announceAppearance(appearance)
 }
 
 export function applyTheme(theme: ThemeTokens) {
   if (!isValidTheme(theme)) return
 
   const root = document.documentElement
+  const dark = requiresDarkControls(theme.background)
+  root.dataset.appearance = 'custom'
+  root.style.colorScheme = dark ? 'dark' : 'light'
+  root.classList.toggle('dark', dark)
 
-  // Base colors
   root.style.setProperty('--color-background', theme.background)
   root.style.setProperty('--color-surface', theme.surface)
   root.style.setProperty('--color-foreground', theme.foreground)
@@ -233,8 +339,6 @@ export function applyTheme(theme: ThemeTokens) {
     '--color-surface-elevated',
     'color-mix(in srgb, var(--color-surface) 88%, white)'
   )
-
-  // Sync derived accent properties
   root.style.setProperty('--color-primary', theme.accent)
   root.style.setProperty(
     '--color-accent-hover',
@@ -257,30 +361,54 @@ export function applyTheme(theme: ThemeTokens) {
     'color-mix(in srgb, var(--color-accent) 30%, transparent)'
   )
 
-  // Radius scale
   const md = parseInt(theme.radiusMd, 10)
   const sm = Number.isFinite(md) ? Math.max(0, md - 4) : 0
   const lg = Number.isFinite(md) ? md + 4 : 12
-
   root.style.setProperty('--radius-sm', `${sm}px`)
   root.style.setProperty('--radius-md', theme.radiusMd)
   root.style.setProperty('--radius-lg', `${lg}px`)
   root.style.setProperty('--radius-xl', `${lg}px`)
   root.style.setProperty('--radius-2xl', `${lg}px`)
 
-  // Fonts
   if (theme.fontPreset === 'modern') {
     root.style.setProperty('--font-heading', '"Inter", system-ui, sans-serif')
     root.style.setProperty('--font-sans', '"Inter", system-ui, sans-serif')
+    root.style.setProperty('--font-mono', '"Space Mono", ui-monospace, monospace')
   } else if (theme.fontPreset === 'editorial') {
     root.style.setProperty('--font-heading', '"Playfair Display", Georgia, serif')
     root.style.setProperty('--font-sans', '"Inter", system-ui, sans-serif')
+    root.style.setProperty('--font-mono', '"Space Mono", ui-monospace, monospace')
   } else {
-    // Current / default
     root.style.setProperty(
       '--font-heading',
       '"Space Grotesk Variable", "Space Grotesk", system-ui, sans-serif'
     )
     root.style.setProperty('--font-sans', '"Outfit Variable", "Outfit", system-ui, sans-serif')
+    root.style.setProperty('--font-mono', '"Space Mono", ui-monospace, monospace')
   }
+  announceAppearance('custom')
+}
+
+export function applyAppearance(preference: AppearancePreference) {
+  if (preference.appearance === 'custom') {
+    applyTheme(preference.customTheme)
+  } else {
+    applyNativeAppearance(preference.appearance)
+  }
+}
+
+export async function setAppearance(appearance: Appearance, customTheme = defaultTheme) {
+  await saveAppearance(appearance)
+  applyAppearance({ appearance, customTheme })
+}
+
+export function getAppliedAppearance(): Appearance {
+  const value = document.documentElement.dataset.appearance
+  return VALID_APPEARANCES.has(value as Appearance) ? (value as Appearance) : 'native-light'
+}
+
+export function subscribeAppearance(listener: (appearance: Appearance) => void) {
+  const handler = (event: Event) => listener((event as CustomEvent<Appearance>).detail)
+  window.addEventListener(APPEARANCE_EVENT, handler)
+  return () => window.removeEventListener(APPEARANCE_EVENT, handler)
 }

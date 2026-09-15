@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { useUIStore } from '../ui-store'
+import { SIDEBAR_COLLAPSED_STORAGE_KEY, useUIStore } from '../ui-store'
 
 const defaults = {
   sidebarCollapsed: false,
@@ -11,6 +11,7 @@ const defaults = {
 
 describe('ui-store', () => {
   beforeEach(() => {
+    localStorage.clear()
     useUIStore.setState(defaults)
   })
 
@@ -28,6 +29,15 @@ describe('ui-store', () => {
       useUIStore.getState().toggleSidebar()
       useUIStore.getState().toggleSidebar()
       expect(useUIStore.getState().sidebarCollapsed).toBe(false)
+    })
+
+    it('persists collapse state separately from application settings', () => {
+      useUIStore.getState().setSidebarCollapsed(true)
+      expect(localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY)).toBe('true')
+      expect(useUIStore.getState().sidebarCollapsed).toBe(true)
+
+      useUIStore.getState().setSidebarCollapsed(false)
+      expect(localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY)).toBe('false')
     })
   })
 

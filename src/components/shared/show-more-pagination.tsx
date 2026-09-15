@@ -23,7 +23,7 @@ export function ShowMorePagination({
   return (
     <div
       className={cn(
-        'liquid-card flex flex-col items-center gap-3 p-4 text-center sm:flex-row sm:justify-between sm:text-left',
+        'native-panel flex flex-col items-center gap-3 p-4 text-center sm:flex-row sm:justify-between sm:text-left',
         className
       )}
     >

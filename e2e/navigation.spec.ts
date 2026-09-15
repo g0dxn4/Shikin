@@ -1,140 +1,110 @@
-import { test, expect } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 import { mockTauri } from './fixtures/tauri-mock'
+
+const ALL_ROUTES = [
+  '/',
+  '/transactions',
+  '/categories',
+  '/accounts',
+  '/investments',
+  '/receivables',
+  '/budgets',
+  '/goals',
+  '/bills',
+  '/bill-calendar',
+  '/debt-payoff',
+  '/forecast',
+  '/insights',
+  '/reports',
+  '/net-worth',
+  '/spending-insights',
+  '/spending-heatmap',
+  '/settings',
+  '/extensions',
+]
 
 test.beforeEach(async ({ page }) => {
   await mockTauri(page)
   await page.goto('/')
 })
 
-test.describe('desktop sidebar navigation', () => {
-  test.skip(({ isMobile }) => isMobile, 'Sidebar not visible on mobile')
+test.describe('desktop native navigation', () => {
+  test.skip(({ isMobile }) => isMobile, 'Desktop sidebar is hidden on mobile')
 
-  test('sidebar renders all navigation items', async ({ page }) => {
-    const sidebar = page.locator('aside').first()
+  test('shows six groups and contextual section tabs', async ({ page }) => {
+    const sidebar = page.getByRole('complementary', { name: 'Primary navigation' })
+    await expect(sidebar.getByRole('link')).toHaveCount(6)
+    for (const label of [
+      'Overview',
+      'Transactions',
+      'Accounts',
+      'Planning',
+      'Insights',
+      'Settings',
+    ]) {
+      await expect(sidebar.getByRole('link', { name: label })).toBeVisible()
+    }
 
-    await expect(sidebar.getByRole('link')).not.toHaveCount(0)
-
-    await expect(sidebar.getByRole('link', { name: 'Dashboard' })).toBeVisible()
-    await expect(sidebar.getByRole('link', { name: 'Transactions' })).toBeVisible()
-    await expect(sidebar.getByRole('link', { name: 'Accounts' })).toBeVisible()
-    await expect(sidebar.getByRole('link', { name: 'Budgets' })).toBeVisible()
-    await expect(sidebar.getByRole('link', { name: 'Categories' })).toBeVisible()
-    await expect(sidebar.getByRole('link', { name: 'Goals' })).toBeVisible()
-    await expect(sidebar.getByRole('link', { name: 'Insights' })).toBeVisible()
-    await expect(sidebar.getByRole('link', { name: 'Settings' })).toBeVisible()
-  })
-
-  test('clicking Dashboard navigates to /', async ({ page }) => {
-    await page.getByRole('link', { name: 'Transactions' }).click()
+    await sidebar.getByRole('link', { name: 'Transactions' }).click()
     await page.waitForURL('/transactions')
-
-    await page.getByRole('link', { name: 'Dashboard' }).click()
-    await page.waitForURL('/')
-
-    expect(page.url()).toContain('/')
-  })
-
-  test('clicking Transactions navigates to /transactions', async ({ page }) => {
-    await page.locator('aside').first().getByRole('link', { name: 'Transactions' }).click()
-    await page.waitForURL('/transactions')
-    expect(page.url()).toContain('/transactions')
-  })
-
-  test('clicking Accounts navigates to /accounts', async ({ page }) => {
-    await page.locator('aside').first().getByRole('link', { name: 'Accounts' }).click()
-    await page.waitForURL('/accounts')
-    expect(page.url()).toContain('/accounts')
-  })
-
-  test('clicking Budgets navigates to /budgets', async ({ page }) => {
-    await page.locator('aside').first().getByRole('link', { name: 'Budgets' }).click()
-    await page.waitForURL('/budgets')
-    expect(page.url()).toContain('/budgets')
-  })
-
-  test('clicking Categories navigates to /categories', async ({ page }) => {
-    await page.locator('aside').first().getByRole('link', { name: 'Categories' }).click()
+    const tabs = page.getByRole('navigation', { name: 'Transactions section navigation' })
+    await tabs.getByRole('link', { name: 'Categories' }).click()
     await page.waitForURL('/categories')
-    expect(page.url()).toContain('/categories')
+    await expect(page.getByRole('heading', { level: 1, name: 'Categories' })).toBeVisible()
+    await expect(sidebar.getByRole('link', { name: 'Transactions' })).toHaveAttribute(
+      'aria-current',
+      'page'
+    )
   })
 
-  test('clicking Goals navigates to /goals', async ({ page }) => {
-    await page.locator('aside').first().getByRole('link', { name: 'Goals' }).click()
-    await page.waitForURL('/goals')
-    expect(page.url()).toContain('/goals')
-  })
+  test('all 19 routes expose the shell title and browser history remains functional', async ({
+    page,
+  }) => {
+    for (const route of ALL_ROUTES) {
+      await page.goto(route)
+      await expect(page.locator('[data-startup-state]')).toHaveAttribute(
+        'data-startup-state',
+        /ready|error/
+      )
+      await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
+    }
 
-  test('clicking Settings navigates to /settings', async ({ page }) => {
-    await page.locator('aside').first().getByRole('link', { name: 'Settings' }).click()
-    await page.waitForURL('/settings')
-    expect(page.url()).toContain('/settings')
-  })
-
-  test('clicking Insights navigates to /insights', async ({ page }) => {
-    await page.locator('aside').first().getByRole('link', { name: 'Insights' }).click()
-    await page.waitForURL('/insights')
-    expect(page.url()).toContain('/insights')
-  })
-
-  test('active nav link is highlighted', async ({ page }) => {
-    await page.getByRole('link', { name: 'Accounts' }).click()
-    await page.waitForURL('/accounts')
-
-    const accountsLink = page.getByRole('link', { name: 'Accounts' })
-    await expect(accountsLink).toHaveClass(/sidebar-link-active/)
+    await page.goto('/transactions')
+    await page.goto('/accounts')
+    await page.goBack()
+    await expect(page).toHaveURL(/\/transactions$/)
   })
 })
 
-test.describe('mobile bottom nav navigation', () => {
-  test.skip(({ isMobile }) => !isMobile, 'Bottom nav only visible on mobile')
+test.describe('mobile native navigation', () => {
+  test.skip(({ isMobile }) => !isMobile, 'Mobile navigation is hidden on desktop')
 
-  test('bottom nav renders primary items and More menu', async ({ page }) => {
-    const bottomNav = page.getByRole('navigation').filter({ hasText: 'Dashboard' })
-    await expect(bottomNav).toBeVisible()
+  test('shows three primary destinations and grouped More with all routes', async ({ page }) => {
+    const bottomNav = page.getByRole('navigation', { name: 'Mobile primary navigation' })
+    await expect(bottomNav.getByRole('link')).toHaveCount(3)
+    await expect(bottomNav.getByRole('link', { name: 'Overview' })).toBeVisible()
+    await expect(bottomNav.getByRole('link', { name: 'Transactions' })).toBeVisible()
+    await expect(bottomNav.getByRole('link', { name: 'Accounts' })).toBeVisible()
 
-    const links = bottomNav.getByRole('link')
-    await expect(links).toHaveCount(4)
-
-    await expect(bottomNav.getByText('Dashboard')).toBeVisible()
-    await expect(bottomNav.getByText('Transactions')).toBeVisible()
-    await expect(bottomNav.getByText('Accounts')).toBeVisible()
-    await expect(bottomNav.getByText('Insights')).toBeVisible()
-    await expect(bottomNav.getByRole('button', { name: 'More pages' })).toBeVisible()
-  })
-
-  test('clicking Transactions navigates to /transactions', async ({ page }) => {
-    const bottomNav = page.getByRole('navigation').filter({ hasText: 'Dashboard' })
-    await bottomNav.getByText('Transactions').click()
-    await page.waitForURL('/transactions')
-    expect(page.url()).toContain('/transactions')
-  })
-
-  test('clicking Accounts navigates to /accounts', async ({ page }) => {
-    const bottomNav = page.getByRole('navigation').filter({ hasText: 'Dashboard' })
-    await bottomNav.getByText('Accounts').click()
-    await page.waitForURL('/accounts')
-    expect(page.url()).toContain('/accounts')
-  })
-
-  test('clicking Insights navigates to /insights', async ({ page }) => {
-    const bottomNav = page.getByRole('navigation').filter({ hasText: 'Dashboard' })
-    await bottomNav.getByText('Insights').click()
-    await page.waitForURL('/insights')
-    expect(page.url()).toContain('/insights')
-  })
-
-  test('clicking Settings navigates to /settings', async ({ page }) => {
-    const bottomNav = page.getByRole('navigation').filter({ hasText: 'Dashboard' })
     await bottomNav.getByRole('button', { name: 'More pages' }).click()
-    await page.getByRole('link', { name: 'Settings' }).click()
-    await page.waitForURL('/settings')
-    expect(page.url()).toContain('/settings')
-  })
+    const more = page.getByRole('dialog')
+    await expect(more.getByRole('link')).toHaveCount(19)
+    for (const group of [
+      'Overview',
+      'Transactions',
+      'Accounts',
+      'Planning',
+      'Insights',
+      'Settings',
+    ]) {
+      await expect(more.getByRole('heading', { name: group })).toBeVisible()
+    }
 
-  test('active bottom nav item is highlighted', async ({ page }) => {
-    // Dashboard should be active by default (at /)
-    const bottomNav = page.getByRole('navigation').filter({ hasText: 'Dashboard' })
-    const dashboardLink = bottomNav.getByRole('link').first()
-    await expect(dashboardLink).toHaveClass(/text-accent/)
+    await more.getByRole('link', { name: 'Extensions' }).click()
+    await page.waitForURL('/extensions')
+    await expect(page.getByRole('heading', { level: 1, name: 'Extensions' })).toBeVisible()
+    await expect(bottomNav.getByRole('button', { name: 'More pages' })).toHaveClass(
+      /bottom-nav-link-active/
+    )
   })
 })

@@ -1,8 +1,27 @@
 import { create } from 'zustand'
 
+export const SIDEBAR_COLLAPSED_STORAGE_KEY = 'shikin.sidebar.collapsed'
+
+function getInitialSidebarCollapsed() {
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function persistSidebarCollapsed(collapsed: boolean) {
+  try {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(collapsed))
+  } catch {
+    // Collapse preference is optional UI state; storage failures must not block navigation.
+  }
+}
+
 interface UIState {
   sidebarCollapsed: boolean
   toggleSidebar: () => void
+  setSidebarCollapsed: (collapsed: boolean) => void
 
   accountDialogOpen: boolean
   editingAccountId: string | null
@@ -36,8 +55,17 @@ interface UIState {
 }
 
 export const useUIStore = create<UIState>((set) => ({
-  sidebarCollapsed: false,
-  toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+  sidebarCollapsed: getInitialSidebarCollapsed(),
+  toggleSidebar: () =>
+    set((state) => {
+      const sidebarCollapsed = !state.sidebarCollapsed
+      persistSidebarCollapsed(sidebarCollapsed)
+      return { sidebarCollapsed }
+    }),
+  setSidebarCollapsed: (sidebarCollapsed) => {
+    persistSidebarCollapsed(sidebarCollapsed)
+    set({ sidebarCollapsed })
+  },
 
   accountDialogOpen: false,
   editingAccountId: null,

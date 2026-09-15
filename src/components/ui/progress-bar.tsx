@@ -11,10 +11,10 @@ interface ProgressBarProps {
 }
 
 const COLOR_MAP = {
-  accent: '#7C5CFF',
-  success: '#34D399',
-  warning: '#F59E0B',
-  destructive: '#F87171',
+  accent: 'var(--color-accent)',
+  success: 'var(--color-success)',
+  warning: 'var(--color-warning)',
+  destructive: 'var(--color-destructive)',
 } as const
 
 export function ProgressBar({
@@ -40,12 +40,12 @@ export function ProgressBar({
         aria-valuemin={0}
         aria-valuemax={ariaValueMax}
         className={cn(
-          'w-full overflow-hidden rounded-full bg-white/[0.06]',
+          'bg-muted w-full overflow-hidden rounded-full',
           size === 'sm' ? 'h-1.5' : 'h-2'
         )}
       >
         <div
-          className="h-full rounded-full transition-all duration-500"
+          className="h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none"
           style={{ width: `${clamped}%`, backgroundColor: fill }}
         />
       </div>

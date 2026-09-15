@@ -13,7 +13,6 @@ import {
   Palette,
   RefreshCw,
   RotateCcw,
-  Settings,
   Tags,
   Trash2,
 } from 'lucide-react'
@@ -350,57 +349,11 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="animate-fade-in-up page-content">
-      <div className="liquid-hero relative overflow-hidden p-6 sm:p-8">
-        <Settings
-          size={260}
-          className="pointer-events-none absolute -right-16 -bottom-24 text-white/[0.035]"
-          aria-hidden="true"
-        />
-        <div className="relative z-10 grid grid-cols-1 gap-6 xl:grid-cols-[1.2fr_0.8fr] xl:items-end">
-          <div>
-            <span className="text-accent mb-3 inline-flex items-center gap-2 font-mono text-[10px] font-semibold tracking-[0.18em] uppercase">
-              <Settings size={14} aria-hidden="true" />
-              {t('title')}
-            </span>
-            <h1 className="font-heading text-4xl font-bold tracking-tight sm:text-5xl">
-              {t('title')}
-            </h1>
-            <p className="text-muted-foreground mt-3 max-w-xl text-sm leading-6">
-              {t(
-                'settingsDescription',
-                'Language, currency, updates, backups, and local app controls.'
-              )}
-            </p>
-          </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 xl:grid-cols-1">
-            <SettingsStatusTile
-              icon={<Globe2 size={15} />}
-              label={t('language.label')}
-              value={
-                SUPPORTED_LANGUAGES.find((lang) => lang.code === i18n.language)?.name ??
-                i18n.language
-              }
-              tone="accent"
-            />
-            <SettingsStatusTile
-              icon={<BadgeDollarSign size={15} />}
-              label={t('currency.preferred')}
-              value={preferredCurrency}
-              tone="success"
-            />
-            <SettingsStatusTile
-              icon={<MonitorUp size={15} />}
-              label={t('updates.status')}
-              value={readyUpdateVersion ? t('updates.readyShort') : t('updates.idle')}
-              tone="muted"
-            />
-          </div>
-        </div>
-      </div>
+    <div className="page-content">
+      <p className="text-muted-foreground max-w-2xl text-sm">{t('settingsDescription')}</p>
 
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[0.85fr_1.15fr]">
-        <section className="liquid-card space-y-4 p-5 sm:p-6">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.85fr_1.15fr]">
+        <section className="native-panel space-y-5 p-5 sm:p-6">
           <SectionTitle icon={<Globe2 size={18} />} title={t('sections.general')} />
 
           <div className="space-y-1">
@@ -415,17 +368,17 @@ export function SettingsPage() {
               id="language-select"
               value={i18n.language}
               onChange={(e) => i18n.changeLanguage(e.target.value)}
-              className="border-accent/55 focus:border-accent focus:ring-accent/25 mt-2 w-full rounded-[18px] border bg-white px-4 py-3 text-sm font-semibold text-black shadow-[0_10px_30px_rgba(0,0,0,0.2)] outline-none focus:ring-2"
+              className="native-select mt-2 w-full"
             >
               {SUPPORTED_LANGUAGES.map((lang) => (
-                <option key={lang.code} value={lang.code} className="bg-white text-black">
+                <option key={lang.code} value={lang.code}>
                   {lang.name}
                 </option>
               ))}
             </select>
           </div>
 
-          <div className="border-border/60 flex items-center justify-between gap-4 rounded-[18px] border bg-white/[0.035] p-4">
+          <div className="border-border bg-muted/50 flex items-center justify-between gap-4 rounded-lg border p-4">
             <div className="min-w-0 space-y-1">
               <Label
                 htmlFor="close-to-tray-switch"
@@ -448,13 +401,11 @@ export function SettingsPage() {
               }}
               disabled={!isTauri || isSavingDesktopSettings}
               className={`focus-visible:ring-accent focus-visible:ring-offset-background relative h-8 w-14 shrink-0 rounded-full border p-1 transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
-                closeToTrayEnabled
-                  ? 'border-accent/70 bg-accent shadow-[0_0_24px_rgba(124,92,255,0.28)]'
-                  : 'border-white/10 bg-white/10'
+                closeToTrayEnabled ? 'border-accent bg-accent' : 'border-border bg-muted'
               }`}
             >
               <span
-                className={`block size-6 rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.35)] transition-transform ${
+                className={`block size-6 rounded-full bg-white shadow-sm transition-transform ${
                   closeToTrayEnabled ? 'translate-x-6' : 'translate-x-0'
                 }`}
                 aria-hidden="true"
@@ -463,7 +414,7 @@ export function SettingsPage() {
           </div>
 
           {isTauri && (
-            <div className="border-border/60 space-y-4 rounded-[18px] border bg-white/[0.035] p-4">
+            <div className="border-border bg-muted/50 space-y-4 rounded-lg border p-4">
               <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0 space-y-1">
                   <Label
@@ -485,13 +436,11 @@ export function SettingsPage() {
                   onClick={() => setWebServerEnabled((enabled) => !enabled)}
                   disabled={isLoadingWebServerSettings || isApplyingWebServer}
                   className={`focus-visible:ring-accent focus-visible:ring-offset-background relative h-8 w-14 shrink-0 rounded-full border p-1 transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
-                    webServerEnabled
-                      ? 'border-accent/70 bg-accent shadow-[0_0_24px_rgba(124,92,255,0.28)]'
-                      : 'border-white/10 bg-white/10'
+                    webServerEnabled ? 'border-accent bg-accent' : 'border-border bg-muted'
                   }`}
                 >
                   <span
-                    className={`block size-6 rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.35)] transition-transform ${
+                    className={`block size-6 rounded-full bg-white shadow-sm transition-transform ${
                       webServerEnabled ? 'translate-x-6' : 'translate-x-0'
                     }`}
                     aria-hidden="true"
@@ -571,7 +520,7 @@ export function SettingsPage() {
                 <p className="text-foreground text-xs font-medium">
                   {t('desktop.webServer.tailscaleTitle')}
                 </p>
-                <code className="text-accent block overflow-x-auto rounded-lg bg-black/20 px-3 py-2 font-mono text-[11px]">
+                <code className="text-accent bg-muted block overflow-x-auto rounded-lg px-3 py-2 font-mono text-[11px]">
                   tailscale serve --bg http://127.0.0.1:{webServerDisplayPort}
                 </code>
                 <p className="text-muted-foreground text-[11px] leading-relaxed">
@@ -582,7 +531,7 @@ export function SettingsPage() {
           )}
         </section>
 
-        <section className="liquid-card space-y-4 p-5 sm:p-6">
+        <section className="native-panel space-y-5 p-5 sm:p-6">
           <SectionTitle
             icon={<MonitorUp size={18} />}
             title={t('sections.updates')}
@@ -592,19 +541,19 @@ export function SettingsPage() {
           {isTauri ? (
             <>
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-[18px] border border-white/[0.06] bg-white/[0.035] px-4 py-3">
+                <div className="border-border bg-muted/50 rounded-lg border px-4 py-3">
                   <p className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
                     {t('updates.currentVersion')}
                   </p>
-                  <p className="font-heading mt-1 text-base font-semibold">
+                  <p className="mt-1 text-base font-semibold">
                     {currentVersion ?? t('updates.loadingVersion')}
                   </p>
                 </div>
-                <div className="rounded-[18px] border border-white/[0.06] bg-white/[0.035] px-4 py-3">
+                <div className="border-border bg-muted/50 rounded-lg border px-4 py-3">
                   <p className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
                     {t('updates.status')}
                   </p>
-                  <p className="font-heading mt-1 text-base font-semibold">
+                  <p className="mt-1 text-base font-semibold">
                     {readyUpdateVersion
                       ? t('updates.readyShort')
                       : availableUpdate
@@ -745,7 +694,7 @@ export function SettingsPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1fr_1fr]">
-        <section className="liquid-card space-y-4 p-5 sm:p-6">
+        <section className="native-panel space-y-5 p-5 sm:p-6">
           <SectionTitle icon={<BadgeDollarSign size={18} />} title={t('sections.currency')} />
 
           <div className="space-y-1">
@@ -821,10 +770,10 @@ export function SettingsPage() {
                   {relevantRates.map(({ from, rate }) => (
                     <div
                       key={from}
-                      className="flex items-center justify-between rounded-[16px] border border-white/[0.06] bg-white/[0.035] px-3 py-2"
+                      className="border-border bg-muted/50 flex items-center justify-between rounded-lg border px-3 py-2"
                     >
                       <span className="font-mono text-xs">1 {from}</span>
-                      <span className="font-heading text-primary text-sm font-semibold">
+                      <span className="text-primary text-sm font-semibold tabular-nums">
                         {rate!.toFixed(4)} {preferredCurrency}
                       </span>
                     </div>
@@ -834,7 +783,7 @@ export function SettingsPage() {
             )
           })()}
         </section>
-        <section className="liquid-card space-y-4 p-5 sm:p-6">
+        <section className="native-panel space-y-5 p-5 sm:p-6">
           <SectionTitle
             icon={<Tags size={18} />}
             title={t('sections.categoryRules')}
@@ -852,7 +801,7 @@ export function SettingsPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-muted-foreground border-b border-white/[0.06] text-left font-mono text-xs tracking-wider uppercase">
+                  <tr className="text-muted-foreground border-border border-b text-left font-mono text-xs tracking-wider uppercase">
                     <th scope="col" className="pr-4 pb-2">
                       {tTransactions('rules.pattern')}
                     </th>
@@ -869,7 +818,7 @@ export function SettingsPage() {
                 </thead>
                 <tbody>
                   {rules.map((rule) => (
-                    <tr key={rule.id} className="border-b border-white/[0.03]">
+                    <tr key={rule.id} className="border-border border-b">
                       <td className="py-2 pr-4 font-mono text-xs">{rule.pattern}</td>
                       <td className="py-2 pr-4">
                         <span className="inline-flex items-center gap-1.5">
@@ -910,7 +859,7 @@ export function SettingsPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.15fr_0.85fr]">
-        <section className="liquid-card space-y-4 p-5 sm:p-6">
+        <section className="native-panel space-y-5 p-5 sm:p-6">
           <SectionTitle
             icon={<Palette size={18} />}
             title={t('sections.theme', 'Theme & Appearance')}
@@ -920,11 +869,11 @@ export function SettingsPage() {
         </section>
 
         <div className="space-y-3">
-          <section className="liquid-card space-y-4 p-5 sm:p-6">
+          <section className="native-panel space-y-5 p-5 sm:p-6">
             <SectionTitle
               icon={<Database size={18} />}
               title={t('sections.data')}
-              description={t('data.resetWarning')}
+              description={t('data.description')}
             />
             <div className="flex flex-wrap gap-2">
               <Button
@@ -956,7 +905,7 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section className="liquid-card space-y-4 p-5 sm:p-6">
+          <section className="native-panel space-y-5 p-5 sm:p-6">
             <SectionTitle
               icon={<KeyRound size={18} />}
               title={t('sections.dataApis')}
@@ -1088,37 +1037,9 @@ function SectionTitle({
         {icon}
       </div>
       <div className="min-w-0">
-        <h2 className="font-heading text-lg font-semibold">{title}</h2>
+        <h2 className="text-base font-semibold">{title}</h2>
         {description && <p className="text-muted-foreground mt-1 text-xs">{description}</p>}
       </div>
-    </div>
-  )
-}
-
-function SettingsStatusTile({
-  icon,
-  label,
-  value,
-  tone,
-}: {
-  icon: React.ReactNode
-  label: string
-  value: string
-  tone: 'accent' | 'success' | 'muted'
-}) {
-  const toneClass = {
-    accent: 'text-accent',
-    success: 'text-success',
-    muted: 'text-muted-foreground',
-  }[tone]
-
-  return (
-    <div className="rounded-[18px] border border-white/[0.06] bg-black/20 p-4 backdrop-blur-xl">
-      <div className="text-muted-foreground mb-2 flex items-center gap-2">
-        <span className={toneClass}>{icon}</span>
-        <span className="font-mono text-[10px] tracking-wider uppercase">{label}</span>
-      </div>
-      <p className="font-heading truncate text-lg font-bold">{value}</p>
     </div>
   )
 }

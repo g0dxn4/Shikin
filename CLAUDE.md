@@ -117,15 +117,17 @@ sudo dpkg -i src-tauri/target/release/bundle/deb/Shikin_*.deb
 - Imports: use `@/` path alias (maps to `src/`)
 - React Router v7: import from `'react-router'` (not `'react-router-dom'`)
 - Tailwind v4: CSS-first `@theme` config, no `tailwind.config.js`
-- Forced dark mode (no light/dark toggle)
+- Appearance: native light/dark defaults with separately preserved advanced custom themes
 - SQL uses `$1, $2` positional params (converted to `?` for better-sqlite3)
 
-## Design System (ASF)
+## Design System
 
-- Background: `#020202`, Surface: `#0a0a0a`, Accent: `#bf5af2`
-- Fonts: Space Grotesk (headings), Outfit (body), Space Mono (mono)
-- Brutalist buttons (0px radius), pill badges (9999px), 12px card radius
-- Glass morphism: `rgba(10,10,10,0.6)` + `blur(12px)` + border `rgba(255,255,255,0.06)`
+- Source of truth: `designs/shikin-native-concept/prototype.html` and `DESIGN.md`
+- Native light/dark semantic palettes; system-native typography and tabular financial figures
+- Solid surfaces, hairline borders, modest radii, restrained shadows, and no heavy blur/glow/grid
+- 216px / 72px desktop rail, six navigation groups, contextual tabs, and grouped mobile More sheet
+- The shell owns the single compact route heading; pages own local actions and filters
+- Saved legacy custom themes and font modes remain available behind advanced appearance controls
 
 ## Testing Notes
 

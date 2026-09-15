@@ -1,0 +1,34 @@
+{
+  "title": "Extensions",
+  "description": "Local tools and integrations available with your Shikin data.",
+  "capabilitiesTitle": "Available capabilities",
+  "capabilitiesDescription": "Open the existing workflow or setting for each capability.",
+  "status": { "ready": "Ready", "configure": "Configure" },
+  "items": {
+    "csvImport": {
+      "title": "Statement import",
+      "description": "Import bank CSV files, map fields, and review rows before they reach your ledger.",
+      "action": "Open imports"
+    },
+    "mcp": {
+      "title": "CLI and MCP server",
+      "description": "Use Shikin's local command surface from terminals and MCP-compatible clients.",
+      "action": "View setup"
+    },
+    "marketData": {
+      "title": "Market data keys",
+      "description": "Configure Alpha Vantage or Finnhub for investment price refreshes.",
+      "action": "Configure keys"
+    },
+    "localData": {
+      "title": "Local data and backups",
+      "description": "Export or import your local SQLite data with the existing safety confirmation.",
+      "action": "Open data settings"
+    },
+    "updates": {
+      "title": "Signed updates",
+      "description": "Check, install, and restart into signed desktop releases.",
+      "action": "Review updates"
+    }
+  }
+}

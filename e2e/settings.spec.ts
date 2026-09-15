@@ -9,7 +9,7 @@ test.describe('Settings', () => {
   })
 
   test('renders page title', async ({ page }) => {
-    await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1, name: 'Preferences' })).toBeVisible()
   })
 
   test('language dropdown is present', async ({ page }) => {

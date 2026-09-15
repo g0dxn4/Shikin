@@ -31,7 +31,7 @@ export function TauriTitleBar() {
       data-tauri-drag-region
       aria-label="Window title bar"
       onMouseDown={handleDragStart}
-      className="bg-background/95 flex h-10 shrink-0 items-center border-b border-white/[0.06] pl-3 backdrop-blur-xl select-none"
+      className="bg-background border-border flex h-10 shrink-0 items-center border-b pl-3 select-none"
     >
       <div data-tauri-drag-region className="h-full flex-1" />
       <div className="flex h-full items-center" role="group" aria-label="Window controls">
@@ -66,7 +66,7 @@ function TitleBarButton({ label, command, children, destructive = false }: Title
       className={
         destructive
           ? 'text-muted-foreground hover:bg-destructive hover:text-destructive-foreground focus-visible:ring-ring flex h-10 w-12 items-center justify-center transition-colors focus-visible:ring-2 focus-visible:outline-none'
-          : 'text-muted-foreground hover:text-foreground focus-visible:ring-ring flex h-10 w-12 items-center justify-center transition-colors hover:bg-white/[0.08] focus-visible:ring-2 focus-visible:outline-none'
+          : 'text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:ring-ring flex h-10 w-12 items-center justify-center transition-colors focus-visible:ring-2 focus-visible:outline-none'
       }
     >
       {children}

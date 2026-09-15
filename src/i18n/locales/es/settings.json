@@ -1,5 +1,5 @@
 {
-  "title": "Configuraci\u00f3n",
+  "title": "Configuración",
   "sections": {
     "general": "General",
     "updates": "Actualizaciones",
@@ -90,7 +90,17 @@
         "modern": "Moderno",
         "editorial": "Editorial"
       }
-    }
+    },
+    "appearance": "Apariencia",
+    "nativeLight": "Clara",
+    "nativeLightDescription": "Superficies claras y tranquilas",
+    "nativeDark": "Oscura",
+    "nativeDarkDescription": "Superficies grafito de bajo brillo",
+    "custom": "Personalizada guardada",
+    "customDescription": "Tu configuración de tema conservada",
+    "advanced": "Apariencia personalizada avanzada",
+    "filtersLabel": "Filtrar temas personalizados",
+    "allPresets": "Todos los temas personalizados"
   },
   "language": {
     "label": "Idioma",
@@ -156,13 +166,13 @@
     "label": "Moneda Predeterminada",
     "description": "Moneda usada para nuevas transacciones",
     "preferred": "Moneda Preferida",
-    "preferredDescription": "Todos los saldos y totales se mostrar\u00e1n en esta moneda",
+    "preferredDescription": "Todos los saldos y totales se mostrarán en esta moneda",
     "refreshRates": "Actualizar Tasas",
     "refreshing": "Actualizando...",
-    "lastUpdated": "\u00daltima actualizaci\u00f3n",
+    "lastUpdated": "Última actualización",
     "never": "Nunca",
     "currentRates": "Tasas Actuales",
-    "noRates": "Sin tasas en cach\u00e9. Haz clic en actualizar.",
+    "noRates": "Sin tasas en caché. Haz clic en actualizar.",
     "rateFrom": "De",
     "rateTo": "Tasa"
   },
@@ -174,11 +184,13 @@
     "importSuccess": "Respaldo importado",
     "importError": "No se pudo importar el respaldo",
     "reset": "Restablecer Datos",
-    "resetWarning": "Esto eliminará permanentemente todos tus datos. Esta acción no se puede deshacer."
+    "resetWarning": "Esto eliminará permanentemente todos tus datos. Esta acción no se puede deshacer.",
+    "description": "Exporta un respaldo o importa una instantánea de la base de datos. Las importaciones requieren confirmación y reemplazan la base de datos actual."
   },
   "dataApis": {
     "description": "Claves API opcionales para actualizar precios de inversiones. Alpha Vantage se intenta primero y luego Finnhub; usa símbolos del proveedor como WALMEX.MX cuando estén soportados.",
     "alphaVantageHint": "Nivel gratuito: 25 solicitudes/día. Soporta muchos símbolos de EE. UU. y algunos internacionales/MX.",
     "finnhubHint": "Nivel gratuito: 60 solicitudes/min. Se usa como respaldo para acciones, ETFs, fondos, bonos o símbolos tipo CETES soportados."
-  }
+  },
+  "settingsDescription": "Idioma, moneda, actualizaciones, respaldos y controles locales de la app."
 }

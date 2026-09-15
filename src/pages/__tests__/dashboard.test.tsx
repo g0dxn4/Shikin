@@ -60,6 +60,7 @@ vi.mock('@/stores/ui-store', () => ({
 }))
 
 let mockAccounts: unknown[] = []
+let mockInvestments: unknown[] = []
 let mockTransactions: unknown[] = []
 let mockAccountError: string | null = null
 let mockTransactionError: string | null = null
@@ -74,6 +75,12 @@ vi.mock('@/stores/account-store', () => ({
     fetchError: mockAccountError,
     error: mockAccountError,
     fetch: mockFetchAccounts,
+  }),
+}))
+
+vi.mock('@/stores/investment-store', () => ({
+  useInvestmentStore: () => ({
+    investments: mockInvestments,
   }),
 }))
 
@@ -176,6 +183,7 @@ describe('Dashboard', () => {
     vi.clearAllMocks()
     window.localStorage.clear()
     mockAccounts = []
+    mockInvestments = []
     mockTransactions = []
     mockAccountError = null
     mockTransactionError = null
@@ -697,6 +705,111 @@ describe('Dashboard', () => {
   })
 
   describe('net worth current calculation', () => {
+    it('recalculates after an in-session account balance refresh', async () => {
+      mockAccounts = [
+        { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 195000 },
+      ]
+      mockNetWorth = 1195000
+      mockCalculateCurrent.mockResolvedValue(undefined)
+
+      const { rerender } = render(<Dashboard />)
+      expect(await screen.findByText('$11,950.00')).toBeInTheDocument()
+
+      mockAccounts = [
+        { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 205000 },
+      ]
+      mockNetWorth = 1205000
+      rerender(<Dashboard />)
+
+      expect(screen.queryByText('$11,950.00')).not.toBeInTheDocument()
+      expect(await screen.findByText('$12,050.00')).toBeInTheDocument()
+      expect(mockCalculateCurrent).toHaveBeenCalledTimes(2)
+    })
+
+    it('recalculates after an in-session investment refresh', async () => {
+      mockInvestments = [{ id: 'inv-1', shares: 1, currentPrice: 100000 }]
+      mockNetWorth = 1195000
+      mockCalculateCurrent.mockResolvedValue(undefined)
+
+      const { rerender } = render(<Dashboard />)
+      expect(await screen.findByText('$11,950.00')).toBeInTheDocument()
+
+      mockInvestments = [{ id: 'inv-1', shares: 2, currentPrice: 100000 }]
+      mockNetWorth = 1295000
+      rerender(<Dashboard />)
+
+      expect(screen.queryByText('$11,950.00')).not.toBeInTheDocument()
+      expect(await screen.findByText('$12,950.00')).toBeInTheDocument()
+      expect(mockCalculateCurrent).toHaveBeenCalledTimes(2)
+    })
+
+    it('serializes rapid recalculations, skips obsolete queued inputs, and withholds stale results', async () => {
+      const pending: Array<{
+        resolve: () => void
+        promise: Promise<void>
+      }> = []
+      let running = 0
+      let maximumRunning = 0
+      mockAccounts = [{ id: 'acc-1', balance: 100000 }]
+      mockNetWorth = 1195000
+      mockCalculateCurrent.mockImplementation(() => {
+        let resolve = () => {}
+        const promise = new Promise<void>((resolvePromise) => {
+          resolve = resolvePromise
+        })
+        pending.push({ resolve, promise })
+        running += 1
+        maximumRunning = Math.max(maximumRunning, running)
+        return promise.finally(() => {
+          running -= 1
+        })
+      })
+
+      const { rerender } = render(<Dashboard />)
+      await waitFor(() => expect(mockCalculateCurrent).toHaveBeenCalledTimes(1))
+
+      mockAccounts = [{ id: 'acc-1', balance: 200000 }]
+      rerender(<Dashboard />)
+      mockAccounts = [{ id: 'acc-1', balance: 300000 }]
+      mockNetWorth = 1395000
+      rerender(<Dashboard />)
+
+      expect(screen.queryByText('$11,950.00')).not.toBeInTheDocument()
+      expect(screen.getByRole('alert')).toHaveTextContent('currency.totalUnavailable')
+      expect(mockCalculateCurrent).toHaveBeenCalledTimes(1)
+
+      await act(async () => pending[0].resolve())
+      await waitFor(() => expect(mockCalculateCurrent).toHaveBeenCalledTimes(2))
+      expect(maximumRunning).toBe(1)
+      expect(screen.queryByText('$13,950.00')).not.toBeInTheDocument()
+
+      await act(async () => pending[1].resolve())
+      expect(await screen.findByText('$13,950.00')).toBeInTheDocument()
+      expect(mockCalculateCurrent).toHaveBeenCalledTimes(2)
+      expect(maximumRunning).toBe(1)
+    })
+
+    it('does not start obsolete queued work or publish an error after unmount', async () => {
+      let rejectFirst: ((error: Error) => void) | undefined
+      mockAccounts = [{ id: 'acc-1', balance: 100000 }]
+      mockCalculateCurrent.mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectFirst = reject
+          })
+      )
+
+      const { rerender, unmount } = render(<Dashboard />)
+      await waitFor(() => expect(mockCalculateCurrent).toHaveBeenCalledTimes(1))
+
+      mockAccounts = [{ id: 'acc-1', balance: 200000 }]
+      rerender(<Dashboard />)
+      unmount()
+      await act(async () => rejectFirst?.(new Error('Late net worth failure')))
+
+      expect(mockCalculateCurrent).toHaveBeenCalledTimes(1)
+    })
+
     it('withholds stale data while pending, then keeps a $10k unlinked holding in headline and chart current value', async () => {
       let resolveCalculation: (() => void) | undefined
       mockNetWorth = 195000
@@ -716,6 +829,7 @@ describe('Dashboard', () => {
       const pendingWarning = screen.getByRole('alert')
       expect(pendingWarning).toHaveTextContent('currency.totalUnavailable')
       expect(pendingWarning.previousElementSibling).toHaveTextContent('overview.netWorth')
+      await waitFor(() => expect(mockCalculateCurrent).toHaveBeenCalledTimes(1))
 
       // The complete calculation includes a valid $10,000 holding with no accountId.
       mockNetWorth = 1195000
@@ -808,7 +922,7 @@ describe('Dashboard', () => {
 
       render(<Dashboard />)
 
-      expect(mockCalculateCurrent).toHaveBeenCalled()
+      await waitFor(() => expect(mockCalculateCurrent).toHaveBeenCalled())
       expect(mockLoadHistory).toHaveBeenCalledWith('6m')
 
       await user.click(screen.getByRole('button', { name: 'overview.period.3m' }))

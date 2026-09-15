@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { Target, Plus, ArrowRight } from 'lucide-react'
@@ -12,6 +12,7 @@ import { ErrorState } from '@/components/ui/error-state'
 import { NativePanel, PageToolbar } from '@/components/ui/native-layout'
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
+import { useInvestmentStore } from '@/stores/investment-store'
 import { useTransactionStore } from '@/stores/transaction-store'
 import { useGoalStore } from '@/stores/goal-store'
 import { useCurrencyStore } from '@/stores/currency-store'
@@ -32,10 +33,12 @@ export function Dashboard() {
   const { t: tAnalytics } = useTranslation('analytics')
   const { openTransactionDialog } = useUIStore()
   const {
+    accounts,
     isLoading: accountsLoading,
     fetchError: accountsFetchError,
     fetch: fetchAccounts,
   } = useAccountStore()
+  const { investments } = useInvestmentStore()
   const {
     transactions,
     isLoading: txLoading,
@@ -63,8 +66,11 @@ export function Dashboard() {
   const [historyPeriod, setHistoryPeriod] = useState<NetWorthPeriod>('6m')
   const [netWorthCalculation, setNetWorthCalculation] = useState<{
     preferredCurrency: string | null
+    accounts: typeof accounts | null
+    investments: typeof investments | null
     error: string | null
-  }>({ preferredCurrency: null, error: null })
+  }>({ preferredCurrency: null, accounts: null, investments: null, error: null })
+  const netWorthCalculationQueue = useRef<Promise<void>>(Promise.resolve())
   const now = useMemo(() => dayjs(), [])
   const splitDateRange = useMemo(
     () => ({
@@ -89,22 +95,28 @@ export function Dashboard() {
 
   useEffect(() => {
     let active = true
-    void calculateCurrent()
-      .then(() => {
-        if (active) setNetWorthCalculation({ preferredCurrency, error: null })
-      })
-      .catch((error) => {
+    netWorthCalculationQueue.current = netWorthCalculationQueue.current.then(async () => {
+      if (!active) return
+      try {
+        await calculateCurrent()
+        if (active) {
+          setNetWorthCalculation({ preferredCurrency, accounts, investments, error: null })
+        }
+      } catch (error) {
         if (active) {
           setNetWorthCalculation({
             preferredCurrency,
+            accounts,
+            investments,
             error: getErrorMessage(error),
           })
         }
-      })
+      }
+    })
     return () => {
       active = false
     }
-  }, [calculateCurrent, preferredCurrency])
+  }, [accounts, calculateCurrent, investments, preferredCurrency])
 
   useEffect(() => {
     void loadHistory(historyPeriod).catch(() => {})
@@ -182,7 +194,10 @@ export function Dashboard() {
 
   const hasTransactionsLoadError = !!transactionsFetchError && recentTransactions.length === 0
   const isLoading = accountsLoading || txLoading
-  const netWorthCalculationCurrent = netWorthCalculation.preferredCurrency === preferredCurrency
+  const netWorthCalculationCurrent =
+    netWorthCalculation.preferredCurrency === preferredCurrency &&
+    netWorthCalculation.accounts === accounts &&
+    netWorthCalculation.investments === investments
   const currentNetWorthComplete =
     netWorthCalculationCurrent &&
     netWorthCurrency === preferredCurrency &&

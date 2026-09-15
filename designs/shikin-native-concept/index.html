@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shikin — native concept previews</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f3ef;
+      --text: #1d1d1f;
+      --muted: #6e6e73;
+      --line: #e4e1da;
+      --surface: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Geist", "SF Pro Text", "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 48px 24px 80px;
+    }
+    header { margin-bottom: 36px; }
+    h1 {
+      font-size: 28px;
+      font-weight: 600;
+      letter-spacing: -0.4px;
+      margin: 0 0 8px;
+    }
+    p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .note {
+      margin-top: 10px;
+      font-size: 12px;
+    }
+    section {
+      margin-top: 40px;
+    }
+    h2 {
+      font-size: 15px;
+      font-weight: 600;
+      margin: 0 0 12px;
+    }
+    figure {
+      margin: 0;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+    figcaption {
+      padding: 10px 14px 12px;
+      font-size: 12px;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+    }
+    .mobile {
+      max-width: 390px;
+    }
+    .latest {
+      margin-top: 28px;
+    }
+    .prototype-link {
+      display: block;
+      color: inherit;
+      text-decoration: none;
+      border-radius: 14px;
+    }
+    .prototype-link:focus-visible {
+      outline: 3px solid rgba(39, 111, 214, .35);
+      outline-offset: 4px;
+    }
+    .prototype-link figure {
+      transition: border-color .18s ease, transform .18s ease;
+    }
+    .prototype-link:hover figure {
+      border-color: #9bb9e1;
+      transform: translateY(-2px);
+    }
+    .prototype-meta {
+      padding: 15px 16px 17px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .prototype-meta strong { display: block; font-size: 14px; }
+    .prototype-meta span { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; }
+    .open-label {
+      flex: 0 0 auto;
+      color: #276fd6 !important;
+      font-weight: 600;
+      margin: 0 !important;
+    }
+    .preview-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px; }
+    .preview-grid figure { height:100%; }
+    .route-map { margin-top:12px;color:var(--muted);font-size:12px;line-height:1.7; }
+    @media(max-width:700px){.preview-grid{grid-template-columns:1fr}}
+    .badge {
+      display: inline-flex;
+      margin-bottom: 9px;
+      padding: 4px 7px;
+      border-radius: 6px;
+      color: #276fd6;
+      background: #e9f1fc;
+      font-size: 11px;
+      font-weight: 650;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .prototype-link figure { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Shikin</h1>
+      <p>Calm native finance workspace — interactive iteration and initial static concept.</p>
+      <p class="note">All values are deterministic sample data. Nothing connects to a real account.</p>
+    </header>
+
+    <section class="latest">
+      <span class="badge">LATEST ITERATION</span>
+      <h2>Interactive prototype · 19 routed screens · light and dark · responsive</h2>
+      <a class="prototype-link" href="prototype.html" aria-label="Open the Shikin interactive prototype">
+        <figure>
+          <img src="prototype-desktop.png" alt="Interactive Shikin overview prototype with a net-worth trend, category breakdown, and cash-flow chart" />
+          <div class="prototype-meta">
+            <div><strong>Open the complete design preview</strong><span>19 hash-routed screens, six desktop groups, mobile More navigation, and sample interactions</span></div>
+            <span class="open-label">Launch →</span>
+          </div>
+        </figure>
+      </a>
+      <p class="route-map"><strong>Routes:</strong> Overview · Transactions / Categories · Accounts / Investments / Receivables · Budgets / Goals / Bills / Calendar / Debt payoff / Forecast · Insights / Reports / Net worth / Spending insights / Heatmap · Preferences / Extensions</p>
+    </section>
+
+    <section>
+      <h2>Representative interactive screens</h2>
+      <div class="preview-grid">
+        <figure><img src="prototype-accounts.png" alt="Accounts screen with reconciled balances and account mix"><figcaption>Accounts · light · 1440×900</figcaption></figure>
+        <figure><img src="prototype-planning.png" alt="Budget planning screen with actual spending progress"><figcaption>Planning / Budgets · light · 1440×900</figcaption></figure>
+        <figure><img src="prototype-insights.png" alt="Spending heatmap with selected day details"><figcaption>Insights / Spending heatmap · light · 1440×900</figcaption></figure>
+        <figure><img src="prototype-settings.png" alt="Preferences screen with appearance and sample export controls"><figcaption>Settings / Preferences · light · 1440×900</figcaption></figure>
+      </div>
+    </section>
+
+    <section>
+      <h2>Initial static sketch · Overview · Light · 1440×900</h2>
+      <figure>
+        <img src="overview-light.png" alt="Shikin desktop overview in light mode, September 2026" />
+        <figcaption>overview-light.png · root A9xtO</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Initial static sketch · Overview · Dark · 1440×900</h2>
+      <figure>
+        <img src="overview-dark.png" alt="Shikin desktop overview in dark graphite mode" />
+        <figcaption>overview-dark.png · root ogVPN</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Initial static sketch · Transactions · Light · 1440×900</h2>
+      <figure>
+        <img src="transactions-light.png" alt="Shikin desktop transactions ledger with pagination" />
+        <figcaption>transactions-light.png · root NHP2H</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Initial static sketch · Overview · Mobile · 390×844</h2>
+      <figure class="mobile">
+        <img src="overview-mobile.png" alt="Shikin mobile overview companion" />
+        <figcaption>overview-mobile.png · root Zw7wX</figcaption>
+      </figure>
+    </section>
+  </main>
+</body>
+</html>

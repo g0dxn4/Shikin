@@ -5693,8 +5693,11 @@ describe('CLI tool validation regressions', () => {
             amount: 100000,
             type: 'expense',
             frequency: 'monthly',
+            anchor_kind: 'fixed_day',
+            anchor_day: Number(today.slice(-2)),
             next_date: today,
-            end_date: null,
+            // This fixture represents one expected occurrence, regardless of the current month.
+            end_date: today,
             account_id: 'acct-1',
             category_id: 'cat-rent',
             notes: null,

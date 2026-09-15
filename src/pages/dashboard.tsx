@@ -1,31 +1,34 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
-import { TrendingUp, TrendingDown, Target, Plus, ArrowRight } from 'lucide-react'
+import { Target, Plus, ArrowRight } from 'lucide-react'
 import dayjs from 'dayjs'
-import relativeTime from 'dayjs/plugin/relativeTime'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { ErrorState } from '@/components/ui/error-state'
+import { NativePanel, PageToolbar } from '@/components/ui/native-layout'
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
 import { useTransactionStore } from '@/stores/transaction-store'
 import { useGoalStore } from '@/stores/goal-store'
 import { useCurrencyStore } from '@/stores/currency-store'
+import { useNetWorthStore } from '@/stores/net-worth-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import { formatMoney } from '@/lib/money'
 import { buildDashboardAnalytics } from '@/lib/dashboard-analytics'
 import { useDashboardSplits } from '@/components/dashboard/use-dashboard-splits'
 import { SpendingAnalytics } from '@/components/dashboard/spending-analytics'
-
-dayjs.extend(relativeTime)
+import { OverviewNetWorth, type NetWorthPeriod } from '@/components/dashboard/overview-net-worth'
+import { OverviewCategories } from '@/components/dashboard/overview-categories'
+import { OverviewCashFlow } from '@/components/dashboard/overview-cash-flow'
 
 export function Dashboard() {
   const { t } = useTranslation('dashboard')
   const { t: tTx } = useTranslation('transactions')
+  const { t: tAnalytics } = useTranslation('analytics')
   const { openTransactionDialog } = useUIStore()
   const {
     accounts,
@@ -47,6 +50,8 @@ export function Dashboard() {
     getTotalBalanceInPreferred,
     loadRates,
   } = useCurrencyStore()
+  const { history, loadHistory, calculateCurrent } = useNetWorthStore()
+  const [historyPeriod, setHistoryPeriod] = useState<NetWorthPeriod>('6m')
   const now = useMemo(() => dayjs(), [])
   const splitDateRange = useMemo(
     () => ({
@@ -68,6 +73,14 @@ export function Dashboard() {
     void fetchGoals().catch(() => {})
     void loadRates().catch(() => {})
   }, [fetchAccounts, fetchTransactions, fetchGoals, loadRates])
+
+  useEffect(() => {
+    void calculateCurrent().catch(() => {})
+  }, [calculateCurrent])
+
+  useEffect(() => {
+    void loadHistory(historyPeriod).catch(() => {})
+  }, [loadHistory, historyPeriod])
 
   const totalBalanceResult = useMemo(
     () => getTotalBalanceInPreferred(accounts),
@@ -130,6 +143,9 @@ export function Dashboard() {
     analytics.cashFlowConversion.kind === 'incomplete'
       ? analytics.cashFlowConversion.missingCurrencies
       : []
+  const cashFlowUnavailableLabel = cashFlowDisplayable
+    ? undefined
+    : `${t('currency.derivedUnavailable')}: ${cashFlowMissingCurrencies.join(', ')}`
 
   const savingsRate = useMemo(() => {
     if (monthlyIncome <= 0) return 0
@@ -138,6 +154,15 @@ export function Dashboard() {
 
   const incomeDelta = monthlyIncome - previousIncome
   const expenseDelta = monthlyExpenses - previousExpenses
+  const savedAmount = monthlyIncome - monthlyExpenses
+  const monthStart = now.startOf('month').format('YYYY-MM-DD')
+  const monthEnd = now.format('YYYY-MM-DD')
+  const categoryTotal = analytics.categories.currentMonthBreakdown.reduce(
+    (sum, item) => sum + item.amount,
+    0
+  )
+  const categoryConversionIncomplete = analytics.categories.conversion.kind === 'incomplete'
+  const compactCashFlowMonths = analytics.trend.months.slice(-6)
 
   const recentTransactions = useMemo(() => transactions.slice(0, 8), [transactions])
   const dashboardErrors = [
@@ -152,29 +177,23 @@ export function Dashboard() {
 
   const hasTransactionsLoadError = !!transactionsFetchError && recentTransactions.length === 0
   const isLoading = accountsLoading || txLoading
+  const historyCurrency = preferredCurrency
+  const lastHistoryDate = history.length > 0 ? history[history.length - 1]?.date : null
 
   if (isLoading) {
     return <DashboardSkeleton />
   }
 
   return (
-    <div className="animate-fade-in-up page-content">
-      <div className="liquid-card page-header min-h-[72px] p-3 sm:p-4">
-        <div>
-          <h1 className="font-heading text-2xl font-bold tracking-tight md:text-[28px]">
-            Good evening
-          </h1>
-          <p className="text-muted-foreground mt-1 text-sm font-medium">
-            Your money is calm, current, and completely local.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <div className="page-content">
+      <PageToolbar
+        actions={
           <Button onClick={() => openTransactionDialog()}>
             <Plus size={16} />
-            Add Transaction
+            {t('quickActions.addTransaction')}
           </Button>
-        </div>
-      </div>
+        }
+      />
 
       <ErrorBanner
         title="Some dashboard data couldn’t be loaded"
@@ -185,115 +204,108 @@ export function Dashboard() {
         }}
       />
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(280px,0.95fr)]">
-        <div className="liquid-hero min-h-[284px] p-7 sm:p-8">
-          <div className="flex h-full flex-col justify-between gap-12">
-            <div>
-              <p className="text-muted-foreground text-sm font-bold">Net Worth</p>
-              {totalBalanceResult.complete ? (
-                <p className="mt-10 font-mono text-4xl font-bold tracking-[-0.08em] sm:text-5xl md:text-[54px]">
-                  {formatMoney(
-                    totalBalanceResult.amountCentavos,
-                    totalBalanceResult.preferredCurrency
-                  )}
-                </p>
-              ) : (
-                <div
-                  className="border-warning/30 bg-warning/8 mt-8 max-w-xl rounded-xl border px-4 py-3"
-                  role="alert"
-                >
-                  <p className="text-warning font-semibold">{t('currency.totalUnavailable')}</p>
-                  <p className="text-muted-foreground mt-1 text-sm">
-                    {totalBalanceResult.reason === 'invalid_currency_data'
-                      ? t('currency.invalidData', { details: invalidCurrencyDetails })
-                      : t('currency.missingRates', {
-                          currencies: totalBalanceResult.missingCurrencies.join(', '),
-                        })}
-                  </p>
-                </div>
-              )}
-            </div>
-            <div className="flex flex-col gap-2 text-sm font-bold sm:flex-row sm:items-center sm:justify-between">
-              <span
-                className={
-                  cashFlowDisplayable
-                    ? savingsRate >= 0
-                      ? 'text-success'
-                      : 'text-warning'
-                    : 'text-warning'
-                }
-              >
-                {cashFlowDisplayable ? (
-                  <>
-                    <span>{savingsRate}%</span> savings rate
-                  </>
-                ) : (
-                  t('currency.derivedUnavailable')
-                )}
-              </span>
-              <span className="text-muted-foreground text-xs font-semibold">Updated just now</span>
-            </div>
-          </div>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-          <MetricCard
-            icon={<TrendingUp size={16} />}
-            iconColor="text-success"
-            label={t('cards.monthlyIncome')}
-            value={cashFlowDisplayable ? formatMoney(monthlyIncome, cashFlowDisplayCurrency) : '—'}
-            valueColor="text-success"
-            subtitle={
-              cashFlowDisplayable
-                ? `${incomeDelta >= 0 ? '+' : '-'}${formatMoney(Math.abs(incomeDelta), cashFlowDisplayCurrency)} vs last month`
-                : `${t('currency.derivedUnavailable')}: ${cashFlowMissingCurrencies.join(', ')}`
-            }
-          />
-          <MetricCard
-            icon={<TrendingDown size={16} />}
-            iconColor="text-warning"
-            label={t('cards.monthlyExpenses')}
-            value={
-              cashFlowDisplayable ? formatMoney(monthlyExpenses, cashFlowDisplayCurrency) : '—'
-            }
-            valueColor="text-warning"
-            subtitle={
-              cashFlowDisplayable
-                ? `${expenseDelta >= 0 ? '+' : '-'}${formatMoney(Math.abs(expenseDelta), cashFlowDisplayCurrency)} vs last month`
-                : `${t('currency.derivedUnavailable')}: ${cashFlowMissingCurrencies.join(', ')}`
-            }
-          />
-        </div>
+      <OverviewNetWorth
+        currentComplete={totalBalanceResult.complete}
+        currentAmount={totalBalanceResult.complete ? totalBalanceResult.amountCentavos : 0}
+        currentCurrency={
+          totalBalanceResult.complete ? totalBalanceResult.preferredCurrency : preferredCurrency
+        }
+        unavailableMessage={
+          totalBalanceResult.complete
+            ? undefined
+            : totalBalanceResult.reason === 'invalid_currency_data'
+              ? t('currency.invalidData', { details: invalidCurrencyDetails })
+              : t('currency.missingRates', {
+                  currencies: totalBalanceResult.missingCurrencies.join(', '),
+                })
+        }
+        income={cashFlowDisplayable ? formatMoney(monthlyIncome, cashFlowDisplayCurrency) : '—'}
+        incomeDetail={
+          cashFlowDisplayable
+            ? `${incomeDelta >= 0 ? '+' : '-'}${formatMoney(Math.abs(incomeDelta), cashFlowDisplayCurrency)} vs last month`
+            : cashFlowUnavailableLabel
+        }
+        spent={cashFlowDisplayable ? formatMoney(monthlyExpenses, cashFlowDisplayCurrency) : '—'}
+        spentDetail={
+          cashFlowDisplayable
+            ? `${expenseDelta >= 0 ? '+' : '-'}${formatMoney(Math.abs(expenseDelta), cashFlowDisplayCurrency)} vs last month`
+            : cashFlowUnavailableLabel
+        }
+        saved={cashFlowDisplayable ? formatMoney(savedAmount, cashFlowDisplayCurrency) : '—'}
+        savingsRate={cashFlowDisplayable ? `${savingsRate}%` : undefined}
+        savedTone={!cashFlowDisplayable ? 'muted' : savedAmount >= 0 ? 'positive' : 'negative'}
+        cashFlowLabel={t('overview.currentMonthCashFlow', { month: now.format('MMMM YYYY') })}
+        asOfLabel={t('overview.asOf', {
+          date: dayjs(lastHistoryDate ?? now).format('MMMM D, YYYY'),
+        })}
+        history={history}
+        period={historyPeriod}
+        onPeriodChange={setHistoryPeriod}
+        historyCurrency={historyCurrency}
+        emptyHistoryMessage={
+          history.length === 1
+            ? tAnalytics('netWorth.firstSnapshot')
+            : tAnalytics('netWorth.noHistory')
+        }
+      />
+
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
+        <OverviewCategories
+          items={analytics.categories.currentMonthBreakdown}
+          total={categoryTotal}
+          displayCurrency={analytics.categories.conversion.currency}
+          comparisonLabel={
+            cashFlowDisplayable
+              ? `${expenseDelta >= 0 ? '+' : '-'}${formatMoney(Math.abs(expenseDelta), cashFlowDisplayCurrency)} vs last month`
+              : (cashFlowUnavailableLabel ?? t('currency.derivedUnavailable'))
+          }
+          dateFrom={monthStart}
+          dateTo={monthEnd}
+          unavailable={categoryConversionIncomplete}
+          unavailableMessage={
+            categoryConversionIncomplete
+              ? `${t('currency.derivedUnavailable')}: ${analytics.categories.conversion.missingCurrencies.join(', ')}`
+              : undefined
+          }
+        />
+        <OverviewCashFlow
+          months={compactCashFlowMonths}
+          displayCurrency={analytics.trend.conversion.currency}
+          unavailable={analytics.trend.conversion.kind === 'incomplete'}
+          unavailableMessage={
+            analytics.trend.conversion.kind === 'incomplete'
+              ? `${t('currency.derivedUnavailable')}: ${analytics.trend.conversion.missingCurrencies.join(', ')}`
+              : undefined
+          }
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
-        <div className="liquid-card min-h-[572px] p-5">
-          <div className="mb-5 flex items-center justify-between gap-3">
-            <h2 className="font-heading text-[23px] font-bold tracking-tight">
-              {t('analytics.spendingPace')}
-            </h2>
+        <NativePanel className="p-5">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 className="text-base font-semibold">{t('analytics.spendingPace')}</h2>
             <Link
               to="/transactions"
-              className="text-muted-foreground hover:text-foreground text-xs font-semibold transition-colors"
+              className="text-muted-foreground hover:text-foreground text-xs font-semibold"
             >
               {t('charts.drilldownTransactions')}
             </Link>
           </div>
-
           <SpendingAnalytics
             analytics={analytics}
             isLoading={txLoading || splitsLoading}
             categoriesError={splitsFetchError}
           />
-        </div>
+        </NativePanel>
 
-        <div className="liquid-card min-h-[572px] p-5">
-          <div className="mb-5 flex items-center justify-between gap-3">
-            <h2 className="font-heading text-[23px] font-bold tracking-tight">Recent activity</h2>
+        <NativePanel className="p-5">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 className="text-base font-semibold">{t('recentActivity')}</h2>
             <Link
               to="/transactions"
-              className="text-muted-foreground hover:text-foreground text-xs font-semibold transition-colors"
+              className="text-muted-foreground hover:text-foreground text-xs font-semibold"
             >
-              Open
+              {t('openActivity')}
             </Link>
           </div>
           {recentTransactions.length === 0 ? (
@@ -316,21 +328,20 @@ export function Dashboard() {
               </div>
             )
           ) : (
-            <div className="divide-y divide-white/[0.08]">
+            <div className="divide-border divide-y">
               {recentTransactions.map((tx) => (
                 <RecentTransactionRow key={tx.id} transaction={tx} compact />
               ))}
             </div>
           )}
-        </div>
+        </NativePanel>
       </div>
 
-      {/* Goals preview */}
       {goals.length > 0 && (
         <div className="space-y-3">
-          <div className="page-header">
-            <h2 className="font-heading text-lg font-semibold">
-              <Target size={16} className="text-primary mr-2 inline" />
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-base font-semibold">
+              <Target size={16} className="text-accent mr-2 inline" />
               {t('goals.title', { ns: 'goals', defaultValue: 'Savings Goals' })}
             </h2>
             <Button variant="ghost" size="sm" asChild>
@@ -343,12 +354,16 @@ export function Dashboard() {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {goals.slice(0, 3).map((goal) => {
               const progressColor =
-                goal.progress >= 75 ? '#34D399' : goal.progress >= 40 ? '#F59E0B' : '#F87171'
+                goal.progress >= 75
+                  ? 'var(--color-success)'
+                  : goal.progress >= 40
+                    ? 'var(--color-warning)'
+                    : 'var(--color-destructive)'
               return (
-                <div key={goal.id} className="liquid-card p-5">
+                <NativePanel key={goal.id} className="p-5">
                   <div className="mb-2 flex items-center gap-2">
-                    <span className="text-base">{goal.icon || '🎯'}</span>
-                    <h3 className="font-heading truncate text-sm font-semibold">{goal.name}</h3>
+                    {goal.icon ? <span className="text-base">{goal.icon}</span> : null}
+                    <h3 className="truncate text-sm font-semibold">{goal.name}</h3>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="relative h-10 w-10 shrink-0">
@@ -358,7 +373,7 @@ export function Dashboard() {
                           cy="20"
                           r="16"
                           fill="none"
-                          stroke="rgba(255,255,255,0.08)"
+                          stroke="var(--color-border)"
                           strokeWidth="4"
                         />
                         <circle
@@ -373,7 +388,7 @@ export function Dashboard() {
                         />
                       </svg>
                       <span
-                        className="font-heading absolute inset-0 flex items-center justify-center text-[10px] font-bold"
+                        className="absolute inset-0 flex items-center justify-center text-[10px] font-bold"
                         style={{ color: progressColor }}
                       >
                         {goal.progress}%
@@ -388,7 +403,7 @@ export function Dashboard() {
                       </p>
                     </div>
                   </div>
-                </div>
+                </NativePanel>
               )
             })}
           </div>
@@ -398,56 +413,14 @@ export function Dashboard() {
   )
 }
 
-function MetricCard({
-  icon,
-  iconColor,
-  label,
-  value,
-  valueColor,
-  subtitle,
-}: {
-  icon: React.ReactNode
-  iconColor: string
-  label: string
-  value: string
-  valueColor?: string
-  subtitle?: string
-}) {
-  return (
-    <div className="metric-card p-5">
-      <div className="text-muted-foreground mb-2 flex items-center gap-2">
-        <span className={iconColor}>{icon}</span>
-        <span className="font-mono text-[10px] tracking-wider uppercase">{label}</span>
-      </div>
-      <p className={`font-heading text-2xl font-bold tracking-tight ${valueColor || ''}`}>
-        {value}
-      </p>
-      {subtitle && <p className="text-muted-foreground mt-0.5 font-mono text-[10px]">{subtitle}</p>}
-    </div>
-  )
-}
-
 function DashboardSkeleton() {
   return (
     <div className="page-content">
-      <Skeleton className="h-8 w-32" />
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="liquid-card space-y-3 p-5">
-            <Skeleton className="h-3 w-24" />
-            <Skeleton className="h-8 w-32" />
-          </div>
-        ))}
-      </div>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="liquid-card p-5">
-          <Skeleton className="h-4 w-32" />
-          <Skeleton className="mt-4 h-48 w-full" />
-        </div>
-        <div className="liquid-card p-5">
-          <Skeleton className="h-4 w-24" />
-          <Skeleton className="mt-4 h-48 w-full" />
-        </div>
+      <Skeleton className="h-10 w-40" />
+      <Skeleton className="h-72 w-full" />
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-64 w-full" />
       </div>
     </div>
   )
@@ -461,12 +434,7 @@ function RecentTransactionRow({
   compact?: boolean
 }) {
   return (
-    <div
-      className={cn(
-        'flex items-center gap-3 rounded-[22px] transition-colors hover:bg-white/[0.04]',
-        compact ? 'px-0 py-4' : 'px-4 py-3'
-      )}
-    >
+    <div className={cn('flex items-center gap-3 rounded-xl', compact ? 'px-0 py-4' : 'px-4 py-3')}>
       {!compact &&
         (tx.category_color ? (
           <span
@@ -491,6 +459,7 @@ function RecentTransactionRow({
       </div>
       <div className="text-right">
         <span
+          data-amount-type={tx.type}
           className={`font-heading text-sm font-semibold ${
             tx.type === 'income' ? 'text-success' : 'text-destructive'
           }`}

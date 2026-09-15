@@ -60,25 +60,25 @@ export function SpendingAnalytics({
 
   if (isLoading || !analytics) {
     return (
-      <div className="rounded-[22px] border border-white/[0.06] bg-white/[0.035] p-4">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <p className="text-muted-foreground text-xs font-bold tracking-[0.14em] uppercase">
+      <div>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-muted-foreground text-xs font-semibold tracking-[0.14em] uppercase">
             {t('analytics.spendingPace')}
           </p>
-          <div className="flex rounded-full border border-white/[0.08] bg-black/20 p-1">
-            {tabs.map(([tabMode]) => (
+          <div className="border-border bg-muted flex rounded-lg border p-1">
+            {tabs.map(([tabMode, label]) => (
               <button
                 key={tabMode}
                 type="button"
                 disabled
-                className="text-muted-foreground rounded-full px-2.5 py-1 font-mono text-[10px] font-bold"
+                className="text-muted-foreground rounded-md px-2.5 py-1 text-[11px] font-semibold"
               >
-                {tabs.find(([m]) => m === tabMode)?.[1]}
+                {label}
               </button>
             ))}
           </div>
         </div>
-        <div className="bg-muted/30 h-64 animate-pulse rounded-2xl" />
+        <div className="bg-muted h-64 animate-pulse rounded-xl" />
       </div>
     )
   }
@@ -105,13 +105,13 @@ export function SpendingAnalytics({
   const categoriesUnavailable = mode === 'categories' && categoriesError
 
   return (
-    <div className="rounded-[22px] border border-white/[0.06] bg-white/[0.035] p-4">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <p className="text-muted-foreground text-xs font-bold tracking-[0.14em] uppercase">
+    <div>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-muted-foreground text-xs font-semibold tracking-[0.14em] uppercase">
           {t('analytics.spendingPace')}
         </p>
         <div
-          className="flex rounded-full border border-white/[0.08] bg-black/20 p-1"
+          className="border-border bg-muted flex rounded-lg border p-1"
           role="tablist"
           aria-label={t('analytics.spendingModes')}
         >
@@ -123,9 +123,9 @@ export function SpendingAnalytics({
               aria-selected={mode === tabMode}
               onClick={() => handleSetMode(tabMode)}
               className={cn(
-                'rounded-full px-2.5 py-1 font-mono text-[10px] font-bold transition-colors',
+                'rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors',
                 mode === tabMode
-                  ? 'bg-accent-hover text-white'
+                  ? 'bg-surface text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground'
               )}
             >
@@ -137,7 +137,7 @@ export function SpendingAnalytics({
 
       {categoriesUnavailable && (
         <div
-          className="border-warning/30 bg-warning/8 text-warning rounded-2xl border p-4 text-center text-sm"
+          className="border-warning/30 bg-warning/10 text-warning rounded-xl border p-4 text-center text-sm"
           role="alert"
         >
           {t('analytics.categoriesUnavailable')}: {categoriesError}
@@ -146,7 +146,7 @@ export function SpendingAnalytics({
 
       {!categoriesUnavailable && conversion.kind === 'incomplete' && !hasEligibleData && (
         <div
-          className="border-warning/30 bg-warning/8 text-warning rounded-2xl border p-4 text-center text-sm"
+          className="border-warning/30 bg-warning/10 text-warning rounded-xl border p-4 text-center text-sm"
           role="status"
         >
           {conversionNotice ?? t('analytics.noEligibleData')}
@@ -155,7 +155,7 @@ export function SpendingAnalytics({
 
       {!categoriesUnavailable && conversion.kind === 'incomplete' && hasEligibleData && (
         <div
-          className="border-warning/30 bg-warning/8 text-warning rounded-2xl border p-4 text-center text-sm"
+          className="border-warning/30 bg-warning/10 text-warning rounded-xl border p-4 text-center text-sm"
           role="alert"
         >
           {conversionNotice}

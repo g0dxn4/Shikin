@@ -1,7 +1,14 @@
 import { useTranslation } from 'react-i18next'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts'
 import { formatMoney } from '@/lib/money'
-import { CHART_TOOLTIP_STYLE, CHART_ITEM_STYLE, CHART_LABEL_STYLE } from '@/lib/constants'
+import {
+  CHART_AXIS_COLOR,
+  CHART_GRID_COLOR,
+  CHART_ITEM_STYLE,
+  CHART_LABEL_STYLE,
+  CHART_LEGEND_STYLE,
+  CHART_TOOLTIP_STYLE,
+} from '@/lib/constants'
 import type { CategoriesResult } from '@/lib/dashboard-analytics'
 import { SafeChart } from '@/components/ui/safe-chart'
 
@@ -55,7 +62,7 @@ export function SpendingCategoriesPanel({
     <div className="space-y-4">
       {notice && (
         <div
-          className="border-warning/30 bg-warning/8 text-warning rounded-xl border px-3 py-2 text-xs font-semibold"
+          className="border-warning/30 bg-warning/10 text-warning rounded-xl border px-3 py-2 text-xs font-semibold"
           role="status"
         >
           {notice}
@@ -64,7 +71,7 @@ export function SpendingCategoriesPanel({
 
       {categories.splitIntegrityNotices.length > 0 && (
         <div
-          className="border-warning/30 bg-warning/8 text-warning rounded-xl border px-3 py-2 text-xs font-semibold"
+          className="border-warning/30 bg-warning/10 text-warning rounded-xl border px-3 py-2 text-xs font-semibold"
           role="status"
         >
           {t('analytics.splitIntegrityNotice', {
@@ -81,18 +88,18 @@ export function SpendingCategoriesPanel({
       >
         <SafeChart>
           <BarChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+            <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} />
             <XAxis
               dataKey="label"
               axisLine={false}
               tickLine={false}
-              tick={{ fill: '#A9A9B4', fontSize: 11 }}
+              tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
               interval="preserveStartEnd"
             />
             <YAxis
               axisLine={false}
               tickLine={false}
-              tick={{ fill: '#A9A9B4', fontSize: 11 }}
+              tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
               tickFormatter={(v) => formatMoney(Number(v), displayCurrency)}
               width={64}
             />
@@ -107,7 +114,7 @@ export function SpendingCategoriesPanel({
               }}
             />
             <Legend
-              wrapperStyle={{ fontSize: 11, color: '#A9A9B4' }}
+              wrapperStyle={{ ...CHART_LEGEND_STYLE, fontSize: 11 }}
               formatter={(value) => {
                 const key = String(value ?? '')
                 return categories.categoryMeta[key]?.name ?? key
@@ -119,7 +126,7 @@ export function SpendingCategoriesPanel({
                 dataKey={categoryId}
                 name={categoryId}
                 stackId="total"
-                fill={categories.categoryMeta[categoryId]?.color ?? '#9CA3AF'}
+                fill={categories.categoryMeta[categoryId]?.color ?? 'var(--color-muted-foreground)'}
                 radius={[0, 0, 0, 0]}
                 isAnimationActive={false}
               />
@@ -153,7 +160,7 @@ export function SpendingCategoriesPanel({
       </table>
 
       <div className="space-y-3">
-        <p className="text-muted-foreground text-xs font-bold tracking-wider uppercase">
+        <p className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
           {t('analytics.topCategories')}
         </p>
         {categories.currentMonthBreakdown.length === 0 ? (
@@ -168,7 +175,7 @@ export function SpendingCategoriesPanel({
                 <div className="flex min-w-0 items-center gap-2">
                   <span
                     className="h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: item.color ?? '#9CA3AF' }}
+                    style={{ backgroundColor: item.color ?? 'var(--color-muted-foreground)' }}
                   />
                   <span className="truncate text-sm font-semibold">{item.name}</span>
                 </div>

@@ -6,14 +6,52 @@
     "description": "Comienza agregando una cuenta y tu primera transacción.",
     "addAccount": "Agregar Cuenta"
   },
+  "recentActivity": "Actividad reciente",
+  "openActivity": "Abrir",
   "cards": {
     "totalBalance": "Balance Total",
     "totalBalanceConverted": "Balance Total (convertido)",
     "monthlyIncome": "Ingresos Mensuales",
     "monthlyExpenses": "Gastos Mensuales",
     "savings": "Tasa de Ahorro",
+    "income": "Ingresos",
+    "spent": "Gastado",
+    "saved": "Ahorrado",
     "incomeVsLastMonth": "Ingresos vs mes anterior",
     "expensesVsLastMonth": "Gastos vs mes anterior"
+  },
+  "errors": {
+    "title": "No se pudo cargar parte de los datos del inicio",
+    "accounts": "Cuentas: {{message}}",
+    "transactions": "Transacciones: {{message}}",
+    "goals": "Metas: {{message}}",
+    "splits": "Divisiones de transacciones: {{message}}",
+    "rates": "Tipos de cambio: {{message}}",
+    "recentTransactions": "No se pudieron cargar las transacciones recientes"
+  },
+  "overview": {
+    "netWorth": "Patrimonio neto",
+    "netWorthHistory": "Historial de saldo",
+    "historyPeriod": "Rango de patrimonio neto",
+    "asOf": "Al {{date}}",
+    "changeOverPeriod": "{{delta}} en {{period}}",
+    "cashFlow": "Flujo de caja",
+    "cashFlowSubtitle": "Ingresos y gastos por mes",
+    "currentMonthCashFlow": "Flujo de caja de {{month}}",
+    "spendingByCategory": "Gastos por categoría",
+    "categoryHint": "Selecciona una categoría para ver transacciones",
+    "showAllCategories": "Mostrar todas las categorías",
+    "showFewerCategories": "Mostrar menos categorías",
+    "showingCategories": "Mostrando {{shown}} categorías · el total incluye todas",
+    "viewChartData": "Ver datos del gráfico",
+    "focusDate": "Enfoca o apunta una fecha para ver su saldo",
+    "chartTitle": "Patrimonio neto en el tiempo",
+    "period": {
+      "3m": "3M",
+      "6m": "6M",
+      "1y": "1A",
+      "all": "TODO"
+    }
   },
   "currency": {
     "totalUnavailable": "Patrimonio neto no disponible",

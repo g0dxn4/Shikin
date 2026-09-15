@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
+import { NativePanel, PageToolbar } from '@/components/ui/native-layout'
 import { useSpendingInsightsStore } from '@/stores/spending-insights-store'
 import type { SpendingComparison, SpendingInsight } from '@/stores/spending-insights-store'
 import { formatMoney } from '@/lib/money'
@@ -40,47 +41,32 @@ export function SpendingInsights() {
     loadComparisons()
   }, [loadComparisons])
 
-  if (isLoading) {
-    return (
-      <div className="animate-fade-in-up page-content" role="status" aria-busy="true">
-        <span className="sr-only">Loading</span>
-        <div className="liquid-card page-header min-h-[72px] p-3 sm:p-4">
-          <div>
-            <h1 className="font-heading text-[28px] font-bold tracking-tight">
-              {t('spendingInsights.title')}
-            </h1>
-            <p className="text-muted-foreground mt-1 text-sm">
-              {t('spendingInsights.description')}
-            </p>
-          </div>
-        </div>
-        <div className="space-y-4">
-          <Skeleton className="h-12 w-full" />
-          <Skeleton className="h-64 w-full" />
-        </div>
-      </div>
-    )
-  }
-
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'insights', label: t('spendingInsights.tabs.insights'), icon: <Lightbulb size={14} /> },
     { id: 'mom', label: t('spendingInsights.tabs.mom'), icon: <Calendar size={14} /> },
     { id: 'yoy', label: t('spendingInsights.tabs.yoy'), icon: <CalendarRange size={14} /> },
   ]
 
-  return (
-    <div className="animate-fade-in-up page-content">
-      <div className="liquid-card page-header min-h-[72px] p-3 sm:p-4">
-        <div>
-          <h1 className="font-heading text-[28px] font-bold tracking-tight">
-            {t('spendingInsights.title')}
-          </h1>
-          <p className="text-muted-foreground mt-1 text-sm">{t('spendingInsights.description')}</p>
-        </div>
+  if (isLoading) {
+    return (
+      <div className="page-content" role="status" aria-busy="true">
+        <span className="sr-only">Loading</span>
+        <Skeleton className="h-12 w-full" />
+        <Skeleton className="h-64 w-full" />
       </div>
+    )
+  }
+
+  return (
+    <div className="page-content">
+      <PageToolbar
+        leading={
+          <p className="text-muted-foreground text-sm">{t('spendingInsights.description')}</p>
+        }
+      />
 
       <div
-        className="liquid-card flex gap-1 p-1"
+        className="border-border bg-muted flex gap-1 rounded-xl border p-1"
         role="group"
         aria-label={t('spendingInsights.title')}
       >
@@ -91,10 +77,10 @@ export function SpendingInsights() {
             aria-pressed={tab === tItem.id}
             onClick={() => setTab(tItem.id)}
             className={cn(
-              'flex flex-1 items-center justify-center gap-1.5 rounded-[14px] px-3 py-2.5 font-mono text-xs transition-colors',
-              'focus-visible:ring-accent focus-visible:ring-2 focus-visible:outline-none',
+              'flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-xs font-semibold transition-colors',
+              'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
               tab === tItem.id
-                ? 'bg-accent text-accent-foreground'
+                ? 'bg-surface text-foreground shadow-sm'
                 : 'text-muted-foreground hover:text-foreground'
             )}
           >
@@ -104,7 +90,7 @@ export function SpendingInsights() {
         ))}
       </div>
 
-      <div role="region" aria-label={tabs.find((t) => t.id === tab)?.label}>
+      <div role="region" aria-label={tabs.find((item) => item.id === tab)?.label}>
         {tab === 'insights' && <InsightsTab insights={insights} />}
         {tab === 'mom' && (
           <ComparisonTab
@@ -129,18 +115,16 @@ export function SpendingInsights() {
   )
 }
 
-// ── Insights Tab ──────────────────────────────────────────────────────────
-
 function InsightsTab({ insights }: { insights: SpendingInsight[] }) {
   const { t } = useTranslation('analytics')
   if (insights.length === 0) {
     return (
-      <div className="liquid-hero flex h-64 items-center justify-center p-5">
+      <NativePanel className="flex h-64 items-center justify-center p-5">
         <div className="text-center">
           <Lightbulb size={24} className="text-muted-foreground mx-auto mb-2" aria-hidden="true" />
           <p className="text-muted-foreground text-sm">{t('spendingInsights.insightsEmpty')}</p>
         </div>
-      </div>
+      </NativePanel>
     )
   }
 
@@ -158,7 +142,7 @@ function InsightCard({ insight }: { insight: SpendingInsight }) {
   const severityStyles = {
     alert: 'border-destructive/20 bg-destructive/5',
     warning: 'border-warning/20 bg-warning/5',
-    info: 'border-accent/10 bg-accent/5',
+    info: 'border-accent/10 bg-accent-muted/40',
   }
 
   const severityIcon = {
@@ -181,14 +165,9 @@ function InsightCard({ insight }: { insight: SpendingInsight }) {
   }
 
   return (
-    <div
-      className={cn(
-        'liquid-card min-h-[150px] items-start gap-3 border p-5',
-        severityStyles[insight.severity]
-      )}
-    >
+    <NativePanel className={cn('min-h-[150px] p-5', severityStyles[insight.severity])}>
       <div className="flex items-start gap-3">
-        <div className="mt-0.5 rounded-2xl border border-white/[0.08] bg-white/[0.05] p-2">
+        <div className="border-border bg-surface mt-0.5 rounded-xl border p-2">
           {severityIcon[insight.severity]}
         </div>
         <div className="min-w-0 flex-1">
@@ -197,7 +176,7 @@ function InsightCard({ insight }: { insight: SpendingInsight }) {
               className="h-2.5 w-2.5 rounded-full"
               style={{ backgroundColor: insight.categoryColor }}
             />
-            <span className="font-heading text-sm font-semibold">{insight.categoryName}</span>
+            <span className="text-sm font-semibold">{insight.categoryName}</span>
             {typeIcon[insight.type]}
             <span className="sr-only">{severityLabel[insight.severity]}</span>
           </div>
@@ -220,11 +199,9 @@ function InsightCard({ insight }: { insight: SpendingInsight }) {
           </div>
         </div>
       </div>
-    </div>
+    </NativePanel>
   )
 }
-
-// ── Comparison Tab ────────────────────────────────────────────────────────
 
 function ComparisonTab({
   comparisons,
@@ -245,21 +222,16 @@ function ComparisonTab({
 
   return (
     <div className="space-y-3">
-      <div className="liquid-hero border-accent/10 relative overflow-hidden border p-6 sm:p-7">
-        <CalendarRange
-          size={220}
-          className="pointer-events-none absolute -right-12 -bottom-20 text-white/[0.035]"
-          aria-hidden="true"
-        />
-        <div className="relative z-10 flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
+      <NativePanel className="p-5 sm:p-6">
+        <div className="flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
           <div>
-            <span className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
+            <span className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
               {t('spendingInsights.totalChange')}
             </span>
-            <div className="flex items-center gap-2">
+            <div className="mt-1 flex items-center gap-2">
               <span
                 className={cn(
-                  'font-heading text-4xl font-bold tracking-tight sm:text-5xl',
+                  'text-4xl font-semibold tracking-tight tabular-nums sm:text-5xl',
                   totalChange > 0 ? 'text-destructive' : totalChange < 0 ? 'text-success' : ''
                 )}
               >
@@ -282,26 +254,25 @@ function ComparisonTab({
           </div>
           <div className="text-right">
             <div className="text-muted-foreground text-xs">{currentLabel}</div>
-            <div className="font-heading font-semibold">
+            <div className="font-semibold tabular-nums">
               {formatMoney(Math.round(currentTotal))}
             </div>
             <div className="text-muted-foreground text-xs">{previousLabel}</div>
-            <div className="text-muted-foreground font-heading text-sm">
+            <div className="text-muted-foreground text-sm tabular-nums">
               {formatMoney(Math.round(previousTotal))}
             </div>
           </div>
         </div>
-      </div>
+      </NativePanel>
 
-      {/* Category breakdown */}
       {comparisons.length === 0 ? (
-        <div className="liquid-card flex h-32 items-center justify-center p-5">
+        <NativePanel className="flex h-32 items-center justify-center p-5">
           <p className="text-muted-foreground text-sm">{t('spendingInsights.noData')}</p>
-        </div>
+        </NativePanel>
       ) : (
-        <div className="liquid-card overflow-x-auto p-0">
-          <div className="min-w-[520px] divide-y divide-white/[0.04]">
-            <div className="text-muted-foreground grid grid-cols-[1fr_80px_80px_90px] gap-2 px-5 py-3 font-mono text-[10px] tracking-wider uppercase">
+        <NativePanel className="overflow-x-auto p-0">
+          <div className="divide-border min-w-[520px] divide-y">
+            <div className="text-muted-foreground grid grid-cols-[1fr_80px_80px_90px] gap-2 px-5 py-3 text-[10px] font-semibold tracking-wider uppercase">
               <span>{t('spendingInsights.category')}</span>
               <span className="text-right">{t('spendingInsights.current')}</span>
               <span className="text-right">{t('spendingInsights.previous')}</span>
@@ -312,7 +283,7 @@ function ComparisonTab({
               <ComparisonRow key={comp.categoryName} comp={comp} />
             ))}
           </div>
-        </div>
+        </NativePanel>
       )}
     </div>
   )

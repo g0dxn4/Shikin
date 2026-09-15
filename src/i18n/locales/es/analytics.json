@@ -11,7 +11,15 @@
     "addAccountsPrompt": "Agrega cuentas para ver el desglose de activos y pasivos.",
     "noHistory": "Sin historial todavia. Agrega cuentas para comenzar a rastrear tu patrimonio.",
     "firstSnapshot": "Primer registro guardado. Vuelve manana para ver tendencias.",
-    "incompleteTotals": "Los totales no están disponibles hasta que haya tipos de cambio para: {{currencies}}."
+    "incompleteTotals": "Los totales no están disponibles hasta que haya tipos de cambio para: {{currencies}}.",
+    "historyPeriod": "Rango de patrimonio neto",
+    "viewChartData": "Ver datos del gráfico",
+    "periods": {
+      "3m": "3M",
+      "6m": "6M",
+      "1y": "1A",
+      "all": "TODO"
+    }
   },
   "spendingInsights": {
     "title": "Analisis de Gastos",
@@ -65,7 +73,18 @@
       "fri": "Vie",
       "sat": "Sab",
       "sun": "Dom"
-    }
+    },
+    "incompleteTotals": "Los totales de gastos no están disponibles hasta que haya tipos de cambio para: {{currencies}}.",
+    "invalidData": "Los totales de gastos no están disponibles por datos de moneda no válidos para {{details}}.",
+    "selectDay": "Selecciona un día para revisar los gastos elegibles.",
+    "dayDetail": "Detalle del día",
+    "selectedDay": "Día seleccionado",
+    "openDay": "Ver el día en transacciones",
+    "noDayExpenses": "No hay gastos elegibles en este día.",
+    "activeDays": "Días activos",
+    "totalSpending": "Gasto total",
+    "loadError": "No se pudieron cargar los gastos del mapa de calor",
+    "daysCount": "{{count}} días"
   },
   "reports": {
     "title": "Informes",

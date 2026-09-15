@@ -1,95 +1,51 @@
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import { ArrowRight, BarChart3, Flame, Landmark, LineChart, PieChart, Sparkles } from 'lucide-react'
+import { ArrowRight, Flame, Landmark, LineChart, PieChart, Sparkles } from 'lucide-react'
+import { NativePanel } from '@/components/ui/native-layout'
 
 const insightSections = [
   {
     key: 'reports',
     href: '/reports',
     icon: PieChart,
-    accent: 'text-primary',
-    border: 'bg-primary',
     featured: true,
   },
   {
     key: 'spendingInsights',
     href: '/spending-insights',
     icon: Sparkles,
-    accent: 'text-chart-4',
-    border: 'bg-chart-4',
     featured: true,
   },
   {
     key: 'forecast',
     href: '/forecast',
     icon: LineChart,
-    accent: 'text-accent',
-    border: 'bg-accent',
     featured: false,
   },
   {
     key: 'netWorth',
     href: '/net-worth',
     icon: Landmark,
-    accent: 'text-chart-3',
-    border: 'bg-chart-3',
     featured: false,
   },
   {
     key: 'spendingHeatmap',
     href: '/spending-heatmap',
     icon: Flame,
-    accent: 'text-chart-5',
-    border: 'bg-chart-5',
     featured: false,
   },
 ] as const
 
 export function InsightsPage() {
   const { t } = useTranslation('insights')
-  const featuredSections = insightSections.filter((section) => section.featured)
-  const secondarySections = insightSections.filter((section) => !section.featured)
 
   return (
-    <div className="page-content animate-fade-in-up">
-      <div className="liquid-hero relative overflow-hidden p-5 sm:p-6 lg:p-8">
-        <div className="bg-accent/20 pointer-events-none absolute -top-24 -right-20 h-64 w-64 rounded-full blur-3xl" />
-        <BarChart3
-          size={220}
-          className="pointer-events-none absolute -right-12 -bottom-16 text-white/[0.035]"
-          aria-hidden="true"
-        />
-        <div className="relative z-10 max-w-2xl">
-          <span className="text-accent mb-3 inline-flex items-center gap-2 font-mono text-[10px] font-semibold tracking-[0.18em] uppercase">
-            <BarChart3 size={14} aria-hidden="true" />
-            {t('eyebrow')}
-          </span>
-          <h1 className="font-heading text-3xl font-bold tracking-tight sm:text-4xl">
-            {t('title')}
-          </h1>
-          <p className="text-muted-foreground mt-3 max-w-xl text-sm leading-6 sm:text-base">
-            {t('description')}
-          </p>
-        </div>
-      </div>
-
+    <div className="page-content">
+      <p className="text-muted-foreground max-w-2xl text-sm">{t('description')}</p>
       <section aria-label={t('featuredLabel')}>
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {featuredSections.map((section, index) => (
-            <InsightCard key={section.href} section={section} index={index} t={t} featured />
-          ))}
-        </div>
-      </section>
-
-      <section aria-label={t('deeperLabel')}>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {secondarySections.map((section, index) => (
-            <InsightCard
-              key={section.href}
-              section={section}
-              index={index + featuredSections.length}
-              t={t}
-            />
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {insightSections.map((section) => (
+            <InsightCard key={section.href} section={section} t={t} />
           ))}
         </div>
       </section>
@@ -101,51 +57,42 @@ type InsightSection = (typeof insightSections)[number]
 
 interface InsightCardProps {
   section: InsightSection
-  index: number
   t: ReturnType<typeof useTranslation<'insights'>>['t']
-  featured?: boolean
 }
 
-function InsightCard({ section, index, t, featured = false }: InsightCardProps) {
-  const { key, href, icon: Icon, accent, border } = section
+function InsightCard({ section, t }: InsightCardProps) {
+  const { key, href, icon: Icon, featured } = section
   const title = t(`sections.${key}.title`)
   const descriptionId = `insight-${key}-description`
 
   return (
-    <Link
-      to={href}
-      aria-describedby={descriptionId}
-      className="liquid-card group focus-visible:ring-ring focus-visible:ring-offset-background relative flex min-h-[11rem] flex-col justify-between overflow-hidden p-5 transition-all duration-200 [animation-fill-mode:both] hover:-translate-y-0.5 hover:border-white/[0.12] focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none motion-reduce:transform-none sm:min-h-[13rem]"
-      style={{ animationDelay: `${index * 70}ms` }}
-    >
-      <div className={`absolute inset-x-0 top-0 h-0.5 ${border}`} />
-      <div className="pointer-events-none absolute -right-12 -bottom-16 h-40 w-40 rounded-full bg-white/[0.035] blur-2xl transition-opacity group-hover:opacity-80" />
-
-      <div className="relative">
-        <div className="mb-4 flex items-start justify-between gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-3xl border border-white/[0.08] bg-gradient-to-br from-white/[0.08] to-transparent">
-            <Icon size={22} className={accent} aria-hidden="true" />
-          </div>
-          {featured && (
-            <span className="text-muted-foreground rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 font-mono text-[10px] tracking-wider uppercase">
-              {t('featuredBadge')}
+    <NativePanel as="article" className={key === 'forecast' ? 'lg:col-span-2' : undefined}>
+      <Link
+        to={href}
+        aria-describedby={descriptionId}
+        className="hover:bg-muted/60 focus-visible:ring-ring flex min-h-32 flex-col justify-between gap-4 rounded-[inherit] p-5 focus-visible:ring-2 focus-visible:outline-none"
+      >
+        <div>
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <span className="bg-accent-muted text-accent grid size-9 place-items-center rounded-lg">
+              <Icon size={18} aria-hidden="true" />
             </span>
-          )}
+            {featured ? (
+              <span className="border-border text-muted-foreground rounded-md border px-2 py-0.5 text-[11px] font-medium">
+                {t('featuredBadge')}
+              </span>
+            ) : null}
+          </div>
+          <h2 className="text-sm font-semibold">{title}</h2>
+          <p id={descriptionId} className="text-muted-foreground mt-1.5 text-xs leading-5">
+            {t(`sections.${key}.description`)}
+          </p>
         </div>
-        <h3 className="font-heading text-lg font-semibold">{title}</h3>
-        <p id={descriptionId} className="text-muted-foreground mt-2 text-sm leading-6">
-          {t(`sections.${key}.description`)}
-        </p>
-      </div>
-
-      <span className="text-muted-foreground group-hover:text-accent mt-5 inline-flex items-center gap-2 text-sm font-semibold transition-colors">
-        {t('open', { title })}
-        <ArrowRight
-          size={15}
-          className="transition-transform group-hover:translate-x-0.5 motion-reduce:transform-none"
-          aria-hidden="true"
-        />
-      </span>
-    </Link>
+        <span className="text-accent inline-flex items-center gap-1.5 text-xs font-semibold">
+          {t('open', { title })}
+          <ArrowRight size={14} aria-hidden="true" />
+        </span>
+      </Link>
+    </NativePanel>
   )
 }

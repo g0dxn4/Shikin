@@ -6,14 +6,52 @@
     "description": "Start by adding an account and your first transaction.",
     "addAccount": "Add Account"
   },
+  "recentActivity": "Recent activity",
+  "openActivity": "Open",
   "cards": {
     "totalBalance": "Total Balance",
     "totalBalanceConverted": "Total Balance (converted)",
     "monthlyIncome": "Monthly Income",
     "monthlyExpenses": "Monthly Expenses",
     "savings": "Savings Rate",
+    "income": "Income",
+    "spent": "Spent",
+    "saved": "Saved",
     "incomeVsLastMonth": "Income vs last month",
     "expensesVsLastMonth": "Expenses vs last month"
+  },
+  "errors": {
+    "title": "Some dashboard data couldn’t be loaded",
+    "accounts": "Accounts: {{message}}",
+    "transactions": "Transactions: {{message}}",
+    "goals": "Goals: {{message}}",
+    "splits": "Transaction splits: {{message}}",
+    "rates": "Exchange rates: {{message}}",
+    "recentTransactions": "Couldn’t load recent transactions"
+  },
+  "overview": {
+    "netWorth": "Net worth",
+    "netWorthHistory": "Balance history",
+    "historyPeriod": "Net worth date range",
+    "asOf": "As of {{date}}",
+    "changeOverPeriod": "{{delta}} over {{period}}",
+    "cashFlow": "Cash flow",
+    "cashFlowSubtitle": "Income and spending by month",
+    "currentMonthCashFlow": "{{month}} cash flow",
+    "spendingByCategory": "Spending by category",
+    "categoryHint": "Select a category to view transactions",
+    "showAllCategories": "Show all categories",
+    "showFewerCategories": "Show fewer categories",
+    "showingCategories": "Showing {{shown}} categories · total includes all categories",
+    "viewChartData": "View chart data",
+    "focusDate": "Focus or point to a date for its balance",
+    "chartTitle": "Net worth over time",
+    "period": {
+      "3m": "3M",
+      "6m": "6M",
+      "1y": "1Y",
+      "all": "ALL"
+    }
   },
   "currency": {
     "totalUnavailable": "Net worth unavailable",

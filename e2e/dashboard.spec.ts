@@ -10,24 +10,24 @@ test.describe('Dashboard', () => {
     await page.goto('/')
     await page.waitForLoadState('networkidle')
 
-    await expect(page.getByRole('heading', { name: 'Good evening' })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible()
   })
 
-  test('shows local-first hero when no data', async ({ page }) => {
+  test('keeps add-transaction action without a promotional page heading', async ({ page }) => {
     await page.goto('/')
     await page.waitForLoadState('networkidle')
 
-    await expect(page.getByText('Your money is calm, current, and completely local.')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Good evening' })).toHaveCount(0)
     await expect(page.getByRole('button', { name: /Add Transaction/i }).first()).toBeVisible()
   })
 
-  test('shows metric cards', async ({ page }) => {
+  test('shows net worth and cash-flow summaries', async ({ page }) => {
     await page.goto('/')
     await page.waitForLoadState('networkidle')
 
-    await expect(page.getByText('Net Worth')).toBeVisible()
-    await expect(page.getByText('Monthly Income')).toBeVisible()
-    await expect(page.getByText('Monthly Expenses')).toBeVisible()
+    await expect(page.getByText('Net worth').first()).toBeVisible()
+    await expect(page.getByText('Income').first()).toBeVisible()
+    await expect(page.getByText('Spent').first()).toBeVisible()
     await expect(page.getByText(/savings rate/i)).toBeVisible()
   })
 
@@ -43,6 +43,6 @@ test.describe('Dashboard', () => {
     await page.waitForLoadState('networkidle')
 
     await expect(page.locator('.page-content')).toBeVisible()
-    await expect(page.locator('.liquid-hero')).toBeVisible()
+    await expect(page.locator('.native-panel').first()).toBeVisible()
   })
 })

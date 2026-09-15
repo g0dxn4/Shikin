@@ -11,7 +11,15 @@
     "addAccountsPrompt": "Add accounts to see your asset and liability breakdown.",
     "noHistory": "No history yet. Add accounts to start tracking net worth.",
     "firstSnapshot": "First snapshot recorded. Come back tomorrow for trend data.",
-    "incompleteTotals": "Totals are unavailable until exchange rates are available for: {{currencies}}."
+    "incompleteTotals": "Totals are unavailable until exchange rates are available for: {{currencies}}.",
+    "historyPeriod": "Net worth date range",
+    "viewChartData": "View chart data",
+    "periods": {
+      "3m": "3M",
+      "6m": "6M",
+      "1y": "1Y",
+      "all": "ALL"
+    }
   },
   "spendingInsights": {
     "title": "Spending Insights",
@@ -65,7 +73,18 @@
       "fri": "Fri",
       "sat": "Sat",
       "sun": "Sun"
-    }
+    },
+    "incompleteTotals": "Spending totals are unavailable until exchange rates are available for: {{currencies}}.",
+    "invalidData": "Spending totals are unavailable because of invalid currency data for {{details}}.",
+    "selectDay": "Select a day to inspect eligible expenses.",
+    "dayDetail": "Day detail",
+    "selectedDay": "Selected day",
+    "openDay": "View day in transactions",
+    "noDayExpenses": "No eligible expenses on this day.",
+    "activeDays": "Active days",
+    "totalSpending": "Total spending",
+    "loadError": "Couldn’t load heatmap spending",
+    "daysCount": "{{count}} days"
   },
   "reports": {
     "title": "Reports",

@@ -1,7 +1,14 @@
 import { useTranslation } from 'react-i18next'
 import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts'
 import { formatMoney } from '@/lib/money'
-import { CHART_TOOLTIP_STYLE, CHART_ITEM_STYLE, CHART_LABEL_STYLE } from '@/lib/constants'
+import {
+  CHART_AXIS_COLOR,
+  CHART_GRID_COLOR,
+  CHART_ITEM_STYLE,
+  CHART_LABEL_STYLE,
+  CHART_LEGEND_STYLE,
+  CHART_TOOLTIP_STYLE,
+} from '@/lib/constants'
 import type { TrendResult } from '@/lib/dashboard-analytics'
 import { SafeChart } from '@/components/ui/safe-chart'
 import { cn } from '@/lib/utils'
@@ -29,7 +36,7 @@ export function SpendingTrendPanel({ trend, displayCurrency, notice }: SpendingT
     <div className="space-y-4">
       {notice && (
         <div
-          className="border-warning/30 bg-warning/8 text-warning rounded-xl border px-3 py-2 text-xs font-semibold"
+          className="border-warning/30 bg-warning/10 text-warning rounded-xl border px-3 py-2 text-xs font-semibold"
           role="status"
         >
           {notice}
@@ -44,18 +51,18 @@ export function SpendingTrendPanel({ trend, displayCurrency, notice }: SpendingT
       >
         <SafeChart>
           <ComposedChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+            <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} />
             <XAxis
               dataKey="label"
               axisLine={false}
               tickLine={false}
-              tick={{ fill: '#A9A9B4', fontSize: 11 }}
+              tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
               interval="preserveStartEnd"
             />
             <YAxis
               axisLine={false}
               tickLine={false}
-              tick={{ fill: '#A9A9B4', fontSize: 11 }}
+              tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
               tickFormatter={(v) => formatMoney(Number(v), displayCurrency)}
               width={64}
             />
@@ -65,11 +72,11 @@ export function SpendingTrendPanel({ trend, displayCurrency, notice }: SpendingT
               labelStyle={CHART_LABEL_STYLE}
               formatter={(value, name) => [formatMoney(Number(value), displayCurrency), name]}
             />
-            <Legend wrapperStyle={{ fontSize: 11, color: '#A9A9B4' }} />
+            <Legend wrapperStyle={{ ...CHART_LEGEND_STYLE, fontSize: 11 }} />
             <Bar
               dataKey="expenses"
               name={t('analytics.expenses')}
-              fill="rgba(255,255,255,0.16)"
+              fill="var(--color-chart-3)"
               radius={[4, 4, 0, 0]}
               isAnimationActive={false}
             />
@@ -77,9 +84,9 @@ export function SpendingTrendPanel({ trend, displayCurrency, notice }: SpendingT
               type="monotone"
               dataKey="income"
               name={t('analytics.income')}
-              stroke="#34D399"
+              stroke="var(--color-success)"
               strokeWidth={2}
-              dot={{ r: 3, fill: '#34D399' }}
+              dot={{ r: 3, fill: 'var(--color-success)' }}
               isAnimationActive={false}
             />
           </ComposedChart>
@@ -135,11 +142,11 @@ export function SpendingTrendPanel({ trend, displayCurrency, notice }: SpendingT
 
 function MetricPill({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div className="rounded-2xl border border-white/[0.06] bg-white/[0.035] p-3">
-      <p className="text-muted-foreground text-[10px] font-bold tracking-wider uppercase">
+    <div className="border-border bg-muted/60 rounded-xl border p-3">
+      <p className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
         {label}
       </p>
-      <p className={cn('font-heading mt-1 text-lg font-bold tracking-tight', color)}>{value}</p>
+      <p className={cn('mt-1 text-lg font-semibold tracking-tight tabular-nums', color)}>{value}</p>
     </div>
   )
 }

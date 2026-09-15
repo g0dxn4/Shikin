@@ -35,6 +35,15 @@ const mockOpenTransactionDialog = vi.fn()
 const mockFetchGoals = vi.fn().mockResolvedValue(undefined)
 const mockLoadRates = vi.fn().mockResolvedValue(undefined)
 const mockRetrySplits = vi.fn()
+const mockLoadHistory = vi.fn().mockResolvedValue(undefined)
+const mockCalculateCurrent = vi.fn().mockResolvedValue(undefined)
+
+let mockNetWorthHistory: Array<{
+  date: string
+  netWorth: number
+  assets: number
+  liabilities: number
+}> = []
 
 vi.mock('@/stores/ui-store', () => ({
   useUIStore: () => ({
@@ -139,6 +148,20 @@ vi.mock('@/stores/spending-insights-store', () => ({
   }),
 }))
 
+vi.mock('@/stores/net-worth-store', () => ({
+  useNetWorthStore: () => ({
+    history: mockNetWorthHistory,
+    isLoading: false,
+    loadHistory: mockLoadHistory,
+    calculateCurrent: mockCalculateCurrent,
+    totalsComplete: true,
+    netWorth: 0,
+    totalAssets: 0,
+    totalLiabilities: 0,
+    missingCurrencies: [],
+  }),
+}))
+
 vi.mock('@/components/dashboard/use-dashboard-splits', () => ({
   useDashboardSplits: () => ({
     splits: [],
@@ -183,6 +206,7 @@ describe('Dashboard', () => {
     mockCurrencyError = null
     mockSplitsError = null
     mockTotalBalanceResult = null
+    mockNetWorthHistory = []
   })
 
   it('fails category analytics closed when split allocations cannot be loaded', async () => {
@@ -209,7 +233,7 @@ describe('Dashboard', () => {
       render(<Dashboard />)
 
       expect(screen.getAllByText('analytics.spendingPace').length).toBeGreaterThanOrEqual(1)
-      expect(screen.getByText('Recent activity')).toBeInTheDocument()
+      expect(screen.getByText('recentActivity')).toBeInTheDocument()
       expect(screen.queryByText('empty.addAccount')).not.toBeInTheDocument()
     })
   })
@@ -356,6 +380,27 @@ describe('Dashboard', () => {
       expect(screen.queryByText('Savings')).not.toBeInTheDocument()
       expect(screen.queryByText('Credit')).not.toBeInTheDocument()
       expect(screen.queryByText('Extra')).not.toBeInTheDocument()
+    })
+
+    it('renders zero and negative complete net worth without inventing a mixed total', () => {
+      mockTotalBalanceResult = {
+        complete: true,
+        preferredCurrency: 'USD',
+        amountCentavos: 0,
+        missingCurrencies: [],
+      }
+      const { unmount } = render(<Dashboard />)
+      expect(screen.getAllByText('$0.00').length).toBeGreaterThanOrEqual(1)
+      unmount()
+
+      mockTotalBalanceResult = {
+        complete: true,
+        preferredCurrency: 'USD',
+        amountCentavos: -1250,
+        missingCurrencies: [],
+      }
+      render(<Dashboard />)
+      expect(screen.getByText('-$12.50')).toBeInTheDocument()
     })
   })
 
@@ -551,11 +596,11 @@ describe('Dashboard', () => {
 
       render(<Dashboard />)
 
-      expect(screen.getByText('$1,500.00')).toBeInTheDocument()
+      expect(screen.getAllByText('$1,500.00').length).toBeGreaterThanOrEqual(1)
       expect(screen.getAllByText('$300.00').length).toBeGreaterThanOrEqual(1)
       expect(screen.getByText('80%')).toBeInTheDocument()
-      expect(screen.getByText('+$600.00 vs last month')).toBeInTheDocument()
-      expect(screen.getByText('+$250.00 vs last month')).toBeInTheDocument()
+      expect(screen.getAllByText('+$600.00 vs last month').length).toBeGreaterThanOrEqual(1)
+      expect(screen.getAllByText('+$250.00 vs last month').length).toBeGreaterThanOrEqual(1)
 
       await user.click(screen.getByText('analytics.categories'))
 
@@ -636,6 +681,83 @@ describe('Dashboard', () => {
 
       expect(screen.getByRole('table', { name: 'analytics.trendChartLabel' })).toBeInTheDocument()
       expect(screen.getAllByText('analytics.income').length).toBeGreaterThan(0)
+    })
+  })
+
+  describe('category drill-down and history period', () => {
+    it('links category bars to the shared transactions query contract', () => {
+      const today = dayjs()
+      mockAccounts = [
+        { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 100000 },
+      ]
+      mockTransactions = [
+        {
+          id: 'tx-food',
+          description: 'Groceries',
+          type: 'expense',
+          amount: 10000,
+          currency: 'USD',
+          date: today.format('YYYY-MM-DD'),
+          status: 'posted',
+          reporting_treatment: 'normal',
+          transaction_kind: 'standard',
+          is_archived: 0,
+          category_id: 'cat-food',
+          category_color: '#f97316',
+          category_name: 'Food',
+          account_name: 'Checking',
+        },
+        {
+          id: 'tx-none',
+          description: 'Unknown',
+          type: 'expense',
+          amount: 4000,
+          currency: 'USD',
+          date: today.format('YYYY-MM-DD'),
+          status: 'posted',
+          reporting_treatment: 'normal',
+          transaction_kind: 'standard',
+          is_archived: 0,
+          category_id: null,
+          category_color: null,
+          category_name: null,
+          account_name: 'Checking',
+        },
+      ]
+
+      render(<Dashboard />)
+
+      const foodLink = screen.getByRole('link', { name: /Food/ })
+      expect(foodLink).toHaveAttribute(
+        'href',
+        expect.stringMatching(
+          new RegExp(
+            `^/transactions\\?type=expense&category=cat-food&dateFrom=${today.startOf('month').format('YYYY-MM-DD')}&dateTo=${today.format('YYYY-MM-DD')}$`
+          )
+        )
+      )
+
+      const uncategorizedLink = screen.getByRole('link', { name: /Uncategorized/ })
+      expect(uncategorizedLink.getAttribute('href')).toMatch(
+        /^\/transactions\?type=expense&dateFrom=\d{4}-\d{2}-\d{2}&dateTo=\d{4}-\d{2}-\d{2}$/
+      )
+      expect(uncategorizedLink.getAttribute('href')).not.toContain('category=')
+    })
+
+    it('loads net worth history for the selected period without writing snapshots', async () => {
+      const user = userEvent.setup()
+      mockNetWorthHistory = [
+        { date: '2024-01-01', netWorth: 100000, assets: 100000, liabilities: 0 },
+        { date: '2024-06-01', netWorth: 120000, assets: 120000, liabilities: 0 },
+      ]
+
+      render(<Dashboard />)
+
+      expect(mockCalculateCurrent).toHaveBeenCalled()
+      expect(mockLoadHistory).toHaveBeenCalledWith('6m')
+
+      await user.click(screen.getByRole('button', { name: 'overview.period.3m' }))
+      expect(mockLoadHistory).toHaveBeenCalledWith('3m')
     })
   })
 })

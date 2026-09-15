@@ -1,7 +1,14 @@
 import { useTranslation } from 'react-i18next'
 import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts'
 import { formatMoney } from '@/lib/money'
-import { CHART_TOOLTIP_STYLE, CHART_ITEM_STYLE, CHART_LABEL_STYLE } from '@/lib/constants'
+import {
+  CHART_AXIS_COLOR,
+  CHART_GRID_COLOR,
+  CHART_ITEM_STYLE,
+  CHART_LABEL_STYLE,
+  CHART_LEGEND_STYLE,
+  CHART_TOOLTIP_STYLE,
+} from '@/lib/constants'
 import type { PaceResult } from '@/lib/dashboard-analytics'
 import { SafeChart } from '@/components/ui/safe-chart'
 import { cn } from '@/lib/utils'
@@ -31,7 +38,7 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
     <div className="space-y-4">
       {notice && (
         <div
-          className="border-warning/30 bg-warning/8 text-warning rounded-xl border px-3 py-2 text-xs font-semibold"
+          className="border-warning/30 bg-warning/10 text-warning rounded-xl border px-3 py-2 text-xs font-semibold"
           role="status"
         >
           {notice}
@@ -46,18 +53,18 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
       >
         <SafeChart>
           <LineChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+            <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} />
             <XAxis
               dataKey="day"
               axisLine={false}
               tickLine={false}
-              tick={{ fill: '#A9A9B4', fontSize: 11 }}
+              tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
               interval="preserveStartEnd"
             />
             <YAxis
               axisLine={false}
               tickLine={false}
-              tick={{ fill: '#A9A9B4', fontSize: 11 }}
+              tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
               tickFormatter={(v) => formatMoney(Number(v), displayCurrency)}
               width={64}
             />
@@ -70,13 +77,13 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
                 return [formatMoney(Number(value), displayCurrency), name]
               }}
             />
-            <Legend wrapperStyle={{ fontSize: 11, color: '#A9A9B4' }} />
+            <Legend wrapperStyle={{ ...CHART_LEGEND_STYLE, fontSize: 11 }} />
             {hasPrevious && (
               <Line
                 type="monotone"
                 dataKey="previous"
                 name={t('analytics.previousMonth')}
-                stroke="rgba(255,255,255,0.35)"
+                stroke="var(--color-muted-foreground)"
                 strokeWidth={1.5}
                 strokeDasharray="6 4"
                 dot={false}
@@ -89,7 +96,7 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
                 type="monotone"
                 dataKey="priorAverage"
                 name={t('analytics.priorMonthsAverage')}
-                stroke="#34D399"
+                stroke="var(--color-success)"
                 strokeWidth={1.5}
                 strokeDasharray="4 4"
                 dot={false}
@@ -100,7 +107,7 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
               type="monotone"
               dataKey="runRate"
               name={t('analytics.runRate')}
-              stroke="#F59E0B"
+              stroke="var(--color-warning)"
               strokeWidth={1.5}
               strokeDasharray="8 4"
               dot={false}
@@ -111,7 +118,7 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
                 type="monotone"
                 dataKey="current"
                 name={t('analytics.currentMonth')}
-                stroke="#7C5CFF"
+                stroke="var(--color-chart-1)"
                 strokeWidth={2.5}
                 dot={false}
                 isAnimationActive={false}
@@ -191,11 +198,11 @@ function MetricPill({
   color?: string
 }) {
   return (
-    <div className="rounded-2xl border border-white/[0.06] bg-white/[0.035] p-3">
-      <p className="text-muted-foreground text-[10px] font-bold tracking-wider uppercase">
+    <div className="border-border bg-muted/60 rounded-xl border p-3">
+      <p className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
         {label}
       </p>
-      <p className={cn('font-heading mt-1 text-lg font-bold tracking-tight', color)}>
+      <p className={cn('mt-1 text-lg font-semibold tracking-tight tabular-nums', color)}>
         {prefix}
         {value}
       </p>

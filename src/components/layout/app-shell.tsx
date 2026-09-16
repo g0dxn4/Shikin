@@ -36,6 +36,7 @@ export function AppShell() {
   const mainRef = useRef<HTMLElement>(null)
   const route = getNavigationRoute(pathname)
   const group = getNavigationGroup(pathname)
+  const routeLabel = t(route.labelKey, route.fallbackLabel)
 
   useEffect(() => {
     const main = mainRef.current
@@ -56,11 +57,6 @@ export function AppShell() {
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <header className="native-topbar">
-            <h1 className="truncate text-[15px] font-semibold sm:text-base">
-              {t(route.labelKey, route.fallbackLabel)}
-            </h1>
-          </header>
           {group.routes.length > 1 ? (
             <nav
               className="native-subnav"
@@ -84,8 +80,12 @@ export function AppShell() {
             id="main-content"
             ref={mainRef}
             tabIndex={-1}
+            aria-labelledby="page-title"
             className="min-h-0 flex-1 overflow-y-auto overscroll-contain focus:outline-none"
           >
+            <h1 id="page-title" className="sr-only">
+              {routeLabel}
+            </h1>
             <div className="route-content mx-auto w-full max-w-[1320px] p-4 pb-24 sm:p-5 sm:pb-24 lg:p-7 lg:pb-8">
               <Suspense fallback={<LoadingSpinner className="min-h-64" />}>
                 <Outlet />

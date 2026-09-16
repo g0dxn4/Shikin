@@ -431,7 +431,7 @@ export function Accounts() {
                 />
               </MetricStrip>
 
-              <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.75fr)]">
+              <div className="flex flex-col gap-3">
                 <NativePanel className="overflow-hidden p-0">
                   <div className="border-border flex flex-col gap-1 border-b px-5 py-4 sm:flex-row sm:items-end sm:justify-between">
                     <div>
@@ -474,10 +474,28 @@ export function Accounts() {
                   )}
                 </NativePanel>
 
-                <NativePanel className="p-5">
-                  <h2 className="text-base font-semibold">{t('mix.title')}</h2>
-                  <p className="text-muted-foreground mt-1 text-sm">{t('mix.subtitle')}</p>
-                  <div className="mt-5 space-y-4">
+                <NativePanel className="p-4 sm:px-5 sm:py-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h2 className="text-base font-semibold">{t('mix.title')}</h2>
+                      <p className="text-muted-foreground mt-1 text-sm">{t('mix.subtitle')}</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:text-right">
+                      <div>
+                        <p className="text-muted-foreground text-xs">{t('mix.spendable')}</p>
+                        <p className="mt-0.5 text-sm font-semibold tabular-nums">
+                          {formatConverted(pageTotals.assets)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground text-xs">{t('mix.cardDebt')}</p>
+                        <p className="text-warning mt-0.5 text-sm font-semibold tabular-nums">
+                          {formatConverted(pageTotals.liabilities)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
                     {mixItems.map((item) => (
                       <div key={item.key}>
                         <div className="mb-2 flex items-center justify-between gap-4">
@@ -506,20 +524,6 @@ export function Accounts() {
                         </div>
                       </div>
                     ))}
-                  </div>
-                  <div className="border-border mt-6 grid grid-cols-2 gap-3 border-t pt-4">
-                    <div>
-                      <p className="text-muted-foreground text-xs">{t('mix.spendable')}</p>
-                      <p className="mt-1 text-lg font-semibold tabular-nums">
-                        {formatConverted(pageTotals.assets)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground text-xs">{t('mix.cardDebt')}</p>
-                      <p className="text-warning mt-1 text-lg font-semibold tabular-nums">
-                        {formatConverted(pageTotals.liabilities)}
-                      </p>
-                    </div>
                   </div>
                 </NativePanel>
               </div>
@@ -762,7 +766,7 @@ function AccountCard({
       className={`group relative px-5 py-4 ${archived ? 'bg-muted/30' : ''}`}
       style={{ borderLeft: `3px solid ${accentColor}` }}
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-base font-semibold">{account.name}</h3>
@@ -780,45 +784,54 @@ function AccountCard({
               </Badge>
             )}
           </div>
-          <p className="mt-2 text-2xl font-semibold tracking-tight tabular-nums">
-            {formatMoney(account.balance, account.currency)}
-          </p>
-          <p className="text-muted-foreground mt-1 text-xs tabular-nums">{account.currency}</p>
         </div>
-        <div className="flex gap-1 opacity-100 transition-opacity md:opacity-40 md:group-focus-within:opacity-100 md:group-hover:opacity-100">
-          {canSetPrimary && onSetPrimary && (
+        <div className="flex items-center justify-between gap-3 sm:justify-end sm:gap-4">
+          <div className="sm:text-right">
+            <p className="text-2xl font-semibold tracking-tight tabular-nums">
+              {formatMoney(account.balance, account.currency)}
+            </p>
+            <p className="text-muted-foreground mt-1 text-xs tabular-nums">{account.currency}</p>
+          </div>
+          <div className="flex gap-1 opacity-100 transition-opacity md:opacity-40 md:group-focus-within:opacity-100 md:group-hover:opacity-100">
+            {canSetPrimary && onSetPrimary && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onSetPrimary}
+                disabled={isPrimary || isSettingPrimary}
+                aria-label={
+                  isPrimary ? `${account.name} is primary` : `Set ${account.name} as primary`
+                }
+              >
+                <Star size={12} className={isPrimary ? 'fill-accent text-accent' : ''} />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"
-              onClick={onSetPrimary}
-              disabled={isPrimary || isSettingPrimary}
-              aria-label={
-                isPrimary ? `${account.name} is primary` : `Set ${account.name} as primary`
-              }
+              onClick={onArchive}
+              aria-label={`${archiveLabel ?? t('archiveAccount')} ${account.name}`}
             >
-              <Star size={12} className={isPrimary ? 'fill-accent text-accent' : ''} />
+              {archiveIcon ?? <Archive size={12} />}
             </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onArchive}
-            aria-label={`${archiveLabel ?? t('archiveAccount')} ${account.name}`}
-          >
-            {archiveIcon ?? <Archive size={12} />}
-          </Button>
-          <Button variant="ghost" size="icon" onClick={onEdit} aria-label={`Edit ${account.name}`}>
-            <Pencil size={12} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-destructive hover:text-destructive"
-            onClick={onDelete}
-            aria-label={`Delete ${account.name}`}
-          >
-            <Trash2 size={12} />
-          </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onEdit}
+              aria-label={`Edit ${account.name}`}
+            >
+              <Pencil size={12} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-destructive hover:text-destructive"
+              onClick={onDelete}
+              aria-label={`Delete ${account.name}`}
+            >
+              <Trash2 size={12} />
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -1000,7 +1013,7 @@ function AccountsSkeleton() {
           </div>
         ))}
       </div>
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.75fr)]">
+      <div className="flex flex-col gap-3">
         <NativePanel className="space-y-3 p-5">
           {Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="space-y-2">
@@ -1009,9 +1022,13 @@ function AccountsSkeleton() {
             </div>
           ))}
         </NativePanel>
-        <NativePanel className="space-y-3 p-5">
+        <NativePanel className="space-y-3 p-4 sm:px-5 sm:py-4">
           <Skeleton className="h-4 w-32" />
-          <Skeleton className="h-24 w-full" />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+          </div>
         </NativePanel>
       </div>
     </>

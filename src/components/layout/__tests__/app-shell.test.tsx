@@ -58,13 +58,19 @@ describe('AppShell', () => {
 
     expect(screen.getByTestId('sidebar')).toBeInTheDocument()
     expect(screen.getByTestId('bottom-nav')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 1, name: 'Overview' })).toBeInTheDocument()
+    const heading = screen.getByRole('heading', { level: 1, name: 'Overview' })
+    expect(heading).toBeInTheDocument()
+    expect(heading).toHaveClass('sr-only')
+    expect(document.querySelector('.native-topbar')).not.toBeInTheDocument()
+    expect(screen.getByRole('main')).toHaveAccessibleName('Overview')
     expect(screen.getByTestId('outlet')).toBeInTheDocument()
   })
 
   it('omits the redundant one-item Overview tab row', () => {
     render(<AppShell />)
     expect(screen.queryByRole('navigation', { name: /Overview section/ })).not.toBeInTheDocument()
+    expect(document.querySelector('.native-topbar')).not.toBeInTheDocument()
+    expect(document.querySelector('.native-subnav')).not.toBeInTheDocument()
   })
 
   it('renders contextual tabs with proper active state', () => {
@@ -72,9 +78,14 @@ describe('AppShell', () => {
     render(<AppShell />)
 
     const sectionNav = screen.getByRole('navigation', { name: 'Transactions section navigation' })
-    expect(screen.getByRole('heading', { level: 1, name: 'Categories' })).toBeInTheDocument()
+    const heading = screen.getByRole('heading', { level: 1, name: 'Categories' })
+    expect(heading).toBeInTheDocument()
+    expect(heading).toHaveClass('sr-only')
+    expect(document.querySelector('.native-topbar')).not.toBeInTheDocument()
     expect(sectionNav).toBeInTheDocument()
+    expect(sectionNav).toHaveClass('native-subnav')
     expect(screen.getByRole('link', { name: 'Categories' })).toHaveClass('subnav-link-active')
+    expect(screen.getByRole('main')).toHaveAccessibleName('Categories')
   })
 
   it('resets and focuses the internal page scroller when the route changes', () => {

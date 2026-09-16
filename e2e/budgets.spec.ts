@@ -9,9 +9,13 @@ test.describe('Budgets', () => {
   })
 
   test('renders title and add button', async ({ page }) => {
-    await expect(page.getByRole('heading', { level: 1, name: 'Budgets' })).toBeVisible()
+    await expect(page.locator('.native-topbar')).toHaveCount(0)
+    await expect(page.getByRole('heading', { level: 1, name: 'Budgets' })).toHaveClass(/sr-only/)
     await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
     await expect(page.getByRole('button', { name: /Add Budget/i }).first()).toBeVisible()
+    await expect(
+      page.getByRole('navigation', { name: 'Planning section navigation' })
+    ).toBeVisible()
   })
 
   test('shows empty state', async ({ page }) => {

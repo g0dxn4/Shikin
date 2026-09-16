@@ -270,21 +270,27 @@ export function Budgets() {
       {isLoading ? (
         <div role="status" aria-busy="true">
           <span className="sr-only">{tCommon('status.loading')}</span>
-          <div className="native-panel space-y-2 p-6">
-            <Skeleton className="h-3 w-20" />
-            <Skeleton className="h-9 w-40" />
-            <Skeleton className="h-3 w-24" />
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="native-panel space-y-3 p-5">
-                <Skeleton className="h-4 w-24" />
-                <Skeleton className="h-4 w-16" />
-                <Skeleton className="h-8 w-20" />
-                <Skeleton className="h-3 w-full" />
-                <Skeleton className="h-3 w-32" />
+          <div className="metric-strip">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="metric-item space-y-2">
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-7 w-28" />
               </div>
             ))}
+          </div>
+          <div className="flex flex-col gap-3">
+            <div className="native-panel space-y-3 p-5 sm:p-6">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="space-y-2">
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-3 w-full" />
+                </div>
+              ))}
+            </div>
+            <div className="native-panel space-y-3 p-4 sm:px-5 sm:py-4">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-4 w-3/4" />
+            </div>
           </div>
         </div>
       ) : hasInitialLoadError ? (
@@ -320,7 +326,7 @@ export function Budgets() {
             />
           </MetricStrip>
 
-          <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+          <div className="flex flex-col gap-3">
             <div className="native-panel p-5 sm:p-6">
               <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-base font-semibold">{t('progress.title')}</h2>
@@ -362,53 +368,57 @@ export function Budgets() {
               />
             </div>
 
-            <div className="native-panel p-5 sm:p-6">
-              <div className="mb-4 flex items-center gap-3">
-                <div
-                  className="flex h-11 w-11 items-center justify-center rounded-xl sm:h-10 sm:w-10"
-                  style={{
-                    background:
-                      intelligence.tone === 'danger'
-                        ? 'color-mix(in srgb, var(--color-destructive) 12%, transparent)'
-                        : intelligence.tone === 'warning'
-                          ? 'color-mix(in srgb, var(--color-warning) 12%, transparent)'
-                          : 'color-mix(in srgb, var(--color-success) 12%, transparent)',
-                    color:
-                      intelligence.tone === 'danger'
-                        ? 'var(--color-destructive)'
-                        : intelligence.tone === 'warning'
-                          ? 'var(--color-warning)'
-                          : 'var(--color-success)',
-                  }}
-                >
-                  {intelligence.tone === 'safe' ? (
-                    <Lightbulb size={18} />
-                  ) : (
-                    <AlertTriangle size={18} />
-                  )}
+            <div className="native-panel p-4 sm:px-5 sm:py-4">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:gap-6">
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <div
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl sm:h-10 sm:w-10"
+                    style={{
+                      background:
+                        intelligence.tone === 'danger'
+                          ? 'color-mix(in srgb, var(--color-destructive) 12%, transparent)'
+                          : intelligence.tone === 'warning'
+                            ? 'color-mix(in srgb, var(--color-warning) 12%, transparent)'
+                            : 'color-mix(in srgb, var(--color-success) 12%, transparent)',
+                      color:
+                        intelligence.tone === 'danger'
+                          ? 'var(--color-destructive)'
+                          : intelligence.tone === 'warning'
+                            ? 'var(--color-warning)'
+                            : 'var(--color-success)',
+                    }}
+                  >
+                    {intelligence.tone === 'safe' ? (
+                      <Lightbulb size={18} />
+                    ) : (
+                      <AlertTriangle size={18} />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-base font-semibold">{t('intelligence.title')}</h2>
+                    <p className="mt-1 text-sm leading-snug font-semibold">
+                      {complete ? intelligence.title : t('currency.unavailable')}
+                    </p>
+                    <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
+                      {complete ? intelligence.message : t('currency.description')}
+                    </p>
+                  </div>
                 </div>
-                <h2 className="text-base font-semibold">{t('intelligence.title')}</h2>
-              </div>
-              <p className="text-base leading-snug font-semibold">
-                {complete ? intelligence.title : t('currency.unavailable')}
-              </p>
-              <p className="text-muted-foreground mt-4 text-sm leading-relaxed">
-                {complete ? intelligence.message : t('currency.description')}
-              </p>
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <div className="border-border bg-muted/50 rounded-xl border p-4">
-                  <p className="text-muted-foreground text-xs font-bold">{t('status.warning')}</p>
-                  <p className="text-2xl font-bold tabular-nums">
-                    {complete ? summary.warningCount : '—'}
-                  </p>
-                </div>
-                <div className="border-border bg-muted/50 rounded-xl border p-4">
-                  <p className="text-muted-foreground text-xs font-bold">
-                    {t('status.overBudget')}
-                  </p>
-                  <p className="text-2xl font-bold tabular-nums">
-                    {complete ? summary.overBudgetCount : '—'}
-                  </p>
+                <div className="grid shrink-0 grid-cols-2 gap-3 md:w-56">
+                  <div className="border-border bg-muted/50 rounded-xl border p-3">
+                    <p className="text-muted-foreground text-xs font-bold">{t('status.warning')}</p>
+                    <p className="text-lg font-bold tabular-nums">
+                      {complete ? summary.warningCount : '—'}
+                    </p>
+                  </div>
+                  <div className="border-border bg-muted/50 rounded-xl border p-3">
+                    <p className="text-muted-foreground text-xs font-bold">
+                      {t('status.overBudget')}
+                    </p>
+                    <p className="text-lg font-bold tabular-nums">
+                      {complete ? summary.overBudgetCount : '—'}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>

@@ -163,6 +163,8 @@ describe('Budgets', () => {
       // Should show skeleton loaders (Skeleton component uses 'skeleton' class)
       const skeletons = document.querySelectorAll('.skeleton')
       expect(skeletons.length).toBeGreaterThan(0)
+      expect(document.querySelector('[class*="xl:grid-cols-"]')).not.toBeInTheDocument()
+      expect(document.querySelector('.metric-strip')).toBeInTheDocument()
     })
 
     it('marks loading skeleton container with aria-busy', () => {
@@ -212,6 +214,34 @@ describe('Budgets', () => {
       expect(screen.getByText('progress.title')).toBeInTheDocument()
       expect(screen.getByText('intelligence.title')).toBeInTheDocument()
       expect(screen.getByText('2 hero.budgetCount')).toBeInTheDocument()
+    })
+
+    it('stacks full-width progress above compact budget intelligence', () => {
+      mockBudgets = [
+        {
+          id: 'budget-1',
+          name: 'Groceries',
+          categoryName: 'Food',
+          categoryColor: '#ff0000',
+          amount: 50000,
+          spent: 30000,
+          remaining: 20000,
+          percentUsed: 60,
+          period: 'monthly',
+        },
+      ]
+
+      const { container } = render(<Budgets />)
+      const progress = screen.getByRole('heading', { name: 'progress.title' })
+      const intelligence = screen.getByRole('heading', { name: 'intelligence.title' })
+
+      expect(container.querySelector('[class*="xl:grid-cols-"]')).not.toBeInTheDocument()
+      expect(
+        progress.compareDocumentPosition(intelligence) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+      expect(screen.getByText('hero.totalBudgeted')).toBeInTheDocument()
+      expect(screen.getByText('status.warning')).toBeInTheDocument()
+      expect(screen.getByText('status.overBudget')).toBeInTheDocument()
     })
   })
 

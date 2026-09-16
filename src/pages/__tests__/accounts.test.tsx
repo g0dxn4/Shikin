@@ -113,6 +113,8 @@ describe('Accounts', () => {
     // Loading state renders skeleton, not the account cards
     expect(screen.queryByText('empty.title')).not.toBeInTheDocument()
     expect(container.querySelector('.skeleton')).toBeInTheDocument()
+    expect(container.querySelector('[class*="xl:grid-cols-"]')).not.toBeInTheDocument()
+    expect(container.querySelector('.metric-strip')).toBeInTheDocument()
   })
 
   it('renders empty state with add button', () => {
@@ -155,6 +157,25 @@ describe('Accounts', () => {
     expect(container.querySelector('.native-panel')).toBeInTheDocument()
     expect(container.querySelector('.page-toolbar')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
+  })
+
+  it('stacks the full-width account list above the asset mix', () => {
+    mockAccounts = [
+      { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 250000 },
+      { id: 'acc-2', name: 'Travel Card', type: 'credit_card', currency: 'USD', balance: -10000 },
+    ]
+
+    const { container } = renderAccounts()
+    const listHeading = screen.getByRole('heading', { name: 'list.title' })
+    const mixHeading = screen.getByRole('heading', { name: 'mix.title' })
+
+    expect(container.querySelector('[class*="xl:grid-cols-"]')).not.toBeInTheDocument()
+    expect(
+      listHeading.compareDocumentPosition(mixHeading) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(screen.getByText('mix.spendable')).toBeInTheDocument()
+    expect(screen.getByText('mix.cardDebt')).toBeInTheDocument()
+    expect(screen.getByText('metrics.net')).toBeInTheDocument()
   })
 
   it('edit button calls openAccountDialog with id', async () => {

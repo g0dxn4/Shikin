@@ -55,6 +55,8 @@ test.describe('mobile viewport', () => {
   test('mobile: content has bottom padding', async ({ page }) => {
     const contentWrapper = page.locator('main > div')
     await expect(contentWrapper).toHaveClass(/pb-24/)
+    await expect(page.locator('.native-topbar')).toHaveCount(0)
+    await expect(page.getByRole('heading', { level: 1 })).toHaveClass(/sr-only/)
   })
 })
 

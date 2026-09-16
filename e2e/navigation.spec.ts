@@ -48,9 +48,12 @@ test.describe('desktop native navigation', () => {
     await sidebar.getByRole('link', { name: 'Transactions' }).click()
     await page.waitForURL('/transactions')
     const tabs = page.getByRole('navigation', { name: 'Transactions section navigation' })
+    await expect(page.locator('.native-topbar')).toHaveCount(0)
     await tabs.getByRole('link', { name: 'Categories' }).click()
     await page.waitForURL('/categories')
-    await expect(page.getByRole('heading', { level: 1, name: 'Categories' })).toBeVisible()
+    const heading = page.getByRole('heading', { level: 1, name: 'Categories' })
+    await expect(heading).toHaveClass(/sr-only/)
+    await expect(tabs).toBeVisible()
     await expect(sidebar.getByRole('link', { name: 'Transactions' })).toHaveAttribute(
       'aria-current',
       'page'
@@ -66,7 +69,10 @@ test.describe('desktop native navigation', () => {
         'data-startup-state',
         /ready|error/
       )
-      await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
+      const heading = page.getByRole('heading', { level: 1 })
+      await expect(heading).toHaveCount(1)
+      await expect(heading).toHaveClass(/sr-only/)
+      await expect(page.locator('.native-topbar')).toHaveCount(0)
     }
 
     await page.goto('/transactions')
@@ -120,7 +126,8 @@ test.describe('mobile native navigation', () => {
 
     await more.getByRole('link', { name: 'Extensions' }).click()
     await page.waitForURL('/extensions')
-    await expect(page.getByRole('heading', { level: 1, name: 'Extensions' })).toBeVisible()
+    await expect(page.locator('.native-topbar')).toHaveCount(0)
+    await expect(page.getByRole('heading', { level: 1, name: 'Extensions' })).toHaveClass(/sr-only/)
     await expect(bottomNav.getByRole('button', { name: 'More pages' })).toHaveClass(
       /bottom-nav-link-active/
     )

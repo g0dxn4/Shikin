@@ -10,8 +10,12 @@ test.describe('Accounts', () => {
     await page.goto('/accounts')
     await page.waitForLoadState('networkidle')
 
-    await expect(page.getByRole('heading', { level: 1, name: 'Accounts' })).toBeVisible()
+    await expect(page.locator('.native-topbar')).toHaveCount(0)
+    await expect(page.getByRole('heading', { level: 1, name: 'Accounts' })).toHaveClass(/sr-only/)
     await expect(page.getByRole('button', { name: /Add Account/i }).first()).toBeVisible()
+    await expect(
+      page.getByRole('navigation', { name: 'Accounts section navigation' })
+    ).toBeVisible()
   })
 
   test('shows empty state without data', async ({ page }) => {

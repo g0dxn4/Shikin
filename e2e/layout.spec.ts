@@ -53,6 +53,14 @@ test.describe('desktop layout', () => {
     await expect(main).toBeVisible()
     await expect(main).toHaveClass(/overflow-y-auto/)
   })
+
+  test('omits the native topbar and keeps a screen-reader route heading', async ({ page }) => {
+    await expect(page.locator('.native-topbar')).toHaveCount(0)
+    const heading = page.getByRole('heading', { level: 1, name: 'Overview' })
+    await expect(heading).toHaveClass(/sr-only/)
+    await expect(page.getByRole('navigation', { name: /Overview section/ })).toHaveCount(0)
+    await expect(page.getByRole('main')).toHaveAttribute('aria-labelledby', 'page-title')
+  })
 })
 
 test.describe('mobile layout', () => {
@@ -77,5 +85,10 @@ test.describe('mobile layout', () => {
     const contentWrapper = page.locator('main > div')
     await expect(contentWrapper).toBeVisible()
     await expect(contentWrapper).toHaveClass(/pb-24/)
+  })
+
+  test('omits the native topbar on mobile', async ({ page }) => {
+    await expect(page.locator('.native-topbar')).toHaveCount(0)
+    await expect(page.getByRole('heading', { level: 1 })).toHaveClass(/sr-only/)
   })
 })

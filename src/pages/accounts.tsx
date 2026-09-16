@@ -785,7 +785,7 @@ function AccountCard({
             )}
           </div>
         </div>
-        <div className="flex items-center justify-between gap-3 sm:justify-end sm:gap-4">
+        <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-end sm:gap-4">
           <div className="sm:text-right">
             <p className="text-2xl font-semibold tracking-tight tabular-nums">
               {formatMoney(account.balance, account.currency)}

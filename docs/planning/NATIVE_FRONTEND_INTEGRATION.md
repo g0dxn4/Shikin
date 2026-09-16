@@ -204,3 +204,14 @@ Do not claim checks that have not run. Any baseline fixture failure is tracked s
 - Linux desktop compilation passed with `pnpm exec tauri build --no-bundle`. The resulting application was **not launched against user storage**, installed, released, or pushed.
 - WebKit 26 was tested with Playwright's matching browser build. Missing host libraries were extracted into a temporary test-only runtime; no system package installation was performed.
 - Non-blocking build diagnostics: Vite reports the existing >500KB chunk/dynamic-import warnings. No dependency or bundling refactor is included.
+
+## Follow-up layout refinement — 2026-09-16
+
+- Removed Overview's top Add Transaction toolbar and the shell's visible title-only bars. One screen-reader-only route heading remains; useful contextual navigation and all other creation/editing workflows remain available.
+- Overview now offers full-width Summary, History, and Compare accounts views. Summary is numbers-only; History provides date ranges; comparison reads parameterized recorded account snapshots with balance/change modes, signed debts, explicit per-account baseline dates, missing-date gaps, conversion diagnostics, and current-FX disclosure.
+- Accounts now stacks its full-width list above the compact asset/liability mix. Budgets stacks full-width progress above Budget Intelligence.
+- Validation: `pnpm check`, 119 files / **1,306 tests**, and frontend build passed on the integrated changes. Read-only layout/dashboard/navigation/responsive E2E passed **35 cases in Chromium and 35 in WebKit**, with 15 intentional viewport-specific skips per engine, against the existing isolated demo preview.
+- Review ledger: **F1 fixed** — account comparison explicitly recomputes on preferred-currency changes even with a stable converter, rates, and history. The new regression failed before the fix and passed afterward. **F2 fixed** — account balances/actions stack below `sm`; browser verification at 320px confirmed previously clipped controls now fit. Both received a bounded Sol high recheck: no material findings.
+- After those two fixes, `pnpm check`, all **59 directly affected tests**, and the frontend build passed again. Manual checks covered Summary/History/Compare, keyboard tabs, account/range/change selection, both appearances, and narrow layouts.
+- Exact ordered-row comparisons confirmed all 11 protected financial tables unchanged, including all **565 transactions**, in the verified temporary demo database. No real-data mode, schema changes, financial mutation changes, installation, release, or push occurred.
+- The earlier integration results above remain historical; this follow-up intentionally replaces visible shell headings with accessible screen-reader headings.

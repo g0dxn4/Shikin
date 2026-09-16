@@ -175,6 +175,11 @@ describe('Accounts', () => {
     ).toBeTruthy()
     expect(screen.getByText('mix.spendable')).toBeInTheDocument()
     expect(screen.getByText('mix.cardDebt')).toBeInTheDocument()
+    // Keep the balance and fixed-width action group on separate rows on narrow screens.
+    expect(screen.getByLabelText('Delete Checking').parentElement?.parentElement).toHaveClass(
+      'flex-col',
+      'sm:flex-row'
+    )
     expect(screen.getByText('metrics.net')).toBeInTheDocument()
   })
 

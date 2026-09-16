@@ -72,7 +72,8 @@ export function OverviewAccountComparison({
   )
 
   const comparison = useMemo(() => {
-    // Reading rates here makes stable store converters recompute when their backing rates change.
+    // The store converter is stable; both its target currency and rates can change.
+    void preferredCurrency
     void rates
     if (!firstAccount || !secondAccount) return INVALID_COMPARISON
     if (invalidRates.length > 0) return INVALID_COMPARISON
@@ -84,13 +85,13 @@ export function OverviewAccountComparison({
       mode,
       convertToPreferred
     )
-    // Rates are an explicit dependency because the store converter has stable identity.
   }, [
     convertToPreferred,
     firstAccount,
     firstHistory,
     invalidRates,
     mode,
+    preferredCurrency,
     rates,
     secondAccount,
     secondHistory,

@@ -12,19 +12,21 @@ vi.mock('react-i18next', () => ({
   }),
 }))
 
+const history = vi.hoisted(() => ({
+  firstHistory: [
+    { date: '2026-01-01', balance: -20_000 },
+    { date: '2026-03-01', balance: -5_000 },
+  ],
+  secondHistory: [
+    { date: '2026-02-01', balance: 100_000 },
+    { date: '2026-03-01', balance: 120_000 },
+  ],
+  isLoading: false,
+  error: null,
+}))
+
 vi.mock('@/components/dashboard/use-overview-account-comparison', () => ({
-  useOverviewAccountComparison: () => ({
-    firstHistory: [
-      { date: '2026-01-01', balance: -20_000 },
-      { date: '2026-03-01', balance: -5_000 },
-    ],
-    secondHistory: [
-      { date: '2026-02-01', balance: 100_000 },
-      { date: '2026-03-01', balance: 120_000 },
-    ],
-    isLoading: false,
-    error: null,
-  }),
+  useOverviewAccountComparison: () => history,
 }))
 
 vi.mock('@/components/ui/safe-chart', () => ({
@@ -98,6 +100,33 @@ describe('OverviewAccountComparison', () => {
     expect(screen.getAllByText(/Feb 1, 2026/).length).toBeGreaterThan(0)
     expect(within(screen.getAllByRole('row')[3]).getByText('$150.00')).toBeInTheDocument()
     expect(within(screen.getAllByRole('row')[3]).getByText('$400.00')).toBeInTheDocument()
+  })
+
+  it('recomputes when preferred currency changes with stable history, rates, and converter identity', () => {
+    let preferredCurrency = 'USD'
+    const convertToPreferred: ConvertToPreferred = (amount, currency) => ({
+      complete: true,
+      preferredCurrency,
+      amountCentavos:
+        currency === preferredCurrency ? amount : amount * (preferredCurrency === 'USD' ? 2 : 0.5),
+      missingCurrencies: [],
+    })
+    const props = {
+      accounts,
+      rates: { 'EUR:USD': 2, 'USD:EUR': 0.5 },
+      invalidRates: [],
+      convertToPreferred,
+    }
+    const { rerender } = render(
+      <OverviewAccountComparison {...props} preferredCurrency={preferredCurrency} />
+    )
+    expect(screen.getAllByText('$2,400.00').length).toBeGreaterThan(0)
+
+    preferredCurrency = 'EUR'
+    rerender(<OverviewAccountComparison {...props} preferredCurrency={preferredCurrency} />)
+    expect(screen.getAllByText('€1,200.00').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('-€25.00').length).toBeGreaterThan(0)
+    expect(screen.queryByText('€2,400.00')).not.toBeInTheDocument()
   })
 
   it('recomputes historical conversion when current rates update and withholds all values for missing or invalid rates', () => {

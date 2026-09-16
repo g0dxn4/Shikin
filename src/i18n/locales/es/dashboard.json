@@ -31,7 +31,14 @@
   },
   "overview": {
     "netWorth": "Patrimonio neto",
-    "netWorthHistory": "Historial de saldo",
+    "financeOverview": "Finanzas de un vistazo",
+    "viewsLabel": "Vistas del resumen financiero",
+    "views": {
+      "summary": "Resumen",
+      "history": "Historial",
+      "comparison": "Comparar cuentas"
+    },
+    "netWorthHistory": "Historial del patrimonio neto",
     "historyPeriod": "Rango de patrimonio neto",
     "asOf": "Al {{date}}",
     "changeOverPeriod": "{{delta}} en {{period}}",
@@ -46,6 +53,27 @@
     "viewChartData": "Ver datos del gráfico",
     "focusDate": "Enfoca o apunta una fecha para ver su saldo",
     "chartTitle": "Patrimonio neto en el tiempo",
+    "comparison": {
+      "firstAccount": "Primera cuenta",
+      "secondAccount": "Segunda cuenta",
+      "display": "Mostrar",
+      "balance": "Saldo",
+      "change": "Cambio",
+      "period": "Rango de fechas",
+      "recordedSnapshots": "Las líneas conectan registros guardados; los intervalos se muestran sin datos, no como cero.",
+      "currentFx": "Los importes históricos usan los tipos de cambio actuales a {{currency}}.",
+      "baseline": "El cambio inicia en el primer registro de cada cuenta: {{first}} el {{firstDate}}; {{second}} el {{secondDate}}.",
+      "debtBalance": "Deuda de tarjeta (saldo negativo)",
+      "chartLabel": "Comparación de saldos registrados de {{first}} y {{second}}",
+      "loading": "Cargando saldos registrados…",
+      "loadError": "No se pudo cargar el historial de cuentas",
+      "unavailable": "Comparación no disponible",
+      "invalidConversion": "Corrige los datos de moneda o tipos de cambio antes de comparar cuentas.",
+      "missingRates": "Faltan tipos de cambio actuales para {{currencies}}.",
+      "noAccounts": "Agrega cuentas para comparar sus saldos registrados.",
+      "needTwoAccounts": "Agrega otra cuenta activa para hacer una comparación.",
+      "noHistory": "No hay historial de saldo registrado para {{accounts}} en este rango."
+    },
     "period": {
       "3m": "3M",
       "6m": "6M",

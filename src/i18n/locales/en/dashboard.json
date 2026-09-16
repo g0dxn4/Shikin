@@ -31,7 +31,14 @@
   },
   "overview": {
     "netWorth": "Net worth",
-    "netWorthHistory": "Balance history",
+    "financeOverview": "Finances at a glance",
+    "viewsLabel": "Finance overview views",
+    "views": {
+      "summary": "Summary",
+      "history": "History",
+      "comparison": "Compare accounts"
+    },
+    "netWorthHistory": "Net worth history",
     "historyPeriod": "Net worth date range",
     "asOf": "As of {{date}}",
     "changeOverPeriod": "{{delta}} over {{period}}",
@@ -46,6 +53,27 @@
     "viewChartData": "View chart data",
     "focusDate": "Focus or point to a date for its balance",
     "chartTitle": "Net worth over time",
+    "comparison": {
+      "firstAccount": "First account",
+      "secondAccount": "Second account",
+      "display": "Display",
+      "balance": "Balance",
+      "change": "Change",
+      "period": "Date range",
+      "recordedSnapshots": "Lines connect recorded snapshots; gaps are shown as missing, not zero.",
+      "currentFx": "Historical amounts use current exchange rates into {{currency}}.",
+      "baseline": "Change starts at each account’s first snapshot: {{first}} on {{firstDate}}; {{second}} on {{secondDate}}.",
+      "debtBalance": "Credit card debt (negative balance)",
+      "chartLabel": "Recorded balance comparison for {{first}} and {{second}}",
+      "loading": "Loading recorded balances…",
+      "loadError": "Couldn’t load account history",
+      "unavailable": "Comparison unavailable",
+      "invalidConversion": "Invalid currency or exchange-rate data must be repaired before comparing accounts.",
+      "missingRates": "Missing current exchange rates for {{currencies}}.",
+      "noAccounts": "Add accounts to compare their recorded balances.",
+      "needTwoAccounts": "Add another active account to make a comparison.",
+      "noHistory": "No recorded balance history for {{accounts}} in this date range."
+    },
     "period": {
       "3m": "3M",
       "6m": "6M",

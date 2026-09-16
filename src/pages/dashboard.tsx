@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { ErrorState } from '@/components/ui/error-state'
-import { NativePanel, PageToolbar } from '@/components/ui/native-layout'
+import { NativePanel } from '@/components/ui/native-layout'
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
 import { useInvestmentStore } from '@/stores/investment-store'
@@ -52,6 +52,7 @@ export function Dashboard() {
     rates,
     invalidRates,
     loadRates,
+    convertToPreferred,
   } = useCurrencyStore()
   const {
     history,
@@ -211,15 +212,6 @@ export function Dashboard() {
 
   return (
     <div className="page-content">
-      <PageToolbar
-        actions={
-          <Button onClick={() => openTransactionDialog()}>
-            <Plus size={16} />
-            {t('quickActions.addTransaction')}
-          </Button>
-        }
-      />
-
       <ErrorBanner
         title="Some dashboard data couldn’t be loaded"
         messages={dashboardErrors}
@@ -269,6 +261,11 @@ export function Dashboard() {
             ? tAnalytics('netWorth.firstSnapshot')
             : tAnalytics('netWorth.noHistory')
         }
+        accounts={accounts}
+        preferredCurrency={preferredCurrency}
+        rates={rates}
+        invalidRates={invalidRates}
+        convertToPreferred={convertToPreferred}
       />
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">

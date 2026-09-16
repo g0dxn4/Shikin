@@ -37,6 +37,11 @@ const mockLoadRates = vi.fn().mockResolvedValue(undefined)
 const mockRetrySplits = vi.fn()
 const mockLoadHistory = vi.fn().mockResolvedValue(undefined)
 const mockCalculateCurrent = vi.fn().mockResolvedValue(undefined)
+const mockDashboardQuery = vi.fn().mockResolvedValue([])
+
+vi.mock('@/lib/database', () => ({
+  query: (...args: unknown[]) => mockDashboardQuery(...args),
+}))
 
 let mockNetWorthHistory: Array<{
   date: string
@@ -52,6 +57,31 @@ let mockNetWorthLoading = false
 let mockPreferredCurrency = 'USD'
 let mockRates: Record<string, number> = {}
 let mockInvalidRates: Array<{ fromCurrency: string; toCurrency: string; rate: string }> = []
+const mockConvertToPreferred = vi.fn((amount: number, currency: string) => {
+  const normalized = currency.toUpperCase()
+  if (normalized === mockPreferredCurrency) {
+    return {
+      complete: true as const,
+      preferredCurrency: mockPreferredCurrency,
+      amountCentavos: amount,
+      missingCurrencies: [] as const,
+    }
+  }
+  const rate = mockRates[`${normalized}:${mockPreferredCurrency}`]
+  return rate
+    ? {
+        complete: true as const,
+        preferredCurrency: mockPreferredCurrency,
+        amountCentavos: Math.round(amount * rate),
+        missingCurrencies: [] as const,
+      }
+    : {
+        complete: false as const,
+        preferredCurrency: mockPreferredCurrency,
+        missingCurrencies: [normalized],
+        reason: 'missing_exchange_rates' as const,
+      }
+})
 
 vi.mock('@/stores/ui-store', () => ({
   useUIStore: () => ({
@@ -109,6 +139,7 @@ vi.mock('@/stores/currency-store', () => ({
     rates: mockRates,
     invalidRates: mockInvalidRates,
     loadRates: mockLoadRates,
+    convertToPreferred: mockConvertToPreferred,
   }),
 }))
 
@@ -199,6 +230,8 @@ describe('Dashboard', () => {
     mockPreferredCurrency = 'USD'
     mockRates = {}
     mockInvalidRates = []
+    mockDashboardQuery.mockReset()
+    mockDashboardQuery.mockResolvedValue([])
     mockCalculateCurrent.mockReset()
     mockCalculateCurrent.mockImplementation(() => new Promise<void>(() => {}))
   })
@@ -220,6 +253,48 @@ describe('Dashboard', () => {
 
     expect(mockFetchAccounts).toHaveBeenCalled()
     expect(mockFetchTransactions).toHaveBeenCalled()
+  })
+
+  it('defaults to a numbers-only summary and switches to full-width history and comparison views', async () => {
+    const user = userEvent.setup()
+    mockAccounts = [
+      { id: 'nu', name: 'Nu Card', type: 'credit_card', currency: 'USD', balance: -12000 },
+      { id: 'bbva', name: 'BBVA', type: 'checking', currency: 'USD', balance: 85000 },
+    ]
+    mockNetWorthHistory = [
+      { date: '2026-01-01', netWorth: 60000, assets: 80000, liabilities: 20000 },
+      { date: '2026-02-01', netWorth: 73000, assets: 85000, liabilities: 12000 },
+    ]
+    mockDashboardQuery.mockImplementation((_sql: string, params: unknown[]) =>
+      Promise.resolve(
+        params[0] === 'nu'
+          ? [{ date: '2026-02-01', balance: -12000 }]
+          : [{ date: '2026-02-01', balance: 85000 }]
+      )
+    )
+
+    render(<Dashboard />)
+
+    expect(screen.getByRole('tab', { name: 'overview.views.summary' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    expect(screen.queryByLabelText('overview.chartTitle')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'overview.views.history' }))
+    expect(screen.getByLabelText('overview.chartTitle')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'overview.views.comparison' }))
+    expect(screen.getByLabelText('overview.comparison.firstAccount')).toBeInTheDocument()
+    expect(screen.getByLabelText('overview.comparison.secondAccount')).toBeInTheDocument()
+    await waitFor(() => expect(mockDashboardQuery).toHaveBeenCalledTimes(2))
+  })
+
+  it('removes only the Overview toolbar add action', () => {
+    const { container } = render(<Dashboard />)
+
+    expect(container.querySelector('.page-toolbar')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'addTransaction' })).toBeInTheDocument()
   })
 
   describe('without accounts', () => {
@@ -820,7 +895,7 @@ describe('Dashboard', () => {
 
       const pendingWarning = screen.getByRole('alert')
       expect(pendingWarning).toHaveTextContent('currency.totalUnavailable')
-      expect(pendingWarning.previousElementSibling).toHaveTextContent('overview.netWorth')
+      expect(pendingWarning.closest('.metric-item')).toHaveTextContent('overview.netWorth')
       await waitFor(() => expect(mockCalculateCurrent).toHaveBeenCalledTimes(1))
 
       // The complete calculation includes a valid $10,000 holding with no accountId.
@@ -829,8 +904,11 @@ describe('Dashboard', () => {
       await act(async () => resolveCalculation?.())
 
       await waitFor(() => {
-        expect(screen.getAllByText('$11,950.00')).toHaveLength(2)
+        expect(screen.getByText('$11,950.00')).toBeInTheDocument()
       })
+
+      await userEvent.setup().click(screen.getByRole('tab', { name: 'overview.views.history' }))
+      expect(screen.getAllByText('$11,950.00')).toHaveLength(2)
     })
 
     it('withholds a stale current amount when calculation fails', async () => {
@@ -917,6 +995,7 @@ describe('Dashboard', () => {
       await waitFor(() => expect(mockCalculateCurrent).toHaveBeenCalled())
       expect(mockLoadHistory).toHaveBeenCalledWith('6m')
 
+      await user.click(screen.getByRole('tab', { name: 'overview.views.history' }))
       await user.click(screen.getByRole('button', { name: 'overview.period.3m' }))
       expect(mockLoadHistory).toHaveBeenCalledWith('3m')
     })

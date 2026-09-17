@@ -14,7 +14,10 @@ import {
 import { formatMoney } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import type { Account } from '@/types/database'
-import type { ConvertToPreferred } from '@/components/dashboard/overview-account-comparison-helpers'
+import type {
+  ComparisonDisplayMode,
+  ConvertToPreferred,
+} from '@/components/dashboard/overview-account-comparison-helpers'
 import { OverviewAccountComparison } from '@/components/dashboard/overview-account-comparison'
 
 export type NetWorthPeriod = '3m' | '6m' | '1y' | 'all'
@@ -81,6 +84,9 @@ export function OverviewNetWorth({
 }: OverviewNetWorthProps) {
   const { t } = useTranslation('dashboard')
   const [view, setView] = useState<OverviewView>('summary')
+  const [comparisonSelection, setComparisonSelection] = useState<[string, string]>(['', ''])
+  const [comparisonPeriod, setComparisonPeriod] = useState<NetWorthPeriod>('6m')
+  const [comparisonMode, setComparisonMode] = useState<ComparisonDisplayMode>('balance')
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
   const firstPoint = history[0]
   const lastPoint = history.length > 1 ? history[history.length - 1] : null
@@ -334,6 +340,12 @@ export function OverviewNetWorth({
             rates={rates}
             invalidRates={invalidRates}
             convertToPreferred={convertToPreferred}
+            selection={comparisonSelection}
+            onSelectionChange={setComparisonSelection}
+            period={comparisonPeriod}
+            onPeriodChange={setComparisonPeriod}
+            mode={comparisonMode}
+            onModeChange={setComparisonMode}
           />
         </div>
       ) : null}

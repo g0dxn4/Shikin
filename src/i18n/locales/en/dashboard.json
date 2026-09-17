@@ -64,6 +64,7 @@
       "currentFx": "Historical amounts use current exchange rates into {{currency}}.",
       "baseline": "Change starts at each account’s first snapshot: {{first}} on {{firstDate}}; {{second}} on {{secondDate}}.",
       "debtBalance": "Credit card debt (negative balance)",
+      "lastRecorded": "Last recorded: {{date}}",
       "chartLabel": "Recorded balance comparison for {{first}} and {{second}}",
       "loading": "Loading recorded balances…",
       "loadError": "Couldn’t load account history",

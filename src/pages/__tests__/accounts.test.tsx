@@ -602,4 +602,47 @@ describe('Accounts', () => {
       '/transactions?account=acc-ledger'
     )
   })
+
+  it('keeps card actions in one wrapping row and toggles balance history', async () => {
+    const user = userEvent.setup()
+    mockAccounts = [
+      { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 0 },
+      {
+        id: 'acc-card',
+        name: 'Travel Card',
+        type: 'credit_card',
+        currency: 'USD',
+        balance: -10000,
+        credit_limit: 100000,
+      },
+    ]
+
+    renderAccounts()
+
+    const viewTransactions = screen.getAllByRole('link', { name: 'viewTransactions' })[0]
+    const historyToggle = screen.getAllByRole('button', { name: 'history.show' })[0]
+    const actionRow = viewTransactions.parentElement
+    expect(actionRow).toBe(historyToggle.parentElement)
+    expect(actionRow).toHaveClass('flex-wrap')
+    expect(viewTransactions).toHaveClass('min-h-11')
+    expect(historyToggle).toHaveClass('min-h-11')
+    expect(historyToggle).toHaveAttribute('aria-expanded', 'false')
+
+    const payCard = screen.getByLabelText('Pay Travel Card')
+    const cardHistory = screen.getAllByRole('button', { name: 'history.show' })[1]
+    expect(payCard.parentElement).toBe(cardHistory.parentElement)
+    expect(payCard).toHaveClass('min-h-11')
+    expect(payCard.parentElement).not.toHaveTextContent('utilization.label')
+    expect(screen.getByText('utilization.label')).toBeInTheDocument()
+
+    await user.click(historyToggle)
+    expect(historyToggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: 'history.hide' })).toBeInTheDocument()
+    expect(screen.getByText('history.none')).toBeInTheDocument()
+    expect(actionRow).not.toContainElement(screen.getByText('history.none'))
+
+    await user.click(screen.getByRole('button', { name: 'history.hide' }))
+    expect(screen.queryByText('history.none')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'history.show' })).toHaveLength(2)
+  })
 })

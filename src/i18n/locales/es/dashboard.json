@@ -64,6 +64,7 @@
       "currentFx": "Los importes históricos usan los tipos de cambio actuales a {{currency}}.",
       "baseline": "El cambio inicia en el primer registro de cada cuenta: {{first}} el {{firstDate}}; {{second}} el {{secondDate}}.",
       "debtBalance": "Deuda de tarjeta (saldo negativo)",
+      "lastRecorded": "Último registro: {{date}}",
       "chartLabel": "Comparación de saldos registrados de {{first}} y {{second}}",
       "loading": "Cargando saldos registrados…",
       "loadError": "No se pudo cargar el historial de cuentas",

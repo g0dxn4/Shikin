@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
 import { CartesianGrid, Legend, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts'
@@ -38,6 +38,12 @@ interface OverviewAccountComparisonProps {
   rates: Readonly<Record<string, number>>
   invalidRates: ReadonlyArray<unknown>
   convertToPreferred: ConvertToPreferred
+  selection: [string, string]
+  onSelectionChange: (selection: [string, string]) => void
+  period: NetWorthPeriod
+  onPeriodChange: (period: NetWorthPeriod) => void
+  mode: ComparisonDisplayMode
+  onModeChange: (mode: ComparisonDisplayMode) => void
 }
 
 const INVALID_COMPARISON: PreparedAccountComparison = {
@@ -55,12 +61,15 @@ export function OverviewAccountComparison({
   rates,
   invalidRates,
   convertToPreferred,
+  selection,
+  onSelectionChange,
+  period,
+  onPeriodChange,
+  mode,
+  onModeChange,
 }: OverviewAccountComparisonProps) {
   const { t } = useTranslation('dashboard')
   const accountIds = useMemo(() => accounts.map((account) => account.id), [accounts])
-  const [selection, setSelection] = useState<[string, string]>(['', ''])
-  const [period, setPeriod] = useState<NetWorthPeriod>('6m')
-  const [mode, setMode] = useState<ComparisonDisplayMode>('balance')
   const effectiveSelection = reconcileComparisonSelection(accountIds, selection)
 
   const firstAccount = accounts.find((account) => account.id === effectiveSelection[0])
@@ -111,8 +120,8 @@ export function OverviewAccountComparison({
 
   if (!firstAccount || !secondAccount) return null
 
-  const firstLatest = findLatestValue(comparison.points, 'first')
-  const secondLatest = findLatestValue(comparison.points, 'second')
+  const firstLatest = findLatestRecord(comparison.points, 'first')
+  const secondLatest = findLatestRecord(comparison.points, 'second')
   const hasNoHistory =
     !isLoading && !error && (firstHistory.length === 0 || secondHistory.length === 0)
   const conversionMessage =
@@ -125,9 +134,9 @@ export function OverviewAccountComparison({
   const selectAccount = (side: 'first' | 'second', accountId: string) => {
     const [first, second] = effectiveSelection
     if (side === 'first') {
-      setSelection(accountId === second ? [accountId, first] : [accountId, second])
+      onSelectionChange(accountId === second ? [accountId, first] : [accountId, second])
     } else {
-      setSelection(accountId === first ? [second, accountId] : [first, accountId])
+      onSelectionChange(accountId === first ? [second, accountId] : [first, accountId])
     }
   }
 
@@ -155,11 +164,11 @@ export function OverviewAccountComparison({
             { value: 'balance', label: t('overview.comparison.balance') },
             { value: 'change', label: t('overview.comparison.change') },
           ]}
-          onChange={(value) => setMode(value as ComparisonDisplayMode)}
+          onChange={(value) => onModeChange(value as ComparisonDisplayMode)}
         />
         <PeriodControl
           period={period}
-          onChange={setPeriod}
+          onChange={onPeriodChange}
           label={t('overview.comparison.period')}
         />
       </div>
@@ -227,27 +236,43 @@ export function OverviewAccountComparison({
           <dl className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
             <ComparisonValue
               name={firstAccount.name}
-              value={firstLatest}
+              value={firstLatest?.value ?? null}
+              recordedAt={firstLatest?.date ?? null}
               currency={preferredCurrency}
               isDebt={
                 mode === 'balance' &&
                 firstAccount.type === 'credit_card' &&
                 firstLatest !== null &&
-                firstLatest < 0
+                firstLatest.value < 0
               }
               debtLabel={t('overview.comparison.debtBalance')}
+              lastRecordedLabel={
+                firstLatest
+                  ? t('overview.comparison.lastRecorded', {
+                      date: formatSnapshotDate(firstLatest.date),
+                    })
+                  : null
+              }
             />
             <ComparisonValue
               name={secondAccount.name}
-              value={secondLatest}
+              value={secondLatest?.value ?? null}
+              recordedAt={secondLatest?.date ?? null}
               currency={preferredCurrency}
               isDebt={
                 mode === 'balance' &&
                 secondAccount.type === 'credit_card' &&
                 secondLatest !== null &&
-                secondLatest < 0
+                secondLatest.value < 0
               }
               debtLabel={t('overview.comparison.debtBalance')}
+              lastRecordedLabel={
+                secondLatest
+                  ? t('overview.comparison.lastRecorded', {
+                      date: formatSnapshotDate(secondLatest.date),
+                    })
+                  : null
+              }
             />
           </dl>
           <div
@@ -468,20 +493,29 @@ function PeriodControl({
 function ComparisonValue({
   name,
   value,
+  recordedAt,
   currency,
   isDebt,
   debtLabel,
+  lastRecordedLabel,
 }: {
   name: string
   value: number | null
+  recordedAt: string | null
   currency: string
   isDebt: boolean
   debtLabel: string
+  lastRecordedLabel: string | null
 }) {
   return (
     <div className="border-border rounded-lg border px-3 py-2">
       <dt className="text-muted-foreground text-xs">{name}</dt>
-      <dd className="mt-1 font-semibold tabular-nums">{formatOptionalMoney(value, currency)}</dd>
+      <dd className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span className="font-semibold tabular-nums">{formatOptionalMoney(value, currency)}</span>
+        {recordedAt && lastRecordedLabel ? (
+          <span className="text-muted-foreground text-xs font-normal">{lastRecordedLabel}</span>
+        ) : null}
+      </dd>
       {isDebt ? (
         <span className="text-muted-foreground mt-0.5 block text-[10px]">{debtLabel}</span>
       ) : null}
@@ -489,10 +523,13 @@ function ComparisonValue({
   )
 }
 
-function findLatestValue(points: PreparedAccountComparison['points'], key: 'first' | 'second') {
+function findLatestRecord(
+  points: PreparedAccountComparison['points'],
+  key: 'first' | 'second'
+): { date: string; value: number } | null {
   for (let index = points.length - 1; index >= 0; index -= 1) {
     const value = points[index][key]
-    if (value !== null) return value
+    if (value !== null) return { date: points[index].date, value }
   }
   return null
 }

@@ -215,3 +215,12 @@ Do not claim checks that have not run. Any baseline fixture failure is tracked s
 - After those two fixes, `pnpm check`, all **59 directly affected tests**, and the frontend build passed again. Manual checks covered Summary/History/Compare, keyboard tabs, account/range/change selection, both appearances, and narrow layouts.
 - Exact ordered-row comparisons confirmed all 11 protected financial tables unchanged, including all **565 transactions**, in the verified temporary demo database. No real-data mode, schema changes, financial mutation changes, installation, release, or push occurred.
 - The earlier integration results above remain historical; this follow-up intentionally replaces visible shell headings with accessible screen-reader headings.
+
+### Usability polish — 2026-09-17
+
+- Account transaction/payment/history actions share a compact wrapping row with 44px targets; expanded history and utilization remain full-width.
+- Comparison account selections, range, and balance/change mode survive switches through Summary and History within the same Overview visit. Hidden comparison content still unmounts; no persistent storage or new global state was added.
+- Each comparison value shows its own last recorded date, taken from that same latest non-null point, with EN/ES labels and existing incomplete/loading/error gates preserved.
+- `pnpm check`, all 71 affected tests across six files, and frontend build passed. Integrated review found no material findings. Live checks verified retained selections, history expansion/collapse, and unclipped controls at 1440px and 320px; comparison dates also fit the narrow dark appearance.
+- The dev server briefly retained an empty transformed module; invalidating that file's watch entry restored the correct export without restarting servers or changing source content.
+- Exact before/after comparisons again preserved all 11 protected finance tables and 565 demo transactions. No real financial data was touched.

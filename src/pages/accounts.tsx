@@ -861,8 +861,8 @@ function AccountCard({
         </div>
       )}
 
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" asChild>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button variant="outline" size="sm" className="min-h-11" asChild>
           <Link to={`/transactions?account=${account.id}`}>
             <Receipt size={14} />
             {t('viewTransactions')}
@@ -873,6 +873,7 @@ function AccountCard({
             type="button"
             variant="outline"
             size="sm"
+            className="min-h-11"
             onClick={onPayCreditCard}
             aria-label={`Pay ${account.name}`}
           >
@@ -880,6 +881,18 @@ function AccountCard({
             {t('credit.pay')}
           </Button>
         )}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="min-h-11"
+          onClick={onToggleExpand}
+          aria-expanded={isExpanded}
+        >
+          <TrendingUp size={14} />
+          {isExpanded ? t('history.hide') : t('history.show')}
+          {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+        </Button>
       </div>
 
       {utilization !== null && (
@@ -924,17 +937,8 @@ function AccountCard({
         </div>
       )}
 
-      <button
-        onClick={onToggleExpand}
-        className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 mt-3 flex min-h-11 w-full items-center justify-center gap-1 rounded-md py-2 text-xs transition-colors focus-visible:ring-2 focus-visible:outline-none"
-      >
-        <TrendingUp size={12} />
-        {isExpanded ? t('history.hide') : t('history.show')}
-        {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-      </button>
-
       {isExpanded && (
-        <div className="border-border border-t pt-3 pb-1">
+        <div className="border-border mt-3 border-t pt-3 pb-1">
           {historyLoading ? (
             <Skeleton className="h-32 w-full" />
           ) : chartData.length > 1 ? (

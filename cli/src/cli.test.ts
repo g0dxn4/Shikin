@@ -250,7 +250,7 @@ describe('CLI command execution', () => {
     expect(webCommand.effects).toBeUndefined()
     expect(output.database).toMatchObject({
       requiredMigrations: [...CLI_DATABASE_MIGRATIONS],
-      latestRequiredMigration: '020_quote_recurrence_import_identity',
+      latestRequiredMigration: CLI_DATABASE_MIGRATIONS.at(-1),
       migrationCount: CLI_DATABASE_MIGRATIONS.length,
       expectsCurrent016FoundationSchema: true,
       foundationMigration: '016_cli_qol_foundation',
@@ -1438,25 +1438,7 @@ describe('CLI command execution', () => {
 
   it('includes deep integrity details for diagnose --deep', async () => {
     vi.mocked(query)
-      .mockReturnValueOnce([
-        { name: '001_core_tables' },
-        { name: '003_credit_cards' },
-        { name: '004_category_rules' },
-        { name: '005_recurring_rules' },
-        { name: '006_goals' },
-        { name: '007_recaps' },
-        { name: '010_transaction_splits' },
-        { name: '011_net_worth_snapshots' },
-        { name: '012_account_balance_history' },
-        { name: '013_recurring_rules_currency' },
-        { name: '014_recurring_rules_currency_backfill' },
-        { name: '015_primary_account' },
-        { name: '016_cli_qol_foundation' },
-        { name: '017_investment_type_cetes' },
-        { name: '018_placeholder_transactions' },
-        { name: '019_financial_semantics' },
-        { name: '020_quote_recurrence_import_identity' },
-      ])
+      .mockReturnValueOnce(CLI_DATABASE_MIGRATIONS.map((name) => ({ name })))
       .mockReturnValueOnce([{ count: 2 }])
       .mockReturnValueOnce([{ count: 14 }])
       .mockReturnValueOnce([{ count: 42 }])
@@ -1518,7 +1500,7 @@ describe('CLI command execution', () => {
           database: {
             ready: true,
             migrationCount: CLI_DATABASE_MIGRATIONS.length,
-            latestMigration: '020_quote_recurrence_import_identity',
+            latestMigration: CLI_DATABASE_MIGRATIONS.at(-1),
             accountCount: 2,
             categoryCount: 14,
             transactionCount: 42,

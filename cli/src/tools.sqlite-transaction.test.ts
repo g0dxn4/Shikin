@@ -8,6 +8,7 @@ import type * as DatabaseModule from './database.js'
 import type * as OsModule from 'node:os'
 import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
 import { applyFinancialSemanticsTestSchema } from './financial-semantics-test-schema.js'
+import { applyBackendFoundationTestSchema } from './backend-foundation-test-schema.js'
 
 const tempDirs = new Set<string>()
 const cleanupCallbacks = new Set<() => void>()
@@ -136,6 +137,8 @@ function seedDatabase({
       tags TEXT DEFAULT '',
       notes TEXT,
       active INTEGER DEFAULT 1,
+      anchor_kind TEXT,
+      anchor_day INTEGER,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
@@ -157,6 +160,9 @@ function seedDatabase({
       source TEXT,
       note TEXT,
       recurring_rule_id TEXT,
+      import_source TEXT,
+      import_external_id TEXT,
+      import_fingerprint TEXT,
       is_placeholder INTEGER NOT NULL DEFAULT 0,
       placeholder_status TEXT,
       resolved_at TEXT,
@@ -246,17 +252,37 @@ function seedDatabase({
       notes TEXT,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
+    CREATE TABLE subscriptions (id TEXT PRIMARY KEY);
+    CREATE TABLE budgets (id TEXT PRIMARY KEY);
+    CREATE TABLE budget_periods (id TEXT PRIMARY KEY);
+    CREATE TABLE investments (
+      id TEXT PRIMARY KEY,
+      avg_cost_basis INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE stock_prices (
+      id TEXT PRIMARY KEY,
+      quote_currency TEXT
+    );
+    CREATE TABLE exchange_rates (id TEXT PRIMARY KEY);
+    CREATE TABLE category_rules (id TEXT PRIMARY KEY);
+    CREATE TABLE goals (id TEXT PRIMARY KEY);
+    CREATE TABLE net_worth_snapshots (
+      id TEXT PRIMARY KEY,
+      currency TEXT
+    );
+    CREATE TABLE recaps (id TEXT PRIMARY KEY);
   `)
 
   seedTransactionStatusTriggers(db)
   applyFinancialSemanticsTestSchema(db)
 
-  for (const migration of CLI_DATABASE_MIGRATIONS) {
+  for (const migration of CLI_DATABASE_MIGRATIONS.slice(0, -1)) {
     db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(
       Number(migration.slice(0, 3)),
       migration
     )
   }
+  applyBackendFoundationTestSchema(db)
 
   db.prepare(
     `INSERT INTO accounts (id, name, type, currency, balance, is_archived)

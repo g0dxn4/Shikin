@@ -9,6 +9,7 @@ import type * as InsightsModule from './insights.js'
 import type * as OsModule from 'node:os'
 import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
 import { applyFinancialSemanticsTestSchema } from './financial-semantics-test-schema.js'
+import { applyBackendFoundationTestSchema } from './backend-foundation-test-schema.js'
 
 const tempDirs = new Set<string>()
 const cleanupCallbacks = new Set<() => void>()
@@ -117,6 +118,9 @@ function seedDatabase(tempHome: string, seed: (db: Database.Database) => void): 
       source TEXT,
       note TEXT,
       recurring_rule_id TEXT,
+      import_source TEXT,
+      import_external_id TEXT,
+      import_fingerprint TEXT,
       is_placeholder INTEGER NOT NULL DEFAULT 0,
       placeholder_status TEXT,
       resolved_at TEXT,
@@ -228,17 +232,41 @@ function seedDatabase(tempHome: string, seed: (db: Database.Database) => void): 
       highlights_json TEXT NOT NULL DEFAULT '[]',
       generated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
+    CREATE TABLE subcategories (id TEXT PRIMARY KEY);
+    CREATE TABLE recurring_rules (
+      id TEXT PRIMARY KEY,
+      anchor_kind TEXT,
+      anchor_day INTEGER
+    );
+    CREATE TABLE budget_periods (id TEXT PRIMARY KEY);
+    CREATE TABLE investments (
+      id TEXT PRIMARY KEY,
+      avg_cost_basis INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE stock_prices (
+      id TEXT PRIMARY KEY,
+      quote_currency TEXT
+    );
+    CREATE TABLE exchange_rates (id TEXT PRIMARY KEY);
+    CREATE TABLE category_rules (id TEXT PRIMARY KEY);
+    CREATE TABLE goals (id TEXT PRIMARY KEY);
+    CREATE TABLE net_worth_snapshots (
+      id TEXT PRIMARY KEY,
+      currency TEXT
+    );
+    CREATE TABLE account_balance_history (id TEXT PRIMARY KEY);
   `)
 
   seedTransactionStatusTriggers(db)
   applyFinancialSemanticsTestSchema(db)
 
-  for (const migration of CLI_DATABASE_MIGRATIONS) {
+  for (const migration of CLI_DATABASE_MIGRATIONS.slice(0, -1)) {
     db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(
       Number(migration.slice(0, 3)),
       migration
     )
   }
+  applyBackendFoundationTestSchema(db)
   seed(db)
   db.close()
 

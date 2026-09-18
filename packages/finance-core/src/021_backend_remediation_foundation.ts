@@ -146,14 +146,21 @@ const tables: Record<string, Record<string, string>> = {
   },
   card_statement_payment_links: {
     id: 'TEXT PRIMARY KEY',
-    statement_id: 'TEXT NOT NULL REFERENCES credit_card_statements(id) ON DELETE RESTRICT',
-    transaction_id: 'TEXT NOT NULL REFERENCES transactions(id) ON DELETE RESTRICT',
+    original_statement_id: 'TEXT NOT NULL',
+    original_transaction_id: 'TEXT NOT NULL',
+    statement_id: `TEXT REFERENCES credit_card_statements(id) ON DELETE SET NULL
+      CHECK (statement_id IS NULL OR statement_id = original_statement_id)`,
+    transaction_id: `TEXT REFERENCES transactions(id) ON DELETE SET NULL
+      CHECK (transaction_id IS NULL OR transaction_id = original_transaction_id)`,
     amount: "INTEGER NOT NULL CHECK (typeof(amount) = 'integer' AND amount > 0)",
     mode: "TEXT NOT NULL CHECK (mode IN ('apply_to_unpaid', 'attribute_existing'))",
     source: 'TEXT',
     note: 'TEXT',
     created_at: timestamp,
-    voided_at: 'TEXT',
+    voided_at: `TEXT CHECK (voided_at IS NOT NULL
+      OR (statement_id IS NOT NULL AND transaction_id IS NOT NULL
+        AND statement_id = original_statement_id
+        AND transaction_id = original_transaction_id))`,
   },
   app_data_state: {
     id: 'INTEGER PRIMARY KEY CHECK (id = 1)',
@@ -253,6 +260,11 @@ for (const operation of ['UPDATE', 'DELETE']) {
     `CREATE TRIGGER IF NOT EXISTS ${name} BEFORE ${operation} ON duplicate_review_decisions
     BEGIN SELECT RAISE(ABORT, 'Duplicate review evidence is immutable'); END`
 }
+triggers.trg_payment_link_originals_immutable = `CREATE TRIGGER IF NOT EXISTS trg_payment_link_originals_immutable
+  BEFORE UPDATE OF original_statement_id, original_transaction_id ON card_statement_payment_links
+  WHEN NEW.original_statement_id IS NOT OLD.original_statement_id
+    OR NEW.original_transaction_id IS NOT OLD.original_transaction_id
+  BEGIN SELECT RAISE(ABORT, 'Payment link original evidence is immutable'); END`
 for (const table of FINANCIAL_REVISION_TABLES) {
   for (const operation of ['INSERT', 'UPDATE', 'DELETE']) {
     const name = `trg_data_revision_${table}_${operation.toLowerCase()}`

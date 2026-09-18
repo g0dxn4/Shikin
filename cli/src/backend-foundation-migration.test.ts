@@ -305,16 +305,42 @@ describe('021 backend remediation foundation', () => {
         "INSERT INTO cashflow_bucket_allocations (id, bucket_id, amount, allocation_date, reverses_allocation_id) VALUES ('reverse2', 'bucket', -321, '2025-02-01', 'allocation')"
       )
     ).toThrow(/UNIQUE/)
+    db.exec(
+      "INSERT INTO transactions (id, account_id, type, amount, description, date) VALUES ('payment', 'cash', 'expense', 100, 'Card payment', '2025-02-01')"
+    )
     const link = db.prepare(
-      "INSERT INTO card_statement_payment_links (id, statement_id, transaction_id, amount, mode) VALUES (?, 'statement', 't2', ?, ?)"
+      `INSERT INTO card_statement_payment_links
+        (id, original_statement_id, original_transaction_id, statement_id, transaction_id, amount, mode)
+       VALUES (?, 'statement', 'payment', 'statement', 'payment', ?, ?)`
     )
     expect(() => link.run('bad', 0, 'apply_to_unpaid')).toThrow(/CHECK/)
     expect(() => link.run('bad', 1.5, 'apply_to_unpaid')).toThrow(/CHECK/)
     expect(() => link.run('bad', 1, 'other')).toThrow(/CHECK/)
     link.run('valid', 1, 'attribute_existing')
+    expect(() =>
+      db.exec(
+        "UPDATE card_statement_payment_links SET original_transaction_id = 't2' WHERE id = 'valid'"
+      )
+    ).toThrow(/immutable/)
+    expect(() => db.exec("DELETE FROM transactions WHERE id = 'payment'")).toThrow(/CHECK/)
     expect(() => db.exec("DELETE FROM credit_card_statements WHERE id = 'statement'")).toThrow(
-      /FOREIGN KEY/
+      /CHECK/
     )
+    const balances = rows(db, 'SELECT id, balance FROM accounts ORDER BY id')
+    db.exec(
+      "UPDATE card_statement_payment_links SET voided_at = '2025-02-02' WHERE id = 'valid'; DELETE FROM transactions WHERE id = 'payment'; DELETE FROM credit_card_statements WHERE id = 'statement'"
+    )
+    expect(rows(db, 'SELECT * FROM card_statement_payment_links')).toEqual([
+      expect.objectContaining({
+        id: 'valid',
+        original_statement_id: 'statement',
+        original_transaction_id: 'payment',
+        statement_id: null,
+        transaction_id: null,
+        voided_at: '2025-02-02',
+      }),
+    ])
+    expect(rows(db, 'SELECT id, balance FROM accounts ORDER BY id')).toEqual(balances)
     db.exec(
       "UPDATE investments SET avg_cost_basis_decimal = '0', cost_basis_known = 1 WHERE id = 'unknown'"
     )

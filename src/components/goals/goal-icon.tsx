@@ -8,6 +8,7 @@ interface GoalIconProps {
 }
 
 export function GoalIcon({ icon, size = 16, className }: GoalIconProps) {
-  const Icon = (icon && GOAL_ICON_MAP[icon]) || Target
+  const Icon =
+    icon && Object.prototype.hasOwnProperty.call(GOAL_ICON_MAP, icon) ? GOAL_ICON_MAP[icon] : Target
   return <Icon size={size} className={className} aria-hidden="true" />
 }

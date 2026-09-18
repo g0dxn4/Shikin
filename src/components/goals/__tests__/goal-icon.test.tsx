@@ -25,6 +25,14 @@ describe('GoalIcon', () => {
     expect(empty.container.textContent ?? '').not.toMatch(LEGACY_EMOJI_PATTERN)
   })
 
+  it.each(['constructor', 'toString', '__proto__'])(
+    'safely falls back for unknown key %s',
+    (icon) => {
+      const { container } = render(<GoalIcon icon={icon} />)
+      expect(container.querySelector('svg.lucide-target')).toBeInTheDocument()
+    }
+  )
+
   it('defines human-readable EN and ES labels for every picker icon', () => {
     for (const icon of GOAL_ICONS) {
       const key = GOAL_ICON_LABEL_KEYS[icon]

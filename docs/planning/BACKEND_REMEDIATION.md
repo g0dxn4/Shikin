@@ -26,7 +26,7 @@ Approved bounded fix:
 - Mirror CLI and data-server behavior, with synthetic source/destination preservation tests.
 - Preserve ordinary-mode storage resolution and migration behavior. Do not claim that setting XDG alone is safe isolation, or that this repairs a separately installed wrapper.
 
-Status: **implemented; integrated validation and final review pending**. Planning review approved this scope with no blockers. Commit `5c3e33d` adds the guard and synthetic-root parity tests.
+Status: **bounded slice fixed and reviewed**. Planning review approved this scope with no blockers. Commit `5c3e33d` adds the guard and synthetic-root parity tests. Integrated Sol high database review reported no material database issues; broader DEP-01 work below remains open.
 
 Remaining DEP-01 decisions: ordinary custom-XDG migration opt-in, native desktop isolation, installation-specific wrapper remediation, and resolved database identity before writes. These are not silently included in this small fix.
 
@@ -77,4 +77,14 @@ All open entries require isolated acceptance tests before being called runtime-c
 6. **Imports and exhaustive reads:** IMP-11/12/13/10. Source-scoped identity and conflict semantics precede backfill and resumability decisions.
 7. **Correction APIs and diagnostics:** IMP-14/15, existing-payment statement linking (UX-01), non-sensitive instance identity (DEP-03), completeness/discovery improvements (UX-02/04). Optional bucket hierarchy (UX-03) remains an enhancement, not a corruption fix.
 
-This ledger is a work queue, not a claim that all listed defects have been fixed or that every historical incident applies to the current build.
+## Validation and parallel icon cleanup — 2026-09-18
+
+- `pnpm check`, **121 test files / 1,340 tests**, and frontend build passed on the integrated isolation and icon changes. The focused CLI/MCP public-contract and isolation selection also passed all 84 tests.
+- `pnpm build:cli` now deploys the production package and performs a real MCP SDK handshake, checks parity of all **91 shared tools** with the CLI catalog, validates input schemas, reads the same synthetic account and transaction through both surfaces, checks invalid-input/domain error behavior, and exercises financial dry runs through both CLI and MCP.
+- Exact snapshots of every SQLite table before/after those reads and dry runs remained unchanged. The committed account/expense fixtures are intentionally created only in fresh disposable storage before that preservation baseline. This verifies the exercised contracts, not every financial calculation or the still-open recap side effect.
+- The deployment harness now overrides HOME, USERPROFILE, APPDATA, LOCALAPPDATA, XDG and temporary-directory roots, strips inherited Shikin runtime options, and uses an ephemeral loopback port. Linux deployment/MCP execution passed. macOS/Windows environment construction was added but not executed on those native operating systems.
+- Decorative goal emojis now render through the existing Lucide pack, including human-readable EN/ES picker labels. Stored icon strings and form payloads are unchanged. **UI-01 fixed:** unknown inherited object-property names now safely select the fallback icon; three regressions failed before the guard and pass afterward.
+- Browser checks used a separate, newly created hosted fixture—not the user's running preview—and verified keyboard icon selection, saved legacy icon value, Lucide rendering in Goals and Overview, and a 390px layout without overflow. That temporary server and its data were removed afterward. No real financial records were read or modified.
+- Integrated final review: no material database issues. No install, release, or push performed.
+
+This ledger is a work queue, not a claim that all listed defects have been fixed or that every historical incident applies to the current build. The next financial correctness slice is reporting eligibility, split-aware category totals, and explicit recap persistence.

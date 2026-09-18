@@ -326,8 +326,65 @@ async function smokeMcp({ cliEntrypoint, entrypoint, packageFile, env, port, fix
       throw new Error(`MCP query-transactions failed: ${JSON.stringify(transactionsResult)}`)
     }
     const transactions = parseMcpTextResult(transactionsResult, 'query-transactions')
-    if (transactions.success !== true || !Array.isArray(transactions.transactions)) {
-      throw new Error(`Unexpected query-transactions payload: ${JSON.stringify(transactions)}`)
+    const cliTransactions = JSON.parse(
+      runNode(
+        [
+          cliEntrypoint,
+          'query-transactions',
+          '--account-id',
+          fixture.accountId,
+          '--limit',
+          '10',
+          '--json',
+        ],
+        env
+      )
+    )
+    for (const [surface, result] of [
+      ['CLI', cliTransactions],
+      ['MCP', transactions],
+    ]) {
+      if (
+        result.success !== true ||
+        result.totalMatched !== 1 ||
+        result.transactions?.length !== 1 ||
+        result.transactions[0].id !== fixture.transactionId
+      ) {
+        throw new Error(
+          `${surface} did not return the seeded transaction: ${JSON.stringify(result)}`
+        )
+      }
+    }
+
+    const cliDryRun = JSON.parse(
+      runNode(
+        [
+          cliEntrypoint,
+          'add-transaction',
+          '--account-id',
+          fixture.accountId,
+          '--category',
+          fixture.categoryName,
+          '--amount',
+          '12.34',
+          '--type',
+          'expense',
+          '--description',
+          'CLI deployment smoke dry run',
+          '--date',
+          '2026-01-15',
+          '--dry-run',
+          '--json',
+        ],
+        env
+      )
+    )
+    if (
+      cliDryRun.success !== true ||
+      cliDryRun.dryRun !== true ||
+      cliDryRun.wouldCreate?.accountId !== fixture.accountId
+    ) {
+      throw new Error(`Unexpected CLI dry-run payload: ${JSON.stringify(cliDryRun)}`)
     }
 
     const schemaInvalidResult = await client.callTool(
@@ -416,7 +473,7 @@ async function smokeMcp({ cliEntrypoint, entrypoint, packageFile, env, port, fix
         new Set([...Object.keys(before), ...Object.keys(after)])
       ).filter((name) => JSON.stringify(before[name]) !== JSON.stringify(after[name]))
       throw new Error(
-        `MCP reads or financial dry run changed database table contents: ${changedTables.join(', ')}`
+        `CLI/MCP reads or financial dry runs changed database table contents: ${changedTables.join(', ')}`
       )
     }
   } catch (error) {
@@ -534,6 +591,40 @@ async function smokeHostedWeb(
       throw new Error(`CLI did not observe the hosted web category: ${JSON.stringify(categories)}`)
     }
 
+    // This is a committed fixture write in the disposable database, before the
+    // read/dry-run preservation baseline. Nonempty queries must return its exact ID.
+    const recorded = JSON.parse(
+      runNode(
+        [
+          cliEntrypoint,
+          'add-transaction',
+          '--account-id',
+          created.account.id,
+          '--category',
+          'Web Shared DB Smoke',
+          '--amount',
+          '7.50',
+          '--type',
+          'expense',
+          '--description',
+          'CLI deployment smoke fixture',
+          '--date',
+          '2026-01-15',
+          '--json',
+        ],
+        isolatedEnv
+      )
+    )
+    if (
+      recorded.success !== true ||
+      typeof recorded.transaction?.id !== 'string' ||
+      !recorded.transaction.id
+    ) {
+      throw new Error(
+        `Could not create the synthetic transaction fixture: ${JSON.stringify(recorded)}`
+      )
+    }
+
     const wrongOrigin = await fetch(`http://127.0.0.1:${port}/api/db/query`, {
       method: 'POST',
       headers: {
@@ -555,6 +646,7 @@ async function smokeHostedWeb(
       port,
       fixture: {
         accountId: created.account.id,
+        transactionId: recorded.transaction.id,
         categoryName: 'Web Shared DB Smoke',
       },
     })

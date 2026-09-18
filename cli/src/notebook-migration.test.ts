@@ -1,4 +1,5 @@
 // @vitest-environment node
+import type * as NodeFs from 'node:fs'
 import {
   chmodSync,
   existsSync,
@@ -52,6 +53,7 @@ async function loadNotebook() {
 afterEach(() => {
   vi.unstubAllEnvs()
   vi.doUnmock('./storage-context.js')
+  vi.doUnmock('node:fs')
   vi.resetModules()
   for (const dir of tempDirs) {
     rmSync(dir, { recursive: true, force: true })
@@ -103,27 +105,94 @@ describe('notebook writes across approved custom-root migration', () => {
     expect(existsSync(join(outsideDir, 'escape.md'))).toBe(false)
   })
 
-  it('does not treat an unreadable migrated note as missing during append', async () => {
+  it('appends to a write-only migrated note without reading it', async () => {
     const roots = syntheticRoots()
     const legacyDir = legacyNotebookDir(roots.home)
     mkdirSync(legacyDir, { recursive: true })
     const legacyFile = join(legacyDir, 'secret.md')
     writeFileSync(legacyFile, 'do-not-lose')
-    // Write-only: append can still overwrite unless read errors other than ENOENT propagate.
+    // Write-only: append must not require read access, so no bytes are lost.
     chmodSync(legacyFile, 0o200)
     stubApprovedCustomRoot(roots)
 
     try {
       const { appendNote } = await loadNotebook()
-      await expect(appendNote('secret.md', 'appended')).rejects.toMatchObject({ code: 'EACCES' })
+      await appendNote('secret.md', 'appended')
       const migrated = join(targetNotebookDir(roots.data), 'secret.md')
-      chmodSync(migrated, 0o600)
-      expect(readFileSync(migrated, 'utf-8')).toBe('do-not-lose')
+      expect(readFileSync(migrated, 'utf-8')).toBe('do-not-lose\nappended')
     } finally {
       const migrated = join(targetNotebookDir(roots.data), 'secret.md')
       if (existsSync(migrated)) chmodSync(migrated, 0o600)
       if (existsSync(legacyFile)) chmodSync(legacyFile, 0o600)
     }
+  })
+
+  it('preserves migrated bytes when append is denied write access', async () => {
+    const roots = syntheticRoots()
+    const legacyDir = legacyNotebookDir(roots.home)
+    mkdirSync(legacyDir, { recursive: true })
+    const legacyFile = join(legacyDir, 'readonly.md')
+    writeFileSync(legacyFile, 'do-not-lose')
+    chmodSync(legacyFile, 0o400)
+    stubApprovedCustomRoot(roots)
+
+    try {
+      const { appendNote } = await loadNotebook()
+      await expect(appendNote('readonly.md', 'appended')).rejects.toMatchObject({ code: 'EACCES' })
+      const migrated = join(targetNotebookDir(roots.data), 'readonly.md')
+      expect(existsSync(migrated)).toBe(true)
+      chmodSync(migrated, 0o600)
+      expect(readFileSync(migrated, 'utf-8')).toBe('do-not-lose')
+    } finally {
+      const migrated = join(targetNotebookDir(roots.data), 'readonly.md')
+      if (existsSync(migrated)) chmodSync(migrated, 0o600)
+      if (existsSync(legacyFile)) chmodSync(legacyFile, 0o600)
+    }
+  })
+
+  it('preserves invalid UTF-8 bytes in a migrated note when appending', async () => {
+    const roots = syntheticRoots()
+    const legacyDir = legacyNotebookDir(roots.home)
+    mkdirSync(legacyDir, { recursive: true })
+    const legacyBytes = Buffer.from([0xff, 0xfe, 0x80, 0x41])
+    writeFileSync(join(legacyDir, 'binary.md'), legacyBytes)
+    stubApprovedCustomRoot(roots)
+
+    const { appendNote } = await loadNotebook()
+    await appendNote('binary.md', 'appended')
+
+    const migrated = readFileSync(join(targetNotebookDir(roots.data), 'binary.md'))
+    expect(migrated).toEqual(Buffer.concat([legacyBytes, Buffer.from('\nappended')]))
+  })
+
+  it('does not overwrite a competitor file created during an exclusive write', async () => {
+    const roots = syntheticRoots()
+    const legacyDir = legacyNotebookDir(roots.home)
+    mkdirSync(legacyDir, { recursive: true })
+    stubApprovedCustomRoot(roots)
+
+    const targetPath = join(targetNotebookDir(roots.data), 'race.md')
+    vi.doMock('node:fs', async (importOriginal) => {
+      const actual = await importOriginal<typeof NodeFs>()
+      return {
+        ...actual,
+        writeFileSync: ((
+          path: Parameters<typeof actual.writeFileSync>[0],
+          data: Parameters<typeof actual.writeFileSync>[1],
+          options?: Parameters<typeof actual.writeFileSync>[2]
+        ) => {
+          const flag = typeof options === 'object' && options !== null ? options.flag : undefined
+          if (path === targetPath && flag === 'wx') {
+            actual.writeFileSync(targetPath, 'competitor', { encoding: 'utf-8', mode: 0o600 })
+          }
+          return actual.writeFileSync(path, data, options)
+        }) as typeof actual.writeFileSync,
+      }
+    })
+
+    const { writeNoteIfAbsent } = await loadNotebook()
+    await expect(writeNoteIfAbsent('race.md', 'loser')).resolves.toBe(false)
+    expect(readFileSync(targetPath, 'utf-8')).toBe('competitor')
   })
 
   it('writes a note only when it is still absent after preparation', async () => {

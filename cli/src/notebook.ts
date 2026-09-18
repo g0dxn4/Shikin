@@ -4,8 +4,8 @@ import { PRIVATE_FILE_MODE, ensurePrivateDirectory, hardenPathMode } from './app
 import { NOTEBOOK_DIR, isSafeNotebookPathInput, resolveNotebookPath } from './notebook-path.js'
 import { prepareStorageForWrite, validateNativeSqliteBinding } from './storage-context.js'
 
-function writePrivateNoteFile(path: string, content: string): void {
-  writeFileSync(path, content, { encoding: 'utf-8', mode: PRIVATE_FILE_MODE })
+function writePrivateNoteFile(path: string, content: string, flag: 'w' | 'wx' | 'a' = 'w'): void {
+  writeFileSync(path, content, { encoding: 'utf-8', mode: PRIVATE_FILE_MODE, flag })
   hardenPathMode(path, PRIVATE_FILE_MODE)
 }
 
@@ -34,24 +34,20 @@ export async function writeNote(relativePath: string, content: string): Promise<
 
 export async function writeNoteIfAbsent(relativePath: string, content: string): Promise<boolean> {
   const fullPath = prepareNotebookWrite(relativePath)
-  if (existsSync(fullPath)) {
-    return false
+  try {
+    writePrivateNoteFile(fullPath, content, 'wx')
+    return true
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'EEXIST') {
+      return false
+    }
+    throw error
   }
-  writePrivateNoteFile(fullPath, content)
-  return true
 }
 
 export async function appendNote(relativePath: string, content: string): Promise<void> {
   const fullPath = prepareNotebookWrite(relativePath)
-  let existing = ''
-  try {
-    existing = readFileSync(fullPath, 'utf-8')
-  } catch (error) {
-    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
-      throw error
-    }
-  }
-  writePrivateNoteFile(fullPath, existing + '\n' + content)
+  writePrivateNoteFile(fullPath, '\n' + content, 'a')
 }
 
 export async function noteExists(relativePath: string): Promise<boolean> {

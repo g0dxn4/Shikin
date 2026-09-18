@@ -1,3 +1,10 @@
+import {
+  BACKEND_FOUNDATION_MIGRATION,
+  BACKEND_FOUNDATION_SCHEMA,
+  backendFoundationStatements,
+  assertBackendFoundationReady,
+  assertSupportedSchemaVersion,
+} from '@shikin/finance-core'
 import { isTauri, DATA_SERVER_URL, withDataServerHeaders } from '@/lib/runtime'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -222,6 +229,7 @@ const CURRENT_SHIKIN_MIGRATIONS = [
   '018_placeholder_transactions',
   '019_financial_semantics',
   '020_quote_recurrence_import_identity',
+  BACKEND_FOUNDATION_MIGRATION,
 ] as const
 
 const CURRENT_SHIKIN_SCHEMA: Record<string, readonly string[]> = {
@@ -400,10 +408,17 @@ async function getTauriDb(): Promise<TauriDatabase> {
     tauriInitPromise = (async () => {
       const { default: Database } = await import('@tauri-apps/plugin-sql')
       const database = await Database.load(await getTauriSqliteUrl())
-      tauriDb = database as unknown as TauriDatabase
-      await enableTauriForeignKeys(tauriDb)
-      await runTauriMigrations(tauriDb)
-      return tauriDb
+      const loaded = database as unknown as TauriDatabase
+      try {
+        await enableTauriForeignKeys(loaded)
+        await runTauriMigrations(loaded)
+        tauriDb = loaded
+        return loaded
+      } catch (error) {
+        await loaded.close().catch(() => {})
+        tauriInitPromise = null
+        throw error
+      }
     })()
   }
   return tauriInitPromise
@@ -448,7 +463,13 @@ function createTauriTransactionClient(transactionId: string): TransactionClient 
 
 async function runTauriWithTransaction<T>(fn: (tx: TransactionClient) => Promise<T>): Promise<T> {
   await getTauriDb()
+  return runTauriLoadedPoolTransaction(fn)
+}
 
+// Initialization already loaded the SQL pool. Do not recurse into getTauriDb here.
+async function runTauriLoadedPoolTransaction<T>(
+  fn: (tx: TransactionClient) => Promise<T>
+): Promise<T> {
   const transactionId = nextTauriTransactionId()
   await invokeTauri<void>('shikin_db_tx_begin', { transactionId })
 
@@ -705,7 +726,25 @@ async function validateTauriCurrentDatabase(db: TauriDatabase): Promise<void> {
 
   await assertTauriTransactionStatusReady(db)
 
-  const migrationRows = await db.select<{ name: string }[]>('SELECT name FROM _migrations')
+  const migrationRows = await db.select<{ id: number; name: string }[]>(
+    'SELECT id, name FROM _migrations'
+  )
+  assertSupportedSchemaVersion(migrationRows)
+  const foundationColumns: Record<string, string[]> = {}
+  for (const table of Object.keys(BACKEND_FOUNDATION_SCHEMA)) {
+    foundationColumns[table] = (
+      await db.select<{ name: string }[]>(`PRAGMA table_info(${table})`)
+    ).map((column) => column.name)
+  }
+  assertBackendFoundationReady(
+    foundationColumns,
+    await db.select<{ name: string; sql: string | null }[]>(
+      "SELECT name, sql FROM sqlite_master WHERE type IN ('index', 'trigger')"
+    ),
+    await db.select<{ id: number; database_id: string; data_revision: number }[]>(
+      'SELECT * FROM app_data_state'
+    )
+  )
   const appliedMigrations = new Set(migrationRows.map((row) => row.name))
   const missingMigrations = CURRENT_SHIKIN_MIGRATIONS.filter(
     (migration) => !appliedMigrations.has(migration)
@@ -733,8 +772,20 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
     )
   `)
 
-  const rows = await db.select<{ name: string }[]>('SELECT name FROM _migrations')
+  const rows = await db.select<{ id: number; name: string }[]>('SELECT id, name FROM _migrations')
+  assertSupportedSchemaVersion(rows)
   const applied = new Set(rows.map((r) => r.name))
+  if (applied.has(BACKEND_FOUNDATION_MIGRATION)) {
+    await validateTauriCurrentDatabase(db)
+    return
+  }
+
+  // 019/020 databases need only the supported additive tail. Do not replay
+  // older status/timestamp repair DML against existing financial evidence.
+  if (applied.has('019_financial_semantics')) {
+    await runTauriBackendFoundationUpgrade(db, applied)
+    return
+  }
 
   // --- Migration 001: Core Tables ---
   if (!applied.has('001_core_tables')) {
@@ -1437,6 +1488,13 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
     applied.add('019_financial_semantics')
   }
 
+  await runTauriBackendFoundationUpgrade(db, applied)
+}
+
+async function runTauriBackendFoundationUpgrade(
+  db: TauriDatabase,
+  applied: Set<string>
+): Promise<void> {
   if (!applied.has('020_quote_recurrence_import_identity')) {
     await ensureTableColumn(db, 'stock_prices', 'quote_currency', 'TEXT')
     await db.execute(
@@ -1514,7 +1572,27 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
     END
   `)
 
-  await validateTauriCurrentDatabase(db)
+  await runTauriLoadedPoolTransaction(async (tx) => {
+    // Recheck under the write lock, not against the pre-transaction snapshot.
+    const migrations = await tx.query<{ id: number; name: string }>(
+      'SELECT id, name FROM _migrations'
+    )
+    assertSupportedSchemaVersion(migrations)
+    if (!migrations.some((row) => row.name === BACKEND_FOUNDATION_MIGRATION)) {
+      const columns: Record<string, string[]> = {}
+      for (const table of Object.keys(BACKEND_FOUNDATION_SCHEMA)) {
+        columns[table] = (await tx.query<{ name: string }>(`PRAGMA table_info(${table})`)).map(
+          (column) => column.name
+        )
+      }
+      for (const statement of backendFoundationStatements(columns)) await tx.execute(statement)
+    }
+    await validateTauriCurrentDatabase({
+      select: async <T>(sql: string, params?: unknown[]) => tx.query(sql, params) as Promise<T>,
+      execute: tx.execute,
+      close: async () => {},
+    })
+  })
 }
 
 // ── Browser Backend ────────────────────────────────────────────────────────

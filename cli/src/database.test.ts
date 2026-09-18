@@ -13,6 +13,8 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
+import { BACKEND_FOUNDATION_MIGRATION, FINANCIAL_REVISION_TABLES } from '@shikin/finance-core'
+import { applyBackendFoundationTestSchema } from './backend-foundation-test-schema.js'
 import { applyFinancialSemanticsTestSchema } from './financial-semantics-test-schema.js'
 
 const tempHomes = new Set<string>()
@@ -77,12 +79,14 @@ function seedCoreShikinSchema(
   db.exec(`
     CREATE TABLE _migrations (
       id INTEGER PRIMARY KEY,
-      name TEXT NOT NULL UNIQUE
+      name TEXT NOT NULL UNIQUE,
+      applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
     CREATE TABLE accounts (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      balance INTEGER NOT NULL DEFAULT 0
+      balance INTEGER NOT NULL DEFAULT 0,
+      type TEXT NOT NULL DEFAULT 'checking'
     );
     CREATE TABLE categories (
       id TEXT PRIMARY KEY,
@@ -92,6 +96,7 @@ function seedCoreShikinSchema(
     CREATE TABLE transactions (
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL,
+      transfer_to_account_id TEXT,
       type TEXT NOT NULL,
       amount INTEGER NOT NULL,
       date TEXT NOT NULL
@@ -211,8 +216,35 @@ function seedCoreShikinSchema(
     applyFinancialSemanticsTestSchema(db)
   }
 
+  if (
+    includeCliQolTables &&
+    includeCliQolTransactionColumns &&
+    migrations.includes('019_financial_semantics')
+  ) {
+    // Abbreviated readiness fixtures still need all financial trigger targets.
+    for (const table of FINANCIAL_REVISION_TABLES) {
+      if (
+        [
+          'instrument_prices',
+          'transaction_consumption_classifications',
+          'source_coverage',
+          'reconciliation_corrections',
+          'transfer_match_provenance',
+          'duplicate_review_decisions',
+          'card_statement_payment_links',
+        ].includes(table)
+      )
+        continue
+      db.exec(`CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY)`)
+    }
+    db.exec(
+      'CREATE TABLE IF NOT EXISTS recaps (id TEXT PRIMARY KEY); ALTER TABLE investments ADD COLUMN avg_cost_basis INTEGER NOT NULL DEFAULT 0'
+    )
+    if (migrations.includes(BACKEND_FOUNDATION_MIGRATION)) applyBackendFoundationTestSchema(db)
+  }
+
   for (const migration of migrations) {
-    db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(
+    db.prepare('INSERT OR IGNORE INTO _migrations (id, name) VALUES (?, ?)').run(
       Number(migration.slice(0, 3)),
       migration
     )
@@ -312,33 +344,23 @@ describe('CLI database readiness', { timeout: 20_000 }, () => {
     close()
   })
 
-  it('repairs legacy migration metadata with applied_at before use', async () => {
+  it('rejects missing migration metadata without repairing it during a read', async () => {
     const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-'))
     tempHomes.add(homeDir)
     const dbPath = createCliDatabasePath(homeDir)
-
     seedCoreShikinSchema(dbPath)
-
+    const legacy = new Database(dbPath)
+    legacy.exec('ALTER TABLE _migrations DROP COLUMN applied_at')
+    legacy.close()
     const { query, close } = await importFreshDatabaseModule(homeDir)
-
-    expect(query<{ ok: number }>('SELECT 1 AS ok')).toEqual([{ ok: 1 }])
+    expect(() => query('SELECT 1')).toThrow(/Missing required columns on _migrations: applied_at/)
     close()
-
-    const db = new Database(dbPath, { readonly: true, fileMustExist: true })
+    const db = new Database(dbPath, { readonly: true })
     expect(
       db
-        .prepare(
-          "SELECT COUNT(*) as count FROM pragma_table_info('_migrations') WHERE name = 'applied_at'"
-        )
-        .get()
-    ).toEqual({ count: 1 })
-    expect(
-      db
-        .prepare(
-          "SELECT COUNT(*) as count FROM _migrations WHERE applied_at IS NULL OR TRIM(applied_at) = ''"
-        )
-        .get()
-    ).toEqual({ count: 0 })
+        .prepare("SELECT name FROM pragma_table_info('_migrations') WHERE name = 'applied_at'")
+        .all()
+    ).toEqual([])
     db.close()
   })
 
@@ -375,33 +397,26 @@ describe('CLI database readiness', { timeout: 20_000 }, () => {
     close()
   })
 
-  it('repairs legacy Rust-side migration markers before use', async () => {
+  it('rejects missing Rust-side migration markers without writing during a read', async () => {
     const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-'))
     tempHomes.add(homeDir)
-
     const dbPath = createCliDatabasePath(homeDir)
     seedCoreShikinSchema(
       dbPath,
-      CLI_DATABASE_MIGRATIONS.filter(
-        (migration) => migration !== '001_core_tables' && migration !== '003_credit_cards'
-      )
+      CLI_DATABASE_MIGRATIONS.filter((m) => m !== '001_core_tables' && m !== '003_credit_cards')
     )
     addCreditCardColumns(dbPath)
-
     const { query, close } = await importFreshDatabaseModule(homeDir)
-
-    expect(query<{ ok: number }>('SELECT 1 AS ok')).toEqual([{ ok: 1 }])
-
+    expect(() => query('SELECT 1')).toThrow(/Missing required migration metadata/)
     close()
-
-    const db = new Database(dbPath, { readonly: true, fileMustExist: true })
+    const db = new Database(dbPath, { readonly: true })
     expect(
       db
         .prepare(
-          "SELECT COUNT(*) as count FROM _migrations WHERE name IN ('001_core_tables', '003_credit_cards') AND applied_at IS NOT NULL AND TRIM(applied_at) != ''"
+          "SELECT name FROM _migrations WHERE name IN ('001_core_tables', '003_credit_cards')"
         )
-        .get()
-    ).toEqual({ count: 2 })
+        .all()
+    ).toEqual([])
     db.close()
   })
 
@@ -417,7 +432,7 @@ describe('CLI database readiness', { timeout: 20_000 }, () => {
     const { query, close } = await importFreshDatabaseModule(homeDir)
 
     expect(() => query('SELECT 1 AS ok')).toThrow(
-      /Missing columns for 003_credit_cards: credit_limit, statement_closing_day, payment_due_day/i
+      /Missing required migration metadata: 003_credit_cards/i
     )
 
     close()
@@ -434,7 +449,7 @@ describe('CLI database readiness', { timeout: 20_000 }, () => {
     const { query, close } = await importFreshDatabaseModule(homeDir)
 
     expect(() => query('SELECT 1 AS ok')).toThrow(
-      /Missing required migration metadata: 004_category_rules/i
+      /Missing required migration metadata: .*004_category_rules/i
     )
 
     close()

@@ -1,3 +1,5 @@
+import { BACKEND_FOUNDATION_MIGRATION } from '@shikin/finance-core'
+
 export const CLI_DATABASE_MIGRATIONS = [
   '001_core_tables',
   '003_credit_cards',
@@ -16,4 +18,5 @@ export const CLI_DATABASE_MIGRATIONS = [
   '018_placeholder_transactions',
   '019_financial_semantics',
   '020_quote_recurrence_import_identity',
+  BACKEND_FOUNDATION_MIGRATION,
 ] as const

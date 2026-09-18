@@ -18,7 +18,15 @@ import {
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
 import Database from 'better-sqlite3'
 import { ulid } from 'ulidx'
-import { advanceAnchoredRecurrence, advanceLegacyRecurrence } from '@shikin/finance-core'
+import {
+  advanceAnchoredRecurrence,
+  advanceLegacyRecurrence,
+  BACKEND_FOUNDATION_MIGRATION,
+  BACKEND_FOUNDATION_SCHEMA,
+  backendFoundationStatements,
+  assertBackendFoundationReady,
+  assertSupportedSchemaVersion,
+} from '@shikin/finance-core'
 import {
   PRIVATE_DIR_MODE,
   PRIVATE_FILE_MODE,
@@ -242,6 +250,7 @@ const CURRENT_SHIKIN_MIGRATIONS = [
   '018_placeholder_transactions',
   '019_financial_semantics',
   '020_quote_recurrence_import_identity',
+  BACKEND_FOUNDATION_MIGRATION,
 ]
 
 const CURRENT_SHIKIN_SCHEMA = {
@@ -608,7 +617,21 @@ function validateCurrentDatabase() {
 
   assertTransactionStatusReady(db)
 
-  const migrationRows = db.prepare('SELECT name FROM _migrations').all()
+  const migrationRows = db.prepare('SELECT id, name FROM _migrations').all()
+  assertSupportedSchemaVersion(migrationRows)
+  assertBackendFoundationReady(
+    Object.fromEntries(
+      Object.keys(BACKEND_FOUNDATION_SCHEMA).map((table) => [
+        table,
+        db
+          .prepare(`PRAGMA table_info(${table})`)
+          .all()
+          .map((column) => column.name),
+      ])
+    ),
+    db.prepare("SELECT name, sql FROM sqlite_master WHERE type IN ('index', 'trigger')").all(),
+    db.prepare('SELECT * FROM app_data_state').all()
+  )
   const appliedMigrations = new Set(migrationRows.map((row) => row.name))
   const missingMigrations = CURRENT_SHIKIN_MIGRATIONS.filter(
     (migration) => !appliedMigrations.has(migration)
@@ -638,6 +661,18 @@ function runMigrations() {
       .all()
       .map((r) => r.name)
   )
+
+  assertSupportedSchemaVersion(db.prepare('SELECT id, name FROM _migrations').all())
+  if (applied.has(BACKEND_FOUNDATION_MIGRATION)) {
+    validateCurrentDatabase()
+    return
+  }
+
+  // Do not replay already-applied status/timestamp repair DML on 019/020.
+  if (applied.has('019_financial_semantics')) {
+    runBackendFoundationUpgrade(applied)
+    return
+  }
 
   // --- Migration 001: Core Tables ---
   if (!applied.has('001_core_tables')) {
@@ -1398,6 +1433,10 @@ WHERE (currency IS NULL OR TRIM(currency) = '') AND account_id IS NOT NULL;
     applied.add('019_financial_semantics')
   }
 
+  runBackendFoundationUpgrade(applied)
+}
+
+function runBackendFoundationUpgrade(applied) {
   if (!applied.has('020_quote_recurrence_import_identity')) {
     ensureTableColumn(db, 'stock_prices', 'quote_currency', 'TEXT')
     db.prepare(
@@ -1472,7 +1511,23 @@ WHERE (currency IS NULL OR TRIM(currency) = '') AND account_id IS NOT NULL;
     END;
   `)
 
-  validateCurrentDatabase()
+  db.transaction(() => {
+    const migrations = db.prepare('SELECT id, name FROM _migrations').all()
+    assertSupportedSchemaVersion(migrations)
+    if (!migrations.some((row) => row.name === BACKEND_FOUNDATION_MIGRATION)) {
+      const columns = Object.fromEntries(
+        Object.keys(BACKEND_FOUNDATION_SCHEMA).map((table) => [
+          table,
+          db
+            .prepare(`PRAGMA table_info(${table})`)
+            .all()
+            .map((column) => column.name),
+        ])
+      )
+      for (const statement of backendFoundationStatements(columns)) db.exec(statement)
+    }
+    validateCurrentDatabase()
+  }).immediate()
   console.log('[data-server] Migrations complete')
 }
 

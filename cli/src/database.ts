@@ -1,3 +1,10 @@
+import {
+  BACKEND_FOUNDATION_MIGRATION,
+  BACKEND_FOUNDATION_SCHEMA,
+  backendFoundationStatements,
+  assertBackendFoundationReady,
+  assertSupportedSchemaVersion,
+} from '@shikin/finance-core'
 import Database from 'better-sqlite3'
 import {
   closeSync,
@@ -35,9 +42,24 @@ const REQUIRED_CORE_TABLES = [
 ] as const
 // fallow-ignore-next-line unused-export
 export const REQUIRED_MIGRATIONS = CLI_DATABASE_MIGRATIONS
-const CREDIT_CARD_COLUMNS = ['credit_limit', 'statement_closing_day', 'payment_due_day'] as const
 const REQUIRED_CORE_SCHEMA: Record<string, readonly string[]> = {
   _migrations: ['id', 'name', 'applied_at'],
+}
+// Minimum legacy inputs for the supported staged 019 -> 020 -> 021 path.
+// Do not substitute latest-schema requirements here.
+const RESTORE_MIGRATION_INPUT_SCHEMA: Record<string, readonly string[]> = {
+  accounts: ['type', 'account_mode'],
+  investments: ['id', 'avg_cost_basis'],
+  stock_prices: ['id', 'currency'],
+  recurring_rules: ['id'],
+  net_worth_snapshots: ['id'],
+  recaps: ['id'],
+}
+const QUOTE_RECURRENCE_IMPORT_SCHEMA: Record<string, readonly string[]> = {
+  transactions: ['import_source', 'import_external_id', 'import_fingerprint'],
+  stock_prices: ['quote_currency'],
+  recurring_rules: ['anchor_kind', 'anchor_day'],
+  net_worth_snapshots: ['currency'],
 }
 const REQUIRED_CLI_QOL_SCHEMA: Record<string, readonly string[]> = {
   accounts: ['account_mode'],
@@ -496,14 +518,28 @@ function assertSupportedRestoreSchema(db: Database.Database, dbPath: string): vo
     )
   }
 
-  assertCoreSchemaReady(db, dbPath)
+  if (!['id', 'name'].every((column) => getColumnNames(db, '_migrations').has(column))) {
+    throw new Error('Backup has incompatible migration metadata.')
+  }
   assertCliQolSchemaReady(db, dbPath)
+  for (const [table, columns] of Object.entries(RESTORE_MIGRATION_INPUT_SCHEMA)) {
+    const existing = getColumnNames(db, table)
+    if (columns.some((column) => !existing.has(column))) {
+      throw new Error(`Backup has incompatible legacy migration inputs on ${table}.`)
+    }
+  }
   const appliedMigrations = new Set(
     (db.prepare('SELECT name FROM _migrations').all() as Array<{ name: string }>).map(
       (row) => row.name
     )
   )
-  const previousMigrations = REQUIRED_MIGRATIONS.slice(0, -1)
+  // Restore eligibility deliberately stays at 019, independently of latest readiness.
+  assertSupportedSchemaVersion(
+    db.prepare('SELECT id, name FROM _migrations').all() as Array<{ id: number; name: string }>
+  )
+  const previousMigrations = REQUIRED_MIGRATIONS.filter(
+    (migration) => Number.parseInt(migration, 10) <= 19
+  )
   const missingMigrations = previousMigrations.filter(
     (migration) => !appliedMigrations.has(migration)
   )
@@ -526,34 +562,35 @@ function addColumnIfMissing(
 }
 
 function applyRestoreCompatibleMigrations(db: Database.Database): void {
-  const latestMigration = REQUIRED_MIGRATIONS.at(-1)
-  if (latestMigration !== '020_quote_recurrence_import_identity') return
+  assertSupportedSchemaVersion(
+    db.prepare('SELECT id, name FROM _migrations').all() as Array<{ id: number; name: string }>
+  )
+  ensureMigrationAppliedAtColumn(db)
   const applied = new Set(
     (db.prepare('SELECT name FROM _migrations').all() as Array<{ name: string }>).map(
       (row) => row.name
     )
   )
-  if (applied.has(latestMigration)) return
-
-  db.transaction(() => {
-    addColumnIfMissing(db, 'transactions', 'import_source', 'TEXT')
-    addColumnIfMissing(db, 'transactions', 'import_external_id', 'TEXT')
-    addColumnIfMissing(db, 'transactions', 'import_fingerprint', 'TEXT')
-    addColumnIfMissing(db, 'stock_prices', 'quote_currency', 'TEXT')
-    addColumnIfMissing(
-      db,
-      'recurring_rules',
-      'anchor_kind',
-      "TEXT CHECK (anchor_kind IN ('fixed_day', 'end_of_month'))"
-    )
-    addColumnIfMissing(
-      db,
-      'recurring_rules',
-      'anchor_day',
-      'INTEGER CHECK (anchor_day BETWEEN 1 AND 31)'
-    )
-    addColumnIfMissing(db, 'net_worth_snapshots', 'currency', 'TEXT')
-    db.exec(`
+  if (!applied.has('020_quote_recurrence_import_identity'))
+    db.transaction(() => {
+      addColumnIfMissing(db, 'transactions', 'import_source', 'TEXT')
+      addColumnIfMissing(db, 'transactions', 'import_external_id', 'TEXT')
+      addColumnIfMissing(db, 'transactions', 'import_fingerprint', 'TEXT')
+      addColumnIfMissing(db, 'stock_prices', 'quote_currency', 'TEXT')
+      addColumnIfMissing(
+        db,
+        'recurring_rules',
+        'anchor_kind',
+        "TEXT CHECK (anchor_kind IN ('fixed_day', 'end_of_month'))"
+      )
+      addColumnIfMissing(
+        db,
+        'recurring_rules',
+        'anchor_day',
+        'INTEGER CHECK (anchor_day BETWEEN 1 AND 31)'
+      )
+      addColumnIfMissing(db, 'net_worth_snapshots', 'currency', 'TEXT')
+      db.exec(`
       CREATE INDEX IF NOT EXISTS idx_transactions_import_identity
         ON transactions(account_id, import_source, import_external_id);
       CREATE INDEX IF NOT EXISTS idx_transactions_import_fingerprint
@@ -562,10 +599,28 @@ function applyRestoreCompatibleMigrations(db: Database.Database): void {
       SET quote_currency = UPPER(currency)
       WHERE quote_currency IS NULL AND currency IS NOT NULL AND TRIM(currency) <> '';
     `)
-    db.prepare(
-      "INSERT OR IGNORE INTO _migrations (id, name, applied_at) VALUES (20, '020_quote_recurrence_import_identity', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
-    ).run()
-  })()
+      db.prepare(
+        "INSERT OR IGNORE INTO _migrations (id, name, applied_at) VALUES (20, '020_quote_recurrence_import_identity', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+      ).run()
+    })()
+
+  db.transaction(() => {
+    const migrations = db.prepare('SELECT id, name FROM _migrations').all() as Array<{
+      id: number
+      name: string
+    }>
+    assertSupportedSchemaVersion(migrations)
+    if (!migrations.some((row) => row.name === BACKEND_FOUNDATION_MIGRATION)) {
+      const columns = Object.fromEntries(
+        Object.keys(BACKEND_FOUNDATION_SCHEMA).map((table) => [
+          table,
+          [...getColumnNames(db, table)],
+        ])
+      )
+      for (const statement of backendFoundationStatements(columns)) db.exec(statement)
+    }
+    assertShikinSchemaReady(db)
+  }).immediate()
 }
 
 function validateDatabaseFile(
@@ -593,6 +648,9 @@ function validateDatabaseFile(
 
     if (options.allowPreviousSchema) {
       assertSupportedRestoreSchema(db, label)
+      // This is the staged COPY only: upgrade and validate before promotion.
+      applyRestoreCompatibleMigrations(db)
+      assertShikinSchemaReady(db, label)
     } else {
       assertShikinSchemaReady(db, label)
     }
@@ -816,8 +874,6 @@ function ensureMigrationAppliedAtColumn(db: Database.Database): void {
 }
 
 function assertCoreSchemaReady(db: Database.Database, dbPath: string): void {
-  ensureMigrationAppliedAtColumn(db)
-
   for (const [tableName, requiredColumns] of Object.entries(REQUIRED_CORE_SCHEMA)) {
     const existingColumns = getColumnNames(db, tableName)
     const missingColumns = requiredColumns.filter((column) => !existingColumns.has(column))
@@ -983,35 +1039,9 @@ function assertShikinSchemaReady(db: Database.Database, dbPath = DB_PATH): void 
     )
   )
 
-  // The desktop app can inherit 001/003 from Rust-side migrations before the JS
-  // migration table records them. Mirror the app's safe metadata repair so CLI
-  // readiness does not reject structurally initialized legacy databases.
-  if (!appliedMigrations.has('001_core_tables') && existingTables.has('accounts')) {
-    db.prepare(
-      "INSERT OR IGNORE INTO _migrations (id, name, applied_at) VALUES (1, '001_core_tables', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
-    ).run()
-    appliedMigrations.add('001_core_tables')
-  }
-  if (!appliedMigrations.has('003_credit_cards') && existingTables.has('accounts')) {
-    const accountColumns = new Set(
-      (db.prepare('PRAGMA table_info(accounts)').all() as Array<{ name: string }>).map(
-        (column) => column.name
-      )
-    )
-    const hasCreditCardColumns = CREDIT_CARD_COLUMNS.every((column) => accountColumns.has(column))
-    if (!hasCreditCardColumns) {
-      const missingColumns = CREDIT_CARD_COLUMNS.filter((column) => !accountColumns.has(column))
-      throw new Error(
-        `Shikin database at ${dbPath} is not ready for CLI/MCP use. ` +
-          `Missing columns for 003_credit_cards: ${missingColumns.join(', ')}. ` +
-          'Open the Shikin app to finish initializing or migrating the shared database.'
-      )
-    }
-    db.prepare(
-      "INSERT OR IGNORE INTO _migrations (id, name, applied_at) VALUES (3, '003_credit_cards', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
-    ).run()
-    appliedMigrations.add('003_credit_cards')
-  }
+  assertSupportedSchemaVersion(
+    db.prepare('SELECT id, name FROM _migrations').all() as Array<{ id: number; name: string }>
+  )
 
   const missingMigrations = REQUIRED_MIGRATIONS.filter(
     (migration) => !appliedMigrations.has(migration)
@@ -1026,6 +1056,25 @@ function assertShikinSchemaReady(db: Database.Database, dbPath = DB_PATH): void 
   }
 
   assertCliQolSchemaReady(db, dbPath)
+  for (const [table, columns] of Object.entries(QUOTE_RECURRENCE_IMPORT_SCHEMA)) {
+    const existing = getColumnNames(db, table)
+    if (columns.some((column) => !existing.has(column))) {
+      throw new Error(`Database is not ready for CLI/MCP use. Missing 020 columns on ${table}.`)
+    }
+  }
+  assertBackendFoundationReady(
+    Object.fromEntries(
+      Object.keys(BACKEND_FOUNDATION_SCHEMA).map((table) => [table, [...getColumnNames(db, table)]])
+    ),
+    db
+      .prepare("SELECT name, sql FROM sqlite_master WHERE type IN ('index', 'trigger')")
+      .all() as Array<{ name: string; sql: string | null }>,
+    db.prepare('SELECT * FROM app_data_state').all() as Array<{
+      id: number
+      database_id: string
+      data_revision: number
+    }>
+  )
 }
 
 type DatabaseInitializationErrorCode =
@@ -1280,7 +1329,6 @@ export async function restoreDatabase({
     try {
       restoredDb.pragma('journal_mode = WAL')
       restoredDb.pragma('foreign_keys = ON')
-      applyRestoreCompatibleMigrations(restoredDb)
       validateDatabaseFile(DB_PATH, DB_PATH)
       try {
         recordRestoreMetadata(restoredDb, {

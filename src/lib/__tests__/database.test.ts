@@ -1,3 +1,8 @@
+import {
+  BACKEND_FOUNDATION_MIGRATION,
+  BACKEND_FOUNDATION_SCHEMA,
+  BACKEND_FOUNDATION_OBJECTS,
+} from '@shikin/finance-core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -36,6 +41,7 @@ function mockTauriDatabaseModules() {
     '018_placeholder_transactions',
     '019_financial_semantics',
     '020_quote_recurrence_import_identity',
+    BACKEND_FOUNDATION_MIGRATION,
   ].map((name) => ({ name }))
   const tableRows = [
     '_migrations',
@@ -65,8 +71,10 @@ function mockTauriDatabaseModules() {
     'credit_card_statements',
     'account_reconciliations',
     'receivables',
+    ...Object.keys(BACKEND_FOUNDATION_SCHEMA),
   ].map((name) => ({ name }))
   const columnRows = [
+    ...Object.values(BACKEND_FOUNDATION_SCHEMA).flat(),
     'id',
     'name',
     'applied_at',
@@ -198,7 +206,12 @@ function mockTauriDatabaseModules() {
 
   const tauriDatabase = {
     select: vi.fn(async (sql: string) => {
-      if (sql === 'SELECT name FROM _migrations') return migrationRows
+      if (sql === 'SELECT name FROM _migrations' || sql === 'SELECT id, name FROM _migrations')
+        return migrationRows
+      if (sql === 'SELECT * FROM app_data_state')
+        return [{ id: 1, database_id: 'synthetic', data_revision: 0 }]
+      if (sql.includes("type IN ('index', 'trigger')"))
+        return Object.entries(BACKEND_FOUNDATION_OBJECTS).map(([name, sql]) => ({ name, sql }))
       if (sql.includes("sqlite_master WHERE type = 'table'")) return tableRows
       if (sql.startsWith('PRAGMA table_info(')) return columnRows
       if (sql.includes("sqlite_master WHERE type = 'trigger'")) return triggerRows

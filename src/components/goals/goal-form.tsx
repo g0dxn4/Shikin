@@ -17,8 +17,9 @@ import {
 import { useAccountStore } from '@/stores/account-store'
 import type { GoalWithProgress } from '@/stores/goal-store'
 import { fromCentavos } from '@/lib/money'
+import { GoalIcon } from './goal-icon'
+import { DEFAULT_GOAL_ICON, GOAL_ICON_LABEL_KEYS, GOAL_ICONS } from './goal-icons'
 
-const GOAL_ICONS = ['🎯', '🏠', '✈️', '🚗', '🎓', '💰', '🏖️', '💍', '🏥', '📱'] as const
 const GOAL_COLORS = [
   '#7C5CFF',
   '#22c55e',
@@ -78,7 +79,7 @@ export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormP
       currentAmount: goal ? fromCentavos(goal.current_amount) : 0,
       deadline: goal?.deadline ?? '',
       accountId: goal?.account_id ?? '',
-      icon: goal?.icon ?? '🎯',
+      icon: goal?.icon ?? DEFAULT_GOAL_ICON,
       color: goal?.color ?? '#7C5CFF',
       notes: goal?.notes ?? '',
     },
@@ -228,10 +229,10 @@ export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormP
             role="radiogroup"
             aria-labelledby="goal-icon-label"
           >
-            {GOAL_ICONS.map((ic) => (
+            {GOAL_ICONS.map((ic, index) => (
               <button
                 key={ic}
-                id={`goal-icon-${GOAL_ICONS.indexOf(ic)}`}
+                id={`goal-icon-${index}`}
                 type="button"
                 onClick={() => setValue('icon', ic)}
                 onKeyDown={(event) =>
@@ -244,16 +245,18 @@ export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormP
                   )
                 }
                 role="radio"
-                aria-label={t('form.selectIcon', { icon: ic })}
+                aria-label={t('form.selectIcon', {
+                  icon: t(`form.iconLabels.${GOAL_ICON_LABEL_KEYS[ic]}`),
+                })}
                 aria-checked={iconValue === ic}
                 tabIndex={iconValue === ic ? 0 : -1}
-                className={`flex h-11 w-11 items-center justify-center rounded-lg text-base transition-colors ${
+                className={`flex h-11 w-11 items-center justify-center rounded-lg transition-colors ${
                   iconValue === ic
                     ? 'bg-muted/50 ring-ring ring-1'
                     : 'bg-muted/50 hover:bg-muted/50'
                 }`}
               >
-                {ic}
+                <GoalIcon icon={ic} size={18} />
               </button>
             ))}
           </div>

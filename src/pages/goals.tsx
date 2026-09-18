@@ -14,6 +14,7 @@ import { useUIStore } from '@/stores/ui-store'
 import { useGoalStore, type GoalWithProgress } from '@/stores/goal-store'
 import { formatMoney } from '@/lib/money'
 import { getErrorMessage } from '@/lib/errors'
+import { GoalIcon } from '@/components/goals/goal-icon'
 
 const ConfirmDialog = lazy(() =>
   import('@/components/shared/confirm-dialog').then((m) => ({
@@ -61,10 +62,10 @@ function GoalRow({
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <div
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
             style={{ backgroundColor: `${goal.color || '#7C5CFF'}20` }}
           >
-            {goal.icon || '🎯'}
+            <GoalIcon icon={goal.icon} size={20} />
           </div>
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">

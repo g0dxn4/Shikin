@@ -75,6 +75,54 @@ describe('Goals', () => {
     expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
   })
 
+  it('renders stored legacy goal icons as SVG without emoji', () => {
+    mockGoals = [
+      {
+        id: 'goal-1',
+        name: 'House Fund',
+        target_amount: 10000,
+        current_amount: 5000,
+        progress: 50,
+        daysRemaining: 100,
+        monthlyNeeded: 500,
+        accountName: null,
+        color: '#22c55e',
+        icon: '🏠',
+        notes: null,
+      },
+    ]
+
+    render(<Goals />)
+
+    const group = screen.getAllByText('House Fund')[0].closest('.group')
+    expect(group?.querySelector('svg')).toBeInTheDocument()
+    expect(group?.textContent ?? '').not.toContain('🏠')
+  })
+
+  it('falls back to an SVG icon when a goal has no stored icon', () => {
+    mockGoals = [
+      {
+        id: 'goal-1',
+        name: 'Emergency Fund',
+        target_amount: 10000,
+        current_amount: 5000,
+        progress: 50,
+        daysRemaining: 100,
+        monthlyNeeded: 500,
+        accountName: null,
+        color: null,
+        icon: null,
+        notes: null,
+      },
+    ]
+
+    render(<Goals />)
+
+    const group = screen.getAllByText('Emergency Fund')[0].closest('.group')
+    expect(group?.querySelector('svg')).toBeInTheDocument()
+    expect(group?.textContent ?? '').not.toContain('🎯')
+  })
+
   describe('failure/retry boundary behavior', () => {
     it('shows ErrorState (not empty CTA) when initial fetch fails with empty dataset', () => {
       mockFetchError = 'Database connection failed'

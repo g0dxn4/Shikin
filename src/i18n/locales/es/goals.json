@@ -28,7 +28,19 @@
     "notesPlaceholder": "Cualquier nota adicional...",
     "accountsError": "No se pudieron cargar las cuentas",
     "selectIcon": "Seleccionar ícono {{icon}}",
-    "selectColor": "Seleccionar color {{color}}"
+    "selectColor": "Seleccionar color {{color}}",
+    "iconLabels": {
+      "target": "Objetivo",
+      "home": "Hogar",
+      "travel": "Viaje",
+      "car": "Auto",
+      "education": "Educación",
+      "savings": "Ahorros",
+      "vacation": "Vacaciones",
+      "wedding": "Boda",
+      "health": "Salud",
+      "phone": "Teléfono"
+    }
   },
   "status": {
     "onTrack": "En buen camino",

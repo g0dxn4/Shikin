@@ -27,8 +27,20 @@
     "notes": "Notes",
     "notesPlaceholder": "Any additional notes...",
     "accountsError": "Accounts couldn't be loaded",
-    "selectIcon": "Select icon {{icon}}",
-    "selectColor": "Select color {{color}}"
+    "selectIcon": "Select {{icon}} icon",
+    "selectColor": "Select color {{color}}",
+    "iconLabels": {
+      "target": "Target",
+      "home": "Home",
+      "travel": "Travel",
+      "car": "Car",
+      "education": "Education",
+      "savings": "Savings",
+      "vacation": "Vacation",
+      "wedding": "Wedding",
+      "health": "Health",
+      "phone": "Phone"
+    }
   },
   "status": {
     "onTrack": "On track",

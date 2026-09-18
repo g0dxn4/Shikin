@@ -26,6 +26,7 @@ import { SpendingAnalytics } from '@/components/dashboard/spending-analytics'
 import { OverviewNetWorth, type NetWorthPeriod } from '@/components/dashboard/overview-net-worth'
 import { OverviewCategories } from '@/components/dashboard/overview-categories'
 import { OverviewCashFlow } from '@/components/dashboard/overview-cash-flow'
+import { GoalIcon } from '@/components/goals/goal-icon'
 
 export function Dashboard() {
   const { t } = useTranslation('dashboard')
@@ -381,7 +382,7 @@ export function Dashboard() {
               return (
                 <NativePanel key={goal.id} className="p-5">
                   <div className="mb-2 flex items-center gap-2">
-                    {goal.icon ? <span className="text-base">{goal.icon}</span> : null}
+                    <GoalIcon icon={goal.icon} size={16} className="shrink-0" />
                     <h3 className="truncate text-sm font-semibold">{goal.name}</h3>
                   </div>
                   <div className="flex items-center gap-3">

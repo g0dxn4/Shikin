@@ -1,6 +1,6 @@
 # Approved backend implementation contracts
 
-Status: **approved plan, not yet implemented**. Financial planning review closed FC-01–FC-04 after explicit classification, supersession, payment and import contracts were added. DELTA-01 was closed by separating finalization membership from the uniquely constrained bridge reference. A subsequent narrow check approved restricting batch uniqueness to legacy observations. These approvals are not implementation or runtime-validation claims.
+Status: **approved contracts; implementation progress is tracked in [the remediation ledger](./BACKEND_REMEDIATION.md)**. Financial planning review closed FC-01–FC-04 after explicit classification, supersession, payment and import contracts were added. DELTA-01 was closed by separating finalization membership from the uniquely constrained bridge reference. A subsequent narrow check approved restricting batch uniqueness to legacy observations. These approvals are not implementation or runtime-validation claims.
 
 Scope: remaining actionable handoff findings, synthetic validation only. Existing UI architecture and ledger rules retained. All new durable fields/tables additive; no inferred refunds, balance zeroing, historical record deletion, or guessed source identity. Keep private evidence outside repository.
 

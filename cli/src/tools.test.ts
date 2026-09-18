@@ -3242,6 +3242,43 @@ describe('CLI tool validation regressions', () => {
     })
   })
 
+  it('uses canonical eligibility for current-period card spending', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("FROM accounts WHERE type = 'credit_card'")) {
+        return [
+          {
+            id: 'cc-1',
+            name: 'Rewards Card',
+            type: 'credit_card',
+            currency: 'USD',
+            balance: -20000,
+            credit_limit: 500000,
+            is_archived: 0,
+          },
+        ]
+      }
+      if (sql.includes('AS split_count')) return []
+      if (sql.includes('COALESCE(SUM(t.amount), 0)')) return [{ total: 1000 }]
+      return []
+    })
+
+    const result = await getCreditCardStatus.execute(getCreditCardStatus.schema.parse({}))
+    expect(result).toMatchObject({
+      success: true,
+      cards: [
+        expect.objectContaining({
+          currentPeriodSpending: 10,
+          currentPeriod: expect.objectContaining({ complete: true, spendingCentavos: 1000 }),
+        }),
+      ],
+    })
+    const spendingSql = mockQuery.mock.calls
+      .map(([sql]) => sql as string)
+      .find((sql) => sql.includes('COALESCE(SUM(t.amount), 0)'))!
+    expect(spendingSql).toContain("COALESCE(t.ledger_treatment, 'normal') = 'normal'")
+    expect(spendingSql).toContain("COALESCE(t.transaction_kind, 'standard') = 'standard'")
+  })
+
   it('integrates statement data into credit-card status and upcoming bills', async () => {
     mockQuery.mockImplementation((sql: string) => {
       if (sql.includes("FROM accounts WHERE type = 'credit_card'")) {
@@ -3280,6 +3317,7 @@ describe('CLI tool validation regressions', () => {
           },
         ]
       }
+      if (sql.includes('AS split_count') && sql.includes('account_id = $3')) return []
       if (sql.includes('FROM transactions') && sql.includes('account_id = $1')) {
         return [{ total: 4567 }]
       }
@@ -4179,7 +4217,12 @@ describe('CLI tool validation regressions', () => {
       updateSubscription.schema.parse({ subscriptionId: 'sub-1', dryRun: true })
     )
 
-    expect(result).toMatchObject({ success: true, action: 'updated', dryRun: true, changed: false })
+    expect(result).toMatchObject({
+      success: true,
+      action: 'updated',
+      dryRun: true,
+      changed: false,
+    })
     expect(mockExecute).not.toHaveBeenCalled()
   })
 
@@ -5555,7 +5598,9 @@ describe('CLI tool validation regressions', () => {
         ].map((name) => ({ name }))
       }
       if (sql.includes('PRAGMA table_info(stock_prices)')) {
-        return ['id', 'symbol', 'price', 'currency', 'date', 'created_at'].map((name) => ({ name }))
+        return ['id', 'symbol', 'price', 'currency', 'date', 'created_at'].map((name) => ({
+          name,
+        }))
       }
       if (sql.includes('FROM settings') && params?.[0] === 'account_aliases') {
         return [{ value: JSON.stringify({ checking: 'acct-1', visa: 'cc-1' }) }]
@@ -6465,7 +6510,7 @@ describe('CLI tool validation regressions', () => {
 
   it('does not group anomalies across currencies and formats anomaly amounts correctly', async () => {
     mockQuery.mockImplementation((sql: string) => {
-      if (sql.includes('SELECT DISTINCT currency')) {
+      if (sql.includes('SELECT DISTINCT UPPER(TRIM(t.currency))')) {
         return [{ currency: 'EUR' }, { currency: 'USD' }]
       }
 
@@ -6487,7 +6532,11 @@ describe('CLI tool validation regressions', () => {
         ]
       }
 
-      if (sql.includes("WHERE description = $1 AND currency = $2 AND type = 'expense'")) {
+      if (
+        sql.includes(
+          "WHERE t.description = $1 AND UPPER(TRIM(t.currency)) = $2 AND t.type = 'expense'"
+        )
+      ) {
         return [{ amount: 4000 }, { amount: 4100 }, { amount: 3900 }]
       }
 
@@ -6543,6 +6592,7 @@ describe('CLI tool validation regressions', () => {
   it('generates forecast output from balances and daily averages', async () => {
     mockQuery
       .mockReturnValueOnce([{ currency: 'USD', total: 100000 }])
+      .mockReturnValueOnce([]) // reporting integrity preflight
       .mockReturnValueOnce([
         { currency: 'USD', type: 'income', avg_daily: 5000 },
         { currency: 'USD', type: 'expense', avg_daily: 3000 },
@@ -6596,6 +6646,7 @@ describe('CLI tool validation regressions', () => {
 
   it('returns a financial health score with weighted subscores', async () => {
     mockQuery
+      .mockReturnValueOnce([]) // reporting integrity preflight
       .mockReturnValueOnce([
         { currency: 'USD', type: 'income', total: 500000 },
         { currency: 'USD', type: 'expense', total: 300000 },
@@ -6655,6 +6706,7 @@ describe('CLI tool validation regressions', () => {
         { currency: 'USD', total: 100000 },
         { currency: 'EUR', total: 50000 },
       ])
+      .mockReturnValueOnce([]) // reporting integrity preflight
       .mockReturnValueOnce([
         { currency: 'USD', type: 'income', avg_daily: 5000 },
         { currency: 'USD', type: 'expense', avg_daily: 3000 },
@@ -6678,6 +6730,7 @@ describe('CLI tool validation regressions', () => {
 
   it('returns per-currency financial health scores for mixed currencies', async () => {
     mockQuery
+      .mockReturnValueOnce([]) // reporting integrity preflight
       .mockReturnValueOnce([
         { currency: 'USD', type: 'income', total: 500000 },
         { currency: 'USD', type: 'expense', total: 300000 },

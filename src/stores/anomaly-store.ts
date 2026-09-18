@@ -46,6 +46,7 @@ interface AnomalyState {
   anomalies: Anomaly[]
   isLoading: boolean
   lastScanAt: string | null
+  error: string | null
   scanForAnomalies: (options?: AnomalyDetectionOptions) => Promise<void>
   dismissAnomaly: (id: string) => void
   getActiveAnomalies: () => Anomaly[]
@@ -55,9 +56,10 @@ export const useAnomalyStore = create<AnomalyState>((set, get) => ({
   anomalies: [],
   isLoading: false,
   lastScanAt: null,
+  error: null,
 
   scanForAnomalies: async (options?: AnomalyDetectionOptions) => {
-    set({ isLoading: true })
+    set({ isLoading: true, error: null })
     try {
       const raw = await detectAnomalies(options)
       const dismissedIds = await getDismissedIds()
@@ -78,6 +80,11 @@ export const useAnomalyStore = create<AnomalyState>((set, get) => ({
       }
 
       set({ anomalies: deduped, lastScanAt: new Date().toISOString() })
+    } catch (error) {
+      set({
+        anomalies: [],
+        error: error instanceof Error ? error.message : 'Anomaly detection is unavailable.',
+      })
     } finally {
       set({ isLoading: false })
     }

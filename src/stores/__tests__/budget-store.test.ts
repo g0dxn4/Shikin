@@ -65,6 +65,10 @@ describe('budget-store', () => {
     await useBudgetStore.getState().fetch()
 
     expect(mockQuery).toHaveBeenCalledTimes(1)
+    const sql = mockQuery.mock.calls[0][0] as string
+    expect(sql).toContain('transaction_splits')
+    expect(sql).toContain("COALESCE(t.ledger_treatment, 'normal') = 'normal'")
+    expect(sql).toContain("COALESCE(t.transaction_kind, 'standard') = 'standard'")
     const state = useBudgetStore.getState()
     expect(state.budgets).toHaveLength(1)
     expect(state.budgets[0].spent).toBe(30000)
@@ -72,6 +76,28 @@ describe('budget-store', () => {
     expect(state.budgets[0].percentUsed).toBe(60)
     expect(state.budgets[0].categoryName).toBe('Food')
     expect(state.fetchError).toBeNull()
+  })
+
+  it('fails closed instead of storing partial malformed or mixed-currency spending', async () => {
+    mockQuery.mockResolvedValueOnce([
+      {
+        id: 'budget-1',
+        name: 'Groceries',
+        category_id: 'cat-1',
+        amount: 50000,
+        period: 'monthly',
+        is_active: 1,
+        category_name: 'Food',
+        category_color: '#ff0000',
+        spent: 10000,
+        reporting_incomplete: 1,
+      },
+    ])
+
+    await expect(useBudgetStore.getState().fetch()).rejects.toThrow(
+      'Budget spending is unavailable'
+    )
+    expect(useBudgetStore.getState().budgets).toEqual([])
   })
 
   it('uses calendar week-to-date for weekly budgets', async () => {

@@ -1,5 +1,10 @@
 import { query } from '@/lib/database'
-import { fromCentavos } from '@/lib/money'
+import { formatMoney, fromCentavos } from '@/lib/money'
+import {
+  assertReportingReadComplete,
+  CASH_FLOW_SQL,
+  CATEGORY_ALLOCATION_CTE,
+} from '@/lib/reporting-read'
 import { generateId } from '@/lib/ulid'
 import dayjs from 'dayjs'
 
@@ -33,6 +38,7 @@ interface TransactionRow {
   id: string
   description: string
   amount: number
+  currency: string
   date: string
   category_id: string | null
   category_name: string | null
@@ -40,7 +46,8 @@ interface TransactionRow {
 }
 
 interface CategorySpendRow {
-  category_id: string
+  currency: string
+  category_id: string | null
   category_name: string
   total: number
   count: number
@@ -65,14 +72,12 @@ async function detectUnusualAmounts(recentDays: number = 30): Promise<Anomaly[]>
 
   // Get recent expense transactions
   const recentTx = await query<TransactionRow>(
-    `SELECT t.id, t.description, t.amount, t.date, t.category_id,
+    `SELECT t.id, t.description, t.amount, UPPER(TRIM(t.currency)) AS currency, t.date, t.category_id,
             COALESCE(c.name, '${UNCATEGORIZED}') as category_name, t.type
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1
-       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(t.is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
+       AND ${CASH_FLOW_SQL}
      ORDER BY t.date DESC`,
     [since]
   )
@@ -80,17 +85,16 @@ async function detectUnusualAmounts(recentDays: number = 30): Promise<Anomaly[]>
   // Group by description (merchant) to check against history
   const checked = new Set<string>()
   for (const tx of recentTx) {
-    if (checked.has(tx.description)) continue
-    checked.add(tx.description)
+    const merchantKey = `${tx.currency}:${tx.description}`
+    if (checked.has(merchantKey)) continue
+    checked.add(merchantKey)
 
     // Get 90-day history for this merchant
     const history = await query<{ amount: number }>(
-      `SELECT amount FROM transactions
-       WHERE description = $1 AND type = 'expense' AND date >= $2 AND date < $3
-         AND COALESCE(reporting_treatment, 'normal') = 'normal'
-         AND COALESCE(is_archived, 0) = 0
-         AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
-      [tx.description, historyStart, since]
+      `SELECT t.amount FROM transactions t
+       WHERE t.description = $1 AND UPPER(TRIM(t.currency)) = $2 AND t.type = 'expense' AND t.date >= $3 AND t.date < $4
+         AND ${CASH_FLOW_SQL}`,
+      [tx.description, tx.currency, historyStart, since]
     )
 
     if (history.length < 3) continue
@@ -100,7 +104,9 @@ async function detectUnusualAmounts(recentDays: number = 30): Promise<Anomaly[]>
     if (stdDev === 0) continue
 
     // Check each recent tx against the historical distribution
-    for (const recent of recentTx.filter((r) => r.description === tx.description)) {
+    for (const recent of recentTx.filter(
+      (r) => r.description === tx.description && r.currency === tx.currency
+    )) {
       const zScore = (recent.amount - mean) / stdDev
       if (zScore > 2) {
         const severity: AnomalySeverity = zScore > 3 ? 'high' : 'medium'
@@ -109,7 +115,7 @@ async function detectUnusualAmounts(recentDays: number = 30): Promise<Anomaly[]>
           type: 'unusual_amount',
           severity,
           title: `Unusual charge at ${recent.description}`,
-          description: `$${fromCentavos(recent.amount).toFixed(2)} is ${zScore.toFixed(1)} standard deviations above the average of $${fromCentavos(mean).toFixed(2)} for this merchant.`,
+          description: `${formatMoney(recent.amount, recent.currency)} is ${zScore.toFixed(1)} standard deviations above the average of ${formatMoney(Math.round(mean), recent.currency)} for this merchant.`,
           transaction_id: recent.id,
           amount: fromCentavos(recent.amount),
           detected_at: new Date().toISOString(),
@@ -128,14 +134,12 @@ async function detectDuplicateCharges(): Promise<Anomaly[]> {
 
   // Find transactions with same amount and similar description within 48 hours
   const recentTx = await query<TransactionRow>(
-    `SELECT t.id, t.description, t.amount, t.date, t.category_id,
+    `SELECT t.id, t.description, t.amount, UPPER(TRIM(t.currency)) AS currency, t.date, t.category_id,
             COALESCE(c.name, '${UNCATEGORIZED}') as category_name, t.type
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1
-       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(t.is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
+       AND ${CASH_FLOW_SQL}
      ORDER BY t.date DESC`,
     [since]
   )
@@ -143,7 +147,7 @@ async function detectDuplicateCharges(): Promise<Anomaly[]> {
   const seen = new Map<string, TransactionRow[]>()
   for (const tx of recentTx) {
     // Key: amount + lowercase description
-    const key = `${tx.amount}:${tx.description.toLowerCase()}`
+    const key = `${tx.currency}:${tx.amount}:${tx.description.toLowerCase()}`
     const existing = seen.get(key)
     if (existing) {
       existing.push(tx)
@@ -166,7 +170,7 @@ async function detectDuplicateCharges(): Promise<Anomaly[]> {
           type: 'duplicate_charge',
           severity: 'medium',
           title: `Possible duplicate: ${a.description}`,
-          description: `Two charges of $${fromCentavos(a.amount).toFixed(2)} at "${a.description}" within ${diffHours}h of each other.`,
+          description: `Two charges of ${formatMoney(a.amount, a.currency)} at "${a.description}" within ${diffHours}h of each other.`,
           transaction_id: a.id,
           amount: fromCentavos(a.amount),
           detected_at: new Date().toISOString(),
@@ -195,39 +199,35 @@ async function detectSpendingSpikes(): Promise<Anomaly[]> {
   const projectionFactor = daysInMonth / daysElapsed
 
   const currentSpending = await query<CategorySpendRow>(
-    `SELECT t.category_id, COALESCE(c.name, '${UNCATEGORIZED}') as category_name,
-            SUM(t.amount) as total, COUNT(*) as count
-     FROM transactions t
+    `${CATEGORY_ALLOCATION_CTE}
+     SELECT UPPER(TRIM(t.currency)) AS currency, t.category_id, COALESCE(c.name, '${UNCATEGORIZED}') as category_name,
+            SUM(t.amount) as total, COUNT(DISTINCT t.transaction_id) as count
+     FROM reporting_allocations t
      LEFT JOIN categories c ON t.category_id = c.id
-     WHERE t.type = 'expense' AND t.date >= $1 AND t.date <= $2
-       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(t.is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
-     GROUP BY t.category_id`,
+     WHERE t.type = 'expense' AND t.date >= $1 AND t.date <= $2 AND ${CASH_FLOW_SQL}
+     GROUP BY UPPER(TRIM(t.currency)), t.category_id`,
     [thisMonthStart, thisMonthEnd]
   )
 
   const historicalSpending = await query<CategorySpendRow>(
-    `SELECT t.category_id, COALESCE(c.name, '${UNCATEGORIZED}') as category_name,
-            SUM(t.amount) as total, COUNT(*) as count
-     FROM transactions t
+    `${CATEGORY_ALLOCATION_CTE}
+     SELECT UPPER(TRIM(t.currency)) AS currency, t.category_id, COALESCE(c.name, '${UNCATEGORIZED}') as category_name,
+            SUM(t.amount) as total, COUNT(DISTINCT t.transaction_id) as count
+     FROM reporting_allocations t
      LEFT JOIN categories c ON t.category_id = c.id
-     WHERE t.type = 'expense' AND t.date >= $1 AND t.date <= $2
-       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(t.is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
-     GROUP BY t.category_id`,
+     WHERE t.type = 'expense' AND t.date >= $1 AND t.date <= $2 AND ${CASH_FLOW_SQL}
+     GROUP BY UPPER(TRIM(t.currency)), t.category_id`,
     [avgStart, avgEnd]
   )
 
   const avgByCategory = new Map<string, number>()
   for (const h of historicalSpending) {
     // Average monthly spending = total / 3 months
-    avgByCategory.set(h.category_id || 'uncategorized', h.total / 3)
+    avgByCategory.set(`${h.currency}:${h.category_id || 'uncategorized'}`, h.total / 3)
   }
 
   for (const current of currentSpending) {
-    const catKey = current.category_id || 'uncategorized'
+    const catKey = `${current.currency}:${current.category_id || 'uncategorized'}`
     const avgMonthly = avgByCategory.get(catKey)
     if (!avgMonthly || avgMonthly === 0) continue
 
@@ -242,7 +242,7 @@ async function detectSpendingSpikes(): Promise<Anomaly[]> {
         type: 'spending_spike',
         severity,
         title: `${current.category_name} spending spike`,
-        description: `On pace to spend $${fromCentavos(projected).toFixed(0)} in ${current.category_name} this month, ${Math.round((ratio - 1) * 100)}% above your 3-month average of $${fromCentavos(avgMonthly).toFixed(0)}.`,
+        description: `On pace to spend ${formatMoney(Math.round(projected), current.currency)} in ${current.category_name} this month, ${Math.round((ratio - 1) * 100)}% above your 3-month average of ${formatMoney(Math.round(avgMonthly), current.currency)}.`,
         amount: fromCentavos(current.total),
         detected_at: new Date().toISOString(),
         dismissed: false,
@@ -259,18 +259,16 @@ async function detectSubscriptionPriceChanges(): Promise<Anomaly[]> {
   // Look for recurring merchants where the most recent charge differs from prior
   const since = dayjs().subtract(90, 'day').format('YYYY-MM-DD')
 
-  const recurring = await query<{ description: string; amounts: string }>(
-    `SELECT description, GROUP_CONCAT(amount, ',') as amounts
+  const recurring = await query<{ description: string; currency: string; amounts: string }>(
+    `SELECT description, currency, GROUP_CONCAT(amount, ',') as amounts
      FROM (
-       SELECT description, amount, date
-       FROM transactions
-        WHERE type = 'expense' AND is_recurring = 1 AND date >= $1
-          AND COALESCE(reporting_treatment, 'normal') = 'normal'
-          AND COALESCE(is_archived, 0) = 0
-          AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
+       SELECT t.description, UPPER(TRIM(t.currency)) AS currency, t.amount, t.date
+       FROM transactions t
+        WHERE t.type = 'expense' AND t.is_recurring = 1 AND t.date >= $1
+          AND ${CASH_FLOW_SQL}
        ORDER BY date ASC
      )
-     GROUP BY description
+     GROUP BY description, currency
      HAVING COUNT(*) >= 2`,
     [since]
   )
@@ -290,7 +288,7 @@ async function detectSubscriptionPriceChanges(): Promise<Anomaly[]> {
         type: 'subscription_price_change',
         severity,
         title: `${row.description} price ${latest > previous ? 'increase' : 'decrease'}`,
-        description: `${row.description} changed from $${fromCentavos(previous).toFixed(2)} to $${fromCentavos(latest).toFixed(2)} (${changePct > 0 ? '+' : ''}${changePct}%).`,
+        description: `${row.description} changed from ${formatMoney(previous, row.currency)} to ${formatMoney(latest, row.currency)} (${changePct > 0 ? '+' : ''}${changePct}%).`,
         amount: fromCentavos(latest),
         detected_at: new Date().toISOString(),
         dismissed: false,
@@ -306,14 +304,12 @@ async function detectLargeTransactions(thresholdCentavos: number): Promise<Anoma
   const since = dayjs().subtract(7, 'day').format('YYYY-MM-DD')
 
   const largeTx = await query<TransactionRow>(
-    `SELECT t.id, t.description, t.amount, t.date, t.category_id,
+    `SELECT t.id, t.description, t.amount, UPPER(TRIM(t.currency)) AS currency, t.date, t.category_id,
             COALESCE(c.name, '${UNCATEGORIZED}') as category_name, t.type
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
       WHERE t.type = 'expense' AND t.amount >= $1 AND t.date >= $2
-        AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
-        AND COALESCE(t.is_archived, 0) = 0
-        AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
+        AND ${CASH_FLOW_SQL}
      ORDER BY t.amount DESC`,
     [thresholdCentavos, since]
   )
@@ -324,7 +320,7 @@ async function detectLargeTransactions(thresholdCentavos: number): Promise<Anoma
       type: 'large_transaction',
       severity: tx.amount >= thresholdCentavos * 2 ? 'high' : 'medium',
       title: `Large transaction: ${tx.description}`,
-      description: `$${fromCentavos(tx.amount).toFixed(2)} expense at ${tx.description} on ${dayjs(tx.date).format('MMM D')}.`,
+      description: `${formatMoney(tx.amount, tx.currency)} expense at ${tx.description} on ${dayjs(tx.date).format('MMM D')}.`,
       transaction_id: tx.id,
       amount: fromCentavos(tx.amount),
       detected_at: new Date().toISOString(),
@@ -344,6 +340,11 @@ export interface AnomalyDetectionOptions {
 export async function detectAnomalies(options: AnomalyDetectionOptions = {}): Promise<Anomaly[]> {
   const thresholdDollars = options.largeTransactionThreshold ?? 500
   const thresholdCentavos = thresholdDollars * 100
+
+  await assertReportingReadComplete(
+    dayjs().subtract(3, 'month').startOf('month').format('YYYY-MM-DD'),
+    dayjs().format('YYYY-MM-DD')
+  )
 
   const results = await Promise.all([
     detectUnusualAmounts(),

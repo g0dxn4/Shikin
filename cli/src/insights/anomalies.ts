@@ -11,16 +11,26 @@ import {
   type CategorySpendRow,
   type AnomalySeverity,
 } from './shared.js'
+import { CASH_FLOW_SQL, REPORTING_CTE, reportingReadFailure } from '../reporting-read.js'
 
 export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: number) {
   const thresholdCentavos = Math.round(largeTransactionThreshold * 100)
+  const historyStart = dayjs().subtract(90, 'day').format('YYYY-MM-DD')
+  const today = dayjs().format('YYYY-MM-DD')
+  const failure = reportingReadFailure(historyStart, today)
+  if (failure)
+    return {
+      ...failure,
+      totalAnomalies: 0,
+      largeTransactionThresholdCurrencyMode: 'per_transaction_currency' as const,
+      bySeverity: { high: 0, medium: 0, low: 0 },
+      anomalies: [],
+    }
   const ledgerCurrencies = query<{ currency: string }>(
-    `SELECT DISTINCT currency
-     FROM transactions
-     WHERE type = 'expense' AND currency IS NOT NULL AND TRIM(currency) != ''
-       AND COALESCE(reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`
+    `SELECT DISTINCT UPPER(TRIM(t.currency)) AS currency
+     FROM transactions t
+     WHERE t.type = 'expense' AND t.currency IS NOT NULL AND TRIM(t.currency) != ''
+       AND ${CASH_FLOW_SQL}`
   )
   const hasMixedCurrencies = ledgerCurrencies.length > 1
   const anomalies: Array<{
@@ -35,20 +45,17 @@ export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: 
   }> = []
 
   const recentExpenseRows = query<AnomalyTransactionRow>(
-    `SELECT t.id, t.description, t.amount, t.currency, t.date, t.category_id,
+    `SELECT t.id, t.description, t.amount, UPPER(TRIM(t.currency)) AS currency, t.date, t.category_id,
             COALESCE(c.name, '${UNCATEGORIZED}') AS category_name, t.type
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1
-       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(t.is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
+       AND ${CASH_FLOW_SQL}
      ORDER BY t.date DESC`,
     [dayjs().subtract(30, 'day').format('YYYY-MM-DD')]
   )
 
   const checkedDescriptions = new Set<string>()
-  const historyStart = dayjs().subtract(90, 'day').format('YYYY-MM-DD')
   const recentWindowStart = dayjs().subtract(30, 'day').format('YYYY-MM-DD')
 
   for (const row of recentExpenseRows) {
@@ -57,11 +64,9 @@ export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: 
     checkedDescriptions.add(descriptionKey)
 
     const history = query<{ amount: number }>(
-      `SELECT amount FROM transactions
-       WHERE description = $1 AND currency = $2 AND type = 'expense' AND date >= $3 AND date < $4
-         AND COALESCE(reporting_treatment, 'normal') = 'normal'
-         AND COALESCE(is_archived, 0) = 0
-         AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
+      `SELECT t.amount FROM transactions t
+       WHERE t.description = $1 AND UPPER(TRIM(t.currency)) = $2 AND t.type = 'expense' AND t.date >= $3 AND t.date < $4
+         AND ${CASH_FLOW_SQL}`,
       [row.description, row.currency, historyStart, recentWindowStart]
     )
 
@@ -89,14 +94,12 @@ export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: 
   }
 
   const duplicateWindowRows = query<AnomalyTransactionRow>(
-    `SELECT t.id, t.description, t.amount, t.currency, t.date, t.category_id,
+    `SELECT t.id, t.description, t.amount, UPPER(TRIM(t.currency)) AS currency, t.date, t.category_id,
             COALESCE(c.name, '${UNCATEGORIZED}') AS category_name, t.type
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1
-       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(t.is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
+       AND ${CASH_FLOW_SQL}
      ORDER BY t.date DESC`,
     [dayjs().subtract(7, 'day').format('YYYY-MM-DD')]
   )
@@ -129,30 +132,25 @@ export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: 
   }
 
   const currentMonthStart = dayjs().startOf('month').format('YYYY-MM-DD')
-  const today = dayjs().format('YYYY-MM-DD')
   const historicalStart = dayjs().subtract(3, 'month').startOf('month').format('YYYY-MM-DD')
   const historicalEnd = dayjs().subtract(1, 'month').endOf('month').format('YYYY-MM-DD')
   const currentCategorySpend = query<CategorySpendRow>(
-    `SELECT t.currency, t.category_id, COALESCE(c.name, '${UNCATEGORIZED}') AS category_name,
-            SUM(t.amount) AS total, COUNT(*) AS count
-     FROM transactions t
+    `${REPORTING_CTE}
+     SELECT t.currency, t.category_id, COALESCE(c.name, '${UNCATEGORIZED}') AS category_name,
+            SUM(t.amount) AS total, COUNT(DISTINCT t.id) AS count
+     FROM category_allocations t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1 AND t.date <= $2
-       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(t.is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      GROUP BY t.currency, t.category_id`,
     [currentMonthStart, today]
   )
   const historicalCategorySpend = query<CategorySpendRow>(
-    `SELECT t.currency, t.category_id, COALESCE(c.name, '${UNCATEGORIZED}') AS category_name,
-            SUM(t.amount) AS total, COUNT(*) AS count
-     FROM transactions t
+    `${REPORTING_CTE}
+     SELECT t.currency, t.category_id, COALESCE(c.name, '${UNCATEGORIZED}') AS category_name,
+            SUM(t.amount) AS total, COUNT(DISTINCT t.id) AS count
+     FROM category_allocations t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1 AND t.date <= $2
-       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(t.is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      GROUP BY t.currency, t.category_id`,
     [historicalStart, historicalEnd]
   )
@@ -182,12 +180,10 @@ export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: 
   const recurringAmounts = query<{ description: string; currency: string; amounts: string }>(
     `SELECT description, currency, GROUP_CONCAT(amount, ',') AS amounts
      FROM (
-       SELECT description, currency, amount, date
-        FROM transactions
-        WHERE type = 'expense' AND is_recurring = 1 AND date >= $1
-          AND COALESCE(reporting_treatment, 'normal') = 'normal'
-          AND COALESCE(is_archived, 0) = 0
-          AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
+       SELECT t.description, UPPER(TRIM(t.currency)) AS currency, t.amount, t.date
+        FROM transactions t
+        WHERE t.type = 'expense' AND t.is_recurring = 1 AND t.date >= $1
+          AND ${CASH_FLOW_SQL}
         ORDER BY date ASC
       )
      GROUP BY description, currency
@@ -213,14 +209,12 @@ export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: 
   }
 
   const largeTransactions = query<AnomalyTransactionRow>(
-    `SELECT t.id, t.description, t.amount, t.currency, t.date, t.category_id,
+    `SELECT t.id, t.description, t.amount, UPPER(TRIM(t.currency)) AS currency, t.date, t.category_id,
             COALESCE(c.name, '${UNCATEGORIZED}') AS category_name, t.type
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.amount >= $1 AND t.date >= $2
-       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(t.is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
+       AND ${CASH_FLOW_SQL}
      ORDER BY t.currency ASC, t.amount DESC`,
     [thresholdCentavos, dayjs().subtract(7, 'day').format('YYYY-MM-DD')]
   )

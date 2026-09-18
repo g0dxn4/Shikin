@@ -6,26 +6,28 @@ import {
   buildCashFlowForecast,
   type SubscriptionBillingCycle,
 } from './shared.js'
+import { CASH_FLOW_SQL, reportingReadFailure } from '../reporting-read.js'
 
 export async function generateCashFlowForecastSummary(days: number) {
   const boundedDays = Math.max(1, Math.min(90, Math.round(days)))
   const currentBalances = query<{ currency: string; total: number }>(
-    `SELECT currency, COALESCE(SUM(balance), 0) AS total
+    `SELECT UPPER(TRIM(currency)) AS currency, COALESCE(SUM(balance), 0) AS total
      FROM accounts
      WHERE is_archived = 0 AND type IN ('checking', 'savings', 'cash')
-     GROUP BY currency`
+     GROUP BY UPPER(TRIM(currency))`
   )
 
   const ninetyDaysAgo = dayjs().subtract(90, 'day').format('YYYY-MM-DD')
   const today = dayjs().format('YYYY-MM-DD')
+  const failure = reportingReadFailure(ninetyDaysAgo, today)
+  if (failure) return { ...failure, forecast: null, forecastsByCurrency: [] }
+
   const dailyAverages = query<{ currency: string; type: string; avg_daily: number }>(
-    `SELECT currency, type, CAST(SUM(amount) AS REAL) / 90.0 AS avg_daily
-     FROM transactions
-     WHERE date >= $1 AND date <= $2 AND type IN ('expense', 'income')
-       AND COALESCE(reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
-     GROUP BY currency, type`,
+    `SELECT UPPER(TRIM(t.currency)) AS currency, t.type,
+            CAST(SUM(t.amount) AS REAL) / 90.0 AS avg_daily
+     FROM transactions t
+     WHERE t.date >= $1 AND t.date <= $2 AND ${CASH_FLOW_SQL}
+     GROUP BY UPPER(TRIM(t.currency)), t.type`,
     [ninetyDaysAgo, today]
   )
 
@@ -33,7 +35,9 @@ export async function generateCashFlowForecastSummary(days: number) {
     currency: string
     amount: number
     billing_cycle: SubscriptionBillingCycle
-  }>('SELECT amount, currency, billing_cycle FROM subscriptions WHERE is_active = 1')
+  }>(
+    'SELECT amount, UPPER(TRIM(currency)) AS currency, billing_cycle FROM subscriptions WHERE is_active = 1'
+  )
 
   const currencies = uniqueCurrencies(currentBalances, dailyAverages, subscriptions)
   const balanceByCurrency = new Map(currentBalances.map((row) => [row.currency, row.total]))

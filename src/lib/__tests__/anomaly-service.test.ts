@@ -11,6 +11,7 @@ vi.mock('@/lib/ulid', () => ({
 
 vi.mock('@/lib/money', () => ({
   fromCentavos: (c: number) => c / 100,
+  formatMoney: (c: number, currency: string) => `${currency} ${(c / 100).toFixed(2)}`,
 }))
 
 import { query } from '@/lib/database'
@@ -61,11 +62,34 @@ describe('anomaly-service', () => {
           (sql): sql is string => typeof sql === 'string' && sql.includes('FROM transactions')
         )
 
-      expect(transactionQueries).toHaveLength(6)
+      expect(transactionQueries).toHaveLength(7)
       for (const sql of transactionQueries) {
         expect(sql).toMatch(/COALESCE\((?:t\.)?reporting_treatment, 'normal'\) = 'normal'/)
+        expect(sql).toMatch(/COALESCE\((?:t\.)?ledger_treatment, 'normal'\) = 'normal'/)
+        expect(sql).toMatch(/COALESCE\((?:t\.)?transaction_kind, 'standard'\) = 'standard'/)
         expect(sql).toMatch(/COALESCE\((?:t\.)?is_archived, 0\) = 0/)
       }
+    })
+
+    it('rejects malformed split evidence instead of returning partial anomalies', async () => {
+      mockQuery.mockImplementation(async (sql: string) => {
+        if (sql.includes('AS split_count')) {
+          return [
+            {
+              id: 'tx-bad',
+              type: 'expense',
+              amount: 1000,
+              currency: 'USD',
+              split_count: 2,
+              split_total: 900,
+              invalid_splits: 0,
+            },
+          ]
+        }
+        return []
+      })
+
+      await expect(detectAnomalies()).rejects.toThrow(/transaction tx-bad/)
     })
 
     it('returns empty array when no transactions exist', async () => {
@@ -86,6 +110,7 @@ describe('anomaly-service', () => {
               id: 'tx1',
               description: 'Expensive Item',
               amount: 100000,
+              currency: 'USD',
               date: '2024-01-15',
               category_id: null,
               category_name: 'Uncategorized',
@@ -120,6 +145,7 @@ describe('anomaly-service', () => {
               id: 'tx1',
               description: 'Coffee Shop',
               amount: 500,
+              currency: 'USD',
               date: today,
               category_id: null,
               category_name: 'Uncategorized',
@@ -129,6 +155,7 @@ describe('anomaly-service', () => {
               id: 'tx2',
               description: 'Coffee Shop',
               amount: 500,
+              currency: 'USD',
               date: today,
               category_id: null,
               category_name: 'Uncategorized',
@@ -162,6 +189,7 @@ describe('anomaly-service', () => {
               id: 'tx1',
               description: 'Store',
               amount: 50000,
+              currency: 'USD',
               date: '2024-01-15',
               category_id: null,
               category_name: 'Uncategorized',
@@ -190,6 +218,7 @@ describe('anomaly-service', () => {
               id: 'tx1',
               description: 'Medium',
               amount: 60000,
+              currency: 'USD',
               date: '2024-01-15',
               category_id: null,
               category_name: 'Uncategorized',
@@ -199,6 +228,7 @@ describe('anomaly-service', () => {
               id: 'tx2',
               description: 'High',
               amount: 120000,
+              currency: 'USD',
               date: '2024-01-15',
               category_id: null,
               category_name: 'Uncategorized',
@@ -223,7 +253,7 @@ describe('anomaly-service', () => {
       mockQuery.mockImplementation(async (sql: string) => {
         const s = sql as string
         if (s.includes('GROUP_CONCAT')) {
-          return [{ description: 'Netflix', amounts: '1599,1799' }]
+          return [{ description: 'Netflix', currency: 'USD', amounts: '1599,1799' }]
         }
         return []
       })

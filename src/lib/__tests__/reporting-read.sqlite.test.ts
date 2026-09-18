@@ -7,8 +7,9 @@ vi.mock('@/lib/database', () => ({
   execute: vi.fn(),
 }))
 import { useSpendingInsightsStore } from '@/stores/spending-insights-store'
+import { useBudgetStore } from '@/stores/budget-store'
 import { useCurrencyStore } from '@/stores/currency-store'
-import { CATEGORY_ALLOCATION_CTE } from '../reporting-read'
+import { assertReportingReadComplete, CATEGORY_ALLOCATION_CTE } from '../reporting-read'
 import { aggregateHeatmapSpending, fetchHeatmapLedgerRows } from '../spending-heatmap'
 
 beforeEach(() => {
@@ -20,7 +21,11 @@ beforeEach(() => {
       category_id TEXT, status TEXT, ledger_treatment TEXT, reporting_treatment TEXT, transaction_kind TEXT, is_archived INTEGER);
     CREATE TABLE transaction_splits (id TEXT, transaction_id TEXT, category_id TEXT, amount INTEGER);
     CREATE TABLE categories (id TEXT, name TEXT, color TEXT);
+    CREATE TABLE budgets (id TEXT, category_id TEXT, name TEXT, amount INTEGER, period TEXT,
+      is_active INTEGER, created_at TEXT, updated_at TEXT);
     INSERT INTO categories VALUES ('food', 'Food', '#fff'), ('other', 'Other Expenses', '#000');
+    INSERT INTO budgets VALUES ('food-budget', 'food', 'Food budget', 10000, 'monthly', 1,
+      '2026-06-01', '2026-06-01');
     INSERT INTO transactions VALUES ('split', 'expense', 1001, 'USD', '2026-06-15', 'food', 'posted', NULL, NULL, NULL, 0),
       ('unsplit', 'expense', 199, 'USD', '2026-06-15', 'other', 'cleared', NULL, NULL, NULL, 0),
       ('staged', 'expense', 999999, '', '2026-06-15', 'food', 'posted', 'staged_no_balance_impact', NULL, NULL, 0);
@@ -29,11 +34,19 @@ beforeEach(() => {
     ALTER TABLE transactions ADD COLUMN description TEXT;
   `)
   useCurrencyStore.setState({ preferredCurrency: 'USD', rates: {}, invalidRates: [] })
+  useBudgetStore.setState({ budgets: [], isLoading: false, fetchError: null, error: null })
 })
 afterEach(() => {
   state.db?.close()
   state.db = null
   vi.useRealTimers()
+})
+
+it('executes budget-store split allocation without duplicating the parent', async () => {
+  await useBudgetStore.getState().fetch()
+  expect(useBudgetStore.getState().budgets).toEqual([
+    expect.objectContaining({ id: 'food-budget', spent: 401, remaining: 9599, percentUsed: 4 }),
+  ])
 })
 
 it('executes the frontend category allocation read with centavo and staging parity', async () => {
@@ -56,6 +69,14 @@ it('marks malformed splits incomplete rather than showing partial category total
     reason: 'invalid_category_allocations',
     momComparisons: [],
     momCurrentTotal: 0,
+  })
+})
+
+it('actual frontend validation withholds malformed split evidence', async () => {
+  state.db!.exec("UPDATE transaction_splits SET amount = 400 WHERE id = 'food-split'")
+  await expect(assertReportingReadComplete('2026-06-01', '2026-06-30')).rejects.toMatchObject({
+    reason: 'invalid_category_allocations',
+    transactionIds: ['split'],
   })
 })
 

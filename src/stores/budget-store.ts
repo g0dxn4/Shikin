@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { query, execute } from '@/lib/database'
+import { CASH_FLOW_SQL, CATEGORY_ALLOCATION_CTE } from '@/lib/reporting-read'
 import { getErrorMessage } from '@/lib/errors'
 import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
@@ -68,17 +69,28 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
       const monthlyRange = getPeriodDateRange('monthly')
       const yearlyRange = getPeriodDateRange('yearly')
       const raw = await query<
-        Budget & { category_name: string | null; category_color: string | null; spent: number }
+        Budget & {
+          category_name: string | null
+          category_color: string | null
+          spent: number
+          reporting_incomplete: number
+          reporting_transaction_id: string | null
+        }
       >(
-        `SELECT b.*, c.name as category_name, c.color as category_color,
-                COALESCE(SUM(t.amount), 0) as spent
+        `${CATEGORY_ALLOCATION_CTE}, eligible_allocations AS (
+           SELECT * FROM reporting_allocations t WHERE ${CASH_FLOW_SQL}
+         )
+         SELECT b.*, c.name as category_name, c.color as category_color,
+                COALESCE(SUM(CASE WHEN t.type = 'expense' THEN t.amount ELSE 0 END), 0) as spent,
+                COALESCE(MAX(CASE WHEN t.invalid_allocations = 1 OR t.invalid_reporting_data = 1
+                  OR UPPER(TRIM(t.currency)) != 'USD' THEN 1 ELSE 0 END), 0) as reporting_incomplete,
+                MIN(CASE WHEN t.invalid_allocations = 1 OR t.invalid_reporting_data = 1
+                  OR UPPER(TRIM(t.currency)) != 'USD' THEN t.transaction_id END) as reporting_transaction_id
          FROM budgets b
          LEFT JOIN categories c ON b.category_id = c.id
-         LEFT JOIN transactions t ON t.category_id = b.category_id
-          AND t.type = 'expense'
-          AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
-          AND COALESCE(t.is_archived, 0) = 0
-          AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
+         LEFT JOIN eligible_allocations t
+          ON (b.category_id IS NULL OR t.category_id = b.category_id
+              OR t.invalid_allocations = 1 OR t.invalid_reporting_data = 1)
           AND (
             (b.period = 'weekly' AND t.date >= ? AND t.date <= ?) OR
             (b.period = 'monthly' AND t.date >= ? AND t.date <= ?) OR
@@ -96,6 +108,14 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
           yearlyRange.end,
         ]
       )
+
+      const incomplete = raw.find((budget) => budget.reporting_incomplete)
+      if (incomplete) {
+        set({ budgets: [] })
+        throw new Error(
+          `Budget spending is unavailable because transaction ${incomplete.reporting_transaction_id ?? 'unknown'} requires repair or currency conversion.`
+        )
+      }
 
       const budgets: BudgetWithStatus[] = raw.map((b) => {
         const spent = b.spent ?? 0

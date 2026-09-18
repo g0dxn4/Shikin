@@ -1,5 +1,11 @@
 import { query } from '@/lib/database'
+import {
+  assertReportingReadComplete,
+  CASH_FLOW_SQL,
+  CATEGORY_ALLOCATION_CTE,
+} from '@/lib/reporting-read'
 import { load } from '@/lib/storage'
+import { useCurrencyStore } from '@/stores/currency-store'
 import dayjs from 'dayjs'
 
 // --- Types ---
@@ -77,9 +83,8 @@ async function saveStreak(streak: StreakData): Promise<void> {
 
 export async function computeStreak(): Promise<StreakData> {
   const rows = await query<{ d: string }>(
-    `SELECT DISTINCT date(date) as d FROM transactions
-     WHERE COALESCE(reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(is_archived, 0) = 0
+    `SELECT DISTINCT date(t.date) as d FROM transactions t
+     WHERE ${CASH_FLOW_SQL}
      ORDER BY d DESC`
   )
 
@@ -133,9 +138,7 @@ export async function computeStreak(): Promise<StreakData> {
 
 async function checkFirstSteps(): Promise<boolean> {
   const rows = await query<{ cnt: number }>(
-    `SELECT COUNT(*) as cnt FROM transactions
-     WHERE COALESCE(reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(is_archived, 0) = 0`
+    `SELECT COUNT(*) as cnt FROM transactions t WHERE ${CASH_FLOW_SQL}`
   )
   return (rows[0]?.cnt ?? 0) >= 1
 }
@@ -157,15 +160,18 @@ async function checkBudgetBoss(): Promise<boolean> {
 
   if (budgets.length === 0) return false
 
+  await assertReportingReadComplete(start, end)
   for (const b of budgets) {
-    const spent = await query<{ total: number }>(
-      `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
-       WHERE category_id = ? AND type = 'expense' AND date >= ? AND date <= ?
-         AND COALESCE(reporting_treatment, 'normal') = 'normal'
-         AND COALESCE(is_archived, 0) = 0
-         AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
+    const spent = await query<{ currency: string; total: number }>(
+      `${CATEGORY_ALLOCATION_CTE}
+       SELECT UPPER(TRIM(t.currency)) AS currency, COALESCE(SUM(t.amount), 0) as total
+       FROM reporting_allocations t
+       WHERE t.category_id = ? AND t.type = 'expense' AND t.date >= ? AND t.date <= ?
+         AND ${CASH_FLOW_SQL}
+       GROUP BY UPPER(TRIM(t.currency))`,
       [b.category_id, start, end]
     )
+    if (spent.some((row) => row.currency !== 'USD')) return false
     if ((spent[0]?.total ?? 0) > b.amount) return false
   }
   return true
@@ -176,34 +182,30 @@ async function checkSavingsStar(): Promise<boolean> {
   const start = lastMonth.startOf('month').format('YYYY-MM-DD')
   const end = lastMonth.endOf('month').format('YYYY-MM-DD')
 
-  const income = await query<{ total: number }>(
-    `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
-     WHERE type = 'income' AND date >= ? AND date <= ?
-       AND COALESCE(reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
+  await assertReportingReadComplete(start, end)
+  const totals = await query<{ currency: string; type: string; total: number }>(
+    `SELECT UPPER(TRIM(t.currency)) AS currency, t.type, COALESCE(SUM(t.amount), 0) as total
+     FROM transactions t
+     WHERE t.date >= ? AND t.date <= ? AND ${CASH_FLOW_SQL}
+     GROUP BY UPPER(TRIM(t.currency)), t.type`,
     [start, end]
   )
-  const expenses = await query<{ total: number }>(
-    `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
-     WHERE type = 'expense' AND date >= ? AND date <= ?
-       AND COALESCE(reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
-    [start, end]
-  )
-
-  const inc = income[0]?.total ?? 0
-  const exp = expenses[0]?.total ?? 0
+  const { convertToPreferred } = useCurrencyStore.getState()
+  let inc = 0
+  let exp = 0
+  for (const row of totals) {
+    const converted = convertToPreferred(row.total, row.currency)
+    if (!converted.complete) return false
+    if (row.type === 'income') inc += converted.amountCentavos
+    if (row.type === 'expense') exp += converted.amountCentavos
+  }
   if (inc <= 0) return false
   return (inc - exp) / inc > 0.2
 }
 
 async function checkCenturyClub(): Promise<boolean> {
   const rows = await query<{ cnt: number }>(
-    `SELECT COUNT(*) as cnt FROM transactions
-     WHERE COALESCE(reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(is_archived, 0) = 0`
+    `SELECT COUNT(*) as cnt FROM transactions t WHERE ${CASH_FLOW_SQL}`
   )
   return (rows[0]?.cnt ?? 0) >= 100
 }
@@ -212,12 +214,12 @@ async function checkDiversified(): Promise<boolean> {
   const start = dayjs().startOf('month').format('YYYY-MM-DD')
   const end = dayjs().format('YYYY-MM-DD')
 
+  await assertReportingReadComplete(start, end)
   const rows = await query<{ cnt: number }>(
-    `SELECT COUNT(DISTINCT category_id) as cnt FROM transactions
-     WHERE type = 'expense' AND category_id IS NOT NULL AND date >= ? AND date <= ?
-       AND COALESCE(reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
+    `${CATEGORY_ALLOCATION_CTE}
+     SELECT COUNT(DISTINCT t.category_id) as cnt FROM reporting_allocations t
+     WHERE t.type = 'expense' AND t.category_id IS NOT NULL AND t.date >= ? AND t.date <= ?
+       AND ${CASH_FLOW_SQL}`,
     [start, end]
   )
   return (rows[0]?.cnt ?? 0) >= 5
@@ -226,7 +228,8 @@ async function checkDiversified(): Promise<boolean> {
 async function checkDebtDestroyer(): Promise<boolean> {
   // Any credit card with zero or positive balance (paid off)
   const rows = await query<{ cnt: number }>(
-    `SELECT COUNT(*) as cnt FROM accounts WHERE type = 'credit_card' AND balance >= 0`
+    `SELECT COUNT(*) as cnt FROM accounts
+     WHERE type = 'credit_card' AND balance >= 0 AND is_archived = 0`
   )
   return (rows[0]?.cnt ?? 0) >= 1
 }
@@ -236,7 +239,7 @@ async function checkGoalGetter(): Promise<boolean> {
   // Simple heuristic: savings account with balance > 0 that has income transactions
   const rows = await query<{ cnt: number }>(
     `SELECT COUNT(*) as cnt FROM accounts a
-     WHERE a.type = 'savings' AND a.balance > 0`
+     WHERE a.type = 'savings' AND a.balance > 0 AND a.is_archived = 0`
   )
   return (rows[0]?.cnt ?? 0) >= 1
 }
@@ -260,6 +263,12 @@ const CHECKERS: Record<AchievementId, () => Promise<boolean>> = {
  */
 export async function checkAchievements(): Promise<UnlockedAchievement[]> {
   const existing = await loadAchievements()
+  try {
+    await assertReportingReadComplete()
+  } catch {
+    // Preserve prior rewards, but never mint new ones from incomplete financial evidence.
+    return []
+  }
   const unlockedIds = new Set(existing.map((a) => a.id))
   const newlyUnlocked: UnlockedAchievement[] = []
 

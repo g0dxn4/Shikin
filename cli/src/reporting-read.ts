@@ -26,8 +26,15 @@ export const REPORTING_CTE = `WITH cash_flow AS (
   FROM cash_flow t LEFT JOIN transaction_splits s ON s.transaction_id = t.id
 )`
 
-export function reportingReadFailure(start: string, end: string) {
+export function reportingReadFailure(
+  start: string,
+  end: string,
+  scope: { accountId?: string } = {}
+) {
+  const accountFilter = scope.accountId ? ' AND t.account_id = $3' : ''
+  const params = scope.accountId ? [start, end, scope.accountId] : [start, end]
   const rows = query<{
+    id: string
     type: string
     amount: number
     currency: string | null
@@ -35,13 +42,13 @@ export function reportingReadFailure(start: string, end: string) {
     split_total: number | null
     invalid_splits: number
   }>(
-    `SELECT t.type, t.amount, t.currency,
+    `SELECT t.id, t.type, t.amount, t.currency,
        (SELECT COUNT(*) FROM transaction_splits s WHERE s.transaction_id = t.id) AS split_count,
        (SELECT SUM(s.amount) FROM transaction_splits s WHERE s.transaction_id = t.id) AS split_total,
        (SELECT COUNT(*) FROM transaction_splits s WHERE s.transaction_id = t.id
          AND (typeof(s.amount) != 'integer' OR s.amount <= 0)) AS invalid_splits
-     FROM transactions t WHERE ${CASH_FLOW_SQL} AND t.date >= $1 AND t.date <= $2`,
-    [start, end]
+     FROM transactions t WHERE ${CASH_FLOW_SQL} AND t.date >= $1 AND t.date <= $2${accountFilter}`,
+    params
   )
   const totals = new Map<string, number>()
   for (const row of rows) {
@@ -65,8 +72,8 @@ export function reportingReadFailure(start: string, end: string) {
         complete: false as const,
         basis: 'gross_cashflow' as const,
         reason,
-        message:
-          'Gross cash-flow report is incomplete: invalid currency, centavo totals or category allocations. No partial totals are reported.',
+        transactionIds: [row.id],
+        message: `Gross cash-flow report is incomplete: transaction ${row.id} has invalid currency, centavo totals or category allocations. No partial totals are reported.`,
       }
   }
   return null

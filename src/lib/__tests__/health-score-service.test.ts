@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import dayjs from 'dayjs'
 
 const mockStore = vi.hoisted(() => ({
   get: vi.fn(async () => null),
@@ -16,7 +17,7 @@ vi.mock('@/lib/database', () => ({
 }))
 
 vi.mock('@/lib/money', () => ({
-  fromCentavos: (c: number) => c / 100,
+  formatMoney: (c: number, currency: string) => `${currency} ${(c / 100).toFixed(2)}`,
 }))
 
 import { query } from '@/lib/database'
@@ -58,49 +59,56 @@ describe('health-score-service', () => {
       monthlyExpenses = [300000, 310000, 290000, 305000, 295000, 300000],
     } = overrides
 
-    let monthIdx = 0
-
     mockQuery.mockImplementation(async (sql: string) => {
       const s = sql as string
-      // Savings rate & debt-to-income: income query
-      if (s.includes("type = 'income'") && s.includes('SUM(amount)') && !s.includes('accounts')) {
-        return [{ total: income }]
+      if (s.includes('AS split_count')) return []
+      if (s.includes('FROM budgets')) return budgets
+      if (s.includes("type IN ('credit_card', 'savings')")) {
+        return [
+          { type: 'credit_card', balance: -ccDebt, currency: 'USD' },
+          { type: 'savings', balance: savings, currency: 'USD' },
+        ]
       }
-      // Budget adherence: get active budgets
-      if (s.includes('FROM budgets')) {
-        return budgets
-      }
-      // Budget adherence: spending per budget category
-      if (s.includes('category_id = ?') && s.includes("type = 'expense'")) {
-        return [{ total: budgetSpent }]
-      }
-      // Debt-to-income: credit card balances
-      if (s.includes("type = 'credit_card'") && s.includes('SUM(ABS(balance))')) {
-        return [{ total_balance: ccDebt }]
-      }
-      // Emergency fund: savings balance
-      if (s.includes("type = 'savings'") && s.includes('SUM(balance)')) {
-        return [{ total: savings }]
-      }
-      // Emergency fund or spending consistency: expense totals
-      if (s.includes("type = 'expense'") && s.includes('SUM(amount)')) {
-        // Emergency fund 3-month query uses a wider date range
-        // Spending consistency queries monthly totals in a loop
-        // We need to distinguish -- emergency fund comes first in Promise.all order
-        if (monthIdx === 0) {
-          // Could be emergency fund or first monthly expense
-          // Emergency fund query spans 3 months
-          monthIdx++
-          return [{ total: expenses3mo }]
+      if (s.includes('FROM reporting_allocations')) {
+        const base = {
+          status: 'posted',
+          ledger_treatment: 'normal',
+          reporting_treatment: 'normal',
+          transaction_kind: 'standard',
+          is_archived: 0,
+          currency: 'USD',
+          category_id: null as string | null,
+          invalid_allocations: 0,
+          invalid_reporting_data: 0,
         }
-        if (monthIdx <= monthlyExpenses.length) {
-          const val = monthlyExpenses[monthIdx - 1] ?? 0
-          monthIdx++
-          return [{ total: val }]
+        const rows = monthlyExpenses.slice(0, 5).map((amount, index) => ({
+          ...base,
+          type: 'expense',
+          amount,
+          date: dayjs()
+            .subtract(5 - index, 'month')
+            .format('YYYY-MM-DD'),
+        }))
+        rows.push({ ...base, type: 'income', amount: income, date: dayjs().format('YYYY-MM-DD') })
+        rows.push({
+          ...base,
+          type: 'expense',
+          amount: expenses,
+          date: dayjs().format('YYYY-MM-DD'),
+        })
+        if (budgets.length > 0 && budgetSpent > 0) {
+          rows.push({
+            ...base,
+            type: 'expense',
+            amount: budgetSpent,
+            date: dayjs().format('YYYY-MM-DD'),
+            category_id: budgets[0].category_id,
+          })
         }
-        return [{ total: expenses }]
+        void expenses3mo
+        return rows
       }
-      return [{ total: 0 }]
+      return []
     })
   }
 
@@ -179,6 +187,28 @@ describe('health-score-service', () => {
       expect(typeof tip).toBe('string')
       expect(tip.length).toBeGreaterThan(0)
     }
+  })
+
+  it('rejects incomplete reporting evidence instead of publishing a zero score', async () => {
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('AS split_count')) {
+        return [
+          {
+            id: 'tx-bad',
+            type: 'expense',
+            amount: 1000,
+            currency: 'USD',
+            split_count: 2,
+            split_total: 900,
+            invalid_splits: 0,
+          },
+        ]
+      }
+      return []
+    })
+
+    await expect(calculateHealthScore()).rejects.toThrow(/transaction tx-bad/)
+    expect(mockStore.set).not.toHaveBeenCalled()
   })
 
   it('calculatedAt is a valid ISO string', async () => {

@@ -290,6 +290,9 @@ describe('ReportsPage', () => {
         category_color: '#38bdf8',
       }),
       transaction('pending', 'expense', 901_000, { status: 'pending' }),
+      transaction('staged', 'expense', 911_000, {
+        ledger_treatment: 'staged_no_balance_impact',
+      }),
       transaction('reconciliation-bridge', 'expense', 902_000, {
         reporting_treatment: 'exclude_from_cashflow',
         transaction_kind: 'reconciliation_bridge',

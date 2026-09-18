@@ -22,6 +22,7 @@ import {
   writeAuditLog,
   type ToolDefinition,
 } from './shared.js'
+import { CASH_FLOW_SQL, reportingReadFailure } from '../reporting-read.js'
 import {
   findTransactionDuplicate,
   transactionDuplicateReason,
@@ -773,22 +774,31 @@ function getCurrentPeriodSpending(
       ? previousDateForDay(card.statement_closing_day).add(1, 'day').format('YYYY-MM-DD')
       : dayjs().startOf('month').format('YYYY-MM-DD')
 
+  const failure = reportingReadFailure(startDate, today, { accountId: card.id })
+  if (failure) {
+    return {
+      startDate,
+      endDate: today,
+      complete: false as const,
+      reason: failure.reason,
+      spending: null,
+      spendingCentavos: null,
+    }
+  }
+
   const total =
     query<{ total: number | null }>(
-      `SELECT COALESCE(SUM(amount), 0) as total
-     FROM transactions
-     WHERE account_id = $1
-       AND type = 'expense'
-       AND COALESCE(reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
-       AND date >= $2 AND date <= $3`,
+      `SELECT COALESCE(SUM(t.amount), 0) as total
+       FROM transactions t
+       WHERE t.account_id = $1 AND t.type = 'expense'
+         AND t.date >= $2 AND t.date <= $3 AND ${CASH_FLOW_SQL}`,
       [card.id, startDate, today]
     )[0]?.total ?? 0
 
   return {
     startDate,
     endDate: today,
+    complete: true as const,
     spending: fromCentavos(total),
     spendingCentavos: total,
   }

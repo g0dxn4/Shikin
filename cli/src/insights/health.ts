@@ -11,51 +11,62 @@ import {
   type BudgetScoreRow,
   type HealthTrend,
 } from './shared.js'
+import { CASH_FLOW_SQL, reportingReadFailure } from '../reporting-read.js'
 
 export async function calculateFinancialHealthScoreSummary() {
   const startOfMonth = dayjs().startOf('month').format('YYYY-MM-DD')
   const today = dayjs().format('YYYY-MM-DD')
   const sixMonthsAgo = dayjs().subtract(5, 'month').startOf('month').format('YYYY-MM-DD')
+  const failure = reportingReadFailure(sixMonthsAgo, today)
+  if (failure)
+    return {
+      ...failure,
+      score: {
+        overall: null,
+        grade: null,
+        subscores: [],
+        trend: 'stable' as HealthTrend,
+        tips: [failure.message],
+        calculatedAt: new Date().toISOString(),
+        mixedCurrency: false,
+        omittedSubscores: [],
+        scoresByCurrency: [],
+      },
+    }
+
   const currentMonthTotals = query<{ currency: string; type: string; total: number }>(
-    `SELECT currency, type, COALESCE(SUM(amount), 0) AS total
-     FROM transactions
-     WHERE type IN ('income', 'expense') AND date >= $1 AND date <= $2
-       AND COALESCE(reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
-     GROUP BY currency, type`,
+    `SELECT UPPER(TRIM(t.currency)) AS currency, t.type, COALESCE(SUM(t.amount), 0) AS total
+     FROM transactions t
+     WHERE t.date >= $1 AND t.date <= $2 AND ${CASH_FLOW_SQL}
+     GROUP BY UPPER(TRIM(t.currency)), t.type`,
     [startOfMonth, today]
   )
   const debtBalances = query<{ currency: string; total_balance: number }>(
-    `SELECT currency, COALESCE(SUM(ABS(balance)), 0) AS total_balance
+    `SELECT UPPER(TRIM(currency)) AS currency,
+            COALESCE(SUM(MAX(-balance, 0)), 0) AS total_balance
      FROM accounts
      WHERE type = 'credit_card' AND is_archived = 0
-     GROUP BY currency`
+     GROUP BY UPPER(TRIM(currency))`
   )
   const savingsBalances = query<{ currency: string; total: number }>(
-    `SELECT currency, COALESCE(SUM(balance), 0) AS total
+    `SELECT UPPER(TRIM(currency)) AS currency, COALESCE(SUM(balance), 0) AS total
      FROM accounts
      WHERE type = 'savings' AND is_archived = 0
-     GROUP BY currency`
+     GROUP BY UPPER(TRIM(currency))`
   )
   const trailingExpenseTotals = query<{ currency: string; total: number }>(
-    `SELECT currency, COALESCE(SUM(amount), 0) AS total
-     FROM transactions
-     WHERE type = 'expense' AND date >= $1 AND date <= $2
-       AND COALESCE(reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
-     GROUP BY currency`,
+    `SELECT UPPER(TRIM(t.currency)) AS currency, COALESCE(SUM(t.amount), 0) AS total
+     FROM transactions t
+     WHERE t.date >= $1 AND t.date <= $2 AND t.type = 'expense' AND ${CASH_FLOW_SQL}
+     GROUP BY UPPER(TRIM(t.currency))`,
     [dayjs().subtract(3, 'month').startOf('month').format('YYYY-MM-DD'), today]
   )
   const monthlyExpenseRows = query<{ month: string; currency: string; total: number }>(
-    `SELECT substr(date, 1, 7) AS month, currency, COALESCE(SUM(amount), 0) AS total
-     FROM transactions
-     WHERE type = 'expense' AND date >= $1 AND date <= $2
-       AND COALESCE(reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
-     GROUP BY substr(date, 1, 7), currency`,
+    `SELECT substr(t.date, 1, 7) AS month, UPPER(TRIM(t.currency)) AS currency,
+            COALESCE(SUM(t.amount), 0) AS total
+     FROM transactions t
+     WHERE t.date >= $1 AND t.date <= $2 AND t.type = 'expense' AND ${CASH_FLOW_SQL}
+     GROUP BY substr(t.date, 1, 7), UPPER(TRIM(t.currency))`,
     [sixMonthsAgo, today]
   )
 

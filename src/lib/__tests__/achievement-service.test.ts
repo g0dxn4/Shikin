@@ -124,6 +124,7 @@ describe('achievement-service', () => {
     it('returns newly unlocked first_steps when >= 1 transaction', async () => {
       mockQuery.mockImplementation(async (sql: string) => {
         const s = sql as string
+        if (s.includes('AS split_count')) return []
         if (s.includes('SELECT COUNT(*) as cnt FROM transactions')) {
           return [{ cnt: 5 }]
         }
@@ -156,6 +157,27 @@ describe('achievement-service', () => {
       expect(ids).toContain('first_steps')
     })
 
+    it('preserves existing rewards and mints none from malformed financial evidence', async () => {
+      mockStore._data['achievements'] = [
+        { id: 'first_steps', unlockedAt: '2024-01-01T00:00:00Z', dismissed: false },
+      ]
+      mockQuery.mockResolvedValue([
+        {
+          id: 'tx-bad',
+          type: 'expense',
+          amount: 1000,
+          currency: 'USD',
+          split_count: 2,
+          split_total: 900,
+          invalid_splits: 0,
+        },
+      ])
+
+      await expect(checkAchievements()).resolves.toEqual([])
+      expect(mockStore._data['achievements']).toHaveLength(1)
+      expect(mockStore.set).not.toHaveBeenCalledWith('achievements', expect.anything())
+    })
+
     it('skips already unlocked achievements', async () => {
       mockStore._data['achievements'] = [
         { id: 'first_steps', unlockedAt: '2024-01-01T00:00:00Z', dismissed: false },
@@ -163,6 +185,7 @@ describe('achievement-service', () => {
 
       mockQuery.mockImplementation(async (sql: string) => {
         const s = sql as string
+        if (s.includes('AS split_count')) return []
         if (s.includes('SELECT COUNT(*) as cnt FROM transactions')) {
           return [{ cnt: 5 }]
         }
@@ -183,6 +206,7 @@ describe('achievement-service', () => {
     it('saves newly unlocked achievements to shared store', async () => {
       mockQuery.mockImplementation(async (sql: string) => {
         const s = sql as string
+        if (s.includes('AS split_count')) return []
         if (s.includes('SELECT COUNT(*) as cnt FROM transactions')) {
           return [{ cnt: 1 }]
         }
@@ -205,6 +229,7 @@ describe('achievement-service', () => {
     it('newly unlocked achievements have correct shape', async () => {
       mockQuery.mockImplementation(async (sql: string) => {
         const s = sql as string
+        if (s.includes('AS split_count')) return []
         if (s.includes('SELECT COUNT(*) as cnt FROM transactions')) {
           return [{ cnt: 100 }] // unlocks first_steps and century_club
         }

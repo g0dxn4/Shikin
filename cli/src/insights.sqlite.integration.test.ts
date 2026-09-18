@@ -126,6 +126,12 @@ function seedDatabase(tempHome: string, seed: (db: Database.Database) => void): 
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
+    CREATE TABLE transaction_splits (
+      id TEXT PRIMARY KEY,
+      transaction_id TEXT NOT NULL,
+      category_id TEXT,
+      amount INTEGER NOT NULL
+    );
     CREATE TABLE audit_log (
       id TEXT PRIMARY KEY,
       entity TEXT NOT NULL,
@@ -488,6 +494,10 @@ describe('insights summaries with a real temporary SQLite database', () => {
         `INSERT INTO accounts (id, name, type, currency, balance, is_archived)
          VALUES (?, ?, ?, ?, ?, ?)`
       ).run('cc-usd', 'USD Credit Card', 'credit_card', 'USD', -cents(400), 0)
+      db.prepare(
+        `INSERT INTO accounts (id, name, type, currency, balance, is_archived)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run('cc-credit', 'Card with positive credit', 'credit_card', 'USD', cents(5_000), 0)
 
       const thisMonth = dayjs().format('YYYY-MM-DD')
       db.prepare(
@@ -546,12 +556,70 @@ describe('insights summaries with a real temporary SQLite database', () => {
     expect(result.message).toContain('Budget adherence is omitted')
   }, 60_000)
 
+  it('withholds forecast, health, and anomaly results when eligible split evidence is malformed', async () => {
+    const tempHome = createTempHome()
+    seedDatabase(tempHome, (db) => {
+      db.prepare(
+        `INSERT INTO accounts (id, name, type, currency, balance, is_archived)
+         VALUES ('acct', 'Checking', 'checking', 'USD', 100000, 0)`
+      ).run()
+      db.prepare(
+        `INSERT INTO transactions
+          (id, account_id, type, amount, currency, description, date)
+         VALUES ('split', 'acct', 'expense', 1000, 'USD', 'Split expense', ?)`
+      ).run(dayjs().format('YYYY-MM-DD'))
+      db.prepare(
+        `INSERT INTO transaction_splits (id, transaction_id, category_id, amount)
+         VALUES ('split-a', 'split', NULL, 400), ('split-b', 'split', NULL, 500)`
+      ).run()
+    })
+
+    const insights = await loadInsights(tempHome)
+    for (const result of [
+      await insights.generateCashFlowForecastSummary(10),
+      await insights.calculateFinancialHealthScoreSummary(),
+      await insights.detectSpendingAnomaliesSummary(100),
+    ]) {
+      expect(result).toMatchObject({
+        success: false,
+        complete: false,
+        reason: 'invalid_category_allocations',
+        transactionIds: ['split'],
+      })
+    }
+  }, 60_000)
+
+  it('excludes staged and technical rows from forecast and anomaly evidence', async () => {
+    const tempHome = createTempHome()
+    seedDatabase(tempHome, (db) => {
+      db.prepare(
+        `INSERT INTO accounts (id, name, type, currency, balance, is_archived)
+         VALUES ('acct', 'Checking', 'checking', 'USD', 100000, 0)`
+      ).run()
+      const insert = db.prepare(
+        `INSERT INTO transactions
+          (id, account_id, type, amount, currency, description, date, ledger_treatment, transaction_kind)
+         VALUES (?, 'acct', 'expense', ?, 'USD', ?, ?, ?, ?)`
+      )
+      const date = dayjs().subtract(1, 'day').format('YYYY-MM-DD')
+      insert.run('ordinary', 9000, 'Ordinary', date, 'normal', 'standard')
+      insert.run('staged', 999999, 'Staged', date, 'staged_no_balance_impact', 'standard')
+      insert.run('technical', 999999, 'Technical', date, 'normal', 'reconciliation_bridge')
+    })
+
+    const insights = await loadInsights(tempHome)
+    const forecast = await insights.generateCashFlowForecastSummary(1)
+    const anomalies = await insights.detectSpendingAnomaliesSummary(1000)
+
+    expect(forecast.success).toBe(true)
+    expect(forecast.forecast?.dailyBurnRate).toBe(1)
+    expect(anomalies.success).toBe(true)
+    expect(anomalies.anomalies).toEqual([])
+  }, 60_000)
+
   it('reads a mixed-currency weekly recap without writing, then explicitly saves it', async () => {
     const tempHome = createTempHome()
     const dbPath = seedDatabase(tempHome, (db) => {
-      db.exec(
-        'CREATE TABLE transaction_splits (id TEXT PRIMARY KEY, transaction_id TEXT, category_id TEXT, amount INTEGER)'
-      )
       db.prepare(
         `INSERT INTO accounts (id, name, type, currency, balance, is_archived)
          VALUES (?, ?, ?, ?, ?, ?)`

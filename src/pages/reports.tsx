@@ -67,6 +67,7 @@ export function ReportsPage() {
         !isCashFlowEligible({
           type: tx.type,
           status: tx.status ?? 'posted',
+          ledgerTreatment: tx.ledger_treatment ?? 'normal',
           reportingTreatment: tx.reporting_treatment ?? 'normal',
           transactionKind: tx.transaction_kind ?? 'standard',
           isArchived: tx.is_archived ?? 0,

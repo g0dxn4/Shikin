@@ -17,6 +17,11 @@
       "import": "./dist/corrections.js",
       "default": "./dist/corrections.js"
     },
+    "./reconciliation": {
+      "types": "./dist/reconciliation.d.ts",
+      "import": "./dist/reconciliation.js",
+      "default": "./dist/reconciliation.js"
+    },
     "./valuation": {
       "types": "./dist/valuation.d.ts",
       "import": "./dist/valuation.js",

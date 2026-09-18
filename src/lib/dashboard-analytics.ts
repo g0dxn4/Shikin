@@ -16,6 +16,7 @@ export type DashboardTransaction = Pick<
   | 'currency'
   | 'date'
   | 'status'
+  | 'ledger_treatment'
   | 'reporting_treatment'
   | 'transaction_kind'
   | 'is_archived'
@@ -43,7 +44,12 @@ export interface DashboardAnalyticsInput {
 export type ConversionState =
   | { kind: 'complete'; currency: string; missingCurrencies: [] }
   | { kind: 'fallback'; currency: string; missingTarget: string; missingCurrencies: [string] }
-  | { kind: 'incomplete'; currency: string; missingCurrencies: string[] }
+  | {
+      kind: 'incomplete'
+      currency: string
+      missingCurrencies: string[]
+      reason?: 'invalid_category_allocations'
+    }
 
 export interface PacePoint {
   day: number
@@ -153,6 +159,7 @@ function isEligibleForCashFlow(tx: DashboardTransaction): boolean {
   return isCashFlowEligible({
     type: tx.type,
     status: tx.status ?? 'posted',
+    ledgerTreatment: tx.ledger_treatment,
     reportingTreatment: tx.reporting_treatment ?? 'normal',
     transactionKind: tx.transaction_kind ?? 'standard',
     isArchived: tx.is_archived ?? 0,
@@ -508,12 +515,16 @@ export function buildDashboardAnalytics(input: DashboardAnalyticsInput): Dashboa
     const txSplits = splitsByTransaction.get(tx.id)
     if (txSplits && txSplits.length > 0) {
       const splitTotal = txSplits.reduce((sum, s) => sum + s.amount, 0)
-      if (splitTotal !== tx.amount) {
+      if (
+        splitTotal !== tx.amount ||
+        txSplits.some((split) => !Number.isSafeInteger(split.amount) || split.amount <= 0)
+      ) {
         splitIntegrityNotices.push({
           transactionId: tx.id,
-          difference: tx.amount - splitTotal,
+          difference: Number.isSafeInteger(splitTotal) ? tx.amount - splitTotal : 0,
           currency: tx.currency,
         })
+        continue
       }
       for (const split of txSplits) {
         const categoryId = split.category_id ?? UNCATEGORIZED_ID
@@ -636,13 +647,20 @@ export function buildDashboardAnalytics(input: DashboardAnalyticsInput): Dashboa
       conversion: trendConversion,
     },
     categories: {
-      months: categoryMonths,
+      months: splitIntegrityNotices.length ? [] : categoryMonths,
       categoryMeta: finalCategoryMeta,
       topCategoryIds,
       otherCategoryId: OTHER_CATEGORY_ID,
-      currentMonthBreakdown,
+      currentMonthBreakdown: splitIntegrityNotices.length ? [] : currentMonthBreakdown,
       splitIntegrityNotices: convertedIntegrityNotices,
-      conversion: categoriesConversion,
+      conversion: splitIntegrityNotices.length
+        ? {
+            kind: 'incomplete',
+            currency: preferredCurrency,
+            missingCurrencies: [],
+            reason: 'invalid_category_allocations',
+          }
+        : categoriesConversion,
     },
   }
 }
@@ -652,6 +670,9 @@ export function formatDashboardNotice(conversion: ConversionState): string | nul
     return `Showing ${conversion.currency}; ${conversion.missingTarget} conversion unavailable`
   }
   if (conversion.kind === 'incomplete') {
+    if (conversion.reason === 'invalid_category_allocations') {
+      return 'Category report incomplete: split allocations do not reconcile.'
+    }
     if (conversion.missingCurrencies.length === 1) {
       return `Conversion unavailable for ${conversion.missingCurrencies[0]}`
     }

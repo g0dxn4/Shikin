@@ -51,6 +51,9 @@ describe('isHeatmapEligibleExpense', () => {
     expect(isHeatmapEligibleExpense(row())).toBe(true)
     expect(isHeatmapEligibleExpense(row({ status: 'cleared' }))).toBe(true)
     expect(isHeatmapEligibleExpense(row({ status: 'pending' }))).toBe(false)
+    expect(isHeatmapEligibleExpense(row({ ledger_treatment: 'staged_no_balance_impact' }))).toBe(
+      false
+    )
     expect(isHeatmapEligibleExpense(row({ type: 'income' }))).toBe(false)
     expect(isHeatmapEligibleExpense(row({ type: 'transfer' }))).toBe(false)
     expect(isHeatmapEligibleExpense(row({ is_archived: 1 }))).toBe(false)
@@ -66,6 +69,42 @@ describe('isHeatmapEligibleExpense', () => {
 })
 
 describe('aggregateHeatmapSpending', () => {
+  it('uses validated allocations for categories but counts the parent once per day', () => {
+    const splits_json = JSON.stringify([
+      { amount: 401, category_id: 'food', category_name: 'Food' },
+      { amount: 600, category_id: 'other', category_name: 'Other Expenses' },
+    ])
+    const result = aggregateHeatmapSpending(
+      [row({ amount: 1001, splits_json })],
+      'USD',
+      convertUsdOnly
+    )
+    expect(result.complete).toBe(true)
+    expect(result.totalSpent).toBe(1001)
+    expect(result.eligibleTransactions).toHaveLength(1)
+    expect(result.categoryTotals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ categoryId: 'food', total: 401 }),
+        expect.objectContaining({ categoryId: 'other', total: 600 }),
+      ])
+    )
+  })
+
+  it('withholds malformed split categories rather than falling back to the parent', () => {
+    const result = aggregateHeatmapSpending(
+      [row({ splits_json: JSON.stringify([{ amount: 1, category_id: 'food' }]) })],
+      'USD',
+      convertUsdOnly
+    )
+    expect(result).toMatchObject({
+      complete: false,
+      reason: 'invalid_category_allocations',
+      categoryTotals: [],
+      eligibleTransactions: [],
+      totalSpent: 0,
+    })
+  })
+
   it('converts mixed currencies before summing daily and category totals', () => {
     const convert: ConvertToPreferredFn = (amountCentavos, currency) => ({
       complete: true,

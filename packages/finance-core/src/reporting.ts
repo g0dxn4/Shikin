@@ -1,10 +1,16 @@
-import { normalizePostingStatus, type PostingStatus, type TransactionKind } from './ledger.js'
+import {
+  normalizePostingStatus,
+  type LedgerTreatment,
+  type PostingStatus,
+  type TransactionKind,
+} from './ledger.js'
 
 export type ReportingTreatment = 'normal' | 'exclude_from_cashflow'
 
 export interface CashFlowCandidate {
   type: string
   status?: string | null
+  ledgerTreatment?: LedgerTreatment | null
   reportingTreatment?: ReportingTreatment | null
   transactionKind?: TransactionKind | null
   isArchived?: boolean | number | null
@@ -22,6 +28,8 @@ export type CashFlowEligibility =
         | 'not_income_or_expense'
         | 'invalid_transaction_type'
         | 'invalid_reporting_treatment'
+        | 'invalid_ledger_treatment'
+        | 'staged_no_balance_impact'
         | 'invalid_transaction_kind'
         | 'invalid_archive_flag'
         | 'excluded_transaction_kind'
@@ -35,6 +43,14 @@ export function getCashFlowEligibility(candidate: CashFlowCandidate): CashFlowEl
   if (!isReportingTreatment(candidate.reportingTreatment)) {
     return { eligible: false, postingStatus, reason: 'invalid_reporting_treatment' }
   }
+  if (
+    candidate.ledgerTreatment !== undefined &&
+    candidate.ledgerTreatment !== null &&
+    candidate.ledgerTreatment !== 'normal' &&
+    candidate.ledgerTreatment !== 'staged_no_balance_impact'
+  ) {
+    return { eligible: false, postingStatus, reason: 'invalid_ledger_treatment' }
+  }
   if (!isTransactionKind(candidate.transactionKind)) {
     return { eligible: false, postingStatus, reason: 'invalid_transaction_kind' }
   }
@@ -43,6 +59,9 @@ export function getCashFlowEligibility(candidate: CashFlowCandidate): CashFlowEl
   }
   if (postingStatus !== 'posted' && postingStatus !== 'cleared') {
     return { eligible: false, postingStatus, reason: 'not_posted_or_cleared' }
+  }
+  if (candidate.ledgerTreatment === 'staged_no_balance_impact') {
+    return { eligible: false, postingStatus, reason: 'staged_no_balance_impact' }
   }
   if (candidate.reportingTreatment === 'exclude_from_cashflow') {
     return { eligible: false, postingStatus, reason: 'excluded_reporting_treatment' }

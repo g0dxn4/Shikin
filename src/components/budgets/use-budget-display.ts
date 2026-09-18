@@ -1,3 +1,4 @@
+import { CATEGORY_ALLOCATION_CTE } from '@/lib/reporting-read'
 import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
 import { isCashFlowEligible } from '@shikin/finance-core'
@@ -8,8 +9,14 @@ import type { Transaction } from '@/types/database'
 
 type SpendingRow = Pick<
   Transaction,
-  'type' | 'status' | 'currency' | 'reporting_treatment' | 'transaction_kind' | 'is_archived'
-> & { budget_id: string; amount: number }
+  | 'type'
+  | 'status'
+  | 'currency'
+  | 'ledger_treatment'
+  | 'reporting_treatment'
+  | 'transaction_kind'
+  | 'is_archived'
+> & { budget_id: string; amount: number; invalid_allocations?: number }
 export type DisplayBudget = BudgetWithStatus & { complete: boolean; currency: string }
 
 export function useBudgetDisplay(budgets: BudgetWithStatus[]) {
@@ -27,14 +34,16 @@ export function useBudgetDisplay(budgets: BudgetWithStatus[]) {
       now.format('YYYY-MM-DD'),
     ])
     query<SpendingRow>(
-      `SELECT b.id AS budget_id, t.currency, t.type, t.status, t.reporting_treatment,
-      t.transaction_kind, t.is_archived, SUM(t.amount) AS amount
-      FROM budgets b JOIN transactions t ON t.category_id = b.category_id
+      `${CATEGORY_ALLOCATION_CTE}
+      SELECT b.id AS budget_id, t.currency, t.type, t.status, t.ledger_treatment, t.reporting_treatment,
+      t.transaction_kind, t.is_archived, SUM(t.amount) AS amount, MAX(t.invalid_allocations) AS invalid_allocations
+      FROM budgets b JOIN reporting_allocations t
+        ON b.category_id IS NULL OR t.category_id = b.category_id OR t.invalid_allocations = 1
       WHERE b.is_active = 1 AND (
         (b.period = 'weekly' AND t.date >= ? AND t.date <= ?) OR
         (b.period = 'monthly' AND t.date >= ? AND t.date <= ?) OR
         (b.period = 'yearly' AND t.date >= ? AND t.date <= ?))
-      GROUP BY b.id, t.currency, t.type, t.status, t.reporting_treatment, t.transaction_kind, t.is_archived`,
+      GROUP BY b.id, t.currency, t.type, t.status, t.ledger_treatment, t.reporting_treatment, t.transaction_kind, t.is_archived`,
       params
     )
       .then((rows) => {
@@ -64,12 +73,17 @@ export function useBudgetDisplay(budgets: BudgetWithStatus[]) {
             !isCashFlowEligible({
               type: row.type,
               status: row.status,
+              ledgerTreatment: row.ledger_treatment,
               reportingTreatment: row.reporting_treatment,
               transactionKind: row.transaction_kind,
               isArchived: row.is_archived,
             })
           )
             continue
+          if (row.invalid_allocations) {
+            complete = false
+            continue
+          }
           const converted = convertToPreferred(row.amount, row.currency)
           if (!converted.complete) complete = false
           else spent += converted.amountCentavos

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { TransactionKind } from './ledger.js'
+import type { LedgerTreatment, TransactionKind } from './ledger.js'
 import { getCashFlowEligibility, isCashFlowEligible, type ReportingTreatment } from './reporting.js'
 
 describe('cash-flow eligibility', () => {
@@ -19,6 +19,41 @@ describe('cash-flow eligibility', () => {
     ).toMatchObject({ eligible: false, reason: 'excluded_reporting_treatment' })
     expect(isCashFlowEligible({ type: 'transfer', status: 'posted' })).toBe(false)
     expect(isCashFlowEligible({ type: 'income', status: 'posted', isArchived: 2 })).toBe(false)
+  })
+
+  it.each([
+    [undefined, true],
+    [null, true],
+    ['normal', true],
+    ['staged_no_balance_impact', false],
+    ['invalid', false],
+  ])('validates ledger treatment %s', (ledgerTreatment, eligible) => {
+    expect(
+      isCashFlowEligible({
+        type: 'expense',
+        status: 'posted',
+        ledgerTreatment: ledgerTreatment as LedgerTreatment,
+      })
+    ).toBe(eligible)
+  })
+
+  it('normalizes legacy statuses but never admits invalid or staged states', () => {
+    for (const status of [undefined, null, '', '  ', ' POSTED ', 'Cleared']) {
+      expect(isCashFlowEligible({ type: 'expense', status })).toBe(true)
+    }
+    for (const status of ['pending', 'void', 'unknown']) {
+      expect(isCashFlowEligible({ type: 'expense', status })).toBe(false)
+    }
+    expect(
+      getCashFlowEligibility({ type: 'expense', ledgerTreatment: 'invalid' as LedgerTreatment })
+    ).toMatchObject({ reason: 'invalid_ledger_treatment' })
+    expect(
+      getCashFlowEligibility({
+        type: 'expense',
+        status: 'cleared',
+        ledgerTreatment: 'staged_no_balance_impact',
+      })
+    ).toMatchObject({ reason: 'staged_no_balance_impact' })
   })
 
   it('excludes reconciliation provenance regardless of reporting defaults', () => {

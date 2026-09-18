@@ -1284,6 +1284,7 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('returns a per-currency spending summary for mixed-currency ledgers', async () => {
+    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
     mockQuery
       .mockReturnValueOnce([
         { currency: 'USD', category_name: 'Food', total: 12000, count: 3 },
@@ -1316,6 +1317,7 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('fails spending summary when aggregate rows have missing currency', async () => {
+    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
     mockQuery
       .mockReturnValueOnce([
         {
@@ -1339,6 +1341,7 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('returns zero top-level spending totals for an empty period', async () => {
+    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
     mockQuery.mockReturnValueOnce([]).mockReturnValueOnce([])
 
     const result = await getSpendingSummary.execute({ period: 'month' })
@@ -1379,6 +1382,7 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('uses an inclusive 7-day window for weekly spending summaries', async () => {
+    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
     mockQuery.mockReturnValueOnce([]).mockReturnValueOnce([])
 
     const result = await getSpendingSummary.execute({ period: 'week' })
@@ -1387,6 +1391,7 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('keeps real Uncategorized categories distinct from uncategorized transactions', async () => {
+    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
     mockQuery
       .mockReturnValueOnce([
         {
@@ -1428,6 +1433,7 @@ describe('CLI tool validation regressions', () => {
         { id: 'acct-usd', name: 'Checking', type: 'checking', currency: 'USD', balance: 100000 },
         { id: 'acct-eur', name: 'Travel', type: 'cash', currency: 'EUR', balance: 50000 },
       ])
+      .mockReturnValueOnce([]) // reporting integrity preflight
       .mockReturnValueOnce([
         { currency: 'USD', total_income: 50000, total_expenses: 12000 },
         { currency: 'EUR', total_income: 0, total_expenses: 9000 },
@@ -1464,6 +1470,7 @@ describe('CLI tool validation regressions', () => {
       .mockReturnValueOnce([
         { id: 'acct-usd', name: 'Checking', type: 'checking', currency: 'USD', balance: 100000 },
       ])
+      .mockReturnValueOnce([]) // reporting integrity preflight
       .mockReturnValueOnce([{ currency: 'EUR', total_income: 50000, total_expenses: 12000 }])
       .mockReturnValueOnce([])
 
@@ -1493,6 +1500,7 @@ describe('CLI tool validation regressions', () => {
       .mockReturnValueOnce([
         { id: 'acct-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 100000 },
       ])
+      .mockReturnValueOnce([]) // reporting integrity preflight
       .mockReturnValueOnce([{ currency: null, total_income: 50000, total_expenses: 12000 }])
       .mockReturnValueOnce([])
 
@@ -1510,7 +1518,10 @@ describe('CLI tool validation regressions', () => {
     mockQuery.mockReturnValueOnce([
       { id: 'acct-usd', name: 'Checking', type: 'checking', currency: 'USD', balance: 100000 },
     ])
-    mockQuery.mockReturnValueOnce([]).mockReturnValueOnce([])
+    mockQuery
+      .mockReturnValueOnce([]) // reporting integrity preflight
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([])
 
     const result = await getBalanceOverview.execute({})
 
@@ -1532,6 +1543,7 @@ describe('CLI tool validation regressions', () => {
       { id: 'acct-eur', name: 'Travel', type: 'cash', currency: 'EUR', balance: 50000 },
     ])
     mockQuery
+      .mockReturnValueOnce([]) // reporting integrity preflight
       .mockReturnValueOnce([{ currency: 'USD', total_income: 50000, total_expenses: 12000 }])
       .mockReturnValueOnce([{ currency: 'USD', total_income: 45000, total_expenses: 15000 }])
 
@@ -1591,6 +1603,7 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('returns per-currency spending trends for mixed-currency ledgers', async () => {
+    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
     mockQuery
       .mockReturnValueOnce([
         { month: '2026-03', currency: 'USD', category_name: 'Food', total: 10000 },
@@ -1636,6 +1649,7 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('fails spending trends when aggregate rows have missing currency', async () => {
+    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
     mockQuery
       .mockReturnValueOnce([
         {
@@ -1659,6 +1673,7 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('does not emit month-over-month trends when months are not consecutive', async () => {
+    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
     mockQuery
       .mockReturnValueOnce([
         { month: '2026-02', currency: 'USD', category_name: 'Food', total: 10000 },
@@ -1676,6 +1691,7 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('ignores a latest month that only contains transfers when selecting trend months', async () => {
+    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
     mockQuery
       .mockReturnValueOnce([
         {
@@ -1700,7 +1716,7 @@ describe('CLI tool validation regressions', () => {
 
     const result = await analyzeSpendingTrends.execute({ months: 3 })
 
-    const aggregateQuery = mockQuery.mock.calls[1]?.[0]
+    const aggregateQuery = mockQuery.mock.calls[2]?.[0]
     expect(aggregateQuery).toContain("type IN ('income', 'expense')")
     expect(result.months).toEqual(
       expect.arrayContaining([
@@ -1724,6 +1740,7 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('keeps real Uncategorized categories distinct from null-category rows in spending trends', async () => {
+    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
     mockQuery
       .mockReturnValueOnce([
         {
@@ -1757,6 +1774,7 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('reports new and disappeared categories in spending trends', async () => {
+    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
     mockQuery
       .mockReturnValueOnce([
         {
@@ -6603,7 +6621,8 @@ describe('CLI tool validation regressions', () => {
     expect(result.score.subscores).toHaveLength(5)
   })
 
-  it('generates and persists a weekly spending recap', async () => {
+  it('generates a weekly spending recap without persistence', async () => {
+    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
     mockQuery
       .mockReturnValueOnce([
         { currency: 'USD', type: 'expense', total: 12500 },
@@ -6627,10 +6646,7 @@ describe('CLI tool validation regressions', () => {
         title: expect.stringContaining('Weekly Recap:'),
       }),
     })
-    expect(mockExecute).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT OR REPLACE INTO recaps'),
-      expect.any(Array)
-    )
+    expect(mockExecute).not.toHaveBeenCalled()
   })
 
   it('returns per-currency cash-flow forecasts when balances span currencies', async () => {
@@ -6710,6 +6726,7 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('generates a weekly mixed-currency recap without cross-currency aggregation', async () => {
+    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
     mockQuery
       .mockReturnValueOnce([
         { currency: 'USD', type: 'expense', total: 12500 },

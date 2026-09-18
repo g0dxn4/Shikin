@@ -1,3 +1,4 @@
+import { REPORTING_CTE, reportingReadFailure, readBudgetSpending } from '../reporting-read.js'
 import {
   dayjs,
   query,
@@ -6,7 +7,6 @@ import {
   toDisplayAmount,
   uniqueCurrencies,
   buildRecapRecord,
-  saveRecap,
   percentageChange,
   type RecapHighlight,
   type RecapType,
@@ -37,23 +37,20 @@ export async function generateSpendingRecapSummary(type: RecapType, period?: str
       ? anchor.subtract(7, 'day').format('YYYY-MM-DD')
       : anchor.subtract(1, 'month').endOf('month').format('YYYY-MM-DD')
 
+  const failure = reportingReadFailure(previousStart, end)
+  if (failure) return failure
+
   const currentTotals = query<{ currency: string; type: string; total: number }>(
-    `SELECT currency, type, COALESCE(SUM(amount), 0) AS total
-     FROM transactions
+    `${REPORTING_CTE} SELECT currency, type, COALESCE(SUM(amount), 0) AS total
+     FROM cash_flow
      WHERE type IN ('expense', 'income') AND date >= $1 AND date <= $2
-       AND COALESCE(reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
      GROUP BY currency, type`,
     [start, end]
   )
   const previousTotals = query<{ currency: string; type: string; total: number }>(
-    `SELECT currency, type, COALESCE(SUM(amount), 0) AS total
-     FROM transactions
+    `${REPORTING_CTE} SELECT currency, type, COALESCE(SUM(amount), 0) AS total
+     FROM cash_flow
      WHERE type IN ('expense', 'income') AND date >= $1 AND date <= $2
-       AND COALESCE(reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
      GROUP BY currency, type`,
     [previousStart, previousEnd]
   )
@@ -63,14 +60,11 @@ export async function generateSpendingRecapSummary(type: RecapType, period?: str
     total: number
     count: number
   }>(
-    `SELECT t.currency, COALESCE(c.name, '${UNCATEGORIZED}') AS category_name, SUM(t.amount) AS total, COUNT(*) AS count
-     FROM transactions t
+    `${REPORTING_CTE} SELECT t.currency, COALESCE(c.name, '${UNCATEGORIZED}') AS category_name, SUM(t.amount) AS total, COUNT(DISTINCT t.id) AS count
+     FROM category_allocations t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1 AND t.date <= $2
-       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(t.is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
-     GROUP BY t.currency, c.name
+     GROUP BY t.currency, t.category_id, c.name
      ORDER BY t.currency ASC, total DESC`,
     [start, end]
   )
@@ -80,13 +74,10 @@ export async function generateSpendingRecapSummary(type: RecapType, period?: str
     amount: number
     category_name: string
   }>(
-    `SELECT t.currency, t.description, t.amount, COALESCE(c.name, '${UNCATEGORIZED}') AS category_name
-     FROM transactions t
+    `${REPORTING_CTE} SELECT t.currency, t.description, t.amount, COALESCE(c.name, '${UNCATEGORIZED}') AS category_name
+     FROM cash_flow t
      LEFT JOIN categories c ON t.category_id = c.id
      WHERE t.type = 'expense' AND t.date >= $1 AND t.date <= $2
-       AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
-       AND COALESCE(t.is_archived, 0) = 0
-       AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
      ORDER BY t.currency ASC, t.amount DESC`,
     [start, end]
   )
@@ -113,7 +104,7 @@ export async function generateSpendingRecapSummary(type: RecapType, period?: str
     }
   }
 
-  const summaryParts: string[] = []
+  const summaryParts: string[] = ['Gross cash flow (gross_cashflow); not net consumption.']
   const highlights: RecapHighlight[] = []
   const weeklyLabel = `${dayjs(start).format('MMM D')} - ${dayjs(end).format('MMM D')}`
   const monthLabel = anchor.format('MMMM YYYY')
@@ -142,7 +133,7 @@ export async function generateSpendingRecapSummary(type: RecapType, period?: str
         previousIncome: toDisplayAmount(previous.income),
         expenseChange: percentageChange(current.expense, previous.expense),
         incomeChange: percentageChange(current.income, previous.income),
-        savings: type === 'monthly' ? toDisplayAmount(Math.max(savings, 0)) : undefined,
+        savings: type === 'monthly' ? toDisplayAmount(savings) : undefined,
         savingsRate: type === 'monthly' ? savingsRate : undefined,
         topCategories,
         biggestExpense: biggestExpense
@@ -175,7 +166,7 @@ export async function generateSpendingRecapSummary(type: RecapType, period?: str
           )
         } else {
           summaryParts.push(
-            `${totals.currency}: earned ${formatMoney(Math.round(totals.totalIncome * 100), totals.currency)} and spent ${formatMoney(Math.round(totals.totalExpenses * 100), totals.currency)}, saving ${formatMoney(Math.round((totals.savings ?? 0) * 100), totals.currency)} (${totals.savingsRate ?? 0}% savings rate).`
+            `${totals.currency}: earned ${formatMoney(Math.round(totals.totalIncome * 100), totals.currency)} and spent ${formatMoney(Math.round(totals.totalExpenses * 100), totals.currency)}, ${(totals.savings ?? 0) < 0 ? 'deficit' : 'saving'} ${formatMoney(Math.round((totals.savings ?? 0) * 100), totals.currency)} (${totals.savingsRate ?? 0}% savings rate).`
           )
         }
 
@@ -226,12 +217,14 @@ export async function generateSpendingRecapSummary(type: RecapType, period?: str
       end,
       type === 'weekly' ? `Weekly Recap: ${weeklyLabel}` : `Monthly Recap: ${monthLabel}`,
       summaryParts.join(' '),
-      highlights
+      highlights,
+      currencies
     )
-    await saveRecap(record)
 
     return {
       success: true,
+      basis: 'gross_cashflow',
+      complete: true,
       recap: record,
       totalsByCurrency,
       message: `Generated ${type} recap with per-currency totals. See totalsByCurrency for exact figures; no FX conversion was applied.`,
@@ -300,27 +293,36 @@ export async function generateSpendingRecapSummary(type: RecapType, period?: str
       end,
       `Weekly Recap: ${weeklyLabel}`,
       summaryParts.join(' '),
-      highlights
+      highlights,
+      currencies
     )
-    await saveRecap(record)
     return {
       success: true,
+      basis: 'gross_cashflow',
+      complete: true,
       recap: record,
+      totalsByCurrency: [
+        {
+          currency: summaryCurrency,
+          totalExpenses: toDisplayAmount(totalExpenses),
+          totalIncome: toDisplayAmount(totalIncome),
+          topCategories: categoriesForCurrency.map((row) => ({
+            category: row.category_name,
+            total: toDisplayAmount(row.total),
+            count: row.count,
+          })),
+        },
+      ],
       message: `Generated weekly recap for ${weeklyLabel}.`,
     }
   }
 
-  const budgets = query<{ name: string; budget_amount: number; spent: number }>(
-    `SELECT b.name, b.amount AS budget_amount,
-            COALESCE((SELECT SUM(t.amount) FROM transactions t
-              WHERE t.category_id = b.category_id AND t.type = 'expense'
-              AND t.date >= $1 AND t.date <= $2
-              AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
-              AND COALESCE(t.is_archived, 0) = 0
-              AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')), 0) AS spent
-     FROM budgets b WHERE b.is_active = 1`,
-    [start, end]
-  )
+  const budgets = query<{ name: string; amount: number; category_id: string | null }>(
+    'SELECT name, amount, category_id FROM budgets WHERE is_active = 1'
+  ).map((budget) => ({
+    ...budget,
+    spending: readBudgetSpending(budget.category_id, start, end),
+  }))
   const savings = totalIncome - totalExpenses
   const savingsRate = totalIncome > 0 ? Math.round((savings / totalIncome) * 100) : 0
 
@@ -328,7 +330,7 @@ export async function generateSpendingRecapSummary(type: RecapType, period?: str
     summaryParts.push(`No transactions recorded for ${monthLabel}.`)
   } else {
     summaryParts.push(
-      `In ${monthLabel}, you earned ${formatMoney(totalIncome, summaryCurrency)} and spent ${formatMoney(totalExpenses, summaryCurrency)}, saving ${formatMoney(Math.max(savings, 0), summaryCurrency)} (${savingsRate}% savings rate).`
+      `In ${monthLabel}, you earned ${formatMoney(totalIncome, summaryCurrency)} and spent ${formatMoney(totalExpenses, summaryCurrency)}, ${savings < 0 ? 'deficit' : 'saving'} ${formatMoney(savings, summaryCurrency)} (${savingsRate}% savings rate).`
     )
     if (categoriesForCurrency.length > 0) {
       summaryParts.push(
@@ -346,7 +348,12 @@ export async function generateSpendingRecapSummary(type: RecapType, period?: str
         `Largest single expense was ${biggestExpense.description} at ${formatMoney(biggestExpense.amount, summaryCurrency)}.`
       )
     }
-    const overBudget = budgets.filter((budget) => budget.spent > budget.budget_amount)
+    if (budgets.some((budget) => !budget.spending.success)) {
+      summaryParts.push('Budget comparison unavailable: USD plans require currency conversion.')
+    }
+    const overBudget = budgets.filter(
+      (budget) => budget.spending.success && budget.spending.total > budget.amount
+    )
     if (overBudget.length > 0) {
       summaryParts.push(`Over budget on: ${overBudget.map((budget) => budget.name).join(', ')}.`)
     }
@@ -376,12 +383,28 @@ export async function generateSpendingRecapSummary(type: RecapType, period?: str
     end,
     `Monthly Recap: ${monthLabel}`,
     summaryParts.join(' '),
-    highlights
+    highlights,
+    currencies
   )
-  await saveRecap(record)
   return {
     success: true,
+    basis: 'gross_cashflow',
+    complete: true,
     recap: record,
+    totalsByCurrency: [
+      {
+        currency: summaryCurrency,
+        totalExpenses: toDisplayAmount(totalExpenses),
+        totalIncome: toDisplayAmount(totalIncome),
+        savings: toDisplayAmount(savings),
+        savingsRate,
+        topCategories: categoriesForCurrency.map((row) => ({
+          category: row.category_name,
+          total: toDisplayAmount(row.total),
+          count: row.count,
+        })),
+      },
+    ],
     message: `Generated monthly recap for ${monthLabel}.`,
   }
 }

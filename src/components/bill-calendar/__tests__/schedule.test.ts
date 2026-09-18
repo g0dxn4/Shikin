@@ -78,6 +78,13 @@ describe('read-only monthly bill schedule', () => {
         '2028-02'
       ).bills[0].paid
     ).toBe(false)
+    expect(
+      buildBillSchedule(
+        [rule],
+        [{ ...payment, ledger_treatment: 'staged_no_balance_impact' }],
+        '2028-02'
+      ).bills[0].paid
+    ).toBe(false)
     expect(buildBillSchedule([rule], [], '2028-01').bills[0].paid).toBe(false)
   })
   it('includes every weekly occurrence within the displayed month', () => {

@@ -55,6 +55,9 @@ describe('buildDashboardAnalytics', () => {
 
   it('filters non-eligible transactions from every aggregate', () => {
     const transactions: DashboardTransaction[] = [
+      makeTransaction('staged', 'expense', 999999, 'USD', '2024-06-10', {
+        ledger_treatment: 'staged_no_balance_impact',
+      }),
       makeTransaction('pending', 'expense', 10000, 'USD', '2024-06-10', { status: 'pending' }),
       makeTransaction('bridge', 'expense', 20000, 'USD', '2024-06-10', {
         transaction_kind: 'reconciliation_bridge',
@@ -325,6 +328,12 @@ describe('buildDashboardAnalytics', () => {
       now: FIXED_NOW,
     })
 
+    expect(result.categories.conversion).toMatchObject({
+      kind: 'incomplete',
+      reason: 'invalid_category_allocations',
+    })
+    expect(result.categories.currentMonthBreakdown).toEqual([])
+    expect(result.categories.months).toEqual([])
     expect(result.categories.splitIntegrityNotices).toHaveLength(1)
     expect(result.categories.splitIntegrityNotices[0].transactionId).toBe('split-parent')
     expect(result.categories.splitIntegrityNotices[0].difference).toBe(5000)

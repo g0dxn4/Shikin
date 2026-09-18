@@ -546,9 +546,12 @@ describe('insights summaries with a real temporary SQLite database', () => {
     expect(result.message).toContain('Budget adherence is omitted')
   }, 60_000)
 
-  it('generateSpendingRecapSummary stores a mixed-currency weekly recap record', async () => {
+  it('reads a mixed-currency weekly recap without writing, then explicitly saves it', async () => {
     const tempHome = createTempHome()
     const dbPath = seedDatabase(tempHome, (db) => {
+      db.exec(
+        'CREATE TABLE transaction_splits (id TEXT PRIMARY KEY, transaction_id TEXT, category_id TEXT, amount INTEGER)'
+      )
       db.prepare(
         `INSERT INTO accounts (id, name, type, currency, balance, is_archived)
          VALUES (?, ?, ?, ?, ?, ?)`
@@ -624,6 +627,14 @@ describe('insights summaries with a real temporary SQLite database', () => {
     expect(result.success).toBe(true)
     expect(result.totalsByCurrency).toHaveLength(2)
     expect(result.message).toContain('no FX conversion was applied')
+
+    const readDb = new Database(dbPath, { readonly: true, fileMustExist: true })
+    expect(readDb.prepare('SELECT COUNT(*) AS total FROM recaps').get()).toEqual({ total: 0 })
+    readDb.close()
+    const { financialInsightsTools } = await import('./tools/financial-insights.js')
+    await financialInsightsTools
+      .find((tool) => tool.name === 'save-spending-recap')!
+      .execute({ type: 'weekly', period: dayjs().format('YYYY-MM-DD') })
 
     const db = new Database(dbPath, { readonly: true, fileMustExist: true })
     try {

@@ -27,7 +27,13 @@ export interface CashFlowForecast {
 
 interface DailyAggregate extends Pick<
   Transaction,
-  'type' | 'status' | 'reporting_treatment' | 'transaction_kind' | 'is_archived' | 'currency'
+  | 'type'
+  | 'status'
+  | 'ledger_treatment'
+  | 'reporting_treatment'
+  | 'transaction_kind'
+  | 'is_archived'
+  | 'currency'
 > {
   amount: number
 }
@@ -67,12 +73,12 @@ export async function generateCashFlowForecast(
   const today = dayjs().format('YYYY-MM-DD')
   // Group only identical eligibility/currency dimensions, then use the canonical helper.
   const dailyAverages = await query<DailyAggregate>(
-    `SELECT t.type, t.currency, t.status, t.reporting_treatment, t.transaction_kind, t.is_archived,
+    `SELECT t.type, t.currency, t.status, t.ledger_treatment, t.reporting_treatment, t.transaction_kind, t.is_archived,
             SUM(t.amount) AS amount
      FROM transactions t JOIN accounts a ON a.id = t.account_id
      WHERE t.date >= ? AND t.date <= ? AND a.is_archived = 0
        ${scope.accountId ? 'AND t.account_id = ?' : ''}
-     GROUP BY t.type, t.currency, t.status, t.reporting_treatment, t.transaction_kind, t.is_archived`,
+     GROUP BY t.type, t.currency, t.status, t.ledger_treatment, t.reporting_treatment, t.transaction_kind, t.is_archived`,
     [ninetyDaysAgo, today, ...params]
   )
   // 3. Factor in subscriptions as additional known expenses
@@ -104,6 +110,7 @@ export async function generateCashFlowForecast(
       !isCashFlowEligible({
         type: row.type,
         status: row.status,
+        ledgerTreatment: row.ledger_treatment,
         reportingTreatment: row.reporting_treatment,
         transactionKind: row.transaction_kind,
         isArchived: row.is_archived,

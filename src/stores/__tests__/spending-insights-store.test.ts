@@ -95,6 +95,17 @@ describe('spending-insights-store', () => {
     expect(state.momCurrentTotal).toBe(0)
   })
 
+  it('withholds comparisons for malformed split allocations', async () => {
+    mockQuery.mockResolvedValue([row({ invalid_allocations: 1 })])
+    await useSpendingInsightsStore.getState().loadComparisons()
+    expect(useSpendingInsightsStore.getState()).toMatchObject({
+      complete: false,
+      reason: 'invalid_category_allocations',
+      momComparisons: [],
+      insights: [],
+    })
+  })
+
   it('withholds comparisons for invalid currency data', async () => {
     mockQuery.mockResolvedValue([row({ total: 5000, currency: 'US D' })])
 
@@ -112,6 +123,7 @@ describe('spending-insights-store', () => {
       row({ status: null, total: 20000 }),
       row({ status: ' ', total: 10000 }),
       row({ status: '', total: 5000 }),
+      row({ ledger_treatment: 'staged_no_balance_impact', total: 999999 }),
       row({ status: 'pending', total: 901000 }),
       row({ type: 'transfer', total: 902000 }),
       row({ reporting_treatment: 'exclude_from_cashflow', total: 903000 }),

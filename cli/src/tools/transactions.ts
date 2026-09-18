@@ -1,3 +1,4 @@
+import { REPORTING_CTE, reportingReadFailure } from '../reporting-read.js'
 import {
   z,
   query,
@@ -3190,6 +3191,9 @@ const getSpendingSummary: ToolDefinition = {
       }
     }
 
+    const failure = reportingReadFailure(start, end)
+    if (failure) return failure
+
     const spending = await query<{
       currency: string
       category_id: string | null
@@ -3197,16 +3201,16 @@ const getSpendingSummary: ToolDefinition = {
       total: number
       count: number
     }>(
-      `SELECT
+      `${REPORTING_CTE}
+       SELECT
          t.currency as currency,
          t.category_id as category_id,
          COALESCE(c.name, 'Uncategorized') as category_name,
          SUM(t.amount) as total,
-         COUNT(*) as count
-       FROM transactions t
+         COUNT(DISTINCT t.id) as count
+       FROM category_allocations t
        LEFT JOIN categories c ON t.category_id = c.id
         WHERE t.type = 'expense'
-          AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
           AND t.date >= $1
           AND t.date <= $2
         GROUP BY t.currency, t.category_id, c.name
@@ -3215,10 +3219,9 @@ const getSpendingSummary: ToolDefinition = {
     )
 
     const totals = await query<{ currency: string; type: string; total: number }>(
-      `SELECT currency, type, COALESCE(SUM(amount), 0) as total
-       FROM transactions
+      `${REPORTING_CTE} SELECT currency, type, COALESCE(SUM(amount), 0) as total
+       FROM cash_flow
        WHERE type IN ('income', 'expense')
-         AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
          AND date >= $1 AND date <= $2
        GROUP BY currency, type`,
       [start, end]
@@ -3246,6 +3249,8 @@ const getSpendingSummary: ToolDefinition = {
       totalsByCurrency.length === 0 ? { totalExpenses: 0, totalIncome: 0, netSavings: 0 } : null
 
     return {
+      basis: 'gross_cashflow',
+      complete: true,
       period: { start, end },
       mixedCurrency: totalsByCurrency.length > 1,
       totalExpenses: singleCurrency?.totalExpenses ?? emptyPeriodTotals?.totalExpenses ?? null,

@@ -25,6 +25,7 @@ describe('budget currency-safe display reads', () => {
       { ...expense, currency: 'EUR', status: ' ' },
       { ...expense, type: 'transfer', currency: 'XXX' },
       { ...expense, status: 'pending', currency: 'XXX' },
+      { ...expense, ledger_treatment: 'staged_no_balance_impact', currency: 'XXX' },
       { ...expense, transaction_kind: 'reconciliation_bridge', currency: 'XXX' },
       { ...expense, reporting_treatment: 'exclude_from_cashflow', currency: 'XXX' },
       { ...expense, is_archived: 1, currency: 'XXX' },
@@ -49,6 +50,13 @@ describe('budget currency-safe display reads', () => {
     await waitFor(() => expect(result.current.budgets[0].spent).toBe(10000))
     expect(result.current.complete).toBe(false)
     expect(result.current.budgets[0].complete).toBe(false)
+  })
+  it('marks malformed split allocations incomplete', async () => {
+    vi.mocked(query).mockResolvedValue([{ ...expense, invalid_allocations: 1 }])
+    const { result } = renderHook(() => useBudgetDisplay(budgets))
+    await waitFor(() => expect(query).toHaveBeenCalled())
+    expect(result.current.complete).toBe(false)
+    expect(result.current.budgets[0].spent).toBe(0)
   })
   it('converts both the USD plan and spending when preferred currency changes', async () => {
     useCurrencyStore.setState({ preferredCurrency: 'EUR', rates: { 'USD:EUR': 0.5 } })

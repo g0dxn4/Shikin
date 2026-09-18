@@ -1,3 +1,4 @@
+import { REPORTING_CTE, reportingReadFailure } from '../reporting-read.js'
 import {
   z,
   query,
@@ -40,21 +41,24 @@ const getBalanceOverview: ToolDefinition = {
     const currentMonthStart = dayjs().startOf('month').format('YYYY-MM-DD')
     const currentMonthEnd = dayjs().endOf('month').format('YYYY-MM-DD')
 
+    const reportFailure = reportingReadFailure(
+      dayjs().subtract(1, 'month').startOf('month').format('YYYY-MM-DD'),
+      currentMonthEnd
+    )
+    if (reportFailure) return reportFailure
+
     const currentMonth = await query<{
       currency: string
       total_income: number
       total_expenses: number
     }>(
-      `SELECT
+      `${REPORTING_CTE} SELECT
          t.currency,
          COALESCE(SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE 0 END), 0) as total_income,
          COALESCE(SUM(CASE WHEN t.type = 'expense' THEN t.amount ELSE 0 END), 0) as total_expenses
-       FROM transactions t
+       FROM cash_flow t
        JOIN accounts a ON a.id = t.account_id
        WHERE a.is_archived = 0
-         AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
-         AND COALESCE(t.is_archived, 0) = 0
-         AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
          AND t.date >= $1 AND t.date <= $2
        GROUP BY t.currency`,
       [currentMonthStart, currentMonthEnd]
@@ -68,16 +72,13 @@ const getBalanceOverview: ToolDefinition = {
       total_income: number
       total_expenses: number
     }>(
-      `SELECT
+      `${REPORTING_CTE} SELECT
          t.currency,
          COALESCE(SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE 0 END), 0) as total_income,
          COALESCE(SUM(CASE WHEN t.type = 'expense' THEN t.amount ELSE 0 END), 0) as total_expenses
-       FROM transactions t
+       FROM cash_flow t
        JOIN accounts a ON a.id = t.account_id
        WHERE a.is_archived = 0
-         AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
-         AND COALESCE(t.is_archived, 0) = 0
-         AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
          AND t.date >= $1 AND t.date <= $2
        GROUP BY t.currency`,
       [prevMonthStart, prevMonthEnd]
@@ -129,6 +130,8 @@ const getBalanceOverview: ToolDefinition = {
         : null
 
     return {
+      basis: 'gross_cashflow',
+      complete: true,
       mixedCurrency:
         balanceCurrencies.length > 1 ||
         monthCurrencies.length > 1 ||
@@ -186,6 +189,9 @@ const analyzeSpendingTrends: ToolDefinition = {
       .format('YYYY-MM-DD')
     const endDate = dayjs().endOf('month').format('YYYY-MM-DD')
 
+    const failure = reportingReadFailure(startDate, endDate)
+    if (failure) return failure
+
     const breakdown = await query<{
       month: string
       currency: string
@@ -193,18 +199,15 @@ const analyzeSpendingTrends: ToolDefinition = {
       category_name: string
       total: number
     }>(
-      `SELECT
+      `${REPORTING_CTE} SELECT
          strftime('%Y-%m', t.date) as month,
          t.currency as currency,
          t.category_id as category_id,
          COALESCE(c.name, 'Uncategorized') as category_name,
          SUM(t.amount) as total
-       FROM transactions t
+       FROM category_allocations t
        LEFT JOIN categories c ON t.category_id = c.id
         WHERE t.type = 'expense'
-          AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
-          AND COALESCE(t.is_archived, 0) = 0
-          AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
           AND t.date >= $1 AND t.date <= $2
         GROUP BY month, t.currency, t.category_id, category_name
         ORDER BY month, t.currency, total DESC`,
@@ -217,16 +220,13 @@ const analyzeSpendingTrends: ToolDefinition = {
       total_expenses: number
       total_income: number
     }>(
-      `SELECT
+      `${REPORTING_CTE} SELECT
          strftime('%Y-%m', date) as month,
          currency,
          COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as total_expenses,
          COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as total_income
-       FROM transactions
+       FROM cash_flow
        WHERE type IN ('income', 'expense')
-         AND COALESCE(reporting_treatment, 'normal') = 'normal'
-         AND COALESCE(is_archived, 0) = 0
-         AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
          AND date >= $1 AND date <= $2
         GROUP BY month, currency
         ORDER BY month, currency`,
@@ -352,6 +352,8 @@ const analyzeSpendingTrends: ToolDefinition = {
     }
 
     return {
+      basis: 'gross_cashflow',
+      complete: true,
       mixedCurrency: currencies.length > 1,
       months: monthlyData,
       trends,

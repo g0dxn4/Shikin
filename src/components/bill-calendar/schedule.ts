@@ -79,6 +79,7 @@ export function buildBillSchedule(
       !isCashFlowEligible({
         type: transaction.type,
         status: status === 'pending' ? 'posted' : transaction.status,
+        ledgerTreatment: transaction.ledger_treatment,
         reportingTreatment: transaction.reporting_treatment,
         transactionKind: transaction.transaction_kind,
         isArchived: transaction.is_archived,

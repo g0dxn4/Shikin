@@ -1,6 +1,8 @@
+import { writeAuditLog } from '../tools/shared.js'
+import { readBudgetSpending } from '../reporting-read.js'
 import dayjs from 'dayjs'
 import weekOfYear from 'dayjs/plugin/weekOfYear.js'
-import { query, execute } from '../database.js'
+import { query, execute, transaction } from '../database.js'
 import { generateId } from '../ulid.js'
 import { fromCentavos, formatMoney } from '../money.js'
 import { noteExists, writeNote } from '../notebook.js'
@@ -76,12 +78,15 @@ export type RecapRecord = {
   summary: string
   highlights: RecapHighlight[]
   generated_at: string
+  basis: 'gross_cashflow'
+  currencies: string[]
+  currencyScope: 'all'
 }
 
 export type BudgetScoreRow = {
   id: string
   amount: number
-  category_id: string
+  category_id: string | null
   period: string
 }
 
@@ -333,15 +338,17 @@ export function createBudgetAdherenceSubscore(
     if (budget.period === 'weekly') start = dayjs().subtract(6, 'day').format('YYYY-MM-DD')
     if (budget.period === 'yearly') start = dayjs().startOf('year').format('YYYY-MM-DD')
 
-    const spent =
-      query<{ total: number }>(
-        `SELECT COALESCE(SUM(amount), 0) AS total FROM transactions
-         WHERE category_id = $1 AND type = 'expense' AND date >= $2 AND date <= $3
-           AND COALESCE(reporting_treatment, 'normal') = 'normal'
-           AND COALESCE(is_archived, 0) = 0
-           AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')`,
-        [budget.category_id, start, today]
-      )[0]?.total ?? 0
+    const spending = readBudgetSpending(budget.category_id, start, today)
+    if (!spending.success) {
+      return {
+        name: 'Budget Adherence',
+        score: 0,
+        weight: 0,
+        description: spending.message,
+        tip: 'Resolve incomplete budget reporting before using this subscore.',
+      }
+    }
+    const spent = spending.total
     if (spent <= budget.amount) withinCount += 1
   }
 
@@ -482,10 +489,14 @@ export function buildRecapRecord(
   end: string,
   title: string,
   summary: string,
-  highlights: RecapHighlight[]
+  highlights: RecapHighlight[],
+  currencies: string[]
 ): RecapRecord {
   return {
     id: generateId(),
+    basis: 'gross_cashflow',
+    currencyScope: 'all',
+    currencies: [...currencies].sort(),
     type,
     period_start: start,
     period_end: end,
@@ -497,18 +508,51 @@ export function buildRecapRecord(
 }
 
 export async function saveRecap(record: RecapRecord): Promise<void> {
-  execute(
-    `INSERT OR REPLACE INTO recaps (id, type, period_start, period_end, title, summary, highlights_json, generated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [
-      record.id,
-      record.type,
-      record.period_start,
-      record.period_end,
-      record.title,
-      record.summary,
-      JSON.stringify(record.highlights),
-      record.generated_at,
-    ]
-  )
+  // Explicit save writes only recaps and audit_log, atomically. Unchanged re-saves are no-ops.
+  transaction(() => {
+    // Every recap in the current schema is gross_cashflow with currencyScope=all.
+    // Logical identity is (type, inclusive period, gross_cashflow, all), NOT the
+    // currencies observed in today's data. Reuse the latest matching ULID; preserve
+    // any historical duplicates. A future basis needs an explicit schema dimension.
+    const before = query<RecapRecord & { highlights_json: string }>(
+      `SELECT * FROM recaps WHERE type = $1 AND period_start = $2 AND period_end = $3
+       ORDER BY generated_at DESC, id DESC LIMIT 1`,
+      [record.type, record.period_start, record.period_end]
+    )[0]
+    if (before) record.id = before.id
+    const highlightsJson = JSON.stringify(record.highlights)
+    if (
+      before &&
+      before.title === record.title &&
+      before.summary === record.summary &&
+      before.highlights_json === highlightsJson
+    ) {
+      record.generated_at = before.generated_at
+      return
+    }
+    execute(
+      `INSERT INTO recaps (id, type, period_start, period_end, title, summary, highlights_json, generated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT(id) DO UPDATE SET title = excluded.title, summary = excluded.summary,
+         highlights_json = excluded.highlights_json, generated_at = excluded.generated_at`,
+      [
+        record.id,
+        record.type,
+        record.period_start,
+        record.period_end,
+        record.title,
+        record.summary,
+        highlightsJson,
+        record.generated_at,
+      ]
+    )
+    writeAuditLog({
+      entity: 'recap',
+      entityId: record.id,
+      action: before ? 'replace' : 'create',
+      before: before ?? null,
+      after: record,
+      source: 'save-spending-recap',
+    })
+  })
 }

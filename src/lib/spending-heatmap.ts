@@ -1,4 +1,4 @@
-import { isCashFlowEligible } from '@shikin/finance-core'
+import { isCashFlowEligible, type LedgerTreatment } from '@shikin/finance-core'
 import { query } from '@/lib/database'
 import type { ReportingTreatment, TransactionKind, TransactionStatus } from '@/types/database'
 
@@ -11,6 +11,7 @@ export interface HeatmapLedgerRow {
   currency: string
   type: string
   status?: TransactionStatus | string | null
+  ledger_treatment?: LedgerTreatment | null
   reporting_treatment?: ReportingTreatment | string | null
   transaction_kind?: TransactionKind | string | null
   is_archived?: number | boolean | null
@@ -19,7 +20,13 @@ export interface HeatmapLedgerRow {
   category_color?: string | null
   account_id?: string | null
   description?: string | null
+  splits_json?: string
 }
+
+type HeatmapAllocation = Pick<
+  HeatmapLedgerRow,
+  'amount' | 'category_id' | 'category_name' | 'category_color'
+>
 
 export type ConvertToPreferredFn = (
   amountCentavos: number,
@@ -46,7 +53,7 @@ export interface HeatmapAggregation {
   complete: boolean
   currency: string
   missingCurrencies: string[]
-  reason: 'missing_exchange_rates' | 'invalid_currency_data' | null
+  reason: 'missing_exchange_rates' | 'invalid_currency_data' | 'invalid_category_allocations' | null
   dailyTotals: Map<string, number>
   categoryTotals: HeatmapCategoryTotal[]
   eligibleTransactions: HeatmapConvertedTransaction[]
@@ -58,6 +65,7 @@ export function isHeatmapEligibleExpense(row: HeatmapLedgerRow): boolean {
   return isCashFlowEligible({
     type: row.type,
     status: row.status ?? 'posted',
+    ledgerTreatment: row.ledger_treatment,
     reportingTreatment: (row.reporting_treatment ?? 'normal') as ReportingTreatment,
     transactionKind: (row.transaction_kind ?? 'standard') as TransactionKind,
     isArchived: row.is_archived ?? 0,
@@ -72,10 +80,29 @@ export function aggregateHeatmapSpending(
   const missingCurrencies = new Set<string>()
   let reason: HeatmapAggregation['reason'] = null
   const converted: HeatmapConvertedTransaction[] = []
+  const allocations = new Map<string, HeatmapAllocation[]>()
 
   for (const row of rows) {
     if (!isHeatmapEligibleExpense(row)) continue
 
+    let splits: HeatmapAllocation[]
+    try {
+      splits = JSON.parse(row.splits_json ?? '[]') as HeatmapAllocation[]
+      if (
+        !Array.isArray(splits) ||
+        (splits.length > 0 &&
+          (splits.some(
+            (split) => !split || !Number.isSafeInteger(split.amount) || split.amount <= 0
+          ) ||
+            splits.reduce((total, split) => total + split.amount, 0) !== row.amount))
+      ) {
+        reason = 'invalid_category_allocations'
+        continue
+      }
+    } catch {
+      reason = 'invalid_category_allocations'
+      continue
+    }
     const result = convertToPreferred(row.amount, row.currency)
     if (!result.complete) {
       for (const currency of result.missingCurrencies ?? []) {
@@ -90,13 +117,27 @@ export function aggregateHeatmapSpending(
       continue
     }
 
+    const convertedAllocations: HeatmapAllocation[] = []
+    for (const allocation of splits.length ? splits : [row]) {
+      const allocationResult = splits.length
+        ? convertToPreferred(allocation.amount, row.currency)
+        : result
+      if (!allocationResult.complete) {
+        reason = allocationResult.reason ?? 'missing_exchange_rates'
+        for (const currency of allocationResult.missingCurrencies ?? [])
+          missingCurrencies.add(currency)
+      } else {
+        convertedAllocations.push({ ...allocation, amount: allocationResult.amountCentavos ?? 0 })
+      }
+    }
+    allocations.set(row.id, convertedAllocations)
     converted.push({
       ...row,
       convertedAmount: result.amountCentavos ?? 0,
     })
   }
 
-  const complete = missingCurrencies.size === 0
+  const complete = reason === null && missingCurrencies.size === 0
   const dailyTotals = new Map<string, number>()
   const categoryMap = new Map<string, HeatmapCategoryTotal>()
 
@@ -104,15 +145,17 @@ export function aggregateHeatmapSpending(
     for (const tx of converted) {
       dailyTotals.set(tx.date, (dailyTotals.get(tx.date) ?? 0) + tx.convertedAmount)
 
-      const categoryId = tx.category_id ?? null
-      const key = categoryId ?? HEATMAP_UNCATEGORIZED_ID
-      const existing = categoryMap.get(key)
-      categoryMap.set(key, {
-        categoryId,
-        name: tx.category_name || existing?.name || 'Uncategorized',
-        color: tx.category_color || existing?.color || '#6b7280',
-        total: (existing?.total ?? 0) + tx.convertedAmount,
-      })
+      for (const allocation of allocations.get(tx.id) ?? []) {
+        const categoryId = allocation.category_id ?? null
+        const key = categoryId ?? HEATMAP_UNCATEGORIZED_ID
+        const existing = categoryMap.get(key)
+        categoryMap.set(key, {
+          categoryId,
+          name: allocation.category_name || existing?.name || 'Uncategorized',
+          color: allocation.category_color || existing?.color || '#6b7280',
+          total: (existing?.total ?? 0) + allocation.amount,
+        })
+      }
     }
   }
 
@@ -139,14 +182,18 @@ export async function fetchHeatmapLedgerRows(
             t.currency,
             t.type,
             t.status,
-            t.reporting_treatment,
+            t.ledger_treatment, t.reporting_treatment,
             t.transaction_kind,
             t.is_archived,
             t.category_id,
             t.account_id,
             t.description,
             c.name as category_name,
-            c.color as category_color
+            c.color as category_color,
+            (SELECT json_group_array(json_object('amount', s.amount, 'category_id', s.category_id,
+                      'category_name', sc.name, 'category_color', sc.color))
+             FROM transaction_splits s LEFT JOIN categories sc ON sc.id = s.category_id
+             WHERE s.transaction_id = t.id) AS splits_json
      FROM transactions t
      LEFT JOIN categories c ON c.id = t.category_id
      WHERE t.date >= ? AND t.date <= ?

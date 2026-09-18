@@ -1,3 +1,4 @@
+import { REPORTING_CTE, reportingReadFailure } from '../reporting-read.js'
 import {
   z,
   query,
@@ -2406,22 +2407,30 @@ function getOtherExpensesFindings(input: {
   redacted: boolean
 }) {
   const monthStart = dayjs(input.asOf).startOf('month').format('YYYY-MM-DD')
-  const rows = query<{ category_id: string | null; category_name: string | null; total: number }>(
-    `SELECT t.category_id, c.name AS category_name, SUM(t.amount) AS total
-     FROM transactions t
+  const failure = reportingReadFailure(monthStart, input.asOf)
+  if (failure)
+    return [{ severity: 'warning' as const, type: 'incomplete_cashflow_reporting', ...failure }]
+  const rows = query<{
+    currency: string
+    category_id: string | null
+    category_name: string | null
+    total: number
+  }>(
+    `${REPORTING_CTE}
+     SELECT t.currency, t.category_id, c.name AS category_name, SUM(t.amount) AS total
+     FROM category_allocations t
      LEFT JOIN categories c ON c.id = t.category_id
-     WHERE t.type = 'expense'
-       AND t.date >= $1
-       AND t.date <= $2
-       AND COALESCE(NULLIF(TRIM(t.status), ''), 'posted') IN ('posted', 'cleared')
+     WHERE t.type = 'expense' AND t.date >= $1 AND t.date <= $2
        AND lower(COALESCE(c.name, '')) IN ('other', 'other expenses')
-     GROUP BY t.category_id, c.name
+     GROUP BY t.currency, t.category_id, c.name
      HAVING total >= $3`,
     [monthStart, input.asOf, input.thresholdCentavos]
   )
   return rows.map((row) => ({
     severity: 'warning' as const,
     type: 'high_other_expenses',
+    basis: 'gross_cashflow',
+    currency: row.currency,
     categoryId: row.category_id,
     categoryName: maybeRedactText(row.category_name, input.redacted),
     periodStart: monthStart,
@@ -2668,7 +2677,8 @@ const financeSanityCheck: ToolDefinition = {
     const status = summary.critical > 0 ? 'critical' : summary.warning > 0 ? 'warning' : 'ok'
 
     return {
-      success: true,
+      success: !findings.some((finding) => finding.type === 'incomplete_cashflow_reporting'),
+      complete: !findings.some((finding) => finding.type === 'incomplete_cashflow_reporting'),
       asOf: asOfDate,
       daysAhead,
       cutoffDate: cutoff,

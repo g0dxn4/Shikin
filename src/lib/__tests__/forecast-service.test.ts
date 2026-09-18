@@ -193,6 +193,7 @@ describe('currency and scope safety', () => {
       .mockResolvedValueOnce([
         ...[null, '', '  ', 'cleared'].map((status) => ({ ...normal, status })),
         { ...normal, status: 'pending', currency: 'XXX' },
+        { ...normal, ledger_treatment: 'staged_no_balance_impact', currency: 'XXX' },
         { ...normal, type: 'transfer', currency: 'XXX' },
         { ...normal, reporting_treatment: 'exclude_from_cashflow', currency: 'XXX' },
         { ...normal, transaction_kind: 'reconciliation_bridge', currency: 'XXX' },

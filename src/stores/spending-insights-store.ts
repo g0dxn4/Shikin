@@ -1,5 +1,6 @@
+import { CATEGORY_ALLOCATION_CTE } from '@/lib/reporting-read'
 import { create } from 'zustand'
-import { isCashFlowEligible } from '@shikin/finance-core'
+import { isCashFlowEligible, type LedgerTreatment } from '@shikin/finance-core'
 import { query } from '@/lib/database'
 import { getErrorMessage } from '@/lib/errors'
 import { formatMoney } from '@/lib/money'
@@ -37,6 +38,7 @@ export interface SpendingInsight {
 export type SpendingInsightsReason =
   | 'missing_exchange_rates'
   | 'invalid_currency_data'
+  | 'invalid_category_allocations'
   | 'read_error'
   | null
 
@@ -64,10 +66,12 @@ interface RawRow {
   currency: string | null
   type: string
   status: string | null
+  ledger_treatment?: LedgerTreatment | null
   reporting_treatment: string | null
   transaction_kind: string | null
   is_archived: number | boolean | null
   total: number
+  invalid_allocations?: number
 }
 
 interface CategorySpendingRead {
@@ -85,22 +89,24 @@ async function getSpendingByCategory(
   const currencyState = useCurrencyStore.getState()
   const preferredCurrency = currencyState.preferredCurrency
   const rows = await query<RawRow>(
-    `SELECT
+    `${CATEGORY_ALLOCATION_CTE}
+     SELECT
        t.category_id,
        c.name as category_name,
        c.color as category_color,
        t.currency,
        t.type,
        t.status,
-       t.reporting_treatment,
+       t.ledger_treatment, t.reporting_treatment,
        t.transaction_kind,
        t.is_archived,
-       COALESCE(SUM(t.amount), 0) as total
-     FROM transactions t
+       COALESCE(SUM(t.amount), 0) as total,
+       MAX(t.invalid_allocations) as invalid_allocations
+     FROM reporting_allocations t
      LEFT JOIN categories c ON c.id = t.category_id
      WHERE t.date >= ? AND t.date <= ?
      GROUP BY t.category_id, c.name, c.color, t.currency, t.type, t.status,
-              t.reporting_treatment, t.transaction_kind, t.is_archived
+              t.ledger_treatment, t.reporting_treatment, t.transaction_kind, t.is_archived
      ORDER BY total DESC`,
     [startDate, endDate]
   )
@@ -115,12 +121,23 @@ async function getSpendingByCategory(
       !isCashFlowEligible({
         type: row.type,
         status: row.status ?? 'posted',
+        ledgerTreatment: row.ledger_treatment,
         reportingTreatment: (row.reporting_treatment ?? 'normal') as ReportingTreatment,
         transactionKind: (row.transaction_kind ?? 'standard') as TransactionKind,
         isArchived: row.is_archived ?? 0,
       })
     ) {
       continue
+    }
+
+    if (row.invalid_allocations) {
+      return {
+        complete: false,
+        currency: preferredCurrency,
+        missingCurrencies: [],
+        reason: 'invalid_category_allocations',
+        categories: [],
+      }
     }
 
     const converted = currencyState.convertToPreferred(row.total, row.currency ?? '')

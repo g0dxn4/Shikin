@@ -1,3 +1,4 @@
+import { readBudgetSpending } from '../reporting-read.js'
 import {
   z,
   query,
@@ -510,31 +511,9 @@ const getBudgetStatus: ToolDefinition = {
           periodEnd = today.endOf('month').format('YYYY-MM-DD')
         }
 
-        let spentResult: { total: number | null }[]
-        if (budget.category_id) {
-          spentResult = await query<{ total: number | null }>(
-            `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
-             WHERE category_id = $1
-               AND type = 'expense'
-               AND COALESCE(reporting_treatment, 'normal') = 'normal'
-               AND COALESCE(is_archived, 0) = 0
-               AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
-               AND date >= $2 AND date <= $3`,
-            [budget.category_id, periodStart, periodEnd]
-          )
-        } else {
-          spentResult = await query<{ total: number | null }>(
-            `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
-             WHERE type = 'expense'
-               AND COALESCE(reporting_treatment, 'normal') = 'normal'
-               AND COALESCE(is_archived, 0) = 0
-               AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
-               AND date >= $1 AND date <= $2`,
-            [periodStart, periodEnd]
-          )
-        }
-
-        const spentCentavos = spentResult[0]?.total ?? 0
+        const spending = readBudgetSpending(budget.category_id, periodStart, periodEnd)
+        if (!spending.success) return spending
+        const spentCentavos = spending.total
         const budgetAmount = fromCentavos(budget.amount)
         const spentAmount = fromCentavos(spentCentavos)
         const remaining = budgetAmount - spentAmount
@@ -556,12 +535,18 @@ const getBudgetStatus: ToolDefinition = {
       })
     )
 
-    const totalBudget = statuses.reduce((s, b) => s + b.budgetAmount, 0)
-    const totalSpent = statuses.reduce((s, b) => s + b.spentAmount, 0)
+    const failure = statuses.find((status) => 'success' in status && !status.success)
+    if (failure) return failure
+    const completeStatuses = statuses.filter((status) => 'budgetAmount' in status)
+    const totalBudget = completeStatuses.reduce((s, b) => s + b.budgetAmount, 0)
+    const totalSpent = completeStatuses.reduce((s, b) => s + b.spentAmount, 0)
 
     return {
       success: true,
-      budgets: statuses,
+      basis: 'gross_cashflow',
+      complete: true,
+      currency: 'USD',
+      budgets: completeStatuses,
       summary: {
         totalBudget,
         totalSpent,

@@ -84,15 +84,32 @@ export function getAppDataDir(env = process.env, platform = process.platform) {
   return joinPath(platform, getPlatformDataHome(env, platform), SHIKIN_APP_ID)
 }
 
-function shouldRespectConfiguredXdgDataHome(env, platform = process.platform) {
-  if (platform === 'darwin' || platform === 'win32') return false
+function validateExplicitXdgDataHomeIsolation(env, platform = process.platform) {
+  const configuredValue = env.SHIKIN_RESPECT_XDG_DATA_HOME
+  if (configuredValue === undefined || configuredValue === '' || configuredValue === '0') {
+    return false
+  }
+
+  if (configuredValue !== RESPECT_XDG_DATA_HOME_VALUE) {
+    throw new Error(
+      `SHIKIN_RESPECT_XDG_DATA_HOME must be unset, empty, "0", or "1"; received ${JSON.stringify(configuredValue)}`
+    )
+  }
+
+  if (platform === 'darwin' || platform === 'win32') {
+    throw new Error(
+      `SHIKIN_RESPECT_XDG_DATA_HOME=1 is supported only on XDG platforms; received platform ${platform}`
+    )
+  }
 
   const configuredDataHome = env.XDG_DATA_HOME
-  return (
-    env.SHIKIN_RESPECT_XDG_DATA_HOME === RESPECT_XDG_DATA_HOME_VALUE &&
-    Boolean(configuredDataHome) &&
-    isAbsolutePath(configuredDataHome || '', 'linux')
-  )
+  if (!configuredDataHome || !isAbsolutePath(configuredDataHome, 'linux')) {
+    throw new Error(
+      'SHIKIN_RESPECT_XDG_DATA_HOME=1 requires XDG_DATA_HOME to be a nonempty absolute path'
+    )
+  }
+
+  return true
 }
 
 function getPlatformConfigHome(env, platform = process.platform) {
@@ -314,7 +331,7 @@ export function ensurePrivateDirectory(path) {
 }
 
 export function prepareAppDataDir(env = process.env, platform = process.platform) {
-  const respectConfiguredXdgDataHome = shouldRespectConfiguredXdgDataHome(env, platform)
+  const respectConfiguredXdgDataHome = validateExplicitXdgDataHomeIsolation(env, platform)
   const appDataDir = respectConfiguredXdgDataHome
     ? getAppDataDir(env, platform)
     : migrateLegacyAppDataDir(env, platform)

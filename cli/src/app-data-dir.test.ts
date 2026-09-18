@@ -18,6 +18,18 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { SHIKIN_APP_ID, getAppDataDir, getXdgDataHome, prepareAppDataDir } from './app-data-dir.js'
 
 const tempDirs: string[] = []
+const sqliteFileSuffixes = ['', '-wal', '-shm', '-journal']
+
+type PrepareResult = { appDataDir: string } | { error: string }
+
+interface SyntheticRoots {
+  root: string
+  home: string
+  config: string
+  data: string
+  userProfile: string
+  appData: string
+}
 
 function createTempDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix))
@@ -25,22 +37,114 @@ function createTempDir(prefix: string): string {
   return dir
 }
 
-function prepareScriptAppDataDir(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = 'linux') {
+function createSyntheticRoots(): SyntheticRoots {
+  const root = createTempDir('shikin-app-data-test-')
+  const roots = {
+    root,
+    home: join(root, 'home'),
+    config: join(root, 'config'),
+    data: join(root, 'data'),
+    userProfile: join(root, 'user-profile'),
+    appData: join(root, 'app-data'),
+  }
+
+  for (const dir of [roots.home, roots.config, roots.data, roots.userProfile, roots.appData]) {
+    mkdirSync(dir, { recursive: true })
+  }
+
+  return roots
+}
+
+function syntheticEnv(roots: SyntheticRoots, overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return {
+    HOME: roots.home,
+    XDG_CONFIG_HOME: roots.config,
+    XDG_DATA_HOME: roots.data,
+    USERPROFILE: roots.userProfile,
+    APPDATA: roots.appData,
+    SHIKIN_RESPECT_XDG_DATA_HOME: '',
+    ...overrides,
+  }
+}
+
+function writeMarkerFamily(dir: string, marker: string): void {
+  mkdirSync(dir, { recursive: true })
+  for (const suffix of sqliteFileSuffixes) {
+    writeFileSync(join(dir, `shikin.db${suffix}`), `${marker}${suffix}`)
+  }
+}
+
+function expectMarkerFamily(dir: string, marker: string): void {
+  for (const suffix of sqliteFileSuffixes) {
+    expect(readFileSync(join(dir, `shikin.db${suffix}`), 'utf-8')).toBe(`${marker}${suffix}`)
+  }
+}
+
+function capturePrepareAppDataDir(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = 'linux'
+): PrepareResult {
+  try {
+    return { appDataDir: prepareAppDataDir(env, platform) }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+function prepareScriptAppDataDir(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = 'linux'
+): PrepareResult {
   const scriptUrl = new URL('../../scripts/app-data-dir.mjs', import.meta.url).href
   const output = execFileSync(
     process.execPath,
     [
       '--input-type=module',
       '-e',
-      `import { prepareAppDataDir } from ${JSON.stringify(scriptUrl)}; process.stdout.write(JSON.stringify({ appDataDir: prepareAppDataDir(process.env, ${JSON.stringify(platform)}) }));`,
+      `import { prepareAppDataDir } from ${JSON.stringify(scriptUrl)}; try { process.stdout.write(JSON.stringify({ appDataDir: prepareAppDataDir(process.env, ${JSON.stringify(platform)}) })) } catch (error) { process.stdout.write(JSON.stringify({ error: error instanceof Error ? error.message : String(error) })) }`,
     ],
     {
       encoding: 'utf-8',
-      env: { ...process.env, ...env },
+      env: {
+        HOME: env.HOME ?? '',
+        XDG_CONFIG_HOME: env.XDG_CONFIG_HOME ?? '',
+        XDG_DATA_HOME: env.XDG_DATA_HOME ?? '',
+        USERPROFILE: env.USERPROFILE ?? '',
+        APPDATA: env.APPDATA ?? '',
+        SHIKIN_RESPECT_XDG_DATA_HOME: env.SHIKIN_RESPECT_XDG_DATA_HOME ?? '',
+      },
     }
   )
 
-  return JSON.parse(output) as { appDataDir: string }
+  return JSON.parse(output) as PrepareResult
+}
+
+function prepareGuardedScriptAppDataDir(
+  platform: 'darwin' | 'win32',
+  roots: SyntheticRoots
+): PrepareResult {
+  const scriptUrl = new URL('../../scripts/app-data-dir.mjs', import.meta.url).href
+  const output = execFileSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `import { prepareAppDataDir } from ${JSON.stringify(scriptUrl)}; const env = new Proxy({ SHIKIN_RESPECT_XDG_DATA_HOME: '1' }, { get(target, property, receiver) { if (property !== 'SHIKIN_RESPECT_XDG_DATA_HOME') throw new Error('Unexpected environment access: ' + String(property)); return Reflect.get(target, property, receiver) } }); try { process.stdout.write(JSON.stringify({ appDataDir: prepareAppDataDir(env, ${JSON.stringify(platform)}) })) } catch (error) { process.stdout.write(JSON.stringify({ error: error instanceof Error ? error.message : String(error) })) }`,
+    ],
+    {
+      encoding: 'utf-8',
+      env: {
+        HOME: roots.home,
+        XDG_CONFIG_HOME: roots.config,
+        XDG_DATA_HOME: roots.data,
+        USERPROFILE: roots.userProfile,
+        APPDATA: roots.appData,
+        SHIKIN_RESPECT_XDG_DATA_HOME: '',
+      },
+    }
+  )
+
+  return JSON.parse(output) as PrepareResult
 }
 
 afterEach(() => {
@@ -105,55 +209,125 @@ describe('XDG app data directory', () => {
     expect(statSync(expectedDir).mode & 0o777).toBe(0o700)
   })
 
-  it('respects absolute XDG_DATA_HOME without moving legacy HOME data when requested', () => {
-    const homeDir = createTempDir('shikin-home-')
-    const xdgDataHome = createTempDir('shikin-xdg-data-')
-    const legacyDir = join(homeDir, '.local', 'share', SHIKIN_APP_ID)
-    const appConfigDir = join(homeDir, '.config', SHIKIN_APP_ID)
-    const expectedDir = join(xdgDataHome, SHIKIN_APP_ID)
-    mkdirSync(legacyDir, { recursive: true })
-    mkdirSync(appConfigDir, { recursive: true })
-    writeFileSync(join(legacyDir, 'shikin.db'), 'legacy database')
-    writeFileSync(join(appConfigDir, 'shikin.db'), 'app config database')
+  it('respects valid explicit XDG isolation in both helpers without moving marker families', () => {
+    const roots = createSyntheticRoots()
+    const env = syntheticEnv(roots, { SHIKIN_RESPECT_XDG_DATA_HOME: '1' })
+    const legacyDir = join(roots.home, '.local', 'share', SHIKIN_APP_ID)
+    const appConfigDir = join(roots.config, SHIKIN_APP_ID)
+    const expectedDir = join(roots.data, SHIKIN_APP_ID)
+    writeMarkerFamily(legacyDir, 'legacy')
+    writeMarkerFamily(appConfigDir, 'app-config')
 
-    expect(
-      prepareAppDataDir({
-        HOME: homeDir,
+    const directResult = capturePrepareAppDataDir(env)
+    const scriptResult = prepareScriptAppDataDir(env)
+
+    expect(directResult).toEqual({ appDataDir: expectedDir })
+    expect(scriptResult).toEqual(directResult)
+    expectMarkerFamily(legacyDir, 'legacy')
+    expectMarkerFamily(appConfigDir, 'app-config')
+    expect(existsSync(join(expectedDir, 'shikin.db'))).toBe(false)
+    expect(statSync(expectedDir).mode & 0o777).toBe(0o700)
+  })
+
+  it.each([
+    ['missing', undefined],
+    ['empty', ''],
+    ['relative', 'relative-test-root'],
+  ])(
+    'rejects %s XDG_DATA_HOME before either helper can migrate marker families',
+    (_description, xdgDataHome) => {
+      const roots = createSyntheticRoots()
+      const env = syntheticEnv(roots, {
         XDG_DATA_HOME: xdgDataHome,
         SHIKIN_RESPECT_XDG_DATA_HOME: '1',
       })
-    ).toBe(expectedDir)
+      const appConfigDir = join(roots.config, SHIKIN_APP_ID)
+      const fallbackTarget = join(roots.home, '.local', 'share', SHIKIN_APP_ID)
+      const configuredTarget = join(roots.data, SHIKIN_APP_ID)
+      writeMarkerFamily(appConfigDir, 'app-config')
 
-    expect(readFileSync(join(legacyDir, 'shikin.db'), 'utf-8')).toBe('legacy database')
-    expect(readFileSync(join(appConfigDir, 'shikin.db'), 'utf-8')).toBe('app config database')
-    expect(existsSync(join(expectedDir, 'shikin.db'))).toBe(false)
-    expect(statSync(expectedDir).mode & 0o777).toBe(0o700)
-  })
+      const directResult = capturePrepareAppDataDir(env)
+      const scriptResult = prepareScriptAppDataDir(env)
 
-  it('mirrors the XDG escape hatch in the script helper used by data-server flows', () => {
-    const homeDir = createTempDir('shikin-home-')
-    const xdgDataHome = createTempDir('shikin-xdg-data-')
-    const legacyDir = join(homeDir, '.local', 'share', SHIKIN_APP_ID)
-    const appConfigDir = join(homeDir, '.config', SHIKIN_APP_ID)
-    const expectedDir = join(xdgDataHome, SHIKIN_APP_ID)
-    mkdirSync(legacyDir, { recursive: true })
-    mkdirSync(appConfigDir, { recursive: true })
-    writeFileSync(join(legacyDir, 'shikin.db'), 'legacy database')
-    writeFileSync(join(appConfigDir, 'shikin.db'), 'app config database')
+      expect(directResult).toEqual({
+        error:
+          'SHIKIN_RESPECT_XDG_DATA_HOME=1 requires XDG_DATA_HOME to be a nonempty absolute path',
+      })
+      expect(scriptResult).toEqual(directResult)
+      expectMarkerFamily(appConfigDir, 'app-config')
+      expect(existsSync(fallbackTarget)).toBe(false)
+      expect(existsSync(configuredTarget)).toBe(false)
+    }
+  )
 
-    const result = prepareScriptAppDataDir({
-      HOME: homeDir,
-      XDG_DATA_HOME: xdgDataHome,
-      XDG_CONFIG_HOME: '',
-      SHIKIN_RESPECT_XDG_DATA_HOME: '1',
-    })
+  it.each(['true', '2', ' 1 '])(
+    'rejects invalid isolation flag value %j before either helper touches storage',
+    (configuredValue) => {
+      const roots = createSyntheticRoots()
+      const env = syntheticEnv(roots, {
+        SHIKIN_RESPECT_XDG_DATA_HOME: configuredValue,
+      })
+      const legacyDir = join(roots.home, '.local', 'share', SHIKIN_APP_ID)
+      const appConfigDir = join(roots.config, SHIKIN_APP_ID)
+      const configuredTarget = join(roots.data, SHIKIN_APP_ID)
+      writeMarkerFamily(legacyDir, 'legacy')
+      writeMarkerFamily(appConfigDir, 'app-config')
 
-    expect(result.appDataDir).toBe(expectedDir)
-    expect(readFileSync(join(legacyDir, 'shikin.db'), 'utf-8')).toBe('legacy database')
-    expect(readFileSync(join(appConfigDir, 'shikin.db'), 'utf-8')).toBe('app config database')
-    expect(existsSync(join(expectedDir, 'shikin.db'))).toBe(false)
-    expect(statSync(expectedDir).mode & 0o777).toBe(0o700)
-  })
+      const directResult = capturePrepareAppDataDir(env)
+      const scriptResult = prepareScriptAppDataDir(env)
+
+      expect(directResult).toEqual({
+        error: `SHIKIN_RESPECT_XDG_DATA_HOME must be unset, empty, "0", or "1"; received ${JSON.stringify(configuredValue)}`,
+      })
+      expect(scriptResult).toEqual(directResult)
+      expectMarkerFamily(legacyDir, 'legacy')
+      expectMarkerFamily(appConfigDir, 'app-config')
+      expect(existsSync(configuredTarget)).toBe(false)
+    }
+  )
+
+  it.each(['darwin', 'win32'] as const)(
+    'rejects explicit XDG isolation on %s before reading any platform path',
+    (platform) => {
+      const roots = createSyntheticRoots()
+      const accessedKeys: PropertyKey[] = []
+      const env = new Proxy({ SHIKIN_RESPECT_XDG_DATA_HOME: '1' } as NodeJS.ProcessEnv, {
+        get(target, property, receiver) {
+          accessedKeys.push(property)
+          if (property !== 'SHIKIN_RESPECT_XDG_DATA_HOME') {
+            throw new Error(`Unexpected environment access: ${String(property)}`)
+          }
+          return Reflect.get(target, property, receiver)
+        },
+      })
+
+      const expectedResult = {
+        error: `SHIKIN_RESPECT_XDG_DATA_HOME=1 is supported only on XDG platforms; received platform ${platform}`,
+      }
+      expect(capturePrepareAppDataDir(env, platform)).toEqual(expectedResult)
+      expect(prepareGuardedScriptAppDataDir(platform, roots)).toEqual(expectedResult)
+      expect(accessedKeys).toEqual(['SHIKIN_RESPECT_XDG_DATA_HOME'])
+    }
+  )
+
+  it.each(['', '0'])(
+    'preserves normal AppConfig migration when explicit isolation is %j',
+    (configuredValue) => {
+      const roots = createSyntheticRoots()
+      const env = syntheticEnv(roots, {
+        SHIKIN_RESPECT_XDG_DATA_HOME: configuredValue,
+      })
+      const appConfigDir = join(roots.config, SHIKIN_APP_ID)
+      const expectedDir = join(roots.data, SHIKIN_APP_ID)
+      writeMarkerFamily(appConfigDir, 'app-config')
+
+      expect(prepareAppDataDir(env)).toBe(expectedDir)
+      expectMarkerFamily(expectedDir, 'app-config')
+      for (const suffix of sqliteFileSuffixes) {
+        expect(existsSync(join(appConfigDir, `shikin.db${suffix}`))).toBe(false)
+      }
+    }
+  )
 
   it('hardens an existing app data directory', () => {
     const homeDir = createTempDir('shikin-home-')

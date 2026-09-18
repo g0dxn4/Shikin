@@ -84,7 +84,7 @@ Notes:
 - One-off transfers are supported with `--type transfer --account-id <source> --transfer-to-account-id <destination>`. Recurring transfer rules are still deferred.
 - Structured options must be valid JSON.
 - The CLI reads and writes the shared Shikin database under the platform app-data directory: `~/.local/share/com.asf.shikin/shikin.db` on Linux and `~/Library/Application Support/com.asf.shikin/shikin.db` on macOS.
-- For isolated source/dev smoke tests, set `SHIKIN_RESPECT_XDG_DATA_HOME=1` with an absolute temp `XDG_DATA_HOME` such as `/tmp/opencode/shikin-smoke`; this keeps test data isolated and skips legacy HOME/AppConfig data moves into the temp directory.
+- For isolated source/dev smoke tests on Linux and other XDG platforms, set `SHIKIN_RESPECT_XDG_DATA_HOME=1` with an absolute temp `XDG_DATA_HOME` such as `/tmp/opencode/shikin-smoke`; this keeps test data isolated and skips legacy HOME/AppConfig data moves into the temp directory. The explicit isolation request fails before storage preparation if the path is missing, empty, or relative, or if the platform is macOS or Windows. Setting `XDG_DATA_HOME` without the explicit flag retains the normal migration policy and is not an isolation guarantee.
 
 ## Automation Workflows
 
@@ -186,7 +186,7 @@ The MCP server also exposes read-only resources:
 - `SHIKIN_SERVER_TRANSACTION_TTL_MS`: override the browser data-server transaction lease timeout (default `15000`).
 - `SHIKIN_DATA_SERVER_MAX_JSON_BODY_BYTES`: override the data-server JSON request size limit.
 - `SHIKIN_DATA_SERVER_MAX_DB_IMPORT_BYTES`: override the SQLite import payload size limit.
-- `SHIKIN_RESPECT_XDG_DATA_HOME=1`: when `XDG_DATA_HOME` is absolute, use that app-data directory for CLI/data-server testing without automatically moving legacy HOME/AppConfig data into it.
+- `SHIKIN_RESPECT_XDG_DATA_HOME=1`: on Linux and other XDG platforms, require an absolute, nonempty `XDG_DATA_HOME` and use it for CLI/data-server testing without automatically moving legacy HOME/AppConfig data into it. Invalid flag values and unsupported macOS/Windows use fail before filesystem preparation; unset, empty, and `0` preserve normal behavior. This protects only explicit test isolation requests—bare `XDG_DATA_HOME` still uses the normal migration policy.
 
 ## Current Scope
 

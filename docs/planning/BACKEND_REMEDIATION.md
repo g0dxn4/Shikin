@@ -11,7 +11,18 @@ This is a sanitized source-level work plan. The private external handoff and its
 - Keep frontend icon cleanup independent of backend ownership. No install, push, release, or production migration is part of this work.
 - Reproduce a bounded cluster, agree its semantics, implement and test it, then perform one integrated risk-matched review. Storage, provenance, reconciliation and migration changes require a Sol high-or-higher final gate.
 
-## Current first slice: explicit-isolation fail-closed
+## Authorized continuation
+
+The user has authorized completing the remaining actionable remediation across React, CLI and MCP. [Approved implementation contracts](./BACKEND_IMPLEMENTATION_CONTRACTS.md) define the financial semantics before durable schema or mutation changes. This does not authorize production repairs, installation or release.
+
+Current independent work is **in progress, not yet integrated**:
+
+- Reporting eligibility including ledger staging, split-aware category readers, gross/deficit wording, read-only recap generation and explicit saving.
+- Pure/lazy storage initialization, native-binding preflight before filesystem mutation, explicit custom-root migration approval, native/Node policy parity and accurate failure diagnostics.
+
+Subsequent dependent work covers additive schema, audited corrections/classifications, dated reconciliation/coverage/supersession, valuation/quote identity, atomic imports/keyset traversal, virtual maintenance/payment links and instance diagnostics. Optional bucket hierarchy remains outside the correctness scope.
+
+## Completed first slice: explicit-isolation fail-closed
 
 **DEP-01: partially mitigated in current source; remaining gap reproduced.**
 
@@ -36,32 +47,32 @@ Remaining DEP-01 decisions: ordinary custom-XDG migration opt-in, native desktop
 
 All open entries require isolated acceptance tests before being called runtime-confirmed or fixed.
 
-| ID | Assessment | Current source / next action |
-| --- | --- | --- |
-| IMP-03 | Open, source-confirmed | `cli/src/tools/transactions.ts:getSpendingSummary` and `audit-and-context.ts:getOtherExpensesFindings` omit reporting/archive/staging eligibility. Summary already groups by currency; Other Expenses does not. |
-| IMP-22 | Open, source-confirmed | Summary/recap category grouping ignores `transaction_splits`; split-aware frontend helpers already exist. Reconcile eligible per-currency parent totals with allocations exactly once. |
-| IMP-24 | Open; separate correctness from new semantics | `cli/src/insights/recap.ts` reports gross flows and clamps deficit wording. Preserve/label gross basis, fix signed deficit text; do not invent refund/principal recognition without explicit source relationships. |
-| IMP-04 | Open, source-confirmed | `financial-insights.ts:getSpendingRecap` and `insights/recap.ts` persist by default through `insights/shared.ts:saveRecap`. Define explicit save behavior and update tests that currently expect persistence. |
-| IMP-01 | Open; policy required | `transactions.ts:updateTransaction` blocks metadata edits on finalized batches. Introduce an audited allowlisted correction path without relaxing financial guards. |
-| IMP-23 | Open, source-confirmed | `currency-and-splits.ts:splitTransaction` is atomic but lacks matching lifecycle, preview and audit protections. Share the agreed correction policy with IMP-01. |
-| IMP-02 | Open, narrower than historical wording | `transactions.ts:matchTransferTransactions` rejects excluded rows; the batch-finalization guard explicitly permits the match action. Preserve both original treatments for reversible match/unmatch. |
-| IMP-17 | Open, source-confirmed | Transaction update replaces supplied `source`/`note`; imports still use note tokens for identity. Separate edit audit metadata from import provenance. |
-| IMP-06 | Open, source-confirmed | `accounts.ts:getEffectiveLedgerBalance` is all-date while reconcile/finalize accept dated observations. Define current versus as-of behavior and preserve later activity. |
-| IMP-07 | Open, source-confirmed | Finalization selects all staged rows and clears them; min/max dates do not establish settlement or complete statement coverage. |
-| IMP-08 | Open; workflow absent | Protected bridge replacement/supersession requires an explicit atomic, audited workflow; generic deletion stays blocked. |
-| IMP-09 | Open, source-confirmed | `credit-cards.ts` status and CLI `budgets-and-net-worth.ts` use absolute card balances as debt. Test negative debt, zero, and positive customer credit. |
-| IMP-19 | Open, source-confirmed | CLI net worth sums nominal currencies and ignores market quote currency. Frontend has conversion/completeness handling; do not generalize this CLI finding to every UI reader. |
-| IMP-20 | Open, conditional | CLI account balances plus linked holdings can overlap. Decide account valuation ownership (cash plus holdings versus total portfolio snapshot) before changing totals. |
-| IMP-21 | Open, source-confirmed reader risk | Investment quote readers join/partition by symbol. Quote provider currency and instrument identity require a separate bounded audit and synthetic fixtures. |
-| IMP-10 | Open, source-confirmed | CLI transaction query is capped at 100 without traversal or an ID tie-break. Frontend paging does not fix the CLI contract. |
-| IMP-11 | Partially mitigated | Fuzzy duplicate rules remain; same-source disjoint external-ID mitigation already exists. Test legitimate repeats separately from reimports. |
-| IMP-12 | Open, source-confirmed | Import identity columns exist, but CLI CSV identity still depends on mutable note tokens without source namespacing. Design backfill/conflict behavior before migrating anything. |
-| IMP-13 | Open, source-confirmed | CSV preview lacks intrafile dedup state; apply commits row-wise. Choose atomic or explicitly resumable semantics, not an undocumented mixture. |
-| IMP-14 | Open, source-confirmed | Account metadata schemas lack explicit set/clear distinction; transaction category clearing also needs a supported contract. |
-| IMP-15 | Open, source-confirmed | Bucket API exposes creation/list/allocation, not maintenance/reversal/reallocation. Virtual corrections must not change real account balances. |
-| IMP-05 | Historical basis defect appears fixed | Reconcile uses effective ledger, applies inside a transaction and verifies parity. Keep regressions; do not reopen the old stored-balance diagnosis. |
-| IMP-16 | Existing guard; regression scope remains | Current price service rejects non-positive quotes. Verify unsupported/provider-error/sub-cent cases without live provider calls; no historical data repair is authorized. |
-| IMP-18 | Original diagnosis invalid | Category is optional; explicitly blank category is rejected. Quiet mode suppresses successes, not errors. Do not patch omission as though it were broken. |
+| ID     | Assessment                                    | Current source / next action                                                                                                                                                                                                                   |
+| ------ | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| IMP-03 | Open, source-confirmed                        | `cli/src/tools/transactions.ts:getSpendingSummary` and `audit-and-context.ts:getOtherExpensesFindings` omit reporting/archive/staging eligibility. Summary already groups by currency; Other Expenses does not.                                |
+| IMP-22 | Open, source-confirmed                        | Summary/recap category grouping ignores `transaction_splits`; split-aware frontend helpers already exist. Reconcile eligible per-currency parent totals with allocations exactly once.                                                         |
+| IMP-24 | Open; separate correctness from new semantics | `cli/src/insights/recap.ts` reports gross flows and clamps deficit wording. Preserve/label gross basis, fix signed deficit text; do not invent refund/principal recognition without explicit source relationships.                             |
+| IMP-04 | Open, source-confirmed                        | `financial-insights.ts:getSpendingRecap` and `insights/recap.ts` persist by default through `insights/shared.ts:saveRecap`. Define explicit save behavior and update tests that currently expect persistence.                                  |
+| IMP-01 | Open; policy required                         | `transactions.ts:updateTransaction` blocks metadata edits on finalized batches. Introduce an audited allowlisted correction path without relaxing financial guards.                                                                            |
+| IMP-23 | Open, source-confirmed                        | `currency-and-splits.ts:splitTransaction` is atomic but lacks matching lifecycle, preview and audit protections. Share the agreed correction policy with IMP-01.                                                                               |
+| IMP-02 | Open, narrower than historical wording        | `transactions.ts:matchTransferTransactions` rejects excluded rows; the batch-finalization guard explicitly permits the match action. Preserve both original treatments for reversible match/unmatch.                                           |
+| IMP-17 | Open, source-confirmed                        | Transaction update replaces supplied `source`/`note`; imports still use note tokens for identity. Separate edit audit metadata from import provenance.                                                                                         |
+| IMP-06 | Open, source-confirmed                        | `accounts.ts:getEffectiveLedgerBalance` is all-date while reconcile/finalize accept dated observations. Define current versus as-of behavior and preserve later activity.                                                                      |
+| IMP-07 | Open, source-confirmed                        | Finalization selects all staged rows and clears them; min/max dates do not establish settlement or complete statement coverage.                                                                                                                |
+| IMP-08 | Open; workflow absent                         | Protected bridge replacement/supersession requires an explicit atomic, audited workflow; generic deletion stays blocked.                                                                                                                       |
+| IMP-09 | Open, source-confirmed                        | CLI card/net-worth readers and frontend `net-worth-store.ts` use absolute card balances as debt. Test negative debt, zero, and positive customer credit without changing stored signs.                                                         |
+| IMP-19 | Open, source-confirmed                        | CLI net worth sums nominal currencies and ignores market quote currency. Frontend has conversion/completeness handling; do not generalize this CLI finding to every UI reader.                                                                 |
+| IMP-20 | Open, conditional                             | CLI and frontend net-worth readers add account balances plus linked holdings, which can overlap. Explicit cash-plus-holdings versus portfolio-snapshot ownership, including unresolved legacy ambiguity, is defined in the approved contracts. |
+| IMP-21 | Open, source-confirmed reader risk            | Investment quote readers join/partition by symbol. Quote provider currency and instrument identity require a separate bounded audit and synthetic fixtures.                                                                                    |
+| IMP-10 | Open, source-confirmed                        | CLI transaction query is capped at 100 without traversal or an ID tie-break. Frontend paging does not fix the CLI contract.                                                                                                                    |
+| IMP-11 | Partially mitigated                           | Fuzzy duplicate rules remain; same-source disjoint external-ID mitigation already exists. Test legitimate repeats separately from reimports.                                                                                                   |
+| IMP-12 | Open, source-confirmed                        | Import identity columns exist, but CLI CSV identity still depends on mutable note tokens without source namespacing. Design backfill/conflict behavior before migrating anything.                                                              |
+| IMP-13 | Open, source-confirmed                        | CSV preview lacks intrafile dedup state; apply commits row-wise. Choose atomic or explicitly resumable semantics, not an undocumented mixture.                                                                                                 |
+| IMP-14 | Open, source-confirmed                        | Account metadata schemas lack explicit set/clear distinction; transaction category clearing also needs a supported contract.                                                                                                                   |
+| IMP-15 | Open, source-confirmed                        | Bucket API exposes creation/list/allocation, not maintenance/reversal/reallocation. Virtual corrections must not change real account balances.                                                                                                 |
+| IMP-05 | Historical basis defect appears fixed         | Reconcile uses effective ledger, applies inside a transaction and verifies parity. Keep regressions; do not reopen the old stored-balance diagnosis.                                                                                           |
+| IMP-16 | Existing guard; regression scope remains      | Current price service rejects non-positive quotes. Verify unsupported/provider-error/sub-cent cases without live provider calls; no historical data repair is authorized.                                                                      |
+| IMP-18 | Original diagnosis invalid                    | Category is optional; explicitly blank category is rejected. Quiet mode suppresses successes, not errors. Do not patch omission as though it were broken.                                                                                      |
 
 ### Shared reporting boundary needing care
 

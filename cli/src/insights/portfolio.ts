@@ -14,13 +14,15 @@ export async function generatePortfolioReview(force: boolean) {
   const weekLabel = `Week ${weekNum}, ${year}`
   const path = `weekly-reviews/${year}-W${String(weekNum).padStart(2, '0')}-review.md`
 
+  const alreadyExistsResult = {
+    success: true,
+    skipped: true,
+    path,
+    message: `Portfolio review already exists for ${weekLabel}. Use --force to overwrite it.`,
+  }
+
   if (!force && (await noteExists(path))) {
-    return {
-      success: true,
-      skipped: true,
-      path,
-      message: `Portfolio review already exists for ${weekLabel}. Use --force to overwrite it.`,
-    }
+    return alreadyExistsResult
   }
 
   const investments = query<{
@@ -149,6 +151,12 @@ export async function generatePortfolioReview(force: boolean) {
     '---',
     `*Generated on ${dayjs().format('YYYY-MM-DD HH:mm')}*`
   )
+
+  // query() above lazily migrates approved custom-root storage. Re-check so a
+  // review that only appeared through migration is not overwritten when force=false.
+  if (!force && (await noteExists(path))) {
+    return alreadyExistsResult
+  }
 
   await writeNote(path, lines.join('\n'))
 

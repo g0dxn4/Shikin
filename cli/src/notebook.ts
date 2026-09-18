@@ -14,14 +14,15 @@ export async function readNote(relativePath: string): Promise<string> {
 }
 
 function prepareNotebookWrite(relativePath: string): string {
-  // Reject lexical traversal before any storage mutation, while still probing the
-  // native binding before filesystem-backed path checks or preparation.
+  // Reject lexical traversal and probe the native binding before any storage
+  // mutation. Resolve and check the final notebook path only after preparation
+  // so migrated symlink components cannot bypass the confinement check.
   if (!isSafeNotebookPathInput(relativePath, { allowEmpty: true })) {
     throw new Error('Path traversal detected')
   }
   validateNativeSqliteBinding()
-  const fullPath = resolveNotebookPath(relativePath)
   prepareStorageForWrite()
+  const fullPath = resolveNotebookPath(relativePath)
   ensurePrivateDirectory(NOTEBOOK_DIR)
   ensurePrivateDirectory(dirname(fullPath))
   return fullPath
@@ -31,18 +32,25 @@ export async function writeNote(relativePath: string, content: string): Promise<
   writePrivateNoteFile(prepareNotebookWrite(relativePath), content)
 }
 
+export async function writeNoteIfAbsent(relativePath: string, content: string): Promise<boolean> {
+  const fullPath = prepareNotebookWrite(relativePath)
+  if (existsSync(fullPath)) {
+    return false
+  }
+  writePrivateNoteFile(fullPath, content)
+  return true
+}
+
 export async function appendNote(relativePath: string, content: string): Promise<void> {
-  validateNativeSqliteBinding()
-  const fullPath = resolveNotebookPath(relativePath)
+  const fullPath = prepareNotebookWrite(relativePath)
   let existing = ''
   try {
     existing = readFileSync(fullPath, 'utf-8')
-  } catch {
-    // Start a new note when the file does not exist yet.
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+      throw error
+    }
   }
-  prepareStorageForWrite()
-  ensurePrivateDirectory(NOTEBOOK_DIR)
-  ensurePrivateDirectory(dirname(fullPath))
   writePrivateNoteFile(fullPath, existing + '\n' + content)
 }
 

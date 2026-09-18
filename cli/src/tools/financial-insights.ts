@@ -27,6 +27,10 @@ const getSpendingRecap: ToolDefinition = {
       .describe('Type of recap: weekly (past 7 days) or monthly (full month)'),
     period: isoDate('Optional ISO date (YYYY-MM-DD) to target a specific month.').optional(),
   }),
+  effects: {
+    readOnly: true,
+    writesTo: [],
+  },
   execute: async ({ type, period }) => generateSpendingRecapSummary(type, period),
 }
 
@@ -38,6 +42,11 @@ const saveSpendingRecap: ToolDefinition = {
   description:
     'Explicitly save a gross cash-flow recap. Writes only recaps and audit_log; replaces the same type/period/all-currencies/gross-basis identity, and unchanged re-saves are no-ops.',
   schema: getSpendingRecap.schema,
+  effects: {
+    readOnly: false,
+    idempotent: true,
+    writesTo: ['recaps', 'audit_log'],
+  },
   execute: async ({ type, period }) => {
     const result = await generateSpendingRecapSummary(type, period)
     if (!result.success || !result.recap) return result

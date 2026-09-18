@@ -37,10 +37,12 @@ describe('MCP tool registration', () => {
 
     const toolNames = registerTool.mock.calls.map(([name]) => name)
 
-    expect(tools).toHaveLength(91)
+    expect(tools).toHaveLength(92)
     expect(toolNames).toEqual(tools.map((tool) => tool.name))
     expect(toolNames).toEqual(
       expect.arrayContaining([
+        'get-spending-recap',
+        'save-spending-recap',
         'record-card-payment',
         'credit-card-cycle-explain',
         'create-placeholder-transaction',
@@ -83,6 +85,30 @@ describe('MCP tool registration', () => {
         'disable-plugin',
       ])
     )
+  })
+
+  it('passes conservative MCP annotations only for tools that declare effects', () => {
+    const registerTool = vi.fn()
+
+    registerMcpTools({ tool: registerTool } as never, tools)
+
+    const byName = new Map(registerTool.mock.calls.map((call) => [call[0], call]))
+    const getRecap = byName.get('get-spending-recap')
+    const saveRecap = byName.get('save-spending-recap')
+    const listAccounts = byName.get('list-accounts')
+
+    expect(getRecap?.[3]).toEqual({ readOnlyHint: true })
+    expect(typeof getRecap?.[4]).toBe('function')
+    expect(saveRecap?.[3]).toEqual({ readOnlyHint: false, idempotentHint: true })
+    expect(typeof saveRecap?.[4]).toBe('function')
+    expect(typeof listAccounts?.[3]).toBe('function')
+    expect(listAccounts?.[4]).toBeUndefined()
+
+    const annotated = registerTool.mock.calls
+      .filter((call) => typeof call[3] !== 'function')
+      .map(([name]) => name)
+      .sort()
+    expect(annotated).toEqual(['get-spending-recap', 'save-spending-recap'])
   })
 
   it('executes real shared tools through the MCP handler without CLI-only coercion', async () => {

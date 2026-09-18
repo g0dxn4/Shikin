@@ -186,6 +186,76 @@ async function snapshotHostedTables(port) {
   return snapshot
 }
 
+function changedTables(before, after) {
+  return Array.from(new Set([...Object.keys(before), ...Object.keys(after)]))
+    .filter((name) => JSON.stringify(before[name]) !== JSON.stringify(after[name]))
+    .sort()
+}
+
+function assertSameSnapshot(before, after, label) {
+  const changed = changedTables(before, after)
+  if (changed.length > 0) {
+    throw new Error(`${label} changed database table contents: ${changed.join(', ')}`)
+  }
+}
+
+function assertDeclaredRecapMetadata(cliCatalog, mcpTools) {
+  if (cliCatalog.toolCount !== 92 || cliCatalog.commandCount !== 97) {
+    throw new Error(
+      `Deployed catalog counts were ${cliCatalog.toolCount} tools / ${cliCatalog.commandCount} commands; expected 92 / 97.`
+    )
+  }
+  if (cliCatalog.compatibility?.effects?.declaredOnly !== true) {
+    throw new Error(
+      `CLI catalog did not mark effects as declared-only: ${JSON.stringify(cliCatalog.compatibility)}`
+    )
+  }
+
+  const cliByName = new Map((cliCatalog.commands ?? []).map((command) => [command.name, command]))
+  const mcpByName = new Map((mcpTools ?? []).map((tool) => [tool.name, tool]))
+  const cliGet = cliByName.get('get-spending-recap')
+  const cliSave = cliByName.get('save-spending-recap')
+  const mcpGet = mcpByName.get('get-spending-recap')
+  const mcpSave = mcpByName.get('save-spending-recap')
+
+  if (JSON.stringify(cliGet?.effects) !== JSON.stringify({ readOnly: true, writesTo: [] })) {
+    throw new Error(`CLI get-spending-recap effects were invalid: ${JSON.stringify(cliGet)}`)
+  }
+  if (
+    JSON.stringify(cliSave?.effects) !==
+    JSON.stringify({ readOnly: false, idempotent: true, writesTo: ['recaps', 'audit_log'] })
+  ) {
+    throw new Error(`CLI save-spending-recap effects were invalid: ${JSON.stringify(cliSave)}`)
+  }
+  if (cliByName.get('list-accounts')?.effects !== undefined) {
+    throw new Error('CLI catalog claimed effects for unaudited list-accounts.')
+  }
+
+  if (JSON.stringify(mcpGet?.annotations) !== JSON.stringify({ readOnlyHint: true })) {
+    throw new Error(
+      `MCP get-spending-recap annotations were invalid: ${JSON.stringify(mcpGet?.annotations)}`
+    )
+  }
+  if (
+    JSON.stringify(mcpSave?.annotations) !==
+    JSON.stringify({ readOnlyHint: false, idempotentHint: true })
+  ) {
+    throw new Error(
+      `MCP save-spending-recap annotations were invalid: ${JSON.stringify(mcpSave?.annotations)}`
+    )
+  }
+
+  const annotatedMcp = mcpTools
+    .filter((tool) => tool.annotations && Object.keys(tool.annotations).length > 0)
+    .map((tool) => tool.name)
+    .sort()
+  if (
+    JSON.stringify(annotatedMcp) !== JSON.stringify(['get-spending-recap', 'save-spending-recap'])
+  ) {
+    throw new Error(`MCP annotated unexpected tools: ${JSON.stringify(annotatedMcp)}`)
+  }
+}
+
 function parseMcpTextResult(result, toolName) {
   const textContent = result?.content?.find((item) => item?.type === 'text')
   if (!textContent || typeof textContent.text !== 'string') {
@@ -277,6 +347,7 @@ async function smokeMcp({ cliEntrypoint, entrypoint, packageFile, env, port, fix
         `CLI/MCP tool catalog mismatch. CLI=${JSON.stringify(cliNames)} MCP=${JSON.stringify(mcpNames)}`
       )
     }
+    assertDeclaredRecapMetadata(cliCatalog, mcpTools)
 
     for (const tool of mcpTools) {
       if (
@@ -467,14 +538,93 @@ async function smokeMcp({ cliEntrypoint, entrypoint, packageFile, env, port, fix
       throw new Error(`Unexpected add-transaction dry-run payload: ${JSON.stringify(dryRun)}`)
     }
 
-    const after = await snapshotHostedTables(port)
-    if (JSON.stringify(after) !== JSON.stringify(before)) {
-      const changedTables = Array.from(
-        new Set([...Object.keys(before), ...Object.keys(after)])
-      ).filter((name) => JSON.stringify(before[name]) !== JSON.stringify(after[name]))
-      throw new Error(
-        `CLI/MCP reads or financial dry runs changed database table contents: ${changedTables.join(', ')}`
+    const recapInput = { type: 'monthly', period: fixture.transactionDate }
+    const cliRecap = JSON.parse(
+      runNode(
+        [
+          cliEntrypoint,
+          'get-spending-recap',
+          '--type',
+          recapInput.type,
+          '--period',
+          recapInput.period,
+          '--json',
+        ],
+        env
       )
+    )
+    if (cliRecap.success !== true || cliRecap.complete !== true || !cliRecap.recap) {
+      throw new Error(`CLI get-spending-recap failed: ${JSON.stringify(cliRecap)}`)
+    }
+
+    const mcpRecapResult = await client.callTool(
+      { name: 'get-spending-recap', arguments: recapInput },
+      undefined,
+      { timeout: 10_000 }
+    )
+    if (mcpRecapResult.isError) {
+      throw new Error(`MCP get-spending-recap failed: ${JSON.stringify(mcpRecapResult)}`)
+    }
+    const mcpRecap = parseMcpTextResult(mcpRecapResult, 'get-spending-recap')
+    if (mcpRecap.success !== true || mcpRecap.complete !== true || !mcpRecap.recap) {
+      throw new Error(`MCP get-spending-recap payload failed: ${JSON.stringify(mcpRecap)}`)
+    }
+
+    const afterReads = await snapshotHostedTables(port)
+    assertSameSnapshot(before, afterReads, 'CLI/MCP reads, recap generation, or financial dry runs')
+
+    const cliSave = JSON.parse(
+      runNode(
+        [
+          cliEntrypoint,
+          'save-spending-recap',
+          '--type',
+          recapInput.type,
+          '--period',
+          recapInput.period,
+          '--json',
+        ],
+        env
+      )
+    )
+    if (cliSave.success !== true || cliSave.saved !== true || !cliSave.recap) {
+      throw new Error(`CLI save-spending-recap failed: ${JSON.stringify(cliSave)}`)
+    }
+
+    const afterCliSave = await snapshotHostedTables(port)
+    const cliSaveChanges = changedTables(before, afterCliSave)
+    if (JSON.stringify(cliSaveChanges) !== JSON.stringify(['audit_log', 'recaps'])) {
+      throw new Error(
+        `CLI save-spending-recap changed unexpected tables: ${cliSaveChanges.join(', ') || '(none)'}`
+      )
+    }
+    if (
+      JSON.stringify(afterCliSave.accounts) !== JSON.stringify(before.accounts) ||
+      JSON.stringify(afterCliSave.transactions) !== JSON.stringify(before.transactions)
+    ) {
+      throw new Error('CLI save-spending-recap changed ledger or account tables.')
+    }
+
+    const mcpSaveResult = await client.callTool(
+      { name: 'save-spending-recap', arguments: recapInput },
+      undefined,
+      { timeout: 10_000 }
+    )
+    if (mcpSaveResult.isError) {
+      throw new Error(`MCP save-spending-recap failed: ${JSON.stringify(mcpSaveResult)}`)
+    }
+    const mcpSave = parseMcpTextResult(mcpSaveResult, 'save-spending-recap')
+    if (mcpSave.success !== true || mcpSave.saved !== true) {
+      throw new Error(`MCP save-spending-recap payload failed: ${JSON.stringify(mcpSave)}`)
+    }
+
+    const afterMcpSave = await snapshotHostedTables(port)
+    assertSameSnapshot(afterCliSave, afterMcpSave, 'Identical MCP save-spending-recap')
+    if (
+      JSON.stringify(afterMcpSave.accounts) !== JSON.stringify(before.accounts) ||
+      JSON.stringify(afterMcpSave.transactions) !== JSON.stringify(before.transactions)
+    ) {
+      throw new Error('MCP save-spending-recap changed ledger or account tables.')
     }
   } catch (error) {
     operationError = error
@@ -648,6 +798,7 @@ async function smokeHostedWeb(
         accountId: created.account.id,
         transactionId: recorded.transaction.id,
         categoryName: 'Web Shared DB Smoke',
+        transactionDate: '2026-01-15',
       },
     })
   } finally {

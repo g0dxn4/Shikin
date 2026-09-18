@@ -271,12 +271,31 @@ export function createMcpToolHandler(tool: ToolDefinition) {
   }
 }
 
+function toMcpToolAnnotations(effects: ToolDefinition['effects']) {
+  if (!effects) return undefined
+
+  const annotations: {
+    readOnlyHint?: boolean
+    idempotentHint?: boolean
+  } = {}
+  if (typeof effects.readOnly === 'boolean') annotations.readOnlyHint = effects.readOnly
+  if (typeof effects.idempotent === 'boolean') annotations.idempotentHint = effects.idempotent
+
+  return Object.keys(annotations).length > 0 ? annotations : undefined
+}
+
 export function registerMcpTools(
   server: Pick<McpServer, 'tool'>,
   toolDefinitions: ToolDefinition[] = tools
 ): void {
   for (const tool of toolDefinitions) {
-    server.tool(tool.name, tool.description, tool.schema.shape, createMcpToolHandler(tool))
+    const handler = createMcpToolHandler(tool)
+    const annotations = toMcpToolAnnotations(tool.effects)
+    if (annotations) {
+      server.tool(tool.name, tool.description, tool.schema.shape, annotations, handler)
+    } else {
+      server.tool(tool.name, tool.description, tool.schema.shape, handler)
+    }
   }
 }
 

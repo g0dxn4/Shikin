@@ -91,6 +91,7 @@ Notes:
 
 Generic CLI/MCP workflows are available for automation clients and local scripts:
 
+- `get-spending-recap` reads a gross cash-flow recap without writing. `save-spending-recap` is the explicit save command: it writes only `recaps` and `audit_log`, and identical repeated saves are no-ops. There is no dry-run flag; invoking save is the write intent.
 - `record-card-payment` records credit-card payments as transfers, cleanup expenses, or statement-only paid-amount updates. Dry-run previews include `balanceImpact`, statement impact, duplicate warnings, and audit previews.
 - `credit-card-cycle-explain` explains current statement cycle, latest statement due date, next upcoming due date, and optional purchase-date classification without ambiguous `nextPaymentDueDate` wording.
 - `create-placeholder-transaction`, `list-placeholder-transactions`, `resolve-placeholder-transaction`, and `split-placeholder-transaction` track unknown charges while preserving balance impact and audit history.
@@ -112,6 +113,7 @@ See [`../docs/reference/AUTOMATION-WORKFLOWS.md`](../docs/reference/AUTOMATION-W
 - `shikin diagnose` prints CLI/MCP surface counts plus available/unavailable tool names.
 - `shikin diagnose --deep` adds migration/integrity/balance diagnostics.
 - MCP clients can discover the same tool set via the standard MCP `tools/list` flow and read resources listed below.
+- A few tools declare optional `effects` (`readOnly`, `idempotent`, `writesTo`) in `shikin tools --json`. Declared tools also expose conservative MCP `readOnlyHint` / `idempotentHint` annotations. Unannotated tools have not been audited; missing effects is not a read-only or no-write claim.
 
 ## Currency conversion behavior
 
@@ -193,7 +195,7 @@ The MCP server also exposes read-only resources:
 ## Current Scope
 
 - CLI and MCP share the same tool definition catalog in `cli/src/tools/index.ts`, including `backup-database`, guarded `restore-database`, `undo`, `finance-sanity-check`, `audit-list`, `audit-show`, `automation-context`, and plugin management tools.
-- `shikin tools --json` is the authoritative discovery contract and includes `catalogVersion`, `schemaVersion`, generation time, CLI/MCP compatibility counts, validation-scope notes, and required migration metadata.
+- `shikin tools --json` is the authoritative discovery contract and includes `catalogVersion`, `schemaVersion`, generation time, CLI/MCP compatibility counts, validation-scope notes, required migration metadata, and optional declared tool `effects`. Effects are opt-in annotations, not a complete audit of the catalog.
 - `setup-status` and the automation context tool expose existing goal, debt, and investment support surfaces. Investment support remains limited to stored holdings (`manage-investment`) and portfolio review (`generate-portfolio-review`).
 - All shipped tools are available end-to-end against the local database.
 - Debt payoff projections infer debts from negative credit-card account balances. Accounts do not store APR yet, so CLI payoff estimates default card APR to 0% and exclude interest for automatically inferred cards.

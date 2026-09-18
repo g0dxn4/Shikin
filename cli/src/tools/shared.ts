@@ -27,6 +27,12 @@ export {
 // Types
 // ---------------------------------------------------------------------------
 
+export type ToolEffects = {
+  readOnly?: boolean
+  idempotent?: boolean
+  writesTo?: string[]
+}
+
 export interface ToolDefinition {
   name: string
   description: string
@@ -34,6 +40,8 @@ export interface ToolDefinition {
   execute: (input: any) => Promise<any>
   cliUnavailableMessage?: string
   mcpUnavailableMessage?: string
+  /** Optional declared effects. Absence means unaudited, not side-effect free. */
+  effects?: ToolEffects
 }
 
 // ---------------------------------------------------------------------------

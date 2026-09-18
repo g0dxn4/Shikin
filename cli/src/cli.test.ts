@@ -204,6 +204,11 @@ describe('CLI command execution', () => {
         redacted: z.boolean().default(false).describe('Redact tool payload'),
         splits: z.array(z.object({ amount: z.number() })).optional(),
       }),
+      effects: {
+        readOnly: false,
+        idempotent: true,
+        writesTo: ['notes'],
+      },
       execute: vi.fn(async () => ({ success: true })),
     }
 
@@ -233,7 +238,16 @@ describe('CLI command execution', () => {
       cli: { availableToolCount: 1, unavailableToolCount: 0, unavailableTools: [] },
       mcp: { availableToolCount: 1, unavailableToolCount: 0, unavailableTools: [] },
       validation: { scope: 'schema' },
+      effects: {
+        declaredOnly: true,
+      },
     })
+    expect(catalogDemo.effects).toEqual({
+      readOnly: false,
+      idempotent: true,
+      writesTo: ['notes'],
+    })
+    expect(webCommand.effects).toBeUndefined()
     expect(output.database).toMatchObject({
       requiredMigrations: [...CLI_DATABASE_MIGRATIONS],
       latestRequiredMigration: '020_quote_recurrence_import_identity',
@@ -317,7 +331,7 @@ describe('CLI command execution', () => {
 
     const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
     expect(output.catalogVersion).toBe(COMMAND_CATALOG_VERSION)
-    expect(output.toolCount).toBe(91)
+    expect(output.toolCount).toBe(92)
     const commandByName = new Map(
       output.commands.map((command: { name: string }) => [command.name, command])
     )
@@ -388,6 +402,8 @@ describe('CLI command execution', () => {
       'list-investments': ['type', 'accountId', 'account', 'symbol', 'search', 'redacted'],
       undo: ['apply', 'dryRun', 'source', 'note'],
       'finance-sanity-check': ['redacted', 'limit'],
+      'get-spending-recap': ['type', 'period'],
+      'save-spending-recap': ['type', 'period'],
     }
 
     for (const [name, optionNames] of Object.entries(requiredWorkflowOptions)) {
@@ -405,6 +421,16 @@ describe('CLI command execution', () => {
     expect(recordCommand.options.map((option) => option.name)).toEqual(
       expect.arrayContaining(['strict', 'dryRun', 'allowDuplicate', 'source', 'note'])
     )
+    expect((commandByName.get('get-spending-recap') as { effects?: unknown }).effects).toEqual({
+      readOnly: true,
+      writesTo: [],
+    })
+    expect((commandByName.get('save-spending-recap') as { effects?: unknown }).effects).toEqual({
+      readOnly: false,
+      idempotent: true,
+      writesTo: ['recaps', 'audit_log'],
+    })
+    expect((commandByName.get('list-accounts') as { effects?: unknown }).effects).toBeUndefined()
     expect(close).toHaveBeenCalledTimes(1)
   })
 

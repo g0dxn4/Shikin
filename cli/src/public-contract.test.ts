@@ -34,22 +34,40 @@ describe('public automation contract', () => {
     await program.parseAsync(['node', 'shikin', 'tools', '--json'])
     const catalog = JSON.parse(String(log.mock.calls[0]?.[0])) as Record<string, unknown>
 
-    expect(builtInTools).toHaveLength(91)
-    expect(program.commands).toHaveLength(96)
+    expect(builtInTools).toHaveLength(92)
+    expect(program.commands).toHaveLength(97)
     expect(builtInTools.map((tool) => tool.name).sort()).toEqual(inventory.tools)
     expect(program.commands.map((command) => command.name()).sort()).toEqual(inventory.commands)
     expect(program.version()).toBe('1.0.10')
     expect(APPLICATION_VERSION).toBe('1.0.10')
-    expect(COMMAND_CATALOG_VERSION).toBe('2026-07-17.web-mode')
+    expect(COMMAND_CATALOG_VERSION).toBe('2026-09-18.save-spending-recap')
     expect(EXPOSED_CATALOG_VERSION).toBe(COMMAND_CATALOG_VERSION)
     expect(COMMAND_CATALOG_VERSION).not.toBe(APPLICATION_VERSION)
     expect(catalog).toMatchObject({
       success: true,
       catalogVersion: COMMAND_CATALOG_VERSION,
       schemaVersion: 'cli-tools-json.v1',
-      commandCount: 96,
-      toolCount: 91,
+      commandCount: 97,
+      toolCount: 92,
+      compatibility: {
+        effects: {
+          declaredOnly: true,
+        },
+      },
     })
+
+    const commands = catalog.commands as Array<{ name: string; effects?: unknown }>
+    expect(commands.find((command) => command.name === 'get-spending-recap')?.effects).toEqual({
+      readOnly: true,
+      writesTo: [],
+    })
+    expect(commands.find((command) => command.name === 'save-spending-recap')?.effects).toEqual({
+      readOnly: false,
+      idempotent: true,
+      writesTo: ['recaps', 'audit_log'],
+    })
+    expect(commands.find((command) => command.name === 'list-accounts')?.effects).toBeUndefined()
+    expect(commands.find((command) => command.name === 'add-transaction')?.effects).toBeUndefined()
   })
 
   it('keeps plugin-like tools additive without changing the built-in fixture', () => {

@@ -267,6 +267,21 @@ function getToolAliases(tool: ToolDefinition): string[] {
   return tool.name === 'query-transactions' ? ['list-transactions'] : []
 }
 
+function describeToolEffects(effects: ToolDefinition['effects']) {
+  if (!effects) return undefined
+
+  const described: {
+    readOnly?: boolean
+    idempotent?: boolean
+    writesTo?: string[]
+  } = {}
+  if (typeof effects.readOnly === 'boolean') described.readOnly = effects.readOnly
+  if (typeof effects.idempotent === 'boolean') described.idempotent = effects.idempotent
+  if (Array.isArray(effects.writesTo)) described.writesTo = [...effects.writesTo]
+
+  return Object.keys(described).length > 0 ? described : undefined
+}
+
 function getCommandCatalog(toolDefinitions: ToolDefinition[]) {
   const defaultOutputOptions = describeOutputOptions()
   const validateOutputOptions = describeOutputOptions({ includeRedacted: false })
@@ -460,20 +475,24 @@ function getCommandCatalog(toolDefinitions: ToolDefinition[]) {
     },
   ]
 
-  const toolCommands = toolDefinitions.map((tool) => ({
-    name: tool.name,
-    kind: 'tool',
-    validateable: true,
-    validationScope: 'schema',
-    description: tool.description,
-    aliases: getToolAliases(tool),
-    availableInCli: !tool.cliUnavailableMessage,
-    availableInMcp: !tool.mcpUnavailableMessage,
-    cliUnavailableMessage: tool.cliUnavailableMessage,
-    mcpUnavailableMessage: tool.mcpUnavailableMessage,
-    options: describeToolOptions(tool.schema),
-    outputOptions: describeToolOutputOptions(tool.schema),
-  }))
+  const toolCommands = toolDefinitions.map((tool) => {
+    const effects = describeToolEffects(tool.effects)
+    return {
+      name: tool.name,
+      kind: 'tool',
+      validateable: true,
+      validationScope: 'schema',
+      description: tool.description,
+      aliases: getToolAliases(tool),
+      availableInCli: !tool.cliUnavailableMessage,
+      availableInMcp: !tool.mcpUnavailableMessage,
+      cliUnavailableMessage: tool.cliUnavailableMessage,
+      mcpUnavailableMessage: tool.mcpUnavailableMessage,
+      options: describeToolOptions(tool.schema),
+      outputOptions: describeToolOutputOptions(tool.schema),
+      ...(effects ? { effects } : {}),
+    }
+  })
 
   const commands = [...builtInCommands, ...toolCommands]
 
@@ -488,7 +507,12 @@ function getCommandCatalog(toolDefinitions: ToolDefinition[]) {
       notes: [
         'Commands execute against the local Shikin SQLite database; no remote service is required.',
         'CLI and MCP surfaces are generated from the same shared tool definition catalog.',
+        'Effects metadata is optional and declared only for annotated tools; unannotated tools have not been audited.',
       ],
+      effects: {
+        declaredOnly: true,
+        note: 'Unannotated tools have not been audited. Missing effects is not a read-only or no-write claim.',
+      },
       cli: {
         availableToolCount: toolDefinitions.length - cliUnavailableTools.length,
         unavailableToolCount: cliUnavailableTools.length,

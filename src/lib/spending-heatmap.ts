@@ -85,6 +85,17 @@ export function aggregateHeatmapSpending(
   for (const row of rows) {
     if (!isHeatmapEligibleExpense(row)) continue
 
+    if (!Number.isSafeInteger(row.amount) || row.amount < 0) {
+      reason = 'invalid_category_allocations'
+      continue
+    }
+    const currency = typeof row.currency === 'string' ? row.currency.trim().toUpperCase() : ''
+    if (!/^[A-Z0-9]{2,10}$/.test(currency)) {
+      reason = 'invalid_currency_data'
+      missingCurrencies.add(row.currency?.trim() || 'unknown')
+      continue
+    }
+
     let splits: HeatmapAllocation[]
     try {
       splits = JSON.parse(row.splits_json ?? '[]') as HeatmapAllocation[]
@@ -94,6 +105,7 @@ export function aggregateHeatmapSpending(
           (splits.some(
             (split) => !split || !Number.isSafeInteger(split.amount) || split.amount <= 0
           ) ||
+            !Number.isSafeInteger(splits.reduce((total, split) => total + split.amount, 0)) ||
             splits.reduce((total, split) => total + split.amount, 0) !== row.amount))
       ) {
         reason = 'invalid_category_allocations'

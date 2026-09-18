@@ -150,7 +150,8 @@ const CATEGORY_PALETTE = [
   '#60A5FA',
 ]
 
-function safeNormalizeCurrency(value: string): string | null {
+function safeNormalizeCurrency(value: unknown): string | null {
+  if (typeof value !== 'string') return null
   const normalized = value.trim().toUpperCase()
   return /^[A-Z0-9]{2,10}$/.test(normalized) ? normalized : null
 }
@@ -171,12 +172,27 @@ function buildConversionState(
   preferredCurrency: string,
   rates: ConversionRate[]
 ): ConversionState {
+  if (
+    amounts.some(
+      (amount) => !Number.isSafeInteger(amount.amountCentavos) || amount.amountCentavos < 0
+    )
+  ) {
+    return {
+      kind: 'incomplete',
+      currency: preferredCurrency,
+      missingCurrencies: [],
+      reason: 'invalid_category_allocations',
+    }
+  }
+
   const validAmounts: Array<{ currency: string; amountCentavos: number }> = []
   const invalidCurrencies: string[] = []
   for (const amount of amounts) {
     const currency = safeNormalizeCurrency(amount.currency)
     if (!currency) {
-      invalidCurrencies.push(amount.currency?.trim() || 'blank')
+      invalidCurrencies.push(
+        typeof amount.currency === 'string' ? amount.currency.trim() || 'blank' : 'blank'
+      )
       continue
     }
     validAmounts.push({ currency, amountCentavos: amount.amountCentavos })
@@ -516,6 +532,7 @@ export function buildDashboardAnalytics(input: DashboardAnalyticsInput): Dashboa
     if (txSplits && txSplits.length > 0) {
       const splitTotal = txSplits.reduce((sum, s) => sum + s.amount, 0)
       if (
+        !Number.isSafeInteger(splitTotal) ||
         splitTotal !== tx.amount ||
         txSplits.some((split) => !Number.isSafeInteger(split.amount) || split.amount <= 0)
       ) {

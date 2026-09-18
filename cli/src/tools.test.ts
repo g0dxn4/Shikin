@@ -3378,6 +3378,82 @@ describe('CLI tool validation regressions', () => {
     })
   })
 
+  it('keeps upcoming recurring bills eligible and grouped by native currency', async () => {
+    const recurringDate = dayjs().subtract(10, 'day').format('YYYY-MM-DD')
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('t.is_recurring = 1')) {
+        const fixtures = [
+          {
+            description: 'Hosting',
+            amount: 5000,
+            currency: 'EUR',
+            date: recurringDate,
+            count: 1,
+          },
+          {
+            description: 'Hosting',
+            amount: 5000,
+            currency: 'USD',
+            date: recurringDate,
+            count: 1,
+          },
+          {
+            description: 'Posted staged bill',
+            amount: 999999,
+            currency: 'USD',
+            date: recurringDate,
+            count: 1,
+            ledger_treatment: 'staged_no_balance_impact',
+          },
+          {
+            description: 'Posted technical bill',
+            amount: 999999,
+            currency: 'USD',
+            date: recurringDate,
+            count: 1,
+            transaction_kind: 'reconciliation_bridge',
+          },
+        ]
+        return fixtures.filter((fixture) => {
+          if (fixture.ledger_treatment) {
+            return !sql.includes("COALESCE(t.ledger_treatment, 'normal') = 'normal'")
+          }
+          if (fixture.transaction_kind) {
+            return !sql.includes("COALESCE(t.transaction_kind, 'standard') = 'standard'")
+          }
+          return true
+        })
+      }
+      return []
+    })
+
+    const result = await getUpcomingBills.execute(getUpcomingBills.schema.parse({ daysAhead: 30 }))
+
+    expect(result).toMatchObject({
+      success: true,
+      bills: [
+        expect.objectContaining({ source: 'recurring', currency: 'EUR', amount: 50 }),
+        expect.objectContaining({ source: 'recurring', currency: 'USD', amount: 50 }),
+      ],
+      summary: {
+        count: 2,
+        totalAmount: null,
+        totalsByCurrency: [
+          { currency: 'EUR', totalAmount: 50 },
+          { currency: 'USD', totalAmount: 50 },
+        ],
+      },
+    })
+    expect(result.message).toContain('no FX conversion was applied')
+    const recurringReadSql = mockQuery.mock.calls
+      .map(([sql]) => sql as string)
+      .find((sql) => sql.includes('t.is_recurring = 1'))!
+    expect(recurringReadSql).toContain("COALESCE(t.ledger_treatment, 'normal') = 'normal'")
+    expect(recurringReadSql).toContain("COALESCE(t.transaction_kind, 'standard') = 'standard'")
+    expect(recurringReadSql).toContain("IN ('posted', 'cleared')")
+    expect(recurringReadSql).toContain('GROUP BY t.description, t.amount, UPPER(TRIM(t.currency))')
+  })
+
   it('reports expected recurring bills with linked and fallback paid matches', async () => {
     mockQuery
       .mockReturnValueOnce([
@@ -3419,6 +3495,36 @@ describe('CLI tool validation regressions', () => {
         },
       ])
       .mockReturnValueOnce([
+        {
+          id: 'tx-rent-staged',
+          recurring_rule_id: 'rule-linked',
+          account_id: 'acct-1',
+          type: 'expense',
+          amount: 100000,
+          currency: 'USD',
+          description: 'Rent',
+          date: '2026-05-01',
+          status: 'posted',
+          ledger_treatment: 'staged_no_balance_impact',
+          reporting_treatment: 'normal',
+          transaction_kind: 'standard',
+          is_archived: 0,
+        },
+        {
+          id: 'tx-rent-technical',
+          recurring_rule_id: 'rule-linked',
+          account_id: 'acct-1',
+          type: 'expense',
+          amount: 100000,
+          currency: 'USD',
+          description: 'Rent',
+          date: '2026-05-01',
+          status: 'posted',
+          ledger_treatment: 'normal',
+          reporting_treatment: 'normal',
+          transaction_kind: 'reconciliation_bridge',
+          is_archived: 0,
+        },
         {
           id: 'tx-rent',
           recurring_rule_id: 'rule-linked',
@@ -3463,6 +3569,76 @@ describe('CLI tool validation regressions', () => {
           match: expect.objectContaining({ method: 'fallback_heuristic', fallback: true }),
         }),
       ]),
+    })
+    const paidReadSql = mockQuery.mock.calls[1][0] as string
+    expect(paidReadSql).toContain("COALESCE(t.ledger_treatment, 'normal') = 'normal'")
+    expect(paidReadSql).toContain("COALESCE(t.transaction_kind, 'standard') = 'standard'")
+    expect(paidReadSql).toContain("IN ('pending', 'posted', 'cleared')")
+    expect(
+      result.expected.find((item: { ruleId: string }) => item.ruleId === 'rule-linked')
+    ).toMatchObject({
+      match: expect.objectContaining({ transactionId: 'tx-rent' }),
+      status: 'paid',
+    })
+  })
+
+  it('keeps ordinary pending recurring matches visible as unpaid', async () => {
+    mockQuery
+      .mockReturnValueOnce([
+        {
+          id: 'rule-pending',
+          description: 'Pending utility',
+          amount: 5000,
+          type: 'expense',
+          frequency: 'monthly',
+          next_date: '2026-05-10',
+          end_date: null,
+          account_id: 'acct-1',
+          category_id: null,
+          notes: null,
+          active: 1,
+          currency: 'USD',
+          account_name: 'Checking',
+          account_currency: 'USD',
+          category_name: null,
+        },
+      ])
+      .mockReturnValueOnce([
+        {
+          id: 'tx-pending',
+          recurring_rule_id: 'rule-pending',
+          account_id: 'acct-1',
+          type: 'expense',
+          amount: 5000,
+          currency: 'USD',
+          description: 'Pending utility',
+          date: '2026-05-10',
+          status: 'pending',
+          ledger_treatment: 'normal',
+          reporting_treatment: 'normal',
+          transaction_kind: 'standard',
+          is_archived: 0,
+        },
+      ])
+
+    const result = await getRecurringExpectedVsPaid.execute(
+      getRecurringExpectedVsPaid.schema.parse({
+        startDate: '2026-05-01',
+        endDate: '2026-05-31',
+        asOfDate: '2026-05-10',
+      })
+    )
+
+    expect(result).toMatchObject({
+      success: true,
+      summary: { expectedCount: 1, paidCount: 0, unpaidCount: 1 },
+      expected: [
+        expect.objectContaining({
+          ruleId: 'rule-pending',
+          status: 'unpaid',
+          match: expect.objectContaining({ transactionId: 'tx-pending', status: 'pending' }),
+        }),
+      ],
     })
   })
 

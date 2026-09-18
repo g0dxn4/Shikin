@@ -66,6 +66,10 @@ type RecurringPaidTransactionRow = {
   description: string
   date: string
   status: string | null
+  ledger_treatment?: string | null
+  reporting_treatment?: string | null
+  transaction_kind?: string | null
+  is_archived?: number | null
 }
 
 type RecurringOccurrence = {
@@ -158,8 +162,24 @@ function descriptionMatchesRecurringRule(ruleDescription: string, transactionDes
 }
 
 function isPaidTransactionStatus(status: string | null | undefined) {
-  const normalized = typeof status === 'string' && status.trim() ? status.trim() : 'posted'
+  const normalized =
+    typeof status === 'string' && status.trim() ? status.trim().toLowerCase() : 'posted'
   return normalized === 'posted' || normalized === 'cleared'
+}
+
+function isRecurringPaymentCandidate(transaction: RecurringPaidTransactionRow) {
+  const status =
+    typeof transaction.status === 'string' && transaction.status.trim()
+      ? transaction.status.trim().toLowerCase()
+      : 'posted'
+  return (
+    (transaction.type === 'income' || transaction.type === 'expense') &&
+    (transaction.reporting_treatment ?? 'normal') === 'normal' &&
+    (transaction.ledger_treatment ?? 'normal') === 'normal' &&
+    (transaction.transaction_kind ?? 'standard') === 'standard' &&
+    (transaction.is_archived ?? 0) === 0 &&
+    (status === 'pending' || status === 'posted' || status === 'cleared')
+  )
 }
 
 function occurrencePaymentStatus(
@@ -1069,24 +1089,29 @@ const getRecurringExpectedVsPaid: ToolDefinition = {
     const extendedStart = dayjs(startDate).subtract(fallbackWindowDays, 'day').format('YYYY-MM-DD')
     const extendedEnd = dayjs(endDate).add(fallbackWindowDays, 'day').format('YYYY-MM-DD')
     const txFilters = [
-      'type = $1',
-      'date >= $2',
-      'date <= $3',
-      "COALESCE(reporting_treatment, 'normal') = 'normal'",
-      'COALESCE(is_archived, 0) = 0',
+      't.type = $1',
+      't.date >= $2',
+      't.date <= $3',
+      "COALESCE(t.reporting_treatment, 'normal') = 'normal'",
+      "COALESCE(t.ledger_treatment, 'normal') = 'normal'",
+      "COALESCE(t.transaction_kind, 'standard') = 'standard'",
+      'COALESCE(t.is_archived, 0) = 0',
+      "COALESCE(NULLIF(LOWER(TRIM(t.status, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279))), ''), 'posted') IN ('pending', 'posted', 'cleared')",
     ]
     const txParams: unknown[] = [type, extendedStart, extendedEnd]
     if (accountId) {
-      txFilters.push(`account_id = $${txParams.length + 1}`)
+      txFilters.push(`t.account_id = $${txParams.length + 1}`)
       txParams.push(accountId)
     }
     const transactions = query<RecurringPaidTransactionRow>(
-      `SELECT id, recurring_rule_id, account_id, type, amount, currency, description, date, status
-       FROM transactions
+      `SELECT t.id, t.recurring_rule_id, t.account_id, t.type, t.amount, t.currency,
+              t.description, t.date, t.status, t.ledger_treatment, t.reporting_treatment,
+              t.transaction_kind, t.is_archived
+       FROM transactions t
        WHERE ${txFilters.join(' AND ')}
-       ORDER BY date ASC, id ASC`,
+       ORDER BY t.date ASC, t.id ASC`,
       txParams
-    )
+    ).filter(isRecurringPaymentCandidate)
 
     const usedTransactionIds = new Set<string>()
     const expectedTotals = new Map<string, number>()

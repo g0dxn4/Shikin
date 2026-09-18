@@ -3,6 +3,11 @@ import { query } from '@/lib/database'
 // ECMAScript trim whitespace, matching finance-core posting-status normalization.
 const SQL_WHITESPACE =
   'char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)'
+const INVALID_PARENT_REPORTING_SQL = `typeof(t.amount) != 'integer'
+  OR t.amount < 0 OR t.amount > 9007199254740991
+  OR t.currency IS NULL
+  OR LENGTH(UPPER(TRIM(t.currency, ${SQL_WHITESPACE}))) NOT BETWEEN 2 AND 10
+  OR UPPER(TRIM(t.currency, ${SQL_WHITESPACE})) GLOB '*[^A-Z0-9]*'`
 
 /** Fixed alias only; mirrors finance-core cash-flow eligibility, including legacy nulls. */
 export const CASH_FLOW_SQL = `t.type IN ('income', 'expense')
@@ -20,14 +25,14 @@ export const CATEGORY_ALLOCATION_CTE = `WITH reporting_allocations AS (
          t.transaction_kind, t.is_archived, t.currency, t.date,
          CASE WHEN s.id IS NULL THEN t.category_id ELSE s.category_id END AS category_id,
          COALESCE(s.amount, t.amount) AS amount,
-         CASE WHEN EXISTS (SELECT 1 FROM transaction_splits v WHERE v.transaction_id = t.id)
-           AND ((SELECT SUM(v.amount) FROM transaction_splits v WHERE v.transaction_id = t.id) != t.amount
-             OR EXISTS (SELECT 1 FROM transaction_splits v WHERE v.transaction_id = t.id
-                        AND (typeof(v.amount) != 'integer' OR v.amount <= 0)))
+         CASE WHEN ${INVALID_PARENT_REPORTING_SQL}
+           OR (EXISTS (SELECT 1 FROM transaction_splits v WHERE v.transaction_id = t.id)
+             AND ((SELECT SUM(v.amount) FROM transaction_splits v WHERE v.transaction_id = t.id) != t.amount
+               OR EXISTS (SELECT 1 FROM transaction_splits v WHERE v.transaction_id = t.id
+                          AND (typeof(v.amount) != 'integer' OR v.amount <= 0
+                            OR v.amount > 9007199254740991))))
            THEN 1 ELSE 0 END AS invalid_allocations,
-         CASE WHEN typeof(t.amount) != 'integer' OR t.amount < 0
-           OR LENGTH(UPPER(TRIM(t.currency, ${SQL_WHITESPACE}))) != 3
-           OR UPPER(TRIM(t.currency, ${SQL_WHITESPACE})) GLOB '*[^A-Z]*'
+         CASE WHEN ${INVALID_PARENT_REPORTING_SQL}
            THEN 1 ELSE 0 END AS invalid_reporting_data
   FROM transactions t LEFT JOIN transaction_splits s ON s.transaction_id = t.id
 )`

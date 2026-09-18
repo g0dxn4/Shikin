@@ -72,6 +72,24 @@ it('marks malformed splits incomplete rather than showing partial category total
   })
 })
 
+it.each([
+  "UPDATE transactions SET amount = 'not-centavos' WHERE id = 'unsplit'",
+  "UPDATE transactions SET amount = 9007199254740992 WHERE id = 'unsplit'",
+  "UPDATE transactions SET currency = NULL WHERE id = 'unsplit'",
+  "UPDATE transactions SET currency = '' WHERE id = 'unsplit'",
+])('withholds malformed eligible parent evidence: %s', async (sql) => {
+  state.db!.exec(sql)
+  await useSpendingInsightsStore.getState().loadComparisons()
+  expect(useSpendingInsightsStore.getState()).toMatchObject({
+    complete: false,
+    reason: 'invalid_category_allocations',
+    momComparisons: [],
+    momCurrentTotal: 0,
+  })
+  await expect(useBudgetStore.getState().fetch()).rejects.toThrow('Budget spending is unavailable')
+  expect(useBudgetStore.getState().budgets).toEqual([])
+})
+
 it('actual frontend validation withholds malformed split evidence', async () => {
   state.db!.exec("UPDATE transaction_splits SET amount = 400 WHERE id = 'food-split'")
   await expect(assertReportingReadComplete('2026-06-01', '2026-06-30')).rejects.toMatchObject({
@@ -86,10 +104,20 @@ it('carries invalid allocation state even when a split category is null', () => 
   )
   const rows = state
     .db!.prepare(
-      `${CATEGORY_ALLOCATION_CTE} SELECT * FROM reporting_allocations WHERE invalid_allocations = 1`
+      `${CATEGORY_ALLOCATION_CTE} SELECT * FROM reporting_allocations
+       WHERE invalid_allocations = 1 AND transaction_id = 'split'`
     )
     .all()
   expect(rows).toHaveLength(2)
+})
+
+it('does not let excluded staged malformed rows poison eligible category reads', async () => {
+  state.db!.exec("UPDATE transactions SET amount = 'bad' WHERE id = 'staged'")
+  await useSpendingInsightsStore.getState().loadComparisons()
+  expect(useSpendingInsightsStore.getState()).toMatchObject({
+    complete: true,
+    momCurrentTotal: 1200,
+  })
 })
 
 it('reads heatmap split categories with SQLite while preserving parent counts and daily totals', async () => {

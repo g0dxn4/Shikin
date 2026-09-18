@@ -264,6 +264,50 @@ describe('buildDashboardAnalytics', () => {
     expect(result.trend.months.find((m) => m.isCurrent)?.expenses).toBe(0)
   })
 
+  it.each([
+    { label: 'unsafe parent amount', amount: Number.MAX_SAFE_INTEGER + 1, currency: 'USD' },
+    { label: 'negative parent amount', amount: -1, currency: 'USD' },
+    { label: 'blank parent currency', amount: 10000, currency: '' },
+    { label: 'null parent currency', amount: 10000, currency: null as unknown as string },
+  ])('withholds eligible malformed $label', ({ amount, currency }) => {
+    const result = buildDashboardAnalytics({
+      transactions: [makeTransaction('malformed', 'expense', amount, currency, '2024-06-10')],
+      splits: [],
+      preferredCurrency: 'USD',
+      rates: USD_RATES,
+      now: FIXED_NOW,
+    })
+
+    expect(result.pace.conversion.kind).toBe('incomplete')
+    expect(result.trend.conversion.kind).toBe('incomplete')
+    expect(result.categories.conversion.kind).toBe('incomplete')
+    expect(result.pace.spentMTD).toBe(0)
+    expect(result.trend.months.find((month) => month.isCurrent)?.expenses).toBe(0)
+  })
+
+  it('does not let ineligible malformed rows poison dashboard totals', () => {
+    const result = buildDashboardAnalytics({
+      transactions: [
+        makeTransaction('ordinary', 'expense', 10000, 'USD', '2024-06-10'),
+        makeTransaction(
+          'staged-malformed',
+          'expense',
+          Number.MAX_SAFE_INTEGER + 1,
+          null as unknown as string,
+          '2024-06-10',
+          { ledger_treatment: 'staged_no_balance_impact' }
+        ),
+      ],
+      splits: [],
+      preferredCurrency: 'USD',
+      rates: USD_RATES,
+      now: FIXED_NOW,
+    })
+
+    expect(result.pace.conversion.kind).toBe('complete')
+    expect(result.pace.spentMTD).toBe(10000)
+  })
+
   it('uses splits for category composition and does not double-count parent', () => {
     const transactions: DashboardTransaction[] = [
       makeTransaction('split-parent', 'expense', 30000, 'USD', '2024-06-10', {

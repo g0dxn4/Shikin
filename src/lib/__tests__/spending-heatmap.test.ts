@@ -193,7 +193,7 @@ describe('aggregateHeatmapSpending', () => {
     expect(result.totalSpent).toBe(0)
   })
 
-  it('keeps zero and negative converted amounts without raw-summing other currencies', () => {
+  it('keeps zero amounts but withholds negative or unsafe parent amounts', () => {
     const convert: ConvertToPreferredFn = (amountCentavos, currency) => {
       if (currency !== 'USD') {
         return {
@@ -214,25 +214,54 @@ describe('aggregateHeatmapSpending', () => {
     expect(zeroOnly.totalSpent).toBe(0)
     expect(zeroOnly.dailyTotals.get('2024-06-15')).toBe(0)
 
-    const negative = aggregateHeatmapSpending(
-      [row({ id: 'refund-shaped', amount: -2500, currency: 'USD' })],
-      'USD',
-      convert
-    )
-    expect(negative.complete).toBe(true)
-    expect(negative.totalSpent).toBe(-2500)
+    for (const amount of [-2500, Number.MAX_SAFE_INTEGER + 1]) {
+      const malformed = aggregateHeatmapSpending(
+        [row({ id: 'malformed', amount, currency: 'USD' })],
+        'USD',
+        convert
+      )
+      expect(malformed).toMatchObject({
+        complete: false,
+        reason: 'invalid_category_allocations',
+        totalSpent: 0,
+        eligibleTransactions: [],
+      })
+    }
+  })
 
-    const mixedMissing = aggregateHeatmapSpending(
+  it('withholds null and blank parent currencies before conversion', () => {
+    const permissiveConverter: ConvertToPreferredFn = (amountCentavos) => ({
+      complete: true,
+      amountCentavos,
+      missingCurrencies: [],
+    })
+    for (const currency of ['', null as unknown as string]) {
+      const result = aggregateHeatmapSpending([row({ currency })], 'USD', permissiveConverter)
+      expect(result).toMatchObject({
+        complete: false,
+        reason: 'invalid_currency_data',
+        totalSpent: 0,
+        eligibleTransactions: [],
+      })
+    }
+  })
+
+  it('does not let staged malformed rows poison eligible heatmap totals', () => {
+    const result = aggregateHeatmapSpending(
       [
-        row({ id: 'neg', amount: -2500, currency: 'USD' }),
-        row({ id: 'mxn', amount: 1000, currency: 'MXN' }),
+        row({ id: 'ordinary', amount: 10000 }),
+        row({
+          id: 'staged',
+          amount: Number.MAX_SAFE_INTEGER + 1,
+          currency: null as unknown as string,
+          ledger_treatment: 'staged_no_balance_impact',
+        }),
       ],
       'USD',
-      convert
+      convertUsdOnly
     )
-    expect(mixedMissing.complete).toBe(false)
-    expect(mixedMissing.totalSpent).toBe(0)
-    expect(mixedMissing.missingCurrencies).toEqual(['MXN'])
+    expect(result.complete).toBe(true)
+    expect(result.totalSpent).toBe(10000)
   })
 
   it('excludes ineligible rows from every aggregate', () => {

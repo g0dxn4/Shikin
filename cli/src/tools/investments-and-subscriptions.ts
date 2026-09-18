@@ -20,6 +20,7 @@ import {
 } from './shared.js'
 
 import { listSubscriptionsSummary, getSubscriptionSpendingSummary } from '../insights.js'
+import { CASH_FLOW_SQL } from '../reporting-read.js'
 import { getCreditCardBillEntries, type CreditCardBillEntry } from './credit-cards.js'
 
 type InvestmentRow = {
@@ -871,14 +872,12 @@ const getUpcomingBills: ToolDefinition = {
 
     // Recurring transactions
     const recurringTx = await query<RecurringBillRow>(
-      `SELECT description, amount, currency, MAX(date) as date, COUNT(*) as count
-       FROM transactions
-       WHERE is_recurring = 1 AND type = 'expense'
-          AND COALESCE(reporting_treatment, 'normal') = 'normal'
-          AND COALESCE(is_archived, 0) = 0
-          AND date >= $1
-         AND COALESCE(NULLIF(TRIM(status), ''), 'posted') IN ('posted', 'cleared')
-       GROUP BY description, amount
+      `SELECT t.description, t.amount, UPPER(TRIM(t.currency)) AS currency,
+              MAX(t.date) as date, COUNT(*) as count
+       FROM transactions t
+       WHERE t.is_recurring = 1 AND t.type = 'expense'
+         AND t.date >= $1 AND ${CASH_FLOW_SQL}
+       GROUP BY t.description, t.amount, UPPER(TRIM(t.currency))
        HAVING count >= 1
        ORDER BY date DESC`,
       [today.subtract(60, 'day').format('YYYY-MM-DD')]
@@ -894,6 +893,7 @@ const getUpcomingBills: ToolDefinition = {
         const isDuplicate = bills.some(
           (b) =>
             b.name.toLowerCase() === tx.description.toLowerCase() &&
+            normalizeCurrencyCode(b.currency) === normalizeCurrencyCode(tx.currency) &&
             Math.abs(b.amount - fromCentavos(tx.amount)) < 1
         )
         if (!isDuplicate) {
@@ -911,14 +911,27 @@ const getUpcomingBills: ToolDefinition = {
 
     bills.sort((a, b) => a.daysUntilDue - b.daysUntilDue)
 
-    const totalDue = bills.reduce((sum, b) => sum + b.amount, 0)
+    const totals = new Map<string, number>()
+    for (const bill of bills) {
+      const currency = normalizeCurrencyCode(bill.currency) || bill.currency.trim().toUpperCase()
+      totals.set(currency, (totals.get(currency) ?? 0) + bill.amount)
+    }
+    const totalsByCurrency = [...totals.entries()]
+      .map(([currency, totalAmount]) => ({
+        currency,
+        totalAmount: Math.round(totalAmount * 100) / 100,
+      }))
+      .sort((a, b) => a.currency.localeCompare(b.currency))
+    const totalAmount =
+      totalsByCurrency.length <= 1 ? (totalsByCurrency[0]?.totalAmount ?? 0) : null
 
     return {
       success: true,
       bills,
       summary: {
         count: bills.length,
-        totalAmount: Math.round(totalDue * 100) / 100,
+        totalAmount,
+        totalsByCurrency,
         daysAhead,
         bySource: {
           creditCard: bills.filter((b) => b.source === 'credit_card').length,
@@ -929,7 +942,9 @@ const getUpcomingBills: ToolDefinition = {
       message:
         bills.length === 0
           ? `No upcoming bills in the next ${daysAhead} days.`
-          : `${bills.length} upcoming bill(s) in the next ${daysAhead} days, totaling $${totalDue.toFixed(2)}.`,
+          : totalsByCurrency.length === 1
+            ? `${bills.length} upcoming bill(s) in the next ${daysAhead} days, totaling ${totalsByCurrency[0].totalAmount.toFixed(2)} ${totalsByCurrency[0].currency}.`
+            : `${bills.length} upcoming bill(s) in the next ${daysAhead} days across ${totalsByCurrency.length} currencies (${totalsByCurrency.map((total) => `${total.currency} ${total.totalAmount.toFixed(2)}`).join(', ')}); no FX conversion was applied.`,
     }
   },
 }

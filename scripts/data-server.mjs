@@ -22,9 +22,10 @@ import { advanceAnchoredRecurrence, advanceLegacyRecurrence } from '@shikin/fina
 import {
   PRIVATE_DIR_MODE,
   PRIVATE_FILE_MODE,
+  createStorageContext,
   ensurePrivateDirectory,
   hardenPathMode,
-  prepareAppDataDir,
+  prepareStorageContext,
 } from './app-data-dir.mjs'
 import { exportDatabaseBuffer, importDatabaseBuffer } from './data-server-db.mjs'
 import {
@@ -55,16 +56,35 @@ if (STATIC_ROOT) {
   }
 }
 
-const DATA_DIR = prepareAppDataDir()
-const DB_PATH = join(DATA_DIR, 'shikin.db')
-const SETTINGS_PATH = join(DATA_DIR, 'settings.json')
-const NOTEBOOK_DIR = join(DATA_DIR, 'notebook')
-const HOSTED_PROCESS_PATH = join(DATA_DIR, '.shikin-web.pid')
-const RESTORE_LOCK_PATH = join(DATA_DIR, 'shikin.db.restore.lock')
+const STORAGE_CONTEXT = createStorageContext()
 
-// Ensure directories exist
-ensurePrivateDirectory(DATA_DIR)
-ensurePrivateDirectory(NOTEBOOK_DIR)
+function validateNativeSqliteBinding() {
+  let probe = null
+  try {
+    probe = new Database(':memory:')
+    probe.close()
+    probe = null
+  } catch (error) {
+    try {
+      probe?.close()
+    } catch {
+      // Keep the native load failure as the diagnostic cause.
+    }
+    throw new Error(
+      'The better-sqlite3 native binding could not be loaded for this Node.js runtime. Reinstall or rebuild the CLI dependencies for the active Node ABI.',
+      { cause: error }
+    )
+  }
+}
+
+// Native validation must succeed before preparation can inspect or migrate any
+// existing storage. The context itself is pure and immutable.
+validateNativeSqliteBinding()
+const DATA_DIR = prepareStorageContext(STORAGE_CONTEXT)
+const DB_PATH = STORAGE_CONTEXT.databasePath
+const SETTINGS_PATH = join(DATA_DIR, 'settings.json')
+const HOSTED_PROCESS_PATH = join(DATA_DIR, '.shikin-web.pid')
+const RESTORE_LOCK_PATH = STORAGE_CONTEXT.restoreLockPath
 
 function processIsRunning(pid) {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false
@@ -126,19 +146,73 @@ const releaseHostedProcessMarker = acquireHostedProcessMarker()
 
 // ── Database Setup ─────────────────────────────────────────────────────────
 
-function openDatabase() {
-  const database = new Database(DB_PATH)
-  database.pragma('journal_mode = WAL')
-  database.pragma('foreign_keys = ON')
-  database.pragma('busy_timeout = 5000')
-  hardenPathMode(DB_PATH, PRIVATE_FILE_MODE)
-  hardenPathMode(`${DB_PATH}-wal`, PRIVATE_FILE_MODE)
-  hardenPathMode(`${DB_PATH}-shm`, PRIVATE_FILE_MODE)
-  hardenPathMode(`${DB_PATH}-journal`, PRIVATE_FILE_MODE)
-  return database
+function sqliteErrorCode(error) {
+  return error && typeof error === 'object' && typeof error.code === 'string'
+    ? error.code
+    : undefined
 }
 
-let db = openDatabase()
+function databaseStartupError(error) {
+  const code = sqliteErrorCode(error)
+  const detail = error instanceof Error ? error.message : String(error)
+  if (
+    code === 'SQLITE_NOTADB' ||
+    code === 'SQLITE_CORRUPT' ||
+    /not a database|malformed/i.test(detail)
+  ) {
+    return new Error(
+      `The Shikin database at ${DB_PATH} is invalid or corrupt. Original error: ${detail}`,
+      {
+        cause: error,
+      }
+    )
+  }
+  if (
+    code === 'EACCES' ||
+    code === 'EPERM' ||
+    /permission denied|access denied|readonly|read-only/i.test(detail)
+  ) {
+    return new Error(
+      `Permission denied while opening the Shikin database at ${DB_PATH}. Original error: ${detail}`,
+      {
+        cause: error,
+      }
+    )
+  }
+  return new Error(`Unable to open the Shikin database at ${DB_PATH}. Original error: ${detail}`, {
+    cause: error,
+  })
+}
+
+function openDatabase() {
+  let database = null
+  try {
+    database = new Database(DB_PATH)
+    database.pragma('journal_mode = WAL')
+    database.pragma('foreign_keys = ON')
+    database.pragma('busy_timeout = 5000')
+    hardenPathMode(DB_PATH, PRIVATE_FILE_MODE)
+    hardenPathMode(`${DB_PATH}-wal`, PRIVATE_FILE_MODE)
+    hardenPathMode(`${DB_PATH}-shm`, PRIVATE_FILE_MODE)
+    hardenPathMode(`${DB_PATH}-journal`, PRIVATE_FILE_MODE)
+    return database
+  } catch (error) {
+    try {
+      database?.close()
+    } catch {
+      // Preserve the open/pragma failure.
+    }
+    throw databaseStartupError(error)
+  }
+}
+
+let db
+try {
+  db = openDatabase()
+} catch (error) {
+  releaseHostedProcessMarker()
+  throw error
+}
 const TRANSACTION_TTL_MS = Number(process.env.SHIKIN_SERVER_TRANSACTION_TTL_MS || 15000)
 const activeTransactions = new Map()
 const closedTransactions = new Map()
@@ -1402,7 +1476,17 @@ WHERE (currency IS NULL OR TRIM(currency) = '') AND account_id IS NOT NULL;
   console.log('[data-server] Migrations complete')
 }
 
-runMigrations()
+try {
+  runMigrations()
+} catch (error) {
+  try {
+    db?.close()
+  } catch {
+    // Preserve the initialization failure.
+  }
+  releaseHostedProcessMarker()
+  throw error
+}
 
 // ── Settings (Key-Value Store) ─────────────────────────────────────────────
 

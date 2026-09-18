@@ -18,7 +18,22 @@ export const PRIVATE_FILE_MODE = 0o600
 const DB_FILE_NAME = 'shikin.db'
 const SQLITE_FILE_SUFFIXES = ['', '-wal', '-shm', '-journal']
 const SQLITE_SIDECAR_SUFFIXES = SQLITE_FILE_SUFFIXES.slice(1)
-const RESPECT_XDG_DATA_HOME_VALUE = '1'
+const ENABLED_FLAG_VALUE = '1'
+
+export type StorageContext = Readonly<{
+  platform: NodeJS.Platform
+  appDataDir: string
+  appConfigDir: string
+  legacyAppDataDir: string
+  databasePath: string
+  backupDir: string
+  notebookDir: string
+  restoreLockPath: string
+  isCustomDataRoot: boolean
+  explicitIsolation: boolean
+  legacyMigrationApproved: boolean
+  allowLegacyMigration: boolean
+}>
 
 function isAbsolutePath(path: string, platform: NodeJS.Platform): boolean {
   return platform === 'win32' ? win32.isAbsolute(path) : isAbsolute(path)
@@ -38,19 +53,13 @@ function resolvePath(platform: NodeJS.Platform, path: string): string {
 
 function getHomeDir(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): string {
   const configuredHome = platform === 'win32' ? env.USERPROFILE || env.HOME : env.HOME
-  if (configuredHome && isAbsolutePath(configuredHome, platform)) {
-    return configuredHome
-  }
-
+  if (configuredHome && isAbsolutePath(configuredHome, platform)) return configuredHome
   return homedir()
 }
 
 export function getXdgDataHome(env: NodeJS.ProcessEnv = process.env): string {
   const configuredDataHome = env.XDG_DATA_HOME
-  if (configuredDataHome && isAbsolutePath(configuredDataHome, 'linux')) {
-    return configuredDataHome
-  }
-
+  if (configuredDataHome && isAbsolutePath(configuredDataHome, 'linux')) return configuredDataHome
   return joinPath('linux', getHomeDir(env, 'linux'), '.local', 'share')
 }
 
@@ -59,7 +68,6 @@ function getXdgConfigHome(env: NodeJS.ProcessEnv = process.env): string {
   if (configuredConfigHome && isAbsolutePath(configuredConfigHome, 'linux')) {
     return configuredConfigHome
   }
-
   return joinPath('linux', getHomeDir(env, 'linux'), '.config')
 }
 
@@ -70,16 +78,11 @@ function getPlatformDataHome(
   if (platform === 'darwin') {
     return joinPath(platform, getHomeDir(env, platform), 'Library', 'Application Support')
   }
-
   if (platform === 'win32') {
     const configuredAppData = env.APPDATA
-    if (configuredAppData && isAbsolutePath(configuredAppData, platform)) {
-      return configuredAppData
-    }
-
+    if (configuredAppData && isAbsolutePath(configuredAppData, platform)) return configuredAppData
     return joinPath(platform, getHomeDir(env, platform), 'AppData', 'Roaming')
   }
-
   return getXdgDataHome(env)
 }
 
@@ -90,69 +93,110 @@ export function getAppDataDir(
   return joinPath(platform, getPlatformDataHome(env, platform), SHIKIN_APP_ID)
 }
 
+function parseBooleanFlag(name: string, value: string | undefined): boolean {
+  if (value === undefined || value === '' || value === '0') return false
+  if (value === ENABLED_FLAG_VALUE) return true
+  throw new Error(`${name} must be unset, empty, "0", or "1"; received ${JSON.stringify(value)}`)
+}
+
 function validateExplicitXdgDataHomeIsolation(
   env: NodeJS.ProcessEnv,
-  platform: NodeJS.Platform = process.platform
-): boolean {
-  const configuredValue = env.SHIKIN_RESPECT_XDG_DATA_HOME
-  if (configuredValue === undefined || configuredValue === '' || configuredValue === '0') {
-    return false
-  }
-
-  if (configuredValue !== RESPECT_XDG_DATA_HOME_VALUE) {
-    throw new Error(
-      `SHIKIN_RESPECT_XDG_DATA_HOME must be unset, empty, "0", or "1"; received ${JSON.stringify(configuredValue)}`
-    )
-  }
-
+  platform: NodeJS.Platform,
+  requested: boolean
+): void {
+  if (!requested) return
   if (platform === 'darwin' || platform === 'win32') {
     throw new Error(
       `SHIKIN_RESPECT_XDG_DATA_HOME=1 is supported only on XDG platforms; received platform ${platform}`
     )
   }
-
   const configuredDataHome = env.XDG_DATA_HOME
   if (!configuredDataHome || !isAbsolutePath(configuredDataHome, 'linux')) {
     throw new Error(
       'SHIKIN_RESPECT_XDG_DATA_HOME=1 requires XDG_DATA_HOME to be a nonempty absolute path'
     )
   }
-
-  return true
 }
 
-function getPlatformConfigHome(
-  env: NodeJS.ProcessEnv,
-  platform: NodeJS.Platform = process.platform
-): string {
-  if (platform === 'darwin' || platform === 'win32') {
-    return getPlatformDataHome(env, platform)
-  }
-
+function getPlatformConfigHome(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string {
+  if (platform === 'darwin' || platform === 'win32') return getPlatformDataHome(env, platform)
   return getXdgConfigHome(env)
 }
 
-function getAppConfigDir(
-  env: NodeJS.ProcessEnv,
-  platform: NodeJS.Platform = process.platform
-): string {
-  return joinPath(platform, getPlatformConfigHome(env, platform), SHIKIN_APP_ID)
-}
-
-function getLegacyAppDataDir(
-  env: NodeJS.ProcessEnv,
-  platform: NodeJS.Platform = process.platform
-): string {
-  return joinPath(platform, getHomeDir(env, platform), '.local', 'share', SHIKIN_APP_ID)
-}
-
 function isSamePath(left: string, right: string, platform: NodeJS.Platform): boolean {
-  return resolvePath(platform, left) === resolvePath(platform, right)
+  const resolvedLeft = resolvePath(platform, left)
+  const resolvedRight = resolvePath(platform, right)
+  return platform === 'win32'
+    ? resolvedLeft.toLowerCase() === resolvedRight.toLowerCase()
+    : resolvedLeft === resolvedRight
+}
+
+function hasCustomDataRoot(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): boolean {
+  if (platform === 'darwin') return false
+  const home = getHomeDir(env, platform)
+
+  if (platform === 'win32') {
+    const appData = env.APPDATA
+    if (!appData || !isAbsolutePath(appData, platform)) return false
+    const normalAppData = joinPath(platform, home, 'AppData', 'Roaming')
+    return !isSamePath(appData, normalAppData, platform)
+  }
+
+  const xdgDataHome = env.XDG_DATA_HOME
+  if (!xdgDataHome || !isAbsolutePath(xdgDataHome, 'linux')) return false
+  const normalDataHome = joinPath('linux', home, '.local', 'share')
+  return !isSamePath(xdgDataHome, normalDataHome, platform)
+}
+
+/** Pure path and migration-policy resolution. This function performs no filesystem access. */
+export function createStorageContext(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform
+): StorageContext {
+  // Validate both policy flags before resolving HOME or any platform paths. This
+  // keeps malformed/unsupported isolation requests free of fallback host reads.
+  const explicitIsolation = parseBooleanFlag(
+    'SHIKIN_RESPECT_XDG_DATA_HOME',
+    env.SHIKIN_RESPECT_XDG_DATA_HOME
+  )
+  const legacyMigrationApproved = parseBooleanFlag(
+    'SHIKIN_MIGRATE_LEGACY_DATA',
+    env.SHIKIN_MIGRATE_LEGACY_DATA
+  )
+  if (explicitIsolation && legacyMigrationApproved) {
+    throw new Error('SHIKIN_RESPECT_XDG_DATA_HOME=1 conflicts with SHIKIN_MIGRATE_LEGACY_DATA=1')
+  }
+  validateExplicitXdgDataHomeIsolation(env, platform, explicitIsolation)
+
+  const appDataDir = getAppDataDir(env, platform)
+  // Strict isolation never inspects a source root. Keeping the unused source
+  // paths pinned to the selected root also avoids host HOME fallback reads.
+  const appConfigDir = explicitIsolation
+    ? appDataDir
+    : joinPath(platform, getPlatformConfigHome(env, platform), SHIKIN_APP_ID)
+  const legacyAppDataDir = explicitIsolation
+    ? appDataDir
+    : joinPath(platform, getHomeDir(env, platform), '.local', 'share', SHIKIN_APP_ID)
+  const isCustomDataRoot = explicitIsolation || hasCustomDataRoot(env, platform)
+
+  return Object.freeze({
+    platform,
+    appDataDir,
+    appConfigDir,
+    legacyAppDataDir,
+    databasePath: joinPath(platform, appDataDir, DB_FILE_NAME),
+    backupDir: joinPath(platform, appDataDir, 'backups'),
+    notebookDir: joinPath(platform, appDataDir, 'notebook'),
+    restoreLockPath: joinPath(platform, appDataDir, `${DB_FILE_NAME}.restore.lock`),
+    isCustomDataRoot,
+    explicitIsolation,
+    legacyMigrationApproved,
+    allowLegacyMigration: !explicitIsolation && (!isCustomDataRoot || legacyMigrationApproved),
+  })
 }
 
 function isMissingOrEmptyDirectory(path: string): boolean {
   if (!existsSync(path)) return true
-
   const stats = lstatSync(path)
   return stats.isDirectory() && !stats.isSymbolicLink() && readdirSync(path).length === 0
 }
@@ -166,9 +210,7 @@ function moveDirectory(source: string, target: string): void {
     renameSync(source, target)
     return
   } catch (error) {
-    if (!(error instanceof Error && 'code' in error && error.code === 'EXDEV')) {
-      throw error
-    }
+    if (!(error instanceof Error && 'code' in error && error.code === 'EXDEV')) throw error
   }
 
   const tempTarget = `${target}.tmp-${process.pid}-${Date.now()}`
@@ -190,19 +232,15 @@ function sqliteFamilyMembers(sourceDir: string, targetDir: string, targetName: s
 }
 
 function removeSqliteSidecars(dir: string, fileName: string): void {
-  for (const suffix of SQLITE_SIDECAR_SUFFIXES) {
+  for (const suffix of SQLITE_SIDECAR_SUFFIXES)
     rmSync(join(dir, `${fileName}${suffix}`), { force: true })
-  }
 }
 
 function moveSqliteFamily(sourceDir: string, targetDir: string, targetName: string): void {
   const members = sqliteFamilyMembers(sourceDir, targetDir, targetName)
   if (!members.some((member) => member.source.endsWith(DB_FILE_NAME))) return
-
   const existingTarget = members.find((member) => existsSync(member.target))
-  if (existingTarget) {
-    throw new Error(`target SQLite file already exists: ${existingTarget.target}`)
-  }
+  if (existingTarget) throw new Error(`target SQLite file already exists: ${existingTarget.target}`)
 
   const stamp = `${process.pid}-${Date.now()}`
   const stagedMembers = members.map((member) => ({
@@ -210,25 +248,19 @@ function moveSqliteFamily(sourceDir: string, targetDir: string, targetName: stri
     temp: `${member.target}.tmp-${stamp}`,
   }))
   const promotedTargets: string[] = []
-
   try {
     for (const member of stagedMembers) {
       cpSync(member.source, member.temp, { errorOnExist: true })
       hardenPathMode(member.temp, PRIVATE_FILE_MODE)
     }
-
     for (const member of stagedMembers) {
       renameSync(member.temp, member.target)
       promotedTargets.push(member.target)
       hardenPathMode(member.target, PRIVATE_FILE_MODE)
     }
   } catch (error) {
-    for (const member of stagedMembers) {
-      rmSync(member.temp, { force: true })
-    }
-    for (const promotedTarget of promotedTargets) {
-      rmSync(promotedTarget, { force: true })
-    }
+    for (const member of stagedMembers) rmSync(member.temp, { force: true })
+    for (const promotedTarget of promotedTargets) rmSync(promotedTarget, { force: true })
     throw error
   }
 
@@ -244,13 +276,9 @@ function moveSqliteFamily(sourceDir: string, targetDir: string, targetName: stri
 }
 
 function migrateLegacySqliteFamily(legacyAppDataDir: string, appDataDir: string): void {
-  const legacyDbPath = join(legacyAppDataDir, DB_FILE_NAME)
-  if (!existsSync(legacyDbPath)) return
-
+  if (!existsSync(join(legacyAppDataDir, DB_FILE_NAME))) return
   ensurePrivateDirectory(appDataDir)
-
-  const appDataDbPath = join(appDataDir, DB_FILE_NAME)
-  if (existsSync(appDataDbPath)) {
+  if (existsSync(join(appDataDir, DB_FILE_NAME))) {
     const backupName = `${DB_FILE_NAME}.legacy-backup-${Date.now()}`
     console.warn(
       `[storage] Both legacy and app data databases exist; preserving legacy database as ${backupName}`
@@ -258,56 +286,35 @@ function migrateLegacySqliteFamily(legacyAppDataDir: string, appDataDir: string)
     moveSqliteFamily(legacyAppDataDir, appDataDir, backupName)
     return
   }
-
   removeSqliteSidecars(appDataDir, DB_FILE_NAME)
   moveSqliteFamily(legacyAppDataDir, appDataDir, DB_FILE_NAME)
 }
 
-function migrateLegacyAppDataDir(
-  env: NodeJS.ProcessEnv,
-  platform: NodeJS.Platform = process.platform
-): string {
-  const appDataDir = getAppDataDir(env, platform)
-  const legacyAppDataDir = getLegacyAppDataDir(env, platform)
-
-  if (!isSamePath(appDataDir, legacyAppDataDir, platform) && existsSync(legacyAppDataDir)) {
-    try {
-      mkdirSync(dirnamePath(platform, appDataDir), { recursive: true, mode: PRIVATE_DIR_MODE })
-
-      if (isMissingOrEmptyDirectory(appDataDir)) {
-        if (existsSync(appDataDir)) {
-          rmdirSync(appDataDir)
-        }
-        moveDirectory(legacyAppDataDir, appDataDir)
-      } else {
-        migrateLegacySqliteFamily(legacyAppDataDir, appDataDir)
-      }
-    } catch (error) {
-      console.warn(
-        `[storage] Could not migrate legacy app data directory to app data: ${formatMigrationError(error)}`
-      )
+function migrateLegacyAppDataDir(context: StorageContext): void {
+  const { appDataDir, legacyAppDataDir, platform } = context
+  if (isSamePath(appDataDir, legacyAppDataDir, platform) || !existsSync(legacyAppDataDir)) return
+  try {
+    mkdirSync(dirnamePath(platform, appDataDir), { recursive: true, mode: PRIVATE_DIR_MODE })
+    if (isMissingOrEmptyDirectory(appDataDir)) {
+      if (existsSync(appDataDir)) rmdirSync(appDataDir)
+      moveDirectory(legacyAppDataDir, appDataDir)
+    } else {
+      migrateLegacySqliteFamily(legacyAppDataDir, appDataDir)
     }
+  } catch (error) {
+    console.warn(
+      `[storage] Could not migrate legacy app data directory to app data: ${formatMigrationError(error)}`
+    )
   }
-
-  return appDataDir
 }
 
-function migrateAppConfigSqliteFamily(
-  env: NodeJS.ProcessEnv,
-  appDataDir: string,
-  platform: NodeJS.Platform = process.platform
-): void {
-  const appConfigDir = getAppConfigDir(env, platform)
+function migrateAppConfigSqliteFamily(context: StorageContext): void {
+  const { appConfigDir, appDataDir, platform } = context
   if (isSamePath(appConfigDir, appDataDir, platform)) return
-
-  const appConfigDbPath = join(appConfigDir, DB_FILE_NAME)
-  if (!existsSync(appConfigDbPath)) return
-
+  if (!existsSync(join(appConfigDir, DB_FILE_NAME))) return
   try {
     ensurePrivateDirectory(appDataDir)
-
-    const appDataDbPath = join(appDataDir, DB_FILE_NAME)
-    if (existsSync(appDataDbPath)) {
+    if (existsSync(join(appDataDir, DB_FILE_NAME))) {
       const backupName = `${DB_FILE_NAME}.app-config-backup-${Date.now()}`
       console.warn(
         `[storage] Both AppConfig and app data databases exist; preserving AppConfig database as ${backupName}`
@@ -315,7 +322,6 @@ function migrateAppConfigSqliteFamily(
       moveSqliteFamily(appConfigDir, appDataDir, backupName)
       return
     }
-
     removeSqliteSidecars(appDataDir, DB_FILE_NAME)
     moveSqliteFamily(appConfigDir, appDataDir, DB_FILE_NAME)
   } catch (error) {
@@ -329,12 +335,8 @@ export function hardenPathMode(path: string, mode: number): void {
   try {
     chmodSync(path, mode)
   } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-      return
-    }
-    if (process.platform !== 'win32') {
-      throw error
-    }
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return
+    if (process.platform !== 'win32') throw error
   }
 }
 
@@ -342,32 +344,28 @@ export function ensurePrivateDirectory(path: string): void {
   try {
     mkdirSync(path, { recursive: true, mode: PRIVATE_DIR_MODE })
   } catch (error) {
-    if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) {
-      throw error
-    }
+    if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error
   }
-
   const stats = lstatSync(path)
   if (stats.isSymbolicLink() || !stats.isDirectory()) {
     throw new Error(`Refusing to use non-directory app data path: ${path}`)
   }
-
   hardenPathMode(path, PRIVATE_DIR_MODE)
+}
+
+/** Mutating preparation for an already validated, immutable context. */
+export function prepareStorageContext(context: StorageContext): string {
+  if (context.allowLegacyMigration) {
+    migrateLegacyAppDataDir(context)
+    migrateAppConfigSqliteFamily(context)
+  }
+  ensurePrivateDirectory(context.appDataDir)
+  return context.appDataDir
 }
 
 export function prepareAppDataDir(
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform
 ): string {
-  const respectConfiguredXdgDataHome = validateExplicitXdgDataHomeIsolation(env, platform)
-  const appDataDir = respectConfiguredXdgDataHome
-    ? getAppDataDir(env, platform)
-    : migrateLegacyAppDataDir(env, platform)
-
-  if (!respectConfiguredXdgDataHome) {
-    migrateAppConfigSqliteFamily(env, appDataDir, platform)
-  }
-
-  ensurePrivateDirectory(appDataDir)
-  return appDataDir
+  return prepareStorageContext(createStorageContext(env, platform))
 }

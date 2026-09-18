@@ -1,6 +1,7 @@
 mod database_snapshot;
 
 use std::{
+    env,
     ffi::{OsStr, OsString},
     fs, io,
     net::{TcpListener, TcpStream},
@@ -1087,14 +1088,155 @@ fn migrate_app_config_db_to_app_data(app_config_dir: &Path, app_data_dir: &Path)
     move_sqlite_family(app_config_dir, app_data_dir, DB_FILE_NAME).map(|_| ())
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StoragePlatform {
+    Xdg,
+    Macos,
+    Windows,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ConfiguredDataRoot {
+    DefaultOrUnconfigured,
+    Relative,
+    StandardAbsolute,
+    CustomAbsolute,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LegacyMigrationPolicy {
+    Allow,
+    Skip,
+}
+
+fn parse_storage_flag(name: &str, value: Option<&OsStr>) -> io::Result<bool> {
+    match value {
+        None => Ok(false),
+        Some(value) if value.is_empty() || value == OsStr::new("0") => Ok(false),
+        Some(value) if value == OsStr::new("1") => Ok(true),
+        Some(value) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{name} must be unset, empty, \"0\", or \"1\"; received {value:?}"),
+        )),
+    }
+}
+
+fn decide_legacy_migration_policy(
+    platform: StoragePlatform,
+    configured_root: ConfiguredDataRoot,
+    respect_xdg: Option<&OsStr>,
+    migrate_legacy: Option<&OsStr>,
+) -> io::Result<LegacyMigrationPolicy> {
+    let isolated = parse_storage_flag("SHIKIN_RESPECT_XDG_DATA_HOME", respect_xdg)?;
+    let migration_approved = parse_storage_flag("SHIKIN_MIGRATE_LEGACY_DATA", migrate_legacy)?;
+
+    if isolated && migration_approved {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "SHIKIN_RESPECT_XDG_DATA_HOME=1 conflicts with SHIKIN_MIGRATE_LEGACY_DATA=1",
+        ));
+    }
+    if isolated && platform != StoragePlatform::Xdg {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "SHIKIN_RESPECT_XDG_DATA_HOME=1 is supported only on XDG platforms",
+        ));
+    }
+    if isolated
+        && !matches!(
+            configured_root,
+            ConfiguredDataRoot::StandardAbsolute | ConfiguredDataRoot::CustomAbsolute
+        )
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "SHIKIN_RESPECT_XDG_DATA_HOME=1 requires XDG_DATA_HOME to be a nonempty absolute path",
+        ));
+    }
+
+    if isolated || (configured_root == ConfiguredDataRoot::CustomAbsolute && !migration_approved) {
+        Ok(LegacyMigrationPolicy::Skip)
+    } else {
+        Ok(LegacyMigrationPolicy::Allow)
+    }
+}
+
+fn current_storage_platform() -> StoragePlatform {
+    if cfg!(target_os = "macos") {
+        StoragePlatform::Macos
+    } else if cfg!(target_os = "windows") {
+        StoragePlatform::Windows
+    } else {
+        StoragePlatform::Xdg
+    }
+}
+
+fn classify_configured_data_root(platform: StoragePlatform) -> ConfiguredDataRoot {
+    let (configured, normal) = match platform {
+        StoragePlatform::Macos => return ConfiguredDataRoot::DefaultOrUnconfigured,
+        StoragePlatform::Windows => {
+            let configured = env::var_os("APPDATA");
+            let home = env::var_os("USERPROFILE").or_else(|| env::var_os("HOME"));
+            let normal = home
+                .map(PathBuf::from)
+                .map(|path| path.join("AppData").join("Roaming"));
+            (configured, normal)
+        }
+        StoragePlatform::Xdg => {
+            let configured = env::var_os("XDG_DATA_HOME");
+            let normal = env::var_os("HOME")
+                .map(PathBuf::from)
+                .map(|path| path.join(".local").join("share"));
+            (configured, normal)
+        }
+    };
+
+    let Some(configured) = configured else {
+        return ConfiguredDataRoot::DefaultOrUnconfigured;
+    };
+    if configured.is_empty() {
+        return ConfiguredDataRoot::DefaultOrUnconfigured;
+    }
+    let configured = PathBuf::from(configured);
+    if !configured.is_absolute() {
+        return ConfiguredDataRoot::Relative;
+    }
+    let is_standard = normal.as_deref().is_some_and(|normal| {
+        if platform == StoragePlatform::Windows {
+            configured
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&normal.to_string_lossy())
+        } else {
+            configured == normal
+        }
+    });
+    if is_standard {
+        ConfiguredDataRoot::StandardAbsolute
+    } else {
+        ConfiguredDataRoot::CustomAbsolute
+    }
+}
+
 fn prepare_app_data_db(identifier: &str) -> io::Result<()> {
+    // Validate policy before dirs path resolution, directory creation, or any
+    // legacy source inspection/migration.
+    let platform = current_storage_platform();
+    let migration_policy = decide_legacy_migration_policy(
+        platform,
+        classify_configured_data_root(platform),
+        env::var_os("SHIKIN_RESPECT_XDG_DATA_HOME").as_deref(),
+        env::var_os("SHIKIN_MIGRATE_LEGACY_DATA").as_deref(),
+    )?;
+
     let app_data_dir = dirs::data_dir()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no app data path was found"))?;
-    let app_data_dir = app_data_dir.join(identifier);
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no app data path was found"))?
+        .join(identifier);
     ensure_private_dir(&app_data_dir)?;
 
-    if let Some(config_dir) = dirs::config_dir() {
-        migrate_app_config_db_to_app_data(&config_dir.join(identifier), &app_data_dir)?;
+    if migration_policy == LegacyMigrationPolicy::Allow {
+        if let Some(config_dir) = dirs::config_dir() {
+            migrate_app_config_db_to_app_data(&config_dir.join(identifier), &app_data_dir)?;
+        }
     }
 
     Ok(())
@@ -1477,6 +1619,95 @@ mod tests {
         assert!(!close_to_tray_setting_from_json(&serde_json::json!({
             CLOSE_TO_TRAY_KEY: false
         })));
+    }
+
+    #[test]
+    fn storage_policy_skips_unapproved_custom_roots_and_allows_explicit_migration() {
+        assert_eq!(
+            decide_legacy_migration_policy(
+                StoragePlatform::Xdg,
+                ConfiguredDataRoot::CustomAbsolute,
+                None,
+                None,
+            )
+            .unwrap(),
+            LegacyMigrationPolicy::Skip
+        );
+        assert_eq!(
+            decide_legacy_migration_policy(
+                StoragePlatform::Windows,
+                ConfiguredDataRoot::CustomAbsolute,
+                None,
+                Some(OsStr::new("1")),
+            )
+            .unwrap(),
+            LegacyMigrationPolicy::Allow
+        );
+        assert_eq!(
+            decide_legacy_migration_policy(
+                StoragePlatform::Macos,
+                ConfiguredDataRoot::DefaultOrUnconfigured,
+                None,
+                None,
+            )
+            .unwrap(),
+            LegacyMigrationPolicy::Allow
+        );
+    }
+
+    #[test]
+    fn storage_policy_rejects_invalid_flags_conflicts_and_unsupported_isolation() {
+        let invalid = decide_legacy_migration_policy(
+            StoragePlatform::Xdg,
+            ConfiguredDataRoot::CustomAbsolute,
+            None,
+            Some(OsStr::new("true")),
+        )
+        .unwrap_err();
+        assert!(invalid.to_string().contains("SHIKIN_MIGRATE_LEGACY_DATA"));
+
+        let conflict = decide_legacy_migration_policy(
+            StoragePlatform::Xdg,
+            ConfiguredDataRoot::CustomAbsolute,
+            Some(OsStr::new("1")),
+            Some(OsStr::new("1")),
+        )
+        .unwrap_err();
+        assert!(conflict.to_string().contains("conflicts"));
+
+        for platform in [StoragePlatform::Macos, StoragePlatform::Windows] {
+            let unsupported = decide_legacy_migration_policy(
+                platform,
+                ConfiguredDataRoot::CustomAbsolute,
+                Some(OsStr::new("1")),
+                None,
+            )
+            .unwrap_err();
+            assert!(unsupported.to_string().contains("only on XDG platforms"));
+        }
+
+        let relative = decide_legacy_migration_policy(
+            StoragePlatform::Xdg,
+            ConfiguredDataRoot::Relative,
+            Some(OsStr::new("1")),
+            None,
+        )
+        .unwrap_err();
+        assert!(relative.to_string().contains("absolute path"));
+    }
+
+    #[test]
+    fn storage_policy_preserves_standard_root_upgrade_migration() {
+        for root in [
+            ConfiguredDataRoot::DefaultOrUnconfigured,
+            ConfiguredDataRoot::Relative,
+            ConfiguredDataRoot::StandardAbsolute,
+        ] {
+            assert_eq!(
+                decide_legacy_migration_policy(StoragePlatform::Xdg, root, None, None).unwrap(),
+                LegacyMigrationPolicy::Allow
+            );
+        }
     }
 
     #[test]

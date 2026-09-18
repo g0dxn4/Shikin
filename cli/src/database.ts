@@ -15,18 +15,13 @@ import {
 } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
-import {
-  PRIVATE_FILE_MODE,
-  ensurePrivateDirectory,
-  hardenPathMode,
-  prepareAppDataDir,
-} from './app-data-dir.js'
+import { PRIVATE_FILE_MODE, ensurePrivateDirectory, hardenPathMode } from './app-data-dir.js'
+import { prepareStorageForWrite, storageContext } from './storage-context.js'
 
-const DB_FILE_NAME = 'shikin.db'
-const DATA_DIR = prepareAppDataDir()
-const DB_PATH = join(DATA_DIR, DB_FILE_NAME)
-const BACKUP_DIR = join(DATA_DIR, 'backups')
-const RESTORE_LOCK_PATH = join(DATA_DIR, `${DB_FILE_NAME}.restore.lock`)
+const DATA_DIR = storageContext.appDataDir
+const DB_PATH = storageContext.databasePath
+const BACKUP_DIR = storageContext.backupDir
+const RESTORE_LOCK_PATH = storageContext.restoreLockPath
 const SQLITE_SIDECAR_SUFFIXES = ['-wal', '-shm', '-journal'] as const
 const SQLITE_FAMILY_SUFFIXES = ['', ...SQLITE_SIDECAR_SUFFIXES] as const
 const MAX_BACKUP_METADATA_ENTRIES = 20
@@ -1033,36 +1028,114 @@ function assertShikinSchemaReady(db: Database.Database, dbPath = DB_PATH): void 
   assertCliQolSchemaReady(db, dbPath)
 }
 
+type DatabaseInitializationErrorCode =
+  | 'DATABASE_MISSING'
+  | 'DATABASE_PERMISSION'
+  | 'DATABASE_OPEN'
+  | 'DATABASE_INVALID'
+  | 'DATABASE_SCHEMA_NOT_READY'
+
+class DatabaseInitializationError extends Error {
+  readonly code: DatabaseInitializationErrorCode
+
+  constructor(code: DatabaseInitializationErrorCode, message: string, cause: unknown) {
+    super(message, { cause })
+    this.name = 'DatabaseInitializationError'
+    this.code = code
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function databaseInitializationError(error: unknown): DatabaseInitializationError {
+  if (error instanceof DatabaseInitializationError) return error
+
+  const code = sqliteErrorCode(error)
+  const message = errorMessage(error)
+  let databasePathErrorCode: string | undefined
+  try {
+    statSync(DB_PATH)
+  } catch (pathError) {
+    databasePathErrorCode = sqliteErrorCode(pathError)
+  }
+  if (
+    code === 'SQLITE_NOTADB' ||
+    code === 'SQLITE_CORRUPT' ||
+    /not a database|malformed/i.test(message)
+  ) {
+    return new DatabaseInitializationError(
+      'DATABASE_INVALID',
+      `The Shikin database at ${DB_PATH} is invalid or corrupt. Original error: ${message}`,
+      error
+    )
+  }
+  if (/not ready for CLI\/MCP use/i.test(message)) {
+    return new DatabaseInitializationError('DATABASE_SCHEMA_NOT_READY', message, error)
+  }
+  if (
+    code === 'EACCES' ||
+    code === 'EPERM' ||
+    code === 'SQLITE_PERM' ||
+    code === 'SQLITE_AUTH' ||
+    code === 'SQLITE_READONLY' ||
+    databasePathErrorCode === 'EACCES' ||
+    databasePathErrorCode === 'EPERM' ||
+    /permission denied|access denied|readonly|read-only/i.test(message)
+  ) {
+    return new DatabaseInitializationError(
+      'DATABASE_PERMISSION',
+      `Permission denied while opening the Shikin database at ${DB_PATH}. Check ownership and access permissions. Original error: ${message}`,
+      error
+    )
+  }
+  if (/does not exist|no such file/i.test(message) || databasePathErrorCode === 'ENOENT') {
+    return new DatabaseInitializationError(
+      'DATABASE_MISSING',
+      `The Shikin database does not exist at ${DB_PATH}. Open the Shikin app once to initialize the shared database before using the CLI or MCP server. Original error: ${message}`,
+      error
+    )
+  }
+  return new DatabaseInitializationError(
+    'DATABASE_OPEN',
+    `Unable to open the Shikin database at ${DB_PATH}. Original error: ${message}`,
+    error
+  )
+}
+
 function openDb(): Database.Database {
   try {
-    const db = new Database(DB_PATH, { fileMustExist: true })
-    hardenPathMode(DB_PATH, PRIVATE_FILE_MODE)
-    return db
+    return new Database(DB_PATH, { fileMustExist: true })
   } catch (error) {
-    throw new Error(
-      `Unable to open the Shikin database at ${DB_PATH}. ` +
-        'Open the Shikin app once to initialize the shared database before using the CLI or MCP server. ' +
-        `Original error: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error }
-    )
+    throw databaseInitializationError(error)
   }
 }
 
 function getDb(): Database.Database {
   if (!_db) {
-    const db = openDb()
-    db.pragma('journal_mode = WAL')
-    db.pragma('foreign_keys = ON')
-    hardenPathMode(`${DB_PATH}-wal`, PRIVATE_FILE_MODE)
-    hardenPathMode(`${DB_PATH}-shm`, PRIVATE_FILE_MODE)
-    hardenPathMode(`${DB_PATH}-journal`, PRIVATE_FILE_MODE)
+    // The in-memory constructor/close probe must happen before preparation can
+    // inspect or migrate any existing user files.
+    prepareStorageForWrite()
 
+    let db: Database.Database | null = null
     try {
+      db = openDb()
+      db.pragma('journal_mode = WAL')
+      db.pragma('foreign_keys = ON')
+      hardenPathMode(DB_PATH, PRIVATE_FILE_MODE)
+      hardenPathMode(`${DB_PATH}-wal`, PRIVATE_FILE_MODE)
+      hardenPathMode(`${DB_PATH}-shm`, PRIVATE_FILE_MODE)
+      hardenPathMode(`${DB_PATH}-journal`, PRIVATE_FILE_MODE)
       assertShikinSchemaReady(db)
       _db = db
     } catch (error) {
-      db.close()
-      throw error
+      try {
+        db?.close()
+      } catch {
+        // Retain the initialization error as the diagnostic cause.
+      }
+      throw databaseInitializationError(error)
     }
   }
   return _db
@@ -1126,6 +1199,7 @@ export async function restoreDatabase({
   sourcePath: string
   dryRun?: boolean
 }): Promise<DatabaseRestoreResult> {
+  prepareStorageForWrite()
   const candidate = stageRestoreCandidate(sourcePath)
   if (dryRun) {
     try {

@@ -84,7 +84,8 @@ Notes:
 - One-off transfers are supported with `--type transfer --account-id <source> --transfer-to-account-id <destination>`. Recurring transfer rules are still deferred.
 - Structured options must be valid JSON.
 - The CLI reads and writes the shared Shikin database under the platform app-data directory: `~/.local/share/com.asf.shikin/shikin.db` on Linux and `~/Library/Application Support/com.asf.shikin/shikin.db` on macOS.
-- For isolated source/dev smoke tests on Linux and other XDG platforms, set `SHIKIN_RESPECT_XDG_DATA_HOME=1` with an absolute temp `XDG_DATA_HOME` such as `/tmp/opencode/shikin-smoke`; this keeps test data isolated and skips legacy HOME/AppConfig data moves into the temp directory. The explicit isolation request fails before storage preparation if the path is missing, empty, or relative, or if the platform is macOS or Windows. Setting `XDG_DATA_HOME` without the explicit flag retains the normal migration policy and is not an isolation guarantee.
+- For isolated source/dev smoke tests on Linux and other XDG platforms, set `SHIKIN_RESPECT_XDG_DATA_HOME=1` with an absolute temp `XDG_DATA_HOME` such as `/tmp/opencode/shikin-smoke`; this keeps test data isolated and skips all legacy HOME/AppConfig source checks and moves. The explicit isolation request fails before storage preparation if the path is missing, empty, or relative, or if the platform is macOS or Windows.
+- An absolute custom `XDG_DATA_HOME` (or custom Windows `APPDATA`) is isolated by default: Shikin uses only that selected root and does not inspect or relocate legacy data. To approve a one-time existing-data relocation into a custom root, set `SHIKIN_MIGRATE_LEGACY_DATA=1` for that invocation. Do not combine migration approval with `SHIKIN_RESPECT_XDG_DATA_HOME=1`. Standard platform roots retain ordinary upgrade migration behavior.
 
 ## Automation Workflows
 
@@ -186,7 +187,8 @@ The MCP server also exposes read-only resources:
 - `SHIKIN_SERVER_TRANSACTION_TTL_MS`: override the browser data-server transaction lease timeout (default `15000`).
 - `SHIKIN_DATA_SERVER_MAX_JSON_BODY_BYTES`: override the data-server JSON request size limit.
 - `SHIKIN_DATA_SERVER_MAX_DB_IMPORT_BYTES`: override the SQLite import payload size limit.
-- `SHIKIN_RESPECT_XDG_DATA_HOME=1`: on Linux and other XDG platforms, require an absolute, nonempty `XDG_DATA_HOME` and use it for CLI/data-server testing without automatically moving legacy HOME/AppConfig data into it. Invalid flag values and unsupported macOS/Windows use fail before filesystem preparation; unset, empty, and `0` preserve normal behavior. This protects only explicit test isolation requests—bare `XDG_DATA_HOME` still uses the normal migration policy.
+- `SHIKIN_RESPECT_XDG_DATA_HOME=1`: on Linux and other XDG platforms, require an absolute, nonempty `XDG_DATA_HOME` for source/dev isolation and skip all legacy-source inspection and migration. Invalid values and unsupported macOS/Windows use fail before filesystem preparation. Use this for disposable tests; unset, empty, and `0` do not request strict test isolation.
+- `SHIKIN_MIGRATE_LEGACY_DATA=1`: explicitly approve existing HOME/AppConfig data relocation into a nondefault custom XDG or Windows data root. Unset, empty, and `0` leave custom roots isolated; any other value is rejected. It conflicts with `SHIKIN_RESPECT_XDG_DATA_HOME=1`. This approval is unnecessary for ordinary upgrades using the standard platform data root.
 
 ## Current Scope
 

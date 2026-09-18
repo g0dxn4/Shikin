@@ -267,6 +267,38 @@ describe('CLI database readiness', { timeout: 20_000 }, () => {
     expect(REQUIRED_MIGRATIONS).toHaveLength(sharedMigrations.length)
   })
 
+  it('does not prepare storage or create a database at module import time', async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-import-'))
+    const dataHome = join(homeDir, 'data')
+    tempHomes.add(homeDir)
+
+    const databaseModule = await importFreshDatabaseModule(homeDir, dataHome)
+
+    expect(existsSync(join(dataHome, 'com.asf.shikin'))).toBe(false)
+    expect(databaseModule.getDatabasePath()).toBe(join(dataHome, 'com.asf.shikin', 'shikin.db'))
+  })
+
+  it('reports a missing database without creating one', async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-missing-'))
+    tempHomes.add(homeDir)
+
+    const { query, getDatabasePath } = await importFreshDatabaseModule(homeDir)
+
+    expect(() => query('SELECT 1')).toThrow(/database does not exist/i)
+    expect(existsSync(getDatabasePath())).toBe(false)
+  })
+
+  it('reports invalid database bytes separately from missing and schema readiness', async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-invalid-'))
+    tempHomes.add(homeDir)
+    const dbPath = createCliDatabasePath(homeDir)
+    writeFileSync(dbPath, 'not sqlite')
+
+    const { query } = await importFreshDatabaseModule(homeDir)
+
+    expect(() => query('SELECT 1')).toThrow(/invalid or corrupt/i)
+  })
+
   it('allows queries once the shared Shikin schema is ready', async () => {
     const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-'))
     tempHomes.add(homeDir)

@@ -1,9 +1,8 @@
 import { lstatSync } from 'node:fs'
-import { isAbsolute, join, relative, resolve } from 'node:path'
-import { prepareAppDataDir } from './app-data-dir.js'
+import { isAbsolute, relative, resolve } from 'node:path'
+import { storageContext } from './storage-context.js'
 
-const DATA_DIR = prepareAppDataDir()
-export const NOTEBOOK_DIR = join(DATA_DIR, 'notebook')
+export const NOTEBOOK_DIR = storageContext.notebookDir
 
 export function isSafeNotebookPathInput(
   value: string,

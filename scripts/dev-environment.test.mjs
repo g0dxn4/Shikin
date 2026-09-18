@@ -33,8 +33,8 @@ describe('development data isolation', () => {
     writeFileSync(join(legacyDir, 'shikin.db'), 'real-user-data')
 
     const env = {
-      HOME: home,
       ...isolatedAppDataEnvironment(sandbox, 'linux'),
+      HOME: home,
     }
     const isolatedDir = prepareAppDataDir(env, 'linux')
 
@@ -43,9 +43,30 @@ describe('development data isolation', () => {
     expect(readFileSync(join(legacyDir, 'shikin.db'), 'utf8')).toBe('real-user-data')
   })
 
-  it('isolates the native platform data home on macOS and Windows', () => {
+  it('rejects relative Linux/XDG sandbox roots', () => {
+    expect(() => isolatedAppDataEnvironment('relative-sandbox', 'linux')).toThrow(
+      /absolute temporary root/i
+    )
+  })
+
+  it('uses only synthetic absolute roots on every supported development platform', () => {
     const root = tempRoot()
-    expect(isolatedAppDataEnvironment(root, 'darwin')).toEqual({ HOME: root })
-    expect(isolatedAppDataEnvironment(root, 'win32')).toEqual({ APPDATA: root })
+    expect(isolatedAppDataEnvironment(root, 'linux')).toEqual({
+      HOME: root,
+      XDG_DATA_HOME: root,
+      SHIKIN_RESPECT_XDG_DATA_HOME: '1',
+      SHIKIN_MIGRATE_LEGACY_DATA: '0',
+    })
+    expect(isolatedAppDataEnvironment(root, 'darwin')).toEqual({
+      HOME: root,
+      SHIKIN_RESPECT_XDG_DATA_HOME: '0',
+      SHIKIN_MIGRATE_LEGACY_DATA: '0',
+    })
+    expect(isolatedAppDataEnvironment(root, 'win32')).toEqual({
+      APPDATA: root,
+      USERPROFILE: root,
+      SHIKIN_RESPECT_XDG_DATA_HOME: '0',
+      SHIKIN_MIGRATE_LEGACY_DATA: '0',
+    })
   })
 })

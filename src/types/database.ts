@@ -13,6 +13,7 @@ import type {
 
 export type TransactionStatus = 'pending' | 'posted' | 'cleared'
 export type AccountMode = 'transactional' | 'snapshot_only'
+export type AccountValuationMode = 'cash_plus_holdings' | 'portfolio_snapshot' | 'unresolved'
 export type LedgerTreatment = 'normal' | 'staged_no_balance_impact'
 export type ReportingTreatment = 'normal' | 'exclude_from_cashflow'
 export type TransactionKind = 'standard' | 'reconciliation_bridge' | 'archived_transfer_mirror'
@@ -29,6 +30,7 @@ export interface Account {
   is_archived: number
   is_primary?: number
   account_mode?: AccountMode
+  valuation_mode?: AccountValuationMode
   credit_limit?: number
   statement_closing_day?: number
   payment_due_day?: number
@@ -69,6 +71,7 @@ export interface Transaction {
   transaction_kind?: TransactionKind
   staging_batch_id?: string | null
   reconciliation_id?: ULID | null
+  finalization_id?: ULID | null
   matched_transaction_id?: ULID | null
   is_archived?: number
   is_placeholder?: number
@@ -80,6 +83,7 @@ export interface Transaction {
   import_source?: string | null
   import_external_id?: string | null
   import_fingerprint?: string | null
+  import_content_fingerprint?: string | null
   created_at: DateTimeStr
   updated_at: DateTimeStr
 }
@@ -137,7 +141,11 @@ export interface Investment {
   name: string
   type: InvestmentType
   shares: number
+  quantity_decimal?: string | null
   avg_cost_basis: Money
+  avg_cost_basis_decimal?: string | null
+  cost_basis_known?: number
+  instrument_key?: string | null
   currency: CurrencyCode
   notes: string | null
   created_at: DateTimeStr

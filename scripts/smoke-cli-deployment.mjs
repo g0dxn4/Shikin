@@ -1,9 +1,10 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const rootPackage = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
@@ -47,6 +48,7 @@ function runNode(args, env) {
     cwd: root,
     env,
     encoding: 'utf8',
+    timeout: 15_000,
   })
   if (result.error) throw result.error
   if (result.status !== 0) {
@@ -134,6 +136,7 @@ async function requestHostedApi(port, path, body, options = {}) {
       ...(options.headers ?? {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    signal: AbortSignal.timeout(10_000),
   })
   const payload = await response.json()
   if (!response.ok) {
@@ -150,7 +153,8 @@ function assertPackagedWebAssets(webRoot) {
   const assetPaths = [...index.matchAll(/(?:src|href)="([^"?#]+)"/g)]
     .map((match) => match[1])
     .filter((path) => path.startsWith('/assets/'))
-  if (assetPaths.length === 0) throw new Error('Packaged web/index.html does not reference any assets.')
+  if (assetPaths.length === 0)
+    throw new Error('Packaged web/index.html does not reference any assets.')
 
   for (const assetPath of assetPaths) {
     if (!existsSync(join(webRoot, assetPath))) {
@@ -161,7 +165,298 @@ function assertPackagedWebAssets(webRoot) {
   return assetPaths
 }
 
-async function smokeHostedWeb(cliEntrypoint, deployedWebRoot, isolatedEnv) {
+async function snapshotHostedTables(port) {
+  const tables = await requestHostedApi(port, '/api/db/query', {
+    sql: "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+    params: [],
+  })
+  const snapshot = {}
+
+  for (const { name } of tables) {
+    if (typeof name !== 'string' || name.length === 0) {
+      throw new Error(`Hosted database returned an invalid table name: ${JSON.stringify(name)}`)
+    }
+    const escapedName = name.replaceAll('"', '""')
+    snapshot[name] = await requestHostedApi(port, '/api/db/query', {
+      sql: `SELECT * FROM "${escapedName}"`,
+      params: [],
+    })
+  }
+
+  return snapshot
+}
+
+function parseMcpTextResult(result, toolName) {
+  const textContent = result?.content?.find((item) => item?.type === 'text')
+  if (!textContent || typeof textContent.text !== 'string') {
+    throw new Error(`${toolName} returned no MCP text content: ${JSON.stringify(result)}`)
+  }
+
+  try {
+    return JSON.parse(textContent.text)
+  } catch (error) {
+    throw new Error(
+      `${toolName} returned invalid JSON text: ${error instanceof Error ? error.message : String(error)}`
+    )
+  }
+}
+
+function formatError(error) {
+  return error instanceof Error ? error.stack || error.message : String(error)
+}
+
+async function withTimeout(promise, label, timeoutMs = 10_000) {
+  let timeout
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`${label} timed out after ${timeoutMs}ms.`)),
+          timeoutMs
+        )
+      }),
+    ])
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function smokeMcp({ cliEntrypoint, entrypoint, packageFile, env, port, fixture }) {
+  const requireFromDeployedCli = createRequire(packageFile)
+  const clientModulePath = requireFromDeployedCli.resolve(
+    '@modelcontextprotocol/sdk/client/index.js'
+  )
+  const stdioModulePath = requireFromDeployedCli.resolve(
+    '@modelcontextprotocol/sdk/client/stdio.js'
+  )
+  const [{ Client }, { StdioClientTransport }] = await Promise.all([
+    import(pathToFileURL(clientModulePath).href),
+    import(pathToFileURL(stdioModulePath).href),
+  ])
+
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [entrypoint],
+    cwd: root,
+    env,
+    stderr: 'pipe',
+  })
+  let stderr = ''
+  transport.stderr?.setEncoding('utf8')
+  transport.stderr?.on('data', (chunk) => {
+    stderr = `${stderr}${chunk}`.slice(-20_000)
+  })
+
+  const client = new Client({ name: 'shikin-deployment-smoke', version: rootPackage.version })
+  let operationError
+  let toolCount = 0
+
+  try {
+    await client.connect(transport, { timeout: 10_000 })
+
+    const before = await snapshotHostedTables(port)
+    const cliCatalog = JSON.parse(runNode([cliEntrypoint, 'tools', '--json'], env))
+    const cliTools = cliCatalog.commands?.filter((command) => command.kind === 'tool') ?? []
+    if (cliCatalog.toolCount !== cliTools.length || cliTools.length === 0) {
+      throw new Error(
+        `Deployed CLI returned an invalid tool catalog: ${JSON.stringify(cliCatalog)}`
+      )
+    }
+
+    const listed = await client.listTools(undefined, { timeout: 10_000 })
+    const mcpTools = listed.tools ?? []
+    toolCount = mcpTools.length
+    const cliNames = cliTools.map((tool) => tool.name).sort()
+    const mcpNames = mcpTools.map((tool) => tool.name).sort()
+    if (new Set(mcpNames).size !== mcpNames.length) {
+      throw new Error(`MCP returned duplicate tool names: ${JSON.stringify(mcpNames)}`)
+    }
+    if (JSON.stringify(mcpNames) !== JSON.stringify(cliNames)) {
+      throw new Error(
+        `CLI/MCP tool catalog mismatch. CLI=${JSON.stringify(cliNames)} MCP=${JSON.stringify(mcpNames)}`
+      )
+    }
+
+    for (const tool of mcpTools) {
+      if (
+        !tool.inputSchema ||
+        typeof tool.inputSchema !== 'object' ||
+        Array.isArray(tool.inputSchema) ||
+        Object.keys(tool.inputSchema).length === 0
+      ) {
+        throw new Error(`MCP tool ${tool.name} has an empty input schema.`)
+      }
+      if (tool.inputSchema.type !== 'object') {
+        throw new Error(`MCP tool ${tool.name} input schema is not an object schema.`)
+      }
+    }
+
+    const cliAccounts = JSON.parse(runNode([cliEntrypoint, 'list-accounts', '--json'], env))
+    const cliFixture = cliAccounts.accounts?.find((account) => account.id === fixture.accountId)
+    if (!cliFixture) {
+      throw new Error(`CLI list-accounts did not return fixture ${fixture.accountId}.`)
+    }
+
+    const listAccountsResult = await client.callTool(
+      { name: 'list-accounts', arguments: {} },
+      undefined,
+      { timeout: 10_000 }
+    )
+    if (listAccountsResult.isError) {
+      throw new Error(`MCP list-accounts failed: ${JSON.stringify(listAccountsResult)}`)
+    }
+    const mcpAccounts = parseMcpTextResult(listAccountsResult, 'list-accounts')
+    const mcpFixture = mcpAccounts.accounts?.find((account) => account.id === fixture.accountId)
+    if (!mcpFixture || mcpFixture.id !== cliFixture.id) {
+      throw new Error(
+        `CLI and MCP did not read the same fixture account ID ${fixture.accountId}: ${JSON.stringify({ cliFixture, mcpFixture })}`
+      )
+    }
+
+    const transactionsResult = await client.callTool(
+      {
+        name: 'query-transactions',
+        arguments: { accountId: fixture.accountId, limit: 10 },
+      },
+      undefined,
+      { timeout: 10_000 }
+    )
+    if (transactionsResult.isError) {
+      throw new Error(`MCP query-transactions failed: ${JSON.stringify(transactionsResult)}`)
+    }
+    const transactions = parseMcpTextResult(transactionsResult, 'query-transactions')
+    if (transactions.success !== true || !Array.isArray(transactions.transactions)) {
+      throw new Error(`Unexpected query-transactions payload: ${JSON.stringify(transactions)}`)
+    }
+
+    const schemaInvalidResult = await client.callTool(
+      { name: 'query-transactions', arguments: { limit: 0 } },
+      undefined,
+      { timeout: 10_000 }
+    )
+    const schemaInvalidText = schemaInvalidResult.content?.find(
+      (item) => item?.type === 'text'
+    )?.text
+    if (
+      schemaInvalidResult.isError !== true ||
+      typeof schemaInvalidText !== 'string' ||
+      !schemaInvalidText.toLowerCase().includes('validation')
+    ) {
+      throw new Error(
+        `MCP schema-invalid error result was unstable: ${JSON.stringify(schemaInvalidResult)}`
+      )
+    }
+
+    const domainInvalidResult = await client.callTool(
+      {
+        name: 'add-transaction',
+        arguments: {
+          accountId: fixture.accountId,
+          category: 'Missing MCP Smoke Category',
+          amount: 12.34,
+          type: 'expense',
+          description: 'MCP deployment smoke invalid category',
+          date: '2026-01-15',
+          dryRun: true,
+        },
+      },
+      undefined,
+      { timeout: 10_000 }
+    )
+    const domainInvalidPayload = parseMcpTextResult(
+      domainInvalidResult,
+      'add-transaction invalid category'
+    )
+    if (
+      domainInvalidResult.isError !== true ||
+      domainInvalidPayload.success !== false ||
+      domainInvalidPayload.errorType !== 'execution_error' ||
+      typeof domainInvalidPayload.error !== 'string' ||
+      domainInvalidPayload.error.length === 0 ||
+      domainInvalidPayload.error !== domainInvalidPayload.message
+    ) {
+      throw new Error(
+        `MCP domain-invalid error envelope was unstable: ${JSON.stringify(domainInvalidResult)}`
+      )
+    }
+
+    const dryRunResult = await client.callTool(
+      {
+        name: 'add-transaction',
+        arguments: {
+          accountId: fixture.accountId,
+          category: fixture.categoryName,
+          amount: 12.34,
+          type: 'expense',
+          description: 'MCP deployment smoke dry run',
+          date: '2026-01-15',
+          dryRun: true,
+        },
+      },
+      undefined,
+      { timeout: 10_000 }
+    )
+    if (dryRunResult.isError) {
+      throw new Error(`MCP add-transaction dry run failed: ${JSON.stringify(dryRunResult)}`)
+    }
+    const dryRun = parseMcpTextResult(dryRunResult, 'add-transaction dry run')
+    if (
+      dryRun.success !== true ||
+      dryRun.dryRun !== true ||
+      dryRun.wouldCreate?.accountId !== fixture.accountId ||
+      dryRun.wouldCreate?.category !== fixture.categoryName
+    ) {
+      throw new Error(`Unexpected add-transaction dry-run payload: ${JSON.stringify(dryRun)}`)
+    }
+
+    const after = await snapshotHostedTables(port)
+    if (JSON.stringify(after) !== JSON.stringify(before)) {
+      const changedTables = Array.from(
+        new Set([...Object.keys(before), ...Object.keys(after)])
+      ).filter((name) => JSON.stringify(before[name]) !== JSON.stringify(after[name]))
+      throw new Error(
+        `MCP reads or financial dry run changed database table contents: ${changedTables.join(', ')}`
+      )
+    }
+  } catch (error) {
+    operationError = error
+  }
+
+  let closeError
+  try {
+    await withTimeout(client.close(), 'MCP client close', 5_000)
+  } catch (error) {
+    closeError = error
+  }
+  try {
+    await withTimeout(transport.close(), 'MCP stdio transport close', 5_000)
+  } catch (error) {
+    closeError ??= error
+  }
+
+  if (operationError || closeError) {
+    throw new Error(
+      [
+        operationError ? formatError(operationError) : null,
+        closeError ? `MCP close failed: ${formatError(closeError)}` : null,
+        stderr ? `MCP stderr:\n${stderr}` : null,
+      ]
+        .filter(Boolean)
+        .join('\n')
+    )
+  }
+
+  return toolCount
+}
+
+async function smokeHostedWeb(
+  cliEntrypoint,
+  mcpEntrypoint,
+  packageFile,
+  deployedWebRoot,
+  isolatedEnv
+) {
   const packagedAssets = assertPackagedWebAssets(deployedWebRoot)
   const port = await findAvailablePort()
   const child = spawn(process.execPath, [cliEntrypoint, 'web', '--port', String(port)], {
@@ -179,14 +474,18 @@ async function smokeHostedWeb(cliEntrypoint, deployedWebRoot, isolatedEnv) {
     await waitForDataServer(child, () => stderr)
 
     for (const path of ['/', '/settings']) {
-      const response = await fetch(`http://127.0.0.1:${port}${path}`)
+      const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+        signal: AbortSignal.timeout(10_000),
+      })
       const html = await response.text()
       if (!response.ok || !html.includes('<div id="root">')) {
         throw new Error(`Hosted web path ${path} did not serve the production SPA.`)
       }
     }
     for (const assetPath of packagedAssets) {
-      const response = await fetch(`http://127.0.0.1:${port}${assetPath}`)
+      const response = await fetch(`http://127.0.0.1:${port}${assetPath}`, {
+        signal: AbortSignal.timeout(10_000),
+      })
       if (!response.ok) {
         throw new Error(`Hosted web asset ${assetPath} did not serve successfully.`)
       }
@@ -208,7 +507,11 @@ async function smokeHostedWeb(cliEntrypoint, deployedWebRoot, isolatedEnv) {
         isolatedEnv
       )
     )
-    if (created?.account?.name !== 'CLI Shared DB Smoke') {
+    if (
+      created?.account?.name !== 'CLI Shared DB Smoke' ||
+      typeof created.account.id !== 'string' ||
+      created.account.id.length === 0
+    ) {
       throw new Error(`Unexpected deployed CLI create response: ${JSON.stringify(created)}`)
     }
 
@@ -238,10 +541,23 @@ async function smokeHostedWeb(cliEntrypoint, deployedWebRoot, isolatedEnv) {
         origin: 'https://wrong-origin.example',
       },
       body: JSON.stringify({ sql: 'SELECT 1', params: [] }),
+      signal: AbortSignal.timeout(10_000),
     })
     if (wrongOrigin.status !== 403) {
       throw new Error(`Hosted web API accepted a wrong Origin with status ${wrongOrigin.status}.`)
     }
+
+    return await smokeMcp({
+      cliEntrypoint,
+      entrypoint: mcpEntrypoint,
+      packageFile,
+      env: isolatedEnv,
+      port,
+      fixture: {
+        accountId: created.account.id,
+        categoryName: 'Web Shared DB Smoke',
+      },
+    })
   } finally {
     const stopped = await stopChild(child)
     if (stopped.code !== 0 || stopped.signal !== null) {
@@ -252,44 +568,6 @@ async function smokeHostedWeb(cliEntrypoint, deployedWebRoot, isolatedEnv) {
   }
 }
 
-function smokeMcp(entrypoint, env) {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn(process.execPath, [entrypoint], {
-      cwd: root,
-      env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
-    let stderr = ''
-    child.stderr.setEncoding('utf8')
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk
-    })
-
-    const timeout = setTimeout(() => {
-      child.kill('SIGKILL')
-      reject(new Error('Deployed MCP entrypoint did not exit after stdin closed.'))
-    }, 5_000)
-
-    child.once('error', (error) => {
-      clearTimeout(timeout)
-      reject(error)
-    })
-    child.once('close', (code, signal) => {
-      clearTimeout(timeout)
-      if (code !== 0) {
-        reject(
-          new Error(
-            `Deployed MCP entrypoint exited with code ${code} signal ${signal ?? 'none'}\n${stderr}`
-          )
-        )
-        return
-      }
-      resolvePromise()
-    })
-    child.stdin.end()
-  })
-}
-
 const actualPnpmVersion = runPnpm(['--version'], { capture: true })
 if (actualPnpmVersion !== pinnedPnpmVersion) {
   throw new Error(`Expected pnpm ${pinnedPnpmVersion}, received ${actualPnpmVersion}.`)
@@ -298,11 +576,17 @@ if (actualPnpmVersion !== pinnedPnpmVersion) {
 const tempRoot = mkdtempSync(join(tmpdir(), 'shikin-cli-deploy-smoke-'))
 try {
   const deployDir = join(tempRoot, 'cli-support')
-  const homeDir = join(tempRoot, 'home')
-  const dataDir = join(tempRoot, 'xdg-data')
-  const configDir = join(tempRoot, 'xdg-config')
-  const cacheDir = join(tempRoot, 'xdg-cache')
-  for (const directory of [homeDir, dataDir, configDir, cacheDir]) {
+  const syntheticRoots = {
+    home: join(tempRoot, 'home'),
+    userProfile: join(tempRoot, 'user-profile'),
+    appData: join(tempRoot, 'app-data'),
+    localAppData: join(tempRoot, 'local-app-data'),
+    xdgData: join(tempRoot, 'xdg-data'),
+    xdgConfig: join(tempRoot, 'xdg-config'),
+    xdgCache: join(tempRoot, 'xdg-cache'),
+    temp: join(tempRoot, 'tmp'),
+  }
+  for (const directory of Object.values(syntheticRoots)) {
     mkdirSync(directory, { recursive: true })
   }
 
@@ -336,21 +620,41 @@ try {
   assertNoFinanceCoreRuntimeImport(cliEntrypoint)
   assertNoFinanceCoreRuntimeImport(mcpEntrypoint)
 
+  const inheritedEnv = Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([name, value]) => value !== undefined && !name.startsWith('SHIKIN_')
+    )
+  )
   const isolatedEnv = {
-    ...process.env,
-    HOME: homeDir,
-    XDG_DATA_HOME: dataDir,
-    XDG_CONFIG_HOME: configDir,
-    XDG_CACHE_HOME: cacheDir,
+    ...inheritedEnv,
+    HOME: syntheticRoots.home,
+    USERPROFILE: syntheticRoots.userProfile,
+    APPDATA: syntheticRoots.appData,
+    LOCALAPPDATA: syntheticRoots.localAppData,
+    XDG_DATA_HOME: syntheticRoots.xdgData,
+    XDG_CONFIG_HOME: syntheticRoots.xdgConfig,
+    XDG_CACHE_HOME: syntheticRoots.xdgCache,
+    TMPDIR: syntheticRoots.temp,
+    TMP: syntheticRoots.temp,
+    TEMP: syntheticRoots.temp,
+    SHIKIN_RESPECT_XDG_DATA_HOME:
+      process.platform === 'darwin' || process.platform === 'win32' ? '0' : '1',
   }
   const version = runNode([cliEntrypoint, '--version'], isolatedEnv)
   if (version !== rootPackage.version) {
     throw new Error(`Deployed CLI reported version ${version}; expected ${rootPackage.version}.`)
   }
-  await smokeHostedWeb(cliEntrypoint, deployedWebRoot, isolatedEnv)
-  await smokeMcp(mcpEntrypoint, isolatedEnv)
+  const mcpToolCount = await smokeHostedWeb(
+    cliEntrypoint,
+    mcpEntrypoint,
+    packageFile,
+    deployedWebRoot,
+    isolatedEnv
+  )
 
-  console.log(`CLI deployment and hosted web shared-database smoke passed with pnpm ${actualPnpmVersion}.`)
+  console.log(
+    `CLI deployment, hosted web shared-database, and ${mcpToolCount}-tool MCP protocol smoke passed with pnpm ${actualPnpmVersion}.`
+  )
 } finally {
   rmSync(tempRoot, { recursive: true, force: true })
 }

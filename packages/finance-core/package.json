@@ -11,6 +11,16 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./corrections": {
+      "types": "./dist/corrections.d.ts",
+      "import": "./dist/corrections.js",
+      "default": "./dist/corrections.js"
+    },
+    "./valuation": {
+      "types": "./dist/valuation.d.ts",
+      "import": "./dist/valuation.js",
+      "default": "./dist/valuation.js"
     }
   },
   "files": [

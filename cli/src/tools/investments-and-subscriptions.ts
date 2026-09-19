@@ -20,22 +20,22 @@ import {
 } from './shared.js'
 
 import { listSubscriptionsSummary, getSubscriptionSpendingSummary } from '../insights.js'
+import {
+  canonicalDecimal,
+  decimalFromCentavos,
+  instrumentIdentityKey,
+  valueHolding,
+  type InstrumentIdentity,
+  type PriceProvider,
+} from '@shikin/finance-core/valuation'
+import {
+  readInvestmentValuationRows,
+  readValuationRates,
+  rowToHoldingInput,
+  type InvestmentValuationRow,
+} from '../valuation-read.js'
 import { CASH_FLOW_SQL } from '../reporting-read.js'
 import { getCreditCardBillEntries, type CreditCardBillEntry } from './credit-cards.js'
-
-type InvestmentRow = {
-  id: string
-  name: string
-  symbol: string
-  type: InvestmentType
-  shares: number
-  avg_cost_basis: number
-  currency: string
-  account_id: string | null
-  notes: string | null
-  created_at: string
-  updated_at: string
-}
 
 const INVESTMENT_TYPES = [
   'stock',
@@ -48,12 +48,7 @@ const INVESTMENT_TYPES = [
 ] as const
 type InvestmentType = (typeof INVESTMENT_TYPES)[number]
 
-type InvestmentWithPriceRow = InvestmentRow & {
-  account_name: string | null
-  latest_price: number | null
-  latest_price_currency: string | null
-  latest_price_date: string | null
-}
+type InvestmentWithPriceRow = InvestmentValuationRow
 
 type RecurringBillRow = {
   description: string
@@ -226,6 +221,12 @@ function normalizeInvestmentSymbol(value: string): string {
   return value.trim().toUpperCase()
 }
 
+function nonNegativeDecimal(value: string, label: string): string {
+  const decimal = canonicalDecimal(value)
+  if (decimal.startsWith('-')) throw new RangeError(`${label} must be non-negative`)
+  return decimal
+}
+
 function redactInvestmentText(value: string | null, redacted: boolean): string | null {
   if (!redacted) return value
   return value === null ? null : '[REDACTED]'
@@ -263,73 +264,85 @@ function investmentSnapshot(
   options: { redacted?: boolean } = {}
 ) {
   const redacted = options.redacted ?? false
-  const avgCostCentavos = investment.avg_cost_basis
-  const costBasisCentavos = Math.round(investment.shares * investment.avg_cost_basis)
-  const currentPriceCentavos = investment.latest_price ?? null
-  const marketValueCentavos =
-    currentPriceCentavos === null ? null : Math.round(investment.shares * currentPriceCentavos)
-  const priceCurrency = investment.latest_price_currency
-  const comparableCurrencies =
-    priceCurrency !== null &&
-    normalizeCurrencyCode(priceCurrency) === normalizeCurrencyCode(investment.currency)
-  const gainLossCentavos =
-    marketValueCentavos === null || !comparableCurrencies
+  const input = rowToHoldingInput(investment)
+  const targetCurrency = investment.price_quote_currency ?? investment.currency
+  const valuation = valueHolding(input, targetCurrency, readValuationRates(targetCurrency))
+  const currentPriceDecimal = valuation.price?.unitPriceDecimal ?? null
+  const currentPriceCentavos =
+    currentPriceDecimal === null
       ? null
-      : marketValueCentavos - costBasisCentavos
+      : valueHolding(
+          { ...input, quantityDecimal: '1' },
+          targetCurrency,
+          readValuationRates(targetCurrency)
+        ).valueCentavos
+  const costBasisCentavos = valuation.costBasisCentavos
+  const marketValueCentavos = valuation.valueCentavos
+  const gainLossCentavos = valuation.gainLossCentavos
   const gainLossPercent =
-    gainLossCentavos === null || costBasisCentavos <= 0
+    gainLossCentavos === null || costBasisCentavos === null || costBasisCentavos === 0
       ? null
-      : Math.round((gainLossCentavos / costBasisCentavos) * 10000) / 100
+      : Math.round((gainLossCentavos / Math.abs(costBasisCentavos)) * 10000) / 100
 
   return {
     id: investment.id,
     accountId: investment.account_id,
-    accountName: redactInvestmentText(investment.account_name, redacted),
+    accountName: redactInvestmentText(investment.account_name ?? null, redacted),
     symbol: investment.symbol,
     name: redactInvestmentText(investment.name, redacted),
     type: investment.type,
     shares: investment.shares,
-    avgCost: fromCentavos(avgCostCentavos),
-    avgCostCentavos,
-    costBasis: fromCentavos(costBasisCentavos),
+    quantityDecimal: input.quantityDecimal,
+    quantityPrecision: investment.quantity_decimal ? 'exact_decimal' : 'legacy_number',
+    avgCost: input.avgCostBasisDecimal === null ? null : Number(input.avgCostBasisDecimal),
+    avgCostDecimal: input.avgCostBasisDecimal,
+    avgCostCentavos: investment.cost_basis_known === 1 ? investment.avg_cost_basis : null,
+    costBasisKnown: input.costBasisKnown,
+    costBasis: costBasisCentavos === null ? null : fromCentavos(costBasisCentavos),
     costBasisCentavos,
     currency: investment.currency,
     notes: redactInvestmentText(investment.notes, redacted),
     createdAt: investment.created_at,
     updatedAt: investment.updated_at,
+    instrumentKey: investment.instrument_key,
     currentPrice: currentPriceCentavos === null ? null : fromCentavos(currentPriceCentavos),
+    currentPriceDecimal,
     currentPriceCentavos,
-    priceCurrency,
-    priceDate: investment.latest_price_date,
-    lastPriceDate: investment.latest_price_date,
+    priceCurrency: valuation.valueCurrency,
+    priceProvider: valuation.price?.provider ?? null,
+    priceInstrumentId: valuation.price?.instrumentId ?? null,
+    priceExchange: valuation.price?.exchange ?? null,
+    priceDate: valuation.price?.quoteDate ?? null,
+    lastPriceDate: valuation.price?.quoteDate ?? null,
     marketValue: marketValueCentavos === null ? null : fromCentavos(marketValueCentavos),
     marketValueCentavos,
     gainLoss: gainLossCentavos === null ? null : fromCentavos(gainLossCentavos),
     gainLossCentavos,
     gainLossPercent,
+    valuationComplete: valuation.complete,
+    valuationReasons: valuation.reasons,
   }
 }
 
 function getInvestment(investmentId: string): InvestmentWithPriceRow | null {
-  const rows = query<InvestmentWithPriceRow>(
-    `SELECT i.id, i.account_id, i.symbol, i.name, i.type, i.shares, i.avg_cost_basis, i.currency, i.notes, i.created_at, i.updated_at,
-            a.name as account_name,
-            sp.price as latest_price,
-            COALESCE(sp.quote_currency, sp.currency) as latest_price_currency,
-            sp.date as latest_price_date
-     FROM investments i
-     LEFT JOIN accounts a ON a.id = i.account_id
-     LEFT JOIN (
-       SELECT symbol, price, currency, quote_currency, date,
-              ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC, created_at DESC, id DESC) as rn
-       FROM stock_prices
-     ) sp ON sp.symbol = i.symbol AND sp.rn = 1
-     WHERE i.id = $1
-     LIMIT 1`,
-    [investmentId]
-  )
+  return readInvestmentValuationRows('WHERE i.id = $1 LIMIT 1', [investmentId])[0] ?? null
+}
 
-  return rows[0] ?? null
+function manualPriceIdentity(input: {
+  type: InvestmentType
+  symbol: string
+  provider?: PriceProvider
+  instrumentId?: string
+  exchange?: string
+  quoteCurrency: string
+}): InstrumentIdentity {
+  return {
+    assetType: input.type,
+    provider: input.provider ?? 'manual',
+    instrumentId: normalizeOptionalText(input.instrumentId) ?? input.symbol,
+    exchange: normalizeOptionalText(input.exchange) ?? '',
+    quoteCurrency: normalizeCurrencyCode(input.quoteCurrency),
+  }
 }
 
 const manageInvestment: ToolDefinition = {
@@ -349,20 +362,57 @@ const manageInvestment: ToolDefinition = {
       .enum(INVESTMENT_TYPES)
       .optional()
       .describe('Investment type, including CETES for Mexican treasury holdings'),
-    shares: z.number().finite().min(0).optional().describe('Number of shares/units'),
+    shares: z
+      .number()
+      .finite()
+      .min(0)
+      .optional()
+      .describe('Legacy-compatible number of shares/units'),
+    quantityDecimal: z.string().trim().min(1).max(82).optional().describe('Exact decimal quantity'),
     avgCost: z
       .number()
       .finite()
       .min(0)
       .optional()
-      .describe('Average cost basis per share in main currency unit'),
+      .describe('Legacy-compatible average cost per unit'),
+    avgCostDecimal: z
+      .string()
+      .trim()
+      .min(1)
+      .max(82)
+      .optional()
+      .describe('Exact average cost per unit'),
+    costBasisKnown: z
+      .boolean()
+      .optional()
+      .describe('Whether cost basis is known; known zero is explicit'),
     currentPrice: z
       .number()
       .finite()
       .min(0)
       .optional()
-      .describe('Current price per share (will be saved to price history)'),
-    currency: assetCode('Currency code').optional(),
+      .describe('Legacy-compatible manually verified unit price'),
+    currentPriceDecimal: z
+      .string()
+      .trim()
+      .min(1)
+      .max(82)
+      .optional()
+      .describe('Exact manually verified unit price'),
+    priceProvider: z.enum(['manual', 'alpha_vantage', 'finnhub', 'coingecko']).optional(),
+    instrumentId: boundedText(
+      'Instrument ID',
+      'Provider instrument ID, never a guessed ticker',
+      200
+    ).optional(),
+    exchange: z
+      .string()
+      .trim()
+      .max(120)
+      .optional()
+      .describe('Exact listing exchange/region, or empty when not applicable'),
+    quoteCurrency: assetCode('Actual quote currency').optional(),
+    currency: assetCode('Cost basis currency code').optional(),
     accountId: z
       .string()
       .trim()
@@ -400,8 +450,16 @@ const manageInvestment: ToolDefinition = {
     symbol,
     type,
     shares,
+    quantityDecimal,
     avgCost,
+    avgCostDecimal,
+    costBasisKnown,
     currentPrice,
+    currentPriceDecimal,
+    priceProvider,
+    instrumentId,
+    exchange,
+    quoteCurrency,
     currency,
     accountId,
     account,
@@ -421,29 +479,88 @@ const manageInvestment: ToolDefinition = {
 
       const id = generateId()
       const normalizedSymbol = normalizeInvestmentSymbol(symbol)
+      const resolvedType = type ?? 'stock'
       const resolvedCurrency = normalizeCurrencyCode(currency) || 'USD'
-      const avgCostCentavos = avgCost !== undefined ? toCentavos(avgCost) : 0
+      const exactQuantity = nonNegativeDecimal(quantityDecimal ?? String(shares ?? 0), 'Quantity')
+      const legacyShares = shares ?? Number(exactQuantity)
+      if (!Number.isFinite(legacyShares) || legacyShares < 0) {
+        return {
+          success: false,
+          reason: 'invalid_quantity',
+          message: 'Quantity must be non-negative.',
+        }
+      }
+      const hasCost = avgCostDecimal !== undefined || avgCost !== undefined
+      const resolvedCostKnown = costBasisKnown ?? hasCost
+      const exactAvgCost = resolvedCostKnown
+        ? nonNegativeDecimal(avgCostDecimal ?? String(avgCost ?? 0), 'Average cost')
+        : null
+      const avgCostCentavos = exactAvgCost === null ? 0 : toCentavos(Number(exactAvgCost))
+      const hasManualPrice = currentPriceDecimal !== undefined || currentPrice !== undefined
+      if (hasManualPrice && priceProvider && priceProvider !== 'manual') {
+        return {
+          success: false,
+          reason: 'provider_quote_not_verified',
+          message:
+            'CLI-entered prices must use provider manual. Provider identities activate only after a validated provider response.',
+        }
+      }
+      const identityFieldsRequested =
+        priceProvider !== undefined ||
+        instrumentId !== undefined ||
+        exchange !== undefined ||
+        quoteCurrency !== undefined
+      if (identityFieldsRequested && !hasManualPrice) {
+        return {
+          success: false,
+          reason: 'identity_not_validated',
+          message:
+            'A provider identity was not activated. Supply a manually verified price, or refresh through a provider adapter.',
+        }
+      }
+      const exactPrice = hasManualPrice
+        ? nonNegativeDecimal(currentPriceDecimal ?? String(currentPrice), 'Current price')
+        : null
+      const identity = exactPrice
+        ? manualPriceIdentity({
+            type: resolvedType,
+            symbol: normalizedSymbol,
+            provider: 'manual',
+            instrumentId,
+            exchange,
+            quoteCurrency: quoteCurrency ?? resolvedCurrency,
+          })
+        : null
+      const acceptedInstrumentKey = identity ? instrumentIdentityKey(identity) : null
       const resolvedAccount = resolveOptionalInvestmentAccount(accountId, account)
       if (!resolvedAccount.success) return resolvedAccount
       const now = dayjs().toISOString()
       const today = dayjs().format('YYYY-MM-DD')
-      const priceCentavos = currentPrice !== undefined ? toCentavos(currentPrice) : null
       const investment: InvestmentWithPriceRow = {
         id,
         account_id: resolvedAccount.id,
         account_name: resolvedAccount.name,
         symbol: normalizedSymbol,
         name,
-        type: type ?? 'stock',
-        shares: shares ?? 0,
+        type: resolvedType,
+        shares: legacyShares,
+        quantity_decimal: exactQuantity,
         avg_cost_basis: avgCostCentavos,
+        avg_cost_basis_decimal: exactAvgCost,
+        cost_basis_known: resolvedCostKnown ? 1 : 0,
+        instrument_key: acceptedInstrumentKey,
         currency: resolvedCurrency,
         notes: normalizeOptionalText(notes),
         created_at: now,
         updated_at: now,
-        latest_price: priceCentavos,
-        latest_price_currency: priceCentavos === null ? null : resolvedCurrency,
-        latest_price_date: priceCentavos === null ? null : today,
+        price_instrument_key: acceptedInstrumentKey,
+        price_asset_type: identity?.assetType ?? null,
+        price_provider: identity?.provider ?? null,
+        price_instrument_id: identity?.instrumentId ?? null,
+        price_exchange: identity?.exchange ?? null,
+        price_quote_currency: identity?.quoteCurrency ?? null,
+        unit_price_decimal: exactPrice,
+        quote_date: exactPrice === null ? null : today,
       }
       const snapshot = investmentSnapshot(investment)
 
@@ -459,8 +576,8 @@ const manageInvestment: ToolDefinition = {
 
       transaction(() => {
         execute(
-          `INSERT INTO investments (id, account_id, symbol, name, type, shares, avg_cost_basis, currency, notes, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          `INSERT INTO investments (id, account_id, symbol, name, type, shares, quantity_decimal, avg_cost_basis, avg_cost_basis_decimal, cost_basis_known, instrument_key, currency, notes, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
           [
             id,
             investment.account_id,
@@ -468,7 +585,11 @@ const manageInvestment: ToolDefinition = {
             investment.name,
             investment.type,
             investment.shares,
+            investment.quantity_decimal,
             investment.avg_cost_basis,
+            investment.avg_cost_basis_decimal,
+            investment.cost_basis_known,
+            investment.instrument_key,
             investment.currency,
             investment.notes,
             investment.created_at,
@@ -476,16 +597,19 @@ const manageInvestment: ToolDefinition = {
           ]
         )
 
-        if (priceCentavos !== null) {
+        if (identity && exactPrice && acceptedInstrumentKey) {
           execute(
-            `INSERT OR REPLACE INTO stock_prices (id, symbol, price, currency, quote_currency, date, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            `INSERT INTO instrument_prices (id, instrument_key, asset_type, provider, instrument_id, exchange, quote_currency, unit_price_decimal, quote_date, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
             [
               generateId(),
-              investment.symbol,
-              priceCentavos,
-              investment.currency,
-              investment.currency,
+              acceptedInstrumentKey,
+              identity.assetType,
+              identity.provider,
+              identity.instrumentId,
+              identity.exchange,
+              identity.quoteCurrency,
+              exactPrice,
               today,
               now,
             ]
@@ -508,7 +632,7 @@ const manageInvestment: ToolDefinition = {
         action: 'added' as const,
         dryRun: false,
         investment: snapshot,
-        message: `Added investment: ${name} (${normalizedSymbol}) — ${shares ?? 0} shares at ${resolvedCurrency} ${(avgCost ?? 0).toFixed(2)} avg cost.`,
+        message: `Added investment: ${name} (${normalizedSymbol}) — ${exactQuantity} units.`,
       }
     }
 
@@ -538,20 +662,91 @@ const manageInvestment: ToolDefinition = {
 
       const normalizedSymbol =
         symbol !== undefined ? normalizeInvestmentSymbol(symbol) : existing.symbol
-      const symbolChanged = normalizedSymbol !== existing.symbol
+      const resolvedType = type ?? existing.type
       const resolvedCurrency =
         currency !== undefined ? normalizeCurrencyCode(currency) : existing.currency
+      const exactQuantity =
+        quantityDecimal !== undefined
+          ? nonNegativeDecimal(quantityDecimal, 'Quantity')
+          : shares !== undefined
+            ? nonNegativeDecimal(String(shares), 'Quantity')
+            : existing.quantity_decimal?.trim() || String(existing.shares)
+      const legacyShares =
+        shares ?? (quantityDecimal !== undefined ? Number(exactQuantity) : existing.shares)
+      if (!Number.isFinite(legacyShares) || legacyShares < 0) {
+        return {
+          success: false,
+          reason: 'invalid_quantity',
+          message: 'Quantity must be non-negative.',
+        }
+      }
+      const costWasProvided = avgCostDecimal !== undefined || avgCost !== undefined
+      const resolvedCostKnown =
+        costBasisKnown ?? (costWasProvided ? true : existing.cost_basis_known === 1)
+      const exactAvgCost = resolvedCostKnown
+        ? nonNegativeDecimal(
+            avgCostDecimal ??
+              (avgCost !== undefined
+                ? String(avgCost)
+                : existing.avg_cost_basis_decimal?.trim() ||
+                  decimalFromCentavos(existing.avg_cost_basis)),
+            'Average cost'
+          )
+        : null
+      const avgCostCentavos = exactAvgCost === null ? 0 : toCentavos(Number(exactAvgCost))
+      const hasManualPrice = currentPriceDecimal !== undefined || currentPrice !== undefined
+      if (hasManualPrice && priceProvider && priceProvider !== 'manual') {
+        return {
+          success: false,
+          reason: 'provider_quote_not_verified',
+          message:
+            'CLI-entered prices must use provider manual. Provider identities activate only after a validated provider response.',
+        }
+      }
+      const exactPrice = hasManualPrice
+        ? nonNegativeDecimal(currentPriceDecimal ?? String(currentPrice), 'Current price')
+        : null
+      const replacementIdentity = exactPrice
+        ? manualPriceIdentity({
+            type: resolvedType,
+            symbol: normalizedSymbol,
+            provider: 'manual',
+            instrumentId,
+            exchange,
+            quoteCurrency: quoteCurrency ?? resolvedCurrency,
+          })
+        : null
+      const replacementInstrumentKey = replacementIdentity
+        ? instrumentIdentityKey(replacementIdentity)
+        : null
+      const identityFieldsRequested =
+        priceProvider !== undefined ||
+        instrumentId !== undefined ||
+        exchange !== undefined ||
+        quoteCurrency !== undefined
+      if (identityFieldsRequested && !exactPrice) {
+        return {
+          success: false,
+          reason: 'identity_not_validated',
+          message:
+            'A replacement identity was not activated. Supply a manually verified price, or refresh through a provider adapter; the prior verified binding is preserved.',
+        }
+      }
       const investmentFieldsChanged =
         name !== undefined ||
         symbol !== undefined ||
         type !== undefined ||
         shares !== undefined ||
+        quantityDecimal !== undefined ||
         avgCost !== undefined ||
+        avgCostDecimal !== undefined ||
+        costBasisKnown !== undefined ||
         currency !== undefined ||
         accountWasProvided ||
-        notes !== undefined
+        notes !== undefined ||
+        exactPrice !== null
 
-      if (!investmentFieldsChanged && currentPrice === undefined) {
+      if (!investmentFieldsChanged) {
         return {
           success: false,
           reason: 'no_investment_changes',
@@ -561,7 +756,6 @@ const manageInvestment: ToolDefinition = {
 
       const now = dayjs().toISOString()
       const today = dayjs().format('YYYY-MM-DD')
-      const priceCentavos = currentPrice !== undefined ? toCentavos(currentPrice) : null
       const updated: InvestmentWithPriceRow = {
         ...existing,
         account_id:
@@ -570,61 +764,51 @@ const manageInvestment: ToolDefinition = {
           resolvedAccount && resolvedAccount.success ? resolvedAccount.name : existing.account_name,
         symbol: normalizedSymbol,
         name: name ?? existing.name,
-        type: type ?? existing.type,
-        shares: shares ?? existing.shares,
-        avg_cost_basis: avgCost !== undefined ? toCentavos(avgCost) : existing.avg_cost_basis,
+        type: resolvedType,
+        shares: legacyShares,
+        quantity_decimal: exactQuantity,
+        avg_cost_basis: avgCostCentavos,
+        avg_cost_basis_decimal: exactAvgCost,
+        cost_basis_known: resolvedCostKnown ? 1 : 0,
+        instrument_key: replacementInstrumentKey ?? existing.instrument_key,
         currency: resolvedCurrency,
         notes: notes !== undefined ? normalizeOptionalText(notes) : existing.notes,
-        updated_at: investmentFieldsChanged ? now : existing.updated_at,
-        latest_price:
-          priceCentavos !== null ? priceCentavos : symbolChanged ? null : existing.latest_price,
-        latest_price_currency:
-          priceCentavos !== null
-            ? resolvedCurrency
-            : symbolChanged
-              ? null
-              : existing.latest_price_currency,
-        latest_price_date:
-          priceCentavos !== null ? today : symbolChanged ? null : existing.latest_price_date,
+        updated_at: now,
+        price_instrument_key: replacementInstrumentKey ?? existing.price_instrument_key,
+        price_asset_type: replacementIdentity?.assetType ?? existing.price_asset_type,
+        price_provider: replacementIdentity?.provider ?? existing.price_provider,
+        price_instrument_id: replacementIdentity?.instrumentId ?? existing.price_instrument_id,
+        price_exchange: replacementIdentity?.exchange ?? existing.price_exchange,
+        price_quote_currency: replacementIdentity?.quoteCurrency ?? existing.price_quote_currency,
+        unit_price_decimal: exactPrice ?? existing.unit_price_decimal,
+        quote_date: exactPrice === null ? existing.quote_date : today,
       }
       const beforeSnapshot = investmentSnapshot(existing)
       const afterSnapshot = investmentSnapshot(updated)
       const setClauses: string[] = []
       const params: unknown[] = []
       let paramIdx = 1
+      const addSet = (column: string, value: unknown) => {
+        setClauses.push(`${column} = $${paramIdx++}`)
+        params.push(value)
+      }
 
-      if (name !== undefined) {
-        setClauses.push(`name = $${paramIdx++}`)
-        params.push(name)
+      if (name !== undefined) addSet('name', updated.name)
+      if (symbol !== undefined) addSet('symbol', updated.symbol)
+      if (type !== undefined) addSet('type', updated.type)
+      if (shares !== undefined || quantityDecimal !== undefined) {
+        addSet('shares', updated.shares)
+        addSet('quantity_decimal', updated.quantity_decimal)
       }
-      if (symbol !== undefined) {
-        setClauses.push(`symbol = $${paramIdx++}`)
-        params.push(updated.symbol)
+      if (costWasProvided || costBasisKnown !== undefined) {
+        addSet('avg_cost_basis', updated.avg_cost_basis)
+        addSet('avg_cost_basis_decimal', updated.avg_cost_basis_decimal)
+        addSet('cost_basis_known', updated.cost_basis_known)
       }
-      if (type !== undefined) {
-        setClauses.push(`type = $${paramIdx++}`)
-        params.push(updated.type)
-      }
-      if (shares !== undefined) {
-        setClauses.push(`shares = $${paramIdx++}`)
-        params.push(updated.shares)
-      }
-      if (avgCost !== undefined) {
-        setClauses.push(`avg_cost_basis = $${paramIdx++}`)
-        params.push(updated.avg_cost_basis)
-      }
-      if (currency !== undefined) {
-        setClauses.push(`currency = $${paramIdx++}`)
-        params.push(updated.currency)
-      }
-      if (accountWasProvided) {
-        setClauses.push(`account_id = $${paramIdx++}`)
-        params.push(updated.account_id)
-      }
-      if (notes !== undefined) {
-        setClauses.push(`notes = $${paramIdx++}`)
-        params.push(updated.notes)
-      }
+      if (replacementInstrumentKey) addSet('instrument_key', replacementInstrumentKey)
+      if (currency !== undefined) addSet('currency', updated.currency)
+      if (accountWasProvided) addSet('account_id', updated.account_id)
+      if (notes !== undefined) addSet('notes', updated.notes)
 
       if (dryRun) {
         return {
@@ -642,8 +826,7 @@ const manageInvestment: ToolDefinition = {
 
       transaction(() => {
         if (setClauses.length > 0) {
-          setClauses.push(`updated_at = $${paramIdx++}`)
-          params.push(updated.updated_at)
+          addSet('updated_at', updated.updated_at)
           params.push(investmentId)
           const updateResult = execute(
             `UPDATE investments SET ${setClauses.join(', ')} WHERE id = $${paramIdx}`,
@@ -655,16 +838,22 @@ const manageInvestment: ToolDefinition = {
           )
         }
 
-        if (priceCentavos !== null) {
+        if (replacementIdentity && replacementInstrumentKey && exactPrice) {
           execute(
-            `INSERT OR REPLACE INTO stock_prices (id, symbol, price, currency, quote_currency, date, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            `INSERT INTO instrument_prices (id, instrument_key, asset_type, provider, instrument_id, exchange, quote_currency, unit_price_decimal, quote_date, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             ON CONFLICT(instrument_key, quote_date) DO UPDATE SET
+               unit_price_decimal = excluded.unit_price_decimal,
+               created_at = excluded.created_at`,
             [
               generateId(),
-              updated.symbol,
-              priceCentavos,
-              updated.currency,
-              updated.currency,
+              replacementInstrumentKey,
+              replacementIdentity.assetType,
+              replacementIdentity.provider,
+              replacementIdentity.instrumentId,
+              replacementIdentity.exchange,
+              replacementIdentity.quoteCurrency,
+              exactPrice,
               today,
               now,
             ]
@@ -806,22 +995,8 @@ const listInvestments: ToolDefinition = {
 
     params.push(limit)
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
-    const investments = query<InvestmentWithPriceRow>(
-      `SELECT i.id, i.account_id, i.symbol, i.name, i.type, i.shares, i.avg_cost_basis, i.currency, i.notes, i.created_at, i.updated_at,
-              a.name as account_name,
-              sp.price as latest_price,
-              COALESCE(sp.quote_currency, sp.currency) as latest_price_currency,
-              sp.date as latest_price_date
-       FROM investments i
-       LEFT JOIN accounts a ON a.id = i.account_id
-       LEFT JOIN (
-         SELECT symbol, price, currency, quote_currency, date,
-                ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC, created_at DESC, id DESC) as rn
-         FROM stock_prices
-       ) sp ON sp.symbol = i.symbol AND sp.rn = 1
-       ${whereClause}
-       ORDER BY i.symbol ASC, i.id ASC
-       LIMIT $${paramIdx}`,
+    const investments = readInvestmentValuationRows(
+      `${whereClause} ORDER BY i.symbol ASC, i.id ASC LIMIT $${paramIdx}`,
       params
     )
 

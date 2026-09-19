@@ -224,7 +224,7 @@ export function Dashboard() {
 
       <OverviewNetWorth
         currentComplete={currentNetWorthComplete}
-        currentAmount={currentNetWorthComplete ? netWorth : 0}
+        currentAmount={currentNetWorthComplete && netWorth !== null ? netWorth : 0}
         currentCurrency={netWorthCurrency}
         unavailableMessage={
           (netWorthCalculationCurrent ? netWorthCalculation.error : null) ??

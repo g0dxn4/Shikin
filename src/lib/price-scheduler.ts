@@ -1,128 +1,133 @@
 import { query } from '@/lib/database'
-import { fetchAllCurrentPrices, savePricesToDB } from '@/lib/price-service'
+import {
+  fetchAllCurrentPrices,
+  savePricesToDB,
+  type PriceIdentitySelection,
+} from '@/lib/price-service'
 import { useInvestmentStore } from '@/stores/investment-store'
 import type { Investment } from '@/types/database'
 
-const STOCK_INTERVAL = 4 * 60 * 60 * 1000 // 4 hours
-const CRYPTO_INTERVAL = 6 * 60 * 60 * 1000 // 6 hours
+const STOCK_INTERVAL = 4 * 60 * 60 * 1000
+const CRYPTO_INTERVAL = 6 * 60 * 60 * 1000
 
 let stockTimer: ReturnType<typeof setInterval> | null = null
 let cryptoTimer: ReturnType<typeof setInterval> | null = null
+
+type ScheduledInvestment = Investment & {
+  price_provider: PriceIdentitySelection['provider'] | null
+  price_instrument_id: string | null
+  price_exchange: string | null
+  price_quote_currency: string | null
+  quote_date: string | null
+}
 
 function isMarketHours(): boolean {
   const now = new Date()
   const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }))
   const day = et.getDay()
-  const hour = et.getHours()
-  const minute = et.getMinutes()
-  const time = hour * 60 + minute
-
-  // Weekdays only, 9:30 AM - 4:00 PM ET
+  const time = et.getHours() * 60 + et.getMinutes()
   return day >= 1 && day <= 5 && time >= 570 && time <= 960
 }
 
-async function getInvestments(): Promise<Investment[]> {
-  return query<Investment>('SELECT * FROM investments')
-}
-
-async function getLastPriceDate(symbol: string): Promise<string | null> {
-  const rows = await query<{ date: string }>(
-    'SELECT date FROM stock_prices WHERE symbol = ? ORDER BY date DESC LIMIT 1',
-    [symbol]
+async function getInvestments(): Promise<ScheduledInvestment[]> {
+  return query<ScheduledInvestment>(
+    `SELECT i.*,
+            ip.provider AS price_provider,
+            ip.instrument_id AS price_instrument_id,
+            ip.exchange AS price_exchange,
+            ip.quote_currency AS price_quote_currency,
+            ip.quote_date
+     FROM investments i
+     LEFT JOIN instrument_prices ip ON ip.id = (
+       SELECT candidate.id FROM instrument_prices candidate
+       WHERE candidate.instrument_key = i.instrument_key
+       ORDER BY candidate.quote_date DESC, candidate.created_at DESC, candidate.id DESC
+       LIMIT 1
+     )`
   )
-  return rows.length > 0 ? rows[0].date : null
 }
 
 export function isInvestmentPriceStale(lastDate: string | null, type: 'stock' | 'crypto'): boolean {
   if (!lastDate) return true
-
   const last = new Date(lastDate)
   const now = new Date()
   const diffMs = now.getTime() - last.getTime()
-
-  if (type === 'crypto') {
-    return diffMs > CRYPTO_INTERVAL
-  }
-
-  // For stocks, check if it's been more than 1 business day
+  if (type === 'crypto') return diffMs > CRYPTO_INTERVAL
   const diffDays = diffMs / (24 * 60 * 60 * 1000)
   const lastDay = last.getDay()
-  // If last price was Friday, stale after Monday (3 days)
   if (lastDay === 5) return diffDays > 3
-  // If Saturday, stale after Monday (2 days)
   if (lastDay === 6) return diffDays > 2
   return diffDays > 1.5
 }
 
-async function fetchStalePrices(): Promise<void> {
-  const investments = await getInvestments()
-  if (investments.length === 0) return
-
-  const staleInvestments: Investment[] = []
-
-  for (const inv of investments) {
-    const lastDate = await getLastPriceDate(inv.symbol)
-    const isCrypto = inv.type === 'crypto'
-    if (isInvestmentPriceStale(lastDate, isCrypto ? 'crypto' : 'stock')) {
-      staleInvestments.push(inv)
+function selectionsFor(investments: ScheduledInvestment[]) {
+  const selections = new Map<string, PriceIdentitySelection>()
+  for (const investment of investments) {
+    if (
+      investment.price_provider &&
+      investment.price_provider !== 'manual' &&
+      investment.price_instrument_id &&
+      investment.price_quote_currency
+    ) {
+      selections.set(investment.id, {
+        provider: investment.price_provider,
+        instrumentId: investment.price_instrument_id,
+        exchange: investment.price_exchange ?? '',
+        quoteCurrency: investment.price_quote_currency,
+      })
     }
   }
+  return selections
+}
 
-  if (staleInvestments.length === 0) return
+async function refresh(investments: ScheduledInvestment[]) {
+  const result = await fetchAllCurrentPrices(investments, selectionsFor(investments))
+  useInvestmentStore
+    .getState()
+    .setRefreshFailures(
+      Object.fromEntries(result.failures.map((failure) => [failure.investmentId, failure.reason]))
+    )
+  if (result.quotes.size === 0) return
+  await savePricesToDB(result.quotes)
+  useInvestmentStore.getState().setLastPriceFetch(new Date().toISOString())
+  await useInvestmentStore.getState().fetch()
+}
 
-  console.warn(
-    `[PriceScheduler] Fetching prices for ${staleInvestments.length} stale investment(s)`
+async function fetchStalePrices(): Promise<void> {
+  const investments = await getInvestments()
+  const stale = investments.filter((investment) =>
+    isInvestmentPriceStale(investment.quote_date, investment.type === 'crypto' ? 'crypto' : 'stock')
   )
-
-  const prices = await fetchAllCurrentPrices(staleInvestments)
-  if (prices.size > 0) {
-    await savePricesToDB(prices)
-    const now = new Date().toISOString()
-    useInvestmentStore.getState().setLastPriceFetch(now)
-    await useInvestmentStore.getState().fetch()
-  }
+  if (stale.length > 0) await refresh(stale)
 }
 
 function startStockScheduler(): void {
   if (stockTimer) return
   stockTimer = setInterval(async () => {
     if (!isMarketHours()) return
-    const investments = await getInvestments()
-    const stocks = investments.filter((i) => i.type !== 'crypto')
-    if (stocks.length === 0) return
-
-    const prices = await fetchAllCurrentPrices(stocks)
-    if (prices.size > 0) {
-      await savePricesToDB(prices)
-      useInvestmentStore.getState().setLastPriceFetch(new Date().toISOString())
-      await useInvestmentStore.getState().fetch()
-    }
+    const investments = (await getInvestments()).filter(
+      (investment) => investment.type !== 'crypto'
+    )
+    if (investments.length > 0) await refresh(investments)
   }, STOCK_INTERVAL)
 }
 
 function startCryptoScheduler(): void {
   if (cryptoTimer) return
   cryptoTimer = setInterval(async () => {
-    const investments = await getInvestments()
-    const crypto = investments.filter((i) => i.type === 'crypto')
-    if (crypto.length === 0) return
-
-    const prices = await fetchAllCurrentPrices(crypto)
-    if (prices.size > 0) {
-      await savePricesToDB(prices)
-      useInvestmentStore.getState().setLastPriceFetch(new Date().toISOString())
-      await useInvestmentStore.getState().fetch()
-    }
+    const investments = (await getInvestments()).filter(
+      (investment) => investment.type === 'crypto'
+    )
+    if (investments.length > 0) await refresh(investments)
   }, CRYPTO_INTERVAL)
 }
 
 export async function initPriceScheduler(): Promise<void> {
   try {
     await fetchStalePrices()
-  } catch (err) {
-    console.warn('[PriceScheduler] Initial fetch failed:', err)
+  } catch (error) {
+    console.warn('[PriceScheduler] Initial fetch failed:', error)
   }
-
   startStockScheduler()
   startCryptoScheduler()
 }

@@ -28,7 +28,12 @@ import { useInvestmentStore, type InvestmentWithPrice } from '@/stores/investmen
 import { useAccountStore } from '@/stores/account-store'
 import { formatMoney, fromCentavos } from '@/lib/money'
 import { getErrorMessage } from '@/lib/errors'
-import { fetchAllCurrentPrices, savePricesToDB } from '@/lib/price-service'
+import {
+  fetchAllCurrentPrices,
+  savePricesToDB,
+  type PriceIdentitySelection,
+} from '@/lib/price-service'
+import { multiplyDecimalsToCentavos } from '@shikin/finance-core/valuation'
 import { isInvestmentPriceStale } from '@/lib/price-scheduler'
 import { CHART_AXIS_COLOR, CHART_TOOLTIP_STYLE } from '@/lib/constants'
 import dayjs from 'dayjs'
@@ -91,6 +96,8 @@ export function Investments() {
     fetch: fetchInvestments,
     remove,
     fetchPriceHistory,
+    refreshFailures = {},
+    setRefreshFailures = () => {},
   } = useInvestmentStore()
   const { fetch: fetchAccounts } = useAccountStore()
 
@@ -110,9 +117,15 @@ export function Investments() {
 
   useEffect(() => {
     if (investments.length > 0) {
-      const symbols = [...new Set(investments.map((i) => i.symbol))]
-      symbols.forEach((s) => {
-        void fetchPriceHistory(s, 365).catch(() => {})
+      const instrumentKeys = [
+        ...new Set(
+          investments
+            .map((investment) => investment.instrument_key)
+            .filter((key): key is string => Boolean(key))
+        ),
+      ]
+      instrumentKeys.forEach((instrumentKey) => {
+        void fetchPriceHistory(instrumentKey, 365).catch(() => {})
       })
     }
   }, [investments.length]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -134,9 +147,28 @@ export function Investments() {
   const handleRefresh = async () => {
     setIsRefreshing(true)
     try {
-      const prices = await fetchAllCurrentPrices(investments)
-      if (prices.size > 0) {
-        await savePricesToDB(prices)
+      const selections = new Map<string, PriceIdentitySelection>()
+      for (const investment of investments) {
+        if (
+          investment.priceProvider &&
+          investment.priceProvider !== 'manual' &&
+          investment.priceInstrumentId &&
+          investment.currentPriceCurrency
+        ) {
+          selections.set(investment.id, {
+            provider: investment.priceProvider,
+            instrumentId: investment.priceInstrumentId,
+            exchange: investment.priceExchange ?? '',
+            quoteCurrency: investment.currentPriceCurrency,
+          })
+        }
+      }
+      const result = await fetchAllCurrentPrices(investments, selections)
+      setRefreshFailures(
+        Object.fromEntries(result.failures.map((failure) => [failure.investmentId, failure.reason]))
+      )
+      if (result.quotes.size > 0) {
+        await savePricesToDB(result.quotes)
         useInvestmentStore.getState().setLastPriceFetch(new Date().toISOString())
         await fetchInvestments()
         toast.success(t('toast.pricesUpdated'))
@@ -174,48 +206,31 @@ export function Investments() {
 
     const dates = [...dateSet].sort()
 
-    const holdingsBySymbol = new Map<
-      string,
-      { shares: number; fallbackValue: number; points: { date: string; price: number }[] }
-    >()
-
-    for (const inv of investments) {
-      const points = priceHistory.get(inv.symbol)
-      if (!points) continue
-
-      const existing = holdingsBySymbol.get(inv.symbol)
-      if (existing) {
-        existing.shares += inv.shares
-        existing.fallbackValue += inv.shares * inv.avg_cost_basis
-      } else {
-        holdingsBySymbol.set(inv.symbol, {
-          shares: inv.shares,
-          fallbackValue: inv.shares * inv.avg_cost_basis,
-          points,
-        })
-      }
-    }
-
-    const cursors = new Map<string, { index: number; price: number | null }>()
-    for (const symbol of holdingsBySymbol.keys()) {
-      cursors.set(symbol, { index: -1, price: null })
-    }
+    const holdings = investments.flatMap((investment) => {
+      if (!investment.instrument_key) return []
+      const points = priceHistory.get(investment.instrument_key)
+      return points
+        ? [{ id: investment.id, quantityDecimal: investment.quantityDecimal, points }]
+        : []
+    })
+    const cursors = new Map<string, { index: number; unitPriceDecimal: string | null }>()
+    for (const holding of holdings) cursors.set(holding.id, { index: -1, unitPriceDecimal: null })
 
     return dates.map((date) => {
       let total = 0
-      for (const [symbol, holding] of holdingsBySymbol.entries()) {
-        const cursor = cursors.get(symbol)
+      for (const holding of holdings) {
+        const cursor = cursors.get(holding.id)
         if (!cursor) continue
-
         while (
           cursor.index + 1 < holding.points.length &&
           holding.points[cursor.index + 1].date <= date
         ) {
           cursor.index += 1
-          cursor.price = holding.points[cursor.index].price
+          cursor.unitPriceDecimal = holding.points[cursor.index].unitPriceDecimal
         }
-
-        total += cursor.price === null ? holding.fallbackValue : holding.shares * cursor.price
+        if (cursor.unitPriceDecimal !== null) {
+          total += multiplyDecimalsToCentavos([holding.quantityDecimal, cursor.unitPriceDecimal])
+        }
       }
       return { date, value: total }
     })
@@ -359,7 +374,7 @@ export function Investments() {
         }}
       />
 
-      {portfolioSummary.isMixedCurrency && (
+      {(!portfolioSummary.totalsComplete || !portfolioSummary.gainsComplete) && (
         <div className="border-warning/30 bg-warning/10 rounded-lg border px-4 py-3" role="status">
           <div className="flex items-start gap-2">
             <AlertTriangle size={16} className="text-warning mt-0.5" />
@@ -391,7 +406,10 @@ export function Investments() {
           label={t('summary.portfolioValue')}
           value={
             portfolioSummary.totalsComplete
-              ? formatMoney(portfolioSummary.totalMarketValue ?? 0)
+              ? formatMoney(
+                  portfolioSummary.totalMarketValue ?? 0,
+                  portfolioSummary.preferredCurrency
+                )
               : '—'
           }
           detail={
@@ -404,7 +422,7 @@ export function Investments() {
             portfolioSummary.totalsComplete ? (
               <span className={gainLoss >= 0 ? 'text-success' : 'text-destructive'}>
                 {gainLoss >= 0 ? '+' : ''}
-                {formatMoney(gainLoss)}
+                {formatMoney(gainLoss, portfolioSummary.preferredCurrency)}
                 <span className="ml-2 text-sm font-medium">
                   ({(portfolioSummary.totalGainLossPercent ?? 0) >= 0 ? '+' : ''}
                   {(portfolioSummary.totalGainLossPercent ?? 0).toFixed(2)}%)
@@ -418,8 +436,11 @@ export function Investments() {
         <MetricItem
           label={t('summary.costBasis')}
           value={
-            portfolioSummary.totalsComplete
-              ? formatMoney(portfolioSummary.totalCostBasis ?? 0)
+            portfolioSummary.totalsComplete && portfolioSummary.gainsComplete
+              ? formatMoney(
+                  portfolioSummary.totalCostBasis ?? 0,
+                  portfolioSummary.preferredCurrency
+                )
               : '—'
           }
         />
@@ -623,6 +644,8 @@ export function Investments() {
                   inv.lastPriceDate,
                   inv.type === 'crypto' ? 'crypto' : 'stock'
                 )}
+                refreshFailure={refreshFailures[inv.id]}
+                gainCurrency={portfolioSummary.preferredCurrency ?? 'USD'}
                 onEdit={() => openInvestmentDialog(inv.id)}
                 onDelete={() => setDeleteId(inv.id)}
                 t={t}
@@ -640,6 +663,8 @@ export function Investments() {
                 inv.lastPriceDate,
                 inv.type === 'crypto' ? 'crypto' : 'stock'
               )}
+              refreshFailure={refreshFailures[inv.id]}
+              gainCurrency={portfolioSummary.preferredCurrency ?? 'USD'}
               onEdit={() => openInvestmentDialog(inv.id)}
               onDelete={() => setDeleteId(inv.id)}
               t={t}
@@ -703,12 +728,16 @@ export function Investments() {
 function HoldingRow({
   investment: inv,
   isStale,
+  refreshFailure,
+  gainCurrency,
   onEdit,
   onDelete,
   t,
 }: {
   investment: InvestmentWithPrice
   isStale: boolean
+  refreshFailure?: string
+  gainCurrency: string
   onEdit: () => void
   onDelete: () => void
   t: ReturnType<typeof useTranslation<'investments'>>['t']
@@ -722,8 +751,8 @@ function HoldingRow({
           <p className="text-sm font-semibold">{inv.symbol}</p>
           <p className="text-muted-foreground text-xs">{inv.name}</p>
         </div>
-        {isStale && (
-          <span title={t('holdings.stale')}>
+        {(isStale || refreshFailure || inv.valuationComplete === false) && (
+          <span title={refreshFailure ?? (inv.valuationReasons?.join(', ') || t('holdings.stale'))}>
             <AlertTriangle size={12} className="text-warning" />
           </span>
         )}
@@ -733,13 +762,15 @@ function HoldingRow({
           {t(`types.${inv.type}`)}
         </Badge>
       </div>
-      <p className="text-right text-sm tabular-nums">{inv.shares.toLocaleString()}</p>
+      <p className="text-right text-sm tabular-nums">{inv.quantityDecimal ?? inv.shares}</p>
       <p className="text-right text-sm tabular-nums">
-        {formatMoney(inv.avg_cost_basis, inv.currency)}
+        {inv.costBasisKnown && inv.avgCostBasisDecimal !== null
+          ? `${inv.currency} ${inv.avgCostBasisDecimal}`
+          : '—'}
       </p>
       <p className="text-right text-sm tabular-nums">
-        {inv.currentPrice !== null
-          ? formatMoney(inv.currentPrice, inv.currentPriceCurrency ?? inv.currency)
+        {inv.currentPriceDecimal !== null
+          ? `${inv.currentPriceCurrency ?? inv.currency} ${inv.currentPriceDecimal}`
           : '—'}
       </p>
       <p className="text-right text-sm font-semibold tabular-nums">
@@ -755,7 +786,7 @@ function HoldingRow({
             {inv.gainLoss !== null ? (
               <>
                 {gainPositive ? '+' : ''}
-                {formatMoney(inv.gainLoss, inv.currency)}
+                {formatMoney(inv.gainLoss, gainCurrency)}
               </>
             ) : (
               '—'
@@ -799,12 +830,16 @@ function HoldingRow({
 function HoldingCard({
   investment: inv,
   isStale,
+  refreshFailure,
+  gainCurrency,
   onEdit,
   onDelete,
   t,
 }: {
   investment: InvestmentWithPrice
   isStale: boolean
+  refreshFailure?: string
+  gainCurrency: string
   onEdit: () => void
   onDelete: () => void
   t: ReturnType<typeof useTranslation<'investments'>>['t']
@@ -818,7 +853,15 @@ function HoldingCard({
           <div>
             <p className="text-base font-semibold">
               {inv.symbol}
-              {isStale && <AlertTriangle size={12} className="text-warning ml-1 inline" />}
+              {(isStale || refreshFailure || inv.valuationComplete === false) && (
+                <span
+                  title={
+                    refreshFailure ?? (inv.valuationReasons?.join(', ') || t('holdings.stale'))
+                  }
+                >
+                  <AlertTriangle size={12} className="text-warning ml-1 inline" />
+                </span>
+              )}
             </p>
             <p className="text-muted-foreground text-xs">{inv.name}</p>
           </div>
@@ -850,11 +893,15 @@ function HoldingCard({
       <div className="grid grid-cols-2 gap-2 text-sm">
         <div>
           <p className="text-muted-foreground text-xs">{t('holdings.header.shares')}</p>
-          <p className="tabular-nums">{inv.shares.toLocaleString()}</p>
+          <p className="tabular-nums">{inv.quantityDecimal ?? inv.shares}</p>
         </div>
         <div>
           <p className="text-muted-foreground text-xs">{t('holdings.header.avgCost')}</p>
-          <p className="tabular-nums">{formatMoney(inv.avg_cost_basis, inv.currency)}</p>
+          <p className="tabular-nums">
+            {inv.costBasisKnown && inv.avgCostBasisDecimal !== null
+              ? `${inv.currency} ${inv.avgCostBasisDecimal}`
+              : '—'}
+          </p>
         </div>
         <div>
           <p className="text-muted-foreground text-xs">{t('holdings.header.value')}</p>
@@ -872,7 +919,7 @@ function HoldingCard({
             {inv.gainLoss !== null ? (
               <>
                 {gainPositive ? '+' : ''}
-                {formatMoney(inv.gainLoss, inv.currency)}
+                {formatMoney(inv.gainLoss, gainCurrency)}
                 <span className="ml-1 text-xs">
                   ({gainPositive ? '+' : ''}
                   {inv.gainLossPercent?.toFixed(2)}%)

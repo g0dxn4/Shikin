@@ -10,12 +10,29 @@
     "name": "Name",
     "type": "Type",
     "shares": "Shares",
-    "avgCost": "Avg Cost / Share",
-    "currency": "Currency",
+    "quantity": "Exact quantity",
+    "avgCost": "Average cost per unit",
+    "costBasisKnown": "Cost basis is known (zero is allowed)",
+    "currency": "Cost currency",
     "account": "Account",
     "noAccount": "None",
+    "accountsError": "Accounts couldn’t be loaded",
+    "valuationIdentity": "Verified valuation identity",
+    "valuationIdentityHelp": "Choose a provider and full identity. A failed refresh preserves the last accepted quote.",
+    "priceProvider": "Price provider",
+    "noPrice": "No verified price yet",
+    "instrumentId": "Provider instrument ID",
+    "exchange": "Exchange or region",
+    "quoteCurrency": "Actual quote currency",
+    "manualPrice": "Verified manual unit price",
     "notes": "Notes",
     "notesPlaceholder": "Optional notes about this investment..."
+  },
+  "providers": {
+    "manual": "Manual",
+    "alpha_vantage": "Alpha Vantage",
+    "finnhub": "Finnhub",
+    "coingecko": "CoinGecko"
   },
   "types": {
     "stock": "Stock",
@@ -35,11 +52,11 @@
   },
   "priceSource": {
     "label": "Price source",
-    "tooltip": "Crypto prices come from CoinGecko. Stocks, ETFs, bonds, funds, and CETES use Alpha Vantage or Finnhub when API keys are configured. Prices update automatically during market hours."
+    "tooltip": "Only identity-verified manual or provider quotes are used. CoinGecko requires a unique coin ID; stock providers require exact listing metadata and actual price currency. CETES and other unsupported assets use manual prices."
   },
   "currencyWarning": {
     "title": "Mixed currencies",
-    "body": "Your portfolio includes holdings in multiple currencies. Totals below are not converted and should be read per-currency.",
+    "body": "Some holdings require a verified price, ownership resolution, or a real FX rate. Native-currency components remain visible; no nominal sum is shown.",
     "totalsUnavailable": "Converted total unavailable"
   },
   "summary": {

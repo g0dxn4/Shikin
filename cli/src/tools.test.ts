@@ -40,6 +40,10 @@ vi.mock('./ulid.js', () => ({
 vi.mock('./notebook.js', () => ({
   readNote: vi.fn(),
   writeNote: mockWriteNote,
+  writeNoteIfAbsent: vi.fn(async (...args: unknown[]) => {
+    mockWriteNote(...args)
+    return true
+  }),
   appendNote: vi.fn(),
   noteExists: mockNoteExists,
   listNotes: vi.fn(async () => []),
@@ -7020,13 +7024,33 @@ describe('CLI tool validation regressions', () => {
     mockQuery
       .mockReturnValueOnce([
         {
+          id: 'inv',
+          account_id: null,
+          account_name: null,
           symbol: 'AAPL',
           name: 'Apple',
+          type: 'stock',
           shares: 2,
+          quantity_decimal: '2',
           avg_cost_basis: 10000,
+          avg_cost_basis_decimal: '100',
+          cost_basis_known: 1,
+          instrument_key: 'v1|stock|manual|AAPL|XNAS|USD',
+          currency: 'USD',
+          notes: null,
+          created_at: '',
+          updated_at: '',
+          price_instrument_key: 'v1|stock|manual|AAPL|XNAS|USD',
+          price_asset_type: 'stock',
+          price_provider: 'manual',
+          price_instrument_id: 'AAPL',
+          price_exchange: 'XNAS',
+          price_quote_currency: 'USD',
+          unit_price_decimal: '150',
+          quote_date: '2026-04-18',
         },
       ])
-      .mockReturnValueOnce([{ price: 15000 }])
+      .mockReturnValueOnce([])
 
     const result = await generatePortfolioReview.execute({ force: false })
 
@@ -7135,8 +7159,8 @@ describe('CLI tool validation regressions', () => {
     )
     expect(mockExecute).toHaveBeenNthCalledWith(
       2,
-      expect.stringContaining('INSERT OR REPLACE INTO stock_prices'),
-      expect.arrayContaining(['AAPL', 16000, 'USD', expect.any(String), expect.any(String)])
+      expect.stringContaining('INSERT INTO instrument_prices'),
+      expect.arrayContaining(['v1|stock|manual|AAPL||USD', 'AAPL', '160', 'USD'])
     )
     expect(mockExecute).toHaveBeenNthCalledWith(
       3,
@@ -7208,8 +7232,8 @@ describe('CLI tool validation regressions', () => {
       dryRun: true,
       wouldUpdate: {
         investmentId: 'inv-1',
-        before: { shares: 1, costBasisCentavos: 15000, notes: null },
-        after: { shares: 1.5, costBasisCentavos: 22500, notes: 'Added fractional share' },
+        before: { shares: 1, costBasisCentavos: null, notes: null },
+        after: { shares: 1.5, costBasisCentavos: null, notes: 'Added fractional share' },
       },
     })
     expect(mockExecute).not.toHaveBeenCalled()
@@ -7270,8 +7294,8 @@ describe('CLI tool validation regressions', () => {
     )
     expect(mockExecute).toHaveBeenNthCalledWith(
       2,
-      expect.stringContaining('INSERT OR REPLACE INTO stock_prices'),
-      expect.arrayContaining(['AAPL', 17525, 'USD'])
+      expect.stringContaining('INSERT INTO instrument_prices'),
+      expect.arrayContaining(['v1|stock|manual|AAPL||USD', 'AAPL', '175.25', 'USD'])
     )
     expect(mockExecute).toHaveBeenNthCalledWith(
       3,
@@ -7414,12 +7438,12 @@ describe('CLI tool validation regressions', () => {
           symbol: 'VOO',
           name: '[REDACTED]',
           notes: '[REDACTED]',
-          currentPrice: 410,
-          currentPriceCentavos: 41000,
-          marketValue: 820,
-          marketValueCentavos: 82000,
-          gainLoss: 20,
-          gainLossCentavos: 2000,
+          currentPrice: null,
+          currentPriceCentavos: null,
+          marketValue: null,
+          marketValueCentavos: null,
+          gainLoss: null,
+          gainLossCentavos: null,
         },
       ],
     })
@@ -7471,8 +7495,8 @@ describe('CLI tool validation regressions', () => {
       investments: [
         {
           currency: 'MXN',
-          priceCurrency: 'USD',
-          marketValueCentavos: 14400,
+          priceCurrency: null,
+          marketValueCentavos: null,
           gainLoss: null,
           gainLossCentavos: null,
           gainLossPercent: null,

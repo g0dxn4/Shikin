@@ -1,4 +1,5 @@
 import { readBudgetSpending } from '../reporting-read.js'
+import { readOwnershipValuation } from '../valuation-read.js'
 import {
   z,
   query,
@@ -35,25 +36,6 @@ type BudgetUpsertMatch =
   | { success: true; budget: BudgetRow; matchedBy: 'budgetId' | 'category' | 'name' }
   | { success: true; budget: null; matchedBy: 'new' }
   | { success: false; reason?: string; message: string }
-
-type NetWorthAccountRow = {
-  id: string
-  name: string
-  type: string
-  currency: string
-  balance: number
-}
-
-type InvestmentWithLatestPriceRow = {
-  id: string
-  name: string
-  symbol: string
-  type: string
-  shares: number
-  avg_cost_basis: number
-  currency: string
-  latest_price: number | null
-}
 
 function budgetSnapshot(budget: BudgetRow) {
   return {
@@ -624,81 +606,56 @@ const deleteBudget: ToolDefinition = {
 const getNetWorth: ToolDefinition = {
   name: 'get-net-worth',
   description:
-    'Calculate total net worth by summing all account balances (assets minus credit card debt) plus investment values.',
+    'Calculate ownership-aware net worth. Returns native-currency components and only returns a converted total when ownership, verified prices, and FX are complete.',
   schema: z.object({}),
   execute: async () => {
-    const accounts = await query<NetWorthAccountRow>(
-      'SELECT * FROM accounts WHERE is_archived = 0 ORDER BY type, name'
-    )
-
-    const investments = await query<InvestmentWithLatestPriceRow>(
-      `SELECT i.*,
-              (SELECT sp.price FROM stock_prices sp WHERE sp.symbol = i.symbol ORDER BY sp.date DESC LIMIT 1) as latest_price
-       FROM investments i
-       ORDER BY i.name`
-    )
-
-    let totalAssets = 0
-    let totalLiabilities = 0
-
-    const accountBreakdown = accounts.map((acc) => {
-      const balance = fromCentavos(acc.balance)
-      const isLiability = acc.type === 'credit_card'
-
-      if (isLiability) {
-        totalLiabilities += Math.abs(balance)
-      } else {
-        totalAssets += balance
-      }
-
-      return {
-        id: acc.id,
-        name: acc.name,
-        type: acc.type,
-        currency: acc.currency,
-        balance,
-        isLiability,
-      }
-    })
-
-    let totalInvestments = 0
-
-    const investmentBreakdown = investments.map((inv) => {
-      const currentPrice = inv.latest_price
-        ? fromCentavos(inv.latest_price)
-        : fromCentavos(inv.avg_cost_basis)
-      const value = inv.shares * currentPrice
-      const costBasis = inv.shares * fromCentavos(inv.avg_cost_basis)
-      const gainLoss = value - costBasis
-      totalInvestments += value
-
-      return {
-        id: inv.id,
-        name: inv.name,
-        symbol: inv.symbol,
-        type: inv.type,
-        shares: inv.shares,
-        currentPrice,
-        value,
-        costBasis,
-        gainLoss,
-        gainLossPercent: costBasis > 0 ? Math.round((gainLoss / costBasis) * 100) : 0,
-        currency: inv.currency,
-      }
-    })
-
-    totalAssets += totalInvestments
-    const netWorth = totalAssets - totalLiabilities
+    const valuation = readOwnershipValuation('USD')
+    const toAmount = (centavos: number | null) =>
+      centavos === null ? null : fromCentavos(centavos)
 
     return {
       success: true,
-      netWorth,
-      totalAssets,
-      totalLiabilities,
-      totalInvestments,
-      accounts: accountBreakdown,
-      investments: investmentBreakdown,
-      message: `Net worth: $${netWorth.toFixed(2)} (Assets: $${totalAssets.toFixed(2)}, Liabilities: $${totalLiabilities.toFixed(2)}, Investments: $${totalInvestments.toFixed(2)}).`,
+      complete: valuation.complete,
+      currency: valuation.targetCurrency,
+      netWorth: toAmount(valuation.netWorthCentavos),
+      totalAssets: toAmount(valuation.totalAssetsCentavos),
+      totalLiabilities: toAmount(valuation.totalLiabilitiesCentavos),
+      totalInvestments: toAmount(valuation.totalInvestmentsCentavos),
+      nativeTotals: valuation.nativeTotals.map((total) => ({
+        currency: total.currency,
+        assets: fromCentavos(total.assetsCentavos),
+        liabilities: fromCentavos(total.liabilitiesCentavos),
+        netWorth: fromCentavos(total.netWorthCentavos),
+        investments: fromCentavos(total.investmentsCentavos),
+      })),
+      missingCurrencies: valuation.missingCurrencies,
+      unresolvedAccountIds: valuation.unresolvedAccountIds,
+      incompleteHoldingIds: valuation.incompleteHoldingIds,
+      accounts: valuation.accounts.map((account) => ({
+        ...account,
+        rawBalance: fromCentavos(account.rawBalanceCentavos),
+        asset: fromCentavos(account.assetCentavos),
+        liability: fromCentavos(account.liabilityCentavos),
+      })),
+      investments: valuation.holdings.map((holding) => ({
+        id: holding.id,
+        accountId: holding.accountId,
+        quantityDecimal: holding.quantityDecimal,
+        instrumentKey: holding.instrumentKey,
+        value: toAmount(holding.valueCentavos),
+        valueCurrency: holding.valueCurrency,
+        convertedValue: toAmount(holding.convertedValueCentavos),
+        costBasis: toAmount(holding.costBasisCentavos),
+        costCurrency: holding.costCurrency,
+        gainLoss: toAmount(holding.gainLossCentavos),
+        included: holding.included,
+        comparisonOnly: holding.comparisonOnly,
+        complete: holding.complete,
+        reasons: holding.reasons,
+      })),
+      message: valuation.complete
+        ? `Net worth: ${valuation.targetCurrency} ${fromCentavos(valuation.netWorthCentavos ?? 0).toFixed(2)}.`
+        : 'Net worth is incomplete. Resolve ownership, verified prices, or missing FX; native components are included.',
     }
   },
 }

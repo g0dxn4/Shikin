@@ -10,12 +10,29 @@
     "name": "Nombre",
     "type": "Tipo",
     "shares": "Acciones",
-    "avgCost": "Costo Prom / Acción",
-    "currency": "Moneda",
+    "quantity": "Cantidad exacta",
+    "avgCost": "Costo promedio por unidad",
+    "costBasisKnown": "La base de costo es conocida (puede ser cero)",
+    "currency": "Moneda del costo",
     "account": "Cuenta",
     "noAccount": "Ninguna",
+    "accountsError": "No se pudieron cargar las cuentas",
+    "valuationIdentity": "Identidad de valuación verificada",
+    "valuationIdentityHelp": "Elige proveedor e identidad completa. Un fallo conserva la última cotización aceptada.",
+    "priceProvider": "Proveedor de precios",
+    "noPrice": "Aún sin precio verificado",
+    "instrumentId": "ID del instrumento del proveedor",
+    "exchange": "Bolsa o región",
+    "quoteCurrency": "Moneda real de cotización",
+    "manualPrice": "Precio unitario manual verificado",
     "notes": "Notas",
     "notesPlaceholder": "Notas opcionales sobre esta inversión..."
+  },
+  "providers": {
+    "manual": "Manual",
+    "alpha_vantage": "Alpha Vantage",
+    "finnhub": "Finnhub",
+    "coingecko": "CoinGecko"
   },
   "types": {
     "stock": "Acción",
@@ -35,11 +52,11 @@
   },
   "priceSource": {
     "label": "Fuente de precios",
-    "tooltip": "Los precios de cripto provienen de CoinGecko. Acciones, ETFs, bonos, fondos y CETES usan Alpha Vantage o Finnhub cuando hay claves API configuradas. Los precios se actualizan automáticamente durante horario de mercado."
+    "tooltip": "Solo se usan precios manuales o de proveedor con identidad verificada. CoinGecko requiere un ID único; las acciones requieren metadatos exactos y moneda real. CETES y otros activos no compatibles usan precios manuales."
   },
   "currencyWarning": {
     "title": "Divisas mixtas",
-    "body": "Tu portafolio incluye tenencias en múltiples monedas. Los totales no están convertidos y deben leerse por moneda.",
+    "body": "Algunas tenencias requieren precio verificado, resolución de propiedad o una tasa FX real. Se muestran componentes por moneda, sin suma nominal.",
     "totalsUnavailable": "Total convertido no disponible"
   },
   "summary": {

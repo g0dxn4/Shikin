@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { query, execute } from '@/lib/database'
 import { generateId } from '@/lib/ulid'
-import type { Account, Investment } from '@/types/database'
+import { readOwnershipValuation } from '@/lib/valuation-read'
 import { useCurrencyStore } from './currency-store'
 import dayjs from 'dayjs'
 
@@ -37,13 +37,15 @@ interface NetWorthChartPoint {
 
 interface NetWorthState {
   // Current calculated values (centavos)
-  totalAssets: number
-  totalLiabilities: number
-  totalInvestments: number
-  netWorth: number
+  totalAssets: number | null
+  totalLiabilities: number | null
+  totalInvestments: number | null
+  netWorth: number | null
   totalsComplete: boolean
   preferredCurrency: string
   missingCurrencies: string[]
+  unresolvedAccountIds: string[]
+  incompleteHoldingIds: string[]
   assetBreakdown: AccountBreakdown[]
   liabilityBreakdown: AccountBreakdown[]
 
@@ -84,6 +86,8 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
   totalsComplete: true,
   preferredCurrency: 'USD',
   missingCurrencies: [],
+  unresolvedAccountIds: [],
+  incompleteHoldingIds: [],
   assetBreakdown: [],
   liabilityBreakdown: [],
   history: [],
@@ -91,82 +95,63 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
 
   calculateCurrent: () =>
     enqueueRead(async () => {
-      const accounts = await query<Account>(
-        'SELECT * FROM accounts WHERE is_archived = 0 ORDER BY type, name'
-      )
-
-      const investments = await query<
-        Investment & { latest_price: number | null; latest_price_currency: string | null }
-      >(
-        `SELECT i.*,
-              (SELECT sp.price FROM stock_prices sp WHERE sp.symbol = i.symbol ORDER BY sp.date DESC LIMIT 1) as latest_price,
-              (SELECT sp.quote_currency FROM stock_prices sp WHERE sp.symbol = i.symbol ORDER BY sp.date DESC LIMIT 1) as latest_price_currency
-       FROM investments i
-       ORDER BY i.name`
-      )
-
       await useCurrencyStore
         .getState()
         .loadRates()
         .catch(() => {})
       const currencyState = useCurrencyStore.getState()
-      const missingCurrencies = new Set<string>()
-      const convert = (amountCentavos: number, currency: string): number | null => {
-        const result = currencyState.convertToPreferred(amountCentavos, currency)
-        if (result.complete) return result.amountCentavos
-        for (const missing of result.missingCurrencies) missingCurrencies.add(missing)
-        if (result.reason === 'invalid_currency_data') missingCurrencies.add(currency || 'unknown')
-        return null
-      }
-
-      let totalAssets = 0
-      let totalLiabilities = 0
-      let totalInvestments = 0
+      const valuation = await readOwnershipValuation({
+        targetCurrency: currencyState.preferredCurrency,
+        rates: currencyState.rates,
+      })
       const assetBreakdown: AccountBreakdown[] = []
       const liabilityBreakdown: AccountBreakdown[] = []
 
-      for (const acc of accounts) {
-        const item: AccountBreakdown = {
-          id: acc.id,
-          name: acc.name,
-          type: acc.type,
-          currency: acc.currency,
-          balance: acc.balance,
-          convertedBalance: null,
+      for (const account of valuation.accounts) {
+        const convertedAsset = currencyState.convertToPreferred(
+          account.assetCentavos,
+          account.currency
+        )
+        const convertedLiability = currencyState.convertToPreferred(
+          account.liabilityCentavos,
+          account.currency
+        )
+        if (account.assetCentavos > 0 || account.type !== 'credit_card') {
+          assetBreakdown.push({
+            id: account.id,
+            name: account.name,
+            type: account.type,
+            currency: account.currency,
+            balance: account.rawBalanceCentavos,
+            convertedBalance:
+              account.included && convertedAsset.complete ? convertedAsset.amountCentavos : null,
+          })
         }
-
-        const convertedBalance = convert(Math.abs(acc.balance), acc.currency)
-        item.convertedBalance = convertedBalance
-        if (acc.type === 'credit_card') {
-          if (convertedBalance !== null) totalLiabilities += convertedBalance
-          liabilityBreakdown.push(item)
-        } else {
-          if (convertedBalance !== null) {
-            totalAssets += acc.balance < 0 ? -convertedBalance : convertedBalance
-          }
-          assetBreakdown.push(item)
+        if (account.liabilityCentavos > 0) {
+          liabilityBreakdown.push({
+            id: account.id,
+            name: account.name,
+            type: account.type,
+            currency: account.currency,
+            balance: account.rawBalanceCentavos,
+            convertedBalance:
+              account.included && convertedLiability.complete
+                ? convertedLiability.amountCentavos
+                : null,
+          })
         }
       }
-
-      for (const inv of investments) {
-        const currentPrice = inv.latest_price ?? inv.avg_cost_basis
-        const priceCurrency = inv.latest_price_currency ?? inv.currency
-        const value = Math.round(inv.shares * currentPrice)
-        const convertedValue = convert(value, priceCurrency)
-        if (convertedValue !== null) totalInvestments += convertedValue
-      }
-
-      const totalsComplete = missingCurrencies.size === 0
-      totalAssets += totalInvestments
 
       set({
-        totalAssets: totalsComplete ? totalAssets : 0,
-        totalLiabilities: totalsComplete ? totalLiabilities : 0,
-        totalInvestments: totalsComplete ? totalInvestments : 0,
-        netWorth: totalsComplete ? totalAssets - totalLiabilities : 0,
-        totalsComplete,
-        preferredCurrency: currencyState.preferredCurrency,
-        missingCurrencies: [...missingCurrencies].sort(),
+        totalAssets: valuation.totalAssetsCentavos,
+        totalLiabilities: valuation.totalLiabilitiesCentavos,
+        totalInvestments: valuation.totalInvestmentsCentavos,
+        netWorth: valuation.netWorthCentavos,
+        totalsComplete: valuation.complete,
+        preferredCurrency: valuation.targetCurrency,
+        missingCurrencies: valuation.missingCurrencies,
+        unresolvedAccountIds: valuation.unresolvedAccountIds,
+        incompleteHoldingIds: valuation.incompleteHoldingIds,
         assetBreakdown,
         liabilityBreakdown,
       })
@@ -183,7 +168,14 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
       totalsComplete,
       preferredCurrency,
     } = get()
-    if (!totalsComplete) return
+    if (
+      !totalsComplete ||
+      totalAssets === null ||
+      totalLiabilities === null ||
+      netWorth === null ||
+      totalInvestments === null
+    )
+      return
     const today = dayjs().format('YYYY-MM-DD')
 
     const breakdown = JSON.stringify({

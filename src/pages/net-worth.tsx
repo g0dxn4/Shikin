@@ -49,8 +49,8 @@ export function NetWorth() {
       ? ((changeAmount / Math.abs(firstPoint.netWorth)) * 100).toFixed(1)
       : '0'
   const isPositiveChange = changeAmount >= 0
-  const totalAssetsAbs = Math.abs(totalAssets)
-  const totalLiabilitiesAbs = Math.abs(totalLiabilities)
+  const totalAssetsAbs = Math.abs(totalAssets ?? 0)
+  const totalLiabilitiesAbs = Math.abs(totalLiabilities ?? 0)
   const hasData = assetBreakdown.length > 0 || liabilityBreakdown.length > 0
 
   if (isLoading) {
@@ -103,7 +103,7 @@ export function NetWorth() {
       <MetricStrip>
         <MetricItem
           label={t('netWorth.currentNetWorth')}
-          value={totalsComplete ? formatMoney(netWorth) : '—'}
+          value={totalsComplete && netWorth !== null ? formatMoney(netWorth) : '—'}
           detail={
             history.length > 1 ? (
               <span className={isPositiveChange ? 'text-success' : 'text-destructive'}>
@@ -120,11 +120,11 @@ export function NetWorth() {
         />
         <MetricItem
           label={t('netWorth.assets')}
-          value={totalsComplete ? formatMoney(totalAssets) : '—'}
+          value={totalsComplete && totalAssets !== null ? formatMoney(totalAssets) : '—'}
         />
         <MetricItem
           label={t('netWorth.liabilities')}
-          value={totalsComplete ? formatMoney(totalLiabilities) : '—'}
+          value={totalsComplete && totalLiabilities !== null ? formatMoney(totalLiabilities) : '—'}
         />
       </MetricStrip>
 
@@ -213,12 +213,12 @@ export function NetWorth() {
                 <h3 className="text-sm font-semibold">{t('netWorth.assets')}</h3>
               </div>
               <span className="text-success text-lg font-bold tabular-nums">
-                {totalsComplete ? formatMoney(totalAssets) : '—'}
+                {totalsComplete && totalAssets !== null ? formatMoney(totalAssets) : '—'}
               </span>
             </div>
-            {totalInvestments > 0 && (
+            {(totalInvestments ?? 0) > 0 && (
               <div className="text-muted-foreground text-xs">
-                {t('netWorth.includesInvestments', { amount: formatMoney(totalInvestments) })}
+                {t('netWorth.includesInvestments', { amount: formatMoney(totalInvestments ?? 0) })}
               </div>
             )}
             <div className="space-y-3">
@@ -253,7 +253,7 @@ export function NetWorth() {
                 <h3 className="text-sm font-semibold">{t('netWorth.liabilities')}</h3>
               </div>
               <span className="text-destructive text-lg font-bold tabular-nums">
-                {totalsComplete ? formatMoney(totalLiabilities) : '—'}
+                {totalsComplete && totalLiabilities !== null ? formatMoney(totalLiabilities) : '—'}
               </span>
             </div>
             <div className="space-y-3">

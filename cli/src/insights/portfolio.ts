@@ -1,12 +1,18 @@
+import { valueHolding } from '@shikin/finance-core/valuation'
 import {
-  dayjs,
-  query,
-  formatMoney,
-  noteExists,
-  writeNote,
-  toDisplayAmount,
-  type ReviewHolding,
-} from './shared.js'
+  readInvestmentValuationRows,
+  readValuationRates,
+  rowToHoldingInput,
+} from '../valuation-read.js'
+import { writeNoteIfAbsent } from '../notebook.js'
+import { dayjs, formatMoney, noteExists, writeNote, toDisplayAmount } from './shared.js'
+
+function addCentavos(left: number, right: number): number {
+  const total = left + right
+  if (!Number.isSafeInteger(total))
+    throw new RangeError('Portfolio total exceeds safe integer range')
+  return total
+}
 
 export async function generatePortfolioReview(force: boolean) {
   const weekNum = dayjs().week()
@@ -21,18 +27,9 @@ export async function generatePortfolioReview(force: boolean) {
     message: `Portfolio review already exists for ${weekLabel}. Use --force to overwrite it.`,
   }
 
-  if (!force && (await noteExists(path))) {
-    return alreadyExistsResult
-  }
+  if (!force && (await noteExists(path))) return alreadyExistsResult
 
-  const investments = query<{
-    symbol: string
-    name: string
-    shares: number
-    avg_cost_basis: number
-    currency: string
-  }>('SELECT symbol, name, shares, avg_cost_basis, currency FROM investments ORDER BY name ASC')
-
+  const investments = readInvestmentValuationRows('ORDER BY i.name ASC, i.id ASC')
   if (investments.length === 0) {
     return {
       success: false,
@@ -40,105 +37,123 @@ export async function generatePortfolioReview(force: boolean) {
     }
   }
 
-  let totalValue = 0
-  let totalCostBasis = 0
-  const totalsByCurrency = new Map<string, { value: number; costBasis: number }>()
-  const holdings: ReviewHolding[] = []
-
-  for (const investment of investments) {
-    const latestPrice = query<{ price: number; currency: string }>(
-      'SELECT price, currency FROM stock_prices WHERE symbol = $1 ORDER BY date DESC LIMIT 1',
-      [investment.symbol]
-    )[0]
-    const currentPrice = latestPrice?.price ?? investment.avg_cost_basis
-    const currentCurrency = latestPrice?.currency ?? investment.currency
-    if (currentCurrency !== investment.currency) {
-      return {
-        success: false,
-        message: `Investment ${investment.symbol} mixes ${investment.currency} cost basis with ${currentCurrency} price data. Normalize currencies before generating a portfolio review.`,
-      }
-    }
-    const value = Math.round(investment.shares * currentPrice)
-    const costBasis = Math.round(investment.shares * investment.avg_cost_basis)
+  const totalsByCurrency = new Map<string, { value: number; costBasis: number | null }>()
+  const holdings = investments.map((investment) => {
+    const targetCurrency = investment.price_quote_currency ?? investment.currency
+    const valuation = valueHolding(
+      rowToHoldingInput(investment),
+      targetCurrency,
+      readValuationRates(targetCurrency)
+    )
     const gainLossPercent =
-      costBasis > 0 ? Math.round(((value - costBasis) / costBasis) * 10000) / 100 : 0
+      valuation.gainLossCentavos !== null &&
+      valuation.convertedCostBasisCentavos !== null &&
+      valuation.convertedCostBasisCentavos !== 0
+        ? Math.round(
+            (valuation.gainLossCentavos / Math.abs(valuation.convertedCostBasisCentavos)) * 10000
+          ) / 100
+        : null
 
-    totalValue += value
-    totalCostBasis += costBasis
-    const currencyTotals = totalsByCurrency.get(investment.currency) ?? { value: 0, costBasis: 0 }
-    currencyTotals.value += value
-    currencyTotals.costBasis += costBasis
-    totalsByCurrency.set(investment.currency, currencyTotals)
-    holdings.push({
+    if (valuation.valueCentavos !== null && valuation.valueCurrency !== null) {
+      const existing = totalsByCurrency.get(valuation.valueCurrency) ?? {
+        value: 0,
+        costBasis: 0,
+      }
+      existing.value = addCentavos(existing.value, valuation.valueCentavos)
+      if (valuation.convertedCostBasisCentavos === null) existing.costBasis = null
+      else if (existing.costBasis !== null)
+        existing.costBasis = addCentavos(existing.costBasis, valuation.convertedCostBasisCentavos)
+      totalsByCurrency.set(valuation.valueCurrency, existing)
+    }
+
+    return {
+      id: investment.id,
       symbol: investment.symbol,
       name: investment.name,
-      shares: investment.shares,
-      currency: investment.currency,
-      value,
+      quantityDecimal: valuation.quantityDecimal,
+      currency: valuation.valueCurrency,
+      value: valuation.valueCentavos,
+      costBasis: valuation.convertedCostBasisCentavos,
       gainLossPercent,
-    })
-  }
+      complete: valuation.complete,
+      reasons: valuation.reasons,
+    }
+  })
 
+  const incompleteHoldingIds = holdings
+    .filter((holding) => !holding.complete)
+    .map((holding) => holding.id)
+  const unknownCostBasisIds = holdings
+    .filter((holding) => holding.costBasis === null)
+    .map((holding) => holding.id)
   const totalsByCurrencyList = [...totalsByCurrency.entries()]
     .map(([currency, totals]) => {
-      const gainLoss = totals.value - totals.costBasis
+      const costBasis = totals.costBasis
+      const gainLoss = costBasis === null ? null : totals.value - costBasis
       const gainLossPercent =
-        totals.costBasis > 0 ? Math.round((gainLoss / totals.costBasis) * 10000) / 100 : 0
+        gainLoss !== null && costBasis !== null && costBasis !== 0
+          ? Math.round((gainLoss / Math.abs(costBasis)) * 10000) / 100
+          : null
       return {
         currency,
         portfolioValue: toDisplayAmount(totals.value),
-        costBasis: toDisplayAmount(totals.costBasis),
-        gainLoss: toDisplayAmount(gainLoss),
+        costBasis: costBasis === null ? null : toDisplayAmount(costBasis),
+        gainLoss: gainLoss === null ? null : toDisplayAmount(gainLoss),
         gainLossPercent,
       }
     })
-    .sort((a, b) => a.currency.localeCompare(b.currency))
-  const singleCurrency = totalsByCurrencyList.length === 1
+    .sort((left, right) => left.currency.localeCompare(right.currency))
 
-  const sortedByPerformance = [...holdings].sort((a, b) => b.gainLossPercent - a.gainLossPercent)
-  const topPerformer = sortedByPerformance[0] ?? null
-  const worstPerformer = sortedByPerformance[sortedByPerformance.length - 1] ?? null
-  const gainLoss = totalValue - totalCostBasis
-  const gainLossPercent =
-    totalCostBasis > 0 ? Math.round((gainLoss / totalCostBasis) * 10000) / 100 : 0
-
+  const comparable = holdings
+    .filter((holding) => holding.gainLossPercent !== null)
+    .sort((left, right) => (right.gainLossPercent ?? 0) - (left.gainLossPercent ?? 0))
+  const topPerformer = comparable[0] ?? null
+  const worstPerformer = comparable[comparable.length - 1] ?? null
+  const complete = incompleteHoldingIds.length === 0
   const lines = [`# Portfolio Review — ${weekLabel}`, '', '## Performance']
 
-  if (singleCurrency) {
+  lines.push(`- **Valuation completeness:** ${complete ? 'complete' : 'incomplete'}`)
+  if (incompleteHoldingIds.length > 0) {
+    lines.push(`- **Holdings missing verified price/FX:** ${incompleteHoldingIds.join(', ')}`)
+  }
+  if (unknownCostBasisIds.length > 0) {
+    lines.push(`- **Holdings with unknown cost basis:** ${unknownCostBasisIds.join(', ')}`)
+  }
+  lines.push('- **Native-currency totals:**')
+  for (const total of totalsByCurrencyList) {
+    const gain =
+      total.gainLoss === null
+        ? 'gain/loss unavailable'
+        : `${total.gainLoss >= 0 ? '+' : ''}${total.gainLoss.toFixed(2)} gain/loss`
     lines.push(
-      `- **Portfolio value:** ${formatMoney(totalValue, totalsByCurrencyList[0].currency)}`
+      `  - ${total.currency}: ${total.portfolioValue.toFixed(2)} value, ${total.costBasis === null ? 'unknown' : total.costBasis.toFixed(2)} cost basis, ${gain}`
     )
-    lines.push(`- **Cost basis:** ${formatMoney(totalCostBasis, totalsByCurrencyList[0].currency)}`)
-    lines.push(
-      `- **Total gain/loss:** ${gainLoss >= 0 ? '+' : ''}${formatMoney(gainLoss, totalsByCurrencyList[0].currency)} (${gainLossPercent >= 0 ? '+' : ''}${gainLossPercent.toFixed(2)}%)`
-    )
-  } else {
-    lines.push('- **Totals by currency:**')
-    for (const currencyTotal of totalsByCurrencyList) {
-      lines.push(
-        `  - ${currencyTotal.currency}: ${currencyTotal.portfolioValue.toFixed(2)} value, ${currencyTotal.costBasis.toFixed(2)} cost basis, ${currencyTotal.gainLoss >= 0 ? '+' : ''}${currencyTotal.gainLoss.toFixed(2)} (${currencyTotal.gainLossPercent >= 0 ? '+' : ''}${currencyTotal.gainLossPercent.toFixed(2)}%)`
-      )
-    }
   }
 
-  if (topPerformer) {
+  if (topPerformer?.gainLossPercent !== null) {
     lines.push(
       `- **Top performer:** ${topPerformer.symbol} (${topPerformer.gainLossPercent >= 0 ? '+' : ''}${topPerformer.gainLossPercent.toFixed(2)}%)`
     )
   }
-
-  if (worstPerformer && worstPerformer.symbol !== topPerformer?.symbol) {
+  if (worstPerformer?.gainLossPercent !== null && worstPerformer.symbol !== topPerformer?.symbol) {
     lines.push(
       `- **Worst performer:** ${worstPerformer.symbol} (${worstPerformer.gainLossPercent >= 0 ? '+' : ''}${worstPerformer.gainLossPercent.toFixed(2)}%)`
     )
   }
 
-  lines.push('', '## Holdings', '', '| Symbol | Name | Shares | Value | Gain/Loss |')
-  lines.push('|--------|------|--------|-------|-----------|')
-
+  lines.push('', '## Holdings', '', '| Symbol | Name | Quantity | Value | Gain/Loss | Status |')
+  lines.push('|--------|------|----------|-------|-----------|--------|')
   for (const holding of holdings) {
+    const value =
+      holding.value === null || holding.currency === null
+        ? '—'
+        : formatMoney(holding.value, holding.currency)
+    const gain =
+      holding.gainLossPercent === null
+        ? '—'
+        : `${holding.gainLossPercent >= 0 ? '+' : ''}${holding.gainLossPercent.toFixed(2)}%`
     lines.push(
-      `| ${holding.symbol} | ${holding.name} | ${holding.shares} | ${formatMoney(holding.value, holding.currency)} | ${holding.gainLossPercent >= 0 ? '+' : ''}${holding.gainLossPercent.toFixed(2)}% |`
+      `| ${holding.symbol} | ${holding.name} | ${holding.quantityDecimal} | ${value} | ${gain} | ${holding.complete ? 'verified' : holding.reasons.join(', ')} |`
     )
   }
 
@@ -146,29 +161,39 @@ export async function generatePortfolioReview(force: boolean) {
     '',
     '## Notes',
     '',
-    '*Auto-generated from current holdings and latest saved prices.*',
+    '*Auto-generated from exact quantities and identity-verified saved prices. No nominal FX sums are used.*',
     '',
     '---',
     `*Generated on ${dayjs().format('YYYY-MM-DD HH:mm')}*`
   )
+  const content = lines.join('\n')
 
-  // query() above lazily migrates approved custom-root storage. Re-check so a
-  // review that only appeared through migration is not overwritten when force=false.
-  if (!force && (await noteExists(path))) {
-    return alreadyExistsResult
-  }
-
-  await writeNote(path, lines.join('\n'))
+  // The first valuation query may initialize/migrate a custom-root notebook.
+  // Keep this post-initialization check, then use exclusive creation to close the race.
+  if (!force && (await noteExists(path))) return alreadyExistsResult
+  if (force) await writeNote(path, content)
+  else if (!(await writeNoteIfAbsent(path, content))) return alreadyExistsResult
 
   return {
     success: true,
     path,
     summary: {
-      portfolioValue: singleCurrency ? toDisplayAmount(totalValue) : null,
-      costBasis: singleCurrency ? toDisplayAmount(totalCostBasis) : null,
-      gainLoss: singleCurrency ? toDisplayAmount(gainLoss) : null,
-      gainLossPercent: singleCurrency ? gainLossPercent : null,
+      complete,
+      portfolioValue:
+        complete && totalsByCurrencyList.length === 1
+          ? totalsByCurrencyList[0].portfolioValue
+          : null,
+      costBasis:
+        complete && totalsByCurrencyList.length === 1 ? totalsByCurrencyList[0].costBasis : null,
+      gainLoss:
+        complete && totalsByCurrencyList.length === 1 ? totalsByCurrencyList[0].gainLoss : null,
+      gainLossPercent:
+        complete && totalsByCurrencyList.length === 1
+          ? totalsByCurrencyList[0].gainLossPercent
+          : null,
       totalsByCurrency: totalsByCurrencyList,
+      incompleteHoldingIds,
+      unknownCostBasisIds,
       holdingsCount: holdings.length,
       topPerformer: topPerformer
         ? { symbol: topPerformer.symbol, gainLossPercent: topPerformer.gainLossPercent }

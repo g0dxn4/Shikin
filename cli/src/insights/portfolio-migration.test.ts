@@ -40,35 +40,51 @@ function stubApprovedCustomRoot(roots: { home: string; data: string; config: str
 
 async function loadPortfolio(queryImpl?: (sql: string) => unknown[]) {
   vi.resetModules()
-  vi.doMock('./shared.js', async (importOriginal) => {
-    const actual = (await importOriginal()) as Record<string, unknown>
+  vi.doMock('../database.js', async () => {
     const { prepareStorageForWrite } = await import('../storage-context.js')
     return {
-      ...actual,
       query: (sql: string) => {
         prepareStorageForWrite()
         if (queryImpl) return queryImpl(sql)
         if (sql.includes('FROM investments')) {
           return [
             {
+              id: 'inv',
+              account_id: null,
+              account_name: null,
               symbol: 'AAPL',
               name: 'Apple',
+              type: 'stock',
               shares: 1,
+              quantity_decimal: '1',
               avg_cost_basis: 10000,
+              avg_cost_basis_decimal: '100',
+              cost_basis_known: 1,
+              instrument_key: 'v1|stock|manual|AAPL|XNAS|USD',
               currency: 'USD',
+              notes: null,
+              created_at: '',
+              updated_at: '',
+              price_instrument_key: 'v1|stock|manual|AAPL|XNAS|USD',
+              price_asset_type: 'stock',
+              price_provider: 'manual',
+              price_instrument_id: 'AAPL',
+              price_exchange: 'XNAS',
+              price_quote_currency: 'USD',
+              unit_price_decimal: '150',
+              quote_date: '2026-04-18',
             },
           ]
         }
-        if (sql.includes('FROM stock_prices')) {
-          return [{ price: 15000, currency: 'USD' }]
-        }
         return []
       },
+      execute: vi.fn(),
+      transaction: vi.fn(),
     }
   })
   const portfolio = await import('./portfolio.js')
   cleanupCallbacks.add(() => {
-    vi.doUnmock('./shared.js')
+    vi.doUnmock('../database.js')
   })
   return portfolio
 }
@@ -76,7 +92,7 @@ async function loadPortfolio(queryImpl?: (sql: string) => unknown[]) {
 afterEach(() => {
   for (const cleanup of cleanupCallbacks) cleanup()
   cleanupCallbacks.clear()
-  vi.doUnmock('./shared.js')
+  vi.doUnmock('../database.js')
   vi.unstubAllEnvs()
   vi.resetModules()
   for (const dir of tempDirs) {

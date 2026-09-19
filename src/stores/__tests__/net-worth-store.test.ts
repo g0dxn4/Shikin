@@ -1,53 +1,75 @@
 import { createElement, useEffect } from 'react'
 import { render, waitFor } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@/lib/database', () => ({
-  query: vi.fn(),
-  execute: vi.fn(),
-}))
+vi.mock('@/lib/database', () => ({ query: vi.fn(), execute: vi.fn() }))
+vi.mock('@/lib/valuation-read', () => ({ readOwnershipValuation: vi.fn() }))
 
-import { query } from '@/lib/database'
+import { readOwnershipValuation } from '@/lib/valuation-read'
 import { useNetWorthStore } from '../net-worth-store'
 
-const mockQuery = vi.mocked(query)
+const mockRead = vi.mocked(readOwnershipValuation)
+const complete = {
+  complete: true,
+  targetCurrency: 'USD',
+  totalAssetsCentavos: 12_500,
+  totalLiabilitiesCentavos: 2_000,
+  totalInvestmentsCentavos: 2_500,
+  netWorthCentavos: 10_500,
+  nativeTotals: [],
+  missingCurrencies: [],
+  unresolvedAccountIds: [],
+  incompleteHoldingIds: [],
+  accounts: [
+    {
+      id: 'card-credit',
+      name: 'Card credit',
+      type: 'credit_card',
+      currency: 'USD',
+      rawBalanceCentavos: 500,
+      assetCentavos: 500,
+      liabilityCentavos: 0,
+      valuationMode: 'cash_plus_holdings' as const,
+      linkedHoldingIds: [],
+      included: true,
+      reason: null,
+    },
+    {
+      id: 'card-debt',
+      name: 'Card debt',
+      type: 'credit_card',
+      currency: 'USD',
+      rawBalanceCentavos: -2000,
+      assetCentavos: 0,
+      liabilityCentavos: 2000,
+      valuationMode: 'cash_plus_holdings' as const,
+      linkedHoldingIds: [],
+      included: true,
+      reason: null,
+    },
+  ],
+  holdings: [],
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void
   let reject!: (reason: unknown) => void
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise
-    reject = rejectPromise
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
   })
   return { promise, resolve, reject }
 }
 
-function account(balance: number) {
-  return {
-    id: `acct-${balance}`,
-    name: 'Checking',
-    type: 'checking',
-    currency: 'USD',
-    balance,
-    icon: null,
-    color: null,
-    is_archived: 0,
-    created_at: '2024-01-01T00:00:00Z',
-    updated_at: '2024-01-01T00:00:00Z',
-  }
-}
-
-function NetWorthCalculationCaller() {
-  const calculateCurrent = useNetWorthStore((state) => state.calculateCurrent)
-
+function Caller() {
+  const calculate = useNetWorthStore((state) => state.calculateCurrent)
   useEffect(() => {
-    void calculateCurrent().catch(() => {})
-  }, [calculateCurrent])
-
+    void calculate().catch(() => {})
+  }, [calculate])
   return null
 }
 
-describe('net-worth-store', () => {
+describe('ownership-aware net-worth store', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     useNetWorthStore.setState({
@@ -58,6 +80,8 @@ describe('net-worth-store', () => {
       totalsComplete: true,
       preferredCurrency: 'USD',
       missingCurrencies: [],
+      unresolvedAccountIds: [],
+      incompleteHoldingIds: [],
       assetBreakdown: [],
       liabilityBreakdown: [],
       history: [],
@@ -65,212 +89,51 @@ describe('net-worth-store', () => {
     })
   })
 
-  it('values investments with the latest saved price when available', async () => {
-    mockQuery
-      .mockResolvedValueOnce([
-        {
-          id: 'acct-checking',
-          name: 'Checking',
-          type: 'checking',
-          currency: 'USD',
-          balance: 10000,
-          icon: null,
-          color: null,
-          is_archived: 0,
-          created_at: '2024-01-01T00:00:00Z',
-          updated_at: '2024-01-01T00:00:00Z',
-        },
-      ])
-      .mockResolvedValueOnce([
-        {
-          id: 'inv-aapl',
-          account_id: null,
-          symbol: 'AAPL',
-          name: 'Apple',
-          type: 'stock',
-          shares: 2,
-          avg_cost_basis: 1000,
-          currency: 'USD',
-          notes: null,
-          created_at: '2024-01-01T00:00:00Z',
-          updated_at: '2024-01-01T00:00:00Z',
-          latest_price: 1500,
-        },
-      ])
-
+  it('keeps signed card credit as an asset and card debt as a liability', async () => {
+    mockRead.mockResolvedValue(complete)
     await useNetWorthStore.getState().calculateCurrent()
-
     expect(useNetWorthStore.getState()).toMatchObject({
-      totalInvestments: 3000,
-      totalAssets: 13000,
-      totalLiabilities: 0,
-      netWorth: 13000,
-    })
-  })
-
-  it('falls back to investment cost basis when no latest price exists', async () => {
-    mockQuery.mockResolvedValueOnce([]).mockResolvedValueOnce([
-      {
-        id: 'inv-cetes',
-        account_id: null,
-        symbol: 'CETES-28',
-        name: 'CETES 28 días',
-        type: 'cetes',
-        shares: 3,
-        avg_cost_basis: 2000,
-        currency: 'USD',
-        notes: null,
-        created_at: '2024-01-01T00:00:00Z',
-        updated_at: '2024-01-01T00:00:00Z',
-        latest_price: null,
-      },
-    ])
-
-    await useNetWorthStore.getState().calculateCurrent()
-
-    expect(useNetWorthStore.getState()).toMatchObject({
-      totalInvestments: 6000,
-      totalAssets: 6000,
-      netWorth: 6000,
-    })
-  })
-
-  it('marks totals unavailable when an exchange rate is missing', async () => {
-    mockQuery.mockResolvedValueOnce([]).mockResolvedValueOnce([
-      {
-        id: 'inv-cetes',
-        account_id: null,
-        symbol: 'CETES-28',
-        name: 'CETES 28 días',
-        type: 'cetes',
-        shares: 3,
-        avg_cost_basis: 2000,
-        currency: 'MXN',
-        latest_price: null,
-      },
-    ])
-
-    await useNetWorthStore.getState().calculateCurrent()
-
-    expect(useNetWorthStore.getState()).toMatchObject({
-      totalsComplete: false,
-      totalInvestments: 0,
-      netWorth: 0,
-      missingCurrencies: ['MXN'],
-    })
-  })
-
-  it('adds investment account cash balance and linked holdings intentionally', async () => {
-    mockQuery
-      .mockResolvedValueOnce([
-        {
-          id: 'acct-checking',
-          name: 'Checking',
-          type: 'checking',
-          currency: 'USD',
-          balance: 10000,
-          icon: null,
-          color: null,
-          is_archived: 0,
-          created_at: '2024-01-01T00:00:00Z',
-          updated_at: '2024-01-01T00:00:00Z',
-        },
-        {
-          id: 'acct-brokerage',
-          name: 'Brokerage Cash',
-          type: 'investment',
-          currency: 'USD',
-          balance: 50000,
-          icon: null,
-          color: null,
-          is_archived: 0,
-          created_at: '2024-01-01T00:00:00Z',
-          updated_at: '2024-01-01T00:00:00Z',
-        },
-        {
-          id: 'acct-card',
-          name: 'Credit Card',
-          type: 'credit_card',
-          currency: 'USD',
-          balance: -2000,
-          icon: null,
-          color: null,
-          is_archived: 0,
-          created_at: '2024-01-01T00:00:00Z',
-          updated_at: '2024-01-01T00:00:00Z',
-        },
-      ])
-      .mockResolvedValueOnce([
-        {
-          id: 'inv-voo',
-          account_id: 'acct-brokerage',
-          symbol: 'VOO',
-          name: 'Vanguard S&P 500 ETF',
-          type: 'etf',
-          shares: 2,
-          avg_cost_basis: 12000,
-          currency: 'USD',
-          notes: null,
-          created_at: '2024-01-01T00:00:00Z',
-          updated_at: '2024-01-01T00:00:00Z',
-          latest_price: 15000,
-        },
-      ])
-
-    await useNetWorthStore.getState().calculateCurrent()
-
-    expect(useNetWorthStore.getState()).toMatchObject({
-      totalInvestments: 30000,
-      totalAssets: 90000,
-      totalLiabilities: 2000,
-      netWorth: 88000,
+      totalAssets: 12_500,
+      totalLiabilities: 2_000,
+      netWorth: 10_500,
     })
     expect(useNetWorthStore.getState().assetBreakdown).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: 'acct-brokerage', balance: 50000 })])
+      expect.arrayContaining([expect.objectContaining({ id: 'card-credit', balance: 500 })])
     )
+    expect(useNetWorthStore.getState().liabilityBreakdown).toEqual([
+      expect.objectContaining({ id: 'card-debt', balance: -2000 }),
+    ])
   })
 
-  it('serializes calculations across unmounted and remounted callers', async () => {
-    const firstAccounts = deferred<ReturnType<typeof account>[]>()
-    mockQuery
-      .mockImplementationOnce(() => firstAccounts.promise)
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([account(20000)])
-      .mockResolvedValueOnce([])
+  it('uses null totals and exposes unresolved ownership instead of guessing', async () => {
+    mockRead.mockResolvedValue({
+      ...complete,
+      complete: false,
+      totalAssetsCentavos: null,
+      totalLiabilitiesCentavos: null,
+      totalInvestmentsCentavos: null,
+      netWorthCentavos: null,
+      unresolvedAccountIds: ['broker'],
+    })
+    await useNetWorthStore.getState().calculateCurrent()
+    expect(useNetWorthStore.getState()).toMatchObject({
+      totalsComplete: false,
+      netWorth: null,
+      unresolvedAccountIds: ['broker'],
+    })
+  })
 
-    const firstCaller = render(createElement(NetWorthCalculationCaller))
-    await waitFor(() => expect(mockQuery).toHaveBeenCalledTimes(1))
-    firstCaller.unmount()
-
-    render(createElement(NetWorthCalculationCaller))
+  it('preserves the module-level read queue across unmounts and after failures', async () => {
+    const first = deferred<typeof complete>()
+    mockRead.mockImplementationOnce(() => first.promise).mockResolvedValueOnce(complete)
+    const caller = render(createElement(Caller))
+    await waitFor(() => expect(mockRead).toHaveBeenCalledTimes(1))
+    caller.unmount()
+    render(createElement(Caller))
     await Promise.resolve()
-
-    expect(mockQuery).toHaveBeenCalledTimes(1)
-
-    firstAccounts.resolve([account(10000)])
-
-    await waitFor(() => expect(mockQuery).toHaveBeenCalledTimes(4))
-    await waitFor(() => expect(useNetWorthStore.getState().netWorth).toBe(20000))
-  })
-
-  it('propagates a calculation failure without poisoning later queued reads', async () => {
-    const failedAccounts = deferred<ReturnType<typeof account>[]>()
-    mockQuery
-      .mockImplementationOnce(() => failedAccounts.promise)
-      .mockResolvedValueOnce([account(30000)])
-      .mockResolvedValueOnce([])
-
-    const failed = useNetWorthStore.getState().calculateCurrent()
-    const later = useNetWorthStore.getState().calculateCurrent()
-    const failedExpectation = expect(failed).rejects.toThrow('Account query failed')
-
-    await waitFor(() => expect(mockQuery).toHaveBeenCalledTimes(1))
-    failedAccounts.reject(new Error('Account query failed'))
-
-    await failedExpectation
-    await later
-
-    expect(mockQuery).toHaveBeenCalledTimes(3)
-    expect(useNetWorthStore.getState().netWorth).toBe(30000)
+    expect(mockRead).toHaveBeenCalledTimes(1)
+    first.reject(new Error('read failed'))
+    await waitFor(() => expect(mockRead).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(useNetWorthStore.getState().netWorth).toBe(10_500))
   })
 })

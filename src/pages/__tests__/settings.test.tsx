@@ -16,6 +16,7 @@ export const mockInstallUpdate = vi.fn().mockResolvedValue(undefined)
 export const mockRelaunchToApplyUpdate = vi.fn().mockResolvedValue(undefined)
 export const mockGetWebServerStatus = vi.fn()
 export const mockApplyWebServerSettings = vi.fn()
+export const mockGetRuntimeDiagnostics = vi.fn()
 
 const storageMocks = vi.hoisted(() => ({
   get: vi.fn(),
@@ -98,6 +99,10 @@ vi.mock('@/lib/web-server', () => ({
   applyWebServerSettings: (...args: unknown[]) => mockApplyWebServerSettings(...args),
 }))
 
+vi.mock('@/lib/runtime-diagnostics', () => ({
+  getRuntimeDiagnostics: (...args: unknown[]) => mockGetRuntimeDiagnostics(...args),
+}))
+
 vi.mock('@/lib/storage', () => ({
   load: vi.fn().mockResolvedValue({
     get: storageMocks.get,
@@ -114,6 +119,17 @@ describe('SettingsPage', () => {
     storageMocks.save.mockResolvedValue(undefined)
     mockGetWebServerStatus.mockResolvedValue({ running: false, port: null, error: null })
     mockApplyWebServerSettings.mockResolvedValue({ running: false, port: null, error: null })
+    mockGetRuntimeDiagnostics.mockResolvedValue({
+      success: true,
+      build: 'desktop',
+      version: '1.0.10',
+      schemaVersion: 21,
+      schemaMigration: '021_backend_remediation_foundation',
+      databaseLineageId: 'lineage-from-backup',
+      localInstance: { status: 'available', id: 'local-instance-id' },
+      dataRevision: 3,
+      lastFinancialWriteAt: null,
+    })
   })
 
   it('renders native settings content without a redundant route heading', async () => {
@@ -147,6 +163,21 @@ describe('SettingsPage', () => {
     expect(screen.getByText('sections.updates')).toBeInTheDocument()
     expect(await screen.findByText('0.1.0')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'updates.check' })).toBeInTheDocument()
+  })
+
+  it('keeps ordinary backup, update, and theme controls with data identity nearby', async () => {
+    render(<SettingsPage />)
+
+    expect(await screen.findByText('diagnostics.title')).toBeInTheDocument()
+    expect(screen.getByTestId('theme-settings')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'data.export' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'data.import' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'updates.check' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'diagnostics.refresh' })).toBeInTheDocument()
+    expect(screen.getByText('lineage-from-backup')).toBeInTheDocument()
+    expect(screen.getByText('local-instance-id')).toBeInTheDocument()
+    expect(screen.getByText('diagnostics.lastFinancialWriteNever')).toBeInTheDocument()
+    expect(mockGetRuntimeDiagnostics).toHaveBeenCalledWith()
   })
 
   it('persists the close-to-tray desktop setting', async () => {

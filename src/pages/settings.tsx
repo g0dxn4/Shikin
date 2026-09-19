@@ -28,6 +28,7 @@ import { getErrorMessage } from '@/lib/errors'
 import { load } from '@/lib/storage'
 import { exportDatabaseSnapshot, importDatabaseSnapshot } from '@/lib/database'
 import { ThemeSettings } from '@/components/ThemeSettings'
+import { RuntimeDiagnosticsPanel } from '@/components/settings/runtime-diagnostics-panel'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 import { ProgressBar } from '@/components/ui/progress-bar'
 import { ErrorBanner } from '@/components/ui/error-banner'
@@ -903,6 +904,7 @@ export function SettingsPage() {
                 }}
               />
             </div>
+            <RuntimeDiagnosticsPanel />
           </section>
 
           <section className="native-panel space-y-5 p-5 sm:p-6">

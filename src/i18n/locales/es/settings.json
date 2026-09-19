@@ -187,6 +187,34 @@
     "resetWarning": "Esto eliminará permanentemente todos tus datos. Esta acción no se puede deshacer.",
     "description": "Exporta un respaldo o importa una instantánea de la base de datos. Las importaciones requieren confirmación y reemplazan la base de datos actual."
   },
+  "diagnostics": {
+    "title": "Identidad de los datos",
+    "description": "El linaje de la base de datos sigue un respaldo. La identidad de instancia local pertenece a esta raíz de datos.",
+    "refresh": "Actualizar",
+    "refreshing": "Actualizando...",
+    "loading": "Cargando diagnósticos de tiempo de ejecución...",
+    "loadError": "No se pudieron cargar los diagnósticos de tiempo de ejecución.",
+    "errorTitle": "Diagnósticos de tiempo de ejecución no disponibles",
+    "build": "Origen",
+    "version": "Versión de la app",
+    "schema": "Esquema",
+    "databaseLineage": "Linaje de la base de datos",
+    "localInstance": "Instancia local",
+    "dataRevision": "Revisión de datos",
+    "lastFinancialWrite": "Última escritura financiera",
+    "lastFinancialWriteNever": "Ninguna registrada",
+    "builds": {
+      "desktop": "Escritorio",
+      "hostedWeb": "Web alojada",
+      "browserDevelopment": "Desarrollo en el navegador"
+    },
+    "unavailable": {
+      "missing": "No disponible (ausente)",
+      "invalid": "No disponible (inválida)",
+      "unsafe": "No disponible (insegura)",
+      "unreadable": "No disponible (ilegible)"
+    }
+  },
   "dataApis": {
     "description": "Claves API opcionales para actualizar precios de inversiones. Alpha Vantage se intenta primero y luego Finnhub; usa símbolos del proveedor como WALMEX.MX cuando estén soportados.",
     "alphaVantageHint": "Nivel gratuito: 25 solicitudes/día. Soporta muchos símbolos de EE. UU. y algunos internacionales/MX.",

@@ -187,6 +187,34 @@
     "resetWarning": "This will permanently delete all your data. This action cannot be undone.",
     "description": "Export a backup or import a database snapshot. Imports require confirmation and replace the current database."
   },
+  "diagnostics": {
+    "title": "Data identity",
+    "description": "Database lineage follows a backup. Local instance identity belongs to this data root.",
+    "refresh": "Refresh",
+    "refreshing": "Refreshing...",
+    "loading": "Loading runtime diagnostics...",
+    "loadError": "Could not load runtime diagnostics.",
+    "errorTitle": "Runtime diagnostics unavailable",
+    "build": "Source",
+    "version": "App version",
+    "schema": "Schema",
+    "databaseLineage": "Database lineage",
+    "localInstance": "Local instance",
+    "dataRevision": "Data revision",
+    "lastFinancialWrite": "Last financial write",
+    "lastFinancialWriteNever": "None recorded",
+    "builds": {
+      "desktop": "Desktop",
+      "hostedWeb": "Hosted web",
+      "browserDevelopment": "Browser development"
+    },
+    "unavailable": {
+      "missing": "Unavailable (missing)",
+      "invalid": "Unavailable (invalid)",
+      "unsafe": "Unavailable (unsafe)",
+      "unreadable": "Unavailable (unreadable)"
+    }
+  },
   "dataApis": {
     "description": "Optional API keys for refreshing investment prices. Alpha Vantage is tried first, then Finnhub; use provider symbols such as WALMEX.MX when supported.",
     "alphaVantageHint": "Free tier: 25 requests/day. Supports many US and some international/MX symbols.",

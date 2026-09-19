@@ -156,8 +156,15 @@ function assertSingleRowUpdated(result: { rowsAffected: number }, message: strin
   }
 }
 
-function accountCurrencyChangeBlockedMessage(referenceCount: number) {
-  return `Cannot change this account currency while ${referenceCount} linked monetary reference${referenceCount === 1 ? '' : 's'} still point at the account. Create a new account or explicitly migrate the referenced data so amounts do not silently change meaning.`
+function accountCurrencyChangeBlockedMessage(
+  referenceCount: number,
+  evidenceCounts?: { reconciliationCount: number; coverageCount: number }
+) {
+  const evidenceDetails =
+    evidenceCounts && (evidenceCounts.reconciliationCount > 0 || evidenceCounts.coverageCount > 0)
+      ? ` Counts: account reconciliations=${evidenceCounts.reconciliationCount}, source coverage=${evidenceCounts.coverageCount}.`
+      : ''
+  return `Cannot change this account currency while ${referenceCount} linked monetary reference${referenceCount === 1 ? '' : 's'} still point at the account. Create a new account or explicitly migrate the referenced data so amounts do not silently change meaning.${evidenceDetails}`
 }
 
 function activePaymentAccountReferenceCount(accountId: string): number {
@@ -186,11 +193,26 @@ function accountModeChangeFailure(
        WHERE account_id = $1 OR transfer_to_account_id = $2`,
       [account.id, account.id]
     ) ?? [])[0]?.count ?? 0
-  if (transactionCount === 0) return null
+  const reconciliationCount =
+    (query<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM account_reconciliations WHERE account_id = $1',
+      [account.id]
+    ) ?? [])[0]?.count ?? 0
+  if (transactionCount === 0 && reconciliationCount === 0) return null
+  const evidence = [
+    transactionCount > 0
+      ? `${transactionCount} ledger row${transactionCount === 1 ? '' : 's'}`
+      : null,
+    reconciliationCount > 0
+      ? `${reconciliationCount} reconciliation observation${reconciliationCount === 1 ? '' : 's'}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' and ')
   return {
     success: false as const,
     reason: 'account_mode_transition_requires_new_account' as const,
-    message: `Account "${account.name}" has ${transactionCount} ledger row${transactionCount === 1 ? '' : 's'}. Create a new ${nextMode} account so historical and observed balance bases are not mixed.`,
+    message: `Account "${account.name}" has ${evidence}. Create a new ${nextMode} account so historical and observed balance bases are not mixed.`,
   }
 }
 
@@ -331,6 +353,14 @@ function accountCurrencyChangeFailure(
     'SELECT COUNT(*) as count FROM goals WHERE account_id = $1',
     [accountId]
   )
+  const linkedReconciliationCount = countAccountCurrencyBlockers(
+    'SELECT COUNT(*) as count FROM account_reconciliations WHERE account_id = $1',
+    [accountId]
+  )
+  const linkedCoverageCount = countAccountCurrencyBlockers(
+    'SELECT COUNT(*) as count FROM source_coverage WHERE account_id = $1',
+    [accountId]
+  )
   const accountRows = query<{ balance: number }>(
     'SELECT balance FROM accounts WHERE id = $1 LIMIT 1',
     [accountId]
@@ -344,10 +374,15 @@ function accountCurrencyChangeFailure(
     linkedStatementCount +
     linkedBalanceHistoryCount +
     linkedGoalCount +
+    linkedReconciliationCount +
+    linkedCoverageCount +
     (accountBalance === 0 ? 0 : 1)
 
   return blockingReferenceCount > 0
-    ? accountCurrencyChangeBlockedMessage(blockingReferenceCount)
+    ? accountCurrencyChangeBlockedMessage(blockingReferenceCount, {
+        reconciliationCount: linkedReconciliationCount,
+        coverageCount: linkedCoverageCount,
+      })
     : null
 }
 

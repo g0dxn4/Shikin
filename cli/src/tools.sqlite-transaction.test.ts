@@ -254,11 +254,12 @@ function seedDatabase({
       notes TEXT,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
-    CREATE TABLE subscriptions (id TEXT PRIMARY KEY);
+    CREATE TABLE subscriptions (id TEXT PRIMARY KEY, account_id TEXT REFERENCES accounts(id));
     CREATE TABLE budgets (id TEXT PRIMARY KEY);
     CREATE TABLE budget_periods (id TEXT PRIMARY KEY);
     CREATE TABLE investments (
       id TEXT PRIMARY KEY,
+      account_id TEXT REFERENCES accounts(id),
       avg_cost_basis INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE stock_prices (
@@ -267,7 +268,7 @@ function seedDatabase({
     );
     CREATE TABLE exchange_rates (id TEXT PRIMARY KEY);
     CREATE TABLE category_rules (id TEXT PRIMARY KEY);
-    CREATE TABLE goals (id TEXT PRIMARY KEY);
+    CREATE TABLE goals (id TEXT PRIMARY KEY, account_id TEXT REFERENCES accounts(id));
     CREATE TABLE net_worth_snapshots (
       id TEXT PRIMARY KEY,
       currency TEXT
@@ -1430,6 +1431,201 @@ describe('CLI tools SQLite transaction rollback', () => {
       }
     } finally {
       db.close()
+    }
+  }, 10_000)
+
+  it('blocks reconciliation-only mode and currency changes through update and upsert without writes', async () => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({ tempHome, accountBalance: 0 })
+    const db = new Database(dbPath)
+    try {
+      const insertAccount = db.prepare(
+        `INSERT INTO accounts (
+           id, name, type, currency, balance, is_archived, account_mode, valuation_mode
+         ) VALUES (?, ?, 'checking', 'USD', 0, 0, ?, 'cash_plus_holdings')`
+      )
+      insertAccount.run('guard-update', 'Guard update', 'transactional')
+      insertAccount.run('guard-upsert', 'Guard upsert', 'snapshot_only')
+      const insertObservation = db.prepare(
+        `INSERT INTO account_reconciliations (
+           id, account_id, reconciliation_date, actual_balance, stored_balance_before,
+           ledger_balance_before, ledger_balance_after, adjustment_amount, selection_mode
+         ) VALUES (?, ?, '2026-01-31', 0, 0, 0, 0, 0, 'explicit_rows')`
+      )
+      insertObservation.run('guard-update-observation', 'guard-update')
+      insertObservation.run('guard-upsert-observation', 'guard-upsert')
+    } finally {
+      db.close()
+    }
+
+    const { tools } = await loadToolsWithRealDatabase(tempHome)
+    const updateAccount = tools.find((tool) => tool.name === 'update-account')!
+    const upsertAccount = tools.find((tool) => tool.name === 'upsert-account')!
+    const before = snapshotFinanceTables(dbPath)
+
+    await expect(
+      updateAccount.execute(
+        updateAccount.schema.parse({ accountId: 'guard-update', accountMode: 'snapshot_only' })
+      )
+    ).resolves.toMatchObject({
+      success: false,
+      reason: 'account_mode_transition_requires_new_account',
+      message: expect.stringContaining('1 reconciliation observation'),
+    })
+    expect(snapshotFinanceTables(dbPath)).toEqual(before)
+
+    await expect(
+      upsertAccount.execute(
+        upsertAccount.schema.parse({ accountId: 'guard-upsert', accountMode: 'transactional' })
+      )
+    ).resolves.toMatchObject({
+      success: false,
+      reason: 'account_mode_transition_requires_new_account',
+      message: expect.stringContaining('1 reconciliation observation'),
+    })
+    expect(snapshotFinanceTables(dbPath)).toEqual(before)
+
+    await expect(
+      updateAccount.execute(
+        updateAccount.schema.parse({ accountId: 'guard-update', currency: 'EUR' })
+      )
+    ).resolves.toMatchObject({
+      success: false,
+      message: expect.stringContaining('account reconciliations=1, source coverage=0'),
+    })
+    expect(snapshotFinanceTables(dbPath)).toEqual(before)
+
+    await expect(
+      upsertAccount.execute(
+        upsertAccount.schema.parse({ accountId: 'guard-upsert', currency: 'EUR' })
+      )
+    ).resolves.toMatchObject({
+      success: false,
+      message: expect.stringContaining('account reconciliations=1, source coverage=0'),
+    })
+    expect(snapshotFinanceTables(dbPath)).toEqual(before)
+  }, 10_000)
+
+  it('blocks coverage-only currency changes while allowing metadata and mode updates', async () => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({ tempHome, accountBalance: 0 })
+    const db = new Database(dbPath)
+    try {
+      db.prepare(
+        `INSERT INTO accounts (
+           id, name, type, currency, balance, is_archived, account_mode, valuation_mode
+         ) VALUES ('coverage-account', 'Coverage account', 'checking', 'USD', 0, 0,
+                   'transactional', 'cash_plus_holdings')`
+      ).run()
+      db.prepare(
+        `INSERT INTO source_coverage (
+           id, account_id, source_namespace, period_start, period_end, status, zero_rows
+         ) VALUES ('coverage-only', 'coverage-account', 'bank', '2026-01-01', '2026-01-31',
+                   'verified', 1)`
+      ).run()
+    } finally {
+      db.close()
+    }
+
+    const { tools } = await loadToolsWithRealDatabase(tempHome)
+    const updateAccount = tools.find((tool) => tool.name === 'update-account')!
+    const upsertAccount = tools.find((tool) => tool.name === 'upsert-account')!
+    const beforeRejection = snapshotFinanceTables(dbPath)
+
+    await expect(
+      upsertAccount.execute(
+        upsertAccount.schema.parse({ accountId: 'coverage-account', currency: 'EUR' })
+      )
+    ).resolves.toMatchObject({
+      success: false,
+      message: expect.stringContaining('account reconciliations=0, source coverage=1'),
+    })
+    expect(snapshotFinanceTables(dbPath)).toEqual(beforeRejection)
+
+    await expect(
+      upsertAccount.execute(
+        upsertAccount.schema.parse({
+          accountId: 'coverage-account',
+          name: 'Metadata edit',
+          currency: 'USD',
+          accountMode: 'transactional',
+          icon: 'bank',
+        })
+      )
+    ).resolves.toMatchObject({ success: true })
+    await expect(
+      updateAccount.execute(
+        updateAccount.schema.parse({
+          accountId: 'coverage-account',
+          accountMode: 'snapshot_only',
+        })
+      )
+    ).resolves.toMatchObject({ success: true })
+
+    const verified = new Database(dbPath, { readonly: true })
+    try {
+      expect(
+        verified
+          .prepare(
+            "SELECT name, currency, account_mode, icon FROM accounts WHERE id = 'coverage-account'"
+          )
+          .get()
+      ).toEqual({
+        name: 'Metadata edit',
+        currency: 'USD',
+        account_mode: 'snapshot_only',
+        icon: 'bank',
+      })
+      expect(
+        verified.prepare("SELECT * FROM source_coverage WHERE id = 'coverage-only'").get()
+      ).toEqual(
+        beforeRejection.source_coverage.find(
+          (row: Record<string, unknown>) => row.id === 'coverage-only'
+        )
+      )
+    } finally {
+      verified.close()
+    }
+  }, 10_000)
+
+  it('allows empty accounts without evidence to change currency and mode', async () => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({ tempHome, accountBalance: 0 })
+    const db = new Database(dbPath)
+    try {
+      db.prepare(
+        `INSERT INTO accounts (
+           id, name, type, currency, balance, is_archived, account_mode, valuation_mode
+         ) VALUES ('empty-account', 'Empty account', 'checking', 'USD', 0, 0,
+                   'transactional', 'cash_plus_holdings')`
+      ).run()
+    } finally {
+      db.close()
+    }
+
+    const { tools } = await loadToolsWithRealDatabase(tempHome)
+    const updateAccount = tools.find((tool) => tool.name === 'update-account')!
+    await expect(
+      updateAccount.execute(
+        updateAccount.schema.parse({
+          accountId: 'empty-account',
+          currency: 'EUR',
+          accountMode: 'snapshot_only',
+        })
+      )
+    ).resolves.toMatchObject({ success: true })
+
+    const verified = new Database(dbPath, { readonly: true })
+    try {
+      expect(
+        verified
+          .prepare(
+            "SELECT currency, account_mode, balance FROM accounts WHERE id = 'empty-account'"
+          )
+          .get()
+      ).toEqual({ currency: 'EUR', account_mode: 'snapshot_only', balance: 0 })
+    } finally {
+      verified.close()
     }
   }, 10_000)
 

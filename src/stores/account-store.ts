@@ -81,6 +81,8 @@ type AccountCurrencyBlockerCounts = {
   creditCardStatementCount: number
   balanceHistoryCount: number
   goalCount: number
+  reconciliationCount: number
+  coverageCount: number
   nonzeroBalanceCount: number
 }
 
@@ -90,7 +92,7 @@ function totalAccountCurrencyBlockers(counts: AccountCurrencyBlockerCounts) {
 
 function accountCurrencyChangeBlockedMessage(counts: AccountCurrencyBlockerCounts) {
   const total = totalAccountCurrencyBlockers(counts)
-  return `Cannot change this account currency while ${total} linked monetary reference${total === 1 ? '' : 's'} still point at the account. Create a new account or explicitly migrate the referenced data so amounts do not silently change meaning. Counts: transactions as source=${counts.transactionSourceCount}, transactions as transfer destination=${counts.transactionTransferDestinationCount}, recurring rules as source=${counts.recurringRuleSourceCount}, recurring rules as destination=${counts.recurringRuleDestinationCount}, subscriptions=${counts.subscriptionCount}, investments=${counts.investmentCount}, credit card statements=${counts.creditCardStatementCount}, account balance history=${counts.balanceHistoryCount}, goals=${counts.goalCount}, nonzero account balance=${counts.nonzeroBalanceCount}.`
+  return `Cannot change this account currency while ${total} linked monetary reference${total === 1 ? '' : 's'} still point at the account. Create a new account or explicitly migrate the referenced data so amounts do not silently change meaning. Counts: transactions as source=${counts.transactionSourceCount}, transactions as transfer destination=${counts.transactionTransferDestinationCount}, recurring rules as source=${counts.recurringRuleSourceCount}, recurring rules as destination=${counts.recurringRuleDestinationCount}, subscriptions=${counts.subscriptionCount}, investments=${counts.investmentCount}, credit card statements=${counts.creditCardStatementCount}, account balance history=${counts.balanceHistoryCount}, goals=${counts.goalCount}, account reconciliations=${counts.reconciliationCount}, source coverage=${counts.coverageCount}, nonzero account balance=${counts.nonzeroBalanceCount}.`
 }
 
 async function ensurePrimaryAccountColumn() {
@@ -371,6 +373,12 @@ async function countAccountCurrencyBlockers(
       'SELECT COUNT(*) as count FROM account_balance_history WHERE account_id = ?'
     ),
     goalCount: await count('SELECT COUNT(*) as count FROM goals WHERE account_id = ?'),
+    reconciliationCount: await count(
+      'SELECT COUNT(*) as count FROM account_reconciliations WHERE account_id = ?'
+    ),
+    coverageCount: await count(
+      'SELECT COUNT(*) as count FROM source_coverage WHERE account_id = ?'
+    ),
     nonzeroBalanceCount: currentBalance === 0 ? 0 : 1,
   }
 }
@@ -513,9 +521,15 @@ export const useAccountStore = create<AccountState>((set, get) => ({
              WHERE account_id = ? OR transfer_to_account_id = ?`,
             [id, id]
           )
-          if ((transactionRows[0]?.count ?? 0) > 0) {
+          const reconciliationRows = await tx.query<{ count: number }>(
+            'SELECT COUNT(*) AS count FROM account_reconciliations WHERE account_id = ?',
+            [id]
+          )
+          const transactionCount = transactionRows[0]?.count ?? 0
+          const reconciliationCount = reconciliationRows[0]?.count ?? 0
+          if (transactionCount > 0 || reconciliationCount > 0) {
             throw new Error(
-              'Create a new account to change balance tracking mode after transactions exist.'
+              `Create a new account to change balance tracking mode after durable evidence exists. Counts: transactions=${transactionCount}, account reconciliations=${reconciliationCount}.`
             )
           }
         }

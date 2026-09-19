@@ -1,9 +1,49 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { isInvestmentPriceStale } from '../price-scheduler'
+
+vi.mock('@/lib/database', () => ({ query: vi.fn() }))
+vi.mock('@/lib/price-service', () => ({
+  fetchAllCurrentPrices: vi.fn(async () => ({ quotes: new Map(), failures: [] })),
+  savePricesToDB: vi.fn(),
+}))
+vi.mock('@/stores/investment-store', () => ({
+  useInvestmentStore: {
+    getState: vi.fn(() => ({
+      setRefreshFailures: vi.fn(),
+      setLastPriceFetch: vi.fn(),
+      fetch: vi.fn(),
+    })),
+  },
+}))
+
+import { query } from '@/lib/database'
+import { fetchAllCurrentPrices } from '../price-service'
+import { initPriceScheduler, isInvestmentPriceStale, stopPriceScheduler } from '../price-scheduler'
 
 describe('price-scheduler', () => {
   afterEach(() => {
+    stopPriceScheduler()
     vi.useRealTimers()
+    vi.clearAllMocks()
+  })
+
+  it('uses retrieval time for refresh cadence while retaining the older source quote date', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2024-01-10T12:00:00Z'))
+    vi.mocked(query).mockResolvedValue([
+      {
+        id: 'inv-1',
+        type: 'stock',
+        quote_date: '2024-01-05',
+        price_retrieved_at: '2024-01-10T11:00:00.000Z',
+      },
+    ])
+
+    await initPriceScheduler()
+
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('ip.created_at AS price_retrieved_at')
+    )
+    expect(fetchAllCurrentPrices).not.toHaveBeenCalled()
   })
 
   describe('isInvestmentPriceStale', () => {

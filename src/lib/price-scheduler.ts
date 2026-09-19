@@ -19,6 +19,7 @@ type ScheduledInvestment = Investment & {
   price_exchange: string | null
   price_quote_currency: string | null
   quote_date: string | null
+  price_retrieved_at: string | null
 }
 
 function isMarketHours(): boolean {
@@ -36,7 +37,8 @@ async function getInvestments(): Promise<ScheduledInvestment[]> {
             ip.instrument_id AS price_instrument_id,
             ip.exchange AS price_exchange,
             ip.quote_currency AS price_quote_currency,
-            ip.quote_date
+            ip.quote_date,
+            ip.created_at AS price_retrieved_at
      FROM investments i
      LEFT JOIN instrument_prices ip ON ip.id = (
        SELECT candidate.id FROM instrument_prices candidate
@@ -47,9 +49,12 @@ async function getInvestments(): Promise<ScheduledInvestment[]> {
   )
 }
 
-export function isInvestmentPriceStale(lastDate: string | null, type: 'stock' | 'crypto'): boolean {
-  if (!lastDate) return true
-  const last = new Date(lastDate)
+export function isInvestmentPriceStale(
+  lastRetrievedAt: string | null,
+  type: 'stock' | 'crypto'
+): boolean {
+  if (!lastRetrievedAt) return true
+  const last = new Date(lastRetrievedAt)
   const now = new Date()
   const diffMs = now.getTime() - last.getTime()
   if (type === 'crypto') return diffMs > CRYPTO_INTERVAL
@@ -96,7 +101,10 @@ async function refresh(investments: ScheduledInvestment[]) {
 async function fetchStalePrices(): Promise<void> {
   const investments = await getInvestments()
   const stale = investments.filter((investment) =>
-    isInvestmentPriceStale(investment.quote_date, investment.type === 'crypto' ? 'crypto' : 'stock')
+    isInvestmentPriceStale(
+      investment.price_retrieved_at,
+      investment.type === 'crypto' ? 'crypto' : 'stock'
+    )
   )
   if (stale.length > 0) await refresh(stale)
 }

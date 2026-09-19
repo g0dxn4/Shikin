@@ -66,6 +66,28 @@ function normalizeCurrency(value: string): string {
   return value.trim().toUpperCase()
 }
 
+function sourceDateFromIsoDate(value: unknown, provider: string): string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new Error(`${provider} did not provide a valid source date`)
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`)
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw new Error(`${provider} did not provide a valid source date`)
+  }
+  return value
+}
+
+function sourceDateFromUnixSeconds(value: unknown, provider: string): string {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${provider} did not provide a valid source timestamp`)
+  }
+  const parsed = new Date(value * 1000)
+  if (!Number.isFinite(parsed.getTime())) {
+    throw new Error(`${provider} did not provide a valid source timestamp`)
+  }
+  return parsed.toISOString().slice(0, 10)
+}
+
 function normalizedType(value: unknown): string {
   return String(value ?? '')
     .trim()
@@ -156,6 +178,10 @@ async function fetchAlphaVantage(
   if (returnedSymbol !== instrumentId || !unitPriceDecimal) {
     throw new Error('Alpha Vantage returned an invalid or mismatched quote')
   }
+  const quoteDate = sourceDateFromIsoDate(
+    body['Global Quote']?.['07. latest trading day'],
+    'Alpha Vantage'
+  )
   const identity: InstrumentIdentity = {
     assetType: investment.type,
     provider: 'alpha_vantage',
@@ -167,7 +193,7 @@ async function fetchAlphaVantage(
     ...identity,
     instrumentKey: instrumentIdentityKey(identity),
     unitPriceDecimal,
-    quoteDate: new Date().toISOString().split('T')[0],
+    quoteDate,
   }
 }
 
@@ -209,6 +235,7 @@ async function fetchFinnhub(
   )) as Record<string, unknown>
   const unitPriceDecimal = positiveProviderPrice(quote.c)
   if (!unitPriceDecimal) throw new Error('Finnhub returned an invalid or zero quote')
+  const quoteDate = sourceDateFromUnixSeconds(quote.t, 'Finnhub')
   const identity: InstrumentIdentity = {
     assetType: investment.type,
     provider: 'finnhub',
@@ -220,7 +247,7 @@ async function fetchFinnhub(
     ...identity,
     instrumentKey: instrumentIdentityKey(identity),
     unitPriceDecimal,
-    quoteDate: new Date().toISOString().split('T')[0],
+    quoteDate,
   }
 }
 
@@ -260,10 +287,10 @@ async function fetchCoinGecko(
     `https://api.coingecko.com/api/v3/simple/price?${params.toString()}`,
     'CoinGecko'
   )) as Record<string, Record<string, unknown>>
-  const unitPriceDecimal = positiveProviderPrice(
-    result[instrumentId]?.[quoteCurrency.toLowerCase()]
-  )
+  const coinQuote = result[instrumentId]
+  const unitPriceDecimal = positiveProviderPrice(coinQuote?.[quoteCurrency.toLowerCase()])
   if (!unitPriceDecimal) throw new Error('CoinGecko returned an invalid or zero quote')
+  const quoteDate = sourceDateFromUnixSeconds(coinQuote?.last_updated_at, 'CoinGecko')
   const identity: InstrumentIdentity = {
     assetType: 'crypto',
     provider: 'coingecko',
@@ -275,7 +302,7 @@ async function fetchCoinGecko(
     ...identity,
     instrumentKey: instrumentIdentityKey(identity),
     unitPriceDecimal,
-    quoteDate: new Date().toISOString().split('T')[0],
+    quoteDate,
   }
 }
 

@@ -56,7 +56,13 @@ describe('identity-verified price service', () => {
         })
         .mockResolvedValueOnce({
           ok: true,
-          json: async () => ({ 'Global Quote': { '01. symbol': 'DUP', '05. price': '0.0049' } }),
+          json: async () => ({
+            'Global Quote': {
+              '01. symbol': 'DUP',
+              '05. price': '0.0049',
+              '07. latest trading day': '2024-01-05',
+            },
+          }),
         })
     )
 
@@ -70,6 +76,7 @@ describe('identity-verified price service', () => {
       provider: 'alpha_vantage',
       quoteCurrency: 'MXN',
       unitPriceDecimal: '0.0049',
+      quoteDate: '2024-01-05',
     })
   })
 
@@ -119,6 +126,76 @@ describe('identity-verified price service', () => {
     ).rejects.toThrow('zero')
   })
 
+  it('keeps Finnhub tiny prices and derives the quote date from its Unix timestamp', async () => {
+    settingsStore.set('finnhub_key', 'secret')
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => [{ symbol: 'DUP', type: 'Common Stock', currency: 'CHF' }],
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ c: 0.0000001, t: 1704501000 }),
+        })
+    )
+
+    const quote = await fetchVerifiedPrice(investment, {
+      provider: 'finnhub',
+      instrumentId: 'DUP',
+      exchange: 'SW',
+      quoteCurrency: 'CHF',
+    })
+
+    expect(quote).toMatchObject({
+      unitPriceDecimal: '0.0000001',
+      quoteDate: '2024-01-06',
+    })
+  })
+
+  it('rejects an impossible Alpha Vantage latest trading day', async () => {
+    settingsStore.set('alpha_vantage_key', 'secret')
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            bestMatches: [
+              {
+                '1. symbol': 'DUP',
+                '3. type': 'Equity',
+                '4. region': 'Mexico',
+                '8. currency': 'MXN',
+              },
+            ],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            'Global Quote': {
+              '01. symbol': 'DUP',
+              '05. price': '1.25',
+              '07. latest trading day': '2024-02-30',
+            },
+          }),
+        })
+    )
+
+    await expect(
+      fetchVerifiedPrice(investment, {
+        provider: 'alpha_vantage',
+        instrumentId: 'DUP',
+        exchange: 'Mexico',
+        quoteCurrency: 'MXN',
+      })
+    ).rejects.toThrow('valid source date')
+  })
+
   it('requires a unique CoinGecko ID and precision=full', async () => {
     const crypto = { ...investment, type: 'crypto' as const, symbol: 'ABC' }
     const fetchMock = vi
@@ -128,7 +205,10 @@ describe('identity-verified price service', () => {
         ok: true,
         json: async () => [{ id: 'alpha', symbol: 'abc', name: 'Alpha' }],
       })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ alpha: { usd: 0.0000001 } }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ alpha: { usd: 0.0000001, last_updated_at: 1704412800 } }),
+      })
     vi.stubGlobal('fetch', fetchMock)
     const quote = await fetchVerifiedPrice(crypto, {
       provider: 'coingecko',
@@ -136,14 +216,114 @@ describe('identity-verified price service', () => {
       exchange: '',
       quoteCurrency: 'USD',
     })
-    expect(quote).toMatchObject({ instrumentId: 'alpha', unitPriceDecimal: '0.0000001' })
+    expect(quote).toMatchObject({
+      instrumentId: 'alpha',
+      unitPriceDecimal: '0.0000001',
+      quoteDate: '2024-01-05',
+    })
     expect(String(fetchMock.mock.calls[2]?.[0])).toContain('precision=full')
+    expect(String(fetchMock.mock.calls[2]?.[0])).toContain('include_last_updated_at=true')
   })
 
-  it('reports per-holding failures and preserves prior bindings by writing no replacement', async () => {
-    const result = await fetchAllCurrentPrices([investment], new Map())
+  it('reports missing or malformed source metadata without replacing accepted state', async () => {
+    settingsStore.set('alpha_vantage_key', 'secret')
+    settingsStore.set('finnhub_key', 'secret')
+    const crypto = {
+      ...investment,
+      id: 'inv-crypto',
+      type: 'crypto' as const,
+      symbol: 'ABC',
+    }
+    const finnhubInvestment = { ...investment, id: 'inv-finnhub' }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input)
+        if (url.includes('function=SYMBOL_SEARCH')) {
+          return {
+            ok: true,
+            json: async () => ({
+              bestMatches: [
+                {
+                  '1. symbol': 'DUP',
+                  '3. type': 'Equity',
+                  '4. region': 'Mexico',
+                  '8. currency': 'MXN',
+                },
+              ],
+            }),
+          }
+        }
+        if (url.includes('function=GLOBAL_QUOTE')) {
+          return {
+            ok: true,
+            json: async () => ({
+              'Global Quote': { '01. symbol': 'DUP', '05. price': '1.25' },
+            }),
+          }
+        }
+        if (url.includes('/stock/symbol')) {
+          return {
+            ok: true,
+            json: async () => [{ symbol: 'DUP', type: 'Common Stock', currency: 'CHF' }],
+          }
+        }
+        if (url.includes('/quote?')) {
+          return { ok: true, json: async () => ({ c: 1.25, t: '1704412800' }) }
+        }
+        if (url.includes('supported_vs_currencies')) {
+          return { ok: true, json: async () => ['usd'] }
+        }
+        if (url.endsWith('/coins/list')) {
+          return { ok: true, json: async () => [{ id: 'alpha' }] }
+        }
+        return { ok: true, json: async () => ({ alpha: { usd: 0.0000001 } }) }
+      })
+    )
+    const selections = new Map([
+      [
+        investment.id,
+        {
+          provider: 'alpha_vantage' as const,
+          instrumentId: 'DUP',
+          exchange: 'Mexico',
+          quoteCurrency: 'MXN',
+        },
+      ],
+      [
+        finnhubInvestment.id,
+        {
+          provider: 'finnhub' as const,
+          instrumentId: 'DUP',
+          exchange: 'SW',
+          quoteCurrency: 'CHF',
+        },
+      ],
+      [
+        crypto.id,
+        {
+          provider: 'coingecko' as const,
+          instrumentId: 'alpha',
+          exchange: '',
+          quoteCurrency: 'USD',
+        },
+      ],
+    ])
+
+    const result = await fetchAllCurrentPrices([investment, finnhubInvestment, crypto], selections)
+
     expect(result.quotes.size).toBe(0)
-    expect(result.failures[0]).toMatchObject({ investmentId: 'inv-1' })
+    expect(result.failures).toEqual([
+      expect.objectContaining({ investmentId: 'inv-1', reason: expect.stringContaining('date') }),
+      expect.objectContaining({
+        investmentId: 'inv-finnhub',
+        reason: expect.stringContaining('timestamp'),
+      }),
+      expect.objectContaining({
+        investmentId: 'inv-crypto',
+        reason: expect.stringContaining('timestamp'),
+      }),
+    ])
     await savePricesToDB(result.quotes)
     expect(execute).not.toHaveBeenCalled()
   })

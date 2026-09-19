@@ -2430,7 +2430,8 @@ describe('CLI tool validation regressions', () => {
           note: 'Paid card statement',
         }),
         expect.objectContaining({
-          entity: 'credit_card_statement',
+          entity: 'card_statement_payment_link',
+          action: 'record-payment',
           source: 'mcp',
           note: 'Paid card statement',
         }),
@@ -2653,6 +2654,61 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('records cleanup card payments with category and latest statement update', async () => {
+    const statement = {
+      id: 'stmt-1',
+      account_id: 'cc-1',
+      statement_start_date: null,
+      statement_end_date: '2026-05-15',
+      due_date: '2026-06-05',
+      statement_balance: 10000,
+      minimum_payment: 2500,
+      paid_amount: 0,
+      unattributed_paid_amount: 0,
+      currency: 'USD',
+      status: 'open',
+      source: null,
+      note: null,
+    }
+    let insertedTransaction: Record<string, unknown> | null = null
+    const paymentLinks: Array<{ id: string; transaction_id: string; amount: number }> = []
+
+    mockExecute.mockImplementation((sql: string, params: unknown[] = []) => {
+      if (sql.includes('INSERT INTO transactions')) {
+        insertedTransaction = {
+          id: params[0],
+          account_id: params[1],
+          category_id: params[2],
+          transfer_to_account_id: params[3],
+          type: params[4],
+          amount: params[5],
+          currency: params[6],
+          description: params[7],
+          notes: params[8],
+          status: params[9],
+          source: params[10],
+          note: params[11],
+          date: params[12],
+          ledger_treatment: 'normal',
+          reporting_treatment: 'normal',
+          transaction_kind: 'standard',
+          is_archived: 0,
+          is_placeholder: 0,
+        }
+      }
+      if (sql.includes('INSERT INTO card_statement_payment_links')) {
+        paymentLinks.push({
+          id: String(params[0]),
+          transaction_id: String(params[4]),
+          amount: Number(params[5]),
+        })
+      }
+      if (sql.includes('UPDATE credit_card_statements')) {
+        statement.unattributed_paid_amount = Number(params[0])
+        statement.paid_amount = Number(params[1])
+        statement.status = String(params[2])
+      }
+      return { rowsAffected: 1, lastInsertId: 1 }
+    })
     mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
       if (sql.includes('SELECT value FROM settings')) return []
       if (sql.includes('WHERE id = $1 OR LOWER(name) = LOWER($2)')) {
@@ -2695,24 +2751,34 @@ describe('CLI tool validation regressions', () => {
         sql.includes('FROM credit_card_statements s') &&
         sql.includes('ORDER BY s.statement_end_date')
       ) {
+        return [statement]
+      }
+      if (sql.includes('FROM credit_card_statements WHERE id = $1')) return [statement]
+      if (sql.includes('SELECT id, type, currency, account_mode, is_archived FROM accounts')) {
         return [
           {
-            id: 'stmt-1',
-            account_id: 'cc-1',
-            statement_start_date: null,
-            statement_end_date: '2026-05-15',
-            due_date: '2026-06-05',
-            statement_balance: 10000,
-            minimum_payment: 2500,
-            paid_amount: 0,
+            id: 'acct-1',
+            type: 'checking',
             currency: 'USD',
-            status: 'open',
-            source: null,
-            note: null,
+            account_mode: 'transactional',
+            is_archived: 0,
+          },
+          {
+            id: 'cc-1',
+            type: 'credit_card',
+            currency: 'USD',
+            account_mode: 'transactional',
+            is_archived: 0,
           },
         ]
       }
+      if (sql.includes('SELECT * FROM transactions')) {
+        return insertedTransaction ? [insertedTransaction] : []
+      }
       if (sql.includes('FROM transactions')) return []
+      if (sql.includes('SELECT * FROM transaction_splits')) return []
+      if (sql.includes('SELECT * FROM transaction_consumption_classifications')) return []
+      if (sql.includes('FROM card_statement_payment_links')) return paymentLinks
       return []
     })
 
@@ -2746,7 +2812,7 @@ describe('CLI tool validation regressions', () => {
     )
     expect(mockExecute).toHaveBeenCalledWith(
       expect.stringContaining('UPDATE credit_card_statements'),
-      [10000, 'paid', 'bank-import', null, 'stmt-1']
+      [0, 10000, 'paid', 'stmt-1', 0, 0]
     )
     expect(mockTransaction).toHaveBeenCalledTimes(1)
   })
@@ -3017,27 +3083,29 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('updates credit-card statement paid amounts and writes an audit row', async () => {
+    const statement = {
+      id: 'stmt-1',
+      account_id: 'cc-1',
+      statement_start_date: '2026-04-16',
+      statement_end_date: '2026-05-15',
+      due_date: '2026-06-05',
+      statement_balance: 12345,
+      minimum_payment: 2500,
+      paid_amount: 0,
+      unattributed_paid_amount: 0,
+      currency: 'USD',
+      status: 'open',
+      source: null,
+      note: null,
+      account_name: 'Rewards Card',
+      account_currency: 'USD',
+      account_type: 'credit_card',
+      account_is_archived: 0,
+    }
     mockQuery
-      .mockReturnValueOnce([
-        {
-          id: 'stmt-1',
-          account_id: 'cc-1',
-          statement_start_date: '2026-04-16',
-          statement_end_date: '2026-05-15',
-          due_date: '2026-06-05',
-          statement_balance: 12345,
-          minimum_payment: 2500,
-          paid_amount: 0,
-          currency: 'USD',
-          status: 'open',
-          source: null,
-          note: null,
-          account_name: 'Rewards Card',
-          account_currency: 'USD',
-          account_type: 'credit_card',
-          account_is_archived: 0,
-        },
-      ])
+      .mockReturnValueOnce([statement])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([statement])
       .mockReturnValueOnce([])
 
     const result = await updateCreditCardStatement.execute(
@@ -3061,7 +3129,7 @@ describe('CLI tool validation regressions', () => {
     })
     expect(mockExecute).toHaveBeenCalledWith(
       expect.stringContaining('UPDATE credit_card_statements SET'),
-      [2500, 'partial', 'bank-import', 'stmt-1']
+      [2500, 2500, 'partial', 'bank-import', 'stmt-1']
     )
     expect(mockExecute).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO audit_log'),

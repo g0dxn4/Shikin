@@ -331,7 +331,7 @@ describe('CLI command execution', () => {
 
     const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
     expect(output.catalogVersion).toBe(COMMAND_CATALOG_VERSION)
-    expect(output.toolCount).toBe(92)
+    expect(output.toolCount).toBe(108)
     const commandByName = new Map(
       output.commands.map((command: { name: string }) => [command.name, command])
     )
@@ -404,6 +404,99 @@ describe('CLI command execution', () => {
       'finance-sanity-check': ['redacted', 'limit'],
       'get-spending-recap': ['type', 'period'],
       'save-spending-recap': ['type', 'period'],
+      'correct-transaction-metadata': [
+        'transactionId',
+        'description',
+        'reportingTreatment',
+        'splits',
+        'auditSource',
+        'auditNote',
+        'dryRun',
+      ],
+      'set-transaction-consumption': [
+        'transactionId',
+        'splitId',
+        'role',
+        'referencedPurchaseId',
+        'auditSource',
+        'auditNote',
+      ],
+      'clear-transaction-consumption': ['classificationId', 'auditSource', 'auditNote'],
+      'update-bucket': ['bucketId', 'bucketName', 'name', 'targetAmount', 'active', 'dryRun'],
+      'delete-bucket': ['bucketId', 'bucketName', 'dryRun'],
+      'reverse-bucket-allocation': ['allocationId', 'allocationDate', 'source', 'note', 'dryRun'],
+      'correct-bucket-allocation': [
+        'allocationId',
+        'bucketId',
+        'bucketName',
+        'amount',
+        'currency',
+        'transactionId',
+        'accountId',
+        'account',
+        'allocationDate',
+        'source',
+        'note',
+        'dryRun',
+      ],
+      'set-source-coverage': [
+        'accountId',
+        'account',
+        'coverageId',
+        'sourceNamespace',
+        'periodStart',
+        'periodEnd',
+        'status',
+        'zeroRows',
+        'documentRef',
+        'source',
+        'note',
+        'dryRun',
+      ],
+      'list-source-coverage': ['accountId', 'account', 'sourceNamespace'],
+      'settle-staged-transactions': [
+        'accountId',
+        'account',
+        'transactionIds',
+        'status',
+        'apply',
+        'source',
+        'note',
+      ],
+      'supersede-reconciliation-bridge': [
+        'accountId',
+        'account',
+        'reconciliationId',
+        'bridgeId',
+        'transactionIds',
+        'coverageIds',
+        'apply',
+        'previewToken',
+        'source',
+        'note',
+      ],
+      'bind-transaction-import-identity': [
+        'transactionId',
+        'sourceNamespace',
+        'externalId',
+        'apply',
+        'previewToken',
+        'source',
+        'note',
+      ],
+      'link-card-statement-payment': [
+        'statementId',
+        'transactionId',
+        'amount',
+        'mode',
+        'confirmRepaymentToCard',
+        'auditSource',
+        'auditNote',
+        'dryRun',
+      ],
+      'unlink-card-statement-payment': ['linkId', 'auditSource', 'auditNote', 'dryRun'],
+      'list-card-statement-payment-links': ['statementId', 'transactionId', 'status', 'limit'],
+      'get-runtime-diagnostics': [],
     }
 
     for (const [name, optionNames] of Object.entries(requiredWorkflowOptions)) {
@@ -429,6 +522,22 @@ describe('CLI command execution', () => {
       readOnly: false,
       idempotent: true,
       writesTo: ['recaps', 'audit_log'],
+    })
+    expect((commandByName.get('query-transactions') as { effects?: unknown }).effects).toEqual({
+      readOnly: true,
+      writesTo: [],
+    })
+    expect((commandByName.get('get-runtime-diagnostics') as { effects?: unknown }).effects).toEqual(
+      { readOnly: true, idempotent: true }
+    )
+    expect((commandByName.get('import-transactions') as { effects?: unknown }).effects).toEqual({
+      writesTo: [
+        'accounts',
+        'transactions',
+        'duplicate_review_decisions',
+        'audit_log',
+        'app_data_state',
+      ],
     })
     expect((commandByName.get('list-accounts') as { effects?: unknown }).effects).toBeUndefined()
     expect(close).toHaveBeenCalledTimes(1)

@@ -34,21 +34,21 @@ describe('public automation contract', () => {
     await program.parseAsync(['node', 'shikin', 'tools', '--json'])
     const catalog = JSON.parse(String(log.mock.calls[0]?.[0])) as Record<string, unknown>
 
-    expect(builtInTools).toHaveLength(92)
-    expect(program.commands).toHaveLength(97)
+    expect(builtInTools).toHaveLength(108)
+    expect(program.commands).toHaveLength(113)
     expect(builtInTools.map((tool) => tool.name).sort()).toEqual(inventory.tools)
     expect(program.commands.map((command) => command.name()).sort()).toEqual(inventory.commands)
     expect(program.version()).toBe('1.0.10')
     expect(APPLICATION_VERSION).toBe('1.0.10')
-    expect(COMMAND_CATALOG_VERSION).toBe('2026-09-18.save-spending-recap')
+    expect(COMMAND_CATALOG_VERSION).toBe('2026-09-19.backend-remediation')
     expect(EXPOSED_CATALOG_VERSION).toBe(COMMAND_CATALOG_VERSION)
     expect(COMMAND_CATALOG_VERSION).not.toBe(APPLICATION_VERSION)
     expect(catalog).toMatchObject({
       success: true,
       catalogVersion: COMMAND_CATALOG_VERSION,
       schemaVersion: 'cli-tools-json.v1',
-      commandCount: 97,
-      toolCount: 92,
+      commandCount: 113,
+      toolCount: 108,
       compatibility: {
         effects: {
           declaredOnly: true,
@@ -66,6 +66,28 @@ describe('public automation contract', () => {
       idempotent: true,
       writesTo: ['recaps', 'audit_log'],
     })
+    expect(commands.find((command) => command.name === 'query-transactions')?.effects).toEqual({
+      readOnly: true,
+      writesTo: [],
+    })
+    expect(commands.find((command) => command.name === 'get-runtime-diagnostics')?.effects).toEqual(
+      {
+        readOnly: true,
+        idempotent: true,
+      }
+    )
+    expect(commands.find((command) => command.name === 'import-transactions')?.effects).toEqual({
+      writesTo: [
+        'accounts',
+        'transactions',
+        'duplicate_review_decisions',
+        'audit_log',
+        'app_data_state',
+      ],
+    })
+    expect(
+      commands.find((command) => command.name === 'bind-transaction-import-identity')?.effects
+    ).toEqual({ writesTo: ['transactions', 'audit_log', 'app_data_state'] })
     expect(commands.find((command) => command.name === 'list-accounts')?.effects).toBeUndefined()
     expect(commands.find((command) => command.name === 'add-transaction')?.effects).toBeUndefined()
   })

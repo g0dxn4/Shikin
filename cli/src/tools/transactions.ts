@@ -1441,6 +1441,9 @@ const bindTransactionImportIdentity: ToolDefinition = {
     source: boundedText('Audit source', 'Source of this reviewed binding', 120).optional(),
     note: boundedText('Audit note', 'Reason for binding this legacy identity', 500).optional(),
   }),
+  effects: {
+    writesTo: ['transactions', 'audit_log', 'app_data_state'],
+  },
   execute: async ({
     transactionId,
     sourceNamespace,
@@ -2174,6 +2177,7 @@ const queryTransactions: ToolDefinition = {
     ).optional(),
     limit: z.number().int().min(1).max(100).optional().default(20),
   }),
+  effects: { readOnly: true, writesTo: [] },
   execute: async (input) => {
     try {
       return transaction(() => {

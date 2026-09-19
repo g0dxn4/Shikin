@@ -32,13 +32,13 @@ Shikin is built to keep both:
 - **Investments**: Portfolio tracking with live prices (Alpha Vantage for stocks, CoinGecko for crypto).
 - **Multi-Currency**: Live exchange rates via frankfurter.app with preferred currency conversion.
 
-### CLI & MCP Server — 91 Shared Tools
+### CLI & MCP Server — 108 Shared Tools
 
 - **CLI**: `shikin add-transaction --amount 5.50 --type expense --description "Coffee"`
 - **MCP Server**: Connect Claude Code, Claude Desktop, Cursor, or any MCP-compatible client
 - **Portable AI Skill**: Optional `Skill.md` reference for AI tools that support file-based skills
-- **Shared Tool Definitions**: 91 shipped CLI/MCP tools run end-to-end against local data, including reconciliation, receivables, backup, guarded restore, audit, and automation-context tools
-- **Authoritative Discovery**: `shikin tools --json` includes command schemas plus catalog/schema version, compatibility, and required migration metadata
+- **Shared Tool Definitions**: 108 shipped CLI/MCP tools run end-to-end against local data, including reconciliation, correction, import, payment-evidence, backup, audit, and runtime-diagnostics tools
+- **Authoritative Discovery**: `shikin tools --json` describes 113 CLI commands, input schemas, declared effects, catalog/schema versions, compatibility, and required migrations. Missing effects mean unaudited—not read-only.
 - **Private Hosted Web**: `shikin web` serves the production app on loopback for private HTTPS access through Tailscale Serve
 - **No Built-in Chat Assistant**: Shikin is the local finance engine; external clients can automate it through CLI/MCP
 
@@ -68,21 +68,21 @@ Current MVP limitations:
 
 ## Tech Stack
 
-| Layer      | Technology                       | Purpose                                                                         |
-| ---------- | -------------------------------- | ------------------------------------------------------------------------------- |
-| Runtime    | Tauri v2 + Browser + Vite        | Desktop app and web runtime                                                     |
-| Frontend   | React 19 + TypeScript            | UI and application logic                                                        |
-| Styling    | Tailwind CSS v4 + shadcn/ui      | Design system and components                                                    |
-| Routing    | React Router v7                  | Client-side navigation                                                          |
-| State      | Zustand (19 stores)              | Global state management                                                         |
-| Database   | SQLite (shared storage)          | 21 tables, migration-backed schema                                              |
-| Settings   | Tauri Store / data-server bridge | Local key-value config storage                                                  |
-| Automation | CLI (`commander`) + MCP SDK      | Local automation surface (91 shared tools; 96 CLI commands including built-ins) |
-| Forms      | React Hook Form + Zod v4         | Form validation and parsing                                                     |
-| Charts     | Recharts                         | Financial visualizations                                                        |
-| PDF        | jsPDF                            | Report generation                                                               |
-| i18n       | i18next + react-i18next          | Localization (en/es)                                                            |
-| Build/Test | Vite + Vitest + Playwright       | Build pipeline and test tooling                                                 |
+| Layer      | Technology                       | Purpose                                                                           |
+| ---------- | -------------------------------- | --------------------------------------------------------------------------------- |
+| Runtime    | Tauri v2 + Browser + Vite        | Desktop app and web runtime                                                       |
+| Frontend   | React 19 + TypeScript            | UI and application logic                                                          |
+| Styling    | Tailwind CSS v4 + shadcn/ui      | Design system and components                                                      |
+| Routing    | React Router v7                  | Client-side navigation                                                            |
+| State      | Zustand (19 stores)              | Global state management                                                           |
+| Database   | SQLite (shared storage)          | 21 tables, migration-backed schema                                                |
+| Settings   | Tauri Store / data-server bridge | Local key-value config storage                                                    |
+| Automation | CLI (`commander`) + MCP SDK      | Local automation surface (108 shared tools; 113 CLI commands including built-ins) |
+| Forms      | React Hook Form + Zod v4         | Form validation and parsing                                                       |
+| Charts     | Recharts                         | Financial visualizations                                                          |
+| PDF        | jsPDF                            | Report generation                                                                 |
+| i18n       | i18next + react-i18next          | Localization (en/es)                                                              |
+| Build/Test | Vite + Vitest + Playwright       | Build pipeline and test tooling                                                   |
 
 ---
 
@@ -216,8 +216,8 @@ pnpm build:tauri  # Builds .deb + .AppImage (Linux), .dmg (macOS), .msi (Windows
 
 ## CLI & MCP Server
 
-Shikin exposes 91 shared CLI/MCP tools and 96 total CLI commands including CLI-only built-ins. All shipped tools are available end-to-end against the local database.
-Automation clients can use the same generic finance workflows as humans and scripts: dry-run-first money writes, credit-card payment previews, project-style transaction tags, subscription creation from existing payments, audit-backed undo, and `finance-sanity-check` for daily-review-style checks. Treat `--source` as an opaque provenance label, `--note` as an audit/changelog note, and transaction `--notes` as transaction details.
+Shikin exposes 108 shared CLI/MCP tools and 113 total CLI commands including CLI-only built-ins. `shikin tools --json` is the authoritative inventory and reports only explicitly declared effects; it never infers read-only behavior from command names.
+Automation clients can use dry-run-first money writes, reviewed imports, transaction corrections, source coverage and reconciliation, virtual bucket maintenance, card-payment evidence, audit-backed undo, and `finance-sanity-check`. Treat `--source` as opaque provenance, `--note` as audit/changelog metadata, and transaction `--notes` as transaction details.
 
 ```bash
 # Install automation support for the installed desktop app.
@@ -241,6 +241,17 @@ node cli/dist/cli.js web --port 8480
 # MCP server (source/dev alternative)
 node cli/dist/mcp-server.js
 ```
+
+### Backend automation contracts
+
+- Spending and recaps default to gross cash flow. Net consumption is opt-in and reports known subtotals plus classification and independently verified source-coverage completeness; transaction date ranges are not coverage proof.
+- `correct-transaction-metadata` changes audited metadata only. It does not rewrite immutable import/source identity, financial amounts, or balances. Consumption ownership is explicit per transaction or split; investment prices require exact decimal price plus explicit provider, instrument, exchange, and quote-currency inputs rather than inferred identity.
+- Staged statement rows remain balance-neutral. Set independent printed-period coverage, deliberately settle pending rows, then finalize exact posted/cleared membership. A later-anchor conflict requires reviewed bridge supersession with a fresh preview token.
+- Import source IDs and financial content fingerprints are separate. Unreviewed imports are atomic only when no candidate decisions are needed; reviewed imports bind decisions and a preview token to the current database revision. `query-transactions` uses keyset cursors and rejects stale cursors after writes.
+- Cashflow buckets are virtual envelopes, not bank accounts. Corrections append linked negative reversals and replacements while preserving original allocations; they do not change transaction or account balances.
+- Card statements maintain `paid = unattributed baseline + active links`. `apply_to_unpaid` adds new paid evidence; `attribute_existing` converts existing baseline into a link. Unlinking voids evidence without deleting the source transaction or changing account balances.
+- `get-runtime-diagnostics` opens an initialized database read-only and returns opaque lineage/local-instance status without filesystem paths or identity-sidecar initialization.
+- Before upgrading automation contracts, back up the database and upgrade the desktop app, CLI bridge, and MCP server together. Roll back with that backup and the matching prior binaries. Older binaries cannot promise guards for schemas or workflows introduced later.
 
 ### Private hosted web access with Tailscale
 
@@ -328,7 +339,7 @@ Shikin/
 │   ├── stores/               # 18 Zustand stores
 │   ├── i18n/                 # 14 namespaces, 2 languages (en/es)
 │   └── types/                # TypeScript type definitions
-├── cli/                      # CLI + MCP server (91 shared tools)
+├── cli/                      # CLI + MCP server (108 shared tools)
 ├── skills/                   # Portable AI skill packs distributed by Shikin
 ├── docs/                     # Project documentation
 ├── e2e/                      # Playwright end-to-end tests

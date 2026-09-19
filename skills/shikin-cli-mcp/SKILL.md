@@ -88,14 +88,17 @@ The MCP server exposes the same shared tool catalog as the CLI and these resourc
 
 ## Representative Tool Surface
 
-Current catalog size is 91 shared CLI/MCP tools and 96 total CLI commands including CLI-only built-ins. All shipped tools are available end-to-end against the local database.
-The lists below are representative groups for orientation; use `shikin tools --json` for the authoritative command, argument, enum, catalog/schema version, compatibility, and required-migration metadata.
+Current catalog size is 108 shared CLI/MCP tools and 113 total CLI commands including CLI-only built-ins. All shipped tools are available end-to-end against the local database.
+The lists below are representative groups for orientation; use `shikin tools --json` for the authoritative command, argument, enum, catalog/schema version, declared-effects, compatibility, and required-migration metadata. Effects are declaration-only: absence means unaudited, not read-only.
 
 Transaction tools:
 
 - `add-transaction`
 - `update-transaction`
 - `delete-transaction`
+- `correct-transaction-metadata`
+- `set-transaction-consumption`, `clear-transaction-consumption`
+- `bind-transaction-import-identity`
 - `query-transactions`
 - `match-transfer-transactions`, `unmatch-transfer-transactions`
 - `get-spending-summary`
@@ -114,7 +117,12 @@ Account and analytics tools:
 - `get-credit-card-status`
 - `get-net-worth`
 - `reconcile` (apply requires `basis=effective_ledger`)
+- `set-source-coverage`, `list-source-coverage`
+- `settle-staged-transactions`
 - `finalize-staged-statement-history`
+- `supersede-reconciliation-bridge`
+- `update-bucket`, `delete-bucket`, `reverse-bucket-allocation`, `correct-bucket-allocation`
+- `link-card-statement-payment`, `unlink-card-statement-payment`, `list-card-statement-payment-links`
 
 Budget, planning, and health tools:
 
@@ -151,6 +159,7 @@ Investment, subscription, and automation tools:
 - `undo`
 - `finance-sanity-check`
 - `automation-context`
+- `get-runtime-diagnostics` (read-only opaque build/schema/lineage/local-instance status; no storage paths)
 
 Goal, debt, and investment support is discoverable through `setup-status` and `automation-context`. Investment support includes `manage-investment`, `list-investments`, and `generate-portfolio-review`; do not assume broker sync or automatic price fetching.
 
@@ -164,15 +173,23 @@ Notebook tools:
 ## Safe Workflow Patterns
 
 - For money movement, run dry-run previews first. Examples: `record-card-payment --dry-run`, placeholder create/resolve/split dry-runs, and `undo` without `--apply`.
-- For incomplete statement history, import rows with `ledgerTreatment=staged_no_balance_impact` and one `stagingBatchId`, then preview and apply `finalize-staged-statement-history`. Do not finalize staged rows one at a time.
+- Spending and recaps use gross cash flow by default. Request net consumption explicitly, and treat incomplete classification or independently verified source coverage as known subtotals—not a complete net result. Transaction date extrema do not prove coverage.
+- Use `correct-transaction-metadata` for audited metadata changes; it never rewrites immutable original source/import evidence, money, or balances. Set consumption ownership explicitly at transaction/split level and preserve reference caps.
+- For imports, keep case-sensitive source namespaces/external IDs separate from content fingerprints. Unreviewed apply is atomic only when no decisions are required; otherwise submit exact candidate decisions with a fresh preview token. Use `bind-transaction-import-identity` only for explicitly verified legacy identity; it does not invent an original content fingerprint. Traverse imports with `query-transactions` keyset cursors and restart if a write makes a cursor stale.
+- For incomplete statement history, import rows with `ledgerTreatment=staged_no_balance_impact` and one `stagingBatchId`. Record independent printed-period coverage, explicitly settle pending rows, then preview and finalize exact posted/cleared membership. Pending rows never auto-promote. If later reconciliation anchors block finalization, use reviewed bridge supersession with the exact fresh token.
 - For reconciliation, preview `reconcile` first and inspect the effective ledger, stored balance, and bridge. Apply only with `basis=effective_ledger` after confirming the observed balance.
 - Use `accountMode=snapshot_only` for observed valuation accounts that do not have a transaction ledger. Transaction writers reject snapshot-only accounts; create a new transactional account instead of changing the balance basis after history exists.
+- Cashflow buckets are virtual envelopes. Reverse/correct allocations by appending linked negative reversal/replacement rows; these workflows must not change real accounts or transactions.
+- For card payment evidence, maintain `paid = unattributed baseline + active links`. Use `apply_to_unpaid` for new paid evidence and `attribute_existing` to assign existing baseline. Unlinking voids the link while preserving immutable IDs and leaves transactions/account balances unchanged.
 - For exact own-account payment pairs, preview `match-transfer-transactions`; use `unmatch-transfer-transactions` to reverse a mistaken link without deleting either imported row.
+- For investments, provide explicit holding ownership plus exact decimal manual price, provider, instrument ID, exchange, and quote currency; do not infer or claim provider verification.
 - For expected client income, use receivables rather than pending transactions. Preview `match-receivable` and use `unmatch-receivable` for corrections.
 - For subscription automation, use `create-subscription-from-transaction` against an existing expense or income transaction. Review derived defaults and overrides before applying; transfers are not valid subscription sources.
 - For project-style organization, use transaction tags: `tag-transaction`, `untag-transaction`, `list-tags`, and `query-transactions --tag <tag>`.
 - For rollback, start with `undo --last --dry-run` or filter by `--audit-id`, `--transaction-id`, `--statement-id`, `--source`, `--command`, or `--account`. Apply only after checking dependent-write warnings and balance impact.
 - For a neutral daily review, use `finance-sanity-check --redacted --limit <n>` to inspect due card statements, unresolved placeholders, duplicate-looking transactions, upcoming bills, balance mismatches, transaction hygiene, high Other Expenses, and recent provenance-tagged writes.
+- `get-runtime-diagnostics` is a read-only installed-instance check. Its result is intentionally opaque and contains no filesystem paths; reading it must not initialize an identity sidecar.
+- Before an automation contract upgrade, create a backup and upgrade the desktop app, CLI bridge, and MCP server together. Rollback means restoring that backup and the matching prior binaries. Do not assume an old binary can enforce guards introduced by a future schema.
 
 ## Verification Checklist
 

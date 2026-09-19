@@ -17,7 +17,7 @@ shikin/
 - **Frontend**: React 19 + TypeScript + Tailwind v4 + shadcn/ui
 - **Desktop**: Tauri v2 (Rust)
 - **Database**: SQLite via shared storage (`~/.local/share/com.asf.shikin/`)
-- **CLI/MCP**: 91 shared CLI/MCP tools via commander CLI + MCP server, all available end-to-end
+- **CLI/MCP**: 108 shared CLI/MCP tools via commander CLI + MCP server (113 total CLI commands), all available end-to-end
 - **State**: Zustand stores
 - **Testing**: Vitest + Testing Library + Playwright (e2e)
 - **Package Manager**: pnpm
@@ -68,9 +68,9 @@ pnpm exec tsx src/mcp-server.ts
 }
 ```
 
-### 91 Shared CLI/MCP Tools / 96 CLI Commands
+### 108 Shared CLI/MCP Tools / 113 CLI Commands
 
-Transaction, Account, Category, Analytics, Budget, Goal, Subscription, Investment, Recurring, Notebook, Intelligence, Debt, Currency, Backup/Restore, Audit, and Assistant Context tools — all available end-to-end against local data.
+Transaction, correction, import, account, coverage/reconciliation, bucket, card-payment evidence, analytics, planning, backup/restore, audit, and read-only runtime-diagnostics tools are available against local data. Use `shikin tools --json` as the authoritative schema/effects inventory; undeclared effects mean unaudited, never implicitly read-only.
 
 ### Portable AI Skill
 
@@ -112,6 +112,12 @@ sudo dpkg -i src-tauri/target/release/bundle/deb/Shikin_*.deb
 ## Key Conventions
 
 - Money: INTEGER centavos, converted at boundaries with `toCentavos()`/`fromCentavos()`
+- Gross cash flow is the default; net consumption requires explicit classifications and independent source coverage.
+- Preserve immutable import/source evidence; metadata correction uses separate audit source/note. Imports distinguish source IDs from content fingerprints and bind reviewed preview tokens to the data revision; transaction traversal uses stale-detecting keyset cursors.
+- Staged rows are balance-neutral: settle pending rows explicitly, finalize exact covered membership, and supersede protected reconciliation bridges only from a fresh reviewed preview.
+- Buckets are virtual; reversal/correction rows do not mutate account or transaction balances. Card statement paid amount equals unattributed baseline plus active links (`apply_to_unpaid` or `attribute_existing`).
+- Investment ownership and quote identity are explicit; use exact decimal quote inputs and preserve recorded quote dates. Runtime diagnostics stays read-only and returns no storage paths.
+- Coordinate app, CLI, and MCP upgrades after a backup; rollback requires matching prior binaries plus the backup. Do not promise future schema guards from older binaries.
 - IDs: TEXT (ULIDs via `ulidx`)
 - Dates: TEXT (ISO 8601)
 - Imports: use `@/` path alias (maps to `src/`)

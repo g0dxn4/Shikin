@@ -1728,6 +1728,15 @@ const importTransactions: ToolDefinition = {
       128
     ).optional(),
   }),
+  effects: {
+    writesTo: [
+      'accounts',
+      'transactions',
+      'duplicate_review_decisions',
+      'audit_log',
+      'app_data_state',
+    ],
+  },
   execute: async (input: ImportTransactionsExecutionInput) => {
     const {
       file,

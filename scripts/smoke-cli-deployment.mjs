@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -199,10 +199,10 @@ function assertSameSnapshot(before, after, label) {
   }
 }
 
-function assertDeclaredRecapMetadata(cliCatalog, mcpTools) {
-  if (cliCatalog.toolCount !== 92 || cliCatalog.commandCount !== 97) {
+function assertAutomationCatalog(cliCatalog, mcpTools) {
+  if (cliCatalog.toolCount !== 108 || cliCatalog.commandCount !== 113) {
     throw new Error(
-      `Deployed catalog counts were ${cliCatalog.toolCount} tools / ${cliCatalog.commandCount} commands; expected 92 / 97.`
+      `Deployed catalog counts were ${cliCatalog.toolCount} tools / ${cliCatalog.commandCount} commands; expected 108 / 113.`
     )
   }
   if (cliCatalog.compatibility?.effects?.declaredOnly !== true) {
@@ -217,6 +217,39 @@ function assertDeclaredRecapMetadata(cliCatalog, mcpTools) {
   const cliSave = cliByName.get('save-spending-recap')
   const mcpGet = mcpByName.get('get-spending-recap')
   const mcpSave = mcpByName.get('save-spending-recap')
+  const requiredSchemas = {
+    'correct-transaction-metadata': ['transactionId', 'dryRun'],
+    'set-transaction-consumption': ['transactionId', 'role'],
+    'clear-transaction-consumption': ['classificationId'],
+    'update-bucket': ['bucketId', 'bucketName', 'dryRun'],
+    'delete-bucket': ['bucketId', 'bucketName', 'dryRun'],
+    'reverse-bucket-allocation': ['allocationId', 'dryRun'],
+    'correct-bucket-allocation': ['allocationId', 'amount', 'dryRun'],
+    'set-source-coverage': ['sourceNamespace', 'periodStart', 'periodEnd', 'status'],
+    'list-source-coverage': ['sourceNamespace'],
+    'settle-staged-transactions': ['transactionIds', 'status', 'apply'],
+    'supersede-reconciliation-bridge': ['transactionIds', 'coverageIds', 'previewToken'],
+    'bind-transaction-import-identity': ['transactionId', 'sourceNamespace', 'externalId'],
+    'link-card-statement-payment': ['statementId', 'transactionId', 'amount', 'mode'],
+    'unlink-card-statement-payment': ['linkId', 'dryRun'],
+    'list-card-statement-payment-links': ['statementId', 'transactionId', 'status'],
+    'get-runtime-diagnostics': [],
+  }
+
+  for (const [name, requiredOptions] of Object.entries(requiredSchemas)) {
+    const cliTool = cliByName.get(name)
+    const mcpTool = mcpByName.get(name)
+    if (!cliTool || cliTool.kind !== 'tool' || !mcpTool) {
+      throw new Error(`Deployed discovery omitted ${name}.`)
+    }
+    const cliOptions = new Set((cliTool.options ?? []).map((option) => option.name))
+    const mcpProperties = new Set(Object.keys(mcpTool.inputSchema?.properties ?? {}))
+    for (const option of requiredOptions) {
+      if (!cliOptions.has(option) || !mcpProperties.has(option)) {
+        throw new Error(`${name} discovery omitted schema option ${option}.`)
+      }
+    }
+  }
 
   if (JSON.stringify(cliGet?.effects) !== JSON.stringify({ readOnly: true, writesTo: [] })) {
     throw new Error(`CLI get-spending-recap effects were invalid: ${JSON.stringify(cliGet)}`)
@@ -227,8 +260,41 @@ function assertDeclaredRecapMetadata(cliCatalog, mcpTools) {
   ) {
     throw new Error(`CLI save-spending-recap effects were invalid: ${JSON.stringify(cliSave)}`)
   }
+  const expectedEffects = {
+    'query-transactions': { readOnly: true, writesTo: [] },
+    'get-runtime-diagnostics': { readOnly: true, idempotent: true },
+    'bind-transaction-import-identity': {
+      writesTo: ['transactions', 'audit_log', 'app_data_state'],
+    },
+    'import-transactions': {
+      writesTo: [
+        'accounts',
+        'transactions',
+        'duplicate_review_decisions',
+        'audit_log',
+        'app_data_state',
+      ],
+    },
+    'link-card-statement-payment': {
+      writesTo: [
+        'card_statement_payment_links',
+        'credit_card_statements',
+        'audit_log',
+        'app_data_state',
+      ],
+    },
+    'list-card-statement-payment-links': { readOnly: true },
+  }
+  for (const [name, effects] of Object.entries(expectedEffects)) {
+    if (JSON.stringify(cliByName.get(name)?.effects) !== JSON.stringify(effects)) {
+      throw new Error(`CLI ${name} effects were invalid: ${JSON.stringify(cliByName.get(name))}`)
+    }
+  }
   if (cliByName.get('list-accounts')?.effects !== undefined) {
     throw new Error('CLI catalog claimed effects for unaudited list-accounts.')
+  }
+  if (cliByName.get('add-transaction')?.effects !== undefined) {
+    throw new Error('CLI catalog claimed effects for unaudited add-transaction.')
   }
 
   if (JSON.stringify(mcpGet?.annotations) !== JSON.stringify({ readOnlyHint: true })) {
@@ -245,14 +311,21 @@ function assertDeclaredRecapMetadata(cliCatalog, mcpTools) {
     )
   }
 
-  const annotatedMcp = mcpTools
-    .filter((tool) => tool.annotations && Object.keys(tool.annotations).length > 0)
-    .map((tool) => tool.name)
-    .sort()
-  if (
-    JSON.stringify(annotatedMcp) !== JSON.stringify(['get-spending-recap', 'save-spending-recap'])
-  ) {
-    throw new Error(`MCP annotated unexpected tools: ${JSON.stringify(annotatedMcp)}`)
+  for (const cliTool of cliByName.values()) {
+    if (cliTool.kind !== 'tool') continue
+    const expected = {}
+    if (typeof cliTool.effects?.readOnly === 'boolean') {
+      expected.readOnlyHint = cliTool.effects.readOnly
+    }
+    if (typeof cliTool.effects?.idempotent === 'boolean') {
+      expected.idempotentHint = cliTool.effects.idempotent
+    }
+    const actual = mcpByName.get(cliTool.name)?.annotations ?? {}
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      throw new Error(
+        `MCP ${cliTool.name} annotations did not match declared effects: ${JSON.stringify({ expected, actual })}`
+      )
+    }
   }
 }
 
@@ -292,7 +365,15 @@ async function withTimeout(promise, label, timeoutMs = 10_000) {
   }
 }
 
-async function smokeMcp({ cliEntrypoint, entrypoint, packageFile, env, port, fixture }) {
+async function smokeMcp({
+  cliEntrypoint,
+  entrypoint,
+  packageFile,
+  env,
+  port,
+  fixture,
+  runtimeIdentityPath,
+}) {
   const requireFromDeployedCli = createRequire(packageFile)
   const clientModulePath = requireFromDeployedCli.resolve(
     '@modelcontextprotocol/sdk/client/index.js'
@@ -347,7 +428,7 @@ async function smokeMcp({ cliEntrypoint, entrypoint, packageFile, env, port, fix
         `CLI/MCP tool catalog mismatch. CLI=${JSON.stringify(cliNames)} MCP=${JSON.stringify(mcpNames)}`
       )
     }
-    assertDeclaredRecapMetadata(cliCatalog, mcpTools)
+    assertAutomationCatalog(cliCatalog, mcpTools)
 
     for (const tool of mcpTools) {
       if (
@@ -361,6 +442,55 @@ async function smokeMcp({ cliEntrypoint, entrypoint, packageFile, env, port, fix
       if (tool.inputSchema.type !== 'object') {
         throw new Error(`MCP tool ${tool.name} input schema is not an object schema.`)
       }
+    }
+
+    rmSync(runtimeIdentityPath, { force: true })
+    const cliRuntime = JSON.parse(
+      runNode([cliEntrypoint, 'get-runtime-diagnostics', '--json'], env)
+    )
+    const mcpRuntimeResult = await client.callTool(
+      { name: 'get-runtime-diagnostics', arguments: {} },
+      undefined,
+      { timeout: 10_000 }
+    )
+    if (mcpRuntimeResult.isError) {
+      throw new Error(`MCP get-runtime-diagnostics failed: ${JSON.stringify(mcpRuntimeResult)}`)
+    }
+    const mcpRuntime = parseMcpTextResult(mcpRuntimeResult, 'get-runtime-diagnostics')
+    const expectedRuntimeKeys = [
+      'build',
+      'dataRevision',
+      'databaseLineageId',
+      'lastFinancialWriteAt',
+      'localInstance',
+      'schemaMigration',
+      'schemaVersion',
+      'success',
+      'version',
+    ]
+    for (const [surface, result] of [
+      ['CLI', cliRuntime],
+      ['MCP', mcpRuntime],
+    ]) {
+      if (
+        result.success !== true ||
+        JSON.stringify(Object.keys(result).sort()) !== JSON.stringify(expectedRuntimeKeys)
+      ) {
+        throw new Error(
+          `${surface} runtime diagnostics contract drifted: ${JSON.stringify(result)}`
+        )
+      }
+      const serialized = JSON.stringify(result)
+      if (
+        serialized.includes(env.XDG_DATA_HOME) ||
+        serialized.includes(env.HOME) ||
+        /"[^"}]*(?:path|directory|filename)[^"}]*"\s*:/i.test(serialized)
+      ) {
+        throw new Error(`${surface} runtime diagnostics exposed a filesystem path.`)
+      }
+    }
+    if (existsSync(runtimeIdentityPath)) {
+      throw new Error('Runtime diagnostics initialized the missing runtime identity sidecar.')
     }
 
     const cliAccounts = JSON.parse(runNode([cliEntrypoint, 'list-accounts', '--json'], env))
@@ -425,6 +555,68 @@ async function smokeMcp({ cliEntrypoint, entrypoint, packageFile, env, port, fix
           `${surface} did not return the seeded transaction: ${JSON.stringify(result)}`
         )
       }
+    }
+
+    const importPreview = JSON.parse(
+      runNode(
+        [
+          cliEntrypoint,
+          'import-transactions',
+          '--file',
+          fixture.importFile,
+          '--account-id',
+          fixture.accountId,
+          '--source',
+          'deployment-smoke-import',
+          '--json',
+        ],
+        env
+      )
+    )
+    if (
+      importPreview.success !== true ||
+      importPreview.dryRun !== true ||
+      importPreview.applyRequired !== true ||
+      typeof importPreview.previewToken !== 'string' ||
+      importPreview.previewToken.length === 0
+    ) {
+      throw new Error(`Unexpected import preview/token payload: ${JSON.stringify(importPreview)}`)
+    }
+
+    const correctionPreview = JSON.parse(
+      runNode(
+        [
+          cliEntrypoint,
+          'correct-transaction-metadata',
+          '--transaction-id',
+          fixture.transactionId,
+          '--description',
+          'CLI deployment smoke corrected preview',
+          '--audit-source',
+          'deployment-smoke',
+          '--audit-note',
+          'Preview correction contract',
+          '--dry-run',
+          '--json',
+        ],
+        env
+      )
+    )
+    if (correctionPreview.success !== true || correctionPreview.dryRun !== true) {
+      throw new Error(`Unexpected correction preview payload: ${JSON.stringify(correctionPreview)}`)
+    }
+
+    const coverageReadResult = await client.callTool(
+      { name: 'list-source-coverage', arguments: { accountId: fixture.accountId } },
+      undefined,
+      { timeout: 10_000 }
+    )
+    if (coverageReadResult.isError) {
+      throw new Error(`MCP list-source-coverage failed: ${JSON.stringify(coverageReadResult)}`)
+    }
+    const coverageRead = parseMcpTextResult(coverageReadResult, 'list-source-coverage')
+    if (coverageRead.success !== true || !Array.isArray(coverageRead.coverage)) {
+      throw new Error(`Unexpected coverage read payload: ${JSON.stringify(coverageRead)}`)
     }
 
     const cliDryRun = JSON.parse(
@@ -626,6 +818,232 @@ async function smokeMcp({ cliEntrypoint, entrypoint, packageFile, env, port, fix
     ) {
       throw new Error('MCP save-spending-recap changed ledger or account tables.')
     }
+
+    const beforeCorrection = await snapshotHostedTables(port)
+    const correctionResult = await client.callTool(
+      {
+        name: 'correct-transaction-metadata',
+        arguments: {
+          transactionId: fixture.transactionId,
+          description: 'MCP deployment smoke corrected',
+          auditSource: 'deployment-smoke',
+          auditNote: 'Exercise audited metadata correction',
+        },
+      },
+      undefined,
+      { timeout: 10_000 }
+    )
+    if (correctionResult.isError) {
+      throw new Error(
+        `MCP correct-transaction-metadata failed: ${JSON.stringify(correctionResult)}`
+      )
+    }
+    const correction = parseMcpTextResult(correctionResult, 'correct-transaction-metadata')
+    if (correction.success !== true || !correction.transaction) {
+      throw new Error(`Unexpected metadata correction payload: ${JSON.stringify(correction)}`)
+    }
+    const afterCorrection = await snapshotHostedTables(port)
+    if (JSON.stringify(afterCorrection.accounts) !== JSON.stringify(beforeCorrection.accounts)) {
+      throw new Error('Metadata correction changed account rows.')
+    }
+    const correctedRows = await requestHostedApi(port, '/api/db/query', {
+      sql: 'SELECT description FROM transactions WHERE id = $1',
+      params: [fixture.transactionId],
+    })
+    if (correctedRows[0]?.description !== 'MCP deployment smoke corrected') {
+      throw new Error(`Metadata correction was not persisted: ${JSON.stringify(correctedRows)}`)
+    }
+
+    const setCoverage = JSON.parse(
+      runNode(
+        [
+          cliEntrypoint,
+          'set-source-coverage',
+          '--account-id',
+          fixture.accountId,
+          '--source-namespace',
+          'deployment-smoke-import',
+          '--period-start',
+          '2026-01-01',
+          '--period-end',
+          '2026-01-31',
+          '--status',
+          'verified',
+          '--zero-rows',
+          '--document-ref',
+          'synthetic deployment smoke statement',
+          '--source',
+          'deployment-smoke',
+          '--note',
+          'Synthetic isolated coverage evidence',
+          '--json',
+        ],
+        env
+      )
+    )
+    if (setCoverage.success !== true || typeof setCoverage.coverage?.id !== 'string') {
+      throw new Error(`CLI set-source-coverage failed: ${JSON.stringify(setCoverage)}`)
+    }
+    const listedCoverageResult = await client.callTool(
+      {
+        name: 'list-source-coverage',
+        arguments: {
+          accountId: fixture.accountId,
+          sourceNamespace: 'deployment-smoke-import',
+        },
+      },
+      undefined,
+      { timeout: 10_000 }
+    )
+    if (listedCoverageResult.isError) {
+      throw new Error(`MCP coverage read failed: ${JSON.stringify(listedCoverageResult)}`)
+    }
+    const listedCoverage = parseMcpTextResult(listedCoverageResult, 'list-source-coverage')
+    if (
+      listedCoverage.success !== true ||
+      listedCoverage.coverage?.length !== 1 ||
+      listedCoverage.coverage[0].id !== setCoverage.coverage.id
+    ) {
+      throw new Error(`Coverage CLI/MCP parity failed: ${JSON.stringify(listedCoverage)}`)
+    }
+
+    const card = JSON.parse(
+      runNode(
+        [
+          cliEntrypoint,
+          'create-account',
+          '--name',
+          'Payment Evidence Smoke Card',
+          '--type',
+          'credit_card',
+          '--currency',
+          'MXN',
+          '--json',
+        ],
+        env
+      )
+    )
+    if (card.success !== true || typeof card.account?.id !== 'string') {
+      throw new Error(`Could not create payment smoke card: ${JSON.stringify(card)}`)
+    }
+    const statement = JSON.parse(
+      runNode(
+        [
+          cliEntrypoint,
+          'create-credit-card-statement',
+          '--account-id',
+          card.account.id,
+          '--statement-start-date',
+          '2026-01-01',
+          '--statement-end-date',
+          '2026-01-31',
+          '--due-date',
+          '2026-02-20',
+          '--statement-balance',
+          '25',
+          '--minimum-payment',
+          '5',
+          '--source',
+          'deployment-smoke',
+          '--json',
+        ],
+        env
+      )
+    )
+    if (statement.success !== true || typeof statement.statement?.id !== 'string') {
+      throw new Error(`Could not create payment smoke statement: ${JSON.stringify(statement)}`)
+    }
+    const payment = JSON.parse(
+      runNode(
+        [
+          cliEntrypoint,
+          'add-transaction',
+          '--account-id',
+          fixture.accountId,
+          '--transfer-to-account-id',
+          card.account.id,
+          '--amount',
+          '25',
+          '--type',
+          'transfer',
+          '--description',
+          'Synthetic statement payment evidence',
+          '--date',
+          '2026-02-10',
+          '--source',
+          'deployment-smoke',
+          '--json',
+        ],
+        env
+      )
+    )
+    if (payment.success !== true || typeof payment.transaction?.id !== 'string') {
+      throw new Error(`Could not create payment transaction evidence: ${JSON.stringify(payment)}`)
+    }
+
+    const beforePaymentLink = await snapshotHostedTables(port)
+    const linkResult = await client.callTool(
+      {
+        name: 'link-card-statement-payment',
+        arguments: {
+          statementId: statement.statement.id,
+          transactionId: payment.transaction.id,
+          amount: 25,
+          mode: 'apply_to_unpaid',
+          auditSource: 'deployment-smoke',
+          auditNote: 'Link exact synthetic transfer evidence',
+        },
+      },
+      undefined,
+      { timeout: 10_000 }
+    )
+    if (linkResult.isError) {
+      throw new Error(`MCP link-card-statement-payment failed: ${JSON.stringify(linkResult)}`)
+    }
+    const linked = parseMcpTextResult(linkResult, 'link-card-statement-payment')
+    if (
+      linked.success !== true ||
+      linked.balanceImpact?.affectsBalances !== false ||
+      typeof linked.link?.id !== 'string'
+    ) {
+      throw new Error(`Unexpected payment link payload: ${JSON.stringify(linked)}`)
+    }
+    const afterPaymentLink = await snapshotHostedTables(port)
+    if (
+      JSON.stringify(afterPaymentLink.accounts) !== JSON.stringify(beforePaymentLink.accounts) ||
+      JSON.stringify(afterPaymentLink.transactions) !==
+        JSON.stringify(beforePaymentLink.transactions)
+    ) {
+      throw new Error('Payment linking changed accounts or transactions.')
+    }
+
+    const unlinked = JSON.parse(
+      runNode(
+        [
+          cliEntrypoint,
+          'unlink-card-statement-payment',
+          '--link-id',
+          linked.link.id,
+          '--audit-source',
+          'deployment-smoke',
+          '--audit-note',
+          'Unlink synthetic transfer evidence',
+          '--json',
+        ],
+        env
+      )
+    )
+    if (unlinked.success !== true || unlinked.balanceImpact?.affectsBalances !== false) {
+      throw new Error(`CLI unlink-card-statement-payment failed: ${JSON.stringify(unlinked)}`)
+    }
+    const afterPaymentUnlink = await snapshotHostedTables(port)
+    if (
+      JSON.stringify(afterPaymentUnlink.accounts) !== JSON.stringify(beforePaymentLink.accounts) ||
+      JSON.stringify(afterPaymentUnlink.transactions) !==
+        JSON.stringify(beforePaymentLink.transactions)
+    ) {
+      throw new Error('Payment unlinking changed accounts or transactions.')
+    }
   } catch (error) {
     operationError = error
   }
@@ -662,7 +1080,8 @@ async function smokeHostedWeb(
   mcpEntrypoint,
   packageFile,
   deployedWebRoot,
-  isolatedEnv
+  isolatedEnv,
+  runtimeIdentityPath
 ) {
   const packagedAssets = assertPackagedWebAssets(deployedWebRoot)
   const port = await findAvailablePort()
@@ -788,17 +1207,25 @@ async function smokeHostedWeb(
       throw new Error(`Hosted web API accepted a wrong Origin with status ${wrongOrigin.status}.`)
     }
 
+    const importFile = join(isolatedEnv.TMPDIR, 'deployment-smoke-import.csv')
+    writeFileSync(
+      importFile,
+      'date,description,amount,externalId\n2026-01-16,Synthetic import preview,8.25,smoke-import-001\n'
+    )
+
     return await smokeMcp({
       cliEntrypoint,
       entrypoint: mcpEntrypoint,
       packageFile,
       env: isolatedEnv,
       port,
+      runtimeIdentityPath,
       fixture: {
         accountId: created.account.id,
         transactionId: recorded.transaction.id,
         categoryName: 'Web Shared DB Smoke',
         transactionDate: '2026-01-15',
+        importFile,
       },
     })
   } finally {
@@ -887,16 +1314,23 @@ try {
   if (version !== rootPackage.version) {
     throw new Error(`Deployed CLI reported version ${version}; expected ${rootPackage.version}.`)
   }
+  const runtimeAppDataDir =
+    process.platform === 'win32'
+      ? join(syntheticRoots.appData, 'com.asf.shikin')
+      : process.platform === 'darwin'
+        ? join(syntheticRoots.home, 'Library', 'Application Support', 'com.asf.shikin')
+        : join(syntheticRoots.xdgData, 'com.asf.shikin')
   const mcpToolCount = await smokeHostedWeb(
     cliEntrypoint,
     mcpEntrypoint,
     packageFile,
     deployedWebRoot,
-    isolatedEnv
+    isolatedEnv,
+    join(runtimeAppDataDir, 'runtime-identity.json')
   )
 
   console.log(
-    `CLI deployment, hosted web shared-database, and ${mcpToolCount}-tool MCP protocol smoke passed with pnpm ${actualPnpmVersion}.`
+    `Packaged CLI/MCP ${mcpToolCount}-tool catalog parity and representative import, correction, coverage, payment-link, runtime-read, recap, and hosted-web workflows passed with pnpm ${actualPnpmVersion}.`
   )
 } finally {
   rmSync(tempRoot, { recursive: true, force: true })

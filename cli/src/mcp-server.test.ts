@@ -37,7 +37,7 @@ describe('MCP tool registration', () => {
 
     const toolNames = registerTool.mock.calls.map(([name]) => name)
 
-    expect(tools).toHaveLength(92)
+    expect(tools).toHaveLength(108)
     expect(toolNames).toEqual(tools.map((tool) => tool.name))
     expect(toolNames).toEqual(
       expect.arrayContaining([
@@ -83,6 +83,22 @@ describe('MCP tool registration', () => {
         'list-plugins',
         'enable-plugin',
         'disable-plugin',
+        'correct-transaction-metadata',
+        'set-transaction-consumption',
+        'clear-transaction-consumption',
+        'update-bucket',
+        'delete-bucket',
+        'reverse-bucket-allocation',
+        'correct-bucket-allocation',
+        'set-source-coverage',
+        'list-source-coverage',
+        'settle-staged-transactions',
+        'supersede-reconciliation-bridge',
+        'bind-transaction-import-identity',
+        'link-card-statement-payment',
+        'unlink-card-statement-payment',
+        'list-card-statement-payment-links',
+        'get-runtime-diagnostics',
       ])
     )
   })
@@ -108,7 +124,22 @@ describe('MCP tool registration', () => {
       .filter((call) => typeof call[3] !== 'function')
       .map(([name]) => name)
       .sort()
-    expect(annotated).toEqual(['get-spending-recap', 'save-spending-recap'])
+    const declaredAnnotations = tools
+      .filter(
+        (tool) =>
+          typeof tool.effects?.readOnly === 'boolean' ||
+          typeof tool.effects?.idempotent === 'boolean'
+      )
+      .map((tool) => tool.name)
+      .sort()
+    expect(annotated).toEqual(declaredAnnotations)
+    expect(byName.get('query-transactions')?.[3]).toEqual({ readOnlyHint: true })
+    expect(byName.get('get-runtime-diagnostics')?.[3]).toEqual({
+      readOnlyHint: true,
+      idempotentHint: true,
+    })
+    expect(typeof byName.get('import-transactions')?.[3]).toBe('function')
+    expect(byName.get('import-transactions')?.[4]).toBeUndefined()
   })
 
   it('executes real shared tools through the MCP handler without CLI-only coercion', async () => {
@@ -148,6 +179,7 @@ describe('MCP tool registration', () => {
           currency: 'USD',
           balance: 123.45,
           accountMode: 'transactional',
+          valuationMode: 'cash_plus_holdings',
           aliases: [],
         },
       ],

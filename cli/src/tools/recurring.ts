@@ -36,6 +36,7 @@ type RecurringRuleRow = {
   end_date: string | null
   account_id: string
   category_id: string | null
+  subcategory_id: string | null
   notes: string | null
   active: number
   currency: string | null
@@ -301,11 +302,80 @@ type RecurringRuleActionInput = {
   frequency?: 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly'
   nextDate?: string
   anchorKind?: 'fixed_day' | 'end_of_month'
-  endDate?: string
-  category?: string
-  notes?: string
+  endDate?: string | null
+  category?: string | null
+  notes?: string | null
   accountId?: string
+  clearEndDate?: boolean
+  clearNotes?: boolean
+  clearCategory?: boolean
   dryRun?: boolean
+}
+
+function nullableClearConflict(
+  clear: boolean | undefined,
+  value: unknown,
+  field: string,
+  flag: string
+) {
+  if (clear && value !== undefined) {
+    return {
+      success: false as const,
+      message: `${field} conflicts with ${flag}; provide one or the other.`,
+    }
+  }
+  return null
+}
+
+function resolveRecurringCategory(
+  category: string,
+  expectedType: string
+): { success: true; id: string | null } | { success: false; message: string } {
+  const exactMatches =
+    query<{ id: string; name: string; type: string }>(
+      'SELECT id, name, type FROM categories WHERE LOWER(name) = LOWER($1) ORDER BY name ASC LIMIT 2',
+      [category]
+    ) ?? []
+
+  const pick = (matches: Array<{ id: string; name: string; type: string }>) => {
+    const match = matches[0]
+    if (match.type && match.type !== expectedType) {
+      return {
+        success: false as const,
+        message: 'Category direction must match the recurring rule type.',
+      }
+    }
+    return { success: true as const, id: match.id }
+  }
+
+  if (exactMatches.length === 1) return pick(exactMatches)
+  if (exactMatches.length > 1) {
+    return {
+      success: false as const,
+      message: `Category "${category}" is ambiguous. Use a more specific existing category name.`,
+    }
+  }
+
+  const partialMatches =
+    query<{ id: string; name: string; type: string }>(
+      'SELECT id, name, type FROM categories WHERE LOWER(name) LIKE LOWER($1) ORDER BY name ASC LIMIT 3',
+      [`%${category}%`]
+    ) ?? []
+
+  if (partialMatches.length === 1) return pick(partialMatches)
+  if (partialMatches.length > 1) {
+    return {
+      success: false as const,
+      message: `Category "${category}" matches multiple categories (${partialMatches
+        .map((match) => match.name)
+        .join(', ')}). Use a more specific existing category name.`,
+    }
+  }
+
+  return {
+    success: false as const,
+    message: `Category "${category}" not found. Use list-categories to pick an existing category name.`,
+  }
 }
 
 function requireRecurringRuleId(
@@ -586,10 +656,24 @@ function appendRecurringRuleReferenceUpdates(
   sourceCurrency: string
 ): RecurringRuleActionFailure | null {
   if (input.category !== undefined) {
-    const resolvedCategory = resolveCategoryId(input.category)
+    const resolvedCategory =
+      input.category === null || input.category === ''
+        ? { success: true as const, id: null }
+        : resolveRecurringCategory(input.category, input.type ?? rule.type)
     if (!resolvedCategory.success) return { success: false, message: resolvedCategory.message }
     addRecurringRuleUpdateClause(plan, 'category_id', resolvedCategory.id)
     plan.updatedCategoryId = resolvedCategory.id
+    if (rule.subcategory_id && resolvedCategory.id !== rule.category_id) {
+      if (resolvedCategory.id === null) {
+        addRecurringRuleUpdateClause(plan, 'subcategory_id', null)
+      } else {
+        const owned = query<{ id: string }>(
+          'SELECT id FROM subcategories WHERE id = $1 AND category_id = $2 LIMIT 1',
+          [rule.subcategory_id, resolvedCategory.id]
+        )
+        if (owned.length === 0) addRecurringRuleUpdateClause(plan, 'subcategory_id', null)
+      }
+    }
   }
 
   if (input.accountId !== undefined) {
@@ -647,6 +731,27 @@ function buildUpdatedRecurringRule(
 }
 
 async function updateRecurringRule(input: RecurringRuleActionInput) {
+  const endDateConflict = nullableClearConflict(
+    input.clearEndDate,
+    input.endDate,
+    'endDate',
+    'clearEndDate'
+  )
+  if (endDateConflict) return endDateConflict
+  const notesConflict = nullableClearConflict(input.clearNotes, input.notes, 'notes', 'clearNotes')
+  if (notesConflict) return notesConflict
+  const categoryConflict = nullableClearConflict(
+    input.clearCategory,
+    input.category,
+    'category',
+    'clearCategory'
+  )
+  if (categoryConflict) return categoryConflict
+
+  if (input.clearEndDate) input = { ...input, endDate: null }
+  if (input.clearNotes) input = { ...input, notes: null }
+  if (input.clearCategory) input = { ...input, category: null }
+
   const ruleIdResult = requireRecurringRuleId('update', input.ruleId)
   if (!ruleIdResult.success) return ruleIdResult
   const { ruleId } = ruleIdResult
@@ -834,9 +939,20 @@ const manageRecurringTransaction: ToolDefinition = {
       .enum(['fixed_day', 'end_of_month'])
       .optional()
       .describe('For monthly/quarterly/yearly rules, keep the calendar day or use month-end'),
-    endDate: z.string().optional().describe('Optional end date in YYYY-MM-DD format'),
-    category: z.string().optional().describe('Category name to match'),
-    notes: z.string().optional().describe('Optional notes'),
+    endDate: isoDate('Optional end date in YYYY-MM-DD format').nullable().optional(),
+    category: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('Category name to match. Pass null or clearCategory to clear; omit to preserve.'),
+    notes: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('Optional notes. Pass null or clearNotes to clear; omit to preserve.'),
+    clearEndDate: z.boolean().optional().describe('Clear the recurring rule end date'),
+    clearNotes: z.boolean().optional().describe('Clear recurring rule notes'),
+    clearCategory: z.boolean().optional().describe('Clear the linked category'),
     accountId: boundedText(
       'Account ID',
       'Optional account ID for the recurring rule. Required when multiple accounts exist.',

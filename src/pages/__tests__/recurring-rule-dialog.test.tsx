@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { RecurringRuleDialog } from '@/components/transactions/recurring-rule-dialog'
+import {
+  RecurringRuleDialog,
+  toRecurringRuleFormData,
+} from '@/components/transactions/recurring-rule-dialog'
 import dayjs from 'dayjs'
 
 vi.mock('react-i18next', () => ({
@@ -31,11 +34,16 @@ const mockRules = [
     type: 'expense',
     frequency: 'monthly',
     next_date: dayjs().add(1, 'month').format('YYYY-MM-DD'),
+    end_date: '2027-12-31',
     account_id: 'acc-1',
     account_name: 'Checking',
     category_id: 'cat-1',
+    subcategory_id: 'sub-1',
     category_name: 'Housing',
     category_color: '#ff0000',
+    notes: 'Existing note',
+    tags: '',
+    anchor_kind: 'fixed_day',
     active: 1,
   },
 ]
@@ -86,7 +94,10 @@ vi.mock('@/stores/account-store', () => ({
 
 vi.mock('@/stores/category-store', () => ({
   useCategoryStore: () => ({
-    categories: [{ id: 'cat-1', name: 'Housing', type: 'expense', color: '#ff0000' }],
+    categories: [
+      { id: 'cat-1', name: 'Housing', type: 'expense', color: '#ff0000' },
+      { id: 'cat-2', name: 'Utilities', type: 'expense', color: '#00ff00' },
+    ],
     isLoading: false,
     fetchError: null,
     fetch: vi.fn().mockResolvedValue(undefined),
@@ -201,5 +212,84 @@ describe('RecurringRuleDialog accessibility', () => {
 
     const frequencySelect = document.querySelector('#rec-frequency')
     expect(frequencySelect).toBeInTheDocument()
+  })
+
+  it('exposes end date and notes controls using existing transaction labels', () => {
+    render(<RecurringRuleDialog />)
+
+    expect(screen.getByLabelText('recurring.form.endDate')).toBeInTheDocument()
+    expect(screen.getByLabelText('form.notes')).toBeInTheDocument()
+  })
+
+  it('preserves a hidden valid subcategory on unrelated save and can set end date and notes', async () => {
+    const user = userEvent.setup()
+    mockEditingRecurringId = 'rule-1'
+    mockGetRecurringById.mockReturnValue(mockRules[0])
+    mockUpdateRule.mockResolvedValueOnce(undefined)
+
+    render(<RecurringRuleDialog />)
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('recurring.form.description')).toHaveValue('Monthly Rent')
+    })
+    expect(screen.getByLabelText('recurring.form.endDate')).toHaveValue('2027-12-31')
+    expect(screen.getByLabelText('form.notes')).toHaveValue('Existing note')
+
+    await user.clear(screen.getByLabelText('form.notes'))
+    await user.type(screen.getByLabelText('form.notes'), 'Updated note')
+    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+
+    await waitFor(() => {
+      expect(mockUpdateRule).toHaveBeenCalledWith(
+        'rule-1',
+        expect.objectContaining({
+          description: 'Monthly Rent',
+          categoryId: 'cat-1',
+          subcategoryId: 'sub-1',
+          endDate: '2027-12-31',
+          notes: 'Updated note',
+        })
+      )
+    })
+  })
+
+  it('clears subcategory when category is none or changed, and empty end date/notes become null', () => {
+    const existing = { category_id: 'cat-1', subcategory_id: 'sub-1' }
+    const values = {
+      type: 'expense' as const,
+      amount: 1500,
+      description: 'Monthly Rent',
+      accountId: 'acc-1',
+      frequency: 'monthly' as const,
+      anchorKind: 'fixed_day' as const,
+      nextDate: '2026-05-01',
+      tags: '',
+    }
+
+    expect(
+      toRecurringRuleFormData({ ...values, categoryId: null, endDate: '', notes: '  ' }, existing)
+    ).toMatchObject({
+      categoryId: null,
+      subcategoryId: null,
+      endDate: null,
+      notes: null,
+    })
+    expect(
+      toRecurringRuleFormData(
+        { ...values, categoryId: 'cat-2', endDate: '2028-01-01', notes: 'Kept' },
+        existing
+      )
+    ).toMatchObject({
+      categoryId: 'cat-2',
+      subcategoryId: null,
+      endDate: '2028-01-01',
+      notes: 'Kept',
+    })
+    expect(
+      toRecurringRuleFormData(
+        { ...values, categoryId: 'cat-1', endDate: '2027-12-31', notes: 'Existing note' },
+        existing
+      )
+    ).toMatchObject({ categoryId: 'cat-1', subcategoryId: 'sub-1' })
   })
 })

@@ -225,4 +225,104 @@ describe('precise investment store', () => {
     expect(mockExecute).not.toHaveBeenCalled()
     expect(useInvestmentStore.getState().investments[0]?.instrument_key).toBe(key)
   })
+
+  it('persists empty or whitespace notes as NULL, omits to preserve, and leaves identity/money unchanged', async () => {
+    const holding = {
+      ...row({ id: 'inv-1', account_id: 'acct-1', notes: 'keep notes' }),
+      quantityDecimal: '0.123456789012345678',
+      quantityPrecision: 'exact_decimal',
+      avgCostBasisDecimal: '0',
+      costBasisKnown: true,
+      currentPrice: 12,
+      currentPriceDecimal: '0.123456789012345678',
+      currentPriceCurrency: 'USD',
+      priceProvider: 'manual',
+      priceInstrumentId: 'AAPL',
+      priceExchange: 'XNAS',
+      marketValue: 2,
+      convertedMarketValue: 2,
+      costBasis: 0,
+      convertedCostBasis: 0,
+      gainLoss: 2,
+      gainLossPercent: null,
+      lastPriceDate: '2026-04-18',
+      valuationComplete: true,
+      valuationReasons: [],
+    }
+    const seed = () => useInvestmentStore.setState({ investments: [holding] as never })
+    seed()
+    mockExecute.mockResolvedValue({ rowsAffected: 1, lastInsertId: 1 })
+    mockQuery.mockResolvedValue([])
+
+    const base = {
+      symbol: 'AAPL',
+      name: 'Apple',
+      type: 'stock' as const,
+      shares: 0.1,
+      quantityDecimal: '0.123456789012345678',
+      avgCostDecimal: '0',
+      costBasisKnown: true,
+      currency: 'USD' as const,
+      accountId: 'acct-1',
+    }
+
+    expect(useInvestmentStore.getState().getById('inv-1')?.id).toBe('inv-1')
+    await useInvestmentStore.getState().update('inv-1', { ...base, notes: '   ' })
+    const whitespaceCall = mockExecute.mock.calls.find((call) =>
+      String(call[0]).includes('UPDATE investments')
+    )
+    expect(whitespaceCall?.[1]).toEqual([
+      'acct-1',
+      'AAPL',
+      'Apple',
+      'stock',
+      0.1,
+      '0.123456789012345678',
+      0,
+      '0',
+      1,
+      key,
+      'USD',
+      null,
+      expect.any(String),
+      'inv-1',
+    ])
+
+    mockExecute.mockClear()
+    seed()
+    await useInvestmentStore.getState().update('inv-1', base)
+    const omittedCall = mockExecute.mock.calls.find((call) =>
+      String(call[0]).includes('UPDATE investments')
+    )
+    expect(omittedCall?.[1]?.[11]).toBe('keep notes')
+    expect(omittedCall?.[1]?.slice(0, 11)).toEqual([
+      'acct-1',
+      'AAPL',
+      'Apple',
+      'stock',
+      0.1,
+      '0.123456789012345678',
+      0,
+      '0',
+      1,
+      key,
+      'USD',
+    ])
+
+    mockExecute.mockClear()
+    await useInvestmentStore.getState().add({
+      symbol: 'MSFT',
+      name: 'Microsoft',
+      type: 'stock',
+      quantityDecimal: '1',
+      avgCostDecimal: '0',
+      costBasisKnown: true,
+      currency: 'USD',
+      notes: '   ',
+    })
+    const insertCall = mockExecute.mock.calls.find((call) =>
+      String(call[0]).includes('INSERT INTO investments')
+    )
+    expect(insertCall?.[1]?.[12]).toBeNull()
+  })
 })

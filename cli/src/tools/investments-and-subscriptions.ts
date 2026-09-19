@@ -1474,20 +1474,38 @@ const updateSubscription: ToolDefinition = {
     categoryId: boundedText('Category ID', 'New linked category ID', 128).optional(),
     category: boundedText('Category', 'New category name to resolve', 120).optional(),
     clearCategory: z.boolean().optional().default(false).describe('Clear the linked category'),
-    icon: z.string().trim().max(80).optional().describe('New icon. Pass an empty string to clear.'),
+    icon: z
+      .string()
+      .trim()
+      .max(80)
+      .nullable()
+      .optional()
+      .describe('New icon. Pass null, an empty string, or clearIcon to clear.'),
     color: z
       .string()
       .trim()
       .max(80)
+      .nullable()
       .optional()
-      .describe('New color. Pass an empty string to clear.'),
-    url: z.string().trim().max(500).optional().describe('New URL. Pass an empty string to clear.'),
+      .describe('New color. Pass null, an empty string, or clearColor to clear.'),
+    url: z
+      .string()
+      .trim()
+      .max(500)
+      .nullable()
+      .optional()
+      .describe('New URL. Pass null, an empty string, or clearUrl to clear.'),
     notes: z
       .string()
       .trim()
       .max(1000)
+      .nullable()
       .optional()
-      .describe('New notes. Pass an empty string to clear.'),
+      .describe('New notes. Pass null, an empty string, or clearNotes to clear.'),
+    clearIcon: z.boolean().optional().describe('Clear the icon'),
+    clearColor: z.boolean().optional().describe('Clear the color'),
+    clearUrl: z.boolean().optional().describe('Clear the URL'),
+    clearNotes: z.boolean().optional().describe('Clear notes'),
     active: z.boolean().optional().describe('Whether the subscription is active'),
     dryRun: z
       .boolean()
@@ -1512,6 +1530,10 @@ const updateSubscription: ToolDefinition = {
     color,
     url,
     notes,
+    clearIcon,
+    clearColor,
+    clearUrl,
+    clearNotes,
     active,
     dryRun,
   }) => {
@@ -1532,6 +1554,18 @@ const updateSubscription: ToolDefinition = {
         success: false,
         message: 'Use either clearCategory or category/categoryId, not both.',
       }
+    }
+    if (clearIcon && icon !== undefined) {
+      return { success: false, message: 'Use either clearIcon or icon, not both.' }
+    }
+    if (clearColor && color !== undefined) {
+      return { success: false, message: 'Use either clearColor or color, not both.' }
+    }
+    if (clearUrl && url !== undefined) {
+      return { success: false, message: 'Use either clearUrl or url, not both.' }
+    }
+    if (clearNotes && notes !== undefined) {
+      return { success: false, message: 'Use either clearNotes or notes, not both.' }
     }
 
     const resolvedAccount = clearAccount
@@ -1564,10 +1598,34 @@ const updateSubscription: ToolDefinition = {
       currency: nextCurrency,
       billing_cycle: billingCycle ?? existing.billing_cycle,
       next_billing_date: nextBillingDate ?? existing.next_billing_date,
-      icon: icon !== undefined ? (icon === '' ? null : icon) : existing.icon,
-      color: color !== undefined ? (color === '' ? null : color) : existing.color,
-      url: url !== undefined ? (url === '' ? null : url) : existing.url,
-      notes: notes !== undefined ? (notes === '' ? null : notes) : existing.notes,
+      icon: clearIcon
+        ? null
+        : icon !== undefined
+          ? icon === '' || icon === null
+            ? null
+            : icon
+          : existing.icon,
+      color: clearColor
+        ? null
+        : color !== undefined
+          ? color === '' || color === null
+            ? null
+            : color
+          : existing.color,
+      url: clearUrl
+        ? null
+        : url !== undefined
+          ? url === '' || url === null
+            ? null
+            : url
+          : existing.url,
+      notes: clearNotes
+        ? null
+        : notes !== undefined
+          ? notes === '' || notes === null
+            ? null
+            : notes
+          : existing.notes,
       is_active: active !== undefined ? (active ? 1 : 0) : existing.is_active,
     }
 

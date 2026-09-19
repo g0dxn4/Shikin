@@ -137,6 +137,12 @@ function nonNegativeDecimal(value: string, label: string) {
   return decimal
 }
 
+function persistableNotes(notes: string | undefined, existing: string | null): string | null {
+  if (notes === undefined) return existing
+  const trimmed = notes.trim()
+  return trimmed === '' ? null : trimmed
+}
+
 function exactFormValues(data: InvestmentFormData) {
   const quantityDecimal = nonNegativeDecimal(
     data.quantityDecimal ?? String(data.shares ?? 0),
@@ -305,7 +311,7 @@ export const useInvestmentStore = create<InvestmentState>((set, get) => ({
         cost_basis_known: exact.costBasisKnown ? 1 : 0,
         instrument_key: null,
         currency: data.currency,
-        notes: data.notes ?? null,
+        notes: persistableNotes(data.notes, null),
         created_at: now,
         updated_at: now,
       }
@@ -365,7 +371,7 @@ export const useInvestmentStore = create<InvestmentState>((set, get) => ({
         avg_cost_basis_decimal: exact.avgCostBasisDecimal,
         cost_basis_known: exact.costBasisKnown ? 1 : 0,
         currency: data.currency,
-        notes: data.notes ?? null,
+        notes: persistableNotes(data.notes, existing.notes),
         updated_at: now,
       }
       // A failed provider refresh throws before this UPDATE, preserving the accepted binding/quote.

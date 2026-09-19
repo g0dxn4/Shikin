@@ -42,18 +42,34 @@ const recurringRuleSchema = z.object({
   frequency: z.enum(FREQUENCIES),
   anchorKind: z.enum(['fixed_day', 'end_of_month']),
   nextDate: z.string().min(1),
-  endDate: z.string().nullable(),
+  endDate: z.string(),
   tags: z.string(),
-  notes: z.string().nullable(),
+  notes: z.string(),
 })
 
 type RecurringRuleValues = z.infer<typeof recurringRuleSchema>
 
-function toFormData(values: RecurringRuleValues): RecurringRuleFormData {
+function emptyToNull(value: string): string | null {
+  const trimmed = value.trim()
+  return trimmed === '' ? null : trimmed
+}
+
+// eslint-disable-next-line react-refresh/only-export-components -- form mapping covered by dialog tests
+export function toRecurringRuleFormData(
+  values: RecurringRuleValues,
+  existing?: { category_id: string | null; subcategory_id: string | null } | null
+): RecurringRuleFormData {
+  const categoryId = values.categoryId
+  const subcategoryId =
+    !categoryId || !existing || categoryId !== existing.category_id
+      ? null
+      : (existing.subcategory_id ?? null)
   return {
     ...values,
+    endDate: emptyToNull(values.endDate),
+    notes: emptyToNull(values.notes),
     toAccountId: null,
-    subcategoryId: null,
+    subcategoryId,
   }
 }
 
@@ -87,9 +103,9 @@ export function RecurringRuleDialog() {
       frequency: 'monthly',
       anchorKind: 'fixed_day',
       nextDate: dayjs().format('YYYY-MM-DD'),
-      endDate: null,
+      endDate: '',
       tags: '',
-      notes: null,
+      notes: '',
     },
   })
 
@@ -125,9 +141,9 @@ export function RecurringRuleDialog() {
       frequency: (rule?.frequency as RecurringFrequency | undefined) ?? 'monthly',
       anchorKind: rule?.anchor_kind ?? 'fixed_day',
       nextDate: rule?.next_date ?? dayjs().format('YYYY-MM-DD'),
-      endDate: rule?.end_date ?? null,
+      endDate: rule?.end_date ?? '',
       tags: rule?.tags ?? '',
-      notes: rule?.notes ?? null,
+      notes: rule?.notes ?? '',
     })
   }, [recurringDialogOpen, reset, rule])
 
@@ -135,10 +151,10 @@ export function RecurringRuleDialog() {
     setIsLoading(true)
     try {
       if (isEditing && editingRecurringId) {
-        await update(editingRecurringId, toFormData(values))
+        await update(editingRecurringId, toRecurringRuleFormData(values, rule))
         toast.success(t('recurring.toast.updated'))
       } else {
-        await create(toFormData(values))
+        await create(toRecurringRuleFormData(values))
         toast.success(t('recurring.toast.created'))
       }
       closeRecurringDialog()
@@ -329,6 +345,39 @@ export function RecurringRuleDialog() {
               </Select>
             </div>
           )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="rec-end-date">{t('recurring.form.endDate')}</Label>
+            <Input
+              id="rec-end-date"
+              type="date"
+              placeholder={t('recurring.form.endDatePlaceholder')}
+              aria-invalid={!!errors.endDate}
+              aria-describedby={errors.endDate ? 'rec-end-date-error' : undefined}
+              {...register('endDate')}
+            />
+            {errors.endDate && (
+              <p id="rec-end-date-error" className="text-destructive text-xs" role="alert">
+                {errors.endDate.message}
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="rec-notes">{t('form.notes')}</Label>
+            <Input
+              id="rec-notes"
+              placeholder={t('form.notesPlaceholder')}
+              aria-invalid={!!errors.notes}
+              aria-describedby={errors.notes ? 'rec-notes-error' : undefined}
+              {...register('notes')}
+            />
+            {errors.notes && (
+              <p id="rec-notes-error" className="text-destructive text-xs" role="alert">
+                {errors.notes.message}
+              </p>
+            )}
+          </div>
 
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? '...' : tCommon('actions.save')}

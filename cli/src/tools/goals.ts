@@ -6,6 +6,8 @@ import {
   toCentavos,
   fromCentavos,
   dayjs,
+  isoDate,
+  isAccountWriteEligible,
   type ToolDefinition,
 } from './shared.js'
 
@@ -15,9 +17,44 @@ type GoalRow = {
   target_amount: number
   current_amount: number
   deadline: string | null
+  account_id: string | null
   icon: string | null
+  color: string | null
   notes: string | null
   account_name?: string | null
+}
+
+function nullableClearConflict(
+  clear: boolean | undefined,
+  value: unknown,
+  field: string,
+  flag: string
+) {
+  if (clear && value !== undefined) {
+    return {
+      success: false as const,
+      message: `${field} conflicts with ${flag}; provide one or the other.`,
+    }
+  }
+  return null
+}
+
+function resolveGoalAccountId(accountId: string | null) {
+  if (accountId === null) return { success: true as const, id: null }
+  const account = query<{ id: string; is_archived: number }>(
+    'SELECT id, is_archived FROM accounts WHERE id = $1 LIMIT 1',
+    [accountId]
+  )[0]
+  if (!account) {
+    return { success: false as const, message: `Account ${accountId} not found.` }
+  }
+  if (!isAccountWriteEligible(account)) {
+    return {
+      success: false as const,
+      message: `Account ${accountId} is archived. Unarchive it before using it for new writes.`,
+    }
+  }
+  return { success: true as const, id: account.id }
 }
 
 type GoalStatus = {
@@ -112,7 +149,7 @@ const createGoal: ToolDefinition = {
 const updateGoal: ToolDefinition = {
   name: 'update-goal',
   description:
-    'Update a savings goal. Can add/withdraw saved amounts, change the target, deadline, or other details.',
+    'Update a savings goal. Can add/withdraw saved amounts, change the target, deadline, or other details. Null or clear flags remove optional deadline, notes, and account; omission preserves them.',
   schema: z.object({
     goalId: z.string().describe('The ID of the goal to update'),
     name: z.string().optional().describe('New name for the goal'),
@@ -124,10 +161,22 @@ const updateGoal: ToolDefinition = {
       .positive()
       .optional()
       .describe('Amount to withdraw from current savings'),
-    deadline: z.string().optional().describe('New deadline in YYYY-MM-DD format'),
+    deadline: isoDate('New deadline in YYYY-MM-DD format').nullable().optional(),
+    notes: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('New notes. Pass null or clearNotes to clear; omit to preserve.'),
+    accountId: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('Account ID to link this goal to. Pass null or clearAccount to unlink.'),
+    clearDeadline: z.boolean().optional().describe('Clear the goal deadline'),
+    clearNotes: z.boolean().optional().describe('Clear goal notes'),
+    clearAccount: z.boolean().optional().describe('Clear the linked account'),
     icon: z.string().optional().describe('New emoji icon'),
     color: z.string().optional().describe('New color hex code'),
-    notes: z.string().optional().describe('New notes'),
   }),
   execute: async ({
     goalId,
@@ -137,12 +186,33 @@ const updateGoal: ToolDefinition = {
     addAmount,
     withdrawAmount,
     deadline,
+    notes,
+    accountId,
+    clearDeadline,
+    clearNotes,
+    clearAccount,
     icon,
     color,
-    notes,
   }) => {
+    const deadlineConflict = nullableClearConflict(
+      clearDeadline,
+      deadline,
+      'deadline',
+      'clearDeadline'
+    )
+    if (deadlineConflict) return deadlineConflict
+    const notesConflict = nullableClearConflict(clearNotes, notes, 'notes', 'clearNotes')
+    if (notesConflict) return notesConflict
+    const accountConflict = nullableClearConflict(
+      clearAccount,
+      accountId,
+      'accountId',
+      'clearAccount'
+    )
+    if (accountConflict) return accountConflict
+
     const existing = await query<GoalRow>(
-      'SELECT id, name, target_amount, current_amount, deadline FROM goals WHERE id = $1',
+      'SELECT id, name, target_amount, current_amount, deadline, account_id, icon, color, notes FROM goals WHERE id = $1',
       [goalId]
     )
 
@@ -152,6 +222,15 @@ const updateGoal: ToolDefinition = {
 
     const goal = existing[0]
     const now = new Date().toISOString()
+    const nextDeadline = clearDeadline ? null : deadline !== undefined ? deadline : goal.deadline
+    const nextNotes = clearNotes ? null : notes !== undefined ? notes : goal.notes
+    const requestedAccountId = clearAccount ? null : accountId
+    let nextAccountId = goal.account_id
+    if (requestedAccountId !== undefined) {
+      const resolvedAccount = resolveGoalAccountId(requestedAccountId)
+      if (!resolvedAccount.success) return resolvedAccount
+      nextAccountId = resolvedAccount.id
+    }
 
     // Calculate new current amount
     let newCurrentCentavos = goal.current_amount
@@ -166,18 +245,26 @@ const updateGoal: ToolDefinition = {
     const newTargetCentavos =
       targetAmount !== undefined ? toCentavos(targetAmount) : goal.target_amount
     const newName = name ?? goal.name
-    const newDeadline = deadline !== undefined ? deadline : goal.deadline
 
-    const setClauses = [
-      'name = $1',
-      'target_amount = $2',
-      'current_amount = $3',
-      'deadline = $4',
-      'updated_at = $5',
-    ]
-    const params: unknown[] = [newName, newTargetCentavos, newCurrentCentavos, newDeadline, now]
-    let paramIdx = 6
+    const setClauses = ['name = $1', 'target_amount = $2', 'current_amount = $3', 'updated_at = $4']
+    const params: unknown[] = [newName, newTargetCentavos, newCurrentCentavos, now]
+    let paramIdx = 5
 
+    if (clearDeadline || deadline !== undefined) {
+      setClauses.push(`deadline = $${paramIdx}`)
+      params.push(nextDeadline)
+      paramIdx++
+    }
+    if (clearNotes || notes !== undefined) {
+      setClauses.push(`notes = $${paramIdx}`)
+      params.push(nextNotes)
+      paramIdx++
+    }
+    if (requestedAccountId !== undefined) {
+      setClauses.push(`account_id = $${paramIdx}`)
+      params.push(nextAccountId)
+      paramIdx++
+    }
     if (icon !== undefined) {
       setClauses.push(`icon = $${paramIdx}`)
       params.push(icon)
@@ -186,11 +273,6 @@ const updateGoal: ToolDefinition = {
     if (color !== undefined) {
       setClauses.push(`color = $${paramIdx}`)
       params.push(color)
-      paramIdx++
-    }
-    if (notes !== undefined) {
-      setClauses.push(`notes = $${paramIdx}`)
-      params.push(notes)
       paramIdx++
     }
 
@@ -209,7 +291,7 @@ const updateGoal: ToolDefinition = {
         name: newName,
         targetAmount: newTargetAmount,
         currentAmount: newCurrentAmount,
-        deadline: newDeadline,
+        deadline: nextDeadline,
         progress,
       },
       message: `Updated goal "${newName}" — $${newCurrentAmount.toFixed(2)} / $${newTargetAmount.toFixed(2)} (${progress}%).`,

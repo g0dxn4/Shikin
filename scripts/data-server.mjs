@@ -48,6 +48,9 @@ import {
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
+const APPLICATION_VERSION = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+).version
 const PORT_ENV = process.env.SHIKIN_DATA_SERVER_PORT
 const parsedPort = Number.parseInt(PORT_ENV || '', 10)
 const PORT =
@@ -2260,7 +2263,7 @@ function handleRuntimeDiagnostics(res) {
   return sendJson(res, {
     success: true,
     build: HOSTED_MODE ? 'hosted-web' : 'browser-development',
-    version: '1.0.10',
+    version: APPLICATION_VERSION,
     schemaVersion: migration.id,
     schemaMigration: migration.name,
     databaseLineageId: state.database_id,

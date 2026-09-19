@@ -31,9 +31,9 @@ export interface Account {
   is_primary?: number
   account_mode?: AccountMode
   valuation_mode?: AccountValuationMode
-  credit_limit?: number
-  statement_closing_day?: number
-  payment_due_day?: number
+  credit_limit?: number | null
+  statement_closing_day?: number | null
+  payment_due_day?: number | null
   created_at: DateTimeStr
   updated_at: DateTimeStr
 }

@@ -12,12 +12,25 @@
     "namePlaceholder": "e.g. Checking Account",
     "type": "Account Type",
     "currency": "Currency",
-    "balance": "Current Balance",
+    "balance": "Observed balance",
     "creditDetails": "Credit card details",
     "creditDetailsDescription": "Track limit, utilization, and monthly statement timing.",
     "creditLimit": "Credit Limit",
     "statementClosingDay": "Statement Closing Day",
-    "paymentDueDay": "Payment Due Day"
+    "paymentDueDay": "Payment Due Day",
+    "accountMode": "Balance tracking",
+    "transactional": "Transaction ledger",
+    "snapshotOnly": "Observed snapshots only",
+    "valuationMode": "Balance ownership",
+    "chooseValuationMode": "Choose balance ownership",
+    "cashPlusHoldings": "Cash balance + separate holdings",
+    "portfolioSnapshot": "Whole portfolio (holdings included)",
+    "unresolved": "Unresolved — totals remain incomplete",
+    "valuationHelp": "Independent of tracking mode. Does this balance include your investments, or only cash? New portfolio accounts require an explicit choice. Changing ownership does not change balances or history.",
+    "observedDate": "Observed date (end of day)",
+    "observedDateHelp": "Balance edits reconcile the ledger at this date and retain later activity. Nonzero changes crossing a later reconciliation require bridge supersession. No intraday balance is implied.",
+    "icon": "Icon (blank clears)",
+    "color": "Color (blank clears)"
   },
   "types": {
     "checking": "Checking",
@@ -34,7 +47,8 @@
     "archived": "Account archived successfully",
     "restored": "Account restored successfully",
     "deleted": "Account deleted successfully",
-    "error": "Something went wrong"
+    "error": "Something went wrong",
+    "reconciliation": "Current balance: {{balance}}. Later activity retained: {{later}}. Previous stored-versus-ledger discrepancy: {{discrepancy}}."
   },
   "subtitle": "Balance overview",
   "totalBalance": "Total Balance",

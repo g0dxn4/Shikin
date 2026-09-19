@@ -12,12 +12,25 @@
     "namePlaceholder": "ej. Cuenta Corriente",
     "type": "Tipo de Cuenta",
     "currency": "Moneda",
-    "balance": "Saldo Actual",
+    "balance": "Saldo observado",
     "creditDetails": "Detalles de tarjeta de crédito",
     "creditDetailsDescription": "Rastrea límite, utilización y fechas mensuales del estado.",
     "creditLimit": "Límite de Crédito",
     "statementClosingDay": "Día de Cierre",
-    "paymentDueDay": "Día de Pago"
+    "paymentDueDay": "Día de Pago",
+    "accountMode": "Seguimiento del saldo",
+    "transactional": "Libro de transacciones",
+    "snapshotOnly": "Solo saldos observados",
+    "valuationMode": "Composición del saldo",
+    "chooseValuationMode": "Elige la composición del saldo",
+    "cashPlusHoldings": "Efectivo + inversiones separadas",
+    "portfolioSnapshot": "Cartera completa (incluye inversiones)",
+    "unresolved": "Sin resolver — totales incompletos",
+    "valuationHelp": "Independiente del seguimiento. ¿El saldo incluye inversiones o solo efectivo? Las nuevas carteras requieren una elección explícita. Cambiarla no modifica saldos ni historial.",
+    "observedDate": "Fecha observada (fin del día)",
+    "observedDateHelp": "Los cambios concilian el libro a esta fecha y conservan la actividad posterior. Los ajustes no nulos que cruzan una conciliación posterior requieren sustituir el puente. No se implica precisión intradía.",
+    "icon": "Icono (vacío borra)",
+    "color": "Color (vacío borra)"
   },
   "types": {
     "checking": "Corriente",
@@ -34,7 +47,8 @@
     "archived": "Cuenta archivada exitosamente",
     "restored": "Cuenta restaurada exitosamente",
     "deleted": "Cuenta eliminada exitosamente",
-    "error": "Algo salió mal"
+    "error": "Algo salió mal",
+    "reconciliation": "Saldo actual: {{balance}}. Actividad posterior conservada: {{later}}. Discrepancia previa entre saldo guardado y libro: {{discrepancy}}."
   },
   "subtitle": "Resumen de balance",
   "totalBalance": "Balance Total",

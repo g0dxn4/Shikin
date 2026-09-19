@@ -12,6 +12,7 @@ import { AccountForm, type AccountFormValues } from './account-form'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
+import { fromCentavos } from '@/lib/money'
 import { getErrorMessage } from '@/lib/errors'
 
 export function AccountDialog() {
@@ -29,12 +30,22 @@ export function AccountDialog() {
   const handleSubmit = async (data: AccountFormValues) => {
     setIsLoading(true)
     try {
+      let reconciliation
       if (isEditing && editingAccountId) {
-        await update(editingAccountId, data)
+        reconciliation = await update(editingAccountId, data)
         toast.success(t('toast.updated'))
       } else {
-        await add(data)
+        reconciliation = await add(data)
         toast.success(t('toast.created'))
+      }
+      if (reconciliation) {
+        toast.info(
+          t('toast.reconciliation', {
+            balance: fromCentavos(reconciliation.currentBalanceAfter),
+            later: fromCentavos(reconciliation.laterActivityRetained),
+            discrepancy: fromCentavos(reconciliation.storedVsLedgerDiscrepancy),
+          })
+        )
       }
       closeAccountDialog()
     } catch (error) {
@@ -56,7 +67,7 @@ export function AccountDialog() {
   return (
     <>
       <Dialog open={accountDialogOpen} onOpenChange={(open) => !open && handleRequestClose()}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-h-[90dvh] max-w-md overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{isEditing ? t('editAccount') : t('addAccount')}</DialogTitle>
             <DialogDescription>{isEditing ? t('editAccount') : t('addAccount')}</DialogDescription>

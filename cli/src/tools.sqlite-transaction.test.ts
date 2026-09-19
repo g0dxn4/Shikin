@@ -1375,7 +1375,14 @@ describe('CLI tools SQLite transaction rollback', () => {
           accountMode: 'transactional',
         })
       )
-    ).resolves.toMatchObject({ success: true })
+    ).resolves.toMatchObject({
+      success: true,
+      reconciliation: {
+        storedVsLedgerDiscrepancy: 5000,
+        storedBalanceEffect: -5000,
+        adjustment: 0,
+      },
+    })
     await expect(
       upsertAccount.execute(
         upsertAccount.schema.parse({
@@ -1387,6 +1394,11 @@ describe('CLI tools SQLite transaction rollback', () => {
     ).resolves.toMatchObject({
       success: true,
       account: { balanceCentavos: 0, accountMode: 'transactional' },
+      reconciliation: {
+        storedVsLedgerDiscrepancy: 7500,
+        storedBalanceEffect: -7500,
+        adjustment: 0,
+      },
     })
 
     const db = new Database(dbPath, { readonly: true })
@@ -1406,7 +1418,7 @@ describe('CLI tools SQLite transaction rollback', () => {
             .get(accountId)
         ).toEqual({
           actual_balance: 0,
-          stored_balance_before: 0,
+          stored_balance_before: accountId === updateTarget.account.id ? 5000 : 7500,
           adjustment_amount: 0,
           adjustment_transaction_id: null,
         })

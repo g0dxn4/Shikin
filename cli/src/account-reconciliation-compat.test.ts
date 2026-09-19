@@ -33,6 +33,58 @@ beforeEach(() => {
 afterEach(() => holder.db.close())
 
 describe('reconcile/finalize public response compatibility', () => {
+  it('declares audited reconciliation effects from the implementation', () => {
+    expect(accountsTools.find((tool) => tool.name === 'reconcile')?.effects).toEqual({
+      readOnly: false,
+      writesTo: [
+        'accounts',
+        'transactions',
+        'account_reconciliations',
+        'account_balance_history',
+        'audit_log',
+        'app_data_state',
+      ],
+    })
+    expect(
+      accountsTools.find((tool) => tool.name === 'finalize-staged-statement-history')?.effects
+    ).toEqual({
+      readOnly: false,
+      writesTo: [
+        'accounts',
+        'transactions',
+        'account_reconciliations',
+        'audit_log',
+        'app_data_state',
+      ],
+    })
+    expect(
+      accountsTools.find((tool) => tool.name === 'settle-staged-transactions')?.effects
+    ).toEqual({
+      readOnly: false,
+      writesTo: ['transactions', 'audit_log', 'app_data_state'],
+    })
+    expect(accountsTools.find((tool) => tool.name === 'set-source-coverage')?.effects).toEqual({
+      readOnly: false,
+      writesTo: ['source_coverage', 'audit_log', 'app_data_state'],
+    })
+    expect(accountsTools.find((tool) => tool.name === 'list-source-coverage')?.effects).toEqual({
+      readOnly: true,
+      writesTo: [],
+    })
+    expect(
+      accountsTools.find((tool) => tool.name === 'supersede-reconciliation-bridge')?.effects
+    ).toEqual({
+      readOnly: false,
+      writesTo: [
+        'transactions',
+        'account_reconciliations',
+        'reconciliation_corrections',
+        'audit_log',
+        'app_data_state',
+      ],
+    })
+  })
+
   it('keeps applyRequired, confirmation, message, accountMode, and statementCoverage on preview', async () => {
     const preview = await call('reconcile', {
       accountId: 'acct-1',
@@ -75,6 +127,47 @@ describe('reconcile/finalize public response compatibility', () => {
     })
   })
 
+  it('describes applied reconciliation as complete without requesting another apply', async () => {
+    const result = await call('reconcile', {
+      accountId: 'acct-1',
+      actualBalance: 1102.25,
+      apply: true,
+      basis: 'effective_ledger',
+    })
+    expect(result).toMatchObject({
+      success: true,
+      dryRun: false,
+      applied: true,
+      applyRequired: false,
+      requiresConfirmation: false,
+      account: { accountMode: 'transactional' },
+      requiredBasis: 'effective_ledger',
+    })
+    expect(String(result.message)).toMatch(/Applied reconciliation/)
+    expect(String(result.message)).not.toMatch(/Dry run|Re-run with --apply/)
+  })
+
+  it('does not describe an applied snapshot as a matching transaction ledger', async () => {
+    holder.db
+      .prepare("UPDATE accounts SET account_mode = 'snapshot_only' WHERE id = 'acct-1'")
+      .run()
+    const result = await call('reconcile', {
+      accountId: 'acct-1',
+      actualBalance: 1200,
+      apply: true,
+      basis: 'effective_ledger',
+    })
+    expect(result).toMatchObject({
+      success: true,
+      dryRun: false,
+      applied: true,
+      applyRequired: false,
+      account: { accountMode: 'snapshot_only' },
+    })
+    expect(String(result.message)).toMatch(/observed snapshot/)
+    expect(String(result.message)).toMatch(/No transaction ledger match is implied/)
+  })
+
   it('keeps applyRequired on staged finalization preview', async () => {
     holder.db
       .prepare(
@@ -107,5 +200,24 @@ describe('reconcile/finalize public response compatibility', () => {
       transactionCount: 1,
     })
     expect(typeof preview.reconciliationBridgeCentavos).toBe('number')
+
+    const applied = await call('finalize-staged-statement-history', {
+      accountId: 'acct-1',
+      stagingBatchId: 'statement-2026-05',
+      statementStartDate: '2026-05-01',
+      statementEndDate: '2026-05-31',
+      actualBalance: 1102.25,
+      coverageIds: ['cov-1'],
+      apply: true,
+    })
+    expect(applied).toMatchObject({
+      success: true,
+      dryRun: false,
+      applied: true,
+      applyRequired: false,
+      requiresConfirmation: false,
+    })
+    expect(String(applied.message)).toMatch(/Applied finalization/)
+    expect(String(applied.message)).not.toMatch(/Dry run|would be finalized/)
   })
 })

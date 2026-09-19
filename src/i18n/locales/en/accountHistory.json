@@ -1,1 +1,73 @@
-{}
+{
+  "action": "Maintain history",
+  "title": "History · {{account}}",
+  "description": "Review independent statement evidence before changing the effective ledger.",
+  "loading": "Reading account evidence…",
+  "cancel": "Cancel",
+  "history": {
+    "title": "Reconciliation history",
+    "count_one": "{{count}} observation",
+    "count_other": "{{count}} observations",
+    "empty": "No reconciliation observations have been recorded.",
+    "zeroBridge": "No bridge",
+    "superseded": "Superseded"
+  },
+  "coverage": {
+    "title": "Printed-period coverage",
+    "description": "Coverage is recorded independently; transaction dates never prove a complete statement period.",
+    "source": "Source namespace",
+    "document": "Document reference or provenance",
+    "start": "Printed start date",
+    "end": "Printed end date",
+    "status": "Evidence status",
+    "verified": "Verified",
+    "provisional": "Provisional",
+    "gap": "Gap",
+    "zeroRows": "Verified zero-row period",
+    "save": "Save coverage",
+    "update": "Update coverage",
+    "edit": "Edit",
+    "select": "Coverage used for this operation",
+    "empty": "No coverage records. Add the printed period before finalizing rows."
+  },
+  "staged": {
+    "title": "Staged statement rows",
+    "description": "Select exact rows. Pending holds remain balance-neutral until settled deliberately.",
+    "select": "Select staged rows",
+    "empty": "No staged rows are available.",
+    "noSource": "missing source",
+    "noBatch": "no batch"
+  },
+  "settlement": {
+    "review": "{{count}} pending row(s) selected. Settlement changes status only and keeps the rows staged.",
+    "reviewAction": "Review pending settlement",
+    "confirm": "Confirm settlement as posted"
+  },
+  "finalize": {
+    "balance": "Observed end-of-day balance ({{currency}})",
+    "acknowledge": "Acknowledge provisional coverage",
+    "provenance": "Why incomplete evidence is accepted",
+    "preview": "Review finalization",
+    "confirm": "Confirm finalization",
+    "rows": "Rows",
+    "selectionEffect": "Selected effect",
+    "bridge": "Residual bridge"
+  },
+  "supersede": {
+    "title": "Supersede a reconciliation bridge",
+    "description": "Replace an exact bridge only with verified staged rows. Original evidence and later/current anchors remain preserved.",
+    "bridge": "Original bridge",
+    "choose": "Choose an eligible bridge",
+    "preview": "Review supersession",
+    "confirm": "Confirm supersession",
+    "currentPreserved": "Current values preserved: stored {{stored}}, effective {{effective}}.",
+    "anchors": "{{count}} boundary/current anchor(s) will be checked again inside the write transaction."
+  },
+  "errors": {
+    "load": "Account history could not be read.",
+    "operation": "The operation failed; no partial change was kept.",
+    "preview": "The preview could not be created.",
+    "balance": "Enter a valid observed balance.",
+    "bridge": "Choose an eligible original bridge."
+  }
+}

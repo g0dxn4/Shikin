@@ -1,10 +1,15 @@
 import { createHash } from 'node:crypto'
 import {
   assertObservationDate,
+  assertReconciliationPeriodCovered,
   datedLedgerQuery,
   planDatedReconciliation,
+  planReconciliationBridgeSupersession,
+  planStatementFinalization,
   projectDatedLedger,
   safeMoney,
+  selectReconciliationCoverage,
+  selectStagedReconciliationRows,
   type DatedLedgerRow,
 } from '@shikin/finance-core/reconciliation'
 import {
@@ -88,14 +93,20 @@ function one(result: { rowsAffected: number }) {
   if (result.rowsAffected !== 1)
     throw new Error('Concurrent account evidence change; no changes applied.')
 }
-function context(account: Account, date: string, observed: number, rows = ledgerRows(account.id)) {
+function context(
+  account: Account,
+  date: string,
+  observed: number,
+  rows = ledgerRows(account.id),
+  storedBalance = account.balance
+) {
   return planDatedReconciliation({
     rows,
     accountId: account.id,
     date,
     today: today(),
     observedBalance: observed,
-    storedBalance: account.balance,
+    storedBalance,
     laterAnchorDates: observations(account.id).map((row) => row.reconciliation_date),
   })
 }
@@ -111,6 +122,7 @@ function insertObservation(input: {
   account: Account
   date: string
   observed: number
+  storedBefore?: number
   before: number
   adjustment: number
   batch?: string | null
@@ -128,7 +140,7 @@ function insertObservation(input: {
       input.account.id,
       input.date,
       input.observed,
-      input.account.balance,
+      input.storedBefore ?? input.account.balance,
       input.before,
       input.observed,
       input.adjustment,
@@ -197,13 +209,20 @@ export function reconcileTransactionalAccountBalance(input: {
   const account = accountFor({ accountId: input.accountId })
   if (account.account_mode !== 'transactional') throw new Error('Transactional account required.')
   const date = input.date ?? today()
-  const plan = context(account, date, input.observedBalance)
+  const plan = context(
+    account,
+    date,
+    input.observedBalance,
+    ledgerRows(account.id),
+    input.storedBalanceBefore
+  )
   const reconciliationId = generateId()
   insertObservation({
     id: reconciliationId,
     account,
     date,
     observed: input.observedBalance,
+    storedBefore: input.storedBalanceBefore,
     before: plan.asOfLedger,
     adjustment: plan.adjustment,
     start: input.statementStartDate,
@@ -266,6 +285,17 @@ const reconcile: ToolDefinition = {
     apply: z.boolean().default(false),
     ...auditFields,
   }),
+  effects: {
+    readOnly: false,
+    writesTo: [
+      'accounts',
+      'transactions',
+      'account_reconciliations',
+      'account_balance_history',
+      'audit_log',
+      'app_data_state',
+    ],
+  },
   execute: async (input) => {
     const run = () => {
       const account = accountFor(input),
@@ -317,8 +347,11 @@ const reconcile: ToolDefinition = {
         },
         applyRequired: differenceCentavos !== 0,
         requiresConfirmation: differenceCentavos !== 0,
-        message:
-          differenceCentavos === 0
+        message: snapshotOnly
+          ? differenceCentavos === 0
+            ? `Account "${account.name}" already records the observed ${account.currency} ${fromCentavos(observed).toFixed(2)} snapshot value.`
+            : `Account "${account.name}" needs a ${account.currency} ${fromCentavos(differenceCentavos).toFixed(2)} observed snapshot change. Re-run with --apply.`
+          : differenceCentavos === 0
             ? `Account "${account.name}" as-of ledger already matches ${account.currency} ${fromCentavos(observed).toFixed(2)}. Later activity is retained.`
             : `Account "${account.name}" needs a ${account.currency} ${fromCentavos(differenceCentavos).toFixed(2)} as-of reconciliation change. Current stored balance will keep later activity. Re-run with --apply.`,
       }
@@ -326,28 +359,33 @@ const reconcile: ToolDefinition = {
       if (input.basis !== 'effective_ledger') {
         return {
           success: false,
+          ...preview,
           reason: 'reconciliation_basis_required',
           requiredBasis: 'effective_ledger',
-          ...preview,
           message:
             'Applying reconciliation requires basis="effective_ledger" after reviewing the as-of ledger preview.',
         }
       }
-      if (!snapshotOnly)
+      if (!snapshotOnly) {
+        const applied = reconcileTransactionalAccountBalance({
+          ...input,
+          accountId: account.id,
+          currency: account.currency,
+          observedBalance: observed,
+          storedBalanceBefore: account.balance,
+          date,
+        })
         return {
           success: true,
+          ...preview,
+          ...applied,
           dryRun: false,
           applied: true,
-          ...preview,
-          ...reconcileTransactionalAccountBalance({
-            ...input,
-            accountId: account.id,
-            currency: account.currency,
-            observedBalance: observed,
-            storedBalanceBefore: account.balance,
-            date,
-          }),
+          applyRequired: false,
+          requiresConfirmation: false,
+          message: `Applied reconciliation for account "${account.name}". Later activity was retained.`,
         }
+      }
       const reconciliationId = generateId()
       insertObservation({
         id: reconciliationId,
@@ -372,11 +410,14 @@ const reconcile: ToolDefinition = {
       })
       return {
         success: true,
-        dryRun: false,
-        applied: true,
         ...preview,
         reconciliationId,
         adjustmentTransactionId: null,
+        dryRun: false,
+        applied: true,
+        applyRequired: false,
+        requiresConfirmation: false,
+        message: `Applied observed snapshot for account "${account.name}". No transaction ledger match is implied.`,
       }
     }
     return transaction(run)
@@ -413,6 +454,10 @@ const putCoverage: ToolDefinition = {
     ...coverageFields,
     dryRun: z.boolean().default(false),
   }),
+  effects: {
+    readOnly: false,
+    writesTo: ['source_coverage', 'audit_log', 'app_data_state'],
+  },
   execute: async (input) =>
     transaction(() => {
       const account = accountFor(input)
@@ -479,6 +524,7 @@ const listCoverage: ToolDefinition = {
     ...accountFields,
     sourceNamespace: coverageFields.sourceNamespace.optional(),
   }),
+  effects: { readOnly: true, writesTo: [] },
   execute: async (input) => {
     const account = input.accountId
       ? query<Account>('SELECT * FROM accounts WHERE id = ?', [input.accountId])[0]
@@ -501,55 +547,15 @@ function selectedRows(
   input: { transactionIds?: string[]; stagingBatchId?: string },
   allowPending = false
 ) {
-  if (account.account_mode !== 'transactional')
-    throw new Error('Staged finalization requires a transactional account.')
-  if (!input.transactionIds?.length && !input.stagingBatchId)
-    throw new Error('Provide exact transactionIds or stagingBatchId.')
-  if (input.transactionIds && new Set(input.transactionIds).size !== input.transactionIds.length)
-    throw new Error('Duplicate selected IDs.')
-  const all = ledgerRows(account.id)
-  const rows = input.transactionIds
-    ? input.transactionIds.map((id) => {
-        const row = all.find((row) => row.id === id)
-        if (!row) throw new Error(`Selected row ${id} not found in account scope.`)
-        return row
-      })
-    : all.filter(
-        (row) =>
-          row.account_id === account.id &&
-          row.staging_batch_id === input.stagingBatchId &&
-          row.ledger_treatment === 'staged_no_balance_impact' &&
-          row.is_archived === 0 &&
-          (allowPending
-            ? row.status === 'pending'
-            : ['posted', 'cleared'].includes(row.status ?? ''))
-      )
-  if (!rows.length)
-    throw new Error(
-      'No eligible staged rows; pending holds require settle-staged-transactions first.'
-    )
-  for (const row of rows) {
-    if (
-      row.account_id !== account.id ||
-      row.is_archived !== 0 ||
-      row.transaction_kind !== 'standard' ||
-      row.matched_transaction_id ||
-      row.reconciliation_id ||
-      row.finalization_id ||
-      row.transfer_to_account_id ||
-      !['income', 'expense'].includes(row.type) ||
-      row.ledger_treatment !== 'staged_no_balance_impact' ||
-      row.currency !== account.currency ||
-      !Number.isSafeInteger(row.amount) ||
-      row.amount <= 0 ||
-      (input.stagingBatchId && row.staging_batch_id !== input.stagingBatchId) ||
-      (allowPending ? row.status !== 'pending' : !['posted', 'cleared'].includes(row.status ?? ''))
-    )
-      throw new Error(
-        `Row ${row.id} is not an eligible ${allowPending ? 'pending' : 'posted/cleared'} ordinary staged selection. Already-finalized, matched and technical rows reject.`
-      )
-  }
-  return rows.sort((a, b) => a.id.localeCompare(b.id))
+  return selectStagedReconciliationRows({
+    rows: ledgerRows(account.id),
+    accountId: account.id,
+    accountCurrency: account.currency,
+    accountMode: account.account_mode,
+    transactionIds: input.transactionIds,
+    stagingBatchId: input.stagingBatchId,
+    allowPending,
+  })
 }
 function coverageEvidence(
   account: Account,
@@ -562,65 +568,22 @@ function coverageEvidence(
   boundary: string,
   verifiedOnly = false
 ) {
-  if (!input.coverageIds?.length || new Set(input.coverageIds).size !== input.coverageIds.length)
-    throw new Error(
-      'Provide unique coverageIds from set-source-coverage. Record actual printed periods, or provisional evidence with explicit acknowledgment and provenance.'
-    )
-  const evidence = input.coverageIds.map((id) => {
-    const row = query<Coverage>('SELECT * FROM source_coverage WHERE id = ?', [id])[0]
-    if (!row || row.account_id !== account.id || row.status === 'gap')
-      throw new Error(`Coverage ${id} is missing, a gap, or belongs to another account.`)
-    if (
-      row.status === 'provisional' &&
-      (verifiedOnly || !input.acknowledgeProvisional || !input.provisionalProvenance?.trim())
-    )
-      throw new Error(
-        'Provisional evidence requires acknowledgeProvisional=true and provisionalProvenance; supersession requires verified evidence.'
+  const coverage = input.coverageIds?.length
+    ? query<Coverage>(
+        `SELECT * FROM source_coverage WHERE id IN (${input.coverageIds.map(() => '?').join(', ')})`,
+        input.coverageIds
       )
-    return row
+    : []
+  return selectReconciliationCoverage({
+    coverage,
+    coverageIds: input.coverageIds,
+    accountId: account.id,
+    rows,
+    boundary,
+    verifiedOnly,
+    acknowledgeProvisional: input.acknowledgeProvisional,
+    provisionalProvenance: input.provisionalProvenance,
   })
-  for (const row of rows) {
-    if (
-      row.date > boundary ||
-      !evidence.some(
-        (c) =>
-          !c.zero_rows &&
-          c.source_namespace === row.import_source &&
-          c.period_start <= row.date &&
-          row.date <= c.period_end
-      )
-    )
-      throw new Error(
-        `Row ${row.id} lacks matching case-sensitive source/printed-period coverage or crosses the observation boundary.`
-      )
-  }
-  return evidence
-}
-function assertCoveredPeriod(
-  evidence: Coverage[],
-  rows: SelectionRow[],
-  start: string,
-  end: string
-) {
-  for (const source of new Set(rows.map((row) => row.import_source))) {
-    const periods = evidence
-      .filter((c) => c.source_namespace === source)
-      .sort((a, b) => a.period_start.localeCompare(b.period_start))
-    let next = start
-    for (const period of periods) {
-      if (period.period_start > next) break
-      if (period.period_end >= end) {
-        next = ''
-        break
-      }
-      if (period.period_end >= next)
-        next = dayjs(period.period_end).add(1, 'day').format('YYYY-MM-DD')
-    }
-    if (next)
-      throw new Error(
-        `Source ${source} lacks independent coverage for the full declared period. Record the missing printed period, or provide explicitly acknowledged provisional evidence.`
-      )
-  }
 }
 
 const selectionFields = {
@@ -662,6 +625,10 @@ const settle: ToolDefinition = {
     apply: z.boolean().default(false),
     ...auditFields,
   }),
+  effects: {
+    readOnly: false,
+    writesTo: ['transactions', 'audit_log', 'app_data_state'],
+  },
   execute: async (input) =>
     transaction(() => {
       const account = accountFor(input),
@@ -712,6 +679,16 @@ const finalize: ToolDefinition = {
     apply: z.boolean().default(false),
     ...auditFields,
   }),
+  effects: {
+    readOnly: false,
+    writesTo: [
+      'accounts',
+      'transactions',
+      'account_reconciliations',
+      'audit_log',
+      'app_data_state',
+    ],
+  },
   execute: async (input) =>
     transaction(() => {
       const account = accountFor(input),
@@ -727,21 +704,27 @@ const finalize: ToolDefinition = {
           'Selected rows must be within the declared statement period and observation boundary.'
         )
       const coverage = coverageEvidence(account, rows, input, date)
-      assertCoveredPeriod(coverage, rows, input.statementStartDate, input.statementEndDate)
-      const ids = new Set(rows.map((r) => r.id)),
-        beforeRows = ledgerRows(account.id)
-      const effectiveRows = beforeRows.map((row) =>
-        ids.has(row.id) ? { ...row, ledger_treatment: 'normal' as const } : row
+      assertReconciliationPeriodCovered(
+        coverage,
+        rows,
+        input.statementStartDate,
+        input.statementEndDate
       )
-      const plan = context(account, date, toCentavos(input.actualBalance), effectiveRows)
-      // Activation itself is a historical mutation too, even if the residual bridge is zero.
-      const netChange = safeMoney(
-        plan.currentBalanceAfter - projectDatedLedger(beforeRows, account.id)
-      )
-      if (netChange !== 0 && observations(account.id).some((o) => o.reconciliation_date > date))
-        throw new Error('Finalization crosses later anchors; use reviewed bridge supersession.')
-      const currentLedgerBefore = projectDatedLedger(beforeRows, account.id)
-      const asOfLedgerBefore = projectDatedLedger(beforeRows, account.id, date)
+      const beforeRows = ledgerRows(account.id)
+      const finalization = planStatementFinalization({
+        rows: beforeRows,
+        selectedRows: rows,
+        accountId: account.id,
+        accountBalance: account.balance,
+        date,
+        today: today(),
+        observedBalance: toCentavos(input.actualBalance),
+        laterAnchorDates: observations(account.id).map((row) => row.reconciliation_date),
+      })
+      const plan = finalization
+      const netChange = finalization.totalEffectiveLedgerChange
+      const currentLedgerBefore = finalization.currentLedgerBefore
+      const asOfLedgerBefore = finalization.asOfLedgerBefore
       const preview = {
         ...plan,
         account: {
@@ -750,9 +733,9 @@ const finalize: ToolDefinition = {
         },
         asOfLedger: asOfLedgerBefore,
         currentLedger: currentLedgerBefore,
-        asOfLedgerAfterSelection: plan.asOfLedger,
-        currentLedgerAfterSelection: plan.currentLedger,
-        stagedBalanceEffectCentavos: safeMoney(plan.currentLedger - currentLedgerBefore),
+        asOfLedgerAfterSelection: plan.asOfLedgerAfterSelection,
+        currentLedgerAfterSelection: plan.currentLedgerAfterSelection,
+        stagedBalanceEffectCentavos: plan.stagedBalanceEffect,
         reconciliationBridgeCentavos: plan.adjustment,
         reconciliationBridge: fromCentavos(plan.adjustment),
         totalEffectiveLedgerChangeCentavos: netChange,
@@ -805,7 +788,6 @@ const finalize: ToolDefinition = {
         projectDatedLedger(after, account.id) !== plan.currentBalanceAfter
       )
         throw new Error('Finalization postcondition failed.')
-      snapshot(account.id, date, toCentavos(input.actualBalance))
       writeAuditLog({
         entity: 'account',
         entityId: account.id,
@@ -822,12 +804,16 @@ const finalize: ToolDefinition = {
       })
       return {
         success: true,
-        dryRun: false,
         ...preview,
         reconciliationId,
         adjustmentTransactionId,
         verifiedLedgerBalance: fromCentavos(plan.currentBalanceAfter),
         verifiedLedgerBalanceCentavos: plan.currentBalanceAfter,
+        dryRun: false,
+        applied: true,
+        applyRequired: false,
+        requiresConfirmation: false,
+        message: `Applied finalization for ${rows.length} staged transaction(s). Later activity was retained.`,
       }
     }),
 }
@@ -846,6 +832,16 @@ const supersede: ToolDefinition = {
     previewToken: z.string().optional(),
     ...auditFields,
   }),
+  effects: {
+    readOnly: false,
+    writesTo: [
+      'transactions',
+      'account_reconciliations',
+      'reconciliation_corrections',
+      'audit_log',
+      'app_data_state',
+    ],
+  },
   execute: async (input) =>
     transaction(() => {
       const account = accountFor(input),
@@ -875,9 +871,6 @@ const supersede: ToolDefinition = {
       )
         throw new Error('Original bridge/observation references or immutable shape are invalid.')
       assertObservationDate(original.reconciliation_date, today())
-      const B = bridge.type === 'income' ? bridge.amount : -bridge.amount
-      if (B !== original.adjustment_amount)
-        throw new Error('Original bridge amount disagrees with observation.')
       if (
         query('SELECT id FROM reconciliation_corrections WHERE original_bridge_id = ?', [bridge.id])
           .length
@@ -885,25 +878,20 @@ const supersede: ToolDefinition = {
         throw new Error('Bridge already superseded.')
       const rows = selectedRows(account, input),
         coverage = coverageEvidence(account, rows, input, original.reconciliation_date, true)
-      const R = rows.reduce(
-          (sum, r) => safeMoney(sum + (r.type === 'income' ? r.amount : -r.amount)),
-          0
-        ),
-        S = safeMoney(B - R)
-      if (safeMoney(safeMoney(R + S) - B) !== 0)
-        throw new Error('Supersession conservation failed.')
-      const currentEffective = projectDatedLedger(all, account.id)
-      const laterAnchors = anchors
-        .filter((o) => o.reconciliation_date >= original.reconciliation_date)
-        .map((o) => ({
-          id: o.id,
-          date: o.reconciliation_date,
-          actualBalance: o.actual_balance,
-          effectiveBalance: projectDatedLedger(all, account.id, o.reconciliation_date),
-          discrepancy: safeMoney(
-            o.actual_balance - projectDatedLedger(all, account.id, o.reconciliation_date)
-          ),
-        }))
+      const supersession = planReconciliationBridgeSupersession({
+        rows: all,
+        selectedRows: rows,
+        accountId: account.id,
+        accountBalance: account.balance,
+        original,
+        bridge,
+        observations: anchors,
+      })
+      const B = supersession.originalSignedBridge,
+        R = supersession.replacementEffect,
+        S = supersession.successorSignedBridge,
+        currentEffective = supersession.currentEffective,
+        laterAnchors = supersession.laterAnchors
       const state = query<{ database_id: string; data_revision: number }>(
         'SELECT database_id, data_revision FROM app_data_state WHERE id = 1'
       )[0]

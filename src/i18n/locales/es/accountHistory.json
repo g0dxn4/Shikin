@@ -1,1 +1,73 @@
-{}
+{
+  "action": "Mantener historial",
+  "title": "Historial · {{account}}",
+  "description": "Revisa evidencia independiente del estado antes de cambiar el libro efectivo.",
+  "loading": "Leyendo evidencia de la cuenta…",
+  "cancel": "Cancelar",
+  "history": {
+    "title": "Historial de conciliación",
+    "count_one": "{{count}} observación",
+    "count_other": "{{count}} observaciones",
+    "empty": "No hay observaciones de conciliación registradas.",
+    "zeroBridge": "Sin puente",
+    "superseded": "Reemplazado"
+  },
+  "coverage": {
+    "title": "Cobertura del periodo impreso",
+    "description": "La cobertura se registra por separado; las fechas de transacciones no prueban un periodo completo.",
+    "source": "Espacio de nombres de origen",
+    "document": "Referencia del documento o procedencia",
+    "start": "Inicio impreso",
+    "end": "Fin impreso",
+    "status": "Estado de evidencia",
+    "verified": "Verificada",
+    "provisional": "Provisional",
+    "gap": "Faltante",
+    "zeroRows": "Periodo verificado sin movimientos",
+    "save": "Guardar cobertura",
+    "update": "Actualizar cobertura",
+    "edit": "Editar",
+    "select": "Cobertura usada para esta operación",
+    "empty": "No hay coberturas. Añade el periodo impreso antes de finalizar movimientos."
+  },
+  "staged": {
+    "title": "Movimientos preparados del estado",
+    "description": "Selecciona movimientos exactos. Las retenciones pendientes no afectan el saldo hasta liquidarlas deliberadamente.",
+    "select": "Seleccionar movimientos preparados",
+    "empty": "No hay movimientos preparados disponibles.",
+    "noSource": "origen faltante",
+    "noBatch": "sin lote"
+  },
+  "settlement": {
+    "review": "Hay {{count}} movimiento(s) pendiente(s). La liquidación solo cambia su estado y los mantiene preparados.",
+    "reviewAction": "Revisar liquidación pendiente",
+    "confirm": "Confirmar liquidación como contabilizada"
+  },
+  "finalize": {
+    "balance": "Saldo observado al cierre ({{currency}})",
+    "acknowledge": "Aceptar cobertura provisional",
+    "provenance": "Motivo para aceptar evidencia incompleta",
+    "preview": "Revisar finalización",
+    "confirm": "Confirmar finalización",
+    "rows": "Movimientos",
+    "selectionEffect": "Efecto seleccionado",
+    "bridge": "Puente residual"
+  },
+  "supersede": {
+    "title": "Reemplazar un puente de conciliación",
+    "description": "Reemplaza un puente exacto solo con movimientos verificados. La evidencia original y los anclajes posteriores/actuales se conservan.",
+    "bridge": "Puente original",
+    "choose": "Elige un puente elegible",
+    "preview": "Revisar reemplazo",
+    "confirm": "Confirmar reemplazo",
+    "currentPreserved": "Valores actuales conservados: almacenado {{stored}}, efectivo {{effective}}.",
+    "anchors": "Se comprobarán de nuevo {{count}} anclaje(s) de límite/actuales dentro de la transacción de escritura."
+  },
+  "errors": {
+    "load": "No se pudo leer el historial de la cuenta.",
+    "operation": "La operación falló; no se conservó ningún cambio parcial.",
+    "preview": "No se pudo crear la vista previa.",
+    "balance": "Ingresa un saldo observado válido.",
+    "bridge": "Elige un puente original elegible."
+  }
+}

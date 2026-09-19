@@ -345,8 +345,16 @@ function nonNegativeSafeAmount(value: number, label: string): number {
 }
 
 function assertIsoDate(value: string, label: string): void {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`)))
-    throw new Error(`${label} must be an ISO date.`)
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (match) {
+    const year = Number(match[1])
+    const month = Number(match[2])
+    const day = Number(match[3])
+    const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+    const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    if (month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth[month - 1]!) return
+  }
+  throw new Error(`${label} must be an ISO date.`)
 }
 
 export function deriveStatementPaymentStatus(input: {

@@ -12,6 +12,7 @@
   "legacyBadge": "Legacy overpaid",
   "legacyOverpaid": "This historical statement is overpaid. Its recorded total is preserved; new actions cannot increase the overpayment.",
   "stale": "Payment data changed. Refresh and review again.",
+  "savedRefreshFailed": "Saved successfully, but the latest data could not be refreshed. Close and reopen to retry the refresh; do not submit the payment again.",
   "empty": {
     "title": "No statements recorded",
     "description": "Add the card issuer’s statement totals before attributing payment evidence."
@@ -68,7 +69,11 @@
     "baselineEvidence": "Add external statement evidence without creating a transaction.",
     "noTransaction": "Only the statement baseline and status will change.",
     "realTransfer": "Create a posted transfer and link it to this statement.",
-    "atomicTransfer": "Both account balances, the transaction, and evidence link commit together or not at all."
+    "atomicTransfer": "Both account balances, the transaction, and evidence link commit together or not at all.",
+    "resultingSource": "Resulting source balance",
+    "resultingCard": "Resulting card balance",
+    "negativeFundsWarning": "The source account will have a negative balance. Confirm only if this overdraft is intended.",
+    "cardCreditWarning": "The card will have a positive credit balance. Confirm only if this overpayment is intended."
   },
   "mode": {
     "apply_to_unpaid": "Applied to unpaid",
@@ -91,6 +96,7 @@
     "confirm": "Confirm",
     "loading": "Loading…",
     "saving": "Saving…",
+    "close": "Close",
     "edit": "Edit statement",
     "delete": "Delete statement",
     "unlink": "Unlink payment"

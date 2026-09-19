@@ -14,6 +14,7 @@ import {
   type StatementPaymentState,
 } from '@shikin/finance-core/payments'
 import type { ConsumptionClassification, CorrectionSplit } from '@shikin/finance-core/corrections'
+import { importPlanToken } from '@shikin/finance-core/imports'
 import { withTransaction, type TransactionClient } from '@/lib/database'
 import { generateId } from '@/lib/ulid'
 
@@ -102,9 +103,20 @@ export interface StatementUpdate {
 
 export interface MutationPreview<T> {
   revision: number
+  token: string
   operation: string
   before: unknown
   after: T | null
+}
+
+export interface RecordCardPaymentPreview {
+  transactionId: string | null
+  amount: number
+  currency: string
+  sourceBalance: number | null
+  cardBalance: number
+  statementPaidAmount: number | null
+  createsEvidenceLink: boolean
 }
 
 export interface LinkPaymentInput {
@@ -175,7 +187,11 @@ type TransactionDisplayRow = PaymentTransaction & {
 }
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10)
+  const date = new Date()
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 function now(): string {
@@ -192,14 +208,34 @@ function assertSafePositive(value: number, label: string): void {
     throw new Error(`${label} must be a positive safe integer amount.`)
 }
 
+function safeSignedBalance(value: number, label: string): number {
+  if (!Number.isSafeInteger(value)) throw new Error(`${label} must be a safe integer amount.`)
+  return value
+}
+
+function resultingBalance(value: number, delta: number, label: string): number {
+  safeSignedBalance(value, label)
+  const result = value + delta
+  if (!Number.isSafeInteger(result)) throw new Error(`${label} would exceed safe integer capacity.`)
+  return result
+}
+
 function assertAudit(source: string, note: string): void {
   if (!source.trim() || !note.trim())
     throw new Error('An audit source and note are required for this payment action.')
 }
 
 function assertIsoDate(value: string, label: string): void {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`)))
-    throw new Error(`${label} must be an ISO date.`)
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (match) {
+    const year = Number(match[1])
+    const month = Number(match[2])
+    const day = Number(match[3])
+    const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+    const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    if (month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth[month - 1]!) return
+  }
+  throw new Error(`${label} must be an ISO date.`)
 }
 
 function assertStatementDates(start: string | null, end: string, due: string): void {
@@ -262,19 +298,112 @@ function statementPublic(row: StatementRow, links: LinkRow[]): CardStatement {
   }
 }
 
-async function revision(tx: TransactionClient): Promise<number> {
-  return (
-    (
-      await tx.query<{ data_revision: number }>(
-        'SELECT data_revision FROM app_data_state WHERE id = 1'
-      )
-    )[0]?.data_revision ?? 0
-  )
+type DataState = { database_id: string; data_revision: number }
+
+async function dataState(tx: TransactionClient): Promise<DataState> {
+  const state = (
+    await tx.query<DataState>(
+      'SELECT database_id, data_revision FROM app_data_state WHERE id = 1 LIMIT 1'
+    )
+  )[0]
+  if (!state?.database_id || !Number.isSafeInteger(state.data_revision))
+    throw new Error('Payment review requires a ready database lineage and revision.')
+  return state
 }
 
-async function assertRevision(tx: TransactionClient, expected: number): Promise<void> {
-  if ((await revision(tx)) !== expected)
-    throw new Error('Payment data changed after preview. Refresh and review the updated plan.')
+function reviewedToken(
+  state: DataState,
+  operation: string,
+  normalizedInput: unknown,
+  plan: unknown
+): string {
+  return importPlanToken({
+    version: 1,
+    namespace: 'shikin-native-card-payment-review',
+    databaseId: state.database_id,
+    revision: state.data_revision,
+    operation,
+    input: normalizedInput,
+    plan,
+  })
+}
+
+function assertReviewedToken(expected: string, actual: string, revision: number): void {
+  if (!expected || expected !== actual)
+    throw new Error(
+      `Payment data or arguments changed after preview (current revision ${revision}). Refresh and review the updated plan.`
+    )
+}
+
+function statementReview(row: StatementRow) {
+  return {
+    accountId: row.account_id,
+    statementStartDate: row.statement_start_date,
+    statementEndDate: row.statement_end_date,
+    dueDate: row.due_date,
+    statementBalance: row.statement_balance,
+    minimumPayment: row.minimum_payment,
+    paidAmount: row.paid_amount,
+    unattributedPaidAmount: row.unattributed_paid_amount,
+    currency: row.currency,
+    status: row.status,
+    source: row.source,
+    note: row.note,
+  }
+}
+
+function statementDraftReview(accountId: string, draft: StatementDraft) {
+  return {
+    accountId,
+    statementStartDate: draft.statementStartDate ?? null,
+    statementEndDate: draft.statementEndDate,
+    dueDate: draft.dueDate,
+    statementBalance: draft.statementBalance,
+    minimumPayment: draft.minimumPayment,
+    paidAmount: draft.paidAmount,
+    source: draft.source?.trim() || null,
+    note: draft.note?.trim() || null,
+  }
+}
+
+function statementUpdateReview(id: string, patch: StatementUpdate) {
+  return {
+    id,
+    statementStartDate: patch.statementStartDate,
+    statementEndDate: patch.statementEndDate,
+    dueDate: patch.dueDate,
+    statementBalance: patch.statementBalance,
+    minimumPayment: patch.minimumPayment,
+    paidAmount: patch.paidAmount,
+    source: patch.source === undefined ? undefined : patch.source?.trim() || null,
+    note: patch.note === undefined ? undefined : patch.note?.trim() || null,
+  }
+}
+
+function linkInputReview(input: LinkPaymentInput) {
+  return {
+    statementId: input.statementId,
+    transactionId: input.transactionId,
+    amount: input.amount,
+    mode: input.mode,
+    explicitRepaymentConfirmation: input.explicitRepaymentConfirmation,
+    source: input.source.trim(),
+    note: input.note.trim(),
+  }
+}
+
+function recordInputReview(input: RecordCardPaymentInput, date: string) {
+  return {
+    cardAccountId: input.cardAccountId,
+    fromAccountId: input.fromAccountId ?? null,
+    statementId: input.statementId ?? null,
+    amount: input.amount,
+    date,
+    description: input.description?.trim() || null,
+    source: input.source.trim(),
+    note: input.note.trim(),
+    statementOnly: Boolean(input.statementOnly),
+  }
 }
 
 async function writeAudit(
@@ -515,7 +644,8 @@ async function buildCreateStatement(
   if (card.type !== 'credit_card') throw new Error('Statement account must be a credit card.')
   assertIsoDate(draft.statementEndDate, 'Statement end date')
   assertIsoDate(draft.dueDate, 'Statement due date')
-  if (draft.statementStartDate) assertIsoDate(draft.statementStartDate, 'Statement start date')
+  if (draft.statementStartDate !== null && draft.statementStartDate !== undefined)
+    assertIsoDate(draft.statementStartDate, 'Statement start date')
   assertStatementDates(draft.statementStartDate ?? null, draft.statementEndDate, draft.dueDate)
   assertSafeNonNegative(draft.statementBalance, 'Statement balance')
   assertSafeNonNegative(draft.minimumPayment, 'Minimum payment')
@@ -564,8 +694,15 @@ export async function previewCreateCardStatement(
 ): Promise<MutationPreview<CardStatement>> {
   return withTransaction(async (tx) => {
     const row = await buildCreateStatement(tx, accountId, draft, generateId())
+    const state = await dataState(tx)
     return {
-      revision: await revision(tx),
+      revision: state.data_revision,
+      token: reviewedToken(
+        state,
+        'create-statement',
+        statementDraftReview(accountId, draft),
+        statementReview(row)
+      ),
       operation: 'create-statement',
       before: null,
       after: statementPublic(row, []),
@@ -576,11 +713,21 @@ export async function previewCreateCardStatement(
 export async function createCardStatement(
   accountId: string,
   draft: StatementDraft,
-  expectedRevision: number
+  expectedToken: string
 ): Promise<CardStatement> {
   return withTransaction(async (tx) => {
-    await assertRevision(tx, expectedRevision)
     const row = await buildCreateStatement(tx, accountId, draft, generateId())
+    const state = await dataState(tx)
+    assertReviewedToken(
+      expectedToken,
+      reviewedToken(
+        state,
+        'create-statement',
+        statementDraftReview(accountId, draft),
+        statementReview(row)
+      ),
+      state.data_revision
+    )
     await tx.execute(
       `INSERT INTO credit_card_statements
        (id, account_id, statement_start_date, statement_end_date, due_date, statement_balance,
@@ -635,7 +782,7 @@ async function buildUpdateStatement(
     patch.statementStartDate === undefined ? row.statement_start_date : patch.statementStartDate
   assertIsoDate(end, 'Statement end date')
   assertIsoDate(due, 'Statement due date')
-  if (start) assertIsoDate(start, 'Statement start date')
+  if (start !== null) assertIsoDate(start, 'Statement start date')
   assertStatementDates(start, end, due)
   if (patch.minimumPayment !== undefined)
     assertSafeNonNegative(patch.minimumPayment, 'Minimum payment')
@@ -677,8 +824,13 @@ export async function previewUpdateCardStatement(
 ): Promise<MutationPreview<CardStatement>> {
   return withTransaction(async (tx) => {
     const plan = await buildUpdateStatement(tx, id, patch)
+    const state = await dataState(tx)
     return {
-      revision: await revision(tx),
+      revision: state.data_revision,
+      token: reviewedToken(state, 'update-statement', statementUpdateReview(id, patch), {
+        before: plan.before,
+        after: statementReview(plan.row),
+      }),
       operation: 'update-statement',
       before: plan.before,
       after: plan.after,
@@ -689,12 +841,20 @@ export async function previewUpdateCardStatement(
 export async function updateCardStatement(
   id: string,
   patch: StatementUpdate,
-  expectedRevision: number
+  expectedToken: string
 ): Promise<CardStatement> {
   return withTransaction(async (tx) => {
-    await assertRevision(tx, expectedRevision)
     const current = await statementRow(tx, id)
     const plan = await buildUpdateStatement(tx, id, patch)
+    const state = await dataState(tx)
+    assertReviewedToken(
+      expectedToken,
+      reviewedToken(state, 'update-statement', statementUpdateReview(id, patch), {
+        before: plan.before,
+        after: statementReview(plan.row),
+      }),
+      state.data_revision
+    )
     const result = await tx.execute(
       `UPDATE credit_card_statements
        SET statement_start_date = ?, statement_end_date = ?, due_date = ?, statement_balance = ?,
@@ -734,7 +894,12 @@ export async function updateCardStatement(
   })
 }
 
-export async function previewDeleteCardStatement(id: string): Promise<MutationPreview<null>> {
+export async function previewDeleteCardStatement(
+  id: string,
+  source: string,
+  note: string
+): Promise<MutationPreview<null>> {
+  assertAudit(source, note)
   return withTransaction(async (tx) => {
     const row = await statementRow(tx, id)
     await assertStatementOwnerWritable(tx, row)
@@ -742,25 +907,47 @@ export async function previewDeleteCardStatement(id: string): Promise<MutationPr
     const before = statementPublic(row, links)
     if (before.activeLinks.length)
       throw new Error('Unlink active payments before deleting this statement.')
-    return { revision: await revision(tx), operation: 'delete-statement', before, after: null }
+    const state = await dataState(tx)
+    return {
+      revision: state.data_revision,
+      token: reviewedToken(
+        state,
+        'delete-statement',
+        { id, source: source.trim(), note: note.trim() },
+        before
+      ),
+      operation: 'delete-statement',
+      before,
+      after: null,
+    }
   })
 }
 
 export async function deleteCardStatement(
   id: string,
-  expectedRevision: number,
+  expectedToken: string,
   source: string,
   note: string
 ): Promise<void> {
   assertAudit(source, note)
   return withTransaction(async (tx) => {
-    await assertRevision(tx, expectedRevision)
     const row = await statementRow(tx, id)
     await assertStatementOwnerWritable(tx, row)
     const links = await linksForStatement(tx, id)
     const before = statementPublic(row, links)
     if (before.activeLinks.length)
       throw new Error('Unlink active payments before deleting this statement.')
+    const state = await dataState(tx)
+    assertReviewedToken(
+      expectedToken,
+      reviewedToken(
+        state,
+        'delete-statement',
+        { id, source: source.trim(), note: note.trim() },
+        before
+      ),
+      state.data_revision
+    )
     const result = await tx.execute('DELETE FROM credit_card_statements WHERE id = ?', [id])
     if (result.rowsAffected !== 1) throw new Error('Card statement changed. Refresh and retry.')
     await writeAudit(
@@ -841,8 +1028,13 @@ export async function previewLinkCardPayment(
 ): Promise<MutationPreview<CardStatement>> {
   return withTransaction(async (tx) => {
     const plan = await buildLink(tx, input, generateId())
+    const state = await dataState(tx)
     return {
-      revision: await revision(tx),
+      revision: state.data_revision,
+      token: reviewedToken(state, 'link-payment', linkInputReview(input), {
+        before: plan.before,
+        transition: plan.transition,
+      }),
       operation: 'link-payment',
       before: plan.before,
       after: plan.after,
@@ -852,11 +1044,19 @@ export async function previewLinkCardPayment(
 
 export async function linkCardPayment(
   input: LinkPaymentInput,
-  expectedRevision: number
+  expectedToken: string
 ): Promise<CardStatement> {
   return withTransaction(async (tx) => {
-    await assertRevision(tx, expectedRevision)
     const plan = await buildLink(tx, input, generateId())
+    const state = await dataState(tx)
+    assertReviewedToken(
+      expectedToken,
+      reviewedToken(state, 'link-payment', linkInputReview(input), {
+        before: plan.before,
+        transition: plan.transition,
+      }),
+      state.data_revision
+    )
     await tx.execute(
       `INSERT INTO card_statement_payment_links
        (id, original_statement_id, original_transaction_id, statement_id, transaction_id, amount,
@@ -929,12 +1129,22 @@ async function buildUnlink(tx: TransactionClient, linkId: string) {
 }
 
 export async function previewUnlinkCardPayment(
-  linkId: string
+  linkId: string,
+  source: string,
+  note: string
 ): Promise<MutationPreview<CardStatement>> {
+  assertAudit(source, note)
   return withTransaction(async (tx) => {
     const plan = await buildUnlink(tx, linkId)
+    const state = await dataState(tx)
     return {
-      revision: await revision(tx),
+      revision: state.data_revision,
+      token: reviewedToken(
+        state,
+        'unlink-payment',
+        { linkId, source: source.trim(), note: note.trim() },
+        { link: plan.link, before: plan.before, transition: plan.transition }
+      ),
       operation: 'unlink-payment',
       before: plan.before,
       after: plan.after,
@@ -944,14 +1154,24 @@ export async function previewUnlinkCardPayment(
 
 export async function unlinkCardPayment(
   linkId: string,
-  expectedRevision: number,
+  expectedToken: string,
   source: string,
   note: string
 ): Promise<CardStatement> {
   assertAudit(source, note)
   return withTransaction(async (tx) => {
-    await assertRevision(tx, expectedRevision)
     const plan = await buildUnlink(tx, linkId)
+    const state = await dataState(tx)
+    assertReviewedToken(
+      expectedToken,
+      reviewedToken(
+        state,
+        'unlink-payment',
+        { linkId, source: source.trim(), note: note.trim() },
+        { link: plan.link, before: plan.before, transition: plan.transition }
+      ),
+      state.data_revision
+    )
     const voidedAt = now()
     const result = await tx.execute(
       'UPDATE card_statement_payment_links SET voided_at = ? WHERE id = ? AND voided_at IS NULL',
@@ -1021,20 +1241,57 @@ async function buildRecordPayment(
   if (source.id === card.id) throw new Error('Payment source and destination must differ.')
   if (source.currency?.trim().toUpperCase() !== card.currency?.trim().toUpperCase())
     throw new Error('Payment source and card currencies do not match.')
-  if (source.balance < input.amount) throw new Error('Payment source has insufficient funds.')
-  if (Math.max(-card.balance, 0) < input.amount)
-    throw new Error('Payment exceeds the current card debt.')
-  return { card, source, row, before, transition, date, transactionId }
+  const sourceBalanceAfter = resultingBalance(
+    source.balance,
+    -input.amount,
+    'Payment source balance'
+  )
+  const cardBalanceAfter = resultingBalance(card.balance, input.amount, 'Card balance')
+  return {
+    card,
+    source,
+    sourceBalanceAfter,
+    cardBalanceAfter,
+    row,
+    before,
+    transition,
+    date,
+    transactionId,
+  }
+}
+
+function recordPlanReview(plan: Awaited<ReturnType<typeof buildRecordPayment>>) {
+  return {
+    card: plan.card,
+    source: plan.source,
+    sourceBalanceAfter: plan.source
+      ? (plan as { sourceBalanceAfter: number }).sourceBalanceAfter
+      : null,
+    cardBalanceAfter: plan.source
+      ? (plan as { cardBalanceAfter: number }).cardBalanceAfter
+      : plan.card.balance,
+    statementBefore: plan.before,
+    transition: plan.transition,
+    date: plan.date,
+  }
 }
 
 export async function previewRecordCardPayment(
   input: RecordCardPaymentInput
-): Promise<MutationPreview<Record<string, unknown>>> {
+): Promise<MutationPreview<RecordCardPaymentPreview>> {
   return withTransaction(async (tx) => {
     const plan = await buildRecordPayment(tx, input, generateId())
+    const operation = input.statementOnly ? 'record-statement-payment' : 'record-card-transfer'
+    const state = await dataState(tx)
     return {
-      revision: await revision(tx),
-      operation: input.statementOnly ? 'record-statement-payment' : 'record-card-transfer',
+      revision: state.data_revision,
+      token: reviewedToken(
+        state,
+        operation,
+        recordInputReview(input, plan.date),
+        recordPlanReview(plan)
+      ),
+      operation,
       before: {
         statement: plan.before,
         sourceBalance: plan.source?.balance ?? null,
@@ -1043,9 +1300,13 @@ export async function previewRecordCardPayment(
       after: {
         transactionId: input.statementOnly ? null : plan.transactionId,
         amount: input.amount,
-        currency: plan.card.currency,
-        sourceBalance: plan.source ? plan.source.balance - input.amount : null,
-        cardBalance: input.statementOnly ? plan.card.balance : plan.card.balance + input.amount,
+        currency: plan.card.currency!,
+        sourceBalance: plan.source
+          ? (plan as { sourceBalanceAfter: number }).sourceBalanceAfter
+          : null,
+        cardBalance: plan.source
+          ? (plan as { cardBalanceAfter: number }).cardBalanceAfter
+          : plan.card.balance,
         statementPaidAmount: plan.transition?.after.paidAmount ?? null,
         createsEvidenceLink: Boolean(!input.statementOnly && plan.row),
       },
@@ -1055,12 +1316,18 @@ export async function previewRecordCardPayment(
 
 export async function recordCardPayment(
   input: RecordCardPaymentInput,
-  expectedRevision: number
+  expectedToken: string
 ): Promise<{ transactionId: string | null; statement: CardStatement | null }> {
   return withTransaction(async (tx) => {
-    await assertRevision(tx, expectedRevision)
     const transactionId = generateId()
     const plan = await buildRecordPayment(tx, input, transactionId)
+    const operation = input.statementOnly ? 'record-statement-payment' : 'record-card-transfer'
+    const state = await dataState(tx)
+    assertReviewedToken(
+      expectedToken,
+      reviewedToken(state, operation, recordInputReview(input, plan.date), recordPlanReview(plan)),
+      state.data_revision
+    )
     if (input.statementOnly) {
       await applyStatementTransition(tx, plan.row!, plan.transition!.after)
       const afterRow = {
@@ -1106,14 +1373,14 @@ export async function recordCardPayment(
       ]
     )
     const sourceUpdate = await tx.execute(
-      `UPDATE accounts SET balance = balance - ?, updated_at = ?
+      `UPDATE accounts SET balance = ?, updated_at = ?
        WHERE id = ? AND balance = ? AND is_archived = 0 AND COALESCE(account_mode, 'transactional') = 'transactional'`,
-      [input.amount, timestamp, source.id, source.balance]
+      [plan.sourceBalanceAfter, timestamp, source.id, source.balance]
     )
     const cardUpdate = await tx.execute(
-      `UPDATE accounts SET balance = balance + ?, updated_at = ?
+      `UPDATE accounts SET balance = ?, updated_at = ?
        WHERE id = ? AND balance = ? AND is_archived = 0 AND COALESCE(account_mode, 'transactional') = 'transactional'`,
-      [input.amount, timestamp, plan.card.id, plan.card.balance]
+      [plan.cardBalanceAfter, timestamp, plan.card.id, plan.card.balance]
     )
     if (sourceUpdate.rowsAffected !== 1 || cardUpdate.rowsAffected !== 1)
       throw new Error('An account changed while applying the payment. Refresh and retry.')
@@ -1134,9 +1401,9 @@ export async function recordCardPayment(
         },
         balances: {
           sourceBefore: source.balance,
-          sourceAfter: source.balance - input.amount,
+          sourceAfter: plan.sourceBalanceAfter,
           cardBefore: plan.card.balance,
-          cardAfter: plan.card.balance + input.amount,
+          cardAfter: plan.cardBalanceAfter,
         },
       },
       input.source.trim(),

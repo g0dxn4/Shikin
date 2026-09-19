@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   assertPaymentLinkCapacity,
+  deriveStatementPaymentStatus,
   planStatementPaymentLink,
   planStatementPaymentUnlink,
   planStatementTotalsEdit,
@@ -304,6 +305,27 @@ describe('payment evidence policy', () => {
         today: '2026-03-01',
       })
     ).toThrow(/overpayment/)
+  })
+
+  it('accepts real leap days and rejects normalized overflow or blank calendar dates', () => {
+    expect(
+      deriveStatementPaymentStatus({
+        statementBalance: 100,
+        paidAmount: 0,
+        dueDate: '2024-02-29',
+        today: '2024-02-29',
+      })
+    ).toBe('open')
+    for (const dueDate of ['2026-02-29', '2026-02-31', '2026-04-31', '']) {
+      expect(() =>
+        deriveStatementPaymentStatus({
+          statementBalance: 100,
+          paidAmount: 0,
+          dueDate,
+          today: '2026-02-01',
+        })
+      ).toThrow(/ISO date/)
+    }
   })
 
   it.each([

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertCircle, ArrowRight, Link2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -27,7 +27,9 @@ import {
   type LinkPaymentInput,
   type MutationPreview,
   type RecordCardPaymentInput,
+  type RecordCardPaymentPreview,
 } from '@/lib/card-payment-service'
+import { invalidateTransactionPage } from '@/lib/transaction-query-events'
 import type { Account } from '@/types/database'
 
 interface ControlledPaymentDialogProps {
@@ -65,15 +67,21 @@ export function LinkCardPaymentDialog({
   const [confirmed, setConfirmed] = useState(false)
   const [preview, setPreview] = useState<MutationPreview<CardStatement> | null>(null)
   const [loading, setLoading] = useState(false)
+  const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const requestSequence = useRef(0)
 
   useEffect(() => {
-    if (!open) return
+    const request = ++requestSequence.current
     setPreview(null)
+    setSaved(false)
     setError(null)
+    setLoading(false)
+    if (!open) return
     setLoading(true)
     void listEligibleCardPayments(account.id)
       .then((rows) => {
+        if (request !== requestSequence.current) return
         setPayments(rows)
         setTransactionId(rows[0]?.transactionId ?? '')
         setAmount(
@@ -87,9 +95,13 @@ export function LinkCardPaymentDialog({
             : ''
         )
       })
-      .catch((reason) => setError(getErrorMessage(reason)))
-      .finally(() => setLoading(false))
-  }, [account.id, open, statement.linkedPaidAmount, statement.statementBalance])
+      .catch((reason) => {
+        if (request === requestSequence.current) setError(getErrorMessage(reason))
+      })
+      .finally(() => {
+        if (request === requestSequence.current) setLoading(false)
+      })
+  }, [account.id, open, statement.id, statement.linkedPaidAmount, statement.statementBalance])
 
   const selected = useMemo(
     () => payments.find((payment) => payment.transactionId === transactionId) ?? null,
@@ -106,32 +118,59 @@ export function LinkCardPaymentDialog({
     note: t('audit.linkNote'),
   })
 
+  const invalidateReview = () => {
+    requestSequence.current += 1
+    setPreview(null)
+    setLoading(false)
+  }
+
   const review = async (event: FormEvent) => {
     event.preventDefault()
+    const request = ++requestSequence.current
+    const requestedInput = input()
     setError(null)
     setLoading(true)
     try {
-      setPreview(await previewLinkCardPayment(input()))
+      const reviewed = await previewLinkCardPayment(requestedInput)
+      if (request === requestSequence.current) setPreview(reviewed)
     } catch (reason) {
-      setError(getErrorMessage(reason))
+      if (request === requestSequence.current) setError(getErrorMessage(reason))
     } finally {
-      setLoading(false)
+      if (request === requestSequence.current) setLoading(false)
     }
   }
 
   const apply = async () => {
     if (!preview) return
+    const request = ++requestSequence.current
+    const requestedInput = input()
+    const token = preview.token
     setError(null)
     setLoading(true)
     try {
-      await linkCardPayment(input(), preview.revision)
-      await onCompleted()
-      onOpenChange(false)
+      await linkCardPayment(requestedInput, token)
     } catch (reason) {
-      setPreview(null)
-      setError(getErrorMessage(reason, t('stale')))
-    } finally {
+      if (request === requestSequence.current) {
+        setPreview(null)
+        setError(getErrorMessage(reason, t('stale')))
+        setLoading(false)
+      }
+      return
+    }
+    try {
+      await onCompleted()
+    } catch {
+      if (request === requestSequence.current) {
+        setPreview(null)
+        setSaved(true)
+        setError(t('savedRefreshFailed'))
+        setLoading(false)
+      }
+      return
+    }
+    if (request === requestSequence.current) {
       setLoading(false)
+      onOpenChange(false)
     }
   }
 
@@ -149,7 +188,7 @@ export function LinkCardPaymentDialog({
             <p className="text-muted-foreground mt-1">{t('link.emptyDescription')}</p>
           </div>
         ) : (
-          <form className="space-y-4" onSubmit={review}>
+          <form className="space-y-4" onSubmit={saved ? (event) => event.preventDefault() : review}>
             <div className="space-y-2">
               <Label htmlFor="card-payment-evidence">{t('link.source')}</Label>
               <select
@@ -159,7 +198,7 @@ export function LinkCardPaymentDialog({
                 onChange={(event) => {
                   setTransactionId(event.target.value)
                   setConfirmed(false)
-                  setPreview(null)
+                  invalidateReview()
                 }}
               >
                 {payments.map((payment) => (
@@ -196,7 +235,7 @@ export function LinkCardPaymentDialog({
                   value={amount}
                   onChange={(event) => {
                     setAmount(event.target.value)
-                    setPreview(null)
+                    invalidateReview()
                   }}
                   required
                 />
@@ -210,7 +249,7 @@ export function LinkCardPaymentDialog({
                   value={mode}
                   onChange={(event) => {
                     setMode(event.target.value as typeof mode)
-                    setPreview(null)
+                    invalidateReview()
                   }}
                 >
                   <option value="apply_to_unpaid">{t('link.apply')}</option>
@@ -226,7 +265,7 @@ export function LinkCardPaymentDialog({
                   checked={confirmed}
                   onChange={(event) => {
                     setConfirmed(event.target.checked)
-                    setPreview(null)
+                    invalidateReview()
                   }}
                 />
                 <span>{t('link.confirmRepayment', { card: account.name })}</span>
@@ -258,7 +297,11 @@ export function LinkCardPaymentDialog({
               >
                 {t('actions.cancel')}
               </Button>
-              {preview ? (
+              {saved ? (
+                <Button type="button" className="min-h-11" onClick={() => onOpenChange(false)}>
+                  {t('actions.close')}
+                </Button>
+              ) : preview ? (
                 <Button type="button" className="min-h-11" onClick={apply} disabled={loading}>
                   {loading ? t('actions.saving') : t('actions.confirm')}
                 </Button>
@@ -287,25 +330,35 @@ export function RecordCardPaymentDialog({
   const [sourceId, setSourceId] = useState('')
   const [amount, setAmount] = useState('')
   const [statementOnly, setStatementOnly] = useState(false)
-  const [preview, setPreview] = useState<MutationPreview<Record<string, unknown>> | null>(null)
+  const [preview, setPreview] = useState<MutationPreview<RecordCardPaymentPreview> | null>(null)
   const [loading, setLoading] = useState(false)
+  const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const requestSequence = useRef(0)
 
   useEffect(() => {
-    if (!open) return
+    const request = ++requestSequence.current
     setPreview(null)
+    setSaved(false)
     setError(null)
+    setLoading(false)
+    if (!open) return
     setLoading(true)
     void listCardPaymentSources(account.id)
       .then((rows) => {
+        if (request !== requestSequence.current) return
         setSources(rows)
         setSourceId(rows[0]?.id ?? '')
         const unpaid = Math.max(statement.statementBalance - statement.paidAmount, 0)
         setAmount(unpaid ? fromCentavos(unpaid).toFixed(2) : '')
       })
-      .catch((reason) => setError(getErrorMessage(reason)))
-      .finally(() => setLoading(false))
-  }, [account.id, open, statement.paidAmount, statement.statementBalance])
+      .catch((reason) => {
+        if (request === requestSequence.current) setError(getErrorMessage(reason))
+      })
+      .finally(() => {
+        if (request === requestSequence.current) setLoading(false)
+      })
+  }, [account.id, open, statement.id, statement.paidAmount, statement.statementBalance])
 
   const input = (): RecordCardPaymentInput => ({
     cardAccountId: account.id,
@@ -317,32 +370,61 @@ export function RecordCardPaymentDialog({
     statementOnly,
   })
 
+  const invalidateReview = () => {
+    requestSequence.current += 1
+    setPreview(null)
+    setLoading(false)
+  }
+
   const review = async (event: FormEvent) => {
     event.preventDefault()
+    const request = ++requestSequence.current
+    const requestedInput = input()
     setError(null)
     setLoading(true)
     try {
-      setPreview(await previewRecordCardPayment(input()))
+      const reviewed = await previewRecordCardPayment(requestedInput)
+      if (request === requestSequence.current) setPreview(reviewed)
     } catch (reason) {
-      setError(getErrorMessage(reason))
+      if (request === requestSequence.current) setError(getErrorMessage(reason))
     } finally {
-      setLoading(false)
+      if (request === requestSequence.current) setLoading(false)
     }
   }
 
   const apply = async () => {
     if (!preview) return
+    const request = ++requestSequence.current
+    const requestedInput = input()
+    const token = preview.token
     setError(null)
     setLoading(true)
     try {
-      await recordCardPayment(input(), preview.revision)
-      await onCompleted()
-      onOpenChange(false)
+      await recordCardPayment(requestedInput, token)
     } catch (reason) {
-      setPreview(null)
-      setError(getErrorMessage(reason, t('stale')))
-    } finally {
+      if (request === requestSequence.current) {
+        setPreview(null)
+        setError(getErrorMessage(reason, t('stale')))
+        setLoading(false)
+      }
+      return
+    }
+
+    if (!requestedInput.statementOnly) invalidateTransactionPage('add')
+    try {
+      await onCompleted()
+    } catch {
+      if (request === requestSequence.current) {
+        setPreview(null)
+        setSaved(true)
+        setError(t('savedRefreshFailed'))
+        setLoading(false)
+      }
+      return
+    }
+    if (request === requestSequence.current) {
       setLoading(false)
+      onOpenChange(false)
     }
   }
 
@@ -354,7 +436,7 @@ export function RecordCardPaymentDialog({
           <DialogDescription>{t('payment.description')}</DialogDescription>
         </DialogHeader>
         <ErrorMessage message={error} />
-        <form className="space-y-4" onSubmit={review}>
+        <form className="space-y-4" onSubmit={saved ? (event) => event.preventDefault() : review}>
           <label className="border-border flex min-h-11 items-start gap-3 rounded-lg border p-3 text-sm">
             <input
               className="mt-1 size-4"
@@ -362,7 +444,7 @@ export function RecordCardPaymentDialog({
               checked={statementOnly}
               onChange={(event) => {
                 setStatementOnly(event.target.checked)
-                setPreview(null)
+                invalidateReview()
               }}
             />
             <span>
@@ -381,7 +463,7 @@ export function RecordCardPaymentDialog({
                 value={sourceId}
                 onChange={(event) => {
                   setSourceId(event.target.value)
-                  setPreview(null)
+                  invalidateReview()
                 }}
                 required
               >
@@ -405,7 +487,7 @@ export function RecordCardPaymentDialog({
               value={amount}
               onChange={(event) => {
                 setAmount(event.target.value)
-                setPreview(null)
+                invalidateReview()
               }}
               required
             />
@@ -423,6 +505,26 @@ export function RecordCardPaymentDialog({
               <p className="text-muted-foreground mt-1 text-xs">
                 {statementOnly ? t('review.noTransaction') : t('review.atomicTransfer')}
               </p>
+              {!statementOnly && preview.after.sourceBalance !== null ? (
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm tabular-nums">
+                  <span className="text-muted-foreground">{t('review.resultingSource')}</span>
+                  <span className="text-right font-semibold">
+                    {formatMoney(preview.after.sourceBalance, preview.after.currency)}
+                  </span>
+                  <span className="text-muted-foreground">{t('review.resultingCard')}</span>
+                  <span className="text-right font-semibold">
+                    {formatMoney(preview.after.cardBalance, preview.after.currency)}
+                  </span>
+                </div>
+              ) : null}
+              {!statementOnly &&
+              preview.after.sourceBalance !== null &&
+              preview.after.sourceBalance < 0 ? (
+                <p className="text-warning mt-2 text-xs">{t('review.negativeFundsWarning')}</p>
+              ) : null}
+              {!statementOnly && preview.after.cardBalance > 0 ? (
+                <p className="text-warning mt-2 text-xs">{t('review.cardCreditWarning')}</p>
+              ) : null}
             </div>
           ) : null}
           <DialogFooter>
@@ -435,7 +537,11 @@ export function RecordCardPaymentDialog({
             >
               {t('actions.cancel')}
             </Button>
-            {preview ? (
+            {saved ? (
+              <Button type="button" className="min-h-11" onClick={() => onOpenChange(false)}>
+                {t('actions.close')}
+              </Button>
+            ) : preview ? (
               <Button type="button" className="min-h-11" onClick={apply} disabled={loading}>
                 {loading ? t('actions.saving') : t('actions.confirm')}
               </Button>

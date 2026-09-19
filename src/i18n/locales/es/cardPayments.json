@@ -12,6 +12,7 @@
   "legacyBadge": "Sobrepago histórico",
   "legacyOverpaid": "Este estado histórico tiene un sobrepago. Se conserva el total registrado; las acciones nuevas no pueden aumentarlo.",
   "stale": "Los datos de pago cambiaron. Actualiza y revisa de nuevo.",
+  "savedRefreshFailed": "Se guardó correctamente, pero no se pudieron actualizar los datos. Cierra y vuelve a abrir para reintentar la actualización; no envíes el pago de nuevo.",
   "empty": {
     "title": "No hay estados registrados",
     "description": "Agrega los totales exactos del emisor antes de atribuir evidencia de pago."
@@ -68,7 +69,11 @@
     "baselineEvidence": "Agrega evidencia externa del estado sin crear una transacción.",
     "noTransaction": "Solo cambiarán la base y el estado de pago.",
     "realTransfer": "Crea una transferencia contabilizada y la vincula a este estado.",
-    "atomicTransfer": "Ambos saldos, la transacción y el vínculo se confirman juntos o no se confirma nada."
+    "atomicTransfer": "Ambos saldos, la transacción y el vínculo se confirman juntos o no se confirma nada.",
+    "resultingSource": "Saldo resultante de la cuenta de origen",
+    "resultingCard": "Saldo resultante de la tarjeta",
+    "negativeFundsWarning": "La cuenta de origen tendrá saldo negativo. Confirma solo si este sobregiro es intencional.",
+    "cardCreditWarning": "La tarjeta tendrá un saldo positivo a favor. Confirma solo si este sobrepago es intencional."
   },
   "mode": {
     "apply_to_unpaid": "Aplicado al pendiente",
@@ -91,6 +96,7 @@
     "confirm": "Confirmar",
     "loading": "Cargando…",
     "saving": "Guardando…",
+    "close": "Cerrar",
     "edit": "Editar estado",
     "delete": "Eliminar estado",
     "unlink": "Desvincular pago"

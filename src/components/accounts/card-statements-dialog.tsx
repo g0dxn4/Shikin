@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   AlertCircle,
@@ -40,7 +40,6 @@ import {
   type CardStatement,
   type MutationPreview,
   type StatementDraft,
-  type StatementUpdate,
 } from '@/lib/card-payment-service'
 import type { Account } from '@/types/database'
 import { LinkCardPaymentDialog, RecordCardPaymentDialog } from './card-payment-dialogs'
@@ -59,6 +58,11 @@ interface StatementEditorDialogProps {
   statement: CardStatement | null
   onCompleted: () => void | Promise<void>
 }
+
+const modeTranslationKey = {
+  apply_to_unpaid: 'mode.apply_to_unpaid',
+  attribute_existing: 'mode.attribute_existing',
+} as const
 
 function statusVariant(
   status: CardStatement['status']
@@ -124,9 +128,16 @@ export function StatementEditorDialog({
   const [note, setNote] = useState('')
   const [preview, setPreview] = useState<MutationPreview<CardStatement> | null>(null)
   const [loading, setLoading] = useState(false)
+  const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const requestSequence = useRef(0)
 
   useEffect(() => {
+    requestSequence.current += 1
+    setPreview(null)
+    setSaved(false)
+    setError(null)
+    setLoading(false)
     if (!open) return
     setStartDate(statement?.statementStartDate ?? '')
     setEndDate(statement?.statementEndDate ?? '')
@@ -135,9 +146,7 @@ export function StatementEditorDialog({
     setMinimum(statement ? fromCentavos(statement.minimumPayment).toFixed(2) : '0.00')
     setPaid(statement ? fromCentavos(statement.paidAmount).toFixed(2) : '0.00')
     setNote(statement?.note ?? '')
-    setPreview(null)
-    setError(null)
-  }, [open, statement])
+  }, [account.id, open, statement])
 
   const draft = (): StatementDraft => ({
     statementStartDate: startDate || null,
@@ -149,45 +158,65 @@ export function StatementEditorDialog({
     source: 'frontend-card-statements',
     note,
   })
-  const patch = (): StatementUpdate => draft()
 
   const review = async (event: FormEvent) => {
     event.preventDefault()
+    const request = ++requestSequence.current
+    const requestedDraft = draft()
     setError(null)
     setLoading(true)
     try {
-      setPreview(
-        statement
-          ? await previewUpdateCardStatement(statement.id, patch())
-          : await previewCreateCardStatement(account.id, draft())
-      )
+      const reviewed = statement
+        ? await previewUpdateCardStatement(statement.id, requestedDraft)
+        : await previewCreateCardStatement(account.id, requestedDraft)
+      if (request === requestSequence.current) setPreview(reviewed)
     } catch (reason) {
-      setError(getErrorMessage(reason))
+      if (request === requestSequence.current) setError(getErrorMessage(reason))
     } finally {
-      setLoading(false)
+      if (request === requestSequence.current) setLoading(false)
     }
   }
 
   const apply = async () => {
     if (!preview) return
+    const request = ++requestSequence.current
+    const requestedDraft = draft()
+    const token = preview.token
     setError(null)
     setLoading(true)
     try {
-      if (statement) await updateCardStatement(statement.id, patch(), preview.revision)
-      else await createCardStatement(account.id, draft(), preview.revision)
-      await onCompleted()
-      onOpenChange(false)
+      if (statement) await updateCardStatement(statement.id, requestedDraft, token)
+      else await createCardStatement(account.id, requestedDraft, token)
     } catch (reason) {
-      setPreview(null)
-      setError(getErrorMessage(reason, t('stale')))
-    } finally {
+      if (request === requestSequence.current) {
+        setPreview(null)
+        setError(getErrorMessage(reason, t('stale')))
+        setLoading(false)
+      }
+      return
+    }
+    try {
+      await onCompleted()
+    } catch {
+      if (request === requestSequence.current) {
+        setPreview(null)
+        setSaved(true)
+        setError(t('savedRefreshFailed'))
+        setLoading(false)
+      }
+      return
+    }
+    if (request === requestSequence.current) {
       setLoading(false)
+      onOpenChange(false)
     }
   }
 
   const invalidate = (setter: (value: string) => void) => (value: string) => {
+    requestSequence.current += 1
     setter(value)
     setPreview(null)
+    setLoading(false)
   }
 
   return (
@@ -200,7 +229,7 @@ export function StatementEditorDialog({
           </DialogDescription>
         </DialogHeader>
         <ErrorNotice message={error} />
-        <form className="space-y-4" onSubmit={review}>
+        <form className="space-y-4" onSubmit={saved ? (event) => event.preventDefault() : review}>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="statement-start">{t('fields.startDate')}</Label>
@@ -323,7 +352,11 @@ export function StatementEditorDialog({
             >
               {t('actions.cancel')}
             </Button>
-            {preview ? (
+            {saved ? (
+              <Button type="button" className="min-h-11" onClick={() => onOpenChange(false)}>
+                {t('actions.close')}
+              </Button>
+            ) : preview ? (
               <Button type="button" className="min-h-11" disabled={loading} onClick={apply}>
                 {loading ? t('actions.saving') : t('actions.confirm')}
               </Button>
@@ -353,6 +386,8 @@ export function CardStatementsDialog({
   const [editing, setEditing] = useState<CardStatement | 'new' | null>(null)
   const [linking, setLinking] = useState<CardStatement | null>(null)
   const [paying, setPaying] = useState<CardStatement | null>(null)
+  const refreshSequence = useRef(0)
+  const confirmSequence = useRef(0)
   const [confirm, setConfirm] = useState<
     | { kind: 'delete'; statement: CardStatement; preview: MutationPreview<null> }
     | {
@@ -365,8 +400,11 @@ export function CardStatementsDialog({
   >(null)
 
   const refresh = useCallback(async () => {
-    setLoading(true)
-    setError(null)
+    const request = ++refreshSequence.current
+    if (open) {
+      setLoading(true)
+      setError(null)
+    }
     try {
       const rows = await listCardStatements(account.id)
       const entries = await Promise.all(
@@ -375,84 +413,123 @@ export function CardStatementsDialog({
             [statement.id, await listCardPaymentLinks(statement.id, 'all')] as const
         )
       )
-      setStatements(rows)
-      setHistory(Object.fromEntries(entries))
+      if (request === refreshSequence.current && open) {
+        setStatements(rows)
+        setHistory(Object.fromEntries(entries))
+      }
     } catch (reason) {
-      setError(getErrorMessage(reason))
+      if (request === refreshSequence.current && open) setError(getErrorMessage(reason))
+      throw reason
     } finally {
-      setLoading(false)
+      if (request === refreshSequence.current && open) setLoading(false)
     }
-  }, [account.id])
+  }, [account.id, open])
 
   const completed = useCallback(async () => {
-    await refresh()
-    await onChanged?.()
+    const results = await Promise.allSettled([
+      refresh(),
+      Promise.resolve().then(() => onChanged?.()),
+    ])
+    const failure = results.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected'
+    )
+    if (failure) throw failure.reason
   }, [onChanged, refresh])
 
   useEffect(() => {
-    if (open) void refresh()
-  }, [open, refresh])
+    confirmSequence.current += 1
+    setConfirm(null)
+    if (open) void refresh().catch(() => undefined)
+    else refreshSequence.current += 1
+  }, [account.id, open, refresh])
 
   const requestDelete = async (statement: CardStatement) => {
+    const request = ++confirmSequence.current
     setError(null)
     try {
-      setConfirm({
-        kind: 'delete',
-        statement,
-        preview: await previewDeleteCardStatement(statement.id),
-      })
+      const preview = await previewDeleteCardStatement(
+        statement.id,
+        'frontend-card-statements',
+        t('audit.deleteNote')
+      )
+      if (request === confirmSequence.current && open && statement.accountId === account.id)
+        setConfirm({ kind: 'delete', statement, preview })
     } catch (reason) {
-      setError(getErrorMessage(reason))
+      if (request === confirmSequence.current && open) setError(getErrorMessage(reason))
     }
   }
 
   const requestUnlink = async (statement: CardStatement, link: CardPaymentLink) => {
+    const request = ++confirmSequence.current
     setError(null)
     try {
-      setConfirm({
-        kind: 'unlink',
-        statement,
-        link,
-        preview: await previewUnlinkCardPayment(link.id),
-      })
+      const preview = await previewUnlinkCardPayment(
+        link.id,
+        'frontend-card-statements',
+        t('audit.unlinkNote')
+      )
+      if (request === confirmSequence.current && open && statement.accountId === account.id)
+        setConfirm({ kind: 'unlink', statement, link, preview })
     } catch (reason) {
-      setError(getErrorMessage(reason))
+      if (request === confirmSequence.current && open) setError(getErrorMessage(reason))
     }
   }
 
   const applyConfirm = async () => {
     if (!confirm) return
+    const request = ++confirmSequence.current
+    const requested = confirm
     setLoading(true)
     setError(null)
     try {
-      if (confirm.kind === 'delete') {
+      if (requested.kind === 'delete') {
         await deleteCardStatement(
-          confirm.statement.id,
-          confirm.preview.revision,
+          requested.statement.id,
+          requested.preview.token,
           'frontend-card-statements',
           t('audit.deleteNote')
         )
       } else {
         await unlinkCardPayment(
-          confirm.link.id,
-          confirm.preview.revision,
+          requested.link.id,
+          requested.preview.token,
           'frontend-card-statements',
           t('audit.unlinkNote')
         )
       }
-      setConfirm(null)
-      await completed()
     } catch (reason) {
-      setConfirm(null)
-      setError(getErrorMessage(reason, t('stale')))
+      if (request === confirmSequence.current) {
+        setConfirm(null)
+        setError(getErrorMessage(reason, t('stale')))
+        setLoading(false)
+      }
+      return
+    }
+
+    if (request === confirmSequence.current) setConfirm(null)
+    try {
+      await completed()
+    } catch {
+      if (request === confirmSequence.current) setError(t('savedRefreshFailed'))
     } finally {
-      setLoading(false)
+      if (request === confirmSequence.current) setLoading(false)
     }
   }
 
   return (
     <>
-      <Dialog open={open} onOpenChange={(next) => !loading && onOpenChange(next)}>
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          if (loading) return
+          if (!next) {
+            refreshSequence.current += 1
+            confirmSequence.current += 1
+            setConfirm(null)
+          }
+          onOpenChange(next)
+        }}
+      >
         <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>{t('title', { card: account.name })}</DialogTitle>
@@ -584,7 +661,7 @@ export function CardStatementsDialog({
                                 {link.transactionDescription ?? link.originalTransactionId}
                               </p>
                               <p className="text-muted-foreground text-xs">
-                                {link.transactionDate} · {t(`mode.${link.mode}`)}
+                                {link.transactionDate} · {t(modeTranslationKey[link.mode])}
                               </p>
                             </div>
                             <div className="flex shrink-0 items-center gap-2">
@@ -659,7 +736,12 @@ export function CardStatementsDialog({
       ) : null}
       <Dialog
         open={confirm !== null}
-        onOpenChange={(next) => !next && !loading && setConfirm(null)}
+        onOpenChange={(next) => {
+          if (!next && !loading) {
+            confirmSequence.current += 1
+            setConfirm(null)
+          }
+        }}
       >
         <DialogContent>
           <DialogHeader>
@@ -675,7 +757,7 @@ export function CardStatementsDialog({
           {confirm?.kind === 'unlink' ? (
             <p className="bg-muted/40 rounded-lg p-3 text-sm tabular-nums">
               {formatMoney(confirm.link.amount, confirm.statement.currency)} ·{' '}
-              {t(`mode.${confirm.link.mode}`)}
+              {t(modeTranslationKey[confirm.link.mode])}
             </p>
           ) : null}
           <DialogFooter>

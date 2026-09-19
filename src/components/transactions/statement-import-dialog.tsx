@@ -40,30 +40,20 @@ interface StatementImportDialogProps {
 
 type ImportStep = 'select' | 'preview' | 'importing' | 'done'
 
-/** Temporary until statement-import exposes reviewCandidates. */
-type StatementImportReviewCandidate = {
-  candidateIdentityKey: string
-  existingTransactionId: string
-  incoming: {
-    rowIndex: number
-    date: string
-    description: string
-    type: 'income' | 'expense'
-    amountCentavos: number
-    currency: string
-  }
-  existing: {
-    id: string
-    date: string
-    description: string
-    type: string
-    amountCentavos: number
-    currency: string
-  }
-}
+type StatementImportReviewCandidate = StatementImportPreview['reviewCandidates'][number]
 
-type StatementImportPreviewResult = StatementImportPreview & {
-  reviewCandidates?: StatementImportReviewCandidate[]
+function uniqueStrings(...groups: Array<readonly string[] | undefined>): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const group of groups) {
+    if (!group) continue
+    for (const value of group) {
+      if (seen.has(value)) continue
+      seen.add(value)
+      result.push(value)
+    }
+  }
+  return result
 }
 
 function candidateKey(
@@ -94,6 +84,12 @@ function reviewDecisionPayload(
 
 function isStalePreviewError(errors: readonly string[]): boolean {
   return errors.some((error) => /stale/i.test(error))
+}
+
+function isStaleDecisionBindingError(errors: readonly string[]): boolean {
+  return errors.some((error) =>
+    /duplicate decisions are stale|stale binding|do not belong to this statement plan/i.test(error)
+  )
 }
 
 function signedMoney(type: string, centavos: number, currency: string): string {
@@ -128,7 +124,7 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
   const [decisions, setDecisions] = useState<ImportReviewDecision[]>([])
   const [plannedImported, setPlannedImported] = useState(0)
   const [plannedSkipped, setPlannedSkipped] = useState(0)
-  const [legacyEvidenceLimitations, setLegacyEvidenceLimitations] = useState<string[]>([])
+  const [limitations, setLimitations] = useState<string[]>([])
 
   selectionRef.current = { open, selectedFile, accountId, decisions }
 
@@ -138,7 +134,7 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
     setReviewCandidates([])
     setPlannedImported(0)
     setPlannedSkipped(0)
-    setLegacyEvidenceLimitations([])
+    setLimitations([])
   }, [])
 
   const invalidateInFlightPreview = useCallback(() => {
@@ -163,7 +159,7 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
     setDecisions([])
     setPlannedImported(0)
     setPlannedSkipped(0)
-    setLegacyEvidenceLimitations([])
+    setLimitations([])
   }, [])
 
   const handleOpenChange = useCallback(
@@ -256,11 +252,11 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
     setIsImporting(true)
     setPreviewError(null)
     try {
-      const preview = (await previewStatementFile(
+      const preview = await previewStatementFile(
         requestedFile,
         requestedAccountId,
         requestedDecisions
-      )) as StatementImportPreviewResult
+      )
       if (requestId !== previewRequestIdRef.current) return
       if (!selectionRef.current.open) return
       if (selectionRef.current.selectedFile !== requestedFile) return
@@ -270,16 +266,21 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
       if (preview.errors.length) {
         setPreviewError(preview.errors[0])
         setPreviewToken(null)
+        if (isStaleDecisionBindingError(preview.errors)) {
+          setDecisions([])
+          setRequiredDecisions([])
+          setReviewCandidates([])
+        }
         return
       }
 
       setParsedTransactions(preview.parsedTransactions)
       setPreviewToken(preview.success ? preview.previewToken : null)
       setRequiredDecisions(preview.requiredDecisions)
-      setReviewCandidates(preview.reviewCandidates ?? [])
+      setReviewCandidates(preview.reviewCandidates)
       setPlannedImported(preview.imported)
       setPlannedSkipped(preview.skipped)
-      setLegacyEvidenceLimitations(preview.legacyEvidenceLimitations ?? [])
+      setLimitations(uniqueStrings(preview.limitations, preview.legacyEvidenceLimitations))
       setStep('preview')
     } finally {
       if (requestId === previewRequestIdRef.current) {
@@ -326,12 +327,15 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
         previewToken: requestedToken,
         decisions: requestedDecisions,
       })
-      if (requestId !== importRequestIdRef.current) return
-      if (!selectionRef.current.open) return
-      if (selectionRef.current.selectedFile !== requestedFile) return
-      if (selectionRef.current.accountId !== requestedAccountId) return
 
       if (result.imported > 0) invalidateTransactionPage('import')
+
+      const isStaleResult =
+        requestId !== importRequestIdRef.current ||
+        !selectionRef.current.open ||
+        selectionRef.current.selectedFile !== requestedFile ||
+        selectionRef.current.accountId !== requestedAccountId
+      if (isStaleResult) return
 
       if (result.errors.length > 0) {
         if (result.imported === 0) {
@@ -349,6 +353,11 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
         if (isStalePreviewError(result.errors)) {
           setPreviewToken(null)
           setPreviewError(t('import.stalePreview'))
+        }
+        if (isStaleDecisionBindingError(result.errors)) {
+          setDecisions([])
+          setRequiredDecisions([])
+          setReviewCandidates([])
         }
         setStep('preview')
         return
@@ -527,11 +536,11 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
                 {t('import.missingCandidateDetails')}
               </p>
             ) : null}
-            {legacyEvidenceLimitations.length > 0 && (
+            {limitations.length > 0 && (
               <div className="border-border bg-muted/40 space-y-1 rounded-lg border p-3">
                 <p className="text-sm font-medium">{t('import.legacyLimitations')}</p>
                 <ul className="text-muted-foreground list-disc space-y-1 pl-4 text-xs">
-                  {legacyEvidenceLimitations.map((limitation, index) => (
+                  {limitations.map((limitation, index) => (
                     <li key={`${limitation}-${index}`}>{limitation}</li>
                   ))}
                 </ul>

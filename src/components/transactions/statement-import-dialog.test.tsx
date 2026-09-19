@@ -9,6 +9,8 @@ const {
   mockPreviewStatementFile,
   mockParseStatement,
   mockToastError,
+  mockToastWarning,
+  mockToastSuccess,
   mockInvalidate,
   mockFormatMoney,
 } = vi.hoisted(() => ({
@@ -16,6 +18,8 @@ const {
   mockPreviewStatementFile: vi.fn(),
   mockParseStatement: vi.fn(),
   mockToastError: vi.fn(),
+  mockToastWarning: vi.fn(),
+  mockToastSuccess: vi.fn(),
   mockInvalidate: vi.fn(),
   mockFormatMoney: vi.fn(
     (centavos: number, currency: string) => `FORMATTED:${currency}:${centavos}`
@@ -37,8 +41,8 @@ vi.mock('react-i18next', () => ({
 vi.mock('sonner', () => ({
   toast: {
     error: mockToastError,
-    warning: vi.fn(),
-    success: vi.fn(),
+    warning: mockToastWarning,
+    success: mockToastSuccess,
   },
 }))
 
@@ -236,6 +240,7 @@ function previewResult(overrides: Record<string, unknown> = {}) {
     errors: [],
     requiredDecisions: [],
     reviewCandidates: [],
+    limitations: [],
     legacyEvidenceLimitations: [],
     ...overrides,
   }
@@ -265,6 +270,8 @@ describe('StatementImportDialog', () => {
     mockPreviewStatementFile.mockReset()
     mockParseStatement.mockReset()
     mockToastError.mockClear()
+    mockToastWarning.mockClear()
+    mockToastSuccess.mockClear()
     mockInvalidate.mockClear()
     mockFormatMoney.mockClear()
   })
@@ -320,6 +327,36 @@ describe('StatementImportDialog', () => {
     await user.click(await screen.findByRole('button', { name: 'import.confirm' }))
 
     await waitFor(() => expect(mockInvalidate).toHaveBeenCalledWith('import'))
+  })
+
+  it('invalidates committed imports even if the dialog closes before the request settles', async () => {
+    const parsed = parsedTx({ description: 'Committed' })
+    mockParseStatement.mockReturnValue([parsed])
+    mockPreviewStatementFile.mockResolvedValue(previewResult({ parsedTransactions: [parsed] }))
+    let resolveImport: (value: { imported: number; skipped: number; errors: string[] }) => void
+    mockImportStatementFile.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveImport = resolve
+        })
+    )
+    const file = createStatementFile('close-before-commit.ofx')
+    const { input, user, rerender, onOpenChange } = await renderDialog()
+
+    await chooseAccount(user)
+    await chooseFile(input, file)
+    await user.click(await screen.findByRole('button', { name: 'import.preview' }))
+    await user.click(await screen.findByRole('button', { name: 'import.confirm' }))
+    expect(await screen.findByText('import.importing')).toBeVisible()
+
+    rerender(<StatementImportDialog open={false} onOpenChange={onOpenChange} />)
+    resolveImport!({ imported: 2, skipped: 0, errors: [] })
+
+    await waitFor(() => expect(mockInvalidate).toHaveBeenCalledWith('import'))
+    expect(mockToastSuccess).not.toHaveBeenCalled()
+    expect(mockToastWarning).not.toHaveBeenCalled()
+    expect(mockToastError).not.toHaveBeenCalled()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
   })
 
   it('ignores a stale file parse after a newer file is selected', async () => {
@@ -589,6 +626,114 @@ describe('StatementImportDialog', () => {
     expect(mockInvalidate).toHaveBeenCalledWith('import')
   })
 
+  it('clears stale reviewed decisions so refresh can bind a fresh preview', async () => {
+    const parsed = parsedTx({ description: 'Needs recovery' })
+    const staleDecision = requiredDecision()
+    const freshDecision = requiredDecision({
+      candidateContentFingerprint: 'content-2',
+      existingEvidenceFingerprint: 'evidence-2',
+    })
+    mockParseStatement.mockReturnValue([parsed])
+    mockPreviewStatementFile
+      .mockResolvedValueOnce(
+        previewResult({
+          success: false,
+          previewToken: null,
+          parsedTransactions: [parsed],
+          requiredDecisions: [staleDecision],
+          reviewCandidates: [reviewCandidate()],
+          imported: 0,
+          skipped: 0,
+        })
+      )
+      .mockResolvedValueOnce(
+        previewResult({
+          success: false,
+          previewToken: null,
+          parsedTransactions: [parsed],
+          errors: [
+            'One or more duplicate decisions are stale or do not belong to this statement plan',
+          ],
+        })
+      )
+      .mockResolvedValueOnce(
+        previewResult({
+          success: false,
+          previewToken: null,
+          parsedTransactions: [parsed],
+          requiredDecisions: [freshDecision],
+          reviewCandidates: [
+            reviewCandidate({
+              existing: { description: 'Updated ledger coffee' },
+            }),
+          ],
+          imported: 0,
+          skipped: 0,
+        })
+      )
+      .mockResolvedValueOnce(
+        previewResult({
+          parsedTransactions: [parsed],
+          previewToken: 'recovered-token',
+          imported: 1,
+          skipped: 0,
+        })
+      )
+    mockImportStatementFile.mockResolvedValue({ imported: 1, skipped: 0, errors: [] })
+    const file = createStatementFile('stale-decisions.ofx')
+    const { input, user } = await renderDialog()
+
+    await chooseAccount(user)
+    await chooseFile(input, file)
+    await user.click(screen.getByRole('button', { name: 'import.preview' }))
+    await screen.findByText('Incoming coffee')
+    await user.click(screen.getByRole('button', { name: 'import.keepExisting' }))
+    await user.click(screen.getByRole('button', { name: 'import.reviewDecisions' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/duplicate decisions are stale/i)
+    expect(screen.getByText('stale-decisions.ofx')).toBeVisible()
+    expect(screen.getByText('Checking')).toBeVisible()
+    expect(screen.getByText('Needs recovery')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'import.keepExisting' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'import.confirm' })).not.toBeInTheDocument()
+    expect(mockPreviewStatementFile).toHaveBeenLastCalledWith(file, 'account-1', [
+      {
+        candidateIdentityKey: 'identity-1',
+        candidateContentFingerprint: 'content-1',
+        existingTransactionId: 'existing-1',
+        existingEvidenceFingerprint: 'evidence-1',
+        decision: 'keep_existing',
+      },
+    ])
+
+    await user.click(screen.getByRole('button', { name: 'import.refreshPreview' }))
+    await waitFor(() =>
+      expect(mockPreviewStatementFile).toHaveBeenLastCalledWith(file, 'account-1', [])
+    )
+    expect(await screen.findByText('Updated ledger coffee')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'import.reviewDecisions' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'import.confirm' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'import.importDistinct' }))
+    await user.click(screen.getByRole('button', { name: 'import.reviewDecisions' }))
+    await user.click(await screen.findByRole('button', { name: 'import.confirm' }))
+    await waitFor(() =>
+      expect(mockImportStatementFile).toHaveBeenCalledWith(file, 'account-1', {
+        previewToken: 'recovered-token',
+        decisions: [
+          {
+            candidateIdentityKey: 'identity-1',
+            candidateContentFingerprint: 'content-2',
+            existingTransactionId: 'existing-1',
+            existingEvidenceFingerprint: 'evidence-2',
+            decision: 'distinct',
+          },
+        ],
+      })
+    )
+    expect(mockInvalidate).toHaveBeenCalledWith('import')
+  })
+
   it('shows a visible preview failure without dropping file or account context', async () => {
     const parsed = parsedTx({ description: 'Keep me' })
     mockParseStatement.mockReturnValue([parsed])
@@ -640,6 +785,10 @@ describe('StatementImportDialog', () => {
         skipped: 1,
         requiredDecisions: [requiredDecision()],
         reviewCandidates: [reviewCandidate()],
+        limitations: [
+          'Statement source did not declare a currency; amounts are assumed to be USD.',
+          'Legacy fingerprint only compared amount and date',
+        ],
         legacyEvidenceLimitations: ['Legacy fingerprint only compared amount and date'],
       })
     )
@@ -656,7 +805,12 @@ describe('StatementImportDialog', () => {
     expect(screen.getByText(/FORMATTED:MXN:1200/)).toBeVisible()
     expect(screen.getByText(/import\.plannedImported count=2/)).toBeVisible()
     expect(screen.getByText(/import\.plannedSkipped count=1/)).toBeVisible()
-    expect(screen.getByText('Legacy fingerprint only compared amount and date')).toBeVisible()
+    expect(
+      screen.getByText(
+        'Statement source did not declare a currency; amounts are assumed to be USD.'
+      )
+    ).toBeVisible()
+    expect(screen.getAllByText('Legacy fingerprint only compared amount and date')).toHaveLength(1)
     expect(screen.queryByText('import.existingCandidate id=existing-1')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'import.reviewDecisions' })).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'import.confirm' })).not.toBeInTheDocument()

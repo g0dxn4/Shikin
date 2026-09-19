@@ -51,8 +51,13 @@ export async function createSplits(
   assertOrdinaryCorrection(owner)
   await assertSplitWorkflow(tx, owner, evidence)
   for (const split of splits) {
-    if (!(await tx.query('SELECT id FROM categories WHERE id = ?', [split.categoryId])).length)
-      throw new Error('Category not found.')
+    if (!split.categoryId.trim()) throw new Error('A split category is required.')
+    const category = await tx.query<{ type: string }>('SELECT type FROM categories WHERE id = ?', [
+      split.categoryId,
+    ])
+    if (!category.length) throw new Error('Category not found.')
+    if (category[0].type !== owner.type)
+      throw new Error('Category direction must match the transaction direction.')
     if (
       split.subcategoryId &&
       !(

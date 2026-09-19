@@ -86,7 +86,8 @@ beforeEach(() => {
     ALTER TABLE transactions ADD COLUMN note TEXT;
     CREATE TABLE transaction_splits (id TEXT PRIMARY KEY, transaction_id TEXT, category_id TEXT, amount INTEGER);
     CREATE TABLE recaps (id TEXT PRIMARY KEY, type TEXT NOT NULL, period_start TEXT NOT NULL, period_end TEXT NOT NULL,
-      title TEXT NOT NULL, summary TEXT NOT NULL, highlights_json TEXT NOT NULL, generated_at TEXT NOT NULL);
+      title TEXT NOT NULL, summary TEXT NOT NULL, highlights_json TEXT NOT NULL, generated_at TEXT NOT NULL,
+      basis TEXT NOT NULL DEFAULT 'gross_cashflow', currency_scope TEXT NOT NULL DEFAULT 'all');
     CREATE TABLE audit_log (id TEXT PRIMARY KEY, entity TEXT, entity_id TEXT, action TEXT, before_json TEXT, after_json TEXT, source TEXT, note TEXT, created_at TEXT);
     INSERT INTO accounts (id, name, type) VALUES ('account', 'Synthetic account', 'checking');
     DELETE FROM categories;
@@ -295,7 +296,7 @@ describe('gross reporting cross-reader SQLite parity', () => {
     // Simulate a pre-existing older duplicate. Never silently consolidate history.
     state
       .db!.prepare(
-        `INSERT INTO recaps SELECT '01ARZ3NDEKTSV4RRFFQ69G5FAV', type, period_start, period_end, title, summary, highlights_json, '2026-01-01' FROM recaps`
+        `INSERT INTO recaps SELECT '01ARZ3NDEKTSV4RRFFQ69G5FAV', type, period_start, period_end, title, summary, highlights_json, '2026-01-01', basis, currency_scope FROM recaps`
       )
       .run()
     expense('new-currency', 201, 'EUR', 'other')

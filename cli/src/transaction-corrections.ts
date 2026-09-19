@@ -80,22 +80,34 @@ function assertCorrectionReferences(id: string): void {
 }
 function validateCategory(
   categoryId: string | null | undefined,
-  subcategoryId: string | null | undefined
+  subcategoryId: string | null | undefined,
+  transactionType: string,
+  required = false
 ) {
-  if (categoryId && !query('SELECT id FROM categories WHERE id = $1', [categoryId]).length)
-    throw new Error('Category not found.')
+  if (categoryId === null || categoryId === undefined) {
+    if (required) throw new Error('A split category is required.')
+    if (subcategoryId) throw new Error('Subcategory must belong to the selected category.')
+    return
+  }
+  if (!categoryId.trim()) throw new Error('Category cannot be blank.')
+  const category = query<{ type: string }>('SELECT type FROM categories WHERE id = $1', [
+    categoryId,
+  ])[0]
+  if (!category) throw new Error('Category not found.')
+  if (category.type !== transactionType)
+    throw new Error('Category direction must match the transaction direction.')
   if (
     subcategoryId &&
     !query('SELECT id FROM subcategories WHERE id = $1 AND category_id = $2', [
       subcategoryId,
-      categoryId ?? null,
+      categoryId,
     ]).length
   )
     throw new Error('Subcategory must belong to the selected category.')
 }
 const splitSchema = z
   .object({
-    categoryId: z.string().nullable(),
+    categoryId: z.string().trim().min(1),
     subcategoryId: z.string().nullable().optional(),
     amountCentavos: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
     notes: z.string().max(1000).nullable().optional(),
@@ -112,8 +124,8 @@ export const correctTransactionMetadata: ToolDefinition = {
       clearCategory: z.boolean().optional(),
       clearSubcategory: z.boolean().optional(),
       clearNotes: z.boolean().optional(),
-      categoryId: z.string().nullable().optional(),
-      subcategoryId: z.string().nullable().optional(),
+      categoryId: z.string().trim().min(1).nullable().optional(),
+      subcategoryId: z.string().trim().min(1).nullable().optional(),
       notes: z.string().max(1000).nullable().optional(),
       reportingTreatment: z.enum(['normal', 'exclude_from_cashflow']).optional(),
       splits: z.array(splitSchema).min(2).optional(),
@@ -122,7 +134,9 @@ export const correctTransactionMetadata: ToolDefinition = {
       dryRun: z.boolean().default(false),
     })
     .strict(),
-  effects: { writesTo: ['transactions', 'transaction_splits', 'audit_log'] },
+  effects: {
+    writesTo: ['transactions', 'transaction_splits', 'audit_log', 'app_data_state'],
+  },
   execute: async (input) => correctMetadataMutation(input),
 }
 export function correctMetadataMutation(input: z.infer<typeof correctTransactionMetadata.schema>) {
@@ -156,7 +170,7 @@ export function correctMetadataMutation(input: z.infer<typeof correctTransaction
       oldSplits.length > 0,
       input.splits !== undefined
     )
-    validateCategory(after.category_id, after.subcategory_id)
+    validateCategory(after.category_id, after.subcategory_id, before.type)
     guardTransactionEvidence(before, after)
     if (input.splits) {
       const active = activeTransactionEvidence(before.id)
@@ -172,7 +186,8 @@ export function correctMetadataMutation(input: z.infer<typeof correctTransaction
       )
       if (!Number.isSafeInteger(total) || total !== before.amount)
         throw new Error('Split amounts must equal the transaction amount.')
-      for (const split of input.splits) validateCategory(split.categoryId, split.subcategoryId)
+      for (const split of input.splits)
+        validateCategory(split.categoryId, split.subcategoryId, before.type, true)
     }
     if (input.dryRun)
       return { success: true, dryRun: true, before, after, splits: input.splits ?? oldSplits }
@@ -229,7 +244,9 @@ export const setTransactionConsumption: ToolDefinition = {
       auditNote: z.string().max(1000).optional(),
     })
     .strict(),
-  effects: { writesTo: ['transaction_consumption_classifications', 'audit_log'] },
+  effects: {
+    writesTo: ['transaction_consumption_classifications', 'audit_log', 'app_data_state'],
+  },
   execute: async (input) =>
     transaction(() => {
       assertCorrectionReferences(input.transactionId)
@@ -281,7 +298,9 @@ export const clearTransactionConsumption: ToolDefinition = {
       auditNote: z.string().max(1000).optional(),
     })
     .strict(),
-  effects: { writesTo: ['transaction_consumption_classifications', 'audit_log'] },
+  effects: {
+    writesTo: ['transaction_consumption_classifications', 'audit_log', 'app_data_state'],
+  },
   execute: async (input) =>
     transaction(() => {
       const evidence = readConsumptionEvidence()

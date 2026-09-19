@@ -22,6 +22,8 @@ vi.mock('@/lib/split-service', () => ({
   getSplitTransactionIds: vi.fn().mockResolvedValue(new Set()),
   getSplits: vi.fn().mockResolvedValue([]),
   createSplits: vi.fn().mockResolvedValue(undefined),
+  guardFrontendEvidence: vi.fn().mockResolvedValue(undefined),
+  auditFrontendCorrection: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('@/lib/auto-categorize', () => ({
@@ -408,6 +410,7 @@ describe('transaction-store', () => {
       mockCurrentTransactionFromStore()
       mockQuery
         .mockResolvedValueOnce([{ id: '01ACC001', currency: 'USD', is_archived: 0 }])
+        .mockResolvedValueOnce([{ type: 'expense' }])
         .mockResolvedValueOnce([])
 
       await useTransactionStore.getState().update('01TX001', {
@@ -472,6 +475,7 @@ describe('transaction-store', () => {
       mockCurrentTransactionFromStore()
       mockQuery
         .mockResolvedValueOnce([{ id: '01ACC001', currency: 'USD', is_archived: 0 }])
+        .mockResolvedValueOnce([{ type: 'expense' }])
         .mockResolvedValueOnce([])
 
       await useTransactionStore.getState().update('01TX001', {
@@ -527,6 +531,7 @@ describe('transaction-store', () => {
       mockCurrentTransactionFromStore()
       mockQuery
         .mockResolvedValueOnce([{ id: '01ACC001', currency: 'USD', is_archived: 0 }])
+        .mockResolvedValueOnce([{ type: 'expense' }])
         .mockResolvedValueOnce([])
 
       await useTransactionStore.getState().update('01TX001', {
@@ -692,12 +697,9 @@ describe('transaction-store', () => {
       mockQuery
         .mockResolvedValueOnce([existing])
         .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([{ id: '01ACC001', currency: 'USD', is_archived: 0 }])
+        .mockResolvedValueOnce([{ type: 'expense' }])
         .mockResolvedValueOnce([])
-      mockExecute
-        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
-        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
-        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
 
       await useTransactionStore.getState().updateReviewFields('01TX001', {
         categoryId: '01CAT002',
@@ -707,20 +709,14 @@ describe('transaction-store', () => {
         'SELECT id FROM transaction_splits WHERE transaction_id = ? LIMIT 1',
         ['01TX001']
       )
-      expect(mockExecute).toHaveBeenNthCalledWith(
-        2,
-        expect.stringContaining('UPDATE transactions SET'),
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE transactions SET description'),
         [
-          '01ACC001',
+          'Imported lunch',
           '01CAT002',
           null,
-          'expense',
-          2500,
-          'USD',
-          'Imported lunch',
           'keep this note',
-          'posted',
-          '2024-01-15',
+          'normal',
           expect.any(String),
           '01TX001',
         ]
@@ -728,28 +724,27 @@ describe('transaction-store', () => {
       expect(mockAccountFetch).toHaveBeenCalled()
     })
 
-    it('keeps a legacy missing status unchanged while treating it as posted for balance impact', async () => {
+    it('keeps a legacy missing status unchanged during metadata-only review', async () => {
       const existing = reviewTransaction({ status: undefined })
       mockQuery
         .mockResolvedValueOnce([existing])
         .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([{ id: '01ACC001', currency: 'USD', is_archived: 0 }])
+        .mockResolvedValueOnce([{ type: 'expense' }])
         .mockResolvedValueOnce([])
-      mockExecute
-        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
-        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
-        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
 
       await useTransactionStore.getState().updateReviewFields('01TX001', {
         categoryId: '01CAT002',
       })
 
-      const updateParams = mockExecute.mock.calls[1]?.[1] as unknown[]
-      expect(updateParams[8]).toBeNull()
-      expect(mockExecute).toHaveBeenNthCalledWith(
-        3,
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE transactions SET description'),
+        expect.any(Array)
+      )
+      expect(mockExecute).toHaveBeenCalledTimes(1)
+      expect(mockExecute).not.toHaveBeenCalledWith(
         expect.stringContaining('UPDATE accounts SET balance = balance + ?'),
-        expect.arrayContaining([-2500])
+        expect.anything()
       )
     })
 
@@ -760,7 +755,6 @@ describe('transaction-store', () => {
         { is_reconciliation_adjustment: 1 },
         'Linked financial provenance',
       ],
-      ['finalized statement', { is_finalized_statement: 1 }, 'Linked financial provenance'],
     ])(
       'rejects protected %s rows before an inline review mutation',
       async (_, protection, message) => {
@@ -777,6 +771,25 @@ describe('transaction-store', () => {
         )
       }
     )
+
+    it('allows finalized ordinary review metadata through the correction path', async () => {
+      mockQuery
+        .mockResolvedValueOnce([reviewTransaction({ is_finalized_statement: 1 })])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ type: 'expense' }])
+      mockExecute
+        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+        .mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
+
+      await useTransactionStore.getState().updateReviewFields('01TX001', {
+        categoryId: '01CAT002',
+      })
+
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE transactions SET description'),
+        expect.arrayContaining(['01CAT002'])
+      )
+    })
 
     it('rejects completed placeholder lifecycle rows before an inline review mutation', async () => {
       mockQuery.mockResolvedValueOnce([

@@ -108,6 +108,38 @@ describe('frontend shared correction policy on real SQLite', () => {
     })
     expect(state.db!.prepare('SELECT COUNT(*) AS n FROM audit_log').get()).toEqual({ n: 4 })
   })
+  it('rejects blank and wrong-direction split categories before writes and supports parent clearing', async () => {
+    const before = state.db!.prepare('SELECT * FROM transaction_splits').all()
+    await expect(
+      createSplits(
+        'tx',
+        [
+          { categoryId: '', amount: 400 },
+          { categoryId: 'other', amount: 600 },
+        ],
+        1000
+      )
+    ).rejects.toThrow(/category/i)
+    state.db!.exec(
+      "INSERT INTO categories (id,name,type) VALUES ('salary-correction','Correction income','income')"
+    )
+    await expect(
+      createSplits(
+        'tx',
+        [
+          { categoryId: 'salary-correction', amount: 400 },
+          { categoryId: 'other', amount: 600 },
+        ],
+        1000
+      )
+    ).rejects.toThrow(/direction/)
+    await expect(
+      useTransactionStore.getState().correctMetadata('tx', { category_id: 'salary-correction' })
+    ).rejects.toThrow(/direction/)
+    expect(state.db!.prepare('SELECT * FROM transaction_splits').all()).toEqual(before)
+    await useTransactionStore.getState().correctMetadata('tx', { category_id: null })
+    expect(row()).toMatchObject({ category_id: null, subcategory_id: null })
+  })
   it('does not falsely finalize leftover staged pending rows by legacy batch name', async () => {
     state.db!.exec(
       "INSERT INTO account_reconciliations (id,account_id,reconciliation_date,actual_balance,stored_balance_before,ledger_balance_before,ledger_balance_after,adjustment_amount,staging_batch_id) VALUES ('legacy','a','2026-01-31',0,0,0,0,0,'batch'); UPDATE transactions SET staging_batch_id='batch', ledger_treatment='staged_no_balance_impact', status='pending' WHERE id='tx'"

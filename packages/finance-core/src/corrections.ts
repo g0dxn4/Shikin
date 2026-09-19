@@ -96,6 +96,7 @@ export function applyMetadataCorrection<T extends CorrectionTransaction>(
   return {
     ...row,
     ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)),
+    ...(patch.category_id === null ? { subcategory_id: null } : {}),
   }
 }
 export function isConsumptionEligible(row: CorrectionTransaction): boolean {
@@ -117,17 +118,22 @@ export function owningAllocation(
   const row = evidence.transactions.find((tx) => tx.id === classification.transaction_id)
   if (!row || !isConsumptionEligible(row))
     throw new Error('Classification requires an eligible ordinary posted allocation.')
+  if (!Number.isSafeInteger(row.amount) || row.amount <= 0)
+    throw new Error('Owning amount requires a positive safe parent amount.')
   const ownedSplits = evidence.splits.filter((split) => split.transaction_id === row.id)
   const split = classification.split_id
     ? ownedSplits.find((item) => item.id === classification.split_id)
     : undefined
   if ((classification.split_id && !split) || (!classification.split_id && ownedSplits.length))
     throw new Error('Classification must identify an owned split, or an unsplit transaction.')
-  if (
-    ownedSplits.length &&
-    (ownedSplits.some((item) => !Number.isSafeInteger(item.amount) || item.amount <= 0) ||
-      ownedSplits.reduce((sum, item) => sum + item.amount, 0) !== row.amount)
-  )
+  let splitTotal = 0
+  for (const item of ownedSplits) {
+    if (!Number.isSafeInteger(item.amount) || item.amount <= 0)
+      throw new Error('Invalid split allocation totals.')
+    splitTotal += item.amount
+    if (!Number.isSafeInteger(splitTotal)) throw new Error('Invalid split allocation totals.')
+  }
+  if (ownedSplits.length && splitTotal !== row.amount)
     throw new Error('Invalid split allocation totals.')
   const amount = split?.amount ?? row.amount
   if (
@@ -281,7 +287,7 @@ export function netConsumption(evidence: ConsumptionEvidence, start: string, end
         row.type !== 'transfer' &&
         !row.is_archived &&
         !row.matched_transaction_id &&
-        !row.is_placeholder &&
+        (!row.is_placeholder || (row.placeholder_status ?? 'unresolved') === 'unresolved') &&
         !['reconciliation_bridge', 'archived_transfer_mirror'].includes(
           row.transaction_kind ?? 'standard'
         ) &&

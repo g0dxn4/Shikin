@@ -1,9 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-vi.mock('@/lib/database', () => ({
-  query: vi.fn(),
-  execute: vi.fn(),
-}))
+vi.mock('@/lib/database', () => {
+  const query = vi.fn()
+  const execute = vi.fn()
+  return {
+    query,
+    execute,
+    withTransaction: vi.fn(
+      async (fn: (tx: { query: typeof query; execute: typeof execute }) => Promise<unknown>) =>
+        fn({ query, execute })
+    ),
+  }
+})
 
 vi.mock('@/lib/ulid', () => ({
   generateId: vi.fn().mockReturnValue('01SPLIT00000000000000000000'),
@@ -24,6 +32,24 @@ const mockExecute = vi.mocked(execute)
 describe('split-service', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql === 'SELECT * FROM transactions')
+        return [
+          {
+            id: 'tx1',
+            type: 'expense',
+            amount: 10000,
+            currency: 'USD',
+            description: 'Synthetic',
+          },
+        ]
+      if (sql === 'SELECT * FROM transaction_splits') return []
+      if (sql === 'SELECT * FROM transaction_consumption_classifications') return []
+      if (sql.includes('COALESCE(SUM(amount)')) return [{ total: 0 }]
+      if (sql.includes('FROM categories')) return [{ type: 'expense' }]
+      if (sql.includes('FROM subcategories')) return [{ id: 'subcategory' }]
+      return []
+    })
   })
 
   describe('createSplits', () => {
@@ -64,7 +90,7 @@ describe('split-service', () => {
           ],
           10000
         )
-      ).rejects.toThrow('Split amounts (8000) must equal transaction total (10000)')
+      ).rejects.toThrow('Positive safe split amounts must equal the transaction total.')
     })
 
     it('passes subcategoryId and notes when provided', async () => {

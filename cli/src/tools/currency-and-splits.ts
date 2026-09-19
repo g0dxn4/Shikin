@@ -1,15 +1,13 @@
 import {
   z,
   query,
-  execute,
-  transaction,
-  generateId,
   toCentavos,
   boundedText,
   currencyCode,
   positiveMoneyAmount,
   type ToolDefinition,
 } from './shared.js'
+import { correctMetadataMutation } from '../transaction-corrections.js'
 
 type SplitTransactionInput = {
   transactionId: string
@@ -18,6 +16,9 @@ type SplitTransactionInput = {
     amount: number
     notes?: string
   }>
+  dryRun: boolean
+  auditSource?: string
+  auditNote?: string
 }
 
 type TransactionSplitTargetRow = {
@@ -128,7 +129,7 @@ const convertCurrency: ToolDefinition = {
 const splitTransaction: ToolDefinition = {
   name: 'split-transaction',
   description:
-    'Split a transaction across multiple categories. Use when a single transaction should be allocated to different spending categories.',
+    'Audited split correction across multiple categories. Amounts remain in the main currency unit. Finalized ordinary rows are supported; protected provenance and dependent evidence require their dedicated workflows.',
   schema: z.object({
     transactionId: boundedText('Transaction ID', 'The ID of the transaction to split', 128),
     splits: z
@@ -141,8 +142,20 @@ const splitTransaction: ToolDefinition = {
       )
       .min(2)
       .describe('Array of split portions. Must have at least 2 splits.'),
+    dryRun: z.boolean().default(false),
+    auditSource: boundedText('Audit source', 'Optional correction audit source', 120).optional(),
+    auditNote: boundedText('Audit note', 'Optional correction audit note', 1000).optional(),
   }),
-  execute: async ({ transactionId, splits }: SplitTransactionInput) => {
+  effects: {
+    writesTo: ['transactions', 'transaction_splits', 'audit_log', 'app_data_state'],
+  },
+  execute: async ({
+    transactionId,
+    splits,
+    dryRun,
+    auditSource,
+    auditNote,
+  }: SplitTransactionInput) => {
     const transactions = await query<TransactionSplitTargetRow>(
       'SELECT id, amount, description FROM transactions WHERE id = $1',
       [transactionId]
@@ -167,21 +180,21 @@ const splitTransaction: ToolDefinition = {
       }
     }
 
-    transaction(() => {
-      execute('DELETE FROM transaction_splits WHERE transaction_id = $1', [transactionId])
-
-      for (const split of splitsCentavos) {
-        const splitId = generateId()
-        execute(
-          `INSERT INTO transaction_splits (id, transaction_id, category_id, subcategory_id, amount, notes)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [splitId, transactionId, split.categoryId, null, split.amount, split.notes]
-        )
-      }
+    correctMetadataMutation({
+      transactionId,
+      splits: splitsCentavos.map((split) => ({
+        categoryId: split.categoryId,
+        amountCentavos: split.amount,
+        notes: split.notes,
+      })),
+      dryRun,
+      auditSource,
+      auditNote,
     })
 
     return {
       success: true,
+      ...(dryRun ? { dryRun: true } : {}),
       transactionId,
       description: targetTransaction.description,
       splitCount: splits.length,

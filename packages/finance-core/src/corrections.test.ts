@@ -148,4 +148,79 @@ describe('shared correction policy', () => {
       )
     ).toMatchObject({ classificationComplete: false, unresolvedIds: ['buy'] })
   })
+  it('does not silently omit a financially effective unresolved placeholder', () => {
+    const data: ConsumptionEvidence = {
+      transactions: [
+        {
+          id: 'p',
+          type: 'expense',
+          amount: 1000,
+          currency: 'USD',
+          date: '2026-09-01',
+          status: 'posted',
+          ledger_treatment: 'normal',
+          reporting_treatment: 'normal',
+          transaction_kind: 'standard',
+          is_placeholder: 1,
+          placeholder_status: 'unresolved',
+        },
+      ],
+      splits: [],
+      classifications: [],
+    }
+    expect(netConsumption(data, '2026-09-01', '2026-09-30')).toMatchObject({
+      classificationComplete: false,
+      unresolvedIds: ['p'],
+      totalsByCurrency: [],
+    })
+  })
+  it('rejects split classifications when the parent amount or aggregate is unsafe', () => {
+    const data: ConsumptionEvidence = {
+      transactions: [
+        {
+          id: 'unsafe',
+          type: 'expense',
+          amount: Number.MAX_SAFE_INTEGER + 1,
+          currency: 'USD',
+          date: '2026-09-01',
+        },
+      ],
+      splits: [
+        {
+          id: 's1',
+          transaction_id: 'unsafe',
+          amount: 4503599627370496,
+          category_id: 'food',
+        },
+        {
+          id: 's2',
+          transaction_id: 'unsafe',
+          amount: 4503599627370496,
+          category_id: 'food',
+        },
+      ],
+      classifications: [
+        {
+          id: 'c1',
+          transaction_id: 'unsafe',
+          split_id: 's1',
+          role: 'cash_withdrawal',
+          referenced_purchase_id: null,
+        },
+        {
+          id: 'c2',
+          transaction_id: 'unsafe',
+          split_id: 's2',
+          role: 'cash_withdrawal',
+          referenced_purchase_id: null,
+        },
+      ],
+    }
+    expect(() => validateConsumptionEvidence(data)).toThrow(/positive safe parent|split allocation/)
+    expect(netConsumption(data, '2026-01-01', '2026-12-31')).toMatchObject({
+      classificationComplete: false,
+      unresolvedIds: ['s1', 's2'],
+      totalsByCurrency: [],
+    })
+  })
 })

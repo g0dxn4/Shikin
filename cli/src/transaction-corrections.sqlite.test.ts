@@ -22,7 +22,13 @@ vi.mock('./notebook.js', () => ({
 import { auditAndContextTools } from './tools/audit-and-context.js'
 import { transactionsTools } from './tools/transactions.js'
 import { financialInsightsTools } from './tools/financial-insights.js'
-const tools = [...transactionsTools, ...financialInsightsTools, ...auditAndContextTools]
+import { currencyAndSplitTools } from './tools/currency-and-splits.js'
+const tools = [
+  ...transactionsTools,
+  ...financialInsightsTools,
+  ...auditAndContextTools,
+  ...currencyAndSplitTools,
+]
 const run = (name: string, input: Record<string, unknown>) => {
   const tool = tools.find((item) => item.name === name)!
   return tool.execute(tool.schema.parse(input))
@@ -48,7 +54,7 @@ beforeEach(() => {
   state.db.pragma('foreign_keys = ON')
   runHostedTestMigrations(state.db)
   state.db.exec(
-    "INSERT INTO accounts (id,name,type,balance) VALUES ('a','Synthetic bank','checking',-1000), ('b','Synthetic card','credit_card',1000); INSERT INTO categories (id,name,type) VALUES ('food','Synthetic food','expense'), ('other','Synthetic other','expense');"
+    "INSERT INTO accounts (id,name,type,balance) VALUES ('a','Synthetic bank','checking',-1000), ('b','Synthetic card','credit_card',1000); INSERT INTO categories (id,name,type) VALUES ('food','Synthetic food','expense'), ('other','Synthetic other','expense'), ('salary','Synthetic salary','income');"
   )
 })
 afterEach(() => state.db?.close())
@@ -88,6 +94,46 @@ describe('audited transaction correction SQLite preservation', () => {
     expect((await run('update-transaction', { transactionId: 'buy', amount: 20 })).success).toBe(
       false
     )
+  })
+  it('rejects unsafe split parents in reporting and classification mutation', async () => {
+    add('unsafe', 'expense', Number.MAX_SAFE_INTEGER + 1, '2026-09-01')
+    state.db!.exec(
+      "INSERT INTO transaction_splits (id,transaction_id,category_id,amount) VALUES ('unsafe-1','unsafe','food',4503599627370496),('unsafe-2','unsafe','other',4503599627370496)"
+    )
+    await expect(
+      run('set-transaction-consumption', {
+        transactionId: 'unsafe',
+        splitId: 'unsafe-1',
+        role: 'cash_withdrawal',
+      })
+    ).rejects.toThrow(/positive safe parent|split allocation/)
+    expect(
+      await run('get-spending-summary', {
+        period: 'custom',
+        startDate: '2026-09-01',
+        endDate: '2026-09-30',
+        basis: 'net_consumption',
+      })
+    ).toMatchObject({ complete: false, unresolvedIds: ['unsafe-1', 'unsafe-2'] })
+  })
+  it('keeps posted unresolved placeholders incomplete instead of reporting a complete zero', async () => {
+    add('placeholder', 'expense', 1000, '2026-09-01')
+    state.db!.exec(
+      "UPDATE transactions SET is_placeholder=1, placeholder_status='unresolved', status='posted', ledger_treatment='normal', reporting_treatment='normal', transaction_kind='standard' WHERE id='placeholder'"
+    )
+    expect(
+      await run('get-spending-summary', {
+        period: 'custom',
+        startDate: '2026-09-01',
+        endDate: '2026-09-30',
+        basis: 'net_consumption',
+      })
+    ).toMatchObject({
+      complete: false,
+      classificationComplete: false,
+      unresolvedIds: ['placeholder'],
+      totalsByCurrency: [],
+    })
   })
   it('validates wrong owner, independent caps, referenced purchase remaps and rolls back failures', async () => {
     add('buy')
@@ -148,6 +194,161 @@ describe('audited transaction correction SQLite preservation', () => {
     await expect(
       run('correct-transaction-metadata', { transactionId: 'refund2', categoryId: 'other' })
     ).rejects.toThrow(/split replacement/)
+  })
+  it('routes the public main-unit split command through audited correction policy', async () => {
+    add('finalized')
+    state.db!.exec(
+      "INSERT INTO account_reconciliations (id,account_id,reconciliation_date,actual_balance,stored_balance_before,ledger_balance_before,ledger_balance_after,adjustment_amount,selection_mode) VALUES ('split-final','a','2026-01-31',0,0,0,0,0,'explicit_rows'); UPDATE transactions SET finalization_id='split-final' WHERE id='finalized'"
+    )
+    const before = snapshot()
+    const preview = await run('split-transaction', {
+      transactionId: 'finalized',
+      splits: [
+        { categoryId: 'food', amount: 4 },
+        { categoryId: 'other', amount: 6 },
+      ],
+      dryRun: true,
+      auditSource: 'operator',
+      auditNote: 'preview',
+    })
+    expect(preview).toMatchObject({
+      success: true,
+      dryRun: true,
+      transactionId: 'finalized',
+      description: 'finalized',
+      splitCount: 2,
+    })
+    expect(snapshot()).toEqual(before)
+
+    const applied = await run('split-transaction', {
+      transactionId: 'finalized',
+      splits: [
+        { categoryId: 'food', amount: 4 },
+        { categoryId: 'other', amount: 6 },
+      ],
+      auditSource: 'operator',
+      auditNote: 'approved allocation',
+    })
+    expect(applied).toMatchObject({
+      success: true,
+      transactionId: 'finalized',
+      description: 'finalized',
+      splitCount: 2,
+      message: 'Split "finalized" into 2 categories.',
+    })
+    expect(
+      state.db!.prepare('SELECT category_id,amount FROM transaction_splits ORDER BY amount').all()
+    ).toEqual([
+      { category_id: 'food', amount: 400 },
+      { category_id: 'other', amount: 600 },
+    ])
+    expect(state.db!.prepare('SELECT action,source,note FROM audit_log').get()).toEqual({
+      action: 'correct-metadata',
+      source: 'operator',
+      note: 'approved allocation',
+    })
+  })
+  it.each(['technical', 'matched', 'classification', 'payment', 'bucket'])(
+    'prevents the public split command from bypassing %s evidence',
+    async (protection) => {
+      add('protected')
+      if (protection === 'technical')
+        state.db!.exec(
+          "UPDATE transactions SET transaction_kind='reconciliation_bridge' WHERE id='protected'"
+        )
+      if (protection === 'matched') {
+        add('mirror', 'income')
+        state.db!.exec(
+          "UPDATE transactions SET matched_transaction_id='mirror' WHERE id='protected'"
+        )
+      }
+      if (protection === 'classification') {
+        add('refund', 'income', 100)
+        const purchase = (
+          await run('set-transaction-consumption', {
+            transactionId: 'protected',
+            role: 'purchase',
+          })
+        ).classification.id
+        await run('set-transaction-consumption', {
+          transactionId: 'refund',
+          role: 'refund',
+          referencedPurchaseId: purchase,
+        })
+      }
+      if (protection === 'payment')
+        state.db!.exec(
+          "INSERT INTO credit_card_statements (id,account_id,statement_end_date,due_date,statement_balance) VALUES ('split-st','b','2026-01-31','2026-02-15',1000); INSERT INTO card_statement_payment_links (id,statement_id,transaction_id,original_statement_id,original_transaction_id,amount,mode) VALUES ('split-link','split-st','protected','split-st','protected',100,'apply_to_unpaid')"
+        )
+      if (protection === 'bucket')
+        state.db!.exec(
+          "INSERT INTO cashflow_buckets (id,name) VALUES ('split-bucket','Synthetic'); INSERT INTO cashflow_bucket_allocations (id,bucket_id,transaction_id,amount,allocation_date) VALUES ('split-allocation','split-bucket','protected',100,'2026-01-15')"
+        )
+      const before = snapshot()
+      await expect(
+        run('split-transaction', {
+          transactionId: 'protected',
+          splits: [
+            { categoryId: 'food', amount: 4 },
+            { categoryId: 'other', amount: 6 },
+          ],
+        })
+      ).rejects.toThrow(/provenance|classifications|Unlink|bucket allocations/)
+      expect(snapshot()).toEqual(before)
+    }
+  )
+  it('rejects null, blank and wrong-direction split categories while allowing parent clearing', async () => {
+    add('categories')
+    expect(() =>
+      run('correct-transaction-metadata', {
+        transactionId: 'categories',
+        splits: [
+          { categoryId: null, amountCentavos: 400 },
+          { categoryId: 'other', amountCentavos: 600 },
+        ],
+      })
+    ).toThrow()
+    expect(() =>
+      run('correct-transaction-metadata', {
+        transactionId: 'categories',
+        splits: [
+          { categoryId: '   ', amountCentavos: 400 },
+          { categoryId: 'other', amountCentavos: 600 },
+        ],
+      })
+    ).toThrow()
+    await expect(
+      run('correct-transaction-metadata', {
+        transactionId: 'categories',
+        splits: [
+          { categoryId: 'salary', amountCentavos: 400 },
+          { categoryId: 'other', amountCentavos: 600 },
+        ],
+      })
+    ).rejects.toThrow(/direction/)
+    await expect(
+      run('correct-transaction-metadata', { transactionId: 'categories', categoryId: 'salary' })
+    ).rejects.toThrow(/direction/)
+    await run('correct-transaction-metadata', {
+      transactionId: 'categories',
+      clearCategory: true,
+    })
+    expect(row('categories').category_id).toBeNull()
+  })
+  it('declares trigger-maintained app data state for financial correction effects only', () => {
+    for (const name of [
+      'correct-transaction-metadata',
+      'set-transaction-consumption',
+      'clear-transaction-consumption',
+      'split-transaction',
+    ])
+      expect(tools.find((tool) => tool.name === name)?.effects?.writesTo).toContain(
+        'app_data_state'
+      )
+    expect(tools.find((tool) => tool.name === 'save-spending-recap')?.effects?.writesTo).toEqual([
+      'recaps',
+      'audit_log',
+    ])
   })
   it('guards live payments but allows metadata and voided links; protects bucket capacity', async () => {
     add('pay')

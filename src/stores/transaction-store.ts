@@ -400,7 +400,8 @@ async function updateTransactionWithData(
   await assertCategoryAssignment(
     tx,
     newIsTransfer ? null : data.categoryId,
-    data.subcategoryId === undefined ? existing.subcategory_id : data.subcategoryId
+    data.subcategoryId === undefined ? existing.subcategory_id : data.subcategoryId,
+    data.type
   )
   await guardFrontendEvidence(tx, existing, {
     ...existing,
@@ -475,13 +476,20 @@ async function updateTransactionWithData(
 async function assertCategoryAssignment(
   tx: TransactionClient,
   categoryId: string | null,
-  subcategoryId: string | null | undefined
+  subcategoryId: string | null | undefined,
+  transactionType: string
 ) {
-  if (
-    categoryId &&
-    !(await tx.query('SELECT id FROM categories WHERE id = ?', [categoryId])).length
-  )
-    throw new Error('Category not found.')
+  if (categoryId === null) {
+    if (subcategoryId) throw new Error('Subcategory must belong to the selected category.')
+    return
+  }
+  if (!categoryId.trim()) throw new Error('Category cannot be blank.')
+  const category = await tx.query<{ type: string }>('SELECT type FROM categories WHERE id = ?', [
+    categoryId,
+  ])
+  if (!category.length) throw new Error('Category not found.')
+  if (category[0].type !== transactionType)
+    throw new Error('Category direction must match the transaction direction.')
   if (
     subcategoryId &&
     !(
@@ -509,7 +517,7 @@ async function correctMetadata(
     !!existing.has_splits,
     splits !== undefined
   )
-  await assertCategoryAssignment(tx, after.category_id, after.subcategory_id)
+  await assertCategoryAssignment(tx, after.category_id ?? null, after.subcategory_id, existing.type)
   await guardFrontendEvidence(tx, existing, after)
   if (splits) await createSplits(existing.id, splits, existing.amount, tx)
   await tx.execute(

@@ -1,3 +1,4 @@
+import { readNetConsumption } from '../consumption-read.js'
 import { REPORTING_CTE, reportingReadFailure, readBudgetSpending } from '../reporting-read.js'
 import {
   dayjs,
@@ -12,7 +13,11 @@ import {
   type RecapType,
 } from './shared.js'
 
-export async function generateSpendingRecapSummary(type: RecapType, period?: string) {
+export async function generateSpendingRecapSummary(
+  type: RecapType,
+  period?: string,
+  basis: 'gross_cashflow' | 'net_consumption' = 'gross_cashflow'
+) {
   const anchor = period ? dayjs(period) : dayjs()
   if (!anchor.isValid()) {
     return {
@@ -36,6 +41,45 @@ export async function generateSpendingRecapSummary(type: RecapType, period?: str
     type === 'weekly'
       ? anchor.subtract(7, 'day').format('YYYY-MM-DD')
       : anchor.subtract(1, 'month').endOf('month').format('YYYY-MM-DD')
+
+  if (basis === 'net_consumption') {
+    const result = readNetConsumption(start, end)
+    const summary = [
+      `Explicit net consumption (${start} to ${end}). ${result.message}`,
+      ...result.totalsByCurrency.map(
+        (row) =>
+          `${row.currency}: known net consumption ${formatMoney(row.consumptionCentavos, row.currency)}; earned income ${formatMoney(row.earnedIncomeCentavos, row.currency)}.`
+      ),
+      ...result.byCategory.map(
+        (row) =>
+          `${row.currency} category ${row.categoryId ?? 'uncategorized'}: ${formatMoney(row.amountCentavos, row.currency)}.`
+      ),
+      result.unresolvedIds.length
+        ? `Unresolved allocations: ${result.unresolvedIds.join(', ')}.`
+        : '',
+      result.uncoveredAccountIds.length
+        ? `Accounts without verified period coverage: ${result.uncoveredAccountIds.join(', ')}.`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' ')
+    const record = {
+      ...buildRecapRecord(
+        type,
+        start,
+        end,
+        `${type} net consumption recap`,
+        summary,
+        result.totalsByCurrency.map((row) => ({
+          label: `${row.currency} Known net consumption`,
+          value: formatMoney(row.consumptionCentavos, row.currency),
+        })),
+        result.totalsByCurrency.map((row) => row.currency)
+      ),
+      basis: 'net_consumption' as const,
+    }
+    return { ...result, recap: record }
+  }
 
   const failure = reportingReadFailure(previousStart, end)
   if (failure) return failure

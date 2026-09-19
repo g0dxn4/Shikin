@@ -267,5 +267,13 @@
   "detail": {
     "notes": "Notas",
     "reference": "Referencia"
+  },
+  "correction": {
+    "financialLocked": "Solo corrección de metadatos. El historial financiero está protegido; borra las clasificaciones o desvincula la evidencia antes de reemplazar las asignaciones.",
+    "subcategory": "Subcategoría",
+    "clear": "Ninguna (borrar)",
+    "reporting": "Informes de flujo de efectivo",
+    "normal": "Incluir en el flujo de efectivo",
+    "excluded": "Excluir del flujo de efectivo"
   }
 }

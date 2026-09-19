@@ -1,3 +1,4 @@
+import { applyMetadataCorrection, type MetadataCorrection } from '@shikin/finance-core/corrections'
 import { create } from 'zustand'
 import { query, withTransaction } from '@/lib/database'
 import type { TransactionClient } from '@/lib/database'
@@ -8,6 +9,8 @@ import { learnFromTransaction } from '@/lib/auto-categorize'
 import { useAccountStore } from './account-store'
 import {
   createSplits,
+  guardFrontendEvidence,
+  auditFrontendCorrection,
   getSplits as fetchSplits,
   getSplitCategoryMembership,
 } from '@/lib/split-service'
@@ -26,6 +29,8 @@ interface TransactionFormData {
   date: string
   notes: string | null
   status?: Transaction['status'] | null
+  subcategoryId?: string | null
+  reportingTreatment?: 'normal' | 'exclude_from_cashflow'
 }
 
 interface MutationOptions {
@@ -267,10 +272,10 @@ async function getTransactionForMutation(
               ta.account_mode AS transfer_account_mode,
               EXISTS(SELECT 1 FROM receivables r WHERE r.matched_transaction_id = t.id) AS is_receivable_payment,
               EXISTS(SELECT 1 FROM account_reconciliations ar WHERE ar.adjustment_transaction_id = t.id) AS is_reconciliation_adjustment,
-              EXISTS(
+              (t.finalization_id IS NOT NULL OR EXISTS(
                 SELECT 1 FROM account_reconciliations ar
-                WHERE ar.account_id = t.account_id AND ar.staging_batch_id = t.staging_batch_id
-              ) AS is_finalized_statement,
+                WHERE ar.account_id = t.account_id AND ar.staging_batch_id = t.staging_batch_id AND ar.selection_mode = 'legacy_batch' AND COALESCE(t.ledger_treatment, 'normal') = 'normal' AND COALESCE(t.status, 'posted') != 'pending'
+              )) AS is_finalized_statement,
               EXISTS(
                 SELECT 1 FROM transaction_splits ts WHERE ts.transaction_id = t.id
               ) AS has_splits
@@ -284,7 +289,7 @@ async function getTransactionForMutation(
   return rows[0] ?? null
 }
 
-function assertMutableTransaction(transaction: TransactionForMutation): void {
+function assertMutableTransaction(transaction: TransactionForMutation, metadataOnly = false): void {
   if (transaction.is_archived === 1) {
     throw new Error('Archived transaction provenance cannot be edited or deleted.')
   }
@@ -301,7 +306,7 @@ function assertMutableTransaction(transaction: TransactionForMutation): void {
     transaction.matched_transaction_id ||
     transaction.is_receivable_payment ||
     transaction.is_reconciliation_adjustment ||
-    transaction.is_finalized_statement
+    (!metadataOnly && (transaction.finalization_id || transaction.is_finalized_statement))
   ) {
     throw new Error(
       'Linked financial provenance requires an explicit unmatch or reversal workflow.'
@@ -332,6 +337,24 @@ async function updateTransactionWithData(
 ): Promise<boolean> {
   const existing = currentTransaction ?? (await getTransactionForMutation(tx, id))
   if (!existing) return false
+  const metadataOnly =
+    toCentavos(data.amount) === existing.amount &&
+    data.type === existing.type &&
+    data.accountId === existing.account_id &&
+    data.transferToAccountId === existing.transfer_to_account_id &&
+    data.currency === existing.currency &&
+    data.date === existing.date &&
+    (data.status ?? existing.status ?? 'posted') === (existing.status ?? 'posted')
+  if (metadataOnly && existing.type !== 'transfer') {
+    await correctMetadata(tx, existing, {
+      description: data.description,
+      category_id: data.categoryId,
+      subcategory_id: data.subcategoryId,
+      notes: data.notes,
+      reporting_treatment: data.reportingTreatment,
+    })
+    return true
+  }
   assertMutableTransaction(existing)
   if (existing.has_splits) {
     throw new Error('Split transactions require their dedicated split workflow.')
@@ -374,6 +397,22 @@ async function updateTransactionWithData(
     })
   }
 
+  await assertCategoryAssignment(
+    tx,
+    newIsTransfer ? null : data.categoryId,
+    data.subcategoryId === undefined ? existing.subcategory_id : data.subcategoryId
+  )
+  await guardFrontendEvidence(tx, existing, {
+    ...existing,
+    amount: newAmountCentavos,
+    type: data.type,
+    account_id: sourceAccount.id,
+    transfer_to_account_id: transferDestination?.id ?? null,
+    currency,
+    status: newStatus,
+    date: data.date,
+    reporting_treatment: data.reportingTreatment ?? existing.reporting_treatment,
+  })
   await applyBalanceImpact(
     tx,
     {
@@ -392,7 +431,7 @@ async function updateTransactionWithData(
   )
 
   const updateResult = await tx.execute(
-    `UPDATE transactions SET account_id = ?, category_id = ?, transfer_to_account_id = ?, type = ?, amount = ?, currency = ?, description = ?, notes = ?, status = ?, date = ?, updated_at = ?
+    `UPDATE transactions SET account_id = ?, category_id = ?, transfer_to_account_id = ?, type = ?, amount = ?, currency = ?, description = ?, notes = ?, status = ?, date = ?, updated_at = ?, subcategory_id = ?, reporting_treatment = ?
       WHERE id = ?`,
     [
       sourceAccount.id,
@@ -406,6 +445,8 @@ async function updateTransactionWithData(
       newStatus,
       data.date,
       now,
+      data.subcategoryId === undefined ? existing.subcategory_id : data.subcategoryId,
+      data.reportingTreatment ?? existing.reporting_treatment ?? 'normal',
       id,
     ]
   )
@@ -427,7 +468,71 @@ async function updateTransactionWithData(
     now,
     1
   )
+  await auditFrontendCorrection(tx, id, 'update', existing, { ...data, amount: newAmountCentavos })
   return true
+}
+
+async function assertCategoryAssignment(
+  tx: TransactionClient,
+  categoryId: string | null,
+  subcategoryId: string | null | undefined
+) {
+  if (
+    categoryId &&
+    !(await tx.query('SELECT id FROM categories WHERE id = ?', [categoryId])).length
+  )
+    throw new Error('Category not found.')
+  if (
+    subcategoryId &&
+    !(
+      await tx.query('SELECT id FROM subcategories WHERE id = ? AND category_id = ?', [
+        subcategoryId,
+        categoryId,
+      ])
+    ).length
+  )
+    throw new Error('Subcategory must belong to the selected category.')
+}
+
+async function correctMetadata(
+  tx: TransactionClient,
+  existing: TransactionForMutation,
+  patch: MetadataCorrection,
+  splits?: SplitInput[],
+  auditSource?: string,
+  auditNote?: string
+) {
+  assertMutableTransaction(existing, true)
+  const after = applyMetadataCorrection(
+    existing,
+    patch,
+    !!existing.has_splits,
+    splits !== undefined
+  )
+  await assertCategoryAssignment(tx, after.category_id, after.subcategory_id)
+  await guardFrontendEvidence(tx, existing, after)
+  if (splits) await createSplits(existing.id, splits, existing.amount, tx)
+  await tx.execute(
+    'UPDATE transactions SET description = ?, category_id = ?, subcategory_id = ?, notes = ?, reporting_treatment = ?, updated_at = ? WHERE id = ?',
+    [
+      after.description,
+      after.category_id,
+      after.subcategory_id ?? null,
+      after.notes,
+      after.reporting_treatment === undefined ? 'normal' : after.reporting_treatment,
+      new Date().toISOString(),
+      existing.id,
+    ]
+  )
+  await auditFrontendCorrection(
+    tx,
+    existing.id,
+    'correct-metadata',
+    existing,
+    after,
+    auditSource,
+    auditNote
+  )
 }
 
 /** Transaction row with joined display names */
@@ -452,6 +557,13 @@ interface TransactionState {
   add: (data: TransactionFormData, options?: MutationOptions) => Promise<void>
   addWithSplits: (data: TransactionFormData, splits: SplitInput[]) => Promise<void>
   update: (id: string, data: TransactionFormData) => Promise<void>
+  correctMetadata: (
+    id: string,
+    patch: MetadataCorrection,
+    splits?: SplitInput[],
+    auditSource?: string,
+    auditNote?: string
+  ) => Promise<void>
   updateReviewFields: (id: string, fields: ReviewFieldUpdate) => Promise<void>
   remove: (id: string) => Promise<void>
   getById: (id: string) => TransactionWithDetails | undefined
@@ -476,10 +588,10 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
                   ta.name as transfer_to_account_name,
                   EXISTS(SELECT 1 FROM receivables r WHERE r.matched_transaction_id = t.id) AS is_receivable_payment,
                   EXISTS(SELECT 1 FROM account_reconciliations ar WHERE ar.adjustment_transaction_id = t.id) AS is_reconciliation_adjustment,
-                  EXISTS(
+                  (t.finalization_id IS NOT NULL OR EXISTS(
                     SELECT 1 FROM account_reconciliations ar
-                    WHERE ar.account_id = t.account_id AND ar.staging_batch_id = t.staging_batch_id
-                  ) AS is_finalized_statement
+                    WHERE ar.account_id = t.account_id AND ar.staging_batch_id = t.staging_batch_id AND ar.selection_mode = 'legacy_batch' AND COALESCE(t.ledger_treatment, 'normal') = 'normal' AND COALESCE(t.status, 'posted') != 'pending'
+                  )) AS is_finalized_statement
            FROM transactions t
            LEFT JOIN accounts a ON t.account_id = a.id
            LEFT JOIN categories c ON t.category_id = c.id
@@ -579,13 +691,31 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     await Promise.allSettled([get().fetch(), useAccountStore.getState().fetch()])
   },
 
+  correctMetadata: async (id, patch, splits, auditSource, auditNote) => {
+    set({ error: null })
+    try {
+      await withTransaction(async (tx) => {
+        const existing = await getTransactionForMutation(tx, id)
+        if (!existing) throw new Error('Transaction not found.')
+        await correctMetadata(tx, existing, patch, splits, auditSource, auditNote)
+      })
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
+    await get().fetch()
+  },
+
   updateReviewFields: async (id, fields) => {
     set({ error: null })
     try {
       const changed = await withTransaction(async (tx) => {
         const existing = await getTransactionForMutation(tx, id)
         if (!existing) return false
-        assertMutableTransaction(existing)
+        assertMutableTransaction(
+          existing,
+          fields.accountId === undefined || fields.accountId === existing.account_id
+        )
         if (existing.type === 'transfer') {
           throw new Error('Transfers require their dedicated edit workflow.')
         }
@@ -633,6 +763,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         const existing = await getTransactionForMutation(tx, id)
         if (!existing) return false
         assertMutableTransaction(existing)
+        await guardFrontendEvidence(tx, existing, null)
         if (
           existing.source_account_mode === 'snapshot_only' ||
           existing.transfer_account_mode === 'snapshot_only'

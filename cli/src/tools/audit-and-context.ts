@@ -1,3 +1,5 @@
+import { guardTransactionEvidence } from '../transaction-corrections.js'
+import type { CorrectionTransaction } from '@shikin/finance-core/corrections'
 import { REPORTING_CTE, reportingReadFailure } from '../reporting-read.js'
 import {
   z,
@@ -1815,6 +1817,28 @@ function assertCurrentTransactionUndoState(entry: AuditLogRow, plan: UndoPlan) {
     return
   }
 
+  for (const json of [entry.before_json, entry.after_json]) {
+    const snapshot = parseAuditJson(json)
+    if (!snapshot || typeof snapshot !== 'object') continue
+    const root = snapshot as Record<string, unknown>
+    const row = (root.transaction ?? root) as Record<string, unknown>
+    if (
+      [
+        'finalizationId',
+        'finalization_id',
+        'importSource',
+        'import_source',
+        'importExternalId',
+        'import_external_id',
+        'importFingerprint',
+        'import_fingerprint',
+        'importContentFingerprint',
+        'import_content_fingerprint',
+      ].some((key) => row[key])
+    )
+      throw new Error('Imported or finalized evidence cannot be restored by generic undo.')
+  }
+
   const current = (query<Record<string, unknown>>(
     'SELECT * FROM transactions WHERE id = $1 LIMIT 1',
     [plan.entityId]
@@ -1839,6 +1863,11 @@ function assertCurrentTransactionUndoState(entry: AuditLogRow, plan: UndoPlan) {
     (current.transaction_kind ?? 'standard') !== 'standard' ||
     current.staging_batch_id ||
     current.reconciliation_id ||
+    current.finalization_id ||
+    current.import_source ||
+    current.import_external_id ||
+    current.import_fingerprint ||
+    current.import_content_fingerprint ||
     current.matched_transaction_id ||
     current.is_archived === 1
   ) {
@@ -1846,6 +1875,13 @@ function assertCurrentTransactionUndoState(entry: AuditLogRow, plan: UndoPlan) {
       `Transaction ${plan.entityId} now uses protected financial semantics and requires a dedicated workflow.`
     )
   }
+
+  guardTransactionEvidence(current as unknown as CorrectionTransaction, null)
+  if (
+    query('SELECT id FROM transaction_splits WHERE transaction_id = $1 LIMIT 1', [plan.entityId])
+      .length
+  )
+    throw new Error('Split transactions require the dedicated correction workflow.')
 
   const references = (query<{
     reconciliation_count: number
@@ -1856,13 +1892,15 @@ function assertCurrentTransactionUndoState(entry: AuditLogRow, plan: UndoPlan) {
          (SELECT COUNT(*) FROM account_reconciliations WHERE adjustment_transaction_id = $1) AS reconciliation_count,
          (SELECT COUNT(*) FROM receivables WHERE matched_transaction_id = $2) AS receivable_count,
          (SELECT COUNT(*) FROM account_reconciliations
-          WHERE account_id = $3 AND staging_batch_id = $4) AS finalized_statement_count`,
+          WHERE account_id = $3 AND staging_batch_id = $4 AND selection_mode = 'legacy_batch') AS finalized_statement_count`,
     [plan.entityId, plan.entityId, current.account_id, current.staging_batch_id ?? null]
   ) ?? [])[0]
   if (
     (references?.reconciliation_count ?? 0) > 0 ||
     (references?.receivable_count ?? 0) > 0 ||
-    (references?.finalized_statement_count ?? 0) > 0
+    ((current.ledger_treatment ?? 'normal') === 'normal' &&
+      (current.status ?? 'posted') !== 'pending' &&
+      (references?.finalized_statement_count ?? 0) > 0)
   ) {
     throw new Error(
       `Transaction ${plan.entityId} is now linked financial provenance and cannot be changed by generic undo.`
@@ -2560,6 +2598,7 @@ const undo: ToolDefinition = {
     const planResult = buildUndoPlan(entry)
     if ('success' in planResult && planResult.success === false) return planResult
     const plan = planResult as UndoPlan
+    if (plan.entity === 'transaction') assertCurrentTransactionUndoState(entry, plan)
     const dependentWrites = dependentAuditRows(entry).map((row) => formatAuditRow(row, false))
     if (dependentWrites.length > 0 && !allowDependentWrites) {
       return failure(

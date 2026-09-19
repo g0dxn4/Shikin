@@ -20,6 +20,7 @@ import { useAccountStore } from '@/stores/account-store'
 import { useCategoryStore } from '@/stores/category-store'
 import { useCategorizationStore } from '@/stores/categorization-store'
 import { fromCentavos, toCentavos } from '@/lib/money'
+import { query } from '@/lib/database'
 import type { CategorySuggestion } from '@/lib/auto-categorize'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 
@@ -31,6 +32,8 @@ const transactionSchema = z
     type: z.enum(TRANSACTION_TYPES),
     description: z.string().min(1),
     categoryId: z.string().nullable(),
+    subcategoryId: z.string().nullable().optional(),
+    reportingTreatment: z.enum(['normal', 'exclude_from_cashflow']).optional(),
     accountId: z.string().min(1),
     transferToAccountId: z.string().nullable(),
     currency: z.string().min(1),
@@ -60,12 +63,15 @@ export type TransactionFormValues = z.infer<typeof transactionSchema>
 
 export interface SplitRowData {
   categoryId: string
+  subcategoryId?: string | null
   amount: string // string for input control
   notes: string
 }
 
 interface TransactionFormProps {
   transaction?: TransactionWithDetails
+  initialSplits?: SplitRowData[]
+  metadataOnly?: boolean
   onSubmit: (data: TransactionFormValues, splits?: SplitRowData[]) => void
   isLoading?: boolean
   onDirtyChange?: (isDirty: boolean) => void
@@ -73,6 +79,8 @@ interface TransactionFormProps {
 
 export function TransactionForm({
   transaction,
+  initialSplits,
+  metadataOnly = false,
   onSubmit,
   isLoading,
   onDirtyChange,
@@ -97,11 +105,15 @@ export function TransactionForm({
   const [suggestionDismissed, setSuggestionDismissed] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const [isSplitMode, setIsSplitMode] = useState(false)
-  const [splitRows, setSplitRows] = useState<SplitRowData[]>([
-    { categoryId: '', amount: '', notes: '' },
-    { categoryId: '', amount: '', notes: '' },
-  ])
+  const [isSplitMode, setIsSplitMode] = useState(!!initialSplits?.length)
+  const [splitRows, setSplitRows] = useState<SplitRowData[]>(
+    initialSplits?.length
+      ? initialSplits
+      : [
+          { categoryId: '', amount: '', notes: '' },
+          { categoryId: '', amount: '', notes: '' },
+        ]
+  )
 
   useEffect(() => {
     void fetchAccounts().catch(() => {})
@@ -121,6 +133,8 @@ export function TransactionForm({
       type: transaction?.type ?? 'expense',
       description: transaction?.description ?? '',
       categoryId: transaction?.category_id ?? null,
+      subcategoryId: transaction?.subcategory_id ?? null,
+      reportingTreatment: transaction?.reporting_treatment ?? 'normal',
       accountId: transaction?.account_id ?? '',
       transferToAccountId: transaction?.transfer_to_account_id ?? null,
       currency: transaction?.currency ?? 'USD',
@@ -134,6 +148,11 @@ export function TransactionForm({
   const accountIdValue = watch('accountId')
   const transferToAccountIdValue = watch('transferToAccountId')
   const categoryIdValue = watch('categoryId')
+  const subcategoryValue = watch('subcategoryId')
+  const reportingValue = watch('reportingTreatment')
+  const [subcategories, setSubcategories] = useState<
+    { id: string; category_id: string; name: string }[]
+  >([])
   const descriptionValue = watch('description')
   const amountValue = watch('amount')
 
@@ -217,7 +236,11 @@ export function TransactionForm({
   const updateSplitRow = useCallback((index: number, field: keyof SplitRowData, value: string) => {
     setSplitRows((prev) => {
       const next = [...prev]
-      next[index] = { ...next[index], [field]: value }
+      next[index] = {
+        ...next[index],
+        [field]: value,
+        ...(field === 'categoryId' ? { subcategoryId: null } : {}),
+      }
       return next
     })
   }, [])
@@ -251,9 +274,11 @@ export function TransactionForm({
   const isSubmitDisabled = isLoading || !splitsValid || blockingPrerequisiteErrors.length > 0
 
   useEffect(() => {
-    const hasDirtySplits = splitRows.some((row) => row.categoryId || row.amount || row.notes)
-    onDirtyChange?.(isDirty || hasDirtySplits || isSplitMode)
-  }, [isDirty, isSplitMode, onDirtyChange, splitRows])
+    const hasDirtySplits = initialSplits?.length
+      ? JSON.stringify(initialSplits) !== JSON.stringify(splitRows)
+      : splitRows.some((row) => row.categoryId || row.amount || row.notes)
+    onDirtyChange?.(isDirty || hasDirtySplits || (isSplitMode && !initialSplits?.length))
+  }, [isDirty, isSplitMode, onDirtyChange, splitRows, initialSplits])
 
   return (
     <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-5" noValidate>
@@ -272,6 +297,7 @@ export function TransactionForm({
       <div className="space-y-1.5">
         <Label htmlFor="tx-type">{t('form.type')}</Label>
         <Select
+          disabled={metadataOnly}
           value={typeValue}
           onValueChange={(val) => {
             setValue('type', val as TransactionFormValues['type'])
@@ -298,6 +324,7 @@ export function TransactionForm({
         <Label htmlFor="tx-amount">{t('form.amount')}</Label>
         <Input
           id="tx-amount"
+          readOnly={metadataOnly}
           type="number"
           step="0.01"
           min="0.01"
@@ -337,7 +364,7 @@ export function TransactionForm({
           <Select
             value={accountIdValue}
             onValueChange={(val) => setValue('accountId', val)}
-            disabled={areAccountsUnavailable}
+            disabled={metadataOnly || areAccountsUnavailable}
           >
             <SelectTrigger
               id="tx-account"
@@ -366,7 +393,10 @@ export function TransactionForm({
             <Label htmlFor="tx-category">{t('form.category')}</Label>
             <Select
               value={categoryIdValue ?? '__none__'}
-              onValueChange={(val) => setValue('categoryId', val === '__none__' ? null : val)}
+              onValueChange={(val) => {
+                setValue('categoryId', val === '__none__' ? null : val, { shouldDirty: true })
+                setValue('subcategoryId', null, { shouldDirty: true })
+              }}
               disabled={areCategoriesUnavailable}
             >
               <SelectTrigger id="tx-category">
@@ -432,6 +462,7 @@ export function TransactionForm({
               type="button"
               variant="ghost"
               size="sm"
+              disabled={!!initialSplits?.length}
               onClick={() => {
                 setIsSplitMode(false)
                 setSplitRows([
@@ -456,7 +487,7 @@ export function TransactionForm({
             onValueChange={(val) =>
               setValue('transferToAccountId', val === '__none__' ? null : val)
             }
-            disabled={areAccountsUnavailable}
+            disabled={metadataOnly || areAccountsUnavailable}
           >
             <SelectTrigger
               id="tx-transfer-to"
@@ -484,6 +515,67 @@ export function TransactionForm({
         </div>
       )}
 
+      {transaction && (
+        <div className="space-y-3">
+          {metadataOnly && (
+            <p className="text-muted-foreground text-xs">{t('correction.financialLocked')}</p>
+          )}
+          {!isSplitMode && (
+            <div className="space-y-1.5">
+              <Label htmlFor="tx-subcategory">{t('correction.subcategory')}</Label>
+              <Select
+                onOpenChange={(open) => {
+                  if (open)
+                    void query<{ id: string; category_id: string; name: string }>(
+                      'SELECT id, category_id, name FROM subcategories'
+                    )
+                      .then(setSubcategories)
+                      .catch(() => {})
+                }}
+                value={subcategoryValue ?? '__none__'}
+                onValueChange={(value) =>
+                  setValue('subcategoryId', value === '__none__' ? null : value, {
+                    shouldDirty: true,
+                  })
+                }
+              >
+                <SelectTrigger id="tx-subcategory">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">{t('correction.clear')}</SelectItem>
+                  {subcategories
+                    .filter((item) => item.category_id === categoryIdValue)
+                    .map((item) => (
+                      <SelectItem key={item.id} value={item.id}>
+                        {item.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label htmlFor="tx-reporting">{t('correction.reporting')}</Label>
+            <Select
+              value={reportingValue ?? 'normal'}
+              onValueChange={(value) =>
+                setValue('reportingTreatment', value as 'normal' | 'exclude_from_cashflow', {
+                  shouldDirty: true,
+                })
+              }
+            >
+              <SelectTrigger id="tx-reporting">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="normal">{t('correction.normal')}</SelectItem>
+                <SelectItem value="exclude_from_cashflow">{t('correction.excluded')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      )}
       {/* Split toggle */}
       {!isSplitMode && (
         <button
@@ -597,6 +689,7 @@ export function TransactionForm({
           <Label htmlFor="tx-date">{t('form.date')}</Label>
           <Input
             id="tx-date"
+            readOnly={metadataOnly}
             type="date"
             aria-invalid={!!errors.date}
             aria-describedby={errors.date ? 'tx-date-error' : undefined}

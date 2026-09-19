@@ -13,6 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { TransactionForm, type TransactionFormValues, type SplitRowData } from './transaction-form'
 import { useUIStore } from '@/stores/ui-store'
 import { useTransactionStore } from '@/stores/transaction-store'
+import { getSplits } from '@/lib/split-service'
 import { toCentavos } from '@/lib/money'
 import { getErrorMessage } from '@/lib/errors'
 import { getTransactionById, type TransactionPageRow } from '@/lib/transaction-query'
@@ -30,9 +31,10 @@ export function TransactionDialog() {
   const [editLoadState, setEditLoadState] = useState<EditLoadState>('idle')
   const [editLoadError, setEditLoadError] = useState<string | null>(null)
   const [loadedTransaction, setLoadedTransaction] = useState<TransactionPageRow | null>(null)
+  const [loadedSplits, setLoadedSplits] = useState<SplitRowData[]>([])
   const lookupSequence = useRef(0)
   const { transactionDialogOpen, editingTransactionId, closeTransactionDialog } = useUIStore()
-  const { add, addWithSplits, update } = useTransactionStore()
+  const { add, addWithSplits, update, correctMetadata } = useTransactionStore()
   const isEditing = !!editingTransactionId
 
   const loadEditingTransaction = useCallback(async (id: string) => {
@@ -40,6 +42,7 @@ export function TransactionDialog() {
     setEditLoadState('loading')
     setEditLoadError(null)
     setLoadedTransaction(null)
+    setLoadedSplits([])
     try {
       const transaction = await getTransactionById(id)
       if (sequence !== lookupSequence.current) return
@@ -47,6 +50,16 @@ export function TransactionDialog() {
         setEditLoadState('not-found')
         return
       }
+      const splits = transaction.has_splits ? await getSplits(id) : []
+      if (sequence !== lookupSequence.current) return
+      setLoadedSplits(
+        splits.map((split) => ({
+          categoryId: split.category_id ?? '',
+          subcategoryId: split.subcategory_id,
+          amount: (split.amount / 100).toFixed(2),
+          notes: split.notes ?? '',
+        }))
+      )
       setLoadedTransaction(transaction)
       setEditLoadState('ready')
     } catch (error) {
@@ -74,7 +87,44 @@ export function TransactionDialog() {
     setIsLoading(true)
     try {
       if (isEditing && editingTransactionId) {
-        await update(editingTransactionId, data)
+        const replacement = splits?.map((split) => ({
+          categoryId: split.categoryId,
+          subcategoryId: split.subcategoryId,
+          amount: toCentavos(Number(split.amount)),
+          notes: split.notes || null,
+        }))
+        const splitsChanged =
+          splits !== undefined && JSON.stringify(splits) !== JSON.stringify(loadedSplits)
+        if (
+          splitsChanged ||
+          loadedTransaction?.has_splits ||
+          loadedTransaction?.is_finalized_statement ||
+          loadedTransaction?.finalization_id
+        ) {
+          if (
+            !loadedTransaction ||
+            toCentavos(data.amount) !== loadedTransaction.amount ||
+            data.type !== loadedTransaction.type ||
+            data.accountId !== loadedTransaction.account_id ||
+            data.currency !== loadedTransaction.currency ||
+            data.date !== loadedTransaction.date ||
+            data.transferToAccountId !== loadedTransaction.transfer_to_account_id
+          )
+            throw new Error(t('correction.financialLocked'))
+          await correctMetadata(
+            editingTransactionId,
+            {
+              description: data.description,
+              category_id: data.categoryId,
+              subcategory_id: data.subcategoryId,
+              notes: data.notes,
+              reporting_treatment: data.reportingTreatment,
+            },
+            splitsChanged ? replacement : undefined
+          )
+        } else {
+          await update(editingTransactionId, data)
+        }
         invalidateTransactionPage('edit')
         toast.success(t('toast.updated'))
       } else if (splits && splits.length >= 2) {
@@ -159,6 +209,14 @@ export function TransactionDialog() {
             <TransactionForm
               key={editingTransactionId || 'new'}
               transaction={loadedTransaction ?? undefined}
+              initialSplits={loadedSplits}
+              metadataOnly={
+                !!(
+                  loadedTransaction?.has_splits ||
+                  loadedTransaction?.is_finalized_statement ||
+                  loadedTransaction?.finalization_id
+                )
+              }
               onSubmit={handleSubmit}
               isLoading={isLoading}
               onDirtyChange={setIsDirty}

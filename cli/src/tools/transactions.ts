@@ -1,3 +1,11 @@
+import {
+  correctMetadataMutation,
+  correctTransactionMetadata,
+  setTransactionConsumption,
+  clearTransactionConsumption,
+  guardTransactionEvidence,
+} from '../transaction-corrections.js'
+import { readNetConsumption } from '../consumption-read.js'
 import { REPORTING_CTE, reportingReadFailure } from '../reporting-read.js'
 import {
   z,
@@ -54,6 +62,11 @@ type TransactionRow = {
   reporting_treatment?: ReportingTreatment | null
   transaction_kind?: 'standard' | 'reconciliation_bridge' | 'archived_transfer_mirror' | null
   staging_batch_id?: string | null
+  finalization_id?: string | null
+  import_source?: string | null
+  import_external_id?: string | null
+  import_fingerprint?: string | null
+  import_content_fingerprint?: string | null
   reconciliation_id?: string | null
   matched_transaction_id?: string | null
   is_archived?: number | null
@@ -83,6 +96,7 @@ type QueriedTransactionRow = {
   reporting_treatment: ReportingTreatment | null
   transaction_kind: 'standard' | 'reconciliation_bridge' | 'archived_transfer_mirror' | null
   staging_batch_id: string | null
+  finalization_id: string | null
   reconciliation_id: string | null
   matched_transaction_id: string | null
   is_archived: number | null
@@ -419,6 +433,11 @@ function transactionAuditSnapshot(tx: TransactionRow) {
     reportingTreatment: normalizeReportingTreatment(tx.reporting_treatment),
     transactionKind: tx.transaction_kind ?? 'standard',
     stagingBatchId: tx.staging_batch_id ?? null,
+    finalizationId: tx.finalization_id ?? null,
+    importSource: tx.import_source ?? null,
+    importExternalId: tx.import_external_id ?? null,
+    importFingerprint: tx.import_fingerprint ?? null,
+    importContentFingerprint: tx.import_content_fingerprint ?? null,
     reconciliationId: tx.reconciliation_id ?? null,
     matchedTransactionId: tx.matched_transaction_id ?? null,
     isArchived: tx.is_archived === 1,
@@ -455,6 +474,11 @@ function publicTransactionSnapshot(tx: TransactionRow) {
     reportingTreatment: normalizeReportingTreatment(tx.reporting_treatment),
     transactionKind: tx.transaction_kind ?? 'standard',
     stagingBatchId: tx.staging_batch_id ?? null,
+    finalizationId: tx.finalization_id ?? null,
+    importSource: tx.import_source ?? null,
+    importExternalId: tx.import_external_id ?? null,
+    importFingerprint: tx.import_fingerprint ?? null,
+    importContentFingerprint: tx.import_content_fingerprint ?? null,
     reconciliationId: tx.reconciliation_id ?? null,
     matchedTransactionId: tx.matched_transaction_id ?? null,
     isArchived: tx.is_archived === 1,
@@ -572,7 +596,23 @@ function assertPlaceholderTransaction(tx: TransactionRow) {
   return null
 }
 
+function assertImportedProvenanceUnchanged(tx: TransactionRow, source?: string, note?: string) {
+  if (
+    (tx.import_source ||
+      tx.import_external_id ||
+      tx.import_fingerprint ||
+      tx.import_content_fingerprint) &&
+    ((source !== undefined && (source || null) !== (tx.source ?? null)) ||
+      (note !== undefined && (note || null) !== (tx.note ?? null)))
+  )
+    throw new Error(
+      'Imported source and note are immutable; use auditSource/auditNote in correct-transaction-metadata.'
+    )
+}
+
 function assertUnresolvedPlaceholder(tx: TransactionRow) {
+  const financialFailure = protectedFinancialTransactionFailure(tx, 'update')
+  if (financialFailure) return financialFailure
   const placeholderError = assertPlaceholderTransaction(tx)
   if (placeholderError) return placeholderError
   if ((tx.placeholder_status ?? 'unresolved') !== 'unresolved') {
@@ -621,6 +661,7 @@ function protectedFinancialTransactionFailure(
     }
   }
   if (!includeReferences) return null
+  if (action !== 'update') guardTransactionEvidence(tx, null)
   const references = (query<{
     reconciliation_count: number
     receivable_count: number
@@ -630,7 +671,7 @@ function protectedFinancialTransactionFailure(
        (SELECT COUNT(*) FROM account_reconciliations WHERE adjustment_transaction_id = $1) AS reconciliation_count,
        (SELECT COUNT(*) FROM receivables WHERE matched_transaction_id = $2) AS receivable_count,
        (SELECT COUNT(*) FROM account_reconciliations
-        WHERE account_id = $3 AND staging_batch_id = $4) AS finalized_statement_count`,
+        WHERE account_id = $3 AND staging_batch_id = $4 AND selection_mode = 'legacy_batch') AS finalized_statement_count`,
     [tx.id, tx.id, tx.account_id, tx.staging_batch_id ?? null]
   ) ?? [])[0]
   if ((references?.reconciliation_count ?? 0) > 0 || (references?.receivable_count ?? 0) > 0) {
@@ -640,7 +681,13 @@ function protectedFinancialTransactionFailure(
       message: `Transaction ${tx.id} is part of reconciliation or receivable provenance and requires its dedicated workflow.`,
     }
   }
-  if (action !== 'match' && (references?.finalized_statement_count ?? 0) > 0) {
+  if (
+    action !== 'match' &&
+    (tx.finalization_id ||
+      ((tx.ledger_treatment ?? 'normal') === 'normal' &&
+        (tx.status ?? 'posted') !== 'pending' &&
+        (references?.finalized_statement_count ?? 0) > 0))
+  ) {
     return {
       success: false as const,
       reason: 'finalized_statement_transaction' as const,
@@ -1313,6 +1360,32 @@ const updateTransaction: ToolDefinition = {
       if (lifecycleFailure) return lifecycleFailure
       const financialFailure = protectedFinancialTransactionFailure(tx, 'update', false)
       if (financialFailure) return financialFailure
+      assertImportedProvenanceUnchanged(tx, source, note)
+      if (
+        amount === undefined &&
+        type === undefined &&
+        date === undefined &&
+        status === undefined &&
+        ledgerTreatment === undefined &&
+        stagingBatchId === undefined &&
+        recurringRuleId === undefined &&
+        accountId === undefined &&
+        transferToAccountId === undefined &&
+        source === undefined &&
+        note === undefined &&
+        tx.type !== 'transfer'
+      ) {
+        const resolved = category === undefined ? undefined : resolveCategoryId(category)
+        if (resolved && !resolved.success) return resolved
+        return correctMetadataMutation({
+          transactionId,
+          description,
+          categoryId: resolved?.success ? resolved.id : undefined,
+          notes: notes === '' ? null : notes,
+          reportingTreatment,
+          dryRun,
+        })
+      }
       const oldAmountCentavos = tx.amount
       const oldType = tx.type
       const oldAccountId = tx.account_id
@@ -1469,6 +1542,15 @@ const updateTransaction: ToolDefinition = {
         updatedTx.recurring_rule_id = resolvedRecurringRule.id
       }
 
+      guardTransactionEvidence(tx, updatedTx)
+      if (
+        query('SELECT id FROM transaction_splits WHERE transaction_id = $1 LIMIT 1', [tx.id])
+          .length &&
+        (updatedTx.category_id !== tx.category_id ||
+          updatedTx.type !== tx.type ||
+          updatedTx.amount !== tx.amount)
+      )
+        throw new Error('Split transactions require explicit split correction.')
       const oldImpact = getBalanceImpact(tx)
       if (!oldImpact.success) {
         return { success: false, message: oldImpact.message }
@@ -1821,7 +1903,7 @@ const queryTransactions: ToolDefinition = {
 
     const transactionRows = await query<QueriedTransactionRow>(
       `SELECT t.id, t.description, t.amount, t.currency, t.type, t.date, t.notes, t.status, t.source, t.note, t.recurring_rule_id, t.tags, t.transfer_to_account_id,
-               t.ledger_treatment, t.reporting_treatment, t.transaction_kind, t.staging_batch_id, t.reconciliation_id, t.matched_transaction_id, t.is_archived,
+               t.ledger_treatment, t.reporting_treatment, t.transaction_kind, t.staging_batch_id, t.finalization_id, t.reconciliation_id, t.matched_transaction_id, t.is_archived,
               t.is_placeholder, t.placeholder_status, t.resolved_at, t.resolved_by_transaction_id, t.placeholder_reason, t.placeholder_parent_transaction_id,
               COALESCE(c.name, 'Uncategorized') as category_name,
                a.name as account_name,
@@ -1872,6 +1954,7 @@ const queryTransactions: ToolDefinition = {
         reportingTreatment: normalizeReportingTreatment(t.reporting_treatment),
         transactionKind: t.transaction_kind ?? 'standard',
         stagingBatchId: t.staging_batch_id,
+        finalizationId: t.finalization_id,
         reconciliationId: t.reconciliation_id,
         reconciliation: t.reconciliation_id
           ? {
@@ -1982,7 +2065,11 @@ const matchTransferTransactions: ToolDefinition = {
           message: 'Transfer rows must belong to different accounts.',
         }
       }
-      if (sourceTransaction.amount !== mirrorTransaction.amount) {
+      if (
+        !Number.isSafeInteger(sourceTransaction.amount) ||
+        sourceTransaction.amount <= 0 ||
+        sourceTransaction.amount !== mirrorTransaction.amount
+      ) {
         return {
           success: false as const,
           reason: 'amount_mismatch' as const,
@@ -1990,8 +2077,8 @@ const matchTransferTransactions: ToolDefinition = {
         }
       }
       if (
-        !sourceTransaction.currency ||
-        !mirrorTransaction.currency ||
+        !normalizeCurrencyCode(sourceTransaction.currency) ||
+        !normalizeCurrencyCode(mirrorTransaction.currency) ||
         normalizeCurrencyCode(sourceTransaction.currency) !==
           normalizeCurrencyCode(mirrorTransaction.currency)
       ) {
@@ -2017,7 +2104,6 @@ const matchTransferTransactions: ToolDefinition = {
         (row) =>
           !['posted', 'cleared'].includes(normalizeTransactionStatus(row.status)) ||
           normalizeLedgerTreatment(row.ledger_treatment) !== 'normal' ||
-          normalizeReportingTreatment(row.reporting_treatment) !== 'normal' ||
           row.is_archived === 1 ||
           row.matched_transaction_id
       )
@@ -2025,7 +2111,7 @@ const matchTransferTransactions: ToolDefinition = {
         return {
           success: false as const,
           reason: 'transaction_not_matchable' as const,
-          message: `Transaction ${invalidLifecycle.id} must be unarchived, unmatched, normal-ledger, normal-reporting, and posted or cleared.`,
+          message: `Transaction ${invalidLifecycle.id} must be unarchived, unmatched, normal-ledger, and posted or cleared.`,
         }
       }
       for (const row of [sourceTransaction, mirrorTransaction]) {
@@ -2113,6 +2199,16 @@ const matchTransferTransactions: ToolDefinition = {
     return transaction(() => {
       const current = buildMatch()
       if (!current.success) throw new Error(current.message)
+      execute(
+        'INSERT INTO transfer_match_provenance (id, source_transaction_id, mirror_transaction_id, source_before_json, mirror_before_json) VALUES ($1,$2,$3,$4,$5)',
+        [
+          generateId(),
+          current.sourceTransaction.id,
+          current.mirrorTransaction.id,
+          JSON.stringify(current.sourceTransaction),
+          JSON.stringify(current.mirrorTransaction),
+        ]
+      )
       const currentBalancesBefore = readAccountBalances([...current.balanceDeltas.keys()])
       applyBalanceDeltas(current.balanceDeltas)
       assertSingleRowUpdated(
@@ -2242,19 +2338,79 @@ const unmatchTransferTransactions: ToolDefinition = {
       const mirrorModeFailure = snapshotOnlyAccountFailure(mirrorTransaction.account_id)
       if (mirrorModeFailure) return mirrorModeFailure
 
-      const restoredSource: TransactionRow = {
-        ...sourceTransaction,
-        type: 'expense',
-        transfer_to_account_id: null,
-        reporting_treatment: 'normal',
-        matched_transaction_id: null,
+      guardTransactionEvidence(sourceTransaction, null)
+      guardTransactionEvidence(mirrorTransaction, null)
+      const provenance = query<{
+        id: string
+        source_before_json: string
+        mirror_before_json: string
+      }>(
+        'SELECT * FROM transfer_match_provenance WHERE source_transaction_id = $1 AND mirror_transaction_id = $2 AND unmatched_at IS NULL',
+        [sourceTransaction.id, mirrorTransaction.id]
+      )[0]
+      if (!provenance)
+        return {
+          success: false as const,
+          reason: 'ambiguous_legacy_provenance',
+          message:
+            'Original treatments cannot be proven. Unmatch requires reliable original-row provenance.',
+        }
+      const restoredSource = JSON.parse(provenance.source_before_json) as TransactionRow
+      const restoredMirror = JSON.parse(provenance.mirror_before_json) as TransactionRow
+      if (
+        restoredSource.type !== 'expense' ||
+        restoredMirror.type !== 'income' ||
+        [restoredSource, restoredMirror].some(
+          (row) =>
+            row.is_archived ||
+            row.matched_transaction_id ||
+            (row.transaction_kind ?? 'standard') !== 'standard' ||
+            !['normal', 'exclude_from_cashflow'].includes(row.reporting_treatment ?? 'normal')
+        ) ||
+        [
+          [restoredSource, sourceTransaction],
+          [restoredMirror, mirrorTransaction],
+        ].some(
+          ([original, current]) =>
+            JSON.stringify(Object.keys(original).sort()) !==
+            JSON.stringify(Object.keys(current).sort())
+        )
+      )
+        return {
+          success: false as const,
+          reason: 'invalid_transfer_provenance',
+          message:
+            'Original full-row provenance is incomplete or inconsistent; restoration is unsafe.',
+        }
+      const expectedSource = {
+        ...restoredSource,
+        type: 'transfer',
+        transfer_to_account_id: restoredMirror.account_id,
+        reporting_treatment: 'exclude_from_cashflow',
+        matched_transaction_id: restoredMirror.id,
       }
-      const restoredMirror: TransactionRow = {
-        ...mirrorTransaction,
-        transaction_kind: 'standard',
-        reporting_treatment: 'normal',
-        matched_transaction_id: null,
-        is_archived: 0,
+      const expectedMirror = {
+        ...restoredMirror,
+        reporting_treatment: 'exclude_from_cashflow',
+        transaction_kind: 'archived_transfer_mirror',
+        matched_transaction_id: restoredSource.id,
+        is_archived: 1,
+      }
+      for (const [actual, expected] of [
+        [sourceTransaction, expectedSource],
+        [mirrorTransaction, expectedMirror],
+      ]) {
+        if (
+          Object.entries(expected).some(
+            ([key, value]) =>
+              key !== 'updated_at' && (actual as unknown as Record<string, unknown>)[key] !== value
+          )
+        )
+          return {
+            success: false as const,
+            reason: 'changed_match_provenance',
+            message: 'Matched evidence has changed; unmatch cannot restore it safely.',
+          }
       }
       const deltas = new Map<string, number>()
       for (const [row, multiplier] of [
@@ -2275,6 +2431,7 @@ const unmatchTransferTransactions: ToolDefinition = {
         mirrorTransaction,
         restoredSource,
         restoredMirror,
+        provenance,
         balanceDeltas: deltas,
       }
     }
@@ -2305,30 +2462,22 @@ const unmatchTransferTransactions: ToolDefinition = {
       if (!current.success) throw new Error(current.message)
       const currentBalances = readAccountBalances([...current.balanceDeltas.keys()])
       applyBalanceDeltas(current.balanceDeltas)
-      assertSingleRowUpdated(
-        execute(
-          `UPDATE transactions
-           SET type = 'expense', transfer_to_account_id = NULL,
-               reporting_treatment = 'normal', matched_transaction_id = NULL,
-               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-           WHERE id = $1 AND type = 'transfer' AND matched_transaction_id = $2
-             AND COALESCE(transaction_kind, 'standard') = 'standard'
-             AND COALESCE(is_archived, 0) = 0`,
-          [current.sourceTransaction.id, current.mirrorTransaction.id]
-        ),
-        `Source transfer ${sourceTransactionId} could not be unmatched safely.`
-      )
-      assertSingleRowUpdated(
-        execute(
-          `UPDATE transactions
-           SET reporting_treatment = 'normal', transaction_kind = 'standard',
-               matched_transaction_id = NULL, is_archived = 0,
-               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-           WHERE id = $1 AND transaction_kind = 'archived_transfer_mirror'
-             AND matched_transaction_id = $2 AND is_archived = 1`,
-          [current.mirrorTransaction.id, current.sourceTransaction.id]
-        ),
-        `Archived mirror ${current.mirrorTransaction.id} could not be restored safely.`
+      for (const restored of [current.restoredSource, current.restoredMirror]) {
+        // Snapshot keys originated from SELECT *; bind all values and restrict identifiers.
+        const entries = Object.entries(restored).filter(([key]) => key !== 'id')
+        if (entries.some(([key]) => !/^[a-z_]+$/.test(key)))
+          throw new Error('Invalid match provenance fields.')
+        assertSingleRowUpdated(
+          execute(
+            `UPDATE transactions SET ${entries.map(([key], index) => `${key} = $${index + 1}`).join(', ')} WHERE id = $${entries.length + 1}`,
+            [...entries.map(([, value]) => value), restored.id]
+          ),
+          'Could not restore original transaction.'
+        )
+      }
+      execute(
+        "UPDATE transfer_match_provenance SET unmatched_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $1 AND unmatched_at IS NULL",
+        [current.provenance.id]
       )
       writeTransactionBalanceAudit({
         action: 'unmatch-transfer',
@@ -2859,6 +3008,8 @@ const resolvePlaceholderTransaction: ToolDefinition = {
       if (rows.length === 0)
         return { success: false, message: `Transaction ${transactionId} not found.` }
       const before = rows[0]
+      assertImportedProvenanceUnchanged(before, source, note)
+      guardTransactionEvidence(before, null)
       const unresolvedError = assertUnresolvedPlaceholder(before)
       if (unresolvedError) return unresolvedError
       const categoryResult = resolvePlaceholderCategory(category)
@@ -2984,6 +3135,8 @@ const splitPlaceholderTransaction: ToolDefinition = {
       if (rows.length === 0)
         return { success: false, message: `Transaction ${transactionId} not found.` }
       const before = rows[0]
+      assertImportedProvenanceUnchanged(before, source, note)
+      guardTransactionEvidence(before, null)
       const unresolvedError = assertUnresolvedPlaceholder(before)
       if (unresolvedError) return unresolvedError
 
@@ -3148,6 +3301,7 @@ const getSpendingSummary: ToolDefinition = {
   description:
     'Get a summary of spending by category for a given time period. Use this when the user asks about their spending, expenses, or budget status.',
   schema: z.object({
+    basis: z.enum(['gross_cashflow', 'net_consumption']).optional().default('gross_cashflow'),
     period: z
       .enum(['week', 'month', 'year', 'custom'])
       .optional()
@@ -3156,7 +3310,7 @@ const getSpendingSummary: ToolDefinition = {
     startDate: isoDate('Start date (YYYY-MM-DD) for custom period').optional(),
     endDate: isoDate('End date (YYYY-MM-DD) for custom period').optional(),
   }),
-  execute: async ({ period, startDate, endDate }) => {
+  execute: async ({ period, startDate, endDate, basis }) => {
     let start: string
     let end: string
 
@@ -3190,6 +3344,8 @@ const getSpendingSummary: ToolDefinition = {
           start = now.startOf('month').format('YYYY-MM-DD')
       }
     }
+
+    if (basis === 'net_consumption') return readNetConsumption(start, end)
 
     const failure = reportingReadFailure(start, end)
     if (failure) return failure
@@ -3288,6 +3444,9 @@ const getSpendingSummary: ToolDefinition = {
 // ---------------------------------------------------------------------------
 
 export const transactionsTools: ToolDefinition[] = [
+  correctTransactionMetadata,
+  setTransactionConsumption,
+  clearTransactionConsumption,
   addTransaction,
   updateTransaction,
   deleteTransaction,

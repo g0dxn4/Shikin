@@ -267,5 +267,13 @@
   "detail": {
     "notes": "Notes",
     "reference": "Reference"
+  },
+  "correction": {
+    "financialLocked": "Metadata correction only. Financial history is protected; clear classifications or unlink evidence before replacing allocations.",
+    "subcategory": "Subcategory",
+    "clear": "None (clear)",
+    "reporting": "Cash-flow reporting",
+    "normal": "Include in cash flow",
+    "excluded": "Exclude from cash flow"
   }
 }

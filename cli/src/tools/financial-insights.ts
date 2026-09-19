@@ -1,4 +1,4 @@
-import { saveRecap } from '../insights/shared.js'
+import { saveBasisRecap } from '../recap-persistence.js'
 import { z, isoDate, type ToolDefinition } from './shared.js'
 
 import {
@@ -20,8 +20,10 @@ const getFinancialHealthScore: ToolDefinition = {
 // ---------------------------------------------------------------------------
 const getSpendingRecap: ToolDefinition = {
   name: 'get-spending-recap',
-  description: 'Read a gross cash-flow spending recap without saving. Not net consumption.',
+  description:
+    'Read a spending recap without saving. Gross cash flow by default; explicit net consumption is available with coverage status.',
   schema: z.object({
+    basis: z.enum(['gross_cashflow', 'net_consumption']).optional().default('gross_cashflow'),
     type: z
       .enum(['weekly', 'monthly'])
       .describe('Type of recap: weekly (past 7 days) or monthly (full month)'),
@@ -31,27 +33,27 @@ const getSpendingRecap: ToolDefinition = {
     readOnly: true,
     writesTo: [],
   },
-  execute: async ({ type, period }) => generateSpendingRecapSummary(type, period),
+  execute: async ({ type, period, basis }) => generateSpendingRecapSummary(type, period, basis),
 }
 
-/** Explicit persistence; logical identity by type, period, currencyScope=all and gross basis.
+/** Explicit persistence; logical identity by type, period, currencyScope=all and selected basis.
  * Only recaps and audit_log are written; identical repeated saves are no-ops.
  */
 const saveSpendingRecap: ToolDefinition = {
   name: 'save-spending-recap',
   description:
-    'Explicitly save a gross cash-flow recap. Writes only recaps and audit_log; replaces the same type/period/all-currencies/gross-basis identity, and unchanged re-saves are no-ops.',
+    'Explicitly save a spending recap. Writes only recaps and audit_log; identity includes type, period, all-currencies scope and selected basis. Unchanged re-saves are no-ops.',
   schema: getSpendingRecap.schema,
   effects: {
     readOnly: false,
     idempotent: true,
     writesTo: ['recaps', 'audit_log'],
   },
-  execute: async ({ type, period }) => {
-    const result = await generateSpendingRecapSummary(type, period)
+  execute: async ({ type, period, basis }) => {
+    const result = await generateSpendingRecapSummary(type, period, basis)
     if (!result.success || !result.recap) return result
-    await saveRecap(result.recap)
-    return { ...result, saved: true, message: `Saved ${type} gross cash-flow recap.` }
+    await saveBasisRecap(result.recap)
+    return { ...result, saved: true, message: `Saved ${type} ${basis} recap.` }
   },
 }
 

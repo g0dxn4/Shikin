@@ -1003,7 +1003,12 @@ function LedgerView({
                 <td className="px-2 py-2">
                   <TransactionActions
                     transaction={transaction}
-                    canEdit={!transaction.has_splits}
+                    canEdit={
+                      !transaction.matched_transaction_id &&
+                      !transaction.is_receivable_payment &&
+                      !transaction.is_reconciliation_adjustment &&
+                      (transaction.transaction_kind ?? 'standard') === 'standard'
+                    }
                     onEdit={() => onEdit(transaction.id)}
                     onDelete={() => onDelete(transaction.id)}
                     compact
@@ -1047,7 +1052,12 @@ function LedgerView({
               </div>
               <TransactionActions
                 transaction={transaction}
-                canEdit={!transaction.has_splits}
+                canEdit={
+                  !transaction.matched_transaction_id &&
+                  !transaction.is_receivable_payment &&
+                  !transaction.is_reconciliation_adjustment &&
+                  (transaction.transaction_kind ?? 'standard') === 'standard'
+                }
                 onEdit={() => onEdit(transaction.id)}
                 onDelete={() => onDelete(transaction.id)}
               />
@@ -1166,7 +1176,12 @@ function TransactionRow({
         </span>
         <TransactionActions
           transaction={transaction}
-          canEdit={!transaction.has_splits}
+          canEdit={
+            !transaction.matched_transaction_id &&
+            !transaction.is_receivable_payment &&
+            !transaction.is_reconciliation_adjustment &&
+            (transaction.transaction_kind ?? 'standard') === 'standard'
+          }
           onEdit={onEdit}
           onDelete={onDelete}
         />

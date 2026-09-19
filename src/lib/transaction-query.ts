@@ -193,10 +193,10 @@ const JOINED_TRANSACTION_SELECT = `
          ${HAS_SPLITS_SQL} AS has_splits,
          EXISTS(SELECT 1 FROM receivables r WHERE r.matched_transaction_id = t.id) AS is_receivable_payment,
          EXISTS(SELECT 1 FROM account_reconciliations ar WHERE ar.adjustment_transaction_id = t.id) AS is_reconciliation_adjustment,
-         EXISTS(
+         (t.finalization_id IS NOT NULL OR EXISTS(
            SELECT 1 FROM account_reconciliations ar
-           WHERE ar.account_id = t.account_id AND ar.staging_batch_id = t.staging_batch_id
-         ) AS is_finalized_statement
+           WHERE ar.account_id = t.account_id AND ar.staging_batch_id = t.staging_batch_id AND ar.selection_mode = 'legacy_batch' AND COALESCE(t.ledger_treatment, 'normal') = 'normal' AND COALESCE(t.status, 'posted') != 'pending'
+         )) AS is_finalized_statement
   FROM transactions t
   LEFT JOIN accounts a ON a.id = t.account_id
   LEFT JOIN categories c ON c.id = t.category_id

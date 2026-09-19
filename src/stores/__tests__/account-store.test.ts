@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import dayjs from 'dayjs'
 
 const { mockDbQuery, mockDbExecute, mockDbWithTransaction } = vi.hoisted(() => {
   const mockDbQuery = vi.fn()
@@ -30,14 +31,17 @@ const mockWithTransaction = vi.mocked(withTransaction)
 
 type LedgerCandidate = {
   id: string
+  date: string
   type: string
   amount: number
   currency: string | null
   status: string | null
   ledger_treatment: string | null
   transaction_kind: string | null
+  reporting_treatment: string | null
   is_archived: number | null
   account_id: string
+  matched_transaction_id: string | null
   source_account_id: string | null
   source_currency: string | null
   source_account_mode: string | null
@@ -47,17 +51,41 @@ type LedgerCandidate = {
   destination_account_mode: string | null
 }
 
+function accountRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    id: '01ACC001',
+    name: 'Checking',
+    type: 'checking',
+    currency: 'USD',
+    balance: 0,
+    icon: null,
+    color: null,
+    is_archived: 0,
+    account_mode: 'transactional',
+    valuation_mode: 'cash_plus_holdings',
+    credit_limit: null,
+    statement_closing_day: null,
+    payment_due_day: null,
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-01-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
 function ledgerCandidate(overrides: Partial<LedgerCandidate> = {}): LedgerCandidate {
   return {
     id: 'ledger-row',
+    date: dayjs().format('YYYY-MM-DD'),
     type: 'income',
     amount: 0,
     currency: 'USD',
     status: 'posted',
     ledger_treatment: 'normal',
     transaction_kind: 'standard',
+    reporting_treatment: 'normal',
     is_archived: 0,
     account_id: '01ACC001',
+    matched_transaction_id: null,
     source_account_id: '01ACC001',
     source_currency: 'USD',
     source_account_mode: 'transactional',
@@ -240,7 +268,11 @@ describe('account-store', () => {
         balance: 0,
       })
 
-      expect(mockExecute).toHaveBeenCalledTimes(1)
+      expect(mockExecute).toHaveBeenCalledTimes(2)
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO audit_log'),
+        expect.arrayContaining(['account', '01TESTACC00000000000000000', 'create'])
+      )
       expect(mockExecute).not.toHaveBeenCalledWith(
         expect.stringContaining('account_reconciliations'),
         expect.anything()
@@ -254,12 +286,21 @@ describe('account-store', () => {
         currency: 'USD',
         balance: 1234.56,
         accountMode: 'snapshot_only',
+        valuationMode: 'portfolio_snapshot',
       })
 
-      expect(mockExecute).toHaveBeenCalledTimes(1)
+      expect(mockExecute).toHaveBeenCalledTimes(2)
       expect(mockExecute).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO accounts'),
-        expect.arrayContaining(['USD', 123456, null, null, null, 'snapshot_only'])
+        expect.arrayContaining([
+          'USD',
+          123456,
+          null,
+          null,
+          null,
+          'snapshot_only',
+          'portfolio_snapshot',
+        ])
       )
       expect(mockExecute).not.toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO transactions'),
@@ -268,7 +309,17 @@ describe('account-store', () => {
     })
 
     it('does not reject when refresh fails after a committed write', async () => {
-      mockQuery.mockRejectedValueOnce(new Error('refresh failed'))
+      mockQuery.mockImplementation((sql: string) => {
+        if (sql.includes('SELECT * FROM accounts WHERE id')) {
+          return Promise.resolve([
+            accountRecord({ id: '01TESTACC00000000000000000', name: 'Savings', type: 'savings' }),
+          ])
+        }
+        if (sql.includes('SELECT * FROM accounts ORDER BY')) {
+          return Promise.reject(new Error('refresh failed'))
+        }
+        return Promise.resolve([])
+      })
 
       await expect(
         useAccountStore.getState().add({
@@ -277,7 +328,7 @@ describe('account-store', () => {
           currency: 'USD',
           balance: 0,
         })
-      ).resolves.toBeUndefined()
+      ).resolves.toBeNull()
 
       expect(useAccountStore.getState().error).toBeNull()
       expect(useAccountStore.getState().fetchError).toBe('refresh failed')
@@ -321,10 +372,8 @@ describe('account-store', () => {
     it('corrects a transactional balance with a ledger-derived bridge', async () => {
       let ledgerRead = 0
       mockQuery.mockImplementation((sql: string) => {
-        if (sql.includes('SELECT currency, is_archived, balance, account_mode')) {
-          return Promise.resolve([
-            { currency: 'EUR', is_archived: 0, balance: 10000, account_mode: 'transactional' },
-          ])
+        if (sql.includes('SELECT * FROM accounts WHERE id')) {
+          return Promise.resolve([accountRecord({ currency: 'EUR', balance: 10000 })])
         }
         if (sql.includes('FROM transactions t')) {
           return Promise.resolve([
@@ -367,7 +416,7 @@ describe('account-store', () => {
 
     it('records a no-bridge reconciliation when the ledger already equals the requested balance', async () => {
       mockQuery.mockImplementation((sql: string) => {
-        if (sql.includes('SELECT currency, is_archived, balance, account_mode')) {
+        if (sql.includes('SELECT * FROM accounts WHERE id')) {
           return Promise.resolve([
             { currency: 'USD', is_archived: 0, balance: 10000, account_mode: 'transactional' },
           ])
@@ -441,41 +490,44 @@ describe('account-store', () => {
           destination_account_mode: 'snapshot_only',
         }),
       ],
-    ])('excludes %s from effective-ledger reconciliation', async (_label, excludedRow) => {
-      let ledgerRead = 0
-      mockQuery.mockImplementation((sql: string) => {
-        if (sql.includes('SELECT currency, is_archived, balance, account_mode')) {
-          return Promise.resolve([
-            { currency: 'USD', is_archived: 0, balance: 0, account_mode: 'transactional' },
-          ])
-        }
-        if (sql.includes('FROM transactions t')) {
-          ledgerRead++
-          return Promise.resolve(
-            ledgerRead === 1
-              ? [excludedRow]
-              : [excludedRow, ledgerCandidate({ id: 'reconciliation-bridge', amount: 10000 })]
-          )
-        }
-        return Promise.resolve([])
-      })
+    ])(
+      'rejects %s as broken transfer evidence during reconciliation',
+      async (_label, excludedRow) => {
+        mockQuery.mockImplementation((sql: string) => {
+          if (sql.includes('SELECT * FROM accounts WHERE id')) {
+            return Promise.resolve([accountRecord()])
+          }
+          if (sql.includes('FROM transactions t')) {
+            return Promise.resolve([excludedRow])
+          }
+          return Promise.resolve([])
+        })
 
-      await useAccountStore.getState().update('01ACC001', {
-        name: 'Checking',
-        type: 'checking',
-        currency: 'USD',
-        balance: 100,
-      })
+        await expect(
+          useAccountStore.getState().update('01ACC001', {
+            name: 'Checking',
+            type: 'checking',
+            currency: 'USD',
+            balance: 100,
+          })
+        ).rejects.toThrow(
+          /Broken or ambiguous matched transfer|Missing matched source|Invalid ledger row/
+        )
 
-      expect(mockExecute).toHaveBeenCalledWith(
-        expect.stringContaining('INSERT INTO transactions'),
-        expect.arrayContaining(['income', 10000, 'USD'])
-      )
-    })
+        expect(mockExecute).not.toHaveBeenCalledWith(
+          expect.stringContaining('INSERT INTO account_reconciliations'),
+          expect.anything()
+        )
+        expect(mockExecute).not.toHaveBeenCalledWith(
+          expect.stringContaining('INSERT INTO transactions'),
+          expect.anything()
+        )
+      }
+    )
 
     it('fails reconciliation on an unsupported ledger discriminant', async () => {
       mockQuery.mockImplementation((sql: string) => {
-        if (sql.includes('SELECT currency, is_archived, balance, account_mode')) {
+        if (sql.includes('SELECT * FROM accounts WHERE id')) {
           return Promise.resolve([
             { currency: 'USD', is_archived: 0, balance: 0, account_mode: 'transactional' },
           ])
@@ -503,7 +555,7 @@ describe('account-store', () => {
       'aborts reconciliation without balance history for a %s transaction currency',
       async (_label, transactionCurrency, message) => {
         mockQuery.mockImplementation((sql: string) => {
-          if (sql.includes('SELECT currency, is_archived, balance, account_mode')) {
+          if (sql.includes('SELECT * FROM accounts WHERE id')) {
             return Promise.resolve([
               { currency: 'USD', is_archived: 0, balance: 0, account_mode: 'transactional' },
             ])
@@ -540,7 +592,7 @@ describe('account-store', () => {
 
     it('aborts reconciliation without balance history for a malformed archive flag', async () => {
       mockQuery.mockImplementation((sql: string) => {
-        if (sql.includes('SELECT currency, is_archived, balance, account_mode')) {
+        if (sql.includes('SELECT * FROM accounts WHERE id')) {
           return Promise.resolve([
             { currency: 'USD', is_archived: 0, balance: 0, account_mode: 'transactional' },
           ])
@@ -576,10 +628,8 @@ describe('account-store', () => {
 
     it('does not create history for a metadata-only transactional save', async () => {
       mockQuery.mockImplementation((sql: string) => {
-        if (sql.includes('SELECT currency, is_archived, balance, account_mode')) {
-          return Promise.resolve([
-            { currency: 'USD', is_archived: 0, balance: 1000, account_mode: 'transactional' },
-          ])
+        if (sql.includes('SELECT * FROM accounts WHERE id')) {
+          return Promise.resolve([accountRecord({ balance: 1000 })])
         }
         return Promise.resolve([])
       })
@@ -591,7 +641,11 @@ describe('account-store', () => {
         balance: 10,
       })
 
-      expect(mockExecute).toHaveBeenCalledTimes(1)
+      expect(mockExecute).toHaveBeenCalledTimes(2)
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO audit_log'),
+        expect.arrayContaining(['account', '01ACC001', 'update'])
+      )
       expect(mockExecute).not.toHaveBeenCalledWith(
         expect.stringContaining('account_reconciliations'),
         expect.anything()
@@ -604,9 +658,15 @@ describe('account-store', () => {
 
     it('updates snapshot-only balances directly without ledger history', async () => {
       mockQuery.mockImplementation((sql: string) => {
-        if (sql.includes('SELECT currency, is_archived, balance, account_mode')) {
+        if (sql.includes('SELECT * FROM accounts WHERE id')) {
           return Promise.resolve([
-            { currency: 'USD', is_archived: 0, balance: 1000, account_mode: 'snapshot_only' },
+            accountRecord({
+              name: 'Portfolio',
+              type: 'investment',
+              balance: 1000,
+              account_mode: 'snapshot_only',
+              valuation_mode: 'portfolio_snapshot',
+            }),
           ])
         }
         return Promise.resolve([])
@@ -618,6 +678,7 @@ describe('account-store', () => {
         currency: 'USD',
         balance: 25,
         accountMode: 'snapshot_only',
+        valuationMode: 'portfolio_snapshot',
       })
 
       expect(mockExecute).toHaveBeenCalledWith(
@@ -632,7 +693,7 @@ describe('account-store', () => {
 
     it('rejects account currency changes while linked monetary rows still point at the account', async () => {
       mockQuery.mockImplementation((sql: string) => {
-        if (sql.includes('SELECT currency, is_archived, balance, account_mode FROM accounts')) {
+        if (sql.includes('SELECT * FROM accounts WHERE id')) {
           return Promise.resolve([
             { currency: 'USD', is_archived: 0, balance: 0, account_mode: 'transactional' },
           ])
@@ -658,9 +719,7 @@ describe('account-store', () => {
     })
 
     it('allows currency normalization-only saves when recurring rules depend on the account', async () => {
-      mockQuery.mockResolvedValueOnce([
-        { currency: ' usd ', is_archived: 0, balance: 0, account_mode: 'transactional' },
-      ])
+      mockQuery.mockResolvedValueOnce([accountRecord({ currency: ' usd ' })])
       mockQuery.mockResolvedValueOnce([])
 
       await useAccountStore.getState().update('01ACC001', {
@@ -677,9 +736,7 @@ describe('account-store', () => {
     })
 
     it.each([1, 2])('rejects updates when is_archived is %s', async (isArchived) => {
-      mockQuery.mockResolvedValueOnce([
-        { currency: 'USD', is_archived: isArchived, balance: 0, account_mode: 'transactional' },
-      ])
+      mockQuery.mockResolvedValueOnce([accountRecord({ is_archived: isArchived })])
 
       await expect(
         useAccountStore.getState().update('01ACC001', {
@@ -694,9 +751,7 @@ describe('account-store', () => {
     })
 
     it('rejects an update when the active-row write guard affects zero rows', async () => {
-      mockQuery.mockResolvedValueOnce([
-        { currency: 'USD', is_archived: 0, balance: 0, account_mode: 'transactional' },
-      ])
+      mockQuery.mockResolvedValueOnce([accountRecord()])
       mockExecute.mockResolvedValueOnce({ rowsAffected: 0, lastInsertId: 0 })
 
       await expect(
@@ -711,7 +766,7 @@ describe('account-store', () => {
 
     it('rejects account currency changes when the account has a nonzero balance', async () => {
       mockQuery.mockImplementation((sql: string) => {
-        if (sql.includes('SELECT currency, is_archived, balance, account_mode FROM accounts')) {
+        if (sql.includes('SELECT * FROM accounts WHERE id')) {
           return Promise.resolve([
             { currency: 'EUR', is_archived: 0, balance: 1234, account_mode: 'transactional' },
           ])
@@ -733,9 +788,7 @@ describe('account-store', () => {
     })
 
     it('clears credit card fields when an account is saved as non-credit', async () => {
-      mockQuery.mockResolvedValueOnce([
-        { currency: 'USD', is_archived: 0, balance: 0, account_mode: 'transactional' },
-      ])
+      mockQuery.mockResolvedValueOnce([accountRecord()])
       mockQuery.mockResolvedValueOnce([])
 
       await useAccountStore.getState().update('01ACC001', {

@@ -157,8 +157,31 @@ describe('CLI tool validation regressions', () => {
     mockBackupDatabase.mockReset()
     mockRestoreDatabase.mockReset()
     mockTransaction.mockImplementation((fn: () => unknown) => fn())
+    mockQuery.mockImplementation(() => [])
     mockExecute.mockReturnValue({ rowsAffected: 1, lastInsertId: 1 })
   })
+
+  const appDataState = { database_id: 'test-db', data_revision: 1 }
+  const checkingAccountRow = {
+    id: 'acct-1',
+    name: 'Checking',
+    type: 'checking',
+    currency: 'USD',
+    balance: 0,
+    is_archived: 0,
+    credit_limit: null,
+    statement_closing_day: null,
+    payment_due_day: null,
+    account_mode: 'transactional',
+    valuation_mode: 'cash_plus_holdings',
+  }
+  function mockQueryDefault(handler: (sql: string, params?: unknown[]) => unknown[] | undefined) {
+    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+      const handled = handler(sql, params)
+      if (handled !== undefined) return handled
+      return []
+    })
+  }
 
   it('rejects impossible calendar dates', () => {
     const result = addTransaction.schema.safeParse({
@@ -1961,20 +1984,11 @@ describe('CLI tool validation regressions', () => {
       if (sql.includes('FROM settings') && params?.[0] === 'account_aliases') {
         return [{ value: JSON.stringify({ main: 'acct-1' }) }]
       }
-      if (sql.includes('FROM accounts WHERE id = $1')) {
-        return [
-          {
-            id: 'acct-1',
-            name: 'Checking',
-            type: 'checking',
-            currency: 'USD',
-            balance: 1000,
-            is_archived: 0,
-            credit_limit: null,
-            statement_closing_day: null,
-            payment_due_day: null,
-          },
-        ]
+      if (sql.includes('FROM accounts WHERE id')) {
+        return [{ ...checkingAccountRow, balance: 1000 }]
+      }
+      if (sql.includes('FROM transactions') || sql.includes('FROM account_reconciliations')) {
+        return []
       }
       return []
     })
@@ -2139,20 +2153,20 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('writes account audit rows for metadata-only updates', async () => {
-    const accountRow = {
-      id: 'acct-1',
-      name: 'Checking',
-      type: 'checking',
-      currency: 'USD',
-      balance: 1000,
-      is_archived: 0,
-      credit_limit: null,
-      statement_closing_day: null,
-      payment_due_day: null,
-    }
-    mockQuery
-      .mockReturnValueOnce([accountRow])
-      .mockReturnValueOnce([{ ...accountRow, name: 'Everyday Checking', type: 'savings' }])
+    const accountRow = { ...checkingAccountRow, balance: 1000 }
+    let afterWrite = false
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('SELECT * FROM accounts WHERE id')) {
+        return afterWrite
+          ? [{ ...accountRow, name: 'Everyday Checking', type: 'savings' }]
+          : [accountRow]
+      }
+      return []
+    })
+    mockExecute.mockImplementation((sql: string) => {
+      if (String(sql).includes('UPDATE accounts')) afterWrite = true
+      return { rowsAffected: 1, lastInsertId: 1 }
+    })
 
     const result = await updateAccount.execute(
       updateAccount.schema.parse({
@@ -4973,7 +4987,7 @@ describe('CLI tool validation regressions', () => {
           {
             id: 'tx-undo',
             account_id: 'acct-1',
-            category_id: null,
+            category_id: 'cat-food',
             transfer_to_account_id: null,
             type: 'expense',
             amount: 1000,
@@ -4984,7 +4998,7 @@ describe('CLI tool validation regressions', () => {
             source: 'mcp',
             note: 'created by workflow',
             recurring_rule_id: null,
-            tags: '[]',
+            tags: '["Food"]',
             is_placeholder: 0,
             placeholder_status: null,
             resolved_at: null,
@@ -5196,7 +5210,38 @@ describe('CLI tool validation regressions', () => {
       if (sql.includes('FROM audit_log') && sql.includes('created_at >')) return []
       if (sql.includes('FROM audit_log')) return [auditRow]
       if (sql.includes('FROM transactions') && sql.includes('WHERE id = $1'))
-        return [{ id: 'tx-undo' }]
+        return [
+          {
+            id: 'tx-undo',
+            account_id: 'acct-1',
+            category_id: null,
+            transfer_to_account_id: null,
+            type: 'expense',
+            amount: 1000,
+            currency: 'USD',
+            description: 'Lunch',
+            notes: null,
+            status: 'posted',
+            source: 'bank-import',
+            note: null,
+            recurring_rule_id: null,
+            tags: '[]',
+            is_placeholder: 0,
+            placeholder_status: null,
+            resolved_at: null,
+            resolved_by_transaction_id: null,
+            placeholder_reason: null,
+            placeholder_parent_transaction_id: null,
+            date: '2026-05-18',
+            ledger_treatment: 'normal',
+            reporting_treatment: 'normal',
+            transaction_kind: 'standard',
+            staging_batch_id: null,
+            reconciliation_id: null,
+            matched_transaction_id: null,
+            is_archived: 0,
+          },
+        ]
       if (sql.includes('FROM accounts') && sql.includes('WHERE id IN')) {
         return [{ id: 'acct-1', name: 'Checking', balance: 4000 }]
       }
@@ -5268,7 +5313,38 @@ describe('CLI tool validation regressions', () => {
       if (sql.includes('FROM audit_log') && sql.includes('created_at >')) return [dependentRow]
       if (sql.includes('FROM audit_log')) return [auditRow]
       if (sql.includes('FROM transactions') && sql.includes('WHERE id = $1'))
-        return [{ id: 'tx-undo' }]
+        return [
+          {
+            id: 'tx-undo',
+            account_id: 'acct-1',
+            category_id: null,
+            transfer_to_account_id: null,
+            type: 'expense',
+            amount: 1000,
+            currency: 'USD',
+            description: 'Lunch',
+            notes: null,
+            status: 'posted',
+            source: null,
+            note: null,
+            recurring_rule_id: null,
+            tags: '[]',
+            is_placeholder: 0,
+            placeholder_status: null,
+            resolved_at: null,
+            resolved_by_transaction_id: null,
+            placeholder_reason: null,
+            placeholder_parent_transaction_id: null,
+            date: '2026-05-18',
+            ledger_treatment: 'normal',
+            reporting_treatment: 'normal',
+            transaction_kind: 'standard',
+            staging_batch_id: null,
+            reconciliation_id: null,
+            matched_transaction_id: null,
+            is_archived: 0,
+          },
+        ]
       if (sql.includes('FROM accounts') && sql.includes('WHERE id IN')) {
         return [{ id: 'acct-1', name: 'Checking', balance: 4000 }]
       }
@@ -6268,8 +6344,18 @@ describe('CLI tool validation regressions', () => {
     )
 
     mockQuery.mockImplementation((sql: string) => {
-      if (sql.includes('FROM accounts WHERE id = $1')) {
-        return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
+      if (sql.includes('FROM app_data_state')) return [appDataState]
+      if (sql.includes('FROM accounts')) {
+        return [
+          {
+            id: 'acct-1',
+            name: 'Checking',
+            currency: 'USD',
+            is_archived: 0,
+            account_mode: 'transactional',
+            balance: 5000,
+          },
+        ]
       }
       if (sql.includes('FROM categories WHERE LOWER(name) = LOWER($1)')) {
         return [{ id: 'cat-food', name: 'Food' }]
@@ -6285,18 +6371,16 @@ describe('CLI tool validation regressions', () => {
       expect(result).toMatchObject({
         success: true,
         dryRun: true,
-        summary: { totalRows: 1, validRows: 1, importedRows: 0 },
+        mode: 'preview',
+        summary: { totalRows: 1, importedRows: 1, skippedRows: 0 },
         rows: [
           expect.objectContaining({
-            status: 'valid',
-            input: expect.objectContaining({
-              amount: 4.5,
-              type: 'expense',
-              note: 'externalId=bank-1',
-            }),
+            status: 'create',
+            externalId: 'bank-1',
           }),
         ],
       })
+      expect(result.previewToken).toEqual(expect.any(String))
       expect(mockExecute).not.toHaveBeenCalled()
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -6313,59 +6397,35 @@ describe('CLI tool validation regressions', () => {
     )
 
     mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
-      if (sql.includes('FROM accounts WHERE id = $1')) {
-        return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
-      }
-      if (sql.includes('FROM transactions') && params?.includes('externalId=')) {
-        return [{ id: 'tx-existing', note: 'externalId=bank-1' }]
-      }
-      return []
-    })
-
-    try {
-      const result = await importTransactions.execute(
-        importTransactions.schema.parse({ file, accountId: 'acct-1' })
-      )
-
-      expect(result).toMatchObject({
-        success: true,
-        dryRun: true,
-        summary: { totalRows: 1, validRows: 0, skippedRows: 1, importedRows: 0 },
-        rows: [
-          expect.objectContaining({
-            status: 'skipped',
-            reason: 'duplicate',
-            existingTransactionId: 'tx-existing',
-          }),
-        ],
-      })
-      expect(mockExecute).not.toHaveBeenCalled()
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
-  it('skips likely duplicate CSV import rows unless allowDuplicate is explicit', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'shikin-csv-likely-duplicate-'))
-    const file = join(dir, 'transactions.csv')
-    writeFileSync(file, 'date,description,amount\n2026-05-01,Coffee Shop,-4.50\n', 'utf8')
-
-    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
-      if (sql.includes('FROM accounts WHERE id = $1')) {
-        return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
-      }
-      if (sql.includes('FROM transactions') && params?.length === 4) {
-        return []
-      }
-      if (sql.includes('FROM transactions') && params?.length === 9) {
+      if (sql.includes('FROM app_data_state')) return [appDataState]
+      if (sql.includes('FROM accounts')) {
         return [
           {
-            id: 'tx-similar',
+            id: 'acct-1',
+            name: 'Checking',
+            currency: 'USD',
+            is_archived: 0,
+            account_mode: 'transactional',
+            balance: 5000,
+          },
+        ]
+      }
+      if (sql.includes('import_external_id') && params?.includes('bank-1')) {
+        return [
+          {
+            id: 'tx-existing',
             account_id: 'acct-1',
-            date: '2026-05-01',
-            amount: 450,
             type: 'expense',
-            description: 'coffee shop',
+            amount: 450,
+            currency: 'USD',
+            date: '2026-05-01',
+            description: 'Coffee',
+            transfer_to_account_id: null,
+            import_source: 'csv-import',
+            import_external_id: 'bank-1',
+            import_fingerprint: null,
+            import_content_fingerprint: null,
+            updated_at: null,
           },
         ]
       }
@@ -6380,13 +6440,76 @@ describe('CLI tool validation regressions', () => {
       expect(result).toMatchObject({
         success: true,
         dryRun: true,
-        summary: { totalRows: 1, validRows: 0, skippedRows: 1, importedRows: 0 },
+        mode: 'preview',
+        summary: { totalRows: 1, importedRows: 0, skippedRows: 1 },
         rows: [
           expect.objectContaining({
-            status: 'skipped',
-            reason: 'potential_duplicate',
+            status: 'idempotent',
+            existingTransactionId: 'tx-existing',
+            externalId: 'bank-1',
+          }),
+        ],
+      })
+      expect(mockExecute).not.toHaveBeenCalled()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('skips likely duplicate CSV import rows unless allowDuplicate is explicit', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'shikin-csv-likely-duplicate-'))
+    const file = join(dir, 'transactions.csv')
+    writeFileSync(file, 'date,description,amount\n2026-05-01,Coffee Shop,-4.50\n', 'utf8')
+
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('FROM app_data_state')) return [appDataState]
+      if (sql.includes('FROM accounts')) {
+        return [
+          {
+            id: 'acct-1',
+            name: 'Checking',
+            currency: 'USD',
+            is_archived: 0,
+            account_mode: 'transactional',
+            balance: 5000,
+          },
+        ]
+      }
+      if (sql.includes('date BETWEEN')) {
+        return [
+          {
+            id: 'tx-similar',
+            account_id: 'acct-1',
+            type: 'expense',
+            amount: 450,
+            currency: 'USD',
+            date: '2026-05-01',
+            description: 'coffee shop',
+            transfer_to_account_id: null,
+            import_source: null,
+            import_external_id: null,
+            import_fingerprint: null,
+            import_content_fingerprint: null,
+            updated_at: null,
+          },
+        ]
+      }
+      return []
+    })
+
+    try {
+      const result = await importTransactions.execute(
+        importTransactions.schema.parse({ file, accountId: 'acct-1' })
+      )
+
+      expect(result).toMatchObject({
+        success: false,
+        dryRun: true,
+        mode: 'preview',
+        requiredDecisions: [
+          expect.objectContaining({
             existingTransactionId: 'tx-similar',
-            duplicate: expect.objectContaining({ kind: 'potential_duplicate' }),
+            allowedDecisions: ['keep_existing', 'distinct'],
           }),
         ],
       })
@@ -6406,11 +6529,37 @@ describe('CLI tool validation regressions', () => {
     )
 
     mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
-      if (sql.includes('FROM accounts WHERE id = $1')) {
-        return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
+      if (sql.includes('FROM app_data_state')) return [appDataState]
+      if (sql.includes('FROM accounts')) {
+        return [
+          {
+            id: 'acct-1',
+            name: 'Checking',
+            currency: 'USD',
+            is_archived: 0,
+            account_mode: 'transactional',
+            balance: 5000,
+          },
+        ]
       }
-      if (sql.includes('FROM transactions') && params?.includes('externalId=')) {
-        return [{ id: 'tx-existing', note: 'externalId=bank-1' }]
+      if (sql.includes('import_external_id') && params?.includes('bank-1')) {
+        return [
+          {
+            id: 'tx-existing',
+            account_id: 'acct-1',
+            type: 'expense',
+            amount: 450,
+            currency: 'USD',
+            date: '2026-05-01',
+            description: 'Coffee',
+            transfer_to_account_id: null,
+            import_source: 'csv-import',
+            import_external_id: 'bank-1',
+            import_fingerprint: null,
+            import_content_fingerprint: null,
+            updated_at: null,
+          },
+        ]
       }
       return []
     })
@@ -6428,24 +6577,17 @@ describe('CLI tool validation regressions', () => {
       expect(result).toMatchObject({
         success: true,
         dryRun: false,
-        summary: { totalRows: 1, validRows: 1, skippedRows: 0, importedRows: 1 },
+        summary: { totalRows: 1, importedRows: 0, skippedRows: 1 },
         rows: [
           expect.objectContaining({
-            status: 'imported',
-            reason: 'duplicate_override',
-            duplicateOverride: expect.objectContaining({
-              allowed: true,
-              duplicate: expect.objectContaining({
-                kind: 'duplicate',
-                matchType: 'external_id',
-                externalId: 'bank-1',
-                existingTransactionId: 'tx-existing',
-              }),
-            }),
+            status: 'idempotent',
+            existingTransactionId: 'tx-existing',
+            externalId: 'bank-1',
           }),
         ],
+        warning: expect.stringMatching(/allowDuplicate is legacy-only/),
       })
-      expect(mockExecute).toHaveBeenCalledWith(
+      expect(mockExecute).not.toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO transactions'),
         expect.any(Array)
       )
@@ -6460,11 +6602,21 @@ describe('CLI tool validation regressions', () => {
     writeFileSync(file, 'date,description,amount,externalId\n2026-05-01,Coffee,-4.50,12\n', 'utf8')
 
     mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
-      if (sql.includes('FROM accounts WHERE id = $1')) {
-        return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
+      if (sql.includes('FROM app_data_state')) return [appDataState]
+      if (sql.includes('FROM accounts')) {
+        return [
+          {
+            id: 'acct-1',
+            name: 'Checking',
+            currency: 'USD',
+            is_archived: 0,
+            account_mode: 'transactional',
+            balance: 5000,
+          },
+        ]
       }
-      if (sql.includes('FROM transactions') && params?.includes('externalId=')) {
-        return [{ id: 'tx-existing', note: 'externalId=123' }]
+      if (sql.includes('import_external_id') && params?.includes('123')) {
+        return [{ id: 'tx-existing', import_external_id: '123' }]
       }
       return []
     })
@@ -6477,8 +6629,9 @@ describe('CLI tool validation regressions', () => {
       expect(result).toMatchObject({
         success: true,
         dryRun: true,
-        summary: { totalRows: 1, validRows: 1, skippedRows: 0 },
-        rows: [expect.objectContaining({ status: 'valid', externalId: '12' })],
+        mode: 'preview',
+        summary: { totalRows: 1, skippedRows: 0 },
+        rows: [expect.objectContaining({ status: 'create', externalId: '12' })],
       })
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -6527,14 +6680,18 @@ describe('CLI tool validation regressions', () => {
     writeFileSync(file, 'date,description,amount\n2026-05-01,Paycheck,100.00\n', 'utf8')
 
     mockQuery.mockImplementation((sql: string) => {
-      if (sql.includes('FROM accounts WHERE id = $1')) {
-        return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
-      }
-      if (sql.includes('SELECT id, balance FROM accounts')) {
-        return [{ id: 'acct-1', balance: 5000 }]
-      }
-      if (sql.includes('SELECT id, name FROM accounts') && !sql.includes('is_archived = 1')) {
-        return [{ id: 'acct-1', name: 'Checking' }]
+      if (sql.includes('FROM app_data_state')) return [appDataState]
+      if (sql.includes('FROM accounts')) {
+        return [
+          {
+            id: 'acct-1',
+            name: 'Checking',
+            currency: 'USD',
+            is_archived: 0,
+            account_mode: 'transactional',
+            balance: 5000,
+          },
+        ]
       }
       return []
     })
@@ -6551,25 +6708,20 @@ describe('CLI tool validation regressions', () => {
       })
       expect(mockExecute).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO transactions'),
-        [
+        expect.arrayContaining([
           'tx_test_123',
           'acct-1',
-          null,
-          null,
           'income',
           10000,
           'USD',
           'Paycheck',
-          null,
-          'posted',
           'csv-import',
-          null,
-          null,
-          'normal',
-          'normal',
-          null,
           '2026-05-01',
-        ]
+        ])
+      )
+      expect(mockExecute).toHaveBeenCalledWith(
+        expect.stringContaining('import_source'),
+        expect.arrayContaining(['csv-import', null, expect.any(String), expect.any(String)])
       )
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -7607,19 +7759,26 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('allows update-transaction notes to be cleared with an empty string', async () => {
-    mockQuery.mockReturnValueOnce([
-      {
-        id: 'tx-1',
-        amount: 1000,
-        type: 'expense',
-        account_id: 'acct-1',
-        category_id: null,
-        currency: 'GBP',
-        description: 'Coffee',
-        date: '2026-04-14',
-        notes: 'old notes',
-      },
-    ])
+    const existing = {
+      id: 'tx-1',
+      amount: 1000,
+      type: 'expense',
+      account_id: 'acct-1',
+      category_id: null,
+      subcategory_id: null,
+      currency: 'GBP',
+      description: 'Coffee',
+      date: '2026-04-14',
+      notes: 'old notes',
+      reporting_treatment: 'normal',
+      transaction_kind: 'standard',
+      is_archived: 0,
+      matched_transaction_id: null,
+    }
+    mockQueryDefault((sql) => {
+      if (sql.includes('SELECT * FROM transactions WHERE id = $1')) return [existing]
+      return undefined
+    })
 
     const input = updateTransaction.schema.parse({
       transactionId: 'tx-1',
@@ -7628,49 +7787,43 @@ describe('CLI tool validation regressions', () => {
 
     await updateTransaction.execute(input)
 
-    expect(mockTransaction).toHaveBeenCalledTimes(1)
+    expect(mockTransaction).toHaveBeenCalled()
     expect(mockTransaction.mock.invocationCallOrder[0]).toBeLessThan(
       mockQuery.mock.invocationCallOrder[0]
     )
     expect(mockExecute).toHaveBeenCalledTimes(2)
-    expect(mockExecute.mock.calls[0]?.[1]).toEqual([
-      1000,
-      'expense',
-      'Coffee',
-      null,
-      '2026-04-14',
-      null,
-      'acct-1',
-      'GBP',
-      null,
-      'posted',
-      null,
-      null,
-      null,
-      'normal',
-      'normal',
-      null,
-      'tx-1',
-    ])
+    expect(mockExecute.mock.calls[0]?.[0]).toContain('UPDATE transactions SET description')
+    expect(mockExecute.mock.calls[0]?.[1]).toEqual(['Coffee', null, null, null, 'normal', 'tx-1'])
     expect(mockExecute.mock.calls[1]?.[0]).toContain('INSERT INTO audit_log')
+    expect(mockExecute.mock.calls[1]?.[1]).toEqual(
+      expect.arrayContaining(['transaction', 'tx-1', 'correct-metadata'])
+    )
   })
 
   it('clears update-transaction source and note in the audit row metadata', async () => {
-    mockQuery.mockReturnValueOnce([
-      {
-        id: 'tx-1',
-        amount: 1000,
-        type: 'expense',
-        account_id: 'acct-1',
-        category_id: null,
-        currency: 'GBP',
-        description: 'Coffee',
-        date: '2026-04-14',
-        notes: null,
-        source: 'old-source',
-        note: 'old audit note',
-      },
-    ])
+    mockQueryDefault((sql) => {
+      if (sql.includes('SELECT * FROM transactions WHERE id = $1')) {
+        return [
+          {
+            id: 'tx-1',
+            amount: 1000,
+            type: 'expense',
+            account_id: 'acct-1',
+            category_id: null,
+            currency: 'GBP',
+            description: 'Coffee',
+            date: '2026-04-14',
+            notes: null,
+            source: 'old-source',
+            note: 'old audit note',
+            transaction_kind: 'standard',
+            is_archived: 0,
+            matched_transaction_id: null,
+          },
+        ]
+      }
+      return undefined
+    })
 
     await updateTransaction.execute(
       updateTransaction.schema.parse({
@@ -7706,19 +7859,29 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('preserves a stored historical transaction currency on metadata-only edits', async () => {
-    mockQuery.mockReturnValueOnce([
-      {
-        id: 'tx-legacy',
-        amount: 2500,
-        type: 'expense',
-        account_id: 'acct-1',
-        category_id: null,
-        currency: 'MXN',
-        description: 'Museum ticket',
-        date: '2025-01-10',
-        notes: 'old note',
-      },
-    ])
+    mockQueryDefault((sql) => {
+      if (sql.includes('SELECT * FROM transactions WHERE id = $1')) {
+        return [
+          {
+            id: 'tx-legacy',
+            amount: 2500,
+            type: 'expense',
+            account_id: 'acct-1',
+            category_id: null,
+            subcategory_id: null,
+            currency: 'MXN',
+            description: 'Museum ticket',
+            date: '2025-01-10',
+            notes: 'old note',
+            reporting_treatment: 'normal',
+            transaction_kind: 'standard',
+            is_archived: 0,
+            matched_transaction_id: null,
+          },
+        ]
+      }
+      return undefined
+    })
 
     const result = await updateTransaction.execute(
       updateTransaction.schema.parse({
@@ -7727,48 +7890,45 @@ describe('CLI tool validation regressions', () => {
       })
     )
 
-    expect(mockQuery).toHaveBeenCalledTimes(2)
     expect(mockExecute).toHaveBeenNthCalledWith(1, expect.stringContaining('UPDATE transactions'), [
-      2500,
-      'expense',
       'Museum ticket',
       null,
-      '2025-01-10',
+      null,
       'updated note',
-      'acct-1',
-      'MXN',
-      null,
-      'posted',
-      null,
-      null,
-      null,
       'normal',
-      'normal',
-      null,
       'tx-legacy',
     ])
+    expect(String(mockExecute.mock.calls[0]?.[0])).not.toContain('currency')
     expect(result.success).toBe(true)
   })
 
   it('fails transaction edits when stored currency is unknown', async () => {
-    mockQuery.mockReturnValueOnce([
-      {
-        id: 'tx-legacy',
-        amount: 2500,
-        type: 'expense',
-        account_id: 'acct-1',
-        category_id: null,
-        currency: null,
-        description: 'Museum ticket',
-        date: '2025-01-10',
-        notes: 'old note',
-      },
-    ])
+    mockQueryDefault((sql) => {
+      if (sql.includes('SELECT * FROM transactions WHERE id = $1')) {
+        return [
+          {
+            id: 'tx-legacy',
+            amount: 2500,
+            type: 'expense',
+            account_id: 'acct-1',
+            category_id: null,
+            currency: null,
+            description: 'Museum ticket',
+            date: '2025-01-10',
+            notes: 'old note',
+            transaction_kind: 'standard',
+            is_archived: 0,
+            matched_transaction_id: null,
+          },
+        ]
+      }
+      return undefined
+    })
 
     const result = await updateTransaction.execute(
       updateTransaction.schema.parse({
         transactionId: 'tx-legacy',
-        notes: 'updated note',
+        amount: 30,
       })
     )
 
@@ -7851,21 +8011,30 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('rejects balance-affecting transaction updates against archived accounts', async () => {
-    mockQuery
-      .mockReturnValueOnce([
-        {
-          id: 'tx-archived-account',
-          amount: 1000,
-          type: 'expense',
-          account_id: 'acct-archived',
-          category_id: null,
-          currency: 'USD',
-          description: 'Old coffee',
-          date: '2026-04-14',
-          notes: null,
-        },
-      ])
-      .mockReturnValueOnce([{ id: 'acct-archived', name: 'Archived Checking' }])
+    mockQueryDefault((sql) => {
+      if (sql.includes('SELECT * FROM transactions WHERE id = $1')) {
+        return [
+          {
+            id: 'tx-archived-account',
+            amount: 1000,
+            type: 'expense',
+            account_id: 'acct-archived',
+            category_id: null,
+            currency: 'USD',
+            description: 'Old coffee',
+            date: '2026-04-14',
+            notes: null,
+            transaction_kind: 'standard',
+            is_archived: 0,
+            matched_transaction_id: null,
+          },
+        ]
+      }
+      if (sql.includes('FROM accounts') && sql.includes('is_archived = 1')) {
+        return [{ id: 'acct-archived', name: 'Archived Checking', is_archived: 1 }]
+      }
+      return undefined
+    })
 
     const result = await updateTransaction.execute(
       updateTransaction.schema.parse({ transactionId: 'tx-archived-account', amount: 12 })
@@ -8536,7 +8705,7 @@ describe('CLI tool validation regressions', () => {
 
     const result = await updateAccount.execute(input)
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       success: true,
       message: 'Updated account "Checking".',
     })
@@ -8779,19 +8948,27 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('wraps update-transaction balance and row writes in a transaction', async () => {
-    mockQuery.mockReturnValueOnce([
-      {
-        id: 'tx-1',
-        amount: 1000,
-        type: 'expense',
-        account_id: 'acct-1',
-        category_id: null,
-        currency: 'JPY',
-        description: 'Coffee',
-        date: '2026-04-14',
-        notes: 'old notes',
-      },
-    ])
+    mockQueryDefault((sql) => {
+      if (sql.includes('SELECT * FROM transactions WHERE id = $1')) {
+        return [
+          {
+            id: 'tx-1',
+            amount: 1000,
+            type: 'expense',
+            account_id: 'acct-1',
+            category_id: null,
+            currency: 'JPY',
+            description: 'Coffee',
+            date: '2026-04-14',
+            notes: 'old notes',
+            transaction_kind: 'standard',
+            is_archived: 0,
+            matched_transaction_id: null,
+          },
+        ]
+      }
+      return undefined
+    })
 
     const input = updateTransaction.schema.parse({
       transactionId: 'tx-1',
@@ -8931,19 +9108,27 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('aborts update-transaction when the final row update does not affect exactly one row', async () => {
-    mockQuery.mockReturnValueOnce([
-      {
-        id: 'tx-1',
-        amount: 1000,
-        type: 'expense',
-        account_id: 'acct-1',
-        category_id: null,
-        currency: 'USD',
-        description: 'Coffee',
-        date: '2026-04-14',
-        notes: 'old notes',
-      },
-    ])
+    mockQueryDefault((sql) => {
+      if (sql.includes('SELECT * FROM transactions WHERE id = $1')) {
+        return [
+          {
+            id: 'tx-1',
+            amount: 1000,
+            type: 'expense',
+            account_id: 'acct-1',
+            category_id: null,
+            currency: 'USD',
+            description: 'Coffee',
+            date: '2026-04-14',
+            notes: 'old notes',
+            transaction_kind: 'standard',
+            is_archived: 0,
+            matched_transaction_id: null,
+          },
+        ]
+      }
+      return undefined
+    })
     mockExecute
       .mockReturnValueOnce({ rowsAffected: 1, lastInsertId: 1 })
       .mockReturnValueOnce({ rowsAffected: 0, lastInsertId: 1 })
@@ -9216,56 +9401,51 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('filters query-transactions by tag and preserves display labels', async () => {
-    mockQuery
-      .mockReturnValueOnce([
-        {
-          id: 'tx-1',
-          description: 'Office supplies',
-          amount: 2500,
-          currency: 'USD',
-          type: 'expense',
-          date: '2026-05-01',
-          notes: null,
-          status: 'posted',
-          source: null,
-          note: null,
-          recurring_rule_id: null,
-          tags: '["Business"]',
-          category_name: 'Uncategorized',
-          account_name: 'Checking',
-          transfer_to_account_id: null,
-          transfer_to_account_name: null,
-        },
-      ])
-      .mockReturnValueOnce([{ count: 2 }])
+    const pageRow = {
+      id: 'tx-1',
+      description: 'Office supplies',
+      amount: 2500,
+      currency: 'USD',
+      type: 'expense',
+      date: '2026-05-01',
+      created_at: '2026-05-01T00:00:00.000Z',
+      notes: null,
+      status: 'posted',
+      source: null,
+      note: null,
+      recurring_rule_id: null,
+      tags: '["Business"]',
+      category_name: 'Uncategorized',
+      account_name: 'Checking',
+      transfer_to_account_id: null,
+      transfer_to_account_name: null,
+    }
+    mockQueryDefault((sql) => {
+      if (sql.includes('FROM app_data_state')) return [appDataState]
+      if (sql.includes('COUNT(*)')) return [{ count: 2 }]
+      if (sql.includes('FROM transaction_splits')) return []
+      if (sql.includes('FROM transactions t')) return [pageRow]
+      return undefined
+    })
 
     const result = await queryTransactions.execute(
       queryTransactions.schema.parse({ tag: 'business', limit: 1 })
     )
 
-    expect(mockQuery).toHaveBeenCalledTimes(2)
-    expect(mockQuery.mock.calls[0]?.[0]).toContain('LIMIT $')
-    expect(mockQuery.mock.calls[0]?.[0]).toContain('json_each')
-    expect(mockQuery.mock.calls[0]?.[1]).toEqual([
-      'business',
-      'business',
-      'business',
-      'business',
-      'business',
-      1,
-    ])
-    expect(mockQuery.mock.calls[1]?.[0]).toContain('COUNT(*)')
-    expect(mockQuery.mock.calls[1]?.[0]).toContain('json_each')
-    expect(mockQuery.mock.calls[1]?.[1]).toEqual([
-      'business',
-      'business',
-      'business',
-      'business',
-      'business',
-    ])
+    const countCall = mockQuery.mock.calls.find((call) => String(call[0]).includes('COUNT(*)'))
+    const pageCall = mockQuery.mock.calls.find(
+      (call) => String(call[0]).includes('LIMIT $') && String(call[0]).includes('json_each')
+    )
+    expect(mockQuery.mock.calls[0]?.[0]).toContain('FROM app_data_state')
+    expect(countCall?.[0]).toContain('json_each')
+    expect(countCall?.[1]).toEqual(['business', 'business', 'business', 'business', 'business'])
+    expect(pageCall?.[1]).toEqual(['business', 'business', 'business', 'business', 'business', 2])
     expect(result).toMatchObject({
+      success: true,
       count: 1,
       totalMatched: 2,
+      hasMore: false,
+      dataRevision: 1,
       transactions: [
         {
           id: 'tx-1',
@@ -9296,40 +9476,42 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('filters query-transactions by source or destination transfer account', async () => {
-    mockQuery
-      .mockReturnValueOnce([
-        {
-          id: 'tx-transfer',
-          description: 'Card payment',
-          amount: 5000,
-          type: 'transfer',
-          date: '2026-04-14',
-          notes: null,
-          category_name: 'Uncategorized',
-          account_name: 'Checking',
-          transfer_to_account_id: 'acct-card',
-          transfer_to_account_name: 'Visa',
-        },
-      ])
-      .mockReturnValueOnce([{ count: 1 }])
+    const pageRow = {
+      id: 'tx-transfer',
+      description: 'Card payment',
+      amount: 5000,
+      type: 'transfer',
+      date: '2026-04-14',
+      created_at: '2026-04-14T00:00:00.000Z',
+      notes: null,
+      category_name: 'Uncategorized',
+      account_name: 'Checking',
+      transfer_to_account_id: 'acct-card',
+      transfer_to_account_name: 'Visa',
+    }
+    mockQueryDefault((sql) => {
+      if (sql.includes('FROM app_data_state')) return [appDataState]
+      if (sql.includes('COUNT(*)')) return [{ count: 1 }]
+      if (sql.includes('FROM transaction_splits')) return []
+      if (sql.includes('FROM transactions t')) return [pageRow]
+      return undefined
+    })
 
     const input = queryTransactions.schema.parse({ accountId: 'acct-card', limit: 5 })
-
     const result = await queryTransactions.execute(input)
 
-    expect(mockQuery).toHaveBeenNthCalledWith(
-      1,
-      expect.stringContaining('(t.account_id = $1 OR t.transfer_to_account_id = $2)'),
-      ['acct-card', 'acct-card', 5]
-    )
-    expect(mockQuery).toHaveBeenNthCalledWith(
-      2,
-      expect.stringContaining('(t.account_id = $1 OR t.transfer_to_account_id = $2)'),
-      ['acct-card', 'acct-card']
-    )
+    const countCall = mockQuery.mock.calls.find((call) => String(call[0]).includes('COUNT(*)'))
+    const pageCall = mockQuery.mock.calls.find((call) => String(call[0]).includes('LIMIT $'))
+    expect(countCall?.[0]).toContain('(t.account_id = $1 OR t.transfer_to_account_id = $2)')
+    expect(countCall?.[1]).toEqual(['acct-card', 'acct-card'])
+    expect(pageCall?.[0]).toContain('(t.account_id = $1 OR t.transfer_to_account_id = $2)')
+    expect(pageCall?.[1]).toEqual(['acct-card', 'acct-card', 6])
     expect(result).toMatchObject({
+      success: true,
       count: 1,
       totalMatched: 1,
+      hasMore: false,
+      dataRevision: 1,
       transactions: [
         {
           id: 'tx-transfer',

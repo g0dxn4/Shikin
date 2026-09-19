@@ -93,6 +93,8 @@ function seedDatabase({
       type TEXT NOT NULL CHECK (type IN ('checking', 'savings', 'credit_card', 'cash', 'investment', 'crypto', 'other')),
       currency TEXT NOT NULL DEFAULT 'USD',
       balance INTEGER NOT NULL DEFAULT 0,
+      icon TEXT,
+      color TEXT,
       is_archived INTEGER NOT NULL DEFAULT 0,
       credit_limit INTEGER,
       statement_closing_day INTEGER,
@@ -337,6 +339,25 @@ function seedDatabase({
 
   db.close()
   return dbPath
+}
+
+function snapshotFinanceTables(dbPath: string) {
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true })
+  try {
+    const tables = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+      )
+      .all() as Array<{ name: string }>
+    return Object.fromEntries(
+      tables.map(({ name }) => [
+        name,
+        db.prepare(`SELECT * FROM ${name} ORDER BY rowid`).all() as Array<Record<string, unknown>>,
+      ])
+    )
+  } finally {
+    db.close()
+  }
 }
 
 function readDatabaseState(dbPath: string) {
@@ -964,6 +985,7 @@ describe('CLI tools SQLite transaction rollback', () => {
         type: 'investment',
         balance: 444.44,
         accountMode: 'snapshot_only',
+        valuationMode: 'portfolio_snapshot',
       })
     )) as { account: { id: string; balance: number; accountMode: string } }
 
@@ -1249,6 +1271,7 @@ describe('CLI tools SQLite transaction rollback', () => {
         type: 'investment',
         balance: 50,
         accountMode: 'snapshot_only',
+        valuationMode: 'portfolio_snapshot',
       })
     )) as { account: { id: string } }
     const accountId = created.account.id
@@ -1383,7 +1406,7 @@ describe('CLI tools SQLite transaction rollback', () => {
             .get(accountId)
         ).toEqual({
           actual_balance: 0,
-          stored_balance_before: accountId === updateTarget.account.id ? 5000 : 7500,
+          stored_balance_before: 0,
           adjustment_amount: 0,
           adjustment_transaction_id: null,
         })
@@ -1735,7 +1758,7 @@ describe('CLI tools SQLite transaction rollback', () => {
       transactionKind: 'standard',
     },
   ])(
-    'excludes $label from real-SQLite effective-ledger reconciliation',
+    'rejects $label as broken transfer evidence and preserves the database',
     async (scenario) => {
       const tempHome = createTempHome()
       const dbPath = seedDatabase({ tempHome, accountBalance: 0 })
@@ -1764,19 +1787,15 @@ describe('CLI tools SQLite transaction rollback', () => {
         db.close()
       }
 
+      const before = snapshotFinanceTables(dbPath)
       const { tools } = await loadToolsWithRealDatabase(tempHome)
       const reconcile = tools.find((tool) => tool.name === 'reconcile')!
-      const result = await reconcile.execute(
-        reconcile.schema.parse({ accountId: 'acct-1', actualBalance: 0 })
+      await expect(
+        reconcile.execute(reconcile.schema.parse({ accountId: 'acct-1', actualBalance: 0 }))
+      ).rejects.toThrow(
+        /Broken or ambiguous matched transfer|Missing matched source|Invalid ledger row/
       )
-
-      expect(result).toMatchObject({
-        success: true,
-        dryRun: true,
-        ledgerBalanceCentavos: 0,
-        differenceCentavos: 0,
-        applyRequired: false,
-      })
+      expect(snapshotFinanceTables(dbPath)).toEqual(before)
     },
     15_000
   )
@@ -1871,12 +1890,18 @@ describe('CLI tools SQLite transaction rollback', () => {
       const insert = db.prepare(
         `INSERT INTO transactions (
            id, account_id, type, amount, currency, description, date, status,
-           ledger_treatment, reporting_treatment, staging_batch_id
+           ledger_treatment, reporting_treatment, staging_batch_id, import_source
          ) VALUES (?, 'acct-1', ?, ?, 'USD', ?, ?, 'posted',
-           'staged_no_balance_impact', 'normal', 'statement-2026-05')`
+           'staged_no_balance_impact', 'normal', 'statement-2026-05', 'statement-import')`
       )
       insert.run('staged-1', 'expense', 10_000, 'Purchase', '2026-05-05')
       insert.run('staged-2', 'income', 25_000, 'Deposit', '2026-05-20')
+      db.prepare(
+        `INSERT INTO source_coverage (
+           id, account_id, source_namespace, period_start, period_end, status, zero_rows, document_ref
+         ) VALUES ('cov-statement-2026-05', 'acct-1', 'statement-import', '2026-05-01', '2026-05-31',
+           'verified', 0, 'May 2026 printed statement')`
+      ).run()
     } finally {
       db.close()
     }
@@ -1889,10 +1914,12 @@ describe('CLI tools SQLite transaction rollback', () => {
       statementStartDate: '2026-05-01',
       statementEndDate: '2026-05-31',
       actualBalance: 1102.25,
+      coverageIds: ['cov-statement-2026-05'],
     }
 
     await expect(finalize.execute(finalize.schema.parse(input))).resolves.toMatchObject({
       dryRun: true,
+      applyRequired: true,
       transactionCount: 2,
       stagedBalanceEffectCentavos: 15_000,
       reconciliationBridgeCentavos: 95_225,
@@ -1915,8 +1942,8 @@ describe('CLI tools SQLite transaction rollback', () => {
           )
           .all()
       ).toEqual([
-        { id: 'staged-1', status: 'cleared', ledger_treatment: 'normal' },
-        { id: 'staged-2', status: 'cleared', ledger_treatment: 'normal' },
+        { id: 'staged-1', status: 'posted', ledger_treatment: 'normal' },
+        { id: 'staged-2', status: 'posted', ledger_treatment: 'normal' },
       ])
       expect(
         verified

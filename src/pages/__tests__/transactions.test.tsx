@@ -181,7 +181,7 @@ describe('Transactions', () => {
 
     await user.click(screen.getByRole('tab', { name: 'views.ledger' }))
     expect(screen.getAllByText(/Checking → Savings/).length).toBeGreaterThan(0)
-    expect(screen.queryByLabelText('Edit Split purchase')).not.toBeInTheDocument()
+    expect(screen.getAllByLabelText('Edit Split purchase').length).toBeGreaterThan(0)
   })
 
   it('retains inline review eligibility and currency/account protections', async () => {

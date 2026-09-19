@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { beforeAll, describe, it, expect, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AccountForm } from '../account-form'
@@ -10,6 +10,13 @@ vi.mock('react-i18next', () => ({
     i18n: { language: 'en', changeLanguage: vi.fn() },
   }),
 }))
+
+beforeAll(() => {
+  HTMLElement.prototype.hasPointerCapture ??= () => false
+  HTMLElement.prototype.setPointerCapture ??= () => {}
+  HTMLElement.prototype.releasePointerCapture ??= () => {}
+  HTMLElement.prototype.scrollIntoView ??= () => {}
+})
 
 const mockAccount: Account = {
   id: '01ACC001',
@@ -112,16 +119,19 @@ describe('AccountForm', () => {
     })
   })
 
-  it('keeps investment and crypto out of account type choices', () => {
-    const { container } = render(<AccountForm onSubmit={vi.fn()} />)
+  it('includes investment and crypto in informed portfolio type choices', async () => {
+    const user = userEvent.setup()
+    render(<AccountForm onSubmit={vi.fn()} />)
 
-    const options = Array.from(container.querySelectorAll('option')).map((option) => option.value)
+    await user.click(screen.getByLabelText('form.type'))
 
-    expect(options).toEqual(
-      expect.arrayContaining(['checking', 'savings', 'credit_card', 'cash', 'other'])
-    )
-    expect(options).not.toContain('investment')
-    expect(options).not.toContain('crypto')
+    expect(await screen.findByRole('option', { name: 'types.checking' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'types.savings' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'types.credit_card' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'types.cash' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'types.other' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'types.investment' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'types.crypto' })).toBeInTheDocument()
   })
 
   it('disables submit and shows "..." when isLoading', () => {

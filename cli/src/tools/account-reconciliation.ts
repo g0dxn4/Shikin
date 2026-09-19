@@ -290,8 +290,12 @@ const reconcile: ToolDefinition = {
             laterActivityRetained: null,
           }
         : context(account, date, observed)
+      const differenceCentavos = snapshotOnly ? plan.storedBalanceEffect : plan.adjustment
       const preview = {
-        account,
+        account: {
+          ...account,
+          accountMode: account.account_mode ?? 'transactional',
+        },
         date,
         ...plan,
         storedBalanceCentavos: account.balance,
@@ -304,13 +308,31 @@ const reconcile: ToolDefinition = {
         ledgerDifference: fromCentavos(safeMoney(observed - plan.asOfLedger)),
         storedDifferenceCentavos: safeMoney(observed - account.balance),
         storedDifference: fromCentavos(safeMoney(observed - account.balance)),
-        differenceCentavos: snapshotOnly ? plan.storedBalanceEffect : plan.adjustment,
-        difference: fromCentavos(snapshotOnly ? plan.storedBalanceEffect : plan.adjustment),
+        differenceCentavos,
+        difference: fromCentavos(differenceCentavos),
         requiredBasis: 'effective_ledger',
+        statementCoverage: {
+          startDate: input.statementStartDate ?? null,
+          endDate: input.statementEndDate ?? null,
+        },
+        applyRequired: differenceCentavos !== 0,
+        requiresConfirmation: differenceCentavos !== 0,
+        message:
+          differenceCentavos === 0
+            ? `Account "${account.name}" as-of ledger already matches ${account.currency} ${fromCentavos(observed).toFixed(2)}. Later activity is retained.`
+            : `Account "${account.name}" needs a ${account.currency} ${fromCentavos(differenceCentavos).toFixed(2)} as-of reconciliation change. Current stored balance will keep later activity. Re-run with --apply.`,
       }
       if (!input.apply) return { success: true, dryRun: true, applied: false, ...preview }
-      if (input.basis !== 'effective_ledger')
-        throw new Error('Applying requires basis="effective_ledger" after reviewing the preview.')
+      if (input.basis !== 'effective_ledger') {
+        return {
+          success: false,
+          reason: 'reconciliation_basis_required',
+          requiredBasis: 'effective_ledger',
+          ...preview,
+          message:
+            'Applying reconciliation requires basis="effective_ledger" after reviewing the as-of ledger preview.',
+        }
+      }
       if (!snapshotOnly)
         return {
           success: true,
@@ -722,11 +744,17 @@ const finalize: ToolDefinition = {
       const asOfLedgerBefore = projectDatedLedger(beforeRows, account.id, date)
       const preview = {
         ...plan,
+        account: {
+          ...account,
+          accountMode: account.account_mode ?? 'transactional',
+        },
         asOfLedger: asOfLedgerBefore,
         currentLedger: currentLedgerBefore,
         asOfLedgerAfterSelection: plan.asOfLedger,
         currentLedgerAfterSelection: plan.currentLedger,
         stagedBalanceEffectCentavos: safeMoney(plan.currentLedger - currentLedgerBefore),
+        reconciliationBridgeCentavos: plan.adjustment,
+        reconciliationBridge: fromCentavos(plan.adjustment),
         totalEffectiveLedgerChangeCentavos: netChange,
         storedVsLedgerDiscrepancy: safeMoney(account.balance - currentLedgerBefore),
         transactionIds: rows.map((r) => r.id),
@@ -734,6 +762,12 @@ const finalize: ToolDefinition = {
         coverage,
         selectionMode: 'explicit_rows',
         reconciliationDate: date,
+        statementCoverage: {
+          startDate: input.statementStartDate,
+          endDate: input.statementEndDate,
+        },
+        applyRequired: true,
+        message: `Dry run: ${rows.length} staged transaction(s) would be finalized with a ${account.currency} ${fromCentavos(plan.adjustment).toFixed(2)} as-of bridge. Later activity is retained.`,
       }
       if (!input.apply) return { success: true, dryRun: true, ...preview }
       const reconciliationId = generateId()
@@ -786,7 +820,15 @@ const finalize: ToolDefinition = {
         source: input.source ?? null,
         note: input.note ?? null,
       })
-      return { success: true, dryRun: false, ...preview, reconciliationId, adjustmentTransactionId }
+      return {
+        success: true,
+        dryRun: false,
+        ...preview,
+        reconciliationId,
+        adjustmentTransactionId,
+        verifiedLedgerBalance: fromCentavos(plan.currentBalanceAfter),
+        verifiedLedgerBalanceCentavos: plan.currentBalanceAfter,
+      }
     }),
 }
 

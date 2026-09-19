@@ -136,7 +136,7 @@ describe('identity-verified price service', () => {
       exchange: '',
       quoteCurrency: 'USD',
     })
-    expect(quote.instrumentId).toBe('alpha')
+    expect(quote).toMatchObject({ instrumentId: 'alpha', unitPriceDecimal: '0.0000001' })
     expect(String(fetchMock.mock.calls[2]?.[0])).toContain('precision=full')
   })
 

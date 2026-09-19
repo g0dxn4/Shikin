@@ -277,12 +277,15 @@ function investmentSnapshot(
           readValuationRates(targetCurrency)
         ).valueCentavos
   const costBasisCentavos = valuation.costBasisCentavos
+  const convertedCostBasisCentavos = valuation.convertedCostBasisCentavos
   const marketValueCentavos = valuation.valueCentavos
   const gainLossCentavos = valuation.gainLossCentavos
   const gainLossPercent =
-    gainLossCentavos === null || costBasisCentavos === null || costBasisCentavos === 0
+    gainLossCentavos === null ||
+    convertedCostBasisCentavos === null ||
+    convertedCostBasisCentavos === 0
       ? null
-      : Math.round((gainLossCentavos / Math.abs(costBasisCentavos)) * 10000) / 100
+      : Math.round((gainLossCentavos / Math.abs(convertedCostBasisCentavos)) * 10000) / 100
 
   return {
     id: investment.id,
@@ -300,6 +303,10 @@ function investmentSnapshot(
     costBasisKnown: input.costBasisKnown,
     costBasis: costBasisCentavos === null ? null : fromCentavos(costBasisCentavos),
     costBasisCentavos,
+    costBasisCurrency: valuation.costCurrency,
+    convertedCostBasis:
+      convertedCostBasisCentavos === null ? null : fromCentavos(convertedCostBasisCentavos),
+    convertedCostBasisCentavos,
     currency: investment.currency,
     notes: redactInvestmentText(investment.notes, redacted),
     createdAt: investment.created_at,
@@ -318,6 +325,7 @@ function investmentSnapshot(
     marketValueCentavos,
     gainLoss: gainLossCentavos === null ? null : fromCentavos(gainLossCentavos),
     gainLossCentavos,
+    gainLossCurrency: gainLossCentavos === null ? null : valuation.valueCurrency,
     gainLossPercent,
     valuationComplete: valuation.complete,
     valuationReasons: valuation.reasons,

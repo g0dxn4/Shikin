@@ -1,6 +1,7 @@
 import {
   calculateOwnershipValuation,
   decimalFromCentavos,
+  decimalFromNumber,
   type HoldingValuationInput,
   type OwnershipValuationResult,
   type ValuationRate,
@@ -67,7 +68,7 @@ export function rowToHoldingInput(row: InvestmentValuationRow): HoldingValuation
     id: row.id,
     accountId: row.account_id,
     assetType: row.type,
-    quantityDecimal: row.quantity_decimal?.trim() || String(row.shares),
+    quantityDecimal: row.quantity_decimal?.trim() || decimalFromNumber(row.shares),
     costCurrency: row.currency,
     costBasisKnown,
     avgCostBasisDecimal: costBasisKnown
@@ -90,7 +91,7 @@ function ratesForTarget(
       toCurrency?.toUpperCase() === target &&
       Number.isFinite(rate) &&
       rate > 0
-      ? [{ fromCurrency, toCurrency, rateDecimal: String(rate) }]
+      ? [{ fromCurrency, toCurrency, rateDecimal: decimalFromNumber(rate) }]
       : []
   })
 }

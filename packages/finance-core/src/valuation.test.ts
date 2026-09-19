@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   calculateOwnershipValuation,
+  decimalFromNumber,
   instrumentIdentityKey,
   multiplyDecimalsToCentavos,
   valueHolding,
@@ -40,6 +41,12 @@ function holding(overrides: Partial<HoldingValuationInput> = {}): HoldingValuati
 describe('precise valuation', () => {
   it('multiplies fractional quantities and sub-cent prices before rounding once', () => {
     expect(multiplyDecimalsToCentavos(['0.123456789012345678', '0.123456789012345678'])).toBe(2)
+  })
+
+  it('expands bounded numeric exponent notation without inventing extra digits', () => {
+    expect(decimalFromNumber(1e-7)).toBe('0.0000001')
+    expect(decimalFromNumber(-1.25e3)).toBe('-1250')
+    expect(() => decimalFromNumber(1e-41)).toThrow('supported precision')
   })
 
   it('rejects negative positions and bounds decimal multiplication work', () => {
@@ -107,6 +114,46 @@ describe('precise valuation', () => {
     )
     expect(result.complete).toBe(false)
     expect(result.reasons).toContain('verified_price_missing')
+  })
+
+  it('retains known native holding totals when target FX is missing', () => {
+    const mxnIdentity: InstrumentIdentity = {
+      ...identity,
+      exchange: 'XMEX',
+      quoteCurrency: 'MXN',
+    }
+    const mxnKey = instrumentIdentityKey(mxnIdentity)
+    const result = calculateOwnershipValuation({
+      targetCurrency: 'USD',
+      accounts: [],
+      holdings: [
+        holding({
+          quantityDecimal: '2',
+          instrumentKey: mxnKey,
+          price: {
+            ...mxnIdentity,
+            instrumentKey: mxnKey,
+            unitPriceDecimal: '10',
+            quoteDate: '2026-04-18',
+          },
+        }),
+      ],
+    })
+
+    expect(result).toMatchObject({
+      complete: false,
+      totalAssetsCentavos: null,
+      incompleteHoldingIds: ['holding'],
+      missingCurrencies: ['MXN'],
+      nativeTotals: [
+        {
+          currency: 'MXN',
+          assetsCentavos: 2000,
+          investmentsCentavos: 2000,
+          netWorthCentavos: 2000,
+        },
+      ],
+    })
   })
 
   it('applies ownership modes, signed card credit, and unresolved zero overlap', () => {

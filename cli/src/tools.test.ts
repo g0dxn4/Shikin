@@ -3677,6 +3677,18 @@ describe('CLI tool validation regressions', () => {
       .mockReturnValueOnce([{ total: 25000 }])
       .mockReturnValueOnce([
         {
+          id: 'bucket-1',
+          name: 'Rent',
+          description: null,
+          target_amount: 150000,
+          balance: 10000,
+          currency: 'USD',
+          sort_order: 1,
+          is_active: 1,
+        },
+      ])
+      .mockReturnValueOnce([
+        {
           id: 'tx-income',
           account_id: 'acct-1',
           type: 'income',
@@ -3758,6 +3770,18 @@ describe('CLI tool validation regressions', () => {
         },
       ])
       .mockReturnValueOnce([{ total: 0 }])
+      .mockReturnValueOnce([
+        {
+          id: 'bucket-1',
+          name: 'Rent',
+          description: null,
+          target_amount: 150000,
+          balance: 10000,
+          currency: 'USD',
+          sort_order: 1,
+          is_active: 1,
+        },
+      ])
       .mockReturnValueOnce([
         {
           id: 'tx-income',
@@ -7500,6 +7524,64 @@ describe('CLI tool validation regressions', () => {
           gainLoss: null,
           gainLossCentavos: null,
           gainLossPercent: null,
+        },
+      ],
+    })
+  })
+
+  it('uses converted cost basis for the same cross-currency ROI fixture as the frontend', async () => {
+    const instrumentKey = 'v1|stock|manual|WALMEX.MX|XMEX|USD'
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('FROM investments i')) {
+        return [
+          {
+            id: 'inv-cross-currency',
+            account_id: null,
+            account_name: null,
+            symbol: 'WALMEX.MX',
+            name: 'Walmart de México',
+            type: 'stock',
+            shares: 1,
+            quantity_decimal: '1',
+            avg_cost_basis: 10000,
+            avg_cost_basis_decimal: '100',
+            cost_basis_known: 1,
+            instrument_key: instrumentKey,
+            currency: 'MXN',
+            notes: null,
+            created_at: '2026-01-01T00:00:00.000Z',
+            updated_at: '2026-01-02T00:00:00.000Z',
+            price_instrument_key: instrumentKey,
+            price_asset_type: 'stock',
+            price_provider: 'manual',
+            price_instrument_id: 'WALMEX.MX',
+            price_exchange: 'XMEX',
+            price_quote_currency: 'USD',
+            unit_price_decimal: '10',
+            quote_date: '2026-05-01',
+          },
+        ]
+      }
+      if (sql.includes('FROM exchange_rates er')) {
+        return [{ from_currency: 'MXN', to_currency: 'USD', rate: 0.05 }]
+      }
+      return []
+    })
+
+    const result = await listInvestments.execute(listInvestments.schema.parse({}))
+
+    expect(result).toMatchObject({
+      success: true,
+      investments: [
+        {
+          costBasisCentavos: 10000,
+          costBasisCurrency: 'MXN',
+          convertedCostBasisCentavos: 500,
+          priceCurrency: 'USD',
+          marketValueCentavos: 1000,
+          gainLossCentavos: 500,
+          gainLossCurrency: 'USD',
+          gainLossPercent: 100,
         },
       ],
     })

@@ -3,6 +3,7 @@ import { execute } from '@/lib/database'
 import { generateId } from '@/lib/ulid'
 import {
   canonicalDecimal,
+  decimalFromNumber,
   instrumentIdentityKey,
   isVerifiedInstrumentPrice,
   type InstrumentIdentity,
@@ -48,29 +49,9 @@ function plainDecimal(value: unknown): string | null {
       return null
     }
   }
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null
-  const rendered = String(value)
-  if (!/[eE]/.test(rendered)) {
-    try {
-      return canonicalDecimal(rendered)
-    } catch {
-      return null
-    }
-  }
-  const [mantissa, exponentText] = rendered.toLowerCase().split('e')
-  const exponent = Number(exponentText)
-  const negative = mantissa.startsWith('-')
-  const digits = mantissa.replace('-', '').replace('.', '')
-  const originalScale = (mantissa.split('.')[1] ?? '').length
-  const scale = originalScale - exponent
-  const decimal =
-    scale <= 0
-      ? `${digits}${'0'.repeat(-scale)}`
-      : scale >= digits.length
-        ? `0.${'0'.repeat(scale - digits.length)}${digits}`
-        : `${digits.slice(0, digits.length - scale)}.${digits.slice(digits.length - scale)}`
+  if (typeof value !== 'number') return null
   try {
-    return canonicalDecimal(`${negative ? '-' : ''}${decimal}`)
+    return decimalFromNumber(value)
   } catch {
     return null
   }

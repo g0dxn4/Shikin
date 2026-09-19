@@ -18,12 +18,14 @@ vi.mock('@/lib/exchange-rate-service', () => ({
 }))
 
 import { execute, query } from '@/lib/database'
+import { getCachedRates } from '@/lib/exchange-rate-service'
 import { fetchVerifiedPrice } from '@/lib/price-service'
 import { useInvestmentStore } from '../investment-store'
 
 const mockQuery = vi.mocked(query)
 const mockExecute = vi.mocked(execute)
 const mockFetchPrice = vi.mocked(fetchVerifiedPrice)
+const mockGetCachedRates = vi.mocked(getCachedRates)
 const identity = {
   assetType: 'stock' as const,
   provider: 'manual' as const,
@@ -84,6 +86,45 @@ describe('precise investment store', () => {
       marketValue: 2,
       currentPriceDecimal: '0.123456789012345678',
       gainLoss: 2,
+    })
+  })
+
+  it('normalizes a tiny legacy quantity while disclosing legacy number precision', async () => {
+    mockQuery.mockResolvedValueOnce([
+      row({ shares: 1e-7, quantity_decimal: null, unit_price_decimal: '10000000' }),
+    ])
+
+    await useInvestmentStore.getState().fetch()
+
+    expect(useInvestmentStore.getState().investments[0]).toMatchObject({
+      quantityDecimal: '0.0000001',
+      quantityPrecision: 'legacy_number',
+      marketValue: 100,
+    })
+  })
+
+  it('uses converted cost basis for the same cross-currency ROI fixture as the CLI', async () => {
+    mockGetCachedRates.mockResolvedValueOnce([
+      { from_currency: 'MXN', to_currency: 'USD', rate: 0.05, date: '2026-04-18' },
+    ])
+    mockQuery.mockResolvedValueOnce([
+      row({
+        shares: 1,
+        quantity_decimal: '1',
+        avg_cost_basis: 10000,
+        avg_cost_basis_decimal: '100',
+        currency: 'MXN',
+        unit_price_decimal: '10',
+      }),
+    ])
+
+    await useInvestmentStore.getState().fetch()
+
+    expect(useInvestmentStore.getState().investments[0]).toMatchObject({
+      marketValue: 1000,
+      convertedCostBasis: 500,
+      gainLoss: 500,
+      gainLossPercent: 100,
     })
   })
 

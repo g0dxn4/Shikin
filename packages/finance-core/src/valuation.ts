@@ -184,6 +184,30 @@ export function multiplyDecimalsToCentavos(factors: readonly string[]): number {
   return safeNumber(roundRatio(coefficient, pow10(scale)), 'Decimal amount')
 }
 
+export function decimalFromNumber(value: number): string {
+  if (!Number.isFinite(value)) throw new TypeError('Decimal number must be finite')
+  const rendered = String(value)
+  if (!/[eE]/.test(rendered)) return canonicalDecimal(rendered)
+
+  const match = /^([+-]?)(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/.exec(rendered)
+  if (!match) throw new TypeError(`Invalid decimal number: ${rendered}`)
+  const sign = match[1] ?? ''
+  const integer = match[2]!
+  const fraction = match[3] ?? ''
+  const exponent = Number(match[4])
+  if (!Number.isSafeInteger(exponent)) throw new RangeError('Decimal exponent is out of range')
+
+  const digits = `${integer}${fraction}`
+  const decimalPosition = integer.length + exponent
+  const expanded =
+    decimalPosition <= 0
+      ? `0.${'0'.repeat(-decimalPosition)}${digits}`
+      : decimalPosition >= digits.length
+        ? `${digits}${'0'.repeat(decimalPosition - digits.length)}`
+        : `${digits.slice(0, decimalPosition)}.${digits.slice(decimalPosition)}`
+  return canonicalDecimal(`${sign}${expanded}`)
+}
+
 export function canonicalDecimal(value: string): string {
   const parsed = parseDecimal(value)
   const negative = parsed.coefficient < 0n
@@ -467,7 +491,27 @@ export function calculateOwnershipValuation(input: {
   for (const holding of holdings) {
     if (!holding.accountId) includedHoldingIds.add(holding.id)
     if (!includedHoldingIds.has(holding.id)) continue
-    if (!holding.complete || holding.valueCentavos === null || holding.valueCurrency === null) {
+
+    if (holding.valueCentavos !== null && holding.valueCurrency !== null) {
+      const nativeTotal = ensureNative(holding.valueCurrency)
+      nativeTotal.assetsCentavos = addSafe(
+        nativeTotal.assetsCentavos,
+        holding.valueCentavos,
+        'Native assets'
+      )
+      nativeTotal.investmentsCentavos = addSafe(
+        nativeTotal.investmentsCentavos,
+        holding.valueCentavos,
+        'Native investments'
+      )
+      nativeTotal.netWorthCentavos = addSafe(
+        nativeTotal.netWorthCentavos,
+        holding.valueCentavos,
+        'Native net worth'
+      )
+    }
+
+    if (!holding.complete) {
       incompleteHoldingIds.push(holding.id)
       for (const reason of holding.reasons) {
         if (reason.startsWith('missing_fx:')) {
@@ -475,26 +519,10 @@ export function calculateOwnershipValuation(input: {
           if (currency) missingCurrencies.add(currency)
         }
       }
-      continue
     }
-    const nativeTotal = ensureNative(holding.valueCurrency)
-    nativeTotal.assetsCentavos = addSafe(
-      nativeTotal.assetsCentavos,
-      holding.valueCentavos,
-      'Native assets'
-    )
-    nativeTotal.investmentsCentavos = addSafe(
-      nativeTotal.investmentsCentavos,
-      holding.valueCentavos,
-      'Native investments'
-    )
-    nativeTotal.netWorthCentavos = addSafe(
-      nativeTotal.netWorthCentavos,
-      holding.valueCentavos,
-      'Native net worth'
-    )
+
     if (holding.convertedValueCentavos === null) {
-      missingCurrencies.add(holding.valueCurrency)
+      if (holding.valueCurrency !== null) missingCurrencies.add(holding.valueCurrency)
     } else {
       convertedAssets = addSafe(convertedAssets, holding.convertedValueCentavos, 'Converted assets')
       convertedInvestments = addSafe(

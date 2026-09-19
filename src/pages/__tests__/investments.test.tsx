@@ -508,6 +508,114 @@ describe('Investments', () => {
     expect(screen.getAllByText('AAPL').length).toBeGreaterThan(0)
   })
 
+  it('does not fabricate gain metrics for unknown or known-zero cost basis', () => {
+    mockInvestments = [
+      {
+        id: 'inv-gain',
+        account_id: null,
+        symbol: 'GAIN',
+        name: 'Gain fixture',
+        type: 'stock',
+        shares: 1,
+        quantityDecimal: '1',
+        avg_cost_basis: 0,
+        currency: 'USD',
+        notes: null,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        currentPriceDecimal: '10',
+        currentPriceCurrency: 'USD',
+        marketValue: 1000,
+        convertedMarketValue: 1000,
+        gainLoss: null,
+        gainLossPercent: null,
+        lastPriceDate: '2024-01-10',
+      },
+    ]
+    mockPortfolioSummary = {
+      ...mockPortfolioSummary,
+      preferredCurrency: 'USD',
+      totalMarketValue: 1000,
+      totalCostBasis: null,
+      totalGainLoss: null,
+      totalGainLossPercent: null,
+      totalsComplete: true,
+      gainsComplete: false,
+    }
+
+    const { rerender } = render(<Investments />)
+    const gainMetric = screen.getByText('summary.totalGainLoss').closest('.metric-item')
+    expect(gainMetric?.querySelector('strong')).toHaveTextContent('—')
+    expect(gainMetric).not.toHaveTextContent('+0')
+    expect(gainMetric).not.toHaveTextContent('0.00%')
+
+    mockPortfolioSummary = {
+      ...mockPortfolioSummary,
+      totalCostBasis: 0,
+      totalGainLoss: 1000,
+      totalGainLossPercent: null,
+      gainsComplete: true,
+    }
+    rerender(<Investments />)
+
+    const knownZeroMetric = screen.getByText('summary.totalGainLoss').closest('.metric-item')
+    expect(knownZeroMetric?.querySelector('strong')).not.toHaveTextContent('—')
+    expect(knownZeroMetric).not.toHaveTextContent('%')
+  })
+
+  it('sorts mixed-currency values by converted value and puts unavailable values last', () => {
+    const base = {
+      account_id: null,
+      name: 'Sort fixture',
+      type: 'stock',
+      shares: 1,
+      quantityDecimal: '1',
+      avg_cost_basis: 0,
+      currency: 'USD',
+      notes: null,
+      created_at: '2024-01-01T00:00:00Z',
+      updated_at: '2024-01-01T00:00:00Z',
+      currentPriceDecimal: '1',
+      currentPriceCurrency: 'USD',
+      gainLoss: null,
+      gainLossPercent: null,
+      lastPriceDate: '2024-01-10',
+    }
+    mockInvestments = [
+      {
+        ...base,
+        id: 'native-high',
+        symbol: 'NATIVE-HIGH',
+        marketValue: 100000,
+        convertedMarketValue: 5000,
+      },
+      {
+        ...base,
+        id: 'target-high',
+        symbol: 'TARGET-HIGH',
+        marketValue: 10000,
+        convertedMarketValue: 10000,
+      },
+      {
+        ...base,
+        id: 'unavailable',
+        symbol: 'UNAVAILABLE',
+        marketValue: 999999,
+        convertedMarketValue: null,
+      },
+    ]
+
+    render(<Investments />)
+
+    const target = screen.getAllByText('TARGET-HIGH')[0]
+    const native = screen.getAllByText('NATIVE-HIGH')[0]
+    const unavailable = screen.getAllByText('UNAVAILABLE')[0]
+    expect(target.compareDocumentPosition(native) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(
+      native.compareDocumentPosition(unavailable) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
   it('shows mixed-currency warning and per-currency subtotals', () => {
     mockPortfolioSummary = {
       totalMarketValue: 63000,

@@ -1,6 +1,7 @@
 import {
   calculateOwnershipValuation,
   decimalFromCentavos,
+  decimalFromNumber,
   valueHolding,
   type HoldingValuationInput,
   type OwnershipValuationResult,
@@ -76,7 +77,7 @@ export function readInvestmentValuationRows(whereClause = '', params: unknown[] 
 }
 
 export function rowToHoldingInput(row: InvestmentValuationRow): HoldingValuationInput {
-  const quantityDecimal = row.quantity_decimal?.trim() || String(row.shares)
+  const quantityDecimal = row.quantity_decimal?.trim() || decimalFromNumber(row.shares)
   const costBasisKnown = row.cost_basis_known === 1
   const avgCostBasisDecimal = costBasisKnown
     ? row.avg_cost_basis_decimal?.trim() || decimalFromCentavos(row.avg_cost_basis)
@@ -135,7 +136,7 @@ export function readValuationRates(targetCurrency: string): ValuationRate[] {
           {
             fromCurrency: row.from_currency,
             toCurrency: row.to_currency,
-            rateDecimal: String(row.rate),
+            rateDecimal: decimalFromNumber(row.rate),
           },
         ]
       : []

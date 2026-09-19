@@ -5,6 +5,7 @@ import { query } from './database.js'
 import { valueHolding } from '@shikin/finance-core/valuation'
 import {
   readOwnershipValuation,
+  readValuationRates,
   rowToHoldingInput,
   type InvestmentValuationRow,
 } from './valuation-read.js'
@@ -31,6 +32,57 @@ describe('CLI ownership valuation read', () => {
       valueCentavos: 0,
       convertedValueCentavos: 10,
       gainLossCentavos: 10,
+    })
+  })
+
+  it('normalizes tiny legacy quantities and tiny numeric FX rates', () => {
+    const input = rowToHoldingInput({
+      ...holding('tiny', null),
+      shares: 1e-7,
+      quantity_decimal: null,
+      unit_price_decimal: '10000000',
+    })
+    mockQuery.mockReturnValueOnce([{ from_currency: 'USD', to_currency: 'MXN', rate: 1e-7 }])
+    const rates = readValuationRates('MXN')
+
+    expect(input.quantityDecimal).toBe('0.0000001')
+    expect(rates).toEqual([{ fromCurrency: 'USD', toCurrency: 'MXN', rateDecimal: '0.0000001' }])
+    expect(valueHolding(input, 'MXN', rates)).toMatchObject({
+      valueCentavos: 100,
+      convertedValueCentavos: 0,
+    })
+  })
+
+  it('matches core behavior by retaining native totals when target FX is missing', () => {
+    const mxnKey = 'v1|stock|manual|AAPL|XMEX|MXN'
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('FROM accounts WHERE')) return []
+      if (sql.includes('FROM investments i'))
+        return [
+          {
+            ...holding('mxn', null),
+            quantity_decimal: '2',
+            instrument_key: mxnKey,
+            price_instrument_key: mxnKey,
+            price_exchange: 'XMEX',
+            price_quote_currency: 'MXN',
+            unit_price_decimal: '10',
+          },
+        ]
+      return []
+    })
+
+    expect(readOwnershipValuation('USD')).toMatchObject({
+      complete: false,
+      totalAssetsCentavos: null,
+      incompleteHoldingIds: ['mxn'],
+      nativeTotals: [
+        {
+          currency: 'MXN',
+          assetsCentavos: 2000,
+          investmentsCentavos: 2000,
+        },
+      ],
     })
   })
 

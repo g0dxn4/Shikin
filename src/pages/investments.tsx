@@ -263,8 +263,14 @@ export function Investments() {
   const sortedInvestments = useMemo(() => {
     return [...filteredInvestments].sort((a, b) => {
       switch (sortField) {
-        case 'value':
-          return (b.marketValue ?? 0) - (a.marketValue ?? 0)
+        case 'value': {
+          const aValue = a.convertedMarketValue ?? null
+          const bValue = b.convertedMarketValue ?? null
+          if (aValue === null && bValue === null) return a.id.localeCompare(b.id)
+          if (aValue === null) return 1
+          if (bValue === null) return -1
+          return bValue - aValue || a.id.localeCompare(b.id)
+        }
         case 'gainLoss':
           return (b.gainLossPercent ?? 0) - (a.gainLossPercent ?? 0)
         case 'name':
@@ -284,7 +290,8 @@ export function Investments() {
   }, [assetFilter, searchQuery, sortField])
 
   const hasInitialLoadError = !!fetchError && investments.length === 0
-  const gainLoss = portfolioSummary.totalGainLoss ?? 0
+  const gainLoss = portfolioSummary.totalGainLoss
+  const gainsAvailable = portfolioSummary.gainsComplete && gainLoss !== null
 
   const toolbar = (
     <PageToolbar
@@ -419,14 +426,16 @@ export function Investments() {
         <MetricItem
           label={t('summary.totalGainLoss')}
           value={
-            portfolioSummary.totalsComplete ? (
+            gainsAvailable ? (
               <span className={gainLoss >= 0 ? 'text-success' : 'text-destructive'}>
                 {gainLoss >= 0 ? '+' : ''}
                 {formatMoney(gainLoss, portfolioSummary.preferredCurrency)}
-                <span className="ml-2 text-sm font-medium">
-                  ({(portfolioSummary.totalGainLossPercent ?? 0) >= 0 ? '+' : ''}
-                  {(portfolioSummary.totalGainLossPercent ?? 0).toFixed(2)}%)
-                </span>
+                {portfolioSummary.totalGainLossPercent !== null ? (
+                  <span className="ml-2 text-sm font-medium">
+                    ({portfolioSummary.totalGainLossPercent >= 0 ? '+' : ''}
+                    {portfolioSummary.totalGainLossPercent.toFixed(2)}%)
+                  </span>
+                ) : null}
               </span>
             ) : (
               '—'

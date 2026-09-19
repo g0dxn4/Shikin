@@ -273,18 +273,21 @@ describe('data-server authenticated contract', () => {
       },
     ])
 
-    const outsideQueryBeforeCommitResponse = await fetch(`${SERVER_URL}/api/db/query`, {
+    let outsideQuerySettled = false
+    const outsideQueryBeforeCommitPromise = fetch(`${SERVER_URL}/api/db/query`, {
       method: 'POST',
       headers: defaultHeaders,
       body: JSON.stringify({
         sql: 'SELECT id FROM accounts WHERE id = $1',
         params: [accountId],
       }),
+    }).then((response) => {
+      outsideQuerySettled = true
+      return response
     })
-    const outsideQueryBeforeCommitJson = await outsideQueryBeforeCommitResponse.json()
 
-    expect(outsideQueryBeforeCommitResponse.status).toBe(200)
-    expect(outsideQueryBeforeCommitJson).toEqual([])
+    await delay(50)
+    expect(outsideQuerySettled).toBe(false)
 
     const commitResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
       method: 'POST',
@@ -295,6 +298,11 @@ describe('data-server authenticated contract', () => {
 
     expect(commitResponse.status).toBe(200)
     expect(commitJson).toEqual({ ok: true, status: 'committed' })
+
+    const outsideQueryBeforeCommitResponse = await outsideQueryBeforeCommitPromise
+    const outsideQueryBeforeCommitJson = await outsideQueryBeforeCommitResponse.json()
+    expect(outsideQueryBeforeCommitResponse.status).toBe(200)
+    expect(outsideQueryBeforeCommitJson).toEqual([{ id: accountId }])
 
     const outsideQueryAfterCommitResponse = await fetch(`${SERVER_URL}/api/db/query`, {
       method: 'POST',
@@ -539,6 +547,258 @@ describe('data-server authenticated contract', () => {
     expect(unknownTxJson.error).toContain('Unknown transaction: tx-does-not-exist')
   })
 
+  it('queues overlapping transaction begins without delaying the owner rollback', async () => {
+    const defaultHeaders = {
+      Origin: ORIGIN,
+      'X-Shikin-Bridge': TOKEN,
+      'Content-Type': 'application/json',
+    }
+
+    const firstResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'begin' }),
+    })
+    const first = await firstResponse.json()
+
+    let secondSettled = false
+    const secondPromise = fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'begin' }),
+    }).then((response) => {
+      secondSettled = true
+      return response
+    })
+
+    await delay(50)
+    expect(secondSettled).toBe(false)
+
+    const rollbackStartedAt = Date.now()
+    const rollbackResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'rollback', transactionId: first.transactionId }),
+    })
+    expect(rollbackResponse.status).toBe(200)
+    expect(Date.now() - rollbackStartedAt).toBeLessThan(1_000)
+
+    const secondResponse = await secondPromise
+    const second = await secondResponse.json()
+    expect(secondResponse.status).toBe(200)
+
+    const secondQueryResponse = await fetch(`${SERVER_URL}/api/db/query`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: 'SELECT 1 AS usable',
+        params: [],
+        transactionId: second.transactionId,
+      }),
+    })
+    expect(await secondQueryResponse.json()).toEqual([{ usable: 1 }])
+
+    const secondRollbackResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'rollback', transactionId: second.transactionId }),
+    })
+    expect(secondRollbackResponse.status).toBe(200)
+  })
+
+  it('drops a disconnected queued write instead of executing it after the owner releases', async () => {
+    const defaultHeaders = {
+      Origin: ORIGIN,
+      'X-Shikin-Bridge': TOKEN,
+      'Content-Type': 'application/json',
+    }
+    const accountId = 'cancelled-queued-write-account'
+
+    const beginResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'begin' }),
+    })
+    const transaction = await beginResponse.json()
+
+    const controller = new AbortController()
+    const queuedWrite = fetch(`${SERVER_URL}/api/db/execute`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      signal: controller.signal,
+      body: JSON.stringify({
+        sql: 'INSERT INTO accounts (id, name, type, balance) VALUES ($1, $2, $3, $4)',
+        params: [accountId, 'Cancelled queued write', 'checking', 1],
+      }),
+    })
+    await delay(50)
+    controller.abort()
+    await expect(queuedWrite).rejects.toThrow()
+
+    await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'rollback', transactionId: transaction.transactionId }),
+    })
+
+    const queryResponse = await fetch(`${SERVER_URL}/api/db/query`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: 'SELECT id FROM accounts WHERE id = $1',
+        params: [accountId],
+      }),
+    })
+    expect(await queryResponse.json()).toEqual([])
+
+    const nextBeginResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'begin' }),
+    })
+    const nextTransaction = await nextBeginResponse.json()
+    expect(nextBeginResponse.status).toBe(200)
+    await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'rollback', transactionId: nextTransaction.transactionId }),
+    })
+  })
+
+  it('releases a queued transaction when the owner lease expires', async () => {
+    const defaultHeaders = {
+      Origin: ORIGIN,
+      'X-Shikin-Bridge': TOKEN,
+      'Content-Type': 'application/json',
+    }
+
+    const firstResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'begin' }),
+    })
+    const first = await firstResponse.json()
+
+    const secondResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'begin' }),
+    })
+    const second = await secondResponse.json()
+    expect(secondResponse.status).toBe(200)
+
+    const expiredResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'rollback', transactionId: first.transactionId }),
+    })
+    expect(await expiredResponse.json()).toEqual({ ok: true, status: 'expired_rolled_back' })
+
+    const secondRollbackResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'rollback', transactionId: second.transactionId }),
+    })
+    expect(secondRollbackResponse.status).toBe(200)
+  })
+
+  it('queues autocommit SQL without blocking the active transaction commit', async () => {
+    const defaultHeaders = {
+      Origin: ORIGIN,
+      'X-Shikin-Bridge': TOKEN,
+      'Content-Type': 'application/json',
+    }
+    const accountId = 'queued-autocommit-account'
+
+    const beginResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'begin' }),
+    })
+    const transaction = await beginResponse.json()
+
+    let writeSettled = false
+    const writePromise = fetch(`${SERVER_URL}/api/db/execute`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: 'INSERT INTO accounts (id, name, type, balance) VALUES ($1, $2, $3, $4)',
+        params: [accountId, 'Queued autocommit', 'checking', 5],
+      }),
+    }).then((response) => {
+      writeSettled = true
+      return response
+    })
+
+    await delay(50)
+    expect(writeSettled).toBe(false)
+
+    const commitStartedAt = Date.now()
+    const commitResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'commit', transactionId: transaction.transactionId }),
+    })
+    expect(commitResponse.status).toBe(200)
+    expect(Date.now() - commitStartedAt).toBeLessThan(1_000)
+
+    const writeResponse = await writePromise
+    expect(writeResponse.status).toBe(200)
+    const queryResponse = await fetch(`${SERVER_URL}/api/db/query`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ sql: 'SELECT id FROM accounts WHERE id = $1', params: [accountId] }),
+    })
+    expect(await queryResponse.json()).toEqual([{ id: accountId }])
+  })
+
+  it('releases ownership and reports a truthful status when COMMIT fails', async () => {
+    const defaultHeaders = {
+      Origin: ORIGIN,
+      'X-Shikin-Bridge': TOKEN,
+      'Content-Type': 'application/json',
+    }
+
+    const beginResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'begin' }),
+    })
+    const transaction = await beginResponse.json()
+
+    const forceRollbackResponse = await fetch(`${SERVER_URL}/api/db/execute`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: 'ROLLBACK',
+        params: [],
+        transactionId: transaction.transactionId,
+      }),
+    })
+    expect(forceRollbackResponse.status).toBe(200)
+
+    const failedCommitResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'commit', transactionId: transaction.transactionId }),
+    })
+    expect(failedCommitResponse.status).toBe(500)
+
+    const repeatedCommitResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'commit', transactionId: transaction.transactionId }),
+    })
+    expect(await repeatedCommitResponse.json()).toEqual({ ok: true, status: 'commit_failed' })
+
+    const queryResponse = await fetch(`${SERVER_URL}/api/db/query`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ sql: 'SELECT 1 AS ok', params: [] }),
+    })
+    expect(await queryResponse.json()).toEqual([{ ok: 1 }])
+  })
+
   it('treats recurring rule and account currencies with casing or whitespace drift as equivalent', async () => {
     const defaultHeaders = {
       Origin: ORIGIN,
@@ -691,6 +951,90 @@ describe('data-server authenticated contract', () => {
         balance: 1000,
       },
     ])
+  })
+
+  it('rechecks transaction ownership after snapshot upload before restoring', async () => {
+    const defaultHeaders = {
+      Origin: ORIGIN,
+      'X-Shikin-Bridge': TOKEN,
+      'Content-Type': 'application/json',
+    }
+    const preservedAccountId = 'restore-upload-race-preserved-account'
+
+    const snapshotResponse = await fetch(`${SERVER_URL}/api/db/export`, {
+      headers: {
+        Origin: ORIGIN,
+        'X-Shikin-Bridge': TOKEN,
+      },
+    })
+    const snapshot = new Uint8Array(await snapshotResponse.arrayBuffer())
+    expect(snapshotResponse.status).toBe(200)
+
+    const insertResponse = await fetch(`${SERVER_URL}/api/db/execute`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: 'INSERT INTO accounts (id, name, type, balance) VALUES ($1, $2, $3, $4)',
+        params: [preservedAccountId, 'Restore race preserved', 'checking', 10],
+      }),
+    })
+    expect(insertResponse.status).toBe(200)
+
+    let uploadController: ReadableStreamDefaultController<Uint8Array> | null = null
+    const upload = new ReadableStream<Uint8Array>({
+      start(controller) {
+        uploadController = controller
+        controller.enqueue(snapshot.subarray(0, 16))
+      },
+    })
+    const importPromise = fetch(`${SERVER_URL}/api/db/import`, {
+      method: 'POST',
+      headers: {
+        Origin: ORIGIN,
+        'X-Shikin-Bridge': TOKEN,
+        'Content-Type': 'application/octet-stream',
+      },
+      body: upload,
+      duplex: 'half',
+    } as RequestInit & { duplex: 'half' })
+
+    await delay(50)
+    const beginResponse = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'begin' }),
+    })
+    const transaction = await beginResponse.json()
+    expect(beginResponse.status).toBe(200)
+
+    const blockedExportResponse = await fetch(`${SERVER_URL}/api/db/export`, {
+      headers: {
+        Origin: ORIGIN,
+        'X-Shikin-Bridge': TOKEN,
+      },
+    })
+    expect(blockedExportResponse.status).toBe(409)
+
+    uploadController!.enqueue(snapshot.subarray(16))
+    uploadController!.close()
+    const importResponse = await importPromise
+    expect(importResponse.status).toBe(409)
+
+    await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({ action: 'rollback', transactionId: transaction.transactionId }),
+    })
+
+    const queryResponse = await fetch(`${SERVER_URL}/api/db/query`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: 'SELECT id FROM accounts WHERE id = $1',
+        params: [preservedAccountId],
+      }),
+    })
+    expect(await queryResponse.json()).toEqual([{ id: preservedAccountId }])
   })
 
   it('rejects oversized JSON request bodies with a 413 response', async () => {

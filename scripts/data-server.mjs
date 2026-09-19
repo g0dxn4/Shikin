@@ -230,6 +230,142 @@ const TRANSACTION_TTL_MS = Number(process.env.SHIKIN_SERVER_TRANSACTION_TTL_MS |
 const activeTransactions = new Map()
 const closedTransactions = new Map()
 
+// better-sqlite3 calls are synchronous. A second connection waiting on SQLite's
+// busy timeout would therefore block this process from committing the transaction
+// which owns the lock. Keep all use of the shared database behind an asynchronous
+// ownership gate; transaction-scoped requests use their owner's connection directly.
+const databaseGate = {
+  owner: null,
+  waiters: [],
+  maintenance: null,
+  closed: false,
+}
+
+function removeDatabaseGateWaiter(waiter) {
+  const index = databaseGate.waiters.indexOf(waiter)
+  if (index >= 0) databaseGate.waiters.splice(index, 1)
+}
+
+function grantDatabaseGateWaiter(waiter) {
+  waiter.granted = true
+  waiter.cleanup()
+  const owner = { kind: waiter.kind, token: Symbol(waiter.kind) }
+  databaseGate.owner = owner
+  if (waiter.maintenance) databaseGate.maintenance = 'active'
+
+  let released = false
+  waiter.resolve(() => {
+    if (released) return
+    released = true
+    if (databaseGate.owner?.token === owner.token) databaseGate.owner = null
+    if (waiter.maintenance) databaseGate.maintenance = null
+    grantNextDatabaseGateWaiter()
+  })
+}
+
+function grantNextDatabaseGateWaiter() {
+  if (databaseGate.owner || databaseGate.closed) return
+
+  let waiter
+  while ((waiter = databaseGate.waiters.shift())) {
+    if (!waiter.cancelled) {
+      grantDatabaseGateWaiter(waiter)
+      return
+    }
+  }
+}
+
+function rejectDatabaseGateWaiter(waiter, error) {
+  if (waiter.granted || waiter.cancelled) return
+  waiter.cancelled = true
+  removeDatabaseGateWaiter(waiter)
+  waiter.cleanup()
+  waiter.reject(error)
+}
+
+function enqueueDatabaseGateOwnership(req, res, kind, { maintenance = false } = {}) {
+  return new Promise((resolveOwnership, rejectOwnership) => {
+    const waiter = {
+      kind,
+      maintenance,
+      granted: false,
+      cancelled: false,
+      cleanup: () => {},
+      resolve: resolveOwnership,
+      reject: rejectOwnership,
+    }
+
+    const cancel = () => {
+      rejectDatabaseGateWaiter(
+        waiter,
+        createHttpError('Database request was cancelled before it acquired ownership.', 499)
+      )
+      if (maintenance && databaseGate.maintenance === 'pending') {
+        databaseGate.maintenance = null
+        grantNextDatabaseGateWaiter()
+      }
+    }
+    waiter.cleanup = () => {
+      req?.off('aborted', cancel)
+      res?.off('close', cancel)
+    }
+    req?.once('aborted', cancel)
+    res?.once('close', cancel)
+
+    if (!databaseGate.owner && databaseGate.waiters.length === 0) {
+      grantDatabaseGateWaiter(waiter)
+    } else {
+      databaseGate.waiters.push(waiter)
+    }
+  })
+}
+
+function acquireDatabaseOwnership(req, res, kind) {
+  if (databaseGate.closed) {
+    throw createHttpError('Database server is shutting down.', 503)
+  }
+  if (databaseGate.maintenance) {
+    throw createHttpError('Database restore is in progress.', 409)
+  }
+  return enqueueDatabaseGateOwnership(req, res, kind)
+}
+
+function assertDatabaseRequestConnected(req, res) {
+  if (req.aborted || res.destroyed) {
+    throw createHttpError('Database request was cancelled before it acquired ownership.', 499)
+  }
+}
+
+function acquireDatabaseMaintenance(req, res, operation) {
+  if (databaseGate.closed) {
+    throw createHttpError('Database server is shutting down.', 503)
+  }
+  if (databaseGate.maintenance) {
+    throw createHttpError(`Cannot ${operation} while another database restore is in progress.`, 409)
+  }
+  if (activeTransactions.size > 0 || databaseGate.owner?.kind === 'transaction') {
+    throw createHttpError(`Cannot ${operation} while server-side transactions are active.`, 409)
+  }
+
+  databaseGate.maintenance = 'pending'
+  const displacedWaiters = databaseGate.waiters.splice(0)
+  for (const waiter of displacedWaiters) {
+    rejectDatabaseGateWaiter(
+      waiter,
+      createHttpError('Database restore started before this queued database request ran.', 409)
+    )
+  }
+  return enqueueDatabaseGateOwnership(req, res, 'restore', { maintenance: true })
+}
+
+function closeDatabaseGate() {
+  databaseGate.closed = true
+  const waiters = databaseGate.waiters.splice(0)
+  for (const waiter of waiters) {
+    rejectDatabaseGateWaiter(waiter, createHttpError('Database server is shutting down.', 503))
+  }
+}
+
 // ── SQL Parameter Conversion ───────────────────────────────────────────────
 // The codebase uses $1, $2, ... positional params; better-sqlite3 uses ?
 
@@ -1703,25 +1839,55 @@ function scheduleTransactionExpiry(transactionId) {
       return
     }
 
+    let status = 'expired_rolled_back'
     try {
       staleEntry.db.exec('ROLLBACK')
     } catch {
-      // Best-effort cleanup for abandoned transactions.
-    } finally {
-      activeTransactions.delete(transactionId)
+      status = 'expired_rollback_failed'
+    }
+
+    activeTransactions.delete(transactionId)
+    try {
       staleEntry.db.close()
-      rememberClosedTransaction(transactionId, 'expired_rolled_back')
+    } catch {
+      // The ownership permit must still be released if connection cleanup fails.
+    } finally {
+      try {
+        rememberClosedTransaction(transactionId, status)
+      } finally {
+        staleEntry.releaseOwnership()
+      }
     }
   }, TRANSACTION_TTL_MS)
 }
 
-function beginServerTransaction() {
-  const transactionId = ulid()
-  const transactionDb = openDatabase()
-  transactionDb.exec('BEGIN IMMEDIATE')
-  activeTransactions.set(transactionId, { db: transactionDb, timeout: null })
-  scheduleTransactionExpiry(transactionId)
-  return transactionId
+async function beginServerTransaction(req, res) {
+  const releaseOwnership = await acquireDatabaseOwnership(req, res, 'transaction')
+  let transactionDb = null
+
+  try {
+    assertDatabaseRequestConnected(req, res)
+
+    const transactionId = ulid()
+    transactionDb = openDatabase()
+    transactionDb.exec('BEGIN IMMEDIATE')
+    activeTransactions.set(transactionId, {
+      db: transactionDb,
+      timeout: null,
+      releaseOwnership,
+    })
+    scheduleTransactionExpiry(transactionId)
+    return transactionId
+  } catch (error) {
+    try {
+      transactionDb?.close()
+    } catch {
+      // Preserve the begin failure.
+    } finally {
+      releaseOwnership()
+    }
+    throw error
+  }
 }
 
 function getDatabaseForRequest(transactionId) {
@@ -1759,19 +1925,32 @@ function closeServerTransaction(transactionId, action) {
     throw createHttpError(`Unknown transaction: ${normalizedTransactionId}`, 404)
   }
 
+  let terminalError = null
+  let status
   try {
     transactionEntry.db.exec(action === 'commit' ? 'COMMIT' : 'ROLLBACK')
-  } finally {
-    clearTimeout(transactionEntry.timeout)
-    activeTransactions.delete(normalizedTransactionId)
-    transactionEntry.db.close()
-    rememberClosedTransaction(
-      normalizedTransactionId,
-      action === 'commit' ? 'committed' : 'rolled_back'
-    )
+    status = action === 'commit' ? 'committed' : 'rolled_back'
+  } catch (error) {
+    terminalError = error
+    status = action === 'commit' ? 'commit_failed' : 'rollback_failed'
   }
 
-  return { ok: true, status: action === 'commit' ? 'committed' : 'rolled_back' }
+  clearTimeout(transactionEntry.timeout)
+  activeTransactions.delete(normalizedTransactionId)
+  try {
+    transactionEntry.db.close()
+  } catch (error) {
+    terminalError ??= error
+  } finally {
+    try {
+      rememberClosedTransaction(normalizedTransactionId, status)
+    } finally {
+      transactionEntry.releaseOwnership()
+    }
+  }
+
+  if (terminalError) throw terminalError
+  return { ok: true, status }
 }
 
 function ensureNoActiveTransactions(operation) {
@@ -2115,28 +2294,56 @@ async function handleDbQuery(req, res) {
   const body = await readBody(req)
   const sql = convertParams(body.sql || '')
   const params = body.params || []
-  const database = getDatabaseForRequest(body.transactionId)
-  const rows = database.prepare(sql).all(...params)
-  return sendJson(res, rows)
+  const transactionId = normalizeTransactionId(body.transactionId, { allowUndefined: true })
+
+  if (transactionId) {
+    const rows = getDatabaseForRequest(transactionId)
+      .prepare(sql)
+      .all(...params)
+    return sendJson(res, rows)
+  }
+
+  const releaseOwnership = await acquireDatabaseOwnership(req, res, 'query')
+  try {
+    assertDatabaseRequestConnected(req, res)
+    const rows = db.prepare(sql).all(...params)
+    return sendJson(res, rows)
+  } finally {
+    releaseOwnership()
+  }
 }
 
 async function handleDbExecute(req, res) {
   const body = await readBody(req)
   const sql = convertParams(body.sql || '')
   const params = body.params || []
-  const database = getDatabaseForRequest(body.transactionId)
-  const result = database.prepare(sql).run(...params)
-  return sendJson(res, {
-    rowsAffected: result.changes,
-    lastInsertId: Number(result.lastInsertRowid),
-  })
+  const transactionId = normalizeTransactionId(body.transactionId, { allowUndefined: true })
+
+  let releaseOwnership = null
+  const database = transactionId
+    ? getDatabaseForRequest(transactionId)
+    : await acquireDatabaseOwnership(req, res, 'execute').then((release) => {
+        releaseOwnership = release
+        return db
+      })
+
+  try {
+    if (releaseOwnership) assertDatabaseRequestConnected(req, res)
+    const result = database.prepare(sql).run(...params)
+    return sendJson(res, {
+      rowsAffected: result.changes,
+      lastInsertId: Number(result.lastInsertRowid),
+    })
+  } finally {
+    releaseOwnership?.()
+  }
 }
 
 async function handleTransaction(req, res) {
   const body = await readBody(req)
 
   if (body.action === 'begin') {
-    return sendJson(res, { transactionId: beginServerTransaction() })
+    return sendJson(res, { transactionId: await beginServerTransaction(req, res) })
   }
 
   if (body.action === 'commit' || body.action === 'rollback') {
@@ -2146,8 +2353,14 @@ async function handleTransaction(req, res) {
   return sendError(res, 'Unsupported transaction action', 400)
 }
 
-function handleRecurringMaterialization(res) {
-  return sendJson(res, materializeRecurringBatch())
+async function handleRecurringMaterialization(req, res) {
+  const releaseOwnership = await acquireDatabaseOwnership(req, res, 'recurring-materialization')
+  try {
+    assertDatabaseRequestConnected(req, res)
+    return sendJson(res, materializeRecurringBatch())
+  } finally {
+    releaseOwnership()
+  }
 }
 
 function handleStoreGetAll(res) {
@@ -2249,42 +2462,54 @@ async function handleFsMakeDirectory(req, res) {
   return sendJson(res, { ok: true })
 }
 
-function handleRuntimeDiagnostics(res) {
-  const migration = db.prepare('SELECT id, name FROM _migrations ORDER BY id DESC LIMIT 1').get()
-  const state = db
-    .prepare(
-      'SELECT database_id, data_revision, last_financial_write_at FROM app_data_state WHERE id = 1'
-    )
-    .get()
-  if (!migration || !state) {
-    throw new Error('Runtime diagnostics metadata is unavailable.')
-  }
+async function handleRuntimeDiagnostics(req, res) {
+  const releaseOwnership = await acquireDatabaseOwnership(req, res, 'runtime-diagnostics')
+  try {
+    assertDatabaseRequestConnected(req, res)
+    const migration = db.prepare('SELECT id, name FROM _migrations ORDER BY id DESC LIMIT 1').get()
+    const state = db
+      .prepare(
+        'SELECT database_id, data_revision, last_financial_write_at FROM app_data_state WHERE id = 1'
+      )
+      .get()
+    if (!migration || !state) {
+      throw new Error('Runtime diagnostics metadata is unavailable.')
+    }
 
-  return sendJson(res, {
-    success: true,
-    build: HOSTED_MODE ? 'hosted-web' : 'browser-development',
-    version: APPLICATION_VERSION,
-    schemaVersion: migration.id,
-    schemaMigration: migration.name,
-    databaseLineageId: state.database_id,
-    localInstance: readRuntimeIdentity(DATA_DIR),
-    dataRevision: state.data_revision,
-    lastFinancialWriteAt: state.last_financial_write_at,
-  })
+    return sendJson(res, {
+      success: true,
+      build: HOSTED_MODE ? 'hosted-web' : 'browser-development',
+      version: APPLICATION_VERSION,
+      schemaVersion: migration.id,
+      schemaMigration: migration.name,
+      databaseLineageId: state.database_id,
+      localInstance: readRuntimeIdentity(DATA_DIR),
+      dataRevision: state.data_revision,
+      lastFinancialWriteAt: state.last_financial_write_at,
+    })
+  } finally {
+    releaseOwnership()
+  }
 }
 
-async function handleDbExport(res) {
+async function handleDbExport(req, res) {
   ensureNoActiveTransactions('export the database')
-  const bytes = await exportDatabaseBuffer({ db, dbPath: DB_PATH })
-  res.writeHead(
-    200,
-    buildResponseHeaders({
-      'Content-Type': 'application/octet-stream',
-      'Content-Length': bytes.length,
-      'Content-Disposition': 'attachment; filename="shikin.db"',
-    })
-  )
-  res.end(HOSTED_MODE && res.req?.method === 'HEAD' ? undefined : bytes)
+  const releaseOwnership = await acquireDatabaseOwnership(req, res, 'export')
+  try {
+    assertDatabaseRequestConnected(req, res)
+    const bytes = await exportDatabaseBuffer({ db, dbPath: DB_PATH })
+    res.writeHead(
+      200,
+      buildResponseHeaders({
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': bytes.length,
+        'Content-Disposition': 'attachment; filename="shikin.db"',
+      })
+    )
+    res.end(HOSTED_MODE && res.req?.method === 'HEAD' ? undefined : bytes)
+  } finally {
+    releaseOwnership()
+  }
 }
 
 async function handleDbImport(req, res) {
@@ -2308,37 +2533,45 @@ async function handleDbImport(req, res) {
     return sendError(res, 'Invalid SQLite database file', 400)
   }
 
-  let importResult
+  // Recheck after the upload and reserve exclusive ownership before validation
+  // creates files or the live database can be closed/replaced.
+  const releaseOwnership = await acquireDatabaseMaintenance(req, res, 'import a database snapshot')
   try {
-    importResult = await importDatabaseBuffer({ db, dbPath: DB_PATH, buffer })
+    assertDatabaseRequestConnected(req, res)
+    let importResult
     try {
-      db = openDatabase()
-      runMigrations()
-      if (importResult.backupPath && existsSync(importResult.backupPath)) {
-        try {
-          unlinkSync(importResult.backupPath)
-        } catch (cleanupError) {
-          console.warn(
-            `[data-server] Imported database successfully, but could not remove rollback backup: ${cleanupError.message}`
-          )
+      importResult = await importDatabaseBuffer({ db, dbPath: DB_PATH, buffer })
+      try {
+        db = openDatabase()
+        runMigrations()
+        if (importResult.backupPath && existsSync(importResult.backupPath)) {
+          try {
+            unlinkSync(importResult.backupPath)
+          } catch (cleanupError) {
+            console.warn(
+              `[data-server] Imported database successfully, but could not remove rollback backup: ${cleanupError.message}`
+            )
+          }
         }
+      } catch (error) {
+        db?.close()
+        await importResult.restoreBackup()
+        db = openDatabase()
+        throw error
       }
     } catch (error) {
-      db?.close()
-      await importResult.restoreBackup()
-      db = openDatabase()
+      try {
+        db.prepare('SELECT 1').get()
+      } catch {
+        db = openDatabase()
+      }
       throw error
     }
-  } catch (error) {
-    try {
-      db.prepare('SELECT 1').get()
-    } catch {
-      db = openDatabase()
-    }
-    throw error
-  }
 
-  return sendJson(res, { ok: true, message: 'Database imported successfully.' })
+    return sendJson(res, { ok: true, message: 'Database imported successfully.' })
+  } finally {
+    releaseOwnership()
+  }
 }
 
 function dispatchRequest(req, res, url, path) {
@@ -2360,7 +2593,7 @@ function dispatchRequest(req, res, url, path) {
 
     // ── Recurring: Materialize server-side atomically ───────────────
     case 'POST /api/recurring/materialize':
-      return handleRecurringMaterialization(res)
+      return handleRecurringMaterialization(req, res)
 
     // ── Store: Get all ─────────────────────────────────────────────
     case 'GET /api/store':
@@ -2381,7 +2614,7 @@ function dispatchRequest(req, res, url, path) {
   switch (route) {
     // ── Runtime diagnostics (read-only, no public paths) ───────────
     case 'GET /api/runtime/diagnostics':
-      return handleRuntimeDiagnostics(res)
+      return handleRuntimeDiagnostics(req, res)
 
     // ── FS: App data path ──────────────────────────────────────────
     case 'GET /api/fs/appdata':
@@ -2417,7 +2650,7 @@ function dispatchRequest(req, res, url, path) {
 
     // ── DB: Export (binary) ────────────────────────────────────────
     case 'GET /api/db/export':
-      return handleDbExport(res)
+      return handleDbExport(req, res)
 
     // ── DB: Import (binary) ────────────────────────────────────────
     case 'POST /api/db/import':
@@ -2465,7 +2698,9 @@ const server = createServer(async (req, res) => {
     await dispatchRequest(req, res, url, path)
   } catch (err) {
     console.error('[data-server] Error:', err.message)
-    sendError(res, err.message, err.statusCode || 500)
+    if (!res.destroyed && !res.writableEnded) {
+      sendError(res, err.message, err.statusCode || 500)
+    }
   }
 })
 
@@ -2475,6 +2710,7 @@ async function shutdown(signal) {
   if (shuttingDown) return
   shuttingDown = true
   console.log(`[data-server] Received ${signal}; shutting down.`)
+  closeDatabaseGate()
 
   for (const [transactionId, transactionEntry] of activeTransactions) {
     clearTimeout(transactionEntry.timeout)
@@ -2482,9 +2718,14 @@ async function shutdown(signal) {
       transactionEntry.db.exec('ROLLBACK')
     } catch {
       // Best-effort cleanup for active transactions during process shutdown.
-    } finally {
-      activeTransactions.delete(transactionId)
+    }
+    activeTransactions.delete(transactionId)
+    try {
       transactionEntry.db.close()
+    } catch {
+      // Ownership and shutdown must progress even if connection cleanup fails.
+    } finally {
+      transactionEntry.releaseOwnership()
     }
   }
 

@@ -85,5 +85,86 @@
   "currency": {
     "unavailable": "Totales no disponibles",
     "description": "Se necesitan los gastos completos y tipos de cambio válidos para mostrar el progreso."
+  },
+  "buckets": {
+    "title": "Fondos virtuales de flujo de caja",
+    "description": "Reserva ingresos registrados para próximas prioridades, agrupados en la moneda nativa de cada fondo.",
+    "disclaimer": "Los saldos virtuales solo organizan tu plan. No cambian cuentas bancarias ni transacciones.",
+    "noTarget": "Sin objetivo",
+    "target": "Objetivo {{amount}}",
+    "status": {
+      "active": "Activo",
+      "inactive": "Inactivo"
+    },
+    "actions": {
+      "create": "Nuevo fondo",
+      "edit": "Editar",
+      "save": "Guardar",
+      "saving": "Guardando…",
+      "cancel": "Cancelar",
+      "retry": "Reintentar",
+      "allocate": "Asignar",
+      "deactivate": "Desactivar",
+      "activate": "Reactivar",
+      "delete": "Eliminar",
+      "reverse": "Revertir",
+      "correct": "Corregir",
+      "review": "Revisar corrección",
+      "back": "Atrás",
+      "applyCorrection": "Aplicar corrección"
+    },
+    "dialog": {
+      "createTitle": "Crear fondo virtual",
+      "editTitle": "Editar fondo virtual",
+      "editorDescription": "Los identificadores y el historial de asignaciones no cambian.",
+      "allocateTitle": "Asignar a {{name}}",
+      "allocateDescription": "Elige ingresos registrados elegibles o crea explícitamente una asignación virtual sin vínculo.",
+      "correctTitle": "Corregir asignación",
+      "correctDescription": "Revisa una reversión y sustitución atómicas. Las filas históricas nunca se eliminan."
+    },
+    "fields": {
+      "name": "Nombre",
+      "description": "Descripción",
+      "target": "Monto objetivo",
+      "clearTarget": "Borrar el objetivo existente",
+      "currency": "Moneda nativa",
+      "amount": "Monto ({{currency}})",
+      "funding": "Evidencia de fondos",
+      "targetBucket": "Fondo de reemplazo"
+    },
+    "funding": {
+      "unbound": "Asignación VIRTUAL SIN VÍNCULO",
+      "confirmUnbound": "Entiendo que esta es una asignación virtual sin transacción de origen y que no mueve dinero bancario.",
+      "income": "ingreso registrado",
+      "virtual": "virtual sin vínculo"
+    },
+    "history": {
+      "title": "Historial de asignaciones ({{count}})",
+      "preserved": "Histórico"
+    },
+    "preview": {
+      "title": "Corrección revisada",
+      "move": "Reemplazar con {{amount}} en {{name}}.",
+      "atomicHistory": "El original permanece intacto; se añadirán atómicamente una reversión firmada y un reemplazo."
+    },
+    "confirm": {
+      "deleteTitle": "¿Eliminar fondo vacío?",
+      "deleteDescription": "Solo se puede eliminar un fondo vacío sin historial de asignaciones.",
+      "reverseTitle": "¿Revertir asignación?",
+      "reverseDescription": "Se añadirá una reversión firmada. La fila histórica original permanecerá."
+    },
+    "empty": {
+      "title": "Sin fondos virtuales",
+      "description": "Crea un fondo en moneda nativa para organizar ingresos registrados sin cambiar tus cuentas."
+    },
+    "error": {
+      "load": "No se pudieron cargar los fondos virtuales.",
+      "save": "No se pudo guardar el fondo virtual.",
+      "allocate": "No se pudo asignar este monto.",
+      "confirmUnbound": "Confirma que esta es una asignación virtual sin vínculo.",
+      "preview": "No se pudo preparar la vista previa de la corrección.",
+      "correct": "No se pudo aplicar la corrección. Revisa una vista previa nueva e inténtalo otra vez.",
+      "mutate": "No se pudo completar la acción del fondo."
+    }
   }
 }

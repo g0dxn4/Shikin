@@ -15,6 +15,7 @@ import { useUIStore } from '@/stores/ui-store'
 import { useBudgetStore } from '@/stores/budget-store'
 import { formatMoney } from '@/lib/money'
 import { getErrorMessage } from '@/lib/errors'
+import { CashflowBucketsPanel } from '@/components/budgets/cashflow-buckets-panel'
 
 const ConfirmDialog = lazy(() =>
   import('@/components/shared/confirm-dialog').then((m) => ({
@@ -439,6 +440,8 @@ export function Budgets() {
           </Suspense>
         </>
       )}
+
+      <CashflowBucketsPanel />
     </div>
   )
 }

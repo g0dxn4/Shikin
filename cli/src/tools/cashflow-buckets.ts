@@ -1,4 +1,13 @@
 import {
+  normalizeBucketCurrency,
+  safeBucketInteger,
+  safeBucketSum,
+  validateBucketIncomeSource,
+  planBucketAllocation,
+  planBucketPatch,
+  type BucketPolicySnapshot,
+} from '@shikin/finance-core/cashflow-buckets'
+import {
   z,
   query,
   execute,
@@ -78,7 +87,6 @@ type Failure = {
 
 type BuiltReversal = { success: true; reversal: CashflowAllocationRow }
 
-const CURRENCY_CODE_PATTERN = /^[A-Z]{3}$/
 const BUCKET_CLEARABLE_FIELDS = ['description', 'targetAmount'] as const
 type BucketClearableField = (typeof BUCKET_CLEARABLE_FIELDS)[number]
 
@@ -123,8 +131,7 @@ function assertSingleRowUpdated(result: { rowsAffected: number }, message: strin
 }
 
 function parseCurrencyCode(value: string | null | undefined) {
-  const normalized = normalizeCurrencyCode(value)
-  return CURRENCY_CODE_PATTERN.test(normalized) ? normalized : null
+  return normalizeBucketCurrency(value)
 }
 
 function malformedCurrencyFailure(message: string): Failure {
@@ -144,16 +151,13 @@ function unsafeAmountFailure(message: string): Failure {
 }
 
 function requireSafeInteger(value: unknown, message: string): number | Failure {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
-    return unsafeAmountFailure(message)
-  }
-  return value
+  const result = safeBucketInteger(value, message)
+  return typeof result === 'number' ? result : result
 }
 
 function requireSafeSum(left: number, right: number, message: string): number | Failure {
-  const total = left + right
-  if (!Number.isSafeInteger(total)) return unsafeAmountFailure(message)
-  return total
+  const result = safeBucketSum(left, right, message)
+  return typeof result === 'number' ? result : result
 }
 
 function resolveBucket(bucketId?: string, bucketName?: string) {
@@ -328,54 +332,22 @@ function getSourceIncomeTransaction(transactionId: string) {
       message: `Source transaction ${transactionId} belongs to an archived account. Unarchive it before allocating income from it.`,
     }
   }
-  if (tx.type !== 'income') {
-    return {
-      success: false as const,
-      reason: 'source_transaction_not_income',
-      message: `Source transaction ${transactionId} is a ${tx.type} transaction, not income.`,
-    }
-  }
-  const status = tx.status && tx.status.trim() ? tx.status.trim() : 'posted'
-  if (status !== 'posted' && status !== 'cleared') {
-    return {
-      success: false as const,
-      reason: 'source_transaction_not_posted',
-      message: `Source transaction ${transactionId} must be posted or cleared before allocating income.`,
-    }
-  }
-  if ((tx.ledger_treatment ?? 'normal') !== 'normal') {
-    return {
-      success: false as const,
-      reason: 'source_transaction_staged',
-      message: `Source transaction ${transactionId} is staged or not ordinary normal-ledger income.`,
-    }
-  }
-  if ((tx.transaction_kind ?? 'standard') !== 'standard') {
-    return {
-      success: false as const,
-      reason: 'source_transaction_technical',
-      message: `Source transaction ${transactionId} is a technical ${tx.transaction_kind} record, not ordinary income.`,
-    }
-  }
-  if (!parseCurrencyCode(tx.currency)) {
-    return malformedCurrencyFailure(
-      `Source transaction ${transactionId} has malformed or ambiguous currency evidence.`
-    )
-  }
-  const amount = requireSafeInteger(
-    tx.amount,
-    `Source transaction ${transactionId} amount is not a safe integer.`
-  )
-  if (typeof amount !== 'number') return amount
-  if (amount <= 0) {
-    return {
-      success: false as const,
-      reason: 'source_transaction_not_income',
-      message: `Source transaction ${transactionId} amount must be a positive safe integer.`,
-    }
-  }
+  const policy = validateBucketIncomeSource({
+    id: tx.id,
+    accountId: tx.account_id,
+    type: tx.type,
+    amountCentavos: tx.amount,
+    currency: tx.currency,
+    status: tx.status,
+    ledgerTreatment: tx.ledger_treatment ?? null,
+    transactionKind: tx.transaction_kind ?? null,
+  })
+  if (!policy.success) return policy
 
-  return { success: true as const, transaction: { ...tx, amount } }
+  return {
+    success: true as const,
+    transaction: { ...tx, amount: policy.plan.amountCentavos },
+  }
 }
 
 function applyBucketBalanceDelta(
@@ -410,31 +382,16 @@ function revalidateTargetBucketForAllocation(
       message: `Cashflow bucket ${bucketId} not found.`,
     }
   }
-  if (current.is_active !== 1) return inactiveBucketFailure(current)
-  const currentCurrency = parseCurrencyCode(current.currency)
-  if (!currentCurrency) {
-    return malformedCurrencyFailure(
-      `Cashflow bucket "${current.name}" has malformed or ambiguous currency evidence.`
-    )
-  }
-  if (currentCurrency !== allocationCurrency) {
-    return bucketCurrencyFailure(allocationCurrency, currentCurrency)
-  }
-  const currentBalance = requireSafeInteger(
-    current.balance,
-    `Cashflow bucket "${current.name}" balance is not a safe integer.`
-  )
-  if (typeof currentBalance !== 'number') return currentBalance
-  const nextBalance = requireSafeSum(
-    currentBalance,
+  const plan = planBucketAllocation({
+    bucket: bucketPolicySnapshot(current),
     amountCentavos,
-    `Cashflow bucket "${current.name}" balance exceeds the safe integer range.`
-  )
-  if (typeof nextBalance !== 'number') return nextBalance
+    currency: allocationCurrency,
+  })
+  if (!plan.success) return plan
   return {
     success: true as const,
-    bucket: { ...current, balance: currentBalance },
-    nextBalance,
+    bucket: current,
+    nextBalance: plan.plan.nextBalanceCentavos,
   }
 }
 
@@ -457,6 +414,19 @@ function revalidateReliedAccountCurrency(accountId: string, allocationCurrency: 
   return { success: true as const }
 }
 
+function bucketPolicySnapshot(bucket: CashflowBucketRow): BucketPolicySnapshot {
+  return {
+    id: bucket.id,
+    name: bucket.name,
+    description: bucket.description,
+    targetAmountCentavos: bucket.target_amount,
+    balanceCentavos: bucket.balance,
+    currency: bucket.currency,
+    sortOrder: bucket.sort_order,
+    isActive: bucket.is_active === 1,
+  }
+}
+
 function applyBucketUpdatePatch(
   current: CashflowBucketRow,
   input: {
@@ -467,27 +437,32 @@ function applyBucketUpdatePatch(
     active?: boolean
     clearSet: Set<BucketClearableField>
   }
-) {
-  const next: CashflowBucketRow = { ...current }
-  if (input.name !== undefined) next.name = input.name
-  if (input.clearSet.has('description')) next.description = null
-  else if (input.description !== undefined) next.description = input.description
-  if (input.clearSet.has('targetAmount')) next.target_amount = null
-  else if (input.targetAmount !== undefined) {
-    const targetCentavos = requireSafeInteger(
-      toCentavos(input.targetAmount),
-      'Target amount must be a safe integer in centavos.'
-    )
-    if (typeof targetCentavos !== 'number') return targetCentavos
-    next.target_amount = targetCentavos
+): CashflowBucketRow | Failure {
+  const targetAmountCentavos =
+    input.targetAmount === undefined ? undefined : toCentavos(input.targetAmount)
+  const result = planBucketPatch(bucketPolicySnapshot(current), {
+    ...(input.name !== undefined ? { name: input.name } : {}),
+    ...(input.description !== undefined ? { description: input.description } : {}),
+    ...(targetAmountCentavos !== undefined ? { targetAmountCentavos } : {}),
+    ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
+    ...(input.active !== undefined ? { active: input.active } : {}),
+    clearFields: [...input.clearSet],
+  })
+  if (!result.success) return result
+  return {
+    ...current,
+    name: result.plan.name,
+    description: result.plan.description,
+    target_amount: result.plan.targetAmountCentavos,
+    balance: result.plan.balanceCentavos,
+    currency: result.plan.currency,
+    sort_order: result.plan.sortOrder,
+    is_active: result.plan.isActive ? 1 : 0,
   }
-  if (input.sortOrder !== undefined) next.sort_order = input.sortOrder
-  if (input.active !== undefined) next.is_active = input.active ? 1 : 0
-  return next
 }
 
 function insertLinkedAllocation(allocation: CashflowAllocationRow) {
-  execute(
+  const result = execute(
     `INSERT INTO cashflow_bucket_allocations (
        id, bucket_id, transaction_id, amount, currency, allocation_date, source, note,
        reverses_allocation_id, replaces_allocation_id
@@ -504,6 +479,10 @@ function insertLinkedAllocation(allocation: CashflowAllocationRow) {
       allocation.reverses_allocation_id ?? null,
       allocation.replaces_allocation_id ?? null,
     ]
+  )
+  assertSingleRowUpdated(
+    result,
+    `Cashflow allocation ${allocation.id} could not be inserted safely.`
   )
 }
 
@@ -561,6 +540,10 @@ const createBucket: ToolDefinition = {
     active: z.boolean().optional().default(true).describe('Whether the bucket is active'),
     dryRun: z.boolean().optional().default(false).describe('Validate and preview without writing'),
   }),
+  effects: {
+    readOnly: false,
+    writesTo: ['cashflow_buckets', 'audit_log', 'app_data_state'],
+  },
   execute: async ({ name, description, targetAmount, currency, sortOrder, active, dryRun }) => {
     const duplicate = query<{ id: string }>(
       'SELECT id FROM cashflow_buckets WHERE LOWER(name) = LOWER($1) LIMIT 1',
@@ -596,8 +579,13 @@ const createBucket: ToolDefinition = {
       }
     }
 
-    transaction(() => {
-      execute(
+    const createResult = transaction(() => {
+      const currentDuplicate = query<{ id: string }>(
+        'SELECT id FROM cashflow_buckets WHERE LOWER(name) = LOWER($1) LIMIT 1',
+        [name]
+      )[0]
+      if (currentDuplicate) return duplicateBucketNameFailure(name, currentDuplicate.id)
+      const inserted = execute(
         `INSERT INTO cashflow_buckets (id, name, description, target_amount, balance, currency, sort_order, is_active)
          VALUES ($1, $2, $3, $4, 0, $5, $6, $7)`,
         [
@@ -610,6 +598,7 @@ const createBucket: ToolDefinition = {
           bucket.is_active,
         ]
       )
+      assertSingleRowUpdated(inserted, `Cashflow bucket ${bucket.id} could not be created safely.`)
       writeAuditLog({
         entity: 'cashflow_bucket',
         entityId: bucket.id,
@@ -617,7 +606,9 @@ const createBucket: ToolDefinition = {
         before: null,
         after: { bucket: bucketSnapshot(bucket) },
       })
+      return { success: true as const }
     })
+    if (!createResult.success) return createResult
 
     return {
       success: true,
@@ -634,6 +625,10 @@ const listBuckets: ToolDefinition = {
   schema: z.object({
     activeOnly: z.boolean().optional().default(true).describe('Only list active buckets'),
   }),
+  effects: {
+    readOnly: true,
+    writesTo: [],
+  },
   execute: async ({ activeOnly }) => {
     const buckets = query<CashflowBucketRow>(
       `SELECT * FROM cashflow_buckets
@@ -651,6 +646,32 @@ const listBuckets: ToolDefinition = {
        FROM cashflow_bucket_allocations
        GROUP BY bucket_id`
     )
+    for (const bucket of buckets) {
+      if (!parseCurrencyCode(bucket.currency)) {
+        return malformedCurrencyFailure(
+          `Cashflow bucket "${bucket.name}" has malformed or ambiguous currency evidence.`
+        )
+      }
+      const balance = requireSafeInteger(
+        bucket.balance,
+        `Cashflow bucket "${bucket.name}" balance is not a safe integer.`
+      )
+      if (typeof balance !== 'number') return balance
+      if (bucket.target_amount !== null) {
+        const target = requireSafeInteger(
+          bucket.target_amount,
+          `Cashflow bucket "${bucket.name}" target is not a safe integer.`
+        )
+        if (typeof target !== 'number') return target
+      }
+    }
+    for (const summary of summaries) {
+      const total = requireSafeInteger(
+        summary.allocated_amount ?? 0,
+        `Allocated total for cashflow bucket ${summary.bucket_id} is not a safe integer.`
+      )
+      if (typeof total !== 'number') return total
+    }
     const summaryByBucket = new Map(summaries.map((summary) => [summary.bucket_id, summary]))
 
     return {
@@ -703,6 +724,10 @@ const allocateIncome: ToolDefinition = {
     note: z.string().trim().max(1000).optional().describe('Optional note'),
     dryRun: z.boolean().optional().default(false).describe('Validate and preview without writing'),
   }),
+  effects: {
+    readOnly: false,
+    writesTo: ['cashflow_buckets', 'cashflow_bucket_allocations', 'audit_log', 'app_data_state'],
+  },
   execute: async ({
     bucketId,
     bucketName,
@@ -805,13 +830,16 @@ const allocateIncome: ToolDefinition = {
         (sourceTx?.success ? 'income-transaction' : resolvedAccount?.success ? 'account' : null),
       note: note ?? null,
     }
-    const nextBalance = requireSafeSum(
-      bucket.balance,
+    const bucketPlan = planBucketAllocation({
+      bucket: bucketPolicySnapshot(bucket),
       amountCentavos,
-      `Cashflow bucket "${bucket.name}" balance exceeds the safe integer range.`
-    )
-    if (typeof nextBalance !== 'number') return nextBalance
-    const updatedBucket: CashflowBucketRow = { ...bucket, balance: nextBalance }
+      currency: allocationCurrency,
+    })
+    if (!bucketPlan.success) return bucketPlan
+    const updatedBucket: CashflowBucketRow = {
+      ...bucket,
+      balance: bucketPlan.plan.nextBalanceCentavos,
+    }
 
     if (dryRun) {
       return {
@@ -904,7 +932,7 @@ const allocateIncome: ToolDefinition = {
         ...currentTarget.bucket,
         balance: currentTarget.nextBalance,
       }
-      execute(
+      const inserted = execute(
         `INSERT INTO cashflow_bucket_allocations (id, bucket_id, transaction_id, amount, currency, allocation_date, source, note)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [
@@ -917,6 +945,10 @@ const allocateIncome: ToolDefinition = {
           allocation.source,
           allocation.note,
         ]
+      )
+      assertSingleRowUpdated(
+        inserted,
+        `Cashflow allocation ${allocation.id} could not be inserted safely.`
       )
       applyBucketBalanceDelta(currentTarget.bucket.id, allocation.amount, { requireActive: true })
       writeAuditLog({
@@ -966,6 +998,10 @@ const updateBucket: ToolDefinition = {
       .describe('Nullable fields to clear: description, targetAmount'),
     dryRun: z.boolean().optional().default(false).describe('Validate and preview without writing'),
   }),
+  effects: {
+    readOnly: false,
+    writesTo: ['cashflow_buckets', 'audit_log', 'app_data_state'],
+  },
   execute: async ({
     bucketId,
     bucketName,
@@ -1091,6 +1127,10 @@ const deleteBucket: ToolDefinition = {
     bucketName: boundedText('Bucket name', 'Cashflow bucket name', 120).optional(),
     dryRun: z.boolean().optional().default(false).describe('Validate and preview without writing'),
   }),
+  effects: {
+    readOnly: false,
+    writesTo: ['cashflow_buckets', 'audit_log', 'app_data_state'],
+  },
   execute: async ({ bucketId, bucketName, dryRun }) => {
     const resolvedBucket = resolveBucket(bucketId, bucketName)
     if (!resolvedBucket.success) return resolvedBucket
@@ -1192,6 +1232,10 @@ const reverseBucketAllocation: ToolDefinition = {
     note: z.string().trim().max(1000).optional().describe('Optional reversal note'),
     dryRun: z.boolean().optional().default(false).describe('Validate and preview without writing'),
   }),
+  effects: {
+    readOnly: false,
+    writesTo: ['cashflow_buckets', 'cashflow_bucket_allocations', 'audit_log', 'app_data_state'],
+  },
   execute: async ({ allocationId, allocationDate, source, note, dryRun }) => {
     const loaded = loadAllocationById(allocationId)
     if (!loaded.success) return loaded
@@ -1345,6 +1389,10 @@ const correctBucketAllocation: ToolDefinition = {
     note: z.string().trim().max(1000).optional().describe('Optional replacement note'),
     dryRun: z.boolean().optional().default(false).describe('Validate and preview without writing'),
   }),
+  effects: {
+    readOnly: false,
+    writesTo: ['cashflow_buckets', 'cashflow_bucket_allocations', 'audit_log', 'app_data_state'],
+  },
   execute: async ({
     allocationId,
     bucketId,

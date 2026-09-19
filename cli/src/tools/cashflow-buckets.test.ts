@@ -81,7 +81,7 @@ describe('cashflow bucket maintenance', () => {
     current.harness = null
   })
 
-  it('exports the maintenance tools alongside the existing bucket tools', () => {
+  it('exports the maintenance tools with audited table effects', () => {
     expect(cashflowBucketTools.map((tool) => tool.name)).toEqual([
       'create-bucket',
       'list-buckets',
@@ -91,6 +91,28 @@ describe('cashflow bucket maintenance', () => {
       'reverse-bucket-allocation',
       'correct-bucket-allocation',
     ])
+    expect(listBuckets.effects).toEqual({ readOnly: true, writesTo: [] })
+    expect(createBucket.effects).toEqual({
+      readOnly: false,
+      writesTo: ['cashflow_buckets', 'audit_log', 'app_data_state'],
+    })
+    for (const tool of [allocateIncome, reverseBucketAllocation, correctBucketAllocation]) {
+      expect(tool.effects).toEqual({
+        readOnly: false,
+        writesTo: [
+          'cashflow_buckets',
+          'cashflow_bucket_allocations',
+          'audit_log',
+          'app_data_state',
+        ],
+      })
+    }
+    for (const tool of [updateBucket, deleteBucket]) {
+      expect(tool.effects).toEqual({
+        readOnly: false,
+        writesTo: ['cashflow_buckets', 'audit_log', 'app_data_state'],
+      })
+    }
   })
 
   it('updates listed fields, omits unchanged values, and clears nullable fields explicitly', async () => {
@@ -533,6 +555,45 @@ describe('cashflow bucket maintenance', () => {
     expect(readLedger(db())).toEqual(ledgerBefore)
   })
 
+  it('rolls back correction allocations, balances, audit and revision after an injected failure', async () => {
+    const rent = await createNamedBucket('Rent')
+    const taxes = await createNamedBucket('Taxes')
+    const allocated = (await allocateIncome.execute(
+      allocateIncome.schema.parse({
+        bucketId: rent.id,
+        transactionId: 'tx-income',
+        amount: 25,
+      })
+    )) as AllocationResult
+    const allocationsBefore = readAllocations(db())
+    const bucketsBefore = readBuckets(db())
+    const auditBefore = readAudit(db())
+    const revisionBefore = db()
+      .prepare("SELECT value FROM settings WHERE key = 'financial_data_revision'")
+      .get()
+    const ledgerBefore = readLedger(db())
+    current.harness!.failOnExecuteCall = 2
+    current.harness!.executeCalls = 0
+
+    await expect(
+      correctBucketAllocation.execute(
+        correctBucketAllocation.schema.parse({
+          allocationId: allocated.allocation!.id,
+          bucketId: taxes.id,
+          amount: 20,
+        })
+      )
+    ).rejects.toThrow('Injected execute failure on call 2')
+
+    expect(readAllocations(db())).toEqual(allocationsBefore)
+    expect(readBuckets(db())).toEqual(bucketsBefore)
+    expect(readAudit(db())).toEqual(auditBefore)
+    expect(
+      db().prepare("SELECT value FROM settings WHERE key = 'financial_data_revision'").get()
+    ).toEqual(revisionBefore)
+    expect(readLedger(db())).toEqual(ledgerBefore)
+  })
+
   it('unwinds old source evidence on reverse without requiring replacement funding', async () => {
     const rent = await createNamedBucket('Rent')
     const allocated = (await allocateIncome.execute(
@@ -648,6 +709,81 @@ describe('cashflow bucket maintenance', () => {
       ['cashflow_bucket', 'create'],
       ['cashflow_bucket_allocation', 'allocate'],
       ['cashflow_bucket_allocation', 'reverse'],
+    ])
+  })
+
+  it.each([
+    ['pending', 'normal', 'standard', 'source_transaction_not_posted'],
+    ['posted', 'staged_no_balance_impact', 'standard', 'source_transaction_staged'],
+    ['posted', 'normal', 'reconciliation_bridge', 'source_transaction_technical'],
+  ])(
+    'rejects %s/%s/%s source evidence through the shared eligibility policy',
+    async (status, ledgerTreatment, transactionKind, reason) => {
+      const rent = await createNamedBucket('Rent')
+      db()
+        .prepare(
+          `UPDATE transactions
+           SET status = ?, ledger_treatment = ?, transaction_kind = ?
+           WHERE id = 'tx-income'`
+        )
+        .run(status, ledgerTreatment, transactionKind)
+      const result = await allocateIncome.execute(
+        allocateIncome.schema.parse({
+          bucketId: rent.id,
+          transactionId: 'tx-income',
+          amount: 1,
+        })
+      )
+      expect(result).toMatchObject({ success: false, reason })
+      expect(readAllocations(db())).toEqual([])
+    }
+  )
+
+  it('revalidates source eligibility and net funding inside the write transaction', async () => {
+    const rent = await createNamedBucket('Rent')
+    const ledgerBefore = readLedger(db())
+    current.harness!.onBeforeTransaction = () => {
+      db().prepare("UPDATE transactions SET status = 'pending' WHERE id = 'tx-income'").run()
+    }
+    const staleEligibility = await allocateIncome.execute(
+      allocateIncome.schema.parse({
+        bucketId: rent.id,
+        transactionId: 'tx-income',
+        amount: 10,
+      })
+    )
+    expect(staleEligibility).toMatchObject({
+      success: false,
+      reason: 'source_transaction_not_posted',
+    })
+    expect(readAllocations(db())).toEqual([])
+    expect(readLedger(db()).accounts).toEqual(ledgerBefore.accounts)
+
+    current.harness!.onBeforeTransaction = null
+    db().prepare("UPDATE transactions SET status = 'posted' WHERE id = 'tx-income'").run()
+    current.harness!.onTransactionStart = () => {
+      db()
+        .prepare(
+          `INSERT INTO cashflow_bucket_allocations
+             (id, bucket_id, transaction_id, amount, currency, allocation_date, source)
+           VALUES ('concurrent-allocation', ?, 'tx-income', 19500, 'USD', '2026-05-02', 'test')`
+        )
+        .run(rent.id)
+    }
+    const staleCap = await allocateIncome.execute(
+      allocateIncome.schema.parse({
+        bucketId: rent.id,
+        transactionId: 'tx-income',
+        amount: 10,
+      })
+    )
+    expect(staleCap).toMatchObject({
+      success: false,
+      reason: 'source_transaction_overallocated',
+      remainingAmount: 5,
+    })
+    expect(readAllocations(db())).toEqual([
+      expect.objectContaining({ id: 'concurrent-allocation', amount: 19500 }),
     ])
   })
 

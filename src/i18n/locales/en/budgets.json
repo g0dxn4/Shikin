@@ -85,5 +85,86 @@
   "currency": {
     "unavailable": "Totals unavailable",
     "description": "Complete spending data and valid exchange rates are required to display progress."
+  },
+  "buckets": {
+    "title": "Virtual cashflow buckets",
+    "description": "Reserve recorded income for upcoming priorities, grouped in each bucket's native currency.",
+    "disclaimer": "Virtual balances organize your plan only. They do not change bank accounts or transactions.",
+    "noTarget": "No target",
+    "target": "Target {{amount}}",
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "actions": {
+      "create": "New bucket",
+      "edit": "Edit",
+      "save": "Save",
+      "saving": "Saving…",
+      "cancel": "Cancel",
+      "retry": "Try again",
+      "allocate": "Allocate",
+      "deactivate": "Deactivate",
+      "activate": "Reactivate",
+      "delete": "Delete",
+      "reverse": "Reverse",
+      "correct": "Correct",
+      "review": "Review correction",
+      "back": "Back",
+      "applyCorrection": "Apply correction"
+    },
+    "dialog": {
+      "createTitle": "Create virtual bucket",
+      "editTitle": "Edit virtual bucket",
+      "editorDescription": "Bucket IDs and allocation history remain unchanged.",
+      "allocateTitle": "Allocate to {{name}}",
+      "allocateDescription": "Choose eligible recorded income or explicitly create an unbound virtual allocation.",
+      "correctTitle": "Correct allocation",
+      "correctDescription": "Review an atomic reversal and replacement. Historical rows are never deleted."
+    },
+    "fields": {
+      "name": "Name",
+      "description": "Description",
+      "target": "Target amount",
+      "clearTarget": "Clear the existing target",
+      "currency": "Native currency",
+      "amount": "Amount ({{currency}})",
+      "funding": "Funding evidence",
+      "targetBucket": "Replacement bucket"
+    },
+    "funding": {
+      "unbound": "UNBOUND VIRTUAL allocation",
+      "confirmUnbound": "I understand this is a virtual allocation without a source transaction and does not move bank money.",
+      "income": "recorded income",
+      "virtual": "unbound virtual"
+    },
+    "history": {
+      "title": "Allocation history ({{count}})",
+      "preserved": "Historical"
+    },
+    "preview": {
+      "title": "Reviewed correction",
+      "move": "Replace with {{amount}} in {{name}}.",
+      "atomicHistory": "The original stays intact; a signed reversal and replacement will be appended atomically."
+    },
+    "confirm": {
+      "deleteTitle": "Delete empty bucket?",
+      "deleteDescription": "Only an empty bucket with no allocation history can be deleted.",
+      "reverseTitle": "Reverse allocation?",
+      "reverseDescription": "A signed reversal will be appended. The original historical row will remain."
+    },
+    "empty": {
+      "title": "No virtual buckets",
+      "description": "Create a native-currency bucket to organize recorded income without changing your accounts."
+    },
+    "error": {
+      "load": "Couldn't load virtual buckets.",
+      "save": "Couldn't save the virtual bucket.",
+      "allocate": "Couldn't allocate this amount.",
+      "confirmUnbound": "Confirm that this is an unbound virtual allocation.",
+      "preview": "Couldn't prepare the correction preview.",
+      "correct": "Couldn't apply the correction. Review a fresh preview and try again.",
+      "mutate": "Couldn't complete the bucket action."
+    }
   }
 }

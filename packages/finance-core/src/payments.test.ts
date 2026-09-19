@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   assertPaymentLinkCapacity,
+  planStatementPaymentLink,
+  planStatementPaymentUnlink,
+  planStatementTotalsEdit,
   resolvePaymentEvidence,
   type PaymentEvidence,
   type PaymentTransaction,
@@ -160,6 +163,73 @@ describe('payment evidence policy', () => {
     ).toBe(600)
   })
 
+  it('accepts report-excluded ordinary repayment evidence and keeps known classifications effective', () => {
+    const excludedBankPayment = row({
+      type: 'expense',
+      transfer_to_account_id: null,
+      reporting_treatment: 'exclude_from_cashflow',
+    })
+    expect(
+      resolvePaymentEvidence({
+        transactionId: 'payment',
+        cardAccountId: 'card',
+        explicitRepaymentConfirmation: true,
+        evidence: evidence([excludedBankPayment]),
+      })
+    ).toMatchObject({ shape: 'ordinary_bank_expense', capacity: 1000 })
+
+    expect(() =>
+      resolvePaymentEvidence({
+        transactionId: 'payment',
+        cardAccountId: 'card',
+        explicitRepaymentConfirmation: true,
+        evidence: evidence([excludedBankPayment], {
+          classifications: [
+            {
+              id: 'known-purchase',
+              transaction_id: 'payment',
+              split_id: null,
+              role: 'purchase',
+              referenced_purchase_id: null,
+            },
+          ],
+        }),
+      })
+    ).toThrow(/no eligible/)
+
+    const excludedCardIncome = row({
+      account_id: 'card',
+      type: 'income',
+      transfer_to_account_id: null,
+      reporting_treatment: 'exclude_from_cashflow',
+    })
+    expect(
+      resolvePaymentEvidence({
+        transactionId: 'payment',
+        cardAccountId: 'card',
+        explicitRepaymentConfirmation: true,
+        evidence: evidence([excludedCardIncome]),
+      })
+    ).toMatchObject({ shape: 'ordinary_card_income', capacity: 1000 })
+  })
+
+  it('rejects unknown reporting treatments rather than treating them as unclassified evidence', () => {
+    expect(() =>
+      resolvePaymentEvidence({
+        transactionId: 'payment',
+        cardAccountId: 'card',
+        explicitRepaymentConfirmation: true,
+        evidence: evidence([
+          row({
+            type: 'expense',
+            transfer_to_account_id: null,
+            reporting_treatment: 'mystery',
+          }),
+        ]),
+      })
+    ).toThrow(/unknown reporting treatment/)
+  })
+
   it.each(['purchase', 'fee', 'cash_withdrawal'] as const)(
     'excludes %s expense allocations from repayment capacity',
     (role) => {
@@ -185,10 +255,62 @@ describe('payment evidence policy', () => {
     }
   )
 
+  it('plans link, unlink and explicit totals with equation and legacy-overpaid safeguards', () => {
+    const statement = {
+      statementBalance: 1000,
+      paidAmount: 600,
+      unattributedPaidAmount: 600,
+      dueDate: '2026-03-15',
+      status: 'partial' as const,
+    }
+    const linked = planStatementPaymentLink({
+      statement,
+      activeLinkedAmount: 0,
+      amount: 400,
+      mode: 'attribute_existing',
+      today: '2026-03-01',
+    })
+    expect(linked.after).toMatchObject({ paidAmount: 600, unattributedPaidAmount: 200 })
+    expect(
+      planStatementPaymentUnlink({
+        statement: linked.after,
+        activeLinkedAmount: 400,
+        amount: 400,
+        mode: 'attribute_existing',
+        today: '2026-03-01',
+      }).after
+    ).toEqual(statement)
+    expect(() =>
+      planStatementTotalsEdit({
+        statement,
+        activeLinkedAmount: 0,
+        statementBalance: 500,
+        today: '2026-03-01',
+      })
+    ).toThrow(/overpayment/)
+    const legacy = { ...statement, paidAmount: 1200, unattributedPaidAmount: 1200 }
+    expect(
+      planStatementTotalsEdit({
+        statement: legacy,
+        activeLinkedAmount: 0,
+        today: '2026-03-01',
+      }).legacyOverpaidAfter
+    ).toBe(true)
+    expect(() =>
+      planStatementTotalsEdit({
+        statement: legacy,
+        activeLinkedAmount: 0,
+        paidAmount: 1300,
+        today: '2026-03-01',
+      })
+    ).toThrow(/overpayment/)
+  })
+
   it.each([
     { status: 'pending' },
     { ledger_treatment: 'staged_no_balance_impact' },
     { transaction_kind: 'reconciliation_bridge' },
+    { reporting_treatment: 'mystery' },
     { currency: 'EUR' },
   ])('rejects ineligible transfer evidence %o', (patch) => {
     expect(() =>

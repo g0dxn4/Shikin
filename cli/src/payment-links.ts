@@ -1,5 +1,8 @@
 import {
   assertPaymentLinkCapacity,
+  assertStatementPaymentEquation,
+  planStatementPaymentLink,
+  planStatementPaymentUnlink,
   resolvePaymentEvidence,
   type ActivePaymentLink,
   type PaymentAccount,
@@ -63,11 +66,14 @@ function safeAdd(a: number, b: number, label: string): number {
   return result
 }
 
-function statementStatus(statement: PaymentStatementRow): PaymentStatementRow['status'] {
-  if (statement.statement_balance <= 0 || statement.paid_amount >= statement.statement_balance)
-    return 'paid'
-  if (statement.paid_amount > 0) return 'partial'
-  return dayjs(statement.due_date).isBefore(dayjs(), 'day') ? 'overdue' : 'open'
+function coreStatement(statement: PaymentStatementRow) {
+  return {
+    statementBalance: statement.statement_balance,
+    paidAmount: statement.paid_amount,
+    unattributedPaidAmount: statement.unattributed_paid_amount,
+    dueDate: statement.due_date,
+    status: statement.status,
+  }
 }
 
 function statementPublic(statement: PaymentStatementRow) {
@@ -141,15 +147,12 @@ function activeStatementLinkedAmount(statementId: string): number {
 }
 
 function assertStatementEquation(statement: PaymentStatementRow, activeAmount: number): void {
-  if (
-    !Number.isSafeInteger(statement.paid_amount) ||
-    !Number.isSafeInteger(statement.unattributed_paid_amount) ||
-    statement.unattributed_paid_amount < 0 ||
-    safeAdd(statement.unattributed_paid_amount, activeAmount, 'Statement payment total') !==
-      statement.paid_amount
-  ) {
+  try {
+    assertStatementPaymentEquation(coreStatement(statement), activeAmount)
+  } catch (error) {
     throw new Error(
-      `Statement ${statement.id} payment evidence is inconsistent; repair it before changing links.`
+      `Statement ${statement.id} payment evidence is inconsistent; repair it before changing links.`,
+      { cause: error }
     )
   }
 }
@@ -181,36 +184,19 @@ function planLink(input: {
     activeLinks: evidence.activeLinks,
     additionalAmount: input.amountCentavos,
   })
-  const nextStatementLinked = safeAdd(
-    activeForStatement,
-    input.amountCentavos,
-    'Statement linked payment total'
-  )
-  if (nextStatementLinked > statement.statement_balance)
-    throw new Error('Linked allocations cannot exceed the statement balance.')
-  if (
-    input.mode === 'attribute_existing' &&
-    statement.unattributed_paid_amount < input.amountCentavos
-  )
-    throw new Error('Statement has insufficient unattributed paid amount for this attribution.')
-
-  const baseline =
-    input.mode === 'attribute_existing'
-      ? statement.unattributed_paid_amount - input.amountCentavos
-      : statement.unattributed_paid_amount
-  const paid =
-    input.mode === 'apply_to_unpaid'
-      ? safeAdd(statement.paid_amount, input.amountCentavos, 'Statement paid total')
-      : statement.paid_amount
-  if (input.mode === 'apply_to_unpaid' && paid > statement.statement_balance)
-    throw new Error('Applying this link would newly overpay the statement.')
+  const transition = planStatementPaymentLink({
+    statement: coreStatement(statement),
+    activeLinkedAmount: activeForStatement,
+    amount: input.amountCentavos,
+    mode: input.mode,
+    today: dayjs().format('YYYY-MM-DD'),
+  })
   const statementAfter: PaymentStatementRow = {
     ...statement,
-    unattributed_paid_amount: baseline,
-    paid_amount: paid,
-    status: statement.status,
+    unattributed_paid_amount: transition.after.unattributedPaidAmount,
+    paid_amount: transition.after.paidAmount,
+    status: transition.after.status,
   }
-  statementAfter.status = statementStatus(statementAfter)
   const now = dayjs().toISOString()
   return {
     requestedTransactionId: input.transactionId,
@@ -433,19 +419,19 @@ function planUnlink(linkId: string) {
   const statement = readStatement(link.statement_id)
   const active = activeStatementLinkedAmount(statement.id)
   assertStatementEquation(statement, active)
-  const baseline =
-    link.mode === 'attribute_existing'
-      ? safeAdd(statement.unattributed_paid_amount, link.amount, 'Unattributed paid amount')
-      : statement.unattributed_paid_amount
-  const paid =
-    link.mode === 'apply_to_unpaid' ? statement.paid_amount - link.amount : statement.paid_amount
-  if (paid < 0 || baseline < 0) throw new Error('Unlink would produce an invalid statement total.')
-  const statementAfter = {
+  const transition = planStatementPaymentUnlink({
+    statement: coreStatement(statement),
+    activeLinkedAmount: active,
+    amount: link.amount,
+    mode: link.mode,
+    today: dayjs().format('YYYY-MM-DD'),
+  })
+  const statementAfter: PaymentStatementRow = {
     ...statement,
-    unattributed_paid_amount: baseline,
-    paid_amount: paid,
+    unattributed_paid_amount: transition.after.unattributedPaidAmount,
+    paid_amount: transition.after.paidAmount,
+    status: transition.after.status,
   }
-  statementAfter.status = statementStatus(statementAfter)
   return { link, statementBefore: statement, statementAfter }
 }
 
@@ -557,7 +543,7 @@ const listCardStatementPaymentLinks: ToolDefinition = {
     status: z.enum(['active', 'voided', 'all']).optional().default('active'),
     limit: z.number().int().min(1).max(500).optional().default(100),
   }),
-  effects: { readOnly: true },
+  effects: { readOnly: true, writesTo: [] },
   execute: async (input) => {
     const filters: string[] = []
     const params: unknown[] = []

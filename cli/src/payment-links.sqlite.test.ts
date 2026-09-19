@@ -33,8 +33,9 @@ vi.mock('./notebook.js', () => ({
 
 import { creditCardsTools } from './tools/credit-cards.js'
 import { accountsTools } from './tools/accounts.js'
+import { correctTransactionMetadata } from './transaction-corrections.js'
 
-const tools = [...creditCardsTools, ...accountsTools]
+const tools = [...creditCardsTools, ...accountsTools, correctTransactionMetadata]
 const run = (name: string, input: Record<string, unknown>) => {
   const tool = tools.find((item) => item.name === name)!
   return tool.execute(tool.schema.parse(input))
@@ -105,7 +106,26 @@ describe('card statement payment links on real SQLite', () => {
     }
     expect(
       tools.find((tool) => tool.name === 'list-card-statement-payment-links')?.effects
-    ).toEqual({ readOnly: true })
+    ).toEqual({ readOnly: true, writesTo: [] })
+    expect(tools.find((tool) => tool.name === 'list-credit-card-statements')?.effects).toEqual({
+      readOnly: true,
+      writesTo: [],
+    })
+    for (const name of ['create-credit-card-statement', 'update-credit-card-statement']) {
+      expect(tools.find((tool) => tool.name === name)?.effects?.writesTo).toEqual([
+        'credit_card_statements',
+        'audit_log',
+        'app_data_state',
+      ])
+    }
+    expect(
+      tools.find((tool) => tool.name === 'delete-credit-card-statement')?.effects?.writesTo
+    ).toEqual([
+      'credit_card_statements',
+      'card_statement_payment_links',
+      'audit_log',
+      'app_data_state',
+    ])
   })
   it('applies and unlinks evidence without financial writes and retains immutable originals', async () => {
     statement('s1')
@@ -255,6 +275,32 @@ describe('card statement payment links on real SQLite', () => {
     })
   })
 
+  it('keeps report exclusion separate from repayment eligibility in the active correction guard', async () => {
+    statement('s1')
+    state.db!.exec(
+      `INSERT INTO transactions
+        (id,account_id,type,amount,currency,description,status,ledger_treatment,reporting_treatment,transaction_kind,is_archived,date)
+       VALUES ('ordinary','bank','expense',1000,'USD','manual payment','posted','normal','normal','standard',0,'2026-02-01')`
+    )
+    expect(
+      await run(
+        'link-card-statement-payment',
+        linkInput('s1', 'ordinary', 4, { confirmRepaymentToCard: true })
+      )
+    ).toMatchObject({ success: true })
+    await expect(
+      run('correct-transaction-metadata', {
+        transactionId: 'ordinary',
+        reportingTreatment: 'exclude_from_cashflow',
+        auditSource: 'operator',
+        auditNote: 'reporting only',
+      })
+    ).resolves.toMatchObject({ success: true })
+    expect(
+      state.db!.prepare("SELECT reporting_treatment FROM transactions WHERE id='ordinary'").get()
+    ).toEqual({ reporting_treatment: 'exclude_from_cashflow' })
+  })
+
   it('requires explicit confirmation for ordinary evidence and excludes purchase/refund allocations', async () => {
     statement('s1')
     state.db!.exec(
@@ -342,6 +388,46 @@ describe('card statement payment links on real SQLite', () => {
     expect(rows('credit_card_statements')[0]).toMatchObject({
       paid_amount: 200,
       unattributed_paid_amount: 200,
+    })
+  })
+
+  it('revalidates payment accounts and statement-only totals after acquiring the write lock', async () => {
+    statement('s1')
+    state.beforeTransaction = () => {
+      state.db!.prepare("UPDATE accounts SET balance = balance - 1 WHERE id = 'bank'").run()
+    }
+    await expect(
+      run('record-card-payment', {
+        fromAccount: 'bank',
+        cardAccount: 'card',
+        amount: 1,
+        statementId: 's1',
+        source: 'operator',
+        note: 'receipt',
+      })
+    ).rejects.toThrow(/account changed/i)
+    expect(rows('transactions')).toEqual([])
+    expect(rows('card_statement_payment_links')).toEqual([])
+
+    state.beforeTransaction = () => {
+      state
+        .db!.prepare("UPDATE credit_card_statements SET statement_balance = 50 WHERE id = 's1'")
+        .run()
+    }
+    await expect(
+      run('record-card-payment', {
+        cardAccount: 'card',
+        amount: 1,
+        statementId: 's1',
+        mode: 'statement-payment-only',
+        source: 'operator',
+        note: 'paper receipt',
+      })
+    ).rejects.toThrow(/statement.*changed/i)
+    expect(rows('credit_card_statements')[0]).toMatchObject({
+      statement_balance: 50,
+      paid_amount: 0,
+      unattributed_paid_amount: 0,
     })
   })
 

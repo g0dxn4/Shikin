@@ -1,1 +1,105 @@
-{}
+{
+  "action": "Estados de cuenta",
+  "title": "Estados de cuenta de {{card}}",
+  "description": "Contabilidad y evidencia de pagos en {{currency}}. Vincular evidencia nunca cambia los saldos del libro.",
+  "create": "Agregar estado",
+  "due": "Vence {{date}}",
+  "baseline": "Solo estado",
+  "linked": "Evidencia vinculada",
+  "evidenceTitle": "Evidencia de pago activa",
+  "history": "Historial de evidencia anulada ({{count}})",
+  "voided": "anulada",
+  "legacyBadge": "Sobrepago histórico",
+  "legacyOverpaid": "Este estado histórico tiene un sobrepago. Se conserva el total registrado; las acciones nuevas no pueden aumentarlo.",
+  "stale": "Los datos de pago cambiaron. Actualiza y revisa de nuevo.",
+  "empty": {
+    "title": "No hay estados registrados",
+    "description": "Agrega los totales exactos del emisor antes de atribuir evidencia de pago."
+  },
+  "status": {
+    "open": "Abierto",
+    "partial": "Pago parcial",
+    "paid": "Pagado",
+    "overdue": "Vencido"
+  },
+  "fields": {
+    "startDate": "Inicio del periodo",
+    "endDate": "Fecha de corte",
+    "dueDate": "Fecha límite",
+    "balance": "Saldo del estado",
+    "minimum": "Pago mínimo",
+    "paid": "Total pagado",
+    "amount": "Importe",
+    "note": "Nota"
+  },
+  "editor": {
+    "createTitle": "Agregar estado de tarjeta",
+    "editTitle": "Editar estado de tarjeta",
+    "description": "Usa los importes exactos del emisor para {{card}} ({{currency}}).",
+    "linkFloor": "Los vínculos activos requieren al menos {{amount}} pagado.",
+    "baselineHelp": "El total pagado comienza como evidencia exclusiva del estado."
+  },
+  "link": {
+    "action": "Vincular pago",
+    "title": "Vincular pago existente",
+    "description": "Atribuye un registro contabilizado a este estado sin cambiar transacciones ni saldos.",
+    "source": "Evidencia de pago registrada",
+    "evidence": "Tipo de evidencia",
+    "available": "Disponible para vincular",
+    "mode": "Tratamiento contable",
+    "apply": "Aplicar al saldo pendiente",
+    "attribute": "Atribuir total ya pagado",
+    "confirmRepayment": "Confirmo que esta transacción ordinaria paga {{card}} y no es compra, comisión, retiro ni reembolso.",
+    "empty": "No hay evidencia de pago elegible",
+    "emptyDescription": "Registra una transferencia real o usa una transacción contabilizada elegible y actualiza."
+  },
+  "payment": {
+    "action": "Registrar pago",
+    "title": "Registrar pago de tarjeta",
+    "description": "Crea una transferencia real y un vínculo opcional de forma atómica, o registra evidencia solo del estado.",
+    "from": "Pagar desde",
+    "selectSource": "Selecciona una cuenta",
+    "statementOnly": "Pago solo en el estado",
+    "statementOnlyDescription": "Actualiza la contabilidad del estado con evidencia externa. No crea transacción ni cambia saldos."
+  },
+  "review": {
+    "title": "Revisar antes de confirmar",
+    "noBalanceImpact": "Este vínculo no cambia transacciones, saldos ni historial de transacciones.",
+    "baselineEvidence": "Agrega evidencia externa del estado sin crear una transacción.",
+    "noTransaction": "Solo cambiarán la base y el estado de pago.",
+    "realTransfer": "Crea una transferencia contabilizada y la vincula a este estado.",
+    "atomicTransfer": "Ambos saldos, la transacción y el vínculo se confirman juntos o no se confirma nada."
+  },
+  "mode": {
+    "apply_to_unpaid": "Aplicado al pendiente",
+    "attribute_existing": "Atribuyó total existente"
+  },
+  "evidence": {
+    "canonical_transfer": "Transferencia a esta tarjeta",
+    "ordinary_card_income": "Ingreso de tarjeta confirmado",
+    "ordinary_bank_expense": "Gasto bancario confirmado"
+  },
+  "confirm": {
+    "deleteTitle": "¿Eliminar este estado?",
+    "deleteDescription": "Se eliminará el estado. La evidencia anulada conserva los identificadores originales; primero debes desvincular los vínculos activos.",
+    "unlinkTitle": "¿Desvincular esta evidencia?",
+    "unlinkDescription": "El vínculo se anulará y se revertirá la contabilidad del estado. La transacción y los saldos no cambiarán."
+  },
+  "actions": {
+    "cancel": "Cancelar",
+    "review": "Revisar",
+    "confirm": "Confirmar",
+    "loading": "Cargando…",
+    "saving": "Guardando…",
+    "edit": "Editar estado",
+    "delete": "Eliminar estado",
+    "unlink": "Desvincular pago"
+  },
+  "audit": {
+    "linkNote": "Se vinculó evidencia existente después de la confirmación revisada.",
+    "paymentNote": "Se registró la transferencia y evidencia revisadas.",
+    "baselineNote": "Se registró evidencia de pago exclusiva del estado.",
+    "deleteNote": "Se eliminó el estado después de la confirmación revisada.",
+    "unlinkNote": "Se anuló la evidencia de pago después de la confirmación revisada."
+  }
+}

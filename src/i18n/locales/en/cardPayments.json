@@ -1,1 +1,105 @@
-{}
+{
+  "action": "Statements",
+  "title": "{{card}} statements",
+  "description": "Statement accounting and payment evidence in {{currency}}. Linked evidence never changes ledger balances.",
+  "create": "Add statement",
+  "due": "Due {{date}}",
+  "baseline": "Statement-only",
+  "linked": "Linked evidence",
+  "evidenceTitle": "Active payment evidence",
+  "history": "Voided evidence history ({{count}})",
+  "voided": "voided",
+  "legacyBadge": "Legacy overpaid",
+  "legacyOverpaid": "This historical statement is overpaid. Its recorded total is preserved; new actions cannot increase the overpayment.",
+  "stale": "Payment data changed. Refresh and review again.",
+  "empty": {
+    "title": "No statements recorded",
+    "description": "Add the card issuer’s statement totals before attributing payment evidence."
+  },
+  "status": {
+    "open": "Open",
+    "partial": "Partially paid",
+    "paid": "Paid",
+    "overdue": "Overdue"
+  },
+  "fields": {
+    "startDate": "Period start",
+    "endDate": "Closing date",
+    "dueDate": "Due date",
+    "balance": "Statement balance",
+    "minimum": "Minimum payment",
+    "paid": "Paid total",
+    "amount": "Amount",
+    "note": "Note"
+  },
+  "editor": {
+    "createTitle": "Add card statement",
+    "editTitle": "Edit card statement",
+    "description": "Use the exact issuer amounts for {{card}} ({{currency}}).",
+    "linkFloor": "Active links require at least {{amount}} paid.",
+    "baselineHelp": "The paid total starts as statement-only evidence."
+  },
+  "link": {
+    "action": "Link payment",
+    "title": "Link existing payment",
+    "description": "Attribute a posted ledger row to this statement without changing transactions or account balances.",
+    "source": "Recorded payment evidence",
+    "evidence": "Evidence shape",
+    "available": "Available to link",
+    "mode": "Accounting treatment",
+    "apply": "Apply to unpaid balance",
+    "attribute": "Attribute existing paid total",
+    "confirmRepayment": "I confirm this ordinary transaction is a repayment to {{card}}, not a purchase, fee, withdrawal, or refund.",
+    "empty": "No eligible payment evidence",
+    "emptyDescription": "Record a real transfer or use an eligible posted transaction, then refresh."
+  },
+  "payment": {
+    "action": "Record payment",
+    "title": "Record card payment",
+    "description": "Create a real transfer and optional statement link atomically, or record statement-only evidence.",
+    "from": "Pay from",
+    "selectSource": "Select an account",
+    "statementOnly": "Statement-only payment",
+    "statementOnlyDescription": "Updates statement accounting from external evidence. No transaction or balance change is created."
+  },
+  "review": {
+    "title": "Review before confirming",
+    "noBalanceImpact": "This evidence link does not change transactions, account balances, or transaction history.",
+    "baselineEvidence": "Add external statement evidence without creating a transaction.",
+    "noTransaction": "Only the statement baseline and status will change.",
+    "realTransfer": "Create a posted transfer and link it to this statement.",
+    "atomicTransfer": "Both account balances, the transaction, and evidence link commit together or not at all."
+  },
+  "mode": {
+    "apply_to_unpaid": "Applied to unpaid",
+    "attribute_existing": "Attributed existing total"
+  },
+  "evidence": {
+    "canonical_transfer": "Transfer to this card",
+    "ordinary_card_income": "Confirmed card income",
+    "ordinary_bank_expense": "Confirmed bank expense"
+  },
+  "confirm": {
+    "deleteTitle": "Delete this statement?",
+    "deleteDescription": "The statement will be removed. Voided evidence keeps immutable original IDs; active links must be unlinked first.",
+    "unlinkTitle": "Unlink this payment evidence?",
+    "unlinkDescription": "The evidence link will be voided and statement accounting will be reversed. The underlying transaction and balances will not change."
+  },
+  "actions": {
+    "cancel": "Cancel",
+    "review": "Review",
+    "confirm": "Confirm",
+    "loading": "Loading…",
+    "saving": "Saving…",
+    "edit": "Edit statement",
+    "delete": "Delete statement",
+    "unlink": "Unlink payment"
+  },
+  "audit": {
+    "linkNote": "Linked existing repayment evidence after reviewed confirmation.",
+    "paymentNote": "Recorded reviewed card transfer and statement evidence.",
+    "baselineNote": "Recorded reviewed statement-only payment evidence.",
+    "deleteNote": "Deleted card statement after reviewed confirmation.",
+    "unlinkNote": "Voided payment evidence after reviewed confirmation."
+  }
+}

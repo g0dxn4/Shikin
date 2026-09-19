@@ -1,5 +1,4 @@
 import {
-  isConsumptionEligible,
   owningAllocation,
   validateConsumptionClassification,
   type ConsumptionClassification,
@@ -71,6 +70,10 @@ function posted(row: PaymentTransaction): boolean {
   return row.status === 'posted' || row.status === 'cleared'
 }
 
+function knownReportingTreatment(row: PaymentTransaction): boolean {
+  return ['normal', 'exclude_from_cashflow'].includes(row.reporting_treatment ?? 'normal')
+}
+
 function accountById(evidence: PaymentEvidence, id: string): PaymentAccount {
   const matches = evidence.accounts.filter((account) => account.id === id)
   if (matches.length !== 1)
@@ -113,7 +116,8 @@ function resolveCanonicalTransfer(
     !posted(source) ||
     (source.ledger_treatment ?? 'normal') !== 'normal' ||
     (source.transaction_kind ?? 'standard') !== 'standard' ||
-    source.is_archived === 1 ||
+    Boolean(source.is_archived) ||
+    !knownReportingTreatment(source) ||
     source.account_id === card.id ||
     !source.account_id ||
     !currency ||
@@ -175,6 +179,17 @@ function resolveCanonicalTransfer(
   }
 }
 
+function paymentClassificationEvidence(evidence: PaymentEvidence): ConsumptionEvidence {
+  return {
+    ...evidence,
+    transactions: evidence.transactions.map((transaction) => {
+      const treatment = transaction.reporting_treatment ?? 'normal'
+      if (!['normal', 'exclude_from_cashflow'].includes(treatment)) return transaction
+      return { ...transaction, reporting_treatment: 'normal' }
+    }),
+  }
+}
+
 function ordinaryCapacity(
   row: PaymentTransaction,
   evidence: PaymentEvidence,
@@ -185,9 +200,20 @@ function ordinaryCapacity(
       'Explicit operator confirmation that this transaction repays this card is required.'
     )
   positiveSafeAmount(row.amount, 'Payment transaction amount')
-  if (!isConsumptionEligible(row))
+  if (!knownReportingTreatment(row))
+    throw new Error('Ordinary payment evidence has an unknown reporting treatment.')
+  if (
+    !['expense', 'income'].includes(row.type) ||
+    !posted(row) ||
+    (row.ledger_treatment ?? 'normal') !== 'normal' ||
+    (row.transaction_kind ?? 'standard') !== 'standard' ||
+    Boolean(row.is_archived) ||
+    Boolean(row.matched_transaction_id) ||
+    Boolean(row.is_placeholder)
+  )
     throw new Error('Ordinary payment evidence must be posted, normal-ledger and nontechnical.')
 
+  const classificationEvidence = paymentClassificationEvidence(evidence)
   const ownedSplits = evidence.splits.filter((split) => split.transaction_id === row.id)
   let splitTotal = 0
   for (const split of ownedSplits) {
@@ -208,8 +234,8 @@ function ordinaryCapacity(
     const classification = matches[0]
     const amount = splitId ? ownedSplits.find((split) => split.id === splitId)!.amount : row.amount
     if (classification) {
-      owningAllocation(classification, evidence as ConsumptionEvidence)
-      validateConsumptionClassification(classification, evidence as ConsumptionEvidence)
+      owningAllocation(classification, classificationEvidence)
+      validateConsumptionClassification(classification, classificationEvidence)
     }
     const excluded =
       (row.type === 'income' && classification?.role === 'refund') ||
@@ -290,4 +316,237 @@ export function assertPaymentLinkCapacity(input: {
   if (resulting > input.resolved.capacity)
     throw new Error('Payment allocations across statements exceed eligible transaction capacity.')
   return { activeAmount, remainingCapacity: input.resolved.capacity - resulting }
+}
+
+export type StatementPaymentStatus = 'open' | 'partial' | 'paid' | 'overdue'
+export type StatementPaymentLinkMode = 'apply_to_unpaid' | 'attribute_existing'
+
+export interface StatementPaymentState {
+  statementBalance: number
+  paidAmount: number
+  unattributedPaidAmount: number
+  dueDate: string
+  status: StatementPaymentStatus
+}
+
+export interface StatementPaymentPlan {
+  before: StatementPaymentState
+  after: StatementPaymentState
+  activeLinkedAmountBefore: number
+  activeLinkedAmountAfter: number
+  legacyOverpaidBefore: boolean
+  legacyOverpaidAfter: boolean
+}
+
+function nonNegativeSafeAmount(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 0)
+    throw new Error(`${label} must be a non-negative safe integer amount.`)
+  return value
+}
+
+function assertIsoDate(value: string, label: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`)))
+    throw new Error(`${label} must be an ISO date.`)
+}
+
+export function deriveStatementPaymentStatus(input: {
+  statementBalance: number
+  paidAmount: number
+  dueDate: string
+  today: string
+}): StatementPaymentStatus {
+  nonNegativeSafeAmount(input.statementBalance, 'Statement balance')
+  nonNegativeSafeAmount(input.paidAmount, 'Statement paid amount')
+  assertIsoDate(input.dueDate, 'Statement due date')
+  assertIsoDate(input.today, 'Current date')
+  if (input.statementBalance === 0 || input.paidAmount >= input.statementBalance) return 'paid'
+  if (input.paidAmount > 0) return 'partial'
+  return input.dueDate < input.today ? 'overdue' : 'open'
+}
+
+export function assertStatementPaymentEquation(
+  statement: StatementPaymentState,
+  activeLinkedAmount: number
+): void {
+  nonNegativeSafeAmount(statement.statementBalance, 'Statement balance')
+  nonNegativeSafeAmount(statement.paidAmount, 'Statement paid amount')
+  nonNegativeSafeAmount(statement.unattributedPaidAmount, 'Statement unattributed paid amount')
+  nonNegativeSafeAmount(activeLinkedAmount, 'Statement active linked amount')
+  if (
+    safeAdd(statement.unattributedPaidAmount, activeLinkedAmount, 'Statement payment equation') !==
+    statement.paidAmount
+  )
+    throw new Error('Statement payment evidence is inconsistent; repair it before continuing.')
+}
+
+function statementPlan(
+  before: StatementPaymentState,
+  afterAmounts: Pick<
+    StatementPaymentState,
+    'statementBalance' | 'paidAmount' | 'unattributedPaidAmount'
+  >,
+  activeLinkedAmountBefore: number,
+  activeLinkedAmountAfter: number,
+  today: string
+): StatementPaymentPlan {
+  assertStatementPaymentEquation(before, activeLinkedAmountBefore)
+  const after: StatementPaymentState = {
+    ...before,
+    ...afterAmounts,
+    status: deriveStatementPaymentStatus({ ...afterAmounts, dueDate: before.dueDate, today }),
+  }
+  assertStatementPaymentEquation(after, activeLinkedAmountAfter)
+  return {
+    before,
+    after,
+    activeLinkedAmountBefore,
+    activeLinkedAmountAfter,
+    legacyOverpaidBefore: before.paidAmount > before.statementBalance,
+    legacyOverpaidAfter: after.paidAmount > after.statementBalance,
+  }
+}
+
+export function planStatementPaymentLink(input: {
+  statement: StatementPaymentState
+  activeLinkedAmount: number
+  amount: number
+  mode: StatementPaymentLinkMode
+  today: string
+}): StatementPaymentPlan {
+  positiveSafeAmount(input.amount, 'Payment link amount')
+  const activeAfter = safeAdd(
+    input.activeLinkedAmount,
+    input.amount,
+    'Statement linked payment total'
+  )
+  if (activeAfter > input.statement.statementBalance)
+    throw new Error('Linked allocations cannot exceed the statement balance.')
+  if (input.mode === 'attribute_existing' && input.statement.unattributedPaidAmount < input.amount)
+    throw new Error('Statement has insufficient unattributed paid amount for this attribution.')
+  const paidAmount =
+    input.mode === 'apply_to_unpaid'
+      ? safeAdd(input.statement.paidAmount, input.amount, 'Statement paid total')
+      : input.statement.paidAmount
+  if (input.mode === 'apply_to_unpaid' && paidAmount > input.statement.statementBalance)
+    throw new Error('Applying this link would newly overpay the statement.')
+  return statementPlan(
+    input.statement,
+    {
+      statementBalance: input.statement.statementBalance,
+      paidAmount,
+      unattributedPaidAmount:
+        input.mode === 'attribute_existing'
+          ? input.statement.unattributedPaidAmount - input.amount
+          : input.statement.unattributedPaidAmount,
+    },
+    input.activeLinkedAmount,
+    activeAfter,
+    input.today
+  )
+}
+
+export function planStatementPaymentUnlink(input: {
+  statement: StatementPaymentState
+  activeLinkedAmount: number
+  amount: number
+  mode: StatementPaymentLinkMode
+  today: string
+}): StatementPaymentPlan {
+  positiveSafeAmount(input.amount, 'Payment link amount')
+  if (input.amount > input.activeLinkedAmount)
+    throw new Error('Payment link amount exceeds the statement active linked amount.')
+  const paidAmount =
+    input.mode === 'apply_to_unpaid'
+      ? input.statement.paidAmount - input.amount
+      : input.statement.paidAmount
+  const baseline =
+    input.mode === 'attribute_existing'
+      ? safeAdd(
+          input.statement.unattributedPaidAmount,
+          input.amount,
+          'Statement unattributed paid amount'
+        )
+      : input.statement.unattributedPaidAmount
+  if (paidAmount < 0) throw new Error('Unlink would produce an invalid statement total.')
+  return statementPlan(
+    input.statement,
+    {
+      statementBalance: input.statement.statementBalance,
+      paidAmount,
+      unattributedPaidAmount: baseline,
+    },
+    input.activeLinkedAmount,
+    input.activeLinkedAmount - input.amount,
+    input.today
+  )
+}
+
+export function planStatementBaselinePayment(input: {
+  statement: StatementPaymentState
+  activeLinkedAmount: number
+  amount: number
+  today: string
+}): StatementPaymentPlan {
+  positiveSafeAmount(input.amount, 'Statement-only payment amount')
+  const paidAmount = safeAdd(input.statement.paidAmount, input.amount, 'Statement paid total')
+  if (paidAmount > input.statement.statementBalance)
+    throw new Error('This payment would newly increase the statement paid total above its balance.')
+  return statementPlan(
+    input.statement,
+    {
+      statementBalance: input.statement.statementBalance,
+      paidAmount,
+      unattributedPaidAmount: safeAdd(
+        input.statement.unattributedPaidAmount,
+        input.amount,
+        'Statement unattributed paid amount'
+      ),
+    },
+    input.activeLinkedAmount,
+    input.activeLinkedAmount,
+    input.today
+  )
+}
+
+export function planStatementTotalsEdit(input: {
+  statement: StatementPaymentState
+  activeLinkedAmount: number
+  statementBalance?: number
+  paidAmount?: number
+  dueDate?: string
+  today: string
+}): StatementPaymentPlan {
+  const statementBalance =
+    input.statementBalance === undefined
+      ? input.statement.statementBalance
+      : nonNegativeSafeAmount(input.statementBalance, 'Statement balance')
+  const paidAmount =
+    input.paidAmount === undefined
+      ? input.statement.paidAmount
+      : nonNegativeSafeAmount(input.paidAmount, 'Statement paid amount')
+  if (statementBalance < input.activeLinkedAmount)
+    throw new Error('Statement balance cannot be lower than active linked payment allocations.')
+  if (paidAmount < input.activeLinkedAmount)
+    throw new Error('Paid amount cannot be lower than active linked payment allocations.')
+  const wasOverpaid = input.statement.paidAmount > input.statement.statementBalance
+  if (paidAmount > statementBalance && (!wasOverpaid || paidAmount !== input.statement.paidAmount))
+    throw new Error('A changed statement total cannot introduce or increase overpayment.')
+  const dueDate = input.dueDate ?? input.statement.dueDate
+  assertIsoDate(dueDate, 'Statement due date')
+  const before = input.statement
+  const after = {
+    statementBalance,
+    paidAmount,
+    unattributedPaidAmount: paidAmount - input.activeLinkedAmount,
+  }
+  const plan = statementPlan(
+    before,
+    after,
+    input.activeLinkedAmount,
+    input.activeLinkedAmount,
+    input.today
+  )
+  plan.after.dueDate = dueDate
+  plan.after.status = deriveStatementPaymentStatus({ ...after, dueDate, today: input.today })
+  return plan
 }

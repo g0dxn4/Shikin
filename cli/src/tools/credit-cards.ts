@@ -28,6 +28,7 @@ import {
   transactionDuplicateReason,
   type TransactionDuplicateCheck,
 } from '../duplicate-detection.js'
+import { applyExistingPaymentLink, paymentLinkTools } from '../payment-links.js'
 
 type StatementStatus = 'open' | 'partial' | 'paid' | 'overdue'
 
@@ -53,6 +54,7 @@ type CreditCardStatementRow = {
   statement_balance: number
   minimum_payment: number
   paid_amount: number
+  unattributed_paid_amount: number
   currency: string
   status: StatementStatus
   source: string | null
@@ -101,6 +103,22 @@ type CardPaymentTransactionPreview = {
   note: string | null
   status: 'posted'
   date: string
+}
+
+type CardPaymentLinkEvidencePreview = {
+  id: string
+  statementId: string
+  transactionId: string
+  originalStatementId: string
+  originalTransactionId: string
+  requestedTransactionId: string
+  amount: number
+  amountCentavos: number
+  mode: 'apply_to_unpaid'
+  source: string | null
+  note: string | null
+  createdAt: string | null
+  voidedAt: string | null
 }
 
 type CardPaymentBalanceChange = {
@@ -334,21 +352,31 @@ function cardPaymentDuplicateWarnings(duplicateCheck: TransactionDuplicateCheck)
 function buildStatementPaymentImpact(input: {
   statement: CreditCardStatementRow
   amountCentavos: number
+  attribution: 'baseline' | 'link'
   source?: string
   note?: string
 }) {
   const previousPaidAmountCentavos = input.statement.paid_amount
   const newPaidAmountCentavos = previousPaidAmountCentavos + input.amountCentavos
+  const previousBaseline = input.statement.unattributed_paid_amount ?? input.statement.paid_amount
   const updatedStatement: CreditCardStatementRow = {
     ...input.statement,
     paid_amount: newPaidAmountCentavos,
+    unattributed_paid_amount:
+      input.attribution === 'baseline' ? previousBaseline + input.amountCentavos : previousBaseline,
     status: deriveStatementStatus({
       statementBalance: input.statement.statement_balance,
       paidAmount: newPaidAmountCentavos,
       dueDate: input.statement.due_date,
     }),
-    source: input.source !== undefined ? input.source : input.statement.source,
-    note: input.note !== undefined ? input.note : input.statement.note,
+    source:
+      input.attribution === 'baseline' && input.source !== undefined
+        ? input.source
+        : input.statement.source,
+    note:
+      input.attribution === 'baseline' && input.note !== undefined
+        ? input.note
+        : input.statement.note,
   }
   const payment = paymentAmounts(updatedStatement)
 
@@ -399,6 +427,16 @@ function statementSnapshot(statement: CreditCardStatementRow) {
     minimumPaymentCentavos: statement.minimum_payment,
     paidAmount: fromCentavos(statement.paid_amount),
     paidAmountCentavos: statement.paid_amount,
+    unattributedPaidAmount: fromCentavos(
+      statement.unattributed_paid_amount ?? statement.paid_amount
+    ),
+    unattributedPaidAmountCentavos: statement.unattributed_paid_amount ?? statement.paid_amount,
+    linkedPaidAmount: fromCentavos(
+      statement.paid_amount - (statement.unattributed_paid_amount ?? statement.paid_amount)
+    ),
+    linkedPaidAmountCentavos:
+      statement.paid_amount - (statement.unattributed_paid_amount ?? statement.paid_amount),
+    legacyOverpaid: statement.paid_amount > statement.statement_balance,
     ...payment,
     currency: statement.currency,
     status: statement.status,
@@ -412,6 +450,24 @@ function statementSnapshot(statement: CreditCardStatementRow) {
 
 function statementAuditSnapshot(statement: CreditCardStatementRow) {
   return statementSnapshot(statement)
+}
+
+function paymentLinkStatementAuditSnapshot(statement: CreditCardStatementRow) {
+  const baseline = statement.unattributed_paid_amount ?? statement.paid_amount
+  return {
+    id: statement.id,
+    accountId: statement.account_id,
+    statementBalanceCentavos: statement.statement_balance,
+    statementBalance: fromCentavos(statement.statement_balance),
+    paidAmountCentavos: statement.paid_amount,
+    paidAmount: fromCentavos(statement.paid_amount),
+    unattributedPaidAmountCentavos: baseline,
+    unattributedPaidAmount: fromCentavos(baseline),
+    linkedAmountCentavos: statement.paid_amount - baseline,
+    linkedAmount: fromCentavos(statement.paid_amount - baseline),
+    currency: statement.currency,
+    status: statement.status,
+  }
 }
 
 function assertSingleRowUpdated(result: { rowsAffected: number }, message: string) {
@@ -648,9 +704,34 @@ function resolveStatementCurrency(accountCurrency: string, currency?: string) {
   return { success: true as const, currency: normalizedCurrency }
 }
 
+function activeStatementPaymentAmount(statementId: string): number {
+  const rows =
+    query<{ amount: number }>(
+      'SELECT amount FROM card_statement_payment_links WHERE statement_id = $1 AND voided_at IS NULL',
+      [statementId]
+    ) ?? []
+  let total = 0
+  for (const row of rows) {
+    total += row.amount
+    if (!Number.isSafeInteger(total)) throw new Error('Active payment allocation total is unsafe.')
+  }
+  return total
+}
+
+function assertStatementPaymentInvariant(statement: CreditCardStatementRow): number {
+  const active = activeStatementPaymentAmount(statement.id)
+  const baseline = statement.unattributed_paid_amount ?? statement.paid_amount
+  if (baseline < 0 || baseline + active !== statement.paid_amount) {
+    throw new Error(
+      `Statement ${statement.id} payment evidence is inconsistent; repair it before changing the statement.`
+    )
+  }
+  return active
+}
+
 function getStatement(statementId: string): CreditCardStatementRow | null {
   return (
-    query<CreditCardStatementRow>(
+    (query<CreditCardStatementRow>(
       `SELECT s.*, a.name as account_name, a.currency as account_currency, a.type as account_type,
               a.is_archived as account_is_archived
        FROM credit_card_statements s
@@ -658,7 +739,7 @@ function getStatement(statementId: string): CreditCardStatementRow | null {
        WHERE s.id = $1
        LIMIT 1`,
       [statementId]
-    )[0] ?? null
+    ) ?? [])[0] ?? null
   )
 }
 
@@ -840,6 +921,16 @@ const recordCardPayment: ToolDefinition = {
       .default(false)
       .describe('Allow recording even when a similar transaction already exists'),
   }),
+  effects: {
+    writesTo: [
+      'transactions',
+      'accounts',
+      'credit_card_statements',
+      'card_statement_payment_links',
+      'audit_log',
+      'app_data_state',
+    ],
+  },
   execute: async ({
     fromAccount,
     cardAccount,
@@ -940,6 +1031,8 @@ const recordCardPayment: ToolDefinition = {
       }
     }
 
+    if (selectedStatement) assertStatementPaymentInvariant(selectedStatement)
+
     if (mode === 'statement-payment-only' && !selectedStatement) {
       return {
         success: false,
@@ -951,8 +1044,24 @@ const recordCardPayment: ToolDefinition = {
     }
 
     const statementImpact = selectedStatement
-      ? buildStatementPaymentImpact({ statement: selectedStatement, amountCentavos, source, note })
+      ? buildStatementPaymentImpact({
+          statement: selectedStatement,
+          amountCentavos,
+          attribution: mode === 'statement-payment-only' ? 'baseline' : 'link',
+          source,
+          note,
+        })
       : null
+    if (
+      statementImpact &&
+      statementImpact.statement.paid_amount > statementImpact.statement.statement_balance
+    ) {
+      return {
+        success: false,
+        reason: 'statement_payment_exceeds_balance',
+        message: 'This payment would newly increase the statement paid total above its balance.',
+      }
+    }
 
     const transactionDescription =
       description ??
@@ -1016,6 +1125,25 @@ const recordCardPayment: ToolDefinition = {
 
     const wouldCreateTransactions = transactionPreview ? [transactionPreview] : []
     const wouldUpdateStatements = statementImpact ? [statementImpact.preview] : []
+    const paymentLinkId = transactionPreview && selectedStatement ? generateId() : null
+    const paymentLinkPreview: CardPaymentLinkEvidencePreview | null =
+      paymentLinkId && transactionPreview && selectedStatement && statementImpact
+        ? {
+            id: paymentLinkId,
+            statementId: selectedStatement.id,
+            transactionId: transactionPreview.id,
+            originalStatementId: selectedStatement.id,
+            originalTransactionId: transactionPreview.id,
+            requestedTransactionId: transactionPreview.id,
+            amount,
+            amountCentavos,
+            mode: 'apply_to_unpaid' as const,
+            source: source ?? null,
+            note: note ?? null,
+            createdAt: null,
+            voidedAt: null,
+          }
+        : null
     const transactionAuditPreview = transactionPreview
       ? {
           entity: 'transaction',
@@ -1046,6 +1174,33 @@ const recordCardPayment: ToolDefinition = {
           note: note ?? null,
         }
       : null
+    const paymentLinkAuditPreview =
+      paymentLinkPreview && statementImpact && selectedStatement && transactionPreview
+        ? {
+            entity: 'card_statement_payment_link',
+            entityId: paymentLinkPreview.id,
+            action: 'record-payment',
+            before: {
+              link: null,
+              statement: paymentLinkStatementAuditSnapshot(selectedStatement),
+            },
+            after: {
+              link: paymentLinkPreview,
+              statement: paymentLinkStatementAuditSnapshot(statementImpact.statement),
+              evidence: {
+                shape: mode === 'transfer' ? 'canonical_transfer' : 'ordinary_bank_expense',
+                requestedTransactionId: transactionPreview.id,
+                canonicalTransactionId: transactionPreview.id,
+                aliasTransactionIds: [transactionPreview.id],
+                eligibleCapacityCentavos: amountCentavos,
+                activeLinkedAmountBeforeCentavos: 0,
+                explicitRepaymentConfirmation: mode === 'cleanup-expense',
+              },
+            },
+            source: source ?? null,
+            note: note ?? null,
+          }
+        : null
 
     if (dryRun) {
       return {
@@ -1057,6 +1212,7 @@ const recordCardPayment: ToolDefinition = {
         amountCentavos,
         wouldCreateTransactions,
         wouldUpdateStatements,
+        wouldCreatePaymentLinks: paymentLinkPreview ? [paymentLinkPreview] : [],
         balanceImpact,
         statementImpact: statementImpact?.preview ?? null,
         duplicateWarnings,
@@ -1068,11 +1224,15 @@ const recordCardPayment: ToolDefinition = {
             }
           : { allowDuplicate, applyBlocked: false, reason: null },
         warnings,
-        auditPreview: [transactionAuditPreview, statementAuditPreview].filter(Boolean),
+        auditPreview: [
+          transactionAuditPreview,
+          paymentLinkAuditPreview ?? statementAuditPreview,
+        ].filter(Boolean),
         message: `Dry run: ${mode} card payment for ${card.name} would be recorded.`,
       }
     }
 
+    let appliedPaymentLink = paymentLinkPreview
     transaction(() => {
       if (transactionPreview) {
         execute(
@@ -1112,17 +1272,53 @@ const recordCardPayment: ToolDefinition = {
         })
       }
 
-      if (statementImpact) {
+      if (statementImpact && transactionPreview && paymentLinkId) {
+        const applied = applyExistingPaymentLink({
+          id: paymentLinkId,
+          statementId: statementImpact.statement.id,
+          transactionId: transactionPreview.id,
+          amountCentavos,
+          mode: 'apply_to_unpaid',
+          explicitRepaymentConfirmation: mode === 'cleanup-expense',
+          source,
+          note,
+          action: 'record-payment',
+        })
+        appliedPaymentLink = {
+          ...paymentLinkPreview!,
+          transactionId: applied.plan.link.transaction_id!,
+          originalTransactionId: applied.plan.link.original_transaction_id,
+          createdAt: applied.plan.link.created_at,
+        }
+      } else if (statementImpact) {
+        const lockedStatement = getStatement(statementImpact.statement.id)
+        if (!lockedStatement) {
+          throw new Error(`Credit card statement ${statementImpact.statement.id} disappeared.`)
+        }
+        assertStatementPaymentInvariant(lockedStatement)
+        if (
+          lockedStatement.paid_amount !== selectedStatement!.paid_amount ||
+          (lockedStatement.unattributed_paid_amount ?? lockedStatement.paid_amount) !==
+            (selectedStatement!.unattributed_paid_amount ?? selectedStatement!.paid_amount)
+        ) {
+          throw new Error(
+            `Credit card statement ${statementImpact.statement.id} changed; retry the payment.`
+          )
+        }
         const updateResult = execute(
           `UPDATE credit_card_statements
-           SET paid_amount = $1, status = $2, source = $3, note = $4, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-           WHERE id = $5`,
+           SET unattributed_paid_amount = $1, paid_amount = $2, status = $3, source = $4, note = $5,
+               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+           WHERE id = $6 AND paid_amount = $7 AND unattributed_paid_amount = $8`,
           [
+            statementImpact.statement.unattributed_paid_amount,
             statementImpact.statement.paid_amount,
             statementImpact.statement.status,
             statementImpact.statement.source,
             statementImpact.statement.note,
             statementImpact.statement.id,
+            selectedStatement!.paid_amount,
+            selectedStatement!.unattributed_paid_amount ?? selectedStatement!.paid_amount,
           ]
         )
         assertSingleRowUpdated(
@@ -1148,6 +1344,7 @@ const recordCardPayment: ToolDefinition = {
       mode,
       transactions: wouldCreateTransactions,
       updatedStatements: wouldUpdateStatements,
+      paymentLinks: appliedPaymentLink ? [appliedPaymentLink] : [],
       balanceImpact,
       statementImpact: statementImpact?.preview ?? null,
       duplicateWarnings,
@@ -1352,6 +1549,13 @@ const createCreditCardStatement: ToolDefinition = {
     const id = generateId()
     const statementBalanceCentavos = toCentavos(statementBalance)
     const paidAmountCentavos = toCentavos(paidAmount)
+    if (paidAmountCentavos > statementBalanceCentavos) {
+      return {
+        success: false,
+        reason: 'statement_payment_exceeds_balance',
+        message: 'A new statement paid amount cannot exceed its statement balance.',
+      }
+    }
     const statementStatus = deriveStatementStatus({
       statementBalance: statementBalanceCentavos,
       paidAmount: paidAmountCentavos,
@@ -1376,6 +1580,7 @@ const createCreditCardStatement: ToolDefinition = {
       statement_balance: statementBalanceCentavos,
       minimum_payment: toCentavos(minimumPayment),
       paid_amount: paidAmountCentavos,
+      unattributed_paid_amount: paidAmountCentavos,
       currency: resolvedCurrency.currency,
       status: statementStatus,
       source: source ?? null,
@@ -1395,8 +1600,8 @@ const createCreditCardStatement: ToolDefinition = {
     transaction(() => {
       execute(
         `INSERT INTO credit_card_statements
-           (id, account_id, statement_start_date, statement_end_date, due_date, statement_balance, minimum_payment, paid_amount, currency, status, source, note)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+           (id, account_id, statement_start_date, statement_end_date, due_date, statement_balance, minimum_payment, paid_amount, unattributed_paid_amount, currency, status, source, note)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
         [
           row.id,
           row.account_id,
@@ -1406,6 +1611,7 @@ const createCreditCardStatement: ToolDefinition = {
           row.statement_balance,
           row.minimum_payment,
           row.paid_amount,
+          row.unattributed_paid_amount,
           row.currency,
           row.status,
           row.source,
@@ -1497,6 +1703,7 @@ const updateCreditCardStatement: ToolDefinition = {
 
     const writable = ensureStatementWritable(existing)
     if (!writable.success) return writable
+    const activeLinkedAmount = assertStatementPaymentInvariant(existing)
 
     if (accountId && account) {
       return {
@@ -1532,10 +1739,50 @@ const updateCreditCardStatement: ToolDefinition = {
       minimum_payment:
         minimumPayment !== undefined ? toCentavos(minimumPayment) : existing.minimum_payment,
       paid_amount: paidAmount !== undefined ? toCentavos(paidAmount) : existing.paid_amount,
+      unattributed_paid_amount:
+        paidAmount !== undefined
+          ? toCentavos(paidAmount) - activeLinkedAmount
+          : (existing.unattributed_paid_amount ?? existing.paid_amount),
       currency: normalizeCurrencyCode(currency ?? existing.currency),
       source: source !== undefined ? source : existing.source,
       note: note !== undefined ? note : existing.note,
       status: existing.status,
+    }
+
+    if (
+      activeLinkedAmount > 0 &&
+      (updated.account_id !== existing.account_id || updated.currency !== existing.currency)
+    ) {
+      return {
+        success: false,
+        reason: 'active_payment_links',
+        message: 'Unlink active payments before moving a statement or changing its currency.',
+      }
+    }
+    if (updated.statement_balance < activeLinkedAmount) {
+      return {
+        success: false,
+        reason: 'statement_balance_below_links',
+        message: 'Statement balance cannot be lower than its active linked payment allocations.',
+      }
+    }
+    if (paidAmount !== undefined && updated.unattributed_paid_amount < 0) {
+      return {
+        success: false,
+        reason: 'statement_paid_below_links',
+        message: 'Paid amount cannot be lower than active linked payment allocations.',
+      }
+    }
+    if (
+      paidAmount !== undefined &&
+      updated.paid_amount !== existing.paid_amount &&
+      updated.paid_amount > updated.statement_balance
+    ) {
+      return {
+        success: false,
+        reason: 'statement_payment_exceeds_balance',
+        message: 'A changed statement paid amount cannot exceed its statement balance.',
+      }
     }
 
     const dates = validateStatementDates({
@@ -1611,6 +1858,11 @@ const updateCreditCardStatement: ToolDefinition = {
     if (updated.minimum_payment !== existing.minimum_payment)
       addSet('minimum_payment', updated.minimum_payment)
     if (updated.paid_amount !== existing.paid_amount) addSet('paid_amount', updated.paid_amount)
+    if (
+      updated.unattributed_paid_amount !==
+      (existing.unattributed_paid_amount ?? existing.paid_amount)
+    )
+      addSet('unattributed_paid_amount', updated.unattributed_paid_amount)
     if (normalizeCurrencyCode(updated.currency) !== normalizeCurrencyCode(existing.currency))
       addSet('currency', updated.currency)
     if (updated.status !== existing.status) addSet('status', updated.status)
@@ -1646,6 +1898,19 @@ const updateCreditCardStatement: ToolDefinition = {
     }
 
     transaction(() => {
+      const locked = getStatement(statementId)
+      if (
+        !locked ||
+        locked.paid_amount !== existing.paid_amount ||
+        (locked.unattributed_paid_amount ?? locked.paid_amount) !==
+          (existing.unattributed_paid_amount ?? existing.paid_amount) ||
+        locked.statement_balance !== existing.statement_balance ||
+        locked.account_id !== existing.account_id ||
+        locked.currency !== existing.currency
+      ) {
+        throw new Error(`Credit card statement ${statementId} changed; retry the update.`)
+      }
+      assertStatementPaymentInvariant(locked)
       setClauses.push(`updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`)
       params.push(statementId)
       const updateResult = execute(
@@ -1783,6 +2048,14 @@ const deleteCreditCardStatement: ToolDefinition = {
 
     const writable = ensureStatementWritable(existing)
     if (!writable.success) return writable
+    const activeLinkedAmount = assertStatementPaymentInvariant(existing)
+    if (activeLinkedAmount > 0) {
+      return {
+        success: false,
+        reason: 'active_payment_links',
+        message: 'Unlink active payments before deleting this statement.',
+      }
+    }
 
     if (dryRun) {
       return {
@@ -1795,6 +2068,10 @@ const deleteCreditCardStatement: ToolDefinition = {
     }
 
     transaction(() => {
+      const locked = getStatement(statementId)
+      if (!locked) throw new Error(`Credit card statement ${statementId} disappeared.`)
+      if (assertStatementPaymentInvariant(locked) > 0)
+        throw new Error('Unlink active payments before deleting this statement.')
       const deleteResult = execute('DELETE FROM credit_card_statements WHERE id = $1', [
         statementId,
       ])
@@ -2004,6 +2281,7 @@ export function getCreditCardBillEntries(daysAhead: number): CreditCardBillEntry
 export const creditCardsTools: ToolDefinition[] = [
   getCreditCardStatus,
   recordCardPayment,
+  ...paymentLinkTools,
   creditCardCycleExplain,
   createCreditCardStatement,
   updateCreditCardStatement,

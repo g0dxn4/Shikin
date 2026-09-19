@@ -321,6 +321,22 @@ async function countAccountReferences(tx: TransactionClient, accountId: string) 
   return Object.values(counts).reduce((sum, value) => sum + value, 0)
 }
 
+async function activePaymentAccountReferenceCount(
+  tx: TransactionClient,
+  accountId: string
+): Promise<number> {
+  const rows = await tx.query<{ count: number }>(
+    `SELECT COUNT(DISTINCT l.id) AS count
+     FROM card_statement_payment_links l
+     JOIN credit_card_statements s ON s.id = l.statement_id
+     JOIN transactions t ON t.id = l.transaction_id
+     WHERE l.voided_at IS NULL
+       AND (s.account_id = ? OR t.account_id = ? OR t.transfer_to_account_id = ?)`,
+    [accountId, accountId, accountId]
+  )
+  return rows[0]?.count ?? 0
+}
+
 async function countAccountCurrencyBlockers(
   tx: TransactionClient,
   accountId: string,
@@ -473,6 +489,14 @@ export const useAccountStore = create<AccountState>((set, get) => ({
           throw new Error(`Account ${id} is archived. Unarchive it before editing it.`)
         }
 
+        if (
+          data.type !== existing[0].type &&
+          (await activePaymentAccountReferenceCount(tx, id)) > 0
+        ) {
+          throw new Error(
+            'Unlink active card-statement payments before changing this account type.'
+          )
+        }
         if (
           data.type !== existing[0].type &&
           ['investment', 'crypto'].includes(data.type) &&

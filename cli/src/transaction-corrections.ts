@@ -21,6 +21,7 @@ import {
   type ToolDefinition,
 } from './tools/shared.js'
 import { consumptionRoles } from '@shikin/finance-core/corrections'
+import { assertActivePaymentCapacity } from './payment-links.js'
 
 export function readConsumptionEvidence(): ConsumptionEvidence {
   return {
@@ -35,8 +36,13 @@ export function activeTransactionEvidence(id: string) {
   return {
     payments:
       query<{ id: string }>(
-        'SELECT id FROM card_statement_payment_links WHERE transaction_id = $1 AND voided_at IS NULL LIMIT 1',
-        [id]
+        `SELECT l.id
+         FROM card_statement_payment_links l
+         LEFT JOIN transactions linked ON linked.id = l.transaction_id
+         WHERE l.voided_at IS NULL
+           AND (l.transaction_id = $1 OR linked.matched_transaction_id = $2)
+         LIMIT 1`,
+        [id, id]
       ).length > 0,
     buckets:
       query<{ total: number }>(
@@ -51,7 +57,16 @@ export function guardTransactionEvidence(
 ) {
   const active = activeTransactionEvidence(before.id)
   const changed = !after || financialFieldsChanged(before, after)
-  assertEvidenceMutationAllowed(changed, active.payments, false)
+  if (changed) {
+    const currentTransactions = query<CorrectionTransaction>('SELECT * FROM transactions')
+    assertActivePaymentCapacity({
+      transactionId: before.id,
+      transactions: after
+        ? currentTransactions.map((row) => (row.id === before.id ? after : row))
+        : currentTransactions.filter((row) => row.id !== before.id),
+    })
+  }
+  assertEvidenceMutationAllowed(changed, false, false)
   if (changed && active.buckets)
     assertBucketSourcePreserved(
       before,
@@ -174,12 +189,8 @@ export function correctMetadataMutation(input: z.infer<typeof correctTransaction
     guardTransactionEvidence(before, after)
     if (input.splits) {
       const active = activeTransactionEvidence(before.id)
-      assertSplitReplacementAllowed(
-        before.id,
-        readConsumptionEvidence(),
-        active.payments,
-        active.buckets
-      )
+      const correctionEvidence = readConsumptionEvidence()
+      assertSplitReplacementAllowed(before.id, correctionEvidence, false, active.buckets)
       const total = input.splits.reduce(
         (sum: number, split: { amountCentavos: number }) => sum + split.amountCentavos,
         0
@@ -188,6 +199,18 @@ export function correctMetadataMutation(input: z.infer<typeof correctTransaction
         throw new Error('Split amounts must equal the transaction amount.')
       for (const split of input.splits)
         validateCategory(split.categoryId, split.subcategoryId, before.type, true)
+      assertActivePaymentCapacity({
+        transactionId: before.id,
+        splits: [
+          ...correctionEvidence.splits.filter((split) => split.transaction_id !== before.id),
+          ...input.splits.map((split: z.infer<typeof splitSchema>, index: number) => ({
+            id: `payment-preview-${index}`,
+            transaction_id: before.id,
+            category_id: split.categoryId,
+            amount: split.amountCentavos,
+          })),
+        ],
+      })
     }
     if (input.dryRun)
       return { success: true, dryRun: true, before, after, splits: input.splits ?? oldSplits }
@@ -262,14 +285,17 @@ export const setTransactionConsumption: ToolDefinition = {
         role: input.role,
         referenced_purchase_id: input.referencedPurchaseId ?? null,
       }
-      if (activeTransactionEvidence(input.transactionId).payments)
-        throw new Error('Unlink active payments before changing classifications.')
+      const updatedClassifications = [
+        ...evidence.classifications.filter((item) => item.id !== after.id),
+        after,
+      ]
       validateConsumptionEvidence({
         ...evidence,
-        classifications: [
-          ...evidence.classifications.filter((item) => item.id !== after.id),
-          after,
-        ],
+        classifications: updatedClassifications,
+      })
+      assertActivePaymentCapacity({
+        transactionId: input.transactionId,
+        classifications: updatedClassifications,
       })
       execute(
         "INSERT INTO transaction_consumption_classifications (id, transaction_id, split_id, role, referenced_purchase_id) VALUES ($1,$2,$3,$4,$5) ON CONFLICT(id) DO UPDATE SET role = excluded.role, referenced_purchase_id = excluded.referenced_purchase_id, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
@@ -308,8 +334,10 @@ export const clearTransactionConsumption: ToolDefinition = {
       if (!before) return { success: true, cleared: false }
       if (evidence.classifications.some((item) => item.referenced_purchase_id === before.id))
         throw new Error('Clear referencing refund/principal classifications first.')
-      if (activeTransactionEvidence(before.transaction_id).payments)
-        throw new Error('Unlink active payments before changing classifications.')
+      assertActivePaymentCapacity({
+        transactionId: before.transaction_id,
+        classifications: evidence.classifications.filter((item) => item.id !== before.id),
+      })
       execute('DELETE FROM transaction_consumption_classifications WHERE id = $1', [before.id])
       writeAuditLog({
         entity: 'transaction',

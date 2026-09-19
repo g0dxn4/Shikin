@@ -160,6 +160,20 @@ function accountCurrencyChangeBlockedMessage(referenceCount: number) {
   return `Cannot change this account currency while ${referenceCount} linked monetary reference${referenceCount === 1 ? '' : 's'} still point at the account. Create a new account or explicitly migrate the referenced data so amounts do not silently change meaning.`
 }
 
+function activePaymentAccountReferenceCount(accountId: string): number {
+  return (
+    (query<{ count: number }>(
+      `SELECT COUNT(DISTINCT l.id) AS count
+       FROM card_statement_payment_links l
+       JOIN credit_card_statements s ON s.id = l.statement_id
+       JOIN transactions t ON t.id = l.transaction_id
+       WHERE l.voided_at IS NULL
+         AND (s.account_id = $1 OR t.account_id = $2 OR t.transfer_to_account_id = $3)`,
+      [accountId, accountId, accountId]
+    ) ?? [])[0]?.count ?? 0
+  )
+}
+
 function accountModeChangeFailure(
   account: AccountRow,
   nextMode: AccountRow['account_mode'] | undefined
@@ -383,6 +397,13 @@ function prepareAccountUpdate(
   onlyChangedValues: boolean
 ) {
   input = normalizeNullableAccountInput(input)
+  if (
+    input.type !== undefined &&
+    input.type !== account.type &&
+    activePaymentAccountReferenceCount(account.id) > 0
+  ) {
+    throw new Error('Unlink active card-statement payments before changing this account type.')
+  }
   if (
     input.type &&
     input.type !== account.type &&

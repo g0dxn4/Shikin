@@ -10,6 +10,14 @@ import {
   type CorrectionSplit,
   type CorrectionTransaction,
 } from '@shikin/finance-core/corrections'
+import {
+  assertPaymentLinkCapacity,
+  resolvePaymentEvidence,
+  type ActivePaymentLink,
+  type PaymentAccount,
+  type PaymentEvidence,
+  type PaymentTransaction,
+} from '@shikin/finance-core/payments'
 import { query, withTransaction } from '@/lib/database'
 import type { TransactionClient } from '@/lib/database'
 import { generateId } from '@/lib/ulid'
@@ -70,6 +78,17 @@ export async function createSplits(
       throw new Error('Subcategory must belong to the selected category.')
   }
   const before = evidence.splits.filter((split) => split.transaction_id === transactionId)
+  await assertFrontendActivePaymentCapacity(tx, transactionId, {
+    splits: [
+      ...evidence.splits.filter((split) => split.transaction_id !== transactionId),
+      ...splits.map((split, index) => ({
+        id: `payment-preview-${index}`,
+        transaction_id: transactionId,
+        category_id: split.categoryId,
+        amount: split.amount,
+      })),
+    ],
+  })
   await tx.execute('DELETE FROM transaction_splits WHERE transaction_id = ?', [transactionId])
 
   for (const split of splits) {
@@ -115,6 +134,9 @@ export async function deleteSplits(transactionId: string, tx?: TransactionClient
   if (!owner) throw new Error('Transaction not found.')
   assertOrdinaryCorrection(owner)
   await assertSplitWorkflow(tx, owner, evidence)
+  await assertFrontendActivePaymentCapacity(tx, transactionId, {
+    splits: evidence.splits.filter((split) => split.transaction_id !== transactionId),
+  })
   await tx.execute('DELETE FROM transaction_splits WHERE transaction_id = ?', [transactionId])
   await auditFrontendCorrection(
     tx,
@@ -197,8 +219,63 @@ async function assertSplitWorkflow(
   )
     throw new Error('Protected financial provenance requires its dedicated workflow.')
   const active = await activeFrontendEvidence(tx, owner.id)
-  assertSplitReplacementAllowed(owner.id, evidence, active.payments, active.buckets)
+  assertSplitReplacementAllowed(owner.id, evidence, false, active.buckets)
 }
+
+async function readFrontendPaymentEvidence(tx: TransactionClient): Promise<PaymentEvidence> {
+  const [accounts, transactions, splits, classifications, activeLinks] = await Promise.all([
+    tx.query<PaymentAccount>('SELECT id, type, currency, account_mode, is_archived FROM accounts'),
+    tx.query<PaymentTransaction>('SELECT * FROM transactions'),
+    tx.query<CorrectionSplit>('SELECT * FROM transaction_splits'),
+    tx.query<ConsumptionClassification>('SELECT * FROM transaction_consumption_classifications'),
+    tx.query<ActivePaymentLink>(
+      'SELECT id, transaction_id, amount FROM card_statement_payment_links WHERE voided_at IS NULL'
+    ),
+  ])
+  return { accounts, transactions, splits, classifications, activeLinks }
+}
+
+async function assertFrontendActivePaymentCapacity(
+  tx: TransactionClient,
+  transactionId: string,
+  overrides: Partial<Pick<PaymentEvidence, 'transactions' | 'splits' | 'classifications'>> = {}
+) {
+  const current = await readFrontendPaymentEvidence(tx)
+  const currentRow = current.transactions.find((row) => row.id === transactionId)
+  const canonicalIds = new Set([transactionId])
+  if (currentRow?.matched_transaction_id) canonicalIds.add(currentRow.matched_transaction_id)
+  for (const row of current.transactions)
+    if (row.matched_transaction_id === transactionId) canonicalIds.add(row.id)
+  const relevant = (
+    await tx.query<{ transaction_id: string; account_id: string }>(
+      `SELECT DISTINCT l.transaction_id, s.account_id
+       FROM card_statement_payment_links l
+       JOIN credit_card_statements s ON s.id = l.statement_id
+       WHERE l.voided_at IS NULL`
+    )
+  ).filter((item) => canonicalIds.has(item.transaction_id))
+  if (!relevant.length) return
+  const evidence = { ...current, ...overrides }
+  for (const item of relevant) {
+    try {
+      const resolved = resolvePaymentEvidence({
+        transactionId: item.transaction_id,
+        cardAccountId: item.account_id,
+        explicitRepaymentConfirmation: true,
+        evidence,
+      })
+      assertPaymentLinkCapacity({ resolved, activeLinks: evidence.activeLinks })
+    } catch (error) {
+      throw Object.assign(
+        new Error(
+          `Unlink active payments before invalidating their evidence or eligible capacity: ${error instanceof Error ? error.message : String(error)}`
+        ),
+        { cause: error }
+      )
+    }
+  }
+}
+
 export async function guardFrontendEvidence(
   tx: TransactionClient,
   before: CorrectionTransaction,
@@ -206,7 +283,15 @@ export async function guardFrontendEvidence(
 ) {
   const active = await activeFrontendEvidence(tx, before.id)
   const changed = !after || financialFieldsChanged(before, after)
-  assertEvidenceMutationAllowed(changed, active.payments, false)
+  if (changed) {
+    const paymentEvidence = await readFrontendPaymentEvidence(tx)
+    await assertFrontendActivePaymentCapacity(tx, before.id, {
+      transactions: after
+        ? paymentEvidence.transactions.map((row) => (row.id === before.id ? after : row))
+        : paymentEvidence.transactions.filter((row) => row.id !== before.id),
+    })
+  }
+  assertEvidenceMutationAllowed(changed, false, false)
   if (changed && active.buckets)
     assertBucketSourcePreserved(
       before,

@@ -249,7 +249,7 @@ describe('audited transaction correction SQLite preservation', () => {
     })
   })
   it.each(['technical', 'matched', 'classification', 'payment', 'bucket'])(
-    'prevents the public split command from bypassing %s evidence',
+    'preserves %s evidence while applying public split policy',
     async (protection) => {
       add('protected')
       if (protection === 'technical')
@@ -285,16 +285,24 @@ describe('audited transaction correction SQLite preservation', () => {
           "INSERT INTO cashflow_buckets (id,name) VALUES ('split-bucket','Synthetic'); INSERT INTO cashflow_bucket_allocations (id,bucket_id,transaction_id,amount,allocation_date) VALUES ('split-allocation','split-bucket','protected',100,'2026-01-15')"
         )
       const before = snapshot()
-      await expect(
-        run('split-transaction', {
-          transactionId: 'protected',
-          splits: [
-            { categoryId: 'food', amount: 4 },
-            { categoryId: 'other', amount: 6 },
-          ],
-        })
-      ).rejects.toThrow(/provenance|classifications|Unlink|bucket allocations/)
-      expect(snapshot()).toEqual(before)
+      const mutation = run('split-transaction', {
+        transactionId: 'protected',
+        splits: [
+          { categoryId: 'food', amount: 4 },
+          { categoryId: 'other', amount: 6 },
+        ],
+      })
+      if (protection === 'payment') {
+        await expect(mutation).resolves.toMatchObject({ success: true })
+        expect(
+          state.db!.prepare('SELECT SUM(amount) AS total FROM transaction_splits').get()
+        ).toEqual({ total: 1000 })
+      } else {
+        await expect(mutation).rejects.toThrow(
+          /provenance|classifications|Unlink|bucket allocations/
+        )
+        expect(snapshot()).toEqual(before)
+      }
     }
   )
   it('rejects null, blank and wrong-direction split categories while allowing parent clearing', async () => {
@@ -359,7 +367,10 @@ describe('audited transaction correction SQLite preservation', () => {
       transactionId: 'pay',
       description: 'Still payment',
     })
-    await expect(run('update-transaction', { transactionId: 'pay', amount: 5 })).rejects.toThrow(
+    expect((await run('update-transaction', { transactionId: 'pay', amount: 5 })).success).toBe(
+      true
+    )
+    await expect(run('update-transaction', { transactionId: 'pay', amount: 0.5 })).rejects.toThrow(
       /Unlink/
     )
     await expect(

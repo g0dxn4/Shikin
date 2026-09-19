@@ -108,6 +108,7 @@ type CreditCardStatementContextRow = {
   statement_balance: number
   minimum_payment: number
   paid_amount: number
+  unattributed_paid_amount: number
   currency: string
   status: 'open' | 'partial' | 'paid' | 'overdue'
   source: string | null
@@ -182,6 +183,7 @@ type UndoStatementSnapshot = {
   statementBalanceCentavos: number
   minimumPaymentCentavos: number
   paidAmountCentavos: number
+  unattributedPaidAmountCentavos: number
   currency: string
   status: 'open' | 'partial' | 'paid' | 'overdue'
   source: string | null
@@ -700,6 +702,16 @@ function getCreditCardsContext(redacted: boolean, warnings: ContextWarning[]) {
       minimumPaymentCentavos: statement.minimum_payment,
       paidAmount: fromCentavos(statement.paid_amount),
       paidAmountCentavos: statement.paid_amount,
+      unattributedPaidAmount: fromCentavos(
+        statement.unattributed_paid_amount ?? statement.paid_amount
+      ),
+      unattributedPaidAmountCentavos: statement.unattributed_paid_amount ?? statement.paid_amount,
+      linkedPaidAmount: fromCentavos(
+        statement.paid_amount - (statement.unattributed_paid_amount ?? statement.paid_amount)
+      ),
+      linkedPaidAmountCentavos:
+        statement.paid_amount - (statement.unattributed_paid_amount ?? statement.paid_amount),
+      legacyOverpaid: statement.paid_amount > statement.statement_balance,
       ...payment,
       currency: statement.currency,
       status: statement.status,
@@ -1305,6 +1317,8 @@ function statementSnapshotFromAudit(value: unknown): UndoStatementSnapshot | nul
     statementBalanceCentavos,
     minimumPaymentCentavos,
     paidAmountCentavos,
+    unattributedPaidAmountCentavos:
+      asNumber(statement.unattributedPaidAmountCentavos) ?? paidAmountCentavos,
     currency,
     status: normalizeUndoStatementStatus(statement.status),
     source: asString(statement.source),
@@ -1682,8 +1696,8 @@ function deleteUndoTransaction(transactionId: string) {
 
 function insertUndoStatement(statement: UndoStatementSnapshot) {
   execute(
-    `INSERT INTO credit_card_statements (id, account_id, statement_start_date, statement_end_date, due_date, statement_balance, minimum_payment, paid_amount, currency, status, source, note)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+    `INSERT INTO credit_card_statements (id, account_id, statement_start_date, statement_end_date, due_date, statement_balance, minimum_payment, paid_amount, unattributed_paid_amount, currency, status, source, note)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
     [
       statement.id,
       statement.accountId,
@@ -1693,6 +1707,7 @@ function insertUndoStatement(statement: UndoStatementSnapshot) {
       statement.statementBalanceCentavos,
       statement.minimumPaymentCentavos,
       statement.paidAmountCentavos,
+      statement.unattributedPaidAmountCentavos,
       statement.currency,
       statement.status,
       statement.source,
@@ -1705,10 +1720,10 @@ function updateUndoStatement(statement: UndoStatementSnapshot) {
   const result = execute(
     `UPDATE credit_card_statements
      SET account_id = $1, statement_start_date = $2, statement_end_date = $3, due_date = $4,
-         statement_balance = $5, minimum_payment = $6, paid_amount = $7, currency = $8,
-         status = $9, source = $10, note = $11,
+         statement_balance = $5, minimum_payment = $6, paid_amount = $7,
+         unattributed_paid_amount = $8, currency = $9, status = $10, source = $11, note = $12,
          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-     WHERE id = $12`,
+     WHERE id = $13`,
     [
       statement.accountId,
       statement.statementStartDate,
@@ -1717,6 +1732,7 @@ function updateUndoStatement(statement: UndoStatementSnapshot) {
       statement.statementBalanceCentavos,
       statement.minimumPaymentCentavos,
       statement.paidAmountCentavos,
+      statement.unattributedPaidAmountCentavos,
       statement.currency,
       statement.status,
       statement.source,
@@ -1795,6 +1811,14 @@ function assertCurrentTransactionUndoState(entry: AuditLogRow, plan: UndoPlan) {
       return
     }
     if (!current) throw new Error(`Statement ${plan.entityId} no longer exists.`)
+    if (
+      query(
+        'SELECT id FROM card_statement_payment_links WHERE statement_id = $1 AND voided_at IS NULL LIMIT 1',
+        [plan.entityId]
+      ).length
+    ) {
+      throw new Error('Unlink active payments before undoing statement history.')
+    }
     const expectedCurrent = statementSnapshotFromAudit(parseAuditJson(entry.after_json))
     if (
       !expectedCurrent ||
@@ -1805,6 +1829,8 @@ function assertCurrentTransactionUndoState(entry: AuditLogRow, plan: UndoPlan) {
       current.statement_balance !== expectedCurrent.statementBalanceCentavos ||
       current.minimum_payment !== expectedCurrent.minimumPaymentCentavos ||
       current.paid_amount !== expectedCurrent.paidAmountCentavos ||
+      (current.unattributed_paid_amount ?? current.paid_amount) !==
+        expectedCurrent.unattributedPaidAmountCentavos ||
       current.currency !== expectedCurrent.currency ||
       current.status !== expectedCurrent.status ||
       (current.source ?? null) !== expectedCurrent.source ||
@@ -2027,7 +2053,7 @@ function getCreditCardSanityFindings(input: {
   ) {
     return []
   }
-  const rows = query<CreditCardStatementContextRow>(
+  const dueRows = query<CreditCardStatementContextRow>(
     `SELECT s.*, a.name AS account_name
      FROM credit_card_statements s
      LEFT JOIN accounts a ON a.id = s.account_id
@@ -2037,7 +2063,7 @@ function getCreditCardSanityFindings(input: {
      LIMIT $2`,
     [input.cutoff, input.limit]
   )
-  return rows.map((statement) => {
+  const dueFindings = dueRows.map((statement) => {
     const payment = paymentAmounts(statement)
     const overdue = dayjs(statement.due_date).isBefore(dayjs(input.asOf), 'day')
     return {
@@ -2058,6 +2084,48 @@ function getCreditCardSanityFindings(input: {
         : `Credit-card statement ${statement.id} is due by ${statement.due_date} with ${payment.amountToPay.toFixed(2)} ${statement.currency} remaining.`,
     } satisfies FinanceSanityFinding
   })
+  if (
+    !tableHasColumns('credit_card_statements', ['unattributed_paid_amount']) ||
+    !tableExists('card_statement_payment_links')
+  )
+    return dueFindings
+  const evidenceRows = query<
+    CreditCardStatementContextRow & { linked_amount: number; account_name: string | null }
+  >(
+    `SELECT s.*, a.name AS account_name,
+            COALESCE(SUM(CASE WHEN l.voided_at IS NULL THEN l.amount ELSE 0 END), 0) AS linked_amount
+     FROM credit_card_statements s
+     LEFT JOIN accounts a ON a.id = s.account_id
+     LEFT JOIN card_statement_payment_links l ON l.statement_id = s.id
+     GROUP BY s.id
+     HAVING s.unattributed_paid_amount + linked_amount <> s.paid_amount
+         OR s.paid_amount > s.statement_balance
+     ORDER BY s.due_date ASC, s.id ASC
+     LIMIT $1`,
+    [input.limit]
+  )
+  const evidenceFindings = evidenceRows.map((statement) => {
+    const inconsistent =
+      statement.unattributed_paid_amount + statement.linked_amount !== statement.paid_amount
+    return {
+      severity: inconsistent ? ('critical' as const) : ('warning' as const),
+      type: inconsistent
+        ? 'credit_card_payment_evidence_inconsistent'
+        : 'credit_card_statement_legacy_overpaid',
+      statementId: statement.id,
+      accountId: statement.account_id,
+      accountName: maybeRedactText(statement.account_name, input.redacted),
+      statementBalanceCentavos: statement.statement_balance,
+      paidAmountCentavos: statement.paid_amount,
+      unattributedPaidAmountCentavos: statement.unattributed_paid_amount,
+      linkedAmountCentavos: statement.linked_amount,
+      currency: statement.currency,
+      message: inconsistent
+        ? `Statement ${statement.id} paid total does not equal unattributed baseline plus active payment links.`
+        : `Statement ${statement.id} retains a historical overpayment; it was not clipped.`,
+    } satisfies FinanceSanityFinding
+  })
+  return [...evidenceFindings, ...dueFindings].slice(0, input.limit)
 }
 
 function getPlaceholderSanityFindings(input: { redacted: boolean; limit: number }) {

@@ -238,7 +238,14 @@
     "successNoSkip": "Imported {{imported}} transactions",
     "error": "Import failed",
     "partialError": "Imported {{imported}} transactions with {{errorCount}} errors",
-    "fileTypes": "Supported: .ofx, .qfx, .qif"
+    "fileTypes": "Supported: .ofx, .qfx, .qif",
+    "reviewCandidates": "Review possible matches",
+    "reviewCandidatesDescription": "Choose separately for each existing transaction. Your choices are bound to a new preview before import.",
+    "existingCandidate": "Existing transaction {{id}}",
+    "chooseDecision": "Choose an action",
+    "keepExisting": "Keep existing",
+    "importDistinct": "Import as distinct",
+    "reviewDecisions": "Review decisions"
   },
   "summary": {
     "label": "Transaction result summary",

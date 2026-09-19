@@ -47,7 +47,7 @@ vi.mock('@/stores/transaction-store', () => ({
   useTransactionStore: { getState: () => ({ fetch: vi.fn() }) },
 }))
 
-import { importStatementFile } from '../statement-import'
+import { importStatementFile, previewStatementFile } from '../statement-import'
 
 const requireFromCli = createRequire(resolve(process.cwd(), 'cli/package.json'))
 const Database = requireFromCli('better-sqlite3') as typeof BetterSqlite3
@@ -72,6 +72,26 @@ function createCurrentImportSchema(database: BetterSqlite3.Database): void {
     ALTER TABLE transactions ADD COLUMN import_source TEXT;
     ALTER TABLE transactions ADD COLUMN import_external_id TEXT;
     ALTER TABLE transactions ADD COLUMN import_fingerprint TEXT;
+    ALTER TABLE transactions ADD COLUMN import_content_fingerprint TEXT;
+    CREATE TABLE app_data_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      database_id TEXT NOT NULL UNIQUE,
+      data_revision INTEGER NOT NULL DEFAULT 0,
+      last_financial_write_at TEXT
+    );
+    INSERT INTO app_data_state (id, database_id, data_revision) VALUES (1, 'statement-test', 0);
+    CREATE TABLE duplicate_review_decisions (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      existing_transaction_id TEXT NOT NULL,
+      candidate_identity_key TEXT NOT NULL,
+      candidate_content_fingerprint TEXT NOT NULL,
+      existing_evidence_fingerprint TEXT NOT NULL,
+      decision TEXT NOT NULL,
+      source TEXT,
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `)
   database
     .prepare(
@@ -134,6 +154,74 @@ describe('importStatementFile real SQLite rollback', () => {
     expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 2 })
     expect(db.prepare('SELECT balance FROM accounts WHERE id = ?').get('account-1')).toEqual({
       balance: 8_000,
+    })
+  })
+
+  it('strictly binds preview tokens to the durable data revision', async () => {
+    mockParseStatement.mockReturnValue([
+      {
+        date: '2026-07-13',
+        amount: 10,
+        description: 'Bound row',
+        type: 'expense',
+        externalId: 'opaque-001',
+      },
+    ])
+    const statement = statementFile()
+    const preview = await previewStatementFile(statement, 'account-1')
+    expect(preview).toMatchObject({ success: true, imported: 1, skipped: 0 })
+    expect(preview.previewToken).toMatch(/^sha256:/)
+
+    db.prepare('UPDATE app_data_state SET data_revision = data_revision + 1 WHERE id = 1').run()
+    const result = await importStatementFile(statement, 'account-1', {
+      previewToken: preview.previewToken!,
+    })
+
+    expect(result).toMatchObject({ imported: 0, skipped: 0, mode: 'reviewed_atomic' })
+    expect(result.errors[0]).toContain('stale')
+    expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 0 })
+    expect(db.prepare('SELECT balance FROM accounts WHERE id = ?').get('account-1')).toEqual({
+      balance: 10_000,
+    })
+  })
+
+  it('keeps source identity idempotent after metadata edits and rejects changed financial content', async () => {
+    mockParseStatement.mockReturnValue([
+      {
+        date: '2026-07-13',
+        amount: 10,
+        description: 'Original source description',
+        type: 'expense',
+        externalId: 'Case-Sensitive-01',
+      },
+    ])
+    expect(await importStatementFile(statementFile(), 'account-1')).toMatchObject({
+      imported: 1,
+      skipped: 0,
+      errors: [],
+    })
+    db.prepare("UPDATE transactions SET description = 'User edited metadata'").run()
+
+    expect(await importStatementFile(statementFile(), 'account-1')).toMatchObject({
+      imported: 0,
+      skipped: 1,
+      errors: [],
+    })
+    mockParseStatement.mockReturnValue([
+      {
+        date: '2026-07-13',
+        amount: 11,
+        description: 'Original source description',
+        type: 'expense',
+        externalId: 'Case-Sensitive-01',
+      },
+    ])
+    const conflict = await importStatementFile(statementFile(), 'account-1')
+    expect(conflict).toMatchObject({ imported: 0, skipped: 0 })
+    expect(conflict.errors[0]).toContain('changed financial content')
+    expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 1 })
+    expect(db.prepare('SELECT balance FROM accounts WHERE id = ?').get('account-1')).toEqual({
+      balance: 9_000,
     })
   })
 

@@ -13,6 +13,8 @@ import {
   type ToolDefinition,
 } from './shared.js'
 import { transactionsTools } from './transactions.js'
+import { executeAtomicImport, type AtomicImportRow } from '../import-transactions.js'
+import type { ImportReviewDecision } from '@shikin/finance-core/imports'
 import { backupDatabase, restoreDatabase } from '../database.js'
 import { findTransactionDuplicate, type TransactionDuplicateMatch } from '../duplicate-detection.js'
 
@@ -63,6 +65,8 @@ type ImportTransactionsExecutionInput = {
   ledgerTreatment: 'normal' | 'staged_no_balance_impact'
   reportingTreatment: 'normal' | 'exclude_from_cashflow'
   stagingBatchId?: string
+  previewToken?: string
+  decisions?: ImportReviewDecision[]
 }
 
 type ResolvedImportAccount = {
@@ -97,15 +101,6 @@ type ImportRowPlan = {
   row: ImportRowOutput
   error?: ImportValidationIssue
 }
-
-type ImportApplyResult = {
-  appliedRows: ImportRowOutput[]
-  applyErrors: ImportValidationIssue[]
-}
-
-type ImportRowApplyOutcome =
-  | { kind: 'row'; row: ImportRowOutput }
-  | { kind: 'error'; error: ImportValidationIssue }
 
 type ExportTableSpec = {
   name: string
@@ -164,6 +159,7 @@ const EXPORT_TABLES: ExportTableSpec[] = [
       'statement_closing_day',
       'payment_due_day',
       'account_mode',
+      'valuation_mode',
       'created_at',
       'updated_at',
     ],
@@ -209,6 +205,11 @@ const EXPORT_TABLES: ExportTableSpec[] = [
       'reporting_treatment',
       'transaction_kind',
       'staging_batch_id',
+      'finalization_id',
+      'import_source',
+      'import_external_id',
+      'import_fingerprint',
+      'import_content_fingerprint',
       'reconciliation_id',
       'matched_transaction_id',
       'is_archived',
@@ -230,6 +231,7 @@ const EXPORT_TABLES: ExportTableSpec[] = [
       'adjustment_amount',
       'adjustment_transaction_id',
       'staging_batch_id',
+      'selection_mode',
       'statement_start_date',
       'statement_end_date',
       'source',
@@ -310,6 +312,10 @@ const EXPORT_TABLES: ExportTableSpec[] = [
       'type',
       'shares',
       'avg_cost_basis',
+      'quantity_decimal',
+      'avg_cost_basis_decimal',
+      'cost_basis_known',
+      'instrument_key',
       'currency',
       'notes',
       'created_at',
@@ -401,6 +407,8 @@ const EXPORT_TABLES: ExportTableSpec[] = [
       'title',
       'summary',
       'highlights_json',
+      'basis',
+      'currency_scope',
       'generated_at',
     ],
     orderBy: 'generated_at ASC, id ASC',
@@ -477,6 +485,8 @@ const EXPORT_TABLES: ExportTableSpec[] = [
       'amount',
       'currency',
       'allocation_date',
+      'reverses_allocation_id',
+      'replaces_allocation_id',
       'source',
       'note',
       'created_at',
@@ -511,6 +521,7 @@ const EXPORT_TABLES: ExportTableSpec[] = [
       'statement_balance',
       'minimum_payment',
       'paid_amount',
+      'unattributed_paid_amount',
       'currency',
       'status',
       'source',
@@ -519,6 +530,119 @@ const EXPORT_TABLES: ExportTableSpec[] = [
       'updated_at',
     ],
     orderBy: 'statement_end_date ASC, account_id ASC, id ASC',
+  },
+  {
+    name: 'instrument_prices',
+    columns: [
+      'id',
+      'instrument_key',
+      'asset_type',
+      'provider',
+      'instrument_id',
+      'exchange',
+      'quote_currency',
+      'unit_price_decimal',
+      'quote_date',
+      'created_at',
+    ],
+    orderBy: 'instrument_key ASC, quote_date ASC, id ASC',
+  },
+  {
+    name: 'transaction_consumption_classifications',
+    columns: [
+      'id',
+      'transaction_id',
+      'split_id',
+      'role',
+      'referenced_purchase_id',
+      'created_at',
+      'updated_at',
+    ],
+    orderBy: 'transaction_id ASC, split_id ASC, id ASC',
+  },
+  {
+    name: 'source_coverage',
+    columns: [
+      'id',
+      'account_id',
+      'source_namespace',
+      'period_start',
+      'period_end',
+      'status',
+      'zero_rows',
+      'document_ref',
+      'source',
+      'note',
+      'created_at',
+      'updated_at',
+    ],
+    orderBy: 'account_id ASC, source_namespace ASC, period_start ASC, id ASC',
+  },
+  {
+    name: 'reconciliation_corrections',
+    columns: [
+      'id',
+      'original_reconciliation_id',
+      'original_bridge_id',
+      'successor_reconciliation_id',
+      'successor_bridge_id',
+      'replacement_transaction_ids_json',
+      'source',
+      'note',
+      'created_at',
+    ],
+    orderBy: 'created_at ASC, id ASC',
+  },
+  {
+    name: 'transfer_match_provenance',
+    columns: [
+      'id',
+      'source_transaction_id',
+      'mirror_transaction_id',
+      'source_before_json',
+      'mirror_before_json',
+      'matched_at',
+      'unmatched_at',
+    ],
+    orderBy: 'matched_at ASC, id ASC',
+  },
+  {
+    name: 'duplicate_review_decisions',
+    columns: [
+      'id',
+      'account_id',
+      'existing_transaction_id',
+      'candidate_identity_key',
+      'candidate_content_fingerprint',
+      'existing_evidence_fingerprint',
+      'decision',
+      'source',
+      'note',
+      'created_at',
+    ],
+    orderBy: 'created_at ASC, id ASC',
+  },
+  {
+    name: 'card_statement_payment_links',
+    columns: [
+      'id',
+      'original_statement_id',
+      'original_transaction_id',
+      'statement_id',
+      'transaction_id',
+      'amount',
+      'mode',
+      'source',
+      'note',
+      'created_at',
+      'voided_at',
+    ],
+    orderBy: 'created_at ASC, id ASC',
+  },
+  {
+    name: 'app_data_state',
+    columns: ['id', 'database_id', 'data_revision', 'last_financial_write_at'],
+    orderBy: 'id ASC',
   },
 ]
 
@@ -544,10 +668,18 @@ const OPTIONAL_EXPORT_TABLES = new Set([
   'cashflow_bucket_allocations',
   'category_suggestions',
   'credit_card_statements',
+  'instrument_prices',
+  'transaction_consumption_classifications',
+  'source_coverage',
+  'reconciliation_corrections',
+  'transfer_match_provenance',
+  'duplicate_review_decisions',
+  'card_statement_payment_links',
+  'app_data_state',
 ])
 
 const REDACTED_FIELD_PATTERN =
-  /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key|payer|project[_-]?reference|invoice[_-]?reference|notes?|description|url|value|summary|tags|source|reason|before_json|after_json|pattern|highlights_json|breakdown_json)/i
+  /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key|payer|project[_-]?reference|invoice[_-]?reference|notes?|description|url|value|summary|tags|source|reason|before_json|after_json|pattern|highlights_json|breakdown_json|document_ref|replacement_transaction_ids_json|source_before_json|mirror_before_json)/i
 const REDACTED_SETTINGS_VALUE_KEYS = new Set([FINANCE_PROFILE_SETTING_KEY, 'account_aliases'])
 
 function stableJsonValue(value: unknown): unknown {
@@ -811,11 +943,11 @@ function buildImportRowInput({
 
   if (errors.length > 0 || amount === null || type === null) return { success: false, errors }
 
-  const externalId = normalizeOptionalCell(values.externalid) ?? null
-  const noteParts = [
-    normalizeOptionalCell(values.note),
-    externalId ? `externalId=${externalId}` : null,
-  ].filter((value): value is string => Boolean(value))
+  const externalId =
+    values.externalid === undefined || values.externalid.length === 0 ? null : values.externalid
+  const noteParts = [normalizeOptionalCell(values.note)].filter((value): value is string =>
+    Boolean(value)
+  )
   const input: ImportTransactionInput = {
     amount: Math.abs(amount),
     type,
@@ -1280,176 +1412,6 @@ function formatCsvValidationFailure({
   }
 }
 
-function formatCsvPreviewResult({
-  file,
-  account,
-  plan,
-}: {
-  file: string
-  account: ResolvedImportAccount
-  plan: CsvImportPlan
-}) {
-  return {
-    success: true,
-    dryRun: true,
-    applyRequired: true,
-    file,
-    account: importAccountOutput(account),
-    supportedColumns: importSupportedColumns(),
-    ignoredColumns: plan.unsupportedHeaders,
-    summary: {
-      ...previewImportSummary(plan),
-      invalidRows: 0,
-    },
-    rows: plan.previewRows,
-    message: `Previewed ${plan.previewRows.length} transaction row(s). Re-run with --apply to import.`,
-  }
-}
-
-function previouslySkippedImportRow(previewRow: ImportRowOutput): ImportRowOutput {
-  return {
-    row: previewRow.row,
-    lineNumber: previewRow.lineNumber,
-    status: 'skipped',
-    reason: previewRow.reason ?? 'duplicate',
-    externalId: previewRow.externalId ?? null,
-    existingTransactionId: previewRow.existingTransactionId,
-    duplicate: previewRow.duplicate,
-    message: 'Matching transaction already exists; row was skipped.',
-  }
-}
-
-async function applyCsvImportRow({
-  previewRow,
-  allowDuplicate,
-  importTool,
-}: {
-  previewRow: ImportRowOutput
-  allowDuplicate: boolean
-  importTool: ToolDefinition
-}): Promise<ImportRowApplyOutcome> {
-  const input = previewRow.input as ImportTransactionInput
-  const externalId = typeof previewRow.externalId === 'string' ? previewRow.externalId : null
-  const duplicate = findDuplicateImportTransaction(input, externalId)
-  if (duplicate && !allowDuplicate) {
-    return {
-      kind: 'row',
-      row: {
-        row: previewRow.row,
-        lineNumber: previewRow.lineNumber,
-        status: 'skipped',
-        reason: duplicate.kind === 'duplicate' ? 'duplicate' : duplicate.kind,
-        externalId,
-        existingTransactionId: duplicate.id,
-        duplicate: importDuplicateDetails(duplicate),
-        message:
-          duplicate.kind === 'duplicate' || duplicate.kind === 'exact_duplicate'
-            ? 'Matching transaction already exists; row was skipped.'
-            : 'Potential matching transaction exists; row was skipped because allowDuplicate is false.',
-      },
-    }
-  }
-
-  const result = await importTool.execute({
-    ...input,
-    dryRun: false,
-    allowDuplicate: allowDuplicate ? true : undefined,
-  })
-  if (result?.success === false) {
-    return {
-      kind: 'error',
-      error: {
-        row: previewRow.row as number,
-        lineNumber: previewRow.lineNumber as number,
-        messages: [String(result.message ?? 'Row failed during import.')],
-      },
-    }
-  }
-
-  return {
-    kind: 'row',
-    row: {
-      row: previewRow.row,
-      lineNumber: previewRow.lineNumber,
-      externalId: previewRow.externalId,
-      status: 'imported',
-      ...(allowDuplicate && duplicate
-        ? {
-            reason: 'duplicate_override',
-            duplicateOverride: importDuplicateOverride(duplicate),
-          }
-        : potentialDuplicateFields(duplicate)),
-      transaction: result.transaction ?? result,
-    },
-  }
-}
-
-async function applyCsvImportPlan({
-  previewRows,
-  allowDuplicate,
-  importTool,
-}: {
-  previewRows: ImportRowOutput[]
-  allowDuplicate: boolean
-  importTool: ToolDefinition
-}): Promise<ImportApplyResult> {
-  const appliedRows: ImportRowOutput[] = []
-  const applyErrors: ImportValidationIssue[] = []
-
-  for (const previewRow of previewRows) {
-    if (previewRow.status === 'skipped') {
-      appliedRows.push(previouslySkippedImportRow(previewRow))
-      continue
-    }
-
-    const outcome = await applyCsvImportRow({ previewRow, allowDuplicate, importTool })
-    if (outcome.kind === 'error') {
-      applyErrors.push(outcome.error)
-      continue
-    }
-    appliedRows.push(outcome.row)
-  }
-
-  return { appliedRows, applyErrors }
-}
-
-function formatCsvApplyResult({
-  file,
-  account,
-  plan,
-  appliedRows,
-  applyErrors,
-}: {
-  file: string
-  account: ResolvedImportAccount
-  plan: CsvImportPlan
-  appliedRows: ImportRowOutput[]
-  applyErrors: ImportValidationIssue[]
-}) {
-  const importedRows = appliedRows.filter((row) => row.status === 'imported').length
-
-  return {
-    success: applyErrors.length === 0,
-    ...(applyErrors.length > 0 ? { reason: 'csv_apply_failed' } : {}),
-    dryRun: false,
-    file,
-    account: importAccountOutput(account),
-    summary: {
-      totalRows: plan.dataRows.length,
-      validRows: plan.previewRows.filter((row) => row.status === 'valid').length,
-      invalidRows: applyErrors.length,
-      skippedRows: appliedRows.filter((row) => row.status === 'skipped').length,
-      importedRows,
-    },
-    rows: appliedRows,
-    errors: applyErrors,
-    message:
-      applyErrors.length === 0
-        ? `Imported ${importedRows} transaction row(s).`
-        : `Imported ${importedRows} transaction row(s); ${applyErrors.length} row(s) failed during apply.`,
-  }
-}
-
 function escapeCsvValue(value: unknown): string {
   if (value === null || value === undefined) return ''
   const rawText = String(value)
@@ -1711,7 +1673,42 @@ const importTransactions: ToolDefinition = {
       .boolean()
       .optional()
       .default(false)
-      .describe('Import rows even when an external-ID or likely duplicate is detected'),
+      .describe(
+        'Legacy compatibility flag. It never bypasses identity conflicts or candidate review.'
+      ),
+    previewToken: boundedText(
+      'Preview token',
+      'Token returned by a preview of this exact file, options, decisions, and database revision',
+      128
+    ).optional(),
+    decisions: z
+      .array(
+        z.object({
+          candidateIdentityKey: boundedText(
+            'Candidate identity key',
+            'Preview candidate identity',
+            128
+          ),
+          candidateContentFingerprint: boundedText(
+            'Candidate content fingerprint',
+            'Preview candidate financial content',
+            128
+          ),
+          existingTransactionId: boundedText(
+            'Existing transaction ID',
+            'Candidate existing transaction',
+            128
+          ),
+          existingEvidenceFingerprint: boundedText(
+            'Existing evidence fingerprint',
+            'Bound existing evidence',
+            128
+          ),
+          decision: z.enum(['distinct', 'keep_existing']),
+        })
+      )
+      .optional()
+      .default([]),
     source: boundedText('Source', 'Default source label for imported rows', 120)
       .optional()
       .default('csv-import'),
@@ -1743,6 +1740,8 @@ const importTransactions: ToolDefinition = {
       ledgerTreatment,
       reportingTreatment,
       stagingBatchId,
+      previewToken,
+      decisions,
     } = input
     const requestFailure = validateImportTransactionsRequest({
       apply,
@@ -1773,7 +1772,7 @@ const importTransactions: ToolDefinition = {
       ledgerTreatment,
       reportingTreatment,
       stagingBatchId,
-      allowDuplicate,
+      allowDuplicate: true,
       importTool: addTransactionTool,
     })
     if (planResult.kind === 'empty') {
@@ -1795,20 +1794,70 @@ const importTransactions: ToolDefinition = {
         plan,
       })
     }
-    if (previewOnly) return formatCsvPreviewResult({ file, account: resolvedAccount, plan })
-
-    const { appliedRows, applyErrors } = await applyCsvImportPlan({
-      previewRows: plan.previewRows,
-      allowDuplicate,
-      importTool: addTransactionTool,
+    const atomicRows: AtomicImportRow[] = plan.previewRows.map((previewRow) => {
+      const plannedInput = previewRow.input as ImportTransactionInput
+      return {
+        row: previewRow.row as number,
+        lineNumber: previewRow.lineNumber as number,
+        externalId: typeof previewRow.externalId === 'string' ? previewRow.externalId : null,
+        input: {
+          accountId: plannedInput.accountId,
+          amountCentavos: toCentavos(plannedInput.amount),
+          type: plannedInput.type,
+          description: plannedInput.description,
+          category: plannedInput.category,
+          date: plannedInput.date,
+          notes: plannedInput.notes,
+          status: plannedInput.status,
+          source: plannedInput.source,
+          note: plannedInput.note,
+          ledgerTreatment: plannedInput.ledgerTreatment,
+          reportingTreatment: plannedInput.reportingTreatment,
+          stagingBatchId: plannedInput.stagingBatchId,
+        },
+      }
     })
-    return formatCsvApplyResult({
-      file,
-      account: resolvedAccount,
-      plan,
-      appliedRows,
-      applyErrors,
-    })
+    try {
+      const atomicResult = executeAtomicImport({
+        rawContent: fileContents.text,
+        rows: atomicRows,
+        options: {
+          accountId: resolvedAccount.id,
+          accountCurrency: resolvedAccount.currency,
+          sourceNamespace: source,
+          ledgerTreatment,
+          reportingTreatment,
+          stagingBatchId,
+        },
+        decisions,
+        previewToken,
+        apply: !previewOnly,
+      })
+      return {
+        ...atomicResult,
+        dryRun: previewOnly,
+        applyRequired: previewOnly,
+        file,
+        account: importAccountOutput(resolvedAccount),
+        supportedColumns: importSupportedColumns(),
+        ignoredColumns: plan.unsupportedHeaders,
+        ...(allowDuplicate
+          ? {
+              warning:
+                'allowDuplicate is legacy-only and did not bypass conflicts. Submit candidate-specific decisions from requiredDecisions and preview again.',
+            }
+          : {}),
+      }
+    } catch (error) {
+      return {
+        success: false,
+        reason: previewToken ? 'import_preview_stale_or_apply_failed' : 'csv_apply_failed',
+        mode: previewToken ? 'reviewed_atomic' : 'unreviewed_atomic',
+        file,
+        account: importAccountOutput(resolvedAccount),
+        message: error instanceof Error ? error.message : String(error),
+      }
+    }
   },
 }
 

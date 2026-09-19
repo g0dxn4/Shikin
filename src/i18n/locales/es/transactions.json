@@ -238,7 +238,14 @@
     "successNoSkip": "Se importaron {{imported}} transacciones",
     "error": "Error al importar",
     "partialError": "Se importaron {{imported}} transacciones con {{errorCount}} errores",
-    "fileTypes": "Soportados: .ofx, .qfx, .qif"
+    "fileTypes": "Soportados: .ofx, .qfx, .qif",
+    "reviewCandidates": "Revisar posibles coincidencias",
+    "reviewCandidatesDescription": "Elige por separado para cada transacción existente. Tus decisiones se vinculan a una nueva vista previa antes de importar.",
+    "existingCandidate": "Transacción existente {{id}}",
+    "chooseDecision": "Elegir una acción",
+    "keepExisting": "Conservar existente",
+    "importDistinct": "Importar como distinta",
+    "reviewDecisions": "Revisar decisiones"
   },
   "summary": {
     "label": "Resumen de resultados de transacciones",

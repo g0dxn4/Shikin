@@ -33,6 +33,11 @@ import {
   type ToolDefinition,
 } from './shared.js'
 import {
+  importPlanToken,
+  prepareImportIdentities,
+  sha256Fingerprint,
+} from '@shikin/finance-core/imports'
+import {
   findTransactionDuplicate,
   transactionDuplicateReason,
   type TransactionDuplicateCheck,
@@ -907,6 +912,139 @@ function resolveRecurringRuleId(
   return { success: true as const, id: rule.id }
 }
 
+export type ImportedTransactionCreateInput = {
+  id?: string
+  accountId: string
+  amountCentavos: number
+  type: 'expense' | 'income'
+  description: string
+  category?: string
+  date: string
+  notes?: string
+  status?: TransactionStatus
+  source?: string
+  note?: string
+  ledgerTreatment?: LedgerTreatment
+  reportingTreatment?: ReportingTreatment
+  stagingBatchId?: string
+  importSource: string
+  importExternalId: string | null
+  importFingerprint: string
+  importContentFingerprint: string
+}
+
+export function validateImportedTransactionSync(input: ImportedTransactionCreateInput) {
+  if (!Number.isSafeInteger(input.amountCentavos) || input.amountCentavos <= 0) {
+    throw new Error('Imported amount must be a positive safe integer number of centavos.')
+  }
+  const ledgerTreatment = input.ledgerTreatment ?? 'normal'
+  const reportingTreatment = input.reportingTreatment ?? 'normal'
+  const status = input.status ?? 'posted'
+  if (ledgerTreatment === 'staged_no_balance_impact' && !input.stagingBatchId) {
+    throw new Error('stagingBatchId is required for staged_no_balance_impact transactions.')
+  }
+  const resolvedAccount = resolveAccountId(input.accountId, undefined)
+  if (!resolvedAccount.success) throw new Error(resolvedAccount.message)
+  if (resolvedAccount.accountMode === 'snapshot_only') {
+    throw new Error(
+      `Account ${resolvedAccount.id} is snapshot-only and cannot be used for transaction ledger writes.`
+    )
+  }
+  const resolvedCategory = resolveCategoryId(input.category)
+  if (!resolvedCategory.success) throw new Error(resolvedCategory.message)
+  return { ledgerTreatment, reportingTreatment, status, resolvedAccount, resolvedCategory }
+}
+
+/**
+ * Synchronous transaction creation primitive for whole-file imports. The caller
+ * owns the surrounding better-sqlite3 transaction; every failure throws so a
+ * file can never commit a prefix.
+ */
+export function createImportedTransactionSync(input: ImportedTransactionCreateInput) {
+  const { ledgerTreatment, reportingTreatment, status, resolvedAccount, resolvedCategory } =
+    validateImportedTransactionSync(input)
+  const id = input.id ?? generateId()
+  const row: TransactionRow = {
+    id,
+    account_id: resolvedAccount.id,
+    category_id: resolvedCategory.id,
+    transfer_to_account_id: null,
+    type: input.type,
+    amount: input.amountCentavos,
+    currency: resolvedAccount.currency,
+    description: input.description,
+    notes: input.notes ?? null,
+    status,
+    source: input.source ?? null,
+    note: input.note ?? null,
+    recurring_rule_id: null,
+    ledger_treatment: ledgerTreatment,
+    reporting_treatment: reportingTreatment,
+    transaction_kind: 'standard',
+    staging_batch_id: input.stagingBatchId ?? null,
+    import_source: input.importSource,
+    import_external_id: input.importExternalId,
+    import_fingerprint: input.importFingerprint,
+    import_content_fingerprint: input.importContentFingerprint,
+    is_archived: 0,
+    date: input.date,
+  }
+  const impact = getBalanceImpact(row)
+  if (!impact.success) throw new Error(impact.message)
+  const balancesBefore = readAccountBalances([...impact.impacts.keys()])
+  execute(
+    `INSERT INTO transactions (id, account_id, category_id, transfer_to_account_id, type, amount, currency, description, notes, status, source, note, recurring_rule_id, ledger_treatment, reporting_treatment, transaction_kind, staging_batch_id, import_source, import_external_id, import_fingerprint, import_content_fingerprint, is_archived, date)
+     VALUES ($1,$2,$3,NULL,$4,$5,$6,$7,$8,$9,$10,$11,NULL,$12,$13,'standard',$14,$15,$16,$17,$18,0,$19)`,
+    [
+      id,
+      resolvedAccount.id,
+      resolvedCategory.id,
+      input.type,
+      input.amountCentavos,
+      resolvedAccount.currency,
+      input.description,
+      input.notes ?? null,
+      status,
+      input.source ?? null,
+      input.note ?? null,
+      ledgerTreatment,
+      reportingTreatment,
+      input.stagingBatchId ?? null,
+      input.importSource,
+      input.importExternalId,
+      input.importFingerprint,
+      input.importContentFingerprint,
+      input.date,
+    ]
+  )
+  applyBalanceDeltas(impact.impacts)
+  writeTransactionBalanceAudit({
+    action: 'create',
+    before: null,
+    after: row,
+    balanceDeltas: impact.impacts,
+    balancesBefore,
+  })
+  return {
+    id,
+    accountId: resolvedAccount.id,
+    amount: fromCentavos(input.amountCentavos),
+    type: input.type,
+    description: input.description,
+    category: resolvedCategory.name,
+    date: input.date,
+    currency: resolvedAccount.currency,
+    status,
+    ledgerTreatment,
+    reportingTreatment,
+    stagingBatchId: input.stagingBatchId ?? null,
+    importSource: input.importSource,
+    importExternalId: input.importExternalId,
+    importFingerprint: input.importFingerprint,
+    importContentFingerprint: input.importContentFingerprint,
+  }
+}
+
 const addTransaction: ToolDefinition = {
   name: 'add-transaction',
   description:
@@ -1250,6 +1388,186 @@ const addTransaction: ToolDefinition = {
         message: `Added ${type}: $${amount.toFixed(2)} for "${description}" on ${txDate}`,
       }
     })
+  },
+}
+
+const bindTransactionImportIdentity: ToolDefinition = {
+  name: 'bind-transaction-import-identity',
+  description:
+    'Preview and explicitly bind verified source/external-ID identity to one legacy transaction without inferring original financial content.',
+  schema: z.object({
+    transactionId: boundedText('Transaction ID', 'Legacy transaction to bind', 128),
+    sourceNamespace: boundedText(
+      'Source namespace',
+      'Case-sensitive source namespace; surrounding whitespace is ignored',
+      120
+    ),
+    externalId: z
+      .string()
+      .min(1)
+      .max(512)
+      .refine((value) => Boolean(value.trim()), 'External ID must not be blank')
+      .describe('Exact opaque external ID; case and leading zeros are preserved'),
+    apply: z.boolean().optional().default(false),
+    previewToken: boundedText(
+      'Preview token',
+      'Token returned by this exact binding preview',
+      128
+    ).optional(),
+    source: boundedText('Audit source', 'Source of this reviewed binding', 120).optional(),
+    note: boundedText('Audit note', 'Reason for binding this legacy identity', 500).optional(),
+  }),
+  execute: async ({
+    transactionId,
+    sourceNamespace,
+    externalId,
+    apply,
+    previewToken,
+    source,
+    note,
+  }) => {
+    try {
+      return transaction(() => {
+        const row = query<TransactionRow & { updated_at?: string }>(
+          'SELECT * FROM transactions WHERE id = $1 LIMIT 1',
+          [transactionId]
+        )[0]
+        if (!row)
+          return {
+            success: false,
+            reason: 'transaction_not_found',
+            message: `Transaction ${transactionId} not found.`,
+          }
+        if (row.is_archived === 1 || (row.transaction_kind ?? 'standard') !== 'standard') {
+          return {
+            success: false,
+            reason: 'protected_transaction',
+            message:
+              'Only active standard ledger rows can receive a legacy import identity binding.',
+          }
+        }
+        const namespace = sourceNamespace.trim()
+        const prepared = prepareImportIdentities(
+          [
+            {
+              accountId: row.account_id,
+              sourceNamespace: namespace,
+              externalId,
+              date: row.date,
+              type: row.type,
+              amountCentavos: row.amount,
+              currency: row.currency ?? '',
+              description: row.description,
+            },
+          ],
+          [
+            {
+              accountId: row.account_id,
+              sourceNamespace: namespace,
+              externalId,
+              date: row.date,
+              type: row.type,
+              amountCentavos: row.amount,
+              currency: row.currency ?? '',
+              transferToAccountId: row.transfer_to_account_id,
+            },
+          ]
+        )[0]!
+        const collision = query<{ id: string }>(
+          `SELECT id FROM transactions
+           WHERE account_id=$1 AND import_source=$2 AND import_external_id=$3 AND id<>$4
+           ORDER BY id LIMIT 1`,
+          [row.account_id, namespace, externalId, row.id]
+        )[0]
+        if (collision) {
+          return {
+            success: false,
+            reason: 'identity_already_bound',
+            message: `Source identity is already bound to transaction ${collision.id}.`,
+          }
+        }
+        if (
+          (row.import_source || row.import_external_id || row.import_fingerprint) &&
+          (row.import_source !== namespace ||
+            row.import_external_id !== externalId ||
+            row.import_fingerprint !== prepared.identity.canonicalMaterial)
+        ) {
+          return {
+            success: false,
+            reason: 'identity_conflict',
+            message: 'Transaction already has a different import identity.',
+          }
+        }
+        const state = query<{ database_id: string; data_revision: number }>(
+          'SELECT database_id, data_revision FROM app_data_state WHERE id=1'
+        )[0]
+        if (!state) throw new Error('Import identity binding requires app_data_state.')
+        const token = importPlanToken({
+          version: 1,
+          operation: 'bind-transaction-import-identity',
+          databaseId: state.database_id,
+          dataRevision: state.data_revision,
+          transactionId: row.id,
+          sourceNamespace: namespace,
+          externalId,
+          existingEvidence: sha256Fingerprint(JSON.stringify(row)),
+          identityKey: prepared.identityKey,
+          source: source ?? null,
+          note: note ?? null,
+        })
+        const binding = {
+          transactionId: row.id,
+          importSource: namespace,
+          importExternalId: externalId,
+          importFingerprint: prepared.identity.canonicalMaterial,
+          importContentFingerprint: null,
+          originalContentVerified: false,
+        }
+        if (!apply) {
+          return {
+            success: true,
+            dryRun: true,
+            applyRequired: true,
+            previewToken: token,
+            binding,
+            limitation:
+              'Original source content is unknown. No content fingerprint was fabricated from the possibly edited ledger row.',
+          }
+        }
+        if (!previewToken || previewToken !== token) {
+          throw new Error(
+            'A matching current previewToken is required for explicit legacy identity binding.'
+          )
+        }
+        const update = execute(
+          `UPDATE transactions SET import_source=$1, import_external_id=$2, import_fingerprint=$3,
+             updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+           WHERE id=$4 AND import_content_fingerprint IS NULL`,
+          [namespace, externalId, prepared.identity.canonicalMaterial, row.id]
+        )
+        if (update.rowsAffected !== 1) throw new Error('Legacy identity binding became stale.')
+        writeAuditLog({
+          entity: 'transaction',
+          entityId: row.id,
+          action: 'bind-import-identity',
+          before: {
+            importSource: row.import_source,
+            importExternalId: row.import_external_id,
+            importFingerprint: row.import_fingerprint,
+          },
+          after: binding,
+          source,
+          note,
+        })
+        return { success: true, dryRun: false, mode: 'reviewed_atomic', binding }
+      })
+    } catch (error) {
+      return {
+        success: false,
+        reason: 'identity_binding_failed',
+        message: error instanceof Error ? error.message : String(error),
+      }
+    }
   },
 }
 
@@ -1753,239 +2071,354 @@ const deleteTransaction: ToolDefinition = {
 // 4. query-transactions
 // ---------------------------------------------------------------------------
 
+type TransactionCursorPayload = {
+  version: 1
+  databaseId: string
+  dataRevision: number
+  filtersFingerprint: string
+  date: string
+  createdAt: string
+  id: string
+}
+
+type TransactionSplitRow = {
+  id: string
+  transaction_id: string
+  category_id: string
+  subcategory_id: string | null
+  amount: number
+  notes: string | null
+  created_at: string
+  category_name: string
+  subcategory_name: string | null
+}
+
+function encodeTransactionCursor(payload: TransactionCursorPayload): string {
+  const body = JSON.stringify(payload)
+  const checksum = sha256Fingerprint(body)
+  return Buffer.from(JSON.stringify({ body, checksum }), 'utf8').toString('base64url')
+}
+
+function decodeTransactionCursor(value: string): TransactionCursorPayload {
+  try {
+    const wrapper = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as {
+      body?: unknown
+      checksum?: unknown
+    }
+    if (typeof wrapper.body !== 'string' || wrapper.checksum !== sha256Fingerprint(wrapper.body)) {
+      throw new Error('checksum mismatch')
+    }
+    const payload = JSON.parse(wrapper.body) as Partial<TransactionCursorPayload>
+    if (
+      payload.version !== 1 ||
+      typeof payload.databaseId !== 'string' ||
+      !Number.isSafeInteger(payload.dataRevision) ||
+      typeof payload.filtersFingerprint !== 'string' ||
+      typeof payload.date !== 'string' ||
+      typeof payload.createdAt !== 'string' ||
+      typeof payload.id !== 'string'
+    ) {
+      throw new Error('invalid cursor fields')
+    }
+    return payload as TransactionCursorPayload
+  } catch {
+    throw new Error('Malformed or tampered transaction cursor.')
+  }
+}
+
 const queryTransactions: ToolDefinition = {
   name: 'query-transactions',
   description:
-    'Search and filter transactions. Use this when the user asks about their transactions, wants to find specific ones, or asks questions about their financial history.',
+    'Search and exhaustively traverse transactions with a bounded, snapshot-consistent keyset cursor.',
   schema: z.object({
     accountId: boundedText('Account ID', 'Filter by account ID', 128).optional(),
     categoryId: boundedText('Category ID', 'Filter by category ID', 128).optional(),
-    type: z
-      .enum(['expense', 'income', 'transfer'])
-      .optional()
-      .describe('Filter by transaction type'),
-    status: z
-      .enum(['pending', 'posted', 'cleared'])
-      .optional()
-      .describe('Filter by transaction status'),
-    ledgerTreatment: z
-      .enum(['normal', 'staged_no_balance_impact'])
-      .optional()
-      .describe('Filter by ledger treatment'),
-    reportingTreatment: z
-      .enum(['normal', 'exclude_from_cashflow'])
-      .optional()
-      .describe('Filter by reporting treatment'),
+    type: z.enum(['expense', 'income', 'transfer']).optional(),
+    status: z.enum(['pending', 'posted', 'cleared']).optional(),
+    ledgerTreatment: z.enum(['normal', 'staged_no_balance_impact']).optional(),
+    reportingTreatment: z.enum(['normal', 'exclude_from_cashflow']).optional(),
     stagingBatchId: boundedText('Staging batch ID', 'Filter by staging batch', 128).optional(),
-    includeArchived: z
-      .boolean()
-      .optional()
-      .default(false)
-      .describe('Include archived provenance rows'),
+    includeArchived: z.boolean().optional().default(false),
     startDate: isoDate('Start date (YYYY-MM-DD) inclusive').optional(),
     endDate: isoDate('End date (YYYY-MM-DD) inclusive').optional(),
-    search: boundedText(
-      'Search term',
-      'Search term to match against transaction descriptions',
-      200
-    ).optional(),
+    search: boundedText('Search term', 'Search transaction descriptions', 200).optional(),
     tag: boundedText('Tag', 'Filter by transaction tag label or key', 120).optional(),
-    limit: z
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .optional()
-      .default(20)
-      .describe('Maximum number of results (default 20, max 100)'),
+    cursor: boundedText(
+      'Cursor',
+      'Opaque continuation cursor returned by an earlier page',
+      4096
+    ).optional(),
+    limit: z.number().int().min(1).max(100).optional().default(20),
   }),
-  execute: async ({
-    accountId,
-    categoryId,
-    type,
-    status,
-    ledgerTreatment,
-    reportingTreatment,
-    stagingBatchId,
-    includeArchived,
-    startDate,
-    endDate,
-    search,
-    tag,
-    limit,
-  }) => {
-    const conditions: string[] = []
-    const params: unknown[] = []
-    let paramIndex = 0
-    const tagKey = tag ? normalizeTransactionTagKey(tag) : null
+  execute: async (input) => {
+    try {
+      return transaction(() => {
+        const {
+          accountId,
+          categoryId,
+          type,
+          status,
+          ledgerTreatment,
+          reportingTreatment,
+          stagingBatchId,
+          includeArchived,
+          startDate,
+          endDate,
+          search,
+          tag,
+          cursor,
+          limit,
+        } = input
+        const tagKey = tag ? normalizeTransactionTagKey(tag) : null
+        if (tag && !tagKey) return { success: false, message: 'Tag filter must not be empty.' }
+        const canonicalFilters = {
+          accountId: accountId ?? null,
+          categoryId: categoryId ?? null,
+          type: type ?? null,
+          status: status ?? null,
+          ledgerTreatment: ledgerTreatment ?? null,
+          reportingTreatment: reportingTreatment ?? null,
+          stagingBatchId: stagingBatchId ?? null,
+          includeArchived: Boolean(includeArchived),
+          startDate: startDate ?? null,
+          endDate: endDate ?? null,
+          search: search ?? null,
+          tagKey,
+          order: ['date:desc', 'created_at:desc', 'id:desc'],
+        }
+        const filtersFingerprint = sha256Fingerprint(JSON.stringify(canonicalFilters))
+        const state = query<{ database_id: string; data_revision: number }>(
+          'SELECT database_id, data_revision FROM app_data_state WHERE id = 1'
+        )[0]
+        if (!state || !state.database_id || !Number.isSafeInteger(state.data_revision)) {
+          return {
+            success: false,
+            reason: 'data_state_unavailable',
+            message: 'Transaction traversal requires a ready app_data_state singleton.',
+          }
+        }
+        let decoded: TransactionCursorPayload | null = null
+        if (cursor) {
+          decoded = decodeTransactionCursor(cursor)
+          if (decoded.databaseId !== state.database_id) {
+            return {
+              success: false,
+              reason: 'cursor_database_mismatch',
+              message: 'This cursor belongs to a different database.',
+            }
+          }
+          if (decoded.filtersFingerprint !== filtersFingerprint) {
+            return {
+              success: false,
+              reason: 'cursor_filter_mismatch',
+              message: 'Cursor filters do not match this query.',
+            }
+          }
+          if (decoded.dataRevision !== state.data_revision) {
+            return {
+              success: false,
+              reason: 'cursor_stale',
+              message: 'Transaction data changed after the previous page. Restart traversal.',
+            }
+          }
+        }
 
-    if (tag && !tagKey) {
-      return { success: false, message: 'Tag filter must not be empty.' }
-    }
-
-    if (accountId) {
-      paramIndex++
-      const sourceAccountParam = paramIndex
-      paramIndex++
-      const destinationAccountParam = paramIndex
-      conditions.push(
-        `(t.account_id = $${sourceAccountParam} OR t.transfer_to_account_id = $${destinationAccountParam})`
-      )
-      params.push(accountId, accountId)
-    }
-    if (categoryId) {
-      paramIndex++
-      conditions.push(`t.category_id = $${paramIndex}`)
-      params.push(categoryId)
-    }
-    if (type) {
-      paramIndex++
-      conditions.push(`t.type = $${paramIndex}`)
-      params.push(type)
-    }
-    if (status) {
-      paramIndex++
-      conditions.push(`COALESCE(NULLIF(TRIM(t.status), ''), 'posted') = $${paramIndex}`)
-      params.push(status)
-    }
-    if (ledgerTreatment) {
-      paramIndex++
-      conditions.push(`COALESCE(t.ledger_treatment, 'normal') = $${paramIndex}`)
-      params.push(ledgerTreatment)
-    }
-    if (reportingTreatment) {
-      paramIndex++
-      conditions.push(`COALESCE(t.reporting_treatment, 'normal') = $${paramIndex}`)
-      params.push(reportingTreatment)
-    }
-    if (stagingBatchId) {
-      paramIndex++
-      conditions.push(`t.staging_batch_id = $${paramIndex}`)
-      params.push(stagingBatchId)
-    }
-    if (!includeArchived) conditions.push(`COALESCE(t.is_archived, 0) = 0`)
-    if (startDate) {
-      paramIndex++
-      conditions.push(`t.date >= $${paramIndex}`)
-      params.push(startDate)
-    }
-    if (endDate) {
-      paramIndex++
-      conditions.push(`t.date <= $${paramIndex}`)
-      params.push(endDate)
-    }
-    if (search) {
-      paramIndex++
-      conditions.push(`t.description LIKE $${paramIndex}`)
-      params.push(`%${search}%`)
-    }
-    if (tagKey) {
-      paramIndex++
-      conditions.push(`json_valid(t.tags) AND EXISTS (
-        SELECT 1
-        FROM json_each(t.tags) AS tag
-        WHERE (tag.type = 'text' AND lower(trim(tag.value)) = $${paramIndex})
-           OR (tag.type = 'object' AND (
-             lower(trim(COALESCE(json_extract(tag.value, '$.key'), ''))) = $${paramIndex}
-             OR lower(trim(COALESCE(json_extract(tag.value, '$.label'), ''))) = $${paramIndex}
-             OR lower(trim(COALESCE(json_extract(tag.value, '$.name'), ''))) = $${paramIndex}
-              OR lower(trim(COALESCE(json_extract(tag.value, '$.value'), ''))) = $${paramIndex}
-            ))
-      )`)
-      params.push(tagKey, tagKey, tagKey, tagKey, tagKey)
-    }
-
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
-
-    const queryParams = [...params]
-    const limitClause = `LIMIT $${paramIndex + 1}`
-    queryParams.push(limit)
-
-    const transactionRows = await query<QueriedTransactionRow>(
-      `SELECT t.id, t.description, t.amount, t.currency, t.type, t.date, t.notes, t.status, t.source, t.note, t.recurring_rule_id, t.tags, t.transfer_to_account_id,
-               t.ledger_treatment, t.reporting_treatment, t.transaction_kind, t.staging_batch_id, t.finalization_id, t.reconciliation_id, t.matched_transaction_id, t.is_archived,
-              t.is_placeholder, t.placeholder_status, t.resolved_at, t.resolved_by_transaction_id, t.placeholder_reason, t.placeholder_parent_transaction_id,
-              COALESCE(c.name, 'Uncategorized') as category_name,
-               a.name as account_name,
-               ta.name as transfer_to_account_name,
-               ar.reconciliation_date, ar.account_id AS reconciliation_account_id,
-               ar.adjustment_amount AS reconciliation_adjustment_amount,
-               ar.staging_batch_id AS reconciliation_staging_batch_id,
-               ar.statement_start_date, ar.statement_end_date,
-               ar.source AS reconciliation_source, ar.note AS reconciliation_note
-       FROM transactions t
-       LEFT JOIN categories c ON t.category_id = c.id
-       LEFT JOIN accounts a ON t.account_id = a.id
-        LEFT JOIN accounts ta ON t.transfer_to_account_id = ta.id
-        LEFT JOIN account_reconciliations ar ON t.reconciliation_id = ar.id
-       ${whereClause}
-       ORDER BY t.date DESC, t.created_at DESC
-       ${limitClause}`,
-      queryParams
-    )
-
-    const transactions = transactionRows
-    const totalMatched =
-      (
-        await query<{ count: number }>(
-          `SELECT COUNT(*) as count FROM transactions t ${whereClause}`,
+        const conditions: string[] = []
+        const params: unknown[] = []
+        const add = (condition: (placeholder: string) => string, value: unknown) => {
+          params.push(value)
+          conditions.push(condition(`$${params.length}`))
+        }
+        if (accountId) {
+          params.push(accountId, accountId)
+          conditions.push(
+            `(t.account_id = $${params.length - 1} OR t.transfer_to_account_id = $${params.length})`
+          )
+        }
+        if (categoryId) add((p) => `t.category_id = ${p}`, categoryId)
+        if (type) add((p) => `t.type = ${p}`, type)
+        if (status) add((p) => `COALESCE(NULLIF(TRIM(t.status), ''), 'posted') = ${p}`, status)
+        if (ledgerTreatment)
+          add((p) => `COALESCE(t.ledger_treatment, 'normal') = ${p}`, ledgerTreatment)
+        if (reportingTreatment)
+          add((p) => `COALESCE(t.reporting_treatment, 'normal') = ${p}`, reportingTreatment)
+        if (stagingBatchId) add((p) => `t.staging_batch_id = ${p}`, stagingBatchId)
+        if (!includeArchived) conditions.push('COALESCE(t.is_archived, 0) = 0')
+        if (startDate) add((p) => `t.date >= ${p}`, startDate)
+        if (endDate) add((p) => `t.date <= ${p}`, endDate)
+        if (search) add((p) => `t.description LIKE ${p}`, `%${search}%`)
+        if (tagKey) {
+          const first = params.length + 1
+          params.push(tagKey, tagKey, tagKey, tagKey, tagKey)
+          conditions.push(`json_valid(t.tags) AND EXISTS (
+            SELECT 1 FROM json_each(t.tags) AS tag_value
+            WHERE (tag_value.type = 'text' AND lower(trim(tag_value.value)) = $${first})
+               OR (tag_value.type = 'object' AND (
+                 lower(trim(COALESCE(json_extract(tag_value.value, '$.key'), ''))) = $${first + 1}
+                 OR lower(trim(COALESCE(json_extract(tag_value.value, '$.label'), ''))) = $${first + 2}
+                 OR lower(trim(COALESCE(json_extract(tag_value.value, '$.name'), ''))) = $${first + 3}
+                 OR lower(trim(COALESCE(json_extract(tag_value.value, '$.value'), ''))) = $${first + 4}
+               )))`)
+        }
+        const baseWhere = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+        const countParams = [...params]
+        const totalMatched =
+          query<{ count: number }>(
+            `SELECT COUNT(*) AS count FROM transactions t ${baseWhere}`,
+            countParams
+          )[0]?.count ?? 0
+        if (decoded) {
+          const first = params.length + 1
+          params.push(
+            decoded.date,
+            decoded.date,
+            decoded.createdAt,
+            decoded.date,
+            decoded.createdAt,
+            decoded.id
+          )
+          conditions.push(`(t.date < $${first}
+            OR (t.date = $${first + 1} AND t.created_at < $${first + 2})
+            OR (t.date = $${first + 3} AND t.created_at = $${first + 4} AND t.id < $${first + 5}))`)
+        }
+        const pageWhere = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+        params.push(limit + 1)
+        const transactionRows = query<QueriedTransactionRow & { created_at: string }>(
+          `SELECT t.id, t.description, t.amount, t.currency, t.type, t.date, t.created_at, t.notes,
+                  COALESCE(NULLIF(TRIM(t.status), ''), 'posted') AS status, t.source, t.note,
+                  t.recurring_rule_id, t.tags, t.transfer_to_account_id, t.ledger_treatment,
+                  t.reporting_treatment, t.transaction_kind, t.staging_batch_id, t.finalization_id,
+                  t.reconciliation_id, t.matched_transaction_id, t.is_archived, t.is_placeholder,
+                  t.placeholder_status, t.resolved_at, t.resolved_by_transaction_id,
+                  t.placeholder_reason, t.placeholder_parent_transaction_id,
+                  COALESCE(c.name, 'Uncategorized') AS category_name, a.name AS account_name,
+                  ta.name AS transfer_to_account_name, ar.reconciliation_date,
+                  ar.account_id AS reconciliation_account_id,
+                  ar.adjustment_amount AS reconciliation_adjustment_amount,
+                  ar.staging_batch_id AS reconciliation_staging_batch_id,
+                  ar.statement_start_date, ar.statement_end_date,
+                  ar.source AS reconciliation_source, ar.note AS reconciliation_note
+           FROM transactions t
+           LEFT JOIN categories c ON t.category_id = c.id
+           LEFT JOIN accounts a ON t.account_id = a.id
+           LEFT JOIN accounts ta ON t.transfer_to_account_id = ta.id
+           LEFT JOIN account_reconciliations ar ON t.reconciliation_id = ar.id
+           ${pageWhere}
+           ORDER BY t.date DESC, t.created_at DESC, t.id DESC
+           LIMIT $${params.length}`,
           params
         )
-      )[0]?.count ?? 0
-
-    return {
-      transactions: transactions.map((t) => ({
-        id: t.id,
-        description: t.description,
-        amount: fromCentavos(t.amount),
-        currency: t.currency,
-        type: t.type,
-        category: t.category_name,
-        account: t.account_name,
-        transferToAccountId: t.transfer_to_account_id,
-        transferToAccount: t.transfer_to_account_name,
-        date: t.date,
-        notes: t.notes,
-        status: t.status,
-        source: t.source,
-        note: t.note,
-        recurringRuleId: t.recurring_rule_id,
-        ledgerTreatment: normalizeLedgerTreatment(t.ledger_treatment),
-        reportingTreatment: normalizeReportingTreatment(t.reporting_treatment),
-        transactionKind: t.transaction_kind ?? 'standard',
-        stagingBatchId: t.staging_batch_id,
-        finalizationId: t.finalization_id,
-        reconciliationId: t.reconciliation_id,
-        reconciliation: t.reconciliation_id
-          ? {
-              id: t.reconciliation_id,
-              accountId: t.reconciliation_account_id,
-              date: t.reconciliation_date,
-              adjustmentAmount: fromCentavos(t.reconciliation_adjustment_amount ?? 0),
-              adjustmentAmountCentavos: t.reconciliation_adjustment_amount,
-              stagingBatchId: t.reconciliation_staging_batch_id,
-              statementStartDate: t.statement_start_date,
-              statementEndDate: t.statement_end_date,
-              source: t.reconciliation_source,
-              note: t.reconciliation_note,
-            }
-          : null,
-        matchedTransactionId: t.matched_transaction_id,
-        isArchived: t.is_archived === 1,
-        ...transactionTagOutput(parseStoredTransactionTags(t.tags)),
-        isPlaceholder: Boolean(t.is_placeholder),
-        placeholderStatus: t.placeholder_status,
-        resolvedAt: t.resolved_at,
-        resolvedByTransactionId: t.resolved_by_transaction_id,
-        placeholderReason: t.placeholder_reason,
-        placeholderParentTransactionId: t.placeholder_parent_transaction_id,
-      })),
-      count: transactions.length,
-      totalMatched,
-      message:
-        transactions.length === 0
-          ? 'No transactions found matching your criteria.'
-          : `Found ${totalMatched} transaction${totalMatched !== 1 ? 's' : ''}${transactions.length < totalMatched ? `, showing first ${transactions.length}` : ''}.`,
+        const hasMore = transactionRows.length > limit
+        const pageRows = transactionRows.slice(0, limit)
+        const splitsByTransaction = new Map<string, TransactionSplitRow[]>()
+        if (pageRows.length) {
+          const placeholders = pageRows.map((_, index) => `$${index + 1}`).join(',')
+          const splits = query<TransactionSplitRow>(
+            `SELECT s.id, s.transaction_id, s.category_id, s.subcategory_id, s.amount, s.notes,
+                    s.created_at, c.name AS category_name, sc.name AS subcategory_name
+             FROM transaction_splits s
+             LEFT JOIN categories c ON c.id = s.category_id
+             LEFT JOIN subcategories sc ON sc.id = s.subcategory_id
+             WHERE s.transaction_id IN (${placeholders})
+             ORDER BY s.transaction_id ASC, s.created_at ASC, s.id ASC`,
+            pageRows.map((row) => row.id)
+          )
+          for (const split of splits) {
+            const list = splitsByTransaction.get(split.transaction_id) ?? []
+            list.push(split)
+            splitsByTransaction.set(split.transaction_id, list)
+          }
+        }
+        const last = pageRows.at(-1)
+        const nextCursor =
+          hasMore && last
+            ? encodeTransactionCursor({
+                version: 1,
+                databaseId: state.database_id,
+                dataRevision: state.data_revision,
+                filtersFingerprint,
+                date: last.date,
+                createdAt: last.created_at,
+                id: last.id,
+              })
+            : null
+        const transactions = pageRows.map((t) => ({
+          id: t.id,
+          description: t.description,
+          amount: fromCentavos(t.amount),
+          currency: t.currency,
+          type: t.type,
+          category: t.category_name,
+          account: t.account_name,
+          transferToAccountId: t.transfer_to_account_id,
+          transferToAccount: t.transfer_to_account_name,
+          date: t.date,
+          createdAt: t.created_at,
+          notes: t.notes,
+          status: t.status,
+          source: t.source,
+          note: t.note,
+          recurringRuleId: t.recurring_rule_id,
+          ledgerTreatment: normalizeLedgerTreatment(t.ledger_treatment),
+          reportingTreatment: normalizeReportingTreatment(t.reporting_treatment),
+          transactionKind: t.transaction_kind ?? 'standard',
+          stagingBatchId: t.staging_batch_id,
+          finalizationId: t.finalization_id,
+          reconciliationId: t.reconciliation_id,
+          reconciliation: t.reconciliation_id
+            ? {
+                id: t.reconciliation_id,
+                accountId: t.reconciliation_account_id,
+                date: t.reconciliation_date,
+                adjustmentAmount: fromCentavos(t.reconciliation_adjustment_amount ?? 0),
+                adjustmentAmountCentavos: t.reconciliation_adjustment_amount,
+                stagingBatchId: t.reconciliation_staging_batch_id,
+                statementStartDate: t.statement_start_date,
+                statementEndDate: t.statement_end_date,
+                source: t.reconciliation_source,
+                note: t.reconciliation_note,
+              }
+            : null,
+          matchedTransactionId: t.matched_transaction_id,
+          isArchived: t.is_archived === 1,
+          ...transactionTagOutput(parseStoredTransactionTags(t.tags)),
+          splits: (splitsByTransaction.get(t.id) ?? []).map((split) => ({
+            id: split.id,
+            categoryId: split.category_id,
+            category: split.category_name,
+            subcategoryId: split.subcategory_id,
+            subcategory: split.subcategory_name,
+            amount: fromCentavos(split.amount),
+            amountCentavos: split.amount,
+            notes: split.notes,
+            createdAt: split.created_at,
+          })),
+          isPlaceholder: Boolean(t.is_placeholder),
+          placeholderStatus: t.placeholder_status,
+          resolvedAt: t.resolved_at,
+          resolvedByTransactionId: t.resolved_by_transaction_id,
+          placeholderReason: t.placeholder_reason,
+          placeholderParentTransactionId: t.placeholder_parent_transaction_id,
+        }))
+        return {
+          success: true,
+          transactions,
+          count: transactions.length,
+          totalMatched,
+          hasMore,
+          nextCursor,
+          dataRevision: state.data_revision,
+          message: transactions.length
+            ? `Found ${totalMatched} transaction${totalMatched === 1 ? '' : 's'}; returned ${transactions.length}.`
+            : 'No transactions found matching your criteria.',
+        }
+      })
+    } catch (error) {
+      return {
+        success: false,
+        reason: 'invalid_cursor',
+        message: error instanceof Error ? error.message : String(error),
+      }
     }
   },
 }
@@ -3448,6 +3881,7 @@ export const transactionsTools: ToolDefinition[] = [
   setTransactionConsumption,
   clearTransactionConsumption,
   addTransaction,
+  bindTransactionImportIdentity,
   updateTransaction,
   deleteTransaction,
   queryTransactions,

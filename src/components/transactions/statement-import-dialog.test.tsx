@@ -3,14 +3,19 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { StatementImportDialog } from './statement-import-dialog'
 
-const { mockImportStatementFile, mockParseStatement, mockToastError, mockInvalidate } = vi.hoisted(
-  () => ({
-    mockImportStatementFile: vi.fn(),
-    mockParseStatement: vi.fn(),
-    mockToastError: vi.fn(),
-    mockInvalidate: vi.fn(),
-  })
-)
+const {
+  mockImportStatementFile,
+  mockPreviewStatementFile,
+  mockParseStatement,
+  mockToastError,
+  mockInvalidate,
+} = vi.hoisted(() => ({
+  mockImportStatementFile: vi.fn(),
+  mockPreviewStatementFile: vi.fn(),
+  mockParseStatement: vi.fn(),
+  mockToastError: vi.fn(),
+  mockInvalidate: vi.fn(),
+}))
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -30,6 +35,7 @@ vi.mock('@/lib/statement-parser', () => ({
 
 vi.mock('@/lib/statement-import', () => ({
   importStatementFile: mockImportStatementFile,
+  previewStatementFile: mockPreviewStatementFile,
 }))
 
 vi.mock('@/lib/transaction-query-events', () => ({
@@ -100,6 +106,16 @@ describe('StatementImportDialog', () => {
       type: 'expense' as const,
     }
     mockParseStatement.mockReturnValue([parsed])
+    mockPreviewStatementFile.mockResolvedValue({
+      success: true,
+      parsedTransactions: [parsed],
+      previewToken: 'preview-token',
+      imported: 1,
+      skipped: 0,
+      errors: [],
+      requiredDecisions: [],
+      legacyEvidenceLimitations: [],
+    })
     mockImportStatementFile.mockResolvedValue({
       imported: 0,
       skipped: 0,
@@ -118,7 +134,12 @@ describe('StatementImportDialog', () => {
     await user.click(previewButton)
     await user.click(screen.getByRole('button', { name: 'import.confirm' }))
 
-    await waitFor(() => expect(mockImportStatementFile).toHaveBeenCalledWith(file, 'account-1'))
+    await waitFor(() =>
+      expect(mockImportStatementFile).toHaveBeenCalledWith(file, 'account-1', {
+        previewToken: 'preview-token',
+        decisions: [],
+      })
+    )
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
     expect(screen.getByText('Retry me')).toBeVisible()
     expect(screen.getByText('Checking')).toBeVisible()
@@ -132,9 +153,23 @@ describe('StatementImportDialog', () => {
 
   it('invalidates the page query after imported rows commit', async () => {
     const user = userEvent.setup()
-    mockParseStatement.mockReturnValue([
-      { date: '2026-07-14', amount: 12.5, description: 'Imported', type: 'expense' },
-    ])
+    const parsed = {
+      date: '2026-07-14',
+      amount: 12.5,
+      description: 'Imported',
+      type: 'expense' as const,
+    }
+    mockParseStatement.mockReturnValue([parsed])
+    mockPreviewStatementFile.mockResolvedValue({
+      success: true,
+      parsedTransactions: [parsed],
+      previewToken: 'preview-token',
+      imported: 1,
+      skipped: 0,
+      errors: [],
+      requiredDecisions: [],
+      legacyEvidenceLimitations: [],
+    })
     mockImportStatementFile.mockResolvedValue({ imported: 1, skipped: 0, errors: [] })
     const file = new File(['statement'], 'success.ofx', { type: 'application/xml' })
     Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue('statement') })

@@ -22,7 +22,8 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useAccountStore } from '@/stores/account-store'
 import { parseStatement, type ParsedTransaction } from '@/lib/statement-parser'
-import { importStatementFile } from '@/lib/statement-import'
+import { importStatementFile, previewStatementFile } from '@/lib/statement-import'
+import type { ImportReviewDecision } from '@shikin/finance-core/imports'
 import { cn } from '@/lib/utils'
 import { getErrorMessage } from '@/lib/errors'
 import { invalidateTransactionPage } from '@/lib/transaction-query-events'
@@ -45,6 +46,9 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
   const [parsedTransactions, setParsedTransactions] = useState<ParsedTransaction[]>([])
   const [parseError, setParseError] = useState<string | null>(null)
   const [isImporting, setIsImporting] = useState(false)
+  const [previewToken, setPreviewToken] = useState<string | null>(null)
+  const [requiredDecisions, setRequiredDecisions] = useState<ImportReviewDecision[]>([])
+  const [decisions, setDecisions] = useState<ImportReviewDecision[]>([])
 
   const resetState = useCallback(() => {
     setStep('select')
@@ -53,6 +57,9 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
     setParsedTransactions([])
     setParseError(null)
     setIsImporting(false)
+    setPreviewToken(null)
+    setRequiredDecisions([])
+    setDecisions([])
   }, [])
 
   const handleOpenChange = useCallback(
@@ -69,6 +76,9 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
 
     setSelectedFile(file)
     setParseError(null)
+    setPreviewToken(null)
+    setRequiredDecisions([])
+    setDecisions([])
 
     try {
       const content = await file.text()
@@ -87,11 +97,40 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
   }, [])
 
   const canPreview = selectedFile && parsedTransactions.length > 0 && accountId
-  const canImport = canPreview && !isImporting
+  const canImport = canPreview && previewToken && requiredDecisions.length === 0 && !isImporting
 
-  const handlePreview = useCallback(() => {
-    if (canPreview) setStep('preview')
-  }, [canPreview])
+  const handlePreview = useCallback(async () => {
+    if (!selectedFile || !accountId) return
+    setIsImporting(true)
+    try {
+      const preview = await previewStatementFile(selectedFile, accountId, decisions)
+      if (preview.errors.length) {
+        setParseError(preview.errors[0])
+        return
+      }
+      setParsedTransactions(preview.parsedTransactions)
+      setPreviewToken(preview.success ? preview.previewToken : null)
+      setRequiredDecisions(preview.requiredDecisions)
+      setStep('preview')
+    } finally {
+      setIsImporting(false)
+    }
+  }, [selectedFile, accountId, decisions])
+
+  const setCandidateDecision = useCallback(
+    (candidate: ImportReviewDecision, decision: ImportReviewDecision['decision']) => {
+      setDecisions((current) => [
+        ...current.filter(
+          (item) =>
+            item.candidateIdentityKey !== candidate.candidateIdentityKey ||
+            item.existingTransactionId !== candidate.existingTransactionId
+        ),
+        { ...candidate, decision },
+      ])
+      setPreviewToken(null)
+    },
+    []
+  )
 
   const handleImport = useCallback(async () => {
     if (!selectedFile || !accountId) return
@@ -100,7 +139,10 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
     setStep('importing')
 
     try {
-      const result = await importStatementFile(selectedFile, accountId)
+      const result = await importStatementFile(selectedFile, accountId, {
+        previewToken: previewToken ?? undefined,
+        decisions,
+      })
       if (result.imported > 0) invalidateTransactionPage('import')
 
       if (result.errors.length > 0) {
@@ -141,7 +183,7 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
     } finally {
       setIsImporting(false)
     }
-  }, [selectedFile, accountId, t, handleOpenChange])
+  }, [selectedFile, accountId, previewToken, decisions, t, handleOpenChange])
 
   useEffect(() => {
     if (!open || accounts.length > 0) {
@@ -244,6 +286,47 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
                 {activeAccounts.find((a) => a.id === accountId)?.name}
               </span>
             </div>
+            {requiredDecisions.length > 0 && (
+              <div className="border-warning/30 bg-warning/5 space-y-2 rounded-lg border p-3">
+                <p className="text-sm font-medium">{t('import.reviewCandidates')}</p>
+                <p className="text-muted-foreground text-xs">
+                  {t('import.reviewCandidatesDescription')}
+                </p>
+                {requiredDecisions.map((candidate) => {
+                  const selected = decisions.find(
+                    (item) =>
+                      item.candidateIdentityKey === candidate.candidateIdentityKey &&
+                      item.existingTransactionId === candidate.existingTransactionId
+                  )
+                  return (
+                    <div
+                      key={`${candidate.candidateIdentityKey}:${candidate.existingTransactionId}`}
+                      className="grid grid-cols-[1fr_180px] items-center gap-3"
+                    >
+                      <span className="truncate font-mono text-xs">
+                        {t('import.existingCandidate', {
+                          id: candidate.existingTransactionId,
+                        })}
+                      </span>
+                      <Select
+                        value={selected?.decision ?? ''}
+                        onValueChange={(value) =>
+                          setCandidateDecision(candidate, value as ImportReviewDecision['decision'])
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder={t('import.chooseDecision')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="keep_existing">{t('import.keepExisting')}</SelectItem>
+                          <SelectItem value="distinct">{t('import.importDistinct')}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
             <ScrollArea className="h-[320px]">
               <div className="space-y-1">
                 {/* Table header */}
@@ -320,10 +403,30 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
               <Button variant="ghost" onClick={() => setStep('select')}>
                 {t('import.cancel')}
               </Button>
-              <Button onClick={handleImport} disabled={!canImport}>
-                <Upload size={14} />
-                {t('import.confirm')}
-              </Button>
+              {requiredDecisions.length > 0 ? (
+                <Button
+                  onClick={handlePreview}
+                  disabled={
+                    isImporting ||
+                    requiredDecisions.some(
+                      (candidate) =>
+                        !decisions.some(
+                          (decision) =>
+                            decision.candidateIdentityKey === candidate.candidateIdentityKey &&
+                            decision.existingTransactionId === candidate.existingTransactionId
+                        )
+                    )
+                  }
+                >
+                  <CheckCircle2 size={14} />
+                  {t('import.reviewDecisions')}
+                </Button>
+              ) : (
+                <Button onClick={handleImport} disabled={!canImport}>
+                  <Upload size={14} />
+                  {t('import.confirm')}
+                </Button>
+              )}
             </>
           )}
         </DialogFooter>

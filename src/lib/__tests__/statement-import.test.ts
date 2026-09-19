@@ -56,8 +56,70 @@ describe('statement import service boundaries', () => {
 
     const result = await previewStatementFile(file(), 'account-1')
 
-    expect(result).toMatchObject({ success: false, previewToken: null, imported: 0, skipped: 0 })
+    expect(result).toMatchObject({
+      success: false,
+      previewToken: null,
+      imported: 0,
+      skipped: 0,
+      reviewCandidates: [],
+      limitations: [],
+    })
     expect(result.errors).toEqual(['database unavailable'])
+  })
+
+  it('reports a duplicate lookup failure without attempting a write', async () => {
+    mocks.parseStatement.mockReturnValue([
+      { date: '2026-01-01', amount: 1, description: 'Coffee', type: 'expense' },
+    ])
+    const execute = vi.fn()
+    mocks.withTransaction.mockImplementation(
+      (callback: (tx: TransactionClient) => Promise<unknown>) =>
+        callback({
+          query: vi.fn(async (sql: string) => {
+            if (sql.includes('FROM accounts')) {
+              return [
+                {
+                  currency: 'USD',
+                  balance: 0,
+                  account_mode: 'transactional',
+                  is_archived: 0,
+                },
+              ]
+            }
+            if (sql.includes('FROM app_data_state')) {
+              return [{ database_id: 'test-db', data_revision: 0 }]
+            }
+            throw new Error('duplicate lookup exploded')
+          }),
+          execute,
+        } as unknown as TransactionClient)
+    )
+
+    const result = await importStatementFile(file(), 'account-1')
+
+    expect(result).toMatchObject({ imported: 0, skipped: 0 })
+    expect(result.errors).toEqual(['duplicate lookup exploded'])
+    expect(execute).not.toHaveBeenCalled()
+    expect(mocks.fetchTransactions).not.toHaveBeenCalled()
+  })
+
+  it('keeps a committed import successful when post-commit refresh fails', async () => {
+    mocks.parseStatement.mockReturnValue([
+      { date: '2026-01-01', amount: 1, description: 'Coffee', type: 'expense' },
+    ])
+    mocks.withTransaction.mockResolvedValue({ imported: 1, skipped: 0 })
+    mocks.fetchTransactions.mockRejectedValue(new Error('refresh exploded'))
+
+    const result = await importStatementFile(file(), 'account-1')
+
+    expect(result).toEqual({
+      imported: 1,
+      skipped: 0,
+      errors: [],
+      mode: 'unreviewed_atomic',
+    })
+    expect(mocks.fetchTransactions).toHaveBeenCalledOnce()
+    expect(mocks.fetchAccounts).toHaveBeenCalledOnce()
   })
 
   it('labels a failed token-bound apply as reviewed atomic', async () => {

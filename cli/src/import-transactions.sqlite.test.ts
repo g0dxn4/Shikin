@@ -15,6 +15,7 @@ vi.mock('./database.js', () => ({
     databaseState.current!.transaction(callback).immediate(),
 }))
 
+import type { ImportReviewDecision } from '@shikin/finance-core/imports'
 import { executeAtomicImport, type AtomicImportRequest } from './import-transactions'
 import { transactionsTools } from './tools/transactions'
 
@@ -52,8 +53,8 @@ function setupDatabase(): void {
       subcategory_id TEXT, amount INTEGER NOT NULL, notes TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE audit_log (
-      id TEXT PRIMARY KEY, entity TEXT, entity_id TEXT, action TEXT, before_json TEXT, after_json TEXT,
-      source TEXT, note TEXT, created_at TEXT
+      id TEXT PRIMARY KEY, entity TEXT NOT NULL, entity_id TEXT, action TEXT NOT NULL,
+      before_json TEXT, after_json TEXT, source TEXT, note TEXT, created_at TEXT
     );
     CREATE TABLE app_data_state (
       id INTEGER PRIMARY KEY, database_id TEXT NOT NULL, data_revision INTEGER NOT NULL,
@@ -67,6 +68,10 @@ function setupDatabase(): void {
     );
     INSERT INTO accounts (id, name, currency, balance) VALUES ('account-1', 'Checking', 'USD', 10000);
     INSERT INTO app_data_state (id, database_id, data_revision) VALUES (1, 'atomic-import-test', 0);
+    CREATE TRIGGER revise_import_transaction AFTER INSERT ON transactions
+    BEGIN UPDATE app_data_state SET data_revision = data_revision + 1 WHERE id = 1; END;
+    CREATE TRIGGER revise_import_decision AFTER INSERT ON duplicate_review_decisions
+    BEGIN UPDATE app_data_state SET data_revision = data_revision + 1 WHERE id = 1; END;
   `)
 }
 
@@ -234,6 +239,188 @@ describe('atomic CLI import', () => {
     })
   })
 
+  it('requires review when an authoritative incoming ID matches an unbound legacy row', () => {
+    db.prepare(
+      `INSERT INTO transactions (
+         id, account_id, type, amount, currency, description, note, status, ledger_treatment,
+         reporting_treatment, transaction_kind, is_archived, date
+       ) VALUES ('legacy-unbound','account-1','expense',1000,'USD','Legacy row',
+                 'externalId=opaque-0','posted','normal','normal','standard',0,'2026-01-01')`
+    ).run()
+
+    const preview = executeAtomicImport(request(['Incoming identified row'])) as {
+      success: boolean
+      requiredDecisions: Array<{ existingTransactionId: string }>
+    }
+
+    expect(preview.success).toBe(false)
+    expect(preview.requiredDecisions).toEqual([
+      expect.objectContaining({ existingTransactionId: 'legacy-unbound' }),
+    ])
+    expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 1 })
+  })
+
+  it('bypasses fuzzy review only when both rows have distinct durable external identities', () => {
+    db.prepare(
+      `INSERT INTO transactions (
+         id, account_id, type, amount, currency, description, status, ledger_treatment,
+         reporting_treatment, transaction_kind, import_source, import_external_id,
+         is_archived, date
+       ) VALUES ('verified-other','account-1','expense',1000,'USD','Other verified row',
+                 'posted','normal','normal','standard','Other Bank','verified-other-id',0,'2026-01-01')`
+    ).run()
+
+    const preview = executeAtomicImport(request(['Incoming identified row']))
+
+    expect(preview).toMatchObject({
+      success: true,
+      summary: { importedRows: 1, skippedRows: 0 },
+      requiredDecisions: [],
+    })
+  })
+
+  it('audits a reviewed keep-existing decision even when no transaction is created', () => {
+    db.prepare(
+      `INSERT INTO transactions (
+         id, account_id, type, amount, currency, description, status, ledger_treatment,
+         reporting_treatment, transaction_kind, is_archived, date
+       ) VALUES ('legacy-keep','account-1','expense',1000,'USD','Legacy row',
+                 'posted','normal','normal','standard',0,'2026-01-01')`
+    ).run()
+    const candidate = request(['Incoming identified row'])
+    const undecided = executeAtomicImport(candidate) as {
+      requiredDecisions: ImportReviewDecision[]
+    }
+    const decisions = [{ ...undecided.requiredDecisions[0], decision: 'keep_existing' as const }]
+    const reviewed = executeAtomicImport({ ...candidate, decisions }) as { previewToken: string }
+
+    executeAtomicImport({
+      ...candidate,
+      decisions,
+      previewToken: reviewed.previewToken,
+      apply: true,
+    })
+
+    expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 1 })
+    expect(db.prepare('SELECT decision FROM duplicate_review_decisions').get()).toEqual({
+      decision: 'keep_existing',
+    })
+    const audit = db
+      .prepare('SELECT entity, action, before_json, after_json FROM audit_log')
+      .get() as Record<string, unknown>
+    expect(audit).toMatchObject({
+      entity: 'duplicate_review_decision',
+      action: 'review-import-duplicate',
+      before_json: 'null',
+    })
+    expect(JSON.parse(audit.after_json as string)).toMatchObject({
+      accountId: 'account-1',
+      existingTransactionId: 'legacy-keep',
+      decision: 'keep_existing',
+    })
+  })
+
+  it.each([
+    {
+      name: 'positive aggregate',
+      openingBalance: 0,
+      rows: [
+        { amountCentavos: Number.MAX_SAFE_INTEGER, type: 'income' as const },
+        { amountCentavos: 1, type: 'income' as const },
+      ],
+    },
+    {
+      name: 'negative aggregate',
+      openingBalance: 0,
+      rows: [
+        { amountCentavos: Number.MAX_SAFE_INTEGER, type: 'expense' as const },
+        { amountCentavos: 1, type: 'expense' as const },
+      ],
+    },
+    {
+      name: 'near-limit opening balance',
+      openingBalance: Number.MAX_SAFE_INTEGER - 5,
+      rows: [{ amountCentavos: 10, type: 'income' as const }],
+    },
+  ])(
+    'rejects unsafe $name balances and rolls back every import effect',
+    ({ openingBalance, rows }) => {
+      db.prepare("UPDATE accounts SET balance=? WHERE id='account-1'").run(openingBalance)
+      const unsafe = request(rows.map((_, index) => `Unsafe ${index}`))
+      unsafe.rows = unsafe.rows.map((row, index) => ({
+        ...row,
+        input: { ...row.input, ...rows[index] },
+      }))
+
+      expect(() => executeAtomicImport({ ...unsafe, apply: true })).toThrow(/safe integer/i)
+      expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 0 })
+      expect(db.prepare('SELECT COUNT(*) AS count FROM audit_log').get()).toEqual({ count: 0 })
+      expect(db.prepare('SELECT COUNT(*) AS count FROM duplicate_review_decisions').get()).toEqual({
+        count: 0,
+      })
+      expect(db.prepare('SELECT data_revision FROM app_data_state WHERE id=1').get()).toEqual({
+        data_revision: 0,
+      })
+      expect(db.prepare("SELECT balance FROM accounts WHERE id='account-1'").get()).toEqual({
+        balance: openingBalance,
+      })
+    }
+  )
+
+  it('does not apply pending or staged imported rows to a near-limit balance', () => {
+    const openingBalance = Number.MAX_SAFE_INTEGER - 1
+    db.prepare("UPDATE accounts SET balance=? WHERE id='account-1'").run(openingBalance)
+    const nonAffecting = request(['Pending', 'Staged'])
+    nonAffecting.rows[0].input.status = 'pending'
+    nonAffecting.rows[0].input.amountCentavos = 10
+    nonAffecting.rows[0].input.type = 'income'
+    nonAffecting.rows[1].input.ledgerTreatment = 'staged_no_balance_impact'
+    nonAffecting.rows[1].input.stagingBatchId = 'batch-1'
+    nonAffecting.rows[1].input.amountCentavos = 10
+    nonAffecting.rows[1].input.type = 'income'
+
+    expect(executeAtomicImport({ ...nonAffecting, apply: true })).toMatchObject({ success: true })
+    expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 2 })
+    expect(db.prepare("SELECT balance FROM accounts WHERE id='account-1'").get()).toEqual({
+      balance: openingBalance,
+    })
+  })
+
+  it('rolls back kept-existing evidence when its audit write fails', () => {
+    db.exec(`
+      INSERT INTO transactions (
+        id, account_id, type, amount, currency, description, status, ledger_treatment,
+        reporting_treatment, transaction_kind, is_archived, date
+      ) VALUES ('legacy-audit-failure','account-1','expense',1000,'USD','Legacy row',
+                'posted','normal','normal','standard',0,'2026-01-01');
+      CREATE TRIGGER fail_decision_audit BEFORE INSERT ON audit_log
+      WHEN NEW.entity = 'duplicate_review_decision'
+      BEGIN SELECT RAISE(ABORT, 'synthetic decision audit failure'); END;
+    `)
+    const candidate = request(['Incoming identified row'])
+    const undecided = executeAtomicImport(candidate) as {
+      requiredDecisions: ImportReviewDecision[]
+    }
+    const decisions = [{ ...undecided.requiredDecisions[0], decision: 'keep_existing' as const }]
+    const reviewed = executeAtomicImport({ ...candidate, decisions }) as { previewToken: string }
+
+    expect(() =>
+      executeAtomicImport({
+        ...candidate,
+        decisions,
+        previewToken: reviewed.previewToken,
+        apply: true,
+      })
+    ).toThrow('synthetic decision audit failure')
+    expect(db.prepare('SELECT COUNT(*) AS count FROM duplicate_review_decisions').get()).toEqual({
+      count: 0,
+    })
+    expect(db.prepare('SELECT COUNT(*) AS count FROM audit_log').get()).toEqual({ count: 0 })
+    expect(db.prepare('SELECT data_revision FROM app_data_state WHERE id=1').get()).toEqual({
+      data_revision: 1,
+    })
+  })
+
   it('binds explicit legacy external identity without fabricating original content', async () => {
     db.prepare(
       `INSERT INTO transactions (
@@ -292,6 +479,9 @@ describe('atomic CLI import', () => {
     })
     expect(db.prepare("SELECT balance FROM accounts WHERE id='account-1'").get()).toEqual({
       balance: 10000,
+    })
+    expect(db.prepare('SELECT data_revision FROM app_data_state WHERE id=1').get()).toEqual({
+      data_revision: 0,
     })
   })
 })

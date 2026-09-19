@@ -960,6 +960,29 @@ export function validateImportedTransactionSync(input: ImportedTransactionCreate
  * owns the surrounding better-sqlite3 transaction; every failure throws so a
  * file can never commit a prefix.
  */
+function assertImportedBalanceChangesAreSafe(
+  impacts: Map<string, number>,
+  balancesBefore: Map<string, number>
+): void {
+  for (const [accountId, delta] of impacts) {
+    const balance = balancesBefore.get(accountId)
+    if (balance === undefined) {
+      throw new Error(`Imported balance update account ${accountId} was not found.`)
+    }
+    if (!Number.isSafeInteger(balance) || !Number.isSafeInteger(delta)) {
+      throw new Error(
+        `Imported balance update for account ${accountId} is outside the safe integer range.`
+      )
+    }
+    const resultingBalance = balance + delta
+    if (!Number.isSafeInteger(resultingBalance)) {
+      throw new Error(
+        `Imported transaction would move account ${accountId} outside the safe integer balance range.`
+      )
+    }
+  }
+}
+
 export function createImportedTransactionSync(input: ImportedTransactionCreateInput) {
   const { ledgerTreatment, reportingTreatment, status, resolvedAccount, resolvedCategory } =
     validateImportedTransactionSync(input)
@@ -992,6 +1015,7 @@ export function createImportedTransactionSync(input: ImportedTransactionCreateIn
   const impact = getBalanceImpact(row)
   if (!impact.success) throw new Error(impact.message)
   const balancesBefore = readAccountBalances([...impact.impacts.keys()])
+  assertImportedBalanceChangesAreSafe(impact.impacts, balancesBefore)
   execute(
     `INSERT INTO transactions (id, account_id, category_id, transfer_to_account_id, type, amount, currency, description, notes, status, source, note, recurring_rule_id, ledger_treatment, reporting_treatment, transaction_kind, staging_batch_id, import_source, import_external_id, import_fingerprint, import_content_fingerprint, is_archived, date)
      VALUES ($1,$2,$3,NULL,$4,$5,$6,$7,$8,$9,$10,$11,NULL,$12,$13,'standard',$14,$15,$16,$17,$18,0,$19)`,

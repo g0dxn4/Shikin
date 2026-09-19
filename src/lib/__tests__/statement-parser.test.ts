@@ -67,18 +67,49 @@ describe('statement-parser', () => {
       expect(parseOFX('')).toEqual([])
     })
 
-    it('skips entries with missing date or amount', () => {
+    it('rejects the complete statement when a recognized row is missing financial fields', () => {
       const ofx = `
 <STMTTRN>
-<NAME>NO DATE OR AMOUNT
+<DTPOSTED>20240101
+<TRNAMT>-10.00
+<NAME>VALID FIRST ROW
 </STMTTRN>
 <STMTTRN>
-<DTPOSTED>20240101
+<DTPOSTED>20240102
 <NAME>NO AMOUNT
 </STMTTRN>`
 
-      const result = parseOFX(ofx)
-      expect(result).toHaveLength(0)
+      expect(() => parseOFX(ofx)).toThrow('OFX transaction 2 is missing TRNAMT')
+    })
+
+    it.each(['10oops', 'Infinity', '1e3'])('rejects non-strict OFX amount %s', (amount) => {
+      expect(() =>
+        parseOFX(`<STMTTRN><DTPOSTED>20240101<TRNAMT>${amount}<NAME>Bad</STMTTRN>`)
+      ).toThrow(/invalid amount|safe centavo/i)
+    })
+
+    it('rejects impossible dates and unclosed recognized OFX rows', () => {
+      expect(() =>
+        parseOFX('<STMTTRN><DTPOSTED>20240230<TRNAMT>-10.00<NAME>Bad</STMTTRN>')
+      ).toThrow(/invalid calendar date/i)
+      expect(() => parseOFX('<STMTTRN><DTPOSTED>20240101<TRNAMT>-10.00')).toThrow(
+        /malformed or unclosed STMTTRN/i
+      )
+    })
+
+    it('attaches one declared source currency and rejects unsupported statement scope', () => {
+      const one = parseOFX(
+        '<OFX><STMTRS><CURDEF>USD<STMTTRN><DTPOSTED>20240101<TRNAMT>-10.00<NAME>Test</STMTTRN></STMTRS></OFX>'
+      )
+      expect(one[0].currency).toBe('USD')
+
+      expect(() => parseOFX('<STMTRS><CURDEF>USD</STMTRS><STMTRS><CURDEF>MXN</STMTRS>')).toThrow(
+        /multiple account scopes/i
+      )
+      expect(() =>
+        parseOFX('<CURDEF>USD<CURDEF>MXN<STMTTRN><DTPOSTED>20240101<TRNAMT>-1</STMTTRN>')
+      ).toThrow(/multiple currencies/i)
+      expect(() => parseOFX('<BANKACCTFROM><BANKACCTFROM>')).toThrow(/multiple account scopes/i)
     })
 
     it('handles NAME and MEMO being the same', () => {
@@ -178,6 +209,23 @@ PStore
       const result = parseQIF(qif)
       expect(result[0].amount).toBe(25)
       expect(result[0].type).toBe('expense')
+    })
+
+    it('rejects malformed recognized QIF records instead of importing a prefix', () => {
+      const qif = `D01/01/2024
+T-10.00
+PValid
+^
+D01/02/2024
+T10oops
+PInvalid
+^`
+      expect(() => parseQIF(qif)).toThrow(/QIF transaction 2 has invalid amount/i)
+    })
+
+    it('rejects missing amounts and impossible QIF dates', () => {
+      expect(() => parseQIF('D01/01/2024\nPNo amount\n^')).toThrow(/missing an amount/i)
+      expect(() => parseQIF('D02/30/2024\nT-1\n^')).toThrow(/invalid calendar date/i)
     })
   })
 

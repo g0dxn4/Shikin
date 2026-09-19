@@ -19,6 +19,27 @@ export interface ImportResult {
   mode?: 'reviewed_atomic' | 'unreviewed_atomic'
 }
 
+export interface StatementImportReviewCandidate {
+  candidateIdentityKey: string
+  existingTransactionId: string
+  incoming: {
+    rowIndex: number
+    date: string
+    description: string
+    type: 'income' | 'expense'
+    amountCentavos: number
+    currency: string
+  }
+  existing: {
+    id: string
+    date: string
+    description: string
+    type: string
+    amountCentavos: number
+    currency: string
+  }
+}
+
 export interface StatementImportPreview {
   success: boolean
   parsedTransactions: ParsedTransaction[]
@@ -27,11 +48,14 @@ export interface StatementImportPreview {
   skipped: number
   errors: string[]
   requiredDecisions: ImportReviewDecision[]
+  reviewCandidates: StatementImportReviewCandidate[]
+  limitations: string[]
   legacyEvidenceLimitations: string[]
 }
 
 type AccountRow = {
   currency: string | null
+  balance: number
   account_mode?: 'transactional' | 'snapshot_only' | null
   is_archived: number | null
 }
@@ -43,6 +67,7 @@ type ExistingRow = {
   amount: number
   currency: string
   date: string
+  description: string
   transfer_to_account_id: string | null
   import_source: string | null
   import_external_id: string | null
@@ -64,10 +89,13 @@ type PlannedStatementRow = {
 
 type StatementPlan = {
   accountCurrency: string
+  accountBalance: number
   databaseId: string
   revision: number
   rows: PlannedStatementRow[]
   requiredDecisions: ImportReviewDecision[]
+  reviewCandidates: StatementImportReviewCandidate[]
+  sourceLimitations: string[]
   legacyEvidenceLimitations: string[]
   token: string
 }
@@ -125,7 +153,7 @@ function evidenceFingerprint(row: ExistingRow): string {
 async function validateAccount(tx: TransactionClient, accountId: string): Promise<AccountRow> {
   const account = (
     await tx.query<AccountRow>(
-      'SELECT currency, account_mode, is_archived FROM accounts WHERE id = ? LIMIT 1',
+      'SELECT currency, balance, account_mode, is_archived FROM accounts WHERE id = ? LIMIT 1',
       [accountId]
     )
   )[0]
@@ -141,7 +169,14 @@ async function validateAccount(tx: TransactionClient, accountId: string): Promis
   if (typeof account.currency !== 'string' || !account.currency.trim()) {
     throw new Error(`Account ${accountId} has no stored currency`)
   }
+  if (!Number.isSafeInteger(account.balance)) {
+    throw new Error(`Account ${accountId} balance is outside the safe integer range`)
+  }
   return account
+}
+
+function hasVerifiedExternalIdentity(row: ExistingRow): boolean {
+  return Boolean(row.import_source?.trim() && row.import_external_id?.trim())
 }
 
 async function createPlan(
@@ -155,6 +190,24 @@ async function createPlan(
   for (const transaction of parsed) assertSupportedType(transaction)
   const account = await validateAccount(tx, accountId)
   const accountCurrency = account.currency as string
+  const declaredCurrencies = parsed.map((transaction) => transaction.currency?.trim().toUpperCase())
+  const knownCurrencies = [
+    ...new Set(declaredCurrencies.filter((value): value is string => Boolean(value))),
+  ]
+  if (
+    knownCurrencies.length > 1 ||
+    (knownCurrencies.length === 1 && declaredCurrencies.some((value) => !value))
+  ) {
+    throw new Error('Statement has an unsupported mixed or incomplete currency scope')
+  }
+  if (knownCurrencies[0] && knownCurrencies[0] !== accountCurrency.trim().toUpperCase()) {
+    throw new Error(
+      `Statement currency ${knownCurrencies[0]} does not match account currency ${accountCurrency}`
+    )
+  }
+  const sourceLimitations = knownCurrencies.length
+    ? []
+    : [`Statement source did not declare a currency; amounts are assumed to be ${accountCurrency}.`]
   const state = (
     await tx.query<{ database_id: string; data_revision: number }>(
       'SELECT database_id, data_revision FROM app_data_state WHERE id = 1'
@@ -198,6 +251,7 @@ async function createPlan(
   const decisions = canonicalReviewDecisions(suppliedDecisions)
   const used = new Set<ImportReviewDecision>()
   const requiredDecisions: ImportReviewDecision[] = []
+  const reviewCandidates: StatementImportReviewCandidate[] = []
   const legacyEvidenceLimitations: string[] = []
   const rows: PlannedStatementRow[] = []
   const earlier = new Map<string, PlannedStatementRow>()
@@ -218,14 +272,14 @@ async function createPlan(
     const exact =
       externalId !== null
         ? await tx.query<ExistingRow>(
-            `SELECT id, account_id, type, amount, currency, date, transfer_to_account_id,
+            `SELECT id, account_id, type, amount, currency, date, description, transfer_to_account_id,
                   import_source, import_external_id, import_fingerprint,
                   import_content_fingerprint, updated_at
            FROM transactions WHERE account_id = ? AND import_source = ? AND import_external_id = ? ORDER BY id`,
             [accountId, sourceNamespace, externalId]
           )
         : await tx.query<ExistingRow>(
-            `SELECT id, account_id, type, amount, currency, date, transfer_to_account_id,
+            `SELECT id, account_id, type, amount, currency, date, description, transfer_to_account_id,
                   import_source, import_external_id, import_fingerprint,
                   import_content_fingerprint, updated_at
            FROM transactions WHERE account_id = ? AND import_fingerprint = ? ORDER BY id`,
@@ -270,72 +324,87 @@ async function createPlan(
     let action: PlannedStatementRow['action'] = 'create'
     const selectedDecisions: ImportReviewDecision[] = []
     let existingTransactionId: string | undefined
-    if (externalId === null) {
-      const candidates = await tx.query<ExistingRow>(
-        `SELECT id, account_id, type, amount, currency, date, transfer_to_account_id,
-                import_source, import_external_id, import_fingerprint,
-                import_content_fingerprint, updated_at
-         FROM transactions
-         WHERE account_id = ? AND type = ? AND amount = ? AND UPPER(currency) = ?
-           AND date BETWEEN date(?, '-1 day') AND date(?, '+1 day')
-           AND COALESCE(is_archived, 0) = 0
-         ORDER BY date DESC, created_at DESC, id DESC`,
-        [
-          accountId,
-          preparedRow.transaction.type,
-          preparedRow.amountCentavos,
-          accountCurrency.toUpperCase(),
-          preparedRow.transaction.date,
-          preparedRow.transaction.date,
-        ]
+    const candidates = await tx.query<ExistingRow>(
+      `SELECT id, account_id, type, amount, currency, date, description, transfer_to_account_id,
+              import_source, import_external_id, import_fingerprint,
+              import_content_fingerprint, updated_at
+       FROM transactions
+       WHERE account_id = ? AND type = ? AND amount = ? AND UPPER(currency) = ?
+         AND date BETWEEN date(?, '-1 day') AND date(?, '+1 day')
+         AND COALESCE(is_archived, 0) = 0
+       ORDER BY date DESC, created_at DESC, id DESC`,
+      [
+        accountId,
+        preparedRow.transaction.type,
+        preparedRow.amountCentavos,
+        accountCurrency.toUpperCase(),
+        preparedRow.transaction.date,
+        preparedRow.transaction.date,
+      ]
+    )
+    for (const candidate of candidates) {
+      // Different durable external identities are authoritative. An incoming ID alone cannot
+      // distinguish an otherwise unbound legacy row with the same financial fields.
+      if (externalId !== null && hasVerifiedExternalIdentity(candidate)) continue
+      const evidence = evidenceFingerprint(candidate)
+      reviewCandidates.push({
+        candidateIdentityKey: identity.identityKey,
+        existingTransactionId: candidate.id,
+        incoming: {
+          rowIndex: index,
+          date: preparedRow.transaction.date.slice(0, 10),
+          description: preparedRow.transaction.description.slice(0, 200),
+          type: preparedRow.transaction.type,
+          amountCentavos: preparedRow.amountCentavos,
+          currency: accountCurrency.slice(0, 10),
+        },
+        existing: {
+          id: candidate.id,
+          date: candidate.date.slice(0, 10),
+          description: candidate.description.slice(0, 200),
+          type: candidate.type,
+          amountCentavos: candidate.amount,
+          currency: candidate.currency.slice(0, 10),
+        },
+      })
+      const supplied = decisions.find(
+        (decision) =>
+          decision.candidateIdentityKey === identity.identityKey &&
+          decision.candidateContentFingerprint === identity.contentFingerprint &&
+          decision.existingTransactionId === candidate.id &&
+          decision.existingEvidenceFingerprint === evidence
       )
-      for (const candidate of candidates) {
-        const evidence = evidenceFingerprint(candidate)
-        const supplied = decisions.find(
-          (decision) =>
-            decision.candidateIdentityKey === identity.identityKey &&
-            decision.candidateContentFingerprint === identity.contentFingerprint &&
-            decision.existingTransactionId === candidate.id &&
-            decision.existingEvidenceFingerprint === evidence
-        )
-        const persisted = supplied
-          ? undefined
-          : (
-              await tx.query<ImportReviewDecision>(
-                `SELECT candidate_identity_key AS candidateIdentityKey,
-                        candidate_content_fingerprint AS candidateContentFingerprint,
-                        existing_transaction_id AS existingTransactionId,
-                        existing_evidence_fingerprint AS existingEvidenceFingerprint, decision
-                 FROM duplicate_review_decisions
-                 WHERE account_id=? AND candidate_identity_key=? AND candidate_content_fingerprint=?
-                   AND existing_transaction_id=? AND existing_evidence_fingerprint=?
-                 ORDER BY created_at DESC, id DESC LIMIT 1`,
-                [
-                  accountId,
-                  identity.identityKey,
-                  identity.contentFingerprint,
-                  candidate.id,
-                  evidence,
-                ]
-              )
-            )[0]
-        const decision = supplied ?? persisted
-        if (!decision) {
-          requiredDecisions.push({
-            candidateIdentityKey: identity.identityKey,
-            candidateContentFingerprint: identity.contentFingerprint,
-            existingTransactionId: candidate.id,
-            existingEvidenceFingerprint: evidence,
-            decision: 'keep_existing',
-          })
-          continue
-        }
-        if (supplied) used.add(supplied)
-        selectedDecisions.push(decision)
-        existingTransactionId = candidate.id
-        if (decision.decision === 'keep_existing') action = 'keep_existing'
-        else if (action !== 'keep_existing') action = 'distinct'
+      const persisted = supplied
+        ? undefined
+        : (
+            await tx.query<ImportReviewDecision>(
+              `SELECT candidate_identity_key AS candidateIdentityKey,
+                      candidate_content_fingerprint AS candidateContentFingerprint,
+                      existing_transaction_id AS existingTransactionId,
+                      existing_evidence_fingerprint AS existingEvidenceFingerprint, decision
+               FROM duplicate_review_decisions
+               WHERE account_id=? AND candidate_identity_key=? AND candidate_content_fingerprint=?
+                 AND existing_transaction_id=? AND existing_evidence_fingerprint=?
+               ORDER BY created_at DESC, id DESC LIMIT 1`,
+              [accountId, identity.identityKey, identity.contentFingerprint, candidate.id, evidence]
+            )
+          )[0]
+      const decision = supplied ?? persisted
+      if (!decision) {
+        requiredDecisions.push({
+          candidateIdentityKey: identity.identityKey,
+          candidateContentFingerprint: identity.contentFingerprint,
+          existingTransactionId: candidate.id,
+          existingEvidenceFingerprint: evidence,
+          decision: 'keep_existing',
+        })
+        continue
       }
+      if (supplied) used.add(supplied)
+      selectedDecisions.push(decision)
+      existingTransactionId = candidate.id
+      if (decision.decision === 'keep_existing') action = 'keep_existing'
+      else if (action !== 'keep_existing') action = 'distinct'
     }
     const planned: PlannedStatementRow = {
       ...preparedRow,
@@ -370,16 +439,75 @@ async function createPlan(
       existingTransactionId: row.existingTransactionId ?? null,
     })),
     requiredDecisions,
+    reviewCandidates,
+    sourceLimitations,
   })
   return {
     accountCurrency,
+    accountBalance: account.balance,
     databaseId: state.database_id,
     revision: state.data_revision,
     rows,
     requiredDecisions,
+    reviewCandidates,
+    sourceLimitations,
     legacyEvidenceLimitations,
     token,
   }
+}
+
+const MAX_SAFE_CENTAVOS = BigInt(Number.MAX_SAFE_INTEGER)
+const MIN_SAFE_CENTAVOS = BigInt(Number.MIN_SAFE_INTEGER)
+
+function assertSafeCentavos(value: bigint, label: string): void {
+  if (value < MIN_SAFE_CENTAVOS || value > MAX_SAFE_CENTAVOS) {
+    throw new Error(`${label} is outside the safe integer range`)
+  }
+}
+
+function plannedBalanceDelta(plan: StatementPlan): number {
+  let aggregate = 0n
+  let resultingBalance = BigInt(plan.accountBalance)
+  for (const row of plan.rows) {
+    if (row.action !== 'create' && row.action !== 'distinct') continue
+    const effect = BigInt(row.amountCentavos) * (row.transaction.type === 'income' ? 1n : -1n)
+    aggregate += effect
+    resultingBalance += effect
+    assertSafeCentavos(aggregate, 'Statement import balance delta')
+    assertSafeCentavos(resultingBalance, 'Statement import resulting balance')
+  }
+  return Number(aggregate)
+}
+
+async function writeImportAudit(
+  tx: TransactionClient,
+  input: {
+    entity: 'transaction' | 'duplicate_review_decision'
+    entityId: string
+    action: 'create' | 'review-import-duplicate'
+    before: unknown
+    after: unknown
+    source: string
+    note: string
+    createdAt: string
+  }
+): Promise<void> {
+  await tx.execute(
+    `INSERT INTO audit_log
+       (id, entity, entity_id, action, before_json, after_json, source, note, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      generateId(),
+      input.entity,
+      input.entityId,
+      input.action,
+      JSON.stringify(input.before),
+      JSON.stringify(input.after),
+      input.source,
+      input.note,
+      input.createdAt,
+    ]
+  )
 }
 
 async function parseFile(file: File): Promise<{ content: string; parsed: ParsedTransaction[] }> {
@@ -409,6 +537,8 @@ export async function previewStatementFile(
         .length,
       errors: [],
       requiredDecisions: plan.requiredDecisions,
+      reviewCandidates: plan.reviewCandidates,
+      limitations: [...plan.sourceLimitations, ...plan.legacyEvidenceLimitations],
       legacyEvidenceLimitations: plan.legacyEvidenceLimitations,
     }
   } catch (error) {
@@ -420,6 +550,8 @@ export async function previewStatementFile(
       skipped: 0,
       errors: [getErrorMessage(error)],
       requiredDecisions: [],
+      reviewCandidates: [],
+      limitations: [],
       legacyEvidenceLimitations: [],
     }
   }
@@ -453,13 +585,19 @@ export async function importStatementFile(
       }
       const sourceNamespace = statementSourceNamespace(file.name)
       const now = new Date().toISOString()
+      const balanceDelta = plannedBalanceDelta(plan)
+      let runningBalance = plan.accountBalance
       let imported = 0
       let skipped = 0
-      let balanceDelta = 0
       for (const row of plan.rows) {
         if (row.action === 'skip' || row.action === 'keep_existing') {
           skipped++
         } else {
+          const transactionId = generateId()
+          const rowDelta =
+            row.transaction.type === 'income' ? row.amountCentavos : -row.amountCentavos
+          const previousBalance = runningBalance
+          runningBalance += rowDelta
           await tx.execute(
             `INSERT INTO transactions (
                id, account_id, category_id, type, amount, currency, description, notes, date,
@@ -467,7 +605,7 @@ export async function importStatementFile(
                created_at, updated_at
              ) VALUES (?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
             [
-              generateId(),
+              transactionId,
               accountId,
               row.transaction.type,
               row.amountCentavos,
@@ -482,8 +620,43 @@ export async function importStatementFile(
               now,
             ]
           )
-          balanceDelta +=
-            row.transaction.type === 'income' ? row.amountCentavos : -row.amountCentavos
+          await writeImportAudit(tx, {
+            entity: 'transaction',
+            entityId: transactionId,
+            action: 'create',
+            before: null,
+            after: {
+              transaction: {
+                id: transactionId,
+                accountId,
+                categoryId: null,
+                type: row.transaction.type,
+                amountCentavos: row.amountCentavos,
+                currency: plan.accountCurrency,
+                description: row.transaction.description,
+                notes: null,
+                date: row.transaction.date,
+                status: 'posted',
+                source: null,
+                ledgerTreatment: 'normal',
+                reportingTreatment: 'normal',
+                transactionKind: 'standard',
+                importSource: sourceNamespace,
+                importExternalId: row.transaction.externalId ?? null,
+                importFingerprint: row.importFingerprint,
+                importContentFingerprint: row.contentFingerprint,
+              },
+              balance: {
+                accountId,
+                previousBalanceCentavos: previousBalance,
+                newBalanceCentavos: runningBalance,
+                deltaCentavos: rowDelta,
+              },
+            },
+            source: 'statement-import',
+            note: 'Created during atomic statement import',
+            createdAt: now,
+          })
           imported++
         }
         for (const reviewedDecision of row.decisions ?? []) {
@@ -518,21 +691,42 @@ export async function importStatementFile(
             )
           )[0]
           if (alreadyStored) continue
+          const decisionId = generateId()
+          const decisionSource = 'statement-import'
+          const decisionNote = 'Reviewed during atomic statement import'
           await tx.execute(
             `INSERT INTO duplicate_review_decisions (
                id, account_id, existing_transaction_id, candidate_identity_key,
                candidate_content_fingerprint, existing_evidence_fingerprint, decision, source, note
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, 'statement-import', 'Reviewed during atomic statement import')`,
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-              generateId(),
+              decisionId,
               accountId,
               reviewedDecision.existingTransactionId,
               reviewedDecision.candidateIdentityKey,
               reviewedDecision.candidateContentFingerprint,
               reviewedDecision.existingEvidenceFingerprint,
               reviewedDecision.decision,
+              decisionSource,
+              decisionNote,
             ]
           )
+          await writeImportAudit(tx, {
+            entity: 'duplicate_review_decision',
+            entityId: decisionId,
+            action: 'review-import-duplicate',
+            before: null,
+            after: {
+              id: decisionId,
+              accountId,
+              ...reviewedDecision,
+              source: decisionSource,
+              note: decisionNote,
+            },
+            source: decisionSource,
+            note: decisionNote,
+            createdAt: now,
+          })
         }
       }
       if (imported) {

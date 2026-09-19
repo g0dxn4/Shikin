@@ -679,7 +679,7 @@ const OPTIONAL_EXPORT_TABLES = new Set([
 ])
 
 const REDACTED_FIELD_PATTERN =
-  /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key|payer|project[_-]?reference|invoice[_-]?reference|notes?|description|url|value|summary|tags|source|reason|before_json|after_json|pattern|highlights_json|breakdown_json|document_ref|replacement_transaction_ids_json|source_before_json|mirror_before_json)/i
+  /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key|payer|project[_-]?reference|invoice[_-]?reference|notes?|description|url|value|summary|tags|source|reason|import[_-]?external[_-]?id|import[_-]?fingerprint|before_json|after_json|pattern|highlights_json|breakdown_json|document_ref|replacement_transaction_ids_json|source_before_json|mirror_before_json)/i
 const REDACTED_SETTINGS_VALUE_KEYS = new Set([FINANCE_PROFILE_SETTING_KEY, 'account_aliases'])
 
 function stableJsonValue(value: unknown): unknown {

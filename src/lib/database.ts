@@ -412,6 +412,11 @@ async function getTauriDb(): Promise<TauriDatabase> {
       try {
         await enableTauriForeignKeys(loaded)
         await runTauriMigrations(loaded)
+        // Database initialization is the only native identity creation boundary.
+        // Rust performs exclusive creation; an existing valid identity wins.
+        await invokeTauri<string>('initialize_runtime_identity', {
+          localInstanceId: crypto.randomUUID(),
+        })
         tauriDb = loaded
         return loaded
       } catch (error) {

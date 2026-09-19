@@ -1019,7 +1019,7 @@ function assertCliQolSchemaReady(db: Database.Database, dbPath: string): void {
   assertTransactionStatusReady(db, dbPath)
 }
 
-function assertShikinSchemaReady(db: Database.Database, dbPath = DB_PATH): void {
+export function assertShikinSchemaReady(db: Database.Database, dbPath = DB_PATH): void {
   const existingTables = getTableNames(db)
   const missingTables = REQUIRED_CORE_TABLES.filter((tableName) => !existingTables.has(tableName))
 

@@ -1,4 +1,5 @@
 mod database_snapshot;
+mod runtime_identity;
 
 use std::{
     env,
@@ -1320,6 +1321,8 @@ pub fn run() {
             shikin_db_tx_rollback,
             database_snapshot::shikin_db_create_snapshot,
             database_snapshot::shikin_db_restore_snapshot,
+            runtime_identity::initialize_runtime_identity,
+            runtime_identity::read_runtime_diagnostics,
             get_web_server_status,
             apply_web_server_settings,
         ])

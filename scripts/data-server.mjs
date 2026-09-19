@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import { randomUUID } from 'node:crypto'
 import dayjs from 'dayjs'
 import {
   readFileSync,
@@ -36,6 +37,7 @@ import {
   prepareStorageContext,
 } from './app-data-dir.mjs'
 import { exportDatabaseBuffer, importDatabaseBuffer } from './data-server-db.mjs'
+import { initializeRuntimeIdentity, readRuntimeIdentity } from './runtime-identity.mjs'
 import {
   buildBridgeCorsHeaders,
   safePathNoSymlinks,
@@ -1533,6 +1535,9 @@ function runBackendFoundationUpgrade(applied) {
 
 try {
   runMigrations()
+  // Startup is the authorized initialization boundary. Reads never create or
+  // repair this identity, and database restore leaves the sidecar untouched.
+  initializeRuntimeIdentity(DATA_DIR, randomUUID())
 } catch (error) {
   try {
     db?.close()
@@ -2241,6 +2246,30 @@ async function handleFsMakeDirectory(req, res) {
   return sendJson(res, { ok: true })
 }
 
+function handleRuntimeDiagnostics(res) {
+  const migration = db.prepare('SELECT id, name FROM _migrations ORDER BY id DESC LIMIT 1').get()
+  const state = db
+    .prepare(
+      'SELECT database_id, data_revision, last_financial_write_at FROM app_data_state WHERE id = 1'
+    )
+    .get()
+  if (!migration || !state) {
+    throw new Error('Runtime diagnostics metadata is unavailable.')
+  }
+
+  return sendJson(res, {
+    success: true,
+    build: HOSTED_MODE ? 'hosted-web' : 'browser-development',
+    version: '1.0.10',
+    schemaVersion: migration.id,
+    schemaMigration: migration.name,
+    databaseLineageId: state.database_id,
+    localInstance: readRuntimeIdentity(DATA_DIR),
+    dataRevision: state.data_revision,
+    lastFinancialWriteAt: state.last_financial_write_at,
+  })
+}
+
 async function handleDbExport(res) {
   ensureNoActiveTransactions('export the database')
   const bytes = await exportDatabaseBuffer({ db, dbPath: DB_PATH })
@@ -2347,6 +2376,10 @@ function dispatchRequest(req, res, url, path) {
   }
 
   switch (route) {
+    // ── Runtime diagnostics (read-only, no public paths) ───────────
+    case 'GET /api/runtime/diagnostics':
+      return handleRuntimeDiagnostics(res)
+
     // ── FS: App data path ──────────────────────────────────────────
     case 'GET /api/fs/appdata':
       return handleFsAppData(res)

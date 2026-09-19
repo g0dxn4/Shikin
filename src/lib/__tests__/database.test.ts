@@ -372,21 +372,25 @@ describe('database Tauri transactions', () => {
       write: { rowsAffected: 1, lastInsertId: 0 },
     })
     expect(invoke.mock.calls.map(([command]) => command)).toEqual([
+      'initialize_runtime_identity',
       'shikin_db_tx_begin',
       'shikin_db_tx_query',
       'shikin_db_tx_execute',
       'shikin_db_tx_commit',
     ])
-    const transactionId = invoke.mock.calls[0][1]?.transactionId
+    expect(invoke.mock.calls[0][1]?.localInstanceId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    )
+    const transactionId = invoke.mock.calls[1][1]?.transactionId
     expect(transactionId).toMatch(/^shikin-tx-/)
-    expect(invoke.mock.calls[1][1]).toEqual({
+    expect(invoke.mock.calls[2][1]).toEqual({
       statement: {
         transactionId,
         query: 'SELECT id FROM accounts WHERE id = $1',
         values: ['acct-1'],
       },
     })
-    expect(invoke.mock.calls[3][1]).toEqual({ transactionId })
+    expect(invoke.mock.calls[4][1]).toEqual({ transactionId })
   })
 
   it('keeps the original desktop error when rollback also fails', async () => {
@@ -407,6 +411,7 @@ describe('database Tauri transactions', () => {
     ).rejects.toThrow('original write failure')
 
     expect(invoke.mock.calls.map(([command]) => command)).toEqual([
+      'initialize_runtime_identity',
       'shikin_db_tx_begin',
       'shikin_db_tx_execute',
       'shikin_db_tx_rollback',
@@ -430,14 +435,15 @@ describe('database Tauri transactions', () => {
     ).rejects.toThrow('commit failed')
 
     expect(invoke.mock.calls.map(([command]) => command)).toEqual([
+      'initialize_runtime_identity',
       'shikin_db_tx_begin',
       'shikin_db_tx_execute',
       'shikin_db_tx_commit',
       'shikin_db_tx_rollback',
     ])
-    const transactionId = invoke.mock.calls[0][1]?.transactionId
-    expect(invoke.mock.calls[2][1]).toEqual({ transactionId })
+    const transactionId = invoke.mock.calls[1][1]?.transactionId
     expect(invoke.mock.calls[3][1]).toEqual({ transactionId })
+    expect(invoke.mock.calls[4][1]).toEqual({ transactionId })
   })
 
   it('waits for a desktop transaction before running normal plugin queries', async () => {

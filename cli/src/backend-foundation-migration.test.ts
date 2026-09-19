@@ -99,7 +99,10 @@ async function mockNative(db: Database.Database, fail = false) {
     return { rowsAffected: result.changes, lastInsertId: Number(result.lastInsertRowid) }
   }
   const invoke = vi.fn(
-    async (command: string, args: { statement?: { query: string; values: unknown[] } }) => {
+    async (
+      command: string,
+      args: { statement?: { query: string; values: unknown[] }; localInstanceId?: string }
+    ) => {
       if (command === 'shikin_db_tx_begin') return db.exec('BEGIN IMMEDIATE')
       if (command === 'shikin_db_tx_commit') return db.exec('COMMIT')
       if (command === 'shikin_db_tx_rollback') return db.exec('ROLLBACK')
@@ -107,6 +110,7 @@ async function mockNative(db: Database.Database, fail = false) {
       if (command === 'shikin_db_tx_query')
         return db.prepare(statement.query).all(...statement.values)
       if (command === 'shikin_db_tx_execute') return execute(statement.query, statement.values)
+      if (command === 'initialize_runtime_identity') return args.localInstanceId
       throw new Error(`Unexpected ${command}`)
     }
   )
@@ -448,7 +452,7 @@ describe('021 backend remediation foundation', () => {
       }
       const commands = invoke.mock.calls.map((call) => call[0])
       expect(commands.filter((c) => c === 'shikin_db_tx_begin')).toHaveLength(1)
-      expect(commands.at(-1)).toBe(fail ? 'shikin_db_tx_rollback' : 'shikin_db_tx_commit')
+      expect(commands.at(-1)).toBe(fail ? 'shikin_db_tx_rollback' : 'initialize_runtime_identity')
     }
   )
 

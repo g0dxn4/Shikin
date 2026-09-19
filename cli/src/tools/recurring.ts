@@ -470,7 +470,7 @@ function planRecurringRuleCreation(
   }
   if (type === 'transfer') return unsupportedRecurringTransferFailure()
 
-  const resolvedCategory = resolveCategoryId(category)
+  const resolvedCategory = resolveCategoryId(category ?? undefined)
   if (!resolvedCategory.success) {
     return { success: false, message: resolvedCategory.message }
   }

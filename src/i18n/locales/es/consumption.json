@@ -49,6 +49,14 @@
     "filter": "Sin clasificar",
     "reason": "Falta el rol de consumo"
   },
+  "period": {
+    "label": "Periodo de consumo neto",
+    "start": "Fecha de inicio",
+    "end": "Fecha de fin",
+    "currentMonth": "Mes actual",
+    "previousMonth": "Mes anterior",
+    "invalid": "Introduce fechas de calendario reales, con el inicio igual o anterior al fin."
+  },
   "report": {
     "title": "Consumo neto",
     "knownOnly": "Solo subtotales conocidos",

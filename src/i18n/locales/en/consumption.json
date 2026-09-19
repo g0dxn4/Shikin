@@ -49,6 +49,14 @@
     "filter": "Unclassified",
     "reason": "Consumption role missing"
   },
+  "period": {
+    "label": "Net consumption period",
+    "start": "Start date",
+    "end": "End date",
+    "currentMonth": "Current month",
+    "previousMonth": "Previous month",
+    "invalid": "Enter real calendar dates, with start on or before end."
+  },
   "report": {
     "title": "Net consumption",
     "knownOnly": "Known subtotals only",

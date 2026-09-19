@@ -110,7 +110,14 @@
     "empty": "No card or cash accounts",
     "emptyDescription": "Add a checking, savings, cash, or credit-card account for everyday tracking.",
     "investmentsSeparate": "Investments stay separate",
-    "investmentsSeparateDescription": "{{count}} investment or crypto account(s) should be managed from Investments, not mixed with bank and card balances."
+    "investmentsSeparateDescription": "{{count}} investment or crypto account(s) stay out of bank and card totals. Manage the account records here; holdings stay on Investments.",
+    "investmentsShow": "Show investment accounts",
+    "investmentsHide": "Hide investment accounts",
+    "investmentsArchived": "Archived investment accounts"
+  },
+  "link": {
+    "unknown": "No account matches this link.",
+    "located": "Showing the linked account."
   },
   "currency": {
     "unavailable": "Total unavailable",

@@ -166,6 +166,23 @@ describe('frontend consumption service on SQLite', () => {
     expect(snapshot()).toEqual(before)
   })
 
+  it('rejects rolled, malformed, and inverted report dates before querying', async () => {
+    const before = snapshot()
+    await expect(readNetConsumptionReport('2026-02-31', '2026-02-31')).rejects.toThrow(
+      'A valid report date range is required.'
+    )
+    await expect(readNetConsumptionReport('2026-13-01', '2026-13-01')).rejects.toThrow(
+      'A valid report date range is required.'
+    )
+    await expect(readNetConsumptionReport('2026-02-01', '2026-01-31')).rejects.toThrow(
+      'A valid report date range is required.'
+    )
+    await expect(readNetConsumptionReport('20260201', '2026-02-28')).rejects.toThrow(
+      'A valid report date range is required.'
+    )
+    expect(snapshot()).toEqual(before)
+  })
+
   it('rejects protected and receivable evidence without writing', async () => {
     state.db!.exec(`
       INSERT INTO receivables (id, payer, amount, currency, due_date, status, matched_transaction_id)

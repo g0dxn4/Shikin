@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { Accounts } from '../accounts'
 import { useCurrencyStore } from '@/stores/currency-store'
 
-function renderAccounts() {
+function renderAccounts(path = '/accounts') {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[path]}>
       <Accounts />
     </MemoryRouter>
   )
@@ -22,6 +22,15 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
+}))
+
+vi.mock('@/components/accounts/card-statements-dialog', () => ({
+  CardStatementsAction: ({ account }: { account: { type: string; name: string } }) =>
+    account.type === 'credit_card' ? (
+      <button type="button" className="min-h-11">
+        {`statements ${account.name}`}
+      </button>
+    ) : null,
 }))
 
 vi.mock('@/components/shared/confirm-dialog', () => ({
@@ -644,5 +653,174 @@ describe('Accounts', () => {
     await user.click(screen.getByRole('button', { name: 'history.hide' }))
     expect(screen.queryByText('history.none')).not.toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'history.show' })).toHaveLength(2)
+  })
+
+  it('mounts card statement actions next to credit-card payment shortcuts', () => {
+    mockAccounts = [
+      { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 0 },
+      {
+        id: 'acc-card',
+        name: 'Travel Card',
+        type: 'credit_card',
+        currency: 'USD',
+        balance: -10000,
+        credit_limit: 100000,
+      },
+    ]
+
+    renderAccounts()
+
+    const statements = screen.getByRole('button', { name: 'statements Travel Card' })
+    const payCard = screen.getByLabelText('Pay Travel Card')
+    expect(statements).toHaveClass('min-h-11')
+    expect(statements.parentElement).toBe(payCard.parentElement)
+    expect(screen.queryByRole('button', { name: 'statements Checking' })).not.toBeInTheDocument()
+  })
+
+  it('keeps investment accounts out of liquidity figures until the separate list is opened', async () => {
+    const user = userEvent.setup()
+    mockAccounts = [
+      { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 10000 },
+      {
+        id: 'acc-broker',
+        name: 'Brokerage',
+        type: 'investment',
+        currency: 'USD',
+        balance: 9_990_000,
+        account_mode: 'transactional',
+      },
+    ]
+
+    renderAccounts()
+
+    expect(screen.getByText('list.investmentsSeparate')).toBeInTheDocument()
+    expect(screen.queryByRole('article', { name: 'Brokerage' })).not.toBeInTheDocument()
+    expect(screen.getAllByText('$100.00').length).toBeGreaterThan(0)
+    expect(screen.queryByText('$99,900.00')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /list.investmentsShow/i }))
+    const brokerage = screen.getByRole('article', { name: 'Brokerage' })
+    expect(brokerage).toBeInTheDocument()
+    expect(screen.getByText('$99,900.00')).toBeInTheDocument()
+    expect(within(brokerage).getByRole('button', { name: 'action' })).toBeInTheDocument()
+  })
+
+  it('hides history maintenance on snapshot-only investment accounts', async () => {
+    mockAccounts = [
+      {
+        id: 'acc-crypto',
+        name: 'Hardware Wallet',
+        type: 'crypto',
+        currency: 'USD',
+        balance: 5000,
+        account_mode: 'snapshot_only',
+      },
+    ]
+
+    renderAccounts()
+
+    expect(await screen.findByRole('article', { name: 'Hardware Wallet' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'action' })).not.toBeInTheDocument()
+  })
+
+  it('exposes archived investment accounts in the separate list, not the cash archive', async () => {
+    mockArchivedAccounts = [
+      {
+        id: 'acc-old-broker',
+        name: 'Old Brokerage',
+        type: 'investment',
+        currency: 'USD',
+        balance: 0,
+      },
+    ]
+
+    renderAccounts()
+
+    expect(screen.getByText('noActive.title')).toBeInTheDocument()
+    expect(screen.queryByText('archived.title')).not.toBeInTheDocument()
+    expect(await screen.findByRole('article', { name: 'Old Brokerage' })).toBeInTheDocument()
+  })
+
+  it('focuses an active cash account from the account query after load', async () => {
+    mockAccounts = [
+      { id: 'acc-active', name: 'Daily Checking', type: 'checking', currency: 'USD', balance: 0 },
+    ]
+
+    renderAccounts('/accounts?account=acc-active')
+
+    const card = await screen.findByRole('article', { name: 'Daily Checking' })
+    await waitFor(() => expect(card).toHaveFocus())
+    expect(card).toHaveAttribute('aria-current', 'true')
+    expect(screen.getByText('link.located')).toBeInTheDocument()
+  })
+
+  it('focuses a credit card from the account query', async () => {
+    mockAccounts = [
+      {
+        id: 'acc-card',
+        name: 'Travel Card',
+        type: 'credit_card',
+        currency: 'USD',
+        balance: -10000,
+      },
+    ]
+
+    renderAccounts('/accounts?account=acc-card')
+
+    const card = await screen.findByRole('article', { name: 'Travel Card' })
+    await waitFor(() => expect(card).toHaveFocus())
+    expect(card).toHaveAttribute('aria-current', 'true')
+  })
+
+  it('reveals and focuses a portfolio account from the account query', async () => {
+    mockAccounts = [
+      { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 0 },
+      {
+        id: 'acc-broker',
+        name: 'Brokerage',
+        type: 'investment',
+        currency: 'USD',
+        balance: 0,
+      },
+    ]
+
+    renderAccounts('/accounts?account=acc-broker')
+
+    const card = await screen.findByRole('article', { name: 'Brokerage' })
+    await waitFor(() => expect(card).toHaveFocus())
+    expect(card).toHaveAttribute('aria-current', 'true')
+    expect(screen.getByRole('button', { name: /list.investmentsHide/i })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    )
+  })
+
+  it('reveals and focuses an archived cash account from the account query', async () => {
+    mockAccounts = [
+      { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 0 },
+    ]
+    mockArchivedAccounts = [
+      { id: 'acc-archived', name: 'Old Account', type: 'checking', currency: 'USD', balance: 0 },
+    ]
+
+    renderAccounts('/accounts?account=acc-archived')
+
+    const card = await screen.findByRole('article', { name: 'Old Account' })
+    await waitFor(() => expect(card).toHaveFocus())
+    expect(card).toHaveAttribute('aria-current', 'true')
+  })
+
+  it('does not guess a different account when the linked id is unknown', async () => {
+    mockAccounts = [
+      { id: 'acc-1', name: 'Daily Checking', type: 'checking', currency: 'USD', balance: 0 },
+    ]
+
+    renderAccounts('/accounts?account=Daily%20Checking')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('link.unknown')
+    const card = screen.getByRole('article', { name: 'Daily Checking' })
+    expect(card).not.toHaveAttribute('aria-current')
+    expect(card).not.toHaveFocus()
+    expect(screen.queryByText('link.located')).not.toBeInTheDocument()
   })
 })

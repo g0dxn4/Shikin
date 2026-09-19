@@ -110,7 +110,14 @@
     "empty": "Sin cuentas de efectivo o tarjetas",
     "emptyDescription": "Agrega una cuenta corriente, de ahorros, efectivo o tarjeta para el seguimiento diario.",
     "investmentsSeparate": "Las inversiones se mantienen aparte",
-    "investmentsSeparateDescription": "{{count}} cuenta(s) de inversión o cripto deben gestionarse en Inversiones, no mezclarse con saldos bancarios y de tarjetas."
+    "investmentsSeparateDescription": "{{count}} cuenta(s) de inversión o cripto no entran en los totales de bancos y tarjetas. Gestiona el registro de la cuenta aquí; las posiciones siguen en Inversiones.",
+    "investmentsShow": "Mostrar cuentas de inversión",
+    "investmentsHide": "Ocultar cuentas de inversión",
+    "investmentsArchived": "Cuentas de inversión archivadas"
+  },
+  "link": {
+    "unknown": "Ninguna cuenta coincide con este enlace.",
+    "located": "Mostrando la cuenta vinculada."
   },
   "currency": {
     "unavailable": "Total no disponible",

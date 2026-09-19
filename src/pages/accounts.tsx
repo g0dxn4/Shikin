@@ -2,13 +2,14 @@ import {
   useEffect,
   useState,
   useMemo,
+  useRef,
   lazy,
   Suspense,
   useCallback,
   type FormEvent,
   type ReactNode,
 } from 'react'
-import { Link } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import {
   Landmark,
@@ -52,6 +53,7 @@ import {
 } from '@/components/ui/select'
 import { MetricItem, MetricStrip, NativePanel, PageToolbar } from '@/components/ui/native-layout'
 import { AccountMaintenanceAction } from '@/components/accounts/account-maintenance-dialog'
+import { CardStatementsAction } from '@/components/accounts/card-statements-dialog'
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
 import { useTransactionStore } from '@/stores/transaction-store'
@@ -77,9 +79,37 @@ function formatConverted(total: ConvertedTotal): string {
   return formatMoney(total.amountCentavos, total.preferredCurrency)
 }
 
+function isInvestmentLike(account: Pick<Account, 'type'>): boolean {
+  return account.type === 'investment' || account.type === 'crypto'
+}
+
+function findExactAccount(
+  accountId: string,
+  groups: {
+    liquid: Account[]
+    archivedLiquid: Account[]
+    investments: Account[]
+    archivedInvestments: Account[]
+  }
+): {
+  account: Account
+  group: 'liquid' | 'archivedLiquid' | 'investment' | 'archivedInvestment'
+} | null {
+  const liquid = groups.liquid.find((account) => account.id === accountId)
+  if (liquid) return { account: liquid, group: 'liquid' }
+  const archivedLiquid = groups.archivedLiquid.find((account) => account.id === accountId)
+  if (archivedLiquid) return { account: archivedLiquid, group: 'archivedLiquid' }
+  const investment = groups.investments.find((account) => account.id === accountId)
+  if (investment) return { account: investment, group: 'investment' }
+  const archivedInvestment = groups.archivedInvestments.find((account) => account.id === accountId)
+  if (archivedInvestment) return { account: archivedInvestment, group: 'archivedInvestment' }
+  return null
+}
+
 export function Accounts() {
   const { t } = useTranslation('accounts')
   const { t: tCommon } = useTranslation('common')
+  const [searchParams] = useSearchParams()
   const { openAccountDialog } = useUIStore()
   const addTransaction = useTransactionStore((s) => s.add)
   const {
@@ -106,35 +136,44 @@ export function Accounts() {
   const [settingPrimaryId, setSettingPrimaryId] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [showArchived, setShowArchived] = useState(false)
+  const [showInvestments, setShowInvestments] = useState(false)
+  const [accountsReady, setAccountsReady] = useState(false)
+  const [accountLinkStatus, setAccountLinkStatus] = useState<'idle' | 'found' | 'missing'>('idle')
+  const focusedLinkId = useRef<string | null>(null)
   const [paymentCard, setPaymentCard] = useState<Account | null>(null)
   const [paymentSourceId, setPaymentSourceId] = useState('')
   const [paymentAmount, setPaymentAmount] = useState('')
   const [isPayingCard, setIsPayingCard] = useState(false)
+  const requestedAccountId = searchParams.get('account')?.trim() || null
+  const requestedAccountIdRef = useRef(requestedAccountId)
+  requestedAccountIdRef.current = requestedAccountId
 
   useEffect(() => {
-    void fetch().catch(() => {})
+    let cancelled = false
+    void fetch()
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled && requestedAccountIdRef.current) setAccountsReady(true)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [fetch])
 
   const liquidAccounts = useMemo(
-    () => accounts.filter((account) => account.type !== 'investment' && account.type !== 'crypto'),
+    () => accounts.filter((account) => !isInvestmentLike(account)),
     [accounts]
   )
   const archivedLiquidAccounts = useMemo(
-    () =>
-      archivedAccounts.filter(
-        (account) => account.type !== 'investment' && account.type !== 'crypto'
-      ),
+    () => archivedAccounts.filter((account) => !isInvestmentLike(account)),
     [archivedAccounts]
   )
   const investmentLikeAccounts = useMemo(
-    () => accounts.filter((account) => account.type === 'investment' || account.type === 'crypto'),
+    () => accounts.filter((account) => isInvestmentLike(account)),
     [accounts]
   )
   const archivedInvestmentLikeAccounts = useMemo(
-    () =>
-      archivedAccounts.filter(
-        (account) => account.type === 'investment' || account.type === 'crypto'
-      ),
+    () => archivedAccounts.filter((account) => isInvestmentLike(account)),
     [archivedAccounts]
   )
 
@@ -143,6 +182,63 @@ export function Accounts() {
       setShowArchived(true)
     }
   }, [archivedLiquidAccounts.length, liquidAccounts.length])
+
+  useEffect(() => {
+    if (
+      investmentLikeAccounts.length + archivedInvestmentLikeAccounts.length > 0 &&
+      liquidAccounts.length === 0 &&
+      archivedLiquidAccounts.length === 0
+    ) {
+      setShowInvestments(true)
+    }
+  }, [
+    archivedInvestmentLikeAccounts.length,
+    archivedLiquidAccounts.length,
+    investmentLikeAccounts.length,
+    liquidAccounts.length,
+  ])
+
+  useEffect(() => {
+    if (!requestedAccountId) {
+      focusedLinkId.current = null
+      setAccountLinkStatus('idle')
+      return
+    }
+    if (!accountsReady) return
+
+    const match = findExactAccount(requestedAccountId, {
+      liquid: liquidAccounts,
+      archivedLiquid: archivedLiquidAccounts,
+      investments: investmentLikeAccounts,
+      archivedInvestments: archivedInvestmentLikeAccounts,
+    })
+    if (!match) {
+      setAccountLinkStatus('missing')
+      return
+    }
+    setAccountLinkStatus('found')
+    if (match.group === 'archivedLiquid') setShowArchived(true)
+    if (match.group === 'investment' || match.group === 'archivedInvestment') {
+      setShowInvestments(true)
+    }
+  }, [
+    accountsReady,
+    archivedInvestmentLikeAccounts,
+    archivedLiquidAccounts,
+    investmentLikeAccounts,
+    liquidAccounts,
+    requestedAccountId,
+  ])
+
+  useEffect(() => {
+    if (accountLinkStatus !== 'found' || !requestedAccountId) return
+    if (focusedLinkId.current === requestedAccountId) return
+    const element = document.getElementById(`account-${requestedAccountId}`)
+    if (!element) return
+    element.scrollIntoView?.({ block: 'nearest' })
+    element.focus()
+    focusedLinkId.current = requestedAccountId
+  }, [accountLinkStatus, requestedAccountId, showArchived, showInvestments])
 
   const separatedInvestmentAccountCount =
     investmentLikeAccounts.length + archivedInvestmentLikeAccounts.length
@@ -355,6 +451,12 @@ export function Accounts() {
         }}
       />
 
+      {accountLinkStatus === 'missing' ? (
+        <div className="border-border bg-muted/40 rounded-lg border px-4 py-3 text-sm" role="alert">
+          {t('link.unknown')}
+        </div>
+      ) : null}
+
       {isLoading ? (
         <AccountsSkeleton />
       ) : hasInitialLoadError ? (
@@ -449,6 +551,7 @@ export function Accounts() {
                         <AccountCard
                           key={account.id}
                           account={account}
+                          linked={requestedAccountId === account.id}
                           isExpanded={expandedId === account.id}
                           onToggleExpand={() => toggleExpand(account.id)}
                           onEdit={() => openAccountDialog(account.id)}
@@ -528,22 +631,88 @@ export function Accounts() {
                   </div>
                 </NativePanel>
               </div>
+            </>
+          ) : (
+            <NativePanel className="p-5">
+              <h2 className="text-base font-semibold">{t('noActive.title')}</h2>
+              <p className="text-muted-foreground mt-1 text-sm">{t('noActive.description')}</p>
+            </NativePanel>
+          )}
 
-              {separatedInvestmentAccountCount > 0 && (
-                <NativePanel className="p-5">
+          {separatedInvestmentAccountCount > 0 && (
+            <NativePanel className="space-y-4 p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
                   <h2 className="text-base font-semibold">{t('list.investmentsSeparate')}</h2>
                   <p className="text-muted-foreground mt-1 text-sm">
                     {t('list.investmentsSeparateDescription', {
                       count: separatedInvestmentAccountCount,
                     })}
                   </p>
-                </NativePanel>
-              )}
-            </>
-          ) : (
-            <NativePanel className="p-5">
-              <h2 className="text-base font-semibold">{t('noActive.title')}</h2>
-              <p className="text-muted-foreground mt-1 text-sm">{t('noActive.description')}</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="min-h-11 w-full justify-between sm:w-auto sm:min-w-44"
+                  onClick={() => setShowInvestments((prev) => !prev)}
+                  aria-expanded={showInvestments}
+                >
+                  <span>
+                    {showInvestments ? t('list.investmentsHide') : t('list.investmentsShow')}
+                  </span>
+                  <span className="text-muted-foreground ml-2 text-xs">
+                    {separatedInvestmentAccountCount}
+                  </span>
+                </Button>
+              </div>
+              {showInvestments ? (
+                <div className="space-y-3">
+                  {investmentLikeAccounts.length > 0 ? (
+                    <div className="divide-border border-border divide-y rounded-lg border">
+                      {investmentLikeAccounts.map((account) => (
+                        <AccountCard
+                          key={account.id}
+                          account={account}
+                          linked={requestedAccountId === account.id}
+                          isExpanded={expandedId === account.id}
+                          onToggleExpand={() => toggleExpand(account.id)}
+                          onEdit={() => openAccountDialog(account.id)}
+                          onSetPrimary={() => handleSetPrimary(account.id)}
+                          isSettingPrimary={settingPrimaryId === account.id}
+                          onArchive={() => setArchiveId(account.id)}
+                          onDelete={() => setDeleteId(account.id)}
+                          t={t}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                  {archivedInvestmentLikeAccounts.length > 0 ? (
+                    <div className="space-y-2">
+                      <h3 className="text-sm font-semibold">{t('list.investmentsArchived')}</h3>
+                      <div className="divide-border border-border divide-y rounded-lg border">
+                        {archivedInvestmentLikeAccounts.map((account) => (
+                          <AccountCard
+                            key={account.id}
+                            account={account}
+                            linked={requestedAccountId === account.id}
+                            isExpanded={expandedId === account.id}
+                            onToggleExpand={() => toggleExpand(account.id)}
+                            onEdit={() => openAccountDialog(account.id)}
+                            onSetPrimary={() => handleSetPrimary(account.id)}
+                            isSettingPrimary={settingPrimaryId === account.id}
+                            onArchive={() => handleRestore(account.id)}
+                            onDelete={() => setDeleteId(account.id)}
+                            archiveLabel={t('unarchiveAccount')}
+                            archiveIcon={<ArchiveRestore size={12} />}
+                            archived
+                            t={t}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </NativePanel>
           )}
 
@@ -573,6 +742,7 @@ export function Accounts() {
                     <AccountCard
                       key={account.id}
                       account={account}
+                      linked={requestedAccountId === account.id}
                       isExpanded={expandedId === account.id}
                       onToggleExpand={() => toggleExpand(account.id)}
                       onEdit={() => openAccountDialog(account.id)}
@@ -700,6 +870,7 @@ export function Accounts() {
 
 function AccountCard({
   account,
+  linked = false,
   isExpanded,
   onToggleExpand,
   onEdit,
@@ -714,6 +885,7 @@ function AccountCard({
   t,
 }: {
   account: Account
+  linked?: boolean
   isExpanded: boolean
   onToggleExpand: () => void
   onEdit: () => void
@@ -762,15 +934,30 @@ function AccountCard({
     }))
   }, [history])
 
+  const nameId = `account-${account.id}-name`
+  const locatedId = `account-${account.id}-located`
+
   return (
     <article
-      className={`group relative px-5 py-4 ${archived ? 'bg-muted/30' : ''}`}
+      id={`account-${account.id}`}
+      tabIndex={-1}
+      aria-labelledby={nameId}
+      aria-describedby={linked ? locatedId : undefined}
+      aria-current={linked ? 'true' : undefined}
+      className={`group focus-visible:ring-ring relative px-5 py-4 outline-none focus-visible:ring-2 ${archived ? 'bg-muted/30' : ''} ${linked ? 'ring-ring ring-2' : ''}`}
       style={{ borderLeft: `3px solid ${accentColor}` }}
     >
+      {linked ? (
+        <span id={locatedId} className="sr-only">
+          {t('link.located')}
+        </span>
+      ) : null}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-base font-semibold">{account.name}</h3>
+            <h3 id={nameId} className="text-base font-semibold">
+              {account.name}
+            </h3>
             <Badge variant="secondary" className="text-xs">
               {t(`types.${account.type}`)}
             </Badge>
@@ -870,6 +1057,7 @@ function AccountCard({
           </Link>
         </Button>
         <AccountMaintenanceAction account={account} />
+        <CardStatementsAction account={account} />
         {isCreditCard && onPayCreditCard && (
           <Button
             type="button"

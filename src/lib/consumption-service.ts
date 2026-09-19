@@ -251,12 +251,26 @@ export interface FrontendNetConsumptionReport {
   message: string
 }
 
+const REPORT_DATE_PATTERN = /^\d{4}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/
+
+/** Real YYYY-MM-DD calendar date. Rolled dates such as 2026-02-31 are rejected. */
+export function isRealCalendarDate(value: string): boolean {
+  if (!REPORT_DATE_PATTERN.test(value)) return false
+  const parsed = new Date(`${value}T00:00:00.000Z`)
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+}
+
+/** Inclusive report window with strict calendar dates. No future-observation rule. */
+export function isValidNetConsumptionPeriod(start: string, end: string): boolean {
+  return isRealCalendarDate(start) && isRealCalendarDate(end) && start <= end
+}
+
 /** Read-only net-consumption basis with the same independent coverage policy as the CLI. */
 export function readNetConsumptionReport(
   start: string,
   end: string
 ): Promise<FrontendNetConsumptionReport> {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || start > end)
+  if (!isValidNetConsumptionPeriod(start, end))
     return Promise.reject(new Error('A valid report date range is required.'))
   return withTransaction(async (tx) => {
     const [evidence, accounts, coverage, categories] = await Promise.all([

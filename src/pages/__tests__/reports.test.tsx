@@ -1,9 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router'
 import dayjs from 'dayjs'
 import { ReportsPage } from '../reports'
 import type { FrontendNetConsumptionReport } from '@/lib/consumption-service'
+
+function renderReports() {
+  return render(
+    <MemoryRouter>
+      <ReportsPage />
+    </MemoryRouter>
+  )
+}
 
 const mockFetchAccounts = vi.fn().mockResolvedValue(undefined)
 const mockFetchBudgets = vi.fn().mockResolvedValue(undefined)
@@ -15,9 +24,18 @@ const { mockReadNetConsumptionReport } = vi.hoisted(() => ({
 
 vi.mock('@/lib/consumption-service', () => ({
   readNetConsumptionReport: mockReadNetConsumptionReport,
+  isValidNetConsumptionPeriod: (start: string, end: string) => {
+    const realDate = (value: string) => {
+      if (!/^\d{4}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/.test(value)) return false
+      const parsed = new Date(`${value}T00:00:00.000Z`)
+      return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+    }
+    return realDate(start) && realDate(end) && start <= end
+  },
 }))
 
 let mockAccounts: Array<Record<string, unknown>> = []
+let mockArchivedAccounts: Array<Record<string, unknown>> = []
 let mockBudgets: Array<Record<string, unknown>> = []
 let mockTransactions: Array<Record<string, unknown>> = []
 let mockPreferredCurrency = 'USD'
@@ -92,6 +110,7 @@ vi.mock('react-i18next', () => ({
 vi.mock('@/stores/account-store', () => ({
   useAccountStore: () => ({
     accounts: mockAccounts,
+    archivedAccounts: mockArchivedAccounts,
     fetch: mockFetchAccounts,
     isLoading: false,
   }),
@@ -158,7 +177,16 @@ function transaction(
 describe('ReportsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockAccounts = [{ id: 'account-1', balance: 250_000, currency: 'USD', is_archived: 0 }]
+    mockAccounts = [
+      {
+        id: 'account-1',
+        name: 'Daily Checking',
+        balance: 250_000,
+        currency: 'USD',
+        is_archived: 0,
+      },
+    ]
+    mockArchivedAccounts = []
     mockBudgets = [{ id: 'budget-1', amount: 100_000, spent: 25_000 }]
     mockTransactions = [
       transaction('tx-expense', 'expense', 25_000),
@@ -204,7 +232,7 @@ describe('ReportsPage', () => {
   })
 
   it('renders a usable monthly report and its complete cash total', () => {
-    render(<ReportsPage />)
+    renderReports()
 
     expect(screen.getByText('reports.title')).toBeInTheDocument()
     expect(screen.getByText('reports.categoryBreakdown')).toBeInTheDocument()
@@ -216,7 +244,7 @@ describe('ReportsPage', () => {
 
   it('keeps gross cash flow as default and loads page-owned native-currency net consumption on demand', async () => {
     const user = userEvent.setup()
-    render(<ReportsPage />)
+    renderReports()
 
     expect(screen.getByRole('button', { name: 'basis.gross' })).toHaveAttribute(
       'aria-pressed',
@@ -232,13 +260,20 @@ describe('ReportsPage', () => {
       'href',
       expect.stringContaining('reviewReason=unclassified')
     )
+    expect(
+      screen.getByRole('link', { name: 'actions.reviewAccount · Daily Checking' })
+    ).toHaveAttribute('href', '/accounts?account=account-1')
+    expect(mockReadNetConsumptionReport).toHaveBeenCalledWith(
+      dayjs().startOf('month').format('YYYY-MM-DD'),
+      dayjs().endOf('month').format('YYYY-MM-DD')
+    )
     expect(screen.queryByText('$2,500.00')).not.toBeInTheDocument()
   })
 
   it('surfaces net-basis read failures without replacing the gross report', async () => {
     mockReadNetConsumptionReport.mockRejectedValueOnce(new Error('Synthetic read failure'))
     const user = userEvent.setup()
-    render(<ReportsPage />)
+    renderReports()
 
     await user.click(screen.getByRole('button', { name: 'basis.net' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -254,7 +289,7 @@ describe('ReportsPage', () => {
       () => new Promise((resolve) => (resolveNet = resolve))
     )
     const user = userEvent.setup()
-    render(<ReportsPage />)
+    renderReports()
 
     await user.click(screen.getByRole('button', { name: 'basis.net' }))
     await user.click(screen.getByRole('button', { name: 'basis.gross' }))
@@ -288,7 +323,7 @@ describe('ReportsPage', () => {
       missingCurrencies: [],
     })
 
-    render(<ReportsPage />)
+    renderReports()
 
     expect(screen.getAllByText('$300.00').length).toBeGreaterThan(0)
   })
@@ -334,7 +369,7 @@ describe('ReportsPage', () => {
       missingCurrencies: ['EUR'],
       reason: 'missing_exchange_rates',
     }
-    const { rerender } = render(<ReportsPage />)
+    const { rerender } = renderReports()
     expect(screen.getAllByText('reports.cashUnavailable: EUR').length).toBeGreaterThan(0)
 
     mockRates = { 'EUR:USD': 2 }
@@ -344,7 +379,11 @@ describe('ReportsPage', () => {
       amountCentavos: 50000,
       missingCurrencies: [],
     }
-    rerender(<ReportsPage />)
+    rerender(
+      <MemoryRouter>
+        <ReportsPage />
+      </MemoryRouter>
+    )
     expect(screen.getAllByText('$200.00').length).toBeGreaterThan(0)
     expect(screen.getByText('$500.00')).toBeInTheDocument()
 
@@ -356,7 +395,11 @@ describe('ReportsPage', () => {
       amountCentavos: 25000,
       missingCurrencies: [],
     }
-    rerender(<ReportsPage />)
+    rerender(
+      <MemoryRouter>
+        <ReportsPage />
+      </MemoryRouter>
+    )
     expect(screen.getAllByText('€100.00').length).toBeGreaterThan(0)
     expect(screen.getAllByText('€250.00').length).toBeGreaterThan(0)
     expect(screen.queryByText('€200.00')).not.toBeInTheDocument()
@@ -369,7 +412,11 @@ describe('ReportsPage', () => {
       reason: 'invalid_currency_data',
       invalidRates: mockInvalidRates,
     }
-    rerender(<ReportsPage />)
+    rerender(
+      <MemoryRouter>
+        <ReportsPage />
+      </MemoryRouter>
+    )
     expect(screen.getAllByText(/reports\.cashUnavailable/).length).toBeGreaterThan(0)
     expect(screen.getByText(/reports\.cashInvalidData/)).toBeInTheDocument()
     expect(screen.queryByText('€100.00')).not.toBeInTheDocument()
@@ -407,7 +454,7 @@ describe('ReportsPage', () => {
       transaction('malformed-archive', 'expense', 910_000, { is_archived: 'yes' }),
     ]
 
-    render(<ReportsPage />)
+    renderReports()
 
     expect(screen.getByText('$1,500.00')).toBeInTheDocument()
     expect(screen.getByText('$1,200.00')).toBeInTheDocument()
@@ -426,7 +473,7 @@ describe('ReportsPage', () => {
       invalidCurrencies: [{ accountId: 'account-1', accountName: 'Broken cash', value: 'US D' }],
     }
 
-    render(<ReportsPage />)
+    renderReports()
 
     expect(screen.getByRole('alert')).toHaveTextContent(
       'reports.cashInvalidData: Broken cash (US D)'
@@ -446,7 +493,7 @@ describe('ReportsPage', () => {
       reason: 'missing_exchange_rates',
     }
 
-    render(<ReportsPage />)
+    renderReports()
 
     expect(screen.getByRole('alert')).toHaveTextContent('reports.cashUnavailable: EUR')
     expect(screen.queryByText('$3,000.00')).not.toBeInTheDocument()
@@ -455,7 +502,7 @@ describe('ReportsPage', () => {
   it('withholds budget health when converted budget totals are incomplete', () => {
     mockBudgetDisplayComplete = false
 
-    render(<ReportsPage />)
+    renderReports()
 
     expect(screen.getByRole('alert')).toHaveTextContent('reports.budgetUnavailable')
     expect(screen.queryByText('25%')).not.toBeInTheDocument()
@@ -466,9 +513,138 @@ describe('ReportsPage', () => {
     mockBudgetDisplayComplete = false
     mockBudgetDisplayError = 'Read failed'
 
-    render(<ReportsPage />)
+    renderReports()
 
     expect(screen.getByRole('alert')).toHaveTextContent('reports.budgetReadError: Read failed')
     expect(screen.queryByText('25%')).not.toBeInTheDocument()
+  })
+
+  it('loads a historical native-currency net period and keeps it across basis switches', async () => {
+    const previousStart = dayjs().subtract(1, 'month').startOf('month').format('YYYY-MM-DD')
+    const previousEnd = dayjs().subtract(1, 'month').endOf('month').format('YYYY-MM-DD')
+    mockReadNetConsumptionReport.mockImplementation(async (start: string, end: string) => ({
+      basis: 'net_consumption',
+      complete: true,
+      classificationComplete: true,
+      coverageComplete: true,
+      unresolvedIds: [],
+      uncoveredAccountIds: [],
+      totalsByCurrency: [
+        { currency: 'MXN', consumptionCentavos: 12345, earnedIncomeCentavos: 20000 },
+      ],
+      byCategory: [
+        {
+          currency: 'MXN',
+          categoryId: 'food',
+          categoryName: 'Food',
+          amountCentavos: 12345,
+        },
+      ],
+      period: { start, end },
+      currencyScope: 'all',
+      message: 'Complete',
+    }))
+    const user = userEvent.setup()
+    renderReports()
+
+    await user.click(screen.getByRole('button', { name: 'basis.net' }))
+    await user.click(screen.getByRole('button', { name: 'period.previousMonth' }))
+
+    expect(await screen.findByText('MXN')).toBeInTheDocument()
+    expect(mockReadNetConsumptionReport).toHaveBeenCalledWith(previousStart, previousEnd)
+    expect(screen.getByRole('button', { name: 'period.previousMonth' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
+
+    await user.click(screen.getByRole('button', { name: 'basis.gross' }))
+    expect(screen.getByText('reports.categoryBreakdown')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'basis.net' }))
+    expect(await screen.findByText('MXN')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'period.previousMonth' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
+    expect(mockReadNetConsumptionReport).toHaveBeenLastCalledWith(previousStart, previousEnd)
+  })
+
+  it('rejects an inverted net period before querying', async () => {
+    const user = userEvent.setup()
+    renderReports()
+
+    await user.click(screen.getByRole('button', { name: 'basis.net' }))
+    await screen.findByLabelText('period.start')
+    mockReadNetConsumptionReport.mockClear()
+    fireEvent.change(screen.getByLabelText('period.end'), { target: { value: '2020-01-01' } })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('period.invalid')
+    expect(mockReadNetConsumptionReport).not.toHaveBeenCalled()
+    expect(screen.queryByText('report.title')).not.toBeInTheDocument()
+  })
+
+  it('clears the previous net report, shows retry, and ignores an obsolete response', async () => {
+    const currentStart = dayjs().startOf('month').format('YYYY-MM-DD')
+    const currentEnd = dayjs().endOf('month').format('YYYY-MM-DD')
+    const previousStart = dayjs().subtract(1, 'month').startOf('month').format('YYYY-MM-DD')
+    const previousEnd = dayjs().subtract(1, 'month').endOf('month').format('YYYY-MM-DD')
+    let resolveCurrent!: (value: FrontendNetConsumptionReport) => void
+    mockReadNetConsumptionReport.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveCurrent = resolve))
+    )
+    mockReadNetConsumptionReport.mockRejectedValueOnce(new Error('Range read failure'))
+    const user = userEvent.setup()
+    renderReports()
+
+    await user.click(screen.getByRole('button', { name: 'basis.net' }))
+    await user.click(screen.getByRole('button', { name: 'period.previousMonth' }))
+    resolveCurrent({
+      basis: 'net_consumption',
+      complete: true,
+      classificationComplete: true,
+      coverageComplete: true,
+      unresolvedIds: [],
+      uncoveredAccountIds: [],
+      totalsByCurrency: [
+        { currency: 'USD', consumptionCentavos: 7500, earnedIncomeCentavos: 20000 },
+      ],
+      byCategory: [],
+      period: { start: currentStart, end: currentEnd },
+      currencyScope: 'all',
+      message: 'Complete',
+    })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'report.loadError: Range read failure'
+    )
+    expect(screen.getByRole('button', { name: 'actions.retry' })).toHaveClass('min-h-11')
+    expect(screen.queryByText('$75.00')).not.toBeInTheDocument()
+    expect(screen.queryByText(`${currentStart} – ${currentEnd}`)).not.toBeInTheDocument()
+
+    mockReadNetConsumptionReport.mockResolvedValueOnce({
+      basis: 'net_consumption',
+      complete: false,
+      classificationComplete: false,
+      coverageComplete: true,
+      unresolvedIds: ['allocation-1'],
+      uncoveredAccountIds: ['01HUNKNOWNACCOUNTIDENTLONGULID'],
+      totalsByCurrency: [{ currency: 'EUR', consumptionCentavos: 4400, earnedIncomeCentavos: 0 }],
+      byCategory: [],
+      period: { start: previousStart, end: previousEnd },
+      currencyScope: 'all',
+      message: 'Known subtotals only.',
+    })
+    await user.click(screen.getByRole('button', { name: 'actions.retry' }))
+
+    expect(await screen.findByText('€44.00')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'actions.reviewUnclassified' })).toHaveAttribute(
+      'href',
+      expect.stringContaining(`dateFrom=${previousStart}&dateTo=${previousEnd}`)
+    )
+    const unknownAccountLink = screen.getByRole('link', {
+      name: /actions.reviewAccount · 01HUNKNOWNACCOUNTIDENTLONGULID/,
+    })
+    expect(unknownAccountLink).toHaveClass('max-w-full')
+    expect(unknownAccountLink.querySelector('.break-all')).not.toBeNull()
+    expect(mockReadNetConsumptionReport).toHaveBeenLastCalledWith(previousStart, previousEnd)
   })
 })

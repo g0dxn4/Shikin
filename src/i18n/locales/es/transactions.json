@@ -243,9 +243,19 @@
     "reviewCandidatesDescription": "Elige por separado para cada transacción existente. Tus decisiones se vinculan a una nueva vista previa antes de importar.",
     "existingCandidate": "Transacción existente {{id}}",
     "chooseDecision": "Elegir una acción",
+    "chooseDecisionFor": "Elige una acción para la fila entrante {{number}}",
     "keepExisting": "Conservar existente",
     "importDistinct": "Importar como distinta",
-    "reviewDecisions": "Revisar decisiones"
+    "reviewDecisions": "Revisar decisiones",
+    "plannedImported": "{{count}} se importarán",
+    "plannedSkipped": "{{count}} se omitirán",
+    "legacyLimitations": "Limitaciones de la fuente",
+    "incoming": "Entrante",
+    "existing": "Existente en el libro",
+    "rowIndex": "Fila {{number}}",
+    "refreshPreview": "Actualizar vista previa",
+    "stalePreview": "Esta vista previa está desactualizada. Actualiza antes de importar.",
+    "missingCandidateDetails": "No hay detalles de la coincidencia. Actualiza la vista previa antes de elegir una acción."
   },
   "summary": {
     "label": "Resumen de resultados de transacciones",

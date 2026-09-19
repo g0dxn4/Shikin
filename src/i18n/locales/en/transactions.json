@@ -243,9 +243,19 @@
     "reviewCandidatesDescription": "Choose separately for each existing transaction. Your choices are bound to a new preview before import.",
     "existingCandidate": "Existing transaction {{id}}",
     "chooseDecision": "Choose an action",
+    "chooseDecisionFor": "Choose an action for incoming row {{number}}",
     "keepExisting": "Keep existing",
     "importDistinct": "Import as distinct",
-    "reviewDecisions": "Review decisions"
+    "reviewDecisions": "Review decisions",
+    "plannedImported": "{{count}} will be imported",
+    "plannedSkipped": "{{count}} will be skipped",
+    "legacyLimitations": "Source limitations",
+    "incoming": "Incoming",
+    "existing": "Existing in ledger",
+    "rowIndex": "Row {{number}}",
+    "refreshPreview": "Refresh preview",
+    "stalePreview": "This preview is out of date. Refresh before importing.",
+    "missingCandidateDetails": "Match details are unavailable. Refresh the preview before choosing an action."
   },
   "summary": {
     "label": "Transaction result summary",

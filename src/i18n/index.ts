@@ -18,6 +18,9 @@ import enBillCalendar from './locales/en/billCalendar.json'
 import enInsights from './locales/en/insights.json'
 import enCategories from './locales/en/categories.json'
 import enExtensions from './locales/en/extensions.json'
+import enConsumption from './locales/en/consumption.json'
+import enAccountHistory from './locales/en/accountHistory.json'
+import enCardPayments from './locales/en/cardPayments.json'
 
 import esCommon from './locales/es/common.json'
 import esDashboard from './locales/es/dashboard.json'
@@ -35,6 +38,9 @@ import esBillCalendar from './locales/es/billCalendar.json'
 import esInsights from './locales/es/insights.json'
 import esCategories from './locales/es/categories.json'
 import esExtensions from './locales/es/extensions.json'
+import esConsumption from './locales/es/consumption.json'
+import esAccountHistory from './locales/es/accountHistory.json'
+import esCardPayments from './locales/es/cardPayments.json'
 
 export const resources = {
   en: {
@@ -54,6 +60,9 @@ export const resources = {
     insights: enInsights,
     categories: enCategories,
     extensions: enExtensions,
+    consumption: enConsumption,
+    accountHistory: enAccountHistory,
+    cardPayments: enCardPayments,
   },
   es: {
     common: esCommon,
@@ -72,6 +81,9 @@ export const resources = {
     insights: esInsights,
     categories: esCategories,
     extensions: esExtensions,
+    consumption: esConsumption,
+    accountHistory: esAccountHistory,
+    cardPayments: esCardPayments,
   },
 } as const
 
@@ -99,6 +111,9 @@ i18n
       'insights',
       'categories',
       'extensions',
+      'consumption',
+      'accountHistory',
+      'cardPayments',
     ],
     interpolation: {
       escapeValue: false,

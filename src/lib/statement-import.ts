@@ -175,8 +175,22 @@ async function validateAccount(tx: TransactionClient, accountId: string): Promis
   return account
 }
 
-function hasVerifiedExternalIdentity(row: ExistingRow): boolean {
-  return Boolean(row.import_source?.trim() && row.import_external_id?.trim())
+function hasDistinctSameSourceExternalIdentity(
+  row: ExistingRow,
+  sourceNamespace: string,
+  externalId: string | null
+): boolean {
+  const existingSource = row.import_source?.trim()
+  const incomingSource = sourceNamespace.trim()
+  const existingExternalId = row.import_external_id
+  return Boolean(
+    existingSource &&
+    incomingSource &&
+    existingSource === incomingSource &&
+    existingExternalId?.trim() &&
+    externalId?.trim() &&
+    existingExternalId !== externalId
+  )
 }
 
 async function createPlan(
@@ -343,9 +357,9 @@ async function createPlan(
       ]
     )
     for (const candidate of candidates) {
-      // Different durable external identities are authoritative. An incoming ID alone cannot
-      // distinguish an otherwise unbound legacy row with the same financial fields.
-      if (externalId !== null && hasVerifiedExternalIdentity(candidate)) continue
+      // Only distinct IDs issued within the same namespace prove that two physical records differ.
+      // Cross-namespace IDs and otherwise unbound legacy rows still require candidate review.
+      if (hasDistinctSameSourceExternalIdentity(candidate, sourceNamespace, externalId)) continue
       const evidence = evidenceFingerprint(candidate)
       reviewCandidates.push({
         candidateIdentityKey: identity.identityKey,

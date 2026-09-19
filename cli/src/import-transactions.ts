@@ -160,8 +160,22 @@ function ambiguousCandidates(row: AtomicImportRow, accountCurrency: string): Exi
   )
 }
 
-function hasVerifiedExternalIdentity(row: ExistingImportRow): boolean {
-  return Boolean(row.import_source?.trim() && row.import_external_id?.trim())
+function hasDistinctSameSourceExternalIdentity(
+  row: ExistingImportRow,
+  sourceNamespace: string,
+  externalId: string | null
+): boolean {
+  const existingSource = row.import_source?.trim()
+  const incomingSource = sourceNamespace.trim()
+  const existingExternalId = row.import_external_id
+  return Boolean(
+    existingSource &&
+    incomingSource &&
+    existingSource === incomingSource &&
+    existingExternalId?.trim() &&
+    externalId?.trim() &&
+    existingExternalId !== externalId
+  )
 }
 
 function findDecision(
@@ -331,9 +345,16 @@ function planImport(request: AtomicImportRequest): ImportPlan {
     let reviewedExisting: ExistingImportRow | undefined
     const candidates = ambiguousCandidates(candidate, request.options.accountCurrency)
     for (const possible of candidates) {
-      // Different durable external identities are authoritative. An incoming ID alone does not
-      // identify an otherwise unbound legacy row, so that candidate still requires review.
-      if (candidate.externalId !== null && hasVerifiedExternalIdentity(possible)) continue
+      // Only distinct IDs issued within the same namespace prove that two physical records differ.
+      // Cross-namespace IDs and otherwise unbound legacy rows still require candidate review.
+      if (
+        hasDistinctSameSourceExternalIdentity(
+          possible,
+          request.options.sourceNamespace,
+          candidate.externalId
+        )
+      )
+        continue
       const decision =
         findDecision(decisions, identity.identityKey, identity.contentFingerprint, possible) ??
         readPersistedDecision(identity.identityKey, identity.contentFingerprint, possible)

@@ -381,10 +381,10 @@ describe('importStatementFile real SQLite rollback', () => {
     expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 1 })
   })
 
-  it('bypasses fuzzy review for distinct verified identities and discriminates type and currency', async () => {
+  it('bypasses fuzzy review for distinct IDs in the same trimmed namespace and discriminates type and currency', async () => {
     insertExistingTransaction({
       id: 'verified-other',
-      importSource: 'other-source',
+      importSource: ' statement:ofx ',
       importExternalId: 'other-id',
     })
     insertExistingTransaction({ id: 'other-type', type: 'income' })
@@ -403,6 +403,113 @@ describe('importStatementFile real SQLite rollback', () => {
 
     expect(preview).toMatchObject({ success: true, imported: 1, requiredDecisions: [] })
     expect(preview.reviewCandidates).toEqual([])
+  })
+
+  it('requires review for financially matching rows with different IDs across sources', async () => {
+    insertExistingTransaction({
+      id: 'source-a-row',
+      importSource: 'sourceA',
+      importExternalId: 'source-a-id',
+    })
+    mockParseStatement.mockReturnValue([
+      {
+        date: '2026-07-13',
+        amount: 10,
+        description: 'Incoming source B row',
+        type: 'expense',
+        externalId: 'source-b-id',
+      },
+    ])
+
+    const preview = await previewStatementFile(statementFile(), 'account-1')
+
+    expect(preview).toMatchObject({ success: false, imported: 1, skipped: 0 })
+    expect(preview.requiredDecisions).toEqual([
+      expect.objectContaining({ existingTransactionId: 'source-a-row' }),
+    ])
+    expect(preview.reviewCandidates).toEqual([
+      expect.objectContaining({ existingTransactionId: 'source-a-row' }),
+    ])
+    expect(await importStatementFile(statementFile(), 'account-1')).toMatchObject({
+      imported: 0,
+      skipped: 0,
+      errors: [expect.stringMatching(/require reviewed decisions/i)],
+    })
+    expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 1 })
+    expect(db.prepare("SELECT balance FROM accounts WHERE id='account-1'").get()).toEqual({
+      balance: 10_000,
+    })
+    expect(
+      db
+        .prepare(
+          "SELECT import_source, import_external_id FROM transactions WHERE id='source-a-row'"
+        )
+        .get()
+    ).toEqual({ import_source: 'sourceA', import_external_id: 'source-a-id' })
+  })
+
+  it('reviews identical OFX and QFX FITIDs and atomically keeps the existing transaction', async () => {
+    mockParseStatement.mockImplementation(actualStatementParser.parseStatement)
+    const payload = `<OFX><STMTRS><CURDEF>USD
+<STMTTRN><DTPOSTED>20260713<TRNAMT>-10.00<FITID>same-fitid<NAME>Shared OFX payload</STMTTRN>
+</STMTRS></OFX>`
+    const ofx = statementFile('statement.ofx', payload)
+    const qfx = statementFile('statement.qfx', payload)
+    expect(await importStatementFile(ofx, 'account-1')).toMatchObject({
+      imported: 1,
+      skipped: 0,
+      errors: [],
+    })
+
+    const undecided = await previewStatementFile(qfx, 'account-1')
+
+    expect(undecided).toMatchObject({ success: false, imported: 1, skipped: 0 })
+    expect(undecided.requiredDecisions).toEqual([
+      expect.objectContaining({ existingTransactionId: expect.any(String) }),
+    ])
+    expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 1 })
+    expect(db.prepare("SELECT balance FROM accounts WHERE id='account-1'").get()).toEqual({
+      balance: 9_000,
+    })
+    expect(db.prepare('SELECT import_source, import_external_id FROM transactions').get()).toEqual({
+      import_source: 'statement:ofx',
+      import_external_id: 'same-fitid',
+    })
+
+    expect(await importStatementFile(qfx, 'account-1')).toMatchObject({
+      imported: 0,
+      skipped: 0,
+      errors: [expect.stringMatching(/require reviewed decisions/i)],
+    })
+    expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 1 })
+    expect(db.prepare("SELECT balance FROM accounts WHERE id='account-1'").get()).toEqual({
+      balance: 9_000,
+    })
+
+    const decisions = [{ ...undecided.requiredDecisions[0], decision: 'keep_existing' as const }]
+    const reviewed = await previewStatementFile(qfx, 'account-1', decisions)
+    const applied = await importStatementFile(qfx, 'account-1', {
+      previewToken: reviewed.previewToken!,
+      decisions,
+    })
+
+    expect(applied).toMatchObject({
+      imported: 0,
+      skipped: 1,
+      errors: [],
+      mode: 'reviewed_atomic',
+    })
+    expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 1 })
+    expect(db.prepare("SELECT balance FROM accounts WHERE id='account-1'").get()).toEqual({
+      balance: 9_000,
+    })
+    expect(db.prepare('SELECT decision FROM duplicate_review_decisions').get()).toEqual({
+      decision: 'keep_existing',
+    })
+    expect(db.prepare('SELECT import_source, import_external_id FROM transactions').get()).toEqual({
+      import_source: 'statement:ofx',
+      import_external_id: 'same-fitid',
+    })
   })
 
   it('audits a reviewed keep-existing decision without creating a transaction', async () => {

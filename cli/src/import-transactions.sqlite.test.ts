@@ -260,14 +260,14 @@ describe('atomic CLI import', () => {
     expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 1 })
   })
 
-  it('bypasses fuzzy review only when both rows have distinct durable external identities', () => {
+  it('bypasses fuzzy review for distinct opaque IDs in the same trimmed namespace', () => {
     db.prepare(
       `INSERT INTO transactions (
          id, account_id, type, amount, currency, description, status, ledger_treatment,
          reporting_treatment, transaction_kind, import_source, import_external_id,
          is_archived, date
        ) VALUES ('verified-other','account-1','expense',1000,'USD','Other verified row',
-                 'posted','normal','normal','standard','Other Bank','verified-other-id',0,'2026-01-01')`
+                 'posted','normal','normal','standard',' Bank CSV ','verified-other-id',0,'2026-01-01')`
     ).run()
 
     const preview = executeAtomicImport(request(['Incoming identified row']))
@@ -277,6 +277,93 @@ describe('atomic CLI import', () => {
       summary: { importedRows: 1, skippedRows: 0 },
       requiredDecisions: [],
     })
+  })
+
+  it.each([
+    { label: 'the same ID', existingExternalId: 'opaque-0' },
+    { label: 'a different ID', existingExternalId: 'source-a-id' },
+  ])('requires candidate review across namespaces with $label', ({ existingExternalId }) => {
+    db.prepare(
+      `INSERT INTO transactions (
+         id, account_id, type, amount, currency, description, status, ledger_treatment,
+         reporting_treatment, transaction_kind, import_source, import_external_id,
+         is_archived, date
+       ) VALUES ('source-a-row','account-1','expense',1000,'USD','Source A row',
+                 'posted','normal','normal','standard','sourceA',?,0,'2026-01-01')`
+    ).run(existingExternalId)
+    const candidate = {
+      ...request(['Incoming source B row']),
+      options: { ...request().options, sourceNamespace: 'sourceB' },
+    }
+
+    const preview = executeAtomicImport(candidate) as {
+      success: boolean
+      requiredDecisions: ImportReviewDecision[]
+    }
+
+    expect(preview.success).toBe(false)
+    expect(preview.requiredDecisions).toEqual([
+      expect.objectContaining({ existingTransactionId: 'source-a-row' }),
+    ])
+    expect(() => executeAtomicImport({ ...candidate, apply: true })).toThrow(/duplicate decisions/i)
+    expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 1 })
+    expect(db.prepare("SELECT balance FROM accounts WHERE id='account-1'").get()).toEqual({
+      balance: 10_000,
+    })
+    expect(
+      db
+        .prepare(
+          "SELECT import_source, import_external_id FROM transactions WHERE id='source-a-row'"
+        )
+        .get()
+    ).toEqual({ import_source: 'sourceA', import_external_id: existingExternalId })
+  })
+
+  it('atomically applies reviewed cross-namespace distinct decisions', () => {
+    db.prepare(
+      `INSERT INTO transactions (
+         id, account_id, type, amount, currency, description, status, ledger_treatment,
+         reporting_treatment, transaction_kind, import_source, import_external_id,
+         is_archived, date
+       ) VALUES ('source-a-row','account-1','expense',1000,'USD','Source A row',
+                 'posted','normal','normal','standard','sourceA','opaque-0',0,'2026-01-01')`
+    ).run()
+    const candidate = {
+      ...request(['Incoming source B row']),
+      options: { ...request().options, sourceNamespace: 'sourceB' },
+    }
+    const undecided = executeAtomicImport(candidate) as {
+      requiredDecisions: ImportReviewDecision[]
+    }
+    const decisions = [{ ...undecided.requiredDecisions[0], decision: 'distinct' as const }]
+    const reviewed = executeAtomicImport({ ...candidate, decisions }) as { previewToken: string }
+
+    const applied = executeAtomicImport({
+      ...candidate,
+      decisions,
+      previewToken: reviewed.previewToken,
+      apply: true,
+    })
+
+    expect(applied).toMatchObject({
+      success: true,
+      mode: 'reviewed_atomic',
+      summary: { importedRows: 1, skippedRows: 0 },
+    })
+    expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 2 })
+    expect(db.prepare("SELECT balance FROM accounts WHERE id='account-1'").get()).toEqual({
+      balance: 9_000,
+    })
+    expect(db.prepare('SELECT decision FROM duplicate_review_decisions').get()).toEqual({
+      decision: 'distinct',
+    })
+    expect(
+      db
+        .prepare(
+          "SELECT import_source, import_external_id FROM transactions WHERE id != 'source-a-row'"
+        )
+        .get()
+    ).toEqual({ import_source: 'sourceB', import_external_id: 'opaque-0' })
   })
 
   it('audits a reviewed keep-existing decision even when no transaction is created', () => {

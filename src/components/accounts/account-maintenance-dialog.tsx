@@ -314,7 +314,7 @@ export function AccountMaintenanceDialog({
         ) : null}
 
         {history ? (
-          <div className="space-y-5">
+          <div className="min-w-0 space-y-5">
             <section
               aria-labelledby="history-heading"
               className="border-border rounded-xl border p-4"

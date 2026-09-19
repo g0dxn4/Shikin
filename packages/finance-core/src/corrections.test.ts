@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   applyMetadataCorrection,
+  clearConsumptionClassificationInEvidence,
+  consumptionCoverage,
   consumptionRoles,
   netConsumption,
+  setConsumptionClassificationInEvidence,
   validateConsumptionEvidence,
   type ConsumptionEvidence,
   type ConsumptionRole,
@@ -173,6 +176,77 @@ describe('shared correction policy', () => {
       unresolvedIds: ['p'],
       totalsByCurrency: [],
     })
+  })
+  it('keeps stable classification IDs and blocks dependent remap or clear', () => {
+    const data = evidence()
+    const dependent = {
+      id: 'r',
+      transaction_id: 'refund',
+      split_id: null,
+      role: 'refund' as const,
+      referenced_purchase_id: 'p',
+    }
+    const linked = { ...data, classifications: [...data.classifications, dependent] }
+    expect(() =>
+      setConsumptionClassificationInEvidence(linked, {
+        ...data.classifications[0],
+        role: 'fee',
+      })
+    ).toThrow(/referencing/)
+    expect(() => clearConsumptionClassificationInEvidence(linked, 'p')).toThrow(/referencing/)
+    expect(() =>
+      setConsumptionClassificationInEvidence(data, {
+        ...data.classifications[0],
+        id: 'replacement-id',
+      })
+    ).toThrow(/stable classification ID/)
+  })
+  it('shares independent contiguous account/source coverage semantics', () => {
+    const rows = [
+      {
+        account_id: 'a',
+        source_namespace: 'bank',
+        period_start: '2026-01-01',
+        period_end: '2026-01-15',
+        status: 'verified',
+      },
+      {
+        account_id: 'a',
+        source_namespace: 'bank',
+        period_start: '2026-01-16',
+        period_end: '2026-01-31',
+        status: 'verified',
+      },
+    ]
+    expect(consumptionCoverage(['a'], rows, '2026-01-01', '2026-01-31')).toEqual({
+      coverageComplete: true,
+      uncoveredAccountIds: [],
+    })
+    expect(consumptionCoverage(['a', 'b'], rows, '2026-01-01', '2026-01-31')).toEqual({
+      coverageComplete: false,
+      uncoveredAccountIds: ['b'],
+    })
+  })
+  it('marks pending and staged ordinary rows incomplete rather than complete zero', () => {
+    const data = evidence()
+    expect(
+      netConsumption(
+        {
+          ...data,
+          classifications: [],
+          transactions: [
+            { ...data.transactions[0], id: 'pending', status: 'pending' },
+            {
+              ...data.transactions[0],
+              id: 'staged',
+              ledger_treatment: 'staged_no_balance_impact',
+            },
+          ],
+        },
+        '2026-01-01',
+        '2026-01-31'
+      )
+    ).toMatchObject({ classificationComplete: false, unresolvedIds: ['pending', 'staged'] })
   })
   it('rejects split classifications when the parent amount or aggregate is unsafe', () => {
     const data: ConsumptionEvidence = {

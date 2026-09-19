@@ -27,6 +27,17 @@ const mockFetchAccounts = vi.fn()
 const mockFetchCategories = vi.fn()
 const mockInvalidate = vi.fn()
 const mockUseQuery = vi.fn()
+const { mockReadConsumptionContext, mockSetConsumption, mockClearConsumption } = vi.hoisted(() => ({
+  mockReadConsumptionContext: vi.fn(),
+  mockSetConsumption: vi.fn(),
+  mockClearConsumption: vi.fn(),
+}))
+
+vi.mock('@/lib/consumption-service', () => ({
+  readConsumptionClassificationContext: mockReadConsumptionContext,
+  setConsumptionClassification: mockSetConsumption,
+  clearConsumptionClassification: mockClearConsumption,
+}))
 
 let accounts: unknown[] = []
 let categories: unknown[] = []
@@ -82,6 +93,7 @@ function makeRow(overrides: Partial<TransactionPageRow> = {}): TransactionPageRo
     updated_at: '2026-03-01T00:00:00Z',
     account_name: 'Checking',
     has_splits: 0,
+    is_consumption_unclassified: 1,
     ...overrides,
   }
 }
@@ -91,7 +103,14 @@ function setRows(rows: TransactionPageRow[], total = rows.length) {
     rows,
     total,
     currencies: rows.length ? ['USD'] : [],
-    reviewCounts: { all: 0, 'needs-category': 0, pending: 0, placeholder: 0, staged: 0 },
+    reviewCounts: {
+      all: 0,
+      'needs-category': 0,
+      pending: 0,
+      placeholder: 0,
+      staged: 0,
+      unclassified: 0,
+    },
     isLoading: false,
     error: null,
   } as TransactionPageResult
@@ -108,6 +127,28 @@ describe('Transactions', () => {
     mockFetchCategories.mockResolvedValue(undefined)
     mockRemove.mockResolvedValue(undefined)
     mockUpdateReviewFields.mockResolvedValue(undefined)
+    mockReadConsumptionContext.mockResolvedValue({
+      transaction: makeRow(),
+      allocations: [
+        {
+          transactionId: 'tx-1',
+          splitId: null,
+          amountCentavos: 1234,
+          categoryId: null,
+          categoryName: null,
+          classification: null,
+        },
+      ],
+      purchaseOptions: [],
+    })
+    mockSetConsumption.mockResolvedValue({
+      id: 'classification',
+      transaction_id: 'tx-1',
+      split_id: null,
+      role: 'purchase',
+      referenced_purchase_id: null,
+    })
+    mockClearConsumption.mockResolvedValue(true)
     setRows([])
     mockUseQuery.mockImplementation(() => pageResult)
   })
@@ -143,6 +184,26 @@ describe('Transactions', () => {
     await user.click(screen.getByRole('tab', { name: 'views.ledger' }))
     expect(window.location.search).toContain('account=account-2')
     expect(window.location.search).toContain('view=ledger')
+  })
+
+  it('opens the full unclassified review queue from its URL', () => {
+    window.history.replaceState(null, '', '/transactions?reviewReason=unclassified')
+    setRows([makeRow()])
+    pageResult.reviewCounts.unclassified = 1
+
+    render(<Transactions />)
+
+    expect(mockUseQuery).toHaveBeenLastCalledWith(
+      expect.objectContaining({ reviewReason: 'unclassified' })
+    )
+    expect(screen.getByRole('tab', { name: 'views.review' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    expect(screen.getByRole('button', { name: 'review.filter (1)' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
   })
 
   it('supports numbered previous/next paging and selectable page sizes', async () => {
@@ -204,7 +265,14 @@ describe('Transactions', () => {
     ]
     categories = [{ id: 'food', name: 'Food', type: 'expense' }]
     setRows([makeRow({ category_id: null, status: ' ' as never })])
-    pageResult.reviewCounts = { all: 1, 'needs-category': 1, pending: 0, placeholder: 0, staged: 0 }
+    pageResult.reviewCounts = {
+      all: 1,
+      'needs-category': 1,
+      pending: 0,
+      placeholder: 0,
+      staged: 0,
+      unclassified: 1,
+    }
     const user = userEvent.setup()
     render(<Transactions />)
 
@@ -254,6 +322,26 @@ describe('Transactions', () => {
 
     await waitFor(() => expect(window.location.search).not.toContain('page=2'))
     expect(mockUseQuery).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1 }))
+  })
+
+  it('opens allocation classification from transaction details and refreshes full query counts', async () => {
+    setRows([makeRow()])
+    const user = userEvent.setup()
+    render(<Transactions />)
+
+    await user.click(screen.getByRole('button', { name: /^Coffee/ }))
+    await user.click(screen.getByRole('button', { name: 'actions.classify' }))
+    expect(await screen.findByRole('dialog')).toHaveTextContent('dialog.title')
+    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+    await waitFor(() =>
+      expect(mockSetConsumption).toHaveBeenCalledWith({
+        transactionId: 'tx-1',
+        splitId: null,
+        role: 'purchase',
+        referencedPurchaseId: null,
+      })
+    )
+    expect(mockInvalidate).toHaveBeenCalledWith('review')
   })
 
   it('opens native transaction details while preserving edit actions', async () => {

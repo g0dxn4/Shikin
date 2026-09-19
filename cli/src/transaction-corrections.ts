@@ -4,6 +4,8 @@ import {
   assertEvidenceMutationAllowed,
   assertSplitReplacementAllowed,
   financialFieldsChanged,
+  setConsumptionClassificationInEvidence,
+  clearConsumptionClassificationInEvidence,
   validateConsumptionEvidence,
   type ConsumptionEvidence,
   type ConsumptionClassification,
@@ -285,14 +287,7 @@ export const setTransactionConsumption: ToolDefinition = {
         role: input.role,
         referenced_purchase_id: input.referencedPurchaseId ?? null,
       }
-      const updatedClassifications = [
-        ...evidence.classifications.filter((item) => item.id !== after.id),
-        after,
-      ]
-      validateConsumptionEvidence({
-        ...evidence,
-        classifications: updatedClassifications,
-      })
+      const updatedClassifications = setConsumptionClassificationInEvidence(evidence, after)
       assertActivePaymentCapacity({
         transactionId: input.transactionId,
         classifications: updatedClassifications,
@@ -332,11 +327,10 @@ export const clearTransactionConsumption: ToolDefinition = {
       const evidence = readConsumptionEvidence()
       const before = evidence.classifications.find((item) => item.id === input.classificationId)
       if (!before) return { success: true, cleared: false }
-      if (evidence.classifications.some((item) => item.referenced_purchase_id === before.id))
-        throw new Error('Clear referencing refund/principal classifications first.')
+      const cleared = clearConsumptionClassificationInEvidence(evidence, before.id)
       assertActivePaymentCapacity({
         transactionId: before.transaction_id,
-        classifications: evidence.classifications.filter((item) => item.id !== before.id),
+        classifications: cleared.classifications,
       })
       execute('DELETE FROM transaction_consumption_classifications WHERE id = $1', [before.id])
       writeAuditLog({

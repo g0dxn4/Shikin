@@ -23,6 +23,7 @@ function arrangePageResponses() {
           pending_count: 4,
           placeholder_count: 1,
           staged_count: 2,
+          unclassified_count: 3,
         },
       ] as never
     return [{ id: 'row-1', has_splits: 0 }] as never
@@ -68,6 +69,7 @@ describe('transaction query boundary', () => {
     expect(result.total).toBe(87)
     expect(result.currencies).toEqual(['EUR', 'USD'])
     expect(result.reviewCounts.all).toBe(11)
+    expect(result.reviewCounts.unclassified).toBe(3)
   })
 
   it('normalizes null, empty, and whitespace statuses in page filters and full review counts', async () => {
@@ -95,6 +97,27 @@ describe('transaction query boundary', () => {
     expect(currencyCall?.[0]).toContain('COALESCE(t.is_archived, 0) = 0')
     expect(currencyCall?.[0]).not.toContain('account_id = ?')
     expect(currencyCall?.[1]).toBeUndefined()
+  })
+
+  it('filters and counts unclassified allocations across the full result before pagination', async () => {
+    arrangePageResponses()
+
+    await queryTransactionPage({
+      account: 'account-2',
+      reviewReason: 'unclassified',
+      page: 2,
+      pageSize: 25,
+    })
+
+    const pageSql = mockQuery.mock.calls[0][0]
+    const countSql = mockQuery.mock.calls.find(([sql]) => sql.includes('COUNT(*) AS total'))?.[0]
+    const reviewSql = mockQuery.mock.calls.find(([sql]) => sql.includes('unclassified_count'))?.[0]
+    expect(pageSql).toContain('transaction_consumption_classifications')
+    expect(pageSql).toContain('consumption_split.id')
+    expect(pageSql).toContain('consumption_receivable')
+    expect(countSql).toContain('transaction_consumption_classifications')
+    expect(reviewSql).toContain('unclassified_count')
+    expect(reviewSql).not.toContain('LIMIT')
   })
 
   it('performs a bounded joined lookup by ID for safe edit mode', async () => {

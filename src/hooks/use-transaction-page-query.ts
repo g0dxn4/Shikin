@@ -21,6 +21,7 @@ const EMPTY_RESULT: TransactionPageResult = {
     pending: 0,
     placeholder: 0,
     staged: 0,
+    unclassified: 0,
   },
 }
 

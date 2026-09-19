@@ -195,6 +195,99 @@ export function validateConsumptionClassification(
 export function validateConsumptionEvidence(evidence: ConsumptionEvidence): void {
   for (const item of evidence.classifications) validateConsumptionClassification(item, evidence)
 }
+
+/** Build and validate an atomic allocation-classification replacement. */
+export function setConsumptionClassificationInEvidence(
+  evidence: ConsumptionEvidence,
+  item: ConsumptionClassification
+): readonly ConsumptionClassification[] {
+  const existing = evidence.classifications.find(
+    (entry) => entry.transaction_id === item.transaction_id && entry.split_id === item.split_id
+  )
+  if (existing && existing.id !== item.id)
+    throw new Error('A stable classification ID is required for an existing allocation.')
+  if (
+    existing &&
+    evidence.classifications.some((entry) => entry.referenced_purchase_id === existing.id) &&
+    (item.role !== existing.role || item.referenced_purchase_id !== existing.referenced_purchase_id)
+  )
+    throw new Error(
+      'Clear referencing refund/principal classifications before remapping this purchase.'
+    )
+  const classifications = [
+    ...evidence.classifications.filter((entry) => entry.id !== item.id),
+    item,
+  ]
+  validateConsumptionEvidence({ ...evidence, classifications })
+  return classifications
+}
+
+/** Build and validate an explicit clear without silently cascading dependents. */
+export function clearConsumptionClassificationInEvidence(
+  evidence: ConsumptionEvidence,
+  classificationId: string
+): {
+  before: ConsumptionClassification | null
+  classifications: readonly ConsumptionClassification[]
+} {
+  const before = evidence.classifications.find((entry) => entry.id === classificationId) ?? null
+  if (!before) return { before, classifications: evidence.classifications }
+  if (evidence.classifications.some((entry) => entry.referenced_purchase_id === before.id))
+    throw new Error('Clear referencing refund/principal classifications first.')
+  const classifications = evidence.classifications.filter((entry) => entry.id !== before.id)
+  return { before, classifications }
+}
+
+export interface ConsumptionCoverageRow {
+  account_id: string
+  source_namespace: string
+  period_start: string
+  period_end: string
+  status: string
+}
+
+/** Independent account/source coverage. Transaction dates are never treated as coverage proof. */
+export function consumptionCoverage(
+  accountIds: readonly string[],
+  rows: readonly ConsumptionCoverageRow[],
+  start: string,
+  end: string
+) {
+  const uncoveredAccountIds = accountIds.filter((accountId) => {
+    const overlapping = rows.filter(
+      (row) => row.account_id === accountId && row.period_end >= start && row.period_start <= end
+    )
+    if (overlapping.some((row) => row.status !== 'verified')) return true
+    const sources = [
+      ...new Set(
+        rows.filter((row) => row.account_id === accountId).map((row) => row.source_namespace)
+      ),
+    ]
+    return (
+      sources.length === 0 ||
+      !sources.every((source) => {
+        let cursor = start
+        for (const row of overlapping
+          .filter((item) => item.source_namespace === source && item.status === 'verified')
+          .sort((a, b) => a.period_start.localeCompare(b.period_start))) {
+          if (row.period_start > cursor) return false
+          if (row.period_end >= end) return true
+          if (row.period_end >= cursor) {
+            const next = new Date(`${row.period_end}T00:00:00Z`)
+            next.setUTCDate(next.getUTCDate() + 1)
+            cursor = next.toISOString().slice(0, 10)
+          }
+        }
+        return false
+      })
+    )
+  })
+  return {
+    coverageComplete: accountIds.length > 0 && uncoveredAccountIds.length === 0,
+    uncoveredAccountIds,
+  }
+}
+
 export function assertSplitReplacementAllowed(
   transactionId: string,
   evidence: ConsumptionEvidence,
@@ -262,13 +355,31 @@ export function financialFieldsChanged(
   ).some((field) => before[field] !== after[field])
 }
 
+function isConsumptionReportRelevant(row: CorrectionTransaction): boolean {
+  return (
+    row.type !== 'transfer' &&
+    !row.is_archived &&
+    !row.matched_transaction_id &&
+    (!row.is_placeholder || (row.placeholder_status ?? 'unresolved') === 'unresolved') &&
+    !['reconciliation_bridge', 'archived_transfer_mirror'].includes(
+      row.transaction_kind ?? 'standard'
+    ) &&
+    row.reporting_treatment !== 'exclude_from_cashflow'
+  )
+}
+
 /** Known native-currency subtotals only. Coverage is independently verified by the caller. */
 export function netConsumption(evidence: ConsumptionEvidence, start: string, end: string) {
   const unresolvedIds: string[] = evidence.classifications
     .filter((item) => {
       const row = evidence.transactions.find((tx) => tx.id === item.transaction_id)
       return (
-        !row || (row.date && row.date >= start && row.date <= end && !isConsumptionEligible(row))
+        !row ||
+        (row.date &&
+          row.date >= start &&
+          row.date <= end &&
+          !isConsumptionEligible(row) &&
+          !isConsumptionReportRelevant(row))
       )
     })
     .map((item) => item.id)
@@ -283,19 +394,7 @@ export function netConsumption(evidence: ConsumptionEvidence, start: string, end
   for (const row of evidence.transactions) {
     if (!row.date || row.date < start || row.date > end) continue
     if (!isConsumptionEligible(row)) {
-      if (
-        row.type !== 'transfer' &&
-        !row.is_archived &&
-        !row.matched_transaction_id &&
-        (!row.is_placeholder || (row.placeholder_status ?? 'unresolved') === 'unresolved') &&
-        !['reconciliation_bridge', 'archived_transfer_mirror'].includes(
-          row.transaction_kind ?? 'standard'
-        ) &&
-        row.ledger_treatment !== 'staged_no_balance_impact' &&
-        row.reporting_treatment !== 'exclude_from_cashflow' &&
-        normalizePostingStatus(row.status) !== 'pending'
-      )
-        unresolvedIds.push(row.id)
+      if (isConsumptionReportRelevant(row)) unresolvedIds.push(row.id)
       continue
     }
     const splits = evidence.splits.filter((split) => split.transaction_id === row.id)

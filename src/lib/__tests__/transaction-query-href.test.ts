@@ -56,6 +56,16 @@ describe('buildTransactionsHref', () => {
     ).toBe('/transactions?type=expense&dateFrom=2024-06-01&dateTo=2024-06-30')
   })
 
+  it('builds a durable unclassified review URL with the report period', () => {
+    expect(
+      buildTransactionsHref({
+        reviewReason: 'unclassified',
+        dateFrom: '2026-02-01',
+        dateTo: '2026-02-28',
+      })
+    ).toBe('/transactions?dateFrom=2026-02-01&dateTo=2026-02-28&reviewReason=unclassified')
+  })
+
   it('returns the bare ledger path when no filters are set', () => {
     expect(buildTransactionsHref({})).toBe('/transactions')
   })

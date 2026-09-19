@@ -1,1 +1,70 @@
-{}
+{
+  "basis": {
+    "label": "Base del informe",
+    "gross": "Flujo de caja bruto",
+    "net": "Consumo neto",
+    "grossDescription": "Ingresos y gastos registrados antes de clasificar reembolsos y principal de forma explícita.",
+    "netDescription": "Roles explícitos por asignación en monedas nativas. Sin reembolsos automáticos ni total de monedas mixtas."
+  },
+  "dialog": {
+    "title": "Clasificar consumo",
+    "description": "Asigna un rol explícito a cada asignación. Las divisiones se clasifican por separado; los reembolsos y el principal requieren una compra elegida por ti.",
+    "loading": "Cargando clasificaciones actuales"
+  },
+  "allocation": {
+    "parent": "Asignación de la transacción",
+    "split": "Asignación dividida {{number}}",
+    "uncategorized": "Sin categoría"
+  },
+  "fields": {
+    "role": "Rol de la asignación",
+    "purchase": "Compra referenciada",
+    "selectPurchase": "Selecciona una compra"
+  },
+  "roles": {
+    "purchase": "Compra",
+    "fee": "Comisión",
+    "earned_income": "Ingreso ganado",
+    "refund": "Reembolso",
+    "internal_inflow": "Entrada interna",
+    "cash_withdrawal": "Retiro de efectivo",
+    "principal": "Principal"
+  },
+  "actions": {
+    "classify": "Clasificar consumo",
+    "save": "Guardar rol",
+    "saving": "Guardando…",
+    "clear": "Borrar clasificación",
+    "done": "Listo",
+    "retry": "Intentar de nuevo",
+    "reviewUnclassified": "Revisar asignaciones sin clasificar",
+    "reviewPeriod": "Revisar todas las transacciones del periodo",
+    "reviewAccount": "Revisar cobertura de la cuenta"
+  },
+  "errors": {
+    "purchaseRequired": "Elige la compra a la que corresponde este reembolso o principal.",
+    "clearDependents": "Abre los reembolsos o asignaciones de principal vinculados y bórralos antes de cambiar esta compra."
+  },
+  "review": {
+    "filter": "Sin clasificar",
+    "reason": "Falta el rol de consumo"
+  },
+  "report": {
+    "title": "Consumo neto",
+    "knownOnly": "Solo subtotales conocidos",
+    "complete": "La clasificación y la cobertura independiente de fuentes están completas para este periodo.",
+    "incomplete": "Esto no es un cero ni un total completo. Resuelve clasificaciones y cobertura antes de usarlo.",
+    "consumption": "Consumo",
+    "earnedIncome": "Ingreso ganado",
+    "classification": "Clasificación",
+    "coverage": "Cobertura de fuentes",
+    "completeStatus": "Completa",
+    "incompleteStatus": "Incompleta",
+    "unresolved": "Asignaciones sin resolver",
+    "uncovered": "Cuentas sin cobertura",
+    "noKnownTotals": "No hay subtotal clasificado conocido para este periodo.",
+    "categoryBreakdown": "Consumo por categoría de compra",
+    "uncategorized": "Sin categoría",
+    "loadError": "No se pudo cargar el consumo neto"
+  }
+}

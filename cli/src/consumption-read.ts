@@ -1,4 +1,4 @@
-import { netConsumption } from '@shikin/finance-core/corrections'
+import { consumptionCoverage, netConsumption } from '@shikin/finance-core/corrections'
 import { readConsumptionEvidence } from './transaction-corrections.js'
 import { query } from './database.js'
 
@@ -15,39 +15,12 @@ export function readNetConsumption(start: string, end: string) {
     period_end: string
     status: string
   }>('SELECT * FROM source_coverage')
-  const uncoveredAccountIds = accounts
-    .filter((account) => {
-      const rows = coverage.filter(
-        (row) => row.account_id === account.id && row.period_end >= start && row.period_start <= end
-      )
-      if (rows.some((row) => row.status !== 'verified')) return true
-      // Do not stitch different source namespaces together to invent coverage.
-      const sources = [
-        ...new Set(
-          coverage.filter((row) => row.account_id === account.id).map((row) => row.source_namespace)
-        ),
-      ]
-      return (
-        sources.length === 0 ||
-        !sources.every((source) => {
-          let cursor = start
-          for (const row of rows
-            .filter((row) => row.source_namespace === source && row.status === 'verified')
-            .sort((a, b) => a.period_start.localeCompare(b.period_start))) {
-            if (row.period_start > cursor) return false
-            if (row.period_end >= end) return true
-            if (row.period_end >= cursor) {
-              const next = new Date(`${row.period_end}T00:00:00Z`)
-              next.setUTCDate(next.getUTCDate() + 1)
-              cursor = next.toISOString().slice(0, 10)
-            }
-          }
-          return false
-        })
-      )
-    })
-    .map((account) => account.id)
-  const coverageComplete = accounts.length > 0 && uncoveredAccountIds.length === 0
+  const { coverageComplete, uncoveredAccountIds } = consumptionCoverage(
+    accounts.map((account) => account.id),
+    coverage,
+    start,
+    end
+  )
   return {
     success: true,
     ...result,

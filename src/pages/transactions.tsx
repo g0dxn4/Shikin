@@ -50,6 +50,7 @@ import { getErrorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import type { TransactionSplitWithCategory } from '@/types/database'
 import { StatementImportDialog } from '@/components/transactions/statement-import-dialog'
+import { ConsumptionClassificationDialog } from '@/components/transactions/consumption-classification-dialog'
 import { useTransactionPageQuery } from '@/hooks/use-transaction-page-query'
 import {
   TRANSACTION_PAGE_SIZES,
@@ -80,6 +81,7 @@ const reviewFilters: TransactionReviewReason[] = [
   'pending',
   'placeholder',
   'staged',
+  'unclassified',
 ]
 const sortableFields: TransactionSort[] = ['date', 'description', 'amount']
 
@@ -233,6 +235,7 @@ function getReviewReasons(
   )
     reasons.push('placeholder')
   if (transaction.ledger_treatment === 'staged_no_balance_impact') reasons.push('staged')
+  if (transaction.is_consumption_unclassified) reasons.push('unclassified')
   return reasons
 }
 
@@ -281,6 +284,7 @@ function pageNumbers(current: number, total: number): Array<number | 'ellipsis'>
 export function Transactions() {
   const { t } = useTranslation('transactions')
   const { t: tCommon } = useTranslation('common')
+  const { t: tConsumption } = useTranslation('consumption')
   const { openTransactionDialog, openRecurringDialog } = useUIStore()
   const { remove, getSplits, updateReviewFields } = useTransactionStore()
   const { accounts, archivedAccounts, fetch: fetchAccounts } = useAccountStore()
@@ -290,6 +294,9 @@ export function Transactions() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [statementImportOpen, setStatementImportOpen] = useState(false)
   const [detailTransaction, setDetailTransaction] = useState<TransactionPageRow | null>(null)
+  const [classificationTransactionId, setClassificationTransactionId] = useState<string | null>(
+    null
+  )
   const [activeReviewId, setActiveReviewId] = useState<string | null>(null)
   const [reviewMutationId, setReviewMutationId] = useState<string | null>(null)
   const [reviewAnnouncement, setReviewAnnouncement] = useState('')
@@ -607,7 +614,10 @@ export function Transactions() {
               onClick={() => updateUrlState({ reviewReason: filter })}
               className="filter-pill border-border border"
             >
-              {t(`review.filters.${filter}`)} ({pageQuery.reviewCounts[filter]})
+              {filter === 'unclassified'
+                ? tConsumption('review.filter')
+                : t(`review.filters.${filter}`)}{' '}
+              ({pageQuery.reviewCounts[filter]})
             </button>
           ))}
         </div>
@@ -711,6 +721,7 @@ export function Transactions() {
               onEdit={(id) => openTransactionDialog(id)}
               onDelete={setDeleteId}
               onUpdate={handleReviewUpdate}
+              unclassifiedLabel={tConsumption('review.reason')}
             />
           )}
           <Pagination
@@ -736,6 +747,16 @@ export function Transactions() {
           openTransactionDialog(id)
         }}
         onDelete={(id) => setDeleteId(id)}
+        onClassify={(id) => {
+          setDetailTransaction(null)
+          setClassificationTransactionId(id)
+        }}
+      />
+      <ConsumptionClassificationDialog
+        transactionId={classificationTransactionId}
+        open={!!classificationTransactionId}
+        onOpenChange={(nextOpen) => !nextOpen && setClassificationTransactionId(null)}
+        onChanged={() => invalidateTransactionPage('review')}
       />
       <StatementImportDialog open={statementImportOpen} onOpenChange={setStatementImportOpen} />
       <Suspense>
@@ -1222,6 +1243,7 @@ function ReviewView({
   onEdit,
   onDelete,
   onUpdate,
+  unclassifiedLabel,
 }: {
   transactions: TransactionPageRow[]
   accounts: {
@@ -1239,6 +1261,7 @@ function ReviewView({
   onEdit: (id: string) => void
   onDelete: (id: string) => void
   onUpdate: (transaction: TransactionPageRow, fields: ReviewFieldUpdate) => Promise<void>
+  unclassifiedLabel: string
 }) {
   const { t } = useTranslation('transactions')
   return (
@@ -1291,7 +1314,7 @@ function ReviewView({
             <div className="mt-3 flex flex-wrap gap-1.5">
               {getReviewReasons(transaction).map((reason) => (
                 <Badge key={reason} variant="secondary" className="text-[10px]">
-                  {t(`review.reasons.${reason}`)}
+                  {reason === 'unclassified' ? unclassifiedLabel : t(`review.reasons.${reason}`)}
                 </Badge>
               ))}
             </div>
@@ -1477,14 +1500,17 @@ function TransactionDetail({
   onOpenChange,
   onEdit,
   onDelete,
+  onClassify,
 }: {
   transaction: TransactionPageRow | null
   open: boolean
   onOpenChange: (open: boolean) => void
   onEdit: (id: string) => void
   onDelete: (id: string) => void
+  onClassify: (id: string) => void
 }) {
   const { t } = useTranslation('transactions')
+  const { t: tConsumption } = useTranslation('consumption')
   if (!transaction) return null
   const protection = getReviewProtectionKey(transaction)
   return (
@@ -1528,16 +1554,25 @@ function TransactionDetail({
             {t(protection)}
           </p>
         )}
-        <div className="mt-6 flex gap-2">
+        <div className="mt-6 grid gap-2 sm:grid-cols-2">
+          {(transaction.type === 'expense' || transaction.type === 'income') && (
+            <Button
+              variant="outline"
+              className="min-h-11 sm:col-span-2"
+              onClick={() => onClassify(transaction.id)}
+            >
+              {tConsumption('actions.classify')}
+            </Button>
+          )}
           {!transaction.has_splits && (
-            <Button className="flex-1" onClick={() => onEdit(transaction.id)}>
+            <Button className="min-h-11" onClick={() => onEdit(transaction.id)}>
               <Pencil size={15} />
               {t('editTransaction')}
             </Button>
           )}
           <Button
             variant="outline"
-            className="text-destructive flex-1"
+            className="text-destructive min-h-11"
             onClick={() => onDelete(transaction.id)}
           >
             <Trash2 size={15} />

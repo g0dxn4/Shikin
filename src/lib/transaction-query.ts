@@ -12,6 +12,7 @@ export type TransactionReviewReason =
   | 'pending'
   | 'placeholder'
   | 'staged'
+  | 'unclassified'
 export type TransactionSort =
   | 'date'
   | 'description'
@@ -45,10 +46,12 @@ export interface TransactionReviewCounts {
   pending: number
   placeholder: number
   staged: number
+  unclassified: number
 }
 
 export interface TransactionPageRow extends TransactionWithDetails {
   has_splits: number
+  is_consumption_unclassified?: number
 }
 
 export interface TransactionPageResult {
@@ -66,6 +69,7 @@ type ReviewCountRow = {
   pending_count: number | null
   placeholder_count: number | null
   staged_count: number | null
+  unclassified_count: number | null
 }
 
 const NORMALIZED_STATUS_SQL = "COALESCE(NULLIF(TRIM(t.status), ''), 'posted')"
@@ -75,7 +79,33 @@ const NEEDS_CATEGORY_SQL = `(t.type IN ('expense', 'income') AND t.category_id I
 const PENDING_SQL = `${NORMALIZED_STATUS_SQL} = 'pending'`
 const PLACEHOLDER_SQL = `(COALESCE(t.is_placeholder, 0) = 1 AND COALESCE(t.placeholder_status, 'unresolved') = 'unresolved')`
 const STAGED_SQL = `COALESCE(t.ledger_treatment, 'normal') = 'staged_no_balance_impact'`
-const NEEDS_REVIEW_SQL = `(${NEEDS_CATEGORY_SQL} OR ${PENDING_SQL} OR ${PLACEHOLDER_SQL} OR ${STAGED_SQL})`
+const CONSUMPTION_ELIGIBLE_SQL = `(t.type IN ('expense', 'income')
+  AND ${NORMALIZED_STATUS_SQL} IN ('posted', 'cleared')
+  AND COALESCE(t.ledger_treatment, 'normal') = 'normal'
+  AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+  AND COALESCE(t.transaction_kind, 'standard') = 'standard'
+  AND COALESCE(t.is_archived, 0) = 0
+  AND t.matched_transaction_id IS NULL
+  AND COALESCE(t.is_placeholder, 0) = 0
+  AND NOT EXISTS(SELECT 1 FROM receivables consumption_receivable WHERE consumption_receivable.matched_transaction_id = t.id)
+  AND NOT EXISTS(SELECT 1 FROM account_reconciliations consumption_reconciliation WHERE consumption_reconciliation.adjustment_transaction_id = t.id))`
+const UNCLASSIFIED_SQL = `(${CONSUMPTION_ELIGIBLE_SQL} AND (
+  (${HAS_SPLITS_SQL} AND EXISTS(
+    SELECT 1 FROM transaction_splits consumption_split
+    WHERE consumption_split.transaction_id = t.id
+      AND NOT EXISTS(
+        SELECT 1 FROM transaction_consumption_classifications consumption_classification
+        WHERE consumption_classification.transaction_id = t.id
+          AND consumption_classification.split_id = consumption_split.id
+      )
+  ))
+  OR (NOT ${HAS_SPLITS_SQL} AND NOT EXISTS(
+    SELECT 1 FROM transaction_consumption_classifications consumption_classification
+    WHERE consumption_classification.transaction_id = t.id
+      AND consumption_classification.split_id IS NULL
+  ))
+))`
+const NEEDS_REVIEW_SQL = `(${NEEDS_CATEGORY_SQL} OR ${PENDING_SQL} OR ${PLACEHOLDER_SQL} OR ${STAGED_SQL} OR ${UNCLASSIFIED_SQL})`
 
 const SORT_SQL: Record<TransactionSort, string> = {
   date: 't.date',
@@ -115,6 +145,8 @@ function reviewReasonSql(reason: TransactionReviewReason | undefined): string | 
       return PLACEHOLDER_SQL
     case 'staged':
       return STAGED_SQL
+    case 'unclassified':
+      return UNCLASSIFIED_SQL
     default:
       return null
   }
@@ -191,6 +223,7 @@ const JOINED_TRANSACTION_SELECT = `
          c.color AS category_color,
          ta.name AS transfer_to_account_name,
          ${HAS_SPLITS_SQL} AS has_splits,
+         ${UNCLASSIFIED_SQL} AS is_consumption_unclassified,
          EXISTS(SELECT 1 FROM receivables r WHERE r.matched_transaction_id = t.id) AS is_receivable_payment,
          EXISTS(SELECT 1 FROM account_reconciliations ar WHERE ar.adjustment_transaction_id = t.id) AS is_reconciliation_adjustment,
          (t.finalization_id IS NOT NULL OR EXISTS(
@@ -258,7 +291,8 @@ export async function queryTransactionPage(
          SUM(CASE WHEN ${NEEDS_CATEGORY_SQL} THEN 1 ELSE 0 END) AS needs_category_count,
          SUM(CASE WHEN ${PENDING_SQL} THEN 1 ELSE 0 END) AS pending_count,
          SUM(CASE WHEN ${PLACEHOLDER_SQL} THEN 1 ELSE 0 END) AS placeholder_count,
-         SUM(CASE WHEN ${STAGED_SQL} THEN 1 ELSE 0 END) AS staged_count
+         SUM(CASE WHEN ${STAGED_SQL} THEN 1 ELSE 0 END) AS staged_count,
+         SUM(CASE WHEN ${UNCLASSIFIED_SQL} THEN 1 ELSE 0 END) AS unclassified_count
        FROM transactions t
        LEFT JOIN accounts a ON a.id = t.account_id
        LEFT JOIN categories c ON c.id = t.category_id
@@ -279,6 +313,7 @@ export async function queryTransactionPage(
       pending: Number(review?.pending_count ?? 0),
       placeholder: Number(review?.placeholder_count ?? 0),
       staged: Number(review?.staged_count ?? 0),
+      unclassified: Number(review?.unclassified_count ?? 0),
     },
   }
 }

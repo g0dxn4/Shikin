@@ -15,7 +15,14 @@ const emptyResult = {
   rows: [],
   total: 0,
   currencies: [],
-  reviewCounts: { all: 0, 'needs-category': 0, pending: 0, placeholder: 0, staged: 0 },
+  reviewCounts: {
+    all: 0,
+    'needs-category': 0,
+    pending: 0,
+    placeholder: 0,
+    staged: 0,
+    unclassified: 0,
+  },
 }
 
 describe('useTransactionPageQuery', () => {
@@ -97,6 +104,7 @@ describe('useTransactionPageQuery', () => {
       pending: 1,
       placeholder: 0,
       staged: 0,
+      unclassified: 0,
     })
   })
 

@@ -1,1 +1,70 @@
-{}
+{
+  "basis": {
+    "label": "Reporting basis",
+    "gross": "Gross cash flow",
+    "net": "Net consumption",
+    "grossDescription": "Recorded income and expenses before explicit refund and principal classification.",
+    "netDescription": "Explicit allocation roles in native currencies. No automatic refunds or mixed-currency total."
+  },
+  "dialog": {
+    "title": "Classify consumption",
+    "description": "Assign an explicit role to each allocation. Split rows are classified separately; refunds and principal require a purchase you choose.",
+    "loading": "Loading current classifications"
+  },
+  "allocation": {
+    "parent": "Transaction allocation",
+    "split": "Split allocation {{number}}",
+    "uncategorized": "Uncategorized"
+  },
+  "fields": {
+    "role": "Allocation role",
+    "purchase": "Referenced purchase",
+    "selectPurchase": "Select a purchase"
+  },
+  "roles": {
+    "purchase": "Purchase",
+    "fee": "Fee",
+    "earned_income": "Earned income",
+    "refund": "Refund",
+    "internal_inflow": "Internal inflow",
+    "cash_withdrawal": "Cash withdrawal",
+    "principal": "Principal"
+  },
+  "actions": {
+    "classify": "Classify consumption",
+    "save": "Save role",
+    "saving": "Saving…",
+    "clear": "Clear classification",
+    "done": "Done",
+    "retry": "Try again",
+    "reviewUnclassified": "Review unclassified allocations",
+    "reviewPeriod": "Review all transactions in this period",
+    "reviewAccount": "Review account coverage"
+  },
+  "errors": {
+    "purchaseRequired": "Choose the purchase this refund or principal allocation references.",
+    "clearDependents": "Open the referenced refund or principal allocations and clear them before changing this purchase."
+  },
+  "review": {
+    "filter": "Unclassified",
+    "reason": "Consumption role missing"
+  },
+  "report": {
+    "title": "Net consumption",
+    "knownOnly": "Known subtotals only",
+    "complete": "Classification and independent source coverage are complete for this period.",
+    "incomplete": "This is not a complete zero or total. Resolve classifications and account coverage before relying on it.",
+    "consumption": "Consumption",
+    "earnedIncome": "Earned income",
+    "classification": "Classification",
+    "coverage": "Source coverage",
+    "completeStatus": "Complete",
+    "incompleteStatus": "Incomplete",
+    "unresolved": "Unresolved allocations",
+    "uncovered": "Uncovered accounts",
+    "noKnownTotals": "No known classified subtotal for this period.",
+    "categoryBreakdown": "Consumption by purchase category",
+    "uncategorized": "Uncategorized",
+    "loadError": "Couldn’t load net consumption"
+  }
+}

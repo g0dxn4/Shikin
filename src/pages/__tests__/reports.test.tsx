@@ -1,12 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import dayjs from 'dayjs'
 import { ReportsPage } from '../reports'
+import type { FrontendNetConsumptionReport } from '@/lib/consumption-service'
 
 const mockFetchAccounts = vi.fn().mockResolvedValue(undefined)
 const mockFetchBudgets = vi.fn().mockResolvedValue(undefined)
 const mockFetchTransactions = vi.fn().mockResolvedValue(undefined)
 const mockLoadRates = vi.fn().mockResolvedValue(undefined)
+const { mockReadNetConsumptionReport } = vi.hoisted(() => ({
+  mockReadNetConsumptionReport: vi.fn(),
+}))
+
+vi.mock('@/lib/consumption-service', () => ({
+  readNetConsumptionReport: mockReadNetConsumptionReport,
+}))
 
 let mockAccounts: Array<Record<string, unknown>> = []
 let mockBudgets: Array<Record<string, unknown>> = []
@@ -167,6 +176,31 @@ describe('ReportsPage', () => {
       amountCentavos,
       missingCurrencies: [],
     })
+    mockReadNetConsumptionReport.mockResolvedValue({
+      basis: 'net_consumption',
+      complete: false,
+      classificationComplete: false,
+      coverageComplete: false,
+      unresolvedIds: ['allocation-1'],
+      uncoveredAccountIds: ['account-1'],
+      totalsByCurrency: [
+        { currency: 'USD', consumptionCentavos: 7500, earnedIncomeCentavos: 20000 },
+      ],
+      byCategory: [
+        {
+          currency: 'USD',
+          categoryId: 'food',
+          categoryName: 'Food',
+          amountCentavos: 7500,
+        },
+      ],
+      period: {
+        start: dayjs().startOf('month').format('YYYY-MM-DD'),
+        end: dayjs().endOf('month').format('YYYY-MM-DD'),
+      },
+      currencyScope: 'all',
+      message: 'Known subtotals only.',
+    })
   })
 
   it('renders a usable monthly report and its complete cash total', () => {
@@ -178,6 +212,68 @@ describe('ReportsPage', () => {
     expect(screen.getByText('25%')).toBeInTheDocument()
     expect(screen.getByText('$2,500.00')).toBeInTheDocument()
     expect(mockLoadRates).toHaveBeenCalled()
+  })
+
+  it('keeps gross cash flow as default and loads page-owned native-currency net consumption on demand', async () => {
+    const user = userEvent.setup()
+    render(<ReportsPage />)
+
+    expect(screen.getByRole('button', { name: 'basis.gross' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
+    expect(mockReadNetConsumptionReport).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'basis.net' }))
+
+    expect(await screen.findAllByText('$75.00')).toHaveLength(2)
+    expect(screen.getByText('$200.00')).toBeInTheDocument()
+    expect(screen.getByText(/allocation-1/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'actions.reviewUnclassified' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('reviewReason=unclassified')
+    )
+    expect(screen.queryByText('$2,500.00')).not.toBeInTheDocument()
+  })
+
+  it('surfaces net-basis read failures without replacing the gross report', async () => {
+    mockReadNetConsumptionReport.mockRejectedValueOnce(new Error('Synthetic read failure'))
+    const user = userEvent.setup()
+    render(<ReportsPage />)
+
+    await user.click(screen.getByRole('button', { name: 'basis.net' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'report.loadError: Synthetic read failure'
+    )
+    await user.click(screen.getByRole('button', { name: 'basis.gross' }))
+    expect(screen.getByText('reports.categoryBreakdown')).toBeInTheDocument()
+  })
+
+  it('ignores a stale net response after returning to gross basis', async () => {
+    let resolveNet!: (value: FrontendNetConsumptionReport) => void
+    mockReadNetConsumptionReport.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveNet = resolve))
+    )
+    const user = userEvent.setup()
+    render(<ReportsPage />)
+
+    await user.click(screen.getByRole('button', { name: 'basis.net' }))
+    await user.click(screen.getByRole('button', { name: 'basis.gross' }))
+    resolveNet({
+      basis: 'net_consumption',
+      complete: true,
+      classificationComplete: true,
+      coverageComplete: true,
+      unresolvedIds: [],
+      uncoveredAccountIds: [],
+      totalsByCurrency: [],
+      byCategory: [],
+      period: { start: '2026-09-01', end: '2026-09-30' },
+      currencyScope: 'all',
+      message: 'Complete',
+    })
+    await Promise.resolve()
+    expect(screen.getByText('reports.categoryBreakdown')).toBeInTheDocument()
+    expect(screen.queryByText('report.title')).not.toBeInTheDocument()
   })
 
   it('converts mixed-currency cash flow before aggregating it', () => {

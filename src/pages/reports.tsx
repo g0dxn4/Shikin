@@ -1,11 +1,18 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 import { isCashFlowEligible } from '@shikin/finance-core'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Button } from '@/components/ui/button'
 import { MetricItem, MetricStrip, NativePanel } from '@/components/ui/native-layout'
 import { useBudgetDisplay } from '@/components/budgets/use-budget-display'
 import { formatMoney } from '@/lib/money'
+import { getErrorMessage } from '@/lib/errors'
+import {
+  readNetConsumptionReport,
+  type FrontendNetConsumptionReport,
+} from '@/lib/consumption-service'
+import { buildTransactionsHref } from '@/lib/transaction-query-href'
 import { useAccountStore } from '@/stores/account-store'
 import { useBudgetStore } from '@/stores/budget-store'
 import { useCurrencyStore } from '@/stores/currency-store'
@@ -21,6 +28,7 @@ function endOfCurrentMonth() {
 
 export function ReportsPage() {
   const { t } = useTranslation('analytics')
+  const [basis, setBasis] = useState<'gross_cashflow' | 'net_consumption'>('gross_cashflow')
   const { accounts, fetch: fetchAccounts, isLoading: accountsLoading } = useAccountStore()
   const { budgets, fetch: fetchBudgets, isLoading: budgetsLoading } = useBudgetStore()
   const {
@@ -145,6 +153,22 @@ export function ReportsPage() {
   const isLoading = accountsLoading || budgetsLoading || transactionsLoading
   const periodLabel = dayjs().format('MMMM YYYY')
 
+  if (basis === 'net_consumption') {
+    return (
+      <div className="page-content">
+        <div className="text-muted-foreground text-sm">
+          <span>{t('reports.title')}</span>
+          <span aria-hidden="true"> · </span>
+          <span>{t('reports.description')}</span>
+          <span aria-hidden="true"> · </span>
+          <span>{periodLabel}</span>
+        </div>
+        <ReportBasisControl basis={basis} onChange={setBasis} />
+        <NetConsumptionPanel start={startOfCurrentMonth()} end={endOfCurrentMonth()} />
+      </div>
+    )
+  }
+
   return (
     <div className="page-content">
       <div className="text-muted-foreground text-sm">
@@ -154,6 +178,8 @@ export function ReportsPage() {
         <span aria-hidden="true"> · </span>
         <span>{periodLabel}</span>
       </div>
+
+      <ReportBasisControl basis={basis} onChange={setBasis} />
 
       <MetricStrip aria-label={t('reports.title')}>
         <MetricItem
@@ -227,7 +253,9 @@ export function ReportsPage() {
             </div>
           ) : !cashFlowComplete ? (
             <p className="text-warning py-10 text-center text-sm" role="alert">
-              {t('reports.cashUnavailable', { currencies: cashFlowMissingCurrencies.join(', ') })}
+              {t('reports.cashUnavailable', {
+                currencies: cashFlowMissingCurrencies.join(', '),
+              })}
             </p>
           ) : topCategories.length === 0 ? (
             <p className="text-muted-foreground py-10 text-center text-sm">
@@ -304,6 +332,243 @@ export function ReportsPage() {
           )}
         </NativePanel>
       </div>
+    </div>
+  )
+}
+
+function ReportBasisControl({
+  basis,
+  onChange,
+}: {
+  basis: 'gross_cashflow' | 'net_consumption'
+  onChange: (basis: 'gross_cashflow' | 'net_consumption') => void
+}) {
+  const { t } = useTranslation('consumption')
+  return (
+    <div className="border-border bg-surface flex flex-col gap-3 rounded-xl border p-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <p className="text-sm font-semibold">{t('basis.label')}</p>
+        <p className="text-muted-foreground mt-0.5 text-xs">
+          {basis === 'gross_cashflow' ? t('basis.grossDescription') : t('basis.netDescription')}
+        </p>
+      </div>
+      <div className="bg-muted flex rounded-lg p-0.5" role="group" aria-label={t('basis.label')}>
+        <button
+          type="button"
+          aria-pressed={basis === 'gross_cashflow'}
+          className={`filter-pill min-h-11 ${basis === 'gross_cashflow' ? 'filter-pill-active' : ''}`}
+          onClick={() => onChange('gross_cashflow')}
+        >
+          {t('basis.gross')}
+        </button>
+        <button
+          type="button"
+          aria-pressed={basis === 'net_consumption'}
+          className={`filter-pill min-h-11 ${basis === 'net_consumption' ? 'filter-pill-active' : ''}`}
+          onClick={() => onChange('net_consumption')}
+        >
+          {t('basis.net')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function NetConsumptionPanel({ start, end }: { start: string; end: string }) {
+  const { t } = useTranslation('consumption')
+  const [report, setReport] = useState<FrontendNetConsumptionReport | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const requestSequence = useRef(0)
+
+  useEffect(() => {
+    const sequence = ++requestSequence.current
+    void Promise.resolve()
+      .then(() => {
+        if (sequence !== requestSequence.current) return null
+        setLoading(true)
+        setError(null)
+        return readNetConsumptionReport(start, end)
+      })
+      .then((nextReport) => {
+        if (nextReport && sequence === requestSequence.current) setReport(nextReport)
+      })
+      .catch((readError) => {
+        if (sequence === requestSequence.current) setError(getErrorMessage(readError))
+      })
+      .finally(() => {
+        if (sequence === requestSequence.current) setLoading(false)
+      })
+    return () => {
+      if (sequence === requestSequence.current) requestSequence.current += 1
+    }
+  }, [end, start])
+
+  if (loading && !report) {
+    return (
+      <NativePanel className="space-y-3 p-5 sm:p-6" aria-label={t('report.title')}>
+        <Skeleton className="h-6 w-40" />
+        <Skeleton className="h-20 w-full rounded-xl" />
+        <Skeleton className="h-20 w-full rounded-xl" />
+      </NativePanel>
+    )
+  }
+  if (error && !report) {
+    return (
+      <NativePanel className="p-5 sm:p-6">
+        <p className="text-destructive text-sm font-semibold" role="alert">
+          {t('report.loadError')}: {error}
+        </p>
+      </NativePanel>
+    )
+  }
+  if (!report) return null
+
+  return (
+    <div className="space-y-3">
+      <NativePanel className="p-5 sm:p-6">
+        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+          <div>
+            <p className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
+              {report.complete ? t('report.completeStatus') : t('report.knownOnly')}
+            </p>
+            <h2 className="mt-1 text-lg font-semibold">{t('report.title')}</h2>
+            <p className="text-muted-foreground mt-1 max-w-2xl text-sm">
+              {report.complete ? t('report.complete') : t('report.incomplete')}
+            </p>
+          </div>
+          <span className="text-muted-foreground text-xs tabular-nums">
+            {report.period.start} – {report.period.end}
+          </span>
+        </div>
+
+        {report.totalsByCurrency.length === 0 ? (
+          <p className="border-border bg-muted/30 text-muted-foreground mt-5 rounded-lg border p-4 text-sm">
+            {t('report.noKnownTotals')}
+          </p>
+        ) : (
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            {report.totalsByCurrency.map((total) => (
+              <section key={total.currency} className="border-border rounded-xl border p-4">
+                <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
+                  {total.currency}
+                </h3>
+                <dl className="mt-3 space-y-2 text-sm">
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-muted-foreground">{t('report.consumption')}</dt>
+                    <dd className="font-semibold tabular-nums">
+                      {formatMoney(total.consumptionCentavos, total.currency)}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-muted-foreground">{t('report.earnedIncome')}</dt>
+                    <dd className="font-semibold tabular-nums">
+                      {formatMoney(total.earnedIncomeCentavos, total.currency)}
+                    </dd>
+                  </div>
+                </dl>
+              </section>
+            ))}
+          </div>
+        )}
+      </NativePanel>
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        <NativePanel className="p-5">
+          <h2 className="text-sm font-semibold">{t('report.categoryBreakdown')}</h2>
+          <div className="mt-3 space-y-2">
+            {report.byCategory.map((category) => (
+              <div
+                key={`${category.currency}:${category.categoryId ?? 'none'}`}
+                className="flex items-center justify-between gap-3 text-sm"
+              >
+                <span className="truncate">
+                  {category.categoryName ?? category.categoryId ?? t('report.uncategorized')}
+                </span>
+                <span className="font-semibold tabular-nums">
+                  {formatMoney(category.amountCentavos, category.currency)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </NativePanel>
+
+        <NativePanel className="p-5">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <StatusBlock
+              label={t('report.classification')}
+              complete={report.classificationComplete}
+              count={report.unresolvedIds.length}
+            />
+            <StatusBlock
+              label={t('report.coverage')}
+              complete={report.coverageComplete}
+              count={report.uncoveredAccountIds.length}
+            />
+          </div>
+          {report.unresolvedIds.length > 0 ? (
+            <div className="mt-4">
+              <p className="text-muted-foreground text-xs">
+                {t('report.unresolved')}: {report.unresolvedIds.join(', ')}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button asChild variant="outline" className="min-h-11">
+                  <a
+                    href={buildTransactionsHref({
+                      reviewReason: 'unclassified',
+                      dateFrom: start,
+                      dateTo: end,
+                    })}
+                  >
+                    {t('actions.reviewUnclassified')}
+                  </a>
+                </Button>
+                <Button asChild variant="outline" className="min-h-11">
+                  <a href={buildTransactionsHref({ dateFrom: start, dateTo: end })}>
+                    {t('actions.reviewPeriod')}
+                  </a>
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          {report.uncoveredAccountIds.length > 0 ? (
+            <div className="mt-4">
+              <p className="text-muted-foreground text-xs">
+                {t('report.uncovered')}: {report.uncoveredAccountIds.join(', ')}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {report.uncoveredAccountIds.map((accountId) => (
+                  <Button key={accountId} asChild variant="outline" className="min-h-11">
+                    <a href={`/accounts?account=${encodeURIComponent(accountId)}`}>
+                      {t('actions.reviewAccount')} · {accountId}
+                    </a>
+                  </Button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </NativePanel>
+      </div>
+    </div>
+  )
+}
+
+function StatusBlock({
+  label,
+  complete,
+  count,
+}: {
+  label: string
+  complete: boolean
+  count: number
+}) {
+  const { t } = useTranslation('consumption')
+  return (
+    <div className="border-border rounded-lg border p-3">
+      <p className="text-muted-foreground text-xs">{label}</p>
+      <p className="mt-1 text-sm font-semibold">
+        {complete ? t('report.completeStatus') : `${t('report.incompleteStatus')} · ${count}`}
+      </p>
     </div>
   )
 }

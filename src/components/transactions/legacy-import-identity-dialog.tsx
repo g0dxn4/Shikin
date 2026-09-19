@@ -23,9 +23,8 @@ import {
   type LegacyImportIdentityPreview,
   type LegacyImportIdentityTransaction,
 } from '@/lib/import-identity-service'
-import { invalidateTransactionPage } from '@/lib/transaction-query-events'
 
-export function ExportLegacyImportIdentityAction({
+export function LegacyImportIdentityAction({
   transactionId,
   onChanged,
 }: {
@@ -36,7 +35,7 @@ export function ExportLegacyImportIdentityAction({
   const [open, setOpen] = useState(false)
   return (
     <>
-      <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <Button type="button" variant="outline" className="min-h-11" onClick={() => setOpen(true)}>
         <Fingerprint aria-hidden="true" />
         {t('identity.action')}
       </Button>
@@ -156,8 +155,7 @@ function LegacyImportIdentityDialog({
     setError(null)
     try {
       const result = await bindLegacyImportIdentity({ ...requestedInput, previewToken })
-      // These are post-commit effects and must run even if the dialog closed meanwhile.
-      invalidateTransactionPage('import')
+      // The service already invalidated page reads after commit. Keep the callback even if closed.
       onChanged?.()
       if (!isCurrent(requestId, requestedTransactionId)) return
       setPreview(null)

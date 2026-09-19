@@ -27,7 +27,7 @@ vi.mock('@/lib/transaction-query-events', () => ({
   invalidateTransactionPage: mocks.invalidate,
 }))
 vi.mock('@/components/transactions/legacy-import-identity-dialog', () => ({
-  ExportLegacyImportIdentityAction: ({ transactionId }: { transactionId: string }) => (
+  LegacyImportIdentityAction: ({ transactionId }: { transactionId: string }) => (
     <button type="button">identity-action-{transactionId}</button>
   ),
 }))

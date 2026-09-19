@@ -16,7 +16,7 @@ import { Label } from '@/components/ui/label'
 import { formatMoney, toCentavos } from '@/lib/money'
 import { getErrorMessage } from '@/lib/errors'
 import { invalidateTransactionPage } from '@/lib/transaction-query-events'
-import { ExportLegacyImportIdentityAction } from '@/components/transactions/legacy-import-identity-dialog'
+import { LegacyImportIdentityAction } from '@/components/transactions/legacy-import-identity-dialog'
 import type { Account } from '@/types/database'
 import {
   finalizeAccountStatementHistory,
@@ -581,7 +581,7 @@ export function AccountMaintenanceDialog({
                       </label>
                       {!row.import_source ? (
                         <div className="border-border mt-2 flex justify-end border-t pt-2">
-                          <ExportLegacyImportIdentityAction
+                          <LegacyImportIdentityAction
                             transactionId={row.id}
                             onChanged={() => void reload(contextEpochRef.current)}
                           />

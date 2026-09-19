@@ -24,6 +24,23 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
 
+vi.mock('@/components/accounts/account-maintenance-dialog', async () => {
+  const { useState } = await import('react')
+  return {
+    AccountMaintenanceAction: ({ account }: { account: { account_mode?: string } }) => {
+      const [open, setOpen] = useState(false)
+      if (account.account_mode === 'snapshot_only') return null
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            action
+          </button>
+          {open ? <div role="status">errors.savedRefreshFailed</div> : null}
+        </>
+      )
+    },
+  }
+})
 vi.mock('@/components/accounts/card-statements-dialog', () => ({
   CardStatementsAction: ({ account }: { account: { type: string; name: string } }) =>
     account.type === 'credit_card' ? (
@@ -124,6 +141,28 @@ describe('Accounts', () => {
     expect(container.querySelector('.skeleton')).toBeInTheDocument()
     expect(container.querySelector('[class*="xl:grid-cols-"]')).not.toBeInTheDocument()
     expect(container.querySelector('.metric-strip')).toBeInTheDocument()
+  })
+
+  it('keeps existing account cards mounted during background refresh', async () => {
+    const user = userEvent.setup()
+    mockAccounts = [
+      {
+        id: 'acc-1',
+        name: 'Checking',
+        type: 'checking',
+        currency: 'USD',
+        balance: 250000,
+        account_mode: 'transactional',
+      },
+    ]
+    mockIsLoading = true
+
+    const { container } = renderAccounts()
+
+    expect(screen.getByRole('article', { name: 'Checking' })).toBeInTheDocument()
+    expect(container.querySelector('.skeleton')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'action' }))
+    expect(screen.getByRole('status')).toHaveTextContent('errors.savedRefreshFailed')
   })
 
   it('renders empty state with add button', () => {

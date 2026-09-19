@@ -457,7 +457,7 @@ export function Accounts() {
         </div>
       ) : null}
 
-      {isLoading ? (
+      {isLoading && accounts.length === 0 && archivedAccounts.length === 0 ? (
         <AccountsSkeleton />
       ) : hasInitialLoadError ? (
         <ErrorState

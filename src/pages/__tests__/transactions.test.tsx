@@ -17,6 +17,18 @@ vi.mock('@/components/transactions/statement-import-dialog', () => ({
   StatementImportDialog: ({ open }: { open: boolean }) =>
     open ? <div data-testid="statement-import-dialog" /> : null,
 }))
+vi.mock('@/components/transactions/legacy-import-identity-dialog', () => ({
+  LegacyImportIdentityAction: ({
+    onChanged,
+  }: {
+    transactionId: string
+    onChanged?: () => void
+  }) => (
+    <button type="button" className="min-h-11" onClick={() => onChanged?.()}>
+      identity.action
+    </button>
+  ),
+}))
 
 const mockOpenTransactionDialog = vi.fn()
 const mockOpenRecurringDialog = vi.fn()
@@ -353,5 +365,83 @@ describe('Transactions', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent('Page two record')
     await user.click(screen.getByRole('button', { name: 'editTransaction' }))
     expect(mockOpenTransactionDialog).toHaveBeenCalledWith('page-2-row')
+  })
+
+  it('mounts legacy import identity for eligible unbound rows and closes stale details after change', async () => {
+    setRows([
+      makeRow({
+        id: 'eligible',
+        description: 'Eligible coffee',
+        import_source: null,
+        import_external_id: null,
+        import_fingerprint: null,
+        import_content_fingerprint: null,
+        transaction_kind: 'standard',
+        is_archived: 0,
+      }),
+    ])
+    const user = userEvent.setup()
+    render(<Transactions />)
+
+    await user.click(screen.getByRole('button', { name: /^Eligible coffee/ }))
+    const action = screen.getByRole('button', { name: 'identity.action' })
+    expect(action).toBeVisible()
+    expect(action).toHaveClass('min-h-11')
+    await user.click(action)
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: 'Eligible coffee' })).not.toBeInTheDocument()
+    )
+  })
+
+  it('hides legacy import identity unless the page row is an eligible active ordinary unbound row', async () => {
+    setRows([
+      makeRow({ id: 'missing', description: 'Missing projection' }),
+      makeRow({
+        id: 'bound',
+        description: 'Already bound',
+        import_source: 'Bank',
+        import_external_id: 'x',
+        import_fingerprint: '{id}',
+      }),
+      makeRow({
+        id: 'bridge',
+        description: 'Bridge row',
+        import_source: null,
+        import_external_id: null,
+        import_fingerprint: null,
+        transaction_kind: 'reconciliation_bridge',
+      }),
+      makeRow({
+        id: 'immutable',
+        description: 'Immutable import',
+        import_source: null,
+        import_external_id: null,
+        import_fingerprint: null,
+        import_content_fingerprint: 'sha256:abc',
+      }),
+      makeRow({
+        id: 'archived',
+        description: 'Archived row',
+        import_source: null,
+        import_external_id: null,
+        import_fingerprint: null,
+        is_archived: 1,
+      }),
+    ])
+    const user = userEvent.setup()
+    render(<Transactions />)
+
+    for (const name of [
+      /^Missing projection/,
+      /^Already bound/,
+      /^Bridge row/,
+      /^Immutable import/,
+      /^Archived row/,
+    ]) {
+      await user.click(screen.getByRole('button', { name }))
+      expect(screen.queryByRole('button', { name: 'identity.action' })).not.toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Close' }))
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    }
   })
 })

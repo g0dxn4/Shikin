@@ -13,6 +13,7 @@ import {
   type SourceCoverageEvidence,
 } from '@shikin/finance-core/reconciliation'
 import { query, withTransaction, type TransactionClient } from '@/lib/database'
+import { invalidateTransactionPage } from '@/lib/transaction-query-events'
 import { generateId } from '@/lib/ulid'
 import { useAccountStore } from '@/stores/account-store'
 import { useTransactionStore } from '@/stores/transaction-store'
@@ -410,6 +411,7 @@ export async function setAccountSourceCoverage(
     )
     return after
   })
+  invalidateTransactionPage('store-refresh')
   return { coverage: result, refreshIncomplete: await refreshViews() }
 }
 
@@ -451,6 +453,7 @@ export async function settleAccountStagedTransactions(input: {
     )
     return ids
   })
+  invalidateTransactionPage('store-refresh')
   return { transactionIds, refreshIncomplete: await refreshViews() }
 }
 
@@ -634,6 +637,7 @@ export async function finalizeAccountStatementHistory(
     )
     return auditAfter
   })
+  invalidateTransactionPage('store-refresh')
   return { ...result, refreshIncomplete: await refreshViews() }
 }
 
@@ -817,5 +821,6 @@ export async function supersedeAccountReconciliationBridge(
     )
     return afterAudit
   })
+  invalidateTransactionPage('store-refresh')
   return { ...result, refreshIncomplete: await refreshViews() }
 }

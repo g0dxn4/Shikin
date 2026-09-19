@@ -9,6 +9,7 @@ const holder = vi.hoisted(() => ({
   failAudit: false,
   id: 0,
   refresh: vi.fn(async () => {}),
+  invalidate: vi.fn(),
 }))
 
 vi.mock('@/lib/database', () => {
@@ -37,6 +38,9 @@ vi.mock('@/lib/database', () => {
 vi.mock('@/lib/ulid', () => ({ generateId: () => `identity-audit-${++holder.id}` }))
 vi.mock('@/stores/transaction-store', () => ({
   useTransactionStore: { getState: () => ({ fetch: holder.refresh }) },
+}))
+vi.mock('@/lib/transaction-query-events', () => ({
+  invalidateTransactionPage: holder.invalidate,
 }))
 
 import {
@@ -117,6 +121,7 @@ beforeEach(() => {
   holder.failAudit = false
   holder.id = 0
   holder.refresh.mockClear()
+  holder.invalidate.mockClear()
 })
 afterEach(() => holder.db.close())
 
@@ -147,6 +152,7 @@ describe('legacy import identity service on real schema 021 SQLite', () => {
       },
     })
     expect(preview.limitation).toMatch(/unknown/i)
+    expect(holder.invalidate).not.toHaveBeenCalled()
 
     const result = await bindLegacyImportIdentity({ ...input, previewToken: preview.previewToken })
     const after = row('legacy')
@@ -164,6 +170,7 @@ describe('legacy import identity service on real schema 021 SQLite', () => {
       import_content_fingerprint: null,
     })
     expect(result.refreshIncomplete).toBe(false)
+    expect(holder.invalidate).toHaveBeenCalledWith('import')
     expect(holder.refresh).toHaveBeenCalledTimes(1)
     const audit = holder.db
       .prepare("SELECT * FROM audit_log WHERE action = 'bind-import-identity'")
@@ -259,6 +266,8 @@ describe('legacy import identity service on real schema 021 SQLite', () => {
         .prepare("SELECT COUNT(*) AS count FROM audit_log WHERE action = 'bind-import-identity'")
         .get()
     ).toEqual({ count: 0 })
+    expect(holder.invalidate).not.toHaveBeenCalled()
+    expect(holder.refresh).not.toHaveBeenCalled()
   })
 
   it('rolls back identity, audit, and revision when audit persistence fails', async () => {
@@ -273,5 +282,40 @@ describe('legacy import identity service on real schema 021 SQLite', () => {
     ).rejects.toThrow('audit failed')
     expect(row('legacy')).toEqual(before)
     expect(holder.db.prepare('SELECT * FROM app_data_state').get()).toEqual(stateBefore)
+    expect(holder.invalidate).not.toHaveBeenCalled()
+    expect(holder.refresh).not.toHaveBeenCalled()
+  })
+
+  it('emits import page invalidation after commit while store refresh is still pending', async () => {
+    addTransaction('legacy')
+    const input = { transactionId: 'legacy', sourceNamespace: 'Bank', externalId: '0001' }
+    const preview = await previewLegacyImportIdentity(input)
+    expect(holder.invalidate).not.toHaveBeenCalled()
+
+    let release!: () => void
+    holder.refresh.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+    )
+
+    let finished = false
+    const pending = bindLegacyImportIdentity({
+      ...input,
+      previewToken: preview.previewToken,
+    }).then((result) => {
+      finished = true
+      return result
+    })
+
+    await vi.waitFor(() => expect(holder.invalidate).toHaveBeenCalledWith('import'))
+    expect(holder.refresh).toHaveBeenCalledTimes(1)
+    expect(finished).toBe(false)
+    expect(row('legacy')).toMatchObject({ import_source: 'Bank', import_external_id: '0001' })
+
+    release()
+    await expect(pending).resolves.toMatchObject({ refreshIncomplete: false })
+    expect(finished).toBe(true)
   })
 })

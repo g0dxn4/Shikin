@@ -50,6 +50,7 @@ import { getErrorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import type { TransactionSplitWithCategory } from '@/types/database'
 import { StatementImportDialog } from '@/components/transactions/statement-import-dialog'
+import { LegacyImportIdentityAction } from '@/components/transactions/legacy-import-identity-dialog'
 import { ConsumptionClassificationDialog } from '@/components/transactions/consumption-classification-dialog'
 import { useTransactionPageQuery } from '@/hooks/use-transaction-page-query'
 import {
@@ -254,6 +255,23 @@ function getReviewProtectionKey(transaction: TransactionPageRow): ReviewProtecti
     return 'review.protected.placeholderLifecycle'
   if (transaction.type === 'transfer') return 'review.protected.transfer'
   return null
+}
+
+function isEligibleLegacyImportIdentityRow(transaction: TransactionPageRow): boolean {
+  if (transaction.is_archived === 1) return false
+  if ((transaction.transaction_kind ?? 'standard') !== 'standard') return false
+  if (
+    transaction.import_content_fingerprint !== null &&
+    transaction.import_content_fingerprint !== undefined
+  ) {
+    return false
+  }
+  // Missing projection fields are not evidence of an unbound row.
+  return (
+    transaction.import_source === null &&
+    transaction.import_external_id === null &&
+    transaction.import_fingerprint === null
+  )
 }
 
 function isEditingTarget(target: EventTarget | null): boolean {
@@ -1563,6 +1581,14 @@ function TransactionDetail({
             >
               {tConsumption('actions.classify')}
             </Button>
+          )}
+          {isEligibleLegacyImportIdentityRow(transaction) && (
+            <div className="sm:col-span-2">
+              <LegacyImportIdentityAction
+                transactionId={transaction.id}
+                onChanged={() => onOpenChange(false)}
+              />
+            </div>
           )}
           {!transaction.has_splits && (
             <Button className="min-h-11" onClick={() => onEdit(transaction.id)}>

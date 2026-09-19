@@ -1,22 +1,18 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ExportLegacyImportIdentityAction } from './legacy-import-identity-dialog'
+import { LegacyImportIdentityAction } from './legacy-import-identity-dialog'
 
 const mocks = vi.hoisted(() => ({
   read: vi.fn(),
   preview: vi.fn(),
   bind: vi.fn(),
-  invalidate: vi.fn(),
 }))
 
 vi.mock('@/lib/import-identity-service', () => ({
   readLegacyImportIdentityTransaction: mocks.read,
   previewLegacyImportIdentity: mocks.preview,
   bindLegacyImportIdentity: mocks.bind,
-}))
-vi.mock('@/lib/transaction-query-events', () => ({
-  invalidateTransactionPage: mocks.invalidate,
 }))
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -80,7 +76,7 @@ async function openAndFill(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('checkbox'))
 }
 
-describe('ExportLegacyImportIdentityAction', () => {
+describe('LegacyImportIdentityAction', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.read.mockResolvedValue(transaction)
@@ -91,7 +87,7 @@ describe('ExportLegacyImportIdentityAction', () => {
   it('shows the current native-currency record and requires reviewed explicit identity', async () => {
     const user = userEvent.setup()
     const onChanged = vi.fn()
-    render(<ExportLegacyImportIdentityAction transactionId="legacy" onChanged={onChanged} />)
+    render(<LegacyImportIdentityAction transactionId="legacy" onChanged={onChanged} />)
     await openAndFill(user)
 
     expect(screen.getByText('MXN')).toBeVisible()
@@ -113,7 +109,6 @@ describe('ExportLegacyImportIdentityAction', () => {
         expect.objectContaining({ previewToken: 'reviewed-token', externalId: '000AbC' })
       )
     )
-    expect(mocks.invalidate).toHaveBeenCalledWith('import')
     expect(onChanged).toHaveBeenCalledTimes(1)
   })
 
@@ -132,7 +127,7 @@ describe('ExportLegacyImportIdentityAction', () => {
         binding: { ...preview.binding, importExternalId: 'new-id' },
       })
     const user = userEvent.setup()
-    render(<ExportLegacyImportIdentityAction transactionId="legacy" />)
+    render(<LegacyImportIdentityAction transactionId="legacy" />)
     await openAndFill(user)
     await user.click(screen.getByRole('button', { name: 'identity.review' }))
     await user.clear(screen.getByLabelText('identity.externalId'))
@@ -151,7 +146,7 @@ describe('ExportLegacyImportIdentityAction', () => {
   it('clears confirmation after a rejected apply and requires a new review', async () => {
     mocks.bind.mockRejectedValueOnce(new Error('stale reviewed token'))
     const user = userEvent.setup()
-    render(<ExportLegacyImportIdentityAction transactionId="legacy" />)
+    render(<LegacyImportIdentityAction transactionId="legacy" />)
     await openAndFill(user)
     await user.click(screen.getByRole('button', { name: 'identity.review' }))
     await user.click(await screen.findByRole('button', { name: 'identity.confirm' }))
@@ -161,7 +156,7 @@ describe('ExportLegacyImportIdentityAction', () => {
     expect(screen.getByRole('button', { name: 'identity.review' })).toBeEnabled()
   })
 
-  it('continues post-commit invalidation and callback after closing during apply', async () => {
+  it('continues the post-commit callback after closing during apply', async () => {
     let resolveApply: (value: typeof preview & { refreshIncomplete: boolean }) => void
     mocks.bind.mockImplementation(
       () =>
@@ -171,28 +166,26 @@ describe('ExportLegacyImportIdentityAction', () => {
     )
     const user = userEvent.setup()
     const onChanged = vi.fn()
-    render(<ExportLegacyImportIdentityAction transactionId="legacy" onChanged={onChanged} />)
+    render(<LegacyImportIdentityAction transactionId="legacy" onChanged={onChanged} />)
     await openAndFill(user)
     await user.click(screen.getByRole('button', { name: 'identity.review' }))
     await user.click(await screen.findByRole('button', { name: 'identity.confirm' }))
     await user.click(screen.getByRole('button', { name: 'cancel' }))
 
     resolveApply!({ ...preview, refreshIncomplete: false })
-    await waitFor(() => expect(mocks.invalidate).toHaveBeenCalledWith('import'))
-    expect(onChanged).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1))
     expect(screen.queryByText('identity.savedRefreshFailed')).not.toBeInTheDocument()
   })
 
   it('truthfully reports a committed save when store refresh rejects', async () => {
     mocks.bind.mockResolvedValueOnce({ ...preview, refreshIncomplete: true })
     const user = userEvent.setup()
-    render(<ExportLegacyImportIdentityAction transactionId="legacy" />)
+    render(<LegacyImportIdentityAction transactionId="legacy" />)
     await openAndFill(user)
     await user.click(screen.getByRole('button', { name: 'identity.review' }))
     await user.click(await screen.findByRole('button', { name: 'identity.confirm' }))
 
     expect(await screen.findByText('identity.savedRefreshFailed')).toBeVisible()
-    expect(mocks.invalidate).toHaveBeenCalledWith('import')
     expect(screen.queryByRole('button', { name: 'identity.confirm' })).not.toBeInTheDocument()
   })
 })

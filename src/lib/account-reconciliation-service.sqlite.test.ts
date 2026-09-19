@@ -10,6 +10,7 @@ const holder = vi.hoisted(() => ({
   id: 0,
   accountRefresh: vi.fn(async () => {}),
   transactionRefresh: vi.fn(async () => {}),
+  invalidate: vi.fn(),
 }))
 
 vi.mock('@/lib/database', () => {
@@ -41,6 +42,9 @@ vi.mock('@/stores/account-store', () => ({
 }))
 vi.mock('@/stores/transaction-store', () => ({
   useTransactionStore: { getState: () => ({ fetch: holder.transactionRefresh }) },
+}))
+vi.mock('@/lib/transaction-query-events', () => ({
+  invalidateTransactionPage: holder.invalidate,
 }))
 
 import {
@@ -128,6 +132,7 @@ beforeEach(() => {
   holder.id = 0
   holder.accountRefresh.mockClear()
   holder.transactionRefresh.mockClear()
+  holder.invalidate.mockClear()
 })
 afterEach(() => {
   vi.useRealTimers()
@@ -180,8 +185,41 @@ describe('native/browser account reconciliation service on real schema 021 SQLit
     })
     expect(result.refreshIncomplete).toBe(true)
     expect(rows('source_coverage')).toHaveLength(1)
+    expect(holder.invalidate).toHaveBeenCalledWith('store-refresh')
     expect(holder.accountRefresh).toHaveBeenCalledTimes(1)
     expect(holder.transactionRefresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('emits page invalidation after coverage commit while store refresh is still pending', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    holder.accountRefresh.mockImplementationOnce(() => gate)
+    holder.transactionRefresh.mockImplementationOnce(() => gate)
+
+    let finished = false
+    const pending = setAccountSourceCoverage({
+      accountId: 'a',
+      sourceNamespace: 'Bank',
+      periodStart: '2025-01-01',
+      periodEnd: '2025-01-31',
+      status: 'verified',
+      documentRef: 'synthetic statement',
+    }).then((result) => {
+      finished = true
+      return result
+    })
+
+    await vi.waitFor(() => expect(holder.invalidate).toHaveBeenCalledWith('store-refresh'))
+    expect(holder.accountRefresh).toHaveBeenCalledTimes(1)
+    expect(holder.transactionRefresh).toHaveBeenCalledTimes(1)
+    expect(finished).toBe(false)
+    expect(rows('source_coverage')).toHaveLength(1)
+
+    release()
+    await expect(pending).resolves.toMatchObject({ refreshIncomplete: false })
+    expect(finished).toBe(true)
   })
 
   it('finalizes exact multi-batch rows, preserves source evidence, and settles pending separately', async () => {
@@ -189,6 +227,7 @@ describe('native/browser account reconciliation service on real schema 021 SQLit
     transaction('second', 600, { batch: 'other-batch' })
     transaction('hold', 100, { status: 'pending' })
     const coverageId = await coverage()
+    holder.invalidate.mockClear()
     const input = {
       accountId: 'a',
       transactionIds: ['second', 'first'],
@@ -198,6 +237,7 @@ describe('native/browser account reconciliation service on real schema 021 SQLit
       actualBalanceCentavos: 1_000,
     }
     const preview = await previewAccountStatementFinalization(input)
+    expect(holder.invalidate).not.toHaveBeenCalled()
     expect(preview).toMatchObject({
       transactionIds: ['first', 'second'],
       stagedBalanceEffect: 1_000,
@@ -225,6 +265,8 @@ describe('native/browser account reconciliation service on real schema 021 SQLit
       ledger_treatment: 'staged_no_balance_impact',
       finalization_id: null,
     })
+    expect(holder.invalidate).toHaveBeenCalledWith('store-refresh')
+    holder.invalidate.mockClear()
 
     await settleAccountStagedTransactions({
       accountId: 'a',
@@ -235,6 +277,7 @@ describe('native/browser account reconciliation service on real schema 021 SQLit
       status: 'cleared',
       ledger_treatment: 'staged_no_balance_impact',
     })
+    expect(holder.invalidate).toHaveBeenCalledWith('store-refresh')
     expect(holder.accountRefresh).toHaveBeenCalled()
     expect(holder.transactionRefresh).toHaveBeenCalled()
   })
@@ -295,10 +338,12 @@ describe('native/browser account reconciliation service on real schema 021 SQLit
     const preview = await previewAccountStatementFinalization(input)
     const before = snapshot()
     holder.failSql = 'INSERT INTO audit_log'
+    holder.invalidate.mockClear()
     await expect(
       finalizeAccountStatementHistory({ ...input, previewToken: preview.previewToken })
     ).rejects.toThrow('Injected failure')
     expect(snapshot()).toEqual(before)
+    expect(holder.invalidate).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -336,6 +381,7 @@ describe('native/browser account reconciliation service on real schema 021 SQLit
       )
       transaction('replacement', amount, { type })
       const coverageId = await coverage()
+      holder.invalidate.mockClear()
       const input = {
         accountId: 'a',
         reconciliationId: 'original',
@@ -344,6 +390,7 @@ describe('native/browser account reconciliation service on real schema 021 SQLit
         coverageIds: [coverageId],
       }
       const preview = await previewAccountBridgeSupersession(input)
+      expect(holder.invalidate).not.toHaveBeenCalled()
       expect(preview.successorSignedBridge).toBe(residual)
       const originalBridge = rows('transactions').find((row) => row.id === 'bridge')!
       const accountsBefore = rows('accounts')
@@ -375,6 +422,7 @@ describe('native/browser account reconciliation service on real schema 021 SQLit
         source: 'original-source',
         note: 'original-note',
       })
+      expect(holder.invalidate).toHaveBeenCalledWith('store-refresh')
     }
   )
 
@@ -406,10 +454,12 @@ describe('native/browser account reconciliation service on real schema 021 SQLit
     const preview = await previewAccountBridgeSupersession(input)
     holder.db.prepare("UPDATE accounts SET name = 'revision change' WHERE id = 'b'").run()
     const before = snapshot()
+    holder.invalidate.mockClear()
     await expect(
       supersedeAccountReconciliationBridge({ ...input, previewToken: preview.previewToken })
     ).rejects.toThrow('stale')
     expect(snapshot()).toEqual(before)
+    expect(holder.invalidate).not.toHaveBeenCalled()
     const history = await readAccountMaintenance('a')
     expect(history.observations).toHaveLength(1)
     expect(history.transactions.some((row) => row.id === 'replacement')).toBe(true)

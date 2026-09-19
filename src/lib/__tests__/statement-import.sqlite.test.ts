@@ -1092,6 +1092,60 @@ describe('importStatementFile real schema 021 SQLite rollback and staging', () =
     })
   })
 
+  it('rejects a cancelling normal import whose intermediate balance is unsafe but allows it staged', async () => {
+    db.prepare("UPDATE accounts SET balance=? WHERE id='account-1'").run(Number.MAX_SAFE_INTEGER)
+    mockParseStatement.mockReturnValue([
+      {
+        date: '2026-07-13',
+        amount: 0.02,
+        description: 'Intermediate overflow',
+        type: 'income',
+      },
+      {
+        date: '2026-07-14',
+        amount: 0.02,
+        description: 'Cancelling expense',
+        type: 'expense',
+      },
+    ])
+    const statement = statementFile()
+    const before = databaseSnapshot()
+
+    const normalPreview = await previewStatementFile(statement, 'account-1')
+    expect(normalPreview.success).toBe(false)
+    expect(normalPreview.errors[0]).toMatch(/resulting balance.*safe integer/i)
+    expect(databaseSnapshot()).toEqual(before)
+
+    const normalApply = await importStatementFile(statement, 'account-1')
+    expect(normalApply).toMatchObject({ imported: 0, skipped: 0 })
+    expect(normalApply.errors[0]).toMatch(/resulting balance.*safe integer/i)
+    expect(databaseSnapshot()).toEqual(before)
+
+    const stagedPreview = await previewStatementFile(statement, 'account-1', [], {
+      treatment: 'staged_posted',
+    })
+    expect(stagedPreview).toMatchObject({
+      success: true,
+      imported: 2,
+      stagedCount: 2,
+      balanceImpactCentavos: 0,
+    })
+    expect(databaseSnapshot()).toEqual(before)
+
+    const beforeStagedApply = financeSnapshot()
+    expect(
+      await importStatementFile(statement, 'account-1', {
+        treatment: 'staged_posted',
+        previewToken: stagedPreview.previewToken!,
+      })
+    ).toMatchObject({ imported: 2, skipped: 0, errors: [] })
+    expect(financeSnapshot()).toEqual(beforeStagedApply)
+    expect(db.prepare('SELECT ledger_treatment FROM transactions ORDER BY date').all()).toEqual([
+      { ledger_treatment: 'staged_no_balance_impact' },
+      { ledger_treatment: 'staged_no_balance_impact' },
+    ])
+  })
+
   it('rolls back the transaction when its required audit insert fails', async () => {
     db.exec(`
       CREATE TRIGGER fail_statement_audit BEFORE INSERT ON audit_log

@@ -8,6 +8,7 @@ import {
   dayjs,
   isoDate,
   isAccountWriteEligible,
+  transaction,
   type ToolDefinition,
 } from './shared.js'
 
@@ -211,91 +212,79 @@ const updateGoal: ToolDefinition = {
     )
     if (accountConflict) return accountConflict
 
-    const existing = await query<GoalRow>(
-      'SELECT id, name, target_amount, current_amount, deadline, account_id, icon, color, notes FROM goals WHERE id = $1',
-      [goalId]
-    )
+    return transaction(() => {
+      const goal = query<GoalRow>(
+        'SELECT id, name, target_amount, current_amount, deadline, account_id, icon, color, notes FROM goals WHERE id = $1',
+        [goalId]
+      )[0]
 
-    if (existing.length === 0) {
-      return { success: false, message: `Goal ${goalId} not found.` }
-    }
+      if (!goal) {
+        return { success: false, message: `Goal ${goalId} not found.` }
+      }
 
-    const goal = existing[0]
-    const now = new Date().toISOString()
-    const nextDeadline = clearDeadline ? null : deadline !== undefined ? deadline : goal.deadline
-    const nextNotes = clearNotes ? null : notes !== undefined ? notes : goal.notes
-    const requestedAccountId = clearAccount ? null : accountId
-    let nextAccountId = goal.account_id
-    if (requestedAccountId !== undefined) {
-      const resolvedAccount = resolveGoalAccountId(requestedAccountId)
-      if (!resolvedAccount.success) return resolvedAccount
-      nextAccountId = resolvedAccount.id
-    }
+      const now = new Date().toISOString()
+      const nextDeadline = clearDeadline ? null : deadline !== undefined ? deadline : goal.deadline
+      const nextNotes = clearNotes ? null : notes !== undefined ? notes : goal.notes
+      const requestedAccountId = clearAccount ? null : accountId
+      let nextAccountId = goal.account_id
+      if (requestedAccountId !== undefined) {
+        const resolvedAccount = resolveGoalAccountId(requestedAccountId)
+        if (!resolvedAccount.success) return resolvedAccount
+        nextAccountId = resolvedAccount.id
+      }
 
-    // Calculate new current amount
-    let newCurrentCentavos = goal.current_amount
-    if (currentAmount !== undefined) {
-      newCurrentCentavos = toCentavos(currentAmount)
-    } else if (addAmount !== undefined) {
-      newCurrentCentavos = goal.current_amount + toCentavos(addAmount)
-    } else if (withdrawAmount !== undefined) {
-      newCurrentCentavos = Math.max(0, goal.current_amount - toCentavos(withdrawAmount))
-    }
+      let newCurrentCentavos = goal.current_amount
+      if (currentAmount !== undefined) {
+        newCurrentCentavos = toCentavos(currentAmount)
+      } else if (addAmount !== undefined) {
+        newCurrentCentavos = goal.current_amount + toCentavos(addAmount)
+      } else if (withdrawAmount !== undefined) {
+        newCurrentCentavos = Math.max(0, goal.current_amount - toCentavos(withdrawAmount))
+      }
 
-    const newTargetCentavos =
-      targetAmount !== undefined ? toCentavos(targetAmount) : goal.target_amount
-    const newName = name ?? goal.name
+      const newTargetCentavos =
+        targetAmount !== undefined ? toCentavos(targetAmount) : goal.target_amount
+      const newName = name ?? goal.name
+      const setClauses: string[] = []
+      const params: unknown[] = []
+      const addSetClause = (column: string, value: unknown) => {
+        params.push(value)
+        setClauses.push(`${column} = $${params.length}`)
+      }
 
-    const setClauses = ['name = $1', 'target_amount = $2', 'current_amount = $3', 'updated_at = $4']
-    const params: unknown[] = [newName, newTargetCentavos, newCurrentCentavos, now]
-    let paramIdx = 5
+      if (name !== undefined) addSetClause('name', newName)
+      if (targetAmount !== undefined) addSetClause('target_amount', newTargetCentavos)
+      if (currentAmount !== undefined || addAmount !== undefined || withdrawAmount !== undefined) {
+        addSetClause('current_amount', newCurrentCentavos)
+      }
+      if (clearDeadline || deadline !== undefined) addSetClause('deadline', nextDeadline)
+      if (clearNotes || notes !== undefined) addSetClause('notes', nextNotes)
+      if (requestedAccountId !== undefined) addSetClause('account_id', nextAccountId)
+      if (icon !== undefined) addSetClause('icon', icon)
+      if (color !== undefined) addSetClause('color', color)
+      addSetClause('updated_at', now)
 
-    if (clearDeadline || deadline !== undefined) {
-      setClauses.push(`deadline = $${paramIdx}`)
-      params.push(nextDeadline)
-      paramIdx++
-    }
-    if (clearNotes || notes !== undefined) {
-      setClauses.push(`notes = $${paramIdx}`)
-      params.push(nextNotes)
-      paramIdx++
-    }
-    if (requestedAccountId !== undefined) {
-      setClauses.push(`account_id = $${paramIdx}`)
-      params.push(nextAccountId)
-      paramIdx++
-    }
-    if (icon !== undefined) {
-      setClauses.push(`icon = $${paramIdx}`)
-      params.push(icon)
-      paramIdx++
-    }
-    if (color !== undefined) {
-      setClauses.push(`color = $${paramIdx}`)
-      params.push(color)
-      paramIdx++
-    }
+      params.push(goalId)
+      execute(`UPDATE goals SET ${setClauses.join(', ')} WHERE id = $${params.length}`, params)
 
-    params.push(goalId)
-    await execute(`UPDATE goals SET ${setClauses.join(', ')} WHERE id = $${paramIdx}`, params)
+      const newCurrentAmount = fromCentavos(newCurrentCentavos)
+      const newTargetAmount = fromCentavos(newTargetCentavos)
+      const progress =
+        newTargetAmount > 0 ? Math.round((newCurrentAmount / newTargetAmount) * 100) : 0
 
-    const newCurrentAmount = fromCentavos(newCurrentCentavos)
-    const newTargetAmount = fromCentavos(newTargetCentavos)
-    const progress =
-      newTargetAmount > 0 ? Math.round((newCurrentAmount / newTargetAmount) * 100) : 0
-
-    return {
-      success: true,
-      goal: {
-        id: goalId,
-        name: newName,
-        targetAmount: newTargetAmount,
-        currentAmount: newCurrentAmount,
-        deadline: nextDeadline,
-        progress,
-      },
-      message: `Updated goal "${newName}" — $${newCurrentAmount.toFixed(2)} / $${newTargetAmount.toFixed(2)} (${progress}%).`,
-    }
+      return {
+        success: true,
+        goal: {
+          id: goalId,
+          name: newName,
+          targetAmount: newTargetAmount,
+          currentAmount: newCurrentAmount,
+          deadline: nextDeadline,
+          progress,
+        },
+        message: `Updated goal "${newName}" — $${newCurrentAmount.toFixed(2)} / $${newTargetAmount.toFixed(2)} (${progress}%).`,
+      }
+    })
   },
 }
 

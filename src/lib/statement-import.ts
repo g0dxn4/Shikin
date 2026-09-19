@@ -576,13 +576,20 @@ function assertSafeCentavos(value: bigint, label: string): void {
 
 function plannedBalanceDelta(plan: StatementPlan): number {
   let aggregate = 0n
+  const hasBalanceImpact = plan.importTreatment.ledgerTreatment === 'normal'
   for (const row of plan.rows) {
     if (row.action !== 'create' && row.action !== 'distinct') continue
     const effect = BigInt(row.amountCentavos) * (row.transaction.type === 'income' ? 1n : -1n)
     aggregate += effect
     assertSafeCentavos(aggregate, 'Statement import balance delta')
+    if (hasBalanceImpact) {
+      assertSafeCentavos(
+        BigInt(plan.accountBalance) + aggregate,
+        'Statement import resulting balance'
+      )
+    }
   }
-  if (plan.importTreatment.ledgerTreatment === 'staged_no_balance_impact') return 0
+  if (!hasBalanceImpact) return 0
   const resultingBalance = BigInt(plan.accountBalance) + aggregate
   assertSafeCentavos(resultingBalance, 'Statement import resulting balance')
   return Number(aggregate)

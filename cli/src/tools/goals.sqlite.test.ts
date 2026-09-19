@@ -62,6 +62,35 @@ describe('update-goal nullable maintenance', () => {
     })
   })
 
+  it('updates only explicitly patched metadata columns', async () => {
+    holder.db.exec(`
+      CREATE TRIGGER reject_financial_goal_rewrite
+      BEFORE UPDATE OF name, target_amount, current_amount ON goals
+      BEGIN SELECT RAISE(ABORT, 'financial goal column rewritten'); END;
+    `)
+
+    expect(await call('update-goal', { goalId: 'goal-1', notes: 'updated notes' })).toMatchObject({
+      success: true,
+    })
+    expect(await call('update-goal', { goalId: 'goal-1', deadline: '2028-01-15' })).toMatchObject({
+      success: true,
+    })
+    expect(await call('update-goal', { goalId: 'goal-1', accountId: 'b' })).toMatchObject({
+      success: true,
+    })
+
+    expect(goalRow()).toMatchObject({
+      name: 'Vacation',
+      target_amount: 500000,
+      current_amount: 100000,
+      deadline: '2028-01-15',
+      account_id: 'b',
+      icon: '🎯',
+      color: '#bf5af2',
+      notes: 'updated notes',
+    })
+  })
+
   it('sets deadline, notes, and accountId and rejects unknown or archived accounts', async () => {
     const set = await call('update-goal', {
       goalId: 'goal-1',
@@ -136,17 +165,33 @@ describe('update-goal nullable maintenance', () => {
     expect(goalRow()).toEqual(before)
   })
 
-  it('rejects non-calendar deadline values and preserves addAmount money updates', async () => {
+  it('rejects non-calendar deadlines and preserves explicit money and name workflows', async () => {
     expect(() => call('update-goal', { goalId: 'goal-1', deadline: '2027-02-30' })).toThrow()
     expect(goalRow().deadline).toBe('2027-06-01')
 
-    const added = await call('update-goal', { goalId: 'goal-1', addAmount: 25 })
+    const replaced = await call('update-goal', {
+      goalId: 'goal-1',
+      name: 'Long Trip',
+      targetAmount: 6000,
+      currentAmount: 1200,
+    })
+    expect(replaced).toMatchObject({
+      success: true,
+      goal: { name: 'Long Trip', targetAmount: 6000, currentAmount: 1200 },
+    })
+
+    const added = await call('update-goal', {
+      goalId: 'goal-1',
+      addAmount: 25,
+    })
     expect(added).toMatchObject({
       success: true,
-      goal: { currentAmount: 1025, deadline: '2027-06-01' },
+      goal: { currentAmount: 1225, deadline: '2027-06-01' },
     })
     expect(goalRow()).toMatchObject({
-      current_amount: 102500,
+      name: 'Long Trip',
+      target_amount: 600000,
+      current_amount: 122500,
       deadline: '2027-06-01',
       notes: 'keep notes',
       icon: '🎯',

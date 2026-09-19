@@ -222,7 +222,7 @@ async function assertSplitWorkflow(
   assertSplitReplacementAllowed(owner.id, evidence, false, active.buckets)
 }
 
-async function readFrontendPaymentEvidence(tx: TransactionClient): Promise<PaymentEvidence> {
+export async function readFrontendPaymentEvidence(tx: TransactionClient): Promise<PaymentEvidence> {
   const [accounts, transactions, splits, classifications, activeLinks] = await Promise.all([
     tx.query<PaymentAccount>('SELECT id, type, currency, account_mode, is_archived FROM accounts'),
     tx.query<PaymentTransaction>('SELECT * FROM transactions'),
@@ -235,7 +235,7 @@ async function readFrontendPaymentEvidence(tx: TransactionClient): Promise<Payme
   return { accounts, transactions, splits, classifications, activeLinks }
 }
 
-async function assertFrontendActivePaymentCapacity(
+export async function assertFrontendActivePaymentCapacity(
   tx: TransactionClient,
   transactionId: string,
   overrides: Partial<Pick<PaymentEvidence, 'transactions' | 'splits' | 'classifications'>> = {}

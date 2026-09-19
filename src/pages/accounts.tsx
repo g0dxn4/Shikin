@@ -51,6 +51,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { MetricItem, MetricStrip, NativePanel, PageToolbar } from '@/components/ui/native-layout'
+import { AccountMaintenanceAction } from '@/components/accounts/account-maintenance-dialog'
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
 import { useTransactionStore } from '@/stores/transaction-store'
@@ -868,6 +869,7 @@ function AccountCard({
             {t('viewTransactions')}
           </Link>
         </Button>
+        <AccountMaintenanceAction account={account} />
         {isCreditCard && onPayCreditCard && (
           <Button
             type="button"

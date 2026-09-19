@@ -15,7 +15,7 @@ This is a sanitized source-level work plan. The private external handoff and its
 
 The user has authorized completing the remaining actionable remediation across React, CLI and MCP. [Approved implementation contracts](./BACKEND_IMPLEMENTATION_CONTRACTS.md) define the financial semantics before durable schema or mutation changes. This does not authorize production repairs, installation or release.
 
-**Integrated locally; final financial review still due:**
+**Source remediation complete locally; final financial/storage gate passed:**
 
 - Reporting eligibility including ledger staging, validated split-aware category readers, currency/invalid-data completeness, gross/deficit wording, read-only recap generation and explicit saving. Remaining forecast/health/anomaly/recurring/upcoming-bill adapters are included.
 - Pure/lazy storage initialization, native-binding preflight before filesystem mutation, explicit custom-root migration approval, native/Node policy parity and distinct ABI/missing/permission/open/invalid/schema diagnostics.
@@ -32,15 +32,15 @@ The user has authorized completing the remaining actionable remediation across R
 - Native consumption classification, unclassified transaction review and Reports gross/net basis with independent classification and coverage completeness.
 - Registered automation discovery: **108 shared tools / 113 CLI commands**, catalog `2026-09-19.backend-remediation`; application remains `1.0.10`.
 
-**Still pending:** LOCK01-SHUTDOWN-01 and its bounded final-review closure. DB-FINAL-01 is approved; LOCK-01 scheduling is fixed, but its shutdown lifecycle needs the follow-up below. Named native safety/navigation and nullable-maintenance work is integrated; current full-suite, packaged automation and isolated browser evidence is recorded below. Optional bucket hierarchy, new category automation and a new subscription-management GUI remain outside this remediation scope. The historical 92/97 foundation inventory is not the current domain inventory.
+**All actionable in-scope findings are closed.** Native safety/navigation, nullable maintenance, isolated acceptance and the Sol high financial/storage final gate are complete. Final evidence and deployment limits are recorded below. Optional bucket hierarchy, new category automation and a new subscription-management GUI remain outside this remediation scope. The historical 92/97 foundation inventory is not the current domain inventory.
 
-## Completed first slice: explicit-isolation fail-closed
+## Completed first slice: explicit-isolation fail-closed (historical)
 
-**DEP-01: partially mitigated in current source; remaining gap reproduced.**
+**DEP-01 at initial triage: partially mitigated; remaining gap reproduced.**
 
 Current `scripts/install-cli.sh` launchers do not contain the handoff's hard-coded runtime HOME/XDG overrides. They pin a Node executable. `cli/src/app-data-dir.ts` and `scripts/app-data-dir.mjs` already support `SHIKIN_RESPECT_XDG_DATA_HOME=1` with an absolute XDG data root, and browser development supplies that option.
 
-However, an invalid/missing XDG root or unsupported platform silently disables the requested isolation. A disposable synthetic reproduction confirmed that `SHIKIN_RESPECT_XDG_DATA_HOME=1` plus a relative XDG path moved a fake AppConfig database into the fallback HOME data directory.
+At that baseline, an invalid/missing XDG root or unsupported platform silently disabled the requested isolation. A disposable synthetic reproduction confirmed that `SHIKIN_RESPECT_XDG_DATA_HOME=1` plus a relative XDG path moved a fake AppConfig database into the fallback HOME data directory.
 
 Approved bounded fix:
 
@@ -49,15 +49,15 @@ Approved bounded fix:
 - Mirror CLI and data-server behavior, with synthetic source/destination preservation tests.
 - Preserve ordinary-mode storage resolution and migration behavior. Do not claim that setting XDG alone is safe isolation, or that this repairs a separately installed wrapper.
 
-Status: **bounded slice fixed and reviewed**. Planning review approved this scope with no blockers. Commit `5c3e33d` adds the guard and synthetic-root parity tests. Integrated Sol high database review reported no material database issues; broader DEP-01 work below remains open.
+Status: **bounded slice fixed and reviewed**. Planning review approved this scope with no blockers. Commit `5c3e33d` adds the guard and synthetic-root parity tests. Integrated Sol high database review reported no material database issues; subsequent DEP-01 work is covered by the final gate below.
 
-The later integrated storage slice adds explicit custom-root migration consent and native/Node isolation policy parity. Installed-wrapper remediation and native macOS/Windows execution are not claimed. Runtime/instance identity is now integrated, with final integrated review still due.
+The later integrated storage slice adds explicit custom-root migration consent and native/Node isolation policy parity. Installed-wrapper remediation and native macOS/Windows execution are not claimed. Runtime/instance identity is integrated and covered by the final gate.
 
-**DEP-02: implementation integrated; final review due.** Database/notebook imports no longer prepare storage. Immutable context validation and cached in-memory native-binding preflight precede authorized preparation, and constructor/schema errors retain distinct codes/causes. Synthetic tests cover failure preservation and lazy notebook migration; this is more than a message-only change.
+**DEP-02: fixed and reviewed.** Database/notebook imports no longer prepare storage. Immutable context validation and cached in-memory native-binding preflight precede authorized preparation, and constructor/schema errors retain distinct codes/causes. Synthetic tests cover failure preservation and lazy notebook migration; this is more than a message-only change.
 
 ## Initial source verification ledger (historical triage)
 
-The following table preserves the initial diagnosis, not the current implementation state. The integrated-delivery section above and checkpoints below supersede its original open statuses. Final closure still requires isolated acceptance tests and the integrated financial review.
+The following table preserves the initial diagnosis, not the current implementation state. The integrated-delivery section above and checkpoints below supersede its original open statuses. Final closure evidence and limits are recorded below.
 
 | ID     | Assessment                               | Current source / next action                                                                                                                                                                                                                   |
 | ------ | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -90,7 +90,7 @@ The following table preserves the initial diagnosis, not the current implementat
 
 `packages/finance-core/src/reporting.ts:getCashFlowEligibility` now validates ledger treatment as well as posting/reporting/archive/kind eligibility; absent legacy treatment retains normal semantics. Shared adapters exclude staged rows and validate parent amounts, currencies and split ownership/totals before returning complete aggregates. Excluded malformed rows must not poison eligible reporting. Gross recorded totals do not establish independent statement coverage.
 
-## Sequenced implementation clusters
+## Original implementation sequence
 
 1. **Isolation and initialization:** finish the bounded explicit-isolation guard; separately design normal migration intent and native-runtime preflight/diagnostics.
 2. **Reporting correctness and read-only recap:** IMP-03/22/04, with accurate gross-flow/deficit wording from IMP-24. Tests cover exclusions, staging, archived mirrors, splits, currency grouping and all-table no-write checks.
@@ -159,7 +159,7 @@ The existing synthetic preview required a backend-only schema upgrade because th
 | ACCT-UI01–03     | Fixed | Statement controls, separate portfolio-account maintenance and exact account deep links; background refresh keeps dialogs mounted.   |
 | CONS-UI01–02     | Fixed | Historical net periods with strict dates, latest-only loading/error/retry behavior and contextual review links.                      |
 | IMP-14 remainder | Fixed | Goal/recurring/subscription set-clear-omit semantics, hidden recurring subcategory preservation and native investment-note clearing. |
-| FINAL-GATE       | Open  | Sol high review found DB-FINAL-01; its fix and LOCK-01 acceptance investigation must close before approval.                          |
+| FINAL-GATE       | Fixed | Sol high final financial/storage gate passed after the named account-evidence and server-lifecycle fixes.                            |
 
 Additional integration findings: **IMP-STAGING-UI fixed** by explicit native posted/staged/pending import choices, pending acknowledgement, stable batch IDs and option-bound tokens. **IMP-STAGE-01 fixed** by retaining per-prefix safe-integer balance checks for normal imports while staged rows remain neutral. **IMP-NULL-01 fixed** by synchronous, patch-only goal updates that do not rewrite omitted financial fields.
 
@@ -174,13 +174,25 @@ At `1b859fe`, parent validation passed:
 - Fresh isolated hosted-browser acceptance: native staged OFX import without balance impact; exact legacy identity binding preserving unknown content and original provenance; deliberate pending settlement and dated finalization retaining later activity; reviewed bridge supersession preserving current and later anchors; real card payment plus statement-only baseline and unlink; native classification with known-currency subtotals and independent coverage incompleteness; bucket allocation, atomic correction and reversal with immutable signed history and no real-account changes.
 - Mobile portfolio deep links reveal/focus the correct separately managed account without horizontal overflow. Settings exposes schema/version and separate opaque lineage/local-instance identities without paths. Background-refresh dialog survival was checked in the browser after its fix. A mobile pending-import preview required explicit acknowledgement, displayed one staged/pending row and zero balance impact without overflow; cancellation created no transaction.
 
-All browser mutations used a fresh synthetic root, not the populated preview or real finances. The preserved preview remains available and still contains **566 transactions**, with SQLite quick-check passing. No live market-provider request, installed-app launch, push, release or production migration was performed. macOS/Windows installed execution remains untested. Final review approval must be recorded before claiming full remediation closure.
+All browser mutations used a fresh synthetic root, not the populated preview or real finances. The preserved preview remains available and still contains **566 transactions**, with SQLite quick-check passing. No live market-provider request, installed-app launch, push, release or production migration was performed. macOS/Windows installed execution remains untested. The final review approval is recorded below.
 
 ### Final-gate findings
 
-| ID          | State            | Evidence / required closure                                                                                                                                                                                                                                                                                                                                                                                                         |
-| ----------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| DB-FINAL-01 | Fixed / approved | At `a46de9a`, CLI/native guards block generic mode changes with reconciliation observations and currency changes with reconciliation/coverage evidence, including zero-balance/no-transaction accounts. Parent checks passed: 38 guard/rollback tests plus 15 account-history regressions. Same-context metadata and evidence-free account changes remain supported. Sol high follow-up explicitly approved this finding's closure. |
-| LOCK-01     | Open             | Fixed at `5dc9a80` with asynchronous server ownership. Current validation: 1,838 tests / 167 files, types/lint/format, app/CLI builds, 27 Rust tests and controlled offline 108-tool smoke passed. Four WebKit desktop/mobile rapid-report-period runs now passed with unchanged read-only table digests and no external requests. Sol follow-up found the separate shutdown lifecycle gap below.                                   |
+| ID                 | State            | Evidence / required closure                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------ | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DB-FINAL-01        | Fixed / approved | At `a46de9a`, CLI/native guards block generic mode changes with reconciliation observations and currency changes with reconciliation/coverage evidence, including zero-balance/no-transaction accounts. Parent checks passed: 38 guard/rollback tests plus 15 account-history regressions. Same-context metadata and evidence-free account changes remain supported. Sol high follow-up explicitly approved this finding's closure. |
+| LOCK-01            | Fixed / approved | Fixed at `5dc9a80` with asynchronous server ownership. Current validation: 1,838 tests / 167 files, types/lint/format, app/CLI builds, 27 Rust tests and controlled offline 108-tool smoke passed. Four WebKit desktop/mobile rapid-report-period runs now passed with unchanged read-only table digests and no external requests. Sol follow-up found the separate shutdown lifecycle gap below.                                   |
+| LOCK01-SHUTDOWN-01 | Fixed / approved | At `0620681`, shutdown closes admission and drains the active owner before closing SQLite/exiting. A deterministic disconnected-restore/SIGTERM test failed before the fix and passed afterward; parent HTTP contracts passed 16/16. Sol high explicitly approved the severe gate.                                                                                                                                                  |
 
-| LOCK01-SHUTDOWN-01 | Open (high) | Sol high follow-up found that disconnect plus SIGTERM can allow shutdown to exit before an active asynchronous restore/rollback owner completes. Drain active database ownership before closing the main connection or exiting, with a deterministic HTTP regression. |
+## Final closure — 2026-09-19
+
+At `0620681`, including the mobile history-width fix `e2887bc`:
+
+- **1,839 tests / 167 files passed**, with two workers and a 15-second command-line timeout; no repository timeout defaults changed.
+- Root/CLI/finance-core TypeScript, repository ESLint, source formatting, production frontend and CLI builds passed. **27 Rust library tests passed** offline/locked.
+- The rebuilt packaged CLI/MCP passed the controlled offline **108-tool** smoke again, reusing 130 cached packages with zero downloads and disabled lifecycle scripts.
+- Four WebKit desktop/mobile-viewport history/report runs passed, including rapid period changes, unchanged all-table read digests, no horizontal overflow and no external requests. The earlier Chromium financial-mutation acceptance remains recorded above.
+- The **Sol high financial/storage final gate passed**. The original full review and bounded follow-ups closed DB-FINAL-01, LOCK-01 and LOCK01-SHUTDOWN-01; no material findings remain open.
+- The existing preview backend was refreshed without restarting Vite or reseeding. Backups and logical hashes verified **all 35 application tables unchanged**, including **566 transactions**; schema 21 diagnostics and SQLite quick-check passed.
+
+This closes the requested source remediation, not an installed-platform release certification. macOS/Windows installed execution remains unperformed; browser acceptance is targeted rather than exhaustive. No real finances were repaired, no live provider request was made, and no application installation, push, release or production migration was performed.

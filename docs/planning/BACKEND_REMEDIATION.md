@@ -22,7 +22,13 @@ The user has authorized completing the remaining actionable remediation across R
 - Additive migration 021, atomic native/hosted execution, staged CLI restore through 019→020→021, read-only CLI readiness and future-schema rejection. New evidence tables do not themselves implement domain workflows.
 - Declared recap effects and `save-spending-recap`: the foundation checkpoint exposes 92 shared tools / 97 CLI commands. Financial revision triggers exclude recap/audit writes.
 
-Audited corrections/classifications, dated reconciliation/coverage/supersession, valuation/quote identity and reversible bucket maintenance are being implemented in independent scopes. Atomic imports/keyset traversal, remaining nullable maintenance, payment links and instance diagnostics remain subsequent work. Optional bucket hierarchy remains outside the correctness scope.
+- Audited metadata/split corrections and explicit consumption classifications, with preserved match/unmatch provenance and protected financial membership. CORR-01–05 integration fixes cover unresolved placeholders, unsafe allocation amounts, the public split path, category direction and declared revision effects.
+- Dated reconciliation, independent coverage, deliberate pending settlement, exact-row finalization and token-bound bridge supersession. Native account maintenance exposes ownership declarations, observation dates and nullable clearing; advanced reconciliation dialogs remain unfinished.
+- Ownership-aware exact-decimal valuation, signed card credit/debt, verified quote identity and explicit FX completeness across CLI/React. VAL-01–05 fixes retain native subtotals without FX, normalize tiny numeric inputs, correct cross-currency ROI, suppress unknown gains and sort comparable values.
+- Reversible virtual bucket maintenance, including locked target/source revalidation; real accounts are not mutated by these virtual corrections.
+- Atomic imports, separate identity/content fingerprints, candidate-specific decisions, reviewed React import previews, exhaustive keyset traversal and additive evidence export. Import preservation/redaction follow-up remains open below.
+
+**Not complete:** payment evidence workflows, runtime-instance diagnostics, remaining actual frontend workflow parity, discovery/catalog synchronization, full integrated validation and the final financial review. Provider quote-as-of handling and named import follow-up are in progress. Optional bucket hierarchy remains outside the correctness scope. The historical 92/97 foundation inventory is not the final domain inventory.
 
 ## Completed first slice: explicit-isolation fail-closed
 
@@ -45,9 +51,9 @@ The later integrated storage slice adds explicit custom-root migration consent a
 
 **DEP-02: implementation integrated; final review due.** Database/notebook imports no longer prepare storage. Immutable context validation and cached in-memory native-binding preflight precede authorized preparation, and constructor/schema errors retain distinct codes/causes. Synthetic tests cover failure preservation and lazy notebook migration; this is more than a message-only change.
 
-## Source verification ledger
+## Initial source verification ledger (historical triage)
 
-All open entries require isolated acceptance tests before being called runtime-confirmed or fixed.
+The following table preserves the initial diagnosis, not the current implementation state. The integrated-delivery section above and checkpoints below supersede its original open statuses. Final closure still requires isolated acceptance tests and the integrated financial review.
 
 | ID     | Assessment                               | Current source / next action                                                                                                                                                                                                                   |
 | ------ | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -105,5 +111,25 @@ All open entries require isolated acceptance tests before being called runtime-c
 At source commit `c7c71c5` (integrated as `9c2358f`), **127 files / 1,439 tests**, `pnpm check`, and the packaged CLI/hosted/92-tool MCP smoke passed in isolated storage. Focused foundation/fixture validation passed 100 tests. The serial full suite took about 126 seconds; a 120-second wrapper timeout is insufficient and is not evidence of a product hang.
 
 Migration tests cover fresh/legacy upgrade, rollback, revision exclusions, staged restore preservation and active-versus-voided payment evidence references. Native migration execution uses a SQLite-backed command shim; it is not installed-app or macOS/Windows deployment evidence. Domain workflows and the final integrated financial gate remain outstanding.
+
+## Domain integration checkpoint — 2026-09-19
+
+Integrated commits: valuation `3337965`, accounts/reconciliation `eb978a6`, valuation corrections `eda8f26`, correction-policy fixes `da08f83`, and imports/traversal `92bdd83`. Bucket maintenance and locked revalidation were previously integrated as `37f5ce9` / `9767001`.
+
+Parent-run focused checks passed: 34 valuation/UI tests, 53 correction/split tests, 55 account/reconciliation tests and 18 import tests. Root and CLI TypeScript checks passed at `92bdd83`. These selected runs are not a full-suite or final-review claim; legacy fixture/catalog integration remains unfinished.
+
+| Finding      | State | Evidence / remaining action                                                                                                                                         |
+| ------------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| BUCKET-01–02 | Fixed | Locked allocation inputs and patch-only metadata updates; 16 focused bucket tests previously passed.                                                                |
+| CORR-01–05   | Fixed | Integrated correction guard regressions; 53 parent-run selected tests passed.                                                                                       |
+| VAL-01–05    | Fixed | Integrated native subtotal, numeric precision, ROI and UI fixes; 34 parent-run selected tests passed.                                                               |
+| VAL-06       | Open  | Provider adapters currently stamp retrieval day instead of actual provider quote-as-of metadata. Preserve honest source dates and prior quotes on invalid metadata. |
+| IMP-F01      | Open  | Incoming external IDs must not silently distinguish an otherwise identical unbound legacy row; candidate review/binding needs coverage in both import adapters.     |
+| IMP-F02      | Open  | Import cumulative/current account balances require safe-integer checks, not only per-row checks.                                                                    |
+| IMP-F03      | Open  | React import and evidence-only duplicate decisions need atomic audit parity.                                                                                        |
+| IMP-F04      | Open  | Redacted exports must not leak descriptions/source identifiers embedded in raw identity material.                                                                   |
+| IMP-F05      | Open  | Restore the previous import preservation/refresh guarantees as real SQLite regressions after the service test rewrite.                                              |
+
+No real/demo financial data was used for these validations. No installation, provider quote request, push, release or production migration is claimed.
 
 This ledger is a work queue, not a claim that all listed defects have been fixed or that every historical incident applies to the current build.

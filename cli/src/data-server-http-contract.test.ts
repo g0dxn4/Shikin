@@ -1,10 +1,12 @@
 // @vitest-environment node
-import { mkdtempSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+import { request as requestHttp } from 'node:http'
 import { createServer } from 'node:net'
 import { setTimeout as delay } from 'node:timers/promises'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import Database from 'better-sqlite3'
 import dayjs from 'dayjs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -36,14 +38,17 @@ async function getFreePort(): Promise<number> {
   })
 }
 
-async function waitForServerReady(processRef: ChildProcessWithoutNullStreams): Promise<void> {
+async function waitForServerReady(
+  processRef: ChildProcessWithoutNullStreams,
+  serverUrl = SERVER_URL
+): Promise<void> {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     if (processRef.exitCode !== null) {
       throw new Error(`data-server exited early with code ${processRef.exitCode}`)
     }
 
     try {
-      const response = await fetch(`${SERVER_URL}/api/store`, {
+      const response = await fetch(`${serverUrl}/api/store`, {
         headers: {
           Origin: ORIGIN,
           'X-Shikin-Bridge': TOKEN,
@@ -1058,4 +1063,160 @@ describe('data-server authenticated contract', () => {
       error: 'JSON request body exceeds the 1000000-byte limit.',
     })
   })
+
+  it('waits for a disconnected database restore owner before exiting on SIGTERM', async () => {
+    const defaultHeaders = {
+      Origin: ORIGIN,
+      'X-Shikin-Bridge': TOKEN,
+      'Content-Type': 'application/json',
+    }
+    const restoredAccountId = `shutdown-restore-account-${Date.now()}`
+    const seedResponse = await fetch(`${SERVER_URL}/api/db/execute`, {
+      method: 'POST',
+      headers: defaultHeaders,
+      body: JSON.stringify({
+        sql: 'INSERT INTO accounts (id, name, type, balance) VALUES ($1, $2, $3, $4)',
+        params: [restoredAccountId, 'Shutdown restore account', 'checking', 4321],
+      }),
+    })
+    expect(seedResponse.status).toBe(200)
+
+    const snapshotResponse = await fetch(`${SERVER_URL}/api/db/export`, {
+      headers: {
+        Origin: ORIGIN,
+        'X-Shikin-Bridge': TOKEN,
+      },
+    })
+    const snapshot = new Uint8Array(await snapshotResponse.arrayBuffer())
+    expect(snapshotResponse.status).toBe(200)
+
+    const shutdownRoot = mkdtempSync(join(tmpdir(), 'shikin-data-server-shutdown-test-'))
+    const shutdownDataHome = join(shutdownRoot, 'xdg-data-home')
+    const shutdownDbPath = join(shutdownDataHome, 'com.asf.shikin', 'shikin.db')
+    const pauseReadyPath = join(shutdownRoot, 'backup-paused')
+    const releaseBackupPath = join(shutdownRoot, 'release-backup')
+    const preloadPath = join(shutdownRoot, 'pause-candidate-backup.mjs')
+    const serverPath = resolve(process.cwd(), 'scripts/data-server.mjs')
+    const requireFrom = resolve(process.cwd(), 'package.json')
+    const shutdownPort = await getFreePort()
+    const shutdownServerUrl = `http://127.0.0.1:${shutdownPort}`
+
+    writeFileSync(
+      preloadPath,
+      `import { createRequire } from 'node:module'
+import { existsSync, writeFileSync } from 'node:fs'
+import { setTimeout as delay } from 'node:timers/promises'
+
+const require = createRequire(process.env.SHIKIN_TEST_REQUIRE_FROM)
+const Database = require('better-sqlite3')
+const originalBackup = Database.prototype.backup
+let paused = false
+
+Database.prototype.backup = async function (destinationPath, ...args) {
+  if (!paused && destinationPath === process.env.SHIKIN_TEST_PAUSE_BACKUP_DESTINATION) {
+    paused = true
+    writeFileSync(process.env.SHIKIN_TEST_BACKUP_PAUSED_PATH, 'paused')
+    while (!existsSync(process.env.SHIKIN_TEST_RELEASE_BACKUP_PATH)) await delay(10)
+  }
+  return originalBackup.call(this, destinationPath, ...args)
+}
+`
+    )
+
+    let shutdownProcess: ChildProcessWithoutNullStreams | null = null
+    let processOutput = ''
+    try {
+      shutdownProcess = spawn('node', ['--import', preloadPath, serverPath], {
+        env: {
+          ...process.env,
+          HOME: shutdownRoot,
+          XDG_DATA_HOME: shutdownDataHome,
+          SHIKIN_RESPECT_XDG_DATA_HOME: '1',
+          SHIKIN_DATA_SERVER_BRIDGE_TOKEN: TOKEN,
+          SHIKIN_DATA_SERVER_PORT: String(shutdownPort),
+          SHIKIN_TEST_REQUIRE_FROM: requireFrom,
+          SHIKIN_TEST_PAUSE_BACKUP_DESTINATION: shutdownDbPath,
+          SHIKIN_TEST_BACKUP_PAUSED_PATH: pauseReadyPath,
+          SHIKIN_TEST_RELEASE_BACKUP_PATH: releaseBackupPath,
+        },
+        stdio: 'pipe',
+      })
+      shutdownProcess.stdout.on('data', (chunk) => {
+        processOutput += chunk.toString()
+      })
+      shutdownProcess.stderr.on('data', (chunk) => {
+        processOutput += chunk.toString()
+      })
+      const exitPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+        (resolveExit) => {
+          shutdownProcess!.once('exit', (code, signal) => resolveExit({ code, signal }))
+        }
+      )
+
+      await waitForServerReady(shutdownProcess, shutdownServerUrl)
+
+      const importRequest = requestHttp(`${shutdownServerUrl}/api/db/import`, {
+        method: 'POST',
+        headers: {
+          Origin: ORIGIN,
+          'X-Shikin-Bridge': TOKEN,
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': snapshot.byteLength,
+        },
+      })
+      importRequest.on('response', (response) => response.resume())
+      importRequest.on('error', () => {})
+      importRequest.end(snapshot)
+
+      for (let attempt = 0; attempt < 200 && !existsSync(pauseReadyPath); attempt += 1) {
+        if (shutdownProcess.exitCode !== null) {
+          throw new Error(`restore server exited before backup paused:\n${processOutput}`)
+        }
+        await delay(25)
+      }
+      expect(existsSync(pauseReadyPath), processOutput).toBe(true)
+
+      const importClosed = new Promise<void>((resolveClose) =>
+        importRequest.once('close', resolveClose)
+      )
+      importRequest.destroy()
+      await importClosed
+      shutdownProcess.kill('SIGTERM')
+
+      await delay(200)
+      expect(shutdownProcess.exitCode, processOutput).toBeNull()
+
+      writeFileSync(releaseBackupPath, 'release')
+      const exit = await Promise.race([
+        exitPromise,
+        delay(5_000).then(() => {
+          throw new Error(`restore server did not exit after backup resumed:\n${processOutput}`)
+        }),
+      ])
+      expect(exit).toEqual({ code: 0, signal: null })
+
+      const restoredDb = new Database(shutdownDbPath, { readonly: true, fileMustExist: true })
+      try {
+        expect(restoredDb.pragma('integrity_check', { simple: true })).toBe('ok')
+        expect(
+          restoredDb.prepare('SELECT name FROM _migrations ORDER BY id DESC LIMIT 1').get()
+        ).toEqual({ name: '021_backend_remediation_foundation' })
+        expect(
+          restoredDb.prepare('SELECT id, balance FROM accounts WHERE id = ?').get(restoredAccountId)
+        ).toEqual({
+          id: restoredAccountId,
+          balance: 4321,
+        })
+      } finally {
+        restoredDb.close()
+      }
+    } finally {
+      writeFileSync(releaseBackupPath, 'release')
+      if (shutdownProcess && shutdownProcess.exitCode === null) {
+        shutdownProcess.kill('SIGKILL')
+        await delay(50)
+      }
+      rmSync(shutdownRoot, { recursive: true, force: true })
+    }
+  }, 30_000)
 })

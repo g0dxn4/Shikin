@@ -237,8 +237,20 @@ const closedTransactions = new Map()
 const databaseGate = {
   owner: null,
   waiters: [],
+  idleWaiters: [],
   maintenance: null,
   closed: false,
+}
+
+function notifyDatabaseGateIdle() {
+  if (databaseGate.owner) return
+  const idleWaiters = databaseGate.idleWaiters.splice(0)
+  for (const resolveIdle of idleWaiters) resolveIdle()
+}
+
+function waitForDatabaseGateIdle() {
+  if (!databaseGate.owner) return Promise.resolve()
+  return new Promise((resolveIdle) => databaseGate.idleWaiters.push(resolveIdle))
 }
 
 function removeDatabaseGateWaiter(waiter) {
@@ -260,6 +272,7 @@ function grantDatabaseGateWaiter(waiter) {
     if (databaseGate.owner?.token === owner.token) databaseGate.owner = null
     if (waiter.maintenance) databaseGate.maintenance = null
     grantNextDatabaseGateWaiter()
+    notifyDatabaseGateIdle()
   })
 }
 
@@ -364,6 +377,7 @@ function closeDatabaseGate() {
   for (const waiter of waiters) {
     rejectDatabaseGateWaiter(waiter, createHttpError('Database server is shutting down.', 503))
   }
+  notifyDatabaseGateIdle()
 }
 
 // ── SQL Parameter Conversion ───────────────────────────────────────────────
@@ -2711,6 +2725,7 @@ async function shutdown(signal) {
   shuttingDown = true
   console.log(`[data-server] Received ${signal}; shutting down.`)
   closeDatabaseGate()
+  const serverClosed = new Promise((resolveClose) => server.close(resolveClose))
 
   for (const [transactionId, transactionEntry] of activeTransactions) {
     clearTimeout(transactionEntry.timeout)
@@ -2734,7 +2749,8 @@ async function shutdown(signal) {
   }
   closedTransactions.clear()
 
-  await new Promise((resolveClose) => server.close(resolveClose))
+  await waitForDatabaseGateIdle()
+  await serverClosed
   try {
     db?.close()
   } finally {

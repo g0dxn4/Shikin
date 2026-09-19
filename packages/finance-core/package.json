@@ -22,6 +22,11 @@
       "import": "./dist/imports.js",
       "default": "./dist/imports.js"
     },
+    "./payments": {
+      "types": "./dist/payments.d.ts",
+      "import": "./dist/payments.js",
+      "default": "./dist/payments.js"
+    },
     "./reconciliation": {
       "types": "./dist/reconciliation.d.ts",
       "import": "./dist/reconciliation.js",

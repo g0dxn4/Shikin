@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { AccountMaintenanceAction } from '../account-maintenance-dialog'
+import { AccountMaintenanceAction, AccountMaintenanceDialog } from '../account-maintenance-dialog'
 import type { Account } from '@/types/database'
 
 const mocks = vi.hoisted(() => ({
@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   supersede: vi.fn(),
   coverage: vi.fn(),
   settle: vi.fn(),
+  invalidate: vi.fn(),
 }))
 vi.mock('@/lib/account-reconciliation-service', () => ({
   readAccountMaintenance: mocks.read,
@@ -21,6 +22,14 @@ vi.mock('@/lib/account-reconciliation-service', () => ({
   supersedeAccountReconciliationBridge: mocks.supersede,
   setAccountSourceCoverage: mocks.coverage,
   settleAccountStagedTransactions: mocks.settle,
+}))
+vi.mock('@/lib/transaction-query-events', () => ({
+  invalidateTransactionPage: mocks.invalidate,
+}))
+vi.mock('@/components/transactions/legacy-import-identity-dialog', () => ({
+  ExportLegacyImportIdentityAction: ({ transactionId }: { transactionId: string }) => (
+    <button type="button">identity-action-{transactionId}</button>
+  ),
 }))
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -102,7 +111,10 @@ describe('AccountMaintenanceAction', () => {
       stagedBalanceEffect: -500,
       adjustment: 500,
     })
-    mocks.finalize.mockResolvedValue({ reconciliationId: 'observation' })
+    mocks.finalize.mockResolvedValue({
+      reconciliationId: 'observation',
+      refreshIncomplete: false,
+    })
     mocks.previewSupersession.mockResolvedValue({
       previewToken: 'supersession-token',
       originalSignedBridge: 1_000,
@@ -112,7 +124,7 @@ describe('AccountMaintenanceAction', () => {
       currentEffective: 800,
       laterAnchors: [{ id: 'later', date: '2025-02-28', effectiveBalance: 800 }],
     })
-    mocks.supersede.mockResolvedValue({ correctionId: 'correction' })
+    mocks.supersede.mockResolvedValue({ correctionId: 'correction', refreshIncomplete: false })
   })
 
   it('is hidden for snapshot-only accounts', () => {
@@ -215,5 +227,160 @@ describe('AccountMaintenanceAction', () => {
     await user.click(screen.getByRole('button', { name: 'finalize.preview' }))
     expect(await screen.findByText('Coverage is incomplete')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'finalize.confirm' })).not.toBeInTheDocument()
+  })
+
+  it('mounts the explicit identity workflow only on unbound staged rows', async () => {
+    mocks.read.mockResolvedValue({
+      ...history,
+      transactions: [{ ...staged, import_source: null }],
+    })
+    const user = userEvent.setup()
+    render(<AccountMaintenanceAction account={account} />)
+    await user.click(screen.getByRole('button', { name: 'action' }))
+    expect(await screen.findByRole('button', { name: 'identity-action-staged' })).toBeVisible()
+  })
+
+  it('ignores an older preview after an input change', async () => {
+    let resolvePreview: (value: Awaited<ReturnType<typeof mocks.previewFinalization>>) => void
+    mocks.previewFinalization.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePreview = resolve
+        })
+    )
+    const user = userEvent.setup()
+    render(<AccountMaintenanceAction account={account} />)
+    await user.click(screen.getByRole('button', { name: 'action' }))
+    await screen.findByText('title')
+    const checkboxes = screen.getAllByRole('checkbox')
+    await user.click(checkboxes[1]!)
+    await user.click(checkboxes[2]!)
+    const balance = screen.getByLabelText('finalize.balance')
+    await user.type(balance, '0')
+    await user.click(screen.getByRole('button', { name: 'finalize.preview' }))
+    await user.clear(balance)
+    await user.type(balance, '1')
+    resolvePreview!({
+      previewToken: 'obsolete-token',
+      transactionIds: ['staged'],
+      transactionCount: 1,
+      coverage: [coverage],
+      reconciliationDate: '2025-01-31',
+      stagedBalanceEffect: -500,
+      adjustment: 500,
+    })
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'finalize.confirm' })).not.toBeInTheDocument()
+    )
+    expect(screen.getByRole('button', { name: 'finalize.preview' })).toBeEnabled()
+  })
+
+  it('clears confirmation after a rejected apply and requires a fresh review', async () => {
+    mocks.finalize.mockRejectedValueOnce(new Error('stale reviewed preview token'))
+    const user = userEvent.setup()
+    render(<AccountMaintenanceAction account={account} />)
+    await user.click(screen.getByRole('button', { name: 'action' }))
+    await screen.findByText('title')
+    const checkboxes = screen.getAllByRole('checkbox')
+    await user.click(checkboxes[1]!)
+    await user.click(checkboxes[2]!)
+    await user.type(screen.getByLabelText('finalize.balance'), '0')
+    await user.click(screen.getByRole('button', { name: 'finalize.preview' }))
+    await user.click(await screen.findByRole('button', { name: 'finalize.confirm' }))
+    expect(await screen.findByText('stale reviewed preview token')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'finalize.confirm' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'finalize.preview' })).toBeEnabled()
+  })
+
+  it('invalidates committed views, clears mutation state, and reports rejected refreshes', async () => {
+    mocks.finalize.mockResolvedValueOnce({
+      reconciliationId: 'observation',
+      refreshIncomplete: true,
+    })
+    const user = userEvent.setup()
+    render(<AccountMaintenanceAction account={account} />)
+    await user.click(screen.getByRole('button', { name: 'action' }))
+    await screen.findByText('title')
+    const checkboxes = screen.getAllByRole('checkbox')
+    await user.click(checkboxes[1]!)
+    await user.click(checkboxes[2]!)
+    await user.type(screen.getByLabelText('finalize.balance'), '0')
+    await user.click(screen.getByRole('button', { name: 'finalize.preview' }))
+    await user.click(await screen.findByRole('button', { name: 'finalize.confirm' }))
+
+    expect(await screen.findByText('errors.savedRefreshFailed')).toBeVisible()
+    expect(mocks.invalidate).toHaveBeenCalledWith('store-refresh')
+    expect(screen.queryByRole('button', { name: 'finalize.confirm' })).not.toBeInTheDocument()
+  })
+
+  it('continues post-commit invalidation when closed during apply without reviving old state', async () => {
+    let resolveApply: (value: { reconciliationId: string; refreshIncomplete: boolean }) => void
+    mocks.finalize.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveApply = resolve
+        })
+    )
+    const user = userEvent.setup()
+    const onOpenChange = vi.fn()
+    const view = render(
+      <AccountMaintenanceDialog account={account} open={true} onOpenChange={onOpenChange} />
+    )
+    await screen.findByText('title')
+    const checkboxes = screen.getAllByRole('checkbox')
+    await user.click(checkboxes[1]!)
+    await user.click(checkboxes[2]!)
+    await user.type(screen.getByLabelText('finalize.balance'), '0')
+    await user.click(screen.getByRole('button', { name: 'finalize.preview' }))
+    await user.click(await screen.findByRole('button', { name: 'finalize.confirm' }))
+
+    view.rerender(
+      <AccountMaintenanceDialog account={account} open={false} onOpenChange={onOpenChange} />
+    )
+    resolveApply!({ reconciliationId: 'observation', refreshIncomplete: false })
+    await waitFor(() => expect(mocks.invalidate).toHaveBeenCalledWith('store-refresh'))
+
+    view.rerender(
+      <AccountMaintenanceDialog account={account} open={true} onOpenChange={onOpenChange} />
+    )
+    await screen.findByText('title')
+    expect(screen.queryByRole('button', { name: 'finalize.confirm' })).not.toBeInTheDocument()
+    expect(screen.queryByText('errors.savedRefreshFailed')).not.toBeInTheDocument()
+  })
+
+  it('does not let an older account load replace a newer dialog context', async () => {
+    let resolveFirst: (value: typeof history) => void
+    mocks.read.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = resolve
+        })
+    )
+    const secondAccount = { ...account, id: 'b', name: 'Savings' }
+    const secondHistory = {
+      ...history,
+      account: { ...history.account, id: 'b', name: 'Savings' },
+      transactions: [
+        {
+          ...staged,
+          id: 'new-row',
+          account_id: 'b',
+          source_account_id: 'b',
+          description: 'New row',
+        },
+      ],
+    }
+    mocks.read.mockResolvedValueOnce(secondHistory)
+    const onOpenChange = vi.fn()
+    const view = render(
+      <AccountMaintenanceDialog account={account} open={true} onOpenChange={onOpenChange} />
+    )
+    view.rerender(
+      <AccountMaintenanceDialog account={secondAccount} open={true} onOpenChange={onOpenChange} />
+    )
+    expect(await screen.findByText('New row')).toBeVisible()
+    resolveFirst!(history)
+    await waitFor(() => expect(screen.queryByText('Statement purchase')).not.toBeInTheDocument())
+    expect(screen.getByText('New row')).toBeVisible()
   })
 })

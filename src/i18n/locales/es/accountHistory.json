@@ -43,6 +43,26 @@
     "reviewAction": "Revisar liquidación pendiente",
     "confirm": "Confirmar liquidación como contabilizada"
   },
+  "identity": {
+    "action": "Vincular ID verificado",
+    "title": "Vincular identidad de importación heredada",
+    "description": "Asocia una identidad de origen verificada explícitamente sin cambiar este movimiento contable.",
+    "loading": "Leyendo la transacción actual…",
+    "sourceNamespace": "Espacio de nombres de origen",
+    "externalId": "ID externo exacto",
+    "auditSource": "Origen de auditoría",
+    "auditNote": "Nota de auditoría",
+    "verifiedConfirmation": "Verifiqué este ID externo exacto y sensible a mayúsculas con el origen indicado.",
+    "review": "Revisar vinculación de identidad",
+    "confirm": "Confirmar vinculación de identidad",
+    "unknownContent": "El contenido original de importación es desconocido. Esto no verifica ni recrea una huella de contenido desde el movimiento editable.",
+    "savedRefreshFailed": "La identidad se guardó, pero las vistas actuales no se pudieron actualizar por completo. Vuelve a abrir o actualiza para ver el cambio confirmado.",
+    "errors": {
+      "load": "No se pudo leer la transacción actual.",
+      "preview": "No se pudo revisar la vinculación de identidad.",
+      "apply": "No se vinculó la identidad. Revisa de nuevo el registro actual."
+    }
+  },
   "finalize": {
     "balance": "Saldo observado al cierre ({{currency}})",
     "acknowledge": "Aceptar cobertura provisional",
@@ -66,6 +86,7 @@
   "errors": {
     "load": "No se pudo leer el historial de la cuenta.",
     "operation": "La operación falló; no se conservó ningún cambio parcial.",
+    "savedRefreshFailed": "El cambio se guardó, pero las vistas actuales de cuentas o transacciones no se pudieron actualizar por completo. Actualiza para ver el resultado confirmado.",
     "preview": "No se pudo crear la vista previa.",
     "balance": "Ingresa un saldo observado válido.",
     "bridge": "Elige un puente original elegible."

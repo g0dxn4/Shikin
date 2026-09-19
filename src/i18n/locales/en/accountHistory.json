@@ -43,6 +43,26 @@
     "reviewAction": "Review pending settlement",
     "confirm": "Confirm settlement as posted"
   },
+  "identity": {
+    "action": "Bind verified ID",
+    "title": "Bind legacy import identity",
+    "description": "Attach an explicitly verified source identity without changing this ledger record.",
+    "loading": "Reading the current transaction…",
+    "sourceNamespace": "Source namespace",
+    "externalId": "Exact external ID",
+    "auditSource": "Audit source",
+    "auditNote": "Audit note",
+    "verifiedConfirmation": "I verified this exact, case-sensitive external ID against the named source.",
+    "review": "Review identity binding",
+    "confirm": "Confirm identity binding",
+    "unknownContent": "Original import content is unknown. This does not verify or recreate a content fingerprint from the editable ledger row.",
+    "savedRefreshFailed": "The identity was saved, but current views could not be fully refreshed. Reopen or refresh to see the committed change.",
+    "errors": {
+      "load": "The current transaction could not be read.",
+      "preview": "The identity binding could not be reviewed.",
+      "apply": "The identity was not bound. Review the current record again."
+    }
+  },
   "finalize": {
     "balance": "Observed end-of-day balance ({{currency}})",
     "acknowledge": "Acknowledge provisional coverage",
@@ -66,6 +86,7 @@
   "errors": {
     "load": "Account history could not be read.",
     "operation": "The operation failed; no partial change was kept.",
+    "savedRefreshFailed": "The change was saved, but current account or transaction views could not be fully refreshed. Refresh to see the committed result.",
     "preview": "The preview could not be created.",
     "balance": "Enter a valid observed balance.",
     "bridge": "Choose an eligible original bridge."

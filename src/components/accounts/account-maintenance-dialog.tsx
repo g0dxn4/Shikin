@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { History, Loader2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -15,6 +15,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { formatMoney, toCentavos } from '@/lib/money'
 import { getErrorMessage } from '@/lib/errors'
+import { invalidateTransactionPage } from '@/lib/transaction-query-events'
+import { ExportLegacyImportIdentityAction } from '@/components/transactions/legacy-import-identity-dialog'
 import type { Account } from '@/types/database'
 import {
   finalizeAccountStatementHistory,
@@ -92,25 +94,57 @@ export function AccountMaintenanceDialog({
     'verified'
   )
   const [coverageZeroRows, setCoverageZeroRows] = useState(false)
+  const requestSequenceRef = useRef(0)
+  const busyOwnerRef = useRef(0)
+  const contextEpochRef = useRef(0)
+  const renderContextRef = useRef({ open, accountId: account.id })
+  const currentContextRef = useRef({ open, accountId: account.id })
+  currentContextRef.current = { open, accountId: account.id }
+  if (renderContextRef.current.open !== open || renderContextRef.current.accountId !== account.id) {
+    contextEpochRef.current += 1
+    requestSequenceRef.current += 1
+    renderContextRef.current = { open, accountId: account.id }
+  }
 
-  const reload = async () => {
-    setError(null)
+  const contextIsCurrent = (epoch: number, accountId: string) =>
+    epoch === contextEpochRef.current &&
+    currentContextRef.current.open &&
+    currentContextRef.current.accountId === accountId
+
+  const reload = async (epoch = contextEpochRef.current): Promise<boolean> => {
+    const requestId = ++requestSequenceRef.current
+    const requestedAccountId = account.id
+    if (contextIsCurrent(epoch, requestedAccountId)) setError(null)
     try {
-      setHistory(await readAccountMaintenance(account.id))
+      const result = await readAccountMaintenance(requestedAccountId)
+      if (!contextIsCurrent(epoch, requestedAccountId) || requestId !== requestSequenceRef.current)
+        return false
+      setHistory(result)
+      return true
     } catch (reason) {
+      if (!contextIsCurrent(epoch, requestedAccountId) || requestId !== requestSequenceRef.current)
+        return false
       setHistory(null)
       setError(getErrorMessage(reason, t('errors.load')))
+      return true
     }
   }
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      setBusy(false)
+      return
+    }
+    setHistory(null)
+    setError(null)
+    setBusy(false)
     setSelectedIds([])
     setCoverageIds([])
     setFinalizationPreview(null)
     setSupersessionPreview(null)
     setSettlementReviewed(false)
-    void reload()
+    const epoch = contextEpochRef.current
+    void reload(epoch)
     // Reload only when this dialog opens for a different account.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account.id, open])
@@ -149,6 +183,9 @@ export function AccountMaintenanceDialog({
   )
 
   const resetReviews = () => {
+    contextEpochRef.current += 1
+    requestSequenceRef.current += 1
+    setBusy(false)
     setFinalizationPreview(null)
     setSupersessionPreview(null)
     setSettlementReviewed(false)
@@ -159,17 +196,64 @@ export function AccountMaintenanceDialog({
     )
     resetReviews()
   }
-  const run = async (operation: () => Promise<unknown>, after?: () => void) => {
+  const run = async (
+    operation: () => Promise<unknown>,
+    after?: () => void,
+    onError?: () => void
+  ) => {
+    const requestId = ++requestSequenceRef.current
+    busyOwnerRef.current = requestId
+    const epoch = contextEpochRef.current
+    const requestedAccountId = account.id
     setBusy(true)
     setError(null)
     try {
-      await operation()
+      const result = await operation()
+      // The database commit already happened. Invalidate page reads even if refresh failed
+      // or this controlled dialog closed while the operation was in flight.
+      invalidateTransactionPage('store-refresh')
+      if (!contextIsCurrent(epoch, requestedAccountId)) return
       after?.()
-      await reload()
+      await reload(epoch)
+      if (
+        contextIsCurrent(epoch, requestedAccountId) &&
+        typeof result === 'object' &&
+        result !== null &&
+        'refreshIncomplete' in result &&
+        result.refreshIncomplete === true
+      )
+        setError(t('errors.savedRefreshFailed'))
     } catch (reason) {
+      if (!contextIsCurrent(epoch, requestedAccountId)) return
+      onError?.()
       setError(getErrorMessage(reason, t('errors.operation')))
     } finally {
-      setBusy(false)
+      if (busyOwnerRef.current === requestId && contextIsCurrent(epoch, requestedAccountId))
+        setBusy(false)
+    }
+  }
+
+  const runPreview = async <T,>(operation: () => Promise<T>, onSuccess: (value: T) => void) => {
+    const requestId = ++requestSequenceRef.current
+    busyOwnerRef.current = requestId
+    const epoch = contextEpochRef.current
+    const requestedAccountId = account.id
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await operation()
+      if (contextIsCurrent(epoch, requestedAccountId) && requestId === requestSequenceRef.current)
+        onSuccess(result)
+    } catch (reason) {
+      if (contextIsCurrent(epoch, requestedAccountId) && requestId === requestSequenceRef.current)
+        setError(getErrorMessage(reason, t('errors.preview')))
+    } finally {
+      if (
+        busyOwnerRef.current === requestId &&
+        contextIsCurrent(epoch, requestedAccountId) &&
+        requestId === requestSequenceRef.current
+      )
+        setBusy(false)
     }
   }
 
@@ -202,14 +286,27 @@ export function AccountMaintenanceDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) {
+          contextEpochRef.current += 1
+          requestSequenceRef.current += 1
+          setBusy(false)
+        }
+        onOpenChange(next)
+      }}
+    >
       <DialogContent className="max-h-[92dvh] max-w-3xl overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>{t('title', { account: account.name })}</DialogTitle>
           <DialogDescription>{t('description')}</DialogDescription>
         </DialogHeader>
 
-        <ErrorBanner message={error} onRetry={history ? undefined : reload} />
+        <ErrorBanner
+          message={error}
+          onRetry={history ? undefined : () => void reload(contextEpochRef.current)}
+        />
         {!history && !error ? (
           <div className="text-muted-foreground flex min-h-32 items-center justify-center gap-2 text-sm">
             <Loader2 className="animate-spin" aria-hidden="true" /> {t('loading')}
@@ -288,7 +385,10 @@ export function AccountMaintenanceDialog({
                   <Input
                     id="coverage-source"
                     value={coverageSource}
-                    onChange={(event) => setCoverageSource(event.target.value)}
+                    onChange={(event) => {
+                      setCoverageSource(event.target.value)
+                      resetReviews()
+                    }}
                   />
                 </div>
                 <div>
@@ -296,7 +396,10 @@ export function AccountMaintenanceDialog({
                   <Input
                     id="coverage-document"
                     value={coverageDocument}
-                    onChange={(event) => setCoverageDocument(event.target.value)}
+                    onChange={(event) => {
+                      setCoverageDocument(event.target.value)
+                      resetReviews()
+                    }}
                   />
                 </div>
                 <div>
@@ -329,9 +432,10 @@ export function AccountMaintenanceDialog({
                     id="coverage-status"
                     className="border-input bg-surface h-10 w-full rounded-lg border px-3 text-sm"
                     value={coverageStatus}
-                    onChange={(event) =>
+                    onChange={(event) => {
                       setCoverageStatus(event.target.value as typeof coverageStatus)
-                    }
+                      resetReviews()
+                    }}
                   >
                     <option value="verified">{t('coverage.verified')}</option>
                     <option value="provisional">{t('coverage.provisional')}</option>
@@ -342,7 +446,10 @@ export function AccountMaintenanceDialog({
                   <input
                     type="checkbox"
                     checked={coverageZeroRows}
-                    onChange={(event) => setCoverageZeroRows(event.target.checked)}
+                    onChange={(event) => {
+                      setCoverageZeroRows(event.target.checked)
+                      resetReviews()
+                    }}
                   />
                   {t('coverage.zeroRows')}
                 </label>
@@ -422,6 +529,7 @@ export function AccountMaintenanceDialog({
                           setCoverageStatus(item.status)
                           setCoverageZeroRows(item.zero_rows === 1)
                           setCoverageDocument(item.document_ref ?? '')
+                          resetReviews()
                         }}
                       >
                         {t('coverage.edit')}
@@ -446,33 +554,40 @@ export function AccountMaintenanceDialog({
                 <fieldset className="space-y-2">
                   <legend className="sr-only">{t('staged.select')}</legend>
                   {staged.map((row) => (
-                    <label
-                      key={row.id}
-                      className="border-border flex min-h-11 items-center gap-3 rounded-lg border px-3 py-2 text-sm"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.includes(row.id)}
-                        onChange={(event) => toggle(row.id, event.target.checked, setSelectedIds)}
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="font-medium">{row.description ?? row.id}</span>{' '}
-                        <span className="text-muted-foreground block text-xs">
-                          {row.date} · {row.import_source ?? t('staged.noSource')} ·{' '}
-                          {row.staging_batch_id ?? t('staged.noBatch')}
+                    <div key={row.id} className="border-border rounded-lg border px-3 py-2 text-sm">
+                      <label className="flex min-h-11 items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(row.id)}
+                          onChange={(event) => toggle(row.id, event.target.checked, setSelectedIds)}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="font-medium">{row.description ?? row.id}</span>{' '}
+                          <span className="text-muted-foreground block text-xs">
+                            {row.date} · {row.import_source ?? t('staged.noSource')} ·{' '}
+                            {row.staging_batch_id ?? t('staged.noBatch')}
+                          </span>
                         </span>
-                      </span>
-                      <span className="tabular-nums">
-                        {formatMoney(
-                          signedAmount(row.type, row.amount),
-                          account.currency,
-                          i18n.language
-                        )}
-                      </span>
-                      <Badge variant={row.status === 'pending' ? 'outline' : 'secondary'}>
-                        {row.status}
-                      </Badge>
-                    </label>
+                        <span className="tabular-nums">
+                          {formatMoney(
+                            signedAmount(row.type, row.amount),
+                            account.currency,
+                            i18n.language
+                          )}
+                        </span>
+                        <Badge variant={row.status === 'pending' ? 'outline' : 'secondary'}>
+                          {row.status}
+                        </Badge>
+                      </label>
+                      {!row.import_source ? (
+                        <div className="border-border mt-2 flex justify-end border-t pt-2">
+                          <ExportLegacyImportIdentityAction
+                            transactionId={row.id}
+                            onChanged={() => void reload(contextEpochRef.current)}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
                   ))}
                 </fieldset>
               ) : (
@@ -535,7 +650,7 @@ export function AccountMaintenanceDialog({
                     value={observedBalance}
                     onChange={(event) => {
                       setObservedBalance(event.target.value)
-                      setFinalizationPreview(null)
+                      resetReviews()
                     }}
                   />
                 </div>
@@ -545,7 +660,7 @@ export function AccountMaintenanceDialog({
                     checked={acknowledgeProvisional}
                     onChange={(event) => {
                       setAcknowledgeProvisional(event.target.checked)
-                      setFinalizationPreview(null)
+                      resetReviews()
                     }}
                   />
                   {t('finalize.acknowledge')}
@@ -559,7 +674,7 @@ export function AccountMaintenanceDialog({
                     value={provisionalProvenance}
                     onChange={(event) => {
                       setProvisionalProvenance(event.target.value)
-                      setFinalizationPreview(null)
+                      resetReviews()
                     }}
                   />
                 </div>
@@ -569,18 +684,12 @@ export function AccountMaintenanceDialog({
                   className="min-h-11"
                   variant="outline"
                   disabled={busy || !selectedFinalizable.length}
-                  onClick={async () => {
-                    setBusy(true)
-                    setError(null)
-                    try {
-                      setFinalizationPreview(
-                        await previewAccountStatementFinalization(finalizationInput())
-                      )
-                    } catch (reason) {
-                      setError(getErrorMessage(reason, t('errors.preview')))
-                    } finally {
-                      setBusy(false)
-                    }
+                  onClick={() => {
+                    setFinalizationPreview(null)
+                    void runPreview(
+                      () => previewAccountStatementFinalization(finalizationInput()),
+                      setFinalizationPreview
+                    )
                   }}
                 >
                   {t('finalize.preview')}
@@ -599,7 +708,8 @@ export function AccountMaintenanceDialog({
                         () => {
                           setSelectedIds([])
                           setFinalizationPreview(null)
-                        }
+                        },
+                        () => setFinalizationPreview(null)
                       )
                     }
                   >
@@ -650,7 +760,7 @@ export function AccountMaintenanceDialog({
                 value={bridgeId}
                 onChange={(event) => {
                   setBridgeId(event.target.value)
-                  setSupersessionPreview(null)
+                  resetReviews()
                 }}
               >
                 <option value="">{t('supersede.choose')}</option>
@@ -670,18 +780,12 @@ export function AccountMaintenanceDialog({
                   className="min-h-11"
                   variant="outline"
                   disabled={busy || !bridgeId || !selectedFinalizable.length}
-                  onClick={async () => {
-                    setBusy(true)
-                    setError(null)
-                    try {
-                      setSupersessionPreview(
-                        await previewAccountBridgeSupersession(supersessionInput())
-                      )
-                    } catch (reason) {
-                      setError(getErrorMessage(reason, t('errors.preview')))
-                    } finally {
-                      setBusy(false)
-                    }
+                  onClick={() => {
+                    setSupersessionPreview(null)
+                    void runPreview(
+                      () => previewAccountBridgeSupersession(supersessionInput()),
+                      setSupersessionPreview
+                    )
                   }}
                 >
                   {t('supersede.preview')}
@@ -701,7 +805,8 @@ export function AccountMaintenanceDialog({
                           setSelectedIds([])
                           setSupersessionPreview(null)
                           setBridgeId('')
-                        }
+                        },
+                        () => setSupersessionPreview(null)
                       )
                     }
                   >

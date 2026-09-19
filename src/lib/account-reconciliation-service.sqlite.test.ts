@@ -129,9 +129,61 @@ beforeEach(() => {
   holder.accountRefresh.mockClear()
   holder.transactionRefresh.mockClear()
 })
-afterEach(() => holder.db.close())
+afterEach(() => {
+  vi.useRealTimers()
+  holder.db.close()
+})
 
 describe('native/browser account reconciliation service on real schema 021 SQLite', () => {
+  it('uses the local calendar day at the UTC/local midnight boundary', async () => {
+    const previousTimezone = process.env.TZ
+    process.env.TZ = 'America/Los_Angeles'
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2025-02-01T00:30:00.000Z'))
+    try {
+      transaction('future-locally', 100, { date: '2025-02-01' })
+      const coverageId = (
+        await setAccountSourceCoverage({
+          accountId: 'a',
+          sourceNamespace: 'Bank',
+          periodStart: '2025-02-01',
+          periodEnd: '2025-02-01',
+          status: 'verified',
+          documentRef: 'synthetic statement',
+        })
+      ).coverage.id
+      await expect(
+        previewAccountStatementFinalization({
+          accountId: 'a',
+          transactionIds: ['future-locally'],
+          coverageIds: [coverageId],
+          statementStartDate: '2025-02-01',
+          statementEndDate: '2025-02-01',
+          actualBalanceCentavos: 100,
+        })
+      ).rejects.toThrow('future')
+    } finally {
+      if (previousTimezone === undefined) delete process.env.TZ
+      else process.env.TZ = previousTimezone
+    }
+  })
+
+  it('reports a committed mutation when one post-commit store refresh rejects', async () => {
+    holder.transactionRefresh.mockRejectedValueOnce(new Error('refresh failed'))
+    const result = await setAccountSourceCoverage({
+      accountId: 'a',
+      sourceNamespace: 'Bank',
+      periodStart: '2025-01-01',
+      periodEnd: '2025-01-31',
+      status: 'verified',
+      documentRef: 'synthetic statement',
+    })
+    expect(result.refreshIncomplete).toBe(true)
+    expect(rows('source_coverage')).toHaveLength(1)
+    expect(holder.accountRefresh).toHaveBeenCalledTimes(1)
+    expect(holder.transactionRefresh).toHaveBeenCalledTimes(1)
+  })
+
   it('finalizes exact multi-batch rows, preserves source evidence, and settles pending separately', async () => {
     transaction('first', 400)
     transaction('second', 600, { batch: 'other-batch' })

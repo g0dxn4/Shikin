@@ -26,6 +26,8 @@ import {
   importStatementFile,
   previewStatementFile,
   type StatementImportPreview,
+  type StatementImportTreatment,
+  type StatementImportTreatmentOptions,
 } from '@/lib/statement-import'
 import type { ImportReviewDecision } from '@shikin/finance-core/imports'
 import { cn } from '@/lib/utils'
@@ -109,11 +111,17 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
     selectedFile: null as File | null,
     accountId: '',
     decisions: [] as ImportReviewDecision[],
+    treatment: 'posted' as StatementImportTreatment,
+    stagingBatchId: '',
+    acknowledgePending: false,
   })
 
   const [step, setStep] = useState<ImportStep>('select')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [accountId, setAccountId] = useState<string>('')
+  const [treatment, setTreatment] = useState<StatementImportTreatment>('posted')
+  const [stagingBatchId, setStagingBatchId] = useState('')
+  const [acknowledgePending, setAcknowledgePending] = useState(false)
   const [parsedTransactions, setParsedTransactions] = useState<ParsedTransaction[]>([])
   const [parseError, setParseError] = useState<string | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
@@ -125,8 +133,22 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
   const [plannedImported, setPlannedImported] = useState(0)
   const [plannedSkipped, setPlannedSkipped] = useState(0)
   const [limitations, setLimitations] = useState<string[]>([])
+  const [resolvedTreatment, setResolvedTreatment] = useState<StatementImportTreatment>('posted')
+  const [resolvedStagingBatchId, setResolvedStagingBatchId] = useState<string | null>(null)
+  const [plannedStaged, setPlannedStaged] = useState(0)
+  const [plannedPending, setPlannedPending] = useState(0)
+  const [balanceImpactCentavos, setBalanceImpactCentavos] = useState(0)
+  const [previewCurrency, setPreviewCurrency] = useState<string | null>(null)
 
-  selectionRef.current = { open, selectedFile, accountId, decisions }
+  selectionRef.current = {
+    open,
+    selectedFile,
+    accountId,
+    decisions,
+    treatment,
+    stagingBatchId,
+    acknowledgePending,
+  }
 
   const clearPreviewBinding = useCallback(() => {
     setPreviewToken(null)
@@ -135,10 +157,17 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
     setPlannedImported(0)
     setPlannedSkipped(0)
     setLimitations([])
+    setResolvedTreatment('posted')
+    setResolvedStagingBatchId(null)
+    setPlannedStaged(0)
+    setPlannedPending(0)
+    setBalanceImpactCentavos(0)
+    setPreviewCurrency(null)
   }, [])
 
   const invalidateInFlightPreview = useCallback(() => {
     previewRequestIdRef.current += 1
+    importRequestIdRef.current += 1
     setIsImporting(false)
   }, [])
 
@@ -149,6 +178,9 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
     setStep('select')
     setSelectedFile(null)
     setAccountId('')
+    setTreatment('posted')
+    setStagingBatchId('')
+    setAcknowledgePending(false)
     setParsedTransactions([])
     setParseError(null)
     setPreviewError(null)
@@ -160,6 +192,12 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
     setPlannedImported(0)
     setPlannedSkipped(0)
     setLimitations([])
+    setResolvedTreatment('posted')
+    setResolvedStagingBatchId(null)
+    setPlannedStaged(0)
+    setPlannedPending(0)
+    setBalanceImpactCentavos(0)
+    setPreviewCurrency(null)
   }, [])
 
   const handleOpenChange = useCallback(
@@ -179,6 +217,39 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
       clearPreviewBinding()
     },
     [clearPreviewBinding, invalidateInFlightPreview]
+  )
+
+  const clearTreatmentPreview = useCallback(() => {
+    invalidateInFlightPreview()
+    setPreviewError(null)
+    setDecisions([])
+    clearPreviewBinding()
+  }, [clearPreviewBinding, invalidateInFlightPreview])
+
+  const handleTreatmentChange = useCallback(
+    (value: string) => {
+      clearTreatmentPreview()
+      setTreatment(value as StatementImportTreatment)
+      setAcknowledgePending(false)
+      if (value === 'posted') setStagingBatchId('')
+    },
+    [clearTreatmentPreview]
+  )
+
+  const handleBatchChange = useCallback(
+    (value: string) => {
+      clearTreatmentPreview()
+      setStagingBatchId(value)
+    },
+    [clearTreatmentPreview]
+  )
+
+  const handlePendingAcknowledgement = useCallback(
+    (checked: boolean) => {
+      clearTreatmentPreview()
+      setAcknowledgePending(checked)
+    },
+    [clearTreatmentPreview]
   )
 
   const handleFileSelect = useCallback(
@@ -221,7 +292,12 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
     [clearPreviewBinding, invalidateInFlightPreview]
   )
 
-  const canPreview = Boolean(selectedFile && parsedTransactions.length > 0 && accountId)
+  const canPreview = Boolean(
+    selectedFile &&
+    parsedTransactions.length > 0 &&
+    accountId &&
+    (treatment !== 'staged_pending' || acknowledgePending)
+  )
   const reviewCandidateByKey = new Map(
     reviewCandidates.map((candidate) => [candidateKey(candidate), candidate])
   )
@@ -249,19 +325,34 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
     const requestedFile = selectedFile
     const requestedAccountId = accountId
     const requestedDecisions = decisions.map((item) => reviewDecisionPayload(item, item.decision))
+    const requestedTreatment = treatment
+    const requestedStagingBatchId = stagingBatchId
+    const requestedAcknowledgePending = acknowledgePending
+    const treatmentOptions: StatementImportTreatmentOptions = {
+      treatment: requestedTreatment,
+      stagingBatchId: requestedStagingBatchId.trim() || undefined,
+      acknowledgePending: requestedAcknowledgePending,
+    }
     setIsImporting(true)
     setPreviewError(null)
     try {
-      const preview = await previewStatementFile(
-        requestedFile,
-        requestedAccountId,
-        requestedDecisions
-      )
+      const preview =
+        requestedTreatment === 'posted'
+          ? await previewStatementFile(requestedFile, requestedAccountId, requestedDecisions)
+          : await previewStatementFile(
+              requestedFile,
+              requestedAccountId,
+              requestedDecisions,
+              treatmentOptions
+            )
       if (requestId !== previewRequestIdRef.current) return
       if (!selectionRef.current.open) return
       if (selectionRef.current.selectedFile !== requestedFile) return
       if (selectionRef.current.accountId !== requestedAccountId) return
       if (selectionRef.current.decisions !== decisions) return
+      if (selectionRef.current.treatment !== requestedTreatment) return
+      if (selectionRef.current.stagingBatchId !== requestedStagingBatchId) return
+      if (selectionRef.current.acknowledgePending !== requestedAcknowledgePending) return
 
       if (preview.errors.length) {
         setPreviewError(preview.errors[0])
@@ -281,13 +372,19 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
       setPlannedImported(preview.imported)
       setPlannedSkipped(preview.skipped)
       setLimitations(uniqueStrings(preview.limitations, preview.legacyEvidenceLimitations))
+      setResolvedTreatment(preview.treatment)
+      setResolvedStagingBatchId(preview.stagingBatchId)
+      setPlannedStaged(preview.stagedCount)
+      setPlannedPending(preview.pendingCount)
+      setBalanceImpactCentavos(preview.balanceImpactCentavos)
+      setPreviewCurrency(preview.accountCurrency)
       setStep('preview')
     } finally {
       if (requestId === previewRequestIdRef.current) {
         setIsImporting(false)
       }
     }
-  }, [selectedFile, accountId, decisions])
+  }, [selectedFile, accountId, decisions, treatment, stagingBatchId, acknowledgePending])
 
   const setCandidateDecision = useCallback(
     (candidate: ImportReviewDecision, decision: ImportReviewDecision['decision']) => {
@@ -317,6 +414,9 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
     const requestedAccountId = accountId
     const requestedToken = previewToken
     const requestedDecisions = decisions.map((item) => reviewDecisionPayload(item, item.decision))
+    const requestedTreatment = treatment
+    const requestedStagingBatchId = stagingBatchId
+    const requestedAcknowledgePending = acknowledgePending
 
     setIsImporting(true)
     setStep('importing')
@@ -326,6 +426,13 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
       const result = await importStatementFile(requestedFile, requestedAccountId, {
         previewToken: requestedToken,
         decisions: requestedDecisions,
+        ...(requestedTreatment === 'posted'
+          ? {}
+          : {
+              treatment: requestedTreatment,
+              stagingBatchId: requestedStagingBatchId.trim() || undefined,
+              acknowledgePending: requestedAcknowledgePending,
+            }),
       })
 
       if (result.imported > 0) invalidateTransactionPage('import')
@@ -334,7 +441,10 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
         requestId !== importRequestIdRef.current ||
         !selectionRef.current.open ||
         selectionRef.current.selectedFile !== requestedFile ||
-        selectionRef.current.accountId !== requestedAccountId
+        selectionRef.current.accountId !== requestedAccountId ||
+        selectionRef.current.treatment !== requestedTreatment ||
+        selectionRef.current.stagingBatchId !== requestedStagingBatchId ||
+        selectionRef.current.acknowledgePending !== requestedAcknowledgePending
       if (isStaleResult) return
 
       if (result.errors.length > 0) {
@@ -397,6 +507,9 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
     requiredDecisions.length,
     candidatesMissingDetails,
     decisions,
+    treatment,
+    stagingBatchId,
+    acknowledgePending,
     t,
     handleOpenChange,
   ])
@@ -416,7 +529,7 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="border-border bg-surface max-h-[90vh] max-w-2xl overflow-hidden">
+      <DialogContent className="border-border bg-surface max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-heading">{t('import.title')}</DialogTitle>
           <DialogDescription>{t('import.description')}</DialogDescription>
@@ -452,6 +565,62 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
             </div>
 
             <div className="space-y-2">
+              <label htmlFor="statement-import-treatment" className="text-sm font-medium">
+                {t('import.treatment')}
+              </label>
+              <Select value={treatment} onValueChange={handleTreatmentChange}>
+                <SelectTrigger
+                  id="statement-import-treatment"
+                  className="min-h-11"
+                  aria-label={t('import.treatment')}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="posted">{t('import.treatments.posted')}</SelectItem>
+                  <SelectItem value="staged_posted">
+                    {t('import.treatments.stagedPosted')}
+                  </SelectItem>
+                  <SelectItem value="staged_pending">
+                    {t('import.treatments.stagedPending')}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-muted-foreground text-xs">
+                {t(`import.treatmentDescriptions.${treatment}`)}
+              </p>
+            </div>
+
+            {treatment !== 'posted' ? (
+              <div className="space-y-2">
+                <label htmlFor="statement-import-batch" className="text-sm font-medium">
+                  {t('import.stagingBatch')}
+                </label>
+                <input
+                  id="statement-import-batch"
+                  value={stagingBatchId}
+                  maxLength={200}
+                  onChange={(event) => handleBatchChange(event.currentTarget.value)}
+                  placeholder={t('import.stagingBatchPlaceholder')}
+                  className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 min-h-11 w-full rounded-md border px-3 py-2 text-sm outline-none focus-visible:ring-[3px]"
+                />
+                <p className="text-muted-foreground text-xs">{t('import.stagingBatchHint')}</p>
+              </div>
+            ) : null}
+
+            {treatment === 'staged_pending' ? (
+              <label className="border-warning/30 bg-warning/5 flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={acknowledgePending}
+                  onChange={(event) => handlePendingAcknowledgement(event.currentTarget.checked)}
+                  className="size-4 shrink-0"
+                />
+                <span>{t('import.pendingAcknowledgement')}</span>
+              </label>
+            ) : null}
+
+            <div className="space-y-2">
               <label htmlFor="statement-import-file" className="text-sm font-medium">
                 {t('import.selectFile')}
               </label>
@@ -485,7 +654,9 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
                       <span className="text-destructive text-xs">{parseError}</span>
                     ) : (
                       <span className="text-muted-foreground text-xs">
-                        {t('import.previewCount', { count: parsedTransactions.length })}
+                        {t('import.previewCount', {
+                          count: parsedTransactions.length,
+                        })}
                       </span>
                     )}
                   </>
@@ -513,13 +684,40 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
             <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
               <div className="space-y-1">
                 <span className="text-muted-foreground text-sm">
-                  {t('import.previewCount', { count: parsedTransactions.length })}
+                  {t('import.previewCount', {
+                    count: parsedTransactions.length,
+                  })}
                 </span>
                 <p className="text-muted-foreground text-xs">
                   {t('import.plannedImported', { count: plannedImported })}
                   {' · '}
                   {t('import.plannedSkipped', { count: plannedSkipped })}
                 </p>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  <Badge variant="secondary">
+                    {t(
+                      `import.treatments.${resolvedTreatment === 'staged_posted' ? 'stagedPosted' : resolvedTreatment === 'staged_pending' ? 'stagedPending' : 'posted'}`
+                    )}
+                  </Badge>
+                  <Badge variant="secondary">
+                    {t('import.plannedStaged', { count: plannedStaged })}
+                  </Badge>
+                  <Badge variant="secondary">
+                    {t('import.plannedPending', { count: plannedPending })}
+                  </Badge>
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  {t('import.balanceImpact', {
+                    amount: formatMoney(balanceImpactCentavos, previewCurrency ?? accountCurrency),
+                  })}
+                </p>
+                {resolvedStagingBatchId ? (
+                  <p className="text-muted-foreground font-mono text-[11px] break-all">
+                    {t('import.resolvedBatch', {
+                      batch: resolvedStagingBatchId,
+                    })}
+                  </p>
+                ) : null}
               </div>
               <div className="text-muted-foreground flex flex-col items-start gap-0.5 text-xs sm:items-end">
                 {selectedFile ? <span>{selectedFile.name}</span> : null}
@@ -569,7 +767,9 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
                               {t('import.incoming')}
                             </p>
                             <p className="text-muted-foreground text-xs">
-                              {t('import.rowIndex', { number: details.incoming.rowIndex + 1 })}
+                              {t('import.rowIndex', {
+                                number: details.incoming.rowIndex + 1,
+                              })}
                             </p>
                             <p className="truncate text-sm font-medium">
                               {details.incoming.description}

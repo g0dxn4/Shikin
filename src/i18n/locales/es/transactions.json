@@ -220,6 +220,21 @@
     "button": "Importar Estado",
     "title": "Importar Estado de Cuenta",
     "description": "Importa transacciones desde archivos de estado de cuenta OFX, QFX o QIF.",
+    "treatment": "Tratamiento de importación",
+    "treatments": {
+      "posted": "Registrar en el saldo de la cuenta",
+      "stagedPosted": "Preparar historial registrado",
+      "stagedPending": "Preparar retenciones pendientes"
+    },
+    "treatmentDescriptions": {
+      "posted": "Predeterminado. Importa transacciones registradas y actualiza el saldo de la cuenta.",
+      "staged_posted": "Importa historial registrado sin cambiar el saldo. Finalízalo después desde el historial de la cuenta.",
+      "staged_pending": "Importa solo retenciones pendientes identificadas deliberadamente, sin cambiar el saldo. Liquídalas de forma explícita después."
+    },
+    "stagingBatch": "Identificador del lote de preparación (opcional)",
+    "stagingBatchPlaceholder": "Se genera consistentemente a partir del archivo si se deja vacío",
+    "stagingBatchHint": "Todas las filas nuevas del archivo comparten un lote. Reutilizar una identidad nunca cambia la etiqueta de una fila existente.",
+    "pendingAcknowledgement": "Confirmo que cada fila de este archivo es una retención pendiente. No se debe inferir el estado por la descripción.",
     "selectFile": "Seleccionar Archivo",
     "selectAccount": "Importar a Cuenta",
     "selectAccountPlaceholder": "Selecciona una cuenta",
@@ -249,6 +264,10 @@
     "reviewDecisions": "Revisar decisiones",
     "plannedImported": "{{count}} se importarán",
     "plannedSkipped": "{{count}} se omitirán",
+    "plannedStaged": "{{count}} en preparación",
+    "plannedPending": "{{count}} pendientes",
+    "balanceImpact": "Impacto en el saldo de la cuenta: {{amount}}",
+    "resolvedBatch": "Lote: {{batch}}",
     "legacyLimitations": "Limitaciones de la fuente",
     "incoming": "Entrante",
     "existing": "Existente en el libro",

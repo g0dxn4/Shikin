@@ -12,6 +12,19 @@ import {
 import { useAccountStore } from '@/stores/account-store'
 import { useTransactionStore } from '@/stores/transaction-store'
 
+export type StatementImportTreatment = 'posted' | 'staged_posted' | 'staged_pending'
+
+export interface StatementImportTreatmentOptions {
+  treatment?: StatementImportTreatment
+  stagingBatchId?: string
+  acknowledgePending?: boolean
+}
+
+export interface StatementImportApplyOptions extends StatementImportTreatmentOptions {
+  previewToken?: string
+  decisions?: readonly ImportReviewDecision[]
+}
+
 export interface ImportResult {
   imported: number
   skipped: number
@@ -51,6 +64,20 @@ export interface StatementImportPreview {
   reviewCandidates: StatementImportReviewCandidate[]
   limitations: string[]
   legacyEvidenceLimitations: string[]
+  treatment: StatementImportTreatment
+  stagingBatchId: string | null
+  stagedCount: number
+  pendingCount: number
+  balanceImpactCentavos: number
+  accountCurrency: string | null
+}
+
+type NormalizedStatementImportTreatment = {
+  treatment: StatementImportTreatment
+  status: 'posted' | 'pending'
+  ledgerTreatment: 'normal' | 'staged_no_balance_impact'
+  stagingBatchId: string | null
+  pendingAcknowledged: boolean
 }
 
 type AccountRow = {
@@ -90,6 +117,7 @@ type PlannedStatementRow = {
 type StatementPlan = {
   accountCurrency: string
   accountBalance: number
+  importTreatment: NormalizedStatementImportTreatment
   databaseId: string
   revision: number
   rows: PlannedStatementRow[]
@@ -193,13 +221,66 @@ function hasDistinctSameSourceExternalIdentity(
   )
 }
 
+function normalizeImportTreatment(
+  options: StatementImportTreatmentOptions,
+  input: {
+    content: string
+    fileName: string
+    accountId: string
+    sourceNamespace: string
+  }
+): NormalizedStatementImportTreatment {
+  const treatment = options.treatment ?? 'posted'
+  if (!['posted', 'staged_posted', 'staged_pending'].includes(treatment)) {
+    throw new Error(`Unsupported statement import treatment "${String(treatment)}"`)
+  }
+  if (treatment === 'posted') {
+    if (options.stagingBatchId?.trim()) {
+      throw new Error('A staging batch identifier is only valid for a staged import')
+    }
+    return {
+      treatment,
+      status: 'posted',
+      ledgerTreatment: 'normal',
+      stagingBatchId: null,
+      pendingAcknowledged: false,
+    }
+  }
+  if (treatment === 'staged_pending' && options.acknowledgePending !== true) {
+    throw new Error('Pending holds require an explicit operator acknowledgement')
+  }
+  const explicitBatchId = options.stagingBatchId?.trim()
+  if (explicitBatchId && explicitBatchId.length > 200) {
+    throw new Error('Staging batch identifier must be 200 characters or fewer')
+  }
+  const stagingBatchId =
+    explicitBatchId ||
+    `statement-import-${sha256Fingerprint(
+      JSON.stringify({
+        version: 1,
+        accountId: input.accountId,
+        sourceNamespace: input.sourceNamespace,
+        fileName: input.fileName,
+        rawFileDigest: sha256Fingerprint(input.content),
+      })
+    ).slice(7, 31)}`
+  return {
+    treatment,
+    status: treatment === 'staged_pending' ? 'pending' : 'posted',
+    ledgerTreatment: 'staged_no_balance_impact',
+    stagingBatchId,
+    pendingAcknowledged: treatment === 'staged_pending',
+  }
+}
+
 async function createPlan(
   tx: TransactionClient,
   content: string,
   fileName: string,
   accountId: string,
   parsed: ParsedTransaction[],
-  suppliedDecisions: readonly ImportReviewDecision[]
+  suppliedDecisions: readonly ImportReviewDecision[],
+  options: StatementImportTreatmentOptions
 ): Promise<StatementPlan> {
   for (const transaction of parsed) assertSupportedType(transaction)
   const account = await validateAccount(tx, accountId)
@@ -231,8 +312,16 @@ async function createPlan(
     throw new Error('Statement import requires a ready app_data_state singleton')
   }
   const sourceNamespace = statementSourceNamespace(fileName)
+  const importTreatment = normalizeImportTreatment(options, {
+    content,
+    fileName,
+    accountId,
+    sourceNamespace,
+  })
   const prepared = parsed.map((transaction) => ({
-    transaction: transaction as ParsedTransaction & { type: 'income' | 'expense' },
+    transaction: transaction as ParsedTransaction & {
+      type: 'income' | 'expense'
+    },
     amountCentavos: toCentavos(transaction.amount),
   }))
   for (const row of prepared) {
@@ -279,7 +368,11 @@ async function createPlan(
           `Row ${index + 1} conflicts with an earlier row using the same source identity`
         )
       }
-      rows.push({ ...previous, transaction: preparedRow.transaction, action: 'skip' })
+      rows.push({
+        ...previous,
+        transaction: preparedRow.transaction,
+        action: 'skip',
+      })
       continue
     }
     const externalId = preparedRow.transaction.externalId ?? null
@@ -455,10 +548,12 @@ async function createPlan(
     requiredDecisions,
     reviewCandidates,
     sourceLimitations,
+    importTreatment,
   })
   return {
     accountCurrency,
     accountBalance: account.balance,
+    importTreatment,
     databaseId: state.database_id,
     revision: state.data_revision,
     rows,
@@ -481,15 +576,15 @@ function assertSafeCentavos(value: bigint, label: string): void {
 
 function plannedBalanceDelta(plan: StatementPlan): number {
   let aggregate = 0n
-  let resultingBalance = BigInt(plan.accountBalance)
   for (const row of plan.rows) {
     if (row.action !== 'create' && row.action !== 'distinct') continue
     const effect = BigInt(row.amountCentavos) * (row.transaction.type === 'income' ? 1n : -1n)
     aggregate += effect
-    resultingBalance += effect
     assertSafeCentavos(aggregate, 'Statement import balance delta')
-    assertSafeCentavos(resultingBalance, 'Statement import resulting balance')
   }
+  if (plan.importTreatment.ledgerTreatment === 'staged_no_balance_impact') return 0
+  const resultingBalance = BigInt(plan.accountBalance) + aggregate
+  assertSafeCentavos(resultingBalance, 'Statement import resulting balance')
   return Number(aggregate)
 }
 
@@ -534,19 +629,23 @@ async function parseFile(file: File): Promise<{ content: string; parsed: ParsedT
 export async function previewStatementFile(
   file: File,
   accountId: string,
-  decisions: readonly ImportReviewDecision[] = []
+  decisions: readonly ImportReviewDecision[] = [],
+  options: StatementImportTreatmentOptions = {}
 ): Promise<StatementImportPreview> {
   try {
     const { content, parsed } = await parseFile(file)
     const plan = await withTransaction((tx) =>
-      createPlan(tx, content, file.name, accountId, parsed, decisions)
+      createPlan(tx, content, file.name, accountId, parsed, decisions, options)
     )
+    const balanceImpactCentavos = plannedBalanceDelta(plan)
+    const imported = plan.rows.filter(
+      (row) => row.action === 'create' || row.action === 'distinct'
+    ).length
     return {
       success: plan.requiredDecisions.length === 0,
       parsedTransactions: parsed,
       previewToken: plan.token,
-      imported: plan.rows.filter((row) => row.action === 'create' || row.action === 'distinct')
-        .length,
+      imported,
       skipped: plan.rows.filter((row) => row.action === 'skip' || row.action === 'keep_existing')
         .length,
       errors: [],
@@ -554,6 +653,13 @@ export async function previewStatementFile(
       reviewCandidates: plan.reviewCandidates,
       limitations: [...plan.sourceLimitations, ...plan.legacyEvidenceLimitations],
       legacyEvidenceLimitations: plan.legacyEvidenceLimitations,
+      treatment: plan.importTreatment.treatment,
+      stagingBatchId: plan.importTreatment.stagingBatchId,
+      stagedCount:
+        plan.importTreatment.ledgerTreatment === 'staged_no_balance_impact' ? imported : 0,
+      pendingCount: plan.importTreatment.status === 'pending' ? imported : 0,
+      balanceImpactCentavos,
+      accountCurrency: plan.accountCurrency,
     }
   } catch (error) {
     return {
@@ -567,6 +673,12 @@ export async function previewStatementFile(
       reviewCandidates: [],
       limitations: [],
       legacyEvidenceLimitations: [],
+      treatment: options.treatment ?? 'posted',
+      stagingBatchId: null,
+      stagedCount: 0,
+      pendingCount: 0,
+      balanceImpactCentavos: 0,
+      accountCurrency: null,
     }
   }
 }
@@ -574,7 +686,7 @@ export async function previewStatementFile(
 export async function importStatementFile(
   file: File,
   accountId: string,
-  options: { previewToken?: string; decisions?: readonly ImportReviewDecision[] } = {}
+  options: StatementImportApplyOptions = {}
 ): Promise<ImportResult> {
   try {
     const { content, parsed } = await parseFile(file)
@@ -585,7 +697,8 @@ export async function importStatementFile(
         file.name,
         accountId,
         parsed,
-        options.decisions ?? []
+        options.decisions ?? [],
+        options
       )
       if (options.previewToken && options.previewToken !== plan.token) {
         throw new Error(
@@ -610,14 +723,16 @@ export async function importStatementFile(
           const transactionId = generateId()
           const rowDelta =
             row.transaction.type === 'income' ? row.amountCentavos : -row.amountCentavos
+          const rowBalanceDelta = plan.importTreatment.ledgerTreatment === 'normal' ? rowDelta : 0
           const previousBalance = runningBalance
-          runningBalance += rowDelta
+          runningBalance += rowBalanceDelta
           await tx.execute(
             `INSERT INTO transactions (
                id, account_id, category_id, type, amount, currency, description, notes, date,
+               status, ledger_treatment, staging_batch_id,
                import_source, import_external_id, import_fingerprint, import_content_fingerprint,
                created_at, updated_at
-             ) VALUES (?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+             ) VALUES (?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               transactionId,
               accountId,
@@ -626,6 +741,9 @@ export async function importStatementFile(
               plan.accountCurrency,
               row.transaction.description,
               row.transaction.date,
+              plan.importTreatment.status,
+              plan.importTreatment.ledgerTreatment,
+              plan.importTreatment.stagingBatchId,
               sourceNamespace,
               row.transaction.externalId ?? null,
               row.importFingerprint,
@@ -650,9 +768,10 @@ export async function importStatementFile(
                 description: row.transaction.description,
                 notes: null,
                 date: row.transaction.date,
-                status: 'posted',
+                status: plan.importTreatment.status,
                 source: null,
-                ledgerTreatment: 'normal',
+                ledgerTreatment: plan.importTreatment.ledgerTreatment,
+                stagingBatchId: plan.importTreatment.stagingBatchId,
                 reportingTreatment: 'normal',
                 transactionKind: 'standard',
                 importSource: sourceNamespace,
@@ -664,7 +783,7 @@ export async function importStatementFile(
                 accountId,
                 previousBalanceCentavos: previousBalance,
                 newBalanceCentavos: runningBalance,
-                deltaCentavos: rowDelta,
+                deltaCentavos: rowBalanceDelta,
               },
             },
             source: 'statement-import',
@@ -743,7 +862,7 @@ export async function importStatementFile(
           })
         }
       }
-      if (imported) {
+      if (imported && plan.importTreatment.ledgerTreatment === 'normal') {
         const update = await tx.execute(
           "UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ? AND is_archived = 0 AND COALESCE(account_mode, 'transactional') = 'transactional'",
           [balanceDelta, now, accountId]

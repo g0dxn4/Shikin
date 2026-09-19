@@ -220,6 +220,21 @@
     "button": "Import Statement",
     "title": "Import Bank Statement",
     "description": "Import transactions from OFX, QFX, or QIF bank statement files.",
+    "treatment": "Import treatment",
+    "treatments": {
+      "posted": "Post to account balance",
+      "stagedPosted": "Stage posted statement history",
+      "stagedPending": "Stage pending holds"
+    },
+    "treatmentDescriptions": {
+      "posted": "Default. Import posted transactions and update the account balance.",
+      "staged_posted": "Import posted statement history without changing the account balance. Finalize it later from account history.",
+      "staged_pending": "Import only deliberately identified pending holds without changing the account balance. Settle them explicitly later."
+    },
+    "stagingBatch": "Staging batch identifier (optional)",
+    "stagingBatchPlaceholder": "Generated consistently from this file when blank",
+    "stagingBatchHint": "All new rows in this file share one batch. Reusing an identity never relabels an existing row.",
+    "pendingAcknowledgement": "I confirm every row in this file is a pending hold. Do not infer pending status from descriptions.",
     "selectFile": "Select File",
     "selectAccount": "Import to Account",
     "selectAccountPlaceholder": "Select an account",
@@ -249,6 +264,10 @@
     "reviewDecisions": "Review decisions",
     "plannedImported": "{{count}} will be imported",
     "plannedSkipped": "{{count}} will be skipped",
+    "plannedStaged": "{{count}} staged",
+    "plannedPending": "{{count}} pending",
+    "balanceImpact": "Account balance impact: {{amount}}",
+    "resolvedBatch": "Batch: {{batch}}",
     "legacyLimitations": "Source limitations",
     "incoming": "Incoming",
     "existing": "Existing in ledger",

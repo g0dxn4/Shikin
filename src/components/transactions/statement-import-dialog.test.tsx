@@ -151,7 +151,9 @@ vi.mock('@/components/ui/scroll-area', () => ({
 
 function createStatementFile(name: string, content = 'statement') {
   const file = new File([content], name, { type: 'application/xml' })
-  Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(content) })
+  Object.defineProperty(file, 'text', {
+    value: vi.fn().mockResolvedValue(content),
+  })
   return file
 }
 
@@ -242,6 +244,12 @@ function previewResult(overrides: Record<string, unknown> = {}) {
     reviewCandidates: [],
     limitations: [],
     legacyEvidenceLimitations: [],
+    treatment: 'posted',
+    stagingBatchId: null,
+    stagedCount: 0,
+    pendingCount: 0,
+    balanceImpactCentavos: -1250,
+    accountCurrency: 'USD',
     ...overrides,
   }
 }
@@ -276,6 +284,133 @@ describe('StatementImportDialog', () => {
     mockFormatMoney.mockClear()
   })
 
+  it('previews and applies staged posted history with a file-wide batch and zero balance impact', async () => {
+    const parsed = parsedTx({ description: 'Historical row' })
+    mockParseStatement.mockReturnValue([parsed])
+    mockPreviewStatementFile.mockResolvedValue(
+      previewResult({
+        parsedTransactions: [parsed],
+        treatment: 'staged_posted',
+        stagingBatchId: 'history-2026-07',
+        stagedCount: 1,
+        pendingCount: 0,
+        balanceImpactCentavos: 0,
+      })
+    )
+    mockImportStatementFile.mockResolvedValue({
+      imported: 1,
+      skipped: 0,
+      errors: [],
+    })
+    const file = createStatementFile('history.ofx')
+    const { input, user } = await renderDialog()
+
+    await chooseAccount(user)
+    await user.click(screen.getByRole('button', { name: 'import.treatments.stagedPosted' }))
+    await user.type(screen.getByRole('textbox', { name: 'import.stagingBatch' }), 'history-2026-07')
+    await chooseFile(input, file)
+    await user.click(await screen.findByRole('button', { name: 'import.preview' }))
+
+    await waitFor(() =>
+      expect(mockPreviewStatementFile).toHaveBeenCalledWith(file, 'account-1', [], {
+        treatment: 'staged_posted',
+        stagingBatchId: 'history-2026-07',
+        acknowledgePending: false,
+      })
+    )
+    expect(screen.getByText('import.plannedStaged count=1')).toBeVisible()
+    expect(screen.getByText('import.plannedPending count=0')).toBeVisible()
+    expect(screen.getByText('import.balanceImpact amount=FORMATTED:USD:0')).toBeVisible()
+    expect(screen.getByText('import.resolvedBatch batch=history-2026-07')).toBeVisible()
+
+    await user.click(screen.getByRole('button', { name: 'import.confirm' }))
+    await waitFor(() =>
+      expect(mockImportStatementFile).toHaveBeenCalledWith(file, 'account-1', {
+        previewToken: 'preview-token',
+        decisions: [],
+        treatment: 'staged_posted',
+        stagingBatchId: 'history-2026-07',
+        acknowledgePending: false,
+      })
+    )
+    expect(mockInvalidate).toHaveBeenCalledWith('import')
+  })
+
+  it('requires a deliberate pending acknowledgement and keeps service errors visible', async () => {
+    mockParseStatement.mockReturnValue([parsedTx({ description: 'Pending hold' })])
+    mockPreviewStatementFile.mockResolvedValue(
+      previewResult({
+        success: false,
+        previewToken: null,
+        parsedTransactions: [],
+        errors: ['Pending staging was rejected'],
+        treatment: 'staged_pending',
+        stagingBatchId: null,
+        balanceImpactCentavos: 0,
+      })
+    )
+    const file = createStatementFile('holds.qfx')
+    const { input, user } = await renderDialog()
+
+    await chooseAccount(user)
+    await user.click(screen.getByRole('button', { name: 'import.treatments.stagedPending' }))
+    await chooseFile(input, file)
+    expect(screen.getByRole('button', { name: 'import.preview' })).toBeDisabled()
+    expect(mockPreviewStatementFile).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('checkbox'))
+    const previewButton = screen.getByRole('button', { name: 'import.preview' })
+    expect(previewButton).toBeEnabled()
+    await user.click(previewButton)
+
+    await waitFor(() =>
+      expect(mockPreviewStatementFile).toHaveBeenCalledWith(file, 'account-1', [], {
+        treatment: 'staged_pending',
+        stagingBatchId: undefined,
+        acknowledgePending: true,
+      })
+    )
+    expect(await screen.findByRole('alert')).toHaveTextContent('Pending staging was rejected')
+    expect(screen.getByText('holds.qfx')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'import.confirm' })).not.toBeInTheDocument()
+  })
+
+  it('does not revive an in-flight staged preview after the batch changes', async () => {
+    mockParseStatement.mockReturnValue([parsedTx({ description: 'Batch-bound row' })])
+    let resolvePreview: (value: unknown) => void
+    mockPreviewStatementFile.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvePreview = resolve
+        })
+    )
+    const file = createStatementFile('batch.ofx')
+    const { input, user } = await renderDialog()
+
+    await chooseAccount(user)
+    await user.click(screen.getByRole('button', { name: 'import.treatments.stagedPosted' }))
+    const batch = screen.getByRole('textbox', { name: 'import.stagingBatch' })
+    await user.type(batch, 'first-batch')
+    await chooseFile(input, file)
+    await user.click(screen.getByRole('button', { name: 'import.preview' }))
+    await user.clear(batch)
+    await user.type(batch, 'second-batch')
+
+    resolvePreview!(
+      previewResult({
+        treatment: 'staged_posted',
+        stagingBatchId: 'first-batch',
+        stagedCount: 1,
+        balanceImpactCentavos: 0,
+      })
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'import.confirm' })).not.toBeInTheDocument()
+    )
+    expect(screen.getByRole('button', { name: 'import.preview' })).toBeEnabled()
+    expect(screen.queryByText('import.resolvedBatch batch=first-batch')).not.toBeInTheDocument()
+  })
+
   it('keeps file, account, and preview context after a resolved import failure', async () => {
     const parsed = parsedTx()
     mockParseStatement.mockReturnValue([parsed])
@@ -291,7 +426,9 @@ describe('StatementImportDialog', () => {
     await chooseAccount(user)
     await chooseFile(input, file)
 
-    const previewButton = await screen.findByRole('button', { name: 'import.preview' })
+    const previewButton = await screen.findByRole('button', {
+      name: 'import.preview',
+    })
     await waitFor(() => expect(previewButton).toBeEnabled())
     await user.click(previewButton)
     await user.click(await screen.findByRole('button', { name: 'import.confirm' }))
@@ -317,7 +454,11 @@ describe('StatementImportDialog', () => {
     const parsed = parsedTx({ description: 'Imported' })
     mockParseStatement.mockReturnValue([parsed])
     mockPreviewStatementFile.mockResolvedValue(previewResult({ parsedTransactions: [parsed] }))
-    mockImportStatementFile.mockResolvedValue({ imported: 1, skipped: 0, errors: [] })
+    mockImportStatementFile.mockResolvedValue({
+      imported: 1,
+      skipped: 0,
+      errors: [],
+    })
     const file = createStatementFile('success.ofx')
     const { input, user } = await renderDialog()
 
@@ -361,7 +502,9 @@ describe('StatementImportDialog', () => {
 
   it('ignores a stale file parse after a newer file is selected', async () => {
     let resolveFirst: (value: string) => void
-    const firstFile = new File(['first'], 'first.ofx', { type: 'application/xml' })
+    const firstFile = new File(['first'], 'first.ofx', {
+      type: 'application/xml',
+    })
     Object.defineProperty(firstFile, 'text', {
       value: () =>
         new Promise<string>((resolve) => {
@@ -499,7 +642,11 @@ describe('StatementImportDialog', () => {
         skipped: 0,
       })
     )
-    mockImportStatementFile.mockResolvedValue({ imported: 1, skipped: 0, errors: [] })
+    mockImportStatementFile.mockResolvedValue({
+      imported: 1,
+      skipped: 0,
+      errors: [],
+    })
     const file = createStatementFile('review.ofx')
     const { input, user } = await renderDialog()
     await chooseAccount(user)
@@ -679,7 +826,11 @@ describe('StatementImportDialog', () => {
           skipped: 0,
         })
       )
-    mockImportStatementFile.mockResolvedValue({ imported: 1, skipped: 0, errors: [] })
+    mockImportStatementFile.mockResolvedValue({
+      imported: 1,
+      skipped: 0,
+      errors: [],
+    })
     const file = createStatementFile('stale-decisions.ofx')
     const { input, user } = await renderDialog()
 

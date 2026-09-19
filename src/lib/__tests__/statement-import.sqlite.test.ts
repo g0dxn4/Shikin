@@ -1,11 +1,11 @@
-// @vitest-environment jsdom
-import { readFileSync } from 'node:fs'
+// @vitest-environment node
 import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type BetterSqlite3 from 'better-sqlite3'
 import type { TransactionClient } from '@/lib/database'
 import type { ParsedTransaction } from '@/lib/statement-parser'
+import { runHostedTestMigrations } from '../../../cli/src/backend-foundation-test-schema'
 
 const { databaseState, mockParseStatement } = vi.hoisted(() => ({
   databaseState: { current: null as unknown },
@@ -20,7 +20,10 @@ vi.mock('@/lib/database', () => ({
         db.prepare(sql).all(...bindValues) as Row[],
       execute: async (sql: string, bindValues: unknown[] = []) => {
         const result = db.prepare(sql).run(...bindValues)
-        return { rowsAffected: result.changes, lastInsertId: Number(result.lastInsertRowid) }
+        return {
+          rowsAffected: result.changes,
+          lastInsertId: Number(result.lastInsertRowid),
+        }
       },
     }
 
@@ -49,6 +52,12 @@ vi.mock('@/stores/transaction-store', () => ({
 }))
 
 import { importStatementFile, previewStatementFile } from '../statement-import'
+import {
+  finalizeAccountStatementHistory,
+  previewAccountStatementFinalization,
+  setAccountSourceCoverage,
+  settleAccountStagedTransactions,
+} from '../account-reconciliation-service'
 
 const actualStatementParser = await vi.importActual<{
   parseStatement: (content: string, filename: string) => ParsedTransaction[]
@@ -58,71 +67,41 @@ const requireFromCli = createRequire(resolve(process.cwd(), 'cli/package.json'))
 const Database = requireFromCli('better-sqlite3') as typeof BetterSqlite3
 let db: BetterSqlite3.Database
 
-const CURRENT_MIGRATIONS = [
-  '001_core_tables.sql',
-  '003_credit_cards.sql',
-  '011_net_worth_snapshots.sql',
-  '015_primary_account.sql',
-  '017_investment_type_cetes.sql',
-  '018_placeholder_transactions.sql',
-  '019_financial_semantics.sql',
-] as const
-
 function createCurrentImportSchema(database: BetterSqlite3.Database): void {
   database.pragma('foreign_keys = ON')
-  for (const migration of CURRENT_MIGRATIONS) {
-    database.exec(readFileSync(resolve(process.cwd(), 'src-tauri/migrations', migration), 'utf8'))
-  }
-  database.exec(`
-    ALTER TABLE transactions ADD COLUMN import_source TEXT;
-    ALTER TABLE transactions ADD COLUMN import_external_id TEXT;
-    ALTER TABLE transactions ADD COLUMN import_fingerprint TEXT;
-    ALTER TABLE transactions ADD COLUMN import_content_fingerprint TEXT;
-    CREATE TABLE app_data_state (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      database_id TEXT NOT NULL UNIQUE,
-      data_revision INTEGER NOT NULL DEFAULT 0,
-      last_financial_write_at TEXT
-    );
-    INSERT INTO app_data_state (id, database_id, data_revision) VALUES (1, 'statement-test', 0);
-    CREATE TABLE duplicate_review_decisions (
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL,
-      existing_transaction_id TEXT NOT NULL,
-      candidate_identity_key TEXT NOT NULL,
-      candidate_content_fingerprint TEXT NOT NULL,
-      existing_evidence_fingerprint TEXT NOT NULL,
-      decision TEXT NOT NULL,
-      source TEXT,
-      note TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE audit_log (
-      id TEXT PRIMARY KEY,
-      entity TEXT NOT NULL,
-      entity_id TEXT,
-      action TEXT NOT NULL,
-      before_json TEXT,
-      after_json TEXT,
-      source TEXT,
-      note TEXT,
-      created_at TEXT NOT NULL
-    );
-    CREATE TRIGGER revise_statement_transaction AFTER INSERT ON transactions
-    BEGIN UPDATE app_data_state SET data_revision = data_revision + 1 WHERE id = 1; END;
-    CREATE TRIGGER revise_statement_decision AFTER INSERT ON duplicate_review_decisions
-    BEGIN UPDATE app_data_state SET data_revision = data_revision + 1 WHERE id = 1; END;
-  `)
+  runHostedTestMigrations(database)
   database
     .prepare(
       `INSERT INTO accounts (id, name, type, currency, balance, is_archived, account_mode)
        VALUES (?, ?, ?, ?, ?, 0, 'transactional')`
     )
     .run('account-1', 'Checking', 'checking', 'USD', 10_000)
+  database.prepare('UPDATE app_data_state SET data_revision = 0 WHERE id = 1').run()
 }
 
 function statementFile(name = 'statement.ofx', content = 'parsed by test mock'): File {
   return new File([content], name, { type: 'application/xml' })
+}
+
+function tableRows(table: string): Record<string, unknown>[] {
+  return db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all() as Record<string, unknown>[]
+}
+
+function databaseSnapshot(): Record<string, Record<string, unknown>[]> {
+  const tables = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+    )
+    .all() as Array<{ name: string }>
+  return Object.fromEntries(tables.map(({ name }) => [name, tableRows(name)]))
+}
+
+function financeSnapshot() {
+  return {
+    accounts: tableRows('accounts'),
+    accountBalanceHistory: tableRows('account_balance_history'),
+    netWorthSnapshots: tableRows('net_worth_snapshots'),
+  }
 }
 
 function insertExistingTransaction({
@@ -164,7 +143,344 @@ afterEach(() => {
   db.close()
 })
 
-describe('importStatementFile real SQLite rollback', () => {
+describe('importStatementFile real schema 021 SQLite rollback and staging', () => {
+  it('keeps posted plus normal as the backwards-compatible default', async () => {
+    mockParseStatement.mockReturnValue([
+      {
+        date: '2026-07-13',
+        amount: 12.25,
+        description: 'Default expense',
+        type: 'expense',
+      },
+    ])
+    const statement = statementFile()
+    const preview = await previewStatementFile(statement, 'account-1')
+
+    expect(preview).toMatchObject({
+      success: true,
+      treatment: 'posted',
+      stagingBatchId: null,
+      stagedCount: 0,
+      pendingCount: 0,
+      balanceImpactCentavos: -1225,
+      accountCurrency: 'USD',
+    })
+    expect(await importStatementFile(statement, 'account-1')).toMatchObject({
+      imported: 1,
+      skipped: 0,
+      errors: [],
+    })
+    expect(
+      db
+        .prepare('SELECT status, ledger_treatment, staging_batch_id FROM transactions LIMIT 1')
+        .get()
+    ).toEqual({
+      status: 'posted',
+      ledger_treatment: 'normal',
+      staging_batch_id: null,
+    })
+    expect(db.prepare("SELECT balance FROM accounts WHERE id='account-1'").get()).toEqual({
+      balance: 8_775,
+    })
+  })
+
+  it('stages posted history under one deterministic batch without any finance table changes', async () => {
+    mockParseStatement.mockReturnValue([
+      {
+        date: '2025-01-10',
+        amount: 10,
+        description: 'History expense',
+        type: 'expense',
+      },
+      {
+        date: '2025-01-11',
+        amount: 25,
+        description: 'History income',
+        type: 'income',
+      },
+    ])
+    const statement = statementFile('history.ofx', 'stable history bytes')
+    const before = financeSnapshot()
+    const firstPreview = await previewStatementFile(statement, 'account-1', [], {
+      treatment: 'staged_posted',
+    })
+    const secondPreview = await previewStatementFile(statement, 'account-1', [], {
+      treatment: 'staged_posted',
+    })
+
+    expect(firstPreview).toMatchObject({
+      success: true,
+      treatment: 'staged_posted',
+      stagedCount: 2,
+      pendingCount: 0,
+      balanceImpactCentavos: 0,
+    })
+    expect(firstPreview.stagingBatchId).toMatch(/^statement-import-/)
+    expect(secondPreview.stagingBatchId).toBe(firstPreview.stagingBatchId)
+    expect(secondPreview.previewToken).toBe(firstPreview.previewToken)
+
+    const result = await importStatementFile(statement, 'account-1', {
+      previewToken: firstPreview.previewToken!,
+      treatment: 'staged_posted',
+    })
+    expect(result).toMatchObject({ imported: 2, skipped: 0, errors: [] })
+    expect(financeSnapshot()).toEqual(before)
+    expect(
+      db
+        .prepare(
+          `SELECT status, ledger_treatment, staging_batch_id, import_source,
+                  import_fingerprint, import_content_fingerprint
+             FROM transactions ORDER BY date`
+        )
+        .all()
+    ).toEqual([
+      {
+        status: 'posted',
+        ledger_treatment: 'staged_no_balance_impact',
+        staging_batch_id: firstPreview.stagingBatchId,
+        import_source: 'statement:ofx',
+        import_fingerprint: expect.any(String),
+        import_content_fingerprint: expect.stringMatching(/^sha256:/),
+      },
+      {
+        status: 'posted',
+        ledger_treatment: 'staged_no_balance_impact',
+        staging_batch_id: firstPreview.stagingBatchId,
+        import_source: 'statement:ofx',
+        import_fingerprint: expect.any(String),
+        import_content_fingerprint: expect.stringMatching(/^sha256:/),
+      },
+    ])
+    const audits = db
+      .prepare("SELECT after_json FROM audit_log WHERE entity='transaction' ORDER BY rowid")
+      .all() as Array<{ after_json: string }>
+    expect(audits).toHaveLength(2)
+    expect(audits.map(({ after_json }) => JSON.parse(after_json))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          transaction: expect.objectContaining({
+            status: 'posted',
+            ledgerTreatment: 'staged_no_balance_impact',
+            stagingBatchId: firstPreview.stagingBatchId,
+          }),
+          balance: expect.objectContaining({ deltaCentavos: 0 }),
+        }),
+      ])
+    )
+    expect(
+      (
+        db.prepare('SELECT data_revision FROM app_data_state WHERE id=1').get() as {
+          data_revision: number
+        }
+      ).data_revision
+    ).toBeGreaterThan(0)
+  })
+
+  it('requires deliberate acknowledgement before staging pending holds', async () => {
+    mockParseStatement.mockReturnValue([
+      {
+        date: '2025-01-10',
+        amount: 10,
+        description: 'Not interpreted',
+        type: 'expense',
+      },
+    ])
+    const statement = statementFile('holds.qfx')
+    const rejected = await previewStatementFile(statement, 'account-1', [], {
+      treatment: 'staged_pending',
+      stagingBatchId: 'holds-jan',
+    })
+    expect(rejected.errors[0]).toMatch(/explicit operator acknowledgement/i)
+    expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 0 })
+
+    const preview = await previewStatementFile(statement, 'account-1', [], {
+      treatment: 'staged_pending',
+      stagingBatchId: ' holds-jan ',
+      acknowledgePending: true,
+    })
+    expect(preview).toMatchObject({
+      success: true,
+      treatment: 'staged_pending',
+      stagingBatchId: 'holds-jan',
+      stagedCount: 1,
+      pendingCount: 1,
+      balanceImpactCentavos: 0,
+    })
+    expect(
+      await importStatementFile(statement, 'account-1', {
+        previewToken: preview.previewToken!,
+        treatment: 'staged_pending',
+        stagingBatchId: 'holds-jan',
+        acknowledgePending: true,
+      })
+    ).toMatchObject({ imported: 1, errors: [] })
+    expect(
+      db.prepare('SELECT status, ledger_treatment, staging_batch_id FROM transactions').get()
+    ).toEqual({
+      status: 'pending',
+      ledger_treatment: 'staged_no_balance_impact',
+      staging_batch_id: 'holds-jan',
+    })
+  })
+
+  it('binds status, ledger treatment, and batch to the reviewed token', async () => {
+    mockParseStatement.mockReturnValue([
+      {
+        date: '2025-01-10',
+        amount: 10,
+        description: 'Bound treatment',
+        type: 'expense',
+      },
+    ])
+    const statement = statementFile()
+    const preview = await previewStatementFile(statement, 'account-1', [], {
+      treatment: 'staged_posted',
+      stagingBatchId: 'batch-a',
+    })
+
+    for (const changed of [
+      { treatment: 'posted' as const },
+      { treatment: 'staged_posted' as const, stagingBatchId: 'batch-b' },
+      {
+        treatment: 'staged_pending' as const,
+        stagingBatchId: 'batch-a',
+        acknowledgePending: true,
+      },
+    ]) {
+      const result = await importStatementFile(statement, 'account-1', {
+        previewToken: preview.previewToken!,
+        ...changed,
+      })
+      expect(result.errors[0]).toMatch(/stale|does not match/i)
+    }
+    expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 0 })
+  })
+
+  it('does not relabel or financially rewrite an existing identity under changed options', async () => {
+    mockParseStatement.mockReturnValue([
+      {
+        date: '2025-01-10',
+        amount: 10,
+        description: 'Stable identity',
+        type: 'expense',
+        externalId: 'same-row',
+      },
+    ])
+    const statement = statementFile()
+    expect(await importStatementFile(statement, 'account-1')).toMatchObject({
+      imported: 1,
+    })
+    const before = {
+      row: db.prepare('SELECT * FROM transactions').get(),
+      finance: financeSnapshot(),
+    }
+
+    expect(
+      await importStatementFile(statement, 'account-1', {
+        treatment: 'staged_pending',
+        stagingBatchId: 'attempted-conversion',
+        acknowledgePending: true,
+      })
+    ).toMatchObject({ imported: 0, skipped: 1, errors: [] })
+    expect(db.prepare('SELECT * FROM transactions').get()).toEqual(before.row)
+    expect(financeSnapshot()).toEqual(before.finance)
+  })
+
+  it('feeds imported staged rows through explicit settlement and finalization', async () => {
+    db.prepare("UPDATE accounts SET balance=0 WHERE id='account-1'").run()
+    mockParseStatement.mockReturnValueOnce([
+      {
+        date: '2025-01-10',
+        amount: 10,
+        description: 'Posted history',
+        type: 'expense',
+        externalId: 'posted-history',
+      },
+    ])
+    expect(
+      await importStatementFile(statementFile('posted.ofx'), 'account-1', {
+        treatment: 'staged_posted',
+        stagingBatchId: 'jan-history',
+      })
+    ).toMatchObject({ imported: 1, errors: [] })
+    mockParseStatement.mockReturnValueOnce([
+      {
+        date: '2025-01-11',
+        amount: 5,
+        description: 'Pending hold',
+        type: 'expense',
+        externalId: 'pending-hold',
+      },
+    ])
+    expect(
+      await importStatementFile(statementFile('pending.qfx'), 'account-1', {
+        treatment: 'staged_pending',
+        stagingBatchId: 'jan-holds',
+        acknowledgePending: true,
+      })
+    ).toMatchObject({ imported: 1, errors: [] })
+    const imported = db
+      .prepare('SELECT id, status FROM transactions ORDER BY date')
+      .all() as Array<{ id: string; status: string }>
+    expect(imported.map((row) => row.status)).toEqual(['posted', 'pending'])
+
+    await settleAccountStagedTransactions({
+      accountId: 'account-1',
+      transactionIds: [imported[1].id],
+      status: 'cleared',
+      source: 'statement-import-test',
+    })
+    const coverageIds: string[] = []
+    for (const sourceNamespace of ['statement:ofx', 'statement:qfx']) {
+      coverageIds.push(
+        (
+          await setAccountSourceCoverage({
+            accountId: 'account-1',
+            sourceNamespace,
+            periodStart: '2025-01-01',
+            periodEnd: '2025-01-31',
+            status: 'verified',
+            documentRef: 'synthetic January statement',
+          })
+        ).coverage.id
+      )
+    }
+    const input = {
+      accountId: 'account-1',
+      transactionIds: imported.map((row) => row.id),
+      coverageIds,
+      statementStartDate: '2025-01-01',
+      statementEndDate: '2025-01-31',
+      actualBalanceCentavos: -1500,
+    }
+    const preview = await previewAccountStatementFinalization(input)
+    const finalized = await finalizeAccountStatementHistory({
+      ...input,
+      previewToken: preview.previewToken,
+    })
+
+    expect(finalized.adjustmentTransactionId).toBeNull()
+    expect(
+      db
+        .prepare('SELECT status, ledger_treatment, finalization_id FROM transactions ORDER BY date')
+        .all()
+    ).toEqual([
+      {
+        status: 'posted',
+        ledger_treatment: 'normal',
+        finalization_id: finalized.reconciliationId,
+      },
+      {
+        status: 'cleared',
+        ledger_treatment: 'normal',
+        finalization_id: finalized.reconciliationId,
+      },
+    ])
+    expect(db.prepare("SELECT balance FROM accounts WHERE id='account-1'").get()).toEqual({
+      balance: -1500,
+    })
+  })
+
   it('rolls back an earlier insert when a later insert fails', async () => {
     db.exec(`
       CREATE TRIGGER fail_later_statement_insert
@@ -175,8 +491,18 @@ describe('importStatementFile real SQLite rollback', () => {
       END;
     `)
     mockParseStatement.mockReturnValue([
-      { date: '2026-07-13', amount: 10, description: 'Earlier row', type: 'expense' },
-      { date: '2026-07-14', amount: 20, description: 'Failing row', type: 'expense' },
+      {
+        date: '2026-07-13',
+        amount: 10,
+        description: 'Earlier row',
+        type: 'expense',
+      },
+      {
+        date: '2026-07-14',
+        amount: 20,
+        description: 'Failing row',
+        type: 'expense',
+      },
     ])
 
     const result = await importStatementFile(statementFile(), 'account-1')
@@ -195,8 +521,18 @@ describe('importStatementFile real SQLite rollback', () => {
 
   it('imports legitimate repeated statement rows using their occurrence fingerprints', async () => {
     mockParseStatement.mockReturnValue([
-      { date: '2026-07-13', amount: 10, description: 'Coffee', type: 'expense' },
-      { date: '2026-07-13', amount: 10, description: 'Coffee', type: 'expense' },
+      {
+        date: '2026-07-13',
+        amount: 10,
+        description: 'Coffee',
+        type: 'expense',
+      },
+      {
+        date: '2026-07-13',
+        amount: 10,
+        description: 'Coffee',
+        type: 'expense',
+      },
     ])
 
     const result = await importStatementFile(statementFile(), 'account-1')
@@ -243,7 +579,11 @@ describe('importStatementFile real SQLite rollback', () => {
       previewToken: preview.previewToken!,
     })
 
-    expect(result).toMatchObject({ imported: 0, skipped: 0, mode: 'reviewed_atomic' })
+    expect(result).toMatchObject({
+      imported: 0,
+      skipped: 0,
+      mode: 'reviewed_atomic',
+    })
     expect(result.errors[0]).toContain('stale')
     expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 0 })
     expect(db.prepare('SELECT balance FROM accounts WHERE id = ?').get('account-1')).toEqual({
@@ -301,7 +641,12 @@ describe('importStatementFile real SQLite rollback', () => {
       END;
     `)
     mockParseStatement.mockReturnValue([
-      { date: '2026-07-13', amount: 10, description: 'Expense', type: 'expense' },
+      {
+        date: '2026-07-13',
+        amount: 10,
+        description: 'Expense',
+        type: 'expense',
+      },
       { date: '2026-07-14', amount: 25, description: 'Income', type: 'income' },
     ])
 
@@ -321,7 +666,12 @@ describe('importStatementFile real SQLite rollback', () => {
 
   it('applies a mixed multi-row balance exactly once', async () => {
     mockParseStatement.mockReturnValue([
-      { date: '2026-07-13', amount: 12.25, description: 'Groceries', type: 'expense' },
+      {
+        date: '2026-07-13',
+        amount: 12.25,
+        description: 'Groceries',
+        type: 'expense',
+      },
       { date: '2026-07-14', amount: 30, description: 'Refund', type: 'income' },
     ])
 
@@ -401,7 +751,11 @@ describe('importStatementFile real SQLite rollback', () => {
 
     const preview = await previewStatementFile(statementFile(), 'account-1')
 
-    expect(preview).toMatchObject({ success: true, imported: 1, requiredDecisions: [] })
+    expect(preview).toMatchObject({
+      success: true,
+      imported: 1,
+      requiredDecisions: [],
+    })
     expect(preview.reviewCandidates).toEqual([])
   })
 
@@ -619,7 +973,12 @@ describe('importStatementFile real SQLite rollback', () => {
   it('rejects snapshot-only accounts before any write', async () => {
     db.prepare("UPDATE accounts SET account_mode='snapshot_only' WHERE id='account-1'").run()
     mockParseStatement.mockReturnValue([
-      { date: '2026-07-13', amount: 10, description: 'Blocked', type: 'expense' },
+      {
+        date: '2026-07-13',
+        amount: 10,
+        description: 'Blocked',
+        type: 'expense',
+      },
     ])
 
     const result = await importStatementFile(statementFile(), 'account-1')
@@ -637,7 +996,12 @@ describe('importStatementFile real SQLite rollback', () => {
       BEGIN UPDATE accounts SET is_archived=1 WHERE id=NEW.account_id; END;
     `)
     mockParseStatement.mockReturnValue([
-      { date: '2026-07-13', amount: 10, description: 'Archive account', type: 'income' },
+      {
+        date: '2026-07-13',
+        amount: 10,
+        description: 'Archive account',
+        type: 'income',
+      },
     ])
 
     const result = await importStatementFile(statementFile(), 'account-1')
@@ -677,15 +1041,46 @@ describe('importStatementFile real SQLite rollback', () => {
     expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 0 })
     expect(db.prepare('SELECT COUNT(*) AS count FROM audit_log').get()).toEqual({ count: 0 })
     expect(db.prepare('SELECT data_revision FROM app_data_state WHERE id=1').get()).toEqual({
-      data_revision: 0,
+      data_revision: 1,
     })
+  })
+
+  it('rejects an unsafe staged aggregate instead of using zero balance impact as a loophole', async () => {
+    mockParseStatement.mockReturnValue([
+      {
+        date: '2026-07-13',
+        amount: Number.MAX_SAFE_INTEGER / 100,
+        description: 'At limit',
+        type: 'income',
+      },
+      {
+        date: '2026-07-14',
+        amount: 0.01,
+        description: 'Overflow',
+        type: 'income',
+      },
+    ])
+
+    const result = await importStatementFile(statementFile(), 'account-1', {
+      treatment: 'staged_posted',
+    })
+
+    expect(result.errors[0]).toMatch(/safe integer range/i)
+    expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 0 })
+    expect(financeSnapshot().accounts[0]).toMatchObject({ balance: 10_000 })
+    expect(db.prepare('SELECT COUNT(*) AS count FROM audit_log').get()).toEqual({ count: 0 })
   })
 
   it('rejects a safe row that would overflow the current near-limit balance', async () => {
     const openingBalance = Number.MAX_SAFE_INTEGER - 5
     db.prepare("UPDATE accounts SET balance=? WHERE id='account-1'").run(openingBalance)
     mockParseStatement.mockReturnValue([
-      { date: '2026-07-13', amount: 0.1, description: 'Overflow', type: 'income' },
+      {
+        date: '2026-07-13',
+        amount: 0.1,
+        description: 'Overflow',
+        type: 'income',
+      },
     ])
 
     const result = await importStatementFile(statementFile(), 'account-1')
@@ -703,20 +1098,19 @@ describe('importStatementFile real SQLite rollback', () => {
       BEGIN SELECT RAISE(ABORT, 'statement audit failed'); END;
     `)
     mockParseStatement.mockReturnValue([
-      { date: '2026-07-13', amount: 10, description: 'Audited row', type: 'expense' },
+      {
+        date: '2026-07-13',
+        amount: 10,
+        description: 'Audited row',
+        type: 'expense',
+      },
     ])
+    const before = databaseSnapshot()
 
     const result = await importStatementFile(statementFile(), 'account-1')
 
     expect(result.errors[0]).toContain('statement audit failed')
-    expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 0 })
-    expect(db.prepare('SELECT COUNT(*) AS count FROM audit_log').get()).toEqual({ count: 0 })
-    expect(db.prepare('SELECT data_revision FROM app_data_state WHERE id=1').get()).toEqual({
-      data_revision: 0,
-    })
-    expect(db.prepare("SELECT balance FROM accounts WHERE id='account-1'").get()).toEqual({
-      balance: 10_000,
-    })
+    expect(databaseSnapshot()).toEqual(before)
   })
 
   it('rejects known source/account currency mismatch and discloses an absent source currency assumption', async () => {
@@ -732,7 +1126,11 @@ describe('importStatementFile real SQLite rollback', () => {
     db.prepare("UPDATE accounts SET currency='MXN' WHERE id='account-1'").run()
 
     const mismatch = await previewStatementFile(statementFile(), 'account-1')
-    expect(mismatch).toMatchObject({ success: false, reviewCandidates: [], limitations: [] })
+    expect(mismatch).toMatchObject({
+      success: false,
+      reviewCandidates: [],
+      limitations: [],
+    })
     expect(mismatch.errors[0]).toContain(
       'Statement currency USD does not match account currency MXN'
     )
@@ -743,12 +1141,17 @@ describe('importStatementFile real SQLite rollback', () => {
     expect(db.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({ count: 0 })
     expect(db.prepare('SELECT COUNT(*) AS count FROM audit_log').get()).toEqual({ count: 0 })
     expect(db.prepare('SELECT data_revision FROM app_data_state WHERE id=1').get()).toEqual({
-      data_revision: 0,
+      data_revision: 1,
     })
 
     db.prepare("UPDATE accounts SET currency='USD' WHERE id='account-1'").run()
     mockParseStatement.mockReturnValue([
-      { date: '2026-07-13', amount: 10, description: 'No currency', type: 'expense' },
+      {
+        date: '2026-07-13',
+        amount: 10,
+        description: 'No currency',
+        type: 'expense',
+      },
     ])
     const assumed = await previewStatementFile(statementFile(), 'account-1')
     expect(assumed.limitations).toContain(

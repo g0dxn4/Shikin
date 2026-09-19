@@ -488,21 +488,21 @@ describe('cashflow bucket maintenance', () => {
       })
     )) as AllocationResult
     const ledgerBefore = readLedger(db())
-    current.harness!.onTransactionStart = () => {
+    current.harness!.onBeforeTransaction = () => {
       db().prepare('UPDATE cashflow_buckets SET is_active = 0 WHERE id = ?').run(rent.id)
     }
-    await expect(
-      allocateIncome.execute(
-        allocateIncome.schema.parse({
-          bucketId: rent.id,
-          transactionId: 'tx-income',
-          amount: 10,
-        })
-      )
-    ).rejects.toThrow(/inactive or missing/)
+    const concurrentInactive = await allocateIncome.execute(
+      allocateIncome.schema.parse({
+        bucketId: rent.id,
+        transactionId: 'tx-income',
+        amount: 10,
+      })
+    )
+    expect(concurrentInactive).toMatchObject({ success: false, reason: 'bucket_inactive' })
     expect(readAllocations(db())).toHaveLength(1)
     expect(readLedger(db())).toEqual(ledgerBefore)
 
+    current.harness!.onBeforeTransaction = null
     current.harness!.onTransactionStart = () => {
       db().prepare('UPDATE cashflow_buckets SET is_active = 0 WHERE id = ?').run(rent.id)
     }
@@ -649,5 +649,119 @@ describe('cashflow bucket maintenance', () => {
       ['cashflow_bucket_allocation', 'allocate'],
       ['cashflow_bucket_allocation', 'reverse'],
     ])
+  })
+
+  it('reloads target balance inside allocate-income and rejects an unsafe concurrent sum without writes', async () => {
+    const rent = await createNamedBucket('Rent')
+    const ledgerBefore = readLedger(db())
+    const auditsBefore = readAudit(db())
+    current.harness!.onBeforeTransaction = () => {
+      db()
+        .prepare('UPDATE cashflow_buckets SET balance = ? WHERE id = ?')
+        .run(Number.MAX_SAFE_INTEGER, rent.id)
+    }
+
+    const overflow = await allocateIncome.execute(
+      allocateIncome.schema.parse({
+        bucketId: rent.id,
+        amount: 0.01,
+        accountId: 'acct-1',
+      })
+    )
+    expect(overflow).toMatchObject({ success: false, reason: 'unsafe_amount' })
+    expect(readAllocations(db())).toEqual([])
+    expect(readAudit(db())).toEqual(auditsBefore)
+    expect(readLedger(db())).toEqual(ledgerBefore)
+  })
+
+  it('uses the committed concurrent bucket balance in allocate-income result and audit', async () => {
+    const rent = await createNamedBucket('Rent')
+    current.harness!.onBeforeTransaction = () => {
+      db().prepare('UPDATE cashflow_buckets SET balance = ? WHERE id = ?').run(7777, rent.id)
+    }
+    const allocated = await allocateIncome.execute(
+      allocateIncome.schema.parse({
+        bucketId: rent.id,
+        amount: 10,
+        accountId: 'acct-1',
+      })
+    )
+    expect(allocated).toMatchObject({
+      success: true,
+      bucket: { balance: 87.77, balanceCentavos: 8777 },
+      sourceAccount: { id: 'acct-1', currency: 'USD', persisted: false },
+    })
+    const allocateAudit = readAudit(db()).find((row) => row.action === 'allocate')
+    expect(JSON.parse(allocateAudit?.after_json ?? '{}')).toMatchObject({
+      bucket: { balanceCentavos: 8777, balance: 87.77 },
+    })
+    expect(JSON.parse(allocateAudit?.before_json ?? '{}')).toMatchObject({
+      bucket: { balanceCentavos: 7777 },
+    })
+  })
+
+  it('applies a name-only update against current rows so omitted concurrent fields survive', async () => {
+    const bucket = await createNamedBucket('Rent', {
+      description: 'Housing',
+      targetAmount: 150,
+      sortOrder: 2,
+    })
+    current.harness!.onBeforeTransaction = () => {
+      db()
+        .prepare(
+          `UPDATE cashflow_buckets
+             SET description = ?, target_amount = ?, is_active = 0, balance = 321
+             WHERE id = ?`
+        )
+        .run('Concurrent', 4200, bucket.id)
+    }
+
+    const updated = await updateBucket.execute(
+      updateBucket.schema.parse({ bucketId: bucket.id, name: 'Housing' })
+    )
+    expect(updated).toMatchObject({
+      success: true,
+      action: 'updated',
+      bucket: {
+        id: bucket.id,
+        name: 'Housing',
+        description: 'Concurrent',
+        targetAmount: 42,
+        sortOrder: 2,
+        isActive: false,
+        balance: 3.21,
+        balanceCentavos: 321,
+      },
+    })
+    expect(readBuckets(db())).toEqual([
+      expect.objectContaining({
+        id: bucket.id,
+        name: 'Housing',
+        description: 'Concurrent',
+        target_amount: 4200,
+        sort_order: 2,
+        is_active: 0,
+        balance: 321,
+      }),
+    ])
+    const updateAudit = readAudit(db()).find((row) => row.action === 'update')
+    expect(JSON.parse(updateAudit?.before_json ?? '{}')).toMatchObject({
+      bucket: {
+        name: 'Rent',
+        description: 'Concurrent',
+        targetAmount: 42,
+        isActive: false,
+        balanceCentavos: 321,
+      },
+    })
+    expect(JSON.parse(updateAudit?.after_json ?? '{}')).toMatchObject({
+      bucket: {
+        name: 'Housing',
+        description: 'Concurrent',
+        targetAmount: 42,
+        isActive: false,
+        balanceCentavos: 321,
+      },
+    })
   })
 })

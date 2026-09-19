@@ -397,6 +397,95 @@ function applyBucketBalanceDelta(
   )
 }
 
+function revalidateTargetBucketForAllocation(
+  bucketId: string,
+  allocationCurrency: string,
+  amountCentavos: number
+) {
+  const current = loadBucketById(bucketId)
+  if (!current) {
+    return {
+      success: false as const,
+      reason: 'bucket_not_found',
+      message: `Cashflow bucket ${bucketId} not found.`,
+    }
+  }
+  if (current.is_active !== 1) return inactiveBucketFailure(current)
+  const currentCurrency = parseCurrencyCode(current.currency)
+  if (!currentCurrency) {
+    return malformedCurrencyFailure(
+      `Cashflow bucket "${current.name}" has malformed or ambiguous currency evidence.`
+    )
+  }
+  if (currentCurrency !== allocationCurrency) {
+    return bucketCurrencyFailure(allocationCurrency, currentCurrency)
+  }
+  const currentBalance = requireSafeInteger(
+    current.balance,
+    `Cashflow bucket "${current.name}" balance is not a safe integer.`
+  )
+  if (typeof currentBalance !== 'number') return currentBalance
+  const nextBalance = requireSafeSum(
+    currentBalance,
+    amountCentavos,
+    `Cashflow bucket "${current.name}" balance exceeds the safe integer range.`
+  )
+  if (typeof nextBalance !== 'number') return nextBalance
+  return {
+    success: true as const,
+    bucket: { ...current, balance: currentBalance },
+    nextBalance,
+  }
+}
+
+function revalidateReliedAccountCurrency(accountId: string, allocationCurrency: string) {
+  const currentAccount = resolveAccountId(accountId)
+  if (!currentAccount.success) return currentAccount
+  const accountCurrency = parseCurrencyCode(currentAccount.currency)
+  if (!accountCurrency) {
+    return malformedCurrencyFailure(
+      `Account ${currentAccount.id} has malformed or ambiguous currency evidence.`
+    )
+  }
+  if (accountCurrency !== allocationCurrency) {
+    return {
+      success: false as const,
+      reason: 'source_account_currency_changed',
+      message: `Source account ${currentAccount.id} currency is ${accountCurrency}, not ${allocationCurrency}.`,
+    }
+  }
+  return { success: true as const }
+}
+
+function applyBucketUpdatePatch(
+  current: CashflowBucketRow,
+  input: {
+    name?: string
+    description?: string
+    targetAmount?: number
+    sortOrder?: number
+    active?: boolean
+    clearSet: Set<BucketClearableField>
+  }
+) {
+  const next: CashflowBucketRow = { ...current }
+  if (input.name !== undefined) next.name = input.name
+  if (input.clearSet.has('description')) next.description = null
+  else if (input.description !== undefined) next.description = input.description
+  if (input.clearSet.has('targetAmount')) next.target_amount = null
+  else if (input.targetAmount !== undefined) {
+    const targetCentavos = requireSafeInteger(
+      toCentavos(input.targetAmount),
+      'Target amount must be a safe integer in centavos.'
+    )
+    if (typeof targetCentavos !== 'number') return targetCentavos
+    next.target_amount = targetCentavos
+  }
+  if (input.sortOrder !== undefined) next.sort_order = input.sortOrder
+  if (input.active !== undefined) next.is_active = input.active ? 1 : 0
+  return next
+}
+
 function insertLinkedAllocation(allocation: CashflowAllocationRow) {
   execute(
     `INSERT INTO cashflow_bucket_allocations (
@@ -748,7 +837,24 @@ const allocateIncome: ToolDefinition = {
       }
     }
 
+    const reliedOnAccountCurrency = Boolean(!currency && !transactionId && resolvedAccount?.success)
+
     const allocationResult = transaction(() => {
+      const currentTarget = revalidateTargetBucketForAllocation(
+        bucket.id,
+        allocation.currency,
+        amountCentavos
+      )
+      if (!currentTarget.success) return currentTarget
+
+      if (reliedOnAccountCurrency && resolvedAccount?.success) {
+        const currentAccount = revalidateReliedAccountCurrency(
+          resolvedAccount.id,
+          allocation.currency
+        )
+        if (!currentAccount.success) return currentAccount
+      }
+
       if (sourceTx?.success) {
         const currentSourceTx = getSourceIncomeTransaction(sourceTx.transaction.id)
         if (!currentSourceTx.success) return currentSourceTx
@@ -794,6 +900,10 @@ const allocateIncome: ToolDefinition = {
         }
       }
 
+      const afterBucket: CashflowBucketRow = {
+        ...currentTarget.bucket,
+        balance: currentTarget.nextBalance,
+      }
       execute(
         `INSERT INTO cashflow_bucket_allocations (id, bucket_id, transaction_id, amount, currency, allocation_date, source, note)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -808,20 +918,20 @@ const allocateIncome: ToolDefinition = {
           allocation.note,
         ]
       )
-      applyBucketBalanceDelta(bucket.id, allocation.amount, { requireActive: true })
+      applyBucketBalanceDelta(currentTarget.bucket.id, allocation.amount, { requireActive: true })
       writeAuditLog({
         entity: 'cashflow_bucket_allocation',
         entityId: allocation.id,
         action: 'allocate',
-        before: { bucket: bucketSnapshot(bucket) },
+        before: { bucket: bucketSnapshot(currentTarget.bucket) },
         after: {
-          bucket: bucketSnapshot(updatedBucket),
+          bucket: bucketSnapshot(afterBucket),
           allocation: allocationSnapshot(allocation),
         },
         source: allocation.source,
         note: allocation.note,
       })
-      return { success: true as const }
+      return { success: true as const, bucket: afterBucket }
     })
     if (!allocationResult.success) return allocationResult
 
@@ -830,9 +940,9 @@ const allocateIncome: ToolDefinition = {
       action: 'allocated' as const,
       matchedBy: resolvedBucket.matchedBy,
       allocation: allocationSnapshot(allocation),
-      bucket: bucketSnapshot(updatedBucket),
+      bucket: bucketSnapshot(allocationResult.bucket),
       sourceAccount: sourceAccountSnapshot(resolvedAccount),
-      message: `Allocated ${amount.toFixed(2)} ${allocationCurrency} to "${bucket.name}".`,
+      message: `Allocated ${amount.toFixed(2)} ${allocationCurrency} to "${allocationResult.bucket.name}".`,
     }
   },
 }
@@ -891,7 +1001,6 @@ const updateBucket: ToolDefinition = {
       }
     }
 
-    const nextName = name ?? resolvedBucket.bucket.name
     if (name !== undefined) {
       const duplicate = query<{ id: string }>(
         'SELECT id FROM cashflow_buckets WHERE LOWER(name) = LOWER($1) AND id <> $2 LIMIT 1',
@@ -900,31 +1009,9 @@ const updateBucket: ToolDefinition = {
       if (duplicate) return duplicateBucketNameFailure(name, duplicate.id)
     }
 
-    const nextDescription = clearSet.has('description')
-      ? null
-      : description !== undefined
-        ? description
-        : resolvedBucket.bucket.description
-    const nextTarget = clearSet.has('targetAmount')
-      ? null
-      : targetAmount !== undefined
-        ? toCentavos(targetAmount)
-        : resolvedBucket.bucket.target_amount
-    if (nextTarget !== null) {
-      const targetCentavos = requireSafeInteger(
-        nextTarget,
-        'Target amount must be a safe integer in centavos.'
-      )
-      if (typeof targetCentavos !== 'number') return targetCentavos
-    }
-    const updatedBucket: CashflowBucketRow = {
-      ...resolvedBucket.bucket,
-      name: nextName,
-      description: nextDescription,
-      target_amount: nextTarget,
-      sort_order: sortOrder ?? resolvedBucket.bucket.sort_order,
-      is_active: active === undefined ? resolvedBucket.bucket.is_active : active ? 1 : 0,
-    }
+    const patchInput = { name, description, targetAmount, sortOrder, active, clearSet }
+    const previewBucket = applyBucketUpdatePatch(resolvedBucket.bucket, patchInput)
+    if (!('id' in previewBucket)) return previewBucket
 
     if (dryRun) {
       return {
@@ -934,7 +1021,7 @@ const updateBucket: ToolDefinition = {
         matchedBy: resolvedBucket.matchedBy,
         wouldUpdate: {
           bucketBefore: bucketSnapshot(resolvedBucket.bucket),
-          bucketAfter: bucketSnapshot(updatedBucket),
+          bucketAfter: bucketSnapshot(previewBucket),
         },
         message: `Dry run: cashflow bucket "${resolvedBucket.bucket.name}" would be updated.`,
       }
@@ -949,6 +1036,8 @@ const updateBucket: ToolDefinition = {
           message: `Cashflow bucket ${resolvedBucket.bucket.id} not found.`,
         }
       }
+      const updated = applyBucketUpdatePatch(current, patchInput)
+      if (!('id' in updated)) return updated
       if (name !== undefined) {
         const duplicate = query<{ id: string }>(
           'SELECT id FROM cashflow_buckets WHERE LOWER(name) = LOWER($1) AND id <> $2 LIMIT 1',
@@ -963,11 +1052,11 @@ const updateBucket: ToolDefinition = {
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
          WHERE id = $6`,
         [
-          updatedBucket.name,
-          updatedBucket.description,
-          updatedBucket.target_amount,
-          updatedBucket.sort_order,
-          updatedBucket.is_active,
+          updated.name,
+          updated.description,
+          updated.target_amount,
+          updated.sort_order,
+          updated.is_active,
           current.id,
         ]
       )
@@ -977,9 +1066,9 @@ const updateBucket: ToolDefinition = {
         entityId: current.id,
         action: 'update',
         before: { bucket: bucketSnapshot(current) },
-        after: { bucket: bucketSnapshot({ ...current, ...updatedBucket, id: current.id }) },
+        after: { bucket: bucketSnapshot(updated) },
       })
-      return { success: true as const, current }
+      return { success: true as const, current, updated }
     })
     if (!updateResult.success) return updateResult
 
@@ -987,8 +1076,8 @@ const updateBucket: ToolDefinition = {
       success: true,
       action: 'updated' as const,
       matchedBy: resolvedBucket.matchedBy,
-      bucket: bucketSnapshot({ ...updateResult.current, ...updatedBucket }),
-      message: `Updated cashflow bucket "${updatedBucket.name}".`,
+      bucket: bucketSnapshot(updateResult.updated),
+      message: `Updated cashflow bucket "${updateResult.updated.name}".`,
     }
   },
 }

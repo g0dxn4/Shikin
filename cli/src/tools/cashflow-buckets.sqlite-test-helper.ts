@@ -24,6 +24,7 @@ export type CashflowTestBindings = {
 
 export type CashflowBucketsTestHarness = CashflowTestBindings & {
   db: Database.Database
+  onBeforeTransaction: (() => void) | null
   onTransactionStart: (() => void) | null
   failOnExecuteCall: number | null
   executeCalls: number
@@ -135,6 +136,7 @@ export function createCashflowBucketsTestHarness(): CashflowBucketsTestHarness {
   const db = createCashflowBucketsTestDatabase()
   const harness: CashflowBucketsTestHarness = {
     db,
+    onBeforeTransaction: null,
     onTransactionStart: null,
     failOnExecuteCall: null,
     executeCalls: 0,
@@ -150,6 +152,7 @@ export function createCashflowBucketsTestHarness(): CashflowBucketsTestHarness {
       return { rowsAffected: result.changes, lastInsertId: Number(result.lastInsertRowid) }
     },
     transaction<T>(fn: () => T) {
+      harness.onBeforeTransaction?.()
       return db
         .transaction(() => {
           harness.onTransactionStart?.()

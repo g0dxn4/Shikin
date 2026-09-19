@@ -23,16 +23,16 @@ The user has authorized completing the remaining actionable remediation across R
 - Declared recap effects and `save-spending-recap`: the foundation checkpoint exposes 92 shared tools / 97 CLI commands. Financial revision triggers exclude recap/audit writes.
 
 - Audited metadata/split corrections and explicit consumption classifications, with preserved match/unmatch provenance and protected financial membership. CORR-01–05 integration fixes cover unresolved placeholders, unsafe allocation amounts, the public split path, category direction and declared revision effects.
-- Dated reconciliation, independent coverage, deliberate pending settlement, exact-row finalization and token-bound bridge supersession. Native account maintenance now includes coverage/history, settlement, finalization and supersession dialogs; lifecycle and legacy-identity UI follow-up remains open below.
+- Dated reconciliation, independent coverage, deliberate pending settlement, exact-row finalization and token-bound bridge supersession. Native account maintenance includes coverage/history, explicit settlement, reviewed finalization/supersession and legacy identity binding, with local-calendar boundaries and guarded dialog lifecycles.
 - Ownership-aware exact-decimal valuation, signed card credit/debt, verified quote identity and explicit FX completeness across CLI/React. VAL-01–06 retain native subtotals without FX, normalize tiny numeric inputs, correct cross-currency ROI, suppress unknown gains, sort comparable values and preserve actual provider quote dates.
 - Reversible virtual bucket maintenance with shared CLI/native policy, Budgets maintenance/history dialogs and locked source/target revalidation. Virtual corrections do not mutate real accounts or transactions.
 - Atomic imports, separate identity/content fingerprints, candidate-specific decisions, actionable reviewed React previews, exhaustive keyset traversal and additive/redacted evidence export. Cross-source external IDs no longer bypass ambiguity review.
-- Payment evidence linking/unlinking, canonical capacity and baseline accounting across shared policy, CLI and native services/dialogs. Native reviewed-token/date/payment-parity follow-up remains open below.
+- Payment evidence linking/unlinking, canonical capacity and baseline accounting across shared policy, CLI and native services/dialogs. Native reviews bind lineage, operation, normalized inputs and evidence; strict calendar dates, signed card credit/overdraft parity and postcommit lifecycle handling are integrated.
 - Read-only CLI/hosted/native runtime diagnostics and Settings data-identity panel; instance identity is initialized only by explicit startup, outside database backups.
 - Native consumption classification, unclassified transaction review and Reports gross/net basis with independent classification and coverage completeness.
 - Registered automation discovery: **108 shared tools / 113 CLI commands**, catalog `2026-09-19.backend-remediation`; application remains `1.0.10`.
 
-**Not complete:** the named native safety/navigation follow-up, remaining nullable-maintenance assessment, isolated browser acceptance and the final integrated financial review. Optional bucket hierarchy remains outside the correctness scope. The historical 92/97 foundation inventory is not the current domain inventory.
+**Still pending:** final-review finding DB-FINAL-01 and hosted-browser locking investigation LOCK-01, followed by their bounded validation/review closure. Named native safety/navigation and nullable-maintenance work is integrated; current full-suite, packaged automation and isolated browser evidence is recorded below. Optional bucket hierarchy, new category automation and a new subscription-management GUI remain outside this remediation scope. The historical 92/97 foundation inventory is not the current domain inventory.
 
 ## Completed first slice: explicit-isolation fail-closed
 
@@ -147,18 +147,38 @@ The catalog delivery additionally ran 261 contract/CLI/MCP tests and the package
 
 The existing synthetic preview required a backend-only schema upgrade because the new frontend queried 021 columns/tables against its old 020 server. The deleting development supervisor was detached, the backend shut down gracefully, and Vite stayed running. Private backups and before/after hashes verified that every existing column value in **26 tables, including 566 transactions**, was preserved. The current preview uses schema 021 and its authenticated runtime-diagnostics endpoint succeeds. This was not a real-user-data or production migration.
 
-### Remaining named integration work
+### Named integration closure
 
-| Finding          | State | Required closure                                                                                                                        |
-| ---------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| ACC-01–03        | Fixed | Original stored-balance provenance and truthful preview/applied compatibility responses; integrated tests/types pass.                   |
-| ACC-04–06        | Open  | Native local-calendar boundary, stale dialog results and honest postcommit refresh failure/invalidation.                                |
-| IMP-IDENTITY-UI  | Open  | Explicit reviewed legacy identity binding for native staged-history workflows without fabricating original content.                     |
-| PAY-01           | Fixed | Report-excluded ordinary repayment evidence remains eligible; known classifications still constrain capacity.                           |
-| PAY-02–05        | Open  | Strict calendar dates, lineage/input-bound native previews, signed-credit/overdraft parity and postcommit lifecycle behavior.           |
-| ACCT-UI01–03     | Open  | Mount statement controls, make portfolio-account maintenance reachable without changing liquidity totals, and honor account deep links. |
-| CONS-UI01–02     | Open  | Historical net-report periods, truthful loading/error recovery and usable remediation navigation.                                       |
-| IMP-14 remainder | Open  | Bounded assessment of remaining nullable nonfinancial maintenance; do not loosen immutable provenance.                                  |
-| FINAL-GATE       | Open  | Integrated validation, isolated browser acceptance and Sol high-or-higher financial/storage/provenance review.                          |
+| Finding          | State | Required closure                                                                                                                     |
+| ---------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| ACC-01–03        | Fixed | Original stored-balance provenance and truthful preview/applied compatibility responses; integrated tests/types pass.                |
+| ACC-04–06        | Fixed | Local dates, context guards, saved-but-refresh-failed messaging and immediate postcommit invalidation before store refresh.          |
+| IMP-IDENTITY-UI  | Fixed | Reviewed native binding in staged history and Transaction details; exact opaque IDs and unknown original content preserved.          |
+| PAY-01           | Fixed | Report-excluded ordinary repayment evidence remains eligible; known classifications still constrain capacity.                        |
+| PAY-02–05        | Fixed | Strict dates, lineage/input/evidence-bound tokens, signed-credit/overdraft parity and committed-refresh lifecycle handling.          |
+| ACCT-UI01–03     | Fixed | Statement controls, separate portfolio-account maintenance and exact account deep links; background refresh keeps dialogs mounted.   |
+| CONS-UI01–02     | Fixed | Historical net periods with strict dates, latest-only loading/error/retry behavior and contextual review links.                      |
+| IMP-14 remainder | Fixed | Goal/recurring/subscription set-clear-omit semantics, hidden recurring subcategory preservation and native investment-note clearing. |
+| FINAL-GATE       | Open  | Sol high review found DB-FINAL-01; its fix and LOCK-01 acceptance investigation must close before approval.                          |
 
-This ledger is a work queue, not a claim that all listed defects have been fixed or that every historical incident applies to the current build.
+Additional integration findings: **IMP-STAGING-UI fixed** by explicit native posted/staged/pending import choices, pending acknowledgement, stable batch IDs and option-bound tokens. **IMP-STAGE-01 fixed** by retaining per-prefix safe-integer balance checks for normal imports while staged rows remain neutral. **IMP-NULL-01 fixed** by synchronous, patch-only goal updates that do not rewrite omitted financial fields.
+
+## Integrated acceptance checkpoint — 2026-09-19
+
+At `1b859fe`, parent validation passed:
+
+- **166 Vitest files / 1,824 tests**, using `--maxWorkers=2 --testTimeout=15000`. Earlier five-second defaults produced subprocess-startup timeouts in rollback/diagnostics tests; their isolated reruns and the complete bounded run passed. No repository timeout was relaxed.
+- Root, CLI and finance-core TypeScript; repository ESLint and source formatting; production Vite build. Existing chunk-size warnings remain nonblocking.
+- **27 Rust library tests**, with `cargo test --locked --offline --lib`, including storage policy, native transactions, snapshot/WAL and local identity. This is Linux source validation, not installed cross-platform execution.
+- Packaged **108-tool CLI/MCP** parity and representative import, correction, coverage, payment, runtime-read, recap and hosted-web workflows. A stale smoke expectation omitted the payment-link reader's correct `writesTo: []`; the expectation was corrected, not the declared effects. The successful local smoke used offline cached package assembly, disabled lifecycle scripts explicitly and copied the existing ABI-tested SQLite binding. No dependency manifest/lockfile changed. An earlier packaging attempt reused cached packages but ran the native addon's installer in its disposable bundle; no application installation is claimed.
+- Fresh isolated hosted-browser acceptance: native staged OFX import without balance impact; exact legacy identity binding preserving unknown content and original provenance; deliberate pending settlement and dated finalization retaining later activity; reviewed bridge supersession preserving current and later anchors; real card payment plus statement-only baseline and unlink; native classification with known-currency subtotals and independent coverage incompleteness; bucket allocation, atomic correction and reversal with immutable signed history and no real-account changes.
+- Mobile portfolio deep links reveal/focus the correct separately managed account without horizontal overflow. Settings exposes schema/version and separate opaque lineage/local-instance identities without paths. Background-refresh dialog survival was checked in the browser after its fix.
+
+All browser mutations used a fresh synthetic root, not the populated preview or real finances. The preserved preview remains available and still contains **566 transactions**, with SQLite quick-check passing. No live market-provider request, installed-app launch, push, release or production migration was performed. macOS/Windows installed execution remains untested. Final review approval must be recorded before claiming full remediation closure.
+
+### Final-gate findings
+
+| ID          | State         | Evidence / required closure                                                                                                                                                                                                                                                                                      |
+| ----------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DB-FINAL-01 | Open (high)   | Sol high review found that generic account mode/currency guards omit durable reconciliation/coverage references. Block mode changes with reconciliation observations and currency changes with either evidence table in CLI/native adapters; verify zero-balance, no-transaction cases.                          |
+| LOCK-01     | Investigating | Separate WebKit acceptance twice exposed a truthful `database is locked` report error after history-to-Reports navigation and a valid net-period change. Root cause is not yet established; a focused synthetic investigation is running. No corruption is established and no WebKit acceptance pass is claimed. |

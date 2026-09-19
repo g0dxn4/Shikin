@@ -251,6 +251,7 @@ node cli/dist/mcp-server.js
 - Cashflow buckets are virtual envelopes, not bank accounts. Corrections append linked negative reversals and replacements while preserving original allocations; they do not change transaction or account balances.
 - Card statements maintain `paid = unattributed baseline + active links`. `apply_to_unpaid` adds new paid evidence; `attribute_existing` converts existing baseline into a link. Unlinking voids evidence without deleting the source transaction or changing account balances.
 - `get-runtime-diagnostics` opens an initialized database read-only and returns opaque lineage/local-instance status without filesystem paths or identity-sidecar initialization.
+- Optional metadata updates distinguish omission (preserve) from explicit clearing. Where offered, use actual JSON `null` through MCP or the documented CLI `--clear-*` flag; a value plus its clear flag is rejected. The literal CLI string `"null"` is not a database-null token.
 - Before upgrading automation contracts, back up the database and upgrade the desktop app, CLI bridge, and MCP server together. Roll back with that backup and the matching prior binaries. Older binaries cannot promise guards for schemas or workflows introduced later.
 
 ### Private hosted web access with Tailscale
@@ -301,7 +302,7 @@ curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-
 - Export a local backup from **Settings > Data**. Exports use SQLite's online backup API, so WAL-backed databases are copied consistently.
 - Import a previously exported backup from the same section. Shikin validates it first and creates a rollback snapshot before applying it.
 - CLI/MCP restore previews by default; applying a restore requires `apply:true` (legacy explicit `dryRun:false` remains supported with a warning).
-- Import bank statements (OFX/QFX/QIF) from **Transactions > Import Statement**. Bank-provided IDs are persisted for reliable duplicate detection.
+- Import OFX/QFX/QIF files from **Transactions > Import Statement**. The default posts rows to the account; alternatively stage posted history or explicitly acknowledged pending holds without changing balances. Review the native-currency impact, batch and duplicate decisions before importing. Use **Accounts > Maintain history** for coverage, deliberate settlement, exact-row finalization or reviewed bridge supersession. Verified legacy IDs can be bound there or in Transaction details without inventing original source content.
 - Backups are portable SQLite snapshot files (`.db`).
 
 ---

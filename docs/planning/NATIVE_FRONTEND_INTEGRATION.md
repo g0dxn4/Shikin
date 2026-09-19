@@ -2,6 +2,8 @@
 
 Status: complete — all 19 screens integrated, review findings resolved, and final validation passed. Local commits only; nothing installed, released, or pushed.
 
+This records the earlier native-design milestone. Subsequent financial/storage changes and their separate validation/review gates are tracked in [Backend remediation](./BACKEND_REMEDIATION.md).
+
 ## Outcome and completion bar
 
 Integrate the approved `designs/shikin-native-concept/prototype.html` direction into the existing React/Tauri/browser application. Preserve all 19 routes and real workflows. The prototype supplies appearance, information architecture, and interaction references **only**: none of its fixtures, balances, scenario math, mock settings, or read-only limitations belong in production.
@@ -33,31 +35,31 @@ No new SQL `ALTER`, `DROP`, data `DELETE`, reset, seed-on-startup, or schema-ver
 
 ## Context map
 
-| Area | Files | Planned change / dependencies |
-| --- | --- | --- |
-| Shell / navigation | `src/components/layout/{app-shell,sidebar,bottom-nav,tauri-title-bar}.tsx`, new shared navigation model | Six groups and all route tabs; compact header; persistent collapse; mobile More; preserve skip link, scroll/focus, Tauri chrome, and globally mounted dialogs |
-| Appearance | `src/lib/theme.ts`, `src/main.tsx`, `src/components/ThemeSettings.tsx`, `src/stores/ui-store.ts`, `src/lib/constants.ts` | Native palettes/fonts/chart tokens, simple appearance control, collapse persistence; preserve stored custom-theme payloads |
-| Global / primitive styling | `src/styles/globals.css`, `src/components/ui/*`, shared confirmation/pagination wrappers | Semantic surfaces, readable light/dark controls, modest radii, restrained motion; remove decorative glass/grid/glow dependence |
-| App presentation | `src/App.tsx` | Theme-aware notifications/overlays only; routes and startup behavior unchanged |
-| Overview / insights | Dashboard, insights, reports, net-worth, spending-insights, spending-heatmap pages; dashboard presentation components | Real-data charts and layouts in approved direction; retain analytical algorithms and accessible tables |
-| Activity | Transactions and category-management pages; transaction presentation/forms; new read-only query module/hook | Explicit paginated ledger, filters and details; preserve timeline/review, imports, split rules, and mutation handlers |
-| Accounts | Accounts, investments, receivables pages and domain presentation/forms | Native account/portfolio/owed-money views with real actions and data |
-| Planning | Budgets, goals, bills, bill-calendar, debt-payoff, forecast pages and budget/goal presentation/forms | Native progress/calendar/scenario views, retaining all real domain services and controls |
-| Settings | Settings and extensions pages | Native preferences/capabilities presentation; all actual configuration/data-management actions retained |
-| Translation | Existing EN/ES page namespaces plus common shell namespace | Translate new labels without replacing existing vocabulary or losing namespaces |
-| Tests | Existing page/component/store/theme tests; navigation/responsive/layout/transactions E2E; preservation regression | Update presentation assertions while retaining business/protection assertions |
-| Design instructions | `DESIGN.md`, design section of `CLAUDE.md` | Establish approved HTML/native production system as source of truth; retire conflicting forced-dark/glass guidance |
+| Area                       | Files                                                                                                                    | Planned change / dependencies                                                                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Shell / navigation         | `src/components/layout/{app-shell,sidebar,bottom-nav,tauri-title-bar}.tsx`, new shared navigation model                  | Six groups and all route tabs; compact header; persistent collapse; mobile More; preserve skip link, scroll/focus, Tauri chrome, and globally mounted dialogs |
+| Appearance                 | `src/lib/theme.ts`, `src/main.tsx`, `src/components/ThemeSettings.tsx`, `src/stores/ui-store.ts`, `src/lib/constants.ts` | Native palettes/fonts/chart tokens, simple appearance control, collapse persistence; preserve stored custom-theme payloads                                    |
+| Global / primitive styling | `src/styles/globals.css`, `src/components/ui/*`, shared confirmation/pagination wrappers                                 | Semantic surfaces, readable light/dark controls, modest radii, restrained motion; remove decorative glass/grid/glow dependence                                |
+| App presentation           | `src/App.tsx`                                                                                                            | Theme-aware notifications/overlays only; routes and startup behavior unchanged                                                                                |
+| Overview / insights        | Dashboard, insights, reports, net-worth, spending-insights, spending-heatmap pages; dashboard presentation components    | Real-data charts and layouts in approved direction; retain analytical algorithms and accessible tables                                                        |
+| Activity                   | Transactions and category-management pages; transaction presentation/forms; new read-only query module/hook              | Explicit paginated ledger, filters and details; preserve timeline/review, imports, split rules, and mutation handlers                                         |
+| Accounts                   | Accounts, investments, receivables pages and domain presentation/forms                                                   | Native account/portfolio/owed-money views with real actions and data                                                                                          |
+| Planning                   | Budgets, goals, bills, bill-calendar, debt-payoff, forecast pages and budget/goal presentation/forms                     | Native progress/calendar/scenario views, retaining all real domain services and controls                                                                      |
+| Settings                   | Settings and extensions pages                                                                                            | Native preferences/capabilities presentation; all actual configuration/data-management actions retained                                                       |
+| Translation                | Existing EN/ES page namespaces plus common shell namespace                                                               | Translate new labels without replacing existing vocabulary or losing namespaces                                                                               |
+| Tests                      | Existing page/component/store/theme tests; navigation/responsive/layout/transactions E2E; preservation regression        | Update presentation assertions while retaining business/protection assertions                                                                                 |
+| Design instructions        | `DESIGN.md`, design section of `CLAUDE.md`                                                                               | Establish approved HTML/native production system as source of truth; retire conflicting forced-dark/glass guidance                                            |
 
 ## Route coverage and group ownership
 
-| Group | Existing routes |
-| --- | --- |
-| Overview | `/` |
-| Transactions | `/transactions`, `/categories` |
-| Accounts | `/accounts`, `/investments`, `/receivables` |
-| Planning | `/budgets`, `/goals`, `/bills`, `/bill-calendar`, `/debt-payoff`, `/forecast` |
-| Insights | `/insights`, `/reports`, `/net-worth`, `/spending-insights`, `/spending-heatmap` |
-| Settings | `/settings`, `/extensions` |
+| Group        | Existing routes                                                                  |
+| ------------ | -------------------------------------------------------------------------------- |
+| Overview     | `/`                                                                              |
+| Transactions | `/transactions`, `/categories`                                                   |
+| Accounts     | `/accounts`, `/investments`, `/receivables`                                      |
+| Planning     | `/budgets`, `/goals`, `/bills`, `/bill-calendar`, `/debt-payoff`, `/forecast`    |
+| Insights     | `/insights`, `/reports`, `/net-worth`, `/spending-insights`, `/spending-heatmap` |
+| Settings     | `/settings`, `/extensions`                                                       |
 
 These are navigation groups, not deletion or merging of domain functionality. Recurring rules remain in Bills / transaction actions; subscriptions already surface within Forecast. Do not invent additional routes or add an assistant.
 

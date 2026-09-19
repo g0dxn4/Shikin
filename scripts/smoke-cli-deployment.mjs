@@ -283,7 +283,7 @@ function assertAutomationCatalog(cliCatalog, mcpTools) {
         'app_data_state',
       ],
     },
-    'list-card-statement-payment-links': { readOnly: true },
+    'list-card-statement-payment-links': { readOnly: true, writesTo: [] },
   }
   for (const [name, effects] of Object.entries(expectedEffects)) {
     if (JSON.stringify(cliByName.get(name)?.effects) !== JSON.stringify(effects)) {

@@ -196,3 +196,21 @@ At `0620681`, including the mobile history-width fix `e2887bc`:
 - The existing preview backend was refreshed without restarting Vite or reseeding. Backups and logical hashes verified **all 35 application tables unchanged**, including **566 transactions**; schema 21 diagnostics and SQLite quick-check passed.
 
 This closes the requested source remediation, not an installed-platform release certification. macOS/Windows installed execution remains unperformed; browser acceptance is targeted rather than exhaustive. No real finances were repaired, no live provider request was made, and no application installation, push, release or production migration was performed.
+
+## Language accessibility and code-quality follow-up
+
+Integrated fixes: `b3d9ffb`, with scoped HMR listener cleanup in `1c2234c`.
+
+| Finding    | State                     | Fix and closure evidence                                                                                                                                                                                                                                                                                |
+| ---------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| QA-LANG-01 | Fixed / verified / closed | Document language now follows i18next's resolved language at startup and on subsequent changes. Real-i18next regressions failed against the old code, then passed. Browser tests verify English/Spanish switching, navigation, persisted reloads, regional Spanish and unsupported-language fallback.   |
+| QA-LANG-02 | Fixed / verified / closed | Settings now displays the resolved language rather than an unmatched regional code. A cached `es-MX` preference was reproduced with Spanish UI but English HTML/selector before the fix; afterward the heading, HTML and selector all resolve to Spanish while the cached preference remains unchanged. |
+
+Closure checks at `1c2234c`:
+
+- **1,844 tests / 168 files passed**, including five new real-i18next regressions; the focused i18n/Settings selection passed 33 tests.
+- **28 browser tests passed:** seven language scenarios across Chromium and WebKit, each at desktop and mobile widths, using an isolated synthetic hosted database. The original `es-MX` reproduction was also manually rechecked through agent-browser.
+- Repository TypeScript (root, CLI and finance-core), ESLint, source formatting and production frontend build passed. The existing large-chunk build warning remains a nonblocking performance follow-up; no bundle refactor was included.
+- Independent integrated code-quality review approved both findings with **no material findings** in the language/bootstrap/Settings scope. Module-local listeners use Vite disposal cleanup rather than production global state. Static HTML retains English until JavaScript runs, intentionally.
+
+Both issues were marked closed only after integration, regression tests, browser verification and review. No financial code, schema or dependency changes were made. Repository-wide automated checks are not a claim of an exhaustive architectural audit; installed-platform validation limits above still apply.

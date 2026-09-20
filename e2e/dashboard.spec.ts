@@ -38,8 +38,9 @@ test.describe('Dashboard', () => {
     await expect(page.getByText('Net worth history')).toBeVisible()
 
     await page.getByRole('tab', { name: 'Compare accounts' }).click()
-    await expect(page.getByLabel('First account')).toBeVisible()
-    await expect(page.getByLabel('Second account')).toBeVisible()
+    await expect(page.getByText('Add accounts to compare their recorded balances.')).toBeVisible()
+    await expect(page.getByLabel('First account')).toHaveCount(0)
+    await expect(page.getByLabel('Second account')).toHaveCount(0)
   })
 
   test('metric cards display values', async ({ page }) => {

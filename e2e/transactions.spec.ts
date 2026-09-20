@@ -164,7 +164,7 @@ test.describe('Transactions', () => {
 
     const accountDialog = page.getByRole('dialog')
     await accountDialog.getByLabel('Account Name').fill(qaName('Checking'))
-    await accountDialog.getByLabel('Current Balance').fill('100')
+    await accountDialog.getByLabel('Observed balance').fill('100')
     await accountDialog.getByRole('button', { name: 'Save' }).click()
 
     await expect(page.getByText(qaName('Checking')).first()).toBeVisible()

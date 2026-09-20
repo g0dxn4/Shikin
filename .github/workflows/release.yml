@@ -109,6 +109,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Extract release notes
+        id: release-notes
+        run: node scripts/release-notes.mjs
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
@@ -118,7 +122,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Shikin ${{ github.ref_name }}
-          releaseBody: 'See the assets below to download and install this version.'
+          releaseBody: ${{ steps.release-notes.outputs.body }}
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
@@ -144,39 +148,7 @@ jobs:
       - name: Verify draft release assets are complete
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-          import subprocess
-          import sys
-
-          tag = os.environ['GITHUB_REF_NAME']
-          repo = os.environ['GITHUB_REPOSITORY']
-          result = subprocess.run(
-            ['gh', 'release', 'view', tag, '--repo', repo, '--json', 'isDraft,assets'],
-            check=True,
-            capture_output=True,
-            text=True,
-          )
-          release = json.loads(result.stdout)
-          asset_names = {asset['name'] for asset in release['assets']}
-          source_asset = f'shikin-cli-source-{tag}.tar.gz'
-          missing_assets = {'latest.json', source_asset, f'{source_asset}.sha256'} - asset_names
-
-          if not release['isDraft']:
-            print('Release is already published before finalization step.', file=sys.stderr)
-            sys.exit(1)
-
-          if missing_assets:
-            print(
-              f'Missing expected release assets before publish: {sorted(missing_assets)}',
-              file=sys.stderr,
-            )
-            sys.exit(1)
-
-          print('Draft release contains latest.json and is ready to publish.')
-          PY
+        run: node scripts/verify-release-assets.mjs
 
       - name: Publish release after artifact completion
         env:

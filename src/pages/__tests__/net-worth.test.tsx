@@ -4,8 +4,6 @@ import userEvent from '@testing-library/user-event'
 import { NetWorth } from '../net-worth'
 import enAnalytics from '@/i18n/locales/en/analytics.json'
 import esAnalytics from '@/i18n/locales/es/analytics.json'
-import enCommon from '@/i18n/locales/en/common.json'
-import esCommon from '@/i18n/locales/es/common.json'
 
 globalThis.ResizeObserver = class {
   observe() {}
@@ -214,20 +212,5 @@ describe('NetWorth page', () => {
     expect(esAnalytics.netWorth.unresolvedOwnership_other).toContain('{{count}}')
     expect(esAnalytics.netWorth.unavailable.length).toBeGreaterThan(0)
     expect(esAnalytics.netWorth.incompleteHoldings_one.toLowerCase()).not.toMatch(/cotizaci/)
-
-    expect(enCommon.netWorth.incompleteHoldings_one).toBe(
-      enAnalytics.netWorth.incompleteHoldings_one
-    )
-    expect(enCommon.netWorth.unresolvedOwnership_other).toBe(
-      enAnalytics.netWorth.unresolvedOwnership_other
-    )
-    expect(enCommon.netWorth.unavailable).toBe(enAnalytics.netWorth.unavailable)
-    expect(esCommon.netWorth.incompleteHoldings_one).toBe(
-      esAnalytics.netWorth.incompleteHoldings_one
-    )
-    expect(esCommon.netWorth.unresolvedOwnership_other).toBe(
-      esAnalytics.netWorth.unresolvedOwnership_other
-    )
-    expect(esCommon.netWorth.unavailable).toBe(esAnalytics.netWorth.unavailable)
   })
 })

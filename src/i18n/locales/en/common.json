@@ -140,12 +140,5 @@
     "dark": "Dark",
     "custom": "Custom",
     "switch": "Switch to {{appearance}} appearance"
-  },
-  "netWorth": {
-    "incompleteHoldings_one": "{{count}} holding cannot be valued.",
-    "incompleteHoldings_other": "{{count}} holdings cannot be valued.",
-    "unresolvedOwnership_one": "{{count}} account has unresolved ownership.",
-    "unresolvedOwnership_other": "{{count}} accounts have unresolved ownership.",
-    "unavailable": "Net worth totals are unavailable."
   }
 }

@@ -140,12 +140,5 @@
     "dark": "Oscura",
     "custom": "Personalizada",
     "switch": "Cambiar a apariencia {{appearance}}"
-  },
-  "netWorth": {
-    "incompleteHoldings_one": "{{count}} tenencia no se puede valorar.",
-    "incompleteHoldings_other": "{{count}} tenencias no se pueden valorar.",
-    "unresolvedOwnership_one": "{{count}} cuenta tiene titularidad sin resolver.",
-    "unresolvedOwnership_other": "{{count}} cuentas tienen titularidad sin resolver.",
-    "unavailable": "Los totales de patrimonio neto no están disponibles."
   }
 }

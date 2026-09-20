@@ -124,30 +124,24 @@ i18n
     },
   })
 
-type HtmlLangSync = () => void
-
-const htmlLangSyncOwner = globalThis as typeof globalThis & {
-  __shikinI18nHtmlLangSync?: HtmlLangSync
-}
-
-const syncHtmlDocumentLang: HtmlLangSync = () => {
+const syncHtmlDocumentLang = () => {
   if (typeof document === 'undefined') return
   const lang = i18n.resolvedLanguage
   if (lang) document.documentElement.lang = lang
 }
 
-const previousHtmlLangSync = htmlLangSyncOwner.__shikinI18nHtmlLangSync
-if (previousHtmlLangSync) {
-  i18n.off('initialized', previousHtmlLangSync)
-  i18n.off('languageChanged', previousHtmlLangSync)
-}
-
-htmlLangSyncOwner.__shikinI18nHtmlLangSync = syncHtmlDocumentLang
 i18n.on('initialized', syncHtmlDocumentLang)
 i18n.on('languageChanged', syncHtmlDocumentLang)
 
 if (i18n.isInitialized) {
   syncHtmlDocumentLang()
+}
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    i18n.off('initialized', syncHtmlDocumentLang)
+    i18n.off('languageChanged', syncHtmlDocumentLang)
+  })
 }
 
 export default i18n

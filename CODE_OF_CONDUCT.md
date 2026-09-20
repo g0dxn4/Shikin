@@ -1,25 +1,37 @@
 # Code of Conduct
 
-## Our Standard
+## Our standard
 
-Shikin is an open source project and we want it to be a respectful, constructive place to collaborate.
+Shikin is an open source project. Collaboration should be respectful and focused on the work.
 
-Examples of expected behavior:
+Expected behavior:
 
-- Be respectful in disagreements.
-- Assume good intent and focus on the code and product.
+- Be respectful in disagreement.
+- Assume good intent; critique code and ideas, not people.
 - Give actionable feedback.
-- Be welcoming to new contributors.
+- Welcome newcomers.
 
-Examples of unacceptable behavior:
+Unacceptable behavior includes:
 
 - Harassment, insults, or personal attacks
 - Discriminatory language or conduct
 - Deliberate intimidation or trolling
 - Publishing private information without permission
+- Sexualized language or imagery in project spaces
 
 ## Enforcement
 
-Project maintainers are responsible for clarifying and enforcing this code of conduct. They may remove, edit, or reject comments, commits, issues, pull requests, and other contributions that do not align with this code of conduct.
+Maintainers may hide, edit, or reject comments, commits, issues, and pull requests that violate this code, and may block people from the repository using GitHub’s project tools.
 
-If you experience or witness unacceptable behavior, report it to the maintainers through GitHub so it can be reviewed.
+## Reporting
+
+Do **not** use private vulnerability reporting for conduct issues.
+
+Report abuse or harassment with GitHub’s reporting tools:
+
+- [Report abuse on GitHub](https://github.com/contact/report-abuse)
+- [Reporting abuse or spam](https://docs.github.com/communities/maintaining-your-safety-on-github/reporting-abuse-or-spam)
+
+For a comment, issue, or pull request on this repository, use the **Report** control on that content when GitHub provides it.
+
+This project does not offer a separate email or direct-message intake for conduct reports.

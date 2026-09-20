@@ -14,7 +14,7 @@ Describe the feature or improvement.
 
 What problem would this solve?
 
-## Proposed Approach
+## Proposed approach
 
 Describe the solution you want to see.
 
@@ -22,6 +22,6 @@ Describe the solution you want to see.
 
 Describe any alternatives you considered.
 
-## Additional Context
+## Additional context
 
-Add screenshots, examples, or references.
+Screenshots, examples, or references. Do **not** attach databases, `.env` files, real backups, or secrets.

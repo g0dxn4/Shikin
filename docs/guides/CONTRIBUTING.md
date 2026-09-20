@@ -8,12 +8,14 @@ Thank you for your interest in contributing to Shikin. This document covers the 
 
 Before you begin, make sure you have these tools installed:
 
-| Tool      | Version  | Install                                     |
-| --------- | -------- | ------------------------------------------- |
-| Node.js   | >= 18    | [nodejs.org](https://nodejs.org/)           |
-| pnpm      | >= 9     | `pnpm dlx pnpm`                       |
-| Rust      | Optional | Needed for Tauri desktop development/builds |
-| Tauri CLI | Optional | Needed for Tauri desktop development/builds |
+| Tool      | Version     | Install                                     |
+| --------- | ----------- | ------------------------------------------- |
+| Node.js   | 24 LTS      | [nodejs.org](https://nodejs.org/)           |
+| pnpm      | 11.1.1      | pinned in root `packageManager`             |
+| Rust      | Optional    | Needed for Tauri desktop development/builds |
+| Tauri CLI | Optional    | Needed for Tauri desktop development/builds |
+
+Source setup is best tested on **Node.js 24 LTS** and **pnpm 11.1.1**. Optional CLI/MCP is best tested on Node 24 LTS with npm. `better-sqlite3@12.8` supports Node 20, 22, 23, 24, and 25. Do not treat Node 18 as supported.
 
 The primary workflow is browser-first for day-to-day UI work, but Tauri desktop builds are current and supported. Install the Tauri system dependencies when you need to work on `src-tauri/` or produce desktop binaries.
 
@@ -23,7 +25,7 @@ The primary workflow is browser-first for day-to-day UI work, but Tauri desktop 
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/ASF/Shikin.git
+git clone https://github.com/g0dxn4/Shikin.git
 cd Shikin
 
 # 2. Install dependencies
@@ -33,10 +35,11 @@ pnpm install
 pnpm dev
 ```
 
-`pnpm dev` runs `scripts/dev.mjs`, which starts:
+`pnpm dev` runs `scripts/dev.mjs`, which:
 
-- Browser data-server on `http://127.0.0.1:1480`
-- Vite on `http://localhost:1420` (HMR)
+- Builds `@shikin/finance-core` first so the app and e2e have the compiled package
+- Starts the browser data-server on `http://127.0.0.1:1480`
+- Starts Vite on `http://localhost:1420` (HMR)
 
 The same `pnpm dev` run generates and injects a per-run bridge token into `SHIKIN_DATA_SERVER_BRIDGE_TOKEN` and `VITE_DATA_SERVER_BRIDGE_TOKEN`.
 
@@ -105,7 +108,7 @@ cli/
 ├── src/
 │   ├── cli.ts            # Commander CLI entry point
 │   ├── mcp-server.ts     # MCP server entry point
-│   ├── tools/            # Shared 91-tool CLI/MCP catalog
+│   ├── tools/            # Shared 108-tool CLI/MCP catalog
 │   └── database.ts       # better-sqlite3 data access
 ```
 
@@ -238,6 +241,8 @@ pnpm check
 ```
 
 This runs `pnpm lint && pnpm typecheck && pnpm format:check`. This is the same check that runs in CI.
+
+Quality gates are `pnpm check`, `pnpm test:run`, and GitHub Actions. Git hooks are not used.
 
 ## CI
 

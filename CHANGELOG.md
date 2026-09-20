@@ -4,37 +4,40 @@ All notable changes to Shikin are documented in this file.
 
 ## [Unreleased]
 
-### Added
+## [1.1.0] - 2026-09-20
 
-- CI workflow at `.github/workflows/ci.yml` for lint, typecheck, unit tests, and build.
-- Database backup export/import in Settings for browser-local snapshots.
-- CSV transaction import/export flows with validation and reporting feedback.
-- Transfer destination account flow in transaction form and transfer-aware balance handling.
-- Playwright coverage for budgets and core navigation pages.
-- Theme customization MVP in Settings (presets, token editor, apply/save/reset/revert).
-- CLI and MCP now expose the shipped shared-tool surface from shared definitions, with every shipped tool available end-to-end.
-- Credit card account cards can record a payment from a cash/deposit account as a transfer, reducing the card balance used.
-- Generic automation workflows for card payments, credit-card cycle explanations, placeholder transactions, strict recording, tags, subscription-from-transaction, undo, and finance sanity checks.
-- Trusted-local CLI/MCP plugin management tools with explicit enable/disable workflow and extension documentation.
-- CETES as an investment type, including schema migration support and local UI guidance for government-note holdings.
+Prepared release notes. The `v1.1.0` Git tag is created after CI and packaging checks pass.
 
-### Changed
+### Native UI
 
-- Strengthened transaction mutations with explicit DB transactions to reduce balance drift risk.
-- Hardened CLI/MCP finance writes with dry-run previews, duplicate warnings, opaque source provenance, audit notes, and redacted review output where supported.
-- Extended investment price refresh behavior with broader market-data fallback handling and per-symbol currency persistence.
-- Improved dashboard analytics with month-over-month deltas and chart drilldown links.
-- Updated docs and development tracking to reflect browser-first architecture and current status.
-- Added startup theme hydration so saved themes apply at app boot.
+- Native light and dark appearances with a responsive desktop and mobile shell, grouped navigation, and stacked narrow layouts.
+- Overview, accounts, transactions, and related screens follow the native layout; the shell owns the compact route heading.
+- Saved custom themes remain available behind advanced appearance controls, and the selected appearance applies at startup.
 
-### Fixed
+### Reviewed imports, history, payments, buckets, and valuation
 
-- Multiple localization and accessibility gaps in updated UI flows.
-- Fixed SQLite positional-parameter handling for tag-filtered transaction queries and transaction hygiene sanity checks.
+- Reviewed statement imports, staged history, coverage, settlement, exact-row finalization, and reviewed reconciliation-bridge supersession.
+- Account history maintenance in Accounts; verified legacy import identity can be bound without inventing original source content.
+- Card statement payment evidence with unlink that voids evidence without deleting the source transaction or changing account balances.
+- Virtual cashflow buckets with allocate, correct, and reverse flows that preserve original allocations and do not change bank balances.
+- Ownership-aware valuation: incomplete prices or FX no longer invent converted totals. Legacy holdings stay stored and may need price or valuation identity configuration.
+- Credit-card payments from a cash or deposit account, CETES as an investment type, CSV import/export, and transfer destination handling in the transaction form.
+- Database backup export and import in Settings using SQLite’s online backup API.
 
-### Docs
+### CLI and MCP
 
-- Refreshed README, contributing notes, planning docs, sprint overviews, and backlog.
-- Added archival guidance for historical research docs.
-- Clarified v1 limitations for recurring transfer rules, debt APR defaults, and installment-plan modeling.
-- Added `docs/reference/AUTOMATION-WORKFLOWS.md` covering the plan-delivered workflows, provenance semantics, persistence updates, and hard-smoke coverage.
+- Shared automation catalog is 108 CLI/MCP tools and 113 CLI commands including built-ins. `shikin tools --json` is the discovery contract and reports only declared effects.
+- Dry-run-first money writes, undo, finance sanity check, trusted-local plugins, backup/restore, runtime diagnostics, and loopback `shikin web`.
+- Generic workflows for card payments, credit-card cycle explanation, placeholders, strict recording, tags, subscription-from-transaction, and explicit recap save.
+
+### Validation and preservation
+
+- Stronger transaction mutations with explicit database transactions and parameterized queries, including tag filters.
+- Import balance bounds, goal patch writes, identity binding, account provenance guards, and debt-payoff extra-payment validation (including fractional-cent rejection).
+- Localization, document-language sync, and accessibility fixes in updated UI flows.
+
+### Repository hygiene and CI
+
+- GitHub Actions workflow for release preflight, `pnpm check`, unit tests, app/CLI builds, and e2e.
+- Docs, contributing notes, and `docs/reference/AUTOMATION-WORKFLOWS.md` for provenance, persistence, and smoke coverage.
+- Clarified v1 limits for recurring transfer rules, inferred card APR at 0%, and installment-plan modeling.

@@ -1,8 +1,11 @@
 # Shikin Documentation
 
-## Current vs Historical Docs
+Product overview, install, and privacy: the root [README](../README.md).
+
+## Current vs historical docs
 
 - **Current implementation docs**: Start with `reference/BACKEND-MAP.md`, `reference/FRONTEND-MAP.md`, `guides/CONTRIBUTING.md`, and current runtime/reference docs.
+- **User-facing automation**: `reference/AUTOMATION-WORKFLOWS.md` and [cli/README.md](../cli/README.md).
 
 ## Guides
 
@@ -30,19 +33,18 @@
 | [Extensions](reference/EXTENSIONS.md)                     | Plugin system design, manifest format, permissions, hooks               |
 | [Changelog](../CHANGELOG.md)                              | Recent shipped changes and release notes                                |
 
-## Quick Stats
+## Quick stats
 
-| Metric            | Count                       |
-| ----------------- | --------------------------- |
-| Pages (routed)    | 18                          |
-| Pages (total)     | 18                          |
-| Zustand Stores    | 18                          |
-| CLI/MCP Tools     | 91 shared / 96 CLI commands |
-| Service Files     | 26                          |
-| Database Tables   | 21                          |
-| i18n Namespaces   | 14                          |
-| Languages         | 2                           |
-| Sidebar Nav Items | 10                          |
+| Metric            | Count                            |
+| ----------------- | -------------------------------- |
+| Pages (routed)    | 19                               |
+| Zustand stores    | 18                               |
+| CLI/MCP tools     | 108 shared / 113 CLI commands    |
+| i18n namespaces   | 19                               |
+| Languages         | 2                                |
+| Navigation groups | 6                                |
+
+`shikin tools --json` is the live catalog. Do not treat historical 91/96 counts in planning docs as current.
 
 ## Development (local only, gitignored)
 

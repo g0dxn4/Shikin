@@ -10,11 +10,12 @@ This is a practical backend map for the current repo layout. It is a documentati
   - `src-tauri/src/lib.rs` → Rust bootstrap, desktop/CLI/MCP entrypoint routing, and plugin registration (`sql`, `store`, `fs`, `updater`).
   - `src-tauri/migrations/001_core_tables.sql`, `003_credit_cards.sql` and migration list in `src-tauri/src/lib.rs`.
 - **Browser mode runtime**
-  - `pnpm dev` executes `scripts/dev.mjs`, which starts `scripts/data-server.mjs` and Vite in one process group.
+  - `pnpm dev` executes `scripts/dev.mjs`, which builds `@shikin/finance-core` then starts `scripts/data-server.mjs` and Vite in one process group.
   - Browser runtime DB/storage calls are funneled through `src/lib/database.ts`, `src/lib/storage.ts`, and `src/lib/virtual-fs.ts`.
 - **CLI mode**
   - `cli/src/cli.ts` registers every command from the shared catalog exported by `cli/src/tools/index.ts` and runs via Commander.
-- Current shared tool surface: **91 shared CLI/MCP tools** (from `cli/src/tools/index.ts`) and **96 CLI commands** including CLI-only built-ins, all available end-to-end against local data.
+- Current shared tool surface: **108 shared CLI/MCP tools** (from `cli/src/tools/index.ts`) and **113 CLI commands** including CLI-only built-ins (`diagnose`, `tools`, `validate`, `web`, `record`), all available end-to-end against local data. Live inventory: `cli/src/fixtures/public-automation-inventory.json` and `shikin tools --json`.
+- Catalog groups: transactions/corrections/consumption/transfers/tags/placeholders; accounts/categories/reconciliation/source coverage/staged history; credit cards, statements, and payment evidence; budgets, net worth, and cashflow buckets; investments, subscriptions, and bills; receivables; analytics, recaps, forecast, health, goals, and debt; category rules; notebook and portfolio review; backup/restore/import/export; audit, undo, sanity check, and automation context; read-only runtime diagnostics; trusted-local plugins.
 - MVP limitation decisions: one-off transfer writes are supported in the app and CLI/MCP, but recurring transfer rules remain deferred; debt payoff uses inferred credit-card balances with APR fixed at 0% because account APR is not stored; browser subscription management is deferred while local subscription rows still feed forecasts and CLI/MCP analytics.
 - **MCP mode**
   - `cli/src/mcp-server.ts` registers the same `tools` and bootstraps MCP over stdio.
@@ -49,7 +50,7 @@ This is a practical backend map for the current repo layout. It is a documentati
 ## 3) MCP flow
 
 - `cli/src/mcp-server.ts` creates `McpServer({ name: 'shikin', version: '<release>' })`.
-- Registers **all 91** shared tool definitions from `tools` with:
+- Registers **all 108** shared tool definitions from `tools` with:
   - tool name
   - description
   - `tool.schema.shape`
@@ -126,7 +127,7 @@ This is a practical backend map for the current repo layout. It is a documentati
 
 - Most app store tests mock `@/lib/database`, while statement import also has real SQLite rollback coverage.
 - CLI integration suites execute CRUD, balance, restore, and analytics paths against temporary SQLite databases.
-- MCP tests verify the shared **91-tool** catalog and representative server behavior.
+- MCP tests verify the shared **108-tool** catalog and representative server behavior.
 - Data-server HTTP contract and security suites cover database, transaction, recurring, store, filesystem, snapshot import/export, auth, and request-size behavior.
 - E2E covers user-facing UI flows (`e2e/*.spec.ts`).
 

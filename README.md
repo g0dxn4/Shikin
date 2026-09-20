@@ -1,279 +1,130 @@
 # Shikin
 
-**Your value. Your vault.**
+<img src="src-tauri/icons/128x128.png" alt="Shikin" width="72" height="72">
 
-Shikin is an open-source, local-first personal finance manager. It runs as a Tauri v2 desktop app or browser-first web app, keeping all data local on your machine.
+**Local-first personal finance for desktop and private web access.**
 
----
+[![CI](https://github.com/g0dxn4/Shikin/actions/workflows/ci.yml/badge.svg)](https://github.com/g0dxn4/Shikin/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/g0dxn4/Shikin)](https://github.com/g0dxn4/Shikin/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/g0dxn4/Shikin)](LICENSE)
 
-## Why Shikin?
+Shikin is a personal finance app you run yourself. Budgets, accounts, investments, and bills live in local SQLite — no mandatory cloud account. Use the desktop app, optional loopback web access, and optional CLI/MCP automation. There is no built-in chat assistant.
 
-Most personal finance tools force a tradeoff between privacy and convenience.
+## See it
 
-Shikin is built to keep both:
+![Shikin overview in native light appearance, with balances, activity, and planning summaries](docs/images/overview-light.webp)
 
-- Your finance data stays local (SQLite via shared storage at `~/.local/share/com.asf.shikin/`).
-- Settings and preferences are local (settings.json in shared store).
-- Automation runs through local CLI and MCP surfaces against your local database.
+![Shikin transactions in native dark appearance, with search, filters, and a ledger](docs/images/transactions-dark.webp)
 
----
+*Screenshots show synthetic demo data.*
 
 ## Features
 
-### Core Finance
+### Tracking
 
-- **Transactions**: Full CRUD with search, filtering, CSV import, and OFX/QFX/QIF bank statement import.
-- **Accounts**: 7 account types (checking, savings, credit card, cash, investment, crypto, other).
-- **Budgets**: Category-based budgets with weekly/monthly/yearly periods and progress tracking.
-- **Savings Goals**: Target-based goals with deadlines, progress rings, and monthly contribution estimates.
-- **Recurring Transactions**: Auto-generated transactions from recurring rules (rent, salary, utilities).
-- **Split Transactions**: Split a single payment across multiple categories.
-- **Subscription Insights**: Local subscription data model powering bill forecasts and CLI/MCP analytics.
-- **Investments**: Portfolio tracking with live prices (Alpha Vantage for stocks, CoinGecko for crypto).
-- **Multi-Currency**: Live exchange rates via frankfurter.app with preferred currency conversion.
+- Transactions with search, filters, splits, CSV import, and OFX/QFX/QIF statements
+- Recurring rules for rent, pay, and utilities
+- Accounts: checking, savings, credit card, cash, investment, crypto, and other
 
-### CLI & MCP Server — 108 Shared Tools
+### Planning and insights
 
-- **CLI**: `shikin add-transaction --amount 5.50 --type expense --description "Coffee"`
-- **MCP Server**: Connect Claude Code, Claude Desktop, Cursor, or any MCP-compatible client
-- **Portable AI Skill**: Optional `Skill.md` reference for AI tools that support file-based skills
-- **Shared Tool Definitions**: 108 shipped CLI/MCP tools run end-to-end against local data, including reconciliation, correction, import, payment-evidence, backup, audit, and runtime-diagnostics tools
-- **Authoritative Discovery**: `shikin tools --json` describes 113 CLI commands, input schemas, declared effects, catalog/schema versions, compatibility, and required migrations. Missing effects mean unaudited—not read-only.
-- **Private Hosted Web**: `shikin web` serves the production app on loopback for private HTTPS access through Tailscale Serve
-- **No Built-in Chat Assistant**: Shikin is the local finance engine; external clients can automate it through CLI/MCP
+- Category budgets, savings goals, bills, bill calendar, debt payoff estimates, and receivables
+- Overview, reports with PDF export, spending heatmap, net worth, and habit streaks
+- Native light and dark appearance; English and Spanish
 
-Current MVP limitations:
+### Investments and currency
 
-- Recurring transfer rules are not supported yet; one-off transfers work in the app and CLI/MCP.
-- Debt payoff estimates default credit-card APR to 0% because account APR is not stored yet, so automatically inferred card payoff projections exclude interest.
-- Installment purchases such as meses sin intereses are not first-class yet; record each installment as a recurring or monthly credit-card transaction for now.
+- Holdings with optional quotes from Alpha Vantage, CoinGecko, or Finnhub, plus manual prices
+- Exchange rates via frankfurter.app when you refresh FX
+- Legacy holdings stay stored; they may need a verified price or valuation identity before converted totals appear
 
-### Intelligence & Analytics
+### Automation (optional)
 
-- **Dashboard**: Total balance, income/expenses, savings rate, spending trends, category breakdown.
-- **Reports & PDF Export**: Monthly/annual reports with dark-themed PDF generation via jsPDF.
-- **Spending Heatmap**: Category-based spending intensity visualization.
-- **Net Worth Tracking**: Assets vs liabilities with trend over time.
-- **Bill Calendar**: Upcoming payments from credit cards, subscriptions, and recurring expenses.
-- **Streaks & Achievements**: 8 unlockable badges for financial habits.
+- 108 shared CLI/MCP tools and 113 CLI commands on the same local database
+- Imports, reconciliation, payments, buckets, backup, audit, and diagnostics
+- `shikin tools --json` is the catalog (missing `effects` means unaudited, not read-only)
+- Connect Claude Desktop, Cursor, or any MCP client — Shikin does not ship a chat UI
 
-### Privacy & Data
+### Current limits
 
-- **Fully Local**: No mandatory backend. All data in SQLite via shared storage.
-- **In-App Updates**: Tauri desktop app checks GitHub Releases and lets users install signed updates from Settings.
-- **Bilingual**: English and Spanish localization (15 i18n namespaces).
-- **Database Backup/Restore**: Export and import SQLite snapshots.
+- Recurring transfer rules are not supported yet (one-off transfers work)
+- Debt payoff infers card APR as 0% because accounts do not store APR
+- Installment plans such as meses sin intereses are not first-class; record each installment as a recurring or monthly card transaction
 
----
+## Install
 
-## Tech Stack
+Released desktop builds do not need developer tools.
 
-| Layer      | Technology                       | Purpose                                                                           |
-| ---------- | -------------------------------- | --------------------------------------------------------------------------------- |
-| Runtime    | Tauri v2 + Browser + Vite        | Desktop app and web runtime                                                       |
-| Frontend   | React 19 + TypeScript            | UI and application logic                                                          |
-| Styling    | Tailwind CSS v4 + shadcn/ui      | Design system and components                                                      |
-| Routing    | React Router v7                  | Client-side navigation                                                            |
-| State      | Zustand (19 stores)              | Global state management                                                           |
-| Database   | SQLite (shared storage)          | 21 tables, migration-backed schema                                                |
-| Settings   | Tauri Store / data-server bridge | Local key-value config storage                                                    |
-| Automation | CLI (`commander`) + MCP SDK      | Local automation surface (108 shared tools; 113 CLI commands including built-ins) |
-| Forms      | React Hook Form + Zod v4         | Form validation and parsing                                                       |
-| Charts     | Recharts                         | Financial visualizations                                                          |
-| PDF        | jsPDF                            | Report generation                                                                 |
-| i18n       | i18next + react-i18next          | Localization (en/es)                                                              |
-| Build/Test | Vite + Vitest + Playwright       | Build pipeline and test tooling                                                   |
-
----
-
-## Getting Started
-
-### Prerequisites
-
-Released desktop installs do not require developer tools. Optional CLI/MCP automation support requires Node.js and npm. For source setup, install:
-
-- [Node.js](https://nodejs.org/) >= 18
-- [pnpm](https://pnpm.io/) >= 9
-
-### Installation
-
-Install the latest released desktop app on Linux:
+**Linux (amd64 only).** The helper is interactive by default: it recommends `.deb`, `.rpm`, or AppImage, then can install optional CLI/MCP support.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh
 ```
 
-The helper is interactive by default. It detects your distro, recommends `.deb` on Debian/Ubuntu, `.rpm` on RPM distros, or AppImage elsewhere, then asks what to install. After the desktop app is installed, it asks whether to install optional CLI/MCP automation support. To skip the package prompt and auto-select:
-
 ```bash
+# Auto-select package type
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --auto
-```
 
-Sudo is optional. Native `.deb`/`.rpm` packages require admin privileges, but declining the sudo prompt falls back to the AppImage install under `~/Applications`. To skip sudo entirely:
-
-```bash
+# AppImage under ~/Applications, never sudo
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --no-sudo
-```
 
-You can force a specific install type:
-
-```bash
+# Force a package type
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --deb
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --rpm
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --appimage
-```
 
-You can also force or skip CLI/MCP support from the desktop installer:
-
-```bash
+# Include or skip CLI/MCP during desktop install
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --auto --with-cli
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --auto --no-cli
 ```
 
-To install CLI/MCP and hosted-web support separately later on Linux or macOS:
+Native `.deb`/`.rpm` packages may need sudo; declining sudo falls back to AppImage. Other Linux architectures are not in the installer — use [Releases](https://github.com/g0dxn4/Shikin/releases/latest) or build from source.
+
+**macOS and Windows.** Install the `.dmg` (macOS) or `.msi` / setup `.exe` (Windows) from [GitHub Releases](https://github.com/g0dxn4/Shikin/releases/latest).
+
+**Optional CLI/MCP** (Linux and macOS), after the desktop app or later:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-cli.sh | sh
 ```
 
-To install the optional portable AI skill reference for Shikin CLI/MCP usage:
+Best tested on **Node.js 24 LTS** with npm. `better-sqlite3@12.8` supports Node 20, 22, 23, 24, and 25. Portable AI skill installers and extra flags: [cli/README.md](cli/README.md).
+
+Desktop builds check GitHub Releases and can install **signed updates** from Settings. Export a backup before you upgrade.
+
+## Backup, restore, and upgrades
+
+- Export a SQLite snapshot from **Settings → Data**. Imports are validated and a rollback snapshot is taken first.
+- CLI/MCP restore previews by default; applying a restore requires an explicit apply.
+- Hosted web cannot restore the database — stop hosted access and restore from the desktop app.
+- Legacy holdings stay in the database; they may need a verified price or valuation identity before converted totals appear. Records are not discarded.
+- Import statements from **Transactions → Import Statement**. Maintain coverage and history from **Accounts → Maintain history**. Automation details: [Automation Workflows](docs/reference/AUTOMATION-WORKFLOWS.md).
+
+## Privacy and network
+
+Data is stored locally (SQLite under the platform app-data directory). There is no mandatory cloud account.
+
+Optional market features contact external providers (exchange rates and prices). Optional CLI/MCP clients and external AI tools follow their own privacy practices. Do not assume data never leaves the device if you enable those features.
+
+`shikin web` serves the production app on **127.0.0.1** only. For private access from another machine on your tailnet:
 
 ```bash
-# Neutral portable copy under Shikin app data
-curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh
-
-# Install directly into a supported tool's skill directory
-curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh -s -- --opencode
-curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh -s -- --agents
-
-# Or choose any custom skills root
-curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh -s -- --dir ~/.config/my-ai-tool/skills
+shikin web --port 8480
+# in another terminal
+tailscale serve --bg http://127.0.0.1:8480
 ```
 
-Windows users can install the `.msi` or setup `.exe` from [GitHub Releases](https://github.com/g0dxn4/Shikin/releases/latest). macOS users can install the `.dmg`.
+That is private tailnet access, not public SaaS. Do not use Tailscale Funnel. Keep the app running (or in the tray) while Settings → General → Hosted web access is on.
 
-Developer/source setup:
-
-```bash
-git clone https://github.com/g0dxn4/Shikin.git
-cd Shikin
-pnpm install
-```
-
-## Contribution Flow
-
-Shikin uses a simple two-branch flow for open source work:
-
-- `main` is the stable branch.
-- `developer` is the shared testing and integration branch.
-- Create feature and fix branches from `developer`.
-- Open pull requests into `developer` first.
-- After testing, promote `developer` into `main` with a follow-up pull request.
-
-See `CONTRIBUTING.md` for the quick contributor workflow and `docs/guides/CONTRIBUTING.md` for the full development guide.
-
-### Run Locally
+## Automation example
 
 ```bash
-pnpm dev          # Web mode: Vite :1420 + data-server :1480
-```
-
-Browser development uses an isolated temporary database by default. To work against your real app data intentionally, set `SHIKIN_BROWSER_USE_REAL_DATA=1` before starting the dev server.
-
-Then open `http://localhost:1420`.
-
-### Build Desktop App (Tauri)
-
-```bash
-pnpm build:tauri  # Builds .deb + .AppImage (Linux), .dmg (macOS), .msi (Windows)
-```
-
-### Available Scripts
-
-| Command                  | Description                                                               |
-| ------------------------ | ------------------------------------------------------------------------- |
-| `pnpm dev`               | Start dev servers (Vite + data)                                           |
-| `pnpm build`             | Type-check and build production bundle                                    |
-| `pnpm build:tauri`       | Build Tauri desktop binary                                                |
-| `pnpm preview`           | Preview production build locally                                          |
-| `pnpm lint`              | Run ESLint                                                                |
-| `pnpm typecheck`         | Run TypeScript checks                                                     |
-| `pnpm test`              | Start Vitest in watch mode                                                |
-| `pnpm test:run`          | Run unit tests once                                                       |
-| `pnpm test:coverage`     | Run unit tests with coverage                                              |
-| `pnpm release:preflight` | Verify release version parity, updater config, and Tauri plugin alignment |
-| `pnpm check`             | Lint + typecheck + format check                                           |
-
----
-
-## Release Hygiene
-
-- Run `pnpm release:preflight` before creating any release tag.
-- CI validates release preflight, `pnpm check`, unit tests, app/CLI builds, and e2e before release promotion.
-- The tag-driven release workflow creates a draft GitHub Release first, uploads signed artifacts plus `latest.json`, then publishes only after artifact generation completes.
-
----
-
-## CLI & MCP Server
-
-Shikin exposes 108 shared CLI/MCP tools and 113 total CLI commands including CLI-only built-ins. `shikin tools --json` is the authoritative inventory and reports only explicitly declared effects; it never infers read-only behavior from command names.
-Automation clients can use dry-run-first money writes, reviewed imports, transaction corrections, source coverage and reconciliation, virtual bucket maintenance, card-payment evidence, audit-backed undo, and `finance-sanity-check`. Treat `--source` as opaque provenance, `--note` as audit/changelog metadata, and transaction `--notes` as transaction details.
-
-```bash
-# Install automation support for the installed desktop app.
-curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-cli.sh | sh
-
-# `shikin` is the user-facing entrypoint on Linux and macOS.
-shikin # open the desktop app
 shikin list-accounts
 shikin add-transaction --amount 12.50 --type expense --description "Lunch"
-shikin get-spending-summary --period month
 shikin finance-sanity-check --days-ahead 14 --redacted
-shikin undo --last --dry-run
 shikin web --port 8480
 shikin mcp
-
-# CLI (source/dev alternative, from the repository root)
-pnpm build:cli
-node cli/dist/cli.js list-accounts
-node cli/dist/cli.js web --port 8480
-
-# MCP server (source/dev alternative)
-node cli/dist/mcp-server.js
 ```
-
-### Backend automation contracts
-
-- Spending and recaps default to gross cash flow. Net consumption is opt-in and reports known subtotals plus classification and independently verified source-coverage completeness; transaction date ranges are not coverage proof.
-- `correct-transaction-metadata` changes audited metadata only. It does not rewrite immutable import/source identity, financial amounts, or balances. Consumption ownership is explicit per transaction or split; investment prices require exact decimal price plus explicit provider, instrument, exchange, and quote-currency inputs rather than inferred identity.
-- Staged statement rows remain balance-neutral. Set independent printed-period coverage, deliberately settle pending rows, then finalize exact posted/cleared membership. A later-anchor conflict requires reviewed bridge supersession with a fresh preview token.
-- Import source IDs and financial content fingerprints are separate. Unreviewed imports are atomic only when no candidate decisions are needed; reviewed imports bind decisions and a preview token to the current database revision. `query-transactions` uses keyset cursors and rejects stale cursors after writes.
-- Cashflow buckets are virtual envelopes, not bank accounts. Corrections append linked negative reversals and replacements while preserving original allocations; they do not change transaction or account balances.
-- Card statements maintain `paid = unattributed baseline + active links`. `apply_to_unpaid` adds new paid evidence; `attribute_existing` converts existing baseline into a link. Unlinking voids evidence without deleting the source transaction or changing account balances.
-- `get-runtime-diagnostics` opens an initialized database read-only and returns opaque lineage/local-instance status without filesystem paths or identity-sidecar initialization.
-- Optional metadata updates distinguish omission (preserve) from explicit clearing. Where offered, use actual JSON `null` through MCP or the documented CLI `--clear-*` flag; a value plus its clear flag is rejected. The literal CLI string `"null"` is not a database-null token.
-- Before upgrading automation contracts, back up the database and upgrade the desktop app, CLI bridge, and MCP server together. Roll back with that backup and the matching prior binaries. Older binaries cannot promise guards for schemas or workflows introduced later.
-
-### Private hosted web access with Tailscale
-
-Run the production web app on the machine that owns your Shikin database:
-
-```bash
-shikin web --port 8480
-```
-
-The server listens only on `127.0.0.1`. In another terminal, expose it privately to your tailnet with HTTPS:
-
-```bash
-tailscale serve --bg http://127.0.0.1:8480
-tailscale serve status
-```
-
-Open the `https://<machine>.<tailnet>.ts.net` URL printed by Tailscale from an authorized device. Stop exposure with `tailscale serve reset`. Do not use Tailscale Funnel for financial data; Funnel is public internet exposure.
-
-The desktop **Settings → General → Hosted web access** control can start and stop the same loopback server with the app and persist the chosen port. Keep Shikin running (or enabled in the tray) while using the hosted site. Database restore is intentionally unavailable from hosted mode; stop hosted access and restore from the desktop app.
-
-### MCP Setup (Claude Desktop)
 
 ```json
 {
@@ -286,87 +137,33 @@ The desktop **Settings → General → Hosted web access** control can start and
 }
 ```
 
-### AI Skill Pack
+`shikin tools --json` is the catalog. Missing `effects` means unaudited, not read-only. More: [cli/README.md](cli/README.md) and [Automation Workflows](docs/reference/AUTOMATION-WORKFLOWS.md).
 
-Shikin ships a neutral, portable AI skill at `skills/shikin-cli-mcp/SKILL.md`. It documents safe temp-data testing, the unified `shikin` CLI UX, the MCP server command, expected tool counts, resources, and verification commands. It is not tied to one assistant; copy or install it into any file-based skill-capable AI tool.
+## Development
+
+Source work is best tested on **Node.js 24 LTS** and **pnpm 11.1.1**.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh
-curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh -s -- --opencode
-curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh -s -- --claude
-curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-skill.sh | sh -s -- --agents
+git clone https://github.com/g0dxn4/Shikin.git
+cd Shikin
+pnpm install
+pnpm dev          # http://localhost:1420  (isolated temp DB by default)
 ```
 
-## Data Safety
+`main` is stable; open pull requests into `developer` first. See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/guides/CONTRIBUTING.md](docs/guides/CONTRIBUTING.md).
 
-- Export a local backup from **Settings > Data**. Exports use SQLite's online backup API, so WAL-backed databases are copied consistently.
-- Import a previously exported backup from the same section. Shikin validates it first and creates a rollback snapshot before applying it.
-- CLI/MCP restore previews by default; applying a restore requires `apply:true` (legacy explicit `dryRun:false` remains supported with a warning).
-- Import OFX/QFX/QIF files from **Transactions > Import Statement**. The default posts rows to the account; alternatively stage posted history or explicitly acknowledged pending holds without changing balances. Review the native-currency impact, batch and duplicate decisions before importing. Use **Accounts > Maintain history** for coverage, deliberate settlement, exact-row finalization or reviewed bridge supersession. Verified legacy IDs can be bound there or in Transaction details without inventing original source content.
-- Backups are portable SQLite snapshot files (`.db`).
+## Docs
 
----
-
-## Project Structure
-
-```
-Shikin/
-├── src/
-│   ├── components/
-│   │   ├── layout/           # App shell, sidebar, bottom nav, dialogs
-│   │   ├── ui/               # shadcn/ui primitives (21 components)
-│   │   ├── transactions/     # Transaction form, dialog, split, import
-│   │   ├── goals/            # Goal form, dialog
-│   │   ├── budgets/          # Budget form, dialog
-│   │   ├── investments/      # Investment form, dialog
-│   │   └── accounts/         # Account form, dialog
-│   ├── lib/                  # 27 service/utility files
-│   │   ├── database.ts       # Dual-backend DB access + migrations
-│   │   ├── anomaly-service.ts
-│   │   ├── forecast-service.ts
-│   │   ├── health-score-service.ts
-│   │   ├── recap-service.ts
-│   │   ├── debt-service.ts
-│   │   ├── education-service.ts
-│   │   ├── auto-categorize.ts
-│   │   ├── split-service.ts
-│   │   ├── statement-parser.ts
-│   │   ├── exchange-rate-service.ts
-│   │   ├── report-service.ts
-│   │   ├── pdf-generator.ts
-│   │   ├── achievement-service.ts
-│   │   └── ...
-│   ├── pages/                # 18 routed page files
-│   ├── stores/               # 18 Zustand stores
-│   ├── i18n/                 # 14 namespaces, 2 languages (en/es)
-│   └── types/                # TypeScript type definitions
-├── cli/                      # CLI + MCP server (108 shared tools)
-├── skills/                   # Portable AI skill packs distributed by Shikin
-├── docs/                     # Project documentation
-├── e2e/                      # Playwright end-to-end tests
-└── public/                   # Static assets
-```
-
----
-
-## Documentation
-
-| Document                                                       | Description                                                                     |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| [Architecture](docs/guides/ARCHITECTURE.md)                    | Historical browser-first architecture notes                                     |
-| [Backend Map](docs/reference/BACKEND-MAP.md)                   | Current CLI, MCP, bridge, and local backend map                                 |
-| [Automation Workflows](docs/reference/AUTOMATION-WORKFLOWS.md) | Generic CLI/MCP finance workflows added and hardened by the assistant-safe plan |
-| [Frontend Map](docs/reference/FRONTEND-MAP.md)                 | Current routes, stores, dialogs, and frontend map                               |
-| [Database](docs/reference/DATABASE.md)                         | 21-table SQLite schema, conventions, migrations                                 |
-| [Ideas](docs/planning/IDEAS.md)                                | Feature ideas backlog with priority tiers                                       |
-| [Contributing](docs/guides/CONTRIBUTING.md)                    | Development setup and conventions                                               |
-| [Roadmap](docs/planning/ROADMAP.md)                            | Current roadmap and milestone status                                            |
-| [Changelog](CHANGELOG.md)                                      | Recent shipped changes and release notes                                        |
-
----
+| Document | Description |
+| -------- | ----------- |
+| [CLI and MCP](cli/README.md) | Install, commands, hosted web, environment |
+| [Backend map](docs/reference/BACKEND-MAP.md) | CLI, MCP, bridge, and local backend |
+| [Automation workflows](docs/reference/AUTOMATION-WORKFLOWS.md) | Dry-run writes, provenance, smoke notes |
+| [Frontend map](docs/reference/FRONTEND-MAP.md) | Routes, stores, dialogs |
+| [Database](docs/reference/DATABASE.md) | SQLite schema and migrations |
+| [Contributing](docs/guides/CONTRIBUTING.md) | Setup and conventions |
+| [Support](SUPPORT.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) | Help, private reports, release notes |
 
 ## License
 
-[MIT](LICENSE)
-
-Copyright (c) 2025 ASF
+[MIT](LICENSE) — Copyright (c) 2025 ASF

@@ -1,6 +1,8 @@
 # Shikin CLI and MCP
 
-Shikin exposes the local finance engine through a CLI and an MCP server.
+Shikin exposes the local finance engine through a CLI and an MCP server: **108 shared tools** mirrored on MCP, **113 CLI commands** including built-ins (`diagnose`, `tools`, `validate`, `web`, `record`). There is no built-in chat assistant.
+
+Best tested on **Node.js 24 LTS** with npm. `better-sqlite3@12.8` supports Node 20, 22, 23, 24, and 25.
 
 ## Install
 
@@ -194,7 +196,7 @@ The MCP server also exposes read-only resources:
 
 ## Current Scope
 
-- CLI and MCP share the same tool definition catalog in `cli/src/tools/index.ts`, including `backup-database`, guarded `restore-database`, `undo`, `finance-sanity-check`, `audit-list`, `audit-show`, `automation-context`, and plugin management tools.
+- CLI and MCP share the same 108-tool catalog in `cli/src/tools/index.ts`. Groups: transactions/corrections/consumption/transfers/tags/placeholders; accounts/reconciliation/coverage; credit cards and payment evidence; budgets/net worth/buckets; investments/subscriptions/bills; receivables; analytics/recaps/forecast/health/goals/debt; category rules; notebook/portfolio review; backup/import/export; audit/undo/sanity; runtime diagnostics; plugins.
 - `shikin tools --json` is the authoritative discovery contract and includes `catalogVersion`, `schemaVersion`, generation time, CLI/MCP compatibility counts, validation-scope notes, required migration metadata, and optional declared tool `effects`. Effects are opt-in annotations, not a complete audit of the catalog.
 - `setup-status` and the automation context tool expose existing goal, debt, and investment support surfaces. Investment support remains limited to stored holdings (`manage-investment`) and portfolio review (`generate-portfolio-review`).
 - All shipped tools are available end-to-end against the local database.

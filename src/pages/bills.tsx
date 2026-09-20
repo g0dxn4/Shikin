@@ -4,7 +4,7 @@ import { useCurrencyStore } from '@/stores/currency-store'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
-import { CalendarClock, CheckCircle, Plus, Receipt } from 'lucide-react'
+import { CalendarClock, CheckCircle, Pencil, Plus, Receipt } from 'lucide-react'
 import dayjs from 'dayjs'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -38,15 +38,16 @@ function daysUntil(date: string) {
 
 const BILLS_PAGE_SIZE = 20
 
-function BillRow({ rule }: { rule: RecurringRuleWithDetails }) {
+function BillRow({ rule, onEdit }: { rule: RecurringRuleWithDetails; onEdit: () => void }) {
   const { t } = useTranslation('billCalendar')
+  const { t: tCommon } = useTranslation('common')
   const dueIn = daysUntil(rule.next_date)
   const isOverdue = dueIn < 0
   const isSoon = dueIn >= 0 && dueIn <= 7
 
   return (
-    <div className="soft-divider grid gap-3 border-b py-4 last:border-b-0 sm:grid-cols-[1fr_auto] sm:items-center">
-      <div className="flex items-start gap-3">
+    <div className="soft-divider grid min-w-0 gap-3 border-b py-4 last:border-b-0 sm:grid-cols-[1fr_auto] sm:items-center">
+      <div className="flex min-w-0 items-start gap-3">
         <div
           className="border-border bg-muted/50 mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border"
           style={{ color: rule.category_color ?? 'var(--accent)' }}
@@ -80,13 +81,24 @@ function BillRow({ rule }: { rule: RecurringRuleWithDetails }) {
           </div>
         </div>
       </div>
-      <div className="text-left sm:text-right">
-        <p className="text-lg font-bold tracking-tight">
-          {formatMoney(rule.amount, rule.currency ?? rule.account_currency ?? 'USD')}
-        </p>
-        <p className="text-muted-foreground mt-1 text-xs">
-          {dayjs(rule.next_date).format('MMM D, YYYY')}
-        </p>
+      <div className="flex min-w-0 items-center justify-between gap-3 sm:justify-end">
+        <div className="min-w-0 text-left sm:text-right">
+          <p className="text-lg font-bold tracking-tight">
+            {formatMoney(rule.amount, rule.currency ?? rule.account_currency ?? 'USD')}
+          </p>
+          <p className="text-muted-foreground mt-1 text-xs">
+            {dayjs(rule.next_date).format('MMM D, YYYY')}
+          </p>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-11 w-11 shrink-0 sm:h-10 sm:w-10"
+          onClick={onEdit}
+          aria-label={`${tCommon('actions.edit')} ${rule.description}`}
+        >
+          <Pencil size={12} aria-hidden="true" />
+        </Button>
       </div>
     </div>
   )
@@ -261,7 +273,7 @@ export function BillsPage() {
         ) : (
           <div>
             {visibleBills.map((rule) => (
-              <BillRow key={rule.id} rule={rule} />
+              <BillRow key={rule.id} rule={rule} onEdit={() => openRecurringDialog(rule.id)} />
             ))}
             <ShowMorePagination
               shown={visibleBills.length}

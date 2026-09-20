@@ -13,7 +13,7 @@ Quality gates are local commands plus CI. Git hooks are not used.
 
 ## Branch flow
 
-- [ ] Base branch is `developer` unless this PR is promoting tested changes into `main`
+- [ ] Base branch is `main`, and the topic branch includes the latest changes from `main`
 
 ## Notes
 

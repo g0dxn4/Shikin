@@ -82,6 +82,7 @@ Desktop builds check GitHub Releases and can install **signed updates** from Set
 ## Backup, restore, and upgrades
 
 - Export a SQLite snapshot from **Settings → Data**. Restoring that database snapshot is validated first, and a rollback copy of the current database is taken before replacement. CSV and statement imports are not full-database snapshots and do not use this restore/rollback path.
+- Keep app settings and filesystem notebooks separately when moving machines; a SQLite snapshot is not a full setup backup.
 - CLI/MCP restore previews by default; applying a restore requires an explicit apply.
 - Hosted web cannot restore the database — stop hosted access and restore from the desktop app.
 - Legacy holdings stay in the database; they may need a verified price or valuation identity before converted totals appear. Records are not discarded.

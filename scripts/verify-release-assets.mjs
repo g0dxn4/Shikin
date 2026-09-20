@@ -28,7 +28,9 @@ export function normalizeReleaseVersion(tagOrVersion) {
 
 function asAssetNameSet(assetNames) {
   return new Set(
-    (assetNames ?? []).map((asset) => (typeof asset === 'string' ? asset : asset?.name)).filter(Boolean)
+    (assetNames ?? [])
+      .map((asset) => (typeof asset === 'string' ? asset : asset?.name))
+      .filter(Boolean)
   )
 }
 
@@ -52,7 +54,7 @@ export function parseReleaseAssetUrl(url, { repo, tag }) {
     return { error: `Asset URL must not include credentials: ${url}` }
   }
 
-  if (parsed.hostname.toLowerCase() !== 'github.com') {
+  if (parsed.origin.toLowerCase() !== 'https://github.com') {
     return { error: `Asset URL must be on github.com for ${repo}: ${url}` }
   }
 
@@ -68,7 +70,13 @@ export function parseReleaseAssetUrl(url, { repo, tag }) {
     return { error: `Asset URL has an invalid filename: ${url}` }
   }
 
-  if (!filename || filename.includes('/') || filename.includes('\\') || filename === '.' || filename === '..') {
+  if (
+    !filename ||
+    filename.includes('/') ||
+    filename.includes('\\') ||
+    filename === '.' ||
+    filename === '..'
+  ) {
     return { error: `Asset URL must point at an uploaded release file for ${tag}: ${url}` }
   }
 
@@ -142,9 +150,7 @@ export function validateReleaseAssets({ tag, repo, isDraft, assetNames, manifest
   }
 
   if (manifest.version !== version) {
-    errors.push(
-      `latest.json version "${manifest.version}" does not match tag version "${version}"`
-    )
+    errors.push(`latest.json version "${manifest.version}" does not match tag version "${version}"`)
   }
 
   const platforms = manifest.platforms
@@ -188,7 +194,17 @@ function main() {
     if (assetNames.includes('latest.json')) {
       execFileSync(
         'gh',
-        ['release', 'download', tag, '--repo', repo, '--pattern', 'latest.json', '--dir', downloadDir],
+        [
+          'release',
+          'download',
+          tag,
+          '--repo',
+          repo,
+          '--pattern',
+          'latest.json',
+          '--dir',
+          downloadDir,
+        ],
         { encoding: 'utf8' }
       )
       try {
@@ -210,7 +226,8 @@ function main() {
       for (const error of errors) {
         fail(error)
       }
-      process.exit(1)
+      process.exitCode = 1
+      return
     }
 
     console.log('Draft release assets and latest.json passed consistency checks.')

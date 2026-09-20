@@ -164,7 +164,7 @@ async function waitUntil(predicate, describeFailure, timeoutMs = 4000) {
 afterEach(async () => {
   for (const child of children.splice(0)) {
     if (child.exitCode === null && child.signalCode === null) {
-      child.kill('SIGKILL')
+      child.kill('SIGTERM')
       await waitForExit(child)
     }
   }

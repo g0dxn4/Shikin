@@ -118,12 +118,8 @@ describe('validateReleaseAssets', () => {
   })
 
   it('fails when latest.json version does not match the tag without a v prefix', () => {
-    const withV = validateReleaseAssets(
-      validRelease({ manifest: { version: 'v1.0.10' } })
-    )
-    const otherVersion = validateReleaseAssets(
-      validRelease({ manifest: { version: '1.0.11' } })
-    )
+    const withV = validateReleaseAssets(validRelease({ manifest: { version: 'v1.0.10' } }))
+    const otherVersion = validateReleaseAssets(validRelease({ manifest: { version: '1.0.11' } }))
 
     expect(withV.errors).toContain(
       'latest.json version "v1.0.10" does not match tag version "1.0.10"'
@@ -159,6 +155,14 @@ describe('validateReleaseAssets', () => {
 
     expect(foreign.errors.some((error) => error.includes('evil/other'))).toBe(true)
     expect(http.errors.some((error) => error.includes('must use HTTPS'))).toBe(true)
+  })
+
+  it('rejects a non-default port on an otherwise matching GitHub URL', () => {
+    const result = parseReleaseAssetUrl(
+      platformUrl('Shikin_x64.app.tar.gz').replace('github.com/', 'github.com:8443/'),
+      { repo: REPO, tag: TAG }
+    )
+    expect(result.error).toContain('must be on github.com')
   })
 
   it('fails when a platform URL points at an asset that was not uploaded', () => {

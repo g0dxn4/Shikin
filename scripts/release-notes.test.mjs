@@ -165,11 +165,8 @@ describe('writeGitHubOutput', () => {
     const file = join(tempDir(), 'github_output')
     const delimiters = ['ghadelim_collision', 'ghadelim_uniqueok']
 
-    const delimiter = writeGitHubOutput(
-      file,
-      'body',
-      'notes with ghadelim_collision inside',
-      () => delimiters.shift()
+    const delimiter = writeGitHubOutput(file, 'body', 'notes with ghadelim_collision inside', () =>
+      delimiters.shift()
     )
 
     expect(delimiter).toBe('ghadelim_uniqueok')

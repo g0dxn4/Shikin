@@ -12,11 +12,11 @@ Shikin is a personal finance app you run yourself. Budgets, accounts, investment
 
 ## See it
 
-![Shikin overview in native light appearance, with balances, activity, and planning summaries](docs/images/overview-light.webp)
+![Shikin overview in native light appearance, with net worth, monthly cash flow, and spending categories](docs/images/overview-light.webp)
 
 ![Shikin transactions in native dark appearance, with search, filters, and a ledger](docs/images/transactions-dark.webp)
 
-*Screenshots show synthetic demo data.*
+_Screenshots show synthetic demo data._
 
 ## Features
 
@@ -35,7 +35,7 @@ Shikin is a personal finance app you run yourself. Budgets, accounts, investment
 ### Investments and currency
 
 - Holdings with optional quotes from Alpha Vantage, CoinGecko, or Finnhub, plus manual prices
-- Exchange rates via frankfurter.app when you refresh FX
+- Exchange rates via frankfurter.app from cached rates, with an online refresh (including automatic network refresh when rates are stale)
 - Legacy holdings stay stored; they may need a verified price or valuation identity before converted totals appear
 
 ### Automation (optional)
@@ -53,34 +53,21 @@ Shikin is a personal finance app you run yourself. Budgets, accounts, investment
 
 ## Install
 
-Released desktop builds do not need developer tools.
+Install a **released** desktop build from [GitHub Releases](https://github.com/g0dxn4/Shikin/releases/latest). Released packages do not need developer tools.
 
-**Linux (amd64 only).** The helper is interactive by default: it recommends `.deb`, `.rpm`, or AppImage, then can install optional CLI/MCP support.
+| Platform      | Assets                      |
+| ------------- | --------------------------- |
+| Linux (amd64) | `.deb`, `.rpm`, or AppImage |
+| macOS         | `.dmg`                      |
+| Windows       | `.msi` or setup `.exe`      |
+
+**Linux helper** (amd64). Interactive by default: it recommends `.deb`, `.rpm`, or AppImage, then can install optional CLI/MCP support.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh
 ```
 
-```bash
-# Auto-select package type
-curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --auto
-
-# AppImage under ~/Applications, never sudo
-curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --no-sudo
-
-# Force a package type
-curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --deb
-curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --rpm
-curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --appimage
-
-# Include or skip CLI/MCP during desktop install
-curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --auto --with-cli
-curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --auto --no-cli
-```
-
-Native `.deb`/`.rpm` packages may need sudo; declining sudo falls back to AppImage. Other Linux architectures are not in the installer — use [Releases](https://github.com/g0dxn4/Shikin/releases/latest) or build from source.
-
-**macOS and Windows.** Install the `.dmg` (macOS) or `.msi` / setup `.exe` (Windows) from [GitHub Releases](https://github.com/g0dxn4/Shikin/releases/latest).
+Native `.deb`/`.rpm` packages may need sudo; declining sudo falls back to AppImage. Other Linux architectures are not in the helper — use the release assets above or build from source. Advanced helper flags: [Linux desktop installer](cli/README.md#linux-desktop-installer).
 
 **Optional CLI/MCP** (Linux and macOS), after the desktop app or later:
 
@@ -94,7 +81,7 @@ Desktop builds check GitHub Releases and can install **signed updates** from Set
 
 ## Backup, restore, and upgrades
 
-- Export a SQLite snapshot from **Settings → Data**. Imports are validated and a rollback snapshot is taken first.
+- Export a SQLite snapshot from **Settings → Data**. Restoring that database snapshot is validated first, and a rollback copy of the current database is taken before replacement. CSV and statement imports are not full-database snapshots and do not use this restore/rollback path.
 - CLI/MCP restore previews by default; applying a restore requires an explicit apply.
 - Hosted web cannot restore the database — stop hosted access and restore from the desktop app.
 - Legacy holdings stay in the database; they may need a verified price or valuation identity before converted totals appear. Records are not discarded.
@@ -102,9 +89,9 @@ Desktop builds check GitHub Releases and can install **signed updates** from Set
 
 ## Privacy and network
 
-Data is stored locally (SQLite under the platform app-data directory). There is no mandatory cloud account.
+Finance records are stored locally (SQLite under the platform app-data directory). There is no mandatory cloud account.
 
-Optional market features contact external providers (exchange rates and prices). Optional CLI/MCP clients and external AI tools follow their own privacy practices. Do not assume data never leaves the device if you enable those features.
+Shikin is not an offline-only app. Exchange rates use a local cache and can refresh over the network from frankfurter.app — including an automatic refresh on startup when cached rates are stale. Optional market quotes contact Alpha Vantage, CoinGecko, or Finnhub. Optional CLI/MCP clients and external AI tools follow their own privacy practices. Do not assume requests or data never leave the device.
 
 `shikin web` serves the production app on **127.0.0.1** only. For private access from another machine on your tailnet:
 
@@ -150,19 +137,19 @@ pnpm install
 pnpm dev          # http://localhost:1420  (isolated temp DB by default)
 ```
 
-`main` is stable; open pull requests into `developer` first. See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/guides/CONTRIBUTING.md](docs/guides/CONTRIBUTING.md).
+Current development, CI, and releases use `main`. Create a feature branch from `main` and open the pull request against `main`. Install released versions rather than treating `main` as a stable install target. See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/guides/CONTRIBUTING.md](docs/guides/CONTRIBUTING.md).
 
 ## Docs
 
-| Document | Description |
-| -------- | ----------- |
-| [CLI and MCP](cli/README.md) | Install, commands, hosted web, environment |
-| [Backend map](docs/reference/BACKEND-MAP.md) | CLI, MCP, bridge, and local backend |
-| [Automation workflows](docs/reference/AUTOMATION-WORKFLOWS.md) | Dry-run writes, provenance, smoke notes |
-| [Frontend map](docs/reference/FRONTEND-MAP.md) | Routes, stores, dialogs |
-| [Database](docs/reference/DATABASE.md) | SQLite schema and migrations |
-| [Contributing](docs/guides/CONTRIBUTING.md) | Setup and conventions |
-| [Support](SUPPORT.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) | Help, private reports, release notes |
+| Document                                                                    | Description                                |
+| --------------------------------------------------------------------------- | ------------------------------------------ |
+| [CLI and MCP](cli/README.md)                                                | Install, commands, hosted web, environment |
+| [Backend map](docs/reference/BACKEND-MAP.md)                                | CLI, MCP, bridge, and local backend        |
+| [Automation workflows](docs/reference/AUTOMATION-WORKFLOWS.md)              | Dry-run writes, provenance, smoke notes    |
+| [Frontend map](docs/reference/FRONTEND-MAP.md)                              | Routes, stores, dialogs                    |
+| [Database](docs/reference/DATABASE.md)                                      | SQLite schema and migrations               |
+| [Contributing](docs/guides/CONTRIBUTING.md)                                 | Setup and conventions                      |
+| [Support](SUPPORT.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) | Help, private reports, release notes       |
 
 ## License
 

@@ -35,14 +35,14 @@ Product overview, install, and privacy: the root [README](../README.md).
 
 ## Quick stats
 
-| Metric            | Count                            |
-| ----------------- | -------------------------------- |
-| Pages (routed)    | 19                               |
-| Zustand stores    | 18                               |
-| CLI/MCP tools     | 108 shared / 113 CLI commands    |
-| i18n namespaces   | 19                               |
-| Languages         | 2                                |
-| Navigation groups | 6                                |
+| Metric            | Count                         |
+| ----------------- | ----------------------------- |
+| Pages (routed)    | 19                            |
+| Zustand stores    | 18                            |
+| CLI/MCP tools     | 108 shared / 113 CLI commands |
+| i18n namespaces   | 19                            |
+| Languages         | 2                             |
+| Navigation groups | 6                             |
 
 `shikin tools --json` is the live catalog. Do not treat historical 91/96 counts in planning docs as current.
 

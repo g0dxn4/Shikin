@@ -4,11 +4,10 @@ Thanks for contributing.
 
 ## Branch workflow
 
-- `main` is the stable branch.
-- `developer` is the integration branch for reviewed work.
-- Create feature branches from `developer` using names like `feature/budget-fixes` or `fix/import-parser`.
-- Open pull requests into `developer` first.
-- Promote tested changes from `developer` into `main` in a follow-up pull request.
+- Current development, CI, and GitHub Releases use `main`.
+- Create feature branches from `main` using names like `feature/budget-fixes` or `fix/import-parser`.
+- Open pull requests against `main`.
+- Released versions on GitHub Releases are the install targets. Do not treat `main` as a blanket stable install.
 
 ## Before opening a pull request
 
@@ -24,7 +23,7 @@ Do not attach databases, `.env` files, or real financial exports to issues or pu
 ## CI and releases
 
 - CI on `main` and pull requests runs release preflight, `pnpm check`, unit tests, app/CLI builds, and e2e.
-- Create release tags only from tested `main` after `pnpm release:preflight` passes locally. Maintainers own tagging and GitHub Releases.
+- Create release tags only from `main` after `pnpm release:preflight` passes locally. Maintainers own tagging and GitHub Releases.
 - The GitHub release workflow creates a draft release first and publishes it only after signed artifacts and `latest.json` finish uploading.
 
 ## Project guide

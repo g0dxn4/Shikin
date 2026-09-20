@@ -29,4 +29,4 @@ Vulnerabilities: [SECURITY.md](SECURITY.md) (private advisory). Do not file them
 
 ## What this project is not
 
-Shikin is not a hosted SaaS and does not provide a built-in chat assistant. Loopback hosted web plus Tailscale Serve is private access to *your* instance, not a public cloud product.
+Shikin is not a hosted SaaS and does not provide a built-in chat assistant. Loopback hosted web plus Tailscale Serve is private access to _your_ instance, not a public cloud product.

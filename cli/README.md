@@ -12,7 +12,7 @@ For an installed desktop app on Linux or macOS, use the standalone CLI installer
 curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-cli.sh | sh
 ```
 
-The Linux desktop installer also asks whether to install this support after the app install finishes.
+The Linux desktop installer also asks whether to install this support after the app install finishes. Advanced helper flags: [Linux desktop installer](#linux-desktop-installer).
 
 For source development from the repo root:
 
@@ -22,6 +22,33 @@ pnpm build:cli
 ```
 
 On Linux, the desktop launcher owns the `shikin` command and discovers support under Shikin's app data directory. On macOS, the installer writes a `shikin` helper under `~/.local/bin` because app-bundle executables are not normally on `PATH`; bare `shikin` opens the app, while commands route to installed CLI/MCP support.
+
+## Linux desktop installer
+
+Use this helper for released Linux **amd64** desktop builds. It is interactive by default: it recommends `.deb`, `.rpm`, or AppImage, then can install optional CLI/MCP support.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh
+```
+
+```bash
+# Auto-select package type
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --auto
+
+# AppImage under ~/Applications, never sudo
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --no-sudo
+
+# Force a package type
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --deb
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --rpm
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --appimage
+
+# Include or skip CLI/MCP during desktop install
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --auto --with-cli
+curl -fsSL https://raw.githubusercontent.com/g0dxn4/Shikin/main/scripts/install-linux.sh | sh -s -- --auto --no-cli
+```
+
+Native `.deb`/`.rpm` packages may need sudo; declining sudo falls back to AppImage. Other Linux architectures are not in the installer — use [Releases](https://github.com/g0dxn4/Shikin/releases/latest) or build from source. The helper also asks whether to install CLI/MCP support after the app install finishes unless you pass `--with-cli` or `--no-cli`.
 
 ## AI Skill Pack
 

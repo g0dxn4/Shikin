@@ -8,12 +8,12 @@ Thank you for your interest in contributing to Shikin. This document covers the 
 
 Before you begin, make sure you have these tools installed:
 
-| Tool      | Version     | Install                                     |
-| --------- | ----------- | ------------------------------------------- |
-| Node.js   | 24 LTS      | [nodejs.org](https://nodejs.org/)           |
-| pnpm      | 11.1.1      | pinned in root `packageManager`             |
-| Rust      | Optional    | Needed for Tauri desktop development/builds |
-| Tauri CLI | Optional    | Needed for Tauri desktop development/builds |
+| Tool      | Version  | Install                                     |
+| --------- | -------- | ------------------------------------------- |
+| Node.js   | 24 LTS   | [nodejs.org](https://nodejs.org/)           |
+| pnpm      | 11.1.1   | pinned in root `packageManager`             |
+| Rust      | Optional | Needed for Tauri desktop development/builds |
+| Tauri CLI | Optional | Needed for Tauri desktop development/builds |
 
 Source setup is best tested on **Node.js 24 LTS** and **pnpm 11.1.1**. Optional CLI/MCP is best tested on Node 24 LTS with npm. `better-sqlite3@12.8` supports Node 20, 22, 23, 24, and 25. Do not treat Node 18 as supported.
 
@@ -45,17 +45,16 @@ The same `pnpm dev` run generates and injects a per-run bridge token into `SHIKI
 
 ## Branching Strategy
 
-- `main` is the stable branch.
-- `developer` is the integration branch where reviewed work lands first.
-- Create topic branches from `developer`.
-- Open pull requests into `developer` for normal feature and fix work.
-- After validation, open a second pull request from `developer` into `main`.
+- Current development, CI, and GitHub Releases use `main`.
+- Create topic branches from `main`.
+- Open pull requests against `main`.
+- Released versions are the install targets; do not treat `main` as a blanket stable install.
 
 Example flow:
 
 ```bash
-git checkout developer
-git pull origin developer
+git checkout main
+git pull origin main
 git checkout -b feature/transaction-import-fix
 ```
 
@@ -442,11 +441,11 @@ test(cli): add unit tests for addTransaction tool
 
 ## Pull Request Process
 
-1. **Create a branch** from `developer`:
+1. **Create a branch** from `main`:
 
    ```bash
-   git checkout developer
-   git pull origin developer
+   git checkout main
+   git pull origin main
    git checkout -b feat/account-balances-tool
    ```
 
@@ -459,7 +458,7 @@ test(cli): add unit tests for addTransaction tool
    pnpm test:run
    ```
 
-4. **Push and open a pull request** against `developer`.
+4. **Push and open a pull request** against `main`.
 
 5. **PR description** should include:
    - A summary of what changed and why.

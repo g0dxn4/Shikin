@@ -13,6 +13,24 @@ function renderAccounts(path = '/accounts') {
   )
 }
 
+globalThis.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver
+
+vi.mock('@/components/ui/safe-chart', () => ({
+  SafeChart: (props: { children: React.ReactNode }) => <div>{props.children}</div>,
+}))
+
+vi.mock('recharts', () => ({
+  AreaChart: () => null,
+  Area: () => null,
+  XAxis: () => null,
+  YAxis: () => null,
+  Tooltip: () => null,
+}))
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
@@ -80,6 +98,8 @@ let mockAccounts: unknown[] = []
 let mockArchivedAccounts: unknown[] = []
 let mockIsLoading = false
 let mockFetchError: string | null = null
+let mockBalanceHistory = new Map<string, Array<{ date: string; balance: number }>>()
+const mockLoadBalanceHistory = vi.fn().mockResolvedValue([])
 
 vi.mock('@/stores/ui-store', () => ({
   useUIStore: () => ({
@@ -98,8 +118,8 @@ vi.mock('@/stores/account-store', () => ({
     unarchive: mockUnarchive,
     setPrimary: mockSetPrimary,
     remove: mockRemove,
-    balanceHistory: new Map(),
-    loadBalanceHistory: vi.fn().mockResolvedValue([]),
+    balanceHistory: mockBalanceHistory,
+    loadBalanceHistory: mockLoadBalanceHistory,
   }),
 }))
 
@@ -122,6 +142,9 @@ describe('Accounts', () => {
     mockArchivedAccounts = []
     mockIsLoading = false
     mockFetchError = null
+    mockBalanceHistory = new Map()
+    mockLoadBalanceHistory.mockReset()
+    mockLoadBalanceHistory.mockResolvedValue([])
     useCurrencyStore.setState({ preferredCurrency: 'USD', rates: {}, invalidRates: [] })
   })
 
@@ -692,6 +715,61 @@ describe('Accounts', () => {
     await user.click(screen.getByRole('button', { name: 'history.hide' }))
     expect(screen.queryByText('history.none')).not.toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'history.show' })).toHaveLength(2)
+  })
+
+  it('announces balance-history points in original minor units', async () => {
+    const user = userEvent.setup()
+    mockAccounts = [
+      {
+        id: 'acc-checking',
+        name: 'Everyday Checking',
+        type: 'checking',
+        currency: 'USD',
+        balance: 4084885,
+      },
+      {
+        id: 'acc-card',
+        name: 'Travel Card',
+        type: 'credit_card',
+        currency: 'USD',
+        balance: -157277,
+        credit_limit: 500000,
+      },
+    ]
+    mockBalanceHistory = new Map([
+      [
+        'acc-checking',
+        [
+          { date: '2026-03-23', balance: 2578212 },
+          { date: '2026-09-20', balance: 4084885 },
+        ],
+      ],
+      [
+        'acc-card',
+        [
+          { date: '2026-09-18', balance: -158277 },
+          { date: '2026-09-20', balance: -157277 },
+        ],
+      ],
+    ])
+
+    renderAccounts()
+
+    const checking = screen.getByRole('article', { name: 'Everyday Checking' })
+    await user.click(within(checking).getByRole('button', { name: 'history.show' }))
+    const checkingChart = within(checking).getByRole('img', {
+      name: 'history.show for Everyday Checking',
+    })
+    expect(checkingChart).toHaveTextContent('Sep 20: $40,848.85')
+    expect(checkingChart).toHaveTextContent('Mar 23: $25,782.12')
+    expect(checkingChart).not.toHaveTextContent('$408.49')
+    expect(checkingChart).not.toHaveTextContent('$257.82')
+
+    const card = screen.getByRole('article', { name: 'Travel Card' })
+    await user.click(within(card).getByRole('button', { name: 'history.show' }))
+    const cardChart = within(card).getByRole('img', { name: 'history.show for Travel Card' })
+    expect(cardChart).toHaveTextContent('Sep 18: -$1,582.77')
+    expect(cardChart).toHaveTextContent('Sep 20: -$1,572.77')
   })
 
   it('mounts card statement actions next to credit-card payment shortcuts', () => {

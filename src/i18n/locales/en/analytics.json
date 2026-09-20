@@ -12,6 +12,11 @@
     "noHistory": "No history yet. Add accounts to start tracking net worth.",
     "firstSnapshot": "First snapshot recorded. Come back tomorrow for trend data.",
     "incompleteTotals": "Totals are unavailable until exchange rates are available for: {{currencies}}.",
+    "incompleteHoldings_one": "{{count}} holding cannot be valued.",
+    "incompleteHoldings_other": "{{count}} holdings cannot be valued.",
+    "unresolvedOwnership_one": "{{count}} account has unresolved ownership.",
+    "unresolvedOwnership_other": "{{count}} accounts have unresolved ownership.",
+    "unavailable": "Net worth totals are unavailable.",
     "historyPeriod": "Net worth date range",
     "viewChartData": "View chart data",
     "periods": {

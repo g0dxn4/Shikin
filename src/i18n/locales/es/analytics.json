@@ -12,6 +12,11 @@
     "noHistory": "Sin historial todavia. Agrega cuentas para comenzar a rastrear tu patrimonio.",
     "firstSnapshot": "Primer registro guardado. Vuelve manana para ver tendencias.",
     "incompleteTotals": "Los totales no están disponibles hasta que haya tipos de cambio para: {{currencies}}.",
+    "incompleteHoldings_one": "{{count}} tenencia no se puede valorar.",
+    "incompleteHoldings_other": "{{count}} tenencias no se pueden valorar.",
+    "unresolvedOwnership_one": "{{count}} cuenta tiene titularidad sin resolver.",
+    "unresolvedOwnership_other": "{{count}} cuentas tienen titularidad sin resolver.",
+    "unavailable": "Los totales de patrimonio neto no están disponibles.",
     "historyPeriod": "Rango de patrimonio neto",
     "viewChartData": "Ver datos del gráfico",
     "periods": {

@@ -13,12 +13,14 @@ globalThis.ResizeObserver = class {
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, options?: { currencies?: string; details?: string }) =>
+    t: (key: string, options?: { currencies?: string; details?: string; count?: number }) =>
       options?.currencies
         ? `${key}: ${options.currencies}`
         : options?.details
           ? `${key}: ${options.details}`
-          : key,
+          : typeof options?.count === 'number'
+            ? `${key}: ${options.count}`
+            : key,
     i18n: { language: 'en', changeLanguage: vi.fn() },
   }),
 }))
@@ -53,6 +55,8 @@ let mockNetWorth = 0
 let mockNetWorthComplete = true
 let mockNetWorthCurrency = 'USD'
 let mockNetWorthMissingCurrencies: string[] = []
+let mockNetWorthUnresolvedAccountIds: string[] = []
+let mockNetWorthIncompleteHoldingIds: string[] = []
 let mockNetWorthLoading = false
 let mockPreferredCurrency = 'USD'
 let mockRates: Record<string, number> = {}
@@ -174,6 +178,8 @@ vi.mock('@/stores/net-worth-store', () => ({
     totalAssets: 0,
     totalLiabilities: 0,
     missingCurrencies: mockNetWorthMissingCurrencies,
+    unresolvedAccountIds: mockNetWorthUnresolvedAccountIds,
+    incompleteHoldingIds: mockNetWorthIncompleteHoldingIds,
   }),
 }))
 
@@ -226,6 +232,8 @@ describe('Dashboard', () => {
     mockNetWorthComplete = true
     mockNetWorthCurrency = 'USD'
     mockNetWorthMissingCurrencies = []
+    mockNetWorthUnresolvedAccountIds = []
+    mockNetWorthIncompleteHoldingIds = []
     mockNetWorthLoading = false
     mockPreferredCurrency = 'USD'
     mockRates = {}
@@ -428,6 +436,63 @@ describe('Dashboard', () => {
       expect(warning).toHaveTextContent('currency.totalUnavailable')
       expect(warning).toHaveTextContent('currency.missingRates: EUR')
       expect(screen.queryByText('$1,950.00')).not.toBeInTheDocument()
+    })
+
+    it('names unvalued holdings instead of an empty FX sentence', async () => {
+      mockNetWorthComplete = false
+      mockNetWorthMissingCurrencies = []
+      mockNetWorthIncompleteHoldingIds = ['hold-unvalued-1', 'hold-unvalued-2']
+
+      render(<Dashboard />)
+
+      const warning = await screen.findByRole('alert')
+      expect(warning).toHaveTextContent('currency.totalUnavailable')
+      expect(warning).toHaveTextContent('netWorth.incompleteHoldings: 2')
+      expect(warning).not.toHaveTextContent('currency.missingRates')
+      expect(warning).not.toHaveTextContent('hold-unvalued-1')
+      expect(warning).not.toHaveTextContent('quote')
+    })
+
+    it('names unresolved ownership instead of an empty FX sentence', async () => {
+      mockNetWorthComplete = false
+      mockNetWorthMissingCurrencies = []
+      mockNetWorthUnresolvedAccountIds = ['acct-unresolved-ownership']
+
+      render(<Dashboard />)
+
+      const warning = await screen.findByRole('alert')
+      expect(warning).toHaveTextContent('netWorth.unresolvedOwnership: 1')
+      expect(warning).not.toHaveTextContent('currency.missingRates')
+      expect(warning).not.toHaveTextContent('acct-unresolved-ownership')
+    })
+
+    it('combines real FX names with holding and ownership counts', async () => {
+      mockNetWorthComplete = false
+      mockNetWorthMissingCurrencies = ['EUR', 'MXN']
+      mockNetWorthIncompleteHoldingIds = ['hold-a']
+      mockNetWorthUnresolvedAccountIds = ['acct-a', 'acct-b']
+
+      render(<Dashboard />)
+
+      const warning = await screen.findByRole('alert')
+      expect(warning).toHaveTextContent('currency.missingRates: EUR, MXN')
+      expect(warning).toHaveTextContent('netWorth.incompleteHoldings: 1')
+      expect(warning).toHaveTextContent('netWorth.unresolvedOwnership: 2')
+      expect(warning).not.toHaveTextContent('hold-a')
+      expect(warning).not.toHaveTextContent('acct-a')
+    })
+
+    it('falls back to a generic unavailable reason when incomplete lists are empty', async () => {
+      mockNetWorthComplete = false
+      mockNetWorthMissingCurrencies = []
+      mockNetWorthIncompleteHoldingIds = []
+      mockNetWorthUnresolvedAccountIds = []
+
+      render(<Dashboard />)
+
+      const warning = await screen.findByRole('alert')
+      expect(warning).toHaveTextContent('netWorth.unavailable')
+      expect(warning).not.toHaveTextContent('currency.missingRates')
     })
 
     it('does not render account preview cards', () => {

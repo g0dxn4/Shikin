@@ -632,10 +632,7 @@ function NetConsumptionPanel({ start, end }: { start: string; end: string }) {
           </div>
           {report.unresolvedIds.length > 0 ? (
             <div className="mt-4 min-w-0">
-              <p className="text-muted-foreground text-xs break-all">
-                {t('report.unresolved')}: {report.unresolvedIds.join(', ')}
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button asChild variant="outline" className="min-h-11">
                   <Link
                     to={buildTransactionsHref({

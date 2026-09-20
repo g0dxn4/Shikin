@@ -20,6 +20,11 @@ import dayjs from 'dayjs'
 
 const PERIODS = [{ value: '3m' }, { value: '6m' }, { value: '1y' }, { value: 'all' }] as const
 
+function describeIncompleteNetWorth(reasons: Array<string | false | undefined>, fallback: string) {
+  const parts = reasons.filter((reason): reason is string => Boolean(reason))
+  return parts.length > 0 ? parts.join(' ') : fallback
+}
+
 export function NetWorth() {
   const { t } = useTranslation('analytics')
   const [period, setPeriod] = useState('1y')
@@ -30,6 +35,8 @@ export function NetWorth() {
     netWorth,
     totalsComplete,
     missingCurrencies,
+    incompleteHoldingIds,
+    unresolvedAccountIds,
     assetBreakdown,
     liabilityBreakdown,
     history,
@@ -96,7 +103,17 @@ export function NetWorth() {
 
       {!totalsComplete && (
         <div className="border-warning/30 bg-warning/10 text-warning rounded-xl border px-4 py-3 text-sm">
-          {t('netWorth.incompleteTotals', { currencies: missingCurrencies.join(', ') })}
+          {describeIncompleteNetWorth(
+            [
+              missingCurrencies.length > 0 &&
+                t('netWorth.incompleteTotals', { currencies: missingCurrencies.join(', ') }),
+              incompleteHoldingIds.length > 0 &&
+                t('netWorth.incompleteHoldings', { count: incompleteHoldingIds.length }),
+              unresolvedAccountIds.length > 0 &&
+                t('netWorth.unresolvedOwnership', { count: unresolvedAccountIds.length }),
+            ],
+            t('netWorth.unavailable')
+          )}
         </div>
       )}
 

@@ -28,6 +28,11 @@ import { OverviewCategories } from '@/components/dashboard/overview-categories'
 import { OverviewCashFlow } from '@/components/dashboard/overview-cash-flow'
 import { GoalIcon } from '@/components/goals/goal-icon'
 
+function describeIncompleteNetWorth(reasons: Array<string | false | undefined>, fallback: string) {
+  const parts = reasons.filter((reason): reason is string => Boolean(reason))
+  return parts.length > 0 ? parts.join(' ') : fallback
+}
+
 export function Dashboard() {
   const { t } = useTranslation('dashboard')
   const { t: tTx } = useTranslation('transactions')
@@ -62,6 +67,8 @@ export function Dashboard() {
     totalsComplete: netWorthComplete,
     preferredCurrency: netWorthCurrency,
     missingCurrencies: netWorthMissingCurrencies,
+    incompleteHoldingIds: netWorthIncompleteHoldingIds,
+    unresolvedAccountIds: netWorthUnresolvedAccountIds,
     loadHistory,
     calculateCurrent,
   } = useNetWorthStore()
@@ -229,9 +236,23 @@ export function Dashboard() {
         unavailableMessage={
           (netWorthCalculationCurrent ? netWorthCalculation.error : null) ??
           (!netWorthComplete
-            ? t('currency.missingRates', {
-                currencies: netWorthMissingCurrencies.join(', '),
-              })
+            ? describeIncompleteNetWorth(
+                [
+                  netWorthMissingCurrencies.length > 0 &&
+                    t('currency.missingRates', {
+                      currencies: netWorthMissingCurrencies.join(', '),
+                    }),
+                  netWorthIncompleteHoldingIds.length > 0 &&
+                    tAnalytics('netWorth.incompleteHoldings', {
+                      count: netWorthIncompleteHoldingIds.length,
+                    }),
+                  netWorthUnresolvedAccountIds.length > 0 &&
+                    tAnalytics('netWorth.unresolvedOwnership', {
+                      count: netWorthUnresolvedAccountIds.length,
+                    }),
+                ],
+                tAnalytics('netWorth.unavailable')
+              )
             : undefined)
         }
         income={cashFlowDisplayable ? formatMoney(monthlyIncome, cashFlowDisplayCurrency) : '—'}

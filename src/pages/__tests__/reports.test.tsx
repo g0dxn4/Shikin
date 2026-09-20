@@ -255,7 +255,8 @@ describe('ReportsPage', () => {
 
     expect(await screen.findAllByText('$75.00')).toHaveLength(2)
     expect(screen.getByText('$200.00')).toBeInTheDocument()
-    expect(screen.getByText(/allocation-1/)).toBeInTheDocument()
+    expect(screen.queryByText(/allocation-1/)).not.toBeInTheDocument()
+    expect(screen.getAllByText('report.incompleteStatus · 1').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByRole('link', { name: 'actions.reviewUnclassified' })).toHaveAttribute(
       'href',
       expect.stringContaining('reviewReason=unclassified')
@@ -636,6 +637,8 @@ describe('ReportsPage', () => {
     await user.click(screen.getByRole('button', { name: 'actions.retry' }))
 
     expect(await screen.findByText('€44.00')).toBeInTheDocument()
+    expect(screen.queryByText(/allocation-1/)).not.toBeInTheDocument()
+    expect(screen.getByText('report.incompleteStatus · 1')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'actions.reviewUnclassified' })).toHaveAttribute(
       'href',
       expect.stringContaining(`dateFrom=${previousStart}&dateTo=${previousEnd}`)

@@ -1138,8 +1138,11 @@ function AccountCard({
               aria-label={`${t('history.show')} for ${account.name}`}
             >
               <span className="sr-only">
-                {chartData
-                  .map((d) => `${dayjs(d.date).format('MMM D')}: ${formatMoney(d.balance)}`)
+                {(history ?? [])
+                  .map(
+                    (p) =>
+                      `${dayjs(p.date).format('MMM D')}: ${formatMoney(p.balance, account.currency)}`
+                  )
                   .join(', ')}
               </span>
               <SafeChart>

@@ -16,7 +16,7 @@ vi.mock('@/stores/account-store', () => ({
 }))
 vi.mock('@/lib/database', () => ({ query: vi.fn().mockResolvedValue([]), execute: vi.fn() }))
 import { beforeEach, describe, it, expect, vi } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { DebtPayoff } from '../debt-payoff'
 
@@ -102,5 +102,67 @@ describe('DebtPayoff', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Unresolved debt')
     expect(screen.queryByText('summary.totalDebt')).not.toBeInTheDocument()
     expect(screen.queryByTestId('debt-chart')).not.toBeInTheDocument()
+  })
+
+  it('accepts a finite extra payment of 12.34 as 1234 centavos', () => {
+    data.accounts = [{ id: 'usd', currency: 'USD' }]
+    data.debts = [{ id: 'usd', name: 'USD debt', balance: 10000, minPayment: 2500, apr: 0 }]
+    render(<DebtPayoff />)
+
+    fireEvent.change(screen.getByLabelText('extraPayment.title'), { target: { value: '12.34' } })
+
+    expect(data.setExtraPayment).toHaveBeenCalledWith(1234)
+  })
+
+  it('treats a cleared extra payment as intentional zero', () => {
+    data.accounts = [{ id: 'usd', currency: 'USD' }]
+    data.debts = [{ id: 'usd', name: 'USD debt', balance: 10000, minPayment: 2500, apr: 0 }]
+    render(<DebtPayoff />)
+    const input = screen.getByLabelText('extraPayment.title')
+
+    fireEvent.change(input, { target: { value: '12.34' } })
+    data.setExtraPayment.mockClear()
+    fireEvent.change(input, { target: { value: '' } })
+
+    expect(data.setExtraPayment).toHaveBeenCalledWith(0)
+    expect(input).toHaveAttribute('aria-invalid', 'false')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('rejects a negative extra payment without calling the store and shows an accessible error', () => {
+    data.accounts = [{ id: 'usd', currency: 'USD' }]
+    data.debts = [{ id: 'usd', name: 'USD debt', balance: 10000, minPayment: 2500, apr: 0 }]
+    render(<DebtPayoff />)
+    const input = screen.getByLabelText('extraPayment.title')
+
+    fireEvent.change(input, { target: { value: '12.34' } })
+    expect(data.setExtraPayment).toHaveBeenCalledWith(1234)
+    data.setExtraPayment.mockClear()
+
+    fireEvent.change(input, { target: { value: '-50' } })
+
+    expect(data.setExtraPayment).not.toHaveBeenCalled()
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(input).toHaveAttribute('aria-describedby', 'extra-payment-error')
+    const error = screen.getByRole('alert')
+    expect(error).toHaveTextContent('extraPayment.invalid')
+    expect(error).toHaveAttribute('id', 'extra-payment-error')
+  })
+
+  it('clears extra payment validation after a valid amount is entered', () => {
+    data.accounts = [{ id: 'usd', currency: 'USD' }]
+    data.debts = [{ id: 'usd', name: 'USD debt', balance: 10000, minPayment: 2500, apr: 0 }]
+    render(<DebtPayoff />)
+    const input = screen.getByLabelText('extraPayment.title')
+
+    fireEvent.change(input, { target: { value: '-50' } })
+    expect(screen.getByRole('alert')).toHaveTextContent('extraPayment.invalid')
+
+    fireEvent.change(input, { target: { value: '10' } })
+
+    expect(data.setExtraPayment).toHaveBeenCalledWith(1000)
+    expect(input).toHaveAttribute('aria-invalid', 'false')
+    expect(input).not.toHaveAttribute('aria-describedby')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })

@@ -8,7 +8,7 @@ import {
   CHART_TOOLTIP_STYLE,
   CHART_LEGEND_STYLE,
 } from '@/lib/constants'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ChangeEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Target, Plus, Trash2, Zap, Snowflake, ChevronDown } from 'lucide-react'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from 'recharts'
@@ -38,6 +38,20 @@ const DEBT_COLORS = [
 
 const DEBT_INPUT_CLASS =
   'h-9 w-full rounded-lg border border-border bg-muted/50 px-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-accent/50 focus:outline-none'
+
+const EXTRA_PAYMENT_ERROR_ID = 'extra-payment-error'
+
+function extraPaymentDraftFromCentavos(centavos: number): string {
+  return centavos === 0 ? '' : String(fromCentavos(centavos))
+}
+
+function parseExtraPaymentCentavos(value: string, valueAsNumber: number): number | null {
+  if (value === '') return 0
+  if (!Number.isFinite(valueAsNumber) || valueAsNumber < 0) return null
+  const centavos = toCentavos(valueAsNumber)
+  if (!Number.isSafeInteger(centavos) || centavos < 0) return null
+  return centavos
+}
 
 function StrategyToggle({
   strategy,
@@ -499,6 +513,83 @@ function SummaryMetrics({
   )
 }
 
+function ExtraPaymentInput({
+  extraPayment,
+  currency,
+  onAccept,
+}: {
+  extraPayment: number
+  currency: string
+  onAccept: (centavos: number) => void
+}) {
+  const { t } = useTranslation('debtPayoff')
+  const [draft, setDraft] = useState(() => extraPaymentDraftFromCentavos(extraPayment))
+  const [invalid, setInvalid] = useState(false)
+  const [prevExtraPayment, setPrevExtraPayment] = useState(extraPayment)
+
+  if (extraPayment !== prevExtraPayment) {
+    setPrevExtraPayment(extraPayment)
+    if (!invalid) {
+      const acceptedFromDraft = parseExtraPaymentCentavos(
+        draft,
+        draft === '' ? 0 : Number.parseFloat(draft)
+      )
+      if (acceptedFromDraft !== extraPayment) {
+        setDraft(extraPaymentDraftFromCentavos(extraPayment))
+      }
+    }
+  }
+
+  const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget
+    if (input.validity.badInput) {
+      setInvalid(true)
+      return
+    }
+
+    const { value } = input
+    setDraft(value)
+    const centavos = parseExtraPaymentCentavos(value, input.valueAsNumber)
+    if (centavos === null) {
+      setInvalid(true)
+      return
+    }
+
+    setInvalid(false)
+    onAccept(centavos)
+  }
+
+  return (
+    <div className="native-panel p-4">
+      <h3 className="text-muted-foreground mb-3 text-sm font-semibold tracking-wider uppercase">
+        {t('extraPayment.title')}
+      </h3>
+      <div className="flex items-center gap-2">
+        <span className="text-muted-foreground text-sm">{currency}</span>
+        <Input
+          type="number"
+          step="0.01"
+          min="0"
+          value={draft}
+          onChange={handleChange}
+          placeholder="0.00"
+          aria-label={t('extraPayment.title')}
+          aria-invalid={invalid}
+          aria-describedby={invalid ? EXTRA_PAYMENT_ERROR_ID : undefined}
+          className="text-foreground placeholder:text-muted-foreground h-10 w-full text-lg font-semibold"
+        />
+        <span className="text-muted-foreground text-sm">{t('extraPayment.perMonth')}</span>
+      </div>
+      {invalid ? (
+        <p id={EXTRA_PAYMENT_ERROR_ID} className="text-destructive mt-2 text-xs" role="alert">
+          {t('extraPayment.invalid')}
+        </p>
+      ) : null}
+      <p className="text-muted-foreground mt-2 text-xs">{t('extraPayment.description')}</p>
+    </div>
+  )
+}
+
 export function DebtPayoff() {
   const { t } = useTranslation('debtPayoff')
   const { t: tCommon } = useTranslation('common')
@@ -634,26 +725,11 @@ export function DebtPayoff() {
             <div className="lg:col-span-2">
               <StrategyToggle strategy={strategy} onToggle={setStrategy} />
             </div>
-            <div className="native-panel p-4">
-              <h3 className="text-muted-foreground mb-3 text-sm font-semibold tracking-wider uppercase">
-                {t('extraPayment.title')}
-              </h3>
-              <div className="flex items-center gap-2">
-                <span className="text-muted-foreground text-sm">{currency}</span>
-                <Input
-                  type="number"
-                  step="1"
-                  min="0"
-                  value={fromCentavos(extraPayment) || ''}
-                  onChange={(e) => setExtraPayment(toCentavos(parseFloat(e.target.value) || 0))}
-                  placeholder="0.00"
-                  aria-label={t('extraPayment.title')}
-                  className="text-foreground placeholder:text-muted-foreground h-10 w-full text-lg font-semibold"
-                />
-                <span className="text-muted-foreground text-sm">{t('extraPayment.perMonth')}</span>
-              </div>
-              <p className="text-muted-foreground mt-2 text-xs">{t('extraPayment.description')}</p>
-            </div>
+            <ExtraPaymentInput
+              extraPayment={extraPayment}
+              currency={currency}
+              onAccept={setExtraPayment}
+            />
           </div>
 
           {/* Strategy comparison */}

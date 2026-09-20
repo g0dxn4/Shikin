@@ -133,6 +133,9 @@ export const useDebtStore = create<DebtState>((set, get) => ({
   },
 
   setExtraPayment: (amount) => {
+    if (!Number.isFinite(amount) || !Number.isSafeInteger(amount) || amount < 0) {
+      return
+    }
     const state = get()
     const computed = recalculate({
       debts: state.debts,

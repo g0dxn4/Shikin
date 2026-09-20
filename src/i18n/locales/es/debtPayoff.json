@@ -10,7 +10,8 @@
   "extraPayment": {
     "title": "Pago Extra Mensual",
     "perMonth": "/mes",
-    "description": "Monto extra sobre los pagos mínimos para acelerar el pago"
+    "description": "Monto extra sobre los pagos mínimos para acelerar el pago",
+    "invalid": "Ingresa un pago extra válido de 0 o más."
   },
   "comparison": {
     "avalancheMonths": "Tiempo Avalancha",

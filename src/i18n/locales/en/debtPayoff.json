@@ -10,7 +10,8 @@
   "extraPayment": {
     "title": "Extra Monthly Payment",
     "perMonth": "/mo",
-    "description": "Extra amount on top of minimum payments to accelerate payoff"
+    "description": "Extra amount on top of minimum payments to accelerate payoff",
+    "invalid": "Enter a valid extra payment of 0 or more."
   },
   "comparison": {
     "avalancheMonths": "Avalanche Timeline",

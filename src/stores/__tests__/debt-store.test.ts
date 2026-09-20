@@ -213,5 +213,45 @@ describe('debt-store', () => {
       expect(useDebtStore.getState().extraPayment).toBe(50000)
       expect(mockCalculatePayoffPlan).toHaveBeenCalled()
     })
+
+    it('rejects negative extra payment and preserves the accepted extra and plan', () => {
+      const priorPlan = { ...mockPayoffPlan, months: 50 }
+      useDebtStore.setState({
+        debts: [{ id: 'd1', name: 'Card', balance: 100000, apr: 20, minPayment: 5000 }],
+        extraPayment: 20000,
+        payoffPlan: priorPlan,
+      })
+      mockCalculatePayoffPlan.mockClear()
+      mockCompareStrategies.mockClear()
+
+      useDebtStore.getState().setExtraPayment(-5000)
+
+      expect(useDebtStore.getState().extraPayment).toBe(20000)
+      expect(useDebtStore.getState().payoffPlan).toEqual(priorPlan)
+      expect(mockCalculatePayoffPlan).not.toHaveBeenCalled()
+      expect(mockCompareStrategies).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['NaN', Number.NaN],
+      ['Infinity', Number.POSITIVE_INFINITY],
+      ['-Infinity', Number.NEGATIVE_INFINITY],
+      ['fractional centavos', 12.5],
+      ['unsafe integer', Number.MAX_SAFE_INTEGER + 1],
+    ])('skips %s extra payment and preserves accepted state', (_label, amount) => {
+      const priorPlan = { ...mockPayoffPlan, months: 50 }
+      useDebtStore.setState({
+        debts: [{ id: 'd1', name: 'Card', balance: 100000, apr: 20, minPayment: 5000 }],
+        extraPayment: 1234,
+        payoffPlan: priorPlan,
+      })
+      mockCalculatePayoffPlan.mockClear()
+
+      useDebtStore.getState().setExtraPayment(amount)
+
+      expect(useDebtStore.getState().extraPayment).toBe(1234)
+      expect(useDebtStore.getState().payoffPlan).toEqual(priorPlan)
+      expect(mockCalculatePayoffPlan).not.toHaveBeenCalled()
+    })
   })
 })

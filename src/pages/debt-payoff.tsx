@@ -550,7 +550,7 @@ function ExtraPaymentInput({
     const { value } = input
     setDraft(value)
     const centavos = parseExtraPaymentCentavos(value, input.valueAsNumber)
-    if (centavos === null) {
+    if (centavos === null || input.validity.stepMismatch) {
       setInvalid(true)
       return
     }

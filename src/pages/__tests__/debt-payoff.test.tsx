@@ -114,6 +114,29 @@ describe('DebtPayoff', () => {
     expect(data.setExtraPayment).toHaveBeenCalledWith(1234)
   })
 
+  it('rejects fractional-cent precision without replacing the last accepted payment', () => {
+    data.accounts = [{ id: 'usd', currency: 'USD' }]
+    data.debts = [{ id: 'usd', name: 'USD debt', balance: 10000, minPayment: 2500, apr: 0 }]
+    render(<DebtPayoff />)
+    const input = screen.getByLabelText('extraPayment.title') as HTMLInputElement
+
+    fireEvent.change(input, { target: { value: '12.34' } })
+    expect(data.setExtraPayment).toHaveBeenCalledWith(1234)
+    data.setExtraPayment.mockClear()
+    fireEvent.change(input, { target: { value: '12.345' } })
+
+    expect(input.validity.stepMismatch).toBe(true)
+    expect(input).toHaveValue(12.345)
+    expect(data.setExtraPayment).not.toHaveBeenCalled()
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByRole('alert')).toHaveTextContent('extraPayment.invalid')
+
+    fireEvent.change(input, { target: { value: '12.34' } })
+    expect(data.setExtraPayment).toHaveBeenCalledExactlyOnceWith(1234)
+    expect(input).toHaveAttribute('aria-invalid', 'false')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
   it('treats a cleared extra payment as intentional zero', () => {
     data.accounts = [{ id: 'usd', currency: 'USD' }]
     data.debts = [{ id: 'usd', name: 'USD debt', balance: 10000, minPayment: 2500, apr: 0 }]

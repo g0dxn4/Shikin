@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -12,6 +12,16 @@ import {
 
 const require = createRequire(import.meta.url)
 const viteEntry = join(dirname(require.resolve('vite/package.json')), 'bin', 'vite.js')
+const tscEntry = join(dirname(require.resolve('typescript/package.json')), 'bin', 'tsc')
+
+const compile = spawnSync(
+  process.execPath,
+  [tscEntry, '-p', 'packages/finance-core/tsconfig.json'],
+  { stdio: 'inherit' }
+)
+if (compile.status !== 0) {
+  process.exit(compile.status ?? 1)
+}
 
 const bridgeToken =
   process.env.SHIKIN_DATA_SERVER_BRIDGE_TOKEN ||

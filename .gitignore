@@ -56,6 +56,9 @@ docs/development/
 .continue/
 .claude/
 .worktrees/
+.ava/
+.cortexkit/
+.playwright-mcp/
 
 # Package manager
 .pnpm-store/

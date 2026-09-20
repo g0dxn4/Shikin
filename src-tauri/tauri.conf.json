@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Shikin",
-  "version": "1.0.10",
+  "version": "1.1.0",
   "identifier": "com.asf.shikin",
   "build": {
     "frontendDist": "../dist",
@@ -39,8 +39,8 @@
       "icons/icon.ico"
     ],
     "category": "Finance",
-    "shortDescription": "Local-first personal finance manager",
-    "longDescription": "A privacy-first desktop app for managing your personal finances. Track transactions, budgets, investments, and subscriptions — all stored locally on your device.",
+    "shortDescription": "Local-first personal finance for desktop and private web access, with CLI/MCP automation.",
+    "longDescription": "Local-first personal finance for desktop and private web access, with CLI/MCP automation. Track transactions, budgets, investments, and subscriptions — all stored locally on your device.",
     "linux": {
       "deb": {
         "desktopTemplate": "linux/Shikin.desktop"

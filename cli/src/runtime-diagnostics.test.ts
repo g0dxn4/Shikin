@@ -49,7 +49,7 @@ describe('CLI runtime diagnostics', () => {
     expect(result).toMatchObject({
       success: true,
       build: 'cli',
-      version: '1.0.10',
+      version: '1.1.0',
       schemaVersion: 21,
       schemaMigration: '021_backend_remediation_foundation',
       localInstance: { status: 'available', id },

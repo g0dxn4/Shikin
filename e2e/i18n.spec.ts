@@ -11,6 +11,7 @@ test.describe('i18n', () => {
     await page.waitForLoadState('networkidle')
 
     await expect(page.getByRole('heading', { level: 1, name: 'Transactions' })).toBeVisible()
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en')
   })
 
   test('switching to Spanish updates UI', async ({ page }) => {
@@ -24,6 +25,7 @@ test.describe('i18n', () => {
     await page.waitForLoadState('networkidle')
 
     await expect(page.getByRole('heading', { level: 1, name: 'Transacciones' })).toBeVisible()
+    await expect(page.locator('html')).toHaveAttribute('lang', 'es')
   })
 
   test('Spanish persists across navigation', async ({ page }) => {
@@ -39,6 +41,7 @@ test.describe('i18n', () => {
 
     // Page heading should be in Spanish
     await expect(page.getByRole('heading', { level: 1, name: 'Transacciones' })).toBeVisible()
+    await expect(page.locator('html')).toHaveAttribute('lang', 'es')
   })
 
   test('switching back to English works', async ({ page }) => {
@@ -48,9 +51,52 @@ test.describe('i18n', () => {
     // Switch to Spanish first
     await page.selectOption('select', 'es')
     await expect(page.getByRole('heading', { level: 1, name: 'Preferencias' })).toBeVisible()
+    await expect(page.locator('html')).toHaveAttribute('lang', 'es')
 
     // Switch back to English
     await page.selectOption('select', 'en')
     await expect(page.getByRole('heading', { level: 1, name: 'Preferences' })).toBeVisible()
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en')
+  })
+
+  test('Spanish html lang persists across reload', async ({ page }) => {
+    await page.goto('/settings')
+    await page.waitForLoadState('networkidle')
+
+    await page.selectOption('select', 'es')
+    await expect(page.locator('html')).toHaveAttribute('lang', 'es')
+
+    await page.reload()
+    await page.waitForLoadState('networkidle')
+
+    await expect(page.locator('html')).toHaveAttribute('lang', 'es')
+    await expect(page.getByRole('heading', { level: 1, name: 'Preferencias' })).toBeVisible()
+    await expect(page.locator('#language-select')).toHaveValue('es')
+  })
+
+  test('regional Spanish cache resolves heading, html lang, and select', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('i18nextLng', 'es-MX')
+    })
+    await page.goto('/settings')
+    await page.waitForLoadState('networkidle')
+
+    await expect(page.getByRole('heading', { level: 1, name: 'Preferencias' })).toBeVisible()
+    await expect(page.locator('html')).toHaveAttribute('lang', 'es')
+    await expect(page.locator('#language-select')).toHaveValue('es')
+  })
+
+  test('unsupported language cache falls back to English heading, html lang, and select', async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('i18nextLng', 'fr')
+    })
+    await page.goto('/settings')
+    await page.waitForLoadState('networkidle')
+
+    await expect(page.getByRole('heading', { level: 1, name: 'Preferences' })).toBeVisible()
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en')
+    await expect(page.locator('#language-select')).toHaveValue('en')
   })
 })

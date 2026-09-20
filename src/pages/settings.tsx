@@ -367,7 +367,7 @@ export function SettingsPage() {
             <p className="text-muted-foreground text-xs">{t('language.description')}</p>
             <select
               id="language-select"
-              value={i18n.language}
+              value={i18n.resolvedLanguage ?? i18n.language}
               onChange={(e) => i18n.changeLanguage(e.target.value)}
               className="native-select mt-2 w-full"
             >

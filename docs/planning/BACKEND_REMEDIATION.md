@@ -214,3 +214,7 @@ Closure checks at `1c2234c`:
 - Independent integrated code-quality review approved both findings with **no material findings** in the language/bootstrap/Settings scope. Module-local listeners use Vite disposal cleanup rather than production global state. Static HTML retains English until JavaScript runs, intentionally.
 
 Both issues were marked closed only after integration, regression tests, browser verification and review. No financial code, schema or dependency changes were made. Repository-wide automated checks are not a claim of an exhaustive architectural audit; installed-platform validation limits above still apply.
+
+### Subsequent pre-push acceptance
+
+The later [all-screen mock-data QA](PRE_PUSH_QA.md) exercised all 19 routes on desktop/mobile, closed five additional UI findings and two stale E2E expectations, and passed the Sol high financial UI/input review. Final validation reached **1,867 tests / 169 files**, **87 browser-suite passes** with 15 expected viewport-specific skips, four focused cross-engine input checks, and the **108-tool** packaged smoke. See that ledger for exact closure evidence and remaining platform/coverage limits.

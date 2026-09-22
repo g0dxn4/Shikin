@@ -9,6 +9,7 @@ import {
   Download,
   Globe2,
   KeyRound,
+  Layers3,
   Loader2,
   MonitorUp,
   Palette,
@@ -29,6 +30,7 @@ import { exportDatabaseSnapshot, importDatabaseSnapshot } from '@/lib/database'
 import { ThemeSettings } from '@/components/ThemeSettings'
 import { RuntimeDiagnosticsPanel } from '@/components/settings/runtime-diagnostics-panel'
 import { CurrencySettings } from '@/components/settings/currency-settings'
+import { ClassificationTypesSettings } from '@/components/settings/classification-types-settings'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 import { ProgressBar } from '@/components/ui/progress-bar'
 import { ErrorBanner } from '@/components/ui/error-banner'
@@ -697,7 +699,15 @@ export function SettingsPage() {
           <SectionTitle icon={<BadgeDollarSign size={18} />} title={t('sections.currency')} />
           <CurrencySettings />
         </section>
-        <section className="native-panel space-y-5 p-5 sm:p-6">
+        <section className="native-panel min-w-0 space-y-5 p-5 sm:p-6">
+          <SectionTitle
+            icon={<Layers3 size={18} />}
+            title={t('sections.classificationTypes')}
+            description={t('classificationTypes.sectionDescription')}
+          />
+          <ClassificationTypesSettings />
+        </section>
+        <section className="native-panel space-y-5 p-5 sm:p-6 xl:col-span-2">
           <SectionTitle
             icon={<Tags size={18} />}
             title={t('sections.categoryRules')}

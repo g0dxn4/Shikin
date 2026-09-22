@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { ConsumptionRole } from '@shikin/finance-core/corrections'
 import { AlertCircle, Check, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -22,13 +21,14 @@ import {
 import { getErrorMessage } from '@/lib/errors'
 import { formatMoney } from '@/lib/money'
 
-const EXPENSE_ROLES: ConsumptionRole[] = ['purchase', 'fee', 'principal', 'cash_withdrawal']
-const INCOME_ROLES: ConsumptionRole[] = ['earned_income', 'refund', 'internal_inflow']
-
 interface DraftClassification {
-  role: ConsumptionRole
+  selection: string
   referencedPurchaseId: string
 }
+
+type ClassificationEntry = NonNullable<
+  ConsumptionClassificationContext['classificationTypes']
+>[number]
 
 export interface ConsumptionClassificationDialogProps {
   transactionId: string | null
@@ -41,18 +41,37 @@ function allocationKey(allocation: ConsumptionAllocationView): string {
   return allocation.splitId ?? '__parent__'
 }
 
+function selectionKey(entry: ClassificationEntry): string {
+  return entry.kind === 'builtin'
+    ? `builtin:${entry.id}`
+    : `custom:${entry.id}:${entry.revisionId ?? ''}`
+}
+
 function draftsFromContext(context: ConsumptionClassificationContext) {
-  return Object.fromEntries(
-    context.allocations.map((allocation) => [
-      allocationKey(allocation),
-      {
-        role:
-          allocation.classification?.role ??
-          (context.transaction.type === 'expense' ? 'purchase' : 'earned_income'),
-        referencedPurchaseId: allocation.classification?.referenced_purchase_id ?? '',
-      },
-    ])
-  ) as Record<string, DraftClassification>
+  const classificationTypes = context.classificationTypes
+  if (!classificationTypes)
+    throw new Error('Classification catalog is unavailable. Refresh and try again.')
+  const drafts: Record<string, DraftClassification> = {}
+  for (const allocation of context.allocations) {
+    const classification = allocation.classification
+    const selected = classification
+      ? classification.type_revision_id
+        ? classificationTypes.find(
+            (entry) =>
+              entry.kind === 'custom' &&
+              entry.revisionId === classification.type_revision_id &&
+              entry.role === classification.role
+          )
+        : classificationTypes.find(
+            (entry) => entry.kind === 'builtin' && entry.role === classification.role
+          )
+      : undefined
+    drafts[allocationKey(allocation)] = {
+      selection: selected ? selectionKey(selected) : '',
+      referencedPurchaseId: classification?.referenced_purchase_id ?? '',
+    }
+  }
+  return drafts
 }
 
 export function ConsumptionClassificationDialog({
@@ -76,9 +95,10 @@ export function ConsumptionClassificationDialog({
     setError(null)
     try {
       const next = await readConsumptionClassificationContext(transactionId)
+      const nextDrafts = draftsFromContext(next)
       if (sequence !== requestSequence.current) return
       setContext(next)
-      setDrafts(draftsFromContext(next))
+      setDrafts(nextDrafts)
     } catch (loadError) {
       if (sequence === requestSequence.current) setError(getErrorMessage(loadError))
     } finally {
@@ -104,24 +124,39 @@ export function ConsumptionClassificationDialog({
   }
 
   const save = async (allocation: ConsumptionAllocationView) => {
-    if (!context) return
+    if (!context?.classificationTypes) return
     const key = allocationKey(allocation)
     const draft = drafts[key]
     if (!draft) return
-    const needsPurchase = draft.role === 'refund' || draft.role === 'principal'
-    if (needsPurchase && !draft.referencedPurchaseId) {
+    const selected = context.classificationTypes.find(
+      (entry) => selectionKey(entry) === draft.selection
+    )
+    if (!selected) {
+      setError(t('errors.classificationRequired'))
+      return
+    }
+    if (selected.requiresPurchase && !draft.referencedPurchaseId) {
       setError(t('errors.purchaseRequired'))
       return
     }
     setMutationKey(key)
     setError(null)
     try {
-      await setConsumptionClassification({
+      const owner = {
         transactionId: context.transaction.id,
         splitId: allocation.splitId,
-        role: draft.role,
-        referencedPurchaseId: needsPurchase ? draft.referencedPurchaseId : null,
-      })
+        referencedPurchaseId: selected.requiresPurchase ? draft.referencedPurchaseId : null,
+      }
+      if (selected.kind === 'custom') {
+        if (!selected.revisionId) throw new Error('Custom classification revision is unavailable.')
+        await setConsumptionClassification({
+          ...owner,
+          customTypeId: selected.id,
+          expectedRevisionId: selected.revisionId,
+        })
+      } else {
+        await setConsumptionClassification({ ...owner, role: selected.role })
+      }
       await load()
       onChanged?.()
     } catch (mutationError) {
@@ -147,7 +182,12 @@ export function ConsumptionClassificationDialog({
     }
   }
 
-  const roles = context?.transaction.type === 'income' ? INCOME_ROLES : EXPENSE_ROLES
+  const classificationTypes = context?.classificationTypes
+  const choices = classificationTypes?.filter(
+    (entry) => entry.direction === context?.transaction.type && !entry.archived
+  )
+  const builtins = choices?.filter((entry) => entry.kind === 'builtin') ?? []
+  const custom = choices?.filter((entry) => entry.kind === 'custom') ?? []
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -177,7 +217,7 @@ export function ConsumptionClassificationDialog({
             <Skeleton className="h-28 rounded-xl" />
             <Skeleton className="h-28 rounded-xl" />
           </div>
-        ) : context ? (
+        ) : context && classificationTypes ? (
           <div className="min-w-0 space-y-3">
             <div className="text-muted-foreground flex min-w-0 flex-col gap-1 text-xs sm:flex-row sm:items-start sm:justify-between sm:gap-4">
               <span className="min-w-0 break-words">{context.transaction.description}</span>
@@ -189,11 +229,18 @@ export function ConsumptionClassificationDialog({
               const key = allocationKey(allocation)
               const draft = drafts[key]
               if (!draft) return null
-              const needsPurchase = draft.role === 'refund' || draft.role === 'principal'
+              const selected = classificationTypes.find(
+                (entry) => selectionKey(entry) === draft.selection
+              )
+              const needsPurchase = selected?.requiresPurchase ?? false
               const options = context.purchaseOptions.filter(
                 (option) => option.currency === context.transaction.currency?.trim().toUpperCase()
               )
               const busy = mutationKey === key
+              const pinned = allocation.classificationDisplay
+              const oldCustomRevision = Boolean(
+                allocation.classification?.type_revision_id && !selected
+              )
               return (
                 <section
                   key={key}
@@ -221,29 +268,70 @@ export function ConsumptionClassificationDialog({
                       )}
                     </span>
                   </div>
+
+                  {allocation.classification && pinned ? (
+                    <div
+                      className={`mt-3 rounded-lg border px-3 py-2 text-xs ${
+                        oldCustomRevision
+                          ? 'border-warning/30 bg-warning/10'
+                          : 'border-border bg-surface'
+                      }`}
+                    >
+                      <p className="text-muted-foreground font-semibold tracking-wide uppercase">
+                        {t('fields.currentAssignment')}
+                      </p>
+                      <p className="mt-1 font-medium break-words">
+                        {allocation.classification.type_revision_id
+                          ? pinned.name
+                          : t(`roles.${allocation.classification.role}`)}
+                        {pinned.version === null
+                          ? ''
+                          : ` · ${t('fields.version', { version: pinned.version })}`}
+                      </p>
+                      {oldCustomRevision ? (
+                        <p className="text-muted-foreground mt-1 leading-relaxed">
+                          {t('fields.historicalAssignment')}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+
                   <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">
                     <label className="text-muted-foreground min-w-0 text-xs">
                       {t('fields.role')}
                       <select
                         className="native-select text-foreground mt-1 block min-h-11 w-full max-w-full min-w-0"
-                        value={draft.role}
+                        value={draft.selection}
                         disabled={busy}
                         onChange={(event) => {
-                          const role = event.target.value as ConsumptionRole
+                          const next = classificationTypes.find(
+                            (entry) => selectionKey(entry) === event.target.value
+                          )
                           updateDraft(key, {
-                            role,
-                            referencedPurchaseId:
-                              role === 'refund' || role === 'principal'
-                                ? draft.referencedPurchaseId
-                                : '',
+                            selection: event.target.value,
+                            referencedPurchaseId: next?.requiresPurchase
+                              ? draft.referencedPurchaseId
+                              : '',
                           })
                         }}
                       >
-                        {roles.map((role) => (
-                          <option key={role} value={role}>
-                            {t(`roles.${role}`)}
-                          </option>
-                        ))}
+                        <option value="">{t('fields.selectClassification')}</option>
+                        <optgroup label={t('fields.builtinTypes')}>
+                          {builtins.map((entry) => (
+                            <option key={selectionKey(entry)} value={selectionKey(entry)}>
+                              {t(`roles.${entry.role}`)}
+                            </option>
+                          ))}
+                        </optgroup>
+                        {custom.length > 0 ? (
+                          <optgroup label={t('fields.customTypes')}>
+                            {custom.map((entry) => (
+                              <option key={selectionKey(entry)} value={selectionKey(entry)}>
+                                {entry.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ) : null}
                       </select>
                     </label>
                     {needsPurchase ? (
@@ -268,6 +356,23 @@ export function ConsumptionClassificationDialog({
                       </label>
                     ) : null}
                   </div>
+
+                  {selected ? (
+                    <div className="border-border bg-surface mt-3 min-w-0 rounded-lg border px-3 py-2 text-xs">
+                      <p className="font-medium break-words">
+                        {t(`roles.${selected.role}`)} · {t(`directions.${selected.direction}`)}
+                      </p>
+                      <p className="text-muted-foreground mt-1 leading-relaxed break-words">
+                        {t(`guidance.${selected.role}`, { defaultValue: selected.guidance })}
+                      </p>
+                      {selected.requiresPurchase ? (
+                        <p className="text-muted-foreground mt-1">
+                          {t('fields.confirmedPurchaseRequired')}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+
                   <div className="mt-3 flex min-w-0 flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
                     {allocation.classification ? (
                       <Button

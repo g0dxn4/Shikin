@@ -17,9 +17,16 @@
     "uncategorized": "Sin categoría"
   },
   "fields": {
-    "role": "Rol de la asignación",
+    "role": "Tipo de clasificación",
     "purchase": "Compra referenciada",
-    "selectPurchase": "Selecciona una compra"
+    "selectPurchase": "Selecciona una compra confirmada",
+    "selectClassification": "Elige una clasificación",
+    "builtinTypes": "Tratamientos integrados",
+    "customTypes": "Tipos personalizados",
+    "currentAssignment": "Asignación actual fijada",
+    "version": "Versión {{version}}",
+    "historicalAssignment": "Esta versión histórica ya no se puede seleccionar. Permanece sin cambios hasta que elijas y guardes otra clasificación explícitamente.",
+    "confirmedPurchaseRequired": "Requiere una referencia a una compra confirmada existente."
   },
   "roles": {
     "purchase": "Compra",
@@ -28,7 +35,26 @@
     "refund": "Reembolso",
     "internal_inflow": "Entrada interna",
     "cash_withdrawal": "Retiro de efectivo",
-    "principal": "Principal"
+    "principal": "Principal de gasto",
+    "other_income": "Otro ingreso (no ganado)",
+    "principal_recovery": "Principal recuperado (no crea una cuenta por cobrar)",
+    "asset_acquisition": "Adquisición de activo (excluida del consumo; no crea una tenencia)"
+  },
+  "directions": {
+    "income": "Ingreso",
+    "expense": "Gasto"
+  },
+  "guidance": {
+    "purchase": "Compra de consumo ordinaria.",
+    "fee": "Comisión incluida en el consumo.",
+    "earned_income": "Ingreso ganado explícito.",
+    "refund": "Requiere una compra confirmada en la misma moneda y reduce el consumo de esa categoría en la fecha del reembolso.",
+    "internal_inflow": "Entrada interna; no es ingreso ganado.",
+    "cash_withdrawal": "Retiro de efectivo; no es consumo.",
+    "principal": "El principal de gasto requiere una compra confirmada en la misma moneda; no es recuperación entrante de un préstamo.",
+    "other_income": "Entrada de efectivo no ganada confirmada por la persona; no se infieren ganancias ni intereses.",
+    "principal_recovery": "Principal entrante de un préstamo no registrado. No crea una coincidencia con cuentas por cobrar ni intereses; usa Cuentas por cobrar para pagos registrados.",
+    "asset_acquisition": "Se excluye del consumo. No crea una tenencia ni valor patrimonial; administra las inversiones por separado."
   },
   "actions": {
     "classify": "Clasificar consumo",
@@ -42,6 +68,7 @@
     "reviewAccount": "Revisar cobertura de la cuenta"
   },
   "errors": {
+    "classificationRequired": "Elige una clasificación explícitamente antes de guardar.",
     "purchaseRequired": "Elige la compra a la que corresponde este reembolso o principal.",
     "clearDependents": "Abre los reembolsos o asignaciones de principal vinculados y bórralos antes de cambiar esta compra."
   },
@@ -64,6 +91,16 @@
     "incomplete": "Esto no es un cero ni un total completo. Resuelve clasificaciones y cobertura antes de usarlo.",
     "consumption": "Consumo",
     "earnedIncome": "Ingreso ganado",
+    "otherIncome": "Otro ingreso",
+    "principalRecovery": "Recuperación de principal",
+    "assetAcquisitions": "Adquisiciones de activos",
+    "mainCurrencyTitle": "Totales fechados en moneda principal",
+    "mainComplete": "Todas las asignaciones reconocidas se convirtieron en sus fechas de transacción y la clasificación y cobertura están completas.",
+    "mainPartial": "Solo subtotales convertidos conocidos y parciales. Faltan tasas, clasificaciones o cobertura para completar los totales.",
+    "mainUnavailable": "Los totales en moneda principal no están disponibles porque no hay una moneda de informe configurada. La evidencia nativa permanece abajo.",
+    "partialStatus": "Parcial",
+    "nativeTitle": "Evidencia en monedas nativas",
+    "nativeDescription": "Las monedas originales se mantienen separadas. Estos subtotales no eliminan la incertidumbre de clasificación ni cobertura.",
     "classification": "Clasificación",
     "coverage": "Cobertura de fuentes",
     "completeStatus": "Completa",
@@ -72,6 +109,7 @@
     "uncovered": "Cuentas sin cobertura",
     "noKnownTotals": "No hay subtotal clasificado conocido para este periodo.",
     "categoryBreakdown": "Consumo por categoría de compra",
+    "categoryNative": "Monedas nativas; las categorías no se convierten ni se combinan.",
     "uncategorized": "Sin categoría",
     "loadError": "No se pudo cargar el consumo neto"
   }

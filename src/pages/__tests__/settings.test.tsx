@@ -96,6 +96,12 @@ vi.mock('@/components/ThemeSettings', () => ({
   ThemeSettings: () => <div data-testid="theme-settings">Theme Settings</div>,
 }))
 
+vi.mock('@/components/settings/classification-types-settings', () => ({
+  ClassificationTypesSettings: () => (
+    <div data-testid="classification-types-settings">Classification types</div>
+  ),
+}))
+
 vi.mock('@/lib/runtime', () => ({
   isTauri: true,
 }))

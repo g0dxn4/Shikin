@@ -26,6 +26,7 @@ import { useAccountStore } from '@/stores/account-store'
 import { useBudgetStore } from '@/stores/budget-store'
 import { useCurrencyStore } from '@/stores/currency-store'
 import { useTransactionStore } from '@/stores/transaction-store'
+import { captureCurrencyAuthority } from '@/stores/currency-authority'
 
 function startOfCurrentMonth() {
   return dayjs().startOf('month').format('YYYY-MM-DD')
@@ -493,7 +494,13 @@ function NetPeriodControls({
 function NetConsumptionPanel({ start, end }: { start: string; end: string }) {
   const { t } = useTranslation('consumption')
   const { accounts = [], archivedAccounts = [] } = useAccountStore()
-  const [report, setReport] = useState<FrontendNetConsumptionReport | null>(null)
+  const { mainCurrency, preferredCurrency, manualRates } = useCurrencyStore()
+  const authority = useMemo(
+    () => captureCurrencyAuthority({ mainCurrency, preferredCurrency, manualRates }, end),
+    [end, mainCurrency, manualRates, preferredCurrency]
+  )
+  const [loadedReport, setLoadedReport] = useState<FrontendNetConsumptionReport | null>(null)
+  const [reportAuthorityKey, setReportAuthorityKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [retryNonce, setRetryNonce] = useState(0)
@@ -508,20 +515,26 @@ function NetConsumptionPanel({ start, end }: { start: string; end: string }) {
 
   useEffect(() => {
     const sequence = ++requestSequence.current
+    const requestedAuthorityKey = authority.key
     void Promise.resolve()
       .then(() => {
         if (sequence !== requestSequence.current) return null
         setLoading(true)
         setError(null)
-        setReport(null)
+        setLoadedReport(null)
+        setReportAuthorityKey(null)
         return readNetConsumptionReport(start, end)
       })
       .then((nextReport) => {
-        if (nextReport && sequence === requestSequence.current) setReport(nextReport)
+        if (nextReport && sequence === requestSequence.current) {
+          setLoadedReport(nextReport)
+          setReportAuthorityKey(requestedAuthorityKey)
+        }
       })
       .catch((readError) => {
         if (sequence !== requestSequence.current) return
-        setReport(null)
+        setLoadedReport(null)
+        setReportAuthorityKey(null)
         setError(getErrorMessage(readError))
       })
       .finally(() => {
@@ -530,9 +543,11 @@ function NetConsumptionPanel({ start, end }: { start: string; end: string }) {
     return () => {
       if (sequence === requestSequence.current) requestSequence.current += 1
     }
-  }, [end, start, retryNonce])
+  }, [authority.key, end, start, retryNonce])
 
-  if (loading) {
+  const report = reportAuthorityKey === authority.key ? loadedReport : null
+
+  if (loading || (loadedReport && !report)) {
     return (
       <NativePanel className="space-y-3 p-5 sm:p-6" aria-busy="true" aria-label={t('report.title')}>
         <Skeleton className="h-6 w-40" />
@@ -562,6 +577,9 @@ function NetConsumptionPanel({ start, end }: { start: string; end: string }) {
 
   const reviewStart = report.period.start
   const reviewEnd = report.period.end
+  const mainConversion = report.mainConversion
+  const mainCurrencyConfigured = mainConversion?.toCurrency ?? null
+  const mainComplete = mainConversion?.complete === true
 
   return (
     <div className="space-y-3">
@@ -581,31 +599,68 @@ function NetConsumptionPanel({ start, end }: { start: string; end: string }) {
           </span>
         </div>
 
+        <section className="border-border bg-muted/20 mt-5 rounded-xl border p-4">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-semibold">{t('report.mainCurrencyTitle')}</h3>
+              <p className="text-muted-foreground mt-1 text-xs">
+                {mainCurrencyConfigured
+                  ? mainComplete
+                    ? t('report.mainComplete')
+                    : t('report.mainPartial')
+                  : t('report.mainUnavailable')}
+              </p>
+            </div>
+            {mainCurrencyConfigured ? (
+              <span
+                className={`rounded-full px-2 py-1 text-[10px] font-semibold tracking-wide uppercase ${
+                  mainComplete ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'
+                }`}
+              >
+                {mainComplete ? t('report.completeStatus') : t('report.partialStatus')}
+              </span>
+            ) : null}
+          </div>
+          {mainCurrencyConfigured && mainConversion ? (
+            <FiveFieldTotals
+              currency={mainCurrencyConfigured}
+              values={
+                mainComplete
+                  ? {
+                      consumptionCentavos: mainConversion.consumptionCentavos,
+                      earnedIncomeCentavos: mainConversion.earnedIncomeCentavos,
+                      otherIncomeCentavos: mainConversion.otherIncomeCentavos,
+                      principalRecoveryCentavos: mainConversion.principalRecoveryCentavos,
+                      assetAcquisitionCentavos: mainConversion.assetAcquisitionCentavos,
+                    }
+                  : {
+                      consumptionCentavos: mainConversion.knownConsumptionCentavos,
+                      earnedIncomeCentavos: mainConversion.knownEarnedIncomeCentavos,
+                      otherIncomeCentavos: mainConversion.knownOtherIncomeCentavos,
+                      principalRecoveryCentavos: mainConversion.knownPrincipalRecoveryCentavos,
+                      assetAcquisitionCentavos: mainConversion.knownAssetAcquisitionCentavos,
+                    }
+              }
+            />
+          ) : null}
+        </section>
+
+        <div className="mt-5">
+          <h3 className="text-sm font-semibold">{t('report.nativeTitle')}</h3>
+          <p className="text-muted-foreground mt-1 text-xs">{t('report.nativeDescription')}</p>
+        </div>
         {report.totalsByCurrency.length === 0 ? (
-          <p className="border-border bg-muted/30 text-muted-foreground mt-5 rounded-lg border p-4 text-sm">
+          <p className="border-border bg-muted/30 text-muted-foreground mt-3 rounded-lg border p-4 text-sm">
             {t('report.noKnownTotals')}
           </p>
         ) : (
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
             {report.totalsByCurrency.map((total) => (
               <section key={total.currency} className="border-border rounded-xl border p-4">
-                <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
+                <h4 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
                   {total.currency}
-                </h3>
-                <dl className="mt-3 space-y-2 text-sm">
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-muted-foreground">{t('report.consumption')}</dt>
-                    <dd className="font-semibold tabular-nums">
-                      {formatMoney(total.consumptionCentavos, total.currency)}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-muted-foreground">{t('report.earnedIncome')}</dt>
-                    <dd className="font-semibold tabular-nums">
-                      {formatMoney(total.earnedIncomeCentavos, total.currency)}
-                    </dd>
-                  </div>
-                </dl>
+                </h4>
+                <FiveFieldTotals currency={total.currency} values={total} />
               </section>
             ))}
           </div>
@@ -615,6 +670,7 @@ function NetConsumptionPanel({ start, end }: { start: string; end: string }) {
       <div className="grid min-w-0 gap-3 lg:grid-cols-2">
         <NativePanel className="min-w-0 p-5">
           <h2 className="text-sm font-semibold">{t('report.categoryBreakdown')}</h2>
+          <p className="text-muted-foreground mt-1 text-xs">{t('report.categoryNative')}</p>
           <div className="mt-3 space-y-2">
             {report.byCategory.map((category) => (
               <div
@@ -702,6 +758,41 @@ function NetConsumptionPanel({ start, end }: { start: string; end: string }) {
         </NativePanel>
       </div>
     </div>
+  )
+}
+
+function FiveFieldTotals({
+  currency,
+  values,
+}: {
+  currency: string
+  values: {
+    consumptionCentavos: number | null | undefined
+    earnedIncomeCentavos: number | null | undefined
+    otherIncomeCentavos?: number | null
+    principalRecoveryCentavos?: number | null
+    assetAcquisitionCentavos?: number | null
+  }
+}) {
+  const { t } = useTranslation('consumption')
+  const rows = [
+    ['consumption', values.consumptionCentavos],
+    ['earnedIncome', values.earnedIncomeCentavos],
+    ['otherIncome', values.otherIncomeCentavos],
+    ['principalRecovery', values.principalRecoveryCentavos],
+    ['assetAcquisitions', values.assetAcquisitionCentavos],
+  ] as const
+  return (
+    <dl className="mt-3 space-y-2 text-sm">
+      {rows.map(([label, amount]) => (
+        <div key={label} className="flex min-w-0 justify-between gap-3">
+          <dt className="text-muted-foreground min-w-0 break-words">{t(`report.${label}`)}</dt>
+          <dd className="shrink-0 font-semibold tabular-nums">
+            {amount === null || amount === undefined ? '—' : formatMoney(amount, currency)}
+          </dd>
+        </div>
+      ))}
+    </dl>
   )
 }
 

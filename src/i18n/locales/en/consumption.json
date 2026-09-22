@@ -17,9 +17,16 @@
     "uncategorized": "Uncategorized"
   },
   "fields": {
-    "role": "Allocation role",
+    "role": "Classification type",
     "purchase": "Referenced purchase",
-    "selectPurchase": "Select a purchase"
+    "selectPurchase": "Select a confirmed purchase",
+    "selectClassification": "Choose a classification",
+    "builtinTypes": "Built-in treatments",
+    "customTypes": "Custom types",
+    "currentAssignment": "Current pinned assignment",
+    "version": "Version {{version}}",
+    "historicalAssignment": "This historical version is no longer selectable. It remains unchanged until you explicitly choose and save another classification.",
+    "confirmedPurchaseRequired": "Requires an existing confirmed purchase reference."
   },
   "roles": {
     "purchase": "Purchase",
@@ -28,7 +35,26 @@
     "refund": "Refund",
     "internal_inflow": "Internal inflow",
     "cash_withdrawal": "Cash withdrawal",
-    "principal": "Principal"
+    "principal": "Expense principal",
+    "other_income": "Other income (non-earned)",
+    "principal_recovery": "Principal recovered (no receivable created)",
+    "asset_acquisition": "Asset acquisition (excluded from consumption; no holding created)"
+  },
+  "directions": {
+    "income": "Income",
+    "expense": "Expense"
+  },
+  "guidance": {
+    "purchase": "Ordinary consumption purchase.",
+    "fee": "Fee included in consumption.",
+    "earned_income": "Explicit earned income.",
+    "refund": "Requires a confirmed same-currency purchase and reduces consumption in that purchase category at the refund date.",
+    "internal_inflow": "Internal inflow; not earned income.",
+    "cash_withdrawal": "Cash withdrawal; not consumption.",
+    "principal": "Expense principal requires a confirmed same-currency purchase; it is not incoming loan recovery.",
+    "other_income": "User-confirmed non-earned cash receipt; no gain or interest is inferred.",
+    "principal_recovery": "Incoming untracked loan principal. It creates no receivable match or interest; use Receivables for tracked payments.",
+    "asset_acquisition": "Excluded from consumption. It creates no holding or net-worth value; manage investments independently."
   },
   "actions": {
     "classify": "Classify consumption",
@@ -42,6 +68,7 @@
     "reviewAccount": "Review account coverage"
   },
   "errors": {
+    "classificationRequired": "Choose a classification explicitly before saving.",
     "purchaseRequired": "Choose the purchase this refund or principal allocation references.",
     "clearDependents": "Open the referenced refund or principal allocations and clear them before changing this purchase."
   },
@@ -64,6 +91,16 @@
     "incomplete": "This is not a complete zero or total. Resolve classifications and account coverage before relying on it.",
     "consumption": "Consumption",
     "earnedIncome": "Earned income",
+    "otherIncome": "Other income",
+    "principalRecovery": "Principal recovery",
+    "assetAcquisitions": "Asset acquisitions",
+    "mainCurrencyTitle": "Main-currency dated totals",
+    "mainComplete": "All recognized allocations were converted at their transaction dates, and classification and source coverage are complete.",
+    "mainPartial": "Partial known converted subtotals only. Missing rates, classifications, or source coverage prevent complete totals.",
+    "mainUnavailable": "Main-currency totals are unavailable because no report currency is configured. Native evidence remains below.",
+    "partialStatus": "Partial",
+    "nativeTitle": "Native-currency evidence",
+    "nativeDescription": "Original currencies are kept separate. These subtotals do not remove classification or source-coverage uncertainty.",
     "classification": "Classification",
     "coverage": "Source coverage",
     "completeStatus": "Complete",
@@ -72,6 +109,7 @@
     "uncovered": "Uncovered accounts",
     "noKnownTotals": "No known classified subtotal for this period.",
     "categoryBreakdown": "Consumption by purchase category",
+    "categoryNative": "Native currencies; categories are not converted or combined.",
     "uncategorized": "Uncategorized",
     "loadError": "Couldn’t load net consumption"
   }

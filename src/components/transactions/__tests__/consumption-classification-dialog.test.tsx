@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { classificationCatalog } from '@shikin/finance-core'
 import { ConsumptionClassificationDialog } from '../consumption-classification-dialog'
 import {
   clearConsumptionClassification,
@@ -51,9 +52,16 @@ const context = {
         split_id: 'split-two',
         role: 'earned_income' as const,
         referenced_purchase_id: null,
+        type_revision_id: null,
+      },
+      classificationDisplay: {
+        name: 'earned_income',
+        version: null,
+        revisionId: null,
       },
     },
   ],
+  classificationTypes: classificationCatalog([], []),
   purchaseOptions: [
     {
       classificationId: 'purchase-classification',
@@ -88,7 +96,7 @@ describe('ConsumptionClassificationDialog', () => {
     render(<ConsumptionClassificationDialog transactionId="refund" open onOpenChange={vi.fn()} />)
     expect(await screen.findAllByText('allocation.split')).toHaveLength(2)
     const roles = screen.getAllByLabelText('fields.role')
-    await user.selectOptions(roles[0], 'refund')
+    await user.selectOptions(roles[0], 'builtin:refund')
     await user.click(screen.getAllByRole('button', { name: 'actions.save' })[0])
     expect(screen.getByRole('alert')).toHaveTextContent('errors.purchaseRequired')
     expect(mockSet).not.toHaveBeenCalled()
@@ -101,6 +109,184 @@ describe('ConsumptionClassificationDialog', () => {
         splitId: 'split-one',
         role: 'refund',
         referencedPurchaseId: 'purchase-classification',
+      })
+    )
+  })
+
+  it('submits an active custom type by ID and revision without also sending its role', async () => {
+    const customCatalog = classificationCatalog(
+      [
+        {
+          id: 'custom-income',
+          current_revision_id: 'custom-income-v2',
+          archived: 0,
+          created_at: '2026-01-01',
+          updated_at: '2026-02-01',
+        },
+      ],
+      [
+        {
+          id: 'custom-income-v2',
+          type_id: 'custom-income',
+          version: 2,
+          name: 'Family support with a deliberately long custom classification name',
+          financial_treatment: 'other_income',
+          created_at: '2026-02-01',
+        },
+      ]
+    )
+    mockRead.mockResolvedValue({
+      ...context,
+      classificationTypes: customCatalog,
+      allocations: [context.allocations[0]],
+    })
+    const user = userEvent.setup()
+    render(<ConsumptionClassificationDialog transactionId="refund" open onOpenChange={vi.fn()} />)
+
+    const select = await screen.findByLabelText('fields.role')
+    expect(screen.getByRole('option', { name: 'roles.other_income' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'roles.principal_recovery' })).toBeInTheDocument()
+    await user.selectOptions(select, 'custom:custom-income:custom-income-v2')
+    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+
+    await waitFor(() =>
+      expect(mockSet).toHaveBeenCalledWith({
+        transactionId: 'refund',
+        splitId: 'split-one',
+        customTypeId: 'custom-income',
+        expectedRevisionId: 'custom-income-v2',
+        referencedPurchaseId: null,
+      })
+    )
+    expect(mockSet.mock.calls[0]?.[0]).not.toHaveProperty('role')
+  })
+
+  it('shows an old pinned custom name without selecting a revised or archived head', async () => {
+    const revisedCatalog = classificationCatalog(
+      [
+        {
+          id: 'custom-income',
+          current_revision_id: 'custom-income-v2',
+          archived: 0,
+          created_at: '2026-01-01',
+          updated_at: '2026-02-01',
+        },
+      ],
+      [
+        {
+          id: 'custom-income-v2',
+          type_id: 'custom-income',
+          version: 2,
+          name: 'Current renamed type',
+          financial_treatment: 'other_income',
+          created_at: '2026-02-01',
+        },
+      ]
+    )
+    mockRead.mockResolvedValue({
+      ...context,
+      classificationTypes: revisedCatalog,
+      allocations: [
+        {
+          ...context.allocations[0],
+          classification: {
+            id: 'old-assignment',
+            transaction_id: 'refund',
+            split_id: 'split-one',
+            role: 'other_income',
+            referenced_purchase_id: null,
+            type_revision_id: 'custom-income-v1',
+          },
+          classificationDisplay: {
+            name: 'Old family support name',
+            version: 1,
+            revisionId: 'custom-income-v1',
+          },
+        },
+      ],
+    })
+    const onOpenChange = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <ConsumptionClassificationDialog transactionId="refund" open onOpenChange={onOpenChange} />
+    )
+
+    expect(
+      await screen.findByText((_, element) =>
+        Boolean(
+          element?.tagName === 'P' && element.textContent?.includes('Old family support name')
+        )
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByText('fields.historicalAssignment')).toBeInTheDocument()
+    expect(screen.getByLabelText('fields.role')).toHaveValue('')
+    await user.click(screen.getByRole('button', { name: 'actions.done' }))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    expect(mockSet).not.toHaveBeenCalled()
+    expect(mockClear).not.toHaveBeenCalled()
+  })
+
+  it('keeps an archived custom assignment pinned and unselectable', async () => {
+    mockRead.mockResolvedValue({
+      ...context,
+      classificationTypes: classificationCatalog([], []),
+      allocations: [
+        {
+          ...context.allocations[0],
+          classification: {
+            id: 'archived-assignment',
+            transaction_id: 'refund',
+            split_id: 'split-one',
+            role: 'principal_recovery',
+            referenced_purchase_id: null,
+            type_revision_id: 'archived-v3',
+          },
+          classificationDisplay: {
+            name: 'Archived principal receipts',
+            version: 3,
+            revisionId: 'archived-v3',
+          },
+        },
+      ],
+    })
+    render(<ConsumptionClassificationDialog transactionId="refund" open onOpenChange={vi.fn()} />)
+
+    expect(
+      await screen.findByText((_, element) =>
+        Boolean(
+          element?.tagName === 'P' && element.textContent?.includes('Archived principal receipts')
+        )
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('fields.role')).toHaveValue('')
+    expect(
+      screen.queryByRole('option', { name: 'Archived principal receipts' })
+    ).not.toBeInTheDocument()
+    expect(mockSet).not.toHaveBeenCalled()
+  })
+
+  it('offers asset acquisition only for expenses and does not invent purchase references', async () => {
+    mockRead.mockResolvedValue({
+      ...context,
+      transaction: { ...context.transaction, type: 'expense' },
+      allocations: [context.allocations[0]],
+      purchaseOptions: [],
+    })
+    const user = userEvent.setup()
+    render(<ConsumptionClassificationDialog transactionId="refund" open onOpenChange={vi.fn()} />)
+
+    const select = await screen.findByLabelText('fields.role')
+    expect(screen.getByRole('option', { name: 'roles.asset_acquisition' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'roles.other_income' })).not.toBeInTheDocument()
+    await user.selectOptions(select, 'builtin:asset_acquisition')
+    expect(screen.queryByLabelText('fields.purchase')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+    await waitFor(() =>
+      expect(mockSet).toHaveBeenCalledWith({
+        transactionId: 'refund',
+        splitId: 'split-one',
+        role: 'asset_acquisition',
+        referencedPurchaseId: null,
       })
     )
   })

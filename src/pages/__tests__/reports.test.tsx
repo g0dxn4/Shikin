@@ -1,6 +1,6 @@
 import type { DatedExchangeRate } from '@shikin/finance-core/fx'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import dayjs from 'dayjs'
@@ -43,6 +43,7 @@ let mockArchivedAccounts: Array<Record<string, unknown>> = []
 let mockBudgets: Array<Record<string, unknown>> = []
 let mockTransactions: Array<Record<string, unknown>> = []
 let mockPreferredCurrency = 'USD'
+let mockMainCurrency: string | null | undefined
 let mockManualRates: DatedExchangeRate[] = []
 function rate(fromCurrency: string, toCurrency: string, rateDecimal: string) {
   return {
@@ -142,7 +143,7 @@ const stableGetTotalBalanceInPreferred = (accounts: Array<{ balance: number }>) 
 vi.mock('@/stores/currency-store', () => ({
   useCurrencyStore: () => ({
     preferredCurrency: mockPreferredCurrency,
-    mainCurrency: mockPreferredCurrency,
+    mainCurrency: mockMainCurrency === undefined ? mockPreferredCurrency : mockMainCurrency,
     manualRates: mockManualRates,
     getTotalBalanceInPreferred: stableGetTotalBalanceInPreferred,
     loadRates: mockLoadRates,
@@ -192,6 +193,7 @@ describe('ReportsPage', async () => {
     ]
     mockTotalBalanceResult = null
     mockPreferredCurrency = 'USD'
+    mockMainCurrency = undefined
     mockManualRates = []
     mockBudgetDisplayComplete = true
     mockBudgetDisplayError = null
@@ -260,6 +262,240 @@ describe('ReportsPage', async () => {
       dayjs().endOf('month').format('YYYY-MM-DD')
     )
     expect(screen.queryByText('$2,500.00')).not.toBeInTheDocument()
+  })
+
+  it('shows all five complete dated main-currency totals separately from native evidence', async () => {
+    mockReadNetConsumptionReport.mockResolvedValueOnce({
+      basis: 'net_consumption',
+      complete: true,
+      classificationComplete: true,
+      coverageComplete: true,
+      unresolvedIds: [],
+      uncoveredAccountIds: [],
+      totalsByCurrency: [
+        {
+          currency: 'EUR',
+          consumptionCentavos: 1101,
+          earnedIncomeCentavos: 2202,
+          otherIncomeCentavos: 3303,
+          principalRecoveryCentavos: 4404,
+          assetAcquisitionCentavos: 5505,
+        },
+      ],
+      mainConversion: {
+        complete: true,
+        toCurrency: 'USD',
+        reason: null,
+        policy: 'recognition_transaction_date_parent_then_allocation',
+        consumptionCentavos: 101,
+        earnedIncomeCentavos: 202,
+        otherIncomeCentavos: 303,
+        principalRecoveryCentavos: 404,
+        assetAcquisitionCentavos: 505,
+        knownConsumptionCentavos: 101,
+        knownEarnedIncomeCentavos: 202,
+        knownOtherIncomeCentavos: 303,
+        knownPrincipalRecoveryCentavos: 404,
+        knownAssetAcquisitionCentavos: 505,
+        classificationComplete: true,
+        coverageComplete: true,
+        unresolvedClassificationIds: [],
+        native: {
+          basis: 'net_consumption',
+          classificationComplete: true,
+          unresolvedIds: [],
+          totalsByCurrency: [],
+          byCategory: [],
+        },
+        allocations: [],
+        byCategory: [],
+        conversion: {},
+        uncoveredAccountIds: [],
+      },
+      byCategory: [],
+      period: { start: '2026-01-01', end: '2026-01-31' },
+      currencyScope: 'all',
+      message: 'Complete',
+    })
+    const user = userEvent.setup()
+    await renderReports()
+    await user.click(screen.getByRole('button', { name: 'basis.net' }))
+
+    const main = await screen.findByRole('heading', { name: 'report.mainCurrencyTitle' })
+    const mainSection = main.closest('section')!
+    expect(within(mainSection).getByText('$1.01')).toBeInTheDocument()
+    expect(within(mainSection).getByText('$2.02')).toBeInTheDocument()
+    expect(within(mainSection).getByText('$3.03')).toBeInTheDocument()
+    expect(within(mainSection).getByText('$4.04')).toBeInTheDocument()
+    expect(within(mainSection).getByText('$5.05')).toBeInTheDocument()
+    expect(screen.getByText('€11.01')).toBeInTheDocument()
+    expect(screen.getByText('€55.05')).toBeInTheDocument()
+  })
+
+  it('labels known converted values as partial and never renders missing full totals as zero', async () => {
+    mockReadNetConsumptionReport.mockResolvedValueOnce({
+      basis: 'net_consumption',
+      complete: false,
+      classificationComplete: false,
+      coverageComplete: true,
+      unresolvedIds: ['missing'],
+      uncoveredAccountIds: [],
+      totalsByCurrency: [],
+      mainConversion: {
+        complete: false,
+        toCurrency: 'USD',
+        reason: 'missing_direct_rate',
+        consumptionCentavos: null,
+        earnedIncomeCentavos: null,
+        otherIncomeCentavos: null,
+        principalRecoveryCentavos: null,
+        assetAcquisitionCentavos: null,
+        knownConsumptionCentavos: 111,
+        knownEarnedIncomeCentavos: 222,
+        knownOtherIncomeCentavos: 333,
+        knownPrincipalRecoveryCentavos: null,
+        knownAssetAcquisitionCentavos: 555,
+        native: {
+          basis: 'net_consumption',
+          classificationComplete: false,
+          unresolvedIds: ['missing'],
+          totalsByCurrency: [],
+          byCategory: [],
+        },
+        allocations: [],
+        policy: 'recognition_transaction_date_parent_then_allocation',
+        classificationComplete: false,
+        coverageComplete: true,
+        unresolvedClassificationIds: ['missing'],
+        byCategory: [],
+        conversion: {},
+        uncoveredAccountIds: [],
+      },
+      byCategory: [],
+      period: { start: '2026-01-01', end: '2026-01-31' },
+      currencyScope: 'all',
+      message: 'Partial',
+    })
+    const user = userEvent.setup()
+    await renderReports()
+    await user.click(screen.getByRole('button', { name: 'basis.net' }))
+
+    expect(await screen.findByText('report.partialStatus')).toBeInTheDocument()
+    const mainSection = screen
+      .getByRole('heading', { name: 'report.mainCurrencyTitle' })
+      .closest('section')!
+    expect(within(mainSection).getByText('$1.11')).toBeInTheDocument()
+    expect(within(mainSection).getByText('$3.33')).toBeInTheDocument()
+    expect(within(mainSection).getByText('—')).toBeInTheDocument()
+    expect(within(mainSection).queryByText('$0.00')).not.toBeInTheDocument()
+  })
+
+  it('states that main conversion is unavailable when no report currency is configured', async () => {
+    mockMainCurrency = null
+    mockReadNetConsumptionReport.mockResolvedValueOnce({
+      basis: 'net_consumption',
+      complete: true,
+      classificationComplete: true,
+      coverageComplete: true,
+      unresolvedIds: [],
+      uncoveredAccountIds: [],
+      totalsByCurrency: [
+        {
+          currency: 'MXN',
+          consumptionCentavos: 1234,
+          earnedIncomeCentavos: 0,
+          otherIncomeCentavos: 0,
+          principalRecoveryCentavos: 0,
+          assetAcquisitionCentavos: 0,
+        },
+      ],
+      mainConversion: {
+        complete: false,
+        toCurrency: null,
+        reason: 'main_currency_unconfigured',
+        consumptionCentavos: null,
+        earnedIncomeCentavos: null,
+        otherIncomeCentavos: null,
+        principalRecoveryCentavos: null,
+        assetAcquisitionCentavos: null,
+        knownConsumptionCentavos: null,
+        knownEarnedIncomeCentavos: null,
+        knownOtherIncomeCentavos: null,
+        knownPrincipalRecoveryCentavos: null,
+        knownAssetAcquisitionCentavos: null,
+        native: {
+          basis: 'net_consumption',
+          classificationComplete: true,
+          unresolvedIds: [],
+          totalsByCurrency: [],
+          byCategory: [],
+        },
+        allocations: [],
+        policy: 'recognition_transaction_date_parent_then_allocation',
+        classificationComplete: true,
+        coverageComplete: true,
+        unresolvedClassificationIds: [],
+        byCategory: [],
+        conversion: {},
+        uncoveredAccountIds: [],
+      },
+      byCategory: [],
+      period: { start: '2026-01-01', end: '2026-01-31' },
+      currencyScope: 'all',
+      message: 'Native only',
+    })
+    const user = userEvent.setup()
+    await renderReports()
+    await user.click(screen.getByRole('button', { name: 'basis.net' }))
+
+    expect(await screen.findByText('report.mainUnavailable')).toBeInTheDocument()
+    expect(screen.queryByText('report.partialStatus')).not.toBeInTheDocument()
+    expect(screen.getByText('MX$12.34')).toBeInTheDocument()
+  })
+
+  it('suppresses an initial read when currency authority changes before it resolves', async () => {
+    let resolveInitial!: (value: FrontendNetConsumptionReport) => void
+    mockReadNetConsumptionReport
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveInitial = resolve)))
+      .mockResolvedValueOnce({
+        basis: 'net_consumption',
+        complete: true,
+        classificationComplete: true,
+        coverageComplete: true,
+        unresolvedIds: [],
+        uncoveredAccountIds: [],
+        totalsByCurrency: [],
+        byCategory: [],
+        period: { start: '2026-01-01', end: '2026-01-31' },
+        currencyScope: 'all',
+        message: 'New authority',
+      })
+    const user = userEvent.setup()
+    const { rerender } = await renderReports()
+    await user.click(screen.getByRole('button', { name: 'basis.net' }))
+
+    mockMainCurrency = 'EUR'
+    rerender(
+      <MemoryRouter>
+        <ReportsPage />
+      </MemoryRouter>
+    )
+    await screen.findByText('report.noKnownTotals')
+    resolveInitial({
+      basis: 'net_consumption',
+      complete: true,
+      classificationComplete: true,
+      coverageComplete: true,
+      unresolvedIds: [],
+      uncoveredAccountIds: [],
+      totalsByCurrency: [{ currency: 'USD', consumptionCentavos: 99999, earnedIncomeCentavos: 0 }],
+      byCategory: [],
+      period: { start: '2026-01-01', end: '2026-01-31' },
+      currencyScope: 'all',
+      message: 'Stale authority',
+    })
+    await act(async () => {})
+    expect(screen.queryByText('$999.99')).not.toBeInTheDocument()
   })
 
   it('surfaces net-basis read failures without replacing the gross report', async () => {

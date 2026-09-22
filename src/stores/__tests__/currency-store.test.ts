@@ -153,10 +153,10 @@ describe('currency-store dated FX adapter', () => {
     })
   })
 
-  it('ignores a delayed load result after a newer main-currency save', async () => {
+  it('refreshes history after a main-currency save invalidates a delayed initial load', async () => {
     const oldSettings = deferred<{ configured: true; mainCurrency: string }>()
     mockGetCurrencySettings.mockReturnValueOnce(oldSettings.promise)
-    mockListExchangeRates.mockResolvedValueOnce([])
+    mockListExchangeRates.mockResolvedValueOnce([]).mockResolvedValueOnce(history)
 
     const oldLoad = useCurrencyStore.getState().loadRates()
     await vi.waitFor(() => expect(mockGetCurrencySettings).toHaveBeenCalledOnce())
@@ -165,10 +165,11 @@ describe('currency-store dated FX adapter', () => {
     oldSettings.resolve({ configured: true, mainCurrency: 'USD' })
     await oldLoad
 
+    expect(mockListExchangeRates).toHaveBeenCalledTimes(2)
     expect(useCurrencyStore.getState()).toMatchObject({
       mainCurrency: 'MXN',
       preferredCurrency: 'MXN',
-      manualRates: [],
+      manualRates: history,
       isLoading: false,
       error: null,
     })
@@ -256,6 +257,70 @@ describe('currency-store dated FX adapter', () => {
       isLoading: false,
       error: 'reload failed',
     })
+  })
+
+  it('clears unverifiable authority when a successful main save cannot refresh history', async () => {
+    useCurrencyStore.setState({
+      mainCurrency: 'USD',
+      preferredCurrency: 'USD',
+      manualRates: history,
+    })
+    mockStoreGet.mockResolvedValue('EUR')
+    mockListExchangeRates.mockRejectedValue(new Error('history reload failed'))
+
+    await expect(useCurrencyStore.getState().setPreferredCurrency('MXN')).rejects.toThrow(
+      'history reload failed'
+    )
+
+    expect(mockGetCurrencySettings).not.toHaveBeenCalled()
+    expect(useCurrencyStore.getState()).toMatchObject({
+      mainCurrency: null,
+      preferredCurrency: 'EUR',
+      manualRates: [],
+      isLoading: false,
+      error: 'history reload failed',
+    })
+  })
+
+  it('commits corrected history when a main save supersedes a queued rate reload', async () => {
+    const oldRate = rate('rate-17', '2025-09-01', '17')
+    const correctedRate = rate('rate-18', '2025-09-01', '18', 'USD', 'MXN', 'rate-17')
+    const correctedHistory = [oldRate, correctedRate]
+    useCurrencyStore.setState({
+      mainCurrency: 'USD',
+      preferredCurrency: 'USD',
+      manualRates: [oldRate],
+    })
+    mockSetExchangeRate.mockResolvedValue(correctedRate)
+    mockListExchangeRates.mockResolvedValue(correctedHistory)
+
+    const rateSave = useCurrencyStore.getState().saveExchangeRate({
+      fromCurrency: 'USD',
+      toCurrency: 'MXN',
+      rateDecimal: '18',
+      effectiveFrom: '2025-09-01',
+      replacesRateId: 'rate-17',
+      auditNote: 'Correct historical quote',
+      acknowledgeHistoricalChange: true,
+    })
+    const mainSave = useCurrencyStore.getState().setPreferredCurrency('MXN')
+
+    await Promise.all([rateSave, mainSave])
+
+    expect(mockSetExchangeRate).toHaveBeenCalledOnce()
+    expect(mockSetMainCurrency).toHaveBeenCalledOnce()
+    expect(mockListExchangeRates).toHaveBeenCalledOnce()
+    expect(mockGetCurrencySettings).not.toHaveBeenCalled()
+    expect(useCurrencyStore.getState()).toMatchObject({
+      mainCurrency: 'MXN',
+      preferredCurrency: 'MXN',
+      manualRates: correctedHistory,
+      isLoading: false,
+      error: null,
+    })
+    expect(
+      useCurrencyStore.getState().convertHistoricalToPreferred(100, 'USD', '2025-09-20')
+    ).toMatchObject({ complete: true, amountCentavos: 1800 })
   })
 
   it('serializes main saves and suppresses a stale mutation error', async () => {

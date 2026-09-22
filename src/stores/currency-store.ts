@@ -279,6 +279,26 @@ export const useCurrencyStore = create<CurrencyState>((set, get) => {
     }
   }
 
+  const readRatesAndCommitMainAuthority = async (token: object, mainCurrency: string) => {
+    try {
+      const manualRates = await listExchangeRates()
+      if (!isLatestOperation(token)) return
+      set({ mainCurrency, preferredCurrency: mainCurrency, manualRates })
+    } catch (error) {
+      const setupDraft = await readLegacySetupDraft()
+      if (isLatestOperation(token)) {
+        // The main write succeeded, but history is part of the same in-memory authority.
+        set({
+          mainCurrency: null,
+          preferredCurrency: setupDraft,
+          manualRates: [],
+          error: getErrorMessage(error),
+        })
+      }
+      throw error
+    }
+  }
+
   const reconcileCurrentAuthorityAfterMutationFailure = async (
     token: object,
     mutationError: unknown
@@ -329,14 +349,20 @@ export const useCurrencyStore = create<CurrencyState>((set, get) => {
     setPreferredCurrency: async (currency) => {
       const normalized = requireSupportedCurrency(currency)
       return enqueueMutation(async (token) => {
+        let writeCompleted = false
         try {
           const settings = await setMainCurrency(normalized)
           if (!settings.configured) throw new Error('Main currency was not configured')
+          writeCompleted = true
           if (isLatestOperation(token)) {
-            set({ mainCurrency: settings.mainCurrency, preferredCurrency: settings.mainCurrency })
+            await readRatesAndCommitMainAuthority(token, settings.mainCurrency)
           }
         } catch (error) {
-          await reconcileCurrentAuthorityAfterMutationFailure(token, error)
+          // A failed write needs a full reconciliation. A history read failure after a
+          // successful write has already cleared authority in the current operation.
+          if (!writeCompleted) {
+            await reconcileCurrentAuthorityAfterMutationFailure(token, error)
+          }
           throw error
         } finally {
           finishOperation(token)

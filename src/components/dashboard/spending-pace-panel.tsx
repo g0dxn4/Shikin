@@ -12,6 +12,7 @@ import {
 import type { PaceResult } from '@/lib/dashboard-analytics'
 import { SafeChart } from '@/components/ui/safe-chart'
 import { cn } from '@/lib/utils'
+import { formatCompactChartMoney } from './chart-money'
 
 interface SpendingPacePanelProps {
   pace: PaceResult
@@ -20,7 +21,8 @@ interface SpendingPacePanelProps {
 }
 
 export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPacePanelProps) {
-  const { t } = useTranslation('dashboard')
+  const { t, i18n } = useTranslation('dashboard')
+  const locale = i18n?.resolvedLanguage ?? i18n?.language
 
   const data = pace.points.map((p) => ({
     day: p.day,
@@ -46,35 +48,44 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
       )}
 
       <div
-        className="h-72"
+        className="h-68 min-w-0 sm:h-72"
         role="img"
         aria-label={t('analytics.paceChartLabel')}
         aria-describedby="spending-pace-data"
       >
         <SafeChart>
-          <LineChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} />
+          <LineChart data={data} margin={{ top: 8, right: 6, bottom: 0, left: 0 }}>
+            <CartesianGrid vertical={false} strokeDasharray="2 4" stroke={CHART_GRID_COLOR} />
             <XAxis
               dataKey="day"
               axisLine={false}
               tickLine={false}
               tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
+              tickMargin={8}
+              minTickGap={18}
+              height={28}
               interval="preserveStartEnd"
             />
             <YAxis
               axisLine={false}
               tickLine={false}
               tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
-              tickFormatter={(v) => formatMoney(Number(v), displayCurrency)}
-              width={64}
+              tickMargin={6}
+              tickFormatter={(v) => formatCompactChartMoney(Number(v), displayCurrency, locale)}
+              width={62}
             />
             <Tooltip
-              contentStyle={CHART_TOOLTIP_STYLE}
-              itemStyle={CHART_ITEM_STYLE}
+              contentStyle={{
+                ...CHART_TOOLTIP_STYLE,
+                maxWidth: 'min(260px, calc(100vw - 32px))',
+                overflowWrap: 'anywhere',
+                whiteSpace: 'normal',
+              }}
+              itemStyle={{ ...CHART_ITEM_STYLE, whiteSpace: 'normal' }}
               labelStyle={CHART_LABEL_STYLE}
               formatter={(value, name) => {
                 if (value === null || value === undefined) return ['—', name]
-                return [formatMoney(Number(value), displayCurrency), name]
+                return [formatMoney(Number(value), displayCurrency, locale), name]
               }}
             />
             <Legend wrapperStyle={{ ...CHART_LEGEND_STYLE, fontSize: 11 }} />
@@ -146,18 +157,24 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
               <tr key={point.day}>
                 <th>{point.day}</th>
                 <td>
-                  {point.current === null ? '—' : formatMoney(point.current, displayCurrency)}
+                  {point.current === null
+                    ? '—'
+                    : formatMoney(point.current, displayCurrency, locale)}
                 </td>
                 <td>
-                  {point.previous === null ? '—' : formatMoney(point.previous, displayCurrency)}
+                  {point.previous === null
+                    ? '—'
+                    : formatMoney(point.previous, displayCurrency, locale)}
                 </td>
                 <td>
                   {point.priorAverage === null
                     ? '—'
-                    : formatMoney(point.priorAverage, displayCurrency)}
+                    : formatMoney(point.priorAverage, displayCurrency, locale)}
                 </td>
                 <td>
-                  {point.runRate === null ? '—' : formatMoney(point.runRate, displayCurrency)}
+                  {point.runRate === null
+                    ? '—'
+                    : formatMoney(point.runRate, displayCurrency, locale)}
                 </td>
               </tr>
             ))}
@@ -165,25 +182,25 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
         </table>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-1 gap-2 min-[480px]:grid-cols-2 min-[900px]:grid-cols-4 min-[900px]:gap-3">
         <MetricPill
           label={t('analytics.spentMtd')}
-          value={formatMoney(pace.spentMTD, displayCurrency)}
+          value={formatMoney(pace.spentMTD, displayCurrency, locale)}
           color="text-destructive"
         />
         <MetricPill
           label={t('analytics.projectedMonthEnd')}
-          value={formatMoney(pace.projectedMonthEnd, displayCurrency)}
+          value={formatMoney(pace.projectedMonthEnd, displayCurrency, locale)}
           color="text-warning"
         />
         <MetricPill
           label={t('analytics.priorAverage')}
-          value={formatMoney(pace.priorAverageTotal, displayCurrency)}
+          value={formatMoney(pace.priorAverageTotal, displayCurrency, locale)}
           color="text-muted-foreground"
         />
         <MetricPill
           label={t('analytics.vsPriorAverage')}
-          value={formatMoney(Math.abs(pace.vsPriorAverage), displayCurrency)}
+          value={formatMoney(Math.abs(pace.vsPriorAverage), displayCurrency, locale)}
           prefix={pace.vsPriorAverage >= 0 ? '+' : '−'}
           color={pace.vsPriorAverage >= 0 ? 'text-destructive' : 'text-success'}
         />
@@ -204,11 +221,16 @@ function MetricPill({
   color?: string
 }) {
   return (
-    <div className="border-border bg-muted/60 rounded-xl border p-3">
+    <div className="border-border bg-muted/45 flex min-w-0 items-center justify-between gap-3 rounded-xl border px-3 py-2.5 min-[480px]:block min-[480px]:p-3">
       <p className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
         {label}
       </p>
-      <p className={cn('mt-1 text-lg font-semibold tracking-tight tabular-nums', color)}>
+      <p
+        className={cn(
+          'min-w-0 text-right text-base font-semibold tracking-tight [overflow-wrap:anywhere] tabular-nums min-[480px]:mt-1 min-[480px]:text-left min-[480px]:text-lg',
+          color
+        )}
+      >
         {prefix}
         {value}
       </p>

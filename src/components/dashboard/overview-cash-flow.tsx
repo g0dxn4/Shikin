@@ -16,7 +16,8 @@ export function OverviewCashFlow({
   unavailable = false,
   unavailableMessage,
 }: OverviewCashFlowProps) {
-  const { t } = useTranslation('dashboard')
+  const { t, i18n } = useTranslation('dashboard')
+  const locale = i18n?.resolvedLanguage ?? i18n?.language
   const maxValue = Math.max(1, ...months.flatMap((month) => [month.income, month.expenses]))
 
   return (
@@ -35,33 +36,42 @@ export function OverviewCashFlow({
       ) : (
         <>
           <div
-            className="relative flex h-48 items-stretch gap-2 border-b border-[var(--color-border)] pt-2 pr-1 pl-10"
+            className="relative flex h-44 min-w-0 items-stretch gap-1 border-b border-[var(--color-border)] px-1 pt-2 sm:h-48 sm:gap-2 sm:px-2"
             role="img"
             aria-label={t('overview.cashFlow')}
             aria-describedby="overview-cashflow-data"
           >
+            <span className="border-border/50 pointer-events-none absolute inset-x-1 top-1/4 border-t border-dashed" />
+            <span className="border-border/50 pointer-events-none absolute inset-x-1 top-1/2 border-t border-dashed" />
+            <span className="border-border/50 pointer-events-none absolute inset-x-1 top-3/4 border-t border-dashed" />
             {months.map((month) => (
-              <div key={month.key} className="relative flex flex-1 items-end justify-center gap-1">
+              <div
+                key={month.key}
+                className="relative z-1 flex min-w-0 flex-1 items-end justify-center gap-1"
+              >
                 <span
-                  className="bg-success min-h-0.5 w-[42%] max-w-6 rounded-t-sm"
-                  style={{ height: `${Math.max(2, (month.income / maxValue) * 100)}%` }}
-                  title={`${month.label} ${t('analytics.income')}: ${formatMoney(month.income, displayCurrency)}`}
+                  className="bg-success w-[38%] max-w-6 rounded-t-[3px]"
+                  style={{ height: `${(month.income / maxValue) * 100}%` }}
+                  title={`${month.label} ${t('analytics.income')}: ${formatMoney(month.income, displayCurrency, locale)}`}
                 />
                 <span
-                  className="min-h-0.5 w-[42%] max-w-6 rounded-t-sm"
+                  className="w-[38%] max-w-6 rounded-t-[3px]"
                   style={{
-                    height: `${Math.max(2, (month.expenses / maxValue) * 100)}%`,
+                    height: `${(month.expenses / maxValue) * 100}%`,
                     backgroundColor: 'var(--color-chart-3)',
                   }}
-                  title={`${month.label} ${t('analytics.expenses')}: ${formatMoney(month.expenses, displayCurrency)}`}
+                  title={`${month.label} ${t('analytics.expenses')}: ${formatMoney(month.expenses, displayCurrency, locale)}`}
                 />
-                <span className="text-muted-foreground absolute top-[calc(100%+6px)] text-[11px]">
+                <span
+                  className="text-muted-foreground absolute inset-x-0 top-[calc(100%+7px)] truncate text-center text-[11px]"
+                  title={month.label}
+                >
                   {month.label}
                 </span>
               </div>
             ))}
           </div>
-          <div className="text-muted-foreground mt-7 flex gap-4 text-[11px]">
+          <div className="text-muted-foreground mt-7 flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
             <span>
               <i className="bg-success mr-1.5 inline-block h-2 w-2 rounded-sm" aria-hidden="true" />
               {t('analytics.income')}
@@ -90,9 +100,9 @@ export function OverviewCashFlow({
                 {months.map((month) => (
                   <tr key={month.key}>
                     <th>{month.label}</th>
-                    <td>{formatMoney(month.income, displayCurrency)}</td>
-                    <td>{formatMoney(month.expenses, displayCurrency)}</td>
-                    <td>{formatMoney(month.net, displayCurrency)}</td>
+                    <td>{formatMoney(month.income, displayCurrency, locale)}</td>
+                    <td>{formatMoney(month.expenses, displayCurrency, locale)}</td>
+                    <td>{formatMoney(month.net, displayCurrency, locale)}</td>
                   </tr>
                 ))}
               </tbody>

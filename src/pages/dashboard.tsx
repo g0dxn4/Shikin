@@ -321,8 +321,8 @@ export function Dashboard() {
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
-        <NativePanel className="p-5">
+      <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+        <NativePanel className="self-start p-5">
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-base font-semibold">{t('analytics.spendingPace')}</h2>
             <Link
@@ -339,7 +339,7 @@ export function Dashboard() {
           />
         </NativePanel>
 
-        <NativePanel className="p-5">
+        <NativePanel className="self-start p-5">
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-base font-semibold">{t('recentActivity')}</h2>
             <Link

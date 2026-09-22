@@ -61,17 +61,14 @@ export function SpendingAnalytics({
   if (isLoading || !analytics) {
     return (
       <div>
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-muted-foreground text-xs font-semibold tracking-[0.14em] uppercase">
-            {t('analytics.spendingPace')}
-          </p>
-          <div className="border-border bg-muted flex rounded-lg border p-1">
+        <div className="mb-4 flex justify-end">
+          <div className="border-border bg-muted grid max-w-full grid-cols-3 rounded-lg border p-1">
             {tabs.map(([tabMode, label]) => (
               <button
                 key={tabMode}
                 type="button"
                 disabled
-                className="text-muted-foreground rounded-md px-2.5 py-1 text-[11px] font-semibold"
+                className="text-muted-foreground min-h-8 rounded-md px-2.5 py-1 text-[11px] font-semibold"
               >
                 {label}
               </button>
@@ -106,12 +103,9 @@ export function SpendingAnalytics({
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-muted-foreground text-xs font-semibold tracking-[0.14em] uppercase">
-          {t('analytics.spendingPace')}
-        </p>
+      <div className="mb-4 flex justify-end">
         <div
-          className="border-border bg-muted flex rounded-lg border p-1"
+          className="border-border bg-muted grid max-w-full grid-cols-3 rounded-lg border p-1"
           role="tablist"
           aria-label={t('analytics.spendingModes')}
         >
@@ -123,7 +117,7 @@ export function SpendingAnalytics({
               aria-selected={mode === tabMode}
               onClick={() => handleSetMode(tabMode)}
               className={cn(
-                'rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors',
+                'min-h-8 rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors',
                 mode === tabMode
                   ? 'bg-surface text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground'

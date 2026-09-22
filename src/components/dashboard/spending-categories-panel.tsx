@@ -11,6 +11,7 @@ import {
 } from '@/lib/constants'
 import type { CategoriesResult } from '@/lib/dashboard-analytics'
 import { SafeChart } from '@/components/ui/safe-chart'
+import { formatCompactChartMoney } from './chart-money'
 
 interface SpendingCategoriesPanelProps {
   categories: CategoriesResult
@@ -23,7 +24,8 @@ export function SpendingCategoriesPanel({
   displayCurrency,
   notice,
 }: SpendingCategoriesPanelProps) {
-  const { t } = useTranslation('dashboard')
+  const { t, i18n } = useTranslation('dashboard')
+  const locale = i18n?.resolvedLanguage ?? i18n?.language
 
   const orderedCategoryIds = [
     ...categories.topCategoryIds,
@@ -81,36 +83,45 @@ export function SpendingCategoriesPanel({
       )}
 
       <div
-        className="h-72"
+        className="h-68 min-w-0 sm:h-72"
         role="img"
         aria-label={t('analytics.categoriesChartLabel')}
         aria-describedby="spending-categories-data"
       >
         <SafeChart>
-          <BarChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} />
+          <BarChart data={chartData} margin={{ top: 8, right: 6, bottom: 0, left: 0 }}>
+            <CartesianGrid vertical={false} strokeDasharray="2 4" stroke={CHART_GRID_COLOR} />
             <XAxis
               dataKey="label"
               axisLine={false}
               tickLine={false}
               tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
+              tickMargin={8}
+              minTickGap={14}
+              height={28}
               interval="preserveStartEnd"
             />
             <YAxis
               axisLine={false}
               tickLine={false}
               tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
-              tickFormatter={(v) => formatMoney(Number(v), displayCurrency)}
-              width={64}
+              tickMargin={6}
+              tickFormatter={(v) => formatCompactChartMoney(Number(v), displayCurrency, locale)}
+              width={62}
             />
             <Tooltip
-              contentStyle={CHART_TOOLTIP_STYLE}
-              itemStyle={CHART_ITEM_STYLE}
+              contentStyle={{
+                ...CHART_TOOLTIP_STYLE,
+                maxWidth: 'min(260px, calc(100vw - 32px))',
+                overflowWrap: 'anywhere',
+                whiteSpace: 'normal',
+              }}
+              itemStyle={{ ...CHART_ITEM_STYLE, whiteSpace: 'normal' }}
               labelStyle={CHART_LABEL_STYLE}
               formatter={(value, name) => {
                 const key = String(name ?? '')
                 const label = categories.categoryMeta[key]?.name ?? key
-                return [formatMoney(Number(value), displayCurrency), label]
+                return [formatMoney(Number(value), displayCurrency, locale), label]
               }}
             />
             <Legend
@@ -152,7 +163,7 @@ export function SpendingCategoriesPanel({
                 <th>{month.label}</th>
                 {orderedCategoryIds.map((categoryId) => (
                   <td key={categoryId}>
-                    {formatMoney(Number(month[categoryId] ?? 0), displayCurrency)}
+                    {formatMoney(Number(month[categoryId] ?? 0), displayCurrency, locale)}
                   </td>
                 ))}
               </tr>
@@ -172,7 +183,7 @@ export function SpendingCategoriesPanel({
             {categories.currentMonthBreakdown.map((item) => (
               <div
                 key={item.categoryId}
-                className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3"
+                className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,auto)] items-center gap-3"
               >
                 <div className="flex min-w-0 items-center gap-2">
                   <span
@@ -181,12 +192,14 @@ export function SpendingCategoriesPanel({
                   />
                   <span className="truncate text-sm font-semibold">{item.name}</span>
                 </div>
-                <span className="font-mono text-xs font-bold">
-                  {formatMoney(item.amount, displayCurrency)}
-                </span>
-                <span className="text-muted-foreground w-12 text-right font-mono text-xs font-bold">
-                  {item.percent}%
-                </span>
+                <div className="min-w-0 text-right">
+                  <p className="text-xs font-semibold [overflow-wrap:anywhere] tabular-nums">
+                    {formatMoney(item.amount, displayCurrency, locale)}
+                  </p>
+                  <p className="text-muted-foreground mt-0.5 text-[11px] font-medium tabular-nums">
+                    {item.percent}%
+                  </p>
+                </div>
               </div>
             ))}
           </div>

@@ -406,15 +406,23 @@ describe('Transactions', () => {
     expect(mockUseQuery).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1 }))
   })
 
-  it('opens allocation classification from transaction details and refreshes full query counts', async () => {
+  it('keeps transaction details mounted under classification and restores its launcher focus', async () => {
     setRows([makeRow()])
     const user = userEvent.setup()
     render(<Transactions />)
 
     await user.click(screen.getByRole('button', { name: /^Coffee/ }))
-    await user.click(screen.getByRole('button', { name: 'actions.classify' }))
+    const classify = screen.getByRole('button', { name: 'actions.classify' })
+    await user.click(classify)
     expect(await screen.findByRole('dialog')).toHaveTextContent('dialog.title')
-    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+    expect(screen.getByRole('heading', { name: 'Coffee', hidden: true })).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(classify).toHaveFocus())
+    expect(screen.getByRole('heading', { name: 'Coffee' })).toBeVisible()
+
+    await user.click(classify)
+    await user.click(await screen.findByRole('button', { name: 'actions.save' }))
     await waitFor(() =>
       expect(mockSetConsumption).toHaveBeenCalledWith({
         transactionId: 'tx-1',
@@ -424,6 +432,36 @@ describe('Transactions', () => {
       })
     )
     expect(mockInvalidate).toHaveBeenCalledWith('review')
+    await user.click(screen.getByRole('button', { name: 'actions.done' }))
+    await waitFor(() => expect(classify).toHaveFocus())
+    expect(screen.getByRole('heading', { name: 'Coffee' })).toBeVisible()
+  })
+
+  it('keeps large-money ledger details reachable in the wrapped mobile row layout', async () => {
+    setRows([
+      makeRow({
+        id: 'large-staged',
+        amount: 987654321,
+        description: 'A long staged transaction description',
+        status: 'pending',
+        ledger_treatment: 'staged_no_balance_impact',
+      }),
+    ])
+    const user = userEvent.setup()
+    render(<Transactions />)
+    await user.selectOptions(screen.getByLabelText('views.label'), 'ledger')
+
+    const details = screen
+      .getAllByRole('button', { name: /^A long staged transaction description/ })
+      .find((button) => button.classList.contains('min-h-11'))!
+    expect(details).toHaveClass('min-h-11', 'min-w-0', 'w-full')
+    expect(
+      screen.getAllByText('-$9,876,543.21').some((amount) => amount.classList.contains('block'))
+    ).toBe(true)
+    await user.click(details)
+    expect(
+      screen.getByRole('heading', { name: 'A long staged transaction description' })
+    ).toBeVisible()
   })
 
   it('opens native transaction details while preserving edit actions', async () => {

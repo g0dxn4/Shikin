@@ -405,10 +405,14 @@ export function Transactions() {
   }, [pageQuery.isLoading, totalPages, updateUrlState, urlState.page])
 
   useEffect(() => {
-    if (detailTransaction && !pageQuery.rows.some((row) => row.id === detailTransaction.id)) {
+    if (
+      detailTransaction &&
+      !pageQuery.isLoading &&
+      !pageQuery.rows.some((row) => row.id === detailTransaction.id)
+    ) {
       setDetailTransaction(null)
     }
-  }, [detailTransaction, pageQuery.rows])
+  }, [detailTransaction, pageQuery.isLoading, pageQuery.rows])
 
   const groupedByDate = useMemo(() => {
     const groups = new Map<string, TransactionPageRow[]>()
@@ -744,10 +748,7 @@ export function Transactions() {
           openTransactionDialog(id)
         }}
         onDelete={(id) => setDeleteId(id)}
-        onClassify={(id) => {
-          setDetailTransaction(null)
-          setClassificationTransactionId(id)
-        }}
+        onClassify={setClassificationTransactionId}
       />
       <ConsumptionClassificationDialog
         transactionId={classificationTransactionId}
@@ -1098,29 +1099,27 @@ function LedgerView({
       <div className="divide-border divide-y md:hidden">
         {transactions.map((transaction) => (
           <div key={transaction.id} className="p-4">
-            <div className="flex items-start gap-3">
-              <button
-                type="button"
-                onClick={() => onDetails(transaction)}
-                className="focus-visible:ring-ring min-w-0 flex-1 text-left focus-visible:ring-2 focus-visible:outline-none"
-              >
-                <span className="block truncate text-sm font-semibold">
-                  {transaction.description}
-                </span>
-                <span className="text-muted-foreground mt-1 block truncate text-xs">
-                  {dayjs(transaction.date).format('MMM D')} · {getLedgerAccountLabel(transaction)}
-                </span>
-              </button>
-              <span
-                className={cn(
-                  'shrink-0 text-sm font-semibold tabular-nums',
-                  transaction.type === 'income' ? 'text-success' : 'text-foreground'
-                )}
-              >
-                {transaction.type === 'income' ? '+' : transaction.type === 'expense' ? '-' : ''}
-                {formatMoney(transaction.amount, transaction.currency)}
+            <button
+              type="button"
+              onClick={() => onDetails(transaction)}
+              className="focus-visible:ring-ring flex min-h-11 w-full min-w-0 flex-col justify-center rounded text-left focus-visible:ring-2 focus-visible:outline-none"
+            >
+              <span className="block truncate text-sm font-semibold">
+                {transaction.description}
               </span>
-            </div>
+              <span className="text-muted-foreground mt-1 block truncate text-xs">
+                {dayjs(transaction.date).format('MMM D')} · {getLedgerAccountLabel(transaction)}
+              </span>
+            </button>
+            <span
+              className={cn(
+                'mt-1 block text-right text-sm font-semibold tabular-nums',
+                transaction.type === 'income' ? 'text-success' : 'text-foreground'
+              )}
+            >
+              {transaction.type === 'income' ? '+' : transaction.type === 'expense' ? '-' : ''}
+              {formatMoney(transaction.amount, transaction.currency)}
+            </span>
             <div className="mt-3 flex items-center justify-between gap-2">
               <div className="flex gap-2">
                 <StatusBadge transaction={transaction} />
@@ -1205,9 +1204,9 @@ function TransactionRow({
   }
   return (
     <article>
-      <div className="group hover:bg-muted/45 flex items-center gap-3 px-4 py-3">
+      <div className="group hover:bg-muted/45 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1 px-4 py-3 sm:flex sm:gap-3">
         <span
-          className="bg-muted-foreground/30 h-2.5 w-2.5 shrink-0 rounded-full"
+          className="bg-muted-foreground/30 mt-4 h-2.5 w-2.5 shrink-0 self-start rounded-full sm:mt-0 sm:self-auto"
           style={
             transaction.category_color ? { backgroundColor: transaction.category_color } : undefined
           }
@@ -1215,7 +1214,7 @@ function TransactionRow({
         <button
           type="button"
           onClick={onDetails}
-          className="focus-visible:ring-ring min-w-0 flex-1 rounded text-left focus-visible:ring-2 focus-visible:outline-none"
+          className="focus-visible:ring-ring flex min-h-11 min-w-0 flex-col justify-center rounded text-left focus-visible:ring-2 focus-visible:outline-none sm:min-h-0 sm:flex-1"
         >
           <span className="block truncate text-sm font-medium">{transaction.description}</span>
           <span className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
@@ -1227,40 +1226,42 @@ function TransactionRow({
             <span>{getLedgerAccountLabel(transaction)}</span>
           </span>
         </button>
-        {transaction.has_splits ? (
-          <button
-            type="button"
-            onClick={toggleSplits}
-            disabled={loadingSplits}
-            className="text-accent hover:bg-accent-muted inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-xs"
-          >
-            <Split size={12} />
-            {t('split.badge')}
-            <ChevronDown size={12} className={cn(expanded && 'rotate-180')} />
-          </button>
-        ) : (
-          <StatusBadge transaction={transaction} />
-        )}
-        <span
-          className={cn(
-            'shrink-0 text-sm font-semibold tabular-nums',
-            transaction.type === 'income' ? 'text-success' : 'text-foreground'
+        <div className="col-start-2 flex min-w-0 items-center justify-between gap-2 sm:contents">
+          {transaction.has_splits ? (
+            <button
+              type="button"
+              onClick={toggleSplits}
+              disabled={loadingSplits}
+              className="text-accent hover:bg-accent-muted inline-flex min-h-8 shrink-0 items-center gap-1 rounded-md px-2 text-xs"
+            >
+              <Split size={12} />
+              {t('split.badge')}
+              <ChevronDown size={12} className={cn(expanded && 'rotate-180')} />
+            </button>
+          ) : (
+            <StatusBadge transaction={transaction} />
           )}
-        >
-          {transaction.type === 'income' ? '+' : transaction.type === 'expense' ? '-' : ''}
-          {formatMoney(transaction.amount, transaction.currency)}
-        </span>
-        <TransactionActions
-          transaction={transaction}
-          canEdit={
-            !transaction.matched_transaction_id &&
-            !transaction.is_receivable_payment &&
-            !transaction.is_reconciliation_adjustment &&
-            (transaction.transaction_kind ?? 'standard') === 'standard'
-          }
-          onEdit={onEdit}
-          onDelete={onDelete}
-        />
+          <span
+            className={cn(
+              'ml-auto shrink-0 text-sm font-semibold tabular-nums',
+              transaction.type === 'income' ? 'text-success' : 'text-foreground'
+            )}
+          >
+            {transaction.type === 'income' ? '+' : transaction.type === 'expense' ? '-' : ''}
+            {formatMoney(transaction.amount, transaction.currency)}
+          </span>
+          <TransactionActions
+            transaction={transaction}
+            canEdit={
+              !transaction.matched_transaction_id &&
+              !transaction.is_receivable_payment &&
+              !transaction.is_reconciliation_adjustment &&
+              (transaction.transaction_kind ?? 'standard') === 'standard'
+            }
+            onEdit={onEdit}
+            onDelete={onDelete}
+          />
+        </div>
       </div>
       {expanded && (
         <div className="border-border bg-muted/25 border-t px-5 py-3">

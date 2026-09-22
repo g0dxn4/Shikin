@@ -467,5 +467,9 @@ useCurrencyStore.subscribe((state) => {
     if (requestId !== netWorthRequestId || invalidationGeneration !== historyRequestGeneration)
       return
     await useNetWorthStore.getState().loadHistory(latestHistoryPeriod)
-  })().catch(() => {})
+  })()
+    .catch(() => {})
+    .finally(() => {
+      if (requestId === netWorthRequestId) useNetWorthStore.setState({ isLoading: false })
+    })
 })

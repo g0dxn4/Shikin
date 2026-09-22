@@ -371,9 +371,7 @@ async function writeFrontendFxAudit(
     balances: balanceChanges.map((change) => ({
       accountId: change.accountId,
       balanceCentavos:
-        action === 'delete' && transaction === before
-          ? change.previousBalanceCentavos
-          : change.newBalanceCentavos,
+        transaction === before ? change.previousBalanceCentavos : change.newBalanceCentavos,
     })),
     balanceChanges,
   })

@@ -61,7 +61,9 @@ beforeEach(() => {
   state.db.pragma('foreign_keys = ON')
   runHostedTestMigrations(state.db)
   state.db!.exec(
-    `INSERT INTO accounts (id,name,type,currency,balance) VALUES ('main-mxn','Main MXN','checking','MXN',0);
+    `INSERT INTO accounts (id,name,type,currency,balance) VALUES
+       ('main-mxn','Main MXN','checking','MXN',0),
+       ('reserve-mxn','Reserve MXN','checking','MXN',0);
      INSERT INTO settings (key,value) VALUES ('main_currency','MXN');
      INSERT INTO manual_exchange_rates
        (id,from_currency,to_currency,rate_decimal,effective_from,supersedes_rate_id,created_at,source_note)
@@ -112,10 +114,132 @@ describe('frontend async transaction FX adapter on real SQLite', () => {
     expect(
       state
         .db!.prepare(
-          "SELECT json_extract(after_json,'$.balanceChanges[0].deltaCentavos') AS delta FROM audit_log WHERE action='create'"
+          `SELECT
+             json_extract(before_json,'$') AS before_snapshot,
+             json_extract(after_json,'$.balances[0].balanceCentavos') AS after_balance,
+             json_extract(after_json,'$.balanceChanges[0].deltaCentavos') AS delta
+           FROM audit_log WHERE action='create'`
         )
         .get()
-    ).toEqual({ delta: -17000 })
+    ).toEqual({ before_snapshot: null, after_balance: -17000, delta: -17000 })
+  })
+
+  it('records the actual before and after balances for an FX amount update', async () => {
+    const createPreview = await previewTransactionFxInput({
+      inputAmountCentavos: 1000,
+      inputCurrency: 'EUR',
+      accountId: 'main-mxn',
+      transactionDate: '2026-09-14',
+      transactionType: 'expense',
+    })
+    await useTransactionStore
+      .getState()
+      .add({ ...formData, fxAcceptanceGuard: createPreview.acceptanceGuard }, { skipRefresh: true })
+
+    const transaction = state.db!.prepare('SELECT id FROM transactions LIMIT 1').get() as {
+      id: string
+    }
+    const updatePreview = await previewTransactionFxInput({
+      inputAmountCentavos: 2000,
+      inputCurrency: 'EUR',
+      accountId: 'main-mxn',
+      transactionDate: '2026-09-14',
+      transactionType: 'expense',
+    })
+    await useTransactionStore.getState().update(transaction.id, {
+      ...formData,
+      amount: 20,
+      fxFinancialEdit: true,
+      fxAcceptanceGuard: updatePreview.acceptanceGuard,
+    })
+
+    expect(state.db!.prepare("SELECT balance FROM accounts WHERE id='main-mxn'").get()).toEqual({
+      balance: -34000,
+    })
+    expect(
+      state.db!.prepare('SELECT amount FROM transactions WHERE id = ?').get(transaction.id)
+    ).toEqual({
+      amount: 34000,
+    })
+    expect(
+      state
+        .db!.prepare(
+          `SELECT
+             json_extract(before_json,'$.balances[0].balanceCentavos') AS before_balance,
+             json_extract(after_json,'$.balances[0].balanceCentavos') AS after_balance,
+             json_extract(after_json,'$.balanceChanges[0].deltaCentavos') AS delta,
+             json_extract(after_json,'$.fxEvidence.accountBalanceDeltaCentavos') AS acceptance_contribution
+           FROM audit_log WHERE action='update'`
+        )
+        .get()
+    ).toEqual({
+      before_balance: -17000,
+      after_balance: -34000,
+      delta: -17000,
+      acceptance_contribution: -34000,
+    })
+
+    await useTransactionStore.getState().remove(transaction.id)
+    expect(state.db!.prepare("SELECT balance FROM accounts WHERE id='main-mxn'").get()).toEqual({
+      balance: 0,
+    })
+    expect(
+      state
+        .db!.prepare(
+          `SELECT
+             json_extract(before_json,'$.balances[0].balanceCentavos') AS before_balance,
+             json_extract(after_json,'$') AS after_snapshot
+           FROM audit_log WHERE action='delete'`
+        )
+        .get()
+    ).toEqual({ before_balance: -34000, after_snapshot: null })
+  })
+
+  it('records both account balances when an FX transaction moves accounts', async () => {
+    const createPreview = await previewTransactionFxInput({
+      inputAmountCentavos: 1000,
+      inputCurrency: 'EUR',
+      accountId: 'main-mxn',
+      transactionDate: '2026-09-14',
+      transactionType: 'expense',
+    })
+    await useTransactionStore
+      .getState()
+      .add({ ...formData, fxAcceptanceGuard: createPreview.acceptanceGuard }, { skipRefresh: true })
+    const transaction = state.db!.prepare('SELECT id FROM transactions LIMIT 1').get() as {
+      id: string
+    }
+    const movePreview = await previewTransactionFxInput({
+      inputAmountCentavos: 2000,
+      inputCurrency: 'EUR',
+      accountId: 'reserve-mxn',
+      transactionDate: '2026-09-14',
+      transactionType: 'expense',
+    })
+
+    await useTransactionStore.getState().update(transaction.id, {
+      ...formData,
+      amount: 20,
+      accountId: 'reserve-mxn',
+      fxFinancialEdit: true,
+      fxAcceptanceGuard: movePreview.acceptanceGuard,
+    })
+
+    expect(state.db!.prepare('SELECT id,balance FROM accounts ORDER BY id').all()).toEqual([
+      { id: 'main-mxn', balance: 0 },
+      { id: 'reserve-mxn', balance: -34000 },
+    ])
+    const audit = state
+      .db!.prepare("SELECT before_json,after_json FROM audit_log WHERE action='update'")
+      .get() as { before_json: string; after_json: string }
+    expect(JSON.parse(audit.before_json).balances).toEqual([
+      { accountId: 'main-mxn', balanceCentavos: -17000 },
+      { accountId: 'reserve-mxn', balanceCentavos: 0 },
+    ])
+    expect(JSON.parse(audit.after_json).balances).toEqual([
+      { accountId: 'main-mxn', balanceCentavos: 0 },
+      { accountId: 'reserve-mxn', balanceCentavos: -34000 },
+    ])
   })
 
   it('rejects a stale preview and rolls back transaction, evidence, audit, and balance together', async () => {

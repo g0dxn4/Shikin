@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { classificationCatalog } from '@shikin/finance-core'
 import { Transactions } from '../transactions'
 import type { TransactionPageResult, TransactionPageRow } from '@/lib/transaction-query'
 
@@ -167,6 +168,7 @@ describe('Transactions', () => {
         },
       ],
       purchaseOptions: [],
+      classificationTypes: classificationCatalog([], []),
     })
     mockSetConsumption.mockResolvedValue({
       id: 'classification',
@@ -467,6 +469,7 @@ describe('Transactions', () => {
     expect(screen.getByRole('heading', { name: 'Coffee' })).toBeVisible()
 
     await user.click(classify)
+    await user.selectOptions(await screen.findByLabelText('fields.role'), 'builtin:purchase')
     await user.click(await screen.findByRole('button', { name: 'actions.save' }))
     await waitFor(() =>
       expect(mockSetConsumption).toHaveBeenCalledWith({

@@ -822,8 +822,8 @@ function TransactionFilters({
   return (
     <NativePanel as="div" className="min-w-0 p-3">
       <div className="flex min-w-0 flex-col gap-2" role="region" aria-label={t('filters.toolbar')}>
-        <div className="flex min-w-0 items-center gap-2">
-          <label className="relative min-w-0 flex-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 sm:flex-nowrap">
+          <label className="relative min-w-0 flex-1 basis-full sm:basis-0">
             <span className="sr-only">{t('filters.search')}</span>
             <Search
               size={15}
@@ -837,16 +837,14 @@ function TransactionFilters({
               className="min-h-11 min-w-0 pl-9 md:h-10 md:min-h-10"
             />
           </label>
-          <label className="flex min-w-0 shrink-0 items-center gap-1.5">
-            <span className="text-muted-foreground hidden text-xs font-medium sm:inline">
-              {t('views.display')}
-            </span>
+          <label className="flex min-w-0 flex-1 items-center gap-1.5 sm:flex-none">
+            <span className="text-muted-foreground text-xs font-medium">{t('views.display')}</span>
             <select
               id="transactions-display"
               aria-label={t('views.label')}
               value={state.view}
               onChange={(event) => onPatch({ view: event.target.value as TransactionView })}
-              className="native-select min-h-11 w-[8.5rem] max-w-[11.5rem] min-w-0 text-xs md:min-h-10 md:w-[9.5rem]"
+              className="native-select min-h-11 w-full min-w-0 text-xs sm:w-[8.5rem] md:min-h-10 md:w-[9.5rem]"
             >
               {transactionViews.map((view) => (
                 <option key={view} value={view}>

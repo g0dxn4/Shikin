@@ -34,8 +34,8 @@ describe('public automation contract', () => {
     await program.parseAsync(['node', 'shikin', 'tools', '--json'])
     const catalog = JSON.parse(String(log.mock.calls[0]?.[0])) as Record<string, unknown>
 
-    expect(builtInTools).toHaveLength(112)
-    expect(program.commands).toHaveLength(117)
+    expect(builtInTools).toHaveLength(118)
+    expect(program.commands).toHaveLength(123)
     expect(builtInTools.map((tool) => tool.name).sort()).toEqual(inventory.tools)
     expect(program.commands.map((command) => command.name()).sort()).toEqual(inventory.commands)
     expect(program.version()).toBe('1.1.0')
@@ -47,8 +47,8 @@ describe('public automation contract', () => {
       success: true,
       catalogVersion: COMMAND_CATALOG_VERSION,
       schemaVersion: 'cli-tools-json.v1',
-      commandCount: 117,
-      toolCount: 112,
+      commandCount: 123,
+      toolCount: 118,
       compatibility: {
         effects: {
           declaredOnly: true,

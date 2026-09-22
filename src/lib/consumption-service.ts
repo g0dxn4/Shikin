@@ -1,4 +1,14 @@
 import {
+  projectDatedNetConsumption,
+  convertDatedAmounts,
+  FX_RATE_SELECT,
+  classificationCatalog,
+  currentClassificationTypeRevision,
+  historicalClassificationLabel,
+  type ClassificationType,
+  type DatedExchangeRate,
+} from '@shikin/finance-core'
+import {
   assertOrdinaryCorrection,
   clearConsumptionClassificationInEvidence,
   consumptionCoverage,
@@ -8,6 +18,7 @@ import {
   setConsumptionClassificationInEvidence,
   type ConsumptionClassification,
   type ConsumptionRole,
+  validateConsumptionClassification,
   type CorrectionTransaction,
 } from '@shikin/finance-core/corrections'
 import { query, withTransaction, type TransactionClient } from '@/lib/database'
@@ -25,6 +36,7 @@ export interface ConsumptionAllocationView {
   categoryId: string | null
   categoryName: string | null
   classification: ConsumptionClassification | null
+  classificationDisplay?: { name: string; version: number | null; revisionId: string | null } | null
 }
 
 export interface ConsumptionPurchaseOption {
@@ -43,15 +55,18 @@ export interface ConsumptionClassificationContext {
   transaction: CorrectionTransaction
   allocations: ConsumptionAllocationView[]
   purchaseOptions: ConsumptionPurchaseOption[]
+  classificationTypes?: ReturnType<typeof classificationCatalog>
 }
 
-export interface SetConsumptionClassificationInput {
+export type SetConsumptionClassificationInput = {
   transactionId: string
   splitId?: string | null
-  role: ConsumptionRole
   referencedPurchaseId?: string | null
   auditNote?: string
-}
+} & (
+  | { role: ConsumptionRole; customTypeId?: never; expectedRevisionId?: never }
+  | { role?: never; customTypeId: string; expectedRevisionId: string }
+)
 
 interface CategoryRow {
   id: string
@@ -85,9 +100,10 @@ async function readContext(
   tx: TransactionClient,
   transactionId: string
 ): Promise<ConsumptionClassificationContext> {
-  const [evidence, categories] = await Promise.all([
+  const [evidence, categories, types] = await Promise.all([
     readFrontendConsumptionEvidence(tx),
     tx.query<CategoryRow>('SELECT id, name FROM categories'),
+    tx.query<ClassificationType>('SELECT * FROM classification_types'),
   ])
   const transaction = evidence.transactions.find((row) => row.id === transactionId)
   if (!transaction) throw new Error('Transaction not found.')
@@ -111,15 +127,23 @@ async function readContext(
             categoryId: transaction.category_id ?? null,
           },
         ]
-  ).map((allocation) => ({
-    ...allocation,
-    categoryName: allocation.categoryId ? (categoryNames.get(allocation.categoryId) ?? null) : null,
-    classification:
+  ).map((allocation) => {
+    const classification =
       evidence.classifications.find(
         (item) =>
           item.transaction_id === allocation.transactionId && item.split_id === allocation.splitId
-      ) ?? null,
-  }))
+      ) ?? null
+    return {
+      ...allocation,
+      categoryName: allocation.categoryId
+        ? (categoryNames.get(allocation.categoryId) ?? null)
+        : null,
+      classification,
+      classificationDisplay: classification
+        ? historicalClassificationLabel(classification, evidence.typeRevisions ?? [])
+        : null,
+    }
+  })
   const purchaseOptions: ConsumptionPurchaseOption[] = []
   for (const classification of evidence.classifications) {
     if (classification.role !== 'purchase') continue
@@ -143,7 +167,12 @@ async function readContext(
   purchaseOptions.sort(
     (a, b) => b.date.localeCompare(a.date) || a.description.localeCompare(b.description)
   )
-  return { transaction, allocations, purchaseOptions }
+  return {
+    transaction,
+    allocations,
+    purchaseOptions,
+    classificationTypes: classificationCatalog(types, evidence.typeRevisions ?? []),
+  }
 }
 
 /** Read current allocations and explicit purchase choices from one database snapshot. */
@@ -158,7 +187,10 @@ export function setConsumptionClassification(
   input: SetConsumptionClassificationInput
 ): Promise<ConsumptionClassification> {
   return withTransaction(async (tx) => {
-    if (!consumptionRoles.includes(input.role)) throw new Error('Invalid consumption role.')
+    if (input.role && !consumptionRoles.includes(input.role))
+      throw new Error('Invalid consumption role.')
+    if (Boolean(input.role) === Boolean(input.customTypeId))
+      throw new Error('Choose exactly one builtin role or custom classification type.')
     const evidence = await readFrontendConsumptionEvidence(tx)
     const owner = evidence.transactions.find((row) => row.id === input.transactionId)
     if (!owner) throw new Error('Transaction not found.')
@@ -168,24 +200,48 @@ export function setConsumptionClassification(
       evidence.classifications.find(
         (item) => item.transaction_id === input.transactionId && item.split_id === splitId
       ) ?? null
+    const custom = input.customTypeId
+      ? currentClassificationTypeRevision(
+          input.customTypeId,
+          input.expectedRevisionId,
+          await tx.query<ClassificationType>('SELECT * FROM classification_types'),
+          evidence.typeRevisions ?? []
+        )
+      : null
     const after: ConsumptionClassification = {
       id: before?.id ?? generateId(),
       transaction_id: input.transactionId,
       split_id: splitId,
-      role: input.role,
+      role: custom?.revision.financial_treatment ?? input.role!,
       referenced_purchase_id: input.referencedPurchaseId ?? null,
+      type_revision_id: custom?.revision.id ?? null,
     }
     const classifications = setConsumptionClassificationInEvidence(evidence, after)
+    if (
+      before &&
+      before.role === after.role &&
+      before.referenced_purchase_id === after.referenced_purchase_id &&
+      (before.type_revision_id ?? null) === (after.type_revision_id ?? null)
+    )
+      return before
     await assertFrontendActivePaymentCapacity(tx, input.transactionId, { classifications })
     await tx.execute(
       `INSERT INTO transaction_consumption_classifications
-         (id, transaction_id, split_id, role, referenced_purchase_id)
-       VALUES (?, ?, ?, ?, ?)
+         (id, transaction_id, split_id, role, referenced_purchase_id, type_revision_id)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          role = excluded.role,
          referenced_purchase_id = excluded.referenced_purchase_id,
+         type_revision_id = excluded.type_revision_id,
          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
-      [after.id, after.transaction_id, after.split_id, after.role, after.referenced_purchase_id]
+      [
+        after.id,
+        after.transaction_id,
+        after.split_id,
+        after.role,
+        after.referenced_purchase_id,
+        after.type_revision_id,
+      ]
     )
     await auditFrontendCorrection(
       tx,
@@ -239,7 +295,14 @@ export interface FrontendNetConsumptionReport {
     currency: string
     consumptionCentavos: number
     earnedIncomeCentavos: number
+    otherIncomeCentavos?: number
+    principalRecoveryCentavos?: number
+    assetAcquisitionCentavos?: number
   }>
+  mainConversion?: ReturnType<typeof projectDatedNetConsumption> & {
+    conversion: unknown
+    uncoveredAccountIds: string[]
+  }
   byCategory: Array<{
     currency: string
     categoryId: string | null
@@ -273,7 +336,7 @@ export function readNetConsumptionReport(
   if (!isValidNetConsumptionPeriod(start, end))
     return Promise.reject(new Error('A valid report date range is required.'))
   return withTransaction(async (tx) => {
-    const [evidence, accounts, coverage, categories] = await Promise.all([
+    const [evidence, accounts, coverage, categories, mainCurrencyRows, rates] = await Promise.all([
       readFrontendConsumptionEvidence(tx),
       tx.query<{ id: string }>(
         "SELECT id FROM accounts WHERE COALESCE(account_mode, 'transactional') = 'transactional'"
@@ -286,6 +349,8 @@ export function readNetConsumptionReport(
         status: string
       }>('SELECT * FROM source_coverage'),
       tx.query<CategoryRow>('SELECT id, name FROM categories'),
+      tx.query<{ value: string }>("SELECT value FROM settings WHERE key = 'main_currency'"),
+      tx.query<DatedExchangeRate>(FX_RATE_SELECT),
     ])
     const result = netConsumption(evidence, start, end)
     const coverageResult = consumptionCoverage(
@@ -296,10 +361,59 @@ export function readNetConsumptionReport(
     )
     const categoryNames = new Map(categories.map((row) => [row.id, row.name]))
     const complete = result.classificationComplete && coverageResult.coverageComplete
+    const parentIds = new Set<string>()
+    for (const item of evidence.classifications) {
+      try {
+        validateConsumptionClassification(item, evidence)
+        const owner = owningAllocation(item, evidence)
+        if (owner.row.date && owner.row.date >= start && owner.row.date <= end)
+          parentIds.add(owner.row.id)
+      } catch {
+        // Invalid evidence remains represented by native classification completeness.
+      }
+    }
+    const parents = evidence.transactions.filter((row) => parentIds.has(row.id))
+    const mainCurrency = mainCurrencyRows[0]?.value ?? null
+    const conversion = mainCurrency
+      ? (() => {
+          const converted = convertDatedAmounts(
+            parents.map((row) => ({
+              id: row.id,
+              amountCentavos: row.amount,
+              currency: row.currency!.trim().toUpperCase(),
+              date: row.date!,
+            })),
+            mainCurrency,
+            rates
+          )
+          return { ...converted, reason: converted.complete ? null : 'missing_direct_rate' }
+        })()
+      : {
+          complete: false,
+          toCurrency: null,
+          reason: 'main_currency_unconfigured',
+          totalCentavos: null,
+          knownTotalCentavos: null,
+          nativeTotals: [],
+          unresolvedIds: parents.map((row) => row.id).sort(),
+          converted: [],
+        }
+    const projection = projectDatedNetConsumption({
+      evidence,
+      start,
+      end,
+      conversion,
+      coverageComplete: coverageResult.coverageComplete,
+    })
     return {
       ...result,
       ...coverageResult,
       complete,
+      mainConversion: {
+        ...projection,
+        conversion,
+        uncoveredAccountIds: coverageResult.uncoveredAccountIds,
+      },
       byCategory: result.byCategory.map((row) => ({
         ...row,
         categoryName: row.categoryId ? (categoryNames.get(row.categoryId) ?? null) : null,

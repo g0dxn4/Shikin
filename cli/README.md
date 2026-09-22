@@ -1,6 +1,6 @@
 # Shikin CLI and MCP
 
-Shikin exposes the local finance engine through a CLI and an MCP server: **112 shared tools** mirrored on MCP, **117 CLI commands** including built-ins (`diagnose`, `tools`, `validate`, `web`, `record`). There is no built-in chat assistant.
+Shikin exposes the local finance engine through a CLI and an MCP server: **118 shared tools** mirrored on MCP, **123 CLI commands** including built-ins (`diagnose`, `tools`, `validate`, `web`, `record`). There is no built-in chat assistant.
 
 Best tested on **Node.js 24 LTS** with npm. `better-sqlite3@12.8` supports Node 20, 22, 23, 24, and 25.
 
@@ -220,7 +220,7 @@ The MCP server also exposes read-only resources:
 
 ## Current Scope
 
-- CLI and MCP share the same 112-tool catalog in `cli/src/tools/index.ts`. Groups: transactions/corrections/consumption/transfers/tags/placeholders; accounts/reconciliation/coverage; credit cards and payment evidence; budgets/net worth/buckets; investments/subscriptions/bills; receivables; analytics/recaps/forecast/health/goals/debt; category rules; notebook/portfolio review; backup/import/export; audit/undo/sanity; runtime diagnostics; plugins.
+- CLI and MCP share the same 118-tool catalog in `cli/src/tools/index.ts`. Groups: transactions/corrections/consumption/classification-type catalog and atomic batch previews/transfers/tags/placeholders; accounts/reconciliation/coverage; credit cards and payment evidence; budgets/net worth/buckets; investments/subscriptions/bills; receivables; analytics/recaps/forecast/health/goals/debt; category rules; notebook/portfolio review; backup/import/export; audit/undo/sanity; runtime diagnostics; plugins.
 - `shikin tools --json` is the authoritative discovery contract and includes `catalogVersion`, `schemaVersion`, generation time, CLI/MCP compatibility counts, validation-scope notes, required migration metadata, and optional declared tool `effects`. Effects are opt-in annotations, not a complete audit of the catalog.
 - `setup-status` and the automation context tool expose existing goal, debt, and investment support surfaces. Investment support remains limited to stored holdings (`manage-investment`) and portfolio review (`generate-portfolio-review`).
 - All shipped tools are available end-to-end against the local database.

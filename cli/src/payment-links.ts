@@ -11,6 +11,7 @@ import {
   type ResolvedPaymentEvidence,
 } from '@shikin/finance-core/payments'
 import type { ConsumptionClassification, CorrectionSplit } from '@shikin/finance-core/corrections'
+import type { ClassificationTypeRevision } from '@shikin/finance-core'
 import {
   boundedText,
   dayjs,
@@ -121,6 +122,7 @@ function readPaymentEvidence(): PaymentEvidence {
     classifications: query<ConsumptionClassification>(
       'SELECT * FROM transaction_consumption_classifications'
     ),
+    typeRevisions: query<ClassificationTypeRevision>('SELECT * FROM classification_type_revisions'),
     activeLinks: query<ActivePaymentLink>(
       'SELECT id, transaction_id, amount FROM card_statement_payment_links WHERE voided_at IS NULL'
     ),

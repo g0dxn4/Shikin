@@ -28,6 +28,13 @@ vi.mock('@/lib/database', () => {
 })
 
 import {
+  applyConsumptionClassifications,
+  archiveClassificationType,
+  createClassificationType,
+  previewConsumptionClassifications,
+  reviseClassificationType,
+} from '../classification-type-service'
+import {
   clearConsumptionClassification,
   readConsumptionClassificationContext,
   readNetConsumptionReport,
@@ -90,7 +97,7 @@ describe('frontend consumption service on SQLite', () => {
       referencedPurchaseId: purchase.id,
     })
     expect(snapshot().transactions).toEqual(before)
-    expect(snapshot().audit).toHaveLength(3)
+    expect(snapshot().audit).toHaveLength(2)
 
     state
       .db!.prepare(
@@ -180,6 +187,121 @@ describe('frontend consumption service on SQLite', () => {
     await expect(readNetConsumptionReport('20260201', '2026-02-28')).rejects.toThrow(
       'A valid report date range is required.'
     )
+    expect(snapshot()).toEqual(before)
+  })
+
+  it('manages immutable custom heads and atomically previews/applies pinned assignments', async () => {
+    const created = await createClassificationType({
+      name: '  Family support  ',
+      financialTreatment: 'other_income',
+    })
+    const noOpBefore = {
+      snapshot: snapshot(),
+      revision: state.db!.prepare('SELECT * FROM app_data_state').all(),
+      types: state.db!.prepare('SELECT * FROM classification_types').all(),
+      revisions: state.db!.prepare('SELECT * FROM classification_type_revisions').all(),
+    }
+    await expect(
+      reviseClassificationType({
+        typeId: created.type.id,
+        expectedRevisionId: created.revision.id,
+        name: 'Family support',
+        financialTreatment: 'other_income',
+      })
+    ).resolves.toMatchObject({ changed: false })
+    expect({
+      snapshot: snapshot(),
+      revision: state.db!.prepare('SELECT * FROM app_data_state').all(),
+      types: state.db!.prepare('SELECT * FROM classification_types').all(),
+      revisions: state.db!.prepare('SELECT * FROM classification_type_revisions').all(),
+    }).toEqual(noOpBefore)
+    const preview = await previewConsumptionClassifications([
+      {
+        transactionId: 'refund',
+        customTypeId: created.type.id,
+        expectedRevisionId: created.revision.id,
+      },
+    ])
+    expect(preview).toMatchObject({ applicable: true, changed: true })
+    const digest = snapshot()
+    const repeated = await previewConsumptionClassifications([
+      {
+        transactionId: 'refund',
+        customTypeId: created.type.id,
+        expectedRevisionId: created.revision.id,
+      },
+    ])
+    expect(snapshot()).toEqual(digest)
+    expect(repeated.previewToken).toBe(preview.previewToken)
+    const applied = await applyConsumptionClassifications({
+      targets: [
+        {
+          transactionId: 'refund',
+          customTypeId: created.type.id,
+          expectedRevisionId: created.revision.id,
+        },
+      ],
+      previewToken: preview.previewToken,
+    })
+    expect(applied.batchId).toBeTruthy()
+    const revised = await reviseClassificationType({
+      typeId: created.type.id,
+      expectedRevisionId: created.revision.id,
+      name: 'Gift',
+      financialTreatment: 'principal_recovery',
+    })
+    const context = await readConsumptionClassificationContext('refund')
+    expect(context.allocations[0]).toMatchObject({
+      classification: { type_revision_id: created.revision.id, role: 'other_income' },
+      classificationDisplay: { name: 'Family support', version: 1 },
+    })
+    await archiveClassificationType({
+      typeId: created.type.id,
+      expectedRevisionId: revised.revision.id,
+    })
+    await expect(
+      previewConsumptionClassifications([
+        {
+          transactionId: 'refund',
+          customTypeId: created.type.id,
+          expectedRevisionId: revised.revision.id,
+        },
+      ])
+    ).resolves.toMatchObject({ applicable: false })
+  })
+
+  it('rolls an entire batch back when assignment auditing fails', async () => {
+    const targets = [
+      { transactionId: 'purchase', builtinRole: 'purchase' as const },
+      { transactionId: 'refund', builtinRole: 'earned_income' as const },
+    ]
+    const preview = await previewConsumptionClassifications(targets)
+    state.db!.exec(
+      "CREATE TRIGGER reject_batch_audit BEFORE INSERT ON audit_log WHEN NEW.action = 'batch-classify-consumption' BEGIN SELECT RAISE(ABORT, 'synthetic batch audit failure'); END"
+    )
+    const before = snapshot()
+    await expect(
+      applyConsumptionClassifications({ targets, previewToken: preview.previewToken })
+    ).rejects.toThrow('synthetic batch audit failure')
+    expect(snapshot()).toEqual(before)
+  })
+
+  it('rejects stale batch guards atomically', async () => {
+    const preview = await previewConsumptionClassifications([
+      { transactionId: 'purchase', builtinRole: 'purchase' },
+      { transactionId: 'refund', builtinRole: 'earned_income' },
+    ])
+    state.db!.prepare("UPDATE transactions SET status='pending' WHERE id='refund'").run()
+    const before = snapshot()
+    await expect(
+      applyConsumptionClassifications({
+        targets: [
+          { transactionId: 'purchase', builtinRole: 'purchase' },
+          { transactionId: 'refund', builtinRole: 'earned_income' },
+        ],
+        previewToken: preview.previewToken,
+      })
+    ).rejects.toThrow(/invalid|stale/i)
     expect(snapshot()).toEqual(before)
   })
 

@@ -18,6 +18,7 @@ import {
   type PaymentEvidence,
   type PaymentTransaction,
 } from '@shikin/finance-core/payments'
+import type { ClassificationTypeRevision } from '@shikin/finance-core'
 import { query, withTransaction } from '@/lib/database'
 import type { TransactionClient } from '@/lib/database'
 import { generateId } from '@/lib/ulid'
@@ -185,12 +186,13 @@ export async function getSplitTransactionIds(): Promise<Set<string>> {
 export async function readFrontendConsumptionEvidence(
   tx: TransactionClient
 ): Promise<ConsumptionEvidence> {
-  const [transactions, splits, classifications] = await Promise.all([
+  const [transactions, splits, classifications, typeRevisions] = await Promise.all([
     tx.query<CorrectionTransaction>('SELECT * FROM transactions'),
     tx.query<CorrectionSplit>('SELECT * FROM transaction_splits'),
     tx.query<ConsumptionClassification>('SELECT * FROM transaction_consumption_classifications'),
+    tx.query<ClassificationTypeRevision>('SELECT * FROM classification_type_revisions'),
   ])
-  return { transactions, splits, classifications }
+  return { transactions, splits, classifications, typeRevisions }
 }
 export async function activeFrontendEvidence(tx: TransactionClient, id: string) {
   const payments = await tx.query(
@@ -223,16 +225,20 @@ async function assertSplitWorkflow(
 }
 
 export async function readFrontendPaymentEvidence(tx: TransactionClient): Promise<PaymentEvidence> {
-  const [accounts, transactions, splits, classifications, activeLinks] = await Promise.all([
-    tx.query<PaymentAccount>('SELECT id, type, currency, account_mode, is_archived FROM accounts'),
-    tx.query<PaymentTransaction>('SELECT * FROM transactions'),
-    tx.query<CorrectionSplit>('SELECT * FROM transaction_splits'),
-    tx.query<ConsumptionClassification>('SELECT * FROM transaction_consumption_classifications'),
-    tx.query<ActivePaymentLink>(
-      'SELECT id, transaction_id, amount FROM card_statement_payment_links WHERE voided_at IS NULL'
-    ),
-  ])
-  return { accounts, transactions, splits, classifications, activeLinks }
+  const [accounts, transactions, splits, classifications, typeRevisions, activeLinks] =
+    await Promise.all([
+      tx.query<PaymentAccount>(
+        'SELECT id, type, currency, account_mode, is_archived FROM accounts'
+      ),
+      tx.query<PaymentTransaction>('SELECT * FROM transactions'),
+      tx.query<CorrectionSplit>('SELECT * FROM transaction_splits'),
+      tx.query<ConsumptionClassification>('SELECT * FROM transaction_consumption_classifications'),
+      tx.query<ClassificationTypeRevision>('SELECT * FROM classification_type_revisions'),
+      tx.query<ActivePaymentLink>(
+        'SELECT id, transaction_id, amount FROM card_statement_payment_links WHERE voided_at IS NULL'
+      ),
+    ])
+  return { accounts, transactions, splits, classifications, typeRevisions, activeLinks }
 }
 
 export async function assertFrontendActivePaymentCapacity(

@@ -15,6 +15,7 @@ import {
 } from '@shikin/finance-core/payments'
 import type { ConsumptionClassification, CorrectionSplit } from '@shikin/finance-core/corrections'
 import { importPlanToken } from '@shikin/finance-core/imports'
+import type { ClassificationTypeRevision } from '@shikin/finance-core'
 import { withTransaction, type TransactionClient } from '@/lib/database'
 import { generateId } from '@/lib/ulid'
 
@@ -502,10 +503,13 @@ async function readEvidence(tx: TransactionClient): Promise<PaymentEvidence> {
   const classifications = await tx.query<ConsumptionClassification>(
     'SELECT * FROM transaction_consumption_classifications'
   )
+  const typeRevisions = await tx.query<ClassificationTypeRevision>(
+    'SELECT * FROM classification_type_revisions'
+  )
   const activeLinks = await tx.query<ActivePaymentLink>(
     'SELECT id, transaction_id, amount FROM card_statement_payment_links WHERE voided_at IS NULL'
   )
-  return { accounts, transactions, splits, classifications, activeLinks }
+  return { accounts, transactions, splits, classifications, typeRevisions, activeLinks }
 }
 
 async function applyStatementTransition(

@@ -14,6 +14,7 @@ import { pluginTools } from './plugins.js'
 import { receivablesTools } from './receivables.js'
 import { runtimeDiagnosticsTools } from './runtime-diagnostics.js'
 import { fxTools } from './fx.js'
+import { classificationTools } from '../classification-tools.js'
 import { loadEnabledPluginToolDefinitions } from '../plugins.js'
 
 export const builtInTools: ToolDefinition[] = [
@@ -31,6 +32,7 @@ export const builtInTools: ToolDefinition[] = [
   ...receivablesTools,
   ...runtimeDiagnosticsTools,
   ...fxTools,
+  ...classificationTools,
   ...pluginTools,
 ]
 

@@ -14,6 +14,11 @@ import {
   type MetadataCorrection,
 } from '@shikin/finance-core/corrections'
 import {
+  currentClassificationTypeRevision,
+  type ClassificationType,
+  type ClassificationTypeRevision,
+} from '@shikin/finance-core'
+import {
   query,
   execute,
   transaction,
@@ -32,6 +37,7 @@ export function readConsumptionEvidence(): ConsumptionEvidence {
     classifications: query<ConsumptionClassification>(
       'SELECT * FROM transaction_consumption_classifications'
     ),
+    typeRevisions: query<ClassificationTypeRevision>('SELECT * FROM classification_type_revisions'),
   }
 }
 export function activeTransactionEvidence(id: string) {
@@ -258,12 +264,14 @@ export function correctMetadataMutation(input: z.infer<typeof correctTransaction
 export const setTransactionConsumption: ToolDefinition = {
   name: 'set-transaction-consumption',
   description:
-    'Set an explicit allocation-level consumption classification. Refund/principal require a same-currency purchase classification; each role has an independent aggregate cap. Existing references must remain valid.',
+    'Set an explicit allocation-level consumption classification. Choose one builtin role or one active custom type/current revision. Refund/principal treatments require a same-currency purchase classification; each treatment has an independent aggregate cap.',
   schema: z
     .object({
       transactionId: z.string(),
       splitId: z.string().nullable().optional(),
-      role: z.enum(consumptionRoles),
+      role: z.enum(consumptionRoles).optional(),
+      customTypeId: z.string().trim().min(1).optional(),
+      expectedRevisionId: z.string().trim().min(1).optional(),
       referencedPurchaseId: z.string().nullable().optional(),
       auditSource: z.string().max(120).optional(),
       auditNote: z.string().max(1000).optional(),
@@ -275,26 +283,54 @@ export const setTransactionConsumption: ToolDefinition = {
   execute: async (input) =>
     transaction(() => {
       assertCorrectionReferences(input.transactionId)
+      const customSelection = Boolean(input.customTypeId || input.expectedRevisionId)
+      if (Boolean(input.role) === customSelection)
+        throw new Error('Choose exactly one role or custom type with expected revision.')
+      if (customSelection && (!input.customTypeId || !input.expectedRevisionId))
+        throw new Error('Custom type and expected revision are both required.')
       const evidence = readConsumptionEvidence()
       const before = evidence.classifications.find(
         (item) =>
           item.transaction_id === input.transactionId && item.split_id === (input.splitId ?? null)
       )
+      const custom = input.customTypeId
+        ? currentClassificationTypeRevision(
+            input.customTypeId,
+            input.expectedRevisionId!,
+            query<ClassificationType>('SELECT * FROM classification_types'),
+            evidence.typeRevisions ?? []
+          )
+        : null
       const after: ConsumptionClassification = {
         id: before?.id ?? generateId(),
         transaction_id: input.transactionId,
         split_id: input.splitId ?? null,
-        role: input.role,
+        role: custom?.revision.financial_treatment ?? input.role!,
         referenced_purchase_id: input.referencedPurchaseId ?? null,
+        type_revision_id: custom?.revision.id ?? null,
       }
       const updatedClassifications = setConsumptionClassificationInEvidence(evidence, after)
+      if (
+        before &&
+        before.role === after.role &&
+        before.referenced_purchase_id === after.referenced_purchase_id &&
+        (before.type_revision_id ?? null) === (after.type_revision_id ?? null)
+      )
+        return { success: true, classification: before, changed: false }
       assertActivePaymentCapacity({
         transactionId: input.transactionId,
         classifications: updatedClassifications,
       })
       execute(
-        "INSERT INTO transaction_consumption_classifications (id, transaction_id, split_id, role, referenced_purchase_id) VALUES ($1,$2,$3,$4,$5) ON CONFLICT(id) DO UPDATE SET role = excluded.role, referenced_purchase_id = excluded.referenced_purchase_id, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
-        [after.id, after.transaction_id, after.split_id, after.role, after.referenced_purchase_id]
+        "INSERT INTO transaction_consumption_classifications (id, transaction_id, split_id, role, referenced_purchase_id, type_revision_id) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO UPDATE SET role = excluded.role, referenced_purchase_id = excluded.referenced_purchase_id, type_revision_id = excluded.type_revision_id, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+        [
+          after.id,
+          after.transaction_id,
+          after.split_id,
+          after.role,
+          after.referenced_purchase_id,
+          after.type_revision_id,
+        ]
       )
       writeAuditLog({
         entity: 'transaction',

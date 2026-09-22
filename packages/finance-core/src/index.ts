@@ -21,4 +21,6 @@ export * from './transaction-fx.js'
 export * from './022_dated_fx.js'
 
 export * from './classification-policy.js'
+export * from './classification-batch.js'
+export * from './dated-consumption.js'
 export * from './023_classification_types.js'

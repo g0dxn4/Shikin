@@ -41,6 +41,11 @@
       "types": "./dist/valuation.d.ts",
       "import": "./dist/valuation.js",
       "default": "./dist/valuation.js"
+    },
+    "./fx": {
+      "types": "./dist/fx.d.ts",
+      "import": "./dist/fx.js",
+      "default": "./dist/fx.js"
     }
   },
   "files": [

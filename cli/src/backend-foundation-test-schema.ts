@@ -15,13 +15,25 @@ export function applyBackendFoundationTestSchema(db: Database.Database): void {
       ])
     )
     for (const statement of foundation.backendFoundationStatements(columns)) db.exec(statement)
+    const fxColumns = Object.fromEntries(
+      Object.keys(foundation.DATED_FX_SCHEMA).map((table) => [
+        table,
+        (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(
+          (column) => column.name
+        ),
+      ])
+    )
+    for (const statement of foundation.datedFxStatements(fxColumns)) db.exec(statement)
   }).immediate()
 }
 
 /** Execute only the hosted migration section, never storage setup or a server.
  * A version boundary produces a synthetic legacy database using unchanged old SQL.
  */
-export function runHostedTestMigrations(db: Database.Database, through: 19 | 20 | 21 = 21): void {
+export function runHostedTestMigrations(
+  db: Database.Database,
+  through: 19 | 20 | 21 | 22 = 22
+): void {
   const source = readFileSync(new URL('../../scripts/data-server.mjs', import.meta.url), 'utf8')
   let migrations = source.slice(
     source.indexOf('const CURRENT_SHIKIN_MIGRATIONS'),
@@ -37,5 +49,11 @@ export function runHostedTestMigrations(db: Database.Database, through: 19 | 20 
       '  db.transaction(() => {\n    const migrations',
       '  return\n  db.transaction(() => {\n    const migrations'
     )
+  if (through === 21) {
+    migrations = migrations
+      .replace('  DATED_FX_MIGRATION,\n', '')
+      .replace(/ {2}assertDatedFxReady\([\s\S]*?\n {2}\)/, '')
+      .replace('if (!migrations.some((row) => row.name === DATED_FX_MIGRATION))', 'if (false)')
+  }
   runInNewContext(`${migrations}\nrunMigrations()`, { db, ...foundation, console: { log() {} } })
 }

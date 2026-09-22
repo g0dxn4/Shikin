@@ -8,6 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import Database from 'better-sqlite3'
 import dayjs from 'dayjs'
+import { runHostedTestMigrations } from './backend-foundation-test-schema.js'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 let SERVER_URL = 'http://127.0.0.1:1480'
@@ -1200,7 +1201,7 @@ Database.prototype.backup = async function (destinationPath, ...args) {
         expect(restoredDb.pragma('integrity_check', { simple: true })).toBe('ok')
         expect(
           restoredDb.prepare('SELECT name FROM _migrations ORDER BY id DESC LIMIT 1').get()
-        ).toEqual({ name: '021_backend_remediation_foundation' })
+        ).toEqual({ name: '022_dated_fx' })
         expect(
           restoredDb.prepare('SELECT id, balance FROM accounts WHERE id = ?').get(restoredAccountId)
         ).toEqual({
@@ -1219,4 +1220,103 @@ Database.prototype.backup = async function (destinationPath, ...args) {
       rmSync(shutdownRoot, { recursive: true, force: true })
     }
   }, 30_000)
+})
+
+describe('dated FX browser restore boundary', () => {
+  const headers = { Origin: ORIGIN, 'X-Shikin-Bridge': TOKEN }
+  async function readRows(sql: string) {
+    const result = await fetch(`${SERVER_URL}/api/db/query`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql, params: [] }),
+    })
+    expect(result.status).toBe(200)
+    return result.json()
+  }
+  it.each([19, 20, 21, 22] as const)(
+    'restores schema%i with empty legacy authority or exact schema22 FX snapshots',
+    async (version) => {
+      const fixture = new Database(':memory:')
+      fixture.pragma('foreign_keys = ON')
+      try {
+        runHostedTestMigrations(fixture, version)
+        fixture.exec(
+          "INSERT INTO accounts(id,name,type,balance) VALUES ('fx-account','Synthetic','checking',12345)"
+        )
+        if (version === 22)
+          fixture.exec(`
+        INSERT INTO settings(key,value) VALUES ('main_currency','MXN');
+        INSERT INTO manual_exchange_rates(id,from_currency,to_currency,rate_decimal,effective_from,created_at) VALUES ('fx-rate','USD','MXN','17','2025-09-01','2025-09-01T00:00:00Z');
+        INSERT INTO transaction_fx_evidence(id,original_transaction_id,original_account_id,transaction_type,status,ledger_treatment,input_amount_centavos,input_currency,account_amount_centavos,account_currency,account_balance_delta_centavos,transaction_date,rate_id,rate_decimal,created_at)
+        VALUES ('fx-evidence','deleted-transaction','deleted-account','expense','posted','normal',100,'USD',1700,'MXN',-1700,'2025-09-14','fx-rate','17','2025-09-14T00:00:00Z');
+      `)
+        const response = await fetch(`${SERVER_URL}/api/db/import`, {
+          method: 'POST',
+          headers,
+          body: fixture.serialize(),
+        })
+        expect(response.status, await response.text()).toBe(200)
+        expect(await readRows('SELECT name FROM _migrations WHERE id = 22')).toEqual([
+          { name: '022_dated_fx' },
+        ])
+        expect(await readRows("SELECT value FROM settings WHERE key = 'main_currency'")).toEqual(
+          version === 22 ? [{ value: 'MXN' }] : []
+        )
+        for (const table of ['manual_exchange_rates', 'transaction_fx_evidence'])
+          expect(await readRows(`SELECT * FROM ${table}`)).toEqual(
+            version === 22 ? fixture.prepare(`SELECT * FROM ${table}`).all() : []
+          )
+        const exported = await fetch(`${SERVER_URL}/api/db/export`, { headers })
+        expect(exported.status).toBe(200)
+        const roundtripPath = join(tempHomeDir, `fx-roundtrip-${version}.db`)
+        writeFileSync(roundtripPath, Buffer.from(await exported.arrayBuffer()))
+        const roundtrip = new Database(roundtripPath)
+        try {
+          expect(roundtrip.prepare('SELECT balance FROM accounts').get()).toEqual({
+            balance: 12345,
+          })
+          for (const table of ['manual_exchange_rates', 'transaction_fx_evidence'])
+            expect(roundtrip.prepare(`SELECT * FROM ${table}`).all()).toEqual(
+              await readRows(`SELECT * FROM ${table}`)
+            )
+        } finally {
+          roundtrip.close()
+        }
+      } finally {
+        fixture.close()
+      }
+    }
+  )
+  it.each([19, 20, 21, 23] as const)(
+    'restores original live data when schema%i import fails or is future',
+    async (version) => {
+      const before = await readRows('SELECT * FROM app_data_state')
+      const accounts = await readRows('SELECT * FROM accounts')
+      const main = await readRows("SELECT value FROM settings WHERE key = 'main_currency'")
+      const rates = await readRows('SELECT * FROM manual_exchange_rates')
+      const evidence = await readRows('SELECT * FROM transaction_fx_evidence')
+      const fixture = new Database(':memory:')
+      try {
+        runHostedTestMigrations(fixture, version === 23 ? 22 : version)
+        if (version === 23)
+          fixture.exec("INSERT INTO _migrations(id,name) VALUES (23,'023_future')")
+        else fixture.exec('CREATE TABLE manual_exchange_rates (incompatible TEXT)')
+        const response = await fetch(`${SERVER_URL}/api/db/import`, {
+          method: 'POST',
+          headers,
+          body: fixture.serialize(),
+        })
+        expect(response.ok).toBe(false)
+        expect(await readRows('SELECT * FROM app_data_state')).toEqual(before)
+        expect(await readRows('SELECT * FROM accounts')).toEqual(accounts)
+        expect(await readRows("SELECT value FROM settings WHERE key = 'main_currency'")).toEqual(
+          main
+        )
+        expect(await readRows('SELECT * FROM manual_exchange_rates')).toEqual(rates)
+        expect(await readRows('SELECT * FROM transaction_fx_evidence')).toEqual(evidence)
+      } finally {
+        fixture.close()
+      }
+    }
+  )
 })

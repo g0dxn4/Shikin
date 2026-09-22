@@ -124,6 +124,8 @@ export interface TransactionSplitWithCategory extends TransactionSplit {
 }
 
 export interface Budget {
+  /** Persisted denomination; optional until dated-FX form adapters land. */
+  currency?: CurrencyCode
   id: ULID
   category_id: ULID | null
   name: string
@@ -185,6 +187,8 @@ export interface RecurringRule {
 }
 
 export interface Goal {
+  /** Persisted denomination; optional until dated-FX form adapters land. */
+  currency?: CurrencyCode
   id: ULID
   name: string
   target_amount: Money
@@ -207,4 +211,36 @@ export interface CategoryRule {
   hit_count: number
   created_at: DateTimeStr
   updated_at: DateTimeStr
+}
+
+export interface ManualExchangeRate {
+  id: ULID
+  from_currency: CurrencyCode
+  to_currency: CurrencyCode
+  rate_decimal: string
+  effective_from: DateStr
+  supersedes_rate_id: ULID | null
+  source_note: string | null
+  created_at: DateTimeStr
+}
+
+/** Original acceptance snapshot, not current transaction/balance authority. */
+export interface TransactionFxEvidence {
+  id: ULID
+  transaction_id: ULID | null
+  original_transaction_id: ULID
+  original_account_id: ULID
+  transaction_type: 'income' | 'expense'
+  status: TransactionStatus
+  ledger_treatment: LedgerTreatment
+  input_amount_centavos: Money
+  input_currency: CurrencyCode
+  account_amount_centavos: Money
+  account_currency: CurrencyCode
+  /** Resulting signed ledger contribution, NOT an edit's incremental delta. */
+  account_balance_delta_centavos: Money
+  transaction_date: DateStr
+  rate_id: ULID | null
+  rate_decimal: string
+  created_at: DateTimeStr
 }

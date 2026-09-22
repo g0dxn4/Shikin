@@ -1,3 +1,5 @@
+import { DATED_FX_VERSION } from './022_dated_fx.js'
+
 /** Versioned, complete SQLite statements. Never split these on semicolons (triggers).
  * Callers must check the migration marker and execute the entire list, including
  * the marker, inside one real transaction. No domain evidence is inferred here.
@@ -311,8 +313,7 @@ export function assertSupportedSchemaVersion(rows: readonly { id?: number; name:
   if (
     rows.some(
       (row) =>
-        Number(row.id ?? 0) > BACKEND_FOUNDATION_VERSION ||
-        Number.parseInt(row.name, 10) > BACKEND_FOUNDATION_VERSION
+        Number(row.id ?? 0) > DATED_FX_VERSION || Number.parseInt(row.name, 10) > DATED_FX_VERSION
     )
   ) {
     throw new Error(

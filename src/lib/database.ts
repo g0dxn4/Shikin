@@ -1,4 +1,8 @@
 import {
+  DATED_FX_MIGRATION,
+  DATED_FX_SCHEMA,
+  datedFxStatements,
+  assertDatedFxReady,
   BACKEND_FOUNDATION_MIGRATION,
   BACKEND_FOUNDATION_SCHEMA,
   backendFoundationStatements,
@@ -230,6 +234,7 @@ const CURRENT_SHIKIN_MIGRATIONS = [
   '019_financial_semantics',
   '020_quote_recurrence_import_identity',
   BACKEND_FOUNDATION_MIGRATION,
+  DATED_FX_MIGRATION,
 ] as const
 
 const CURRENT_SHIKIN_SCHEMA: Record<string, readonly string[]> = {
@@ -741,6 +746,18 @@ async function validateTauriCurrentDatabase(db: TauriDatabase): Promise<void> {
       await db.select<{ name: string }[]>(`PRAGMA table_info(${table})`)
     ).map((column) => column.name)
   }
+  const fxColumns: Record<string, string[]> = {}
+  for (const table of Object.keys(DATED_FX_SCHEMA)) {
+    fxColumns[table] = (await db.select<{ name: string }[]>(`PRAGMA table_info(${table})`)).map(
+      (column) => column.name
+    )
+  }
+  assertDatedFxReady(
+    fxColumns,
+    await db.select<{ name: string; sql: string | null }[]>(
+      "SELECT name, sql FROM sqlite_master WHERE type IN ('index', 'trigger')"
+    )
+  )
   assertBackendFoundationReady(
     foundationColumns,
     await db.select<{ name: string; sql: string | null }[]>(
@@ -768,6 +785,39 @@ async function removeIfExists(fsMod: TauriFsModule, path: string): Promise<void>
 }
 
 async function runTauriMigrations(db: TauriDatabase): Promise<void> {
+  const hasMigrations = await db.select<{ name: string }[]>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_migrations'"
+  )
+  const rows = hasMigrations.length
+    ? await db.select<{ id: number; name: string }[]>('SELECT id, name FROM _migrations')
+    : []
+  assertSupportedSchemaVersion(rows)
+  if (rows.some((row) => row.name === DATED_FX_MIGRATION)) {
+    await validateTauriCurrentDatabase(db)
+    return
+  }
+  // Fresh databases and the supported restore tail are one atomic unit.
+  // Pre-019 legacy table rebuilding retains its existing dedicated transaction.
+  if (rows.length && !rows.some((row) => row.name === '019_financial_semantics')) {
+    await runTauriMigrationsOnConnection(db, false)
+    return
+  }
+  await runTauriLoadedPoolTransaction(async (tx) => {
+    await runTauriMigrationsOnConnection(
+      {
+        select: async <T>(sql: string, params?: unknown[]) => tx.query(sql, params) as Promise<T>,
+        execute: tx.execute,
+        close: async () => {},
+      },
+      true
+    )
+  })
+}
+
+async function runTauriMigrationsOnConnection(
+  db: TauriDatabase,
+  inTransaction: boolean
+): Promise<void> {
   // Ensure _migrations table exists (created by earlier JS code or first run)
   await db.execute(`
     CREATE TABLE IF NOT EXISTS _migrations (
@@ -780,7 +830,7 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
   const rows = await db.select<{ id: number; name: string }[]>('SELECT id, name FROM _migrations')
   assertSupportedSchemaVersion(rows)
   const applied = new Set(rows.map((r) => r.name))
-  if (applied.has(BACKEND_FOUNDATION_MIGRATION)) {
+  if (applied.has(DATED_FX_MIGRATION)) {
     await validateTauriCurrentDatabase(db)
     return
   }
@@ -788,7 +838,7 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
   // 019/020 databases need only the supported additive tail. Do not replay
   // older status/timestamp repair DML against existing financial evidence.
   if (applied.has('019_financial_semantics')) {
-    await runTauriBackendFoundationUpgrade(db, applied)
+    await runTauriBackendFoundationUpgrade(db, applied, inTransaction)
     return
   }
 
@@ -1493,12 +1543,13 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
     applied.add('019_financial_semantics')
   }
 
-  await runTauriBackendFoundationUpgrade(db, applied)
+  await runTauriBackendFoundationUpgrade(db, applied, inTransaction)
 }
 
 async function runTauriBackendFoundationUpgrade(
   db: TauriDatabase,
-  applied: Set<string>
+  applied: Set<string>,
+  inTransaction: boolean
 ): Promise<void> {
   if (!applied.has('020_quote_recurrence_import_identity')) {
     await ensureTableColumn(db, 'stock_prices', 'quote_currency', 'TEXT')
@@ -1577,7 +1628,7 @@ async function runTauriBackendFoundationUpgrade(
     END
   `)
 
-  await runTauriLoadedPoolTransaction(async (tx) => {
+  const finish = async (tx: TransactionClient) => {
     // Recheck under the write lock, not against the pre-transaction snapshot.
     const migrations = await tx.query<{ id: number; name: string }>(
       'SELECT id, name FROM _migrations'
@@ -1592,12 +1643,27 @@ async function runTauriBackendFoundationUpgrade(
       }
       for (const statement of backendFoundationStatements(columns)) await tx.execute(statement)
     }
+    if (!migrations.some((row) => row.name === DATED_FX_MIGRATION)) {
+      const columns: Record<string, string[]> = {}
+      for (const table of Object.keys(DATED_FX_SCHEMA)) {
+        columns[table] = (await tx.query<{ name: string }>(`PRAGMA table_info(${table})`)).map(
+          (column) => column.name
+        )
+      }
+      for (const statement of datedFxStatements(columns)) await tx.execute(statement)
+    }
     await validateTauriCurrentDatabase({
       select: async <T>(sql: string, params?: unknown[]) => tx.query(sql, params) as Promise<T>,
       execute: tx.execute,
       close: async () => {},
     })
-  })
+  }
+  if (inTransaction)
+    await finish({
+      query: <T>(sql: string, params?: unknown[]) => db.select<T[]>(sql, params),
+      execute: db.execute.bind(db),
+    })
+  else await runTauriLoadedPoolTransaction(finish)
 }
 
 // ── Browser Backend ────────────────────────────────────────────────────────

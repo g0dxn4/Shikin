@@ -5,7 +5,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BACKEND_FOUNDATION_MIGRATION, FINANCIAL_REVISION_TABLES } from '@shikin/finance-core'
+import {
+  BACKEND_FOUNDATION_MIGRATION,
+  DATED_FX_MIGRATION,
+  DATED_FX_REVISION_TABLES,
+  FINANCIAL_REVISION_TABLES,
+} from '@shikin/finance-core'
 import { runHostedTestMigrations } from './backend-foundation-test-schema.js'
 
 const databases: Database.Database[] = []
@@ -85,7 +90,7 @@ function reconciliation(db: Database.Database, id: string, mode = 'legacy_batch'
     VALUES (?, 'cash', '2025-01-01', 0, 0, 0, 0, 0, 'batch', ?)`
   ).run(id, mode)
 }
-async function mockNative(db: Database.Database, fail = false) {
+async function mockNative(db: Database.Database, fail: boolean | string = false) {
   vi.resetModules()
   vi.doMock('@/lib/runtime', () => ({ isTauri: true }))
   vi.doMock('@tauri-apps/api/path', () => ({
@@ -93,7 +98,12 @@ async function mockNative(db: Database.Database, fail = false) {
     join: async (...parts: string[]) => parts.join('/'),
   }))
   const execute = async (sql: string, params: unknown[] = []) => {
-    if (fail && sql.includes('CREATE TRIGGER IF NOT EXISTS trg_data_revision_'))
+    if (
+      fail &&
+      sql.includes(
+        typeof fail === 'string' ? fail : 'CREATE TRIGGER IF NOT EXISTS trg_data_revision_'
+      )
+    )
       throw new Error('injected migration failure')
     const result = db.prepare(sql).run(...params)
     return { rowsAffected: result.changes, lastInsertId: Number(result.lastInsertRowid) }
@@ -388,9 +398,11 @@ describe('021 backend remediation foundation', () => {
       db,
       "SELECT name, tbl_name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'trg_data_revision_%'"
     ) as Array<{ name: string; tbl_name: string }>
-    expect(revisionTriggers).toHaveLength(FINANCIAL_REVISION_TABLES.length * 3)
+    expect(revisionTriggers).toHaveLength(
+      (FINANCIAL_REVISION_TABLES.length + DATED_FX_REVISION_TABLES.length) * 3
+    )
     expect(new Set(revisionTriggers.map((t) => t.tbl_name))).toEqual(
-      new Set(FINANCIAL_REVISION_TABLES)
+      new Set([...FINANCIAL_REVISION_TABLES, ...DATED_FX_REVISION_TABLES])
     )
     db.exec("INSERT INTO accounts (id, name, type) VALUES ('a', 'A', 'checking')")
     expect(state(db).data_revision).toBe(1)
@@ -471,7 +483,7 @@ describe('021 backend remediation foundation', () => {
     async (engine) => {
       const db = database()
       runHostedTestMigrations(db)
-      db.exec("INSERT INTO _migrations (id, name) VALUES (22, '022_future')")
+      db.exec("INSERT INTO _migrations (id, name) VALUES (23, '023_future')")
       const before = snapshot(db)
       if (engine === 'hosted') expect(() => runHostedTestMigrations(db)).toThrow(/newer/)
       else {
@@ -490,7 +502,7 @@ describe('CLI staged restore and read-only readiness', { timeout: 20_000 }, () =
     vi.resetModules()
     return import('./database.js')
   }
-  it.each([19, 20] as const)(
+  it.each([19, 20, 21, 22] as const)(
     'upgrades a staged %i backup, never its source, before successful restore',
     async (version) => {
       const path = home()
@@ -507,15 +519,17 @@ describe('CLI staged restore and read-only readiness', { timeout: 20_000 }, () =
       expect(digest()).toBe(sourceDigest)
       await api.restoreDatabase({ sourcePath: source, dryRun: false })
       expect(digest()).toBe(sourceDigest)
-      expect(api.query('SELECT name FROM _migrations WHERE id = 21')).toEqual([
-        { name: BACKEND_FOUNDATION_MIGRATION },
+      expect(api.query('SELECT name FROM _migrations WHERE id = 22')).toEqual([
+        { name: DATED_FX_MIGRATION },
       ])
       api.close()
       const restored = database(api.getDatabasePath())
       // Restore metadata is an existing settings write, separate from the migration.
-      const { settings: _settings, ...financialBefore } = before
+      const { settings: _settings, app_data_state: _state, ...financialBefore } = before
       assertPreserved(restored, financialBefore)
       expect(rows(restored, "SELECT key FROM settings WHERE key <> 'database_backups'")).toEqual([])
+      expect(rows(restored, 'SELECT * FROM manual_exchange_rates')).toEqual([])
+      expect(rows(restored, 'SELECT * FROM transaction_fx_evidence')).toEqual([])
     }
   )
 
@@ -550,19 +564,22 @@ describe('CLI staged restore and read-only readiness', { timeout: 20_000 }, () =
     api.close()
   })
 
-  it.each([20, 22])('does not auto-migrate normal CLI reads for schema %i', async (version) => {
-    const path = home()
-    const api = await cli(path)
-    mkdirSync(join(path, 'data', 'com.asf.shikin'), { recursive: true })
-    const db = database(api.getDatabasePath())
-    runHostedTestMigrations(db, version === 20 ? 20 : 21)
-    if (version === 22) db.exec("INSERT INTO _migrations (id, name) VALUES (22, '022_future')")
-    const before = snapshot(db)
-    db.close()
-    expect(() => api.query('SELECT 1')).toThrow(version === 22 ? /newer/ : /not ready/)
-    api.close()
-    expect(snapshot(database(api.getDatabasePath()))).toEqual(before)
-  })
+  it.each([19, 20, 21, 23] as const)(
+    'does not auto-migrate normal CLI reads for schema %i',
+    async (version) => {
+      const path = home()
+      const api = await cli(path)
+      mkdirSync(join(path, 'data', 'com.asf.shikin'), { recursive: true })
+      const db = database(api.getDatabasePath())
+      runHostedTestMigrations(db, version === 23 ? 22 : version)
+      if (version === 23) db.exec("INSERT INTO _migrations (id, name) VALUES (23, '023_future')")
+      const before = snapshot(db)
+      db.close()
+      expect(() => api.query('SELECT 1')).toThrow(version === 23 ? /newer/ : /not ready/)
+      api.close()
+      expect(snapshot(database(api.getDatabasePath()))).toEqual(before)
+    }
+  )
 
   it('rejects future backups during staged validation without modifying source', async () => {
     const path = home()
@@ -577,4 +594,141 @@ describe('CLI staged restore and read-only readiness', { timeout: 20_000 }, () =
     expect(readFileSync(source)).toEqual(before)
     api.close()
   })
+})
+
+describe('022 dated FX migration boundaries', () => {
+  it.each(['hosted', 'native'] as const)(
+    'rejects incomplete schema22 without repairing it (%s)',
+    async (engine) => {
+      const db = database()
+      runHostedTestMigrations(db)
+      db.exec('DROP TRIGGER trg_manual_fx_append_only')
+      const before = snapshot(db)
+      const schema = rows(db, 'SELECT * FROM sqlite_master ORDER BY name')
+      if (engine === 'hosted')
+        expect(() => runHostedTestMigrations(db)).toThrow(/022 schema object/)
+      else await expect((await mockNative(db)).api.getDb()).rejects.toThrow(/022 schema object/)
+      expect(snapshot(db)).toEqual(before)
+      expect(rows(db, 'SELECT * FROM sqlite_master ORDER BY name')).toEqual(schema)
+    }
+  )
+
+  it.each([19, 20, 21, 22] as const)(
+    'upgrades %i preserving USD denomination without inferred FX authority',
+    (version) => {
+      const db = database()
+      runHostedTestMigrations(db, version)
+      db.exec(
+        "INSERT INTO budgets(id,name,amount,period) VALUES ('budget','B',123,'monthly'); INSERT INTO goals(id,name,target_amount) VALUES ('goal','G',456)"
+      )
+      const before = snapshot(db)
+      runHostedTestMigrations(db)
+      assertPreserved(db, before)
+      expect(rows(db, 'SELECT currency FROM budgets')).toEqual([{ currency: 'USD' }])
+      expect(rows(db, 'SELECT currency FROM goals')).toEqual([{ currency: 'USD' }])
+      expect(rows(db, "SELECT * FROM settings WHERE key = 'main_currency'")).toEqual([])
+      expect(rows(db, 'SELECT * FROM manual_exchange_rates')).toEqual([])
+    }
+  )
+
+  for (const engine of ['hosted', 'native'] as const) {
+    it.each([0, 19, 20, 21] as const)(
+      `atomically preserves fresh/%i schema after late 022 failure (${engine})`,
+      async (version) => {
+        const db = database()
+        if (version) runHostedTestMigrations(db, version)
+        const before = snapshot(db)
+        const schema = rows(db, 'SELECT * FROM sqlite_master ORDER BY name')
+        if (engine === 'hosted') {
+          const original = db.exec.bind(db)
+          vi.spyOn(db, 'exec').mockImplementation((sql) => {
+            if (sql.includes('CREATE TRIGGER IF NOT EXISTS trg_fx_evidence_immutable_update'))
+              throw new Error('injected migration failure')
+            return original(sql)
+          })
+          expect(() => runHostedTestMigrations(db)).toThrow('injected migration failure')
+        } else {
+          const { api } = await mockNative(
+            db,
+            'CREATE TRIGGER IF NOT EXISTS trg_fx_evidence_immutable_update'
+          )
+          await expect(api.getDb()).rejects.toThrow('injected migration failure')
+        }
+        expect(snapshot(db)).toEqual(before)
+        expect(rows(db, 'SELECT * FROM sqlite_master ORDER BY name')).toEqual(schema)
+      }
+    )
+    it.each([21, 22] as const)(`validates schema %i through ${engine} startup`, async (version) => {
+      const db = database()
+      runHostedTestMigrations(db, version)
+      if (engine === 'hosted') runHostedTestMigrations(db)
+      else await (await mockNative(db)).api.getDb()
+      expect(rows(db, 'SELECT name FROM _migrations WHERE id = 22')).toEqual([
+        { name: DATED_FX_MIGRATION },
+      ])
+    })
+  }
+
+  it('roundtrips schema22 main/rates/retained evidence through CLI restore and preserves snapshots', async () => {
+    const path = home()
+    const source = join(path, 'fx.db')
+    const backup = database(source)
+    runHostedTestMigrations(backup)
+    backup.exec(`
+      INSERT INTO settings(key,value) VALUES ('main_currency','MXN');
+      INSERT INTO accounts(id,name,type) VALUES ('a','Cash','checking');
+      INSERT INTO transactions(id,account_id,type,amount,description,date) VALUES ('t','a','expense',1700,'Synthetic','2025-09-14');
+      INSERT INTO manual_exchange_rates(id,from_currency,to_currency,rate_decimal,effective_from,created_at) VALUES ('rate','USD','MXN','17','2025-09-01','2025-09-01T00:00:00Z');
+      INSERT INTO transaction_fx_evidence(id,transaction_id,original_transaction_id,original_account_id,transaction_type,status,ledger_treatment,input_amount_centavos,input_currency,account_amount_centavos,account_currency,account_balance_delta_centavos,transaction_date,rate_id,rate_decimal,created_at)
+        VALUES ('fx','t','t','a','expense','posted','normal',100,'USD',1700,'MXN',-1700,'2025-09-14','rate','17','2025-09-14T00:00:00Z');
+      DELETE FROM transactions WHERE id = 't';
+    `)
+    const before = snapshot(backup)
+    backup.close()
+    const sourceBytes = readFileSync(source)
+    vi.stubEnv('HOME', path)
+    vi.stubEnv('XDG_DATA_HOME', join(path, 'data'))
+    vi.resetModules()
+    const api = await import('./database.js')
+    try {
+      await api.restoreDatabase({ sourcePath: source, dryRun: false })
+      expect(api.query("SELECT value FROM settings WHERE key = 'main_currency'")).toEqual([
+        { value: 'MXN' },
+      ])
+      for (const table of ['manual_exchange_rates', 'transaction_fx_evidence'])
+        expect(api.query(`SELECT * FROM ${table}`)).toEqual(before[table]!.rows)
+      expect(readFileSync(source)).toEqual(sourceBytes)
+    } finally {
+      api.close()
+    }
+  })
+
+  it.each([19, 20, 21] as const)(
+    'preserves source and live database when schema%i candidate fails at migration022',
+    async (version) => {
+      const path = home()
+      vi.stubEnv('HOME', path)
+      vi.stubEnv('XDG_DATA_HOME', join(path, 'data'))
+      vi.resetModules()
+      const api = await import('./database.js')
+      mkdirSync(join(path, 'data', 'com.asf.shikin'), { recursive: true })
+      const live = database(api.getDatabasePath())
+      runHostedTestMigrations(live)
+      live.close()
+      const source = join(path, 'broken-fx.db')
+      const backup = database(source)
+      runHostedTestMigrations(backup, version)
+      backup.exec('CREATE TABLE manual_exchange_rates (incompatible TEXT)')
+      backup.close()
+      const beforeSource = readFileSync(source)
+      const beforeLive = readFileSync(api.getDatabasePath())
+      try {
+        await expect(api.restoreDatabase({ sourcePath: source, dryRun: false })).rejects.toThrow()
+        expect(readFileSync(source)).toEqual(beforeSource)
+        expect(readFileSync(api.getDatabasePath())).toEqual(beforeLive)
+      } finally {
+        api.close()
+      }
+    }
+  )
 })

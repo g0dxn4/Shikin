@@ -22,6 +22,10 @@ import { ulid } from 'ulidx'
 import {
   advanceAnchoredRecurrence,
   advanceLegacyRecurrence,
+  DATED_FX_MIGRATION,
+  DATED_FX_SCHEMA,
+  datedFxStatements,
+  assertDatedFxReady,
   BACKEND_FOUNDATION_MIGRATION,
   BACKEND_FOUNDATION_SCHEMA,
   backendFoundationStatements,
@@ -406,6 +410,7 @@ const CURRENT_SHIKIN_MIGRATIONS = [
   '019_financial_semantics',
   '020_quote_recurrence_import_identity',
   BACKEND_FOUNDATION_MIGRATION,
+  DATED_FX_MIGRATION,
 ]
 
 const CURRENT_SHIKIN_SCHEMA = {
@@ -774,6 +779,18 @@ function validateCurrentDatabase() {
 
   const migrationRows = db.prepare('SELECT id, name FROM _migrations').all()
   assertSupportedSchemaVersion(migrationRows)
+  assertDatedFxReady(
+    Object.fromEntries(
+      Object.keys(DATED_FX_SCHEMA).map((table) => [
+        table,
+        db
+          .prepare(`PRAGMA table_info(${table})`)
+          .all()
+          .map((column) => column.name),
+      ])
+    ),
+    db.prepare("SELECT name, sql FROM sqlite_master WHERE type IN ('index', 'trigger')").all()
+  )
   assertBackendFoundationReady(
     Object.fromEntries(
       Object.keys(BACKEND_FOUNDATION_SCHEMA).map((table) => [
@@ -801,6 +818,17 @@ function validateCurrentDatabase() {
 // ── Migrations ─────────────────────────────────────────────────────────────
 
 function runMigrations() {
+  const hasMigrations = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migrations'")
+    .get()
+  const rows = hasMigrations ? db.prepare('SELECT id, name FROM _migrations').all() : []
+  assertSupportedSchemaVersion(rows)
+  if (rows.length && !rows.some((row) => row.name === '019_financial_semantics'))
+    return runMigrationsOnConnection()
+  return db.transaction(runMigrationsOnConnection).immediate()
+}
+
+function runMigrationsOnConnection() {
   // Create migrations tracking table
   db.exec(`
     CREATE TABLE IF NOT EXISTS _migrations (
@@ -818,7 +846,7 @@ function runMigrations() {
   )
 
   assertSupportedSchemaVersion(db.prepare('SELECT id, name FROM _migrations').all())
-  if (applied.has(BACKEND_FOUNDATION_MIGRATION)) {
+  if (applied.has(DATED_FX_MIGRATION)) {
     validateCurrentDatabase()
     return
   }
@@ -1680,6 +1708,18 @@ function runBackendFoundationUpgrade(applied) {
         ])
       )
       for (const statement of backendFoundationStatements(columns)) db.exec(statement)
+    }
+    if (!migrations.some((row) => row.name === DATED_FX_MIGRATION)) {
+      const columns = Object.fromEntries(
+        Object.keys(DATED_FX_SCHEMA).map((table) => [
+          table,
+          db
+            .prepare(`PRAGMA table_info(${table})`)
+            .all()
+            .map((column) => column.name),
+        ])
+      )
+      for (const statement of datedFxStatements(columns)) db.exec(statement)
     }
     validateCurrentDatabase()
   }).immediate()

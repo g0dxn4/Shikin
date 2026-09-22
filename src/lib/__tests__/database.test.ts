@@ -1,4 +1,7 @@
 import {
+  DATED_FX_MIGRATION,
+  DATED_FX_SCHEMA,
+  DATED_FX_OBJECTS,
   BACKEND_FOUNDATION_MIGRATION,
   BACKEND_FOUNDATION_SCHEMA,
   BACKEND_FOUNDATION_OBJECTS,
@@ -42,6 +45,7 @@ function mockTauriDatabaseModules() {
     '019_financial_semantics',
     '020_quote_recurrence_import_identity',
     BACKEND_FOUNDATION_MIGRATION,
+    DATED_FX_MIGRATION,
   ].map((name) => ({ name }))
   const tableRows = [
     '_migrations',
@@ -72,9 +76,11 @@ function mockTauriDatabaseModules() {
     'account_reconciliations',
     'receivables',
     ...Object.keys(BACKEND_FOUNDATION_SCHEMA),
+    ...Object.keys(DATED_FX_SCHEMA),
   ].map((name) => ({ name }))
   const columnRows = [
     ...Object.values(BACKEND_FOUNDATION_SCHEMA).flat(),
+    ...Object.values(DATED_FX_SCHEMA).flat(),
     'id',
     'name',
     'applied_at',
@@ -211,7 +217,9 @@ function mockTauriDatabaseModules() {
       if (sql === 'SELECT * FROM app_data_state')
         return [{ id: 1, database_id: 'synthetic', data_revision: 0 }]
       if (sql.includes("type IN ('index', 'trigger')"))
-        return Object.entries(BACKEND_FOUNDATION_OBJECTS).map(([name, sql]) => ({ name, sql }))
+        return Object.entries({ ...BACKEND_FOUNDATION_OBJECTS, ...DATED_FX_OBJECTS }).map(
+          ([name, sql]) => ({ name, sql })
+        )
       if (sql.includes("sqlite_master WHERE type = 'table'")) return tableRows
       if (sql.startsWith('PRAGMA table_info(')) return columnRows
       if (sql.includes("sqlite_master WHERE type = 'trigger'")) return triggerRows

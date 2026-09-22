@@ -15,8 +15,8 @@ const IDENTITY_FILE_NAME: &str = "runtime-identity.json";
 const DATABASE_FILE_NAME: &str = "shikin.db";
 const IDENTITY_VERSION: u8 = 1;
 const MAX_IDENTITY_BYTES: u64 = 1024;
-const CURRENT_SCHEMA_VERSION: i64 = 21;
-const CURRENT_SCHEMA_MIGRATION: &str = "021_backend_remediation_foundation";
+const CURRENT_SCHEMA_VERSION: i64 = 22;
+const CURRENT_SCHEMA_MIGRATION: &str = "022_dated_fx";
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

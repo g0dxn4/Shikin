@@ -1,4 +1,8 @@
 import {
+  DATED_FX_MIGRATION,
+  DATED_FX_SCHEMA,
+  datedFxStatements,
+  assertDatedFxReady,
   BACKEND_FOUNDATION_MIGRATION,
   BACKEND_FOUNDATION_SCHEMA,
   backendFoundationStatements,
@@ -619,6 +623,12 @@ function applyRestoreCompatibleMigrations(db: Database.Database): void {
       )
       for (const statement of backendFoundationStatements(columns)) db.exec(statement)
     }
+    if (!migrations.some((row) => row.name === DATED_FX_MIGRATION)) {
+      const columns = Object.fromEntries(
+        Object.keys(DATED_FX_SCHEMA).map((table) => [table, [...getColumnNames(db, table)]])
+      )
+      for (const statement of datedFxStatements(columns)) db.exec(statement)
+    }
     assertShikinSchemaReady(db)
   }).immediate()
 }
@@ -649,7 +659,7 @@ function validateDatabaseFile(
     if (options.allowPreviousSchema) {
       assertSupportedRestoreSchema(db, label)
       // This is the staged COPY only: upgrade and validate before promotion.
-      applyRestoreCompatibleMigrations(db)
+      db.transaction(() => applyRestoreCompatibleMigrations(db!)).immediate()
       assertShikinSchemaReady(db, label)
     } else {
       assertShikinSchemaReady(db, label)
@@ -1062,6 +1072,14 @@ export function assertShikinSchemaReady(db: Database.Database, dbPath = DB_PATH)
       throw new Error(`Database is not ready for CLI/MCP use. Missing 020 columns on ${table}.`)
     }
   }
+  assertDatedFxReady(
+    Object.fromEntries(
+      Object.keys(DATED_FX_SCHEMA).map((table) => [table, [...getColumnNames(db, table)]])
+    ),
+    db
+      .prepare("SELECT name, sql FROM sqlite_master WHERE type IN ('index', 'trigger')")
+      .all() as Array<{ name: string; sql: string | null }>
+  )
   assertBackendFoundationReady(
     Object.fromEntries(
       Object.keys(BACKEND_FOUNDATION_SCHEMA).map((table) => [table, [...getColumnNames(db, table)]])

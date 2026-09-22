@@ -57,6 +57,25 @@ describe('net-worth root loading ownership', () => {
     vi.clearAllMocks()
   })
 
+  it('preserves the selected history period during a periodless startup refresh', async () => {
+    const { mockRead, useNetWorthStore } = await loadFreshStores()
+    mockRead.mockImplementation(async ({ targetCurrency }) => valuation(targetCurrency))
+
+    await useNetWorthStore.getState().refresh()
+    expect(useNetWorthStore.getState().historyRequestedPeriod).toBe('1y')
+    await useNetWorthStore.getState().loadHistory('6m')
+    await useNetWorthStore.getState().refresh()
+    expect(useNetWorthStore.getState()).toMatchObject({
+      historyRequestedPeriod: '6m',
+      historyComplete: true,
+      historyLoading: false,
+      isLoading: false,
+    })
+
+    await useNetWorthStore.getState().refresh('3m')
+    expect(useNetWorthStore.getState().historyRequestedPeriod).toBe('3m')
+  })
+
   it('settles loading after an authority replacement successfully reloads history', async () => {
     const { mockRead, useCurrencyStore, useNetWorthStore } = await loadFreshStores()
     const firstValuation = deferred<ReturnType<typeof valuation>>()

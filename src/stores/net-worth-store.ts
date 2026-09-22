@@ -396,7 +396,7 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
     }
   },
 
-  refresh: async (period = '1y') => {
+  refresh: async (period = latestHistoryPeriod) => {
     const requestId = ++netWorthRequestId
     const authority = captureCurrencyAuthority(
       useCurrencyStore.getState(),

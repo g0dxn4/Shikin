@@ -99,7 +99,15 @@ describe('public automation contract', () => {
       commands.find((command) => command.name === 'bind-transaction-import-identity')?.effects
     ).toEqual({ writesTo: ['transactions', 'audit_log', 'app_data_state'] })
     expect(commands.find((command) => command.name === 'list-accounts')?.effects).toBeUndefined()
-    expect(commands.find((command) => command.name === 'add-transaction')?.effects).toBeUndefined()
+    expect(commands.find((command) => command.name === 'add-transaction')?.effects).toEqual({
+      writesTo: [
+        'transactions',
+        'accounts',
+        'transaction_fx_evidence',
+        'audit_log',
+        'app_data_state',
+      ],
+    })
   })
 
   it('keeps plugin-like tools additive without changing the built-in fixture', () => {

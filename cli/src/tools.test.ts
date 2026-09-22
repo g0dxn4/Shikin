@@ -8067,6 +8067,7 @@ describe('CLI tool validation regressions', () => {
           notes: 'old notes',
         },
       ])
+      .mockReturnValueOnce([]) // no existing FX evidence
       .mockReturnValueOnce([])
 
     const input = updateTransaction.schema.parse({
@@ -8080,8 +8081,7 @@ describe('CLI tool validation regressions', () => {
     expect(mockTransaction.mock.invocationCallOrder[0]).toBeLessThan(
       mockQuery.mock.invocationCallOrder[0]
     )
-    expect(mockQuery).toHaveBeenNthCalledWith(
-      2,
+    expect(mockQuery).toHaveBeenCalledWith(
       'SELECT id, currency, is_archived, account_mode FROM accounts WHERE id = $1 LIMIT 1',
       ['missing-account']
     )
@@ -8107,6 +8107,7 @@ describe('CLI tool validation regressions', () => {
           notes: 'old notes',
         },
       ])
+      .mockReturnValueOnce([]) // no existing FX evidence
       .mockReturnValueOnce([{ id: 'acct-2', currency: 'EUR', is_archived: 0 }])
 
     const result = await updateTransaction.execute(
@@ -8173,6 +8174,7 @@ describe('CLI tool validation regressions', () => {
           date: '2026-04-14',
         },
       ])
+      .mockReturnValueOnce([]) // no existing FX evidence
       .mockReturnValueOnce([{ id: 'acct-archived', name: 'Archived Checking' }])
 
     const result = await deleteTransaction.execute(
@@ -8203,6 +8205,7 @@ describe('CLI tool validation regressions', () => {
           recurring_rule_id: 'rule-1',
         },
       ])
+      .mockReturnValueOnce([]) // no existing FX evidence
       .mockReturnValueOnce([
         { id: 'rule-1', account_id: 'acct-1', type: 'expense', currency: 'USD' },
       ])

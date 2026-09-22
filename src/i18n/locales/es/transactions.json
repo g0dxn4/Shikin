@@ -69,6 +69,8 @@
     "status": "Estado",
     "currency": "Moneda",
     "clear": "Limpiar filtros",
+    "toolbar": "Filtros de transacciones",
+    "activeCount": "{{count}} activos",
     "dates": {
       "all": "Todas las fechas",
       "month": "Mes actual",
@@ -80,6 +82,7 @@
   },
   "views": {
     "label": "Vistas de transacciones",
+    "display": "Vista",
     "timeline": "Cronología",
     "ledger": "Libro mayor",
     "review": "Revisar"

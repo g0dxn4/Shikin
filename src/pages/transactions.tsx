@@ -201,6 +201,18 @@ function getDatePreset(dateFrom: string, dateTo: string): DatePreset {
   return 'custom'
 }
 
+function countActiveFilters(state: TransactionUrlState): number {
+  return (
+    Number(!!state.search) +
+    Number(state.type !== 'all') +
+    Number(state.account !== 'all') +
+    Number(state.category !== 'all') +
+    Number(!!state.dateFrom || !!state.dateTo) +
+    Number(state.status !== 'all') +
+    Number(state.currency !== 'all')
+  )
+}
+
 function getTransactionStatus(
   transaction: TransactionPageRow
 ): Exclude<TransactionQueryStatus, 'all'> {
@@ -383,15 +395,7 @@ export function Transactions() {
     [accounts, archivedAccounts]
   )
   const datePreset = getDatePreset(urlState.dateFrom, urlState.dateTo)
-  const hasActiveFilters =
-    !!urlState.search ||
-    urlState.type !== 'all' ||
-    urlState.account !== 'all' ||
-    urlState.category !== 'all' ||
-    !!urlState.dateFrom ||
-    !!urlState.dateTo ||
-    urlState.status !== 'all' ||
-    urlState.currency !== 'all'
+  const hasActiveFilters = countActiveFilters(urlState) > 0
 
   useEffect(() => {
     if (!pageQuery.isLoading && urlState.page > totalPages) {
@@ -448,7 +452,6 @@ export function Transactions() {
     updateUrlState({ dateFrom: urlState.dateFrom, dateTo: urlState.dateTo })
   }
 
-  const handleViewChange = (view: TransactionView) => updateUrlState({ view })
   const handleSort = (field: TransactionSort) => {
     if (!sortableFields.includes(field)) return
     updateUrlState({
@@ -542,33 +545,8 @@ export function Transactions() {
   }, [moveReviewFocus, urlState.view])
 
   return (
-    <div className="page-content animate-fade-in-up space-y-4">
+    <div className="page-content animate-fade-in-up min-w-0 space-y-4">
       <PageToolbar
-        leading={
-          <div
-            className="bg-muted flex rounded-lg p-0.5"
-            role="tablist"
-            aria-label={t('views.label')}
-          >
-            {transactionViews.map((view) => (
-              <button
-                key={view}
-                id={`transactions-${view}-tab`}
-                type="button"
-                role="tab"
-                aria-selected={urlState.view === view}
-                aria-controls={`transactions-${view}-panel`}
-                onClick={() => handleViewChange(view)}
-                className={cn(
-                  'filter-pill min-h-9',
-                  urlState.view === view && 'filter-pill-active'
-                )}
-              >
-                {t(`views.${view}`)}
-              </button>
-            ))}
-          </div>
-        }
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => setStatementImportOpen(true)}>
@@ -620,7 +598,7 @@ export function Transactions() {
 
       {urlState.view === 'review' && (
         <div
-          className="flex flex-wrap items-center gap-1.5"
+          className="flex min-w-0 flex-wrap items-center gap-1.5"
           role="group"
           aria-label={t('review.queueLabel')}
         >
@@ -630,7 +608,7 @@ export function Transactions() {
               type="button"
               aria-pressed={urlState.reviewReason === filter}
               onClick={() => updateUrlState({ reviewReason: filter })}
-              className="filter-pill border-border border"
+              className="filter-pill border-border min-h-11 border md:min-h-8"
             >
               {filter === 'unclassified'
                 ? tConsumption('review.filter')
@@ -684,8 +662,8 @@ export function Transactions() {
       ) : (
         <div
           id={`transactions-${urlState.view}-panel`}
-          role="tabpanel"
-          aria-labelledby={`transactions-${urlState.view}-tab`}
+          role="region"
+          aria-label={t(`views.${urlState.view}`)}
         >
           {urlState.view === 'timeline' && (
             <div className="space-y-5">
@@ -821,101 +799,157 @@ function TransactionFilters({
   onDatePreset: (preset: DatePreset) => void
   onClear: () => void
 }) {
+  const [customRangeRequested, setCustomRangeRequested] = useState(false)
+  const activeFilterCount = countActiveFilters(state)
+  const showCustomDates = customRangeRequested || datePreset === 'custom'
+  const dateSelectValue = showCustomDates ? 'custom' : datePreset
+
+  const handleDateSelect = (value: DatePreset) => {
+    if (value === 'custom') {
+      setCustomRangeRequested(true)
+      onDatePreset('custom')
+      return
+    }
+    setCustomRangeRequested(false)
+    onDatePreset(value)
+  }
+
+  const handleClear = () => {
+    setCustomRangeRequested(false)
+    onClear()
+  }
+
   return (
-    <NativePanel as="div" className="p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="relative min-w-[220px] flex-1">
-          <span className="sr-only">{t('filters.search')}</span>
-          <Search
-            size={15}
-            className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 -translate-y-1/2"
-          />
-          <Input
-            type="search"
-            value={state.search}
-            onChange={(event) => onSearch(event.target.value)}
-            placeholder={t('filters.searchPlaceholder') || `${tCommon('actions.search')}...`}
-            className="pl-9"
-          />
-        </label>
-        <div className="flex flex-wrap gap-1" role="group" aria-label={t('filters.type')}>
-          {(['all', 'expense', 'income', 'transfer'] as const).map((type) => (
-            <button
-              key={type}
-              type="button"
-              className="filter-pill"
-              aria-pressed={state.type === type}
-              onClick={() => onPatch({ type })}
+    <NativePanel as="div" className="min-w-0 p-3">
+      <div className="flex min-w-0 flex-col gap-2" role="region" aria-label={t('filters.toolbar')}>
+        <div className="flex min-w-0 items-center gap-2">
+          <label className="relative min-w-0 flex-1">
+            <span className="sr-only">{t('filters.search')}</span>
+            <Search
+              size={15}
+              className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 -translate-y-1/2"
+            />
+            <Input
+              type="search"
+              value={state.search}
+              onChange={(event) => onSearch(event.target.value)}
+              placeholder={t('filters.searchPlaceholder') || `${tCommon('actions.search')}...`}
+              className="min-h-11 min-w-0 pl-9 md:h-10 md:min-h-10"
+            />
+          </label>
+          <label className="flex min-w-0 shrink-0 items-center gap-1.5">
+            <span className="text-muted-foreground hidden text-xs font-medium sm:inline">
+              {t('views.display')}
+            </span>
+            <select
+              id="transactions-display"
+              aria-label={t('views.label')}
+              value={state.view}
+              onChange={(event) => onPatch({ view: event.target.value as TransactionView })}
+              className="native-select min-h-11 w-[8.5rem] max-w-[11.5rem] min-w-0 text-xs md:min-h-10 md:w-[9.5rem]"
             >
-              {t(`types.${type}`)}
-            </button>
-          ))}
+              {transactionViews.map((view) => (
+                <option key={view} value={view}>
+                  {t(`views.${view}`)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {hasActiveFilters ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleClear}
+              aria-label={t('filters.clear')}
+              title={t('filters.activeCount', { count: activeFilterCount })}
+              className="min-h-11 shrink-0 gap-1 px-2 md:min-h-9"
+            >
+              <span className="text-xs font-medium tabular-nums" aria-hidden="true">
+                {activeFilterCount}
+              </span>
+              <X size={14} />
+            </Button>
+          ) : null}
         </div>
-        <FilterSelect
-          label={t('filters.dateRange')}
-          value={datePreset}
-          onChange={(value) => onDatePreset(value as DatePreset)}
-          options={(['all', 'month', '30-days', '90-days', 'custom'] as const).map((value) => ({
-            value,
-            label: t(`filters.dates.${value}`),
-          }))}
-        />
-        <FilterSelect
-          label={t('filters.account')}
-          value={state.account}
-          onChange={(account) => onPatch({ account })}
-          options={accounts.map((account) => ({ value: account.id, label: account.name }))}
-        />
-        <FilterSelect
-          label={t('filters.category')}
-          value={state.category}
-          onChange={(category) => onPatch({ category })}
-          options={categories.map((category) => ({ value: category.id, label: category.name }))}
-        />
-        <FilterSelect
-          label={t('filters.status')}
-          value={state.status}
-          onChange={(status) => onPatch({ status: status as TransactionQueryStatus })}
-          options={(['posted', 'pending', 'cleared'] as const).map((status) => ({
-            value: status,
-            label: t(`status.${status}`),
-          }))}
-        />
-        <FilterSelect
-          label={t('filters.currency')}
-          value={state.currency}
-          onChange={(currency) => onPatch({ currency })}
-          options={currencies.map((currency) => ({ value: currency, label: currency }))}
-        />
-        {hasActiveFilters && (
-          <Button type="button" variant="ghost" size="sm" onClick={onClear}>
-            <X size={14} />
-            {t('filters.clear')}
-          </Button>
-        )}
+        <div className="grid min-w-0 grid-cols-2 items-center gap-1.5 md:flex md:flex-wrap">
+          <div
+            className="col-span-2 flex min-w-0 flex-wrap gap-1"
+            role="group"
+            aria-label={t('filters.type')}
+          >
+            {(['all', 'expense', 'income', 'transfer'] as const).map((type) => (
+              <button
+                key={type}
+                type="button"
+                className="filter-pill min-h-11 md:min-h-8"
+                aria-pressed={state.type === type}
+                onClick={() => onPatch({ type })}
+              >
+                {t(`types.${type}`)}
+              </button>
+            ))}
+          </div>
+          <FilterSelect
+            label={t('filters.dateRange')}
+            value={dateSelectValue}
+            onChange={(value) => handleDateSelect(value as DatePreset)}
+            options={(['all', 'month', '30-days', '90-days', 'custom'] as const).map((value) => ({
+              value,
+              label: t(`filters.dates.${value}`),
+            }))}
+          />
+          <FilterSelect
+            label={t('filters.account')}
+            value={state.account}
+            onChange={(account) => onPatch({ account })}
+            options={accounts.map((account) => ({ value: account.id, label: account.name }))}
+          />
+          <FilterSelect
+            label={t('filters.category')}
+            value={state.category}
+            onChange={(category) => onPatch({ category })}
+            options={categories.map((category) => ({ value: category.id, label: category.name }))}
+          />
+          <FilterSelect
+            label={t('filters.status')}
+            value={state.status}
+            onChange={(status) => onPatch({ status: status as TransactionQueryStatus })}
+            options={(['posted', 'pending', 'cleared'] as const).map((status) => ({
+              value: status,
+              label: t(`status.${status}`),
+            }))}
+          />
+          <FilterSelect
+            label={t('filters.currency')}
+            value={state.currency}
+            onChange={(currency) => onPatch({ currency })}
+            options={currencies.map((currency) => ({ value: currency, label: currency }))}
+          />
+          {showCustomDates ? (
+            <div className="col-span-2 grid w-full min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 md:w-auto">
+              <label className="text-muted-foreground min-w-0 text-xs">
+                {t('filters.from')}
+                <Input
+                  type="date"
+                  value={state.dateFrom}
+                  onChange={(event) => onPatch({ dateFrom: event.target.value })}
+                  className="text-foreground mt-1 min-h-11 w-full min-w-0 md:min-h-10 md:w-40"
+                />
+              </label>
+              <label className="text-muted-foreground min-w-0 text-xs">
+                {t('filters.to')}
+                <Input
+                  type="date"
+                  value={state.dateTo}
+                  onChange={(event) => onPatch({ dateTo: event.target.value })}
+                  className="text-foreground mt-1 min-h-11 w-full min-w-0 md:min-h-10 md:w-40"
+                />
+              </label>
+            </div>
+          ) : null}
+        </div>
       </div>
-      {datePreset === 'custom' && (
-        <div className="border-border mt-3 flex flex-wrap gap-2 border-t pt-3">
-          <label className="text-muted-foreground text-xs">
-            {t('filters.from')}
-            <Input
-              type="date"
-              value={state.dateFrom}
-              onChange={(event) => onPatch({ dateFrom: event.target.value })}
-              className="text-foreground mt-1 w-[160px]"
-            />
-          </label>
-          <label className="text-muted-foreground text-xs">
-            {t('filters.to')}
-            <Input
-              type="date"
-              value={state.dateTo}
-              onChange={(event) => onPatch({ dateTo: event.target.value })}
-              className="text-foreground mt-1 w-[160px]"
-            />
-          </label>
-        </div>
-      )}
     </NativePanel>
   )
 }
@@ -932,14 +966,18 @@ function FilterSelect({
   options: { value: string; label: string }[]
 }) {
   const hasAllOption = options.some((option) => option.value === EMPTY_FILTER_VALUE)
+  const selectedLabel =
+    options.find((option) => option.value === value)?.label ??
+    (value === EMPTY_FILTER_VALUE || value === 'custom' ? label : value)
   return (
-    <label>
+    <label className="max-w-full min-w-0">
       <span className="sr-only">{label}</span>
       <select
         aria-label={label}
+        title={selectedLabel}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="native-select max-w-40 text-xs"
+        className="native-select min-h-11 w-full max-w-full min-w-0 text-xs md:min-h-10 md:w-auto md:max-w-44"
       >
         {!hasAllOption && value !== 'custom' ? (
           <option value={EMPTY_FILTER_VALUE}>{label}</option>
@@ -971,8 +1009,8 @@ function LedgerView({
 }) {
   const { t } = useTranslation('transactions')
   return (
-    <NativePanel className="overflow-hidden">
-      <div className="hidden overflow-x-auto md:block">
+    <NativePanel className="max-w-full min-w-0 overflow-hidden">
+      <div className="hidden max-w-full overflow-x-auto md:block">
         <table className="w-full table-fixed text-left text-sm">
           <thead className="bg-muted/60 text-muted-foreground text-xs">
             <tr className="border-border border-b">

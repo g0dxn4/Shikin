@@ -193,7 +193,7 @@ describe('Transactions', () => {
         status: 'posted',
       })
     )
-    await user.click(screen.getByRole('tab', { name: 'views.ledger' }))
+    await user.selectOptions(screen.getByLabelText('views.label'), 'ledger')
     expect(window.location.search).toContain('account=account-2')
     expect(window.location.search).toContain('view=ledger')
   })
@@ -208,14 +208,84 @@ describe('Transactions', () => {
     expect(mockUseQuery).toHaveBeenLastCalledWith(
       expect.objectContaining({ reviewReason: 'unclassified' })
     )
-    expect(screen.getByRole('tab', { name: 'views.review' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    )
+    expect(screen.getByLabelText('views.label')).toHaveValue('review')
     expect(screen.getByRole('button', { name: 'review.filter (1)' })).toHaveAttribute(
       'aria-pressed',
       'true'
     )
+  })
+
+  it('exposes timeline, ledger, and review as an explicit display menu', () => {
+    render(<Transactions />)
+
+    const display = screen.getByLabelText('views.label') as HTMLSelectElement
+    expect(display).toBeVisible()
+    expect(Array.from(display.options).map((option) => option.value)).toEqual([
+      'timeline',
+      'ledger',
+      'review',
+    ])
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
+  })
+
+  it('restores the stored display choice and writes it back when the menu changes', async () => {
+    window.localStorage.setItem('shikin.transactions.view', 'ledger')
+    const user = userEvent.setup()
+    render(<Transactions />)
+
+    const display = screen.getByLabelText('views.label')
+    expect(display).toHaveValue('ledger')
+
+    await user.selectOptions(display, 'review')
+    expect(window.location.search).toContain('view=review')
+    expect(window.localStorage.getItem('shikin.transactions.view')).toBe('review')
+    expect(display).toHaveValue('review')
+  })
+
+  it('keeps the display choice when resetting compact active filters', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/transactions?view=ledger&type=expense&account=account-2&search=coffee'
+    )
+    setRows([makeRow()])
+    const user = userEvent.setup()
+    render(<Transactions />)
+
+    const clear = screen.getByRole('button', { name: 'filters.clear' })
+    expect(clear).toHaveTextContent('3')
+    expect(screen.queryByText('filters.clear')).not.toBeInTheDocument()
+
+    await user.click(clear)
+    expect(window.location.search).toContain('view=ledger')
+    expect(window.location.search).not.toContain('type=expense')
+    expect(window.location.search).not.toContain('account=account-2')
+    expect(window.location.search).not.toContain('search=coffee')
+    expect(screen.getByLabelText('views.label')).toHaveValue('ledger')
+    expect(window.localStorage.getItem('shikin.transactions.view')).toBe('ledger')
+    expect(screen.queryByRole('button', { name: 'filters.clear' })).not.toBeInTheDocument()
+  })
+
+  it('keeps custom date labels usable and titles long selected filter values', async () => {
+    accounts = [
+      {
+        id: 'long-account',
+        name: 'Very Long Everyday Checking Account Name',
+        currency: 'USD',
+        is_archived: 0,
+      },
+    ]
+    const user = userEvent.setup()
+    render(<Transactions />)
+
+    await user.selectOptions(screen.getByLabelText('filters.dateRange'), 'custom')
+    expect(screen.getByLabelText('filters.from')).toBeVisible()
+    expect(screen.getByLabelText('filters.to')).toBeVisible()
+
+    const account = screen.getByLabelText('filters.account')
+    await user.selectOptions(account, 'long-account')
+    expect(account).toHaveAttribute('title', 'Very Long Everyday Checking Account Name')
+    expect(account).toHaveClass('max-w-full')
   })
 
   it('supports numbered previous/next paging and selectable page sizes', async () => {
@@ -252,7 +322,7 @@ describe('Transactions', () => {
     const user = userEvent.setup()
     render(<Transactions />)
 
-    await user.click(screen.getByRole('tab', { name: 'views.ledger' }))
+    await user.selectOptions(screen.getByLabelText('views.label'), 'ledger')
     expect(screen.getAllByText(/Checking → Savings/).length).toBeGreaterThan(0)
     expect(screen.getAllByLabelText('Edit Split purchase').length).toBeGreaterThan(0)
   })
@@ -288,7 +358,7 @@ describe('Transactions', () => {
     const user = userEvent.setup()
     render(<Transactions />)
 
-    await user.click(screen.getByRole('tab', { name: 'views.review' }))
+    await user.selectOptions(screen.getByLabelText('views.label'), 'review')
     const accountSelect = screen.getByLabelText('review.account') as HTMLSelectElement
     expect(Array.from(accountSelect.options).map((option) => option.value)).toEqual(['account-1'])
     await user.selectOptions(screen.getByLabelText('review.category'), 'food')
@@ -306,7 +376,7 @@ describe('Transactions', () => {
     pageResult.reviewCounts.all = 2
     const user = userEvent.setup()
     render(<Transactions />)
-    await user.click(screen.getByRole('tab', { name: 'views.review' }))
+    await user.selectOptions(screen.getByLabelText('views.label'), 'review')
 
     fireEvent.keyDown(document, { key: 'j' })
     await waitFor(() => expect(document.activeElement).toHaveTextContent('Second'))

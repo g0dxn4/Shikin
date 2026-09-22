@@ -253,8 +253,8 @@ test.describe('read-only app data preservation', () => {
     await expect(
       page.getByRole('button', { name: new RegExp(`^${PREFIX} Split Ledger(?: |$)`) })
     ).toBeVisible()
-    await page.getByRole('tab', { name: 'Timeline' }).click()
-    await page.getByRole('tab', { name: 'Ledger' }).click()
+    await page.getByLabel('Transaction views').selectOption({ label: 'Timeline' })
+    await page.getByLabel('Transaction views').selectOption({ label: 'Ledger' })
     await page.getByLabel('Account').selectOption(IDS.savings)
     await expect(
       page.getByRole('button', { name: new RegExp(`^${PREFIX} Transfer Ledger(?: |$)`) })
@@ -262,7 +262,7 @@ test.describe('read-only app data preservation', () => {
     await page.getByLabel('Currency').selectOption('USD')
     await page.getByLabel('Account').selectOption('all')
     await page.getByLabel('Status').selectOption('pending')
-    await page.getByRole('tab', { name: 'Review' }).click()
+    await page.getByLabel('Transaction views').selectOption({ label: 'Review' })
 
     for (const path of [
       '/',

@@ -69,6 +69,8 @@
     "status": "Status",
     "currency": "Currency",
     "clear": "Clear filters",
+    "toolbar": "Transaction filters",
+    "activeCount": "{{count}} active",
     "dates": {
       "all": "All dates",
       "month": "Current month",
@@ -80,6 +82,7 @@
   },
   "views": {
     "label": "Transaction views",
+    "display": "Display",
     "timeline": "Timeline",
     "ledger": "Ledger",
     "review": "Review"

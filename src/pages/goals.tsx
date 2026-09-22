@@ -157,7 +157,12 @@ export function Goals() {
   }, [goals])
 
   const mainSummary = useMemo(() => {
-    if (!mainCurrency || goals.some((goal) => !goal.mainConversion.complete)) {
+    if (
+      !mainCurrency ||
+      goals.some(
+        (goal) => !goal.mainConversion.complete || goal.mainConversion.toCurrency !== mainCurrency
+      )
+    ) {
       return { complete: false, current: null, target: null, progress: null }
     }
     const current = goals.reduce(

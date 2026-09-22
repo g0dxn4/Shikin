@@ -17,6 +17,14 @@ import { useGoalStore } from '../goal-store'
 const mockQuery = vi.mocked(query)
 const mockExecute = vi.mocked(execute)
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
 function form(currency = 'USD') {
   return {
     name: 'Emergency Fund',
@@ -78,6 +86,54 @@ describe('goal-store durable denomination', () => {
       },
     })
     expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('suppresses a populated delayed read after immutable rate authority changes', async () => {
+    const oldRate = {
+      id: 'mxn-usd-old',
+      fromCurrency: 'MXN',
+      toCurrency: 'USD',
+      rateDecimal: '0.05',
+      effectiveFrom: '2020-01-01',
+      supersedesRateId: null,
+      createdAt: '',
+      sourceNote: null,
+    }
+    const newRate = {
+      ...oldRate,
+      id: 'mxn-usd-new',
+      rateDecimal: '0.1',
+      supersedesRateId: oldRate.id,
+    }
+    const rows = [row({ currency: 'MXN', target_amount: 10_000, current_amount: 5_000 })]
+    useCurrencyStore.setState({
+      mainCurrency: 'USD',
+      preferredCurrency: 'USD',
+      manualRates: [oldRate],
+    })
+    mockQuery.mockResolvedValueOnce(rows)
+    await useGoalStore.getState().fetch()
+    expect(useGoalStore.getState().goals[0].mainConversion.target).toMatchObject({
+      complete: true,
+      amountCentavos: 500,
+    })
+
+    const delayed = deferred<typeof rows>()
+    mockQuery.mockReturnValueOnce(delayed.promise).mockResolvedValue(rows)
+    const staleRefresh = useGoalStore.getState().fetch()
+    await vi.waitFor(() => expect(mockQuery).toHaveBeenCalledTimes(2))
+    useCurrencyStore.setState({ manualRates: [oldRate, newRate] })
+    await vi.waitFor(() => expect(mockQuery).toHaveBeenCalledTimes(3))
+    delayed.resolve(rows)
+    await staleRefresh
+
+    await vi.waitFor(() =>
+      expect(useGoalStore.getState().goals[0].mainConversion.target).toMatchObject({
+        complete: true,
+        preferredCurrency: 'USD',
+        amountCentavos: 1_000,
+      })
+    )
   })
 
   it('creates in configured main inside the write transaction', async () => {

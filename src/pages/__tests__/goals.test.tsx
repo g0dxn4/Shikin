@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Goals } from '../goals'
+import { useCurrencyStore } from '@/stores/currency-store'
 
 // ResizeObserver polyfill for jsdom
 globalThis.ResizeObserver = class {
@@ -68,6 +69,11 @@ describe('Goals', () => {
     mockGoals = []
     mockFetchError = null
     mockIsLoading = false
+    useCurrencyStore.setState({
+      mainCurrency: null,
+      preferredCurrency: 'USD',
+      manualRates: [],
+    })
   })
 
   it('renders title', () => {
@@ -221,6 +227,51 @@ describe('Goals', () => {
   })
 
   describe('hero section', () => {
+    it('withholds a complete summary whose report currency is not the selected authority', () => {
+      useCurrencyStore.setState({ mainCurrency: 'USD', preferredCurrency: 'USD' })
+      mockGoals = [
+        {
+          id: 'goal-1',
+          name: 'Emergency Fund',
+          target_amount: 10000,
+          current_amount: 5000,
+          currency: 'MXN',
+          progress: 50,
+          daysRemaining: 100,
+          monthlyNeeded: 500,
+          accountName: null,
+          color: null,
+          icon: null,
+          notes: null,
+          mainConversion: {
+            complete: true,
+            policy: 'recorded_goal_value_today',
+            toCurrency: 'MXN',
+            target: {
+              complete: true,
+              preferredCurrency: 'MXN',
+              amountCentavos: 10_000,
+              missingCurrencies: [],
+            },
+            saved: {
+              complete: true,
+              preferredCurrency: 'MXN',
+              amountCentavos: 5_000,
+              missingCurrencies: [],
+            },
+            reason: null,
+          },
+        },
+      ]
+
+      render(<Goals />)
+
+      expect(screen.getByText('currency.unavailable')).toBeInTheDocument()
+      expect(screen.getByText('form.currentAmount').parentElement).toHaveTextContent('—')
+      expect(screen.getByText('form.targetAmount').parentElement).toHaveTextContent('—')
+      expect(screen.queryByText('$50.00')).not.toBeInTheDocument()
+    })
+
     it('renders featured goal and aggregate progress', () => {
       mockGoals = [
         {

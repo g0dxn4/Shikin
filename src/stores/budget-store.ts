@@ -8,6 +8,11 @@ import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
 import type { Budget } from '@/types/database'
 import { useCurrencyStore, type PreferredCurrencyAmountResult } from './currency-store'
+import {
+  captureCurrencyAuthority,
+  convertWithCurrencyAuthority,
+  currencyAuthorityKey,
+} from './currency-authority'
 
 export interface BudgetMainComparison {
   complete: boolean
@@ -52,8 +57,7 @@ interface BudgetState {
   getById: (id: string) => BudgetWithStatus | undefined
 }
 
-function getPeriodDateRange(period: string): { start: string; end: string } {
-  const today = dayjs()
+function getPeriodDateRange(period: string, today: dayjs.Dayjs): { start: string; end: string } {
   switch (period) {
     case 'weekly':
       return {
@@ -106,7 +110,9 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
         .getState()
         .loadRates()
         .catch(() => {})
+      const today = dayjs()
       const currencyState = useCurrencyStore.getState()
+      const authority = captureCurrencyAuthority(currencyState, today.format('YYYY-MM-DD'))
       const raw = await query<
         Budget & { currency: string; category_name: string | null; category_color: string | null }
       >(
@@ -120,24 +126,24 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
       const budgets = await Promise.all(
         raw.map(async (budget): Promise<BudgetWithStatus> => {
           const currency = requiredBudgetCurrency(budget)
-          const range = getPeriodDateRange(budget.period)
+          const range = getPeriodDateRange(budget.period, today)
           const nativeSpending = await readBudgetSpending({
             categoryId: budget.category_id,
             ...range,
             currency,
-            rates: currencyState.manualRates,
+            rates: authority.manualRates,
           })
           const spent = nativeSpending.totalCentavos ?? nativeSpending.knownTotalCentavos
           const remaining = budget.amount - spent
           const percentUsed = budget.amount > 0 ? Math.round((spent / budget.amount) * 100) : 0
 
-          const plan = currencyState.convertCurrentToPreferred(budget.amount, currency)
-          const mainSpending = currencyState.mainCurrency
+          const plan = convertWithCurrencyAuthority(authority, budget.amount, currency)
+          const mainSpending = authority.mainCurrency
             ? await readBudgetSpending({
                 categoryId: budget.category_id,
                 ...range,
-                currency: currencyState.mainCurrency,
-                rates: currencyState.manualRates,
+                currency: authority.mainCurrency,
+                rates: authority.manualRates,
               })
             : null
           const mainComplete = plan.complete && Boolean(mainSpending?.complete)
@@ -148,11 +154,11 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
           const mainComparison: BudgetMainComparison = {
             complete: mainComplete,
             policy: 'current_plan_today_vs_transaction_date_spending',
-            toCurrency: currencyState.mainCurrency,
+            toCurrency: authority.mainCurrency,
             plan,
             spending: mainSpending,
             remainingCentavos: mainRemaining,
-            reason: !currencyState.mainCurrency
+            reason: !authority.mainCurrency
               ? 'main_currency_unconfigured'
               : mainComplete
                 ? null
@@ -175,7 +181,15 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
         })
       )
 
-      if (requestId === budgetFetchRequest) set({ budgets, fetchError: null })
+      if (requestId === budgetFetchRequest) {
+        if (authority.key === currencyAuthorityKey(useCurrencyStore.getState())) {
+          set({ budgets, fetchError: null })
+        } else {
+          void get()
+            .fetch()
+            .catch(() => {})
+        }
+      }
     } catch (error) {
       if (requestId === budgetFetchRequest) set({ fetchError: getErrorMessage(error) })
       throw error
@@ -252,15 +266,13 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
   getById: (id) => get().budgets.find((budget) => budget.id === id),
 }))
 
-let budgetAuthorityKey = ''
+let budgetAuthorityKey = currencyAuthorityKey(useCurrencyStore.getState())
 useCurrencyStore.subscribe((state) => {
-  const key = `${state.mainCurrency ?? ''}|${state.manualRates.map((rate) => rate.id).join(',')}`
+  const key = currencyAuthorityKey(state)
   if (key === budgetAuthorityKey) return
   budgetAuthorityKey = key
-  if (useBudgetStore.getState().budgets.length > 0) {
-    void useBudgetStore
-      .getState()
-      .fetch()
-      .catch(() => {})
+  const budgetState = useBudgetStore.getState()
+  if (budgetState.isLoading || budgetState.budgets.length > 0) {
+    void budgetState.fetch().catch(() => {})
   }
 })

@@ -44,6 +44,14 @@ let mockState = {
     { date: '2024-01-01', netWorth: 100000, assets: 100000, liabilities: 0 },
     { date: '2024-06-01', netWorth: 150000, assets: 150000, liabilities: 0 },
   ],
+  historyComplete: true,
+  historyMissingCurrencies: [] as string[],
+  historyNativeSnapshots: [] as Array<{
+    id: string
+    date: string
+    currency: string
+    amountCentavos: number
+  }>,
   isLoading: false,
 }
 
@@ -94,6 +102,9 @@ describe('NetWorth page', () => {
       netWorth: 150000,
       totalAssets: 200000,
       totalLiabilities: 50000,
+      historyComplete: true,
+      historyMissingCurrencies: [],
+      historyNativeSnapshots: [],
     }
   })
 
@@ -180,6 +191,25 @@ describe('NetWorth page', () => {
     expect(screen.getByText(/netWorth.unresolvedOwnership: 2/)).toBeInTheDocument()
     expect(screen.queryByText(/hold-a/)).not.toBeInTheDocument()
     expect(screen.queryByText(/acct-a/)).not.toBeInTheDocument()
+  })
+
+  it('shows incomplete history as dated native snapshots without adding stock values', () => {
+    mockState = {
+      ...mockState,
+      history: [],
+      historyComplete: false,
+      historyMissingCurrencies: ['USD'],
+      historyNativeSnapshots: [
+        { id: 'first', date: '2024-01-01', currency: 'USD', amountCentavos: 10_000 },
+        { id: 'second', date: '2024-02-01', currency: 'USD', amountCentavos: 10_000 },
+      ],
+    }
+
+    render(<NetWorth />)
+
+    expect(screen.getByText(/Jan 1, 2024: \$100\.00/)).toBeInTheDocument()
+    expect(screen.getByText(/Feb 1, 2024: \$100\.00/)).toBeInTheDocument()
+    expect(screen.queryByText('$200.00')).not.toBeInTheDocument()
   })
 
   it('falls back to generic unavailable copy when incomplete lists are empty', () => {

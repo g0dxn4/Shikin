@@ -91,7 +91,7 @@ describe('ownership-aware net-worth store', () => {
       history: [],
       historyComplete: true,
       historyMissingCurrencies: [],
-      historyNativeTotals: [],
+      historyNativeSnapshots: [],
       isLoading: false,
     })
     useCurrencyStore.setState({
@@ -133,6 +133,50 @@ describe('ownership-aware net-worth store', () => {
       totalsComplete: false,
       netWorth: null,
       unresolvedAccountIds: ['broker'],
+    })
+  })
+
+  it('uses one captured currency authority for delayed totals and account breakdowns', async () => {
+    const delayed = deferred<typeof complete>()
+    useCurrencyStore.setState({
+      mainCurrency: 'MXN',
+      preferredCurrency: 'MXN',
+      manualRates: [
+        {
+          id: 'usd-mxn',
+          fromCurrency: 'USD',
+          toCurrency: 'MXN',
+          rateDecimal: '20',
+          effectiveFrom: '2020-01-01',
+          supersedesRateId: null,
+          createdAt: '',
+          sourceNote: null,
+        },
+      ],
+    })
+    mockRead.mockReturnValueOnce(delayed.promise)
+
+    const calculation = useNetWorthStore.getState().calculateCurrent()
+    await vi.waitFor(() => expect(mockRead).toHaveBeenCalledTimes(1))
+    useCurrencyStore.setState({ mainCurrency: 'USD', preferredCurrency: 'USD', manualRates: [] })
+    delayed.resolve({
+      ...complete,
+      targetCurrency: 'MXN',
+      totalAssetsCentavos: 10_000,
+      accounts: [
+        {
+          ...complete.accounts[0],
+          rawBalanceCentavos: 500,
+          assetCentavos: 500,
+        },
+      ],
+    })
+    await calculation
+
+    expect(useNetWorthStore.getState()).toMatchObject({
+      preferredCurrency: 'MXN',
+      totalAssets: 10_000,
+      assetBreakdown: [{ id: 'card-credit', convertedBalance: 10_000 }],
     })
   })
 
@@ -210,6 +254,44 @@ describe('ownership-aware net-worth store', () => {
       { date: '2024-09-14', netWorth: 170_000, assets: 170_000, liabilities: 0 },
       { date: '2024-09-15', netWorth: 180_000, assets: 180_000, liabilities: 0 },
     ])
+  })
+
+  it('keeps same-currency historical stocks as separate dated native evidence', async () => {
+    useCurrencyStore.setState({ mainCurrency: 'MXN', preferredCurrency: 'MXN', manualRates: [] })
+    mockQuery.mockResolvedValueOnce([
+      {
+        id: 'first',
+        date: '2024-09-14',
+        total_assets: 10_000,
+        total_liabilities: 0,
+        net_worth: 10_000,
+        total_investments: 0,
+        breakdown_json: '{}',
+        currency: 'USD',
+        created_at: '',
+      },
+      {
+        id: 'second',
+        date: '2024-09-15',
+        total_assets: 10_000,
+        total_liabilities: 0,
+        net_worth: 10_000,
+        total_investments: 0,
+        breakdown_json: '{}',
+        currency: 'USD',
+        created_at: '',
+      },
+    ])
+
+    await useNetWorthStore.getState().loadHistory('all')
+
+    expect(useNetWorthStore.getState()).toMatchObject({
+      historyComplete: false,
+      historyNativeSnapshots: [
+        { id: 'first', date: '2024-09-14', currency: 'USD', amountCentavos: 10_000 },
+        { id: 'second', date: '2024-09-15', currency: 'USD', amountCentavos: 10_000 },
+      ],
+    })
   })
 
   it('preserves the module-level read queue across unmounts and after failures', async () => {

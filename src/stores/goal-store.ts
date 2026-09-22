@@ -7,6 +7,11 @@ import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
 import type { Goal } from '@/types/database'
 import { useCurrencyStore, type PreferredCurrencyAmountResult } from './currency-store'
+import {
+  captureCurrencyAuthority,
+  convertWithCurrencyAuthority,
+  currencyAuthorityKey,
+} from './currency-authority'
 
 export interface GoalMainConversion {
   complete: boolean
@@ -102,6 +107,7 @@ export const useGoalStore = create<GoalState>((set, get) => ({
         .loadRates()
         .catch(() => {})
       const currencyState = useCurrencyStore.getState()
+      const authority = captureCurrencyAuthority(currencyState, dayjs().format('YYYY-MM-DD'))
       const raw = await query<Goal & { currency: string; account_name: string | null }>(
         `SELECT g.*, a.name AS account_name
          FROM goals g
@@ -111,8 +117,8 @@ export const useGoalStore = create<GoalState>((set, get) => ({
 
       const goals: GoalWithProgress[] = raw.map((goal) => {
         const currency = requiredGoalCurrency(goal)
-        const target = currencyState.convertCurrentToPreferred(goal.target_amount, currency)
-        const saved = currencyState.convertCurrentToPreferred(goal.current_amount, currency)
+        const target = convertWithCurrencyAuthority(authority, goal.target_amount, currency)
+        const saved = convertWithCurrencyAuthority(authority, goal.current_amount, currency)
         const complete = target.complete && saved.complete
         return {
           ...goal,
@@ -128,10 +134,10 @@ export const useGoalStore = create<GoalState>((set, get) => ({
           mainConversion: {
             complete,
             policy: 'recorded_goal_value_today',
-            toCurrency: currencyState.mainCurrency,
+            toCurrency: authority.mainCurrency,
             target,
             saved,
-            reason: !currencyState.mainCurrency
+            reason: !authority.mainCurrency
               ? 'main_currency_unconfigured'
               : complete
                 ? null
@@ -140,7 +146,15 @@ export const useGoalStore = create<GoalState>((set, get) => ({
         }
       })
 
-      if (requestId === goalFetchRequest) set({ goals, fetchError: null })
+      if (requestId === goalFetchRequest) {
+        if (authority.key === currencyAuthorityKey(useCurrencyStore.getState())) {
+          set({ goals, fetchError: null })
+        } else {
+          void get()
+            .fetch()
+            .catch(() => {})
+        }
+      }
     } catch (error) {
       if (requestId === goalFetchRequest) set({ fetchError: getErrorMessage(error) })
       throw error
@@ -241,15 +255,13 @@ export const useGoalStore = create<GoalState>((set, get) => ({
   getById: (id) => get().goals.find((goal) => goal.id === id),
 }))
 
-let goalAuthorityKey = ''
+let goalAuthorityKey = currencyAuthorityKey(useCurrencyStore.getState())
 useCurrencyStore.subscribe((state) => {
-  const key = `${state.mainCurrency ?? ''}|${state.manualRates.map((rate) => rate.id).join(',')}`
+  const key = currencyAuthorityKey(state)
   if (key === goalAuthorityKey) return
   goalAuthorityKey = key
-  if (useGoalStore.getState().goals.length > 0) {
-    void useGoalStore
-      .getState()
-      .fetch()
-      .catch(() => {})
+  const goalState = useGoalStore.getState()
+  if (goalState.isLoading || goalState.goals.length > 0) {
+    void goalState.fetch().catch(() => {})
   }
 })

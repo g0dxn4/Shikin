@@ -28,6 +28,14 @@ const spending = {
   conversions: [],
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
 function form(currency = 'USD') {
   return {
     name: 'Groceries',
@@ -87,6 +95,41 @@ describe('budget-store durable denomination', () => {
         remainingCentavos: 20_000,
       },
     })
+  })
+
+  it('refetches an initial delayed read when main currency becomes unconfigured', async () => {
+    const rows = [
+      {
+        id: 'budget-1',
+        name: 'Groceries',
+        category_id: 'cat-1',
+        amount: 50_000,
+        period: 'monthly',
+        is_active: 1,
+        currency: 'USD',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        category_name: 'Food',
+        category_color: '#ff0000',
+      },
+    ]
+    const delayed = deferred<typeof rows>()
+    mockQuery.mockReturnValueOnce(delayed.promise).mockResolvedValue(rows)
+
+    const initialFetch = useBudgetStore.getState().fetch()
+    await vi.waitFor(() => expect(mockQuery).toHaveBeenCalledTimes(1))
+    useCurrencyStore.setState({ mainCurrency: null, preferredCurrency: 'USD' })
+    await vi.waitFor(() => expect(mockQuery).toHaveBeenCalledTimes(2))
+    delayed.resolve(rows)
+    await initialFetch
+    await vi.waitFor(() =>
+      expect(useBudgetStore.getState().budgets[0]?.mainComparison).toMatchObject({
+        complete: false,
+        toCurrency: null,
+        reason: 'main_currency_unconfigured',
+        plan: { complete: false, reason: 'main_currency_unconfigured' },
+      })
+    )
   })
 
   it('keeps a partial native spending read explicit', async () => {

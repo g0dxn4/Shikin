@@ -5,6 +5,12 @@ import { query, execute } from '@/lib/database'
 import { generateId } from '@/lib/ulid'
 import { readOwnershipValuation } from '@/lib/valuation-read'
 import { useCurrencyStore } from './currency-store'
+import {
+  captureCurrencyAuthority,
+  convertWithCurrencyAuthority,
+  currencyAuthorityKey,
+  valuationRatesWithCurrencyAuthority,
+} from './currency-authority'
 
 interface AccountBreakdown {
   id: string
@@ -49,7 +55,12 @@ interface NetWorthState {
   history: NetWorthChartPoint[]
   historyComplete: boolean
   historyMissingCurrencies: string[]
-  historyNativeTotals: Array<{ currency: string; amountCentavos: number }>
+  historyNativeSnapshots: Array<{
+    id: string
+    date: string
+    currency: string
+    amountCentavos: number
+  }>
   isLoading: boolean
   calculateCurrent: () => Promise<void>
   takeSnapshot: () => Promise<void>
@@ -68,15 +79,13 @@ function enqueueRead(task: () => Promise<void>): Promise<void> {
   return pending
 }
 
-function snapshotNativeTotals(rows: readonly NetWorthSnapshot[]) {
-  const totals = new Map<string, bigint>()
-  for (const row of rows) {
-    const currency = row.currency?.trim().toUpperCase() || 'UNKNOWN'
-    totals.set(currency, (totals.get(currency) ?? 0n) + BigInt(row.net_worth))
-  }
-  return [...totals]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([currency, amount]) => ({ currency, amountCentavos: Number(amount) }))
+function snapshotNativeEvidence(rows: readonly NetWorthSnapshot[]) {
+  return rows.map((row) => ({
+    id: row.id,
+    date: row.date,
+    currency: row.currency?.trim().toUpperCase() || 'UNKNOWN',
+    amountCentavos: row.net_worth,
+  }))
 }
 
 export const useNetWorthStore = create<NetWorthState>((set, get) => ({
@@ -94,7 +103,7 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
   history: [],
   historyComplete: false,
   historyMissingCurrencies: [],
-  historyNativeTotals: [],
+  historyNativeSnapshots: [],
   isLoading: false,
 
   calculateCurrent: () =>
@@ -104,19 +113,22 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
         .loadRates()
         .catch(() => {})
       const currencyState = useCurrencyStore.getState()
+      const authority = captureCurrencyAuthority(currencyState, dayjs().format('YYYY-MM-DD'))
       const valuation = await readOwnershipValuation({
-        targetCurrency: currencyState.mainCurrency,
-        rates: currencyState.getCurrentValuationRates(),
+        targetCurrency: authority.mainCurrency,
+        rates: valuationRatesWithCurrencyAuthority(authority),
       })
       const assetBreakdown: AccountBreakdown[] = []
       const liabilityBreakdown: AccountBreakdown[] = []
 
       for (const account of valuation.accounts) {
-        const convertedAsset = currencyState.convertCurrentToPreferred(
+        const convertedAsset = convertWithCurrencyAuthority(
+          authority,
           account.assetCentavos,
           account.currency
         )
-        const convertedLiability = currencyState.convertCurrentToPreferred(
+        const convertedLiability = convertWithCurrencyAuthority(
+          authority,
           account.liabilityCentavos,
           account.currency
         )
@@ -251,14 +263,14 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
       'SELECT * FROM net_worth_snapshots WHERE date >= ? ORDER BY date ASC, id ASC',
       [startDate]
     )
-    const nativeTotals = snapshotNativeTotals(rows)
+    const nativeSnapshots = snapshotNativeEvidence(rows)
     const currencyState = useCurrencyStore.getState()
     if (!currencyState.mainCurrency) {
       set({
         history: [],
         historyComplete: false,
         historyMissingCurrencies: [],
-        historyNativeTotals: nativeTotals,
+        historyNativeSnapshots: nativeSnapshots,
       })
       return
     }
@@ -272,7 +284,7 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
         history: [],
         historyComplete: false,
         historyMissingCurrencies: ['UNKNOWN'],
-        historyNativeTotals: nativeTotals,
+        historyNativeSnapshots: nativeSnapshots,
       })
       return
     }
@@ -311,7 +323,7 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
         history: [],
         historyComplete: false,
         historyMissingCurrencies: [...missing].sort(),
-        historyNativeTotals: nativeTotals,
+        historyNativeSnapshots: nativeSnapshots,
       })
       return
     }
@@ -324,7 +336,7 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
       })),
       historyComplete: true,
       historyMissingCurrencies: [],
-      historyNativeTotals: nativeTotals,
+      historyNativeSnapshots: nativeSnapshots,
     })
   },
 
@@ -345,9 +357,9 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
   },
 }))
 
-let netWorthAuthorityKey = ''
+let netWorthAuthorityKey = currencyAuthorityKey(useCurrencyStore.getState())
 useCurrencyStore.subscribe((state) => {
-  const key = `${state.mainCurrency ?? ''}|${state.manualRates.map((rate) => rate.id).join(',')}`
+  const key = currencyAuthorityKey(state)
   if (key === netWorthAuthorityKey) return
   netWorthAuthorityKey = key
   if (!netWorthStoreHasRefreshed) return

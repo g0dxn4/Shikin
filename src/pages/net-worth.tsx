@@ -43,7 +43,7 @@ export function NetWorth() {
     history,
     historyComplete = true,
     historyMissingCurrencies = [],
-    historyNativeTotals = [],
+    historyNativeSnapshots = [],
     isLoading,
     refresh,
   } = useNetWorthStore()
@@ -121,13 +121,16 @@ export function NetWorth() {
         </div>
       )}
 
-      {!historyComplete && historyNativeTotals.length > 0 ? (
+      {!historyComplete && historyNativeSnapshots.length > 0 ? (
         <div className="border-warning/30 bg-warning/10 text-warning rounded-xl border px-4 py-3 text-sm">
           {t('netWorth.unavailable')}
           {historyMissingCurrencies.length > 0 ? ` · ${historyMissingCurrencies.join(', ')}` : ''}
           <span className="text-muted-foreground mt-1 block text-xs">
-            {historyNativeTotals
-              .map((total) => formatMoney(total.amountCentavos, total.currency))
+            {historyNativeSnapshots
+              .map(
+                (snapshot) =>
+                  `${dayjs(snapshot.date).format('MMM D, YYYY')}: ${formatMoney(snapshot.amountCentavos, snapshot.currency)}`
+              )
               .join(' · ')}
           </span>
         </div>

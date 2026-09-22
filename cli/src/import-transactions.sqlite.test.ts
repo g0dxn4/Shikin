@@ -16,6 +16,7 @@ vi.mock('./database.js', () => ({
 }))
 
 import type { ImportReviewDecision } from '@shikin/finance-core/imports'
+import { datedFxStatements } from '@shikin/finance-core'
 import { executeAtomicImport, type AtomicImportRequest } from './import-transactions'
 import { transactionsTools } from './tools/transactions'
 
@@ -73,6 +74,12 @@ function setupDatabase(): void {
     CREATE TRIGGER revise_import_decision AFTER INSERT ON duplicate_review_decisions
     BEGIN UPDATE app_data_state SET data_revision = data_revision + 1 WHERE id = 1; END;
   `)
+  // Transaction reads expose FX provenance even when this import fixture has no FX entries.
+  db.exec(
+    datedFxStatements({})
+      .filter((statement) => statement.startsWith('CREATE TABLE IF NOT EXISTS '))
+      .join(';\n')
+  )
 }
 
 function request(descriptions = ['First', 'Second']): AtomicImportRequest {
@@ -171,7 +178,12 @@ describe('atomic CLI import', () => {
     const tool = transactionsTools.find((candidate) => candidate.name === 'query-transactions')!
 
     const first = await tool.execute(tool.schema.parse({ limit: 100 }))
-    expect(first).toMatchObject({ success: true, count: 100, totalMatched: 125, hasMore: true })
+    expect(first, JSON.stringify(first)).toMatchObject({
+      success: true,
+      count: 100,
+      totalMatched: 125,
+      hasMore: true,
+    })
     expect(first.transactions[0]).toMatchObject({ id: 'tx-124', splits: [{ id: 'split-1' }] })
     const second = await tool.execute(tool.schema.parse({ limit: 100, cursor: first.nextCursor }))
     expect(second).toMatchObject({ success: true, count: 25, totalMatched: 125, hasMore: false })

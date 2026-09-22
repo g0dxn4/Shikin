@@ -10,7 +10,7 @@ import {
 const getFinancialHealthScore: ToolDefinition = {
   name: 'get-financial-health-score',
   description:
-    "Calculate the user's financial health score (0-100) with a breakdown across savings rate, budget adherence, debt-to-income, emergency fund, and spending consistency.",
+    "Calculate the user's financial health score (0-100) with a breakdown across savings rate, budget adherence, debt-to-income, emergency fund, and spending consistency. Native scores are retained; mainConversion uses dated cash flow, current balances at today’s manual rates, and budgets in their durable currencies.",
   schema: z.object({}),
   execute: async () => calculateFinancialHealthScoreSummary(),
 }
@@ -21,7 +21,7 @@ const getFinancialHealthScore: ToolDefinition = {
 const getSpendingRecap: ToolDefinition = {
   name: 'get-spending-recap',
   description:
-    'Read a spending recap without saving. Gross cash flow by default; explicit net consumption is available with coverage status.',
+    'Read a spending recap without saving. Gross cash flow by default; explicit net consumption is available with coverage status. Additive mainConversion retains transaction-date manual-rate provenance and incomplete/known amounts; saved recap text remains native.',
   schema: z.object({
     basis: z.enum(['gross_cashflow', 'net_consumption']).optional().default('gross_cashflow'),
     type: z

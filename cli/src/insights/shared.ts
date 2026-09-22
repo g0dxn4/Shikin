@@ -1,5 +1,6 @@
 import { writeAuditLog } from '../tools/shared.js'
-import { readBudgetSpending } from '../reporting-read.js'
+import { readBudgetSpending, readConvertedCashFlow } from '../reporting-read.js'
+import { readCurrentAmounts, sumCentavos } from '../dated-read.js'
 import dayjs from 'dayjs'
 import weekOfYear from 'dayjs/plugin/weekOfYear.js'
 import { query, execute, transaction } from '../database.js'
@@ -84,6 +85,7 @@ export type RecapRecord = {
 }
 
 export type BudgetScoreRow = {
+  currency: string
   id: string
   amount: number
   category_id: string | null
@@ -318,6 +320,89 @@ export function createSavingsRateSubscore(
   }
 }
 
+/** Compare in durable plan units first; main presentation is additive, never a relabel. */
+export function readInsightBudgetComparison(budget: BudgetScoreRow, start: string, end: string) {
+  const spending = readBudgetSpending(budget.category_id, start, end, budget.currency)
+  const plan = readCurrentAmounts([
+    { id: budget.id, amountCentavos: budget.amount, currency: budget.currency },
+  ])
+  const mainSpending = readConvertedCashFlow(start, end, plan.toCurrency, {
+    categoryId: budget.category_id,
+    expensesOnly: true,
+  })
+  const complete = plan.complete && mainSpending.success && mainSpending.complete
+  return {
+    id: budget.id,
+    currency: budget.currency,
+    budgetCentavos: budget.amount,
+    spending,
+    isOverBudget: spending.success ? spending.total > budget.amount : null,
+    mainComparison: {
+      complete,
+      toCurrency: plan.toCurrency,
+      policy: 'current_plan_today_vs_transaction_date_spending' as const,
+      plan,
+      spending: mainSpending,
+      remainingCentavos:
+        complete && mainSpending.success
+          ? sumCentavos([plan.totalCentavos!, -mainSpending.expenseCentavos!])
+          : null,
+    },
+  }
+}
+
+/** Current subscription estimates convert each bill once, before cycle normalization. */
+export function readSubscriptionEstimate(
+  rows: Pick<SubscriptionRow, 'id' | 'amount' | 'currency' | 'billing_cycle'>[]
+) {
+  const conversion = readCurrentAmounts(
+    rows.map((row) => ({
+      id: row.id,
+      amountCentavos: row.amount,
+      currency: row.currency.trim().toUpperCase(),
+    }))
+  )
+  const estimates = rows.map((row) => {
+    const converted = conversion.converted.find((item) => item.id === row.id)
+    const amount = converted?.amountCentavos ?? null
+    return {
+      id: row.id,
+      billingCycle: row.billing_cycle,
+      amountCentavos: amount,
+      monthlyAmount:
+        amount === null
+          ? null
+          : subscriptionEquivalentAmounts(amount, row.billing_cycle).monthlyAmount,
+      yearlyAmount:
+        amount === null
+          ? null
+          : subscriptionEquivalentAmounts(amount, row.billing_cycle).yearlyAmount,
+      dailyCostCentavos:
+        amount === null ? null : getDailySubscriptionCost(amount, row.billing_cycle),
+    }
+  })
+  const knownMonthlyTotal =
+    conversion.toCurrency === null
+      ? null
+      : Math.round(estimates.reduce((sum, row) => sum + (row.monthlyAmount ?? 0), 0) * 100) / 100
+  const knownYearlyTotal =
+    conversion.toCurrency === null
+      ? null
+      : Math.round(estimates.reduce((sum, row) => sum + (row.yearlyAmount ?? 0), 0) * 100) / 100
+  return {
+    ...conversion,
+    policy: 'planning_estimate_today' as const,
+    estimates,
+    monthlyTotal: conversion.complete ? knownMonthlyTotal : null,
+    yearlyTotal: conversion.complete ? knownYearlyTotal : null,
+    knownMonthlyTotal,
+    knownYearlyTotal,
+    dailyCostCentavos: conversion.complete
+      ? estimates.reduce((sum, row) => sum + row.dailyCostCentavos!, 0)
+      : null,
+  }
+}
+
 export function createBudgetAdherenceSubscore(
   activeBudgets: BudgetScoreRow[],
   today: string
@@ -338,7 +423,7 @@ export function createBudgetAdherenceSubscore(
     if (budget.period === 'weekly') start = dayjs().subtract(6, 'day').format('YYYY-MM-DD')
     if (budget.period === 'yearly') start = dayjs().startOf('year').format('YYYY-MM-DD')
 
-    const spending = readBudgetSpending(budget.category_id, start, today)
+    const spending = readBudgetSpending(budget.category_id, start, today, budget.currency)
     if (!spending.success) {
       return {
         name: 'Budget Adherence',

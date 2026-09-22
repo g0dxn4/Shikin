@@ -7044,6 +7044,9 @@ describe('CLI tool validation regressions', () => {
 
   it('bases cash-flow forecast only on cash-like account balances', async () => {
     mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('balance AS amountCentavos')) {
+        return [{ id: 'cash-like', currency: 'USD', amountCentavos: 200000 }]
+      }
       if (
         sql.includes('FROM accounts') &&
         sql.includes("type IN ('checking', 'savings', 'cash')")
@@ -7103,8 +7106,8 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('generates a weekly spending recap without persistence', async () => {
-    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
-    mockQuery
+    const nativeQueries = vi
+      .fn()
       .mockReturnValueOnce([
         { currency: 'USD', type: 'expense', total: 12500 },
         { currency: 'USD', type: 'income', total: 50000 },
@@ -7117,6 +7120,17 @@ describe('CLI tool validation regressions', () => {
       .mockReturnValueOnce([
         { currency: 'USD', description: 'Groceries', amount: 7000, category_name: 'Food' },
       ])
+
+    mockQuery.mockImplementation((sql: string) => {
+      if (
+        sql.includes('GROUP BY currency, type') ||
+        sql.includes('GROUP BY t.currency, t.category_id, c.name') ||
+        sql.includes('ORDER BY t.currency ASC, t.amount DESC')
+      )
+        return nativeQueries()
+      // No configured main or dated source rows in this native-output unit fixture.
+      return []
+    })
 
     const result = await getSpendingRecap.execute({ type: 'weekly' })
 
@@ -7209,8 +7223,8 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('generates a weekly mixed-currency recap without cross-currency aggregation', async () => {
-    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
-    mockQuery
+    const nativeQueries = vi
+      .fn()
       .mockReturnValueOnce([
         { currency: 'USD', type: 'expense', total: 12500 },
         { currency: 'USD', type: 'income', total: 50000 },
@@ -7230,6 +7244,17 @@ describe('CLI tool validation regressions', () => {
         { currency: 'EUR', description: 'Train', amount: 9000, category_name: 'Travel' },
         { currency: 'USD', description: 'Groceries', amount: 7000, category_name: 'Food' },
       ])
+
+    mockQuery.mockImplementation((sql: string) => {
+      if (
+        sql.includes('GROUP BY currency, type') ||
+        sql.includes('GROUP BY t.currency, t.category_id, c.name') ||
+        sql.includes('ORDER BY t.currency ASC, t.amount DESC')
+      )
+        return nativeQueries()
+      // No configured main or dated source rows in this native-output unit fixture.
+      return []
+    })
 
     const result = await getSpendingRecap.execute({ type: 'weekly' })
 

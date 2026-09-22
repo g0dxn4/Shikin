@@ -1,8 +1,10 @@
 import { readNetConsumption } from '../consumption-read.js'
-import { REPORTING_CTE, reportingReadFailure, readBudgetSpending } from '../reporting-read.js'
+import { REPORTING_CTE, reportingReadFailure, readConvertedCashFlow } from '../reporting-read.js'
 import {
   dayjs,
   query,
+  readInsightBudgetComparison,
+  type BudgetScoreRow,
   formatMoney,
   UNCATEGORIZED,
   toDisplayAmount,
@@ -83,6 +85,42 @@ export async function generateSpendingRecapSummary(
 
   const failure = reportingReadFailure(previousStart, end)
   if (failure) return failure
+
+  // Live main reporting stays outside the persisted native recap. A later main switch
+  // must not relabel a historical saved recap or change its logical identity.
+  const current = readConvertedCashFlow(start, end)
+  const previousMain = readConvertedCashFlow(previousStart, previousEnd)
+  const budgetComparisons =
+    type === 'monthly'
+      ? query<BudgetScoreRow & { name: string }>(
+          'SELECT id, name, amount, currency, category_id, period FROM budgets WHERE is_active = 1'
+        ).map((budget) => ({
+          name: budget.name,
+          ...readInsightBudgetComparison(budget, start, end),
+        }))
+      : []
+  const mainConversion = {
+    toCurrency: current.success ? current.toCurrency : null,
+    reason: current.reason ?? previousMain.reason,
+    complete: current.success && current.complete && previousMain.success && previousMain.complete,
+    policy: 'transaction_date_parent_then_allocation' as const,
+    current,
+    previous: previousMain,
+    expenseChange:
+      current.success && current.complete && previousMain.success && previousMain.complete
+        ? percentageChange(current.expenseCentavos!, previousMain.expenseCentavos!)
+        : null,
+    incomeChange:
+      current.success && current.complete && previousMain.success && previousMain.complete
+        ? percentageChange(current.incomeCentavos!, previousMain.incomeCentavos!)
+        : null,
+    savingsRate:
+      current.success && current.complete
+        ? current.incomeCentavos! > 0
+          ? Math.round((current.netCentavos! / current.incomeCentavos!) * 100)
+          : 0
+        : null,
+  }
 
   const currentTotals = query<{ currency: string; type: string; total: number }>(
     `${REPORTING_CTE} SELECT currency, type, COALESCE(SUM(amount), 0) AS total
@@ -268,6 +306,8 @@ export async function generateSpendingRecapSummary(
     return {
       success: true,
       basis: 'gross_cashflow',
+      mainConversion,
+      budgetComparisons,
       complete: true,
       recap: record,
       totalsByCurrency,
@@ -343,6 +383,8 @@ export async function generateSpendingRecapSummary(
     return {
       success: true,
       basis: 'gross_cashflow',
+      mainConversion,
+      budgetComparisons,
       complete: true,
       recap: record,
       totalsByCurrency: [
@@ -361,12 +403,6 @@ export async function generateSpendingRecapSummary(
     }
   }
 
-  const budgets = query<{ name: string; amount: number; category_id: string | null }>(
-    'SELECT name, amount, category_id FROM budgets WHERE is_active = 1'
-  ).map((budget) => ({
-    ...budget,
-    spending: readBudgetSpending(budget.category_id, start, end),
-  }))
   const savings = totalIncome - totalExpenses
   const savingsRate = totalIncome > 0 ? Math.round((savings / totalIncome) * 100) : 0
 
@@ -392,12 +428,12 @@ export async function generateSpendingRecapSummary(
         `Largest single expense was ${biggestExpense.description} at ${formatMoney(biggestExpense.amount, summaryCurrency)}.`
       )
     }
-    if (budgets.some((budget) => !budget.spending.success)) {
-      summaryParts.push('Budget comparison unavailable: USD plans require currency conversion.')
+    if (budgetComparisons.some((budget) => !budget.spending.success)) {
+      summaryParts.push(
+        'Budget comparison unavailable: direct dated rates into the original plan currencies are required.'
+      )
     }
-    const overBudget = budgets.filter(
-      (budget) => budget.spending.success && budget.spending.total > budget.amount
-    )
+    const overBudget = budgetComparisons.filter((budget) => budget.isOverBudget === true)
     if (overBudget.length > 0) {
       summaryParts.push(`Over budget on: ${overBudget.map((budget) => budget.name).join(', ')}.`)
     }
@@ -433,6 +469,8 @@ export async function generateSpendingRecapSummary(
   return {
     success: true,
     basis: 'gross_cashflow',
+    mainConversion,
+    budgetComparisons,
     complete: true,
     recap: record,
     totalsByCurrency: [

@@ -1,5 +1,6 @@
 import {
   query,
+  readSubscriptionEstimate,
   UNCATEGORIZED,
   toDisplayAmount,
   summarizeCurrencyTotals,
@@ -43,6 +44,7 @@ export async function listSubscriptionsSummary(activeOnly: boolean) {
 
   return {
     success: true,
+    mainConversion: readSubscriptionEstimate(rows),
     subscriptions,
     summary: {
       count: subscriptions.length,
@@ -147,6 +149,7 @@ export async function getSubscriptionSpendingSummary() {
 
   return {
     success: true,
+    mainConversion: readSubscriptionEstimate(rows),
     categories,
     billingCycles,
     summary: {

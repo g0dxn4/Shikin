@@ -212,7 +212,7 @@ export function readBudgetSpending(
   categoryId: string | null,
   start: string,
   end: string,
-  currency = 'USD'
+  currency: string
 ) {
   const report = readConvertedCashFlow(start, end, currency, { categoryId, expensesOnly: true })
   if (!report.success) return report

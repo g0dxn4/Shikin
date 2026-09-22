@@ -2,8 +2,11 @@ import { valueHolding } from '@shikin/finance-core/valuation'
 import {
   readInvestmentValuationRows,
   readValuationRates,
+  readValuationProvenance,
   rowToHoldingInput,
 } from '../valuation-read.js'
+import { getCurrencySettings } from '../fx-service.js'
+import { sumCentavos } from '../dated-read.js'
 import { writeNoteIfAbsent } from '../notebook.js'
 import { dayjs, formatMoney, noteExists, writeNote, toDisplayAmount } from './shared.js'
 
@@ -104,6 +107,58 @@ export async function generatePortfolioReview(force: boolean) {
     })
     .sort((left, right) => left.currency.localeCompare(right.currency))
 
+  const { mainCurrency } = getCurrencySettings()
+  const asOfDate = dayjs().format('YYYY-MM-DD')
+  const rates = mainCurrency === null ? [] : readValuationRates(mainCurrency, asOfDate)
+  const mainHoldings = investments.map((investment) => ({
+    id: investment.id,
+    valuation:
+      mainCurrency === null
+        ? null
+        : valueHolding(rowToHoldingInput(investment), mainCurrency, rates),
+  }))
+  const mainComplete =
+    mainCurrency !== null && mainHoldings.every((holding) => holding.valuation?.complete)
+  const knownValueCentavos =
+    mainCurrency === null
+      ? null
+      : sumCentavos(mainHoldings.map((holding) => holding.valuation?.convertedValueCentavos ?? 0))
+  const costBasisComplete =
+    mainCurrency !== null &&
+    mainHoldings.every((holding) => holding.valuation?.convertedCostBasisCentavos !== null)
+  const knownCostBasisCentavos =
+    mainCurrency === null
+      ? null
+      : sumCentavos(
+          mainHoldings.map((holding) => holding.valuation?.convertedCostBasisCentavos ?? 0)
+        )
+  const mainConversion = {
+    complete: mainComplete,
+    toCurrency: mainCurrency,
+    reason:
+      mainCurrency === null
+        ? 'main_currency_unconfigured'
+        : mainComplete
+          ? null
+          : 'incomplete_valuation',
+    asOfDate,
+    policy: 'current_holdings_today' as const,
+    provenance: readValuationProvenance(mainCurrency, asOfDate),
+    portfolioValueCentavos: mainComplete ? knownValueCentavos : null,
+    costBasisCentavos: costBasisComplete ? knownCostBasisCentavos : null,
+    gainLossCentavos:
+      mainComplete && costBasisComplete
+        ? sumCentavos([knownValueCentavos!, -knownCostBasisCentavos!])
+        : null,
+    knownValueCentavos,
+    knownCostBasisCentavos,
+    nativeTotals: totalsByCurrencyList,
+    holdings: mainHoldings,
+    incompleteHoldingIds: mainHoldings
+      .filter((holding) => !holding.valuation?.complete)
+      .map((holding) => holding.id),
+  }
+
   const comparable = holdings
     .filter((holding) => holding.gainLossPercent !== null)
     .sort((left, right) => (right.gainLossPercent ?? 0) - (left.gainLossPercent ?? 0))
@@ -130,16 +185,33 @@ export async function generatePortfolioReview(force: boolean) {
     )
   }
 
-  if (topPerformer?.gainLossPercent !== null) {
+  if (topPerformer && topPerformer.gainLossPercent !== null) {
     lines.push(
       `- **Top performer:** ${topPerformer.symbol} (${topPerformer.gainLossPercent >= 0 ? '+' : ''}${topPerformer.gainLossPercent.toFixed(2)}%)`
     )
   }
-  if (worstPerformer?.gainLossPercent !== null && worstPerformer.symbol !== topPerformer?.symbol) {
+  if (
+    worstPerformer &&
+    worstPerformer.gainLossPercent !== null &&
+    worstPerformer.symbol !== topPerformer?.symbol
+  ) {
     lines.push(
       `- **Worst performer:** ${worstPerformer.symbol} (${worstPerformer.gainLossPercent >= 0 ? '+' : ''}${worstPerformer.gainLossPercent.toFixed(2)}%)`
     )
   }
+
+  lines.push(
+    '',
+    '## Main-currency valuation at generation',
+    '',
+    `- **Policy:** current_holdings_today; as of ${asOfDate}`,
+    `- **Currency:** ${mainCurrency ?? 'unconfigured'}`,
+    `- **Portfolio value:** ${mainComplete ? formatMoney(mainConversion.portfolioValueCentavos!, mainCurrency!) : 'unavailable (incomplete)'}`,
+    '',
+    '```json',
+    JSON.stringify(mainConversion, null, 2),
+    '```'
+  )
 
   lines.push('', '## Holdings', '', '| Symbol | Name | Quantity | Value | Gain/Loss | Status |')
   lines.push('|--------|------|----------|-------|-----------|--------|')
@@ -177,6 +249,7 @@ export async function generatePortfolioReview(force: boolean) {
   return {
     success: true,
     path,
+    mainConversion,
     summary: {
       complete,
       portfolioValue:

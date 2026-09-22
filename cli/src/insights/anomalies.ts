@@ -11,7 +11,12 @@ import {
   type CategorySpendRow,
   type AnomalySeverity,
 } from './shared.js'
-import { CASH_FLOW_SQL, REPORTING_CTE, reportingReadFailure } from '../reporting-read.js'
+import {
+  CASH_FLOW_SQL,
+  REPORTING_CTE,
+  reportingReadFailure,
+  readConvertedCashFlow,
+} from '../reporting-read.js'
 
 export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: number) {
   const thresholdCentavos = Math.round(largeTransactionThreshold * 100)
@@ -177,10 +182,15 @@ export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: 
     })
   }
 
-  const recurringAmounts = query<{ description: string; currency: string; amounts: string }>(
-    `SELECT description, currency, GROUP_CONCAT(amount, ',') AS amounts
+  const recurringAmounts = query<{
+    description: string
+    currency: string
+    amounts: string
+    ids: string
+  }>(
+    `SELECT description, currency, GROUP_CONCAT(amount, ',') AS amounts, GROUP_CONCAT(id, ',') AS ids
      FROM (
-       SELECT t.description, UPPER(TRIM(t.currency)) AS currency, t.amount, t.date
+       SELECT t.id, t.description, UPPER(TRIM(t.currency)) AS currency, t.amount, t.date
         FROM transactions t
         WHERE t.type = 'expense' AND t.is_recurring = 1 AND t.date >= $1
           AND ${CASH_FLOW_SQL}
@@ -200,6 +210,7 @@ export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: 
     anomalies.push({
       id: generateId(),
       type: 'subscription_price_change',
+      transactionId: row.ids.split(',').at(-1),
       severity: Math.abs(changePct) > 20 ? 'high' : Math.abs(changePct) > 10 ? 'medium' : 'low',
       title: `${row.description} price ${latest > previous ? 'increase' : 'decrease'}`,
       description: `${row.description} changed from ${formatMoney(previous, row.currency)} to ${formatMoney(latest, row.currency)} (${changePct > 0 ? '+' : ''}${changePct}%).`,
@@ -231,11 +242,22 @@ export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: 
     })
   }
 
+  const mainConversion = readMainAnomalies(
+    thresholdCentavos,
+    historicalStart,
+    historicalEnd,
+    currentMonthStart,
+    recentWindowStart,
+    today,
+    anomalies
+  )
+
   const severityRank: Record<AnomalySeverity, number> = { high: 0, medium: 1, low: 2 }
   anomalies.sort((a, b) => severityRank[a.severity] - severityRank[b.severity])
 
   return {
     success: true,
+    mainConversion,
     totalAnomalies: anomalies.length,
     largeTransactionThresholdCurrencyMode: 'per_transaction_currency' as const,
     bySeverity: {
@@ -252,5 +274,168 @@ export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: 
         : hasMixedCurrencies
           ? `Detected ${anomalies.length} anomaly${anomalies.length === 1 ? '' : 'ies'}. Large-transaction thresholds were evaluated independently within each currency.`
           : `Detected ${anomalies.length} anomaly${anomalies.length === 1 ? '' : 'ies'}.`,
+  }
+}
+
+/** Detection rules remain gross cash flow. Duplicate/price-change identity remains native:
+ * FX changes are not subscription price changes. Main statistical comparisons use dated
+ * parent amounts and parent-apportioned category amounts, never nominal currency sums.
+ */
+function readMainAnomalies(
+  thresholdCentavos: number,
+  historicalStart: string,
+  historicalEnd: string,
+  currentMonthStart: string,
+  recentWindowStart: string,
+  today: string,
+  nativeAnomalies: Array<{
+    id: string
+    transactionId?: string
+    type: AnomalyType
+    severity: AnomalySeverity
+  }>
+) {
+  const historyStart = dayjs().subtract(90, 'day').format('YYYY-MM-DD')
+  const realized = readConvertedCashFlow(
+    historicalStart < historyStart ? historicalStart : historyStart,
+    today,
+    undefined,
+    { expensesOnly: true }
+  )
+  const current = readConvertedCashFlow(currentMonthStart, today, undefined, { expensesOnly: true })
+  const historical = readConvertedCashFlow(historicalStart, historicalEnd, undefined, {
+    expensesOnly: true,
+  })
+  const complete =
+    realized.success &&
+    realized.complete &&
+    current.success &&
+    current.complete &&
+    historical.success &&
+    historical.complete
+  const toCurrency = realized.success ? realized.toCurrency : null
+  const metadata = query<{
+    id: string
+    description: string
+    date: string
+    currency: string
+    amount: number
+  }>(
+    `SELECT t.id, t.description, t.date, UPPER(TRIM(t.currency)) AS currency, t.amount
+     FROM transactions t WHERE t.type = 'expense' AND t.date >= $1 AND t.date <= $2 AND ${CASH_FLOW_SQL}`,
+    [historyStart, today]
+  )
+  const converted = new Map(
+    realized.success ? realized.conversion.converted.map((row) => [row.id, row]) : []
+  )
+  const parentRows = metadata.map((row) => ({
+    ...row,
+    amountCentavos: converted.get(row.id)?.amountCentavos ?? null,
+  }))
+  const knownAnomalies: Array<{
+    type: AnomalyType
+    severity: AnomalySeverity
+    transactionId?: string
+    categoryId?: string | null
+    amountCentavos: number
+    description: string
+  }> = []
+  if (toCurrency !== null) {
+    const checked = new Set<string>()
+    for (const recent of parentRows.filter((row) => row.date >= recentWindowStart)) {
+      const key = `${recent.currency}:${recent.description}`
+      if (checked.has(key)) continue
+      checked.add(key)
+      const history = parentRows.filter(
+        (row) =>
+          row.date < recentWindowStart &&
+          row.currency === recent.currency &&
+          row.description === recent.description
+      )
+      // An incomplete sample must not silently produce a mean from only the known rows.
+      if (history.length < 3 || history.some((row) => row.amountCentavos === null)) continue
+      const { mean, stdDev } = calculateStdDev(history.map((row) => row.amountCentavos!))
+      if (stdDev === 0) continue
+      for (const row of parentRows.filter(
+        (row) =>
+          row.date >= recentWindowStart &&
+          row.currency === recent.currency &&
+          row.description === recent.description
+      )) {
+        if (row.amountCentavos === null) continue
+        const zScore = (row.amountCentavos - mean) / stdDev
+        if (zScore <= 2) continue
+        knownAnomalies.push({
+          type: 'unusual_amount',
+          severity: zScore > 3 ? 'high' : 'medium',
+          transactionId: row.id,
+          amountCentavos: row.amountCentavos,
+          description: `${formatMoney(row.amountCentavos, toCurrency)} is ${zScore.toFixed(1)} standard deviations above the dated main-currency mean ${formatMoney(Math.round(mean), toCurrency)}.`,
+        })
+      }
+    }
+    if (current.success && historical.success) {
+      for (const category of current.categories) {
+        const previous = historical.categories.find((row) => row.categoryId === category.categoryId)
+        if (!category.complete || !previous?.complete || !previous.expenseCentavos) continue
+        const average = previous.expenseCentavos / 3
+        const projected = (category.expenseCentavos! * dayjs().daysInMonth()) / dayjs().date()
+        const ratio = projected / average
+        if (ratio <= 1.5) continue
+        knownAnomalies.push({
+          type: 'spending_spike',
+          severity: ratio > 2 ? 'high' : 'medium',
+          categoryId: category.categoryId,
+          amountCentavos: category.expenseCentavos!,
+          description: `Dated main-currency spending pace projects ${formatMoney(Math.round(projected), toCurrency)}, ${Math.round((ratio - 1) * 100)}% above the recent average.`,
+        })
+      }
+    }
+    const weekStart = dayjs().subtract(7, 'day').format('YYYY-MM-DD')
+    for (const row of parentRows.filter(
+      (row) => row.date >= weekStart && row.amount >= thresholdCentavos
+    )) {
+      if (row.amountCentavos === null) continue
+      knownAnomalies.push({
+        type: 'large_transaction',
+        severity: row.amount >= thresholdCentavos * 2 ? 'high' : 'medium',
+        transactionId: row.id,
+        amountCentavos: row.amountCentavos,
+        description: `Native-currency threshold met; dated main amount ${formatMoney(row.amountCentavos, toCurrency)}.`,
+      })
+    }
+    for (const anomaly of nativeAnomalies.filter(
+      (row) => row.type === 'duplicate_charge' || row.type === 'subscription_price_change'
+    )) {
+      const amount = anomaly.transactionId
+        ? converted.get(anomaly.transactionId)?.amountCentavos
+        : null
+      if (amount === null || amount === undefined) continue
+      knownAnomalies.push({
+        type: anomaly.type,
+        severity: anomaly.severity,
+        transactionId: anomaly.transactionId,
+        amountCentavos: amount,
+        description: 'Native-currency detection; amount presented at its transaction-date rate.',
+      })
+    }
+  }
+  return {
+    complete,
+    toCurrency,
+    reason: realized.reason ?? current.reason ?? historical.reason,
+    basis: 'gross_cashflow' as const,
+    policy: 'transaction_date_parent_then_allocation' as const,
+    largeTransactionThresholdCurrencyMode: 'per_transaction_currency' as const,
+    realized,
+    current,
+    historical,
+    anomalies: complete ? knownAnomalies : null,
+    knownAnomalies,
+    nativeDetections: nativeAnomalies.map((row) => ({
+      id: row.id,
+      transactionId: row.transactionId ?? null,
+      conversion: row.transactionId ? (converted.get(row.transactionId) ?? null) : null,
+    })),
   }
 }

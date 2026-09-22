@@ -1,6 +1,7 @@
 import {
   dayjs,
   query,
+  readInsightBudgetComparison,
   uniqueCurrencies,
   createSavingsRateSubscore,
   createBudgetAdherenceSubscore,
@@ -11,7 +12,8 @@ import {
   type BudgetScoreRow,
   type HealthTrend,
 } from './shared.js'
-import { CASH_FLOW_SQL, reportingReadFailure } from '../reporting-read.js'
+import { readCurrentAmounts } from '../dated-read.js'
+import { CASH_FLOW_SQL, reportingReadFailure, readConvertedCashFlow } from '../reporting-read.js'
 
 export async function calculateFinancialHealthScoreSummary() {
   const startOfMonth = dayjs().startOf('month').format('YYYY-MM-DD')
@@ -99,15 +101,100 @@ export async function calculateFinancialHealthScoreSummary() {
   )
   const calculatedAt = new Date().toISOString()
 
+  const activeBudgets = query<BudgetScoreRow>(
+    'SELECT id, amount, currency, category_id, period FROM budgets WHERE is_active = 1'
+  )
+  const budgetComparisons = activeBudgets.map((budget) => {
+    const start =
+      budget.period === 'weekly'
+        ? dayjs().subtract(6, 'day').format('YYYY-MM-DD')
+        : budget.period === 'yearly'
+          ? dayjs().startOf('year').format('YYYY-MM-DD')
+          : startOfMonth
+    return readInsightBudgetComparison(budget, start, today)
+  })
+  const budgetSubscore = createBudgetAdherenceSubscore(activeBudgets, today)
+  const current = readConvertedCashFlow(startOfMonth, today)
+  const target = current.success ? current.toCurrency : null
+  const trailing = readConvertedCashFlow(
+    dayjs().subtract(3, 'month').startOf('month').format('YYYY-MM-DD'),
+    today,
+    target,
+    { expensesOnly: true }
+  )
+  const history = readConvertedCashFlow(sixMonthsAgo, today, target, { expensesOnly: true })
+  const savings = readCurrentAmounts(
+    query<{ id: string; currency: string; amountCentavos: number }>(
+      `SELECT id, UPPER(TRIM(currency)) AS currency, balance AS amountCentavos
+     FROM accounts WHERE type = 'savings' AND is_archived = 0`
+    ),
+    target
+  )
+  const debt = readCurrentAmounts(
+    query<{ id: string; currency: string; amountCentavos: number }>(
+      `SELECT id, UPPER(TRIM(currency)) AS currency, MAX(-balance, 0) AS amountCentavos
+     FROM accounts WHERE type = 'credit_card' AND is_archived = 0`
+    ),
+    target
+  )
+  const mainComplete =
+    current.success &&
+    current.complete &&
+    trailing.success &&
+    trailing.complete &&
+    history.success &&
+    history.complete &&
+    savings.complete &&
+    debt.complete &&
+    budgetComparisons.every((budget) => budget.spending.success && budget.mainComparison.complete)
+  const mainSubscores =
+    mainComplete && current.success && trailing.success && history.success
+      ? [
+          createSavingsRateSubscore(current.incomeCentavos!, current.expenseCentavos!),
+          budgetSubscore,
+          createDebtToIncomeSubscore(current.incomeCentavos!, debt.totalCentavos!),
+          createEmergencyFundSubscore(savings.totalCentavos!, trailing.expenseCentavos!, target!),
+          createSpendingConsistencySubscore(
+            monthKeys.map(
+              (month) => history.months.find((row) => row.month === month)?.expenseCentavos ?? 0
+            )
+          ),
+        ]
+      : []
+  const mainConversion = {
+    complete: mainComplete,
+    toCurrency: target,
+    reason:
+      current.reason ??
+      trailing.reason ??
+      history.reason ??
+      savings.reason ??
+      debt.reason ??
+      (budgetComparisons.some(
+        (budget) => !budget.spending.success || !budget.mainComparison.complete
+      )
+        ? 'incomplete_budget_comparison'
+        : null),
+    asOfDate: today,
+    policy: 'current_balances_today_vs_transaction_date_cashflow' as const,
+    basis: 'gross_cashflow' as const,
+    current,
+    trailing,
+    history,
+    savings,
+    debt,
+    budgetComparisons,
+    score: mainComplete
+      ? { ...summarizeHealthScores(mainSubscores), subscores: mainSubscores, calculatedAt }
+      : null,
+  }
+
   if (currencies.length <= 1) {
     const currency = currencies[0] ?? 'USD'
     const currentMonth = currentMonthByCurrency.get(currency) ?? { income: 0, expense: 0 }
-    const activeBudgets = query<BudgetScoreRow>(
-      'SELECT id, amount, category_id, period FROM budgets WHERE is_active = 1'
-    )
     const subscores = [
       createSavingsRateSubscore(currentMonth.income, currentMonth.expense),
-      createBudgetAdherenceSubscore(activeBudgets, today),
+      budgetSubscore,
       createDebtToIncomeSubscore(currentMonth.income, debtByCurrency.get(currency) ?? 0),
       createEmergencyFundSubscore(
         savingsByCurrency.get(currency) ?? 0,
@@ -122,6 +209,7 @@ export async function calculateFinancialHealthScoreSummary() {
 
     return {
       success: true,
+      mainConversion,
       score: {
         overall: summary.overall,
         grade: summary.grade,
@@ -165,6 +253,7 @@ export async function calculateFinancialHealthScoreSummary() {
 
   return {
     success: true,
+    mainConversion,
     score: {
       overall: null,
       grade: null,
@@ -180,6 +269,6 @@ export async function calculateFinancialHealthScoreSummary() {
       scoresByCurrency,
     },
     message:
-      'Financial health is shown per currency because your data spans multiple currencies. Budget adherence is omitted because budgets are not currency-scoped.',
+      'Financial health is shown per currency because your data spans multiple currencies. Budget adherence is omitted from native per-currency scores; mainConversion compares every budget in its durable denomination.',
   }
 }

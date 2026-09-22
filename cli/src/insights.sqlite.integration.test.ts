@@ -260,7 +260,10 @@ function seedDatabase(tempHome: string, seed: (db: Database.Database) => void): 
   seedTransactionStatusTriggers(db)
   applyFinancialSemanticsTestSchema(db)
 
-  for (const migration of CLI_DATABASE_MIGRATIONS.slice(0, -1)) {
+  // The fixture supplies schema through 020; the helper installs 021 and 022.
+  for (const migration of CLI_DATABASE_MIGRATIONS.filter(
+    (name) => Number(name.slice(0, 3)) <= 20
+  )) {
     db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(
       Number(migration.slice(0, 3)),
       migration

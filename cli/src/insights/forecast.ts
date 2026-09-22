@@ -1,12 +1,14 @@
 import {
   dayjs,
   query,
+  readSubscriptionEstimate,
   uniqueCurrencies,
   getDailySubscriptionCost,
   buildCashFlowForecast,
   type SubscriptionBillingCycle,
 } from './shared.js'
-import { CASH_FLOW_SQL, reportingReadFailure } from '../reporting-read.js'
+import { readCurrentAmounts } from '../dated-read.js'
+import { CASH_FLOW_SQL, reportingReadFailure, readConvertedCashFlow } from '../reporting-read.js'
 
 export async function generateCashFlowForecastSummary(days: number) {
   const boundedDays = Math.max(1, Math.min(90, Math.round(days)))
@@ -32,12 +34,45 @@ export async function generateCashFlowForecastSummary(days: number) {
   )
 
   const subscriptions = query<{
+    id: string
     currency: string
     amount: number
     billing_cycle: SubscriptionBillingCycle
   }>(
-    'SELECT amount, UPPER(TRIM(currency)) AS currency, billing_cycle FROM subscriptions WHERE is_active = 1'
+    'SELECT id, amount, UPPER(TRIM(currency)) AS currency, billing_cycle FROM subscriptions WHERE is_active = 1'
   )
+
+  const balances = readCurrentAmounts(
+    query<{ id: string; currency: string; amountCentavos: number }>(
+      `SELECT id, UPPER(TRIM(currency)) AS currency, balance AS amountCentavos
+     FROM accounts WHERE is_archived = 0 AND type IN ('checking', 'savings', 'cash')`
+    )
+  )
+  const realized = readConvertedCashFlow(ninetyDaysAgo, today, balances.toCurrency)
+  const plannedSubscriptions = readSubscriptionEstimate(subscriptions)
+  const mainComplete =
+    balances.complete && realized.success && realized.complete && plannedSubscriptions.complete
+  const mainConversion = {
+    complete: mainComplete,
+    toCurrency: balances.toCurrency,
+    asOfDate: today,
+    policy: 'planning_estimate_today_with_dated_realized_inputs' as const,
+    basis: 'gross_cashflow' as const,
+    reason: balances.reason ?? realized.reason ?? plannedSubscriptions.reason,
+    balances,
+    realized,
+    subscriptions: plannedSubscriptions,
+    forecast:
+      mainComplete && realized.success
+        ? buildCashFlowForecast(
+            balances.totalCentavos!,
+            realized.incomeCentavos! / 90,
+            realized.expenseCentavos! / 90,
+            plannedSubscriptions.dailyCostCentavos!,
+            boundedDays
+          )
+        : null,
+  }
 
   const currencies = uniqueCurrencies(currentBalances, dailyAverages, subscriptions)
   const balanceByCurrency = new Map(currentBalances.map((row) => [row.currency, row.total]))
@@ -70,6 +105,7 @@ export async function generateCashFlowForecastSummary(days: number) {
 
     return {
       success: true,
+      mainConversion,
       forecast,
       message:
         forecast.dangerDates.length > 0
@@ -97,6 +133,7 @@ export async function generateCashFlowForecastSummary(days: number) {
 
   return {
     success: true,
+    mainConversion,
     forecast: null,
     forecastsByCurrency,
     message:

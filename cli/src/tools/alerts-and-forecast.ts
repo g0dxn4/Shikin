@@ -5,7 +5,7 @@ import { detectSpendingAnomaliesSummary, generateCashFlowForecastSummary } from 
 const getSpendingAnomalies: ToolDefinition = {
   name: 'get-spending-anomalies',
   description:
-    'Detect and return spending anomalies such as unusual charges, duplicate transactions, spending spikes, and large transactions.',
+    'Detect and return spending anomalies such as unusual charges, duplicate transactions, spending spikes, and large transactions. Native detections are retained; mainConversion supplies dated main-currency statistics and provenance, with incomplete results withheld.',
   schema: z.object({
     largeTransactionThreshold: z
       .number()
@@ -24,7 +24,8 @@ const getSpendingAnomalies: ToolDefinition = {
 // ---------------------------------------------------------------------------
 const getForecastedCashFlow: ToolDefinition = {
   name: 'get-forecasted-cash-flow',
-  description: 'Get a cash flow forecast showing projected balances, burn rate, and danger dates.',
+  description:
+    'Get native and main-currency cash flow forecasts showing projected balances, burn rate, and danger dates. Main planning estimates use today’s manual rates; historical realized inputs are converted per transaction date before averaging.',
   schema: z.object({
     days: z
       .number()

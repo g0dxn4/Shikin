@@ -1,12 +1,30 @@
 import { describe, it, expect } from 'vitest'
 import dayjs from 'dayjs'
 import { buildDashboardAnalytics, formatDashboardNotice } from '../dashboard-analytics'
-import type { ConversionRate } from '@shikin/finance-core'
+import type { DatedExchangeRate } from '@shikin/finance-core/fx'
 import type { DashboardTransaction, DashboardSplit } from '../dashboard-analytics'
 
-const USD_RATES: ConversionRate[] = [
-  { fromCurrency: 'EUR', toCurrency: 'USD', rate: 1.1 },
-  { fromCurrency: 'MXN', toCurrency: 'USD', rate: 0.05 },
+const USD_RATES: DatedExchangeRate[] = [
+  {
+    id: 'EURUSD1.12000-01-01',
+    fromCurrency: 'EUR',
+    toCurrency: 'USD',
+    rateDecimal: '1.1',
+    effectiveFrom: '2000-01-01',
+    supersedesRateId: null,
+    createdAt: '2000-01-01',
+    sourceNote: null,
+  },
+  {
+    id: 'MXNUSD0.052000-01-01',
+    fromCurrency: 'MXN',
+    toCurrency: 'USD',
+    rateDecimal: '0.05',
+    effectiveFrom: '2000-01-01',
+    supersedesRateId: null,
+    createdAt: '2000-01-01',
+    sourceNote: null,
+  },
 ]
 
 const FIXED_NOW = dayjs('2024-06-15')
@@ -184,7 +202,7 @@ describe('buildDashboardAnalytics', () => {
     )
   })
 
-  it('falls back to a single source currency when preferred conversion is missing', () => {
+  it('retains native evidence without asserting a converted total when a direct rate is missing', () => {
     const transactions: DashboardTransaction[] = [
       makeTransaction('mxn1', 'expense', 100000, 'MXN', '2024-06-05'),
       makeTransaction('mxn2', 'expense', 50000, 'MXN', '2024-06-10'),
@@ -198,10 +216,11 @@ describe('buildDashboardAnalytics', () => {
       now: FIXED_NOW,
     })
 
-    expect(result.conversion.kind).toBe('fallback')
-    expect(result.conversion.currency).toBe('MXN')
-    expect(result.pace.spentMTD).toBe(150000)
-    expect(result.trend.months.find((m) => m.isCurrent)?.expenses).toBe(150000)
+    expect(result.conversion.kind).toBe('incomplete')
+    expect(result.conversion.currency).toBe('USD')
+    expect(result.fullTotals.expenses).toBeNull()
+    expect(result.evidence.nativeTotals).toEqual([{ currency: 'MXN', amountCentavos: 150000 }])
+    expect(result.pace.points.every((point) => point.current === null)).toBe(true)
   })
 
   it('keeps out-of-range currencies from disabling current dashboard analytics', () => {
@@ -260,8 +279,9 @@ describe('buildDashboardAnalytics', () => {
     })
 
     expect(result.conversion.kind).toBe('incomplete')
-    expect(result.pace.spentMTD).toBe(0)
-    expect(result.trend.months.find((m) => m.isCurrent)?.expenses).toBe(0)
+    expect(result.fullTotals.spentMTD).toBeNull()
+    expect(result.fullTotals.expenses).toBeNull()
+    expect(result.evidence.knownTotalCentavos).toBe(10000)
   })
 
   it.each([
@@ -316,6 +336,7 @@ describe('buildDashboardAnalytics', () => {
     ]
     const splits: DashboardSplit[] = [
       {
+        id: 'split-1',
         transaction_id: 'split-parent',
         category_id: 'cat-food',
         category_name: 'Food',
@@ -324,6 +345,7 @@ describe('buildDashboardAnalytics', () => {
         date: '2024-06-10',
       },
       {
+        id: 'split-2',
         transaction_id: 'split-parent',
         category_id: 'cat-transport',
         category_name: 'Transport',
@@ -355,6 +377,7 @@ describe('buildDashboardAnalytics', () => {
     ]
     const splits: DashboardSplit[] = [
       {
+        id: 'split-3',
         transaction_id: 'split-parent',
         category_id: 'cat-food',
         category_name: 'Food',
@@ -484,4 +507,92 @@ describe('formatDashboardNotice', () => {
     })
     expect(notice).toBeNull()
   })
+})
+
+it('uses midmonth dates and stable split-parent rounding in every dashboard series', () => {
+  const rates: DatedExchangeRate[] = [
+    {
+      id: 'a',
+      fromCurrency: 'USD',
+      toCurrency: 'MXN',
+      rateDecimal: '17',
+      effectiveFrom: '2024-06-01',
+      supersedesRateId: null,
+      sourceNote: null,
+      createdAt: '2024-06-01',
+    },
+    {
+      id: 'b',
+      fromCurrency: 'USD',
+      toCurrency: 'MXN',
+      rateDecimal: '18',
+      effectiveFrom: '2024-06-15',
+      supersedesRateId: null,
+      sourceNote: null,
+      createdAt: '2024-06-01',
+    },
+  ]
+  const transactions = [
+    makeTransaction('a', 'expense', 10000, 'USD', '2024-06-14'),
+    makeTransaction('b', 'expense', 10000, 'USD', '2024-06-15'),
+  ]
+  const result = buildDashboardAnalytics({
+    transactions,
+    splits: [],
+    preferredCurrency: 'MXN',
+    rates,
+    now: FIXED_NOW,
+  })
+  expect(result.fullTotals.expenses).toBe(350000)
+  expect(result.pace.spentMTD).toBe(350000)
+  expect(result.categories.currentMonthBreakdown[0].amount).toBe(350000)
+  const fractional = buildDashboardAnalytics({
+    transactions: [makeTransaction('split', 'expense', 3, 'USD', '2024-06-14')],
+    splits: [
+      {
+        id: 'z',
+        transaction_id: 'split',
+        amount: 1,
+        category_id: 'food',
+        category_name: 'Food',
+        category_color: null,
+        date: '2024-06-14',
+      },
+      {
+        id: 'a',
+        transaction_id: 'split',
+        amount: 1,
+        category_id: 'other',
+        category_name: 'Other',
+        category_color: null,
+        date: '2024-06-14',
+      },
+      {
+        id: 'm',
+        transaction_id: 'split',
+        amount: 1,
+        category_id: 'food',
+        category_name: 'Food',
+        category_color: null,
+        date: '2024-06-14',
+      },
+    ],
+    preferredCurrency: 'MXN',
+    rates: [{ ...rates[0], rateDecimal: '0.5' }],
+    now: FIXED_NOW,
+  })
+  expect(fractional.fullTotals.expenses).toBe(2)
+  expect(fractional.categories.currentMonthBreakdown.map((c) => c.amount)).toEqual([1, 1])
+})
+
+it('does not assert complete empty dashboards without main authority', () => {
+  const result = buildDashboardAnalytics({
+    transactions: [],
+    splits: [],
+    preferredCurrency: null,
+    rates: [],
+    now: FIXED_NOW,
+  })
+  expect(result.evidence.complete).toBe(false)
+  expect(result.fullTotals).toEqual({ income: null, expenses: null, net: null, spentMTD: null })
 })

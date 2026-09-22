@@ -20,6 +20,7 @@ vi.mock('@/lib/money', () => ({
   formatMoney: (c: number, currency: string) => `${currency} ${(c / 100).toFixed(2)}`,
 }))
 
+import { useCurrencyStore } from '@/stores/currency-store'
 import { query } from '@/lib/database'
 import { calculateHealthScore } from '../health-score-service'
 
@@ -28,6 +29,7 @@ const mockQuery = vi.mocked(query)
 describe('health-score-service', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    useCurrencyStore.setState({ mainCurrency: 'USD', manualRates: [] })
     mockStore.get.mockResolvedValue(null)
   })
 
@@ -69,8 +71,9 @@ describe('health-score-service', () => {
           { type: 'savings', balance: savings, currency: 'USD' },
         ]
       }
-      if (s.includes('FROM reporting_allocations')) {
+      if (s.includes('SELECT t.*')) {
         const base = {
+          id: 'tx',
           status: 'posted',
           ledger_treatment: 'normal',
           reporting_treatment: 'normal',
@@ -191,13 +194,15 @@ describe('health-score-service', () => {
 
   it('rejects incomplete reporting evidence instead of publishing a zero score', async () => {
     mockQuery.mockImplementation(async (sql: string) => {
-      if (sql.includes('AS split_count')) {
+      if (sql.includes('SELECT t.*')) {
         return [
           {
             id: 'tx-bad',
             type: 'expense',
             amount: 1000,
             currency: 'USD',
+            date: dayjs().format('YYYY-MM-DD'),
+            splits_json: JSON.stringify([{ id: 'bad', amount: 900 }]),
             split_count: 2,
             split_total: 900,
             invalid_splits: 0,
@@ -207,7 +212,7 @@ describe('health-score-service', () => {
       return []
     })
 
-    await expect(calculateHealthScore()).rejects.toThrow(/transaction tx-bad/)
+    await expect(calculateHealthScore()).rejects.toThrow(/unavailable/)
     expect(mockStore.set).not.toHaveBeenCalled()
   })
 

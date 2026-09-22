@@ -2,10 +2,16 @@ import dayjs from 'dayjs'
 import type { Dayjs } from 'dayjs'
 import { isCashFlowEligible } from '@shikin/finance-core'
 import {
-  aggregateCentavosByCurrency,
-  convertCurrencyTotals,
-  type ConversionRate,
-} from '@shikin/finance-core'
+  convertDatedAmounts,
+  apportionConvertedAmount,
+  convertCentavosAsOf,
+  type DatedExchangeRate,
+} from '@shikin/finance-core/fx'
+import {
+  sumReportingAmounts,
+  projectGrossRows,
+  type GrossProjection,
+} from '@/lib/dated-reporting-read'
 import type { Transaction, TransactionSplitWithCategory } from '@/types/database'
 
 export type DashboardTransaction = Pick<
@@ -28,7 +34,7 @@ export type DashboardTransaction = Pick<
 
 export type DashboardSplit = Pick<
   TransactionSplitWithCategory,
-  'transaction_id' | 'category_id' | 'category_name' | 'category_color' | 'amount'
+  'id' | 'transaction_id' | 'category_id' | 'category_name' | 'category_color' | 'amount'
 > & {
   date: string
 }
@@ -36,8 +42,8 @@ export type DashboardSplit = Pick<
 export interface DashboardAnalyticsInput {
   transactions: DashboardTransaction[]
   splits: DashboardSplit[]
-  preferredCurrency: string
-  rates: ConversionRate[]
+  preferredCurrency: string | null
+  rates: readonly DatedExchangeRate[]
   now: Dayjs
 }
 
@@ -48,7 +54,10 @@ export type ConversionState =
       kind: 'incomplete'
       currency: string
       missingCurrencies: string[]
-      reason?: 'invalid_category_allocations'
+      reason?:
+        | 'invalid_category_allocations'
+        | 'main_currency_unconfigured'
+        | 'invalid_currency_data'
     }
 
 export interface PacePoint {
@@ -126,6 +135,14 @@ export interface CategoriesResult {
 }
 
 export interface DashboardAnalyticsResult {
+  /** Validated dated evidence; full totals are null when any required source is unavailable. */
+  evidence: GrossProjection
+  fullTotals: {
+    income: number | null
+    expenses: number | null
+    net: number | null
+    spentMTD: number | null
+  }
   preferredCurrency: string
   conversion: ConversionState
   cashFlowConversion: ConversionState
@@ -168,123 +185,77 @@ function isEligibleForCashFlow(tx: DashboardTransaction): boolean {
 }
 
 function buildConversionState(
-  amounts: ReadonlyArray<{ currency: string; amountCentavos: number }>,
+  amounts: ReadonlyArray<{ currency: string; amountCentavos: number; date: string }>,
   preferredCurrency: string,
-  rates: ConversionRate[]
+  rates: readonly DatedExchangeRate[]
 ): ConversionState {
-  if (
-    amounts.some(
-      (amount) => !Number.isSafeInteger(amount.amountCentavos) || amount.amountCentavos < 0
-    )
-  ) {
-    return {
-      kind: 'incomplete',
-      currency: preferredCurrency,
-      missingCurrencies: [],
-      reason: 'invalid_category_allocations',
-    }
-  }
-
-  const validAmounts: Array<{ currency: string; amountCentavos: number }> = []
-  const invalidCurrencies: string[] = []
-  for (const amount of amounts) {
-    const currency = safeNormalizeCurrency(amount.currency)
-    if (!currency) {
-      invalidCurrencies.push(
-        typeof amount.currency === 'string' ? amount.currency.trim() || 'blank' : 'blank'
-      )
-      continue
-    }
-    validAmounts.push({ currency, amountCentavos: amount.amountCentavos })
-  }
-
-  if (invalidCurrencies.length > 0) {
-    return {
-      kind: 'incomplete',
-      currency: preferredCurrency,
-      missingCurrencies: [...new Set(invalidCurrencies)].sort(),
-    }
-  }
-
-  const preferred = safeNormalizeCurrency(preferredCurrency)
-  if (!preferred) {
-    return {
-      kind: 'incomplete',
-      currency: preferredCurrency.toUpperCase(),
-      missingCurrencies: [preferredCurrency.toUpperCase()],
-    }
-  }
-
-  if (validAmounts.length === 0) {
-    return { kind: 'complete', currency: preferred, missingCurrencies: [] }
-  }
-
-  const totals = aggregateCentavosByCurrency(validAmounts)
-  const result = convertCurrencyTotals(totals, preferred, rates)
-
-  if (result.complete) {
-    return { kind: 'complete', currency: preferred, missingCurrencies: [] }
-  }
-
-  if (result.converted.length === 0 && result.missingCurrencies.length === 1) {
-    return {
-      kind: 'fallback',
-      currency: result.missingCurrencies[0],
-      missingTarget: preferred,
-      missingCurrencies: [result.missingCurrencies[0]],
-    }
-  }
-
-  return {
-    kind: 'incomplete',
-    currency: preferred,
-    missingCurrencies: [...result.missingCurrencies],
-  }
+  return convertAmounts(amounts, preferredCurrency, rates).conversion
 }
 
 function convertAmounts(
-  amounts: ReadonlyArray<{ currency: string; amountCentavos: number }>,
+  amounts: ReadonlyArray<{ currency: string; amountCentavos: number; date: string }>,
   preferredCurrency: string,
-  rates: ConversionRate[]
+  rates: readonly DatedExchangeRate[]
 ): { centavos: number; conversion: ConversionState } {
-  const state = buildConversionState(amounts, preferredCurrency, rates)
-
-  if (state.kind === 'complete') {
-    const validAmounts = amounts
-      .map((a) => ({
-        currency: safeNormalizeCurrency(a.currency),
-        amountCentavos: a.amountCentavos,
-      }))
-      .filter((a): a is { currency: string; amountCentavos: number } => a.currency !== null)
-    const totals = aggregateCentavosByCurrency(validAmounts)
-    const result = convertCurrencyTotals(totals, state.currency, rates)
-    return { centavos: result.totalCentavos ?? 0, conversion: state }
+  if (!preferredCurrency)
+    return {
+      centavos: 0,
+      conversion: {
+        kind: 'incomplete',
+        currency: '',
+        missingCurrencies: [],
+        reason: 'main_currency_unconfigured',
+      },
+    }
+  try {
+    if (amounts.some((a) => a.amountCentavos < 0)) throw new Error('Invalid amount')
+    const result = convertDatedAmounts(
+      amounts.map((a, i) => ({
+        ...a,
+        id: String(i),
+        currency: safeNormalizeCurrency(a.currency) ?? '',
+      })),
+      preferredCurrency,
+      rates
+    )
+    return {
+      centavos: result.knownTotalCentavos,
+      conversion: result.complete
+        ? { kind: 'complete', currency: preferredCurrency, missingCurrencies: [] }
+        : {
+            kind: 'incomplete',
+            currency: preferredCurrency,
+            missingCurrencies: [
+              ...new Set(result.converted.filter((r) => !r.complete).map((r) => r.fromCurrency)),
+            ].sort(),
+          },
+    }
+  } catch {
+    return {
+      centavos: 0,
+      conversion: {
+        kind: 'incomplete',
+        currency: preferredCurrency,
+        missingCurrencies: [],
+        reason: 'invalid_currency_data',
+      },
+    }
   }
-
-  if (state.kind === 'fallback') {
-    const sourceCurrency = state.currency
-    const total = amounts
-      .filter((a) => safeNormalizeCurrency(a.currency) === sourceCurrency)
-      .reduce((sum, a) => sum + a.amountCentavos, 0)
-    return { centavos: total, conversion: state }
-  }
-
-  return { centavos: 0, conversion: state }
 }
 
 function cumulativeAmountsUpToDay(
   transactions: DashboardTransaction[],
   monthStart: Dayjs,
   maxDay: number
-): Array<{ currency: string; amountCentavos: number }> {
-  const amounts: Array<{ currency: string; amountCentavos: number }> = []
+): Array<{ currency: string; amountCentavos: number; date: string }> {
+  const amounts: Array<{ currency: string; amountCentavos: number; date: string }> = []
   const monthKey = monthStart.format('YYYY-MM')
   for (const tx of transactions) {
     const txDate = dayjs(tx.date)
     if (!txDate.isValid()) continue
     if (txDate.format('YYYY-MM') !== monthKey) continue
     if (txDate.date() > maxDay) continue
-    amounts.push({ currency: tx.currency, amountCentavos: tx.amount })
+    amounts.push({ currency: tx.currency, amountCentavos: tx.amount, date: tx.date })
   }
   return amounts
 }
@@ -292,7 +263,7 @@ function cumulativeAmountsUpToDay(
 function totalAmountsInMonth(
   transactions: DashboardTransaction[],
   monthStart: Dayjs
-): Array<{ currency: string; amountCentavos: number }> {
+): Array<{ currency: string; amountCentavos: number; date: string }> {
   return cumulativeAmountsUpToDay(transactions, monthStart, monthStart.daysInMonth())
 }
 
@@ -301,7 +272,7 @@ function averageConvertedCumulative(
   activePriorMonths: { start: Dayjs }[],
   day: number,
   preferredCurrency: string,
-  rates: ConversionRate[]
+  rates: readonly DatedExchangeRate[]
 ): number {
   let sum = 0
   for (const prior of activePriorMonths) {
@@ -315,7 +286,8 @@ function averageConvertedCumulative(
 }
 
 export function buildDashboardAnalytics(input: DashboardAnalyticsInput): DashboardAnalyticsResult {
-  const { transactions, splits, preferredCurrency, rates, now } = input
+  const { transactions, splits, rates, now } = input
+  const preferredCurrency = input.preferredCurrency ?? ''
 
   // Split index by transaction id.
   const splitsByTransaction = new Map<string, DashboardSplit[]>()
@@ -360,26 +332,26 @@ export function buildDashboardAnalytics(input: DashboardAnalyticsInput): Dashboa
       if (!txDate.isValid() || !paceMonthKeys.has(txDate.format('YYYY-MM'))) return false
       return txDate.format('YYYY-MM') !== currentMonthKey || txDate.date() <= todayDay
     })
-    .map((tx) => ({ currency: tx.currency, amountCentavos: tx.amount }))
+    .map((tx) => ({ currency: tx.currency, amountCentavos: tx.amount, date: tx.date }))
   const paceConversion = buildConversionState(paceAmounts, preferredCurrency, rates)
 
   const trendStart = currentMonthStart.subtract(11, 'month')
-  const displayedTransactions = eligibleTransactions.filter((tx) => {
-    const txDate = dayjs(tx.date)
-    if (!txDate.isValid()) return false
-    if (txDate.isBefore(trendStart, 'day')) return false
-    if (txDate.isAfter(now, 'day')) return false
-    return true
-  })
-  const trendConversion = buildConversionState(
-    displayedTransactions.map((tx) => ({ currency: tx.currency, amountCentavos: tx.amount })),
+  const displayedTransactions = eligibleTransactions.filter(
+    (tx) => tx.date >= trendStart.format('YYYY-MM-DD') && tx.date <= now.format('YYYY-MM-DD')
+  )
+  let trendConversion = buildConversionState(
+    displayedTransactions.map((tx) => ({
+      currency: tx.currency,
+      amountCentavos: tx.amount,
+      date: tx.date,
+    })),
     preferredCurrency,
     rates
   )
   const categoriesConversion = buildConversionState(
     displayedTransactions
       .filter((tx) => tx.type === 'expense')
-      .map((tx) => ({ currency: tx.currency, amountCentavos: tx.amount })),
+      .map((tx) => ({ currency: tx.currency, amountCentavos: tx.amount, date: tx.date })),
     preferredCurrency,
     rates
   )
@@ -397,7 +369,7 @@ export function buildDashboardAnalytics(input: DashboardAnalyticsInput): Dashboa
         }
         return txDate.format('YYYY-MM') !== currentMonthKey || txDate.date() <= todayDay
       })
-      .map((tx) => ({ currency: tx.currency, amountCentavos: tx.amount })),
+      .map((tx) => ({ currency: tx.currency, amountCentavos: tx.amount, date: tx.date })),
     preferredCurrency,
     rates
   )
@@ -472,7 +444,7 @@ export function buildDashboardAnalytics(input: DashboardAnalyticsInput): Dashboa
         if (isCurrent && txDate.date() > todayDay) return false
         return true
       })
-      .map((tx) => ({ currency: tx.currency, amountCentavos: tx.amount }))
+      .map((tx) => ({ currency: tx.currency, amountCentavos: tx.amount, date: tx.date }))
 
     const expenseAmounts = eligibleTransactions
       .filter((tx) => {
@@ -483,7 +455,7 @@ export function buildDashboardAnalytics(input: DashboardAnalyticsInput): Dashboa
         if (isCurrent && txDate.date() > todayDay) return false
         return true
       })
-      .map((tx) => ({ currency: tx.currency, amountCentavos: tx.amount }))
+      .map((tx) => ({ currency: tx.currency, amountCentavos: tx.amount, date: tx.date }))
 
     const { centavos: income } = convertAmounts(incomeAmounts, preferredCurrency, rates)
     const { centavos: expenses } = convertAmounts(expenseAmounts, preferredCurrency, rates)
@@ -499,14 +471,25 @@ export function buildDashboardAnalytics(input: DashboardAnalyticsInput): Dashboa
     })
   }
 
-  const totalIncome = trendMonths.reduce((sum, m) => sum + m.income, 0)
-  const totalExpenses = trendMonths.reduce((sum, m) => sum + m.expenses, 0)
+  let totalIncome = 0
+  let totalExpenses = 0
+  try {
+    totalIncome = sumReportingAmounts(trendMonths.map((m) => m.income))
+    totalExpenses = sumReportingAmounts(trendMonths.map((m) => m.expenses))
+  } catch {
+    trendConversion = {
+      kind: 'incomplete',
+      currency: preferredCurrency,
+      missingCurrencies: [],
+      reason: 'invalid_currency_data',
+    }
+  }
   const totalNet = totalIncome - totalExpenses
 
   // ── Categories ──────────────────────────────────────────────────────────
   const categoryAmountsByMonth = new Map<
     string,
-    Map<string, Array<{ currency: string; amountCentavos: number }>>
+    Map<string, Array<{ currency: string; amountCentavos: number; date: string }>>
   >()
   const categoryMeta = new Map<string, CategoryMeta>()
   const splitIntegrityNotices: SplitIntegrityNotice[] = []
@@ -516,7 +499,7 @@ export function buildDashboardAnalytics(input: DashboardAnalyticsInput): Dashboa
     const key = monthStart.format('YYYY-MM')
     categoryAmountsByMonth.set(
       key,
-      new Map<string, Array<{ currency: string; amountCentavos: number }>>()
+      new Map<string, Array<{ currency: string; amountCentavos: number; date: string }>>()
     )
   }
 
@@ -534,6 +517,8 @@ export function buildDashboardAnalytics(input: DashboardAnalyticsInput): Dashboa
       if (
         !Number.isSafeInteger(splitTotal) ||
         splitTotal !== tx.amount ||
+        new Set(txSplits.map((split) => split.id)).size !== txSplits.length ||
+        txSplits.some((split) => !split.id) ||
         txSplits.some((split) => !Number.isSafeInteger(split.amount) || split.amount <= 0)
       ) {
         splitIntegrityNotices.push({
@@ -543,13 +528,37 @@ export function buildDashboardAnalytics(input: DashboardAnalyticsInput): Dashboa
         })
         continue
       }
+      let convertedSplits: ReturnType<typeof apportionConvertedAmount>
+      try {
+        const parent = preferredCurrency
+          ? convertCentavosAsOf({
+              amountCentavos: tx.amount,
+              fromCurrency: tx.currency.trim().toUpperCase(),
+              toCurrency: preferredCurrency,
+              asOfDate: tx.date,
+              rates,
+            })
+          : null
+        if (!parent?.complete) continue
+        convertedSplits = apportionConvertedAmount(
+          parent.amountCentavos,
+          txSplits.map((split) => ({ id: split.id, amountCentavos: split.amount })),
+          tx.amount
+        )
+      } catch {
+        continue
+      }
       for (const split of txSplits) {
         const categoryId = split.category_id ?? UNCATEGORIZED_ID
         const displayName =
           split.category_name ?? (categoryId === UNCATEGORIZED_ID ? 'Uncategorized' : categoryId)
         categoryMeta.set(categoryId, { name: displayName, color: split.category_color })
         const list = monthMap.get(categoryId) ?? []
-        list.push({ currency: tx.currency, amountCentavos: split.amount })
+        list.push({
+          currency: preferredCurrency,
+          amountCentavos: convertedSplits.find((row) => row.id === split.id)!.amountCentavos,
+          date: tx.date,
+        })
         monthMap.set(categoryId, list)
       }
     } else {
@@ -558,7 +567,7 @@ export function buildDashboardAnalytics(input: DashboardAnalyticsInput): Dashboa
         tx.category_name ?? (categoryId === UNCATEGORIZED_ID ? 'Uncategorized' : categoryId)
       categoryMeta.set(categoryId, { name: displayName, color: tx.category_color ?? null })
       const list = monthMap.get(categoryId) ?? []
-      list.push({ currency: tx.currency, amountCentavos: tx.amount })
+      list.push({ currency: tx.currency, amountCentavos: tx.amount, date: tx.date })
       monthMap.set(categoryId, list)
     }
   }
@@ -569,7 +578,7 @@ export function buildDashboardAnalytics(input: DashboardAnalyticsInput): Dashboa
     const key = monthStart.format('YYYY-MM')
     const monthMap =
       categoryAmountsByMonth.get(key) ??
-      new Map<string, Array<{ currency: string; amountCentavos: number }>>()
+      new Map<string, Array<{ currency: string; amountCentavos: number; date: string }>>()
     const convertedMap: Record<string, number> = {}
     for (const [categoryId, amounts] of monthMap.entries()) {
       const { centavos } = convertAmounts(amounts, preferredCurrency, rates)
@@ -631,17 +640,53 @@ export function buildDashboardAnalytics(input: DashboardAnalyticsInput): Dashboa
     })
   }
 
-  // Convert split integrity notices to display currency.
-  const convertedIntegrityNotices = splitIntegrityNotices.map((notice) => {
-    const { centavos } = convertAmounts(
-      [{ currency: notice.currency, amountCentavos: Math.abs(notice.difference) }],
-      preferredCurrency,
-      rates
-    )
-    return { ...notice, difference: notice.difference < 0 ? -centavos : centavos }
-  })
+  const context = {
+    mainCurrency: input.preferredCurrency,
+    manualRates: rates,
+    today: now.format('YYYY-MM-DD'),
+  }
+  const withSplits = (rows: DashboardTransaction[]) =>
+    rows.map((tx) => ({ ...tx, splits_json: JSON.stringify(splitsByTransaction.get(tx.id) ?? []) }))
+  const evidence = projectGrossRows(withSplits(displayedTransactions), context)
+  const paceEvidence = projectGrossRows(
+    withSplits(
+      eligibleExpenses.filter(
+        (tx) => paceMonthKeys.has(tx.date.slice(0, 7)) && tx.date <= context.today
+      )
+    ),
+    context
+  )
+  const cashEvidence = projectGrossRows(
+    withSplits(
+      eligibleTransactions.filter(
+        (tx) => currentAndPreviousMonthKeys.has(tx.date.slice(0, 7)) && tx.date <= context.today
+      )
+    ),
+    context
+  )
+  for (const [projection, state] of [
+    [evidence, trendConversion],
+    [paceEvidence, paceConversion],
+    [cashEvidence, cashFlowConversion],
+  ] as const) {
+    if (!projection.complete) {
+      state.kind = 'incomplete'
+      state.missingCurrencies = projection.missingCurrencies
+      if (state.kind === 'incomplete' && projection.reason === 'invalid_category_allocations')
+        state.reason = 'invalid_category_allocations'
+    }
+  }
+  // Integrity evidence remains in its original native denomination.
+  const convertedIntegrityNotices = splitIntegrityNotices
 
   return {
+    evidence,
+    fullTotals: {
+      income: trendConversion.kind === 'complete' ? totalIncome : null,
+      expenses: trendConversion.kind === 'complete' ? totalExpenses : null,
+      net: trendConversion.kind === 'complete' ? totalNet : null,
+      spentMTD: paceConversion.kind === 'complete' ? spentMTD : null,
+    },
     preferredCurrency,
     conversion: trendConversion,
     cashFlowConversion,
@@ -649,7 +694,16 @@ export function buildDashboardAnalytics(input: DashboardAnalyticsInput): Dashboa
       currentMonth: currentMonthKey,
       daysInMonth,
       todayDay,
-      points: pacePoints,
+      points:
+        paceConversion.kind === 'complete'
+          ? pacePoints
+          : pacePoints.map((point) => ({
+              ...point,
+              current: null,
+              previous: null,
+              priorAverage: null,
+              runRate: null,
+            })),
       spentMTD,
       projectedMonthEnd,
       priorAverageTotal,
@@ -664,11 +718,17 @@ export function buildDashboardAnalytics(input: DashboardAnalyticsInput): Dashboa
       conversion: trendConversion,
     },
     categories: {
-      months: splitIntegrityNotices.length ? [] : categoryMonths,
+      months:
+        splitIntegrityNotices.length || categoriesConversion.kind !== 'complete'
+          ? []
+          : categoryMonths,
       categoryMeta: finalCategoryMeta,
       topCategoryIds,
       otherCategoryId: OTHER_CATEGORY_ID,
-      currentMonthBreakdown: splitIntegrityNotices.length ? [] : currentMonthBreakdown,
+      currentMonthBreakdown:
+        splitIntegrityNotices.length || categoriesConversion.kind !== 'complete'
+          ? []
+          : currentMonthBreakdown,
       splitIntegrityNotices: convertedIntegrityNotices,
       conversion: splitIntegrityNotices.length
         ? {
@@ -687,6 +747,10 @@ export function formatDashboardNotice(conversion: ConversionState): string | nul
     return `Showing ${conversion.currency}; ${conversion.missingTarget} conversion unavailable`
   }
   if (conversion.kind === 'incomplete') {
+    if (conversion.reason === 'main_currency_unconfigured')
+      return 'Set a main currency in Settings to view converted totals.'
+    if (conversion.reason === 'invalid_currency_data')
+      return 'Report incomplete: currency, date, or centavo evidence requires repair.'
     if (conversion.reason === 'invalid_category_allocations') {
       return 'Category report incomplete: split allocations do not reconcile.'
     }

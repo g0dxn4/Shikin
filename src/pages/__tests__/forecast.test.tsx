@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { Forecast } from '../forecast'
 import { useForecastStore } from '@/stores/forecast-store'
 import { useCurrencyStore } from '@/stores/currency-store'
+import { captureReportingContext, projectGrossRows } from '@/lib/dated-reporting-read'
 import { generateCashFlowForecast } from '@/lib/forecast-service'
 import { query } from '@/lib/database'
 const { fetchAccounts, accounts } = vi.hoisted(() => ({
@@ -18,7 +19,11 @@ vi.mock('@/stores/account-store', () => ({
 }))
 vi.mock('@/components/ui/safe-chart', () => ({ SafeChart: () => <div data-testid="chart" /> }))
 const forecast = {
-  complete: true,
+  authority: captureReportingContext(),
+  estimateAsOf: '2028-01-01',
+  evidence: projectGrossRows([], captureReportingContext()),
+  nativeBalances: [],
+  complete: true as const,
   currency: 'USD',
   missingCurrencies: [],
   points: [{ date: '2028-01-01', projected: 10000, optimistic: 11000, pessimistic: 9000 }],
@@ -39,7 +44,8 @@ describe('Forecast native view', () => {
       dangerThreshold: 0,
       error: null,
     })
-    useCurrencyStore.setState({ preferredCurrency: 'USD', rates: {}, invalidRates: [] })
+    useCurrencyStore.setState({ preferredCurrency: 'USD', mainCurrency: 'USD', manualRates: [] })
+    forecast.authority = captureReportingContext()
     vi.mocked(generateCashFlowForecast).mockResolvedValue(forecast)
     vi.mocked(query).mockResolvedValue([
       {
@@ -79,6 +85,10 @@ describe('Forecast native view', () => {
     vi.mocked(generateCashFlowForecast).mockResolvedValue({
       ...forecast,
       complete: false,
+      currentBalance: null,
+      dailyIncome: null,
+      dailyBurnRate: null,
+      minBalance: { date: '2028-01-01', amount: null },
       points: [],
       missingCurrencies: ['EUR'],
     })

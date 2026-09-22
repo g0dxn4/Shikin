@@ -56,8 +56,7 @@ export function SpendingHeatmap() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
   const loadCountRef = useRef(0)
-  const { preferredCurrency, rates, invalidRates, convertToPreferred, loadRates } =
-    useCurrencyStore()
+  const { preferredCurrency, mainCurrency, manualRates, loadRates } = useCurrencyStore()
 
   const { start, end } = useMemo(() => getDateRange(timeRange), [timeRange])
   const timeOptions = useMemo(
@@ -96,13 +95,14 @@ export function SpendingHeatmap() {
   }, [start, end, reloadToken])
 
   const aggregation = useMemo(() => {
-    // The stable converter reads rates and diagnostics from the current store state.
-    void rates
-    void invalidRates
     return ledgerRows
-      ? aggregateHeatmapSpending(ledgerRows, preferredCurrency, convertToPreferred)
+      ? aggregateHeatmapSpending(ledgerRows, {
+          mainCurrency,
+          manualRates,
+          today: dayjs().format('YYYY-MM-DD'),
+        })
       : null
-  }, [ledgerRows, preferredCurrency, rates, invalidRates, convertToPreferred])
+  }, [ledgerRows, mainCurrency, manualRates])
 
   const spendMap = useMemo(
     () => aggregation?.dailyTotals ?? new Map<string, number>(),
@@ -299,13 +299,36 @@ export function SpendingHeatmap() {
           className="border-warning/30 bg-warning/10 text-warning rounded-xl border px-4 py-3 text-sm"
           role="alert"
         >
-          {aggregation?.reason === 'invalid_currency_data'
-            ? t('spendingHeatmap.invalidData', {
-                details: aggregation.missingCurrencies.join(', '),
-              })
-            : t('spendingHeatmap.incompleteTotals', {
-                currencies: aggregation?.missingCurrencies.join(', ') ?? '',
+          {!mainCurrency
+            ? t('reportingFx.unconfigured')
+            : aggregation?.reason === 'invalid_currency_data'
+              ? t('spendingHeatmap.invalidData', {
+                  details: aggregation.missingCurrencies.join(', '),
+                })
+              : t('spendingHeatmap.incompleteTotals', {
+                  currencies: aggregation?.missingCurrencies.join(', ') ?? '',
+                })}
+          {aggregation?.evidence.currency && (
+            <p>
+              {t('reportingFx.known', {
+                amount:
+                  aggregation.evidence.knownTotalCentavos === null
+                    ? '—'
+                    : formatMoney(
+                        aggregation.evidence.knownTotalCentavos,
+                        aggregation.evidence.currency
+                      ),
               })}
+            </p>
+          )}
+          <p>
+            {t('reportingFx.native', {
+              amounts:
+                aggregation?.evidence.nativeTotals
+                  .map((row) => formatMoney(row.amountCentavos, row.currency))
+                  .join(' · ') || '—',
+            })}
+          </p>
         </div>
       ) : null}
 

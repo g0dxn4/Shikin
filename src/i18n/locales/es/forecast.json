@@ -43,6 +43,10 @@
     "description": "Importes en {{currency}}. Historial de 90 días de la cuenta seleccionada y suscripciones activas; los escenarios usan el 80 % / 120 % del gasto previsto."
   },
   "currency": {
+    "nativeBalances": "Saldos actuales en moneda original (sin combinar): {{amounts}}",
+    "nativeHistory": "Flujos brutos históricos en moneda original (sin combinar): {{amounts}}",
+    "unconfigured": "Configura una moneda principal en Ajustes para generar una previsión.",
+    "estimate": "Estimación con tasas de hoy ({{date}}); los flujos realizados usan la fecha de cada transacción.",
     "unavailable": "Pronóstico no disponible",
     "missing": "No se muestran totales parciales. Revisa los tipos de cambio y las monedas: {{currencies}}."
   },

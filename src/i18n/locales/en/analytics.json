@@ -117,5 +117,10 @@
     "uncategorized": "Uncategorized",
     "budgetUnavailable": "Budget health is unavailable until converted budget totals are complete.",
     "budgetReadError": "Budget health is unavailable. {{message}}"
+  },
+  "reportingFx": {
+    "unconfigured": "Set a main currency in Settings to view converted totals.",
+    "known": "Known converted subtotal (incomplete): {{amount}}",
+    "native": "Native evidence (not combined): {{amounts}}"
   }
 }

@@ -43,6 +43,10 @@
     "description": "Amounts in {{currency}}. Selected-account 90-day history and active subscriptions; scenarios use 80% / 120% of expected expenses."
   },
   "currency": {
+    "nativeBalances": "Native current balances (not combined): {{amounts}}",
+    "nativeHistory": "Native historical gross flows (not combined): {{amounts}}",
+    "unconfigured": "Set a main currency in Settings to generate a forecast.",
+    "estimate": "Planning estimate using today’s rates ({{date}}); realized flows use transaction dates.",
     "unavailable": "Forecast unavailable",
     "missing": "Partial totals are not shown. Check exchange rates and currency data: {{currencies}}."
   },

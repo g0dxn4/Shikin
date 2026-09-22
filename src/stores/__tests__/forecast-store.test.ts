@@ -1,3 +1,4 @@
+import { captureReportingContext, projectGrossRows } from '@/lib/dated-reporting-read'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const { mockGenerateForecast } = vi.hoisted(() => ({
@@ -115,6 +116,10 @@ describe('forecast-store', () => {
     it('returns the min balance date from forecast', () => {
       useForecastStore.setState({
         forecast: {
+          authority: captureReportingContext(),
+          estimateAsOf: '2026-01-01',
+          evidence: projectGrossRows([], captureReportingContext()),
+          nativeBalances: [],
           complete: true,
           currency: 'USD',
           missingCurrencies: [],
@@ -141,6 +146,10 @@ describe('forecast-store', () => {
     it('returns dates where balance goes below threshold', () => {
       useForecastStore.setState({
         forecast: {
+          authority: captureReportingContext(),
+          estimateAsOf: '2026-01-01',
+          evidence: projectGrossRows([], captureReportingContext()),
+          nativeBalances: [],
           complete: true,
           currency: 'USD',
           missingCurrencies: [],
@@ -165,6 +174,10 @@ describe('forecast-store', () => {
     it('returns empty array when no danger dates', () => {
       useForecastStore.setState({
         forecast: {
+          authority: captureReportingContext(),
+          estimateAsOf: '2026-01-01',
+          evidence: projectGrossRows([], captureReportingContext()),
+          nativeBalances: [],
           complete: true,
           currency: 'USD',
           missingCurrencies: [],
@@ -200,14 +213,18 @@ describe('forecast scope and asynchronous results', () => {
   it('does not expose incomplete minimum balances or danger dates', () => {
     useForecastStore.setState({
       forecast: {
+        authority: captureReportingContext(),
+        estimateAsOf: '2026-01-01',
+        evidence: projectGrossRows([], captureReportingContext()),
+        nativeBalances: [],
         complete: false,
         currency: 'USD',
         missingCurrencies: ['EUR'],
         points: [],
-        currentBalance: 100,
-        dailyBurnRate: 0,
-        dailyIncome: 0,
-        minBalance: { date: '2026-01-01', amount: 100 },
+        currentBalance: null,
+        dailyBurnRate: null,
+        dailyIncome: null,
+        minBalance: { date: '2026-01-01', amount: null },
         dangerDates: ['2026-01-01'],
       },
     })

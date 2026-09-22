@@ -5,7 +5,15 @@ import {
   CATEGORY_ALLOCATION_CTE,
 } from '@/lib/reporting-read'
 import { load } from '@/lib/storage'
-import { useCurrencyStore } from '@/stores/currency-store'
+import {
+  captureReportingContext,
+  assertReportingContextCurrent,
+  convertReportingAmount,
+  readGrossProjection,
+  sumReportingAmounts,
+  type ReportingContext,
+} from '@/lib/dated-reporting-read'
+import { readBudgetSpending } from '@/lib/budget-dated-read'
 import dayjs from 'dayjs'
 
 // --- Types ---
@@ -69,8 +77,12 @@ async function loadAchievements(): Promise<UnlockedAchievement[]> {
   }
 }
 
-async function saveAchievements(achievements: UnlockedAchievement[]): Promise<void> {
+async function saveAchievements(
+  achievements: UnlockedAchievement[],
+  context?: ReportingContext
+): Promise<void> {
   const store = await load()
+  if (context) assertReportingContextCurrent(context)
   await store.set(STORE_KEY_ACHIEVEMENTS, achievements)
 }
 
@@ -149,31 +161,36 @@ async function checkWeekWarrior(): Promise<boolean> {
 }
 
 async function checkBudgetBoss(): Promise<boolean> {
+  const context = captureReportingContext()
+  if (!context.mainCurrency) return false
   // Check if all active budgets with monthly period are under limit for last completed month
   const lastMonth = dayjs().subtract(1, 'month')
   const start = lastMonth.startOf('month').format('YYYY-MM-DD')
   const end = lastMonth.endOf('month').format('YYYY-MM-DD')
 
-  const budgets = await query<{ id: string; category_id: string; amount: number }>(
-    `SELECT id, category_id, amount FROM budgets WHERE is_active = 1 AND period = 'monthly'`
+  const budgets = await query<{
+    id: string
+    category_id: string | null
+    amount: number
+    currency: string
+  }>(
+    `SELECT id, category_id, amount, currency FROM budgets WHERE is_active = 1 AND period = 'monthly'`
   )
 
   if (budgets.length === 0) return false
 
   await assertReportingReadComplete(start, end)
   for (const b of budgets) {
-    const spent = await query<{ currency: string; total: number }>(
-      `${CATEGORY_ALLOCATION_CTE}
-       SELECT UPPER(TRIM(t.currency)) AS currency, COALESCE(SUM(t.amount), 0) as total
-       FROM reporting_allocations t
-       WHERE t.category_id = ? AND t.type = 'expense' AND t.date >= ? AND t.date <= ?
-         AND ${CASH_FLOW_SQL}
-       GROUP BY UPPER(TRIM(t.currency))`,
-      [b.category_id, start, end]
-    )
-    if (spent.some((row) => row.currency !== 'USD')) return false
-    if ((spent[0]?.total ?? 0) > b.amount) return false
+    const spent = await readBudgetSpending({
+      categoryId: b.category_id,
+      start,
+      end,
+      currency: b.currency,
+      rates: context.manualRates,
+    })
+    if (!spent.complete || spent.totalCentavos! > b.amount) return false
   }
+  assertReportingContextCurrent(context)
   return true
 }
 
@@ -182,23 +199,16 @@ async function checkSavingsStar(): Promise<boolean> {
   const start = lastMonth.startOf('month').format('YYYY-MM-DD')
   const end = lastMonth.endOf('month').format('YYYY-MM-DD')
 
-  await assertReportingReadComplete(start, end)
-  const totals = await query<{ currency: string; type: string; total: number }>(
-    `SELECT UPPER(TRIM(t.currency)) AS currency, t.type, COALESCE(SUM(t.amount), 0) as total
-     FROM transactions t
-     WHERE t.date >= ? AND t.date <= ? AND ${CASH_FLOW_SQL}
-     GROUP BY UPPER(TRIM(t.currency)), t.type`,
-    [start, end]
+  const context = captureReportingContext()
+  const projection = await readGrossProjection(start, end, context)
+  assertReportingContextCurrent(context)
+  if (!projection.complete) return false
+  const inc = sumReportingAmounts(
+    projection.parents.filter((row) => row.type === 'income').map((row) => row.convertedAmount!)
   )
-  const { convertToPreferred } = useCurrencyStore.getState()
-  let inc = 0
-  let exp = 0
-  for (const row of totals) {
-    const converted = convertToPreferred(row.total, row.currency)
-    if (!converted.complete) return false
-    if (row.type === 'income') inc += converted.amountCentavos
-    if (row.type === 'expense') exp += converted.amountCentavos
-  }
+  const exp = sumReportingAmounts(
+    projection.parents.filter((row) => row.type === 'expense').map((row) => row.convertedAmount!)
+  )
   if (inc <= 0) return false
   return (inc - exp) / inc > 0.2
 }
@@ -225,23 +235,30 @@ async function checkDiversified(): Promise<boolean> {
   return (rows[0]?.cnt ?? 0) >= 5
 }
 
-async function checkDebtDestroyer(): Promise<boolean> {
-  // Any credit card with zero or positive balance (paid off)
-  const rows = await query<{ cnt: number }>(
-    `SELECT COUNT(*) as cnt FROM accounts
-     WHERE type = 'credit_card' AND balance >= 0 AND is_archived = 0`
+async function checkCurrentStock(type: 'credit_card' | 'savings'): Promise<boolean> {
+  const context = captureReportingContext()
+  const rows = await query<{ balance: number; currency: string }>(
+    'SELECT balance, currency FROM accounts WHERE type = ? AND is_archived = 0',
+    [type]
   )
-  return (rows[0]?.cnt ?? 0) >= 1
+  assertReportingContextCurrent(context)
+  return rows.some((row) => {
+    try {
+      const amount = convertReportingAmount(context, row.balance, row.currency)
+      // Keep the original sign-based stock heuristic, but require valid, complete current evidence.
+      return (
+        amount?.complete === true && (type === 'credit_card' ? row.balance >= 0 : row.balance > 0)
+      )
+    } catch {
+      return false
+    }
+  })
 }
-
+async function checkDebtDestroyer(): Promise<boolean> {
+  return checkCurrentStock('credit_card')
+}
 async function checkGoalGetter(): Promise<boolean> {
-  // Check if any savings account has exceeded its initial state (balance > 0)
-  // Simple heuristic: savings account with balance > 0 that has income transactions
-  const rows = await query<{ cnt: number }>(
-    `SELECT COUNT(*) as cnt FROM accounts a
-     WHERE a.type = 'savings' AND a.balance > 0 AND a.is_archived = 0`
-  )
-  return (rows[0]?.cnt ?? 0) >= 1
+  return checkCurrentStock('savings')
 }
 
 // --- Main check function ---
@@ -262,6 +279,7 @@ const CHECKERS: Record<AchievementId, () => Promise<boolean>> = {
  * Previously unlocked achievements are not re-checked.
  */
 export async function checkAchievements(): Promise<UnlockedAchievement[]> {
+  const context = captureReportingContext()
   const existing = await loadAchievements()
   try {
     await assertReportingReadComplete()
@@ -289,8 +307,13 @@ export async function checkAchievements(): Promise<UnlockedAchievement[]> {
     }
   }
 
+  try {
+    assertReportingContextCurrent(context)
+  } catch {
+    return []
+  }
   if (newlyUnlocked.length > 0) {
-    await saveAchievements([...existing, ...newlyUnlocked])
+    await saveAchievements([...existing, ...newlyUnlocked], context)
   }
 
   return newlyUnlocked

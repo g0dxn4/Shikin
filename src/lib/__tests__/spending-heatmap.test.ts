@@ -3,7 +3,6 @@ import {
   aggregateHeatmapSpending,
   fetchHeatmapLedgerRows,
   isHeatmapEligibleExpense,
-  type ConvertToPreferredFn,
   type HeatmapLedgerRow,
 } from '../spending-heatmap'
 
@@ -35,15 +34,21 @@ function row(overrides: Partial<HeatmapLedgerRow> = {}): HeatmapLedgerRow {
   }
 }
 
-const convertUsdOnly: ConvertToPreferredFn = (amountCentavos, currency) => {
-  if (currency === 'USD') {
-    return { complete: true, amountCentavos, missingCurrencies: [] }
-  }
-  return {
-    complete: false,
-    missingCurrencies: [currency],
-    reason: 'missing_exchange_rates',
-  }
+const usdContext = { mainCurrency: 'USD', manualRates: [], today: '2024-06-15' }
+const eurContext = {
+  ...usdContext,
+  manualRates: [
+    {
+      id: 'EURUSD22000-01-01',
+      fromCurrency: 'EUR',
+      toCurrency: 'USD',
+      rateDecimal: '2',
+      effectiveFrom: '2000-01-01',
+      supersedesRateId: null,
+      createdAt: '2000-01-01',
+      sourceNote: null,
+    },
+  ],
 }
 
 describe('isHeatmapEligibleExpense', () => {
@@ -71,14 +76,10 @@ describe('isHeatmapEligibleExpense', () => {
 describe('aggregateHeatmapSpending', () => {
   it('uses validated allocations for categories but counts the parent once per day', () => {
     const splits_json = JSON.stringify([
-      { amount: 401, category_id: 'food', category_name: 'Food' },
-      { amount: 600, category_id: 'other', category_name: 'Other Expenses' },
+      { id: 'food', amount: 401, category_id: 'food', category_name: 'Food' },
+      { id: 'other', amount: 600, category_id: 'other', category_name: 'Other Expenses' },
     ])
-    const result = aggregateHeatmapSpending(
-      [row({ amount: 1001, splits_json })],
-      'USD',
-      convertUsdOnly
-    )
+    const result = aggregateHeatmapSpending([row({ amount: 1001, splits_json })], usdContext)
     expect(result.complete).toBe(true)
     expect(result.totalSpent).toBe(1001)
     expect(result.eligibleTransactions).toHaveLength(1)
@@ -93,25 +94,18 @@ describe('aggregateHeatmapSpending', () => {
   it('withholds malformed split categories rather than falling back to the parent', () => {
     const result = aggregateHeatmapSpending(
       [row({ splits_json: JSON.stringify([{ amount: 1, category_id: 'food' }]) })],
-      'USD',
-      convertUsdOnly
+      usdContext
     )
     expect(result).toMatchObject({
       complete: false,
       reason: 'invalid_category_allocations',
       categoryTotals: [],
       eligibleTransactions: [],
-      totalSpent: 0,
+      totalSpent: null,
     })
   })
 
   it('converts mixed currencies before summing daily and category totals', () => {
-    const convert: ConvertToPreferredFn = (amountCentavos, currency) => ({
-      complete: true,
-      amountCentavos: currency === 'EUR' ? amountCentavos * 2 : amountCentavos,
-      missingCurrencies: [],
-    })
-
     const result = aggregateHeatmapSpending(
       [
         row({ id: 'usd', amount: 10000, currency: 'USD', date: '2024-06-10' }),
@@ -126,8 +120,7 @@ describe('aggregateHeatmapSpending', () => {
         }),
         row({ id: 'usd-2', amount: 5000, currency: 'USD', date: '2024-06-11' }),
       ],
-      'USD',
-      convert
+      eurContext
     )
 
     expect(result.complete).toBe(true)
@@ -156,59 +149,32 @@ describe('aggregateHeatmapSpending', () => {
         row({ id: 'usd', amount: 10000, currency: 'USD' }),
         row({ id: 'eur', amount: 8000, currency: 'EUR' }),
       ],
-      'USD',
-      convertUsdOnly
+      usdContext
     )
 
     expect(result.complete).toBe(false)
     expect(result.reason).toBe('missing_exchange_rates')
     expect(result.missingCurrencies).toEqual(['EUR'])
-    expect(result.totalSpent).toBe(0)
+    expect(result.evidence.totalCentavos).toBeNull()
+    expect(result.evidence.knownTotalCentavos).toBe(10000)
     expect(result.dailyTotals.size).toBe(0)
     expect(result.categoryTotals).toEqual([])
     expect(result.eligibleTransactions).toEqual([])
   })
 
   it('labels invalid currency data without inventing a complete total', () => {
-    const convert: ConvertToPreferredFn = (_amount, currency) => {
-      if (currency === 'US D') {
-        return {
-          complete: false,
-          missingCurrencies: [],
-          reason: 'invalid_currency_data',
-        }
-      }
-      return { complete: true, amountCentavos: _amount, missingCurrencies: [] }
-    }
-
-    const result = aggregateHeatmapSpending(
-      [row({ currency: 'US D', amount: 5000 })],
-      'USD',
-      convert
-    )
+    const result = aggregateHeatmapSpending([row({ currency: 'US D', amount: 5000 })], usdContext)
 
     expect(result.complete).toBe(false)
     expect(result.reason).toBe('invalid_currency_data')
     expect(result.missingCurrencies).toContain('US D')
-    expect(result.totalSpent).toBe(0)
+    expect(result.totalSpent).toBeNull()
   })
 
   it('keeps zero amounts but withholds negative or unsafe parent amounts', () => {
-    const convert: ConvertToPreferredFn = (amountCentavos, currency) => {
-      if (currency !== 'USD') {
-        return {
-          complete: false,
-          missingCurrencies: [currency],
-          reason: 'missing_exchange_rates',
-        }
-      }
-      return { complete: true, amountCentavos, missingCurrencies: [] }
-    }
-
     const zeroOnly = aggregateHeatmapSpending(
       [row({ id: 'zero', amount: 0, currency: 'USD' })],
-      'USD',
-      convert
+      usdContext
     )
     expect(zeroOnly.complete).toBe(true)
     expect(zeroOnly.totalSpent).toBe(0)
@@ -217,30 +183,24 @@ describe('aggregateHeatmapSpending', () => {
     for (const amount of [-2500, Number.MAX_SAFE_INTEGER + 1]) {
       const malformed = aggregateHeatmapSpending(
         [row({ id: 'malformed', amount, currency: 'USD' })],
-        'USD',
-        convert
+        usdContext
       )
       expect(malformed).toMatchObject({
         complete: false,
         reason: 'invalid_category_allocations',
-        totalSpent: 0,
+        totalSpent: null,
         eligibleTransactions: [],
       })
     }
   })
 
   it('withholds null and blank parent currencies before conversion', () => {
-    const permissiveConverter: ConvertToPreferredFn = (amountCentavos) => ({
-      complete: true,
-      amountCentavos,
-      missingCurrencies: [],
-    })
     for (const currency of ['', null as unknown as string]) {
-      const result = aggregateHeatmapSpending([row({ currency })], 'USD', permissiveConverter)
+      const result = aggregateHeatmapSpending([row({ currency })], usdContext)
       expect(result).toMatchObject({
         complete: false,
         reason: 'invalid_currency_data',
-        totalSpent: 0,
+        totalSpent: null,
         eligibleTransactions: [],
       })
     }
@@ -257,8 +217,7 @@ describe('aggregateHeatmapSpending', () => {
           ledger_treatment: 'staged_no_balance_impact',
         }),
       ],
-      'USD',
-      convertUsdOnly
+      usdContext
     )
     expect(result.complete).toBe(true)
     expect(result.totalSpent).toBe(10000)
@@ -278,8 +237,7 @@ describe('aggregateHeatmapSpending', () => {
         row({ id: 'archived', amount: 903000, is_archived: 1 }),
         row({ id: 'transfer', amount: 904000, type: 'transfer' }),
       ],
-      'USD',
-      convertUsdOnly
+      usdContext
     )
 
     expect(result.complete).toBe(true)
@@ -300,8 +258,7 @@ describe('aggregateHeatmapSpending', () => {
           amount: 4200,
         }),
       ],
-      'USD',
-      convertUsdOnly
+      usdContext
     )
 
     expect(result.categoryTotals).toEqual([

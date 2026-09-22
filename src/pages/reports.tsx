@@ -2,7 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
-import { isCashFlowEligible } from '@shikin/finance-core'
+import {
+  projectGrossRows,
+  readGrossLedgerRows,
+  sumReportingAmounts,
+  type GrossLedgerRow,
+} from '@/lib/dated-reporting-read'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -45,14 +50,8 @@ export function ReportsPage() {
   const [netEnd, setNetEnd] = useState(endOfCurrentMonth)
   const { accounts, fetch: fetchAccounts, isLoading: accountsLoading } = useAccountStore()
   const { budgets, fetch: fetchBudgets, isLoading: budgetsLoading } = useBudgetStore()
-  const {
-    preferredCurrency,
-    rates,
-    invalidRates,
-    convertToPreferred,
-    getTotalBalanceInPreferred,
-    loadRates,
-  } = useCurrencyStore()
+  const { preferredCurrency, mainCurrency, manualRates, getTotalBalanceInPreferred, loadRates } =
+    useCurrencyStore()
   const {
     transactions,
     fetch: fetchTransactions,
@@ -63,78 +62,72 @@ export function ReportsPage() {
     void Promise.allSettled([fetchAccounts(), fetchBudgets(), fetchTransactions(), loadRates()])
   }, [fetchAccounts, fetchBudgets, fetchTransactions, loadRates])
 
-  const {
-    monthTransactionCount,
-    income,
-    expenses,
-    topCategories,
-    cashFlowComplete,
-    cashFlowMissingCurrencies,
-  } = useMemo(() => {
-    // Currency actions are stable Zustand methods that read these mutable store fields.
-    void preferredCurrency
-    void rates
-    void invalidRates
-    const monthStart = startOfCurrentMonth()
-    const monthEnd = endOfCurrentMonth()
-    const categoryTotals = new Map<string, { name: string; color: string; amount: number }>()
-    let transactionCount = 0
-    let totalIncome = 0
-    let totalExpenses = 0
-    const incompleteCurrencies = new Set<string>()
-
-    for (const tx of transactions) {
-      if (tx.date < monthStart || tx.date > monthEnd) continue
-      if (
-        !isCashFlowEligible({
-          type: tx.type,
-          status: tx.status ?? 'posted',
-          ledgerTreatment: tx.ledger_treatment ?? 'normal',
-          reportingTreatment: tx.reporting_treatment ?? 'normal',
-          transactionKind: tx.transaction_kind ?? 'standard',
-          isArchived: tx.is_archived ?? 0,
-        })
+  const [grossRows, setGrossRows] = useState<GrossLedgerRow[] | null>(null)
+  const [grossError, setGrossError] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void readGrossLedgerRows(startOfCurrentMonth(), endOfCurrentMonth())
+      .then((rows) => {
+        if (!cancelled) {
+          setGrossRows(rows)
+          setGrossError(null)
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setGrossRows(null)
+          setGrossError(getErrorMessage(error))
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [transactions])
+  const gross = useMemo(
+    () =>
+      projectGrossRows(grossRows ?? [], {
+        mainCurrency,
+        manualRates,
+        today: dayjs().format('YYYY-MM-DD'),
+      }),
+    [grossRows, mainCurrency, manualRates]
+  )
+  const cashFlowComplete = grossRows !== null && !grossError && gross.complete
+  const cashFlowMissingCurrencies = gross.missingCurrencies
+  const monthTransactionCount = gross.parents.length
+  const income = gross.complete
+    ? sumReportingAmounts(
+        gross.parents.filter((row) => row.type === 'income').map((row) => row.convertedAmount ?? 0)
       )
-        continue
-
-      const converted = convertToPreferred(tx.amount, tx.currency)
-      if (!converted.complete) {
-        incompleteCurrencies.add(tx.currency?.trim().toUpperCase() || t('reports.blankCurrency'))
-        continue
-      }
-      const amount = converted.amountCentavos
-      transactionCount += 1
-      if (tx.type === 'income') {
-        totalIncome += amount
-      } else if (tx.type === 'expense') {
-        totalExpenses += amount
-        const key = tx.category_name ?? t('reports.uncategorized')
-        const existing = categoryTotals.get(key)
-        categoryTotals.set(key, {
-          name: key,
-          color: existing?.color ?? tx.category_color ?? 'var(--accent)',
-          amount: (existing?.amount ?? 0) + amount,
+    : 0
+  const expenses = gross.complete
+    ? sumReportingAmounts(
+        gross.parents.filter((row) => row.type === 'expense').map((row) => row.convertedAmount ?? 0)
+      )
+    : 0
+  const topCategories = useMemo(() => {
+    if (!gross.complete) return []
+    const categories = new Map<string, { name: string; color: string; amount: number }>()
+    for (const parent of gross.parents.filter((row) => row.type === 'expense'))
+      for (const row of parent.allocations) {
+        const key = row.category_id ?? 'uncategorized'
+        const existing = categories.get(key)
+        categories.set(key, {
+          name: row.category_name ?? t('reports.uncategorized'),
+          color: row.category_color ?? 'var(--accent)',
+          amount: sumReportingAmounts([existing?.amount ?? 0, row.convertedAmount ?? 0]),
         })
       }
-    }
-
-    return {
-      monthTransactionCount: transactionCount,
-      income: totalIncome,
-      expenses: totalExpenses,
-      topCategories: [...categoryTotals.values()].sort((a, b) => b.amount - a.amount).slice(0, 5),
-      cashFlowComplete: incompleteCurrencies.size === 0,
-      cashFlowMissingCurrencies: [...incompleteCurrencies].sort(),
-    }
-  }, [transactions, preferredCurrency, rates, invalidRates, convertToPreferred, t])
+    return [...categories.values()].sort((a, b) => b.amount - a.amount).slice(0, 5)
+  }, [gross, t])
   const netFlow = income - expenses
   const totalBalanceResult = useMemo(() => {
     // The stable store action reads these values when invoked.
     void preferredCurrency
-    void rates
-    void invalidRates
+    void mainCurrency
+    void manualRates
     return getTotalBalanceInPreferred(accounts)
-  }, [accounts, preferredCurrency, rates, invalidRates, getTotalBalanceInPreferred])
+  }, [accounts, preferredCurrency, mainCurrency, manualRates, getTotalBalanceInPreferred])
   const invalidCurrencyDetails =
     !totalBalanceResult.complete && totalBalanceResult.reason === 'invalid_currency_data'
       ? [
@@ -144,27 +137,25 @@ export function ReportsPage() {
             const value = diagnostic.value || t('reports.blankCurrency')
             return `${owner} (${value})`
           }),
-          ...(totalBalanceResult.invalidRates ?? []).map((diagnostic) =>
-            t('reports.invalidRate', {
-              from: diagnostic.fromCurrency || t('reports.blankCurrency'),
-              to: diagnostic.toCurrency || t('reports.blankCurrency'),
-              rate: diagnostic.rate || t('reports.blankCurrency'),
-            })
-          ),
         ].join(', ')
       : ''
   const {
     budgets: displayBudgets,
-    complete: budgetsComplete,
+    complete: storedBudgetsComplete,
     error: budgetsDisplayError,
   } = useBudgetDisplay(budgets)
+  const budgetsComplete =
+    Boolean(mainCurrency) &&
+    storedBudgetsComplete &&
+    displayBudgets.every((budget) => budget.currency === mainCurrency)
   const totalBudgeted = displayBudgets.reduce((total, budget) => total + budget.amount, 0)
   const totalSpentAgainstBudgets = displayBudgets.reduce((total, budget) => total + budget.spent, 0)
   const budgetUsage =
     budgetsComplete && totalBudgeted > 0
       ? Math.round((totalSpentAgainstBudgets / totalBudgeted) * 100)
       : 0
-  const isLoading = accountsLoading || budgetsLoading || transactionsLoading
+  const isLoading =
+    accountsLoading || budgetsLoading || transactionsLoading || (grossRows === null && !grossError)
   const periodLabel = dayjs().format('MMMM YYYY')
   const netPeriodValid = isValidNetConsumptionPeriod(netStart, netEnd)
 
@@ -198,6 +189,30 @@ export function ReportsPage() {
         </>
       ) : (
         <>
+          {!cashFlowComplete && !isLoading && (
+            <div role="alert" className="text-warning text-sm">
+              {!mainCurrency && <p>{t('reportingFx.unconfigured')}</p>}
+              {grossError && <p>{grossError}</p>}
+              {gross.currency && (
+                <p>
+                  {t('reportingFx.known', {
+                    amount:
+                      gross.knownTotalCentavos === null
+                        ? '—'
+                        : formatMoney(gross.knownTotalCentavos, gross.currency),
+                  })}
+                </p>
+              )}
+              <p>
+                {t('reportingFx.native', {
+                  amounts:
+                    gross.nativeTotals
+                      .map((row) => formatMoney(row.amountCentavos, row.currency))
+                      .join(' · ') || '—',
+                })}
+              </p>
+            </div>
+          )}
           <MetricStrip aria-label={t('reports.title')}>
             <MetricItem
               label={t('reports.income')}

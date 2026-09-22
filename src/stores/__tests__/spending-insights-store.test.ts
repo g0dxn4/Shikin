@@ -14,6 +14,8 @@ const mockQuery = vi.mocked(query)
 
 function row(overrides: Record<string, unknown> = {}) {
   return {
+    id: 'tx',
+    date: dayjs().format('YYYY-MM-DD'),
     category_id: 'cat-food',
     category_name: 'Food',
     category_color: '#f97316',
@@ -23,7 +25,7 @@ function row(overrides: Record<string, unknown> = {}) {
     reporting_treatment: 'normal',
     transaction_kind: 'standard',
     is_archived: 0,
-    total: 10000,
+    amount: 10000,
     ...overrides,
   }
 }
@@ -31,7 +33,7 @@ function row(overrides: Record<string, unknown> = {}) {
 function resetStore() {
   useSpendingInsightsStore.setState({
     momComparisons: [],
-    momCurrentTotal: 0,
+    momCurrentTotal: null,
     momPreviousTotal: 0,
     yoyComparisons: [],
     yoyCurrentTotal: 0,
@@ -52,15 +54,26 @@ describe('spending-insights-store', () => {
     resetStore()
     useCurrencyStore.setState({
       preferredCurrency: 'USD',
-      rates: { 'EUR:USD': 2 },
-      invalidRates: [],
+      mainCurrency: 'USD',
+      manualRates: [
+        {
+          id: 'EURUSD22000-01-01',
+          fromCurrency: 'EUR',
+          toCurrency: 'USD',
+          rateDecimal: '2',
+          effectiveFrom: '2000-01-01',
+          supersedesRateId: null,
+          createdAt: '2000-01-01',
+          sourceNote: null,
+        },
+      ],
     })
   })
 
   it('converts mixed available currencies before merging category totals', async () => {
     mockQuery.mockResolvedValue([
-      row({ total: 10000, currency: 'USD' }),
-      row({ total: 10000, currency: 'EUR' }),
+      row({ amount: 10000, currency: 'USD' }),
+      row({ amount: 10000, currency: 'EUR' }),
     ])
 
     await useSpendingInsightsStore.getState().loadComparisons()
@@ -74,14 +87,14 @@ describe('spending-insights-store', () => {
       categoryColor: '#f97316',
       current: 30000,
     })
-    expect(mockQuery.mock.calls[0]?.[0]).toMatch(/GROUP BY t\.category_id/)
-    expect(mockQuery.mock.calls[0]?.[0]).toMatch(/t\.currency/)
+    expect(mockQuery.mock.calls[0]?.[0]).not.toMatch(/SUM\(/)
+    expect(mockQuery.mock.calls[0]?.[0]).toMatch(/SELECT t\.\*/)
   })
 
   it('withholds comparisons when a required rate is missing', async () => {
     mockQuery.mockResolvedValue([
-      row({ total: 10000, currency: 'USD' }),
-      row({ total: 8000, currency: 'JPY' }),
+      row({ amount: 10000, currency: 'USD' }),
+      row({ amount: 8000, currency: 'JPY' }),
     ])
 
     await useSpendingInsightsStore.getState().loadComparisons()
@@ -92,11 +105,11 @@ describe('spending-insights-store', () => {
     expect(state.missingCurrencies).toEqual(['JPY'])
     expect(state.momComparisons).toEqual([])
     expect(state.insights).toEqual([])
-    expect(state.momCurrentTotal).toBe(0)
+    expect(state.momCurrentTotal).toBeNull()
   })
 
   it('withholds comparisons for malformed split allocations', async () => {
-    mockQuery.mockResolvedValue([row({ invalid_allocations: 1 })])
+    mockQuery.mockResolvedValue([row({ splits_json: JSON.stringify([{ id: 'bad', amount: 1 }]) })])
     await useSpendingInsightsStore.getState().loadComparisons()
     expect(useSpendingInsightsStore.getState()).toMatchObject({
       complete: false,
@@ -107,7 +120,7 @@ describe('spending-insights-store', () => {
   })
 
   it('withholds comparisons for invalid currency data', async () => {
-    mockQuery.mockResolvedValue([row({ total: 5000, currency: 'US D' })])
+    mockQuery.mockResolvedValue([row({ amount: 5000, currency: 'US D' })])
 
     await useSpendingInsightsStore.getState().loadComparisons()
 
@@ -120,16 +133,16 @@ describe('spending-insights-store', () => {
 
   it('includes legacy blank posting status and excludes ineligible rows', async () => {
     mockQuery.mockResolvedValue([
-      row({ status: null, total: 20000 }),
-      row({ status: ' ', total: 10000 }),
-      row({ status: '', total: 5000 }),
-      row({ ledger_treatment: 'staged_no_balance_impact', total: 999999 }),
-      row({ status: 'pending', total: 901000 }),
-      row({ type: 'transfer', total: 902000 }),
-      row({ reporting_treatment: 'exclude_from_cashflow', total: 903000 }),
-      row({ transaction_kind: 'reconciliation_bridge', total: 904000 }),
-      row({ is_archived: 1, total: 905000 }),
-      row({ type: 'income', total: 906000 }),
+      row({ status: null, amount: 20000 }),
+      row({ status: ' ', amount: 10000 }),
+      row({ status: '', amount: 5000 }),
+      row({ ledger_treatment: 'staged_no_balance_impact', amount: 999999 }),
+      row({ status: 'pending', amount: 901000 }),
+      row({ type: 'transfer', amount: 902000 }),
+      row({ reporting_treatment: 'exclude_from_cashflow', amount: 903000 }),
+      row({ transaction_kind: 'reconciliation_bridge', amount: 904000 }),
+      row({ is_archived: 1, amount: 905000 }),
+      row({ type: 'income', amount: 906000 }),
     ])
 
     await useSpendingInsightsStore.getState().loadComparisons()
@@ -149,7 +162,7 @@ describe('spending-insights-store', () => {
     expect(state.reason).toBe('read_error')
     expect(state.error).toContain('Read failed')
     expect(state.momComparisons).toEqual([])
-    expect(state.momCurrentTotal).toBe(0)
+    expect(state.momCurrentTotal).toBeNull()
   })
 
   it('rejects stale responses after a newer load starts', async () => {
@@ -163,7 +176,7 @@ describe('spending-insights-store', () => {
       if (myWave === 0) await firstWave
       return [
         row({
-          total: myWave === 0 ? 999000 : 4000,
+          amount: myWave === 0 ? 999000 : 4000,
           currency: 'USD',
         }),
       ]
@@ -185,13 +198,24 @@ describe('spending-insights-store', () => {
   it('formats new-category insight amounts in the resolved display currency', async () => {
     useCurrencyStore.setState({
       preferredCurrency: 'EUR',
-      rates: { 'USD:EUR': 0.5 },
-      invalidRates: [],
+      mainCurrency: 'EUR',
+      manualRates: [
+        {
+          id: 'USDEUR0.52000-01-01',
+          fromCurrency: 'USD',
+          toCurrency: 'EUR',
+          rateDecimal: '0.5',
+          effectiveFrom: '2000-01-01',
+          supersedesRateId: null,
+          createdAt: '2000-01-01',
+          sourceNote: null,
+        },
+      ],
     })
     mockQuery.mockImplementation(async (_sql, params) => {
       const start = String(params?.[0] ?? '')
       if (start === dayjs().startOf('month').format('YYYY-MM-DD')) {
-        return [row({ total: 5000, currency: 'USD' })]
+        return [row({ amount: 5000, currency: 'USD' })]
       }
       return []
     })
@@ -203,3 +227,27 @@ describe('spending-insights-store', () => {
     expect(state.insights[0]?.message).toContain('€25.00')
   })
 })
+
+it.each([false, true])(
+  'does not publish a stale currency result without requiring a newer request (empty=%s)',
+  async (empty) => {
+    useCurrencyStore.setState({ mainCurrency: 'USD', manualRates: [] })
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mockQuery.mockImplementation(async () => {
+      await pending
+      return empty ? [] : [row()]
+    })
+    const request = useSpendingInsightsStore.getState().loadComparisons()
+    useCurrencyStore.setState({ mainCurrency: 'MXN', manualRates: [] })
+    release()
+    await request
+    expect(useSpendingInsightsStore.getState()).toMatchObject({
+      complete: false,
+      momComparisons: [],
+      isLoading: false,
+    })
+  }
+)

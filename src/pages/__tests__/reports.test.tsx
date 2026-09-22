@@ -1,18 +1,22 @@
+import type { DatedExchangeRate } from '@shikin/finance-core/fx'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import dayjs from 'dayjs'
 import { ReportsPage } from '../reports'
 import type { FrontendNetConsumptionReport } from '@/lib/consumption-service'
 
-function renderReports() {
-  return render(
+async function renderReports() {
+  const result = render(
     <MemoryRouter>
       <ReportsPage />
     </MemoryRouter>
   )
+  await act(async () => {})
+  return result
 }
+vi.mock('@/lib/database', () => ({ query: async () => mockTransactions }))
 
 const mockFetchAccounts = vi.fn().mockResolvedValue(undefined)
 const mockFetchBudgets = vi.fn().mockResolvedValue(undefined)
@@ -39,24 +43,19 @@ let mockArchivedAccounts: Array<Record<string, unknown>> = []
 let mockBudgets: Array<Record<string, unknown>> = []
 let mockTransactions: Array<Record<string, unknown>> = []
 let mockPreferredCurrency = 'USD'
-let mockRates: Record<string, number> = {}
-let mockInvalidRates: Array<{ fromCurrency: string; toCurrency: string; rate: string }> = []
-let mockConvertToPreferred: (
-  amountCentavos: number,
-  currency: string
-) =>
-  | {
-      complete: true
-      preferredCurrency: string
-      amountCentavos: number
-      missingCurrencies: readonly []
-    }
-  | {
-      complete: false
-      preferredCurrency: string
-      missingCurrencies: string[]
-      reason: 'missing_exchange_rates' | 'invalid_currency_data'
-    }
+let mockManualRates: DatedExchangeRate[] = []
+function rate(fromCurrency: string, toCurrency: string, rateDecimal: string) {
+  return {
+    id: fromCurrency + toCurrency,
+    fromCurrency,
+    toCurrency,
+    rateDecimal,
+    effectiveFrom: '2000-01-01',
+    supersedesRateId: null,
+    sourceNote: null,
+    createdAt: '2000-01-01',
+  }
+}
 let mockTotalBalanceResult:
   | {
       complete: true
@@ -132,8 +131,6 @@ vi.mock('@/stores/transaction-store', () => ({
   }),
 }))
 
-const stableConvertToPreferred = (amountCentavos: number, currency: string) =>
-  mockConvertToPreferred(amountCentavos, currency)
 const stableGetTotalBalanceInPreferred = (accounts: Array<{ balance: number }>) =>
   mockTotalBalanceResult ?? {
     complete: true as const,
@@ -145,9 +142,8 @@ const stableGetTotalBalanceInPreferred = (accounts: Array<{ balance: number }>) 
 vi.mock('@/stores/currency-store', () => ({
   useCurrencyStore: () => ({
     preferredCurrency: mockPreferredCurrency,
-    rates: mockRates,
-    invalidRates: mockInvalidRates,
-    convertToPreferred: stableConvertToPreferred,
+    mainCurrency: mockPreferredCurrency,
+    manualRates: mockManualRates,
     getTotalBalanceInPreferred: stableGetTotalBalanceInPreferred,
     loadRates: mockLoadRates,
   }),
@@ -163,6 +159,8 @@ function transaction(
     id,
     type,
     amount,
+    currency: 'USD',
+    category_id: type === 'expense' ? String(overrides.category_name ?? 'Food') : null,
     date: dayjs().format('YYYY-MM-DD'),
     status: 'posted',
     reporting_treatment: 'normal',
@@ -174,7 +172,7 @@ function transaction(
   }
 }
 
-describe('ReportsPage', () => {
+describe('ReportsPage', async () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockAccounts = [
@@ -194,16 +192,9 @@ describe('ReportsPage', () => {
     ]
     mockTotalBalanceResult = null
     mockPreferredCurrency = 'USD'
-    mockRates = {}
-    mockInvalidRates = []
+    mockManualRates = []
     mockBudgetDisplayComplete = true
     mockBudgetDisplayError = null
-    mockConvertToPreferred = (amountCentavos) => ({
-      complete: true,
-      preferredCurrency: 'USD',
-      amountCentavos,
-      missingCurrencies: [],
-    })
     mockReadNetConsumptionReport.mockResolvedValue({
       basis: 'net_consumption',
       complete: false,
@@ -231,8 +222,8 @@ describe('ReportsPage', () => {
     })
   })
 
-  it('renders a usable monthly report and its complete cash total', () => {
-    renderReports()
+  it('renders a usable monthly report and its complete cash total', async () => {
+    await renderReports()
 
     expect(screen.getByText('reports.title')).toBeInTheDocument()
     expect(screen.getByText('reports.categoryBreakdown')).toBeInTheDocument()
@@ -244,7 +235,7 @@ describe('ReportsPage', () => {
 
   it('keeps gross cash flow as default and loads page-owned native-currency net consumption on demand', async () => {
     const user = userEvent.setup()
-    renderReports()
+    await renderReports()
 
     expect(screen.getByRole('button', { name: 'basis.gross' })).toHaveAttribute(
       'aria-pressed',
@@ -274,7 +265,7 @@ describe('ReportsPage', () => {
   it('surfaces net-basis read failures without replacing the gross report', async () => {
     mockReadNetConsumptionReport.mockRejectedValueOnce(new Error('Synthetic read failure'))
     const user = userEvent.setup()
-    renderReports()
+    await renderReports()
 
     await user.click(screen.getByRole('button', { name: 'basis.net' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -290,7 +281,7 @@ describe('ReportsPage', () => {
       () => new Promise((resolve) => (resolveNet = resolve))
     )
     const user = userEvent.setup()
-    renderReports()
+    await renderReports()
 
     await user.click(screen.getByRole('button', { name: 'basis.net' }))
     await user.click(screen.getByRole('button', { name: 'basis.gross' }))
@@ -312,68 +303,30 @@ describe('ReportsPage', () => {
     expect(screen.queryByText('report.title')).not.toBeInTheDocument()
   })
 
-  it('converts mixed-currency cash flow before aggregating it', () => {
+  it('converts mixed-currency cash flow before aggregating it', async () => {
     mockTransactions = [
       transaction('tx-usd', 'expense', 10_000, { currency: 'USD' }),
       transaction('tx-eur', 'expense', 10_000, { currency: 'EUR' }),
     ]
-    mockConvertToPreferred = (amountCentavos, currency) => ({
-      complete: true,
-      preferredCurrency: 'USD',
-      amountCentavos: currency === 'EUR' ? amountCentavos * 2 : amountCentavos,
-      missingCurrencies: [],
-    })
+    mockManualRates = [rate('EUR', 'USD', '2')]
 
-    renderReports()
+    await renderReports()
 
     expect(screen.getAllByText('$300.00').length).toBeGreaterThan(0)
   })
 
-  it('recomputes stable converter results after deferred rates, currency switches, and invalid-rate updates', () => {
+  it('recomputes stable converter results after deferred rates, currency switches, and invalid-rate updates', async () => {
     mockTransactions = [transaction('tx-eur', 'expense', 10_000, { currency: 'EUR' })]
-    mockConvertToPreferred = (amountCentavos, currency) => {
-      if (mockInvalidRates.length > 0) {
-        return {
-          complete: false,
-          preferredCurrency: mockPreferredCurrency,
-          missingCurrencies: [],
-          reason: 'invalid_currency_data',
-        }
-      }
-      if (currency === mockPreferredCurrency) {
-        return {
-          complete: true,
-          preferredCurrency: mockPreferredCurrency,
-          amountCentavos,
-          missingCurrencies: [],
-        }
-      }
-      const rate = mockRates[`${currency}:${mockPreferredCurrency}`]
-      return rate
-        ? {
-            complete: true,
-            preferredCurrency: mockPreferredCurrency,
-            amountCentavos: Math.round(amountCentavos * rate),
-            missingCurrencies: [] as const,
-          }
-        : {
-            complete: false,
-            preferredCurrency: mockPreferredCurrency,
-            missingCurrencies: [currency],
-            reason: 'missing_exchange_rates',
-          }
-    }
-
     mockTotalBalanceResult = {
       complete: false,
       preferredCurrency: 'USD',
       missingCurrencies: ['EUR'],
       reason: 'missing_exchange_rates',
     }
-    const { rerender } = renderReports()
+    const { rerender } = await renderReports()
     expect(screen.getAllByText('reports.cashUnavailable: EUR').length).toBeGreaterThan(0)
 
-    mockRates = { 'EUR:USD': 2 }
+    mockManualRates = [rate('EUR', 'USD', '2')]
     mockTotalBalanceResult = {
       complete: true,
       preferredCurrency: 'USD',
@@ -389,7 +342,7 @@ describe('ReportsPage', () => {
     expect(screen.getByText('$500.00')).toBeInTheDocument()
 
     mockPreferredCurrency = 'EUR'
-    mockRates = {}
+    mockManualRates = []
     mockTotalBalanceResult = {
       complete: true,
       preferredCurrency: 'EUR',
@@ -405,13 +358,12 @@ describe('ReportsPage', () => {
     expect(screen.getAllByText('€250.00').length).toBeGreaterThan(0)
     expect(screen.queryByText('€200.00')).not.toBeInTheDocument()
 
-    mockInvalidRates = [{ fromCurrency: 'USD', toCurrency: 'EUR', rate: '0' }]
+    mockManualRates = [rate('USD', 'EUR', '0')]
     mockTotalBalanceResult = {
       complete: false,
       preferredCurrency: 'EUR',
       missingCurrencies: [],
       reason: 'invalid_currency_data',
-      invalidRates: mockInvalidRates,
     }
     rerender(
       <MemoryRouter>
@@ -423,7 +375,7 @@ describe('ReportsPage', () => {
     expect(screen.queryByText('€100.00')).not.toBeInTheDocument()
   })
 
-  it('uses migration-019 eligibility for income, expense, count, net flow, and categories', () => {
+  it('uses migration-019 eligibility for income, expense, count, net flow, and categories', async () => {
     mockTransactions = [
       transaction('posted-income', 'income', 100_000),
       transaction('cleared-income', 'income', 50_000, { status: 'cleared' }),
@@ -455,7 +407,7 @@ describe('ReportsPage', () => {
       transaction('malformed-archive', 'expense', 910_000, { is_archived: 'yes' }),
     ]
 
-    renderReports()
+    await renderReports()
 
     expect(screen.getByText('$1,500.00')).toBeInTheDocument()
     expect(screen.getByText('$1,200.00')).toBeInTheDocument()
@@ -465,7 +417,7 @@ describe('ReportsPage', () => {
     expect(screen.getByText('4')).toBeInTheDocument()
   })
 
-  it('shows accessible invalid-currency account diagnostics without crashing', () => {
+  it('shows accessible invalid-currency account diagnostics without crashing', async () => {
     mockTotalBalanceResult = {
       complete: false,
       preferredCurrency: 'USD',
@@ -474,7 +426,7 @@ describe('ReportsPage', () => {
       invalidCurrencies: [{ accountId: 'account-1', accountName: 'Broken cash', value: 'US D' }],
     }
 
-    renderReports()
+    await renderReports()
 
     expect(screen.getByRole('alert')).toHaveTextContent(
       'reports.cashInvalidData: Broken cash (US D)'
@@ -482,7 +434,7 @@ describe('ReportsPage', () => {
     expect(screen.queryByText('$2,500.00')).not.toBeInTheDocument()
   })
 
-  it('shows an accessible missing-rate warning without a false cash scalar', () => {
+  it('shows an accessible missing-rate warning without a false cash scalar', async () => {
     mockAccounts = [
       { id: 'account-usd', balance: 100_000, currency: 'USD', is_archived: 0 },
       { id: 'account-eur', balance: 200_000, currency: 'EUR', is_archived: 0 },
@@ -494,27 +446,27 @@ describe('ReportsPage', () => {
       reason: 'missing_exchange_rates',
     }
 
-    renderReports()
+    await renderReports()
 
     expect(screen.getByRole('alert')).toHaveTextContent('reports.cashUnavailable: EUR')
     expect(screen.queryByText('$3,000.00')).not.toBeInTheDocument()
   })
 
-  it('withholds budget health when converted budget totals are incomplete', () => {
+  it('withholds budget health when converted budget totals are incomplete', async () => {
     mockBudgetDisplayComplete = false
 
-    renderReports()
+    await renderReports()
 
     expect(screen.getByRole('alert')).toHaveTextContent('reports.budgetUnavailable')
     expect(screen.queryByText('25%')).not.toBeInTheDocument()
     expect(screen.queryByText('$1,000.00')).not.toBeInTheDocument()
   })
 
-  it('shows a budget-health read error instead of stored raw sums', () => {
+  it('shows a budget-health read error instead of stored raw sums', async () => {
     mockBudgetDisplayComplete = false
     mockBudgetDisplayError = 'Read failed'
 
-    renderReports()
+    await renderReports()
 
     expect(screen.getByRole('alert')).toHaveTextContent('reports.budgetReadError: Read failed')
     expect(screen.queryByText('25%')).not.toBeInTheDocument()
@@ -546,7 +498,7 @@ describe('ReportsPage', () => {
       message: 'Complete',
     }))
     const user = userEvent.setup()
-    renderReports()
+    await renderReports()
 
     await user.click(screen.getByRole('button', { name: 'basis.net' }))
     await user.click(screen.getByRole('button', { name: 'period.previousMonth' }))
@@ -571,7 +523,7 @@ describe('ReportsPage', () => {
 
   it('rejects an inverted net period before querying', async () => {
     const user = userEvent.setup()
-    renderReports()
+    await renderReports()
 
     await user.click(screen.getByRole('button', { name: 'basis.net' }))
     await screen.findByLabelText('period.start')
@@ -594,7 +546,7 @@ describe('ReportsPage', () => {
     )
     mockReadNetConsumptionReport.mockRejectedValueOnce(new Error('Range read failure'))
     const user = userEvent.setup()
-    renderReports()
+    await renderReports()
 
     await user.click(screen.getByRole('button', { name: 'basis.net' }))
     await user.click(screen.getByRole('button', { name: 'period.previousMonth' }))

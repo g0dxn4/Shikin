@@ -36,14 +36,16 @@ export function SpendingInsights() {
     yoyPreviousTotal,
     insights,
     isLoading,
-    complete,
+    complete: storedComplete,
+    authority,
+    evidence,
     currency,
     missingCurrencies,
     reason,
     error,
     loadComparisons,
   } = useSpendingInsightsStore()
-  const { preferredCurrency, rates, invalidRates, loadRates } = useCurrencyStore()
+  const { preferredCurrency, mainCurrency, manualRates, loadRates } = useCurrencyStore()
 
   useEffect(() => {
     void loadRates().catch(() => {})
@@ -51,7 +53,12 @@ export function SpendingInsights() {
 
   useEffect(() => {
     void loadComparisons()
-  }, [loadComparisons, preferredCurrency, rates, invalidRates])
+  }, [loadComparisons, preferredCurrency, mainCurrency, manualRates])
+
+  const complete =
+    storedComplete &&
+    authority?.mainCurrency === mainCurrency &&
+    authority?.manualRates === manualRates
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'insights', label: t('spendingInsights.tabs.insights'), icon: <Lightbulb size={14} /> },
@@ -109,11 +116,31 @@ export function SpendingInsights() {
           className="border-warning/30 bg-warning/10 text-warning rounded-xl border px-4 py-3 text-sm"
           role="alert"
         >
-          {reason === 'invalid_currency_data'
-            ? t('spendingInsights.invalidData', { details: missingCurrencies.join(', ') })
-            : t('spendingInsights.incompleteTotals', {
-                currencies: missingCurrencies.join(', '),
+          {!mainCurrency
+            ? t('reportingFx.unconfigured')
+            : reason === 'invalid_currency_data'
+              ? t('spendingInsights.invalidData', { details: missingCurrencies.join(', ') })
+              : t('spendingInsights.incompleteTotals', {
+                  currencies: missingCurrencies.join(', '),
+                })}
+          {evidence[0]?.currency && (
+            <p>
+              {t('reportingFx.known', {
+                amount:
+                  evidence[0].knownTotalCentavos === null
+                    ? '—'
+                    : formatMoney(evidence[0].knownTotalCentavos, evidence[0].currency),
               })}
+            </p>
+          )}
+          <p>
+            {t('reportingFx.native', {
+              amounts:
+                evidence[0]?.nativeTotals
+                  .map((row) => formatMoney(row.amountCentavos, row.currency))
+                  .join(' · ') || '—',
+            })}
+          </p>
         </div>
       ) : (
         <div role="region" aria-label={tabs.find((item) => item.id === tab)?.label}>
@@ -121,8 +148,8 @@ export function SpendingInsights() {
           {tab === 'mom' && (
             <ComparisonTab
               comparisons={momComparisons}
-              currentTotal={momCurrentTotal}
-              previousTotal={momPreviousTotal}
+              currentTotal={momCurrentTotal ?? 0}
+              previousTotal={momPreviousTotal ?? 0}
               currentLabel={dayjs().format('MMMM YYYY')}
               previousLabel={dayjs().subtract(1, 'month').format('MMMM YYYY')}
               currency={currency}
@@ -131,8 +158,8 @@ export function SpendingInsights() {
           {tab === 'yoy' && (
             <ComparisonTab
               comparisons={yoyComparisons}
-              currentTotal={yoyCurrentTotal}
-              previousTotal={yoyPreviousTotal}
+              currentTotal={yoyCurrentTotal ?? 0}
+              previousTotal={yoyPreviousTotal ?? 0}
               currentLabel={dayjs().format('MMMM YYYY')}
               previousLabel={dayjs().subtract(1, 'year').format('MMMM YYYY')}
               currency={currency}

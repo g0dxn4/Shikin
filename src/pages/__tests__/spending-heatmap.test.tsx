@@ -57,8 +57,8 @@ describe('SpendingHeatmap page', () => {
     vi.clearAllMocks()
     useCurrencyStore.setState({
       preferredCurrency: 'USD',
-      rates: {},
-      invalidRates: [],
+      mainCurrency: 'USD',
+      manualRates: [],
       loadRates: mockLoadRates,
     })
     mockFetchRows.mockResolvedValue([row()])
@@ -103,15 +103,43 @@ describe('SpendingHeatmap page', () => {
       expect(screen.getByRole('alert')).toHaveTextContent('spendingHeatmap.incompleteTotals: EUR')
     })
 
-    act(() => useCurrencyStore.setState({ rates: { 'EUR:USD': 2 } }))
+    act(() =>
+      useCurrencyStore.setState({
+        manualRates: [
+          {
+            id: 'EURUSD22000-01-01',
+            fromCurrency: 'EUR',
+            toCurrency: 'USD',
+            rateDecimal: '2',
+            effectiveFrom: '2000-01-01',
+            supersedesRateId: null,
+            createdAt: '2000-01-01',
+            sourceNote: null,
+          },
+        ],
+      })
+    )
     await waitFor(() => expect(screen.getAllByText('$50.00').length).toBeGreaterThan(0))
 
-    act(() => useCurrencyStore.setState({ preferredCurrency: 'EUR', rates: {} }))
+    act(() =>
+      useCurrencyStore.setState({ preferredCurrency: 'EUR', mainCurrency: 'EUR', manualRates: [] })
+    )
     await waitFor(() => expect(screen.getAllByText('€25.00').length).toBeGreaterThan(0))
 
     act(() =>
       useCurrencyStore.setState({
-        invalidRates: [{ fromCurrency: 'USD', toCurrency: 'EUR', rate: '0' }],
+        manualRates: [
+          {
+            id: 'USDEUR02000-01-01',
+            fromCurrency: 'USD',
+            toCurrency: 'EUR',
+            rateDecimal: '0',
+            effectiveFrom: '2000-01-01',
+            supersedesRateId: null,
+            createdAt: '2000-01-01',
+            sourceNote: null,
+          },
+        ],
       })
     )
     await waitFor(() => {
@@ -237,4 +265,14 @@ describe('SpendingHeatmap page', () => {
     expect(screen.queryByText('$25.00')).not.toBeInTheDocument()
     expect(screen.queryByText('$105.00')).not.toBeInTheDocument()
   })
+})
+
+it('requires main authority even for an empty first heatmap read', async () => {
+  useCurrencyStore.setState({ mainCurrency: null, manualRates: [], loadRates: mockLoadRates })
+  mockFetchRows.mockResolvedValue([])
+  render(<SpendingHeatmap />)
+  await waitFor(() =>
+    expect(screen.getByRole('alert')).toHaveTextContent('reportingFx.unconfigured')
+  )
+  expect(screen.queryByText('$0.00')).not.toBeInTheDocument()
 })

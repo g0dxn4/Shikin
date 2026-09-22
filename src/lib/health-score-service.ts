@@ -1,10 +1,13 @@
-import { isCashFlowEligible } from '@shikin/finance-core'
 import { query } from '@/lib/database'
 import { formatMoney } from '@/lib/money'
-import { assertReportingReadComplete, CATEGORY_ALLOCATION_CTE } from '@/lib/reporting-read'
+import {
+  captureReportingContext,
+  assertReportingContextCurrent,
+  convertReportingAmount,
+  readGrossProjection,
+} from '@/lib/dated-reporting-read'
+import { readBudgetSpending } from '@/lib/budget-dated-read'
 import { load } from '@/lib/storage'
-import { useCurrencyStore } from '@/stores/currency-store'
-import type { LedgerTreatment, ReportingTreatment, TransactionKind } from '@/types/database'
 import dayjs from 'dayjs'
 
 export interface SubScore {
@@ -27,22 +30,13 @@ export interface HealthScore {
   calculatedAt: string
 }
 
-type ReportingRow = {
-  type: string
-  status: string | null
-  ledger_treatment: LedgerTreatment | null
-  reporting_treatment: ReportingTreatment | null
-  transaction_kind: TransactionKind | null
-  is_archived: number | null
+type BudgetRow = {
   currency: string
-  date: string
-  category_id: string | null
+  id: string
   amount: number
-  invalid_allocations: number
-  invalid_reporting_data: number
+  category_id: string | null
+  period: string
 }
-
-type BudgetRow = { id: string; amount: number; category_id: string | null; period: string }
 type AccountRow = { type: string; balance: number; currency: string }
 
 function scoreToGrade(score: number): Grade {
@@ -193,56 +187,45 @@ function spendingConsistencyScore(monthlyTotals: number[]): SubScore {
 }
 
 export async function calculateHealthScore(): Promise<HealthScore> {
-  const today = dayjs()
+  const context = captureReportingContext()
+  const today = dayjs(context.today)
   const sixMonthsAgo = today.subtract(5, 'month').startOf('month')
   const readStart = [sixMonthsAgo, today.startOf('year')]
     .map((date) => date.format('YYYY-MM-DD'))
     .sort()[0]
   const readEnd = today.format('YYYY-MM-DD')
-  await assertReportingReadComplete(readStart, readEnd)
-
-  const [rows, budgets, accounts] = await Promise.all([
-    query<ReportingRow>(
-      `${CATEGORY_ALLOCATION_CTE}
-       SELECT type, status, ledger_treatment, reporting_treatment, transaction_kind, is_archived,
-              currency, date, category_id, amount, invalid_allocations, invalid_reporting_data
-       FROM reporting_allocations WHERE date >= ? AND date <= ?`,
-      [readStart, readEnd]
+  const [projection, budgets, accounts] = await Promise.all([
+    readGrossProjection(readStart, readEnd, context),
+    query<BudgetRow>(
+      'SELECT id, amount, currency, category_id, period FROM budgets WHERE is_active = 1'
     ),
-    query<BudgetRow>('SELECT id, amount, category_id, period FROM budgets WHERE is_active = 1'),
     query<AccountRow>(
       "SELECT type, balance, currency FROM accounts WHERE is_archived = 0 AND type IN ('credit_card', 'savings')"
     ),
   ])
 
-  const { convertToPreferred, preferredCurrency } = useCurrencyStore.getState()
+  if (!projection.complete || !context.mainCurrency)
+    throw new Error(
+      'Financial health is unavailable until reporting evidence and dated rates are complete.'
+    )
+  const preferredCurrency = context.mainCurrency
   const convert = (amount: number, currency: string) => {
     if (!Number.isSafeInteger(amount))
       throw new Error('Financial health is unavailable because a centavo total is unsafe.')
-    const result = convertToPreferred(amount, currency)
-    if (!result.complete)
+    const result = convertReportingAmount(context, amount, currency)
+    if (!result?.complete)
       throw new Error('Financial health is unavailable until all currencies can be converted.')
     return result.amountCentavos
   }
 
-  const eligible = rows.filter((row) =>
-    isCashFlowEligible({
-      type: row.type,
-      status: row.status,
-      ledgerTreatment: row.ledger_treatment,
-      reportingTreatment: row.reporting_treatment,
-      transactionKind: row.transaction_kind,
-      isArchived: row.is_archived,
-    })
+  const convertedRows = projection.parents.flatMap((parent) =>
+    parent.allocations.map((row) => ({
+      ...row,
+      type: parent.type,
+      date: parent.date,
+      converted: row.convertedAmount!,
+    }))
   )
-  if (eligible.some((row) => row.invalid_allocations || row.invalid_reporting_data)) {
-    throw new Error('Financial health is unavailable because reporting data requires repair.')
-  }
-
-  const convertedRows = eligible.map((row) => ({
-    ...row,
-    converted: convert(row.amount, row.currency),
-  }))
   const sumRows = (selected: typeof convertedRows) => {
     let total = 0
     for (const row of selected) {
@@ -283,8 +266,16 @@ export async function calculateHealthScore(): Promise<HealthScore> {
         : budget.period === 'yearly'
           ? today.startOf('year').format('YYYY-MM-DD')
           : monthStart
-    const planned = convert(budget.amount, 'USD')
-    budget.amount = planned
+    const spending = await readBudgetSpending({
+      categoryId: budget.category_id,
+      start,
+      end: readEnd,
+      currency: budget.currency,
+      rates: context.manualRates,
+    })
+    if (!spending.complete)
+      throw new Error('Financial health is unavailable until budget history can be converted.')
+    budget.amount = convert(budget.amount, budget.currency)
     budgetSpending.set(
       budget.id,
       sumRows(
@@ -328,6 +319,7 @@ export async function calculateHealthScore(): Promise<HealthScore> {
     .slice(0, 3)
   if (tips.length === 0) tips.push('Your finances are looking strong across the board')
 
+  assertReportingContextCurrent(context)
   return {
     overall,
     grade: scoreToGrade(overall),

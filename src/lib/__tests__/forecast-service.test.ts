@@ -1,3 +1,4 @@
+import dayjs from 'dayjs'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/database', () => ({
@@ -14,7 +15,7 @@ const mockQuery = vi.mocked(query)
 describe('forecast-service', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    useCurrencyStore.setState({ preferredCurrency: 'USD', rates: {}, invalidRates: [] })
+    useCurrencyStore.setState({ preferredCurrency: 'USD', mainCurrency: 'USD', manualRates: [] })
   })
 
   function setupMocks(
@@ -26,6 +27,8 @@ describe('forecast-service', () => {
       .mockResolvedValueOnce([{ balance, currency: 'USD' }]) // account balance
       .mockResolvedValueOnce(
         dailyAverages.map((row) => ({
+          id: row.type,
+          date: dayjs().format('YYYY-MM-DD'),
           type: row.type,
           amount: row.avg_daily * 90,
           currency: 'USD',
@@ -131,8 +134,19 @@ describe('currency and scope safety', () => {
     vi.clearAllMocks()
     useCurrencyStore.setState({
       preferredCurrency: 'USD',
-      rates: { 'EUR:USD': 2 },
-      invalidRates: [],
+      mainCurrency: 'USD',
+      manualRates: [
+        {
+          id: 'EURUSD22000-01-01',
+          fromCurrency: 'EUR',
+          toCurrency: 'USD',
+          rateDecimal: '2',
+          effectiveFrom: '2000-01-01',
+          supersedesRateId: null,
+          createdAt: '2000-01-01',
+          sourceNote: null,
+        },
+      ],
     })
   })
 
@@ -143,8 +157,20 @@ describe('currency and scope safety', () => {
         { balance: 20000, currency: 'EUR' },
       ])
       .mockResolvedValueOnce([
-        { type: 'income', amount: 90000, currency: 'EUR' },
-        { type: 'expense', amount: 45000, currency: 'USD' },
+        {
+          id: 'income',
+          date: dayjs().format('YYYY-MM-DD'),
+          type: 'income',
+          amount: 90000,
+          currency: 'EUR',
+        },
+        {
+          id: 'expense',
+          date: dayjs().format('YYYY-MM-DD'),
+          type: 'expense',
+          amount: 45000,
+          currency: 'USD',
+        },
       ])
       .mockResolvedValueOnce([{ amount: 30000, currency: 'EUR', billing_cycle: 'monthly' }])
     const result = await generateCashFlowForecast(1)
@@ -166,13 +192,19 @@ describe('currency and scope safety', () => {
   it.each(['accounts', 'history', 'subscriptions'])(
     'withholds the chart when %s has a missing rate',
     async (source) => {
-      useCurrencyStore.setState({ rates: {} })
+      useCurrencyStore.setState({ manualRates: [] })
       mockQuery
         .mockResolvedValueOnce([
           { balance: 10000, currency: source === 'accounts' ? 'EUR' : 'USD' },
         ])
         .mockResolvedValueOnce([
-          { type: 'income', amount: 90000, currency: source === 'history' ? 'EUR' : 'USD' },
+          {
+            id: 'income',
+            date: dayjs().format('YYYY-MM-DD'),
+            type: 'income',
+            amount: 90000,
+            currency: source === 'history' ? 'EUR' : 'USD',
+          },
         ])
         .mockResolvedValueOnce([
           {
@@ -187,7 +219,13 @@ describe('currency and scope safety', () => {
   )
 
   it('normalizes all legacy posted statuses and excludes transfers and nonreporting provenance before conversion', async () => {
-    const normal = { type: 'income', currency: 'USD', amount: 9000 }
+    const normal = {
+      id: 'normal',
+      date: dayjs().format('YYYY-MM-DD'),
+      type: 'income',
+      currency: 'USD',
+      amount: 9000,
+    }
     mockQuery
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
@@ -222,4 +260,26 @@ describe('currency and scope safety', () => {
     expect(calls[2][0]).toContain('AND s.account_id = ?')
     expect(calls[2][1]).toEqual(calls[0][1])
   })
+})
+
+describe('captured authority races', () => {
+  it.each([false, true])(
+    'rejects stale results, including an empty first fetch (%s)',
+    async (empty) => {
+      useCurrencyStore.setState({ mainCurrency: 'USD', manualRates: [] })
+      let resolve!: (rows: unknown[]) => void
+      mockQuery.mockReset()
+      mockQuery.mockImplementationOnce(
+        () =>
+          new Promise((r) => {
+            resolve = r
+          })
+      )
+      mockQuery.mockResolvedValue([])
+      const request = generateCashFlowForecast(30)
+      useCurrencyStore.setState({ mainCurrency: 'MXN', manualRates: [] })
+      resolve(empty ? [] : [{ balance: 10000, currency: 'USD' }])
+      await expect(request).rejects.toThrow('Currency authority changed')
+    }
+  )
 })

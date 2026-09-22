@@ -1,15 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { DatedExchangeRate } from '@shikin/finance-core/fx'
 import { SpendingInsights } from '../spending-insights'
 
 const mockLoadComparisons = vi.fn()
 
 const mockLoadRates = vi.fn().mockResolvedValue(undefined)
-const mockRates: Record<string, number> = {}
-const mockInvalidRates: Array<{ fromCurrency: string; toCurrency: string; rate: string }> = []
+const mockManualRates: DatedExchangeRate[] = []
 
 let mockState = {
+  evidence: [],
+  authority: { mainCurrency: 'USD', manualRates: mockManualRates, today: '2026-06-18' },
   momComparisons: [
     {
       categoryName: 'Food',
@@ -55,8 +57,8 @@ vi.mock('react-i18next', () => ({
 vi.mock('@/stores/currency-store', () => ({
   useCurrencyStore: () => ({
     preferredCurrency: 'USD',
-    rates: mockRates,
-    invalidRates: mockInvalidRates,
+    mainCurrency: 'USD',
+    manualRates: mockManualRates,
     loadRates: mockLoadRates,
   }),
 }))

@@ -1,8 +1,16 @@
 import { query } from '@/lib/database'
 import dayjs from 'dayjs'
-import { isCashFlowEligible } from '@shikin/finance-core'
-import { useCurrencyStore } from '@/stores/currency-store'
-import type { Account, Transaction } from '@/types/database'
+import { convertCentavosAsOf } from '@shikin/finance-core/fx'
+import {
+  captureReportingContext,
+  assertReportingContextCurrent,
+  convertReportingAmount,
+  readGrossProjection,
+  sumReportingAmounts,
+  type GrossProjection,
+  type ReportingContext,
+} from '@/lib/dated-reporting-read'
+import type { Account } from '@/types/database'
 
 /** A single point in the cash flow forecast */
 export interface ForecastPoint {
@@ -13,30 +21,31 @@ export interface ForecastPoint {
 }
 
 /** Full forecast result */
-export interface CashFlowForecast {
-  complete: boolean
+export type CashFlowForecast = {
   currency: string
   missingCurrencies: string[]
   points: ForecastPoint[]
-  currentBalance: number
-  dailyBurnRate: number
-  dailyIncome: number
-  minBalance: { date: string; amount: number }
   dangerDates: string[]
-}
-
-interface DailyAggregate extends Pick<
-  Transaction,
-  | 'type'
-  | 'status'
-  | 'ledger_treatment'
-  | 'reporting_treatment'
-  | 'transaction_kind'
-  | 'is_archived'
-  | 'currency'
-> {
-  amount: number
-}
+  authority: ReportingContext
+  estimateAsOf: string
+  evidence: GrossProjection
+  nativeBalances: Array<{ currency: string; amountCentavos: number }>
+} & (
+  | {
+      complete: true
+      currentBalance: number
+      dailyBurnRate: number
+      dailyIncome: number
+      minBalance: { date: string; amount: number }
+    }
+  | {
+      complete: false
+      currentBalance: null
+      dailyBurnRate: null
+      dailyIncome: null
+      minBalance: { date: string; amount: null }
+    }
+)
 
 interface SubscriptionRow {
   amount: number
@@ -63,67 +72,72 @@ export async function generateCashFlowForecast(
   dangerThreshold: number = 0,
   scope: ForecastScope = {}
 ): Promise<CashFlowForecast> {
+  const context = captureReportingContext()
   const params = scope.accountId ? [scope.accountId] : []
   const accounts = await query<Account>(
     `SELECT * FROM accounts WHERE is_archived = 0${scope.accountId ? ' AND id = ?' : ''}`,
     params
   )
 
-  const ninetyDaysAgo = dayjs().subtract(90, 'day').format('YYYY-MM-DD')
-  const today = dayjs().format('YYYY-MM-DD')
-  // Group only identical eligibility/currency dimensions, then use the canonical helper.
-  const dailyAverages = await query<DailyAggregate>(
-    `SELECT t.type, t.currency, t.status, t.ledger_treatment, t.reporting_treatment, t.transaction_kind, t.is_archived,
-            SUM(t.amount) AS amount
-     FROM transactions t JOIN accounts a ON a.id = t.account_id
-     WHERE t.date >= ? AND t.date <= ? AND a.is_archived = 0
-       ${scope.accountId ? 'AND t.account_id = ?' : ''}
-     GROUP BY t.type, t.currency, t.status, t.ledger_treatment, t.reporting_treatment, t.transaction_kind, t.is_archived`,
-    [ninetyDaysAgo, today, ...params]
-  )
+  const ninetyDaysAgo = dayjs(context.today).subtract(90, 'day').format('YYYY-MM-DD')
+  const today = context.today
+  const history = await readGrossProjection(ninetyDaysAgo, today, context, {
+    accountId: scope.accountId,
+    activeAccountsOnly: true,
+  })
   // 3. Factor in subscriptions as additional known expenses
   const subscriptions = await query<SubscriptionRow>(
     `SELECT s.amount, s.currency, s.billing_cycle FROM subscriptions s LEFT JOIN accounts a ON a.id = s.account_id WHERE s.is_active = 1 AND (s.account_id IS NULL OR a.is_archived = 0)${scope.accountId ? ' AND s.account_id = ?' : ''}`,
     params
   )
 
-  // Snapshot conversion preferences for this read; never mix currencies or publish partial totals.
-  const { convertToPreferred, preferredCurrency } = useCurrencyStore.getState()
-  const missingCurrencies = new Set<string>()
-  let complete = true
+  const missingCurrencies = new Set(history.missingCurrencies)
+  let complete = history.complete
   const convert = (amount: number, currency: string) => {
-    const result = convertToPreferred(amount, currency)
-    if (result.complete) return result.amountCentavos
+    try {
+      const result = convertReportingAmount(context, amount, currency)
+      if (result?.complete) return result.amountCentavos
+    } catch {
+      /* Invalid source evidence is unavailable, not a zero-valued stock. */
+    }
     complete = false
-    result.missingCurrencies.forEach((code) => missingCurrencies.add(code))
-    if (!result.missingCurrencies.length) missingCurrencies.add(currency || '?')
+    missingCurrencies.add(currency || '?')
     return 0
   }
-  const currentBalance = accounts.reduce(
-    (sum, account) => sum + convert(account.balance, account.currency),
-    0
-  )
-  let avgDailyExpense = 0
-  let avgDailyIncome = 0
-  for (const row of dailyAverages) {
-    if (
-      !isCashFlowEligible({
-        type: row.type,
-        status: row.status,
-        ledgerTreatment: row.ledger_treatment,
-        reportingTreatment: row.reporting_treatment,
-        transactionKind: row.transaction_kind,
-        isArchived: row.is_archived,
+  const nativeBalances: Array<{ currency: string; amountCentavos: number }> = []
+  for (const account of accounts) {
+    try {
+      const currency = account.currency.trim().toUpperCase()
+      const native = convertCentavosAsOf({
+        amountCentavos: account.balance,
+        fromCurrency: currency,
+        toCurrency: currency,
+        asOfDate: context.today,
+        rates: [],
       })
-    )
-      continue
-    const daily = convert(row.amount, row.currency) / 90
-    if (row.type === 'expense') avgDailyExpense += daily
-    if (row.type === 'income') avgDailyIncome += daily
+      if (native.complete) nativeBalances.push({ currency, amountCentavos: native.amountCentavos })
+    } catch {
+      complete = false
+    }
   }
+  const currentBalance = sumReportingAmounts(
+    accounts.map((account) => convert(account.balance, account.currency))
+  )
+  const avgDailyExpense =
+    sumReportingAmounts(
+      history.parents.filter((row) => row.type === 'expense').map((row) => row.convertedAmount ?? 0)
+    ) / 90
+  const avgDailyIncome =
+    sumReportingAmounts(
+      history.parents.filter((row) => row.type === 'income').map((row) => row.convertedAmount ?? 0)
+    ) / 90
 
   let dailySubscriptionCost = 0
   for (const sub of subscriptions) {
+    if (sub.amount < 0) {
+      complete = false
+      continue
+    }
     const amount = convert(sub.amount, sub.currency)
     switch (sub.billing_cycle) {
       case 'weekly':
@@ -138,6 +152,8 @@ export async function generateCashFlowForecast(
       case 'yearly':
         dailySubscriptionCost += amount / 365
         break
+      default:
+        complete = false
     }
   }
 
@@ -158,13 +174,20 @@ export async function generateCashFlowForecast(
   const dangerDates: string[] = []
 
   for (let i = 0; i <= days; i++) {
-    const date = dayjs().add(i, 'day').format('YYYY-MM-DD')
+    const date = dayjs(today).add(i, 'day').format('YYYY-MM-DD')
 
     if (i > 0) {
       runningProjected += dailyNet
       runningOptimistic += optimisticDailyNet
       runningPessimistic += pessimisticDailyNet
     }
+
+    if (
+      ![runningProjected, runningOptimistic, runningPessimistic].every((value) =>
+        Number.isSafeInteger(Math.round(value))
+      )
+    )
+      complete = false
 
     points.push({
       date,
@@ -182,11 +205,30 @@ export async function generateCashFlowForecast(
     }
   }
 
-  return {
-    complete,
-    currency: preferredCurrency,
+  assertReportingContextCurrent(context)
+  const shared = {
+    authority: context,
+    currency: context.mainCurrency ?? '',
     missingCurrencies: [...missingCurrencies].sort(),
-    points: complete ? points : [],
+    estimateAsOf: context.today,
+    evidence: history,
+    nativeBalances,
+  }
+  if (!complete)
+    return {
+      ...shared,
+      complete: false,
+      points: [],
+      currentBalance: null,
+      dailyBurnRate: null,
+      dailyIncome: null,
+      minBalance: { date: today, amount: null },
+      dangerDates: [],
+    }
+  return {
+    ...shared,
+    complete: true,
+    points,
     currentBalance,
     dailyBurnRate: Math.round(effectiveDailyExpense),
     dailyIncome: Math.round(avgDailyIncome),

@@ -1,11 +1,15 @@
-import { CATEGORY_ALLOCATION_CTE } from '@/lib/reporting-read'
+import {
+  captureReportingContext,
+  reportingContextIsCurrent,
+  projectGrossRows,
+  readGrossLedgerRows,
+  sumReportingAmounts,
+  type GrossProjection,
+  type ReportingContext,
+} from '@/lib/dated-reporting-read'
 import { create } from 'zustand'
-import { isCashFlowEligible, type LedgerTreatment } from '@shikin/finance-core'
-import { query } from '@/lib/database'
 import { getErrorMessage } from '@/lib/errors'
 import { formatMoney } from '@/lib/money'
-import { useCurrencyStore } from '@/stores/currency-store'
-import type { ReportingTreatment, TransactionKind } from '@/types/database'
 import dayjs from 'dayjs'
 
 interface CategorySpending {
@@ -36,6 +40,7 @@ export interface SpendingInsight {
 }
 
 export type SpendingInsightsReason =
+  | 'main_currency_unconfigured'
   | 'missing_exchange_rates'
   | 'invalid_currency_data'
   | 'invalid_category_allocations'
@@ -44,11 +49,11 @@ export type SpendingInsightsReason =
 
 interface SpendingInsightsState {
   momComparisons: SpendingComparison[]
-  momCurrentTotal: number
-  momPreviousTotal: number
+  momCurrentTotal: number | null
+  momPreviousTotal: number | null
   yoyComparisons: SpendingComparison[]
-  yoyCurrentTotal: number
-  yoyPreviousTotal: number
+  yoyCurrentTotal: number | null
+  yoyPreviousTotal: number | null
   insights: SpendingInsight[]
   isLoading: boolean
   complete: boolean
@@ -56,22 +61,9 @@ interface SpendingInsightsState {
   missingCurrencies: string[]
   reason: SpendingInsightsReason
   error: string | null
+  authority: ReportingContext | null
+  evidence: GrossProjection[]
   loadComparisons: () => Promise<void>
-}
-
-interface RawRow {
-  category_id: string | null
-  category_name: string | null
-  category_color: string | null
-  currency: string | null
-  type: string
-  status: string | null
-  ledger_treatment?: LedgerTreatment | null
-  reporting_treatment: string | null
-  transaction_kind: string | null
-  is_archived: number | boolean | null
-  total: number
-  invalid_allocations?: number
 }
 
 interface CategorySpendingRead {
@@ -80,104 +72,39 @@ interface CategorySpendingRead {
   missingCurrencies: string[]
   reason: SpendingInsightsReason
   categories: CategorySpending[]
+  evidence: GrossProjection
 }
 
 async function getSpendingByCategory(
   startDate: string,
-  endDate: string
+  endDate: string,
+  context: ReportingContext
 ): Promise<CategorySpendingRead> {
-  const currencyState = useCurrencyStore.getState()
-  const preferredCurrency = currencyState.preferredCurrency
-  const rows = await query<RawRow>(
-    `${CATEGORY_ALLOCATION_CTE}
-     SELECT
-       t.category_id,
-       c.name as category_name,
-       c.color as category_color,
-       t.currency,
-       t.type,
-       t.status,
-       t.ledger_treatment, t.reporting_treatment,
-       t.transaction_kind,
-       t.is_archived,
-       COALESCE(SUM(t.amount), 0) as total,
-       MAX(t.invalid_allocations) as invalid_allocations
-     FROM reporting_allocations t
-     LEFT JOIN categories c ON c.id = t.category_id
-     WHERE t.date >= ? AND t.date <= ?
-     GROUP BY t.category_id, c.name, c.color, t.currency, t.type, t.status,
-              t.ledger_treatment, t.reporting_treatment, t.transaction_kind, t.is_archived
-     ORDER BY total DESC`,
-    [startDate, endDate]
+  const rows = await readGrossLedgerRows(startDate, endDate)
+  const evidence = projectGrossRows(
+    rows.filter((row) => row.type === 'expense'),
+    context
   )
-
-  const missingCurrencies = new Set<string>()
-  let reason: SpendingInsightsReason = null
   const merged = new Map<string, CategorySpending>()
-
-  for (const row of rows) {
-    if (row.type !== 'expense') continue
-    if (
-      !isCashFlowEligible({
-        type: row.type,
-        status: row.status ?? 'posted',
-        ledgerTreatment: row.ledger_treatment,
-        reportingTreatment: (row.reporting_treatment ?? 'normal') as ReportingTreatment,
-        transactionKind: (row.transaction_kind ?? 'standard') as TransactionKind,
-        isArchived: row.is_archived ?? 0,
-      })
-    ) {
-      continue
-    }
-
-    if (row.invalid_allocations) {
-      return {
-        complete: false,
-        currency: preferredCurrency,
-        missingCurrencies: [],
-        reason: 'invalid_category_allocations',
-        categories: [],
+  if (evidence.complete)
+    for (const parent of evidence.parents)
+      for (const row of parent.allocations) {
+        const key = row.category_id ?? 'uncategorized'
+        const existing = merged.get(key)
+        merged.set(key, {
+          categoryId: row.category_id ?? null,
+          categoryName: row.category_name || existing?.categoryName || 'Uncategorized',
+          categoryColor: row.category_color || existing?.categoryColor || '#6b7280',
+          amount: sumReportingAmounts([existing?.amount ?? 0, row.convertedAmount!]),
+        })
       }
-    }
-
-    const converted = currencyState.convertToPreferred(row.total, row.currency ?? '')
-    if (!converted.complete) {
-      for (const currency of converted.missingCurrencies) missingCurrencies.add(currency)
-      if (converted.reason === 'invalid_currency_data') {
-        reason = 'invalid_currency_data'
-        missingCurrencies.add(row.currency?.trim() || 'unknown')
-      } else {
-        reason = reason ?? 'missing_exchange_rates'
-      }
-      continue
-    }
-
-    const key = row.category_id ?? 'uncategorized'
-    const existing = merged.get(key)
-    merged.set(key, {
-      categoryId: row.category_id,
-      categoryName: row.category_name || existing?.categoryName || 'Uncategorized',
-      categoryColor: row.category_color || existing?.categoryColor || '#6b7280',
-      amount: (existing?.amount ?? 0) + converted.amountCentavos,
-    })
-  }
-
-  if (missingCurrencies.size > 0) {
-    return {
-      complete: false,
-      currency: preferredCurrency,
-      missingCurrencies: [...missingCurrencies].sort(),
-      reason,
-      categories: [],
-    }
-  }
-
   return {
-    complete: true,
-    currency: preferredCurrency,
-    missingCurrencies: [],
-    reason: null,
+    complete: evidence.complete,
+    currency: context.mainCurrency ?? '',
+    missingCurrencies: evidence.missingCurrencies,
+    reason: evidence.reason,
     categories: [...merged.values()],
+    evidence,
   }
 }
 
@@ -283,12 +210,14 @@ function incompleteState(
   error: string | null = null
 ): Omit<SpendingInsightsState, 'isLoading' | 'loadComparisons'> {
   return {
+    authority: null,
+    evidence: [],
     momComparisons: [],
-    momCurrentTotal: 0,
-    momPreviousTotal: 0,
+    momCurrentTotal: null,
+    momPreviousTotal: null,
     yoyComparisons: [],
-    yoyCurrentTotal: 0,
-    yoyPreviousTotal: 0,
+    yoyCurrentTotal: null,
+    yoyPreviousTotal: null,
     insights: [],
     complete: false,
     currency,
@@ -301,15 +230,17 @@ function incompleteState(
 let insightsRequestId = 0
 
 export const useSpendingInsightsStore = create<SpendingInsightsState>((set) => ({
+  authority: null,
+  evidence: [],
   momComparisons: [],
-  momCurrentTotal: 0,
-  momPreviousTotal: 0,
+  momCurrentTotal: null,
+  momPreviousTotal: null,
   yoyComparisons: [],
-  yoyCurrentTotal: 0,
-  yoyPreviousTotal: 0,
+  yoyCurrentTotal: null,
+  yoyPreviousTotal: null,
   insights: [],
   isLoading: false,
-  complete: true,
+  complete: false,
   currency: 'USD',
   missingCurrencies: [],
   reason: null,
@@ -317,45 +248,53 @@ export const useSpendingInsightsStore = create<SpendingInsightsState>((set) => (
 
   loadComparisons: async () => {
     const requestId = ++insightsRequestId
-    const displayCurrency = useCurrencyStore.getState().preferredCurrency
-    set({ isLoading: true, error: null })
+    const context = captureReportingContext()
+    const displayCurrency = context.mainCurrency ?? ''
+    set({ ...incompleteState(displayCurrency, [], null), isLoading: true })
     try {
-      const now = dayjs()
+      const now = dayjs(context.today)
       const currentMonthStart = now.startOf('month').format('YYYY-MM-DD')
       const currentMonthEnd = now.endOf('month').format('YYYY-MM-DD')
       const prevMonthStart = now.subtract(1, 'month').startOf('month').format('YYYY-MM-DD')
       const prevMonthEnd = now.subtract(1, 'month').endOf('month').format('YYYY-MM-DD')
 
       const [currentMonth, prevMonth] = await Promise.all([
-        getSpendingByCategory(currentMonthStart, currentMonthEnd),
-        getSpendingByCategory(prevMonthStart, prevMonthEnd),
+        getSpendingByCategory(currentMonthStart, currentMonthEnd, context),
+        getSpendingByCategory(prevMonthStart, prevMonthEnd, context),
       ])
 
       const sameMonthLastYearStart = now.subtract(1, 'year').startOf('month').format('YYYY-MM-DD')
       const sameMonthLastYearEnd = now.subtract(1, 'year').endOf('month').format('YYYY-MM-DD')
       const sameMonthLastYear = await getSpendingByCategory(
         sameMonthLastYearStart,
-        sameMonthLastYearEnd
+        sameMonthLastYearEnd,
+        context
       )
 
       const threeMonthStart = now.subtract(3, 'month').startOf('month').format('YYYY-MM-DD')
-      const threeMonthSpending = await getSpendingByCategory(threeMonthStart, prevMonthEnd)
+      const threeMonthSpending = await getSpendingByCategory(threeMonthStart, prevMonthEnd, context)
 
-      if (requestId !== insightsRequestId) return
+      if (requestId !== insightsRequestId || !reportingContextIsCurrent(context)) return
 
       const reads = [currentMonth, prevMonth, sameMonthLastYear, threeMonthSpending]
       const incomplete = reads.find((read) => !read.complete)
       if (incomplete) {
         const missing = [...new Set(reads.flatMap((read) => read.missingCurrencies))].sort()
-        set(
-          incompleteState(displayCurrency, missing, incomplete.reason ?? 'missing_exchange_rates')
-        )
+        set({
+          ...incompleteState(
+            displayCurrency,
+            missing,
+            incomplete.reason ?? 'missing_exchange_rates'
+          ),
+          authority: context,
+          evidence: reads.map((read) => read.evidence),
+        })
         return
       }
 
       const momComparisons = buildComparisons(currentMonth.categories, prevMonth.categories)
-      const momCurrentTotal = currentMonth.categories.reduce((s, c) => s + c.amount, 0)
-      const momPreviousTotal = prevMonth.categories.reduce((s, c) => s + c.amount, 0)
+      const momCurrentTotal = sumReportingAmounts(currentMonth.categories.map((c) => c.amount))
+      const momPreviousTotal = sumReportingAmounts(prevMonth.categories.map((c) => c.amount))
       const yoyComparisons = buildComparisons(currentMonth.categories, sameMonthLastYear.categories)
       const avg3mByCategory = new Map<string, number>()
       for (const cat of threeMonthSpending.categories) {
@@ -363,12 +302,14 @@ export const useSpendingInsightsStore = create<SpendingInsightsState>((set) => (
       }
 
       set({
+        authority: context,
+        evidence: reads.map((read) => read.evidence),
         momComparisons,
         momCurrentTotal,
         momPreviousTotal,
         yoyComparisons,
         yoyCurrentTotal: momCurrentTotal,
-        yoyPreviousTotal: sameMonthLastYear.categories.reduce((s, c) => s + c.amount, 0),
+        yoyPreviousTotal: sumReportingAmounts(sameMonthLastYear.categories.map((c) => c.amount)),
         insights: generateInsights(momComparisons, avg3mByCategory, displayCurrency),
         complete: true,
         currency: displayCurrency,
@@ -377,7 +318,7 @@ export const useSpendingInsightsStore = create<SpendingInsightsState>((set) => (
         error: null,
       })
     } catch (error) {
-      if (requestId !== insightsRequestId) return
+      if (requestId !== insightsRequestId || !reportingContextIsCurrent(context)) return
       set(incompleteState(displayCurrency, [], 'read_error', getErrorMessage(error)))
     } finally {
       if (requestId === insightsRequestId) {

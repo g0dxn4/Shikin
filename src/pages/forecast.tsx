@@ -35,7 +35,7 @@ interface SubscriptionDisplay {
 export function Forecast() {
   const { t } = useTranslation('forecast')
   const {
-    forecast,
+    forecast: storedForecast,
     error,
     isLoading,
     selectedRange,
@@ -45,7 +45,12 @@ export function Forecast() {
     setAccount,
   } = useForecastStore()
   const { accounts, fetch: fetchAccounts, fetchError: accountsError } = useAccountStore()
-  const { preferredCurrency, rates, invalidRates } = useCurrencyStore()
+  const { preferredCurrency, mainCurrency, manualRates } = useCurrencyStore()
+  const forecast =
+    storedForecast?.authority.mainCurrency === mainCurrency &&
+    storedForecast.authority.manualRates === manualRates
+      ? storedForecast
+      : null
   const money = (amount: number) => formatMoney(amount, forecast?.currency ?? preferredCurrency)
   useEffect(() => {
     void fetchAccounts().catch(() => {})
@@ -53,7 +58,7 @@ export function Forecast() {
 
   useEffect(() => {
     generateForecast()
-  }, [generateForecast, preferredCurrency, rates, invalidRates])
+  }, [generateForecast, preferredCurrency, mainCurrency, manualRates])
 
   const chartData = useMemo(() => {
     if (!forecast) return []
@@ -108,7 +113,9 @@ export function Forecast() {
         }
       />
       <p className="text-muted-foreground text-xs">
-        {t('scope.description', { currency: preferredCurrency })}
+        {t('scope.description', { currency: forecast?.currency || mainCurrency || '—' })}
+        {' · '}
+        {t('currency.estimate', { date: forecast?.estimateAsOf ?? dayjs().format('YYYY-MM-DD') })}
       </p>
       <ErrorBanner
         title={t('error.load')}
@@ -120,10 +127,32 @@ export function Forecast() {
       />
       {isLoading && <ForecastSkeleton />}
       {forecast && !forecast.complete && (
-        <ErrorBanner
-          title={t('currency.unavailable')}
-          message={t('currency.missing', { currencies: forecast.missingCurrencies.join(', ') })}
-        />
+        <div className="space-y-2">
+          <ErrorBanner
+            title={t('currency.unavailable')}
+            message={
+              !mainCurrency
+                ? t('currency.unconfigured')
+                : t('currency.missing', { currencies: forecast.missingCurrencies.join(', ') })
+            }
+          />
+          <p className="text-muted-foreground text-xs">
+            {t('currency.nativeHistory', {
+              amounts:
+                forecast.evidence.nativeTotals
+                  .map((row) => formatMoney(row.amountCentavos, row.currency))
+                  .join(' · ') || '—',
+            })}
+          </p>
+          <p className="text-muted-foreground text-xs">
+            {t('currency.nativeBalances', {
+              amounts:
+                forecast.nativeBalances
+                  .map((row) => formatMoney(row.amountCentavos, row.currency))
+                  .join(' · ') || '—',
+            })}
+          </p>
+        </div>
       )}
       {forecast?.complete && (
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.35fr_0.65fr]">

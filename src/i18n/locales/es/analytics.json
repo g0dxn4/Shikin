@@ -117,5 +117,10 @@
     "uncategorized": "Sin categoria",
     "budgetUnavailable": "La salud del presupuesto no está disponible hasta completar los totales convertidos.",
     "budgetReadError": "La salud del presupuesto no está disponible. {{message}}"
+  },
+  "reportingFx": {
+    "unconfigured": "Configura una moneda principal en Ajustes para ver los totales convertidos.",
+    "known": "Subtotal convertido conocido (incompleto): {{amount}}",
+    "native": "Evidencia en moneda original (sin combinar): {{amounts}}"
   }
 }

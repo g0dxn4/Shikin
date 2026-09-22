@@ -6,7 +6,7 @@ export async function getDashboardSplitRows(
   endDate: string
 ): Promise<DashboardSplit[]> {
   return query<DashboardSplit>(
-    `SELECT ts.transaction_id,
+    `SELECT ts.id, ts.transaction_id,
             ts.category_id,
             ts.amount,
             c.name as category_name,

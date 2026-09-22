@@ -67,6 +67,58 @@ describe('ClassificationTypesSettings', () => {
     })
   })
 
+  it('does not enable creation while the initial catalog is pending', async () => {
+    mockList.mockImplementationOnce(() => new Promise(() => {}))
+    const user = userEvent.setup()
+    render(<ClassificationTypesSettings />)
+
+    await user.type(screen.getByLabelText('classificationTypes.name'), 'Must wait for catalog')
+
+    expect(
+      screen.getByLabelText('classificationTypes.treatment').querySelectorAll('option')
+    ).toHaveLength(0)
+    expect(screen.getByRole('button', { name: 'classificationTypes.create' })).toBeDisabled()
+    expect(mockCreate).not.toHaveBeenCalled()
+  })
+
+  it('does not enable creation after the initial catalog fails and keeps refresh reachable', async () => {
+    mockList.mockRejectedValueOnce(new Error('Catalog read failed'))
+    const user = userEvent.setup()
+    render(<ClassificationTypesSettings />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Catalog read failed')
+    await user.type(screen.getByLabelText('classificationTypes.name'), 'Unknown treatment')
+
+    expect(
+      screen.getByLabelText('classificationTypes.treatment').querySelectorAll('option')
+    ).toHaveLength(0)
+    expect(screen.getByRole('button', { name: 'classificationTypes.create' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'classificationTypes.refresh' })).toBeEnabled()
+    expect(mockCreate).not.toHaveBeenCalled()
+  })
+
+  it('keeps a usable old catalog and operator draft visible when refresh fails', async () => {
+    mockList.mockResolvedValueOnce(catalog()).mockRejectedValueOnce(new Error('Refresh failed'))
+    const user = userEvent.setup()
+    render(<ClassificationTypesSettings />)
+    await screen.findByText('Family support')
+
+    await user.type(screen.getByLabelText('classificationTypes.name'), 'Preserved draft')
+    await user.selectOptions(
+      screen.getByLabelText('classificationTypes.treatment'),
+      'principal_recovery'
+    )
+    await user.click(screen.getByRole('button', { name: 'classificationTypes.refresh' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Refresh failed')
+    expect(screen.queryByText('classificationTypes.draftPreserved')).not.toBeInTheDocument()
+    expect(screen.getByText('Family support')).toBeInTheDocument()
+    expect(screen.getByLabelText('classificationTypes.name')).toHaveValue('Preserved draft')
+    expect(screen.getByLabelText('classificationTypes.treatment')).toHaveValue('principal_recovery')
+    expect(screen.getByRole('button', { name: 'classificationTypes.create' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'classificationTypes.refresh' })).toBeEnabled()
+  })
+
   it('shows fixed built-ins as read-only and creates a custom type with an optional audit note', async () => {
     const user = userEvent.setup()
     render(<ClassificationTypesSettings />)
@@ -137,6 +189,27 @@ describe('ClassificationTypesSettings', () => {
     )
     expect(mockList).toHaveBeenCalledTimes(2)
     expect(screen.queryByText('Server-side latest name')).not.toBeInTheDocument()
+  })
+
+  it('disables an open editor while another catalog mutation is pending', async () => {
+    let resolveCreate!: (value: Awaited<ReturnType<typeof createClassificationType>>) => void
+    mockCreate.mockImplementationOnce(() => new Promise((resolve) => (resolveCreate = resolve)))
+    const user = userEvent.setup()
+    render(<ClassificationTypesSettings />)
+    await user.click(await screen.findByRole('button', { name: 'classificationTypes.revise' }))
+
+    await user.type(screen.getAllByLabelText('classificationTypes.name')[0], 'Pending type')
+    await user.click(screen.getByRole('button', { name: 'classificationTypes.create' }))
+
+    expect(screen.getByRole('button', { name: 'classificationTypes.creating' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'classificationTypes.saveRevision' })).toBeDisabled()
+    expect(screen.getAllByLabelText('classificationTypes.name')[1]).toBeDisabled()
+    expect(mockRevise).not.toHaveBeenCalled()
+
+    resolveCreate({ type: catalog().types[0], revision: catalog().revisions[0] })
+    await waitFor(() =>
+      expect(screen.getAllByLabelText('classificationTypes.name')[0]).toBeEnabled()
+    )
   })
 
   it('keeps controls disabled while creation is pending', async () => {

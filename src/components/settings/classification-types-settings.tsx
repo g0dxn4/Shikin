@@ -42,22 +42,41 @@ export function ClassificationTypesSettings() {
   const [loading, setLoading] = useState(true)
   const [mutation, setMutation] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [catalogLoadFailed, setCatalogLoadFailed] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const requestSequence = useRef(0)
+  const loadInFlightRef = useRef(true)
+  const mutationRef = useRef<string | null>(null)
+
+  const definitions = catalog?.definitions ?? []
+  const treatments = definitions.filter((entry) => entry.kind === 'builtin')
+  const catalogUsable = catalog !== null && treatments.length > 0
+  const catalogControlsDisabled = !catalogUsable || loading || mutation !== null
+  const createTreatmentAvailable = treatments.some(
+    (entry) => entry.role === createDraft.financialTreatment
+  )
 
   const load = useCallback(
     async (options: { preserveError?: boolean } = {}) => {
       const sequence = ++requestSequence.current
+      loadInFlightRef.current = true
       setLoading(true)
       try {
         const next = await listClassificationTypes(includeArchived)
         if (sequence !== requestSequence.current) return
         setCatalog(next)
+        setCatalogLoadFailed(false)
         if (!options.preserveError) setError(null)
       } catch (loadError) {
-        if (sequence === requestSequence.current) setError(getErrorMessage(loadError))
+        if (sequence === requestSequence.current) {
+          setCatalogLoadFailed(true)
+          setError(getErrorMessage(loadError))
+        }
       } finally {
-        if (sequence === requestSequence.current) setLoading(false)
+        if (sequence === requestSequence.current) {
+          loadInFlightRef.current = false
+          setLoading(false)
+        }
       }
     },
     [includeArchived]
@@ -71,15 +90,31 @@ export function ClassificationTypesSettings() {
   }, [load])
 
   const refreshAfterFailure = async (mutationError: unknown) => {
+    setCatalogLoadFailed(false)
     setError(getErrorMessage(mutationError))
     setNotice(null)
     await load({ preserveError: true })
   }
 
-  const create = async () => {
-    setMutation('create')
+  const beginMutation = (key: string) => {
+    if (mutationRef.current !== null || loadInFlightRef.current || loading || !catalogUsable)
+      return false
+    mutationRef.current = key
+    setMutation(key)
     setError(null)
     setNotice(null)
+    return true
+  }
+
+  const finishMutation = (key: string) => {
+    if (mutationRef.current !== key) return
+    mutationRef.current = null
+    setMutation(null)
+  }
+
+  const create = async () => {
+    const mutationKey = 'create'
+    if (!createDraft.name.trim() || !createTreatmentAvailable || !beginMutation(mutationKey)) return
     try {
       await createClassificationType({
         name: createDraft.name,
@@ -92,15 +127,19 @@ export function ClassificationTypesSettings() {
     } catch (mutationError) {
       await refreshAfterFailure(mutationError)
     } finally {
-      setMutation(null)
+      finishMutation(mutationKey)
     }
   }
 
   const revise = async () => {
-    if (!editDraft) return
-    setMutation(editDraft.typeId)
-    setError(null)
-    setNotice(null)
+    if (
+      !editDraft ||
+      !editDraft.name.trim() ||
+      !treatments.some((entry) => entry.role === editDraft.financialTreatment) ||
+      !beginMutation(editDraft.typeId)
+    )
+      return
+    const mutationKey = editDraft.typeId
     try {
       await reviseClassificationType({
         typeId: editDraft.typeId,
@@ -116,14 +155,12 @@ export function ClassificationTypesSettings() {
       // Refresh the catalog, but retain the operator's draft and expected revision.
       await refreshAfterFailure(mutationError)
     } finally {
-      setMutation(null)
+      finishMutation(mutationKey)
     }
   }
 
   const archive = async (typeId: string, expectedRevisionId: string) => {
-    setMutation(typeId)
-    setError(null)
-    setNotice(null)
+    if (!beginMutation(typeId)) return
     try {
       const auditNote = archiveNotes[typeId]?.trim()
       await archiveClassificationType({
@@ -142,12 +179,9 @@ export function ClassificationTypesSettings() {
     } catch (mutationError) {
       await refreshAfterFailure(mutationError)
     } finally {
-      setMutation(null)
+      finishMutation(typeId)
     }
   }
-
-  const definitions = catalog?.definitions ?? []
-  const treatments = definitions.filter((entry) => entry.kind === 'builtin')
 
   return (
     <div className="min-w-0 space-y-5">
@@ -159,9 +193,11 @@ export function ClassificationTypesSettings() {
       {error ? (
         <div className="border-destructive/30 bg-destructive/10 rounded-lg border p-3" role="alert">
           <p className="text-sm">{error}</p>
-          <p className="text-muted-foreground mt-1 text-xs">
-            {t('classificationTypes.draftPreserved')}
-          </p>
+          {!catalogLoadFailed ? (
+            <p className="text-muted-foreground mt-1 text-xs">
+              {t('classificationTypes.draftPreserved')}
+            </p>
+          ) : null}
         </div>
       ) : null}
       <div className="sr-only" aria-live="polite" aria-atomic="true">
@@ -190,7 +226,7 @@ export function ClassificationTypesSettings() {
             id="classification-type-treatment"
             value={createDraft.financialTreatment}
             treatments={treatments}
-            disabled={mutation !== null}
+            disabled={catalogControlsDisabled}
             label={t('classificationTypes.treatment')}
             roleLabel={(role) => tConsumption(`roles.${role}`)}
             onChange={(financialTreatment) =>
@@ -214,7 +250,9 @@ export function ClassificationTypesSettings() {
         <Button
           type="button"
           className="mt-3 min-h-11 max-w-full"
-          disabled={mutation !== null || !createDraft.name.trim()}
+          disabled={
+            catalogControlsDisabled || !createTreatmentAvailable || !createDraft.name.trim()
+          }
           onClick={() => void create()}
         >
           {mutation === 'create' ? (
@@ -272,6 +310,9 @@ export function ClassificationTypesSettings() {
             const isEditing = entry.kind === 'custom' && editDraft?.typeId === entry.id
             const customRevisionId = entry.kind === 'custom' ? entry.revisionId : null
             const busy = mutation === entry.id
+            const editTreatmentAvailable = treatments.some(
+              (treatment) => treatment.role === editDraft?.financialTreatment
+            )
             return (
               <article
                 key={`${entry.kind}:${entry.id}`}
@@ -287,7 +328,7 @@ export function ClassificationTypesSettings() {
                         id={`classification-name-${entry.id}`}
                         maxLength={100}
                         value={editDraft.name}
-                        disabled={busy}
+                        disabled={catalogControlsDisabled}
                         onChange={(event) =>
                           setEditDraft((current) =>
                             current ? { ...current, name: event.target.value } : current
@@ -299,7 +340,7 @@ export function ClassificationTypesSettings() {
                       id={`classification-treatment-${entry.id}`}
                       value={editDraft.financialTreatment}
                       treatments={treatments}
-                      disabled={busy}
+                      disabled={catalogControlsDisabled}
                       label={t('classificationTypes.treatment')}
                       roleLabel={(role) => tConsumption(`roles.${role}`)}
                       onChange={(financialTreatment) =>
@@ -315,7 +356,7 @@ export function ClassificationTypesSettings() {
                       <Input
                         id={`classification-note-${entry.id}`}
                         value={editDraft.auditNote}
-                        disabled={busy}
+                        disabled={catalogControlsDisabled}
                         onChange={(event) =>
                           setEditDraft((current) =>
                             current ? { ...current, auditNote: event.target.value } : current
@@ -327,7 +368,7 @@ export function ClassificationTypesSettings() {
                       <Button
                         type="button"
                         variant="outline"
-                        disabled={busy}
+                        disabled={catalogControlsDisabled}
                         onClick={() => setEditDraft(null)}
                       >
                         <X size={14} />
@@ -335,7 +376,11 @@ export function ClassificationTypesSettings() {
                       </Button>
                       <Button
                         type="button"
-                        disabled={busy || !editDraft.name.trim()}
+                        disabled={
+                          catalogControlsDisabled ||
+                          !editTreatmentAvailable ||
+                          !editDraft.name.trim()
+                        }
                         onClick={() => void revise()}
                       >
                         {busy ? (
@@ -401,7 +446,7 @@ export function ClassificationTypesSettings() {
                           <Input
                             id={`classification-archive-note-${entry.id}`}
                             value={archiveNotes[entry.id] ?? ''}
-                            disabled={mutation !== null}
+                            disabled={catalogControlsDisabled}
                             onChange={(event) =>
                               setArchiveNotes((current) => ({
                                 ...current,
@@ -415,7 +460,7 @@ export function ClassificationTypesSettings() {
                             type="button"
                             size="sm"
                             variant="outline"
-                            disabled={mutation !== null}
+                            disabled={catalogControlsDisabled}
                             onClick={() =>
                               setEditDraft({
                                 typeId: entry.id,
@@ -433,7 +478,7 @@ export function ClassificationTypesSettings() {
                             type="button"
                             size="sm"
                             variant="outline"
-                            disabled={mutation !== null}
+                            disabled={catalogControlsDisabled}
                             onClick={() => void archive(entry.id, customRevisionId)}
                           >
                             {busy ? (

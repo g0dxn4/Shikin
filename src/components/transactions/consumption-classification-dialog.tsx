@@ -151,10 +151,10 @@ export function ConsumptionClassificationDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{t('dialog.title')}</DialogTitle>
-          <DialogDescription>{t('dialog.description')}</DialogDescription>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] min-w-0 grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader className="min-w-0">
+          <DialogTitle className="pr-8 break-words">{t('dialog.title')}</DialogTitle>
+          <DialogDescription className="break-words">{t('dialog.description')}</DialogDescription>
         </DialogHeader>
 
         {error ? (
@@ -178,9 +178,9 @@ export function ConsumptionClassificationDialog({
             <Skeleton className="h-28 rounded-xl" />
           </div>
         ) : context ? (
-          <div className="space-y-3">
-            <div className="text-muted-foreground flex items-center justify-between gap-4 text-xs">
-              <span className="truncate">{context.transaction.description}</span>
+          <div className="min-w-0 space-y-3">
+            <div className="text-muted-foreground flex min-w-0 flex-col gap-1 text-xs sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+              <span className="min-w-0 break-words">{context.transaction.description}</span>
               <span className="shrink-0 font-semibold tabular-nums">
                 {formatMoney(context.transaction.amount, context.transaction.currency || 'USD')}
               </span>
@@ -197,32 +197,35 @@ export function ConsumptionClassificationDialog({
               return (
                 <section
                   key={key}
-                  className="border-border bg-muted/25 rounded-xl border p-3 sm:p-4"
+                  className="border-border bg-muted/25 min-w-0 rounded-xl border p-3 sm:p-4"
                   aria-labelledby={`consumption-allocation-${key}`}
                 >
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                     <div className="min-w-0">
-                      <h3 id={`consumption-allocation-${key}`} className="text-sm font-semibold">
+                      <h3
+                        id={`consumption-allocation-${key}`}
+                        className="text-sm font-semibold break-words"
+                      >
                         {context.allocations.length > 1
                           ? t('allocation.split', { number: index + 1 })
                           : t('allocation.parent')}
                       </h3>
-                      <p className="text-muted-foreground mt-0.5 truncate text-xs">
+                      <p className="text-muted-foreground mt-0.5 text-xs break-words">
                         {allocation.categoryName ?? t('allocation.uncategorized')}
                       </p>
                     </div>
-                    <span className="text-sm font-semibold tabular-nums">
+                    <span className="shrink-0 text-sm font-semibold tabular-nums">
                       {formatMoney(
                         allocation.amountCentavos,
                         context.transaction.currency || 'USD'
                       )}
                     </span>
                   </div>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <label className="text-muted-foreground text-xs">
+                  <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">
+                    <label className="text-muted-foreground min-w-0 text-xs">
                       {t('fields.role')}
                       <select
-                        className="native-select text-foreground mt-1 min-h-11 w-full"
+                        className="native-select text-foreground mt-1 block min-h-11 w-full max-w-full min-w-0"
                         value={draft.role}
                         disabled={busy}
                         onChange={(event) => {
@@ -244,10 +247,10 @@ export function ConsumptionClassificationDialog({
                       </select>
                     </label>
                     {needsPurchase ? (
-                      <label className="text-muted-foreground text-xs">
+                      <label className="text-muted-foreground min-w-0 text-xs">
                         {t('fields.purchase')}
                         <select
-                          className="native-select text-foreground mt-1 min-h-11 w-full"
+                          className="native-select text-foreground mt-1 block min-h-11 w-full max-w-full min-w-0"
                           value={draft.referencedPurchaseId}
                           disabled={busy}
                           onChange={(event) =>
@@ -265,12 +268,12 @@ export function ConsumptionClassificationDialog({
                       </label>
                     ) : null}
                   </div>
-                  <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <div className="mt-3 flex min-w-0 flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
                     {allocation.classification ? (
                       <Button
                         type="button"
                         variant="outline"
-                        className="min-h-11"
+                        className="min-h-11 max-w-full min-w-0"
                         disabled={busy}
                         onClick={() => void clear(allocation)}
                       >
@@ -280,7 +283,7 @@ export function ConsumptionClassificationDialog({
                     ) : null}
                     <Button
                       type="button"
-                      className="min-h-11"
+                      className="min-h-11 max-w-full min-w-0"
                       disabled={busy}
                       onClick={() => void save(allocation)}
                     >
@@ -298,11 +301,11 @@ export function ConsumptionClassificationDialog({
           </Button>
         ) : null}
 
-        <DialogFooter>
+        <DialogFooter className="min-w-0">
           <Button
             type="button"
             variant="outline"
-            className="min-h-11"
+            className="min-h-11 max-w-full min-w-0"
             onClick={() => onOpenChange(false)}
           >
             {t('actions.done')}

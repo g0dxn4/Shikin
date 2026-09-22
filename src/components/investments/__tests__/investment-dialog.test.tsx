@@ -69,6 +69,17 @@ describe('InvestmentDialog', () => {
     mockGetById.mockReset()
   })
 
+  it('constrains the dialog with a local vertical scroller', () => {
+    render(<InvestmentDialog />)
+
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.className).toMatch(/max-h-\[calc\(100dvh-2rem\)\]/)
+    expect(dialog.className).toContain('overflow-y-auto')
+    expect(dialog.className).toContain('max-w-md')
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'actions.save' })).toBeInTheDocument()
+  })
+
   it('prevents dialog closure while mutation is in flight', async () => {
     let resolveAdd: () => void = () => {}
     mockAdd.mockImplementation(

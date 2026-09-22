@@ -427,11 +427,15 @@ export function Investments() {
           label={t('summary.totalGainLoss')}
           value={
             gainsAvailable ? (
-              <span className={gainLoss >= 0 ? 'text-success' : 'text-destructive'}>
-                {gainLoss >= 0 ? '+' : ''}
-                {formatMoney(gainLoss, portfolioSummary.preferredCurrency)}
+              <span
+                className={`${gainLoss >= 0 ? 'text-success' : 'text-destructive'} inline-flex max-w-full min-w-0 flex-wrap items-baseline gap-x-2`}
+              >
+                <span className="min-w-0 [overflow-wrap:anywhere]">
+                  {gainLoss >= 0 ? '+' : ''}
+                  {formatMoney(gainLoss, portfolioSummary.preferredCurrency)}
+                </span>
                 {portfolioSummary.totalGainLossPercent !== null ? (
-                  <span className="ml-2 text-sm font-medium">
+                  <span className="text-sm font-medium [overflow-wrap:anywhere]">
                     ({portfolioSummary.totalGainLossPercent >= 0 ? '+' : ''}
                     {portfolioSummary.totalGainLossPercent.toFixed(2)}%)
                   </span>

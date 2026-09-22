@@ -186,10 +186,10 @@ function LegacyImportIdentityDialog({
         onOpenChange(next)
       }}
     >
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{t('identity.title')}</DialogTitle>
-          <DialogDescription>{t('identity.description')}</DialogDescription>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-lg min-w-0 grid-cols-[minmax(0,1fr)] overflow-y-auto">
+        <DialogHeader className="min-w-0">
+          <DialogTitle className="pr-8 break-words">{t('identity.title')}</DialogTitle>
+          <DialogDescription className="break-words">{t('identity.description')}</DialogDescription>
         </DialogHeader>
 
         <ErrorBanner message={error} />
@@ -200,16 +200,16 @@ function LegacyImportIdentityDialog({
         ) : null}
 
         {transaction ? (
-          <div className="space-y-4">
-            <div className="border-border bg-muted/30 rounded-xl border p-3">
-              <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 space-y-4">
+            <div className="border-border bg-muted/30 min-w-0 rounded-xl border p-3">
+              <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{transaction.description}</p>
+                  <p className="text-sm font-medium break-words">{transaction.description}</p>
                   <p className="text-muted-foreground mt-1 text-xs tabular-nums">
                     {transaction.date} · {transaction.status}
                   </p>
                 </div>
-                <div className="text-right">
+                <div className="shrink-0 sm:text-right">
                   <p className="font-medium tabular-nums">
                     {formatMoney(transaction.amount, transaction.currency, i18n.language)}
                   </p>
@@ -218,52 +218,56 @@ function LegacyImportIdentityDialog({
               </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+              <div className="min-w-0">
                 <Label htmlFor={`identity-source-${transactionId}`}>
                   {t('identity.sourceNamespace')}
                 </Label>
                 <Input
                   id={`identity-source-${transactionId}`}
+                  className="max-w-full min-w-0"
                   value={sourceNamespace}
                   onChange={(event) => changeInput(setSourceNamespace)(event.target.value)}
                 />
               </div>
-              <div>
+              <div className="min-w-0">
                 <Label htmlFor={`identity-external-${transactionId}`}>
                   {t('identity.externalId')}
                 </Label>
                 <Input
                   id={`identity-external-${transactionId}`}
+                  className="max-w-full min-w-0"
                   value={externalId}
                   onChange={(event) => changeInput(setExternalId)(event.target.value)}
                 />
               </div>
-              <div>
+              <div className="min-w-0">
                 <Label htmlFor={`identity-audit-source-${transactionId}`}>
                   {t('identity.auditSource')}
                 </Label>
                 <Input
                   id={`identity-audit-source-${transactionId}`}
+                  className="max-w-full min-w-0"
                   value={auditSource}
                   onChange={(event) => changeInput(setAuditSource)(event.target.value)}
                 />
               </div>
-              <div>
+              <div className="min-w-0">
                 <Label htmlFor={`identity-audit-note-${transactionId}`}>
                   {t('identity.auditNote')}
                 </Label>
                 <Input
                   id={`identity-audit-note-${transactionId}`}
+                  className="max-w-full min-w-0"
                   value={auditNote}
                   onChange={(event) => changeInput(setAuditNote)(event.target.value)}
                 />
               </div>
             </div>
 
-            <label className="flex min-h-11 items-start gap-3 text-sm">
+            <label className="flex min-h-11 min-w-0 items-start gap-3 text-sm">
               <input
-                className="mt-1"
+                className="mt-1 shrink-0"
                 type="checkbox"
                 checked={verified}
                 onChange={(event) => {
@@ -271,36 +275,49 @@ function LegacyImportIdentityDialog({
                   setVerified(event.target.checked)
                 }}
               />
-              <span>{t('identity.verifiedConfirmation')}</span>
+              <span className="min-w-0 break-words">{t('identity.verifiedConfirmation')}</span>
             </label>
 
             {preview ? (
               <div
                 role="status"
-                className="border-border bg-muted/40 rounded-lg border p-3 text-sm"
+                className="border-border bg-muted/40 min-w-0 rounded-lg border p-3 text-sm"
               >
-                <p>
-                  <strong>{preview.binding.importSource}</strong> ·{' '}
-                  <span className="font-mono">{preview.binding.importExternalId}</span>
+                <p className="min-w-0 break-words">
+                  <strong className="break-words">{preview.binding.importSource}</strong> ·{' '}
+                  <span className="font-mono break-all">{preview.binding.importExternalId}</span>
                 </p>
-                <p className="text-muted-foreground mt-2 text-xs">{t('identity.unknownContent')}</p>
+                <p className="text-muted-foreground mt-2 text-xs break-words">
+                  {t('identity.unknownContent')}
+                </p>
               </div>
             ) : null}
           </div>
         ) : null}
 
-        <DialogFooter>
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="min-w-0 flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            className="max-w-full min-w-0"
+            onClick={() => onOpenChange(false)}
+          >
             {t('cancel')}
           </Button>
           {preview ? (
-            <Button type="button" disabled={busy} onClick={() => void apply()}>
+            <Button
+              type="button"
+              className="max-w-full min-w-0"
+              disabled={busy}
+              onClick={() => void apply()}
+            >
               {t('identity.confirm')}
             </Button>
           ) : (
             <Button
               type="button"
               variant="outline"
+              className="max-w-full min-w-0"
               disabled={
                 busy || !transaction || !verified || !sourceNamespace.trim() || !externalId.trim()
               }

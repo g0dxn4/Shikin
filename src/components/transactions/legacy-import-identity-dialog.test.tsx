@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { LegacyImportIdentityAction } from './legacy-import-identity-dialog'
@@ -82,6 +82,45 @@ describe('LegacyImportIdentityAction', () => {
     mocks.read.mockResolvedValue(transaction)
     mocks.preview.mockResolvedValue(preview)
     mocks.bind.mockResolvedValue({ ...preview, refreshIncomplete: false })
+  })
+
+  it('constrains long labels, amounts, and identity fields to wrapping grid tracks', async () => {
+    mocks.read.mockResolvedValue({
+      ...transaction,
+      description:
+        'QA staged legacy transaction with deliberately verbose merchant label for modal and row stress',
+      amount: 987654321,
+      currency: 'USD',
+    })
+    const user = userEvent.setup()
+    render(<LegacyImportIdentityAction transactionId="legacy" />)
+    await user.click(screen.getByRole('button', { name: 'identity.action' }))
+    expect(
+      await screen.findByText(
+        'QA staged legacy transaction with deliberately verbose merchant label for modal and row stress'
+      )
+    ).toBeVisible()
+    expect(screen.getByText('$9,876,543.21')).toBeVisible()
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.className).toMatch(/grid-cols-\[minmax\(0,1fr\)\]/)
+    expect(dialog.className).toContain('min-w-0')
+    expect(dialog.className).toMatch(/max-h-\[calc\(100dvh-2rem\)\]/)
+    expect(dialog.className).toContain('overflow-y-auto')
+
+    const longSource = 'qa-verified-bank-with-an-unbroken-source-namespace-that-must-stay-usable'
+    const longExternal = 'QA-EXT-0001-UNBROKENLONGEXTERNALIDENTIFIERTHATMUSTNOTEXPANDTHEDIALOG'
+    fireEvent.change(screen.getByLabelText('identity.sourceNamespace'), {
+      target: { value: longSource },
+    })
+    fireEvent.change(screen.getByLabelText('identity.externalId'), {
+      target: { value: longExternal },
+    })
+    expect(screen.getByLabelText('identity.sourceNamespace')).toHaveValue(longSource)
+    expect(screen.getByLabelText('identity.externalId')).toHaveValue(longExternal)
+    expect(screen.getByLabelText('identity.sourceNamespace').className).toMatch(/min-w-0/)
+    expect(screen.getByRole('checkbox')).toBeEnabled()
+    expect(screen.getByText('identity.verifiedConfirmation')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'identity.review' })).toBeInTheDocument()
   })
 
   it('shows the current native-currency record and requires reviewed explicit identity', async () => {

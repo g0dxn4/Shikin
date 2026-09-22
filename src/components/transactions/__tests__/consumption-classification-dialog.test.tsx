@@ -117,6 +117,38 @@ describe('ConsumptionClassificationDialog', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('errors.clearDependents')
   })
 
+  it('constrains long labels and amounts to wrapping grid tracks', async () => {
+    mockRead.mockResolvedValue({
+      ...context,
+      transaction: {
+        ...context.transaction,
+        description:
+          'QA staged legacy transaction with deliberately verbose merchant label for modal and row stress',
+        amount: 987654321,
+      },
+      allocations: [
+        {
+          ...context.allocations[0],
+          amountCentavos: 987654321,
+          categoryName: 'Other Expenses with an unusually long category label for layout stress',
+        },
+      ],
+    })
+    render(<ConsumptionClassificationDialog transactionId="refund" open onOpenChange={vi.fn()} />)
+    expect(
+      await screen.findByText(
+        'QA staged legacy transaction with deliberately verbose merchant label for modal and row stress'
+      )
+    ).toBeInTheDocument()
+    expect(screen.getAllByText('$9,876,543.21').length).toBeGreaterThan(0)
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.className).toMatch(/grid-cols-\[minmax\(0,1fr\)\]/)
+    expect(dialog.className).toContain('min-w-0')
+    expect(screen.getByRole('button', { name: 'actions.save' }).className).toMatch(/max-w-full/)
+    expect(screen.getByLabelText('fields.role').className).toMatch(/min-w-0/)
+    expect(screen.getByLabelText('fields.role').className).toMatch(/max-w-full/)
+  })
+
   it('ignores a stale response after the selected transaction changes', async () => {
     let resolveFirst!: (value: typeof context) => void
     mockRead

@@ -563,6 +563,62 @@ describe('Investments', () => {
     expect(knownZeroMetric).not.toHaveTextContent('%')
   })
 
+  it('reflows gain money and percentage so MetricStrip can keep overflow hidden', () => {
+    mockInvestments = [
+      {
+        id: 'inv-gain-wrap',
+        account_id: null,
+        symbol: 'WRAP',
+        name: 'Wrap fixture',
+        type: 'stock',
+        shares: 1,
+        quantityDecimal: '1',
+        avg_cost_basis: 1782150,
+        currency: 'USD',
+        notes: null,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        currentPriceDecimal: '224.11',
+        currentPriceCurrency: 'USD',
+        marketValue: 2241100,
+        convertedMarketValue: 2241100,
+        gainLoss: 458950,
+        gainLossPercent: 25.75,
+        lastPriceDate: '2024-01-10',
+      },
+    ]
+    mockPortfolioSummary = {
+      ...mockPortfolioSummary,
+      preferredCurrency: 'USD',
+      totalMarketValue: 2241100,
+      totalCostBasis: 1782150,
+      totalGainLoss: 458950,
+      totalGainLossPercent: 25.75,
+      totalsComplete: true,
+      gainsComplete: true,
+    }
+
+    const { rerender } = render(<Investments />)
+    const gainMetric = screen.getByText('summary.totalGainLoss').closest('.metric-item')
+    expect(gainMetric).toHaveTextContent('+$4,589.50')
+    expect(gainMetric).toHaveTextContent('(+25.75%)')
+    const value = gainMetric?.querySelector('strong span')
+    expect(value?.className).toMatch(/flex-wrap/)
+    expect(value?.className).toMatch(/max-w-full/)
+    expect(gainMetric?.querySelector('.metric-strip')).toBeNull()
+
+    mockPortfolioSummary = {
+      ...mockPortfolioSummary,
+      totalGainLoss: 987654321,
+      totalGainLossPercent: 125.75,
+    }
+    rerender(<Investments />)
+    const largeMetric = screen.getByText('summary.totalGainLoss').closest('.metric-item')
+    expect(largeMetric).toHaveTextContent('+$9,876,543.21')
+    expect(largeMetric).toHaveTextContent('(+125.75%)')
+    expect(largeMetric?.querySelector('strong span')?.className).toMatch(/flex-wrap/)
+  })
+
   it('sorts mixed-currency values by converted value and puts unavailable values last', () => {
     const base = {
       account_id: null,

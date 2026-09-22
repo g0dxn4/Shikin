@@ -53,7 +53,8 @@ export interface ConsumptionBulkDialogProps {
 
 interface SelectedAllocation {
   key: string
-  candidate: ConsumptionBulkCandidate
+  candidateId: string
+  transaction: ConsumptionClassificationContext['transaction']
   allocation: ConsumptionAllocationView
   purchaseOptions: ConsumptionPurchaseOption[]
   treatmentKey: string
@@ -77,13 +78,45 @@ function treatmentKey(entry: ClassificationCatalogEntry): string {
     : `custom:${entry.id}:${entry.revisionId ?? ''}`
 }
 
+const currencyMetadata = Intl as typeof Intl & {
+  supportedValuesOf?: (key: 'currency') => string[]
+  DisplayNames?: new (
+    locales: string[],
+    options: { type: 'currency' }
+  ) => { of: (currency: string) => string | undefined }
+}
+const supportedCurrencies = currencyMetadata.supportedValuesOf
+  ? new Set(currencyMetadata.supportedValuesOf('currency'))
+  : null
+const currencyDisplayNames =
+  !supportedCurrencies && currencyMetadata.DisplayNames
+    ? new currencyMetadata.DisplayNames(['en'], { type: 'currency' })
+    : null
+
+function normalizeNativeCurrency(currency: string | null): string | null {
+  const normalized = currency?.trim().toUpperCase()
+  if (!normalized || !/^[A-Z]{3}$/.test(normalized)) return null
+  if (supportedCurrencies) {
+    if (!supportedCurrencies.has(normalized)) return null
+  } else {
+    const currencyName = currencyDisplayNames?.of(normalized)
+    if (!currencyName || currencyName.toUpperCase() === normalized) return null
+  }
+  return normalized
+}
+
+function displayCurrency(currency: string | null): string {
+  return normalizeNativeCurrency(currency) ?? '—'
+}
+
 function displayMoney(amount: number | null, currency: string | null): string {
   if (amount === null) return '—'
-  if (!currency) return String(amount)
+  const normalizedCurrency = normalizeNativeCurrency(currency)
+  if (!normalizedCurrency) return '—'
   try {
-    return formatMoney(amount, currency)
+    return formatMoney(amount, normalizedCurrency)
   } catch {
-    return `${amount} ${currency}`
+    return '—'
   }
 }
 
@@ -132,7 +165,7 @@ function PreviewItem({
             {source?.transaction.description || t('bulk.preview.unknownTransaction')}
           </h4>
           <p className="text-muted-foreground mt-0.5 text-xs break-words">
-            {source?.transaction.date || '—'} · {currency || '—'}
+            {source?.transaction.date || '—'} · {displayCurrency(currency)}
             {source?.split ? ` · ${t('bulk.preview.split')}` : ''}
           </p>
         </div>
@@ -212,6 +245,7 @@ export function ConsumptionBulkDialog({
   const sessionRef = useRef(0)
   const inputVersionRef = useRef(0)
   const previewRequestRef = useRef(0)
+  const applyPendingRef = useRef(false)
   const [scope, setScope] = useState<ConsumptionBulkCandidate[]>([])
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [contexts, setContexts] = useState<Record<string, ConsumptionClassificationContext>>({})
@@ -249,6 +283,7 @@ export function ConsumptionBulkDialog({
     setReviewed(null)
     setConfirmed(false)
     setPreviewPending(false)
+    applyPendingRef.current = false
     setApplyPending(false)
     setActionError(null)
     setReceipt(null)
@@ -285,6 +320,7 @@ export function ConsumptionBulkDialog({
   }
 
   const loadContext = async (candidate: ConsumptionBulkCandidate) => {
+    if (applyPendingRef.current || receipt) return
     setExpanded((current) => {
       const next = new Set(current)
       if (next.has(candidate.id)) next.delete(candidate.id)
@@ -321,6 +357,7 @@ export function ConsumptionBulkDialog({
     context: ConsumptionClassificationContext,
     allocation: ConsumptionAllocationView
   ) => {
+    if (applyPendingRef.current || receipt) return
     const key = allocationKey(candidate.id, allocation.splitId)
     invalidatePreview()
     setGlobalTreatment('')
@@ -335,7 +372,8 @@ export function ConsumptionBulkDialog({
         ...current,
         [key]: {
           key,
-          candidate,
+          candidateId: candidate.id,
+          transaction: { ...context.transaction },
           allocation,
           purchaseOptions: context.purchaseOptions,
           treatmentKey: '',
@@ -346,6 +384,7 @@ export function ConsumptionBulkDialog({
   }
 
   const updateSelected = (key: string, patch: Partial<SelectedAllocation>) => {
+    if (applyPendingRef.current || receipt) return
     invalidatePreview()
     setSelected((current) => ({
       ...current,
@@ -354,6 +393,7 @@ export function ConsumptionBulkDialog({
   }
 
   const applyGlobalTreatment = (value: string) => {
+    if (applyPendingRef.current || receipt) return
     invalidatePreview()
     setGlobalTreatment(value)
     if (!value) return
@@ -387,7 +427,7 @@ export function ConsumptionBulkDialog({
         return null
       }
       const owner = {
-        transactionId: row.candidate.id,
+        transactionId: row.candidateId,
         splitId: row.allocation.splitId,
         referencedPurchaseId: definition.requiresPurchase ? row.referencedPurchaseId : null,
       }
@@ -405,6 +445,7 @@ export function ConsumptionBulkDialog({
   }
 
   const requestPreview = async () => {
+    if (applyPendingRef.current || receipt) return
     if (selectedRows.length === 0) {
       setActionError(t('bulk.errors.selectionRequired'))
       return
@@ -441,7 +482,16 @@ export function ConsumptionBulkDialog({
   }
 
   const applyReviewed = async () => {
-    if (!reviewed || !confirmed || applyPending || receipt) return
+    if (
+      !reviewed ||
+      !reviewed.result.applicable ||
+      !reviewed.result.changed ||
+      !confirmed ||
+      applyPendingRef.current ||
+      receipt
+    )
+      return
+    applyPendingRef.current = true
     const reviewedSnapshot = reviewed
     const note = auditNote.trim()
     const session = sessionRef.current
@@ -453,11 +503,10 @@ export function ConsumptionBulkDialog({
         previewToken: reviewedSnapshot.result.previewToken,
         ...(note ? { auditNote: note } : {}),
       })
-      if (result.batchId) onChanged?.()
       if (session !== sessionRef.current) return
       setReceipt(result)
       setConfirmed(false)
-      setSelected({})
+      if (result.batchId) onChanged?.()
     } catch (error) {
       if (session !== sessionRef.current) return
       setActionError(getErrorMessage(error))
@@ -466,26 +515,45 @@ export function ConsumptionBulkDialog({
       inputVersionRef.current += 1
       previewRequestRef.current += 1
     } finally {
-      if (session === sessionRef.current) setApplyPending(false)
+      if (session === sessionRef.current) {
+        applyPendingRef.current = false
+        setApplyPending(false)
+      }
     }
   }
 
   const setAuditNoteValue = (value: string) => {
+    if (applyPendingRef.current || receipt) return
     invalidatePreview()
     setAuditNote(value)
   }
 
+  const editorLocked = applyPending || Boolean(receipt)
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen && applyPendingRef.current) return
+    onOpenChange(nextOpen)
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-1rem)] min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden p-4 sm:max-w-4xl sm:p-5">
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent
+        aria-busy={applyPending}
+        className="max-h-[calc(100dvh-1rem)] min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden p-4 sm:max-w-4xl sm:p-5"
+      >
         <DialogHeader className="min-w-0 pr-7 text-left">
           <DialogTitle className="break-words">{t('bulk.title')}</DialogTitle>
           <DialogDescription className="break-words">
             {t('bulk.description', { count: scope.length })}
           </DialogDescription>
+          <p className="sr-only" role="status" aria-live="polite">
+            {applyPending ? t('bulk.actions.applying') : ''}
+          </p>
         </DialogHeader>
 
-        <div className="min-h-0 min-w-0 space-y-4 overflow-y-auto overscroll-contain pr-1">
+        <fieldset
+          disabled={editorLocked}
+          className="m-0 min-h-0 min-w-0 space-y-4 overflow-y-auto overscroll-contain border-0 p-0 pr-1"
+        >
           <section aria-labelledby="bulk-picker-heading" className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-end justify-between gap-2">
               <div className="min-w-0">
@@ -504,6 +572,8 @@ export function ConsumptionBulkDialog({
             <div className="mt-2 space-y-2">
               {scope.map((candidate) => {
                 const context = contexts[candidate.id]
+                const source = context?.transaction ?? candidate
+                const sourceCurrency = normalizeNativeCurrency(source.currency)
                 const isExpanded = expanded.has(candidate.id)
                 const isLoading = contextLoading.has(candidate.id)
                 return (
@@ -523,14 +593,14 @@ export function ConsumptionBulkDialog({
                       )}
                       <span className="min-w-0 flex-1">
                         <span className="block text-sm font-medium break-words">
-                          {candidate.description}
+                          {source.description}
                         </span>
                         <span className="text-muted-foreground mt-0.5 block text-xs break-words">
-                          {candidate.date} · {candidate.currency} · {candidate.type}
+                          {source.date} · {sourceCurrency ?? '—'} · {source.type}
                         </span>
                       </span>
                       <span className="shrink-0 text-xs font-semibold break-all tabular-nums">
-                        {displayMoney(candidate.amount, candidate.currency)}
+                        {displayMoney(source.amount, sourceCurrency)}
                       </span>
                     </button>
 
@@ -603,7 +673,7 @@ export function ConsumptionBulkDialog({
                                   ) : null}
                                 </span>
                                 <span className="shrink-0 text-xs font-semibold break-all tabular-nums">
-                                  {displayMoney(allocation.amountCentavos, candidate.currency)}
+                                  {displayMoney(allocation.amountCentavos, sourceCurrency)}
                                 </span>
                               </label>
                             )
@@ -659,17 +729,17 @@ export function ConsumptionBulkDialog({
                       <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0">
                           <h4 className="text-sm font-medium break-words">
-                            {row.candidate.description}
+                            {row.transaction.description}
                           </h4>
                           <p className="text-muted-foreground text-xs break-words">
-                            {row.candidate.date} · {row.candidate.currency} ·{' '}
+                            {row.transaction.date} · {displayCurrency(row.transaction.currency)} ·{' '}
                             {row.allocation.splitId
                               ? t('bulk.candidates.splitId', { id: row.allocation.splitId })
                               : t('bulk.candidates.parent')}
                           </p>
                         </div>
                         <span className="shrink-0 text-xs font-semibold break-all tabular-nums">
-                          {displayMoney(row.allocation.amountCentavos, row.candidate.currency)}
+                          {displayMoney(row.allocation.amountCentavos, row.transaction.currency)}
                         </span>
                       </div>
                       <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">
@@ -722,7 +792,8 @@ export function ConsumptionBulkDialog({
                       </div>
                       {definition ? (
                         <p className="text-muted-foreground mt-2 text-xs break-words">
-                          {t(`bulk.direction.${definition.direction}`)} · {definition.guidance}
+                          {t(`bulk.direction.${definition.direction}`)} ·{' '}
+                          {t(`guidance.${definition.role}`)}
                           {definition.kind === 'custom'
                             ? ` · ${t('bulk.treatment.version', { version: definition.version })}`
                             : ''}
@@ -766,7 +837,7 @@ export function ConsumptionBulkDialog({
                     {t('bulk.preview.title')}
                   </h3>
                   <p className="text-muted-foreground mt-0.5 text-xs break-words">
-                    {reviewed.result.guidance}
+                    {t('bulk.preview.guidance')}
                   </p>
                 </div>
                 <span
@@ -851,7 +922,7 @@ export function ConsumptionBulkDialog({
               </div>
             </section>
           ) : null}
-        </div>
+        </fieldset>
 
         <DialogFooter className="border-border min-w-0 gap-2 border-t pt-3 sm:space-x-0">
           <Button
@@ -859,7 +930,7 @@ export function ConsumptionBulkDialog({
             variant="outline"
             className="min-h-11 w-full min-w-0 sm:w-auto"
             disabled={applyPending}
-            onClick={() => onOpenChange(false)}
+            onClick={() => handleOpenChange(false)}
           >
             {receipt ? t('bulk.actions.done') : t('bulk.actions.cancel')}
           </Button>

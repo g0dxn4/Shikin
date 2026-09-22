@@ -166,6 +166,7 @@
     },
     "preview": {
       "title": "Reviewed preview",
+      "guidance": "Review the server-resolved classification effects below. Amounts remain in each source transaction’s native currency.",
       "applicable": "Applicable",
       "invalid": "Needs changes",
       "globalErrors": "Batch validation",

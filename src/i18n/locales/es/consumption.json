@@ -166,6 +166,7 @@
     },
     "preview": {
       "title": "Vista previa revisada",
+      "guidance": "Revisa abajo los efectos de clasificación resueltos por el sistema. Los importes permanecen en la moneda nativa de cada transacción de origen.",
       "applicable": "Aplicable",
       "invalid": "Requiere cambios",
       "globalErrors": "Validación del lote",

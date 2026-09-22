@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ClassificationCatalogEntry } from '@shikin/finance-core'
+import esConsumption from '@/i18n/locales/es/consumption.json'
 import { ConsumptionBulkDialog, type ConsumptionBulkCandidate } from '../consumption-bulk-dialog'
 import {
   applyConsumptionClassifications,
@@ -11,9 +13,28 @@ import {
 } from '@/lib/classification-type-service'
 import { readConsumptionClassificationContext } from '@/lib/consumption-service'
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
-}))
+const translationState = vi.hoisted(() => ({ language: 'keys' as 'keys' | 'es' }))
+
+vi.mock('react-i18next', async () => {
+  const { default: spanish } = await import('@/i18n/locales/es/consumption.json')
+  return {
+    useTranslation: () => ({
+      t: (key: string) => {
+        if (
+          translationState.language !== 'es' ||
+          (!key.startsWith('guidance.') && key !== 'bulk.preview.guidance')
+        )
+          return key
+        let value: unknown = spanish
+        for (const segment of key.split('.')) {
+          if (!value || typeof value !== 'object') return key
+          value = (value as Record<string, unknown>)[segment]
+        }
+        return typeof value === 'string' ? value : key
+      },
+    }),
+  }
+})
 vi.mock('@/lib/classification-type-service', () => ({
   listClassificationTypes: vi.fn(),
   previewConsumptionClassifications: vi.fn(),
@@ -61,6 +82,7 @@ const catalog: ClassificationCatalogEntry[] = [
     direction: 'income',
     requiresPurchase: true,
   }),
+  definition({ id: 'asset_acquisition', role: 'asset_acquisition' }),
   definition({
     id: 'custom-loan',
     kind: 'custom',
@@ -209,6 +231,7 @@ function deferred<T>() {
 describe('ConsumptionBulkDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    translationState.language = 'keys'
     mockList.mockResolvedValue({
       definitions: catalog,
       types: [
@@ -288,6 +311,77 @@ describe('ConsumptionBulkDialog', () => {
     expect(screen.getAllByLabelText('bulk.treatment.override')).toHaveLength(1)
     expect(screen.getByText(/real-split-b/)).toBeVisible()
     expect(screen.queryByText(/real-split-a/, { selector: 'p' })).not.toBeInTheDocument()
+  })
+
+  it('uses fresh context facts and normalizes padded native currency for loaded allocations', async () => {
+    const staleCandidate: ConsumptionBulkCandidate = {
+      id: 'changed-owner',
+      description: 'Stale USD candidate',
+      date: '2026-03-01',
+      currency: 'USD',
+      type: 'income',
+      amount: 100,
+    }
+    mockRead.mockResolvedValueOnce({
+      ...splitContext,
+      transaction: {
+        id: 'changed-owner',
+        type: 'expense',
+        amount: 200,
+        currency: ' eur ',
+        description: 'Fresh EUR owner',
+        date: '2026-04-02',
+      },
+      allocations: [
+        {
+          transactionId: 'changed-owner',
+          splitId: 'fresh-split',
+          amountCentavos: 200,
+          categoryId: 'fresh-category',
+          categoryName: 'Fresh category',
+          classification: null,
+          classificationDisplay: null,
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    render(<ConsumptionBulkDialog open candidates={[staleCandidate]} onOpenChange={vi.fn()} />)
+
+    expect(screen.getByText('$1.00')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: /Stale USD candidate/ }))
+    const allocation = await screen.findByRole('checkbox')
+    expect(screen.getAllByText('€2.00').length).toBeGreaterThanOrEqual(2)
+
+    await user.click(allocation)
+    expect(screen.getAllByText('Fresh EUR owner').length).toBeGreaterThan(0)
+    expect(screen.getByText(/2026-04-02 · EUR · bulk.candidates.splitId/)).toBeVisible()
+    expect(screen.getAllByText('€2.00').length).toBeGreaterThanOrEqual(3)
+    expect(screen.queryByText('$2.00')).not.toBeInTheDocument()
+    expect(screen.queryByText(/200\s+eur/i)).not.toBeInTheDocument()
+  })
+
+  it('shows unavailable instead of treating unknown-currency centavos as currency units', () => {
+    mockList.mockReturnValueOnce(new Promise(() => {}))
+    render(
+      <ConsumptionBulkDialog
+        open
+        candidates={[
+          {
+            id: 'unknown-currency',
+            description: 'Unknown native currency',
+            date: '2026-04-03',
+            currency: 'foo',
+            type: 'expense',
+            amount: 100,
+          },
+        ]}
+        onOpenChange={vi.fn()}
+      />
+    )
+
+    const candidateButton = screen.getByRole('button', { name: /Unknown native currency/ })
+    expect(candidateButton).toHaveTextContent('—')
+    expect(candidateButton).not.toHaveTextContent(/100\s+foo|FOO\s*1[.,]00/i)
   })
 
   it('snapshots the visible page per open session and clears selection when reopened', async () => {
@@ -417,6 +511,154 @@ describe('ConsumptionBulkDialog', () => {
     expect(await screen.findByText('actual-assignment-id')).toBeVisible()
     expect(onChanged).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('button', { name: 'bulk.actions.apply' })).not.toBeInTheDocument()
+  })
+
+  it('freezes and cannot dismiss a pending apply, then restores focus from Done', async () => {
+    const apply = deferred<Awaited<ReturnType<typeof applyConsumptionClassifications>>>()
+    mockApply.mockReturnValueOnce(apply.promise)
+    const onChanged = vi.fn()
+    const onOpenChange = vi.fn()
+
+    function Harness() {
+      const [open, setOpen] = useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open bulk dialog
+          </button>
+          <ConsumptionBulkDialog
+            open={open}
+            candidates={[candidates[0]]}
+            onOpenChange={(nextOpen) => {
+              onOpenChange(nextOpen)
+              setOpen(nextOpen)
+            }}
+            onChanged={onChanged}
+          />
+        </>
+      )
+    }
+
+    const user = userEvent.setup()
+    render(<Harness />)
+    const opener = screen.getByRole('button', { name: 'Open bulk dialog' })
+    await user.click(opener)
+    await user.click(screen.getByRole('button', { name: /Split income record/ }))
+    const allocation = (await screen.findAllByRole('checkbox'))[0]
+    await user.click(allocation)
+    const treatment = screen.getByLabelText('bulk.treatment.override')
+    await user.selectOptions(treatment, 'builtin:refund')
+    const reference = screen.getByLabelText('bulk.treatment.purchase')
+    await user.selectOptions(reference, 'confirmed-purchase')
+    const note = screen.getByLabelText('bulk.auditNote.label')
+    await user.type(note, 'Immutable reviewed note')
+    await user.click(screen.getByRole('button', { name: 'bulk.actions.preview' }))
+    await user.click(await screen.findByLabelText('bulk.preview.confirm'))
+
+    const applyButton = screen.getByRole('button', { name: 'bulk.actions.apply' })
+    fireEvent.click(applyButton)
+    fireEvent.click(applyButton)
+
+    expect(mockApply).toHaveBeenCalledTimes(1)
+    expect(mockApply).toHaveBeenCalledWith({
+      targets: [
+        {
+          transactionId: 'split-income',
+          splitId: 'real-split-a',
+          referencedPurchaseId: 'confirmed-purchase',
+          builtinRole: 'refund',
+        },
+      ],
+      previewToken: 'review-token',
+      auditNote: 'Immutable reviewed note',
+    })
+    expect(onChanged).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog')).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByRole('status')).toHaveTextContent('bulk.actions.applying')
+    expect(allocation).toBeDisabled()
+    expect(treatment).toBeDisabled()
+    expect(reference).toBeDisabled()
+    expect(note).toBeDisabled()
+    expect(screen.getByLabelText('bulk.preview.confirm')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'bulk.actions.preview' })).toBeDisabled()
+
+    fireEvent.click(allocation)
+    fireEvent.change(treatment, { target: { value: 'builtin:purchase' } })
+    fireEvent.change(reference, { target: { value: '' } })
+    fireEvent.change(note, { target: { value: 'Changed while pending' } })
+    fireEvent.keyDown(document, { key: 'Escape' })
+    const overlay = screen.getByRole('dialog').previousElementSibling
+    expect(overlay).not.toBeNull()
+    fireEvent.pointerDown(overlay!, { button: 0, pointerType: 'mouse' })
+    fireEvent.click(overlay!)
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    expect(screen.getByRole('dialog')).toBeVisible()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+    expect(allocation).toBeChecked()
+    expect(treatment).toHaveValue('builtin:refund')
+    expect(reference).toHaveValue('confirmed-purchase')
+    expect(note).toHaveValue('Immutable reviewed note')
+    expect(mockApply).toHaveBeenCalledTimes(1)
+
+    apply.resolve({
+      ...previewResult(),
+      batchId: 'batch-locked',
+      items: [
+        {
+          ...previewResult().items[0],
+          after: {
+            id: 'locked-assignment-id',
+            transaction_id: 'split-income',
+            split_id: 'real-split-a',
+            role: 'refund',
+            referenced_purchase_id: 'confirmed-purchase',
+            type_revision_id: null,
+          },
+        },
+      ],
+    })
+
+    expect(await screen.findByText('locked-assignment-id')).toBeVisible()
+    expect(onChanged).toHaveBeenCalledTimes(1)
+    expect(allocation).toBeDisabled()
+    expect(treatment).toBeDisabled()
+    expect(reference).toBeDisabled()
+    expect(note).toBeDisabled()
+    const done = screen.getByRole('button', { name: 'bulk.actions.done' })
+    expect(done).toBeEnabled()
+    await user.click(done)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(opener).toHaveFocus()
+  })
+
+  it('localizes fixed-role and generic preview guidance in Spanish while preserving custom names', async () => {
+    translationState.language = 'es'
+    const user = userEvent.setup()
+    render(<ConsumptionBulkDialog open candidates={[candidates[0]]} onOpenChange={vi.fn()} />)
+    await user.click(screen.getByRole('button', { name: /Split income record/ }))
+    await user.click((await screen.findAllByRole('checkbox'))[0])
+    await user.selectOptions(
+      screen.getByLabelText('bulk.treatment.override'),
+      'custom:custom-loan:revision-7'
+    )
+
+    expect(
+      screen.getByText(esConsumption.guidance.principal_recovery, { exact: false })
+    ).toBeVisible()
+    expect(screen.getAllByRole('option', { name: /Family loan return/ }).length).toBeGreaterThan(0)
+
+    await user.selectOptions(
+      screen.getByLabelText('bulk.treatment.override'),
+      'builtin:asset_acquisition'
+    )
+    expect(
+      screen.getByText(esConsumption.guidance.asset_acquisition, { exact: false })
+    ).toBeVisible()
+
+    await user.click(screen.getByRole('button', { name: 'bulk.actions.preview' }))
+    expect(await screen.findByText(esConsumption.bulk.preview.guidance)).toBeVisible()
+    expect(screen.queryByText('Review the server-resolved effects.')).not.toBeInTheDocument()
   })
 
   it('suppresses a delayed preview after the dialog session closes', async () => {

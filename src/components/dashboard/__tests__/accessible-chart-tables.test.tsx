@@ -6,6 +6,7 @@ import { SpendingPacePanel } from '@/components/dashboard/spending-pace-panel'
 import { SpendingTrendPanel } from '@/components/dashboard/spending-trend-panel'
 import type {
   CategoriesResult,
+  ConversionState,
   PaceResult,
   TrendMonth,
   TrendResult,
@@ -32,11 +33,11 @@ vi.mock('recharts', () => ({
   Legend: () => null,
 }))
 
-const conversion = { kind: 'complete', currency: 'USD', missingCurrencies: [] } as const
+const conversion: ConversionState = { kind: 'complete', currency: 'USD', missingCurrencies: [] }
 
 function expectAccessibleTable(container: HTMLElement, id: string, caption: string) {
   const chart = container.querySelector(`[aria-describedby="${id}"]`)
-  const table = within(container).getByRole('table', { name: caption })
+  const table = within(container).getByRole<HTMLTableElement>('table', { name: caption })
   const wrapper = table.parentElement
 
   expect(chart).toHaveAttribute('aria-describedby', id)

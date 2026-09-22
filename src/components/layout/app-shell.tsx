@@ -1,12 +1,11 @@
 import { lazy, Suspense, useEffect, useRef } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router'
+import { Outlet, useLocation } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { Sidebar } from './sidebar'
 import { BottomNav } from './bottom-nav'
-import { getNavigationGroup, getNavigationRoute } from './navigation-model'
+import { getNavigationRoute } from './navigation-model'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { TauriTitleBar } from '@/components/layout/tauri-title-bar'
-import { cn } from '@/lib/utils'
 
 const AccountDialog = lazy(() =>
   import('@/components/accounts/account-dialog').then((module) => ({
@@ -35,7 +34,6 @@ export function AppShell() {
   const { pathname } = useLocation()
   const mainRef = useRef<HTMLElement>(null)
   const route = getNavigationRoute(pathname)
-  const group = getNavigationGroup(pathname)
   const routeLabel = t(route.labelKey, route.fallbackLabel)
 
   useEffect(() => {
@@ -55,26 +53,8 @@ export function AppShell() {
       </a>
       <TauriTitleBar />
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <Sidebar />
+        <Sidebar key={pathname} />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {group.routes.length > 1 ? (
-            <nav
-              className="native-subnav"
-              aria-label={t('navigation.section', {
-                section: t(group.labelKey, group.fallbackLabel),
-              })}
-            >
-              {group.routes.map((item) => (
-                <NavLink
-                  key={item.path}
-                  to={item.path}
-                  className={({ isActive }) => cn('subnav-link', isActive && 'subnav-link-active')}
-                >
-                  {t(item.labelKey, item.fallbackLabel)}
-                </NavLink>
-              ))}
-            </nav>
-          ) : null}
           <main
             key={pathname}
             id="main-content"

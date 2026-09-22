@@ -131,6 +131,9 @@
     "moreShort": "More",
     "allDestinations": "All destinations",
     "allDestinationsDescription": "Every Shikin page, grouped by section.",
+    "expandGroup": "Expand {{section}}",
+    "collapseGroup": "Collapse {{section}}",
+    "manageCategories": "Manage categories",
     "section": "{{section}} section navigation",
     "skipToContent": "Skip to main content"
   },

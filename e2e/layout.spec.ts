@@ -42,10 +42,14 @@ test.describe('desktop layout', () => {
     await expect(sidebar.getByText('Transactions')).toBeVisible()
   })
 
-  test('settings link is available in sidebar', async ({ page }) => {
+  test('settings destinations are available from the sidebar group', async ({ page }) => {
     const sidebar = page.locator('aside').first()
+    const settings = sidebar.getByRole('button', { name: 'Settings' })
 
-    await expect(sidebar.getByRole('link', { name: 'Settings' })).toBeVisible()
+    await expect(settings).toBeVisible()
+    await settings.click()
+    await expect(sidebar.getByRole('link', { name: 'Preferences' })).toBeVisible()
+    await expect(sidebar.getByRole('link', { name: 'Categories' })).toBeVisible()
   })
 
   test('page content renders in scrollable main area', async ({ page }) => {

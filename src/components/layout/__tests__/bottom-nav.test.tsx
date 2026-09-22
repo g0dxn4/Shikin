@@ -39,7 +39,6 @@ describe('BottomNav', () => {
   })
 
   it.each([
-    ['/categories', 'Transactions'],
     ['/investments', 'Accounts'],
     ['/receivables', 'Accounts'],
   ])('keeps the primary group active on %s', (path, group) => {
@@ -56,14 +55,32 @@ describe('BottomNav', () => {
     )
   })
 
-  it('marks More active for a route outside the three primary groups', () => {
+  it.each(['/reports', '/categories'])('marks More active for the non-primary route %s', (path) => {
     render(
       <MemoryRouter>
-        <BottomNav activeHref="/reports" />
+        <BottomNav activeHref={path} />
       </MemoryRouter>
     )
 
     expect(screen.getByRole('button', { name: 'More pages' })).toHaveClass('bottom-nav-link-active')
+    expect(screen.getByRole('link', { name: 'Transactions' })).not.toHaveAttribute('aria-current')
+  })
+
+  it('shows Categories as the current destination in the Settings section', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter>
+        <BottomNav activeHref="/categories" />
+      </MemoryRouter>
+    )
+
+    await user.click(screen.getByRole('button', { name: 'More pages' }))
+    const dialog = await screen.findByRole('dialog')
+    const settingsGroup = within(dialog).getByRole('region', { name: 'Settings' })
+    expect(within(settingsGroup).getByRole('link', { name: 'Categories' })).toHaveAttribute(
+      'aria-current',
+      'page'
+    )
   })
 
   it('exposes all 19 routes in grouped More navigation', async () => {
@@ -79,6 +96,11 @@ describe('BottomNav', () => {
     const destinations = within(dialog).getAllByRole('link')
     expect(destinations).toHaveLength(19)
     expect(within(dialog).getByRole('heading', { name: 'Planning' })).toBeInTheDocument()
+    const settingsGroup = within(dialog).getByRole('region', { name: 'Settings' })
+    expect(within(settingsGroup).getByRole('link', { name: 'Categories' })).toHaveAttribute(
+      'href',
+      '/categories'
+    )
     expect(within(dialog).getByRole('link', { name: 'Bill calendar' })).toHaveAttribute(
       'aria-current',
       'page'

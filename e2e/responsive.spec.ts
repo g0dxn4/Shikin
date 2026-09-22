@@ -58,6 +58,32 @@ test.describe('mobile viewport', () => {
     await expect(page.locator('.native-topbar')).toHaveCount(0)
     await expect(page.getByRole('heading', { level: 1 })).toHaveClass(/sr-only/)
   })
+
+  test('mobile: More remains bounded and scrollable at narrow, short, large-text sizes', async ({
+    page,
+  }) => {
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 480 })
+      await page.goto('/')
+      await page.evaluate(() => {
+        document.documentElement.style.fontSize = '20px'
+      })
+
+      await page.getByRole('button', { name: 'More pages' }).click()
+      const more = page.getByRole('dialog')
+      await expect(more.getByRole('link')).toHaveCount(19)
+      await expect(more.getByRole('link', { name: 'Spending Insights' })).toBeVisible()
+
+      const overflow = await page.evaluate(() => ({
+        documentWidth: document.documentElement.scrollWidth,
+        viewportWidth: document.documentElement.clientWidth,
+      }))
+      expect(overflow.documentWidth).toBeLessThanOrEqual(overflow.viewportWidth)
+      await expect(more).toHaveCSS('overflow-y', 'auto')
+
+      await page.keyboard.press('Escape')
+    }
+  })
 })
 
 test.describe('desktop viewport', () => {

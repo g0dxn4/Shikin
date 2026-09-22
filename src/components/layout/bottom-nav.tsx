@@ -73,7 +73,7 @@ export function BottomNav({ activeHref }: BottomNavProps) {
                 >
                   {t(group.labelKey, group.fallbackLabel)}
                 </h3>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-2">
                   {group.routes.map((route) => {
                     const active = route.path === activeHref
                     const Icon = route.icon

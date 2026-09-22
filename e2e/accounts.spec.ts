@@ -13,9 +13,7 @@ test.describe('Accounts', () => {
     await expect(page.locator('.native-topbar')).toHaveCount(0)
     await expect(page.getByRole('heading', { level: 1, name: 'Accounts' })).toHaveClass(/sr-only/)
     await expect(page.getByRole('button', { name: /Add Account/i }).first()).toBeVisible()
-    await expect(
-      page.getByRole('navigation', { name: 'Accounts section navigation' })
-    ).toBeVisible()
+    await expect(page.locator('.native-subnav')).toHaveCount(0)
   })
 
   test('shows empty state without data', async ({ page }) => {

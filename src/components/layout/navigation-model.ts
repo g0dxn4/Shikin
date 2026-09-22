@@ -70,12 +70,6 @@ export const NAVIGATION_GROUPS: readonly NavigationGroup[] = [
         fallbackLabel: 'Transactions',
         icon: ReceiptText,
       },
-      {
-        path: '/categories',
-        labelKey: 'nav.categories',
-        fallbackLabel: 'Categories',
-        icon: Tags,
-      },
     ],
   },
   {
@@ -176,6 +170,12 @@ export const NAVIGATION_GROUPS: readonly NavigationGroup[] = [
         labelKey: 'nav.preferences',
         fallbackLabel: 'Preferences',
         icon: Settings,
+      },
+      {
+        path: '/categories',
+        labelKey: 'nav.categories',
+        fallbackLabel: 'Categories',
+        icon: Tags,
       },
       {
         path: '/extensions',

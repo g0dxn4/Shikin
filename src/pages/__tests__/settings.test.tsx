@@ -31,6 +31,14 @@ vi.mock('react-i18next', () => ({
   }),
 }))
 
+vi.mock('react-router', () => ({
+  Link: ({ children, to, ...props }: React.ComponentProps<'a'> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
+}))
+
 vi.mock('sonner', () => ({
   toast: {
     success: (...args: unknown[]) => mockToastSuccess(...args),
@@ -138,6 +146,10 @@ describe('SettingsPage', () => {
     expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
     expect(screen.getByText('settingsDescription')).toBeInTheDocument()
     expect(screen.getByText('sections.general')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'navigation.manageCategories' })).toHaveAttribute(
+      'href',
+      '/categories'
+    )
     expect(await screen.findByText('0.1.0')).toBeInTheDocument()
   })
 

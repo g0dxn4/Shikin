@@ -39,8 +39,11 @@ contracts in `src/lib/constants.ts`.
 
 - Desktop uses a full-height 216px sidebar, collapsing persistently to 72px.
 - The sidebar exposes six groups: Overview, Transactions, Accounts, Planning, Insights, Settings.
-- The shell keeps one screen-reader-only route `h1`; do not add a visible title-only header bar.
-  Multi-route groups expose contextual tabs at the top. Overview has no empty header or one-item tabs.
+  Multi-route groups expand to show indented destinations, including the group home route. The 72px
+  rail keeps every group reachable and expands before revealing a multi-route group's destinations.
+- The shell keeps one screen-reader-only route `h1`; do not add a visible title-only header bar or
+  cross-page tab row. Tabs are reserved for switching views within one page; route navigation belongs
+  in the sidebar and the grouped mobile More sheet.
 - Overview's full-width finance panel offers Summary, History, and Compare accounts views rather
   than a permanent left-summary/right-chart split. Keep account comparisons based on recorded
   balance history with explicit dates, currency conversion, and missing-data states.

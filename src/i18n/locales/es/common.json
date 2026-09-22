@@ -131,6 +131,9 @@
     "moreShort": "Más",
     "allDestinations": "Todos los destinos",
     "allDestinationsDescription": "Todas las páginas de Shikin, agrupadas por sección.",
+    "expandGroup": "Expandir {{section}}",
+    "collapseGroup": "Contraer {{section}}",
+    "manageCategories": "Gestionar categorías",
     "section": "Navegación de la sección {{section}}",
     "skipToContent": "Saltar al contenido principal"
   },

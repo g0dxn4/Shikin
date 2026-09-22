@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Sidebar } from '../sidebar'
 import { SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_WIDTH } from '@/lib/constants'
@@ -15,6 +15,8 @@ vi.mock('react-i18next', () => ({
       ({
         'navigation.primary': 'Primary navigation',
         'navigation.main': 'Main navigation',
+        'navigation.expandGroup': 'Expand group',
+        'navigation.collapseGroup': 'Collapse group',
         'sidebar.expand': 'Expand sidebar',
         'sidebar.collapse': 'Collapse sidebar',
         'app.tagline': 'Personal finance',
@@ -66,19 +68,14 @@ describe('Sidebar', () => {
     mockPathname = '/'
   })
 
-  it('renders the six desktop navigation groups', () => {
+  it('renders six top-level groups with multi-route groups as disclosure buttons', () => {
     render(<Sidebar />)
 
-    expect(screen.getAllByRole('link')).toHaveLength(6)
-    for (const label of [
-      'Overview',
-      'Transactions',
-      'Accounts',
-      'Planning',
-      'Insights',
-      'Settings',
-    ]) {
-      expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Overview' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Transactions' })).toBeInTheDocument()
+    for (const label of ['Accounts', 'Planning', 'Insights', 'Settings']) {
+      expect(screen.getByRole('button', { name: label })).toHaveAttribute('aria-expanded', 'false')
+      expect(screen.getByRole('button', { name: label })).toHaveAttribute('aria-controls')
     }
   })
 
@@ -93,15 +90,70 @@ describe('Sidebar', () => {
     })
   })
 
-  it('shows labels when expanded and accessible icon links when collapsed', () => {
-    const { rerender } = render(<Sidebar />)
-    expect(screen.getByText('Shikin')).toBeInTheDocument()
-    expect(screen.getByText('Overview')).toBeInTheDocument()
+  it('expands a group from the keyboard and exposes its indented home route', async () => {
+    const user = userEvent.setup()
+    render(<Sidebar />)
 
-    mockSidebarCollapsed = true
+    const planning = screen.getByRole('button', { name: 'Planning' })
+    planning.focus()
+    await user.keyboard('{Enter}')
+
+    expect(planning).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('link', { name: 'Budgets' })).toHaveAttribute('href', '/budgets')
+    expect(screen.getByRole('link', { name: 'Bill calendar' })).toHaveClass('sidebar-child-link')
+  })
+
+  it('opens the active group, marks the actual route current, and keeps a collapsed group active', async () => {
+    const user = userEvent.setup()
+    mockPathname = '/categories'
+    render(<Sidebar />)
+
+    const settings = screen.getByRole('button', { name: 'Settings' })
+    expect(settings).toHaveAttribute('aria-expanded', 'true')
+    expect(settings).toHaveClass('sidebar-group-active')
+    expect(screen.getByRole('link', { name: 'Categories' })).toHaveAttribute('aria-current', 'page')
+
+    await user.click(settings)
+    expect(settings).toHaveAttribute('aria-expanded', 'false')
+    expect(settings).toHaveClass('sidebar-group-active')
+    expect(screen.queryByRole('link', { name: 'Categories' })).not.toBeInTheDocument()
+  })
+
+  it('reopens the active group when navigation changes within that group', async () => {
+    const user = userEvent.setup()
+    mockPathname = '/bills'
+    const { rerender } = render(<Sidebar />)
+
+    const planning = screen.getByRole('button', { name: 'Planning' })
+    await user.click(planning)
+    expect(planning).toHaveAttribute('aria-expanded', 'false')
+
+    mockPathname = '/forecast'
     rerender(<Sidebar />)
+
+    await waitFor(() => expect(planning).toHaveAttribute('aria-expanded', 'true'))
+    expect(screen.getByRole('link', { name: 'Forecast' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('expands the narrow rail before revealing a multi-route group', async () => {
+    const user = userEvent.setup()
+    mockSidebarCollapsed = true
+    const { rerender } = render(<Sidebar />)
+
     expect(screen.queryByText('Shikin')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('Overview')).toHaveAttribute('href', '/')
+    const accounts = screen.getByRole('button', { name: 'Accounts' })
+    expect(accounts).toHaveAttribute('aria-expanded', 'false')
+
+    await user.click(accounts)
+    expect(mockToggleSidebar).toHaveBeenCalledOnce()
+
+    mockSidebarCollapsed = false
+    rerender(<Sidebar />)
+    expect(screen.getByRole('button', { name: 'Accounts' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    )
+    expect(screen.getByRole('link', { name: 'Accounts' })).toHaveAttribute('href', '/accounts')
   })
 
   it('uses a labelled footer collapse control', async () => {
@@ -112,12 +164,5 @@ describe('Sidebar', () => {
     expect(button).toHaveAttribute('aria-expanded', 'true')
     await user.click(button)
     expect(mockToggleSidebar).toHaveBeenCalledOnce()
-  })
-
-  it('marks a group active for one of its contextual routes', () => {
-    mockPathname = '/spending-heatmap'
-    render(<Sidebar />)
-
-    expect(screen.getByRole('link', { name: 'Insights' })).toHaveAttribute('aria-current', 'page')
   })
 })

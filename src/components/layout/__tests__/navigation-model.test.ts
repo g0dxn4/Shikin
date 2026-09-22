@@ -9,7 +9,6 @@ import {
 const EXPECTED_ROUTES = [
   '/',
   '/transactions',
-  '/categories',
   '/accounts',
   '/investments',
   '/receivables',
@@ -25,6 +24,7 @@ const EXPECTED_ROUTES = [
   '/spending-insights',
   '/spending-heatmap',
   '/settings',
+  '/categories',
   '/extensions',
 ]
 
@@ -42,9 +42,19 @@ describe('navigation model', () => {
     expect(new Set(NAVIGATION_ROUTES.map((route) => route.path)).size).toBe(19)
   })
 
-  it('resolves route titles and active groups', () => {
+  it('places Categories under Settings and resolves active groups', () => {
+    const transactions = NAVIGATION_GROUPS.find((group) => group.id === 'transactions')
+    const settings = NAVIGATION_GROUPS.find((group) => group.id === 'settings')
+
+    expect(transactions?.routes.map((route) => route.path)).toEqual(['/transactions'])
+    expect(settings?.routes.map((route) => route.path)).toEqual([
+      '/settings',
+      '/categories',
+      '/extensions',
+    ])
     expect(getNavigationRoute('/bill-calendar').fallbackLabel).toBe('Bill calendar')
     expect(getNavigationGroup('/bill-calendar').id).toBe('planning')
+    expect(getNavigationGroup('/categories').id).toBe('settings')
     expect(getNavigationGroup('/extensions').id).toBe('settings')
   })
 })

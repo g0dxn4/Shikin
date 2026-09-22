@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import type { ReactNode } from 'react'
 import { AppShell } from '../app-shell'
 
 let mockPathname = '/'
@@ -18,24 +17,6 @@ vi.mock('react-i18next', () => ({
 vi.mock('react-router', () => ({
   Outlet: () => <div data-testid="outlet">Outlet Content</div>,
   useLocation: () => ({ pathname: mockPathname }),
-  NavLink: ({
-    children,
-    to,
-    className,
-  }: {
-    children: ReactNode
-    to: string
-    className: string | ((state: { isActive: boolean }) => string)
-  }) => (
-    <a
-      href={to}
-      className={
-        typeof className === 'function' ? className({ isActive: to === mockPathname }) : className
-      }
-    >
-      {children}
-    </a>
-  ),
 }))
 
 vi.mock('../bottom-nav', () => ({
@@ -66,25 +47,17 @@ describe('AppShell', () => {
     expect(screen.getByTestId('outlet')).toBeInTheDocument()
   })
 
-  it('omits the redundant one-item Overview tab row', () => {
-    render(<AppShell />)
-    expect(screen.queryByRole('navigation', { name: /Overview section/ })).not.toBeInTheDocument()
+  it('does not render shell cross-page tabs on single or multi-route sections', () => {
+    const { rerender } = render(<AppShell />)
     expect(document.querySelector('.native-topbar')).not.toBeInTheDocument()
     expect(document.querySelector('.native-subnav')).not.toBeInTheDocument()
-  })
 
-  it('renders contextual tabs with proper active state', () => {
     mockPathname = '/categories'
-    render(<AppShell />)
+    rerender(<AppShell />)
 
-    const sectionNav = screen.getByRole('navigation', { name: 'Transactions section navigation' })
     const heading = screen.getByRole('heading', { level: 1, name: 'Categories' })
-    expect(heading).toBeInTheDocument()
     expect(heading).toHaveClass('sr-only')
-    expect(document.querySelector('.native-topbar')).not.toBeInTheDocument()
-    expect(sectionNav).toBeInTheDocument()
-    expect(sectionNav).toHaveClass('native-subnav')
-    expect(screen.getByRole('link', { name: 'Categories' })).toHaveClass('subnav-link-active')
+    expect(document.querySelector('.native-subnav')).not.toBeInTheDocument()
     expect(screen.getByRole('main')).toHaveAccessibleName('Categories')
   })
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
@@ -351,7 +352,16 @@ export function SettingsPage() {
 
   return (
     <div className="page-content">
-      <p className="text-muted-foreground max-w-2xl text-sm">{t('settingsDescription')}</p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-muted-foreground max-w-2xl text-sm">{t('settingsDescription')}</p>
+        <Link
+          to="/categories"
+          className="border-border text-foreground hover:bg-muted focus-visible:ring-ring inline-flex min-h-9 items-center gap-2 rounded-lg border px-3 text-xs font-medium focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+        >
+          <Tags size={15} aria-hidden="true" />
+          {tCommon('navigation.manageCategories')}
+        </Link>
+      </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.85fr_1.15fr]">
         <section className="native-panel space-y-5 p-5 sm:p-6">

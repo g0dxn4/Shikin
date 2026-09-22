@@ -31,33 +31,47 @@ test.beforeEach(async ({ page }) => {
 test.describe('desktop native navigation', () => {
   test.skip(({ isMobile }) => isMobile, 'Desktop sidebar is hidden on mobile')
 
-  test('shows six groups and contextual section tabs', async ({ page }) => {
+  test('shows six groups with expandable children and no shell tabs', async ({ page }) => {
     const sidebar = page.getByRole('complementary', { name: 'Primary navigation' })
-    await expect(sidebar.getByRole('link')).toHaveCount(6)
-    for (const label of [
-      'Overview',
-      'Transactions',
-      'Accounts',
-      'Planning',
-      'Insights',
-      'Settings',
-    ]) {
-      await expect(sidebar.getByRole('link', { name: label })).toBeVisible()
+    await expect(sidebar.getByRole('link', { name: 'Overview' })).toBeVisible()
+    await expect(sidebar.getByRole('link', { name: 'Transactions' })).toBeVisible()
+    for (const label of ['Accounts', 'Planning', 'Insights', 'Settings']) {
+      await expect(sidebar.getByRole('button', { name: label })).toHaveAttribute(
+        'aria-expanded',
+        'false'
+      )
     }
 
-    await sidebar.getByRole('link', { name: 'Transactions' }).click()
-    await page.waitForURL('/transactions')
-    const tabs = page.getByRole('navigation', { name: 'Transactions section navigation' })
-    await expect(page.locator('.native-topbar')).toHaveCount(0)
-    await tabs.getByRole('link', { name: 'Categories' }).click()
+    const settings = sidebar.getByRole('button', { name: 'Settings' })
+    await settings.press('Enter')
+    await expect(settings).toHaveAttribute('aria-expanded', 'true')
+    await sidebar.getByRole('link', { name: 'Categories' }).click()
     await page.waitForURL('/categories')
+
     const heading = page.getByRole('heading', { level: 1, name: 'Categories' })
     await expect(heading).toHaveClass(/sr-only/)
-    await expect(tabs).toBeVisible()
-    await expect(sidebar.getByRole('link', { name: 'Transactions' })).toHaveAttribute(
+    await expect(page.locator('.native-subnav')).toHaveCount(0)
+    await expect(settings).toHaveClass(/sidebar-group-active/)
+    await expect(sidebar.getByRole('link', { name: 'Categories' })).toHaveAttribute(
       'aria-current',
       'page'
     )
+  })
+
+  test('a collapsed rail expands before opening multi-route destinations', async ({ page }) => {
+    const sidebar = page.getByRole('complementary', { name: 'Primary navigation' })
+    await sidebar.getByRole('button', { name: 'Collapse sidebar' }).click()
+
+    const planning = sidebar.getByRole('button', { name: 'Planning' })
+    await expect(planning).toHaveAttribute('aria-expanded', 'false')
+    await planning.click()
+
+    await expect(sidebar.getByRole('button', { name: 'Collapse sidebar' })).toBeVisible()
+    await expect(sidebar.getByRole('button', { name: 'Planning' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    )
+    await expect(sidebar.getByRole('link', { name: 'Budgets' })).toBeVisible()
   })
 
   test('all 19 routes expose the shell title and browser history remains functional', async ({
@@ -88,7 +102,6 @@ test.describe('mobile native navigation', () => {
   test('keeps primary groups active on their contextual pages', async ({ page }) => {
     const bottomNav = page.getByRole('navigation', { name: 'Mobile primary navigation' })
     for (const [path, group] of [
-      ['/categories', 'Transactions'],
       ['/investments', 'Accounts'],
       ['/receivables', 'Accounts'],
     ]) {
@@ -123,6 +136,12 @@ test.describe('mobile native navigation', () => {
     ]) {
       await expect(more.getByRole('heading', { name: group })).toBeVisible()
     }
+
+    const settingsGroup = more.getByRole('region', { name: 'Settings' })
+    await expect(settingsGroup.getByRole('link', { name: 'Categories' })).toHaveAttribute(
+      'href',
+      '/categories'
+    )
 
     await more.getByRole('link', { name: 'Extensions' }).click()
     await page.waitForURL('/extensions')

@@ -3,9 +3,23 @@ import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
-import { useOverlayFocusRestoration } from './use-overlay-focus-restoration'
+import {
+  OverlayFocusRestorationProvider,
+  useOverlayFocusRestoration,
+  useOverlayRootFocusRestoration,
+} from './use-overlay-focus-restoration'
 
-const Dialog = DialogPrimitive.Root
+type DialogProps = React.ComponentPropsWithoutRef<typeof DialogPrimitive.Root>
+
+const Dialog = ({ open, onOpenChange, ...props }: DialogProps) => {
+  const focusRestoration = useOverlayRootFocusRestoration(onOpenChange)
+
+  return (
+    <OverlayFocusRestorationProvider open={open} focusStore={focusRestoration.focusStore}>
+      <DialogPrimitive.Root open={open} onOpenChange={focusRestoration.onOpenChange} {...props} />
+    </OverlayFocusRestorationProvider>
+  )
+}
 
 const DialogPortal = DialogPrimitive.Portal
 

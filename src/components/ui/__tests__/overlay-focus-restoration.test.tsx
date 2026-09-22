@@ -21,7 +21,7 @@ function ControlledDialog() {
         <DialogContent>
           <DialogTitle>Example dialog</DialogTitle>
           <DialogDescription>Dialog used to verify focus restoration.</DialogDescription>
-          <button>Dialog action</button>
+          <input aria-label="Dialog field" autoFocus />
         </DialogContent>
       </Dialog>
     </>
@@ -34,34 +34,38 @@ function ControlledSheet() {
   return (
     <>
       <button onClick={() => setOpen(true)}>Open sheet</button>
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent>
-          <SheetTitle>Example sheet</SheetTitle>
-          <SheetDescription>Sheet used to verify focus restoration.</SheetDescription>
-          <button>Sheet action</button>
-        </SheetContent>
-      </Sheet>
+      {open ? (
+        <Sheet open={open} onOpenChange={setOpen}>
+          <SheetContent>
+            <SheetTitle>Example sheet</SheetTitle>
+            <SheetDescription>Sheet used to verify focus restoration.</SheetDescription>
+            <input aria-label="Sheet field" autoFocus />
+          </SheetContent>
+        </Sheet>
+      ) : null}
     </>
   )
 }
 
 describe('overlay focus restoration', () => {
   it.each([
-    ['dialog', ControlledDialog, 'Open dialog'],
-    ['sheet', ControlledSheet, 'Open sheet'],
+    ['dialog', ControlledDialog, 'Open dialog', 'Dialog field'],
+    ['sheet', ControlledSheet, 'Open sheet', 'Sheet field'],
   ])(
-    'restores a controlled %s to its actual opener after X and Escape',
-    async (_, Overlay, label) => {
+    'restores a controlled %s to its actual opener after descendant autofocus and X or Escape',
+    async (_, Overlay, label, fieldLabel) => {
       const user = userEvent.setup()
       render(<Overlay />)
 
       const opener = screen.getByRole('button', { name: label })
       await user.click(opener)
+      expect(screen.getByRole('textbox', { name: fieldLabel })).toHaveFocus()
       await user.click(screen.getByRole('button', { name: 'Close' }))
 
       await waitFor(() => expect(opener).toHaveFocus())
 
       await user.click(opener)
+      expect(screen.getByRole('textbox', { name: fieldLabel })).toHaveFocus()
       await user.keyboard('{Escape}')
 
       await waitFor(() => expect(opener).toHaveFocus())

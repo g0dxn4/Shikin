@@ -4,9 +4,23 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import { X } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
-import { useOverlayFocusRestoration } from './use-overlay-focus-restoration'
+import {
+  OverlayFocusRestorationProvider,
+  useOverlayFocusRestoration,
+  useOverlayRootFocusRestoration,
+} from './use-overlay-focus-restoration'
 
-const Sheet = SheetPrimitive.Root
+type SheetProps = React.ComponentPropsWithoutRef<typeof SheetPrimitive.Root>
+
+const Sheet = ({ open, onOpenChange, ...props }: SheetProps) => {
+  const focusRestoration = useOverlayRootFocusRestoration(onOpenChange)
+
+  return (
+    <OverlayFocusRestorationProvider open={open} focusStore={focusRestoration.focusStore}>
+      <SheetPrimitive.Root open={open} onOpenChange={focusRestoration.onOpenChange} {...props} />
+    </OverlayFocusRestorationProvider>
+  )
+}
 
 const SheetTrigger = SheetPrimitive.Trigger
 

@@ -279,7 +279,10 @@ function seedDatabase({
   seedTransactionStatusTriggers(db)
   applyFinancialSemanticsTestSchema(db)
 
-  for (const migration of CLI_DATABASE_MIGRATIONS.slice(0, -1)) {
+  // This fixture supplies the pre-021 schema; the helper installs the complete 021+ tail.
+  for (const migration of CLI_DATABASE_MIGRATIONS.filter(
+    (name) => Number.parseInt(name, 10) < 21
+  )) {
     db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(
       Number(migration.slice(0, 3)),
       migration

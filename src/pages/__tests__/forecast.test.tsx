@@ -88,6 +88,26 @@ describe('Forecast native view', () => {
     expect(screen.queryByText('metrics.currentBalance')).not.toBeInTheDocument()
     expect(screen.queryByText('danger.noDanger')).not.toBeInTheDocument()
   })
+  it('separates recurring-cost columns with gutters and local horizontal scrolling', async () => {
+    render(<Forecast />)
+    const amountHeader = await screen.findByRole('columnheader', { name: 'table.amount' })
+    const frequencyHeader = screen.getByRole('columnheader', { name: 'table.frequency' })
+    const nextDateHeader = screen.getByRole('columnheader', { name: 'table.nextDate' })
+    const table = amountHeader.closest('table')
+    expect(table).not.toBeNull()
+    expect(table?.className).toMatch(/w-max/)
+    expect(table?.className).toMatch(/min-w-full/)
+    expect(table?.parentElement?.className).toMatch(/overflow-x-auto/)
+    expect(table?.parentElement?.className).toMatch(/max-w-full/)
+    for (const header of [amountHeader, frequencyHeader, nextDateHeader]) {
+      expect(header.className).toMatch(/px-3/)
+      expect(header.className).toMatch(/whitespace-nowrap/)
+    }
+    const amountCell = screen.getByText('€12.34')
+    expect(amountCell.className).toMatch(/px-3/)
+    expect(amountCell.className).toMatch(/whitespace-nowrap/)
+  })
+
   it('surfaces forecast and subscriptions read errors', async () => {
     vi.mocked(generateCashFlowForecast).mockRejectedValue(new Error('Forecast read failed'))
     vi.mocked(query).mockRejectedValue(new Error('Subscription read failed'))

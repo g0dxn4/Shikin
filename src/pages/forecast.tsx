@@ -344,20 +344,20 @@ function SubscriptionsTable({ accountId }: { accountId?: string }) {
       {subscriptions.length === 0 ? (
         <p className="text-muted-foreground text-sm">{t('table.noSubscriptions')}</p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="max-w-full overflow-x-auto">
+          <table className="w-max min-w-full text-sm">
             <thead>
               <tr className="text-muted-foreground border-border border-b text-left text-xs">
-                <th scope="col" className="pb-2 font-medium">
+                <th scope="col" className="px-3 py-2 font-medium whitespace-nowrap">
                   {t('table.name')}
                 </th>
-                <th scope="col" className="pb-2 font-medium">
+                <th scope="col" className="px-3 py-2 font-medium whitespace-nowrap">
                   {t('table.amount')}
                 </th>
-                <th scope="col" className="pb-2 font-medium">
+                <th scope="col" className="px-3 py-2 font-medium whitespace-nowrap">
                   {t('table.frequency')}
                 </th>
-                <th scope="col" className="pb-2 font-medium">
+                <th scope="col" className="px-3 py-2 font-medium whitespace-nowrap">
                   {t('table.nextDate')}
                 </th>
               </tr>
@@ -365,14 +365,16 @@ function SubscriptionsTable({ accountId }: { accountId?: string }) {
             <tbody>
               {subscriptions.map((sub) => (
                 <tr key={sub.id} className="border-border border-b last:border-0">
-                  <td className="py-2.5 font-medium">{sub.name}</td>
-                  <td className="py-2.5">{formatMoney(sub.amount, sub.currency)}</td>
-                  <td className="py-2.5">
+                  <td className="px-3 py-2.5 font-medium">{sub.name}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">
+                    {formatMoney(sub.amount, sub.currency)}
+                  </td>
+                  <td className="px-3 py-2.5 whitespace-nowrap">
                     <Badge variant="secondary" className="text-[10px]">
                       {sub.billing_cycle}
                     </Badge>
                   </td>
-                  <td className="text-muted-foreground py-2.5 text-xs tabular-nums">
+                  <td className="text-muted-foreground px-3 py-2.5 text-xs whitespace-nowrap tabular-nums">
                     {dayjs(sub.next_billing_date).format('MMM D, YYYY')}
                   </td>
                 </tr>

@@ -121,6 +121,108 @@ describe('SpendingHeatmap page', () => {
     expect(mockFetchRows).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps the range toolbar wrapping instead of shrinking the description', async () => {
+    render(<SpendingHeatmap />)
+
+    await waitFor(() => {
+      expect(screen.getByText('spendingHeatmap.dailyActivity')).toBeInTheDocument()
+    })
+
+    const toolbar = document.querySelector('.page-toolbar')
+    expect(toolbar?.className).toMatch(/max-sm:flex-col/)
+    expect(screen.getByText('spendingHeatmap.description').className).toMatch(/sm:min-w-\[12rem\]/)
+    expect(screen.getByRole('group', { name: 'spendingHeatmap.timeRange' }).className).toMatch(
+      /flex-wrap/
+    )
+  })
+
+  it('does not stick on loading when the active heatmap range is selected again', async () => {
+    render(<SpendingHeatmap />)
+
+    await waitFor(() => {
+      expect(screen.getByText('spendingHeatmap.dailyActivity')).toBeInTheDocument()
+    })
+
+    const active = screen.getByRole('button', { name: 'spendingHeatmap.ranges.3months' })
+    expect(active).toHaveAttribute('aria-pressed', 'true')
+    expect(active).toBeEnabled()
+    fireEvent.click(active)
+
+    expect(screen.getByText('spendingHeatmap.dailyActivity')).toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(active).toHaveAttribute('aria-pressed', 'true')
+    expect(mockFetchRows).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not refetch when a different control maps to the same normalized range', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 0, 15, 12, 0, 0))
+
+    try {
+      render(<SpendingHeatmap />)
+
+      await waitFor(() => {
+        expect(screen.getByText('spendingHeatmap.dailyActivity')).toBeInTheDocument()
+      })
+      expect(mockFetchRows).toHaveBeenCalledTimes(1)
+
+      fireEvent.click(screen.getByRole('button', { name: 'spendingHeatmap.ranges.year' }))
+      await waitFor(() => {
+        expect(screen.getByText('spendingHeatmap.dailyActivity')).toBeInTheDocument()
+      })
+      expect(mockFetchRows).toHaveBeenCalledTimes(2)
+
+      fireEvent.click(screen.getByRole('button', { name: 'spendingHeatmap.ranges.month' }))
+      expect(screen.getByText('spendingHeatmap.dailyActivity')).toBeInTheDocument()
+      expect(screen.queryByRole('status')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'spendingHeatmap.ranges.month' })).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      )
+      expect(mockFetchRows).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reloads when the selected range actually changes', async () => {
+    render(<SpendingHeatmap />)
+
+    await waitFor(() => {
+      expect(screen.getByText('spendingHeatmap.dailyActivity')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'spendingHeatmap.ranges.month' }))
+    expect(screen.getByRole('status')).toHaveAttribute('aria-busy', 'true')
+
+    await waitFor(() => {
+      expect(screen.getByText('spendingHeatmap.dailyActivity')).toBeInTheDocument()
+    })
+    expect(screen.getByRole('button', { name: 'spendingHeatmap.ranges.month' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
+    expect(mockFetchRows).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries a failed heatmap load without staying on the error state', async () => {
+    mockFetchRows.mockRejectedValueOnce(new Error('Heatmap read failed'))
+    render(<SpendingHeatmap />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('Heatmap read failed')
+    })
+
+    mockFetchRows.mockResolvedValueOnce([row()])
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(screen.getByRole('status')).toHaveAttribute('aria-busy', 'true')
+
+    await waitFor(() => {
+      expect(screen.getByText('spendingHeatmap.dailyActivity')).toBeInTheDocument()
+    })
+    expect(mockFetchRows).toHaveBeenCalledTimes(2)
+  })
+
   it('omits heatmap totals when mixed currencies are missing rates', async () => {
     mockFetchRows.mockResolvedValue([
       row({ id: 'usd', amount: 2500, currency: 'USD' }),

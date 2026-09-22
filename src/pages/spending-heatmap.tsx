@@ -233,6 +233,21 @@ export function SpendingHeatmap() {
   const catMax = categoryTotals[0]?.total ?? 1
   const totalsUnavailable = Boolean(aggregation && !complete)
 
+  function handleTimeRangeChange(value: string) {
+    const currentRange = getDateRange(timeRange)
+    const nextRange = getDateRange(value)
+    const equivalentRange =
+      currentRange.start === nextRange.start && currentRange.end === nextRange.end
+    if (value === timeRange && equivalentRange) {
+      return
+    }
+    setTimeRange(value)
+    setSelectedDate(null)
+    if (!equivalentRange) {
+      setIsLoading(true)
+    }
+  }
+
   if (isLoading) {
     return (
       <div className="page-content" role="status" aria-busy="true">
@@ -262,18 +277,18 @@ export function SpendingHeatmap() {
   return (
     <div className="page-content">
       <PageToolbar
+        className="items-start gap-3 max-sm:flex-col max-sm:items-stretch sm:[&>div:first-child]:min-w-[12rem]"
         leading={
-          <p className="text-muted-foreground text-sm">{t('spendingHeatmap.description')}</p>
+          <p className="text-muted-foreground min-w-0 text-sm sm:min-w-[12rem]">
+            {t('spendingHeatmap.description')}
+          </p>
         }
         actions={
           <FilterPills
+            className="max-w-full min-w-0 flex-wrap max-sm:w-full"
             options={timeOptions}
             selected={timeRange}
-            onChange={(value) => {
-              setIsLoading(true)
-              setTimeRange(value)
-              setSelectedDate(null)
-            }}
+            onChange={handleTimeRangeChange}
             ariaLabel={t('spendingHeatmap.timeRange')}
           />
         }

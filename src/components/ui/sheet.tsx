@@ -4,6 +4,7 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import { X } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
+import { useOverlayFocusRestoration } from './use-overlay-focus-restoration'
 
 const Sheet = SheetPrimitive.Root
 
@@ -55,18 +56,30 @@ interface SheetContentProps
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Content>,
   SheetContentProps
->(({ side = 'right', className, children, ...props }, ref) => (
-  <SheetPortal>
-    <SheetOverlay />
-    <SheetPrimitive.Content ref={ref} className={cn(sheetVariants({ side }), className)} {...props}>
-      {children}
-      <SheetPrimitive.Close className="ring-offset-background focus:ring-ring hover:bg-muted text-muted-foreground hover:text-foreground absolute top-4 right-4 rounded-lg p-1 transition-colors focus:ring-2 focus:ring-offset-2 focus:outline-none disabled:pointer-events-none">
-        <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
-      </SheetPrimitive.Close>
-    </SheetPrimitive.Content>
-  </SheetPortal>
-))
+>(({ side = 'right', className, children, onOpenAutoFocus, onCloseAutoFocus, ...props }, ref) => {
+  const focusRestorationProps = useOverlayFocusRestoration({
+    onOpenAutoFocus,
+    onCloseAutoFocus,
+  })
+
+  return (
+    <SheetPortal>
+      <SheetOverlay />
+      <SheetPrimitive.Content
+        ref={ref}
+        className={cn(sheetVariants({ side }), className)}
+        {...props}
+        {...focusRestorationProps}
+      >
+        {children}
+        <SheetPrimitive.Close className="ring-offset-background focus:ring-ring hover:bg-muted text-muted-foreground hover:text-foreground absolute top-4 right-4 rounded-lg p-1 transition-colors focus:ring-2 focus:ring-offset-2 focus:outline-none disabled:pointer-events-none">
+          <X className="h-4 w-4" />
+          <span className="sr-only">Close</span>
+        </SheetPrimitive.Close>
+      </SheetPrimitive.Content>
+    </SheetPortal>
+  )
+})
 SheetContent.displayName = SheetPrimitive.Content.displayName
 
 const SheetHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (

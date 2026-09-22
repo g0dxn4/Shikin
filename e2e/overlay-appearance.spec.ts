@@ -94,7 +94,6 @@ test.describe('dialog overlay', () => {
       await expect(dialog).toHaveCount(0)
       await expect(overlay).toHaveCount(0)
       await expect(trigger).toBeEnabled()
-      await trigger.focus()
       await expect(trigger).toBeFocused()
 
       await trigger.click()
@@ -103,6 +102,7 @@ test.describe('dialog overlay', () => {
       await page.keyboard.press('Escape')
       await expect(dialog).toHaveCount(0)
       await expect(overlay).toHaveCount(0)
+      await expect(trigger).toBeFocused()
     })
   }
 })

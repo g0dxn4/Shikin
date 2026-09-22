@@ -75,27 +75,29 @@ export function OverviewCashFlow({
               {t('analytics.expenses')}
             </span>
           </div>
-          <table id="overview-cashflow-data" className="sr-only">
-            <caption>{t('overview.cashFlow')}</caption>
-            <thead>
-              <tr>
-                <th>{t('analytics.month')}</th>
-                <th>{t('analytics.income')}</th>
-                <th>{t('analytics.expenses')}</th>
-                <th>{t('analytics.net')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {months.map((month) => (
-                <tr key={month.key}>
-                  <th>{month.label}</th>
-                  <td>{formatMoney(month.income, displayCurrency)}</td>
-                  <td>{formatMoney(month.expenses, displayCurrency)}</td>
-                  <td>{formatMoney(month.net, displayCurrency)}</td>
+          <div className="sr-only">
+            <table id="overview-cashflow-data">
+              <caption>{t('overview.cashFlow')}</caption>
+              <thead>
+                <tr>
+                  <th>{t('analytics.month')}</th>
+                  <th>{t('analytics.income')}</th>
+                  <th>{t('analytics.expenses')}</th>
+                  <th>{t('analytics.net')}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {months.map((month) => (
+                  <tr key={month.key}>
+                    <th>{month.label}</th>
+                    <td>{formatMoney(month.income, displayCurrency)}</td>
+                    <td>{formatMoney(month.expenses, displayCurrency)}</td>
+                    <td>{formatMoney(month.net, displayCurrency)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </>
       )}
     </NativePanel>

@@ -93,27 +93,29 @@ export function SpendingTrendPanel({ trend, displayCurrency, notice }: SpendingT
         </SafeChart>
       </div>
 
-      <table id="spending-trend-data" className="sr-only">
-        <caption>{t('analytics.trendChartLabel')}</caption>
-        <thead>
-          <tr>
-            <th>{t('analytics.month')}</th>
-            <th>{t('analytics.income')}</th>
-            <th>{t('analytics.expenses')}</th>
-            <th>{t('analytics.net')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((month) => (
-            <tr key={month.key}>
-              <th>{month.label}</th>
-              <td>{formatMoney(month.income, displayCurrency)}</td>
-              <td>{formatMoney(month.expenses, displayCurrency)}</td>
-              <td>{formatMoney(month.net, displayCurrency)}</td>
+      <div className="sr-only">
+        <table id="spending-trend-data">
+          <caption>{t('analytics.trendChartLabel')}</caption>
+          <thead>
+            <tr>
+              <th>{t('analytics.month')}</th>
+              <th>{t('analytics.income')}</th>
+              <th>{t('analytics.expenses')}</th>
+              <th>{t('analytics.net')}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {data.map((month) => (
+              <tr key={month.key}>
+                <th>{month.label}</th>
+                <td>{formatMoney(month.income, displayCurrency)}</td>
+                <td>{formatMoney(month.expenses, displayCurrency)}</td>
+                <td>{formatMoney(month.net, displayCurrency)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       <div className="grid grid-cols-3 gap-3">
         <MetricPill

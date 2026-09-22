@@ -135,29 +135,31 @@ export function SpendingCategoriesPanel({
         </SafeChart>
       </div>
 
-      <table id="spending-categories-data" className="sr-only">
-        <caption>{t('analytics.categoriesChartLabel')}</caption>
-        <thead>
-          <tr>
-            <th>{t('analytics.month')}</th>
-            {orderedCategoryIds.map((categoryId) => (
-              <th key={categoryId}>{categories.categoryMeta[categoryId]?.name ?? categoryId}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {chartData.map((month) => (
-            <tr key={String(month.key)}>
-              <th>{month.label}</th>
+      <div className="sr-only">
+        <table id="spending-categories-data">
+          <caption>{t('analytics.categoriesChartLabel')}</caption>
+          <thead>
+            <tr>
+              <th>{t('analytics.month')}</th>
               {orderedCategoryIds.map((categoryId) => (
-                <td key={categoryId}>
-                  {formatMoney(Number(month[categoryId] ?? 0), displayCurrency)}
-                </td>
+                <th key={categoryId}>{categories.categoryMeta[categoryId]?.name ?? categoryId}</th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {chartData.map((month) => (
+              <tr key={String(month.key)}>
+                <th>{month.label}</th>
+                {orderedCategoryIds.map((categoryId) => (
+                  <td key={categoryId}>
+                    {formatMoney(Number(month[categoryId] ?? 0), displayCurrency)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       <div className="space-y-3">
         <p className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">

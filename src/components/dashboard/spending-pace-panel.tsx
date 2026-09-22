@@ -129,35 +129,41 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
         </SafeChart>
       </div>
 
-      <table id="spending-pace-data" className="sr-only">
-        <caption>{t('analytics.paceChartLabel')}</caption>
-        <thead>
-          <tr>
-            <th>{t('analytics.day')}</th>
-            <th>{t('analytics.currentMonth')}</th>
-            <th>{t('analytics.previousMonth')}</th>
-            <th>{t('analytics.priorMonthsAverage')}</th>
-            <th>{t('analytics.runRate')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((point) => (
-            <tr key={point.day}>
-              <th>{point.day}</th>
-              <td>{point.current === null ? '—' : formatMoney(point.current, displayCurrency)}</td>
-              <td>
-                {point.previous === null ? '—' : formatMoney(point.previous, displayCurrency)}
-              </td>
-              <td>
-                {point.priorAverage === null
-                  ? '—'
-                  : formatMoney(point.priorAverage, displayCurrency)}
-              </td>
-              <td>{point.runRate === null ? '—' : formatMoney(point.runRate, displayCurrency)}</td>
+      <div className="sr-only">
+        <table id="spending-pace-data">
+          <caption>{t('analytics.paceChartLabel')}</caption>
+          <thead>
+            <tr>
+              <th>{t('analytics.day')}</th>
+              <th>{t('analytics.currentMonth')}</th>
+              <th>{t('analytics.previousMonth')}</th>
+              <th>{t('analytics.priorMonthsAverage')}</th>
+              <th>{t('analytics.runRate')}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {data.map((point) => (
+              <tr key={point.day}>
+                <th>{point.day}</th>
+                <td>
+                  {point.current === null ? '—' : formatMoney(point.current, displayCurrency)}
+                </td>
+                <td>
+                  {point.previous === null ? '—' : formatMoney(point.previous, displayCurrency)}
+                </td>
+                <td>
+                  {point.priorAverage === null
+                    ? '—'
+                    : formatMoney(point.priorAverage, displayCurrency)}
+                </td>
+                <td>
+                  {point.runRate === null ? '—' : formatMoney(point.runRate, displayCurrency)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <MetricPill

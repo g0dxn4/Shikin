@@ -1,3 +1,6 @@
+import dayjs from 'dayjs'
+import { selectValuationRatesAsOf, selectEffectiveRate } from '@shikin/finance-core/fx'
+import { getCurrencySettings, listExchangeRates } from './fx-service.js'
 import {
   calculateOwnershipValuation,
   decimalFromCentavos,
@@ -46,8 +49,6 @@ type AccountValuationRow = {
   account_mode: string | null
   valuation_mode: string | null
 }
-
-type RateRow = { from_currency: string; to_currency: string; rate: number }
 
 export function readInvestmentValuationRows(whereClause = '', params: unknown[] = []) {
   return query<InvestmentValuationRow>(
@@ -115,32 +116,11 @@ export function rowToHoldingInput(row: InvestmentValuationRow): HoldingValuation
   }
 }
 
-export function readValuationRates(targetCurrency: string): ValuationRate[] {
-  const target = targetCurrency.trim().toUpperCase()
-  const rows = query<RateRow>(
-    `SELECT er.from_currency, er.to_currency, er.rate
-     FROM exchange_rates er
-     WHERE UPPER(TRIM(er.to_currency)) = $1
-       AND er.id = (
-         SELECT candidate.id FROM exchange_rates candidate
-         WHERE UPPER(TRIM(candidate.from_currency)) = UPPER(TRIM(er.from_currency))
-           AND UPPER(TRIM(candidate.to_currency)) = UPPER(TRIM(er.to_currency))
-         ORDER BY candidate.date DESC, candidate.created_at DESC, candidate.id DESC
-         LIMIT 1
-       )`,
-    [target]
-  )
-  return rows.flatMap((row) =>
-    Number.isFinite(row.rate) && row.rate > 0
-      ? [
-          {
-            fromCurrency: row.from_currency,
-            toCurrency: row.to_currency,
-            rateDecimal: decimalFromNumber(row.rate),
-          },
-        ]
-      : []
-  )
+export function readValuationRates(
+  targetCurrency: string,
+  asOfDate = dayjs().format('YYYY-MM-DD')
+): ValuationRate[] {
+  return selectValuationRatesAsOf(listExchangeRates(), targetCurrency, asOfDate)
 }
 
 function accountValuationMode(account: AccountValuationRow) {
@@ -156,7 +136,10 @@ function accountValuationMode(account: AccountValuationRow) {
     : ('unresolved' as const)
 }
 
-export function readOwnershipValuation(targetCurrency: string): OwnershipValuationResult {
+export function readOwnershipValuation(
+  targetCurrency: string,
+  asOfDate = dayjs().format('YYYY-MM-DD')
+): OwnershipValuationResult {
   const accounts = query<AccountValuationRow>(
     `SELECT id, name, type, currency, balance, account_mode, valuation_mode
      FROM accounts WHERE is_archived = 0 ORDER BY type, name, id`
@@ -164,7 +147,7 @@ export function readOwnershipValuation(targetCurrency: string): OwnershipValuati
   const investments = readInvestmentValuationRows('ORDER BY i.name, i.id')
   return calculateOwnershipValuation({
     targetCurrency,
-    rates: readValuationRates(targetCurrency),
+    rates: readValuationRates(targetCurrency, asOfDate),
     accounts: accounts.map((account) => ({
       id: account.id,
       name: account.name,
@@ -183,4 +166,80 @@ export function valueInvestmentRows(rows: InvestmentValuationRow[], targetCurren
     row,
     valuation: valueHolding(rowToHoldingInput(row), targetCurrency, rates),
   }))
+}
+
+/** Native ownership evidence remains readable before setup; no target is asserted. */
+export function readMainOwnershipValuation() {
+  const { mainCurrency } = getCurrencySettings()
+  const asOfDate = dayjs().format('YYYY-MM-DD')
+  const provenance = readValuationProvenance(mainCurrency, asOfDate)
+  if (mainCurrency !== null)
+    return {
+      ...readOwnershipValuation(mainCurrency, asOfDate),
+      asOfDate,
+      provenance,
+      reason: null,
+      policy: 'current_ownership_today' as const,
+    }
+  // The core's native ownership components do not depend on its target. Use an
+  // actual source denomination solely to obtain those components, then discard
+  // every target-derived result. Empty portfolios require no probe currency.
+  const nativeCurrency = query<{ currency: string }>(
+    `SELECT currency FROM accounts WHERE is_archived = 0
+     UNION SELECT currency FROM investments ORDER BY currency LIMIT 1`
+  )[0]?.currency
+  const native: OwnershipValuationResult = nativeCurrency
+    ? readOwnershipValuation(nativeCurrency, asOfDate)
+    : {
+        complete: false,
+        targetCurrency: '',
+        totalAssetsCentavos: null,
+        totalLiabilitiesCentavos: null,
+        totalInvestmentsCentavos: null,
+        netWorthCentavos: null,
+        nativeTotals: [],
+        missingCurrencies: [],
+        unresolvedAccountIds: [],
+        incompleteHoldingIds: [],
+        accounts: [],
+        holdings: [],
+      }
+  return {
+    ...native,
+    complete: false,
+    targetCurrency: null,
+    totalAssetsCentavos: null,
+    totalLiabilitiesCentavos: null,
+    totalInvestmentsCentavos: null,
+    netWorthCentavos: null,
+    holdings: native.holdings.map((holding) => ({
+      ...holding,
+      complete: false,
+      convertedValueCentavos: null,
+      convertedCostBasisCentavos: null,
+      gainLossCentavos: null,
+      reasons: [
+        ...holding.reasons.filter((reason) => !reason.startsWith('missing_fx:')),
+        'main_currency_unconfigured',
+      ],
+    })),
+    missingCurrencies: [],
+    asOfDate,
+    provenance,
+    reason: 'main_currency_unconfigured' as const,
+    policy: 'current_ownership_today' as const,
+  }
+}
+
+export function readValuationProvenance(
+  targetCurrency: string | null,
+  asOfDate = dayjs().format('YYYY-MM-DD')
+) {
+  const history = listExchangeRates()
+  return targetCurrency === null
+    ? []
+    : [...new Set(history.map((row) => row.fromCurrency))].sort().flatMap((from) => {
+        const rate = selectEffectiveRate(history, from, targetCurrency, asOfDate)
+        return rate ? [{ ...rate, direction: `${from}->${targetCurrency}`, asOfDate }] : []
+      })
 }

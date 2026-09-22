@@ -35,14 +35,25 @@ describe('CLI ownership valuation read', () => {
     })
   })
 
-  it('normalizes tiny legacy quantities and tiny numeric FX rates', () => {
+  it('normalizes tiny legacy quantities and tiny exact manual FX rates', () => {
     const input = rowToHoldingInput({
       ...holding('tiny', null),
       shares: 1e-7,
       quantity_decimal: null,
       unit_price_decimal: '10000000',
     })
-    mockQuery.mockReturnValueOnce([{ from_currency: 'USD', to_currency: 'MXN', rate: 1e-7 }])
+    mockQuery.mockReturnValueOnce([
+      {
+        id: 'manual',
+        fromCurrency: 'USD',
+        toCurrency: 'MXN',
+        rateDecimal: '0.0000001',
+        effectiveFrom: '2020-01-01',
+        supersedesRateId: null,
+        createdAt: '2020-01-01T00:00:00Z',
+        sourceNote: null,
+      },
+    ])
     const rates = readValuationRates('MXN')
 
     expect(input.quantityDecimal).toBe('0.0000001')

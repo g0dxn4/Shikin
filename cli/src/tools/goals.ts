@@ -1,3 +1,5 @@
+import { getCurrencySettings } from '../fx-service.js'
+import { mainCurrencySetupNeeded, readCurrentAmounts, sumCentavos } from '../dated-read.js'
 import {
   z,
   query,
@@ -15,6 +17,7 @@ import {
 type GoalRow = {
   id: string
   name: string
+  currency: string
   target_amount: number
   current_amount: number
   deadline: string | null
@@ -58,22 +61,6 @@ function resolveGoalAccountId(accountId: string | null) {
   return { success: true as const, id: account.id }
 }
 
-type GoalStatus = {
-  id: string
-  name: string
-  icon: string | null
-  targetAmount: number
-  currentAmount: number
-  remaining: number
-  progress: number
-  isCompleted: boolean
-  deadline: string | null
-  daysRemaining: number | null
-  monthlyNeeded: number
-  accountName: string | null | undefined
-  notes: string | null
-}
-
 const createGoal: ToolDefinition = {
   name: 'create-goal',
   description:
@@ -109,23 +96,31 @@ const createGoal: ToolDefinition = {
     const id = generateId()
     const now = new Date().toISOString()
 
-    await execute(
-      `INSERT INTO goals (id, name, target_amount, current_amount, deadline, account_id, icon, color, notes, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-      [
-        id,
-        name,
-        toCentavos(targetAmount),
-        toCentavos(currentAmount),
-        deadline ?? null,
-        accountId ?? null,
-        icon,
-        color,
-        notes ?? null,
-        now,
-        now,
-      ]
-    )
+    const creation = transaction(() => {
+      const settings = getCurrencySettings()
+      if (!settings.configured) return mainCurrencySetupNeeded
+      execute(
+        `INSERT INTO goals (id, name, target_amount, current_amount, deadline, account_id, icon, color, notes, created_at, updated_at, currency)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [
+          id,
+          name,
+          toCentavos(targetAmount),
+          toCentavos(currentAmount),
+          deadline ?? null,
+          accountId ?? null,
+          icon,
+          color,
+          notes ?? null,
+          now,
+          now,
+          settings.mainCurrency,
+        ]
+      )
+
+      return { success: true as const, currency: settings.mainCurrency }
+    })
+    if (!creation.success) return creation
 
     const progress = targetAmount > 0 ? Math.round((currentAmount / targetAmount) * 100) : 0
 
@@ -134,12 +129,13 @@ const createGoal: ToolDefinition = {
       goal: {
         id,
         name,
+        currency: creation.currency,
         targetAmount,
         currentAmount,
         deadline: deadline ?? null,
         progress,
       },
-      message: `Created savings goal "${name}" — target: $${targetAmount.toFixed(2)}${currentAmount > 0 ? `, starting at $${currentAmount.toFixed(2)} (${progress}%)` : ''}.${deadline ? ` Deadline: ${deadline}.` : ''}`,
+      message: `Created savings goal "${name}" — target: ${creation.currency} ${targetAmount.toFixed(2)}${currentAmount > 0 ? `, starting at $${currentAmount.toFixed(2)} (${progress}%)` : ''}.${deadline ? ` Deadline: ${deadline}.` : ''}`,
     }
   },
 }
@@ -154,14 +150,24 @@ const updateGoal: ToolDefinition = {
   schema: z.object({
     goalId: z.string().describe('The ID of the goal to update'),
     name: z.string().optional().describe('New name for the goal'),
-    targetAmount: z.number().positive().optional().describe('New target amount'),
+    targetAmount: z
+      .number()
+      .positive()
+      .optional()
+      .describe('New target amount in the goal’s recorded currency'),
     currentAmount: z.number().min(0).optional().describe('Set current amount directly'),
-    addAmount: z.number().positive().optional().describe('Amount to add to current savings'),
+    addAmount: z
+      .number()
+      .positive()
+      .optional()
+      .describe('Amount to add in the goal’s recorded currency; linked account money is unchanged'),
     withdrawAmount: z
       .number()
       .positive()
       .optional()
-      .describe('Amount to withdraw from current savings'),
+      .describe(
+        'Amount to withdraw in the goal’s recorded currency; linked account money is unchanged'
+      ),
     deadline: isoDate('New deadline in YYYY-MM-DD format').nullable().optional(),
     notes: z
       .string()
@@ -214,7 +220,7 @@ const updateGoal: ToolDefinition = {
 
     return transaction(() => {
       const goal = query<GoalRow>(
-        'SELECT id, name, target_amount, current_amount, deadline, account_id, icon, color, notes FROM goals WHERE id = $1',
+        'SELECT id, name, currency, target_amount, current_amount, deadline, account_id, icon, color, notes FROM goals WHERE id = $1',
         [goalId]
       )[0]
 
@@ -277,12 +283,13 @@ const updateGoal: ToolDefinition = {
         goal: {
           id: goalId,
           name: newName,
+          currency: goal.currency,
           targetAmount: newTargetAmount,
           currentAmount: newCurrentAmount,
           deadline: nextDeadline,
           progress,
         },
-        message: `Updated goal "${newName}" — $${newCurrentAmount.toFixed(2)} / $${newTargetAmount.toFixed(2)} (${progress}%).`,
+        message: `Updated goal "${newName}" — ${goal.currency} ${newCurrentAmount.toFixed(2)} / ${newTargetAmount.toFixed(2)} (${progress}%).`,
       }
     })
   },
@@ -325,7 +332,7 @@ const getGoalStatus: ToolDefinition = {
       }
     }
 
-    const statuses: GoalStatus[] = goals.map((goal) => {
+    const statuses = goals.map((goal) => {
       const targetAmount = fromCentavos(goal.target_amount)
       const currentAmount = fromCentavos(goal.current_amount)
       const remaining = Math.max(0, targetAmount - currentAmount)
@@ -349,6 +356,16 @@ const getGoalStatus: ToolDefinition = {
         id: goal.id,
         name: goal.name,
         icon: goal.icon,
+        currency: goal.currency,
+        mainConversion: {
+          policy: 'recorded_goal_value_today',
+          target: readCurrentAmounts([
+            { id: goal.id, amountCentavos: goal.target_amount, currency: goal.currency },
+          ]),
+          saved: readCurrentAmounts([
+            { id: goal.id, amountCentavos: goal.current_amount, currency: goal.currency },
+          ]),
+        },
         targetAmount,
         currentAmount,
         remaining,
@@ -362,22 +379,53 @@ const getGoalStatus: ToolDefinition = {
       }
     })
 
-    const totalTarget = statuses.reduce((s, g) => s + g.targetAmount, 0)
-    const totalSaved = statuses.reduce((s, g) => s + g.currentAmount, 0)
+    const totalsByCurrency = [...new Set(goals.map((row) => row.currency))]
+      .sort()
+      .map((currency) => {
+        const rows = goals.filter((row) => row.currency === currency)
+        const totalTarget = fromCentavos(sumCentavos(rows.map((row) => row.target_amount)))
+        const totalSaved = fromCentavos(sumCentavos(rows.map((row) => row.current_amount)))
+        return {
+          currency,
+          totalTarget,
+          totalSaved,
+          totalRemaining: totalTarget - totalSaved,
+          overallProgress: totalTarget > 0 ? Math.round((totalSaved / totalTarget) * 100) : 0,
+        }
+      })
+    const single = totalsByCurrency.length === 1 ? totalsByCurrency[0] : null
     const completedCount = statuses.filter((g) => g.isCompleted).length
-
     return {
       success: true,
+      currency: single?.currency ?? null,
       goals: statuses,
+      totalsByCurrency,
+      mainConversion: {
+        policy: 'recorded_goal_value_today',
+        target: readCurrentAmounts(
+          goals.map((row) => ({
+            id: row.id,
+            amountCentavos: row.target_amount,
+            currency: row.currency,
+          }))
+        ),
+        saved: readCurrentAmounts(
+          goals.map((row) => ({
+            id: row.id,
+            amountCentavos: row.current_amount,
+            currency: row.currency,
+          }))
+        ),
+      },
       summary: {
         totalGoals: statuses.length,
         completedGoals: completedCount,
-        totalTarget,
-        totalSaved,
-        totalRemaining: totalTarget - totalSaved,
-        overallProgress: totalTarget > 0 ? Math.round((totalSaved / totalTarget) * 100) : 0,
+        totalTarget: single?.totalTarget ?? null,
+        totalSaved: single?.totalSaved ?? null,
+        totalRemaining: single?.totalRemaining ?? null,
+        overallProgress: single?.overallProgress ?? null,
       },
-      message: `${statuses.length} savings goal(s). $${totalSaved.toFixed(2)} / $${totalTarget.toFixed(2)} total (${totalTarget > 0 ? Math.round((totalSaved / totalTarget) * 100) : 0}%). ${completedCount} completed.`,
+      message: `${statuses.length} savings goal(s), grouped by recorded denomination. ${completedCount} completed.`,
     }
   },
 }

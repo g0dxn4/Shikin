@@ -1,4 +1,5 @@
-import { REPORTING_CTE, reportingReadFailure } from '../reporting-read.js'
+import { readCurrentAmounts } from '../dated-read.js'
+import { REPORTING_CTE, reportingReadFailure, readConvertedCashFlow } from '../reporting-read.js'
 import {
   z,
   query,
@@ -130,6 +131,21 @@ const getBalanceOverview: ToolDefinition = {
         : null
 
     return {
+      mainConversion: {
+        balances: readCurrentAmounts(
+          accounts.map((row) => ({
+            id: row.id,
+            amountCentavos: row.balance,
+            currency: row.currency,
+          }))
+        ),
+        currentMonth: readConvertedCashFlow(currentMonthStart, currentMonthEnd, undefined, {
+          activeAccountsOnly: true,
+        }),
+        previousMonth: readConvertedCashFlow(prevMonthStart, prevMonthEnd, undefined, {
+          activeAccountsOnly: true,
+        }),
+      },
       basis: 'gross_cashflow',
       complete: true,
       mixedCurrency:
@@ -352,6 +368,7 @@ const analyzeSpendingTrends: ToolDefinition = {
     }
 
     return {
+      mainConversion: readConvertedCashFlow(startDate, endDate),
       basis: 'gross_cashflow',
       complete: true,
       mixedCurrency: currencies.length > 1,

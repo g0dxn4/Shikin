@@ -1,5 +1,7 @@
-import { readBudgetSpending } from '../reporting-read.js'
-import { readOwnershipValuation } from '../valuation-read.js'
+import { getCurrencySettings } from '../fx-service.js'
+import { mainCurrencySetupNeeded, readCurrentAmounts, sumCentavos } from '../dated-read.js'
+import { readBudgetSpending, readConvertedCashFlow } from '../reporting-read.js'
+import { readMainOwnershipValuation } from '../valuation-read.js'
 import {
   z,
   query,
@@ -20,6 +22,7 @@ type BudgetRow = {
   id: string
   name: string
   amount: number
+  currency: string
   period: 'weekly' | 'monthly' | 'yearly'
   category_id: string | null
   category_name: string | null
@@ -43,6 +46,7 @@ function budgetSnapshot(budget: BudgetRow) {
     name: budget.name,
     amount: fromCentavos(budget.amount),
     amountCentavos: budget.amount,
+    currency: budget.currency,
     period: budget.period,
     categoryId: budget.category_id,
     categoryName: budget.category_name ?? null,
@@ -74,7 +78,7 @@ function findBudgetForUpsert(input: {
 }): BudgetUpsertMatch {
   if (input.budgetId) {
     const budget = query<BudgetRow>(
-      `SELECT b.id, b.name, b.amount, b.period, b.category_id, b.is_active, c.name as category_name
+      `SELECT b.id, b.name, b.amount, b.currency, b.period, b.category_id, b.is_active, c.name as category_name
        FROM budgets b
        LEFT JOIN categories c ON b.category_id = c.id
        WHERE b.id = $1
@@ -90,7 +94,7 @@ function findBudgetForUpsert(input: {
     const periodFilter = input.period ? ' AND b.period = $2' : ''
     const params = input.period ? [input.categoryId, input.period] : [input.categoryId]
     const matches = query<BudgetRow>(
-      `SELECT b.id, b.name, b.amount, b.period, b.category_id, b.is_active, c.name as category_name
+      `SELECT b.id, b.name, b.amount, b.currency, b.period, b.category_id, b.is_active, c.name as category_name
        FROM budgets b
        LEFT JOIN categories c ON b.category_id = c.id
         WHERE b.category_id = $1${periodFilter}
@@ -111,7 +115,7 @@ function findBudgetForUpsert(input: {
 
   if (input.name) {
     const matches = query<BudgetRow>(
-      `SELECT b.id, b.name, b.amount, b.period, b.category_id, b.is_active, c.name as category_name
+      `SELECT b.id, b.name, b.amount, b.currency, b.period, b.category_id, b.is_active, c.name as category_name
        FROM budgets b
        LEFT JOIN categories c ON b.category_id = c.id
        WHERE LOWER(b.name) = LOWER($1)
@@ -187,12 +191,15 @@ const createBudget: ToolDefinition = {
 
     if (!resolvedName) resolvedName = 'Budget'
 
+    const settings = getCurrencySettings()
+    if (!settings.configured) return mainCurrencySetupNeeded
     const id = generateId()
     const amountCentavos = toCentavos(amount)
     const createdBudget: BudgetRow = {
       id,
       name: resolvedName,
       amount: amountCentavos,
+      currency: settings.mainCurrency,
       period,
       category_id: resolvedCategoryId,
       category_name: resolvedCategoryName,
@@ -209,17 +216,21 @@ const createBudget: ToolDefinition = {
           categoryId: resolvedCategoryId,
           amount,
           amountCentavos,
+          currency: createdBudget.currency,
           period,
         },
-        message: `Dry run: ${period} budget "${resolvedName}" for $${amount.toFixed(2)} would be created.`,
+        message: `Dry run: ${period} budget "${resolvedName}" for ${createdBudget.currency} ${amount.toFixed(2)} would be created.`,
       }
     }
 
     transaction(() => {
+      const current = getCurrencySettings()
+      if (!current.configured) throw new Error(mainCurrencySetupNeeded.message)
+      createdBudget.currency = current.mainCurrency
       execute(
-        `INSERT INTO budgets (id, category_id, name, amount, period, is_active)
-         VALUES ($1, $2, $3, $4, $5, 1)`,
-        [id, resolvedCategoryId, resolvedName, amountCentavos, period]
+        `INSERT INTO budgets (id, category_id, name, amount, period, is_active, currency)
+         VALUES ($1, $2, $3, $4, $5, 1, $6)`,
+        [id, resolvedCategoryId, resolvedName, amountCentavos, period, createdBudget.currency]
       )
       writeAuditLog({
         entity: 'budget',
@@ -237,9 +248,10 @@ const createBudget: ToolDefinition = {
         name: resolvedName,
         categoryId: resolvedCategoryId,
         amount,
+        currency: createdBudget.currency,
         period,
       },
-      message: `Created ${period} budget "${resolvedName}" for $${amount.toFixed(2)}.`,
+      message: `Created ${period} budget "${resolvedName}" for ${createdBudget.currency} ${amount.toFixed(2)}.`,
     }
   },
 }
@@ -256,7 +268,9 @@ const upsertBudget: ToolDefinition = {
       'Category name to resolve for the budget (e.g. "Food & Dining")',
       120
     ).optional(),
-    amount: positiveMoneyAmount('Budget amount in the main currency unit').optional(),
+    amount: positiveMoneyAmount(
+      'Budget amount: configured main on creation; original budget currency on edits'
+    ).optional(),
     period: z
       .enum(['weekly', 'monthly', 'yearly'])
       .optional()
@@ -295,6 +309,8 @@ const upsertBudget: ToolDefinition = {
         return { success: false, message: 'amount is required when creating a budget.' }
       }
 
+      const settings = getCurrencySettings()
+      if (!settings.configured) return mainCurrencySetupNeeded
       const id = budgetId ?? generateId()
       const createdPeriod = period ?? 'monthly'
       const resolvedName =
@@ -304,6 +320,7 @@ const upsertBudget: ToolDefinition = {
         id,
         name: resolvedName,
         amount: amountCentavos,
+        currency: settings.mainCurrency,
         period: createdPeriod,
         category_id: resolvedCategory.id,
         category_name: resolvedCategory.name,
@@ -322,9 +339,12 @@ const upsertBudget: ToolDefinition = {
       }
 
       transaction(() => {
+        const current = getCurrencySettings()
+        if (!current.configured) throw new Error(mainCurrencySetupNeeded.message)
+        createdBudget.currency = current.mainCurrency
         execute(
-          `INSERT INTO budgets (id, category_id, name, amount, period, is_active)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
+          `INSERT INTO budgets (id, category_id, name, amount, period, is_active, currency)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
           [
             id,
             resolvedCategory.id,
@@ -332,6 +352,7 @@ const upsertBudget: ToolDefinition = {
             amountCentavos,
             createdPeriod,
             active === false ? 0 : 1,
+            createdBudget.currency,
           ]
         )
         writeAuditLog({
@@ -455,7 +476,7 @@ const getBudgetStatus: ToolDefinition = {
 
     if (categoryId) {
       budgets = await query<BudgetRow>(
-        `SELECT b.id, b.name, b.amount, b.period, b.category_id, c.name as category_name
+        `SELECT b.id, b.name, b.amount, b.currency, b.period, b.category_id, c.name as category_name
          FROM budgets b
          LEFT JOIN categories c ON b.category_id = c.id
          WHERE b.is_active = 1 AND b.category_id = $1`,
@@ -463,7 +484,7 @@ const getBudgetStatus: ToolDefinition = {
       )
     } else {
       budgets = await query<BudgetRow>(
-        `SELECT b.id, b.name, b.amount, b.period, b.category_id, c.name as category_name
+        `SELECT b.id, b.name, b.amount, b.currency, b.period, b.category_id, c.name as category_name
          FROM budgets b
          LEFT JOIN categories c ON b.category_id = c.id
          WHERE b.is_active = 1
@@ -493,49 +514,102 @@ const getBudgetStatus: ToolDefinition = {
           periodEnd = today.endOf('month').format('YYYY-MM-DD')
         }
 
-        const spending = readBudgetSpending(budget.category_id, periodStart, periodEnd)
-        if (!spending.success) return spending
-        const spentCentavos = spending.total
+        const spending = readBudgetSpending(
+          budget.category_id,
+          periodStart,
+          periodEnd,
+          budget.currency
+        )
+        const plan = readCurrentAmounts([
+          { id: budget.id, amountCentavos: budget.amount, currency: budget.currency },
+        ])
+        const realized = readConvertedCashFlow(periodStart, periodEnd, undefined, {
+          categoryId: budget.category_id,
+          expensesOnly: true,
+        })
+        const mainComplete = plan.complete && realized.success && realized.complete
         const budgetAmount = fromCentavos(budget.amount)
-        const spentAmount = fromCentavos(spentCentavos)
-        const remaining = budgetAmount - spentAmount
-        const percentUsed = budgetAmount > 0 ? Math.round((spentAmount / budgetAmount) * 100) : 0
-
+        const spentAmount = spending.success ? fromCentavos(spending.total) : null
+        const remaining = spentAmount === null ? null : budgetAmount - spentAmount
         return {
           id: budget.id,
           name: budget.name,
+          currency: budget.currency,
           categoryName: budget.category_name ?? 'All categories',
+          complete: spending.success,
           budgetAmount,
           spentAmount,
           remaining,
-          percentUsed,
+          percentUsed:
+            spentAmount === null
+              ? null
+              : budgetAmount > 0
+                ? Math.round((spentAmount / budgetAmount) * 100)
+                : 0,
           period: budget.period,
           periodStart,
           periodEnd,
-          isOverBudget: remaining < 0,
+          isOverBudget: remaining === null ? null : remaining < 0,
+          spending,
+          mainComparison: {
+            complete: mainComplete,
+            policy: 'current_plan_today_vs_transaction_date_spending',
+            toCurrency: plan.toCurrency,
+            plan,
+            spending: realized,
+            remainingCentavos:
+              mainComplete && realized.success
+                ? sumCentavos([plan.totalCentavos!, -realized.expenseCentavos!])
+                : null,
+          },
         }
       })
     )
 
-    const failure = statuses.find((status) => 'success' in status && !status.success)
-    if (failure) return failure
-    const completeStatuses = statuses.filter((status) => 'budgetAmount' in status)
-    const totalBudget = completeStatuses.reduce((s, b) => s + b.budgetAmount, 0)
-    const totalSpent = completeStatuses.reduce((s, b) => s + b.spentAmount, 0)
-
+    const totalsByCurrency = [...new Set(statuses.map((row) => row.currency))]
+      .sort()
+      .map((currency) => {
+        const rows = statuses.filter((row) => row.currency === currency)
+        const complete = rows.every((row) => row.complete)
+        const totalBudget = fromCentavos(
+          sumCentavos(budgets.filter((row) => row.currency === currency).map((row) => row.amount))
+        )
+        const totalSpent = complete
+          ? fromCentavos(
+              sumCentavos(rows.map((row) => (row.spending.success ? row.spending.total : 0)))
+            )
+          : null
+        return {
+          currency,
+          complete,
+          totalBudget,
+          totalSpent,
+          totalRemaining: totalSpent === null ? null : totalBudget - totalSpent,
+          overallPercentUsed:
+            totalSpent === null
+              ? null
+              : totalBudget > 0
+                ? Math.round((totalSpent / totalBudget) * 100)
+                : 0,
+        }
+      })
+    const single = totalsByCurrency.length === 1 ? totalsByCurrency[0] : null
+    const failure = statuses.find((row) => !row.spending.success)?.spending
     return {
-      success: true,
+      success: statuses.every((row) => row.complete),
+      reason: failure && !failure.success ? failure.reason : null,
       basis: 'gross_cashflow',
-      complete: true,
-      currency: 'USD',
-      budgets: completeStatuses,
+      complete: statuses.every((row) => row.complete),
+      currency: single?.currency ?? null,
+      budgets: statuses,
+      totalsByCurrency,
       summary: {
-        totalBudget,
-        totalSpent,
-        totalRemaining: totalBudget - totalSpent,
-        overallPercentUsed: totalBudget > 0 ? Math.round((totalSpent / totalBudget) * 100) : 0,
+        totalBudget: single?.totalBudget ?? null,
+        totalSpent: single?.totalSpent ?? null,
+        totalRemaining: single?.totalRemaining ?? null,
+        overallPercentUsed: single?.overallPercentUsed ?? null,
       },
-      message: `${statuses.length} active budget(s). Overall: $${totalSpent.toFixed(2)} / $${totalBudget.toFixed(2)} (${totalBudget > 0 ? Math.round((totalSpent / totalBudget) * 100) : 0}% used).`,
+      message: `${statuses.length} active budget(s). Native plan comparisons are grouped by denomination; main comparisons use today's plan rates and dated realized spending.`,
     }
   },
 }
@@ -558,7 +632,7 @@ const deleteBudget: ToolDefinition = {
   }),
   execute: async ({ budgetId, dryRun }) => {
     const existing = await query<BudgetRow>(
-      `SELECT b.id, b.name, b.amount, b.period, b.category_id, b.is_active, c.name as category_name
+      `SELECT b.id, b.name, b.amount, b.currency, b.period, b.category_id, b.is_active, c.name as category_name
        FROM budgets b
        LEFT JOIN categories c ON b.category_id = c.id
        WHERE b.id = $1`,
@@ -609,7 +683,7 @@ const getNetWorth: ToolDefinition = {
     'Calculate ownership-aware net worth. Returns native-currency components and only returns a converted total when ownership, verified prices, and FX are complete.',
   schema: z.object({}),
   execute: async () => {
-    const valuation = readOwnershipValuation('USD')
+    const valuation = readMainOwnershipValuation()
     const toAmount = (centavos: number | null) =>
       centavos === null ? null : fromCentavos(centavos)
 
@@ -617,6 +691,10 @@ const getNetWorth: ToolDefinition = {
       success: true,
       complete: valuation.complete,
       currency: valuation.targetCurrency,
+      asOfDate: valuation.asOfDate,
+      policy: valuation.policy,
+      reason: valuation.reason,
+      provenance: valuation.provenance,
       netWorth: toAmount(valuation.netWorthCentavos),
       totalAssets: toAmount(valuation.totalAssetsCentavos),
       totalLiabilities: toAmount(valuation.totalLiabilitiesCentavos),

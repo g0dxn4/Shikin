@@ -2191,7 +2191,10 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('previews budget upserts by category and default monthly period', async () => {
-    mockQuery.mockReturnValueOnce([{ id: 'cat-food', name: 'Food' }]).mockReturnValueOnce([])
+    mockQuery
+      .mockReturnValueOnce([{ id: 'cat-food', name: 'Food' }])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([{ value: 'USD' }])
 
     const result = await upsertBudget.execute(
       upsertBudget.schema.parse({ categoryName: 'Food', amount: 500, dryRun: true })
@@ -2242,6 +2245,9 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('writes audit rows for budget create, update, and delete writes', async () => {
+    mockQuery.mockImplementation((sql: string) =>
+      sql.includes("key = 'main_currency'") ? [{ value: 'USD' }] : []
+    )
     await createBudget.execute(
       createBudget.schema.parse({ name: 'Monthly Food', amount: 500, period: 'monthly' })
     )
@@ -7626,6 +7632,7 @@ describe('CLI tool validation regressions', () => {
 
   it('lists investments with filters, price fields, and redaction', async () => {
     mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.includes("key = 'main_currency'")) return []
       if (sql.includes('SELECT value FROM settings')) {
         return [{ value: JSON.stringify({ brokerage: 'acct-broker' }) }]
       }
@@ -7782,8 +7789,19 @@ describe('CLI tool validation regressions', () => {
           },
         ]
       }
-      if (sql.includes('FROM exchange_rates er')) {
-        return [{ from_currency: 'MXN', to_currency: 'USD', rate: 0.05 }]
+      if (sql.includes('FROM manual_exchange_rates')) {
+        return [
+          {
+            id: 'manual',
+            fromCurrency: 'MXN',
+            toCurrency: 'USD',
+            rateDecimal: '0.05',
+            effectiveFrom: '2020-01-01',
+            supersedesRateId: null,
+            createdAt: '2020-01-01T00:00:00Z',
+            sourceNote: null,
+          },
+        ]
       }
       return []
     })

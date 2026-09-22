@@ -1,3 +1,5 @@
+import { readCurrentAmounts } from '../dated-read.js'
+import { getCurrencySettings } from '../fx-service.js'
 import {
   z,
   query,
@@ -31,6 +33,7 @@ import {
 import {
   readInvestmentValuationRows,
   readValuationRates,
+  readValuationProvenance,
   rowToHoldingInput,
   type InvestmentValuationRow,
 } from '../valuation-read.js'
@@ -1009,8 +1012,29 @@ const listInvestments: ToolDefinition = {
     )
 
     const snapshots = investments.map((investment) => investmentSnapshot(investment, { redacted }))
+    const { mainCurrency } = getCurrencySettings()
+    const asOfDate = dayjs().format('YYYY-MM-DD')
+    const mainHoldings =
+      mainCurrency === null
+        ? null
+        : investments.map((row) =>
+            valueHolding(
+              rowToHoldingInput(row),
+              mainCurrency,
+              readValuationRates(mainCurrency, asOfDate)
+            )
+          )
     return {
       success: true,
+      mainConversion: {
+        complete: mainHoldings !== null && mainHoldings.every((holding) => holding.complete),
+        toCurrency: mainCurrency,
+        asOfDate,
+        provenance: readValuationProvenance(mainCurrency, asOfDate),
+        policy: 'current_holdings_today',
+        reason: mainCurrency === null ? 'main_currency_unconfigured' : null,
+        holdings: mainHoldings,
+      },
       investments: snapshots,
       count: snapshots.length,
       redacted,
@@ -1111,6 +1135,16 @@ const getUpcomingBills: ToolDefinition = {
     return {
       success: true,
       bills,
+      mainConversion: {
+        ...readCurrentAmounts(
+          bills.map((bill, index) => ({
+            id: `${bill.source}:${index}`,
+            amountCentavos: toCentavos(bill.amount),
+            currency: bill.currency,
+          }))
+        ),
+        policy: 'planning_estimate_today',
+      },
       summary: {
         count: bills.length,
         totalAmount,

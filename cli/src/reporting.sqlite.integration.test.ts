@@ -72,6 +72,9 @@ beforeEach(() => {
   )
   // Nullable legacy columns deliberately allow malformed-row regression fixtures.
   db.exec(`
+    ALTER TABLE budgets ADD COLUMN currency TEXT NOT NULL DEFAULT 'USD';
+    CREATE TABLE manual_exchange_rates (id TEXT PRIMARY KEY, from_currency TEXT, to_currency TEXT,
+      rate_decimal TEXT, effective_from TEXT, supersedes_rate_id TEXT, created_at TEXT, source_note TEXT);
     ALTER TABLE accounts ADD COLUMN account_mode TEXT DEFAULT 'transactional';
     ALTER TABLE accounts ADD COLUMN is_primary INTEGER DEFAULT 0;
     ALTER TABLE accounts ADD COLUMN credit_limit INTEGER;

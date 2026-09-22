@@ -1248,6 +1248,30 @@ function transactionSnapshotFromAudit(value: unknown): UndoTransactionSnapshot |
 
 function protectedUndoSemanticsFailure(entry: AuditLogRow) {
   if (entry.entity !== 'transaction') return null
+  const transactionIds = new Set<string>()
+  if (entry.entity_id) transactionIds.add(entry.entity_id)
+  for (const value of [parseAuditJson(entry.before_json), parseAuditJson(entry.after_json)]) {
+    const snapshot = transactionSnapshotFromAudit(value)
+    if (snapshot) transactionIds.add(snapshot.id)
+  }
+  if (entry.action !== 'create' && transactionIds.size > 0) {
+    const ids = [...transactionIds]
+    const originalPlaceholders = ids.map((_, index) => `$${index + 1}`).join(', ')
+    const livePlaceholders = ids.map((_, index) => `$${ids.length + index + 1}`).join(', ')
+    const fxEvidence = query<{ id: string }>(
+      `SELECT id FROM transaction_fx_evidence
+       WHERE original_transaction_id IN (${originalPlaceholders})
+          OR transaction_id IN (${livePlaceholders})
+       LIMIT 1`,
+      [...ids, ...ids]
+    )[0]
+    if (fxEvidence) {
+      return failure(
+        'dedicated_financial_undo_required',
+        'FX-bearing transaction updates and deletions cannot be restored through generic undo. Use a dedicated financial correction workflow.'
+      )
+    }
+  }
   for (const value of [parseAuditJson(entry.before_json), parseAuditJson(entry.after_json)]) {
     const tx = nestedSnapshot(value, 'transaction')
     if (!tx) continue
@@ -2634,6 +2658,16 @@ const undo: ToolDefinition = {
       .describe('Allow undo even when later audit writes exist for the same entity'),
     note: boundedText('Undo note', 'Optional audit note for the undo operation', 1000).optional(),
   }),
+  effects: {
+    writesTo: [
+      'transactions',
+      'accounts',
+      'credit_card_statements',
+      'transaction_fx_evidence',
+      'audit_log',
+      'app_data_state',
+    ],
+  },
   execute: async ({
     last,
     source,

@@ -52,6 +52,7 @@ import type { TransactionSplitWithCategory } from '@/types/database'
 import { StatementImportDialog } from '@/components/transactions/statement-import-dialog'
 import { LegacyImportIdentityAction } from '@/components/transactions/legacy-import-identity-dialog'
 import { ConsumptionClassificationDialog } from '@/components/transactions/consumption-classification-dialog'
+import { TransactionFxEvidenceDetails } from '@/components/transactions/transaction-fx-evidence'
 import { useTransactionPageQuery } from '@/hooks/use-transaction-page-query'
 import {
   TRANSACTION_PAGE_SIZES,
@@ -1603,6 +1604,7 @@ function TransactionDetail({
           />
           <DetailItem label={t('detail.reference')} value={transaction.id} />
         </dl>
+        <TransactionFxEvidenceDetails transactionId={transaction.id} />
         {protection && (
           <p className="border-warning/30 bg-warning/10 mt-5 rounded-lg border p-3 text-xs">
             {t(protection)}

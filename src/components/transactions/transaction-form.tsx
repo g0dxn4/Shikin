@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { FX_CURRENCIES, type TransactionFxAcceptanceGuard } from '@shikin/finance-core'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 import { Check, X, Split, Plus } from 'lucide-react'
@@ -19,8 +20,14 @@ import {
 import { useAccountStore } from '@/stores/account-store'
 import { useCategoryStore } from '@/stores/category-store'
 import { useCategorizationStore } from '@/stores/categorization-store'
-import { fromCentavos, toCentavos } from '@/lib/money'
+import { formatMoney, fromCentavos, toCentavos } from '@/lib/money'
 import { query } from '@/lib/database'
+import {
+  getLatestTransactionFxEvidence,
+  previewTransactionFxInput,
+  type TransactionFxPreview,
+} from '@/lib/transaction-fx'
+import type { TransactionFxEvidence } from '@/types/database'
 import type { CategorySuggestion } from '@/lib/auto-categorize'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 
@@ -29,6 +36,9 @@ const TRANSACTION_TYPES = ['expense', 'income', 'transfer'] as const
 const transactionSchema = z
   .object({
     amount: z.number().positive(),
+    inputCurrency: z.string().min(1),
+    fxAcceptanceGuard: z.custom<TransactionFxAcceptanceGuard>().nullable().optional(),
+    fxFinancialEdit: z.boolean().optional(),
     type: z.enum(TRANSACTION_TYPES),
     description: z.string().min(1),
     categoryId: z.string().nullable(),
@@ -104,6 +114,11 @@ export function TransactionForm({
   const [suggestion, setSuggestion] = useState<CategorySuggestion | null>(null)
   const [suggestionDismissed, setSuggestionDismissed] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fxPreviewSequence = useRef(0)
+  const [acceptedFxEvidence, setAcceptedFxEvidence] = useState<TransactionFxEvidence | null>(null)
+  const [fxPreview, setFxPreview] = useState<TransactionFxPreview | null>(null)
+  const [fxPreviewError, setFxPreviewError] = useState<string | null>(null)
+  const [isFxPreviewLoading, setIsFxPreviewLoading] = useState(false)
 
   const [isSplitMode, setIsSplitMode] = useState(!!initialSplits?.length)
   const [splitRows, setSplitRows] = useState<SplitRowData[]>(
@@ -130,6 +145,9 @@ export function TransactionForm({
     resolver: zodResolver(transactionSchema),
     defaultValues: {
       amount: transaction ? fromCentavos(transaction.amount) : undefined,
+      inputCurrency: transaction?.currency ?? 'USD',
+      fxAcceptanceGuard: null,
+      fxFinancialEdit: false,
       type: transaction?.type ?? 'expense',
       description: transaction?.description ?? '',
       categoryId: transaction?.category_id ?? null,
@@ -155,6 +173,8 @@ export function TransactionForm({
   >([])
   const descriptionValue = watch('description')
   const amountValue = watch('amount')
+  const inputCurrencyValue = watch('inputCurrency')
+  const dateValue = watch('date')
 
   const filteredCategories = categories.filter((c) => c.type === typeValue)
   const needsCategoriesForSubmission = isSplitMode
@@ -168,11 +188,99 @@ export function TransactionForm({
 
   // Auto-set currency from selected account
   const selectedAccount = accounts.find((a) => a.id === accountIdValue)
+  const selectedAccountId = selectedAccount?.id
+  const selectedAccountCurrency = selectedAccount?.currency
   useEffect(() => {
-    if (selectedAccount) {
-      setValue('currency', selectedAccount.currency)
+    if (selectedAccountId && selectedAccountCurrency) {
+      setValue('currency', selectedAccountCurrency)
+      if (!transaction || typeValue === 'transfer') {
+        setValue('inputCurrency', selectedAccountCurrency)
+      }
     }
-  }, [selectedAccount, setValue])
+  }, [selectedAccountCurrency, selectedAccountId, setValue, transaction, typeValue])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!transaction) return
+    void getLatestTransactionFxEvidence(transaction.id)
+      .then((evidence) => {
+        if (cancelled) return
+        setAcceptedFxEvidence(evidence)
+        if (evidence) {
+          setValue('amount', fromCentavos(evidence.input_amount_centavos), {
+            shouldDirty: false,
+          })
+          setValue('inputCurrency', evidence.input_currency, { shouldDirty: false })
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAcceptedFxEvidence(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [setValue, transaction])
+
+  const fxFinancialEdit = Boolean(
+    transaction &&
+    acceptedFxEvidence &&
+    (toCentavos(amountValue || 0) !== acceptedFxEvidence.input_amount_centavos ||
+      inputCurrencyValue !== acceptedFxEvidence.input_currency ||
+      accountIdValue !== transaction.account_id ||
+      typeValue !== transaction.type ||
+      dateValue !== transaction.date)
+  )
+  const requiresFxPreview = Boolean(
+    selectedAccountId &&
+    typeValue !== 'transfer' &&
+    (inputCurrencyValue !== selectedAccountCurrency || fxFinancialEdit)
+  )
+
+  useEffect(() => {
+    const sequence = ++fxPreviewSequence.current
+    setFxPreview(null)
+    setFxPreviewError(null)
+    if (!requiresFxPreview || !selectedAccountId || !amountValue || amountValue <= 0) {
+      setIsFxPreviewLoading(false)
+      return
+    }
+    setIsFxPreviewLoading(true)
+    const timer = setTimeout(() => {
+      void previewTransactionFxInput({
+        inputAmountCentavos: toCentavos(amountValue),
+        inputCurrency: inputCurrencyValue,
+        accountId: selectedAccountId,
+        transactionDate: dateValue,
+        transactionType: typeValue as 'income' | 'expense',
+        status: transaction?.status ?? 'posted',
+        ledgerTreatment: transaction?.ledger_treatment ?? 'normal',
+      })
+        .then((preview) => {
+          if (sequence !== fxPreviewSequence.current) return
+          setFxPreview(preview)
+          setFxPreviewError(null)
+        })
+        .catch((error) => {
+          if (sequence !== fxPreviewSequence.current) return
+          setFxPreview(null)
+          setFxPreviewError(error instanceof Error ? error.message : String(error))
+        })
+        .finally(() => {
+          if (sequence === fxPreviewSequence.current) setIsFxPreviewLoading(false)
+        })
+    }, 150)
+    return () => clearTimeout(timer)
+  }, [
+    amountValue,
+    dateValue,
+    inputCurrencyValue,
+    requiresFxPreview,
+    selectedAccountCurrency,
+    selectedAccountId,
+    transaction?.ledger_treatment,
+    transaction?.status,
+    typeValue,
+  ])
 
   // Debounced auto-categorization suggestion
   const fetchSuggestion = useCallback(
@@ -257,21 +365,36 @@ export function TransactionForm({
   }, [])
 
   const handleFormSubmit = (data: TransactionFormValues) => {
+    if (requiresFxPreview && !fxPreview) return
+    const acceptedData: TransactionFormValues = {
+      ...data,
+      inputCurrency: inputCurrencyValue,
+      fxAcceptanceGuard: requiresFxPreview ? fxPreview?.acceptanceGuard : null,
+      fxFinancialEdit,
+    }
     if (isSplitMode) {
-      // Validate splits
+      // Foreign original input must first become one account-denominated parent.
+      if (requiresFxPreview) return
       const validSplits = splitRows.filter((r) => r.categoryId && r.amount)
       if (validSplits.length < 2) return
       if (remainingCentavos !== 0) return
-      onSubmit(data, validSplits)
+      onSubmit(acceptedData, validSplits)
     } else {
-      onSubmit(data)
+      onSubmit(acceptedData)
     }
   }
 
   const splitsValid =
     !isSplitMode ||
-    (splitRows.filter((r) => r.categoryId && r.amount).length >= 2 && remainingCentavos === 0)
-  const isSubmitDisabled = isLoading || !splitsValid || blockingPrerequisiteErrors.length > 0
+    (!requiresFxPreview &&
+      splitRows.filter((r) => r.categoryId && r.amount).length >= 2 &&
+      remainingCentavos === 0)
+  const isSubmitDisabled =
+    isLoading ||
+    isFxPreviewLoading ||
+    (requiresFxPreview && !fxPreview) ||
+    !splitsValid ||
+    blockingPrerequisiteErrors.length > 0
 
   useEffect(() => {
     const hasDirtySplits = initialSplits?.length
@@ -341,6 +464,78 @@ export function TransactionForm({
           </p>
         )}
       </div>
+
+      {typeValue !== 'transfer' && (
+        <div className="space-y-1.5">
+          <Label htmlFor="tx-input-currency">{t('fx.inputCurrency')}</Label>
+          <Select
+            value={inputCurrencyValue}
+            onValueChange={(value) =>
+              setValue('inputCurrency', value, { shouldDirty: true, shouldValidate: true })
+            }
+            disabled={metadataOnly}
+          >
+            <SelectTrigger id="tx-input-currency">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {FX_CURRENCIES.map((currency) => (
+                <SelectItem key={currency} value={currency}>
+                  {currency}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-muted-foreground text-xs">{t('fx.inputCurrencyHint')}</p>
+        </div>
+      )}
+
+      {requiresFxPreview && (
+        <div className="border-border bg-muted/35 rounded-lg border p-3 text-sm" aria-live="polite">
+          {isFxPreviewLoading ? (
+            <p className="text-muted-foreground">{t('fx.previewLoading')}</p>
+          ) : fxPreview ? (
+            <div className="space-y-1">
+              <p className="font-medium">{t('fx.previewTitle')}</p>
+              <p>
+                {formatMoney(fxPreview.inputAmountCentavos, fxPreview.inputCurrency)} →{' '}
+                <strong>
+                  {formatMoney(fxPreview.accountAmountCentavos, fxPreview.accountCurrency)}
+                </strong>
+              </p>
+              <p className="text-muted-foreground text-xs">
+                {t('fx.rateProvenance', {
+                  direction: fxPreview.conversion.direction,
+                  rate: fxPreview.conversion.rateDecimal,
+                  effectiveFrom: fxPreview.conversion.effectiveFrom,
+                  date: fxPreview.transactionDate,
+                })}
+              </p>
+            </div>
+          ) : fxPreviewError ? (
+            <p className="text-destructive text-xs" role="alert">
+              {fxPreviewError}
+            </p>
+          ) : null}
+        </div>
+      )}
+
+      {acceptedFxEvidence && !fxFinancialEdit && (
+        <p className="border-border bg-muted/25 rounded-lg border p-3 text-xs">
+          {t('fx.acceptedEvidence', {
+            input: formatMoney(
+              acceptedFxEvidence.input_amount_centavos,
+              acceptedFxEvidence.input_currency
+            ),
+            account: formatMoney(
+              acceptedFxEvidence.account_amount_centavos,
+              acceptedFxEvidence.account_currency
+            ),
+            rate: acceptedFxEvidence.rate_decimal,
+            date: acceptedFxEvidence.transaction_date,
+          })}
+        </p>
+      )}
 
       <div className="space-y-1.5">
         <Label htmlFor="tx-description">{t('form.description')}</Label>
@@ -580,8 +775,9 @@ export function TransactionForm({
       {!isSplitMode && (
         <button
           type="button"
+          disabled={requiresFxPreview}
           onClick={() => setIsSplitMode(true)}
-          className="text-muted-foreground hover:text-accent flex items-center gap-1.5 text-xs transition-colors"
+          className="text-muted-foreground hover:text-accent flex items-center gap-1.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Split size={12} />
           {t('split.toggle')}

@@ -23,6 +23,22 @@
     "acceptSuggestion": "Aceptar sugerencia",
     "dismissSuggestion": "Descartar sugerencia"
   },
+  "fx": {
+    "inputCurrency": "Moneda ingresada",
+    "inputCurrencyHint": "El libro permanece en la moneda de la cuenta seleccionada. Otra moneda requiere aceptar una tasa manual fechada.",
+    "previewLoading": "Resolviendo la tasa de cambio fechada…",
+    "previewTitle": "Vista previa del movimiento de cuenta",
+    "rateProvenance": "{{direction}} a {{rate}}, vigente desde {{effectiveFrom}}, para la fecha {{date}}",
+    "acceptedEvidence": "Entrada aceptada {{input}} → {{account}} a la tasa {{rate}} el {{date}}. Los cambios de metadatos conservan esta aceptación inmutable.",
+    "evidenceTitle": "Aceptación FX original",
+    "evidenceDescription": "Evidencia inmutable de entrada y conversión; el estado y saldo actuales siguen siendo autoridad del libro.",
+    "originalInput": "Entrada original",
+    "accountMovement": "Monto aceptado en la cuenta",
+    "acceptedRate": "Tasa aceptada",
+    "transactionDate": "Fecha de transacción",
+    "balanceContribution": "Contribución aceptada al libro",
+    "retained": "Evidencia conservada"
+  },
   "rules": {
     "title": "Reglas de Categoría",
     "description": "Reglas de auto-categorización aprendidas de tus transacciones. Estas ayudan a sugerir categorías para nuevas transacciones.",

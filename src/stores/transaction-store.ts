@@ -6,6 +6,14 @@ import { getErrorMessage } from '@/lib/errors'
 import { generateId } from '@/lib/ulid'
 import { fromCentavos, toCentavos } from '@/lib/money'
 import { learnFromTransaction } from '@/lib/auto-categorize'
+import {
+  appendTransactionFxEvidence,
+  getLatestTransactionFxEvidence,
+  publicTransactionFxEvidence,
+  resolveTransactionFxPreviewInTransaction,
+  type TransactionFxAcceptanceGuard,
+  type TransactionFxPreview,
+} from '@/lib/transaction-fx'
 import { useAccountStore } from './account-store'
 import {
   createSplits,
@@ -18,8 +26,13 @@ import type { SplitInput } from '@/lib/split-service'
 import type { Account, Transaction, TransactionSplitWithCategory } from '@/types/database'
 import type { TransactionType, CurrencyCode } from '@/types/common'
 
-interface TransactionFormData {
+export interface TransactionFormData {
+  /** Original entered amount when inputCurrency differs from the selected account. */
   amount: number
+  inputCurrency?: CurrencyCode
+  fxAcceptanceGuard?: TransactionFxAcceptanceGuard | null
+  /** Existing FX rows require this explicit flag for any financial replacement. */
+  fxFinancialEdit?: boolean
   type: TransactionType
   description: string
   categoryId: string | null
@@ -253,6 +266,158 @@ async function applyBalanceImpact(
   ])
 }
 
+function balanceImpactMap(input: BalanceImpactInput): Map<string, number> {
+  const impacts = new Map<string, number>()
+  if (
+    !isBalanceAffectingStatus(input.status) ||
+    (input.ledgerTreatment ?? 'normal') !== 'normal' ||
+    input.isArchived === 1
+  )
+    return impacts
+  if (input.type === 'transfer' && input.transferToAccountId) {
+    if ((input.sourceAccountMode ?? 'transactional') === 'transactional') {
+      impacts.set(input.accountId, -input.amount)
+    }
+    if ((input.transferAccountMode ?? 'transactional') === 'transactional') {
+      impacts.set(input.transferToAccountId, input.amount)
+    }
+    return impacts
+  }
+  if ((input.sourceAccountMode ?? 'transactional') === 'transactional') {
+    impacts.set(input.accountId, input.type === 'income' ? input.amount : -input.amount)
+  }
+  return impacts
+}
+
+function diffImpacts(before: Map<string, number>, after: Map<string, number>) {
+  const result = new Map<string, number>()
+  for (const accountId of new Set([...before.keys(), ...after.keys()])) {
+    const delta = (after.get(accountId) ?? 0) - (before.get(accountId) ?? 0)
+    if (delta !== 0) result.set(accountId, delta)
+  }
+  return result
+}
+
+async function readBalances(tx: TransactionClient, accountIds: Iterable<string>) {
+  const ids = [...new Set(accountIds)].sort()
+  if (!ids.length) return new Map<string, number>()
+  const rows = await tx.query<{ id: string; balance: number }>(
+    `SELECT id, balance FROM accounts WHERE id IN (${ids.map(() => '?').join(', ')})`,
+    ids
+  )
+  return new Map(rows.map((row) => [row.id, row.balance]))
+}
+
+function frontendAuditSnapshot(transaction: Transaction | TransactionForMutation) {
+  return {
+    id: transaction.id,
+    accountId: transaction.account_id,
+    categoryId: transaction.category_id,
+    transferToAccountId: transaction.transfer_to_account_id,
+    type: transaction.type,
+    amount: fromCentavos(transaction.amount),
+    amountCentavos: transaction.amount,
+    currency: transaction.currency,
+    description: transaction.description,
+    notes: transaction.notes,
+    status: transaction.status ?? 'posted',
+    source: transaction.source ?? null,
+    note: transaction.note ?? null,
+    recurringRuleId: transaction.recurring_rule_id ?? null,
+    ledgerTreatment: transaction.ledger_treatment ?? 'normal',
+    reportingTreatment: transaction.reporting_treatment ?? 'normal',
+    transactionKind: transaction.transaction_kind ?? 'standard',
+    stagingBatchId: transaction.staging_batch_id ?? null,
+    finalizationId: transaction.finalization_id ?? null,
+    reconciliationId: transaction.reconciliation_id ?? null,
+    matchedTransactionId: transaction.matched_transaction_id ?? null,
+    isArchived: transaction.is_archived === 1,
+    tags: [],
+    isPlaceholder: Boolean(transaction.is_placeholder),
+    placeholderStatus: transaction.placeholder_status ?? null,
+    resolvedAt: transaction.resolved_at ?? null,
+    resolvedByTransactionId: transaction.resolved_by_transaction_id ?? null,
+    placeholderReason: transaction.placeholder_reason ?? null,
+    placeholderParentTransactionId: transaction.placeholder_parent_transaction_id ?? null,
+    date: transaction.date,
+  }
+}
+
+async function writeFrontendFxAudit(
+  tx: TransactionClient,
+  action: 'create' | 'update' | 'delete',
+  before: Transaction | TransactionForMutation | null,
+  after: Transaction | TransactionForMutation | null,
+  balanceDeltas: Map<string, number>,
+  balancesBefore: Map<string, number>,
+  beforeEvidence: unknown,
+  afterEvidence: unknown
+) {
+  const balanceChanges = [...balanceDeltas.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([accountId, deltaCentavos]) => {
+      const previousBalanceCentavos = balancesBefore.get(accountId) ?? null
+      return {
+        accountId,
+        deltaCentavos,
+        previousBalanceCentavos,
+        newBalanceCentavos:
+          previousBalanceCentavos === null ? null : previousBalanceCentavos + deltaCentavos,
+      }
+    })
+  const snapshot = (transaction: Transaction | TransactionForMutation, evidence: unknown) => ({
+    transaction: frontendAuditSnapshot(transaction),
+    fxEvidence: evidence,
+    balances: balanceChanges.map((change) => ({
+      accountId: change.accountId,
+      balanceCentavos:
+        action === 'delete' && transaction === before
+          ? change.previousBalanceCentavos
+          : change.newBalanceCentavos,
+    })),
+    balanceChanges,
+  })
+  await auditFrontendCorrection(
+    tx,
+    after?.id ?? before!.id,
+    action,
+    before ? snapshot(before, beforeEvidence) : null,
+    after ? snapshot(after, afterEvidence) : null,
+    'frontend-transaction-fx'
+  )
+}
+
+async function resolveFxAcceptance(
+  tx: TransactionClient,
+  data: TransactionFormData,
+  account: WritableAccountRef,
+  forceEvidence: boolean,
+  ledgerTreatment: Transaction['ledger_treatment'] = 'normal'
+): Promise<TransactionFxPreview | null> {
+  const inputCurrency = normalizeCurrency(data.inputCurrency ?? data.currency)
+  const isForeignInput = inputCurrency !== account.currency
+  if (!isForeignInput && !forceEvidence) return null
+  if (data.type === 'transfer') {
+    throw new Error('Foreign input is not supported for transfers.')
+  }
+  if (!data.fxAcceptanceGuard) {
+    throw new Error('Preview and accept the foreign-input conversion before saving.')
+  }
+  return resolveTransactionFxPreviewInTransaction(
+    tx,
+    {
+      inputAmountCentavos: toCentavos(data.amount),
+      inputCurrency,
+      accountId: account.id,
+      transactionDate: data.date,
+      transactionType: data.type,
+      status: data.status ?? 'posted',
+      ledgerTreatment: ledgerTreatment ?? 'normal',
+    },
+    data.fxAcceptanceGuard
+  )
+}
+
 type TransactionForMutation = Transaction & {
   source_account_mode?: Account['account_mode'] | null
   transfer_account_mode?: Account['account_mode'] | null
@@ -337,14 +502,20 @@ async function updateTransactionWithData(
 ): Promise<boolean> {
   const existing = currentTransaction ?? (await getTransactionForMutation(tx, id))
   if (!existing) return false
-  const metadataOnly =
-    toCentavos(data.amount) === existing.amount &&
+  const latestFxEvidence = await getLatestTransactionFxEvidence(id, tx)
+  const financialIdentityUnchanged =
     data.type === existing.type &&
     data.accountId === existing.account_id &&
     data.transferToAccountId === existing.transfer_to_account_id &&
     data.currency === existing.currency &&
     data.date === existing.date &&
     (data.status ?? existing.status ?? 'posted') === (existing.status ?? 'posted')
+  const enteredOriginalUnchanged = latestFxEvidence
+    ? toCentavos(data.amount) === latestFxEvidence.input_amount_centavos &&
+      normalizeCurrency(data.inputCurrency ?? existing.currency) === latestFxEvidence.input_currency
+    : toCentavos(data.amount) === existing.amount
+  const metadataOnly =
+    financialIdentityUnchanged && enteredOriginalUnchanged && data.fxFinancialEdit !== true
   if (metadataOnly && existing.type !== 'transfer') {
     await correctMetadata(tx, existing, {
       description: data.description,
@@ -355,13 +526,18 @@ async function updateTransactionWithData(
     })
     return true
   }
+  if (latestFxEvidence && data.fxFinancialEdit !== true) {
+    throw new Error(
+      'FX financial edits require explicit original amount/currency re-entry and conversion confirmation.'
+    )
+  }
   assertMutableTransaction(existing)
   if (existing.has_splits) {
     throw new Error('Split transactions require their dedicated split workflow.')
   }
 
   const now = new Date().toISOString()
-  const newAmountCentavos = toCentavos(data.amount)
+  let newAmountCentavos = toCentavos(data.amount)
   const oldIsTransfer = existing.type === 'transfer' && !!existing.transfer_to_account_id
   const newIsTransfer = data.type === 'transfer'
   const newStatus =
@@ -374,6 +550,14 @@ async function updateTransactionWithData(
   )
   assertTransactionLedgerAccount(sourceAccount)
   assertTransactionLedgerAccount(transferDestination)
+  const acceptedFx = await resolveFxAcceptance(
+    tx,
+    { ...data, status: newStatus },
+    sourceAccount,
+    Boolean(latestFxEvidence),
+    existing.ledger_treatment
+  )
+  if (acceptedFx) newAmountCentavos = acceptedFx.accountAmountCentavos
   if (existing.source_account_mode === 'snapshot_only') {
     throw new Error(
       `Account ${existing.account_id} is snapshot-only and cannot accept transaction ledger rows.`
@@ -414,6 +598,33 @@ async function updateTransactionWithData(
     date: data.date,
     reporting_treatment: data.reportingTreatment ?? existing.reporting_treatment,
   })
+  const oldImpact = balanceImpactMap({
+    type: existing.type,
+    amount: existing.amount,
+    accountId: existing.account_id,
+    transferToAccountId: oldIsTransfer ? existing.transfer_to_account_id : null,
+    status: existing.status,
+    ledgerTreatment: existing.ledger_treatment,
+    isArchived: existing.is_archived,
+    sourceAccountMode: existing.source_account_mode,
+    transferAccountMode: existing.transfer_account_mode,
+  })
+  const newImpact = balanceImpactMap({
+    type: data.type,
+    amount: newAmountCentavos,
+    accountId: sourceAccount.id,
+    transferToAccountId: transferDestination?.id ?? null,
+    status: newStatus,
+    ledgerTreatment: existing.ledger_treatment,
+    isArchived: existing.is_archived,
+    sourceAccountMode: sourceAccount.accountMode,
+    transferAccountMode: transferDestination?.accountMode,
+  })
+  const balanceDeltas = diffImpacts(oldImpact, newImpact)
+  const balancesBefore = acceptedFx
+    ? await readBalances(tx, balanceDeltas.keys())
+    : new Map<string, number>()
+
   await applyBalanceImpact(
     tx,
     {
@@ -469,7 +680,40 @@ async function updateTransactionWithData(
     now,
     1
   )
-  await auditFrontendCorrection(tx, id, 'update', existing, { ...data, amount: newAmountCentavos })
+  if (acceptedFx) {
+    const nextEvidence = await appendTransactionFxEvidence(tx, id, acceptedFx, now)
+    const updated = {
+      ...existing,
+      account_id: sourceAccount.id,
+      category_id: newIsTransfer ? null : data.categoryId,
+      transfer_to_account_id: transferDestination?.id ?? null,
+      type: data.type,
+      amount: newAmountCentavos,
+      currency,
+      description: data.description,
+      notes: data.notes,
+      status: newStatus ?? undefined,
+      date: data.date,
+      subcategory_id:
+        data.subcategoryId === undefined ? existing.subcategory_id : data.subcategoryId,
+      reporting_treatment: data.reportingTreatment ?? existing.reporting_treatment ?? 'normal',
+    }
+    await writeFrontendFxAudit(
+      tx,
+      'update',
+      existing,
+      updated,
+      balanceDeltas,
+      balancesBefore,
+      publicTransactionFxEvidence(latestFxEvidence),
+      nextEvidence
+    )
+  } else {
+    await auditFrontendCorrection(tx, id, 'update', existing, {
+      ...data,
+      amount: newAmountCentavos,
+    })
+  }
   return true
 }
 
@@ -629,12 +873,44 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       await withTransaction(async (tx) => {
         const id = generateId()
         const now = new Date().toISOString()
-        const amountCentavos = toCentavos(data.amount)
+        let amountCentavos = toCentavos(data.amount)
         const isTransfer = data.type === 'transfer'
         const { sourceAccount, transferDestination, currency } =
           await resolveTransactionWriteAccounts(tx, data)
         assertTransactionLedgerAccount(sourceAccount)
         assertTransactionLedgerAccount(transferDestination)
+        const acceptedFx = await resolveFxAcceptance(tx, data, sourceAccount, false)
+        if (acceptedFx) amountCentavos = acceptedFx.accountAmountCentavos
+        const createdTransaction = {
+          id,
+          account_id: sourceAccount.id,
+          category_id: isTransfer ? null : data.categoryId,
+          subcategory_id: data.subcategoryId ?? null,
+          transfer_to_account_id: transferDestination?.id ?? null,
+          type: data.type,
+          amount: amountCentavos,
+          currency,
+          description: data.description,
+          notes: data.notes,
+          status: data.status ?? 'posted',
+          date: data.date,
+          tags: '[]',
+          is_recurring: 0,
+          created_at: now,
+          updated_at: now,
+        } as Transaction
+        const createdImpact = balanceImpactMap({
+          type: data.type,
+          amount: amountCentavos,
+          accountId: sourceAccount.id,
+          transferToAccountId: transferDestination?.id ?? null,
+          status: data.status ?? 'posted',
+          sourceAccountMode: sourceAccount.accountMode,
+          transferAccountMode: transferDestination?.accountMode,
+        })
+        const balancesBefore = acceptedFx
+          ? await readBalances(tx, createdImpact.keys())
+          : new Map<string, number>()
 
         await tx.execute(
           `INSERT INTO transactions (id, account_id, category_id, transfer_to_account_id, type, amount, currency, description, notes, status, date, created_at, updated_at)
@@ -670,6 +946,19 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
           now,
           1
         )
+        if (acceptedFx) {
+          const evidence = await appendTransactionFxEvidence(tx, id, acceptedFx, now)
+          await writeFrontendFxAudit(
+            tx,
+            'create',
+            null,
+            createdTransaction,
+            createdImpact,
+            balancesBefore,
+            null,
+            evidence
+          )
+        }
       })
 
       // Learn categorization from this transaction
@@ -735,6 +1024,17 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
           throw new Error('Split transactions require their dedicated review workflow.')
         }
         if (fields.categoryId === undefined && fields.accountId === undefined) return false
+        if (fields.accountId === undefined || fields.accountId === existing.account_id) {
+          await correctMetadata(tx, existing, {
+            category_id: fields.categoryId === undefined ? existing.category_id : fields.categoryId,
+          })
+          return true
+        }
+        if (await getLatestTransactionFxEvidence(id, tx)) {
+          throw new Error(
+            'FX financial edits require the full transaction form with original amount/currency confirmation.'
+          )
+        }
 
         return updateTransactionWithData(
           tx,
@@ -780,6 +1080,24 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         }
 
         const now = new Date().toISOString()
+        const latestFxEvidence = await getLatestTransactionFxEvidence(id, tx)
+        const existingImpact = balanceImpactMap({
+          type: existing.type,
+          amount: existing.amount,
+          accountId: existing.account_id,
+          transferToAccountId: existing.transfer_to_account_id,
+          status: existing.status,
+          ledgerTreatment: existing.ledger_treatment,
+          isArchived: existing.is_archived,
+          sourceAccountMode: existing.source_account_mode,
+          transferAccountMode: existing.transfer_account_mode,
+        })
+        const deletionDeltas = new Map(
+          [...existingImpact.entries()].map(([accountId, amount]) => [accountId, -amount])
+        )
+        const balancesBefore = latestFxEvidence
+          ? await readBalances(tx, deletionDeltas.keys())
+          : new Map<string, number>()
 
         await applyBalanceImpact(
           tx,
@@ -800,6 +1118,18 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
 
         const deleteResult = await tx.execute('DELETE FROM transactions WHERE id = ?', [id])
         assertSingleRowAffected(deleteResult, `Transaction ${id} could not be deleted safely.`)
+        if (latestFxEvidence) {
+          await writeFrontendFxAudit(
+            tx,
+            'delete',
+            existing,
+            null,
+            deletionDeltas,
+            balancesBefore,
+            publicTransactionFxEvidence(latestFxEvidence),
+            null
+          )
+        }
         return true
       })
       if (!changed) return
@@ -824,6 +1154,11 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         }
         const { sourceAccount, currency } = await resolveTransactionWriteAccounts(tx, data)
         assertTransactionLedgerAccount(sourceAccount)
+        if (normalizeCurrency(data.inputCurrency ?? currency) !== sourceAccount.currency) {
+          throw new Error(
+            'Foreign-input split transactions are not supported. Save in account units before allocating splits.'
+          )
+        }
 
         await tx.execute(
           `INSERT INTO transactions (id, account_id, category_id, type, amount, currency, description, notes, status, date, created_at, updated_at)

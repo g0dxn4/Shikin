@@ -30,6 +30,13 @@ vi.mock('@/lib/auto-categorize', () => ({
   learnFromTransaction: vi.fn().mockResolvedValue(undefined),
 }))
 
+vi.mock('@/lib/transaction-fx', () => ({
+  getLatestTransactionFxEvidence: vi.fn().mockResolvedValue(null),
+  resolveTransactionFxPreviewInTransaction: vi.fn(),
+  appendTransactionFxEvidence: vi.fn(),
+  publicTransactionFxEvidence: vi.fn((value) => value),
+}))
+
 // Mock account store to prevent cross-store fetch issues
 const mockAccountFetch = vi.fn()
 vi.mock('../account-store', () => ({

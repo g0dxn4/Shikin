@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { TransactionForm } from '../transaction-form'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
@@ -41,6 +41,12 @@ vi.mock('@/stores/category-store', () => ({
   }),
 }))
 
+const fxMocks = vi.hoisted(() => ({
+  getLatestTransactionFxEvidence: vi.fn().mockResolvedValue(null),
+  previewTransactionFxInput: vi.fn(),
+}))
+vi.mock('@/lib/transaction-fx', () => fxMocks)
+
 vi.mock('@/stores/categorization-store', () => ({
   useCategorizationStore: () => ({
     suggestCategory: vi.fn().mockResolvedValue(null),
@@ -56,6 +62,8 @@ describe('TransactionForm', () => {
     vi.clearAllMocks()
     mockAccountsFetchError = null
     mockCategoriesFetchError = null
+    fxMocks.getLatestTransactionFxEvidence.mockResolvedValue(null)
+    fxMocks.previewTransactionFxInput.mockReset()
   })
 
   it('renders all fields', () => {
@@ -261,6 +269,85 @@ describe('TransactionForm', () => {
         })
       )
     })
+  })
+
+  it('requires and submits the exact foreign-input preview guard while disabling splits', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    const acceptanceGuard = {
+      version: 1 as const,
+      inputAmountCentavos: 1000,
+      inputCurrency: 'EUR',
+      accountId: 'acc-1',
+      accountCurrency: 'USD',
+      mainCurrency: 'USD',
+      transactionDate: '2024-06-15',
+      transactionType: 'expense' as const,
+      status: 'posted' as const,
+      ledgerTreatment: 'normal' as const,
+      accountAmountCentavos: 1100,
+      rateId: 'rate-1',
+      effectiveFrom: '2024-06-01',
+      rateDecimal: '1.1',
+      direction: 'EUR->USD',
+    }
+    fxMocks.previewTransactionFxInput.mockResolvedValue({
+      inputAmountCentavos: 1000,
+      inputCurrency: 'EUR',
+      accountId: 'acc-1',
+      accountCurrency: 'USD',
+      mainCurrency: 'USD',
+      transactionDate: '2024-06-15',
+      transactionType: 'expense',
+      status: 'posted',
+      ledgerTreatment: 'normal',
+      accountAmountCentavos: 1100,
+      accountBalanceDeltaCentavos: -1100,
+      conversion: {
+        complete: true,
+        amountCentavos: 1100,
+        missingReason: null,
+        fromCurrency: 'EUR',
+        toCurrency: 'USD',
+        asOfDate: '2024-06-15',
+        rateId: 'rate-1',
+        effectiveFrom: '2024-06-01',
+        rateDecimal: '1.1',
+        direction: 'EUR->USD',
+      },
+      acceptanceGuard,
+    })
+
+    render(<TransactionForm onSubmit={onSubmit} />)
+    await user.type(screen.getByLabelText('form.amount'), '10')
+    await user.type(screen.getByLabelText('form.description'), 'Foreign lunch')
+    fireEvent.change(screen.getByLabelText('form.date'), { target: { value: '2024-06-15' } })
+    const selects = [...document.querySelectorAll('select')]
+    const accountSelect = selects.find((select) =>
+      [...select.options].some((option) => option.text === 'Checking')
+    )!
+    fireEvent.change(accountSelect, { target: { value: 'acc-1' } })
+    const currencySelect = [...document.querySelectorAll('select')].find((select) =>
+      [...select.options].some((option) => option.value === 'EUR')
+    )!
+    fireEvent.change(currencySelect, { target: { value: 'EUR' } })
+
+    expect(screen.getByRole('button', { name: 'split.toggle' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'actions.save' })).toBeDisabled()
+    expect(await screen.findByText('fx.previewTitle')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'actions.save' })).not.toBeDisabled()
+    )
+    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          amount: 10,
+          inputCurrency: 'EUR',
+          fxAcceptanceGuard: acceptanceGuard,
+        })
+      )
+    )
   })
 
   it('renders "form.categoryNone" option in category select', () => {

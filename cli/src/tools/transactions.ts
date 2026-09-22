@@ -1,4 +1,16 @@
 import {
+  FX_RATE_SELECT,
+  TRANSACTION_FX_EVIDENCE_INSERT,
+  assertTransactionFxAcceptanceGuard,
+  buildTransactionFxEvidenceSnapshot,
+  resolveTransactionFxPreview,
+  transactionFxEvidenceBindings,
+  type DatedExchangeRate,
+  type TransactionFxAcceptanceGuard,
+  type TransactionFxEvidenceSnapshot,
+  type TransactionFxPreview,
+} from '@shikin/finance-core'
+import {
   correctMetadataMutation,
   correctTransactionMetadata,
   setTransactionConsumption,
@@ -164,6 +176,25 @@ type TransactionTag = {
   label: string
 }
 
+type TransactionFxEvidenceRow = {
+  id: string
+  transaction_id: string | null
+  original_transaction_id: string
+  original_account_id: string
+  transaction_type: 'income' | 'expense'
+  status: TransactionStatus
+  ledger_treatment: LedgerTreatment
+  input_amount_centavos: number
+  input_currency: string
+  account_amount_centavos: number
+  account_currency: string
+  account_balance_delta_centavos: number
+  transaction_date: string
+  rate_id: string | null
+  rate_decimal: string
+  created_at: string
+}
+
 type BalanceImpactPreview = {
   affectsBalances: boolean
   accounts: Array<{
@@ -177,6 +208,24 @@ type BalanceImpactPreview = {
     deltaCentavos: number
   }>
 }
+
+const transactionFxAcceptanceGuardSchema = z.object({
+  version: z.literal(1),
+  inputAmountCentavos: z.number().int().positive(),
+  inputCurrency: z.string(),
+  accountId: z.string(),
+  accountCurrency: z.string(),
+  mainCurrency: z.string(),
+  transactionDate: z.string(),
+  transactionType: z.enum(['income', 'expense']),
+  status: z.enum(['pending', 'posted', 'cleared']),
+  ledgerTreatment: z.enum(['normal', 'staged_no_balance_impact']),
+  accountAmountCentavos: z.number().int().positive(),
+  rateId: z.string().nullable(),
+  effectiveFrom: z.string().nullable(),
+  rateDecimal: z.string(),
+  direction: z.string(),
+})
 
 function normalizeTransactionStatus(status: TransactionRow['status']): TransactionStatus {
   return status ?? 'posted'
@@ -194,6 +243,104 @@ function normalizeReportingTreatment(
   value: TransactionRow['reporting_treatment']
 ): ReportingTreatment {
   return value === 'exclude_from_cashflow' ? value : 'normal'
+}
+
+function latestTransactionFxEvidence(transactionId: string): TransactionFxEvidenceRow | null {
+  return (
+    query<TransactionFxEvidenceRow>(
+      `SELECT * FROM transaction_fx_evidence
+       WHERE transaction_id = $1 OR original_transaction_id = $2
+       ORDER BY created_at DESC, id DESC LIMIT 1`,
+      [transactionId, transactionId]
+    )[0] ?? null
+  )
+}
+
+function publicFxEvidence(
+  evidence: TransactionFxEvidenceRow | TransactionFxEvidenceSnapshot | null
+) {
+  if (!evidence) return null
+  if ('transaction_id' in evidence) {
+    return {
+      id: evidence.id,
+      transactionId: evidence.transaction_id,
+      originalTransactionId: evidence.original_transaction_id,
+      originalAccountId: evidence.original_account_id,
+      transactionType: evidence.transaction_type,
+      acceptedStatus: evidence.status,
+      ledgerTreatment: evidence.ledger_treatment,
+      inputAmountCentavos: evidence.input_amount_centavos,
+      inputCurrency: evidence.input_currency,
+      accountAmountCentavos: evidence.account_amount_centavos,
+      accountCurrency: evidence.account_currency,
+      accountBalanceDeltaCentavos: evidence.account_balance_delta_centavos,
+      transactionDate: evidence.transaction_date,
+      rateId: evidence.rate_id,
+      rateDecimal: evidence.rate_decimal,
+      direction: `${evidence.input_currency}->${evidence.account_currency}`,
+      createdAt: evidence.created_at,
+      immutableAcceptanceSnapshot: true,
+    }
+  }
+  return {
+    ...evidence,
+    acceptedStatus: evidence.status,
+    direction: `${evidence.inputCurrency}->${evidence.accountCurrency}`,
+    immutableAcceptanceSnapshot: true,
+  }
+}
+
+function resolveCliFxAcceptance(input: {
+  inputAmountCentavos: number
+  inputCurrency: string | undefined
+  account: AccountRef
+  transactionDate: string
+  transactionType: TransactionRow['type']
+  status: TransactionStatus
+  ledgerTreatment: LedgerTreatment
+  suppliedGuard?: TransactionFxAcceptanceGuard
+  forceEvidence?: boolean
+}): TransactionFxPreview | null {
+  const inputCurrency = normalizeCurrencyCode(input.inputCurrency ?? input.account.currency)
+  if (!inputCurrency) throw new Error('Input currency is required.')
+  const foreign = inputCurrency !== input.account.currency
+  if (!foreign && !input.forceEvidence) return null
+  if (input.transactionType === 'transfer') {
+    throw new Error('Foreign input is not supported for transfers.')
+  }
+  const mainCurrency = query<{ value: string }>(
+    "SELECT value FROM settings WHERE key = 'main_currency' LIMIT 1"
+  )[0]?.value
+  const current = resolveTransactionFxPreview({
+    inputAmountCentavos: input.inputAmountCentavos,
+    inputCurrency,
+    accountId: input.account.id,
+    accountCurrency: input.account.currency,
+    mainCurrency: mainCurrency ?? null,
+    transactionDate: input.transactionDate,
+    transactionType: input.transactionType,
+    status: input.status,
+    ledgerTreatment: input.ledgerTreatment,
+    rates: query<DatedExchangeRate>(FX_RATE_SELECT),
+  })
+  if (input.suppliedGuard) {
+    assertTransactionFxAcceptanceGuard(input.suppliedGuard, current.acceptanceGuard)
+  }
+  return current
+}
+
+function appendCliFxEvidence(
+  transactionId: string,
+  preview: TransactionFxPreview
+): TransactionFxEvidenceSnapshot {
+  const evidence = buildTransactionFxEvidenceSnapshot({
+    id: generateId(),
+    transactionId,
+    createdAt: new Date().toISOString(),
+    preview,
+  })
+  execute(TRANSACTION_FX_EVIDENCE_INSERT, transactionFxEvidenceBindings(evidence))
+  return evidence
 }
 
 function addImpact(impacts: Map<string, number>, accountId: string, amount: number) {
@@ -708,12 +855,16 @@ function buildTransactionBalanceAuditPreview({
   after,
   balanceDeltas,
   balancesBefore,
+  beforeFxEvidence = null,
+  afterFxEvidence = null,
 }: {
   action: 'create' | 'update' | 'delete' | 'match-transfer' | 'unmatch-transfer'
   before: TransactionRow | null
   after: TransactionRow | null
   balanceDeltas: Map<string, number>
   balancesBefore: Map<string, number>
+  beforeFxEvidence?: TransactionFxEvidenceRow | TransactionFxEvidenceSnapshot | null
+  afterFxEvidence?: TransactionFxEvidenceRow | TransactionFxEvidenceSnapshot | null
 }) {
   const balanceChanges = buildBalanceAuditChanges(balanceDeltas, balancesBefore)
   return {
@@ -723,6 +874,8 @@ function buildTransactionBalanceAuditPreview({
     before: before
       ? {
           transaction: transactionAuditSnapshot(before),
+          fxEvidence: publicFxEvidence(beforeFxEvidence),
+          balanceChanges,
           balances: balanceChanges.map((change) => ({
             accountId: change.accountId,
             balanceCentavos: change.previousBalanceCentavos,
@@ -733,6 +886,8 @@ function buildTransactionBalanceAuditPreview({
     after: after
       ? {
           transaction: transactionAuditSnapshot(after),
+          fxEvidence: publicFxEvidence(afterFxEvidence),
+          balanceChanges,
           balances: balanceChanges.map((change) => ({
             accountId: change.accountId,
             balanceCentavos: change.newBalanceCentavos,
@@ -1075,8 +1230,18 @@ const addTransaction: ToolDefinition = {
     'Add a new financial transaction (expense, income, or transfer). Use this when the user wants to record spending, earnings, or money movement between accounts.',
   schema: z.object({
     amount: positiveMoneyAmount(
-      'The transaction amount in the main currency unit (e.g. 12.50, not cents; max 1,000,000,000)'
+      'Original entered amount in inputCurrency units (e.g. 12.50, not cents; max 1,000,000,000)'
     ),
+    inputCurrency: z
+      .string()
+      .trim()
+      .optional()
+      .describe('Original entered currency. Omit to use the selected account currency.'),
+    fxAcceptanceGuard: transactionFxAcceptanceGuardSchema
+      .optional()
+      .describe(
+        'Exact guard returned by a foreign-input dry run; required to apply foreign input.'
+      ),
     type: z.enum(['expense', 'income', 'transfer']).describe('The type of transaction'),
     description: boundedText('Description', 'A short description of the transaction', 200),
     category: boundedText(
@@ -1151,8 +1316,19 @@ const addTransaction: ToolDefinition = {
       .default(false)
       .describe('Record the transaction even when an exact or likely duplicate is detected'),
   }),
+  effects: {
+    writesTo: [
+      'transactions',
+      'accounts',
+      'transaction_fx_evidence',
+      'audit_log',
+      'app_data_state',
+    ],
+  },
   execute: async ({
     amount,
+    inputCurrency,
+    fxAcceptanceGuard,
     type,
     description,
     category,
@@ -1172,7 +1348,8 @@ const addTransaction: ToolDefinition = {
     allowDuplicate,
   }) => {
     const id = generateId()
-    const amountCentavos = toCentavos(amount)
+    const inputAmountCentavos = toCentavos(amount)
+    let amountCentavos = inputAmountCentavos
     const txDate = date || dayjs().format('YYYY-MM-DD')
     const transactionNotes = notes ?? null
     const transactionSource = source ?? null
@@ -1231,6 +1408,31 @@ const addTransaction: ToolDefinition = {
       if (!resolvedTransferDestination.success) {
         return { success: false, message: resolvedTransferDestination.message }
       }
+
+      const acceptedFx = resolveCliFxAcceptance({
+        inputAmountCentavos,
+        inputCurrency,
+        account: resolvedAccount,
+        transactionDate: txDate,
+        transactionType: type,
+        status: transactionStatus,
+        ledgerTreatment: transactionLedgerTreatment,
+        suppliedGuard: fxAcceptanceGuard,
+      })
+      if (acceptedFx && !dryRun && !fxAcceptanceGuard) {
+        return {
+          success: false,
+          reason: 'fx_preview_required',
+          message:
+            'Foreign input requires a dry-run preview and its exact fxAcceptanceGuard before apply.',
+          preview: {
+            accountAmountCentavos: acceptedFx.accountAmountCentavos,
+            accountCurrency: acceptedFx.accountCurrency,
+            acceptanceGuard: acceptedFx.acceptanceGuard,
+          },
+        }
+      }
+      if (acceptedFx) amountCentavos = acceptedFx.accountAmountCentavos
 
       const resolvedRecurringRule = resolveRecurringRuleId(linkedRecurringRuleId, {
         accountId: resolvedAccount.id,
@@ -1304,6 +1506,21 @@ const addTransaction: ToolDefinition = {
           success: true,
           dryRun: true,
           balanceImpact: balanceImpactPreview,
+          ...(acceptedFx
+            ? {
+                fxPreview: {
+                  inputAmount: amount,
+                  inputAmountCentavos,
+                  inputCurrency: acceptedFx.inputCurrency,
+                  accountAmount: fromCentavos(acceptedFx.accountAmountCentavos),
+                  accountAmountCentavos: acceptedFx.accountAmountCentavos,
+                  accountCurrency: acceptedFx.accountCurrency,
+                  transactionDate: acceptedFx.transactionDate,
+                  conversion: acceptedFx.conversion,
+                  acceptanceGuard: acceptedFx.acceptanceGuard,
+                },
+              }
+            : {}),
           ...(duplicateWarnings.length > 0 ? { duplicateWarnings } : {}),
           ...(duplicateCheck.match
             ? {
@@ -1319,7 +1536,11 @@ const addTransaction: ToolDefinition = {
             id,
             accountId: resolvedAccount.id,
             transferToAccountId: resolvedTransferDestination.id,
-            amount,
+            amount: fromCentavos(amountCentavos),
+            amountCentavos,
+            inputAmount: amount,
+            inputAmountCentavos,
+            inputCurrency: inputCurrency ?? resolvedAccount.currency,
             currency: resolvedAccount.currency,
             type,
             description,
@@ -1340,7 +1561,7 @@ const addTransaction: ToolDefinition = {
           message:
             duplicateFailure && !allowDuplicate
               ? `${duplicateFailure.message} No changes were written.`
-              : `Dry run: ${type} transaction for ${resolvedAccount.currency} ${amount.toFixed(2)} would be created.`,
+              : `Dry run: ${type} transaction for ${resolvedAccount.currency} ${fromCentavos(amountCentavos).toFixed(2)} would be created.`,
         }
       }
 
@@ -1369,12 +1590,14 @@ const addTransaction: ToolDefinition = {
       )
 
       applyBalanceDeltas(balanceDeltas)
+      const fxEvidence = acceptedFx ? appendCliFxEvidence(id, acceptedFx) : null
       writeTransactionBalanceAudit({
         action: 'create',
         before: null,
         after: newTransaction,
         balanceDeltas,
         balancesBefore,
+        afterFxEvidence: fxEvidence,
       })
 
       return {
@@ -1384,7 +1607,11 @@ const addTransaction: ToolDefinition = {
           id,
           accountId: resolvedAccount.id,
           transferToAccountId: resolvedTransferDestination.id,
-          amount,
+          amount: fromCentavos(amountCentavos),
+          amountCentavos,
+          inputAmount: amount,
+          inputAmountCentavos,
+          inputCurrency: inputCurrency ?? resolvedAccount.currency,
           type,
           description,
           category: resolvedCategory.name,
@@ -1398,6 +1625,7 @@ const addTransaction: ToolDefinition = {
           ledgerTreatment: transactionLedgerTreatment,
           reportingTreatment: transactionReportingTreatment,
           stagingBatchId: transactionStagingBatchId,
+          fxEvidence: publicFxEvidence(fxEvidence),
         },
         ...(duplicateCheck.match && allowDuplicate
           ? {
@@ -1409,7 +1637,7 @@ const addTransaction: ToolDefinition = {
               },
             }
           : {}),
-        message: `Added ${type}: $${amount.toFixed(2)} for "${description}" on ${txDate}`,
+        message: `Added ${type}: ${resolvedAccount.currency} ${fromCentavos(amountCentavos).toFixed(2)} for "${description}" on ${txDate}`,
       }
     })
   },
@@ -1608,7 +1836,15 @@ const updateTransaction: ToolDefinition = {
     'Update an existing transaction. Use this when the user wants to change the amount, description, category, date, or other details of a transaction.',
   schema: z.object({
     transactionId: boundedText('Transaction ID', 'The ID of the transaction to update', 128),
-    amount: positiveMoneyAmount('New amount in the main currency unit (e.g. 12.50)').optional(),
+    amount: positiveMoneyAmount('Re-entered original amount in inputCurrency units').optional(),
+    inputCurrency: z
+      .string()
+      .trim()
+      .optional()
+      .describe('Re-entered original currency for an FX financial replacement.'),
+    fxAcceptanceGuard: transactionFxAcceptanceGuardSchema
+      .optional()
+      .describe('Exact guard returned by the current FX update dry run.'),
     type: z.enum(['expense', 'income', 'transfer']).optional().describe('New transaction type'),
     description: boundedText('Description', 'New description', 200).optional(),
     category: boundedText(
@@ -1672,9 +1908,20 @@ const updateTransaction: ToolDefinition = {
       .default(false)
       .describe('Validate and preview the update without writing it'),
   }),
+  effects: {
+    writesTo: [
+      'transactions',
+      'accounts',
+      'transaction_fx_evidence',
+      'audit_log',
+      'app_data_state',
+    ],
+  },
   execute: async ({
     transactionId,
     amount,
+    inputCurrency,
+    fxAcceptanceGuard,
     type,
     description,
     category,
@@ -1701,6 +1948,7 @@ const updateTransaction: ToolDefinition = {
       }
 
       const tx = existing[0]
+      const latestFxEvidence = latestTransactionFxEvidence(tx.id)
       const lifecycleFailure = protectedPlaceholderLifecycleFailure(tx, 'update')
       if (lifecycleFailure) return lifecycleFailure
       const financialFailure = protectedFinancialTransactionFailure(tx, 'update', false)
@@ -1716,6 +1964,8 @@ const updateTransaction: ToolDefinition = {
         recurringRuleId === undefined &&
         accountId === undefined &&
         transferToAccountId === undefined &&
+        inputCurrency === undefined &&
+        fxAcceptanceGuard === undefined &&
         source === undefined &&
         note === undefined &&
         tx.type !== 'transfer'
@@ -1739,7 +1989,7 @@ const updateTransaction: ToolDefinition = {
         return unknownTransactionCurrencyFailure(tx)
       }
 
-      const newAmount = amount !== undefined ? toCentavos(amount) : oldAmountCentavos
+      let newAmount = amount !== undefined ? toCentavos(amount) : oldAmountCentavos
       const newType = type || oldType
       const newStatus = status ?? normalizeTransactionStatus(tx.status)
       const newLedgerTreatment = ledgerTreatment ?? normalizeLedgerTreatment(tx.ledger_treatment)
@@ -1815,6 +2065,49 @@ const updateTransaction: ToolDefinition = {
 
       const newAccountId = resolvedAccount?.success ? resolvedAccount.id : accountId || oldAccountId
       const newCurrency = sourceCurrency
+      const normalizedInputCurrency = normalizeCurrencyCode(inputCurrency)
+      const requestsForeignInput = Boolean(
+        normalizedInputCurrency && normalizedInputCurrency !== newCurrency
+      )
+      if (latestFxEvidence || requestsForeignInput) {
+        if (amount === undefined || inputCurrency === undefined || date === undefined) {
+          return {
+            success: false,
+            reason: 'fx_reentry_required',
+            message:
+              'FX financial edits require explicit amount, inputCurrency, and date re-entry before preview.',
+          }
+        }
+      }
+      const acceptedFx = resolveCliFxAcceptance({
+        inputAmountCentavos: amount !== undefined ? toCentavos(amount) : oldAmountCentavos,
+        inputCurrency,
+        account: {
+          id: newAccountId,
+          currency: newCurrency,
+          accountMode: resolvedAccount?.success ? resolvedAccount.accountMode : 'transactional',
+        },
+        transactionDate: date ?? tx.date,
+        transactionType: newType,
+        status: newStatus,
+        ledgerTreatment: newLedgerTreatment,
+        suppliedGuard: fxAcceptanceGuard,
+        forceEvidence: Boolean(latestFxEvidence),
+      })
+      if (acceptedFx && !dryRun && !fxAcceptanceGuard) {
+        return {
+          success: false,
+          reason: 'fx_preview_required',
+          message:
+            'FX financial edits require a dry-run preview and its exact fxAcceptanceGuard before apply.',
+          preview: {
+            accountAmountCentavos: acceptedFx.accountAmountCentavos,
+            accountCurrency: acceptedFx.accountCurrency,
+            acceptanceGuard: acceptedFx.acceptanceGuard,
+          },
+        }
+      }
+      if (acceptedFx) newAmount = acceptedFx.accountAmountCentavos
 
       let newCategoryId = tx.category_id
       if (newType === 'transfer') {
@@ -1918,12 +2211,36 @@ const updateTransaction: ToolDefinition = {
           after: updatedTx,
           balanceDeltas,
           balancesBefore,
+          beforeFxEvidence: latestFxEvidence,
+          afterFxEvidence: acceptedFx
+            ? buildTransactionFxEvidenceSnapshot({
+                id: 'preview-evidence',
+                transactionId,
+                createdAt: 'preview',
+                preview: acceptedFx,
+              })
+            : latestFxEvidence,
         })
 
         return {
           success: true,
           dryRun: true,
           balanceImpact: formatBalanceImpactPreview(auditPreview.balanceChanges, accountNames),
+          ...(acceptedFx
+            ? {
+                fxPreview: {
+                  inputAmount: amount,
+                  inputAmountCentavos: acceptedFx.inputAmountCentavos,
+                  inputCurrency: acceptedFx.inputCurrency,
+                  accountAmount: fromCentavos(acceptedFx.accountAmountCentavos),
+                  accountAmountCentavos: acceptedFx.accountAmountCentavos,
+                  accountCurrency: acceptedFx.accountCurrency,
+                  transactionDate: acceptedFx.transactionDate,
+                  conversion: acceptedFx.conversion,
+                  acceptanceGuard: acceptedFx.acceptanceGuard,
+                },
+              }
+            : {}),
           wouldUpdate: {
             transactionId,
             before: transactionAuditSnapshot(tx),
@@ -1972,15 +2289,18 @@ const updateTransaction: ToolDefinition = {
         throw new Error(`Transaction ${transactionId} could not be updated safely.`)
       }
 
+      const nextFxEvidence = acceptedFx ? appendCliFxEvidence(transactionId, acceptedFx) : null
       writeTransactionBalanceAudit({
         action: 'update',
         before: tx,
         after: updatedTx,
         balanceDeltas,
         balancesBefore,
+        beforeFxEvidence: latestFxEvidence,
+        afterFxEvidence: nextFxEvidence ?? latestFxEvidence,
       })
 
-      const displayAmount = amount !== undefined ? amount : fromCentavos(oldAmountCentavos)
+      const displayAmount = fromCentavos(updatedTx.amount)
 
       return {
         success: true,
@@ -2001,8 +2321,9 @@ const updateTransaction: ToolDefinition = {
           ledgerTreatment: updatedTx.ledger_treatment,
           reportingTreatment: updatedTx.reporting_treatment,
           stagingBatchId: updatedTx.staging_batch_id,
+          fxEvidence: publicFxEvidence(nextFxEvidence ?? latestFxEvidence),
         },
-        message: `Updated transaction ${transactionId}: $${displayAmount.toFixed(2)} ${updatedTx.type}`,
+        message: `Updated transaction ${transactionId}: ${updatedTx.currency} ${displayAmount.toFixed(2)} ${updatedTx.type}`,
       }
     })
   },
@@ -2024,6 +2345,15 @@ const deleteTransaction: ToolDefinition = {
       .default(false)
       .describe('Validate and preview the deletion without writing it'),
   }),
+  effects: {
+    writesTo: [
+      'transactions',
+      'accounts',
+      'transaction_fx_evidence',
+      'audit_log',
+      'app_data_state',
+    ],
+  },
   execute: async ({ transactionId, dryRun }) => {
     return transaction(() => {
       const existing = query<TransactionRow>('SELECT * FROM transactions WHERE id = $1', [
@@ -2035,6 +2365,7 @@ const deleteTransaction: ToolDefinition = {
       }
 
       const tx = existing[0]
+      const latestFxEvidence = latestTransactionFxEvidence(tx.id)
       const lifecycleFailure = protectedPlaceholderLifecycleFailure(tx, 'delete')
       if (lifecycleFailure) return lifecycleFailure
       const financialFailure = protectedFinancialTransactionFailure(tx, 'delete', false)
@@ -2058,6 +2389,7 @@ const deleteTransaction: ToolDefinition = {
           after: null,
           balanceDeltas,
           balancesBefore,
+          beforeFxEvidence: latestFxEvidence,
         })
 
         return {
@@ -2076,13 +2408,15 @@ const deleteTransaction: ToolDefinition = {
       }
       applyBalanceDeltas(balanceDeltas)
 
-      execute('DELETE FROM transactions WHERE id = $1', [transactionId])
+      const deleted = execute('DELETE FROM transactions WHERE id = $1', [transactionId])
+      assertSingleRowUpdated(deleted, `Transaction ${transactionId} could not be deleted safely.`)
       writeTransactionBalanceAudit({
         action: 'delete',
         before: tx,
         after: null,
         balanceDeltas,
         balancesBefore,
+        beforeFxEvidence: latestFxEvidence,
       })
 
       return {
@@ -2339,6 +2673,7 @@ const queryTransactions: ToolDefinition = {
         const hasMore = transactionRows.length > limit
         const pageRows = transactionRows.slice(0, limit)
         const splitsByTransaction = new Map<string, TransactionSplitRow[]>()
+        const fxEvidenceByTransaction = new Map<string, TransactionFxEvidenceRow>()
         if (pageRows.length) {
           const placeholders = pageRows.map((_, index) => `$${index + 1}`).join(',')
           const splits = query<TransactionSplitRow>(
@@ -2355,6 +2690,17 @@ const queryTransactions: ToolDefinition = {
             const list = splitsByTransaction.get(split.transaction_id) ?? []
             list.push(split)
             splitsByTransaction.set(split.transaction_id, list)
+          }
+          const evidenceRows = query<TransactionFxEvidenceRow>(
+            `SELECT * FROM transaction_fx_evidence
+             WHERE original_transaction_id IN (${placeholders})
+             ORDER BY original_transaction_id ASC, created_at DESC, id DESC`,
+            pageRows.map((row) => row.id)
+          )
+          for (const evidence of evidenceRows) {
+            if (!fxEvidenceByTransaction.has(evidence.original_transaction_id)) {
+              fxEvidenceByTransaction.set(evidence.original_transaction_id, evidence)
+            }
           }
         }
         const last = pageRows.at(-1)
@@ -2427,6 +2773,7 @@ const queryTransactions: ToolDefinition = {
           resolvedByTransactionId: t.resolved_by_transaction_id,
           placeholderReason: t.placeholder_reason,
           placeholderParentTransactionId: t.placeholder_parent_transaction_id,
+          fxEvidence: publicFxEvidence(fxEvidenceByTransaction.get(t.id) ?? null),
         }))
         return {
           success: true,

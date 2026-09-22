@@ -17,4 +17,5 @@ export {
 } from './021_backend_remediation_foundation.js'
 
 export * from './fx.js'
+export * from './transaction-fx.js'
 export * from './022_dated_fx.js'

@@ -61,6 +61,11 @@ vi.mock('@/lib/transaction-query', () => ({
   getTransactionById: (id: string) => mockGetTransactionById(id),
 }))
 
+vi.mock('@/lib/transaction-fx', () => ({
+  getLatestTransactionFxEvidence: vi.fn().mockResolvedValue(null),
+  previewTransactionFxInput: vi.fn(),
+}))
+
 vi.mock('@/lib/transaction-query-events', () => ({
   invalidateTransactionPage: (reason: string) => mockInvalidateTransactionPage(reason),
 }))

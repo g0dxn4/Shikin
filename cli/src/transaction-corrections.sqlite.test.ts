@@ -59,6 +59,239 @@ beforeEach(() => {
 })
 afterEach(() => state.db?.close())
 describe('audited transaction correction SQLite preservation', () => {
+  function seedFxAuthority() {
+    state.db!.exec(
+      `INSERT INTO accounts (id,name,type,currency,balance) VALUES ('main-mxn','Main MXN','checking','MXN',0);
+       INSERT INTO settings (key,value) VALUES ('main_currency','MXN');
+       INSERT INTO manual_exchange_rates
+         (id,from_currency,to_currency,rate_decimal,effective_from,supersedes_rate_id,created_at,source_note)
+       VALUES ('eur-mxn-17','EUR','MXN','17','2026-09-01',NULL,'2026-09-01T00:00:00Z',NULL);`
+    )
+  }
+
+  it('previews, guards, accepts and exposes a dated foreign input with one ledger effect', async () => {
+    seedFxAuthority()
+    const input = {
+      accountId: 'main-mxn',
+      type: 'expense',
+      amount: 10,
+      inputCurrency: 'EUR',
+      description: 'Foreign meal',
+      date: '2026-09-14',
+    }
+    const preview = await run('add-transaction', { ...input, dryRun: true })
+    expect(preview).toMatchObject({
+      success: true,
+      dryRun: true,
+      fxPreview: {
+        inputAmountCentavos: 1000,
+        inputCurrency: 'EUR',
+        accountAmountCentavos: 17000,
+        accountCurrency: 'MXN',
+        conversion: { rateId: 'eur-mxn-17', rateDecimal: '17' },
+        acceptanceGuard: { accountId: 'main-mxn', transactionDate: '2026-09-14' },
+      },
+      balanceImpact: {
+        accounts: [{ accountId: 'main-mxn', deltaCentavos: -17000 }],
+      },
+    })
+    expect(state.db!.prepare('SELECT COUNT(*) AS count FROM transactions').get()).toEqual({
+      count: 0,
+    })
+
+    const applied = await run('add-transaction', {
+      ...input,
+      fxAcceptanceGuard: preview.fxPreview.acceptanceGuard,
+    })
+    expect(applied).toMatchObject({
+      success: true,
+      transaction: {
+        amount: 170,
+        amountCentavos: 17000,
+        currency: 'MXN',
+        inputAmountCentavos: 1000,
+        inputCurrency: 'EUR',
+        fxEvidence: {
+          inputAmountCentavos: 1000,
+          accountAmountCentavos: 17000,
+          accountBalanceDeltaCentavos: -17000,
+          immutableAcceptanceSnapshot: true,
+        },
+      },
+    })
+    expect(state.db!.prepare("SELECT balance FROM accounts WHERE id='main-mxn'").get()).toEqual({
+      balance: -17000,
+    })
+    expect(
+      state
+        .db!.prepare(
+          'SELECT input_amount_centavos,account_amount_centavos,account_balance_delta_centavos,rate_id FROM transaction_fx_evidence'
+        )
+        .get()
+    ).toEqual({
+      input_amount_centavos: 1000,
+      account_amount_centavos: 17000,
+      account_balance_delta_centavos: -17000,
+      rate_id: 'eur-mxn-17',
+    })
+    expect(
+      state
+        .db!.prepare(
+          "SELECT json_extract(after_json,'$.balanceChanges[0].deltaCentavos') AS delta FROM audit_log WHERE action='create'"
+        )
+        .get()
+    ).toEqual({ delta: -17000 })
+
+    const queried = await run('query-transactions', { accountId: 'main-mxn' })
+    expect(queried.transactions[0].fxEvidence).toMatchObject({
+      inputCurrency: 'EUR',
+      accountCurrency: 'MXN',
+      rateDecimal: '17',
+    })
+  })
+
+  it('rejects a stale foreign preview atomically after rate authority changes', async () => {
+    seedFxAuthority()
+    const input = {
+      accountId: 'main-mxn',
+      type: 'income',
+      amount: 1,
+      inputCurrency: 'EUR',
+      description: 'Stale preview',
+      date: '2026-09-14',
+    }
+    const preview = await run('add-transaction', { ...input, dryRun: true })
+    state.db!.exec(
+      `INSERT INTO manual_exchange_rates
+         (id,from_currency,to_currency,rate_decimal,effective_from,supersedes_rate_id,created_at,source_note)
+       VALUES ('eur-mxn-18','EUR','MXN','18','2026-09-10',NULL,'2026-09-10T00:00:00Z',NULL)`
+    )
+    const before = snapshot()
+    await expect(
+      run('add-transaction', {
+        ...input,
+        fxAcceptanceGuard: preview.fxPreview.acceptanceGuard,
+      })
+    ).rejects.toThrow(/stale/)
+    expect(snapshot()).toEqual(before)
+  })
+
+  it('requires explicit FX financial re-entry, appends 1:1 replacement evidence, retains deletion evidence, and guards generic undo', async () => {
+    seedFxAuthority()
+    const createInput = {
+      accountId: 'main-mxn',
+      type: 'expense',
+      amount: 10,
+      inputCurrency: 'EUR',
+      description: 'Editable FX',
+      date: '2026-09-14',
+    }
+    const createPreview = await run('add-transaction', { ...createInput, dryRun: true })
+    const created = await run('add-transaction', {
+      ...createInput,
+      fxAcceptanceGuard: createPreview.fxPreview.acceptanceGuard,
+    })
+    const transactionId = created.transaction.id
+    expect(
+      await run('update-transaction', { transactionId, description: 'Metadata only' })
+    ).toMatchObject({ success: true })
+    expect(
+      state
+        .db!.prepare(
+          'SELECT COUNT(*) AS count FROM transaction_fx_evidence WHERE original_transaction_id=?'
+        )
+        .get(transactionId)
+    ).toEqual({ count: 1 })
+    expect(await run('update-transaction', { transactionId, status: 'pending' })).toMatchObject({
+      success: false,
+      reason: 'fx_reentry_required',
+    })
+
+    const updateInput = {
+      transactionId,
+      amount: 170,
+      inputCurrency: 'MXN',
+      date: '2026-09-14',
+      status: 'pending',
+    }
+    const updatePreview = await run('update-transaction', { ...updateInput, dryRun: true })
+    expect(updatePreview.fxPreview).toMatchObject({
+      accountAmountCentavos: 17000,
+      conversion: { rateId: null, rateDecimal: '1' },
+    })
+    await run('update-transaction', {
+      ...updateInput,
+      fxAcceptanceGuard: updatePreview.fxPreview.acceptanceGuard,
+    })
+    expect(state.db!.prepare("SELECT balance FROM accounts WHERE id='main-mxn'").get()).toEqual({
+      balance: 0,
+    })
+    expect(
+      state
+        .db!.prepare(
+          'SELECT input_currency,account_currency,rate_id,rate_decimal,account_balance_delta_centavos FROM transaction_fx_evidence WHERE original_transaction_id=? ORDER BY created_at DESC,id DESC LIMIT 1'
+        )
+        .get(transactionId)
+    ).toEqual({
+      input_currency: 'MXN',
+      account_currency: 'MXN',
+      rate_id: null,
+      rate_decimal: '1',
+      account_balance_delta_centavos: 0,
+    })
+
+    const updateAudit = state
+      .db!.prepare("SELECT id FROM audit_log WHERE entity_id=? AND action='update'")
+      .get(transactionId) as { id: string }
+    for (const apply of [false, true]) {
+      expect(await run('undo', { auditId: updateAudit.id, apply })).toMatchObject({
+        success: false,
+        reason: 'dedicated_financial_undo_required',
+      })
+    }
+
+    await run('delete-transaction', { transactionId })
+    const deleteAudit = state
+      .db!.prepare("SELECT id FROM audit_log WHERE entity_id=? AND action='delete'")
+      .get(transactionId) as { id: string }
+    expect(await run('undo', { auditId: deleteAudit.id })).toMatchObject({
+      success: false,
+      reason: 'dedicated_financial_undo_required',
+    })
+    expect(
+      state
+        .db!.prepare(
+          'SELECT COUNT(*) AS count FROM transaction_fx_evidence WHERE original_transaction_id=? AND transaction_id IS NULL'
+        )
+        .get(transactionId)
+    ).toEqual({ count: 2 })
+
+    const guardedInput = { ...createInput, description: 'Guarded create undo' }
+    const guardedPreview = await run('add-transaction', { ...guardedInput, dryRun: true })
+    const guarded = await run('add-transaction', {
+      ...guardedInput,
+      fxAcceptanceGuard: guardedPreview.fxPreview.acceptanceGuard,
+    })
+    const guardedAudit = state
+      .db!.prepare("SELECT id FROM audit_log WHERE entity_id=? AND action='create'")
+      .get(guarded.transaction.id) as { id: string }
+    expect(await run('undo', { auditId: guardedAudit.id })).toMatchObject({
+      success: true,
+      dryRun: true,
+    })
+    expect(await run('undo', { auditId: guardedAudit.id, apply: true })).toMatchObject({
+      success: true,
+      dryRun: false,
+    })
+    expect(row(guarded.transaction.id)).toBeUndefined()
+    expect(
+      state
+        .db!.prepare(
+          'SELECT transaction_id FROM transaction_fx_evidence WHERE original_transaction_id=?'
+        )
+        .get(guarded.transaction.id)
+    ).toEqual({ transaction_id: null })
+  })
   it('corrects finalized ordinary metadata while preserving immutable evidence and balances, including legacy metadata routing', async () => {
     add('buy')
     state.db!.exec(

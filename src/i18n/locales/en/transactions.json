@@ -23,6 +23,22 @@
     "acceptSuggestion": "Accept suggestion",
     "dismissSuggestion": "Dismiss suggestion"
   },
+  "fx": {
+    "inputCurrency": "Entered currency",
+    "inputCurrencyHint": "The ledger remains in the selected account’s currency. A different currency requires an accepted dated manual rate.",
+    "previewLoading": "Resolving the dated exchange rate…",
+    "previewTitle": "Account movement preview",
+    "rateProvenance": "{{direction}} at {{rate}}, effective {{effectiveFrom}}, for transaction date {{date}}",
+    "acceptedEvidence": "Accepted input {{input}} → {{account}} at rate {{rate}} on {{date}}. Metadata edits keep this immutable acceptance.",
+    "evidenceTitle": "Original FX acceptance",
+    "evidenceDescription": "Immutable input and conversion evidence; current status and balance remain authoritative in the ledger.",
+    "originalInput": "Original input",
+    "accountMovement": "Accepted account amount",
+    "acceptedRate": "Accepted rate",
+    "transactionDate": "Transaction date",
+    "balanceContribution": "Accepted ledger contribution",
+    "retained": "Retained evidence"
+  },
   "rules": {
     "title": "Category Rules",
     "description": "Auto-categorization rules learned from your transactions. These help suggest categories for new transactions.",

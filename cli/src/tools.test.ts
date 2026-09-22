@@ -9590,48 +9590,111 @@ describe('CLI tool validation regressions', () => {
     })
   })
 
-  it('uses the real exchange_rates currency columns for currency conversion', async () => {
-    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
-      if (
-        sql.includes('FROM exchange_rates') &&
-        sql.includes('from_currency = $1') &&
-        sql.includes('to_currency = $2') &&
-        Array.isArray(params) &&
-        params[0] === 'USD' &&
-        params[1] === 'BRL'
-      ) {
-        return [{ rate: 5.1 }]
+  it('uses an exact effective-dated manual direct rate for currency conversion', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('FROM manual_exchange_rates')) {
+        return [
+          {
+            id: 'usd-brl-2025',
+            fromCurrency: 'USD',
+            toCurrency: 'BRL',
+            rateDecimal: '5.123456789',
+            effectiveFrom: '2025-09-14',
+            supersedesRateId: null,
+            createdAt: '2025-09-14T00:00:00Z',
+            sourceNote: 'Manual quote',
+          },
+          {
+            id: 'future',
+            fromCurrency: 'USD',
+            toCurrency: 'BRL',
+            rateDecimal: '6',
+            effectiveFrom: '2025-09-16',
+            supersedesRateId: null,
+            createdAt: '2025-09-16T00:00:00Z',
+            sourceNote: null,
+          },
+        ]
       }
-
       return []
     })
 
-    const result = await convertCurrency.execute({ amount: 10, from: 'usd', to: 'brl' })
+    const result = await convertCurrency.execute({
+      amount: 10,
+      from: 'usd',
+      to: 'brl',
+      asOfDate: '2025-09-15',
+    })
 
-    expect(result).toMatchObject({
+    expect(result).toEqual({
       amount: 10,
       from: 'USD',
       to: 'BRL',
-      convertedAmount: 51,
-      rate: 5.1,
+      convertedAmount: 51.23,
+      rate: 5.123456789,
+      message: '10 USD = 51.23 BRL (USD->BRL, effective 2025-09-14)',
+      convertedAmountCentavos: 5123,
+      rateDecimal: '5.123456789',
+      asOfDate: '2025-09-15',
+      effectiveFrom: '2025-09-14',
+      rateId: 'usd-brl-2025',
+      direction: 'USD->BRL',
+      complete: true,
+      missingReason: null,
     })
   })
 
-  it('rejects stored non-positive exchange rates safely', async () => {
-    mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
-      if (
-        sql.includes('FROM exchange_rates') &&
-        Array.isArray(params) &&
-        params[0] === 'USD' &&
-        params[1] === 'BRL'
-      ) {
-        return [{ rate: 0 }]
-      }
+  it('preserves same-currency legacy values and adds exact 1:1 provenance without a rate row', async () => {
+    const result = await convertCurrency.execute({
+      amount: 1.005,
+      from: 'usd',
+      to: 'usd',
+      asOfDate: '2025-09-15',
+    })
 
+    expect(result).toEqual({
+      amount: 1.005,
+      from: 'USD',
+      to: 'USD',
+      convertedAmount: 1.005,
+      rate: 1,
+      message: '1.005 USD = 1.005 USD (same currency)',
+      convertedAmountCentavos: 101,
+      rateDecimal: '1',
+      asOfDate: '2025-09-15',
+      effectiveFrom: null,
+      rateId: null,
+      direction: 'USD->USD',
+      complete: true,
+      missingReason: null,
+    })
+  })
+
+  it('returns compatible null legacy fields when no direct manual rate exists', async () => {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('FROM manual_exchange_rates')) {
+        return [
+          {
+            id: 'inverse-only',
+            fromCurrency: 'BRL',
+            toCurrency: 'USD',
+            rateDecimal: '0.2',
+            effectiveFrom: '2025-09-14',
+            supersedesRateId: null,
+            createdAt: '2025-09-14T00:00:00Z',
+            sourceNote: null,
+          },
+        ]
+      }
       return []
     })
 
-    const result = await convertCurrency.execute({ amount: 10, from: 'USD', to: 'BRL' })
+    const result = await convertCurrency.execute({
+      amount: 10,
+      from: 'USD',
+      to: 'BRL',
+      asOfDate: '2025-09-15',
+    })
 
     expect(result).toEqual({
       amount: 10,
@@ -9639,7 +9702,15 @@ describe('CLI tool validation regressions', () => {
       to: 'BRL',
       convertedAmount: null,
       rate: null,
-      message: 'Stored exchange rate for USD to BRL is invalid. Refresh exchange rates first.',
+      message: 'No manual direct exchange rate found for USD->BRL as of 2025-09-15.',
+      convertedAmountCentavos: null,
+      rateDecimal: null,
+      asOfDate: '2025-09-15',
+      effectiveFrom: null,
+      rateId: null,
+      direction: 'USD->BRL',
+      complete: false,
+      missingReason: 'missing_direct_rate',
     })
   })
 

@@ -40,7 +40,7 @@ _Screenshots show synthetic demo data._
 
 ### Automation (optional)
 
-- 108 shared CLI/MCP tools and 113 CLI commands on the same local database
+- 112 shared CLI/MCP tools and 117 CLI commands on the same local database
 - Imports, reconciliation, payments, buckets, backup, audit, and diagnostics
 - `shikin tools --json` is the catalog (missing `effects` means unaudited, not read-only)
 - Connect Claude Desktop, Cursor, or any MCP client — Shikin does not ship a chat UI

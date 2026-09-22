@@ -2,7 +2,7 @@
 
 This reference captures the generic CLI/MCP finance workflows added or hardened by the assistant-safe workflow plan. The features are for any human, script, CLI user, MCP client, bot, or AI assistant. Shikin does not hardcode a specific assistant, Discord bot, or source label.
 
-Use `shikin tools --json` as the authoritative machine-readable contract. Shikin exposes **108 shared CLI/MCP tools** and **113 total CLI commands** including CLI-only built-ins (`diagnose`, `tools`, `validate`, `web`, `record`). Counts in older planning notes (91/96) are historical.
+Use `shikin tools --json` as the authoritative machine-readable contract. Shikin exposes **112 shared CLI/MCP tools** and **117 total CLI commands** including CLI-only built-ins (`diagnose`, `tools`, `validate`, `web`, `record`). Counts in older planning notes (91/96) are historical.
 
 Catalog groups: transactions/corrections/consumption/transfers/tags/placeholders; accounts/reconciliation/coverage; credit-card statements and payment evidence; budgets/net worth/buckets; investments/subscriptions/bills; receivables; analytics/recaps/forecast/health/goals/debt; category rules; notebook/portfolio review; backup/import/export; audit/undo/sanity; runtime diagnostics; trusted-local plugins.
 

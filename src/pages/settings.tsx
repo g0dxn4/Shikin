@@ -23,13 +23,12 @@ import { Label } from '@/components/ui/label'
 import { SUPPORTED_LANGUAGES } from '@/lib/constants'
 import { useCategorizationStore } from '@/stores/categorization-store'
 import { useCurrencyStore } from '@/stores/currency-store'
-import { useAccountStore } from '@/stores/account-store'
-import { COMMON_CURRENCIES } from '@/lib/exchange-rate-service'
 import { getErrorMessage } from '@/lib/errors'
 import { load } from '@/lib/storage'
 import { exportDatabaseSnapshot, importDatabaseSnapshot } from '@/lib/database'
 import { ThemeSettings } from '@/components/ThemeSettings'
 import { RuntimeDiagnosticsPanel } from '@/components/settings/runtime-diagnostics-panel'
+import { CurrencySettings } from '@/components/settings/currency-settings'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 import { ProgressBar } from '@/components/ui/progress-bar'
 import { ErrorBanner } from '@/components/ui/error-banner'
@@ -96,17 +95,7 @@ export function SettingsPage() {
   const [lastCheckResult, setLastCheckResult] = useState<'available' | 'none' | null>(null)
   const importDbInputRef = useRef<HTMLInputElement>(null)
 
-  // Currency state
-  const {
-    preferredCurrency,
-    lastFetched: ratesLastFetched,
-    isLoading: ratesLoading,
-    rates,
-    loadRates,
-    refreshRates: doRefreshRates,
-    setPreferredCurrency,
-  } = useCurrencyStore()
-  const { accounts, fetch: fetchAccounts } = useAccountStore()
+  const loadRates = useCurrencyStore((state) => state.loadRates)
   const webServerDisplayPort = isValidWebServerPort(Number(webServerPort))
     ? webServerPort
     : String(DEFAULT_WEB_SERVER_PORT)
@@ -115,13 +104,12 @@ export function SettingsPage() {
   useEffect(() => {
     loadRules()
     void loadRates().catch(() => {})
-    void fetchAccounts().catch(() => {})
     if (isTauri) {
       void getCurrentAppVersion()
         .then((version) => setCurrentVersion(version))
         .catch(() => {})
     }
-  }, [loadRules, loadRates, fetchAccounts])
+  }, [loadRules, loadRates])
 
   useEffect(() => {
     if (isTauri) {
@@ -705,94 +693,9 @@ export function SettingsPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1fr_1fr]">
-        <section className="native-panel space-y-5 p-5 sm:p-6">
+        <section className="native-panel min-w-0 space-y-5 p-5 sm:p-6">
           <SectionTitle icon={<BadgeDollarSign size={18} />} title={t('sections.currency')} />
-
-          <div className="space-y-1">
-            <Label
-              htmlFor="currency-select"
-              className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
-            >
-              {t('currency.preferred')}
-            </Label>
-            <p className="text-muted-foreground text-xs">{t('currency.preferredDescription')}</p>
-            <select
-              id="currency-select"
-              value={preferredCurrency}
-              onChange={(e) => {
-                setPreferredCurrency(e.target.value)
-                toast.success(tCommon('status.success'))
-              }}
-              className="glass-input text-foreground mt-2 w-full px-3 py-2 text-sm"
-            >
-              {COMMON_CURRENCIES.map((code) => (
-                <option key={code} value={code}>
-                  {code}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={async () => {
-                try {
-                  await doRefreshRates()
-                  toast.success(tCommon('status.success'))
-                } catch (error) {
-                  toast.error(getErrorMessage(error, tCommon('status.error')))
-                }
-              }}
-              disabled={ratesLoading}
-            >
-              {ratesLoading ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <RefreshCw size={14} />
-              )}
-              {ratesLoading ? t('currency.refreshing') : t('currency.refreshRates')}
-            </Button>
-            <span className="text-muted-foreground font-mono text-[10px]">
-              {t('currency.lastUpdated')}: {ratesLastFetched || t('currency.never')}
-            </span>
-          </div>
-
-          {/* Show rates for user's account currencies */}
-          {(() => {
-            const accountCurrencies = [...new Set(accounts.map((a) => a.currency))]
-            const relevantRates = accountCurrencies
-              .filter((c) => c !== preferredCurrency)
-              .map((c) => {
-                const key = `${c}:${preferredCurrency}`
-                return { from: c, rate: rates[key] }
-              })
-              .filter((r) => r.rate !== null && r.rate !== undefined)
-
-            if (relevantRates.length === 0) return null
-
-            return (
-              <div className="space-y-2">
-                <Label className="text-muted-foreground font-mono text-xs tracking-wider uppercase">
-                  {t('currency.currentRates')}
-                </Label>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {relevantRates.map(({ from, rate }) => (
-                    <div
-                      key={from}
-                      className="border-border bg-muted/50 flex items-center justify-between rounded-lg border px-3 py-2"
-                    >
-                      <span className="font-mono text-xs">1 {from}</span>
-                      <span className="text-primary text-sm font-semibold tabular-nums">
-                        {rate!.toFixed(4)} {preferredCurrency}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )
-          })()}
+          <CurrencySettings />
         </section>
         <section className="native-panel space-y-5 p-5 sm:p-6">
           <SectionTitle

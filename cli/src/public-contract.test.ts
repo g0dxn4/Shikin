@@ -34,8 +34,8 @@ describe('public automation contract', () => {
     await program.parseAsync(['node', 'shikin', 'tools', '--json'])
     const catalog = JSON.parse(String(log.mock.calls[0]?.[0])) as Record<string, unknown>
 
-    expect(builtInTools).toHaveLength(108)
-    expect(program.commands).toHaveLength(113)
+    expect(builtInTools).toHaveLength(112)
+    expect(program.commands).toHaveLength(117)
     expect(builtInTools.map((tool) => tool.name).sort()).toEqual(inventory.tools)
     expect(program.commands.map((command) => command.name()).sort()).toEqual(inventory.commands)
     expect(program.version()).toBe('1.1.0')
@@ -47,8 +47,8 @@ describe('public automation contract', () => {
       success: true,
       catalogVersion: COMMAND_CATALOG_VERSION,
       schemaVersion: 'cli-tools-json.v1',
-      commandCount: 113,
-      toolCount: 108,
+      commandCount: 117,
+      toolCount: 112,
       compatibility: {
         effects: {
           declaredOnly: true,
@@ -76,6 +76,16 @@ describe('public automation contract', () => {
         idempotent: true,
       }
     )
+    expect(commands.find((command) => command.name === 'get-currency-settings')?.effects).toEqual({
+      readOnly: true,
+      writesTo: [],
+    })
+    expect(commands.find((command) => command.name === 'set-main-currency')?.effects).toEqual({
+      writesTo: ['settings', 'audit_log', 'app_data_state'],
+    })
+    expect(commands.find((command) => command.name === 'set-exchange-rate')?.effects).toEqual({
+      writesTo: ['manual_exchange_rates', 'audit_log', 'app_data_state'],
+    })
     expect(commands.find((command) => command.name === 'import-transactions')?.effects).toEqual({
       writesTo: [
         'accounts',

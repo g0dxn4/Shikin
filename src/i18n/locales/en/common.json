@@ -55,6 +55,11 @@
     "summary": "Showing {{shown}} of {{total}}",
     "showMore": "Show {{count}} more"
   },
+  "currencySetup": {
+    "title": "Main currency needs to be configured",
+    "description": "Choose and explicitly save a main currency before using converted reports or automation.",
+    "action": "Open currency settings"
+  },
   "updates": {
     "prompt": {
       "badge": "Signed desktop update",

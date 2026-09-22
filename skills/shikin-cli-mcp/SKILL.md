@@ -88,7 +88,7 @@ The MCP server exposes the same shared tool catalog as the CLI and these resourc
 
 ## Representative Tool Surface
 
-Current catalog size is 108 shared CLI/MCP tools and 113 total CLI commands including CLI-only built-ins. All shipped tools are available end-to-end against the local database.
+Current catalog size is 112 shared CLI/MCP tools and 117 total CLI commands including CLI-only built-ins. All shipped tools are available end-to-end against the local database.
 The lists below are representative groups for orientation; use `shikin tools --json` for the authoritative command, argument, enum, catalog/schema version, declared-effects, compatibility, and required-migration metadata. Effects are declaration-only: absence means unaudited, not read-only.
 
 Transaction tools:
@@ -151,7 +151,8 @@ Investment, subscription, and automation tools:
 - `materialize-recurring`
 - `get-spending-anomalies`
 - `get-forecasted-cash-flow`
-- `convert-currency`
+- `get-currency-settings`, `set-main-currency`, `list-exchange-rates`, `set-exchange-rate`
+- `convert-currency` (effective-dated manual direct rates only; optional `asOfDate`)
 - `backup-database` (CLI also has alias `backup`)
 - `restore-database` (CLI alias: `restore`; previews by default, requires `apply:true` to replace data, and keeps a rollback backup)
 - `audit-list`

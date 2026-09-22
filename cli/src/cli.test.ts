@@ -331,7 +331,7 @@ describe('CLI command execution', () => {
 
     const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
     expect(output.catalogVersion).toBe(COMMAND_CATALOG_VERSION)
-    expect(output.toolCount).toBe(108)
+    expect(output.toolCount).toBe(112)
     const commandByName = new Map(
       output.commands.map((command: { name: string }) => [command.name, command])
     )

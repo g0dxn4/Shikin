@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
-import { BrowserRouter, Navigate, Routes, Route } from 'react-router'
+import { BrowserRouter, Link, Navigate, Routes, Route } from 'react-router'
+import { useTranslation } from 'react-i18next'
 import { Toaster } from 'sonner'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { AppShell } from '@/components/layout/app-shell'
@@ -67,6 +68,7 @@ const CategoryManagement = lazy(() =>
 )
 
 export default function App() {
+  const { t } = useTranslation('common')
   const [startupErrors, setStartupErrors] = useState<Record<string, string>>({})
   const [startupInProgress, setStartupInProgress] = useState(false)
   const [startupCompleted, setStartupCompleted] = useState(false)
@@ -81,7 +83,8 @@ export default function App() {
   const updateInFlightRef = useRef(false)
   const readyUpdateVersionRef = useRef<string | null>(null)
   const materializeTransactions = useRecurringStore((s) => s.materializeTransactions)
-  const autoRefreshRates = useCurrencyStore((s) => s.autoRefreshIfStale)
+  const loadRates = useCurrencyStore((s) => s.loadRates)
+  const mainCurrency = useCurrencyStore((s) => s.mainCurrency)
   const fetchAccounts = useAccountStore((s) => s.fetch)
   const snapshotBalances = useAccountStore((s) => s.snapshotBalances)
   const refreshNetWorth = useNetWorthStore((s) => s.refresh)
@@ -194,9 +197,15 @@ export default function App() {
         reportStartupError('recurring', 'Recurring transactions could not be prepared', error)
       )
 
-    const rateTask = autoRefreshRates()
+    const rateTask = loadRates()
       .then(() => clearStartupError('rates'))
-      .catch((error) => reportStartupError('rates', 'Exchange rates could not be refreshed', error))
+      .catch((error) =>
+        reportStartupError(
+          'rates',
+          'Currency settings and manual exchange rates could not be loaded',
+          error
+        )
+      )
 
     const accountTask = recurringTask
       .then(() => fetchAccounts())
@@ -226,7 +235,7 @@ export default function App() {
 
     void checkStartupUpdate()
   }, [
-    autoRefreshRates,
+    loadRates,
     checkStartupUpdate,
     clearStartupError,
     fetchAccounts,
@@ -261,6 +270,25 @@ export default function App() {
     <ErrorBoundary>
       <BrowserRouter>
         <div className="relative min-h-screen" data-startup-state={startupState}>
+          {startupCompleted && mainCurrency === null && (
+            <div className="border-warning/30 bg-warning/10 border-b px-4 py-3">
+              <div className="mx-auto flex max-w-5xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold">{t('currencySetup.title')}</p>
+                  <p className="text-muted-foreground mt-0.5 text-xs">
+                    {t('currencySetup.description')}
+                  </p>
+                </div>
+                <Link
+                  to="/settings"
+                  className="border-warning/40 bg-background hover:bg-muted focus-visible:ring-ring inline-flex min-h-9 shrink-0 items-center justify-center rounded-lg border px-3 text-xs font-semibold focus-visible:ring-2 focus-visible:outline-none"
+                >
+                  {t('currencySetup.action')}
+                </Link>
+              </div>
+            </div>
+          )}
+
           {startupMessages.length > 0 && (
             <div className="pointer-events-none sticky top-0 z-50 px-4 pt-4 sm:fixed sm:inset-x-0 sm:top-4 sm:pt-0">
               <div className="pointer-events-auto mx-auto max-w-3xl">

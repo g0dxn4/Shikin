@@ -55,6 +55,11 @@
     "summary": "Mostrando {{shown}} de {{total}}",
     "showMore": "Mostrar {{count}} mas"
   },
+  "currencySetup": {
+    "title": "Falta configurar la moneda principal",
+    "description": "Elige y guarda explícitamente una moneda principal antes de usar informes convertidos o automatización.",
+    "action": "Abrir configuración de moneda"
+  },
   "updates": {
     "prompt": {
       "badge": "Actualización de escritorio firmada",

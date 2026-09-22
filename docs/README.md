@@ -39,7 +39,7 @@ Product overview, install, and privacy: the root [README](../README.md).
 | ----------------- | ----------------------------- |
 | Pages (routed)    | 19                            |
 | Zustand stores    | 18                            |
-| CLI/MCP tools     | 108 shared / 113 CLI commands |
+| CLI/MCP tools     | 112 shared / 117 CLI commands |
 | i18n namespaces   | 19                            |
 | Languages         | 2                             |
 | Navigation groups | 6                             |

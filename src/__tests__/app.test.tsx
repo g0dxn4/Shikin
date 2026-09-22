@@ -5,7 +5,8 @@ import type { ReactNode } from 'react'
 
 const {
   mockMaterializeTransactions,
-  mockAutoRefreshRates,
+  mockLoadRates,
+  mockCurrencyState,
   mockFetchAccounts,
   mockSnapshotBalances,
   mockRefreshNetWorth,
@@ -16,7 +17,8 @@ const {
   mockRelaunchToApplyUpdate,
 } = vi.hoisted(() => ({
   mockMaterializeTransactions: vi.fn(),
-  mockAutoRefreshRates: vi.fn(),
+  mockLoadRates: vi.fn(),
+  mockCurrencyState: { mainCurrency: null as string | null },
   mockFetchAccounts: vi.fn(),
   mockSnapshotBalances: vi.fn(),
   mockRefreshNetWorth: vi.fn(),
@@ -59,8 +61,8 @@ vi.mock('@/stores/recurring-store', () => ({
 
 vi.mock('@/stores/currency-store', () => ({
   useCurrencyStore: (
-    selector: (state: { autoRefreshIfStale: typeof mockAutoRefreshRates }) => unknown
-  ) => selector({ autoRefreshIfStale: mockAutoRefreshRates }),
+    selector: (state: { loadRates: typeof mockLoadRates; mainCurrency: string | null }) => unknown
+  ) => selector({ loadRates: mockLoadRates, mainCurrency: mockCurrencyState.mainCurrency }),
 }))
 
 vi.mock('@/stores/account-store', () => ({
@@ -102,7 +104,8 @@ describe('App startup orchestration', () => {
     consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     mockMaterializeTransactions.mockResolvedValue(undefined)
-    mockAutoRefreshRates.mockResolvedValue(undefined)
+    mockLoadRates.mockResolvedValue(undefined)
+    mockCurrencyState.mainCurrency = 'USD'
     mockFetchAccounts.mockResolvedValue(undefined)
     mockSnapshotBalances.mockResolvedValue(undefined)
     mockRefreshNetWorth.mockResolvedValue(undefined)
@@ -139,9 +142,22 @@ describe('App startup orchestration', () => {
     })
   })
 
+  it('loads manual FX offline and gives unconfigured users a localized Settings CTA', async () => {
+    mockCurrencyState.mainCurrency = null
+
+    render(<App />)
+
+    expect(await screen.findByText('Main currency needs to be configured')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open currency settings' })).toHaveAttribute(
+      'href',
+      '/settings'
+    )
+    await waitFor(() => expect(mockLoadRates).toHaveBeenCalledTimes(1))
+  })
+
   it('surfaces startup failures and skips dependent account tasks when accounts fail', async () => {
     mockMaterializeTransactions.mockRejectedValueOnce(new Error('Recurring down'))
-    mockAutoRefreshRates.mockRejectedValueOnce(new Error('Rates down'))
+    mockLoadRates.mockRejectedValueOnce(new Error('Rates down'))
     mockFetchAccounts.mockRejectedValueOnce(new Error('Accounts down'))
 
     render(<App />)
@@ -151,7 +167,9 @@ describe('App startup orchestration', () => {
       screen.getByText('Recurring transactions could not be prepared: Recurring down')
     ).toBeInTheDocument()
     expect(
-      screen.getByText('Exchange rates could not be refreshed: Rates down')
+      screen.getByText(
+        'Currency settings and manual exchange rates could not be loaded: Rates down'
+      )
     ).toBeInTheDocument()
     expect(screen.getByText('Accounts could not be loaded: Accounts down')).toBeInTheDocument()
     expect(mockSnapshotBalances).not.toHaveBeenCalled()
@@ -166,7 +184,7 @@ describe('App startup orchestration', () => {
 
   it('retries startup tasks and clears the banner after recovery', async () => {
     mockMaterializeTransactions.mockRejectedValueOnce(new Error('Recurring down'))
-    mockAutoRefreshRates.mockRejectedValueOnce(new Error('Rates down'))
+    mockLoadRates.mockRejectedValueOnce(new Error('Rates down'))
     mockFetchAccounts.mockRejectedValueOnce(new Error('Accounts down'))
 
     const user = userEvent.setup()
@@ -178,7 +196,7 @@ describe('App startup orchestration', () => {
 
     await waitFor(() => {
       expect(mockMaterializeTransactions).toHaveBeenCalledTimes(2)
-      expect(mockAutoRefreshRates).toHaveBeenCalledTimes(2)
+      expect(mockLoadRates).toHaveBeenCalledTimes(2)
       expect(mockFetchAccounts).toHaveBeenCalledTimes(2)
       expect(mockSnapshotBalances).toHaveBeenCalledTimes(1)
       expect(mockRefreshNetWorth).toHaveBeenCalledTimes(1)
@@ -195,7 +213,7 @@ describe('App startup orchestration', () => {
 
   it('aggregates dependent startup failures and clears them after retry', async () => {
     mockMaterializeTransactions.mockResolvedValue(undefined)
-    mockAutoRefreshRates.mockResolvedValue(undefined)
+    mockLoadRates.mockResolvedValue(undefined)
     mockFetchAccounts.mockResolvedValue(undefined)
     mockSnapshotBalances
       .mockRejectedValueOnce(new Error('Snapshot failed'))
@@ -219,7 +237,7 @@ describe('App startup orchestration', () => {
 
     await waitFor(() => {
       expect(mockMaterializeTransactions).toHaveBeenCalledTimes(2)
-      expect(mockAutoRefreshRates).toHaveBeenCalledTimes(2)
+      expect(mockLoadRates).toHaveBeenCalledTimes(2)
       expect(mockFetchAccounts).toHaveBeenCalledTimes(2)
       expect(mockSnapshotBalances).toHaveBeenCalledTimes(2)
       expect(mockRefreshNetWorth).toHaveBeenCalledTimes(2)

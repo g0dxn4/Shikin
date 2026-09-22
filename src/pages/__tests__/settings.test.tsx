@@ -46,17 +46,22 @@ vi.mock('sonner', () => ({
   },
 }))
 
-vi.mock('@/stores/currency-store', () => ({
-  useCurrencyStore: () => ({
+vi.mock('@/stores/currency-store', () => {
+  const state = {
+    mainCurrency: null,
     preferredCurrency: 'USD',
-    lastFetched: null,
+    manualRates: [],
     isLoading: false,
-    rates: {},
+    error: null,
     loadRates: vi.fn().mockResolvedValue(undefined),
-    refreshRates: vi.fn(),
     setPreferredCurrency: vi.fn(),
-  }),
-}))
+    saveExchangeRate: vi.fn(),
+  }
+  return {
+    useCurrencyStore: (selector?: (value: typeof state) => unknown) =>
+      selector ? selector(state) : state,
+  }
+})
 
 vi.mock('@/stores/account-store', () => ({
   useAccountStore: () => ({

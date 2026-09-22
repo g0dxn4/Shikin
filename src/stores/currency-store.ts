@@ -1,344 +1,373 @@
 import {
-  aggregateCentavosByCurrency,
-  convertCurrencyTotals,
-  type ConversionRate,
-  type CurrencyAmount,
-} from '@shikin/finance-core'
+  convertCentavosAsOf,
+  convertDatedAmounts,
+  FX_CURRENCIES,
+  selectValuationRatesAsOf,
+  type DatedConversion,
+  type DatedExchangeRate,
+  type SetExchangeRateInput,
+} from '@shikin/finance-core/fx'
+import type { ValuationRate } from '@shikin/finance-core/valuation'
+import dayjs from 'dayjs'
 import { create } from 'zustand'
-import { load } from '@/lib/storage'
 import { getErrorMessage } from '@/lib/errors'
-import { refreshRates, getCachedRates, getLastFetchDate } from '@/lib/exchange-rate-service'
+import {
+  getCurrencySettings,
+  listExchangeRates,
+  setExchangeRate,
+  setMainCurrency,
+} from '@/lib/fx-service'
+import { load } from '@/lib/storage'
 import type { Account } from '@/types/database'
 
-type InvalidCurrencyDiagnostic = {
+export type InvalidCurrencyDiagnostic = {
   accountId: string | null
   accountName: string | null
   value: string
 }
 
-type InvalidRateDiagnostic = {
-  fromCurrency: string
-  toCurrency: string
-  rate: string
+export type NativeCurrencyTotal = {
+  currency: string
+  amountCentavos: number
 }
 
-type PreferredCurrencyAmountResult =
-  | {
-      complete: true
-      preferredCurrency: string
-      amountCentavos: number
-      missingCurrencies: readonly []
-    }
-  | {
-      complete: false
-      preferredCurrency: string
-      missingCurrencies: ReadonlyArray<string>
-      reason: 'missing_exchange_rates' | 'invalid_currency_data'
-      invalidCurrencies?: ReadonlyArray<InvalidCurrencyDiagnostic>
-      invalidRates?: ReadonlyArray<InvalidRateDiagnostic>
-    }
-
-interface CurrencyState {
-  /** Map of "FROM:TO" -> rate */
-  rates: Record<string, number>
-  invalidRates: InvalidRateDiagnostic[]
+type CompletePreferredAmount = {
+  complete: true
   preferredCurrency: string
-  lastFetched: string | null
+  amountCentavos: number
+  missingCurrencies: readonly []
+  reason?: never
+}
+
+type IncompletePreferredAmount = {
+  complete: false
+  preferredCurrency: string
+  missingCurrencies: ReadonlyArray<string>
+  reason: 'main_currency_unconfigured' | 'missing_exchange_rates' | 'invalid_currency_data'
+  amountCentavos?: never
+  invalidCurrencies?: ReadonlyArray<InvalidCurrencyDiagnostic>
+  invalidData?: ReadonlyArray<string>
+}
+
+export type PreferredCurrencyAmountResult =
+  | (CompletePreferredAmount & {
+      conversion: DatedConversion
+    })
+  | (IncompletePreferredAmount & {
+      conversion?: DatedConversion
+    })
+  | (CompletePreferredAmount & {
+      knownTotalCentavos: number
+      nativeTotals: ReadonlyArray<NativeCurrencyTotal>
+      conversions: ReturnType<typeof convertDatedAmounts>['converted']
+    })
+  | (IncompletePreferredAmount & {
+      knownTotalCentavos?: number
+      nativeTotals?: ReadonlyArray<NativeCurrencyTotal>
+      conversions?: ReturnType<typeof convertDatedAmounts>['converted']
+    })
+
+export interface CurrencyState {
+  /** Authoritative database-backed presentation/reporting currency. */
+  mainCurrency: string | null
+  /** Configured main currency, or the legacy JSON preference/default as a setup draft only. */
+  preferredCurrency: string
+  /** Complete immutable manual rate history, including corrected rows. */
+  manualRates: DatedExchangeRate[]
   isLoading: boolean
   error: string | null
 
-  /** Load cached rates from DB and preferred currency from settings */
+  /** Load database main currency and complete manual history without network access. */
   loadRates: () => Promise<void>
-
-  /** Fetch fresh rates from frankfurter.app and store them */
-  refreshRates: () => Promise<void>
-
-  /** Set the user's preferred display currency */
+  /** Explicitly persist the database-backed main currency. */
   setPreferredCurrency: (currency: string) => Promise<void>
-
-  /** Convert centavos to the preferred currency without assuming a missing rate is 1:1 */
-  convertToPreferred: (
+  /** Append a manual rate or immutable correction using trusted adapter-local today. */
+  saveExchangeRate: (input: Omit<SetExchangeRateInput, 'today'>) => Promise<void>
+  convertHistoricalToPreferred: (
     amountCentavos: number,
-    fromCurrency: string
+    fromCurrency: string,
+    date: string
   ) => PreferredCurrencyAmountResult
-
-  /** Sum all account balances only when every required conversion rate is available */
+  convertCurrentToPreferred: (
+    amountCentavos: number,
+    fromCurrency: string,
+    asOfDate?: string
+  ) => PreferredCurrencyAmountResult
   getTotalBalanceInPreferred: (accounts: Account[]) => PreferredCurrencyAmountResult
-
-  /** Get a valid rate for a specific pair from the local cache */
-  getRate: (from: string, to: string) => number | null
-
-  /** Auto-refresh rates if stale (>24h) */
-  autoRefreshIfStale: () => Promise<void>
-}
-
-interface CachedRateRow {
-  from_currency: string
-  to_currency: string
-  rate: number
+  getCurrentValuationRates: (asOfDate?: string) => ValuationRate[]
 }
 
 const SETTINGS_KEY_PREFERRED_CURRENCY = 'preferred_currency'
-const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000 // 24 hours
+const DEFAULT_SETUP_CURRENCY = 'USD'
 
-function normalizeCurrencyCode(value: unknown): string | null {
+function normalizeSupportedCurrency(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const normalized = value.trim().toUpperCase()
-  return /^[A-Z0-9]{2,10}$/.test(normalized) ? normalized : null
+  return (FX_CURRENCIES as readonly string[]).includes(normalized) ? normalized : null
 }
 
 function currencyDiagnosticValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : String(value ?? '')
 }
 
-function requireCurrencyCode(value: unknown): string {
-  const normalized = normalizeCurrencyCode(value)
-  if (!normalized) throw new TypeError('currency must not be empty')
+function requireSupportedCurrency(value: unknown): string {
+  const normalized = normalizeSupportedCurrency(value)
+  if (!normalized) throw new TypeError(`Unsupported currency: ${currencyDiagnosticValue(value)}`)
   return normalized
 }
 
-function isValidRate(rate: unknown): rate is number {
-  return typeof rate === 'number' && Number.isFinite(rate) && rate > 0
-}
-
-function buildRateCache(rows: ReadonlyArray<CachedRateRow>): {
-  rates: Record<string, number>
-  invalidRates: InvalidRateDiagnostic[]
-} {
-  const rates: Record<string, number> = {}
-  const invalidRates: InvalidRateDiagnostic[] = []
-  for (const row of rows) {
-    const from = normalizeCurrencyCode(row.from_currency)
-    const to = normalizeCurrencyCode(row.to_currency)
-    if (!from || !to || !isValidRate(row.rate)) {
-      invalidRates.push({
-        fromCurrency: currencyDiagnosticValue(row.from_currency),
-        toCurrency: currencyDiagnosticValue(row.to_currency),
-        rate: currencyDiagnosticValue(row.rate),
-      })
-      continue
-    }
-    rates[`${from}:${to}`] = row.rate
+async function readLegacySetupDraft(): Promise<string> {
+  try {
+    const store = await load('settings.json')
+    return (
+      normalizeSupportedCurrency(await store.get(SETTINGS_KEY_PREFERRED_CURRENCY)) ??
+      DEFAULT_SETUP_CURRENCY
+    )
+  } catch {
+    return DEFAULT_SETUP_CURRENCY
   }
-  return { rates, invalidRates }
 }
 
-function getUsableRates(
-  rates: Readonly<Record<string, number>>,
-  targetCurrency: string
-): ConversionRate[] {
-  const target = requireCurrencyCode(targetCurrency)
-  const normalizedRates = new Map<string, ConversionRate>()
-
-  for (const [pair, rate] of Object.entries(rates)) {
-    const parts = pair.split(':')
-    if (parts.length !== 2 || !isValidRate(rate)) continue
-    const from = normalizeCurrencyCode(parts[0])
-    const to = normalizeCurrencyCode(parts[1])
-    if (!from || !to || to !== target) continue
-    normalizedRates.set(from, { fromCurrency: from, toCurrency: to, rate })
-  }
-
-  return [...normalizedRates.values()]
+function localToday(): string {
+  return dayjs().format('YYYY-MM-DD')
 }
 
-type CurrencyAmountInput = CurrencyAmount & {
-  accountId?: string | null
-  accountName?: string | null
-}
-
-function convertAmountsToPreferred(
-  amounts: ReadonlyArray<CurrencyAmountInput>,
+function unconfiguredResult(
   preferredCurrency: string,
-  rates: Readonly<Record<string, number>>,
-  invalidRates: ReadonlyArray<InvalidRateDiagnostic>
+  fromCurrency?: string,
+  nativeTotals?: NativeCurrencyTotal[]
 ): PreferredCurrencyAmountResult {
-  const preferred = normalizeCurrencyCode(preferredCurrency)
-  const invalidCurrencies: InvalidCurrencyDiagnostic[] = amounts.flatMap((amount) => {
-    if (normalizeCurrencyCode(amount.currency)) return []
-    return [
-      {
-        accountId: amount.accountId ?? null,
-        accountName: amount.accountName ?? null,
-        value: currencyDiagnosticValue(amount.currency),
-      },
-    ]
-  })
-  if (!preferred) {
-    invalidCurrencies.unshift({
-      accountId: null,
-      accountName: null,
-      value: currencyDiagnosticValue(preferredCurrency),
-    })
-  }
-  if (!preferred || invalidCurrencies.length > 0 || invalidRates.length > 0) {
-    return {
-      complete: false,
-      preferredCurrency: preferred ?? currencyDiagnosticValue(preferredCurrency).toUpperCase(),
-      missingCurrencies: [],
-      reason: 'invalid_currency_data',
-      ...(invalidCurrencies.length > 0 ? { invalidCurrencies } : {}),
-      ...(invalidRates.length > 0 ? { invalidRates } : {}),
-    }
-  }
-
-  const normalizedAmounts = amounts.map((amount) => ({
-    currency: requireCurrencyCode(amount.currency),
-    amountCentavos: amount.amountCentavos,
-  }))
-  const totals = aggregateCentavosByCurrency(normalizedAmounts)
-  const result = convertCurrencyTotals(totals, preferred, getUsableRates(rates, preferred))
-
-  if (result.complete) {
-    return {
-      complete: true,
-      preferredCurrency: result.targetCurrency,
-      amountCentavos: result.totalCentavos,
-      missingCurrencies: [],
-    }
-  }
-
+  const source = normalizeSupportedCurrency(fromCurrency)
   return {
     complete: false,
-    preferredCurrency: result.targetCurrency,
-    missingCurrencies: result.missingCurrencies,
-    reason: 'missing_exchange_rates',
+    preferredCurrency,
+    missingCurrencies: source ? [source] : [],
+    reason: 'main_currency_unconfigured',
+    ...(nativeTotals ? { nativeTotals } : {}),
+  }
+}
+
+function accountNativeTotals(accounts: readonly Account[]): NativeCurrencyTotal[] {
+  const totals = new Map<string, bigint>()
+  for (const account of accounts) {
+    const currency = requireSupportedCurrency(account.currency)
+    if (!Number.isSafeInteger(account.balance)) {
+      throw new RangeError('Account balance centavos must be a safe integer')
+    }
+    totals.set(currency, (totals.get(currency) ?? 0n) + BigInt(account.balance))
+  }
+  return [...totals]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([currency, total]) => {
+      const amountCentavos = Number(total)
+      if (!Number.isSafeInteger(amountCentavos)) {
+        throw new RangeError('Account balance total exceeds safe integer centavos')
+      }
+      return { currency, amountCentavos }
+    })
+}
+
+function invalidResult(
+  preferredCurrency: string,
+  error: unknown,
+  invalidCurrencies?: InvalidCurrencyDiagnostic[]
+): PreferredCurrencyAmountResult {
+  return {
+    complete: false,
+    preferredCurrency,
+    missingCurrencies: [],
+    reason: 'invalid_currency_data',
+    ...(invalidCurrencies?.length ? { invalidCurrencies } : {}),
+    invalidData: [getErrorMessage(error)],
+  }
+}
+
+function convertOne(
+  amountCentavos: number,
+  fromCurrency: string,
+  asOfDate: string,
+  state: Pick<CurrencyState, 'mainCurrency' | 'preferredCurrency' | 'manualRates'>
+): PreferredCurrencyAmountResult {
+  if (!state.mainCurrency) return unconfiguredResult(state.preferredCurrency, fromCurrency)
+
+  try {
+    const source = requireSupportedCurrency(fromCurrency)
+    const conversion = convertCentavosAsOf({
+      amountCentavos,
+      fromCurrency: source,
+      toCurrency: state.mainCurrency,
+      asOfDate,
+      rates: state.manualRates,
+    })
+    if (!conversion.complete) {
+      return {
+        complete: false,
+        preferredCurrency: state.mainCurrency,
+        missingCurrencies: [source],
+        reason: 'missing_exchange_rates',
+        conversion,
+      }
+    }
+    return {
+      complete: true,
+      preferredCurrency: state.mainCurrency,
+      amountCentavos: conversion.amountCentavos,
+      missingCurrencies: [],
+      conversion,
+    }
+  } catch (error) {
+    const normalized = normalizeSupportedCurrency(fromCurrency)
+    return invalidResult(
+      state.mainCurrency,
+      error,
+      normalized
+        ? undefined
+        : [
+            {
+              accountId: null,
+              accountName: null,
+              value: currencyDiagnosticValue(fromCurrency),
+            },
+          ]
+    )
   }
 }
 
 export const useCurrencyStore = create<CurrencyState>((set, get) => ({
-  rates: {},
-  invalidRates: [],
-  preferredCurrency: 'USD',
-  lastFetched: null,
+  mainCurrency: null,
+  preferredCurrency: DEFAULT_SETUP_CURRENCY,
+  manualRates: [],
   isLoading: false,
   error: null,
 
   loadRates: async () => {
     set({ isLoading: true, error: null })
+    const setupDraft = await readLegacySetupDraft()
     try {
-      // Load preferred currency from localStorage settings
-      const store = await load('settings.json')
-      const saved = await store.get(SETTINGS_KEY_PREFERRED_CURRENCY)
-      const savedCurrency = normalizeCurrencyCode(saved)
-      if (savedCurrency) {
-        set({ preferredCurrency: savedCurrency })
-      }
-
-      // Load cached rates from DB. Invalid cache rows are unavailable, never usable as rates.
-      const cachedRows = await getCachedRates()
-      set(buildRateCache(cachedRows))
-
-      // Load last fetch date
-      const lastDate = await getLastFetchDate()
-      set({ lastFetched: lastDate })
-    } catch (err) {
-      set({ error: getErrorMessage(err) })
-      throw err
+      const [settings, manualRates] = await Promise.all([
+        getCurrencySettings(),
+        listExchangeRates(),
+      ])
+      set({
+        mainCurrency: settings.mainCurrency,
+        preferredCurrency: settings.mainCurrency ?? setupDraft,
+        manualRates,
+      })
+    } catch (error) {
+      // A failed database switch/read must never leave another database's authority in memory.
+      set({
+        mainCurrency: null,
+        preferredCurrency: setupDraft,
+        manualRates: [],
+        error: getErrorMessage(error),
+      })
+      throw error
     } finally {
       set({ isLoading: false })
     }
   },
 
-  refreshRates: async () => {
+  setPreferredCurrency: async (currency) => {
+    const normalized = requireSupportedCurrency(currency)
     set({ isLoading: true, error: null })
     try {
-      await refreshRates()
-
-      // Reload rates from DB
-      const cachedRows = await getCachedRates()
-      const rateCache = buildRateCache(cachedRows)
-
-      const today = new Date().toISOString().split('T')[0]
-      set({ ...rateCache, lastFetched: today })
-    } catch (err) {
-      set({ error: getErrorMessage(err) })
-      throw err
+      const settings = await setMainCurrency(normalized)
+      if (!settings.configured) throw new Error('Main currency was not configured')
+      set({ mainCurrency: settings.mainCurrency, preferredCurrency: settings.mainCurrency })
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
     } finally {
       set({ isLoading: false })
     }
   },
 
-  setPreferredCurrency: async (currency: string) => {
-    const normalizedCurrency = requireCurrencyCode(currency)
-    set({ preferredCurrency: normalizedCurrency })
-    const store = await load('settings.json')
-    await store.set(SETTINGS_KEY_PREFERRED_CURRENCY, normalizedCurrency)
-    await store.save()
+  saveExchangeRate: async (input) => {
+    set({ isLoading: true, error: null })
+    try {
+      await setExchangeRate({ ...input, today: localToday() })
+      await get().loadRates()
+    } catch (error) {
+      set({ error: getErrorMessage(error), isLoading: false })
+      throw error
+    }
   },
 
-  convertToPreferred: (amountCentavos, fromCurrency) => {
-    const { preferredCurrency, rates, invalidRates } = get()
-    return convertAmountsToPreferred(
-      [{ currency: fromCurrency, amountCentavos }],
-      preferredCurrency,
-      rates,
-      invalidRates
-    )
-  },
+  convertHistoricalToPreferred: (amountCentavos, fromCurrency, date) =>
+    convertOne(amountCentavos, fromCurrency, date, get()),
+
+  convertCurrentToPreferred: (amountCentavos, fromCurrency, asOfDate = localToday()) =>
+    convertOne(amountCentavos, fromCurrency, asOfDate, get()),
 
   getTotalBalanceInPreferred: (accounts) => {
-    const { preferredCurrency, rates, invalidRates } = get()
-    return convertAmountsToPreferred(
-      accounts.map((account) => ({
-        currency: account.currency,
-        amountCentavos: account.balance,
-        accountId: account.id,
-        accountName: account.name,
-      })),
-      preferredCurrency,
-      rates,
-      invalidRates
-    )
-  },
-
-  getRate: (from, to) => {
-    const normalizedFrom = normalizeCurrencyCode(from)
-    const normalizedTo = normalizeCurrencyCode(to)
-    if (!normalizedFrom || !normalizedTo) return null
-    if (normalizedFrom === normalizedTo) return 1
-
-    const rate = getUsableRates(get().rates, normalizedTo).find(
-      (candidate) => candidate.fromCurrency === normalizedFrom
-    )?.rate
-    return rate ?? null
-  },
-
-  autoRefreshIfStale: async () => {
-    const { refreshRates: doRefresh, loadRates } = get()
-
-    // Always load cached rates first (updates lastFetched and rates in state)
-    await loadRates()
-
-    // Get updated state after loadRates
-    const { lastFetched } = get()
-
-    if (!lastFetched) {
-      // Never fetched — do initial fetch
-      // If this fails, we don't have any cached data so it's a real startup failure
-      await doRefresh()
-      return
+    const { mainCurrency, preferredCurrency, manualRates } = get()
+    const invalidCurrencies = accounts.flatMap((account) => {
+      if (normalizeSupportedCurrency(account.currency)) return []
+      return [
+        {
+          accountId: account.id,
+          accountName: account.name,
+          value: currencyDiagnosticValue(account.currency),
+        },
+      ]
+    })
+    if (invalidCurrencies.length > 0) {
+      return invalidResult(
+        mainCurrency ?? preferredCurrency,
+        new TypeError('Unsupported account currency'),
+        invalidCurrencies
+      )
     }
 
-    const lastDate = new Date(lastFetched)
-    const now = new Date()
-    if (now.getTime() - lastDate.getTime() > STALE_THRESHOLD_MS) {
-      // Rates are stale — attempt refresh but don't fail startup if cached data exists
-      // This prevents spurious startup failures when network is unavailable
-      // but we have usable cached rates from a previous fetch
-      try {
-        await doRefresh()
-      } catch (err) {
-        // Refresh failed - get potentially updated state
-        const { rates: updatedRates } = get()
-        // Only re-throw if we have no usable cached rates
-        const hasCachedRates = Object.keys(updatedRates).length > 0
-        if (!hasCachedRates) {
-          throw err
+    try {
+      const nativeTotals = accountNativeTotals(accounts)
+      if (!mainCurrency) return unconfiguredResult(preferredCurrency, undefined, nativeTotals)
+
+      const today = localToday()
+      const result = convertDatedAmounts(
+        accounts.map((account) => ({
+          id: account.id,
+          amountCentavos: account.balance,
+          currency: requireSupportedCurrency(account.currency),
+          date: today,
+        })),
+        mainCurrency,
+        manualRates
+      )
+      if (!result.complete) {
+        const missingCurrencies = [
+          ...new Set(
+            result.converted
+              .filter((conversion) => !conversion.complete)
+              .map((conversion) => conversion.fromCurrency)
+          ),
+        ].sort()
+        return {
+          complete: false,
+          preferredCurrency: mainCurrency,
+          missingCurrencies,
+          reason: 'missing_exchange_rates',
+          knownTotalCentavos: result.knownTotalCentavos,
+          nativeTotals: result.nativeTotals,
+          conversions: result.converted,
         }
-        // Otherwise, silently use stale cached rates
-        // The error is already stored in state by refreshRates
       }
+      return {
+        complete: true,
+        preferredCurrency: mainCurrency,
+        amountCentavos: result.totalCentavos!,
+        missingCurrencies: [],
+        knownTotalCentavos: result.knownTotalCentavos,
+        nativeTotals: result.nativeTotals,
+        conversions: result.converted,
+      }
+    } catch (error) {
+      return invalidResult(mainCurrency ?? preferredCurrency, error)
     }
+  },
+
+  getCurrentValuationRates: (asOfDate = localToday()) => {
+    const { mainCurrency, manualRates } = get()
+    return mainCurrency ? selectValuationRatesAsOf(manualRates, mainCurrency, asOfDate) : []
   },
 }))

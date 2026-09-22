@@ -1,6 +1,6 @@
 # Shikin CLI and MCP
 
-Shikin exposes the local finance engine through a CLI and an MCP server: **108 shared tools** mirrored on MCP, **113 CLI commands** including built-ins (`diagnose`, `tools`, `validate`, `web`, `record`). There is no built-in chat assistant.
+Shikin exposes the local finance engine through a CLI and an MCP server: **112 shared tools** mirrored on MCP, **117 CLI commands** including built-ins (`diagnose`, `tools`, `validate`, `web`, `record`). There is no built-in chat assistant.
 
 Best tested on **Node.js 24 LTS** with npm. `better-sqlite3@12.8` supports Node 20, 22, 23, 24, and 25.
 
@@ -129,6 +129,7 @@ Generic CLI/MCP workflows are available for automation clients and local scripts
 - `create-subscription-from-transaction` turns an existing expense or income transaction into a subscription using transaction defaults, with optional account/category/date/amount overrides, dry-run previews, transfer rejection, and audit provenance.
 - `undo` is dry-run-first and can roll back transaction or credit-card-statement audit entries. Pass `--apply` only after reviewing the preview, `balanceImpact`, source/command filters, and dependent-write warnings.
 - `finance-sanity-check` is the neutral daily-review-style command for overdue/due-soon card statements, unresolved placeholders, duplicate-looking transactions, upcoming subscriptions/recurring rules, low balances, balance mismatches, transaction hygiene issues, high Other Expenses, and recent provenance-tagged writes. Use `--redacted` and `--limit` for safer automation output.
+- `get-currency-settings`, `set-main-currency`, `list-exchange-rates`, and `set-exchange-rate` manage the explicit database-backed main currency and immutable effective-dated manual direct rates. Mutations support dry-run validation and declare their audited table effects.
 - `list-plugins`, `enable-plugin`, and `disable-plugin` manage trusted-local CLI/MCP plugins. Plugin tools are disabled by default and appear as `plugin-<plugin-id>-<tool-name>` after explicit trusted-local approval.
 
 Use `--source <label>` for generic provenance such as `manual`, `csv-import`, `mcp`, `scheduled-script`, `local-bot`, or another automation name. Source labels are opaque metadata, not trusted identities or product-specific behavior. Use `--note <text>` for the audit/changelog note; transaction `--notes` remain transaction details.
@@ -146,18 +147,14 @@ See [`../docs/reference/AUTOMATION-WORKFLOWS.md`](../docs/reference/AUTOMATION-W
 
 ## Currency conversion behavior
 
-`convert-currency` uses only the locally stored `exchange_rates` table:
+Currency authority is fully local and explicit:
 
-- It looks up a stored pair for `FROM -> TO`, then falls back to an inverse rate if available.
-- It uses the most recently stored matching rate in the table; it does not enforce freshness itself.
-- If a stored rate is missing or invalid, it returns explicit guidance to refresh/import rates first.
-- The CLI path does **not** fetch rates from the network.
-
-To use currency conversion from CLI successfully, ensure rates are populated before calling the tool:
-
-- run the desktop/web app once so it can refresh/cache rates, or
-- import a DB snapshot that already contains populated `exchange_rates`, or
-- insert/update rows directly in `exchange_rates` by another process/tool.
+- `get-currency-settings` reports whether a database-backed main currency has been explicitly configured. `set-main-currency` saves it without relabelling accounts, transactions, plans, snapshots, or other records.
+- `list-exchange-rates` returns every immutable manual history row. `set-exchange-rate` appends a direct rate or correction; corrections and backdated entries require an audit note plus historical-change acknowledgement. The tool supplies trusted local today internally.
+- `convert-currency` accepts optional `asOfDate` (local today by default) and selects the latest unsuperseded `manual_exchange_rates` row for the exact `FROM -> TO` pair effective on or before that date.
+- There is no provider-cache, inverse, triangulation, or future-rate fallback. Same-currency conversion remains exact 1:1 without a row.
+- Existing response keys remain compatible: `amount`, `from`, `to`, `convertedAmount`, `rate`, and `message`. `convertedAmount` and approximate numeric `rate` are legacy convenience values. Authoritative additions are integer `convertedAmountCentavos`, exact `rateDecimal`, `asOfDate`, `effectiveFrom`, `rateId`, `direction`, `complete`, and `missingReason`.
+- All reads and startup loading work offline; these tools never fetch exchange rates from the network.
 
 ## MCP Server
 
@@ -223,7 +220,7 @@ The MCP server also exposes read-only resources:
 
 ## Current Scope
 
-- CLI and MCP share the same 108-tool catalog in `cli/src/tools/index.ts`. Groups: transactions/corrections/consumption/transfers/tags/placeholders; accounts/reconciliation/coverage; credit cards and payment evidence; budgets/net worth/buckets; investments/subscriptions/bills; receivables; analytics/recaps/forecast/health/goals/debt; category rules; notebook/portfolio review; backup/import/export; audit/undo/sanity; runtime diagnostics; plugins.
+- CLI and MCP share the same 112-tool catalog in `cli/src/tools/index.ts`. Groups: transactions/corrections/consumption/transfers/tags/placeholders; accounts/reconciliation/coverage; credit cards and payment evidence; budgets/net worth/buckets; investments/subscriptions/bills; receivables; analytics/recaps/forecast/health/goals/debt; category rules; notebook/portfolio review; backup/import/export; audit/undo/sanity; runtime diagnostics; plugins.
 - `shikin tools --json` is the authoritative discovery contract and includes `catalogVersion`, `schemaVersion`, generation time, CLI/MCP compatibility counts, validation-scope notes, required migration metadata, and optional declared tool `effects`. Effects are opt-in annotations, not a complete audit of the catalog.
 - `setup-status` and the automation context tool expose existing goal, debt, and investment support surfaces. Investment support remains limited to stored holdings (`manage-investment`) and portfolio review (`generate-portfolio-review`).
 - All shipped tools are available end-to-end against the local database.

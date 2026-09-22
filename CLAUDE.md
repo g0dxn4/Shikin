@@ -18,7 +18,7 @@ shikin/
 - **Frontend**: React 19 + TypeScript + Tailwind v4 + shadcn/ui
 - **Desktop**: Tauri v2 (Rust)
 - **Database**: SQLite via shared storage (`~/.local/share/com.asf.shikin/` on Linux)
-- **CLI/MCP**: 108 shared tools via commander CLI + MCP server (113 total CLI commands including `diagnose`, `tools`, `validate`, `web`, `record`)
+- **CLI/MCP**: 112 shared tools via commander CLI + MCP server (117 total CLI commands including `diagnose`, `tools`, `validate`, `web`, `record`)
 - **State**: 18 Zustand stores
 - **Testing**: Vitest + Testing Library + Playwright (e2e)
 - **Package manager**: pnpm 11.1.1 (`packageManager` field). Node.js 24 LTS is what CI and source setup are best tested on. `better-sqlite3@12.8` supports Node 20/22/23/24/25 — do not document Node 18 support.
@@ -71,7 +71,7 @@ pnpm exec tsx src/mcp-server.ts
 }
 ```
 
-### 108 Shared CLI/MCP Tools / 113 CLI Commands
+### 112 Shared CLI/MCP Tools / 117 CLI Commands
 
 Catalog groups (see `cli/src/tools/index.ts` and `cli/src/fixtures/public-automation-inventory.json`): transactions/corrections/consumption/transfers/tags/placeholders; accounts/categories/reconciliation/coverage; credit cards and payment evidence; budgets/net worth/buckets; investments/subscriptions/bills; receivables; analytics/recaps/forecast/health/goals/debt; category rules; notebook/portfolio review; backup/import/export; audit/undo/sanity; read-only runtime diagnostics; trusted-local plugins.
 

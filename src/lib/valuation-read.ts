@@ -79,23 +79,6 @@ export function rowToHoldingInput(row: InvestmentValuationRow): HoldingValuation
   }
 }
 
-function ratesForTarget(
-  rates: Readonly<Record<string, number>>,
-  targetCurrency: string
-): ValuationRate[] {
-  const target = targetCurrency.trim().toUpperCase()
-  return Object.entries(rates).flatMap(([pair, rate]) => {
-    const [fromCurrency, toCurrency, extra] = pair.split(':')
-    return !extra &&
-      fromCurrency &&
-      toCurrency?.toUpperCase() === target &&
-      Number.isFinite(rate) &&
-      rate > 0
-      ? [{ fromCurrency, toCurrency, rateDecimal: decimalFromNumber(rate) }]
-      : []
-  })
-}
-
 function accountValuationMode(account: Account) {
   if (
     account.valuation_mode === 'cash_plus_holdings' ||
@@ -109,17 +92,45 @@ function accountValuationMode(account: Account) {
     : ('unresolved' as const)
 }
 
+/** Current ownership valuation. The caller supplies the exact dated manual-rate selection. */
+export type CurrentOwnershipValuation = Omit<
+  OwnershipValuationResult,
+  | 'complete'
+  | 'targetCurrency'
+  | 'totalAssetsCentavos'
+  | 'totalLiabilitiesCentavos'
+  | 'totalInvestmentsCentavos'
+  | 'netWorthCentavos'
+> & {
+  complete: boolean
+  targetCurrency: string | null
+  totalAssetsCentavos: number | null
+  totalLiabilitiesCentavos: number | null
+  totalInvestmentsCentavos: number | null
+  netWorthCentavos: number | null
+  reason?: 'main_currency_unconfigured' | 'valuation_incomplete' | null
+}
+
 export async function readOwnershipValuation(input: {
-  targetCurrency: string
-  rates: Readonly<Record<string, number>>
-}): Promise<OwnershipValuationResult> {
+  targetCurrency: string | null
+  rates: readonly ValuationRate[]
+}): Promise<CurrentOwnershipValuation> {
   const [accounts, investments] = await Promise.all([
     query<Account>('SELECT * FROM accounts WHERE is_archived = 0 ORDER BY type, name, id'),
     readInvestmentValuationRows(),
   ])
-  return calculateOwnershipValuation({
-    targetCurrency: input.targetCurrency,
-    rates: ratesForTarget(input.rates, input.targetCurrency),
+  const holdingInputs = investments.map(rowToHoldingInput)
+  // The probe is used only to obtain target-independent native ownership components.
+  // It is never returned or presented as configured authority.
+  const targetCurrency =
+    input.targetCurrency ??
+    accounts[0]?.currency ??
+    holdingInputs.find((holding) => holding.price)?.price?.quoteCurrency ??
+    holdingInputs[0]?.costCurrency ??
+    'USD'
+  const valuation = calculateOwnershipValuation({
+    targetCurrency,
+    rates: input.targetCurrency ? input.rates : [],
     accounts: accounts.map((account) => ({
       id: account.id,
       name: account.name,
@@ -128,8 +139,23 @@ export async function readOwnershipValuation(input: {
       balanceCentavos: account.balance,
       valuationMode: accountValuationMode(account),
     })),
-    holdings: investments.map(rowToHoldingInput),
+    holdings: holdingInputs,
   })
+  if (!input.targetCurrency) {
+    return {
+      ...valuation,
+      complete: false,
+      targetCurrency: null,
+      totalAssetsCentavos: null,
+      totalLiabilitiesCentavos: null,
+      totalInvestmentsCentavos: null,
+      netWorthCentavos: null,
+      missingCurrencies: [],
+      reason: 'main_currency_unconfigured',
+    }
+  }
+  return {
+    ...valuation,
+    reason: valuation.complete ? null : 'valuation_incomplete',
+  }
 }
-
-export { ratesForTarget }

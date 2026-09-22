@@ -14,10 +14,7 @@ import {
 import { formatMoney } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import type { Account } from '@/types/database'
-import type {
-  ComparisonDisplayMode,
-  ConvertToPreferred,
-} from '@/components/dashboard/overview-account-comparison-helpers'
+import type { ComparisonDisplayMode } from '@/components/dashboard/overview-account-comparison-helpers'
 import { OverviewAccountComparison } from '@/components/dashboard/overview-account-comparison'
 
 export type NetWorthPeriod = '3m' | '6m' | '1y' | 'all'
@@ -52,9 +49,9 @@ interface OverviewNetWorthProps {
   emptyHistoryMessage: string
   accounts: Account[]
   preferredCurrency: string
-  rates: Readonly<Record<string, number>>
-  invalidRates: ReadonlyArray<unknown>
-  convertToPreferred: ConvertToPreferred
+  rates?: unknown
+  invalidRates?: unknown
+  convertToPreferred?: unknown
 }
 
 export function OverviewNetWorth({
@@ -78,9 +75,6 @@ export function OverviewNetWorth({
   emptyHistoryMessage,
   accounts,
   preferredCurrency,
-  rates,
-  invalidRates,
-  convertToPreferred,
 }: OverviewNetWorthProps) {
   const { t } = useTranslation('dashboard')
   const [view, setView] = useState<OverviewView>('summary')
@@ -337,9 +331,6 @@ export function OverviewNetWorth({
           <OverviewAccountComparison
             accounts={accounts}
             preferredCurrency={preferredCurrency}
-            rates={rates}
-            invalidRates={invalidRates}
-            convertToPreferred={convertToPreferred}
             selection={comparisonSelection}
             onSelectionChange={setComparisonSelection}
             period={comparisonPeriod}

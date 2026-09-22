@@ -47,7 +47,9 @@
   },
   "currency": {
     "unavailable": "Unavailable",
-    "missing": "Total unavailable: check exchange rates and currency data ({{currencies}})."
+    "missing": "Total unavailable: check exchange rates and currency data ({{currencies}}).",
+    "estimateToday": "{{currency}} · planning estimate using today’s rate",
+    "actualAndEstimate": "{{currency}} · paid at transaction date; estimates use today’s rate"
   },
   "schedule": {
     "allDays": "Whole month",

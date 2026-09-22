@@ -11,11 +11,7 @@ import {
   type PriceProvider,
   type VerifiedInstrumentPrice,
 } from '@shikin/finance-core/valuation'
-import {
-  readInvestmentValuationRows,
-  ratesForTarget,
-  rowToHoldingInput,
-} from '@/lib/valuation-read'
+import { readInvestmentValuationRows, rowToHoldingInput } from '@/lib/valuation-read'
 import { fetchVerifiedPrice, type PriceIdentitySelection } from '@/lib/price-service'
 import { useCurrencyStore } from './currency-store'
 import type { Investment } from '@/types/database'
@@ -81,7 +77,7 @@ interface PortfolioSummary {
   totalsComplete: boolean
   gainsComplete?: boolean
   incompleteHoldingIds?: string[]
-  preferredCurrency?: string
+  preferredCurrency?: string | null
 }
 
 interface PricePoint {
@@ -122,7 +118,7 @@ const EMPTY_SUMMARY: PortfolioSummary = {
   totalsComplete: true,
   gainsComplete: true,
   incompleteHoldingIds: [],
-  preferredCurrency: 'USD',
+  preferredCurrency: null,
 }
 
 function addCentavos(left: number, right: number, label: string) {
@@ -220,6 +216,7 @@ async function persistQuoteEvidence(quote: VerifiedInstrumentPrice) {
   )
 }
 
+let investmentFetchRequest = 0
 export const useInvestmentStore = create<InvestmentState>((set, get) => ({
   investments: [],
   portfolioSummary: EMPTY_SUMMARY,
@@ -231,6 +228,7 @@ export const useInvestmentStore = create<InvestmentState>((set, get) => ({
   refreshFailures: {},
 
   fetch: async () => {
+    const requestId = ++investmentFetchRequest
     set({ isLoading: true, fetchError: null })
     try {
       const rows = await readInvestmentValuationRows()
@@ -239,16 +237,22 @@ export const useInvestmentStore = create<InvestmentState>((set, get) => ({
         .loadRates()
         .catch(() => {})
       const currencyState = useCurrencyStore.getState()
-      const targetCurrency = currencyState.preferredCurrency
-      const rates = ratesForTarget(currencyState.rates, targetCurrency)
+      const targetCurrency = currencyState.mainCurrency
+      const rates = currencyState.getCurrentValuationRates()
       const investments: InvestmentWithPrice[] = rows.map((row) => {
         const input = rowToHoldingInput(row)
-        const valuation = valueHolding(input, targetCurrency, rates)
+        // Native quote value remains readable before setup; no draft currency is asserted as target.
+        const valuationTarget = targetCurrency ?? input.price?.quoteCurrency ?? input.costCurrency
+        const valuation = valueHolding(input, valuationTarget, targetCurrency ? rates : [])
         const currentPriceDecimal = valuation.price?.unitPriceDecimal ?? null
         const currentPrice =
           currentPriceDecimal === null
             ? null
-            : valueHolding({ ...input, quantityDecimal: '1' }, targetCurrency, rates).valueCentavos
+            : valueHolding(
+                { ...input, quantityDecimal: '1' },
+                valuationTarget,
+                targetCurrency ? rates : []
+              ).valueCentavos
         const costBasis = valuation.costBasisCentavos
         const gainLoss = valuation.gainLossCentavos
         const gainLossPercent =
@@ -270,24 +274,27 @@ export const useInvestmentStore = create<InvestmentState>((set, get) => ({
           priceInstrumentId: valuation.price?.instrumentId ?? null,
           priceExchange: valuation.price?.exchange ?? null,
           marketValue: valuation.valueCentavos,
-          convertedMarketValue: valuation.convertedValueCentavos,
+          convertedMarketValue: targetCurrency ? valuation.convertedValueCentavos : null,
           costBasis,
-          convertedCostBasis: valuation.convertedCostBasisCentavos,
-          gainLoss,
-          gainLossPercent,
+          convertedCostBasis: targetCurrency ? valuation.convertedCostBasisCentavos : null,
+          gainLoss: targetCurrency ? gainLoss : null,
+          gainLossPercent: targetCurrency ? gainLossPercent : null,
           lastPriceDate: valuation.price?.quoteDate ?? null,
-          valuationComplete: valuation.complete,
-          valuationReasons: valuation.reasons,
+          valuationComplete: Boolean(targetCurrency) && valuation.complete,
+          valuationReasons: targetCurrency
+            ? valuation.reasons
+            : [...valuation.reasons, 'main_currency_unconfigured'],
         }
       })
 
+      if (requestId !== investmentFetchRequest) return
       set({ investments, fetchError: null, error: null })
       get().calculatePortfolioSummary()
     } catch (error) {
-      set({ fetchError: getErrorMessage(error) })
+      if (requestId === investmentFetchRequest) set({ fetchError: getErrorMessage(error) })
       throw error
     } finally {
-      set({ isLoading: false })
+      if (requestId === investmentFetchRequest) set({ isLoading: false })
     }
   },
 
@@ -561,7 +568,7 @@ export const useInvestmentStore = create<InvestmentState>((set, get) => ({
         totalsComplete,
         gainsComplete,
         incompleteHoldingIds,
-        preferredCurrency: currencyState.preferredCurrency,
+        preferredCurrency: currencyState.mainCurrency,
       },
     })
   },
@@ -569,3 +576,16 @@ export const useInvestmentStore = create<InvestmentState>((set, get) => ({
   setLastPriceFetch: (date) => set({ lastPriceFetch: date }),
   setRefreshFailures: (failures) => set({ refreshFailures: failures }),
 }))
+
+let investmentAuthorityKey = ''
+useCurrencyStore.subscribe((state) => {
+  const key = `${state.mainCurrency ?? ''}|${state.manualRates.map((rate) => rate.id).join(',')}`
+  if (key === investmentAuthorityKey) return
+  investmentAuthorityKey = key
+  if (useInvestmentStore.getState().investments.length > 0) {
+    void useInvestmentStore
+      .getState()
+      .fetch()
+      .catch(() => {})
+  }
+})

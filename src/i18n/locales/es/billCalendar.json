@@ -47,7 +47,9 @@
   },
   "currency": {
     "unavailable": "No disponible",
-    "missing": "Total no disponible: revisa los tipos de cambio y las monedas ({{currencies}})."
+    "missing": "Total no disponible: revisa los tipos de cambio y las monedas ({{currencies}}).",
+    "estimateToday": "{{currency}} · estimación de planificación con la tasa de hoy",
+    "actualAndEstimate": "{{currency}} · pagos a la fecha de transacción; estimaciones con la tasa de hoy"
   },
   "schedule": {
     "allDays": "Todo el mes",

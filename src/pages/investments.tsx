@@ -387,7 +387,11 @@ export function Investments() {
             <AlertTriangle size={16} className="text-warning mt-0.5" />
             <div>
               <p className="text-warning text-sm font-semibold">{t('currencyWarning.title')}</p>
-              <p className="text-muted-foreground mt-1 text-sm">{t('currencyWarning.body')}</p>
+              <p className="text-muted-foreground mt-1 text-sm">
+                {portfolioSummary.preferredCurrency === null
+                  ? t('currencyWarning.setupRequired')
+                  : t('currencyWarning.body')}
+              </p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {portfolioSummary.currencies.map((currency) => {
                   const data = portfolioSummary.byCurrency[currency]
@@ -415,7 +419,7 @@ export function Investments() {
             portfolioSummary.totalsComplete
               ? formatMoney(
                   portfolioSummary.totalMarketValue ?? 0,
-                  portfolioSummary.preferredCurrency
+                  portfolioSummary.preferredCurrency ?? 'USD'
                 )
               : '—'
           }
@@ -432,7 +436,7 @@ export function Investments() {
               >
                 <span className="min-w-0 [overflow-wrap:anywhere]">
                   {gainLoss >= 0 ? '+' : ''}
-                  {formatMoney(gainLoss, portfolioSummary.preferredCurrency)}
+                  {formatMoney(gainLoss, portfolioSummary.preferredCurrency ?? 'USD')}
                 </span>
                 {portfolioSummary.totalGainLossPercent !== null ? (
                   <span className="text-sm font-medium [overflow-wrap:anywhere]">
@@ -452,7 +456,7 @@ export function Investments() {
             portfolioSummary.totalsComplete && portfolioSummary.gainsComplete
               ? formatMoney(
                   portfolioSummary.totalCostBasis ?? 0,
-                  portfolioSummary.preferredCurrency
+                  portfolioSummary.preferredCurrency ?? 'USD'
                 )
               : '—'
           }

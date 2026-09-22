@@ -3,6 +3,11 @@ export type ConvertToPreferredFn = (
   fromCurrency: string
 ) => PreferredAmountResult
 
+export type ConversionIssueReason =
+  | 'main_currency_unconfigured'
+  | 'missing_exchange_rates'
+  | 'invalid_currency_data'
+
 export type PreferredAmountResult =
   | {
       complete: true
@@ -14,7 +19,7 @@ export type PreferredAmountResult =
       complete: false
       preferredCurrency: string
       missingCurrencies: ReadonlyArray<string>
-      reason: 'missing_exchange_rates' | 'invalid_currency_data'
+      reason: ConversionIssueReason
     }
 
 export type ConvertedTotal =
@@ -29,7 +34,7 @@ export type ConvertedTotal =
       preferredCurrency: string
       amountCentavos: null
       missingCurrencies: readonly string[]
-      reason: 'missing_exchange_rates' | 'invalid_currency_data'
+      reason: ConversionIssueReason
     }
 
 export type IncompleteConvertedTotal = Extract<ConvertedTotal, { complete: false }>
@@ -60,10 +65,19 @@ export type ReceivableLikeItem = {
   currency: string
 }
 
-function emptyComplete(preferredCurrency: string): ConvertedTotal {
+function emptyResult(preferredCurrency: string, mainCurrency: string | null): ConvertedTotal {
+  if (!mainCurrency) {
+    return {
+      complete: false,
+      preferredCurrency,
+      amountCentavos: null,
+      missingCurrencies: [],
+      reason: 'main_currency_unconfigured',
+    }
+  }
   return {
     complete: true,
-    preferredCurrency,
+    preferredCurrency: mainCurrency,
     amountCentavos: 0,
     missingCurrencies: [],
   }
@@ -88,27 +102,29 @@ export function fromPreferredResult(result: PreferredAmountResult): ConvertedTot
   }
 }
 
-/** Sum converted amounts only when every conversion is complete. Never returns a partial total. */
+/** Sum current converted amounts only when every conversion is complete. */
 export function sumConvertedAmounts(
   amounts: readonly ConvertibleAmount[],
   convertToPreferred: ConvertToPreferredFn,
-  preferredCurrency: string
+  preferredCurrency: string,
+  mainCurrency: string | null = preferredCurrency
 ): ConvertedTotal {
-  if (amounts.length === 0) return emptyComplete(preferredCurrency)
+  if (amounts.length === 0) return emptyResult(preferredCurrency, mainCurrency)
 
   let total = 0
   let resolvedPreferred = preferredCurrency
   const missing = new Set<string>()
-  let reason: 'missing_exchange_rates' | 'invalid_currency_data' | undefined
+  let reason: ConversionIssueReason | undefined
 
   for (const item of amounts) {
     const result = convertToPreferred(item.amountCentavos, item.currency)
     resolvedPreferred = result.preferredCurrency || resolvedPreferred
     if (result.complete) {
       total += result.amountCentavos
+      if (!Number.isSafeInteger(total)) reason = 'invalid_currency_data'
       continue
     }
-    reason = result.reason
+    if (result.reason === 'invalid_currency_data' || !reason) reason = result.reason
     for (const currency of result.missingCurrencies) missing.add(currency)
   }
 
@@ -134,7 +150,9 @@ export function groupAmountsByCurrency(amounts: readonly ConvertibleAmount[]): C
   const totals = new Map<string, number>()
   for (const item of amounts) {
     const currency = item.currency.trim().toUpperCase() || 'UNKNOWN'
-    totals.set(currency, (totals.get(currency) ?? 0) + item.amountCentavos)
+    const next = (totals.get(currency) ?? 0) + item.amountCentavos
+    if (!Number.isSafeInteger(next)) throw new RangeError('Native currency total is unsafe')
+    totals.set(currency, next)
   }
   return [...totals.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
@@ -146,10 +164,12 @@ function mergeIncomplete(...totals: ConvertedTotal[]): IncompleteConvertedTotal 
   if (incomplete.length === 0) return null
   const missing = new Set<string>()
   let reason: IncompleteConvertedTotal['reason'] = 'missing_exchange_rates'
-  let preferredCurrency = totals[0]?.preferredCurrency ?? 'USD'
+  let preferredCurrency = totals[0]?.preferredCurrency ?? ''
   for (const total of incomplete) {
     preferredCurrency = total.preferredCurrency
-    reason = total.reason
+    if (total.reason === 'invalid_currency_data' || reason !== 'invalid_currency_data') {
+      reason = total.reason
+    }
     for (const currency of total.missingCurrencies) missing.add(currency)
   }
   return {
@@ -166,42 +186,27 @@ export function buildAccountsLiquidTotals({
   convertToPreferred,
   getTotalBalanceInPreferred,
   preferredCurrency,
+  mainCurrency,
 }: {
   liquidAccounts: readonly BalanceLikeAccount[]
   convertToPreferred: ConvertToPreferredFn
   getTotalBalanceInPreferred: (accounts: BalanceLikeAccount[]) => PreferredAmountResult
   preferredCurrency: string
+  mainCurrency: string | null
 }) {
   const depositAccounts = liquidAccounts.filter((account) => account.type !== 'credit_card')
   const creditAccounts = liquidAccounts.filter((account) => account.type === 'credit_card')
 
-  const net = fromPreferredResult(
-    liquidAccounts.length === 0
-      ? {
-          complete: true,
-          preferredCurrency,
-          amountCentavos: 0,
-          missingCurrencies: [],
-        }
-      : getTotalBalanceInPreferred([...liquidAccounts])
-  )
-  const assets = fromPreferredResult(
-    depositAccounts.length === 0
-      ? {
-          complete: true,
-          preferredCurrency,
-          amountCentavos: 0,
-          missingCurrencies: [],
-        }
-      : getTotalBalanceInPreferred([...depositAccounts])
-  )
+  const net = fromPreferredResult(getTotalBalanceInPreferred([...liquidAccounts]))
+  const assets = fromPreferredResult(getTotalBalanceInPreferred([...depositAccounts]))
   const liabilities = sumConvertedAmounts(
     creditAccounts.map((account) => ({
       amountCentavos: Math.max(0, -account.balance),
       currency: account.currency,
     })),
     convertToPreferred,
-    preferredCurrency
+    preferredCurrency,
+    mainCurrency
   )
   const mix = {
     checking: sumConvertedAmounts(
@@ -212,7 +217,8 @@ export function buildAccountsLiquidTotals({
           currency: account.currency,
         })),
       convertToPreferred,
-      preferredCurrency
+      preferredCurrency,
+      mainCurrency
     ),
     savings: sumConvertedAmounts(
       liquidAccounts
@@ -222,7 +228,8 @@ export function buildAccountsLiquidTotals({
           currency: account.currency,
         })),
       convertToPreferred,
-      preferredCurrency
+      preferredCurrency,
+      mainCurrency
     ),
     credit: liabilities,
   }
@@ -247,10 +254,12 @@ export function buildReceivablesStatusTotals({
   receivables,
   convertToPreferred,
   preferredCurrency,
+  mainCurrency,
 }: {
   receivables: readonly ReceivableLikeItem[]
   convertToPreferred: ConvertToPreferredFn
   preferredCurrency: string
+  mainCurrency: string | null
 }) {
   const active = receivables.filter((item) => item.status !== 'cancelled')
   const outstanding = sumConvertedAmounts(
@@ -259,7 +268,8 @@ export function buildReceivablesStatusTotals({
       currency: item.currency,
     })),
     convertToPreferred,
-    preferredCurrency
+    preferredCurrency,
+    mainCurrency
   )
   const overdue = sumConvertedAmounts(
     active
@@ -269,7 +279,8 @@ export function buildReceivablesStatusTotals({
         currency: item.currency,
       })),
     convertToPreferred,
-    preferredCurrency
+    preferredCurrency,
+    mainCurrency
   )
   const received = sumConvertedAmounts(
     active.map((item) => ({
@@ -277,7 +288,8 @@ export function buildReceivablesStatusTotals({
       currency: item.currency,
     })),
     convertToPreferred,
-    preferredCurrency
+    preferredCurrency,
+    mainCurrency
   )
 
   return {

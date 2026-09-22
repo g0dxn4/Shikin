@@ -21,7 +21,8 @@
     "categoryPlaceholder": "Select a category",
     "amount": "Budget Amount (USD)",
     "period": "Period",
-    "categoriesError": "Categories couldn't be loaded"
+    "categoriesError": "Categories couldn't be loaded",
+    "amountWithCurrency": "Budget Amount ({{currency}})"
   },
   "periods": {
     "weekly": "Weekly",
@@ -81,10 +82,12 @@
     "title": "No budgets yet",
     "description": "Create your first budget to start tracking your spending limits."
   },
-  "scope": "USD plans · displayed in {{currency}} · current periods",
+  "scope": "Durable plan currencies · displayed in {{currency}} · current periods",
   "currency": {
     "unavailable": "Totals unavailable",
-    "description": "Complete spending data and valid exchange rates are required to display progress."
+    "description": "Complete spending data and valid exchange rates are required to display progress.",
+    "setupRequired": "Configure a main currency in Settings before creating a budget.",
+    "changedWhileOpen": "The main currency changed while this form was open. Close and reopen it before saving."
   },
   "buckets": {
     "title": "Virtual cashflow buckets",

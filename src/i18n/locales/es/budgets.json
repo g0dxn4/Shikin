@@ -21,7 +21,8 @@
     "categoryPlaceholder": "Seleccionar una categoría",
     "amount": "Monto del Presupuesto (USD)",
     "period": "Período",
-    "categoriesError": "No se pudieron cargar las categorías"
+    "categoriesError": "No se pudieron cargar las categorías",
+    "amountWithCurrency": "Importe del presupuesto ({{currency}})"
   },
   "periods": {
     "weekly": "Semanal",
@@ -81,10 +82,12 @@
     "title": "Sin presupuestos aún",
     "description": "Crea tu primer presupuesto para comenzar a rastrear tus límites de gasto."
   },
-  "scope": "Planes en USD · importes en {{currency}} · períodos actuales",
+  "scope": "Monedas duraderas del plan · mostrado en {{currency}} · períodos actuales",
   "currency": {
     "unavailable": "Totales no disponibles",
-    "description": "Se necesitan los gastos completos y tipos de cambio válidos para mostrar el progreso."
+    "description": "Se necesitan los gastos completos y tipos de cambio válidos para mostrar el progreso.",
+    "setupRequired": "Configura una moneda principal en Ajustes antes de crear un presupuesto.",
+    "changedWhileOpen": "La moneda principal cambió mientras este formulario estaba abierto. Ciérralo y vuelve a abrirlo antes de guardar."
   },
   "buckets": {
     "title": "Fondos virtuales de flujo de caja",

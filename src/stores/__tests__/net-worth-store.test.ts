@@ -5,10 +5,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@/lib/database', () => ({ query: vi.fn(), execute: vi.fn() }))
 vi.mock('@/lib/valuation-read', () => ({ readOwnershipValuation: vi.fn() }))
 
+import { execute, query } from '@/lib/database'
 import { readOwnershipValuation } from '@/lib/valuation-read'
+import { useCurrencyStore } from '../currency-store'
 import { useNetWorthStore } from '../net-worth-store'
 
 const mockRead = vi.mocked(readOwnershipValuation)
+const mockQuery = vi.mocked(query)
+const mockExecute = vi.mocked(execute)
 const complete = {
   complete: true,
   targetCurrency: 'USD',
@@ -85,7 +89,16 @@ describe('ownership-aware net-worth store', () => {
       assetBreakdown: [],
       liabilityBreakdown: [],
       history: [],
+      historyComplete: true,
+      historyMissingCurrencies: [],
+      historyNativeTotals: [],
       isLoading: false,
+    })
+    useCurrencyStore.setState({
+      mainCurrency: 'USD',
+      preferredCurrency: 'USD',
+      manualRates: [],
+      loadRates: vi.fn(async () => {}),
     })
   })
 
@@ -121,6 +134,82 @@ describe('ownership-aware net-worth store', () => {
       netWorth: null,
       unresolvedAccountIds: ['broker'],
     })
+  })
+
+  it('does not relabel today’s existing snapshot after a main-currency change', async () => {
+    useNetWorthStore.setState({
+      totalAssets: 12_500,
+      totalLiabilities: 2_000,
+      totalInvestments: 2_500,
+      netWorth: 10_500,
+      totalsComplete: true,
+      preferredCurrency: 'MXN',
+    })
+    mockQuery.mockResolvedValueOnce([{ id: 'today-usd', currency: 'USD' }])
+
+    await useNetWorthStore.getState().takeSnapshot()
+
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it('converts each stored history point at its own date', async () => {
+    useCurrencyStore.setState({
+      mainCurrency: 'MXN',
+      preferredCurrency: 'MXN',
+      manualRates: [
+        {
+          id: 'sep-14',
+          fromCurrency: 'USD',
+          toCurrency: 'MXN',
+          rateDecimal: '17',
+          effectiveFrom: '2024-09-14',
+          supersedesRateId: null,
+          createdAt: '',
+          sourceNote: null,
+        },
+        {
+          id: 'sep-15',
+          fromCurrency: 'USD',
+          toCurrency: 'MXN',
+          rateDecimal: '18',
+          effectiveFrom: '2024-09-15',
+          supersedesRateId: null,
+          createdAt: '',
+          sourceNote: null,
+        },
+      ],
+    })
+    mockQuery.mockResolvedValueOnce([
+      {
+        id: 'first',
+        date: '2024-09-14',
+        total_assets: 10_000,
+        total_liabilities: 0,
+        net_worth: 10_000,
+        total_investments: 0,
+        breakdown_json: '{}',
+        currency: 'USD',
+        created_at: '',
+      },
+      {
+        id: 'second',
+        date: '2024-09-15',
+        total_assets: 10_000,
+        total_liabilities: 0,
+        net_worth: 10_000,
+        total_investments: 0,
+        breakdown_json: '{}',
+        currency: 'USD',
+        created_at: '',
+      },
+    ])
+
+    await useNetWorthStore.getState().loadHistory('all')
+
+    expect(useNetWorthStore.getState().history).toEqual([
+      { date: '2024-09-14', netWorth: 170_000, assets: 170_000, liabilities: 0 },
+      { date: '2024-09-15', netWorth: 180_000, assets: 180_000, liabilities: 0 },
+    ])
   })
 
   it('preserves the module-level read queue across unmounts and after failures', async () => {

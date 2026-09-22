@@ -63,11 +63,22 @@ async function renderBillCalendar() {
 
 const originalRule = recurringStoreMock.rules[0]
 
+const fxRate = (fromCurrency: string, toCurrency: string, rateDecimal: string) => ({
+  id: `${fromCurrency}-${toCurrency}-${rateDecimal}`,
+  fromCurrency,
+  toCurrency,
+  rateDecimal,
+  effectiveFrom: '2000-01-01',
+  supersedesRateId: null,
+  createdAt: '2000-01-01T00:00:00Z',
+  sourceNote: null,
+})
+
 describe('BillCalendar', () => {
   beforeEach(() => {
     recurringStoreMock.rules = [originalRule]
     vi.mocked(query).mockResolvedValue([])
-    useCurrencyStore.setState({ preferredCurrency: 'USD', rates: {}, invalidRates: [] })
+    useCurrencyStore.setState({ mainCurrency: 'USD', preferredCurrency: 'USD', manualRates: [] })
   })
   it('renders calendar grid and navigation', async () => {
     await renderBillCalendar()
@@ -118,6 +129,60 @@ describe('BillCalendar', () => {
     await user.click(screen.getByRole('button', { name: 'nextMonth' }))
     expect(screen.queryByRole('button', { name: 'schedule.allDays' })).not.toBeInTheDocument()
   })
+  it('uses transaction-date FX for paid bills and today FX for planning estimates', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.setSystemTime(new Date('2024-09-14T12:00:00'))
+    const paidRule = {
+      ...originalRule,
+      id: 'paid-eur',
+      description: 'Paid EUR',
+      amount: 10_000,
+      currency: 'EUR',
+      next_date: '2024-09-13',
+    }
+    const estimateRule = {
+      ...originalRule,
+      id: 'estimate-eur',
+      description: 'Estimated EUR',
+      amount: 10_000,
+      currency: 'EUR',
+      next_date: '2024-09-14',
+    }
+    recurringStoreMock.rules = [paidRule, estimateRule]
+    useCurrencyStore.setState({
+      mainCurrency: 'MXN',
+      preferredCurrency: 'MXN',
+      manualRates: [
+        { ...fxRate('EUR', 'MXN', '17'), id: 'rate-17', effectiveFrom: '2024-09-01' },
+        { ...fxRate('EUR', 'MXN', '18'), id: 'rate-18', effectiveFrom: '2024-09-14' },
+      ],
+    })
+    vi.mocked(query).mockResolvedValue([
+      {
+        id: 'paid-eur-transaction',
+        recurring_rule_id: paidRule.id,
+        date: '2024-09-13',
+        type: 'expense',
+        status: 'posted',
+        amount: 10_000,
+        currency: 'EUR',
+        description: 'Paid EUR',
+      },
+    ])
+
+    try {
+      await renderBillCalendar()
+      const total = screen.getByText('thisMonth').parentElement!
+      const paid = screen.getAllByText('paid')[0].parentElement!
+      const remaining = screen.getByText('remaining').parentElement!
+      expect(within(total).getByText('MX$3,500.00')).toBeInTheDocument()
+      expect(within(paid).getByText('MX$1,700.00')).toBeInTheDocument()
+      expect(within(remaining).getByText('MX$1,800.00')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('converts scheduled and actually paid bills, withholding missing-rate totals', async () => {
     recurringStoreMock.rules.push({
       ...originalRule,
@@ -126,7 +191,7 @@ describe('BillCalendar', () => {
       amount: 10000,
       currency: 'EUR',
     })
-    useCurrencyStore.setState({ rates: { 'EUR:USD': 2 } })
+    useCurrencyStore.setState({ manualRates: [fxRate('EUR', 'USD', '2')] })
     vi.mocked(query).mockResolvedValue([
       {
         id: 'paid-rent',
@@ -144,7 +209,7 @@ describe('BillCalendar', () => {
     const paid = screen.getAllByText('paid')[0].parentElement!
     expect(within(total).getByText('$1,400.00')).toBeInTheDocument()
     expect(within(paid).getByText('$1,200.00')).toBeInTheDocument()
-    act(() => useCurrencyStore.setState({ rates: {} }))
+    act(() => useCurrencyStore.setState({ manualRates: [] }))
     expect(within(total).queryByText('$1,400.00')).not.toBeInTheDocument()
     expect(within(total).getByText('—')).toBeInTheDocument()
   })

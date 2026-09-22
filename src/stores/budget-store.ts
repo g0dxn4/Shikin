@@ -1,25 +1,43 @@
+import { assertFxCurrency } from '@shikin/finance-core/fx'
+import dayjs from 'dayjs'
 import { create } from 'zustand'
-import { query, execute } from '@/lib/database'
-import { CASH_FLOW_SQL, CATEGORY_ALLOCATION_CTE } from '@/lib/reporting-read'
+import { query, execute, withTransaction, type TransactionClient } from '@/lib/database'
+import { readBudgetSpending, type BudgetSpendingRead } from '@/lib/budget-dated-read'
 import { getErrorMessage } from '@/lib/errors'
 import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
 import type { Budget } from '@/types/database'
-import dayjs from 'dayjs'
+import { useCurrencyStore, type PreferredCurrencyAmountResult } from './currency-store'
+
+export interface BudgetMainComparison {
+  complete: boolean
+  policy: 'current_plan_today_vs_transaction_date_spending'
+  toCurrency: string | null
+  plan: PreferredCurrencyAmountResult
+  spending: BudgetSpendingRead | null
+  remainingCentavos: number | null
+  reason: 'main_currency_unconfigured' | 'missing_exchange_rates' | null
+}
 
 export interface BudgetWithStatus extends Budget {
+  currency: Budget['currency'] & string
   categoryName: string
   categoryColor: string
   spent: number
+  knownSpent: number
   remaining: number
   percentUsed: number
+  complete: boolean
+  nativeSpending: BudgetSpendingRead
+  mainComparison: BudgetMainComparison
 }
 
-interface BudgetFormData {
+export interface BudgetFormData {
   name: string
   categoryId: string
   amount: number
   period: 'weekly' | 'monthly' | 'yearly'
+  currency: string
 }
 
 interface BudgetState {
@@ -56,6 +74,24 @@ function getPeriodDateRange(period: string): { start: string; end: string } {
   }
 }
 
+async function readMainCurrencyInTransaction(tx: TransactionClient): Promise<string> {
+  const row = (
+    await tx.query<{ value: string }>("SELECT value FROM settings WHERE key = 'main_currency'")
+  )[0]
+  if (!row) throw new Error('Configure a main currency before creating a budget.')
+  const currency = row.value.trim().toUpperCase()
+  assertFxCurrency(currency)
+  return currency
+}
+
+function requiredBudgetCurrency(budget: Budget): string {
+  const currency = budget.currency?.trim().toUpperCase()
+  if (!currency) throw new Error(`Budget ${budget.id} has no durable currency`)
+  assertFxCurrency(currency)
+  return currency
+}
+
+let budgetFetchRequest = 0
 export const useBudgetStore = create<BudgetState>((set, get) => ({
   budgets: [],
   isLoading: false,
@@ -63,81 +99,88 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
   error: null,
 
   fetch: async () => {
+    const requestId = ++budgetFetchRequest
     set({ isLoading: true, fetchError: null })
     try {
-      const weeklyRange = getPeriodDateRange('weekly')
-      const monthlyRange = getPeriodDateRange('monthly')
-      const yearlyRange = getPeriodDateRange('yearly')
+      await useCurrencyStore
+        .getState()
+        .loadRates()
+        .catch(() => {})
+      const currencyState = useCurrencyStore.getState()
       const raw = await query<
-        Budget & {
-          category_name: string | null
-          category_color: string | null
-          spent: number
-          reporting_incomplete: number
-          reporting_transaction_id: string | null
-        }
+        Budget & { currency: string; category_name: string | null; category_color: string | null }
       >(
-        `${CATEGORY_ALLOCATION_CTE}, eligible_allocations AS (
-           SELECT * FROM reporting_allocations t WHERE ${CASH_FLOW_SQL}
-         )
-         SELECT b.*, c.name as category_name, c.color as category_color,
-                COALESCE(SUM(CASE WHEN t.type = 'expense' THEN t.amount ELSE 0 END), 0) as spent,
-                COALESCE(MAX(CASE WHEN t.invalid_allocations = 1 OR t.invalid_reporting_data = 1
-                  OR UPPER(TRIM(t.currency)) != 'USD' THEN 1 ELSE 0 END), 0) as reporting_incomplete,
-                MIN(CASE WHEN t.invalid_allocations = 1 OR t.invalid_reporting_data = 1
-                  OR UPPER(TRIM(t.currency)) != 'USD' THEN t.transaction_id END) as reporting_transaction_id
+        `SELECT b.*, c.name AS category_name, c.color AS category_color
          FROM budgets b
          LEFT JOIN categories c ON b.category_id = c.id
-         LEFT JOIN eligible_allocations t
-          ON (b.category_id IS NULL OR t.category_id = b.category_id
-              OR t.invalid_allocations = 1 OR t.invalid_reporting_data = 1)
-          AND (
-            (b.period = 'weekly' AND t.date >= ? AND t.date <= ?) OR
-            (b.period = 'monthly' AND t.date >= ? AND t.date <= ?) OR
-            (b.period = 'yearly' AND t.date >= ? AND t.date <= ?)
-          )
          WHERE b.is_active = 1
-         GROUP BY b.id
-         ORDER BY b.created_at DESC`,
-        [
-          weeklyRange.start,
-          weeklyRange.end,
-          monthlyRange.start,
-          monthlyRange.end,
-          yearlyRange.start,
-          yearlyRange.end,
-        ]
+         ORDER BY b.created_at DESC`
       )
 
-      const incomplete = raw.find((budget) => budget.reporting_incomplete)
-      if (incomplete) {
-        set({ budgets: [] })
-        throw new Error(
-          `Budget spending is unavailable because transaction ${incomplete.reporting_transaction_id ?? 'unknown'} requires repair or currency conversion.`
-        )
-      }
+      const budgets = await Promise.all(
+        raw.map(async (budget): Promise<BudgetWithStatus> => {
+          const currency = requiredBudgetCurrency(budget)
+          const range = getPeriodDateRange(budget.period)
+          const nativeSpending = await readBudgetSpending({
+            categoryId: budget.category_id,
+            ...range,
+            currency,
+            rates: currencyState.manualRates,
+          })
+          const spent = nativeSpending.totalCentavos ?? nativeSpending.knownTotalCentavos
+          const remaining = budget.amount - spent
+          const percentUsed = budget.amount > 0 ? Math.round((spent / budget.amount) * 100) : 0
 
-      const budgets: BudgetWithStatus[] = raw.map((b) => {
-        const spent = b.spent ?? 0
-        const remaining = b.amount - spent
-        const percentUsed = b.amount > 0 ? Math.round((spent / b.amount) * 100) : 0
+          const plan = currencyState.convertCurrentToPreferred(budget.amount, currency)
+          const mainSpending = currencyState.mainCurrency
+            ? await readBudgetSpending({
+                categoryId: budget.category_id,
+                ...range,
+                currency: currencyState.mainCurrency,
+                rates: currencyState.manualRates,
+              })
+            : null
+          const mainComplete = plan.complete && Boolean(mainSpending?.complete)
+          const mainRemaining =
+            plan.complete && mainSpending?.complete && mainSpending.totalCentavos !== null
+              ? plan.amountCentavos - mainSpending.totalCentavos
+              : null
+          const mainComparison: BudgetMainComparison = {
+            complete: mainComplete,
+            policy: 'current_plan_today_vs_transaction_date_spending',
+            toCurrency: currencyState.mainCurrency,
+            plan,
+            spending: mainSpending,
+            remainingCentavos: mainRemaining,
+            reason: !currencyState.mainCurrency
+              ? 'main_currency_unconfigured'
+              : mainComplete
+                ? null
+                : 'missing_exchange_rates',
+          }
 
-        return {
-          ...b,
-          categoryName: b.category_name ?? 'Uncategorized',
-          categoryColor: b.category_color ?? '#6b7280',
-          spent,
-          remaining,
-          percentUsed,
-        }
-      })
+          return {
+            ...budget,
+            currency,
+            categoryName: budget.category_name ?? 'Uncategorized',
+            categoryColor: budget.category_color ?? '#6b7280',
+            spent,
+            knownSpent: nativeSpending.knownTotalCentavos,
+            remaining,
+            percentUsed,
+            complete: nativeSpending.complete,
+            nativeSpending,
+            mainComparison,
+          }
+        })
+      )
 
-      set({ budgets, fetchError: null })
+      if (requestId === budgetFetchRequest) set({ budgets, fetchError: null })
     } catch (error) {
-      set({ fetchError: getErrorMessage(error) })
+      if (requestId === budgetFetchRequest) set({ fetchError: getErrorMessage(error) })
       throw error
     } finally {
-      set({ isLoading: false })
+      if (requestId === budgetFetchRequest) set({ isLoading: false })
     }
   },
 
@@ -146,16 +189,25 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
     try {
       const id = generateId()
       const now = new Date().toISOString()
-      await execute(
-        `INSERT INTO budgets (id, category_id, name, amount, period, is_active, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
-        [id, data.categoryId, data.name, toCentavos(data.amount), data.period, now, now]
-      )
-      // Refresh optimistically; don't fail the mutation if refresh fails
+      const expectedCurrency = data.currency.trim().toUpperCase()
+      assertFxCurrency(expectedCurrency)
+      await withTransaction(async (tx) => {
+        const currency = await readMainCurrencyInTransaction(tx)
+        if (currency !== expectedCurrency) {
+          throw new Error(
+            'Main currency changed while this budget form was open. Review the amount and try again.'
+          )
+        }
+        await tx.execute(
+          `INSERT INTO budgets (id, category_id, name, amount, period, is_active, currency, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+          [id, data.categoryId, data.name, toCentavos(data.amount), data.period, currency, now, now]
+        )
+      })
       try {
         await get().fetch()
       } catch {
-        // Silent refresh failure - data was written successfully
+        // The durable mutation succeeded; expose refresh errors separately.
       }
     } catch (error) {
       set({ error: getErrorMessage(error) })
@@ -171,11 +223,10 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
         `UPDATE budgets SET name = ?, category_id = ?, amount = ?, period = ?, updated_at = ? WHERE id = ?`,
         [data.name, data.categoryId, toCentavos(data.amount), data.period, now, id]
       )
-      // Refresh optimistically; don't fail the mutation if refresh fails
       try {
         await get().fetch()
       } catch {
-        // Silent refresh failure - data was written successfully
+        // The durable mutation succeeded; expose refresh errors separately.
       }
     } catch (error) {
       set({ error: getErrorMessage(error) })
@@ -187,11 +238,10 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
     set({ error: null })
     try {
       await execute('DELETE FROM budgets WHERE id = ?', [id])
-      // Refresh optimistically; don't fail the mutation if refresh fails
       try {
         await get().fetch()
       } catch {
-        // Silent refresh failure - data was deleted successfully
+        // The durable mutation succeeded; expose refresh errors separately.
       }
     } catch (error) {
       set({ error: getErrorMessage(error) })
@@ -199,7 +249,18 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
     }
   },
 
-  getById: (id) => {
-    return get().budgets.find((b) => b.id === id)
-  },
+  getById: (id) => get().budgets.find((budget) => budget.id === id),
 }))
+
+let budgetAuthorityKey = ''
+useCurrencyStore.subscribe((state) => {
+  const key = `${state.mainCurrency ?? ''}|${state.manualRates.map((rate) => rate.id).join(',')}`
+  if (key === budgetAuthorityKey) return
+  budgetAuthorityKey = key
+  if (useBudgetStore.getState().budgets.length > 0) {
+    void useBudgetStore
+      .getState()
+      .fetch()
+      .catch(() => {})
+  }
+})

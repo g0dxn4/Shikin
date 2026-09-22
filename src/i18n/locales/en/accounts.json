@@ -123,7 +123,8 @@
     "unavailable": "Total unavailable",
     "missingRates": "Missing exchange rates for {{currencies}}",
     "invalidData": "Some accounts have invalid currency data",
-    "grouped": "Shown by currency because a converted total is unavailable"
+    "grouped": "Shown by currency because a converted total is unavailable",
+    "setupRequired": "Configure a main currency in Settings before showing converted totals."
   },
   "empty": {
     "title": "No accounts yet",

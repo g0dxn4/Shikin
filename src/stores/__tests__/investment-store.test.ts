@@ -18,14 +18,13 @@ vi.mock('@/lib/exchange-rate-service', () => ({
 }))
 
 import { execute, query } from '@/lib/database'
-import { getCachedRates } from '@/lib/exchange-rate-service'
+import { useCurrencyStore } from '../currency-store'
 import { fetchVerifiedPrice } from '@/lib/price-service'
 import { useInvestmentStore } from '../investment-store'
 
 const mockQuery = vi.mocked(query)
 const mockExecute = vi.mocked(execute)
 const mockFetchPrice = vi.mocked(fetchVerifiedPrice)
-const mockGetCachedRates = vi.mocked(getCachedRates)
 const identity = {
   assetType: 'stock' as const,
   provider: 'manual' as const,
@@ -76,6 +75,12 @@ describe('precise investment store', () => {
       lastPriceFetch: null,
       refreshFailures: {},
     })
+    useCurrencyStore.setState({
+      mainCurrency: 'USD',
+      preferredCurrency: 'USD',
+      manualRates: [],
+      loadRates: vi.fn(async () => {}),
+    })
   })
 
   it('uses exact quantity and authoritative identity-keyed quote', async () => {
@@ -104,9 +109,20 @@ describe('precise investment store', () => {
   })
 
   it('uses converted cost basis for the same cross-currency ROI fixture as the CLI', async () => {
-    mockGetCachedRates.mockResolvedValueOnce([
-      { from_currency: 'MXN', to_currency: 'USD', rate: 0.05, date: '2026-04-18' },
-    ])
+    useCurrencyStore.setState({
+      manualRates: [
+        {
+          id: 'mxn-usd',
+          fromCurrency: 'MXN',
+          toCurrency: 'USD',
+          rateDecimal: '0.05',
+          effectiveFrom: '2000-01-01',
+          supersedesRateId: null,
+          createdAt: '2000-01-01T00:00:00Z',
+          sourceNote: null,
+        },
+      ],
+    })
     mockQuery.mockResolvedValueOnce([
       row({
         shares: 1,
@@ -125,6 +141,25 @@ describe('precise investment store', () => {
       convertedCostBasis: 500,
       gainLoss: 500,
       gainLossPercent: 100,
+    })
+  })
+
+  it('keeps native holding value but clears old target values when main is unset', async () => {
+    useCurrencyStore.setState({ mainCurrency: null, preferredCurrency: 'USD', manualRates: [] })
+    mockQuery.mockResolvedValueOnce([row()])
+
+    await useInvestmentStore.getState().fetch()
+
+    expect(useInvestmentStore.getState().investments[0]).toMatchObject({
+      marketValue: 2,
+      convertedMarketValue: null,
+      valuationComplete: false,
+      valuationReasons: expect.arrayContaining(['main_currency_unconfigured']),
+    })
+    expect(useInvestmentStore.getState().portfolioSummary).toMatchObject({
+      totalMarketValue: null,
+      preferredCurrency: null,
+      totalsComplete: false,
     })
   })
 

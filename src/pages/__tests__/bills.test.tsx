@@ -51,9 +51,20 @@ vi.mock('@/stores/recurring-store', () => ({
   }),
 }))
 
+const fxRate = (fromCurrency: string, toCurrency: string, rateDecimal: string) => ({
+  id: `${fromCurrency}-${toCurrency}-${rateDecimal}`,
+  fromCurrency,
+  toCurrency,
+  rateDecimal,
+  effectiveFrom: '2000-01-01',
+  supersedesRateId: null,
+  createdAt: '2000-01-01T00:00:00Z',
+  sourceNote: null,
+})
+
 describe('BillsPage', () => {
   beforeEach(() => {
-    useCurrencyStore.setState({ preferredCurrency: 'USD', rates: {}, invalidRates: [] })
+    useCurrencyStore.setState({ mainCurrency: 'USD', preferredCurrency: 'USD', manualRates: [] })
     recurringStoreMock.fetch.mockClear()
     recurringStoreMock.rules = [
       {
@@ -148,7 +159,7 @@ describe('BillsPage', () => {
       amount: 10000,
       currency: 'EUR',
     })
-    useCurrencyStore.setState({ rates: { 'EUR:USD': 2 } })
+    useCurrencyStore.setState({ manualRates: [fxRate('EUR', 'USD', '2')] })
     render(
       <MemoryRouter>
         <BillsPage />
@@ -156,7 +167,7 @@ describe('BillsPage', () => {
     )
     expect(screen.getByText('$1,400.00')).toBeInTheDocument()
     expect(screen.getByText('€100.00')).toBeInTheDocument()
-    act(() => useCurrencyStore.setState({ rates: {} }))
+    act(() => useCurrencyStore.setState({ manualRates: [] }))
     expect(screen.queryByText('$1,400.00')).not.toBeInTheDocument()
     expect(screen.getByText('currency.unavailable')).toBeInTheDocument()
   })

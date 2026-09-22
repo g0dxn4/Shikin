@@ -40,7 +40,9 @@
       "wedding": "Wedding",
       "health": "Health",
       "phone": "Phone"
-    }
+    },
+    "targetAmountWithCurrency": "Target Amount ({{currency}})",
+    "currentAmountWithCurrency": "Current Amount ({{currency}})"
   },
   "status": {
     "onTrack": "On track",
@@ -97,9 +99,15 @@
     "title": "Savings Goals",
     "viewAll": "View All"
   },
-  "scope": "Goals and recorded contributions in USD · not net worth",
+  "scope": "Goals and recorded contributions · displayed in {{currency}} · not bank money",
   "contributions": {
     "update": "Update contribution",
     "note": "The monthly pace is guidance. Updating a goal does not schedule transfers or move money."
+  },
+  "currency": {
+    "setupRequired": "Configure a main currency in Settings before creating a goal.",
+    "changedWhileOpen": "The main currency changed while this form was open. Close and reopen it before saving.",
+    "unavailable": "Converted goal totals are unavailable. Native goal amounts remain visible.",
+    "unconfigured": "not configured"
   }
 }

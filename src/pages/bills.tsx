@@ -111,7 +111,8 @@ export function BillsPage() {
   const { openRecurringDialog } = useUIStore()
   const [visibleBillCount, setVisibleBillCount] = useState(BILLS_PAGE_SIZE)
 
-  const { convertToPreferred, preferredCurrency, rates, invalidRates } = useCurrencyStore()
+  const { convertCurrentToPreferred, preferredCurrency, mainCurrency, manualRates } =
+    useCurrencyStore()
   const [status, setStatus] = useState('all')
 
   useEffect(() => {
@@ -140,7 +141,7 @@ export function BillsPage() {
           continue
 
         activeBills.push(rule)
-        const result = convertToPreferred(
+        const result = convertCurrentToPreferred(
           monthlyEquivalent(rule),
           rule.currency ?? rule.account_currency ?? 'USD'
         )
@@ -168,9 +169,9 @@ export function BillsPage() {
         complete,
         missingCurrencies: [...missing],
       }
-      // Rates are read by the stable store converter.
+      // Manual authority is read by the stable store converter.
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [rules, convertToPreferred, rates, invalidRates, preferredCurrency])
+    }, [rules, convertCurrentToPreferred, manualRates, mainCurrency, preferredCurrency])
 
   const filteredBills = status === 'overdue' ? overdue : status === 'soon' ? dueSoon : bills
   const visibleBills = filteredBills.slice(0, visibleBillCount)
@@ -232,7 +233,7 @@ export function BillsPage() {
           detail={
             !complete
               ? t('currency.missing', { currencies: missingCurrencies.join(', ') })
-              : preferredCurrency
+              : t('currency.estimateToday', { currency: preferredCurrency })
           }
         />
         <MetricItem label={t('thisMonth')} value={isLoading ? '—' : dueThisMonth.length} />

@@ -25,7 +25,8 @@ const ConfirmDialog = lazy(() =>
 
 const BUDGETS_PAGE_SIZE = 20
 
-function getProgressColor(percent: number): string {
+function getProgressColor(percent: number | null): string {
+  if (percent === null) return 'var(--color-muted-foreground)'
   if (percent > 100) return 'var(--color-destructive)'
   if (percent > 80) return 'var(--color-destructive)'
   if (percent > 60) return 'var(--color-warning)'
@@ -47,12 +48,13 @@ function CompactBudgetRow({
 }) {
   const { t } = useTranslation('budgets')
   const { t: tCommon } = useTranslation('common')
-  const displayPercent = Math.max(0, Math.min(budget.percentUsed, 100))
+  const displayPercent = Math.max(0, Math.min(budget.percentUsed ?? 0, 100))
   const progressColor = getProgressColor(budget.percentUsed)
-  const money = (value: number) => (budget.complete ? formatMoney(value, budget.currency) : '—')
+  const money = (value: number | null) =>
+    value === null ? '—' : formatMoney(value, budget.currency)
   const amount = cents(budget.amount)
-  const spent = cents(budget.spent)
-  const remaining = cents(budget.remaining)
+  const spent = budget.complete ? cents(budget.spent) : null
+  const remaining = budget.complete ? cents(budget.remaining) : null
 
   return (
     <div className="group border-border bg-muted/50 hover:bg-muted/50 rounded-xl border p-4 transition-colors">
@@ -65,7 +67,7 @@ function CompactBudgetRow({
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <Badge variant="secondary" className="text-[10px]" style={{ color: progressColor }}>
-            {budget.complete ? `${budget.percentUsed}%` : '—'}
+            {budget.complete && budget.percentUsed !== null ? `${budget.percentUsed}%` : '—'}
           </Badge>
           <Button
             variant="ghost"
@@ -90,14 +92,17 @@ function CompactBudgetRow({
       <div
         className="bg-muted/50 h-2.5 overflow-hidden rounded-full"
         role={budget.complete ? 'progressbar' : undefined}
-        aria-valuenow={budget.complete ? displayPercent : undefined}
+        aria-valuenow={budget.complete && budget.percentUsed !== null ? displayPercent : undefined}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-label={`${budget.name}: ${budget.complete ? `${budget.percentUsed}%` : '—'}`}
+        aria-label={`${budget.name}: ${budget.complete && budget.percentUsed !== null ? `${budget.percentUsed}%` : '—'}`}
       >
         <div
           className="h-full rounded-full transition-all duration-500 motion-reduce:transition-none"
-          style={{ width: `${budget.complete ? displayPercent : 0}%`, background: progressColor }}
+          style={{
+            width: `${budget.complete && budget.percentUsed !== null ? displayPercent : 0}%`,
+            background: progressColor,
+          }}
         />
       </div>
       <div className="text-muted-foreground mt-3 flex flex-wrap items-center justify-between gap-3 text-xs">
@@ -105,10 +110,12 @@ function CompactBudgetRow({
           <span className="text-foreground font-semibold">{money(spent)}</span> {t('card.of')}{' '}
           {money(amount)}
         </span>
-        <span className={remaining < 0 ? 'text-destructive' : 'text-success'}>
-          {remaining < 0
-            ? `${money(Math.abs(remaining))} ${t('card.overBudget')}`
-            : `${money(remaining)} ${t('card.remaining')}`}
+        <span className={remaining !== null && remaining < 0 ? 'text-destructive' : 'text-success'}>
+          {remaining === null
+            ? '—'
+            : remaining < 0
+              ? `${money(Math.abs(remaining))} ${t('card.overBudget')}`
+              : `${money(remaining)} ${t('card.remaining')}`}
         </span>
       </div>
     </div>
@@ -127,7 +134,7 @@ export function Budgets() {
     () => (period === 'all' ? budgets : budgets.filter((budget) => budget.period === period)),
     [budgets, period]
   )
-  const complete = scopedBudgets.every((budget) => budget.complete)
+  const complete = scopedBudgets.every((budget) => budget.mainComplete)
   const money = (amount: number) => (complete ? formatMoney(amount, preferredCurrency) : '—')
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -136,22 +143,24 @@ export function Budgets() {
   const hasInitialLoadError = !!fetchError && budgets.length === 0
 
   const summary = useMemo(() => {
-    const totalBudgeted = scopedBudgets.reduce((sum, b) => sum + cents(b.amount), 0)
-    const totalSpent = scopedBudgets.reduce((sum, b) => sum + cents(b.spent), 0)
+    const totalBudgeted = scopedBudgets.reduce((sum, b) => sum + cents(b.mainAmount), 0)
+    const totalSpent = scopedBudgets.reduce((sum, b) => sum + cents(b.mainSpent), 0)
     const totalRemaining = scopedBudgets.reduce(
-      (sum, b) => sum + Math.max(0, cents(b.remaining)),
+      (sum, b) => sum + Math.max(0, cents(b.mainRemaining)),
       0
     )
     const rawRemaining = totalBudgeted - totalSpent
     const avgPercent =
       scopedBudgets.length > 0
         ? Math.round(
-            scopedBudgets.reduce((sum, b) => sum + b.percentUsed, 0) / scopedBudgets.length
+            scopedBudgets.reduce((sum, b) => sum + (b.percentUsed ?? 0), 0) / scopedBudgets.length
           )
         : 0
-    const overBudgetCount = scopedBudgets.filter((b) => b.percentUsed > 100).length
+    const overBudgetCount = scopedBudgets.filter(
+      (b) => b.percentUsed !== null && b.percentUsed > 100
+    ).length
     const warningCount = scopedBudgets.filter(
-      (b) => b.percentUsed > 80 && b.percentUsed <= 100
+      (b) => b.percentUsed !== null && b.percentUsed > 80 && b.percentUsed <= 100
     ).length
     return {
       totalBudgeted,
@@ -165,26 +174,30 @@ export function Budgets() {
   }, [scopedBudgets])
 
   const progressBudgets = useMemo(
-    () => [...scopedBudgets].sort((a, b) => b.percentUsed - a.percentUsed),
+    () => [...scopedBudgets].sort((a, b) => (b.percentUsed ?? -1) - (a.percentUsed ?? -1)),
     [scopedBudgets]
   )
 
   const visibleProgressBudgets = progressBudgets.slice(0, visibleBudgetCount)
 
   const intelligence = useMemo(() => {
-    const overBudget = scopedBudgets.find((budget) => budget.percentUsed > 100)
+    const overBudget = scopedBudgets.find(
+      (budget) => budget.percentUsed !== null && budget.percentUsed > 100
+    )
     if (overBudget) {
       return {
         tone: 'danger' as const,
         title: t('intelligence.overTitle'),
         message: t('intelligence.overMessage', {
           category: overBudget.categoryName,
-          amount: formatMoney(Math.abs(overBudget.remaining), preferredCurrency),
+          amount: formatMoney(Math.abs(overBudget.remaining ?? 0), preferredCurrency),
         }),
       }
     }
 
-    const nearLimit = scopedBudgets.find((budget) => budget.percentUsed > 80)
+    const nearLimit = scopedBudgets.find(
+      (budget) => budget.percentUsed !== null && budget.percentUsed > 80
+    )
     if (nearLimit) {
       return {
         tone: 'warning' as const,
@@ -192,7 +205,7 @@ export function Budgets() {
         message: t('intelligence.warningMessage', {
           category: nearLimit.categoryName,
           percent: nearLimit.percentUsed,
-          amount: formatMoney(Math.max(0, nearLimit.remaining), preferredCurrency),
+          amount: formatMoney(Math.max(0, nearLimit.remaining ?? 0), preferredCurrency),
         }),
       }
     }

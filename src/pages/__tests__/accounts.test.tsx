@@ -130,6 +130,17 @@ vi.mock('@/stores/transaction-store', () => ({
   },
 }))
 
+const fxRate = (fromCurrency: string, toCurrency: string, rateDecimal: string) => ({
+  id: `${fromCurrency}-${toCurrency}-${rateDecimal}`,
+  fromCurrency,
+  toCurrency,
+  rateDecimal,
+  effectiveFrom: '2000-01-01',
+  supersedesRateId: null,
+  createdAt: '2000-01-01T00:00:00Z',
+  sourceNote: null,
+})
+
 describe('Accounts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -145,7 +156,7 @@ describe('Accounts', () => {
     mockBalanceHistory = new Map()
     mockLoadBalanceHistory.mockReset()
     mockLoadBalanceHistory.mockResolvedValue([])
-    useCurrencyStore.setState({ preferredCurrency: 'USD', rates: {}, invalidRates: [] })
+    useCurrencyStore.setState({ mainCurrency: 'USD', preferredCurrency: 'USD', manualRates: [] })
   })
 
   it('calls fetch on mount', () => {
@@ -631,15 +642,21 @@ describe('Accounts', () => {
     renderAccounts()
     expect(screen.getByText('currency.missingRates')).toBeInTheDocument()
 
-    act(() => useCurrencyStore.setState({ rates: { 'EUR:USD': 2 } }))
+    act(() => useCurrencyStore.setState({ manualRates: [fxRate('EUR', 'USD', '2')] }))
     expect(screen.getAllByText('$300.00').length).toBeGreaterThan(0)
 
-    act(() => useCurrencyStore.setState({ preferredCurrency: 'EUR', rates: { 'USD:EUR': 0.5 } }))
+    act(() =>
+      useCurrencyStore.setState({
+        mainCurrency: 'EUR',
+        preferredCurrency: 'EUR',
+        manualRates: [fxRate('USD', 'EUR', '0.5')],
+      })
+    )
     expect(screen.getAllByText('€150.00').length).toBeGreaterThan(0)
 
     act(() =>
       useCurrencyStore.setState({
-        invalidRates: [{ fromCurrency: 'USD', toCurrency: 'EUR', rate: '0' }],
+        manualRates: [fxRate('USD', 'EUR', '0')],
       })
     )
     expect(screen.getByText('currency.invalidData')).toBeInTheDocument()

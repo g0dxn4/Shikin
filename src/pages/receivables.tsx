@@ -432,10 +432,10 @@ export function Receivables() {
   const { t: tCommon } = useTranslation('common')
   const { receivables, isLoading, fetchError, fetch, create, update, cancel, remove, getById } =
     useReceivableStore()
-  const convertToPreferred = useCurrencyStore((s) => s.convertToPreferred)
+  const convertToPreferred = useCurrencyStore((s) => s.convertCurrentToPreferred)
   const preferredCurrency = useCurrencyStore((s) => s.preferredCurrency)
-  const rates = useCurrencyStore((s) => s.rates)
-  const invalidRates = useCurrencyStore((s) => s.invalidRates)
+  const mainCurrency = useCurrencyStore((s) => s.mainCurrency)
+  const manualRates = useCurrencyStore((s) => s.manualRates)
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -453,15 +453,15 @@ export function Receivables() {
   const hasInitialLoadError = !!fetchError && receivables.length === 0
 
   const summary = useMemo(() => {
-    // Currency actions are stable Zustand methods that read these mutable store fields.
-    void rates
-    void invalidRates
+    // Currency actions are stable Zustand methods that read current store authority.
+    void manualRates
     return buildReceivablesStatusTotals({
       receivables,
       convertToPreferred,
       preferredCurrency,
+      mainCurrency,
     })
-  }, [receivables, convertToPreferred, preferredCurrency, rates, invalidRates])
+  }, [receivables, convertToPreferred, preferredCurrency, mainCurrency, manualRates])
 
   const filterCounts = useMemo(() => {
     return {
@@ -666,11 +666,13 @@ export function Receivables() {
             >
               <p className="font-semibold">{t('currency.unavailable')}</p>
               <p className="text-muted-foreground mt-1">
-                {summary.conversionIssue.reason === 'invalid_currency_data'
-                  ? t('currency.invalidData')
-                  : t('currency.missingRates', {
-                      currencies: summary.conversionIssue.missingCurrencies.join(', '),
-                    })}
+                {summary.conversionIssue.reason === 'main_currency_unconfigured'
+                  ? t('currency.setupRequired')
+                  : summary.conversionIssue.reason === 'invalid_currency_data'
+                    ? t('currency.invalidData')
+                    : t('currency.missingRates', {
+                        currencies: summary.conversionIssue.missingCurrencies.join(', '),
+                      })}
               </p>
               {summary.groupedOutstanding.length > 0 && (
                 <p className="text-muted-foreground mt-2 text-xs">

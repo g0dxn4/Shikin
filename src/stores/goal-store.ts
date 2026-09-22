@@ -1,19 +1,32 @@
+import { assertFxCurrency } from '@shikin/finance-core/fx'
+import dayjs from 'dayjs'
 import { create } from 'zustand'
-import { query, execute } from '@/lib/database'
+import { query, execute, withTransaction, type TransactionClient } from '@/lib/database'
 import { getErrorMessage } from '@/lib/errors'
 import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
 import type { Goal } from '@/types/database'
-import dayjs from 'dayjs'
+import { useCurrencyStore, type PreferredCurrencyAmountResult } from './currency-store'
+
+export interface GoalMainConversion {
+  complete: boolean
+  policy: 'recorded_goal_value_today'
+  toCurrency: string | null
+  target: PreferredCurrencyAmountResult
+  saved: PreferredCurrencyAmountResult
+  reason: 'main_currency_unconfigured' | 'missing_exchange_rates' | null
+}
 
 export interface GoalWithProgress extends Goal {
+  currency: Goal['currency'] & string
   accountName: string | null
   progress: number
   daysRemaining: number | null
   monthlyNeeded: number
+  mainConversion: GoalMainConversion
 }
 
-interface GoalFormData {
+export interface GoalFormData {
   name: string
   targetAmount: number
   currentAmount: number
@@ -22,6 +35,7 @@ interface GoalFormData {
   icon: string
   color: string
   notes: string | null
+  currency: string
 }
 
 interface GoalState {
@@ -55,6 +69,24 @@ function computeMonthlyNeeded(current: number, target: number, deadline: string 
   return Math.ceil(remaining / monthsLeft)
 }
 
+async function readMainCurrencyInTransaction(tx: TransactionClient): Promise<string> {
+  const row = (
+    await tx.query<{ value: string }>("SELECT value FROM settings WHERE key = 'main_currency'")
+  )[0]
+  if (!row) throw new Error('Configure a main currency before creating a goal.')
+  const currency = row.value.trim().toUpperCase()
+  assertFxCurrency(currency)
+  return currency
+}
+
+function requiredGoalCurrency(goal: Goal): string {
+  const currency = goal.currency?.trim().toUpperCase()
+  if (!currency) throw new Error(`Goal ${goal.id} has no durable currency`)
+  assertFxCurrency(currency)
+  return currency
+}
+
+let goalFetchRequest = 0
 export const useGoalStore = create<GoalState>((set, get) => ({
   goals: [],
   isLoading: false,
@@ -62,29 +94,58 @@ export const useGoalStore = create<GoalState>((set, get) => ({
   error: null,
 
   fetch: async () => {
+    const requestId = ++goalFetchRequest
     set({ isLoading: true, fetchError: null })
     try {
-      const raw = await query<Goal & { account_name: string | null }>(
-        `SELECT g.*, a.name as account_name
+      await useCurrencyStore
+        .getState()
+        .loadRates()
+        .catch(() => {})
+      const currencyState = useCurrencyStore.getState()
+      const raw = await query<Goal & { currency: string; account_name: string | null }>(
+        `SELECT g.*, a.name AS account_name
          FROM goals g
          LEFT JOIN accounts a ON g.account_id = a.id
          ORDER BY g.created_at DESC`
       )
 
-      const goals: GoalWithProgress[] = raw.map((g) => ({
-        ...g,
-        accountName: g.account_name,
-        progress: computeProgress(g.current_amount, g.target_amount),
-        daysRemaining: computeDaysRemaining(g.deadline),
-        monthlyNeeded: computeMonthlyNeeded(g.current_amount, g.target_amount, g.deadline),
-      }))
+      const goals: GoalWithProgress[] = raw.map((goal) => {
+        const currency = requiredGoalCurrency(goal)
+        const target = currencyState.convertCurrentToPreferred(goal.target_amount, currency)
+        const saved = currencyState.convertCurrentToPreferred(goal.current_amount, currency)
+        const complete = target.complete && saved.complete
+        return {
+          ...goal,
+          currency,
+          accountName: goal.account_name,
+          progress: computeProgress(goal.current_amount, goal.target_amount),
+          daysRemaining: computeDaysRemaining(goal.deadline),
+          monthlyNeeded: computeMonthlyNeeded(
+            goal.current_amount,
+            goal.target_amount,
+            goal.deadline
+          ),
+          mainConversion: {
+            complete,
+            policy: 'recorded_goal_value_today',
+            toCurrency: currencyState.mainCurrency,
+            target,
+            saved,
+            reason: !currencyState.mainCurrency
+              ? 'main_currency_unconfigured'
+              : complete
+                ? null
+                : 'missing_exchange_rates',
+          },
+        }
+      })
 
-      set({ goals, fetchError: null })
+      if (requestId === goalFetchRequest) set({ goals, fetchError: null })
     } catch (error) {
-      set({ fetchError: getErrorMessage(error) })
+      if (requestId === goalFetchRequest) set({ fetchError: getErrorMessage(error) })
       throw error
     } finally {
-      set({ isLoading: false })
+      if (requestId === goalFetchRequest) set({ isLoading: false })
     }
   },
 
@@ -93,28 +154,38 @@ export const useGoalStore = create<GoalState>((set, get) => ({
     try {
       const id = generateId()
       const now = new Date().toISOString()
-      await execute(
-        `INSERT INTO goals (id, name, target_amount, current_amount, deadline, account_id, icon, color, notes, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          id,
-          data.name,
-          toCentavos(data.targetAmount),
-          toCentavos(data.currentAmount),
-          data.deadline,
-          data.accountId,
-          data.icon,
-          data.color,
-          data.notes,
-          now,
-          now,
-        ]
-      )
-      // Refresh optimistically; don't fail the mutation if refresh fails
+      const expectedCurrency = data.currency.trim().toUpperCase()
+      assertFxCurrency(expectedCurrency)
+      await withTransaction(async (tx) => {
+        const currency = await readMainCurrencyInTransaction(tx)
+        if (currency !== expectedCurrency) {
+          throw new Error(
+            'Main currency changed while this goal form was open. Review the amounts and try again.'
+          )
+        }
+        await tx.execute(
+          `INSERT INTO goals (id, name, target_amount, current_amount, deadline, account_id, icon, color, notes, currency, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            id,
+            data.name,
+            toCentavos(data.targetAmount),
+            toCentavos(data.currentAmount),
+            data.deadline,
+            data.accountId,
+            data.icon,
+            data.color,
+            data.notes,
+            currency,
+            now,
+            now,
+          ]
+        )
+      })
       try {
         await get().fetch()
       } catch {
-        // Silent refresh failure - data was written successfully
+        // The durable mutation succeeded; expose refresh errors separately.
       }
     } catch (error) {
       set({ error: getErrorMessage(error) })
@@ -141,11 +212,10 @@ export const useGoalStore = create<GoalState>((set, get) => ({
           id,
         ]
       )
-      // Refresh optimistically; don't fail the mutation if refresh fails
       try {
         await get().fetch()
       } catch {
-        // Silent refresh failure - data was written successfully
+        // The durable mutation succeeded; expose refresh errors separately.
       }
     } catch (error) {
       set({ error: getErrorMessage(error) })
@@ -157,11 +227,10 @@ export const useGoalStore = create<GoalState>((set, get) => ({
     set({ error: null })
     try {
       await execute('DELETE FROM goals WHERE id = ?', [id])
-      // Refresh optimistically; don't fail the mutation if refresh fails
       try {
         await get().fetch()
       } catch {
-        // Silent refresh failure - data was deleted successfully
+        // The durable mutation succeeded; expose refresh errors separately.
       }
     } catch (error) {
       set({ error: getErrorMessage(error) })
@@ -169,7 +238,18 @@ export const useGoalStore = create<GoalState>((set, get) => ({
     }
   },
 
-  getById: (id) => {
-    return get().goals.find((g) => g.id === id)
-  },
+  getById: (id) => get().goals.find((goal) => goal.id === id),
 }))
+
+let goalAuthorityKey = ''
+useCurrencyStore.subscribe((state) => {
+  const key = `${state.mainCurrency ?? ''}|${state.manualRates.map((rate) => rate.id).join(',')}`
+  if (key === goalAuthorityKey) return
+  goalAuthorityKey = key
+  if (useGoalStore.getState().goals.length > 0) {
+    void useGoalStore
+      .getState()
+      .fetch()
+      .catch(() => {})
+  }
+})

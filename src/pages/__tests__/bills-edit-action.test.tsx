@@ -67,7 +67,7 @@ describe('BillsPage edit action', () => {
   beforeEach(() => {
     mockOpenRecurringDialog.mockClear()
     recurringStoreMock.fetch.mockClear()
-    useCurrencyStore.setState({ preferredCurrency: 'USD', rates: {}, invalidRates: [] })
+    useCurrencyStore.setState({ mainCurrency: 'USD', preferredCurrency: 'USD', manualRates: [] })
     recurringStoreMock.rules = [
       makeRule({ id: 'rule-rent', description: 'Rent' }),
       makeRule({ id: 'rule-netflix', description: 'Netflix' }),

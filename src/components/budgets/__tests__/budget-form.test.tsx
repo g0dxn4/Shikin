@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { BudgetForm } from '../budget-form'
 
+import { useCurrencyStore } from '@/stores/currency-store'
 const mockFetchCategories = vi.fn().mockResolvedValue(undefined)
 let mockCategoriesLoading = false
 let mockCategoriesFetchError: string | null = null
@@ -27,9 +28,19 @@ vi.mock('@/stores/category-store', () => ({
 describe('BudgetForm', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    useCurrencyStore.setState({ mainCurrency: 'USD', preferredCurrency: 'USD', manualRates: [] })
     mockCategoriesLoading = false
     mockCategoriesFetchError = null
     mockCategories = []
+  })
+
+  it('guards a typed draft when main currency changes while the form is open', () => {
+    render(<BudgetForm onSubmit={vi.fn()} />)
+    act(() =>
+      useCurrencyStore.setState({ mainCurrency: 'EUR', preferredCurrency: 'EUR', manualRates: [] })
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent('currency.changedWhileOpen')
+    expect(screen.getByRole('button', { name: 'actions.save' })).toBeDisabled()
   })
 
   it('shows loading skeleton while categories are loading', () => {
@@ -73,7 +84,7 @@ describe('BudgetForm', () => {
     render(<BudgetForm onSubmit={onSubmit} />)
 
     await user.type(screen.getByLabelText('form.name'), 'Groceries')
-    await user.type(screen.getByLabelText('form.amount'), '100')
+    await user.type(screen.getByLabelText('form.amountWithCurrency'), '100')
     await user.click(screen.getByRole('button', { name: 'actions.save' }))
 
     expect(onSubmit).not.toHaveBeenCalled()
@@ -87,7 +98,10 @@ describe('BudgetForm', () => {
 
       // Check that all inputs have associated labels
       expect(screen.getByLabelText('form.name')).toHaveAttribute('id', 'budget-name')
-      expect(screen.getByLabelText('form.amount')).toHaveAttribute('id', 'budget-amount')
+      expect(screen.getByLabelText('form.amountWithCurrency')).toHaveAttribute(
+        'id',
+        'budget-amount'
+      )
       expect(screen.getByLabelText('form.period')).toBeInTheDocument()
 
       // Category select trigger should have id
@@ -120,7 +134,7 @@ describe('BudgetForm', () => {
 
       // Fill name and amount but not category
       await user.type(screen.getByLabelText('form.name'), 'Test Budget')
-      await user.type(screen.getByLabelText('form.amount'), '100')
+      await user.type(screen.getByLabelText('form.amountWithCurrency'), '100')
 
       // Submit form
       await user.click(screen.getByRole('button', { name: 'actions.save' }))

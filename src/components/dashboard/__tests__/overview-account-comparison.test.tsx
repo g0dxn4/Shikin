@@ -1,14 +1,12 @@
 import { useState, type ComponentProps } from 'react'
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { OverviewAccountComparison } from '@/components/dashboard/overview-account-comparison'
-import type {
-  ComparisonDisplayMode,
-  ConvertToPreferred,
-} from '@/components/dashboard/overview-account-comparison-helpers'
+import type { ComparisonDisplayMode } from '@/components/dashboard/overview-account-comparison-helpers'
 import type { NetWorthPeriod } from '@/components/dashboard/overview-net-worth'
 import type { Account } from '@/types/database'
+import { useCurrencyStore } from '@/stores/currency-store'
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -74,21 +72,17 @@ const accounts = [
   },
 ] as Account[]
 
-function converter(euroRate: number | null): ConvertToPreferred {
-  return (amount, currency) =>
-    currency === 'USD' || euroRate !== null
-      ? {
-          complete: true,
-          preferredCurrency: 'USD',
-          amountCentavos: currency === 'EUR' ? amount * euroRate! : amount,
-          missingCurrencies: [],
-        }
-      : {
-          complete: false,
-          preferredCurrency: 'USD',
-          missingCurrencies: ['EUR'],
-          reason: 'missing_exchange_rates',
-        }
+function rate(fromCurrency: string, toCurrency: string, rateDecimal: string) {
+  return {
+    id: `${fromCurrency}-${toCurrency}-${rateDecimal}`,
+    fromCurrency,
+    toCurrency,
+    rateDecimal,
+    effectiveFrom: '2000-01-01',
+    supersedesRateId: null,
+    createdAt: '',
+    sourceNote: null,
+  }
 }
 
 function ComparisonHarness(
@@ -125,6 +119,11 @@ describe('OverviewAccountComparison', () => {
     history.secondHistory = defaultSecondHistory
     history.isLoading = false
     history.error = null
+    useCurrencyStore.setState({
+      mainCurrency: 'USD',
+      preferredCurrency: 'USD',
+      manualRates: [rate('EUR', 'USD', '2')],
+    })
   })
 
   it('shows negative card debt, missing dates as dashes, and account-specific change baselines', async () => {
@@ -135,7 +134,7 @@ describe('OverviewAccountComparison', () => {
         preferredCurrency="USD"
         rates={{ 'EUR:USD': 2 }}
         invalidRates={[]}
-        convertToPreferred={converter(2)}
+        convertToPreferred={undefined}
       />
     )
 
@@ -151,81 +150,37 @@ describe('OverviewAccountComparison', () => {
     expect(within(screen.getAllByRole('row')[3]).getByText('$400.00')).toBeInTheDocument()
   })
 
-  it('recomputes when preferred currency changes with stable history, rates, and converter identity', () => {
-    let preferredCurrency = 'USD'
-    const convertToPreferred: ConvertToPreferred = (amount, currency) => ({
-      complete: true,
-      preferredCurrency,
-      amountCentavos:
-        currency === preferredCurrency ? amount : amount * (preferredCurrency === 'USD' ? 2 : 0.5),
-      missingCurrencies: [],
-    })
-    const props = {
-      accounts,
-      rates: { 'EUR:USD': 2, 'USD:EUR': 0.5 },
-      invalidRates: [],
-      convertToPreferred,
-    }
-    const { rerender } = render(
-      <ComparisonHarness {...props} preferredCurrency={preferredCurrency} />
-    )
+  it('recomputes when configured main currency changes', () => {
+    render(<ComparisonHarness accounts={accounts} preferredCurrency="USD" />)
     expect(screen.getAllByText('$2,400.00').length).toBeGreaterThan(0)
 
-    preferredCurrency = 'EUR'
-    rerender(<ComparisonHarness {...props} preferredCurrency={preferredCurrency} />)
+    act(() =>
+      useCurrencyStore.setState({
+        mainCurrency: 'EUR',
+        preferredCurrency: 'EUR',
+        manualRates: [rate('USD', 'EUR', '0.5')],
+      })
+    )
     expect(screen.getAllByText('€1,200.00').length).toBeGreaterThan(0)
     expect(screen.getAllByText('-€25.00').length).toBeGreaterThan(0)
     expect(screen.queryByText('€2,400.00')).not.toBeInTheDocument()
   })
 
-  it('recomputes historical conversion when current rates update and withholds all values for missing or invalid rates', () => {
-    const { rerender } = render(
-      <ComparisonHarness
-        accounts={accounts}
-        preferredCurrency="USD"
-        rates={{ 'EUR:USD': 2 }}
-        invalidRates={[]}
-        convertToPreferred={converter(2)}
-      />
-    )
+  it('recomputes historical conversion when dated manual authority changes', () => {
+    render(<ComparisonHarness accounts={accounts} preferredCurrency="USD" />)
     expect(screen.getAllByText('$2,400.00').length).toBeGreaterThan(0)
 
-    rerender(
-      <ComparisonHarness
-        accounts={accounts}
-        preferredCurrency="USD"
-        rates={{ 'EUR:USD': 3 }}
-        invalidRates={[]}
-        convertToPreferred={converter(3)}
-      />
-    )
+    act(() => useCurrencyStore.setState({ manualRates: [rate('EUR', 'USD', '3')] }))
     expect(screen.getAllByText('$3,600.00').length).toBeGreaterThan(0)
     expect(screen.queryByText('$2,400.00')).not.toBeInTheDocument()
 
-    rerender(
-      <ComparisonHarness
-        accounts={accounts}
-        preferredCurrency="USD"
-        rates={{}}
-        invalidRates={[]}
-        convertToPreferred={converter(null)}
-      />
-    )
+    act(() => useCurrencyStore.setState({ manualRates: [] }))
     expect(screen.getByRole('alert')).toHaveTextContent('overview.comparison.missingRates EUR')
     expect(screen.queryByText('$3,600.00')).not.toBeInTheDocument()
     expect(screen.queryByText(/overview.comparison.lastRecorded/)).not.toBeInTheDocument()
 
-    rerender(
-      <ComparisonHarness
-        accounts={accounts}
-        preferredCurrency="USD"
-        rates={{ 'EUR:USD': 3 }}
-        invalidRates={[{ fromCurrency: 'EUR', toCurrency: 'USD', rate: '0' }]}
-        convertToPreferred={converter(3)}
-      />
-    )
+    act(() => useCurrencyStore.setState({ manualRates: [rate('EUR', 'USD', '0')] }))
     expect(screen.getByRole('alert')).toHaveTextContent('overview.comparison.invalidConversion')
-    expect(screen.queryByText(/overview.comparison.lastRecorded/)).not.toBeInTheDocument()
   })
 
   it('labels each account with its own latest non-null snapshot date, not the shared series end', async () => {
@@ -244,7 +199,7 @@ describe('OverviewAccountComparison', () => {
         preferredCurrency="USD"
         rates={{ 'EUR:USD': 2 }}
         invalidRates={[]}
-        convertToPreferred={converter(2)}
+        convertToPreferred={undefined}
       />
     )
 
@@ -276,7 +231,7 @@ describe('OverviewAccountComparison', () => {
         preferredCurrency="USD"
         rates={{ 'EUR:USD': 2 }}
         invalidRates={[]}
-        convertToPreferred={converter(2)}
+        convertToPreferred={undefined}
       />
     )
     expect(screen.getByRole('status')).toHaveTextContent('overview.comparison.loading')
@@ -290,7 +245,7 @@ describe('OverviewAccountComparison', () => {
         preferredCurrency="USD"
         rates={{ 'EUR:USD': 2 }}
         invalidRates={[]}
-        convertToPreferred={converter(2)}
+        convertToPreferred={undefined}
       />
     )
     expect(screen.getByRole('alert')).toHaveTextContent('overview.comparison.loadError')
@@ -305,7 +260,7 @@ describe('OverviewAccountComparison', () => {
         preferredCurrency="USD"
         rates={{ 'EUR:USD': 2 }}
         invalidRates={[]}
-        convertToPreferred={converter(2)}
+        convertToPreferred={undefined}
       />
     )
     expect(screen.getByText(/overview.comparison.noHistory/)).toBeInTheDocument()

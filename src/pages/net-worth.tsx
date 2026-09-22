@@ -34,12 +34,16 @@ export function NetWorth() {
     totalInvestments,
     netWorth,
     totalsComplete,
+    preferredCurrency = 'USD',
     missingCurrencies,
     incompleteHoldingIds,
     unresolvedAccountIds,
     assetBreakdown,
     liabilityBreakdown,
     history,
+    historyComplete = true,
+    historyMissingCurrencies = [],
+    historyNativeTotals = [],
     isLoading,
     refresh,
   } = useNetWorthStore()
@@ -117,10 +121,26 @@ export function NetWorth() {
         </div>
       )}
 
+      {!historyComplete && historyNativeTotals.length > 0 ? (
+        <div className="border-warning/30 bg-warning/10 text-warning rounded-xl border px-4 py-3 text-sm">
+          {t('netWorth.unavailable')}
+          {historyMissingCurrencies.length > 0 ? ` · ${historyMissingCurrencies.join(', ')}` : ''}
+          <span className="text-muted-foreground mt-1 block text-xs">
+            {historyNativeTotals
+              .map((total) => formatMoney(total.amountCentavos, total.currency))
+              .join(' · ')}
+          </span>
+        </div>
+      ) : null}
+
       <MetricStrip>
         <MetricItem
           label={t('netWorth.currentNetWorth')}
-          value={totalsComplete && netWorth !== null ? formatMoney(netWorth) : '—'}
+          value={
+            totalsComplete && netWorth !== null && preferredCurrency
+              ? formatMoney(netWorth, preferredCurrency)
+              : '—'
+          }
           detail={
             history.length > 1 ? (
               <span className={isPositiveChange ? 'text-success' : 'text-destructive'}>
@@ -130,18 +150,29 @@ export function NetWorth() {
                   <TrendingDown size={12} className="mr-1 inline" aria-hidden="true" />
                 )}
                 {isPositiveChange ? '+' : ''}
-                {formatMoney(Math.round(changeAmount))} ({changePercent}%)
+                {preferredCurrency
+                  ? formatMoney(Math.round(changeAmount), preferredCurrency)
+                  : '—'}{' '}
+                ({changePercent}%)
               </span>
             ) : null
           }
         />
         <MetricItem
           label={t('netWorth.assets')}
-          value={totalsComplete && totalAssets !== null ? formatMoney(totalAssets) : '—'}
+          value={
+            totalsComplete && totalAssets !== null && preferredCurrency
+              ? formatMoney(totalAssets, preferredCurrency)
+              : '—'
+          }
         />
         <MetricItem
           label={t('netWorth.liabilities')}
-          value={totalsComplete && totalLiabilities !== null ? formatMoney(totalLiabilities) : '—'}
+          value={
+            totalsComplete && totalLiabilities !== null && preferredCurrency
+              ? formatMoney(totalLiabilities, preferredCurrency)
+              : '—'
+          }
         />
       </MetricStrip>
 
@@ -169,7 +200,9 @@ export function NetWorth() {
                     axisLine={false}
                     tickLine={false}
                     tick={{ fill: CHART_AXIS_COLOR, fontSize: 10 }}
-                    tickFormatter={(v) => formatMoney(Number(v))}
+                    tickFormatter={(v) =>
+                      preferredCurrency ? formatMoney(Number(v), preferredCurrency) : '—'
+                    }
                     width={50}
                   />
                   <Tooltip
@@ -177,7 +210,10 @@ export function NetWorth() {
                     itemStyle={CHART_ITEM_STYLE}
                     labelStyle={CHART_LABEL_STYLE}
                     labelFormatter={(d) => dayjs(d).format('MMM D, YYYY')}
-                    formatter={(value) => [formatMoney(Number(value)), t('netWorth.title')]}
+                    formatter={(value) => [
+                      preferredCurrency ? formatMoney(Number(value), preferredCurrency) : '—',
+                      t('netWorth.title'),
+                    ]}
                   />
                   <Area
                     type="monotone"
@@ -205,7 +241,9 @@ export function NetWorth() {
                   {history.map((point) => (
                     <tr key={point.date}>
                       <td className="py-0.5 pr-6">{dayjs(point.date).format('MMM D, YYYY')}</td>
-                      <td className="tabular-nums">{formatMoney(point.netWorth)}</td>
+                      <td className="tabular-nums">
+                        {preferredCurrency ? formatMoney(point.netWorth, preferredCurrency) : '—'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -230,12 +268,18 @@ export function NetWorth() {
                 <h3 className="text-sm font-semibold">{t('netWorth.assets')}</h3>
               </div>
               <span className="text-success text-lg font-bold tabular-nums">
-                {totalsComplete && totalAssets !== null ? formatMoney(totalAssets) : '—'}
+                {totalsComplete && totalAssets !== null && preferredCurrency
+                  ? formatMoney(totalAssets, preferredCurrency)
+                  : '—'}
               </span>
             </div>
             {(totalInvestments ?? 0) > 0 && (
               <div className="text-muted-foreground text-xs">
-                {t('netWorth.includesInvestments', { amount: formatMoney(totalInvestments ?? 0) })}
+                {t('netWorth.includesInvestments', {
+                  amount: preferredCurrency
+                    ? formatMoney(totalInvestments ?? 0, preferredCurrency)
+                    : '—',
+                })}
               </div>
             )}
             <div className="space-y-3">
@@ -270,7 +314,9 @@ export function NetWorth() {
                 <h3 className="text-sm font-semibold">{t('netWorth.liabilities')}</h3>
               </div>
               <span className="text-destructive text-lg font-bold tabular-nums">
-                {totalsComplete && totalLiabilities !== null ? formatMoney(totalLiabilities) : '—'}
+                {totalsComplete && totalLiabilities !== null && preferredCurrency
+                  ? formatMoney(totalLiabilities, preferredCurrency)
+                  : '—'}
               </span>
             </div>
             <div className="space-y-3">

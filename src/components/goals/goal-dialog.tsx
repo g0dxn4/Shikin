@@ -38,6 +38,7 @@ export function GoalDialog() {
         icon: data.icon,
         color: data.color,
         notes: data.notes || null,
+        currency: data.currency,
       }
 
       if (isEditing && editingGoalId) {

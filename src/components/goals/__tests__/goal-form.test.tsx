@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { GoalForm } from '../goal-form'
 import { GOAL_ICONS } from '../goal-icons'
 
+import { useCurrencyStore } from '@/stores/currency-store'
 const mockFetchAccounts = vi.fn().mockResolvedValue(undefined)
 let mockAccountsFetchError: string | null = null
 const LEGACY_EMOJI_PATTERN = /🎯|🏠|✈️|🚗|🎓|💰|🏖️|💍|🏥|📱/
@@ -31,7 +32,17 @@ vi.mock('@/stores/account-store', () => ({
 describe('GoalForm', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    useCurrencyStore.setState({ mainCurrency: 'USD', preferredCurrency: 'USD', manualRates: [] })
     mockAccountsFetchError = null
+  })
+
+  it('guards a typed draft when main currency changes while the form is open', () => {
+    render(<GoalForm onSubmit={vi.fn()} />)
+    act(() =>
+      useCurrencyStore.setState({ mainCurrency: 'EUR', preferredCurrency: 'EUR', manualRates: [] })
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent('currency.changedWhileOpen')
+    expect(screen.getByRole('button', { name: 'actions.save' })).toBeDisabled()
   })
 
   describe('accessibility', () => {
@@ -40,8 +51,11 @@ describe('GoalForm', () => {
 
       // Check that all inputs have associated labels
       expect(screen.getByLabelText('form.name')).toHaveAttribute('id', 'goal-name')
-      expect(screen.getByLabelText('form.targetAmount')).toHaveAttribute('id', 'goal-target-amount')
-      expect(screen.getByLabelText('form.currentAmount')).toHaveAttribute(
+      expect(screen.getByLabelText('form.targetAmountWithCurrency')).toHaveAttribute(
+        'id',
+        'goal-target-amount'
+      )
+      expect(screen.getByLabelText('form.currentAmountWithCurrency')).toHaveAttribute(
         'id',
         'goal-current-amount'
       )
@@ -148,7 +162,7 @@ describe('GoalForm', () => {
       render(<GoalForm onSubmit={onSubmit} />)
 
       await user.type(screen.getByLabelText('form.name'), 'Vacation fund')
-      const targetAmount = screen.getByLabelText('form.targetAmount')
+      const targetAmount = screen.getByLabelText('form.targetAmountWithCurrency')
       await user.clear(targetAmount)
       await user.type(targetAmount, '2500')
 

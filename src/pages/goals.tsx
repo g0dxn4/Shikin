@@ -12,6 +12,7 @@ import { ErrorState } from '@/components/ui/error-state'
 import { ShowMorePagination } from '@/components/shared/show-more-pagination'
 import { useUIStore } from '@/stores/ui-store'
 import { useGoalStore, type GoalWithProgress } from '@/stores/goal-store'
+import { useCurrencyStore } from '@/stores/currency-store'
 import { formatMoney } from '@/lib/money'
 import { getErrorMessage } from '@/lib/errors'
 import { GoalIcon } from '@/components/goals/goal-icon'
@@ -117,8 +118,10 @@ function GoalRow({
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
         <p className="text-muted-foreground">
-          <span className="text-foreground font-medium">{formatMoney(goal.current_amount)}</span>{' '}
-          {t('card.of')} {formatMoney(goal.target_amount)}
+          <span className="text-foreground font-medium">
+            {formatMoney(goal.current_amount, goal.currency)}
+          </span>{' '}
+          {t('card.of')} {formatMoney(goal.target_amount, goal.currency)}
         </p>
         <p className="text-muted-foreground text-[10px] tracking-wider uppercase tabular-nums">
           {isCompleted ? t('card.completed') : getDaysText(goal, t)}
@@ -133,6 +136,7 @@ export function Goals() {
   const { t: tCommon } = useTranslation('common')
   const { openGoalDialog } = useUIStore()
   const { goals, isLoading, fetchError, fetch, remove } = useGoalStore()
+  const mainCurrency = useCurrencyStore((state) => state.mainCurrency)
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [visibleGoalCount, setVisibleGoalCount] = useState(GOALS_PAGE_SIZE)
@@ -152,12 +156,27 @@ export function Goals() {
     return [...goals].sort((a, b) => b.progress - a.progress)[0]
   }, [goals])
 
-  const aggregateProgress = useMemo(() => {
-    if (goals.length === 0) return 0
-    const totalTarget = goals.reduce((sum, g) => sum + g.target_amount, 0)
-    const totalCurrent = goals.reduce((sum, g) => sum + g.current_amount, 0)
-    return totalTarget > 0 ? Math.min(100, Math.round((totalCurrent / totalTarget) * 100)) : 0
-  }, [goals])
+  const mainSummary = useMemo(() => {
+    if (!mainCurrency || goals.some((goal) => !goal.mainConversion.complete)) {
+      return { complete: false, current: null, target: null, progress: null }
+    }
+    const current = goals.reduce(
+      (sum, goal) =>
+        sum + (goal.mainConversion.saved.complete ? goal.mainConversion.saved.amountCentavos : 0),
+      0
+    )
+    const target = goals.reduce(
+      (sum, goal) =>
+        sum + (goal.mainConversion.target.complete ? goal.mainConversion.target.amountCentavos : 0),
+      0
+    )
+    return {
+      complete: Number.isSafeInteger(current) && Number.isSafeInteger(target),
+      current,
+      target,
+      progress: target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0,
+    }
+  }, [goals, mainCurrency])
 
   const orderedGoals = useMemo(() => {
     return [...goals].sort((a, b) => {
@@ -194,7 +213,11 @@ export function Goals() {
   return (
     <div className="page-content">
       <PageToolbar
-        leading={<p className="text-muted-foreground text-xs">{t('scope')}</p>}
+        leading={
+          <p className="text-muted-foreground text-xs">
+            {t('scope', { currency: mainCurrency ?? t('currency.unconfigured') })}
+          </p>
+        }
         actions={
           <Button onClick={() => openGoalDialog()}>
             <Plus size={16} />
@@ -202,6 +225,12 @@ export function Goals() {
           </Button>
         }
       />
+
+      {goals.length > 0 && !mainSummary.complete ? (
+        <p className="text-warning text-xs" role="status">
+          {t('currency.unavailable')}
+        </p>
+      ) : null}
 
       <ErrorBanner
         title={t('error.load')}
@@ -255,13 +284,24 @@ export function Goals() {
           <MetricStrip>
             <MetricItem
               label={t('form.currentAmount')}
-              value={formatMoney(goals.reduce((sum, goal) => sum + goal.current_amount, 0))}
+              value={
+                mainSummary.complete && mainSummary.current !== null && mainCurrency
+                  ? formatMoney(mainSummary.current, mainCurrency)
+                  : '—'
+              }
             />
             <MetricItem
               label={t('form.targetAmount')}
-              value={formatMoney(goals.reduce((sum, goal) => sum + goal.target_amount, 0))}
+              value={
+                mainSummary.complete && mainSummary.target !== null && mainCurrency
+                  ? formatMoney(mainSummary.target, mainCurrency)
+                  : '—'
+              }
             />
-            <MetricItem label={t('hero.aggregateProgress')} value={`${aggregateProgress}%`} />
+            <MetricItem
+              label={t('hero.aggregateProgress')}
+              value={mainSummary.progress === null ? '—' : `${mainSummary.progress}%`}
+            />
             <MetricItem
               label={t('active.title')}
               value={goals.filter((goal) => goal.progress < 100).length}
@@ -327,7 +367,7 @@ export function Goals() {
                 <p className="text-muted-foreground text-sm leading-relaxed">
                   {automationGoal && automationGoal.monthlyNeeded > 0
                     ? t('automation.monthlyMove', {
-                        amount: formatMoney(automationGoal.monthlyNeeded),
+                        amount: formatMoney(automationGoal.monthlyNeeded, automationGoal.currency),
                         goal: automationGoal.name,
                       })
                     : automationGoal
@@ -354,9 +394,10 @@ export function Goals() {
                   <p className="mt-1 text-lg font-bold tabular-nums">
                     {automationGoal
                       ? formatMoney(
-                          Math.max(0, automationGoal.target_amount - automationGoal.current_amount)
+                          Math.max(0, automationGoal.target_amount - automationGoal.current_amount),
+                          automationGoal.currency
                         )
-                      : formatMoney(0)}
+                      : '—'}
                   </p>
                 </div>
                 <div className="border-border bg-muted/50 rounded-xl border p-4">

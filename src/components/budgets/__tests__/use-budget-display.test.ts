@@ -1,80 +1,134 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { renderHook } from '@testing-library/react'
 import { useBudgetDisplay } from '../use-budget-display'
-import { useCurrencyStore } from '@/stores/currency-store'
-import { query } from '@/lib/database'
 import type { BudgetWithStatus } from '@/stores/budget-store'
-vi.mock('@/lib/database', () => ({ query: vi.fn(), execute: vi.fn() }))
-const budgets = [
-  { id: 'budget', name: 'Food', amount: 100000, period: 'monthly' },
-] as BudgetWithStatus[]
-const expense = { budget_id: 'budget', type: 'expense', amount: 10000, currency: 'USD' }
 
-describe('budget currency-safe display reads', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    useCurrencyStore.setState({
-      preferredCurrency: 'USD',
-      rates: { 'EUR:USD': 2 },
-      invalidRates: [],
+function budget(overrides: Partial<BudgetWithStatus> = {}): BudgetWithStatus {
+  const nativeSpending = {
+    complete: true,
+    currency: 'USD',
+    totalCentavos: 10_000,
+    knownTotalCentavos: 10_000,
+    nativeTotals: [{ currency: 'USD', amountCentavos: 10_000 }],
+    unresolvedIds: [],
+    conversions: [],
+  }
+  return {
+    id: 'budget',
+    name: 'Food',
+    category_id: 'cat',
+    amount: 100_000,
+    period: 'monthly',
+    is_active: 1,
+    currency: 'USD',
+    created_at: '',
+    updated_at: '',
+    categoryName: 'Food',
+    categoryColor: '#fff',
+    spent: 10_000,
+    knownSpent: 10_000,
+    remaining: 90_000,
+    percentUsed: 10,
+    complete: true,
+    nativeSpending,
+    mainComparison: {
+      complete: true,
+      policy: 'current_plan_today_vs_transaction_date_spending',
+      toCurrency: 'MXN',
+      plan: {
+        complete: true,
+        preferredCurrency: 'MXN',
+        amountCentavos: 1_800_000,
+        missingCurrencies: [],
+        conversion: {} as never,
+      },
+      spending: { ...nativeSpending, currency: 'MXN', totalCentavos: 170_000 },
+      remainingCentavos: 1_630_000,
+      reason: null,
+    },
+    ...overrides,
+  }
+}
+
+describe('budget durable denomination display', () => {
+  it('uses current plan valuation and dated realized spending for the main report', () => {
+    const { result } = renderHook(() => useBudgetDisplay([budget()]))
+    expect(result.current.complete).toBe(true)
+    expect(result.current.budgets[0]).toMatchObject({
+      amount: 1_800_000,
+      spent: 170_000,
+      remaining: 1_630_000,
+      percentUsed: 9,
+      currency: 'MXN',
+      mainComplete: true,
     })
   })
-  it('converts all eligible spending and updates when rates change', async () => {
-    vi.mocked(query).mockResolvedValue([
-      { ...expense, status: null },
-      { ...expense, currency: 'EUR', status: ' ' },
-      { ...expense, type: 'transfer', currency: 'XXX' },
-      { ...expense, status: 'pending', currency: 'XXX' },
-      { ...expense, ledger_treatment: 'staged_no_balance_impact', currency: 'XXX' },
-      { ...expense, transaction_kind: 'reconciliation_bridge', currency: 'XXX' },
-      { ...expense, reporting_treatment: 'exclude_from_cashflow', currency: 'XXX' },
-      { ...expense, is_archived: 1, currency: 'XXX' },
-    ])
-    const { result } = renderHook(() => useBudgetDisplay(budgets))
+
+  it('retains readable native values when main conversion is unavailable', () => {
+    const fixture = budget()
+    const { result } = renderHook(() =>
+      useBudgetDisplay([
+        budget({
+          mainComparison: {
+            ...fixture.mainComparison,
+            complete: false,
+            toCurrency: null,
+            spending: null,
+            remainingCentavos: null,
+            reason: 'main_currency_unconfigured',
+            plan: {
+              complete: false,
+              preferredCurrency: 'USD',
+              missingCurrencies: ['USD'],
+              reason: 'main_currency_unconfigured',
+            },
+          },
+        }),
+      ])
+    )
     expect(result.current.complete).toBe(false)
-    await waitFor(() => expect(result.current.complete).toBe(true))
     expect(result.current.budgets[0]).toMatchObject({
-      amount: 100000,
-      spent: 30000,
-      remaining: 70000,
-      percentUsed: 30,
+      amount: 100_000,
+      spent: 10_000,
       currency: 'USD',
+      complete: true,
+      mainComplete: false,
     })
-    act(() => useCurrencyStore.setState({ rates: { 'EUR:USD': 3 } }))
-    expect(result.current.budgets[0].spent).toBe(40000)
-    expect(vi.mocked(query).mock.calls[0][1]).toHaveLength(6)
   })
-  it('never marks a missing-rate partial sum complete', async () => {
-    vi.mocked(query).mockResolvedValue([{ ...expense }, { ...expense, currency: 'JPY' }])
-    const { result } = renderHook(() => useBudgetDisplay(budgets))
-    await waitFor(() => expect(result.current.budgets[0].spent).toBe(10000))
-    expect(result.current.complete).toBe(false)
-    expect(result.current.budgets[0].complete).toBe(false)
-  })
-  it('marks malformed split allocations incomplete', async () => {
-    vi.mocked(query).mockResolvedValue([{ ...expense, invalid_allocations: 1 }])
-    const { result } = renderHook(() => useBudgetDisplay(budgets))
-    await waitFor(() => expect(query).toHaveBeenCalled())
-    expect(result.current.complete).toBe(false)
-    expect(result.current.budgets[0].spent).toBe(0)
-  })
-  it('converts both the USD plan and spending when preferred currency changes', async () => {
-    useCurrencyStore.setState({ preferredCurrency: 'EUR', rates: { 'USD:EUR': 0.5 } })
-    vi.mocked(query).mockResolvedValue([expense])
-    const { result } = renderHook(() => useBudgetDisplay(budgets))
-    await waitFor(() => expect(result.current.complete).toBe(true))
+
+  it('does not present known partial native spending as complete', () => {
+    const fixture = budget()
+    const { result } = renderHook(() =>
+      useBudgetDisplay([
+        budget({
+          complete: false,
+          nativeSpending: {
+            ...fixture.nativeSpending,
+            complete: false,
+            totalCentavos: null,
+            unresolvedIds: ['tx-missing'],
+          },
+          mainComparison: {
+            ...fixture.mainComparison,
+            complete: false,
+            spending: {
+              ...fixture.nativeSpending,
+              complete: false,
+              currency: 'MXN',
+              totalCentavos: null,
+              unresolvedIds: ['tx-missing'],
+            },
+            remainingCentavos: null,
+            reason: 'missing_exchange_rates',
+          },
+        }),
+      ])
+    )
     expect(result.current.budgets[0]).toMatchObject({
-      amount: 50000,
-      spent: 5000,
-      remaining: 45000,
-      percentUsed: 10,
-      currency: 'EUR',
+      complete: false,
+      spent: 10_000,
+      remaining: 90_000,
+      mainComplete: false,
     })
-  })
-  it('keeps totals unavailable when the read fails', async () => {
-    vi.mocked(query).mockRejectedValue(new Error('Read failed'))
-    const { result } = renderHook(() => useBudgetDisplay(budgets))
-    await waitFor(() => expect(result.current.error).toContain('Read failed'))
-    expect(result.current.complete).toBe(false)
   })
 })

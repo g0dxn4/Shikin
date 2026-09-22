@@ -57,7 +57,8 @@
   "currencyWarning": {
     "title": "Mixed currencies",
     "body": "Some holdings require a verified price, ownership resolution, or a real FX rate. Native-currency components remain visible; no nominal sum is shown.",
-    "totalsUnavailable": "Converted total unavailable"
+    "totalsUnavailable": "Converted total unavailable",
+    "setupRequired": "Configure a main currency in Settings before showing portfolio totals."
   },
   "summary": {
     "portfolioValue": "Portfolio Value",

@@ -40,7 +40,9 @@
       "wedding": "Boda",
       "health": "Salud",
       "phone": "Teléfono"
-    }
+    },
+    "targetAmountWithCurrency": "Importe objetivo ({{currency}})",
+    "currentAmountWithCurrency": "Importe actual ({{currency}})"
   },
   "status": {
     "onTrack": "En buen camino",
@@ -97,9 +99,15 @@
     "title": "Metas de Ahorro",
     "viewAll": "Ver Todas"
   },
-  "scope": "Metas y aportes registrados en USD · no son el patrimonio neto",
+  "scope": "Metas y contribuciones registradas · mostrado en {{currency}} · no es dinero bancario",
   "contributions": {
     "update": "Actualizar aporte",
     "note": "El ritmo mensual es una recomendación. Actualizar una meta no programa transferencias ni mueve dinero."
+  },
+  "currency": {
+    "setupRequired": "Configura una moneda principal en Ajustes antes de crear una meta.",
+    "changedWhileOpen": "La moneda principal cambió mientras este formulario estaba abierto. Ciérralo y vuelve a abrirlo antes de guardar.",
+    "unavailable": "Los totales convertidos de las metas no están disponibles. Los importes nativos siguen visibles.",
+    "unconfigured": "sin configurar"
   }
 }

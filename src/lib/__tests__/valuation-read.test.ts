@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { valueHolding } from '@shikin/finance-core/valuation'
-import { ratesForTarget, rowToHoldingInput } from '@/lib/valuation-read'
+import { rowToHoldingInput } from '@/lib/valuation-read'
 
 describe('frontend shared valuation selection', () => {
   it('matches the CLI synthetic sub-cent conversion scenario', () => {
@@ -39,7 +39,7 @@ describe('frontend shared valuation selection', () => {
     })
   })
 
-  it('normalizes tiny legacy quantities and tiny numeric FX rates like the CLI adapter', () => {
+  it('normalizes a tiny legacy quantity while preserving an exact decimal FX rate', () => {
     const key = 'v1|stock|manual|TINY|XNAS|USD'
     const input = rowToHoldingInput({
       id: 'tiny',
@@ -66,10 +66,9 @@ describe('frontend shared valuation selection', () => {
       unit_price_decimal: '10000000',
       quote_date: '2026-04-18',
     })
-    const rates = ratesForTarget({ 'USD:MXN': 1e-7 }, 'MXN')
+    const rates = [{ fromCurrency: 'USD', toCurrency: 'MXN', rateDecimal: '0.0000001' }]
 
     expect(input.quantityDecimal).toBe('0.0000001')
-    expect(rates).toEqual([{ fromCurrency: 'USD', toCurrency: 'MXN', rateDecimal: '0.0000001' }])
     expect(valueHolding(input, 'MXN', rates)).toMatchObject({
       valueCentavos: 100,
       convertedValueCentavos: 0,

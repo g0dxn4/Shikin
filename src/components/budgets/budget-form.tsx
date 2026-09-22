@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -34,6 +34,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useCategoryStore } from '@/stores/category-store'
+import { useCurrencyStore } from '@/stores/currency-store'
 import type { BudgetWithStatus } from '@/stores/budget-store'
 import { fromCentavos } from '@/lib/money'
 
@@ -71,6 +72,7 @@ const budgetSchema = z.object({
   categoryId: z.string().min(1),
   amount: z.number().positive(),
   period: z.enum(BUDGET_PERIODS),
+  currency: z.string().min(1),
 })
 
 export type BudgetFormValues = z.infer<typeof budgetSchema>
@@ -85,6 +87,11 @@ interface BudgetFormProps {
 export function BudgetForm({ budget, onSubmit, isLoading, onDirtyChange }: BudgetFormProps) {
   const { t } = useTranslation('budgets')
   const { t: tCommon } = useTranslation('common')
+  const mainCurrency = useCurrencyStore((state) => state.mainCurrency)
+  const [denomination] = useState(
+    () => budget?.currency ?? useCurrencyStore.getState().mainCurrency
+  )
+  const denominationMismatch = !budget && denomination !== mainCurrency
   const {
     categories,
     isLoading: categoriesLoading,
@@ -98,7 +105,12 @@ export function BudgetForm({ budget, onSubmit, isLoading, onDirtyChange }: Budge
 
   const expenseCategories = categories.filter((c) => c.type === 'expense')
   const isCategorySelectDisabled = categoriesLoading || !!categoriesFetchError
-  const isSubmitDisabled = isLoading || categoriesLoading || !!categoriesFetchError
+  const isSubmitDisabled =
+    isLoading ||
+    categoriesLoading ||
+    !!categoriesFetchError ||
+    !denomination ||
+    denominationMismatch
 
   const {
     register,
@@ -113,6 +125,7 @@ export function BudgetForm({ budget, onSubmit, isLoading, onDirtyChange }: Budge
       categoryId: budget?.category_id ?? '',
       amount: budget ? fromCentavos(budget.amount) : 0,
       period: budget?.period ?? 'monthly',
+      currency: denomination ?? '',
     },
   })
 
@@ -126,6 +139,16 @@ export function BudgetForm({ budget, onSubmit, isLoading, onDirtyChange }: Budge
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+      <input type="hidden" {...register('currency')} />
+      {!denomination ? (
+        <p className="text-warning text-sm" role="alert">
+          {t('currency.setupRequired')}
+        </p>
+      ) : denominationMismatch ? (
+        <p className="text-warning text-sm" role="alert">
+          {t('currency.changedWhileOpen')}
+        </p>
+      ) : null}
       <ErrorBanner
         title={t('form.categoriesError')}
         message={categoriesFetchError}
@@ -189,7 +212,9 @@ export function BudgetForm({ budget, onSubmit, isLoading, onDirtyChange }: Budge
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <Label htmlFor="budget-amount">{t('form.amount')}</Label>
+          <Label htmlFor="budget-amount">
+            {t('form.amountWithCurrency', { currency: denomination ?? '—' })}
+          </Label>
           <Input
             id="budget-amount"
             type="number"

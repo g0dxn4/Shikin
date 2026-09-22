@@ -13,17 +13,23 @@ export interface ComparisonAccount {
   type: string
 }
 
+type ConversionReason =
+  | 'main_currency_unconfigured'
+  | 'missing_exchange_rates'
+  | 'invalid_currency_data'
+
 export interface PreferredConversionResult {
   complete: boolean
   preferredCurrency: string
   amountCentavos?: number
   missingCurrencies: ReadonlyArray<string>
-  reason?: 'missing_exchange_rates' | 'invalid_currency_data'
+  reason?: ConversionReason
 }
 
 export type ConvertToPreferred = (
   amountCentavos: number,
-  fromCurrency: string
+  fromCurrency: string,
+  date: string
 ) => PreferredConversionResult
 
 export type ComparisonDisplayMode = 'balance' | 'change'
@@ -40,7 +46,7 @@ export interface PreparedAccountComparison {
   firstStartDate: string | null
   secondStartDate: string | null
   missingCurrencies: string[]
-  reason?: 'missing_exchange_rates' | 'invalid_currency_data'
+  reason?: ConversionReason
 }
 
 export function getOverviewComparisonDateRange(period: NetWorthPeriod, today: Dayjs = dayjs()) {
@@ -81,16 +87,17 @@ export function prepareAccountComparison(
   ].sort()
 
   if (!firstConverted.complete || !secondConverted.complete) {
+    const reasons = [firstConverted.reason, secondConverted.reason]
     return {
       complete: false,
       points: [],
       firstStartDate: firstHistory[0]?.date ?? null,
       secondStartDate: secondHistory[0]?.date ?? null,
       missingCurrencies,
-      reason:
-        firstConverted.reason === 'invalid_currency_data' ||
-        secondConverted.reason === 'invalid_currency_data'
-          ? 'invalid_currency_data'
+      reason: reasons.includes('invalid_currency_data')
+        ? 'invalid_currency_data'
+        : reasons.includes('main_currency_unconfigured')
+          ? 'main_currency_unconfigured'
           : 'missing_exchange_rates',
     }
   }
@@ -136,17 +143,22 @@ function convertHistory(
   complete: boolean
   points: AccountBalanceSnapshot[]
   missingCurrencies: string[]
-  reason?: 'missing_exchange_rates' | 'invalid_currency_data'
+  reason?: ConversionReason
 } {
   const points: AccountBalanceSnapshot[] = []
   const missingCurrencies = new Set<string>()
-  let reason: 'missing_exchange_rates' | 'invalid_currency_data' | undefined
+  let reason: ConversionReason | undefined
 
   for (const point of history) {
-    const converted = convertToPreferred(point.balance, currency)
+    const converted = convertToPreferred(point.balance, currency, point.date)
     if (!converted.complete || converted.amountCentavos === undefined) {
       converted.missingCurrencies.forEach((item) => missingCurrencies.add(item))
       if (converted.reason === 'invalid_currency_data') reason = 'invalid_currency_data'
+      else if (
+        converted.reason === 'main_currency_unconfigured' &&
+        reason !== 'invalid_currency_data'
+      )
+        reason = 'main_currency_unconfigured'
       else if (!reason) reason = 'missing_exchange_rates'
       continue
     }

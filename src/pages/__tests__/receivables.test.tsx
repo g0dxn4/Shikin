@@ -98,6 +98,17 @@ function makeReceivable(overrides: Partial<Record<string, unknown>> = {}) {
   }
 }
 
+const fxRate = (fromCurrency: string, toCurrency: string, rateDecimal: string) => ({
+  id: `${fromCurrency}-${toCurrency}-${rateDecimal}`,
+  fromCurrency,
+  toCurrency,
+  rateDecimal,
+  effectiveFrom: '2000-01-01',
+  supersedesRateId: null,
+  createdAt: '2000-01-01T00:00:00Z',
+  sourceNote: null,
+})
+
 describe('Receivables', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -105,7 +116,7 @@ describe('Receivables', () => {
     mockReceivables = []
     mockFetchError = null
     mockIsLoading = false
-    useCurrencyStore.setState({ preferredCurrency: 'USD', rates: {}, invalidRates: [] })
+    useCurrencyStore.setState({ mainCurrency: 'USD', preferredCurrency: 'USD', manualRates: [] })
   })
 
   it('renders add action without a promotional page title', () => {
@@ -210,16 +221,22 @@ describe('Receivables', () => {
       render(<Receivables />)
       expect(screen.getByText('currency.missingRates')).toBeInTheDocument()
 
-      act(() => useCurrencyStore.setState({ rates: { 'EUR:USD': 2 } }))
+      act(() => useCurrencyStore.setState({ manualRates: [fxRate('EUR', 'USD', '2')] }))
       expect(screen.getByText('$200.00')).toBeInTheDocument()
 
-      act(() => useCurrencyStore.setState({ preferredCurrency: 'EUR', rates: {} }))
+      act(() =>
+        useCurrencyStore.setState({
+          mainCurrency: 'EUR',
+          preferredCurrency: 'EUR',
+          manualRates: [],
+        })
+      )
       expect(screen.getAllByText('€100.00').length).toBeGreaterThan(0)
       expect(screen.queryByText('€200.00')).not.toBeInTheDocument()
 
       act(() =>
         useCurrencyStore.setState({
-          invalidRates: [{ fromCurrency: 'USD', toCurrency: 'EUR', rate: '0' }],
+          manualRates: [fxRate('USD', 'EUR', '0')],
         })
       )
       expect(screen.getByText('currency.invalidData')).toBeInTheDocument()

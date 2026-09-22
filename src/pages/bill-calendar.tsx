@@ -18,7 +18,13 @@ export function BillCalendar() {
   const [monthOffset, setMonthOffset] = useState(0)
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const { rules, isLoading, fetchError, fetch } = useRecurringStore()
-  const { convertToPreferred, preferredCurrency } = useCurrencyStore()
+  const {
+    convertCurrentToPreferred,
+    convertHistoricalToPreferred,
+    preferredCurrency,
+    mainCurrency,
+    manualRates,
+  } = useCurrencyStore()
   const [payments, setPayments] = useState<{ month: string; rows: Transaction[] } | null>(null)
   const [paymentError, setPaymentError] = useState<string | null>(null)
   const [retry, setRetry] = useState(0)
@@ -67,7 +73,9 @@ export function BillCalendar() {
     const missing = new Set<string>()
     let complete = true
     for (const bill of items) {
-      const result = convertToPreferred(bill.amount, bill.currency)
+      const result = bill.paid
+        ? convertHistoricalToPreferred(bill.amount, bill.currency, bill.date)
+        : convertCurrentToPreferred(bill.amount, bill.currency)
       if (result.complete) total += result.amountCentavos
       else {
         complete = false
@@ -78,9 +86,11 @@ export function BillCalendar() {
       value: ready && complete && !unresolved ? formatMoney(total, preferredCurrency) : '—',
       detail: !complete
         ? t('currency.missing', { currencies: [...missing].join(', ') })
-        : preferredCurrency,
+        : t('currency.actualAndEstimate', { currency: preferredCurrency }),
     }
   }
+  void mainCurrency
+  void manualRates
   const days = Array.from({ length: Math.ceil((startDay + totalDays) / 7) * 7 }, (_, index) => {
     const day = index - startDay + 1
     return day > 0 && day <= totalDays ? day : null

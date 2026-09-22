@@ -64,7 +64,8 @@
     "unavailable": "Total unavailable",
     "missingRates": "Missing exchange rates for {{currencies}}",
     "invalidData": "Some receivables have invalid currency data",
-    "grouped": "Shown by currency because a converted total is unavailable"
+    "grouped": "Shown by currency because a converted total is unavailable",
+    "setupRequired": "Configure a main currency in Settings before showing converted totals."
   },
   "error": {
     "load": "Couldn't load receivables",

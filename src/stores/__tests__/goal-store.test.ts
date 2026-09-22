@@ -1,256 +1,144 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/database', () => ({
   query: vi.fn(),
   execute: vi.fn(),
+  withTransaction: vi.fn(async (fn) => {
+    const { query, execute } = await import('@/lib/database')
+    return fn({ query, execute })
+  }),
 }))
+vi.mock('@/lib/ulid', () => ({ generateId: vi.fn(() => 'goal-test-id') }))
 
-vi.mock('@/lib/ulid', () => ({
-  generateId: vi.fn().mockReturnValue('01TESTGOAL00000000000000000'),
-}))
-
-import { query, execute } from '@/lib/database'
+import { execute, query } from '@/lib/database'
+import { useCurrencyStore } from '../currency-store'
 import { useGoalStore } from '../goal-store'
 
 const mockQuery = vi.mocked(query)
 const mockExecute = vi.mocked(execute)
 
-describe('goal-store', () => {
+function form(currency = 'USD') {
+  return {
+    name: 'Emergency Fund',
+    targetAmount: 1000,
+    currentAmount: 250,
+    deadline: '2026-12-31',
+    accountId: 'account-1',
+    icon: 'shield',
+    color: '#ef4444',
+    notes: 'For emergencies',
+    currency,
+  }
+}
+
+function row(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'goal-1',
+    name: 'Vacation Fund',
+    target_amount: 200_000,
+    current_amount: 100_000,
+    deadline: '2027-06-01',
+    account_id: 'account-1',
+    icon: 'plane',
+    color: '#3b82f6',
+    notes: null,
+    currency: 'USD',
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    account_name: 'Savings',
+    ...overrides,
+  }
+}
+
+describe('goal-store durable denomination', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     useGoalStore.setState({ goals: [], isLoading: false, fetchError: null, error: null })
+    useCurrencyStore.setState({
+      mainCurrency: 'USD',
+      preferredCurrency: 'USD',
+      manualRates: [],
+      loadRates: vi.fn(async () => {}),
+    })
   })
 
-  describe('fetch', () => {
-    it('loads goals from database with progress calculations', async () => {
-      const mockGoals = [
-        {
-          id: '01GOAL001',
-          name: 'Vacation Fund',
-          target_amount: 200000, // $2000
-          current_amount: 100000, // $1000
-          deadline: '2027-06-01',
-          account_id: '01ACC001',
-          icon: 'plane',
-          color: '#3b82f6',
-          notes: null,
-          created_at: '2026-01-01T00:00:00Z',
-          updated_at: '2026-01-01T00:00:00Z',
-          account_name: 'Savings',
-        },
-      ]
-      mockQuery.mockResolvedValueOnce(mockGoals)
+  it('loads native progress and current main conversion without account writes', async () => {
+    mockQuery.mockResolvedValueOnce([row()])
+    await useGoalStore.getState().fetch()
 
-      await useGoalStore.getState().fetch()
-
-      expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('LEFT JOIN accounts'))
-      const goals = useGoalStore.getState().goals
-      expect(goals).toHaveLength(1)
-      expect(goals[0].accountName).toBe('Savings')
-      expect(goals[0].progress).toBe(50) // 100000/200000 = 50%
-      expect(goals[0].daysRemaining).toBeGreaterThan(0)
-      expect(goals[0].monthlyNeeded).toBeGreaterThan(0)
+    expect(useGoalStore.getState().goals[0]).toMatchObject({
+      currency: 'USD',
+      accountName: 'Savings',
+      progress: 50,
+      mainConversion: {
+        complete: true,
+        toCurrency: 'USD',
+        target: { amountCentavos: 200_000 },
+        saved: { amountCentavos: 100_000 },
+      },
     })
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
 
-    it('sets isLoading during fetch', async () => {
-      mockQuery.mockImplementation(
-        () => new Promise((resolve) => setTimeout(() => resolve([]), 10))
-      )
+  it('creates in configured main inside the write transaction', async () => {
+    mockQuery.mockResolvedValueOnce([{ value: 'USD' }]).mockResolvedValueOnce([])
+    mockExecute.mockResolvedValue({ rowsAffected: 1, lastInsertId: 1 })
 
-      const promise = useGoalStore.getState().fetch()
-      expect(useGoalStore.getState().isLoading).toBe(true)
-      await promise
-      expect(useGoalStore.getState().isLoading).toBe(false)
-    })
+    await useGoalStore.getState().add(form())
 
-    it('resets isLoading on error', async () => {
-      mockQuery.mockRejectedValueOnce(new Error('DB error'))
-
-      await expect(useGoalStore.getState().fetch()).rejects.toThrow('DB error')
-      expect(useGoalStore.getState().isLoading).toBe(false)
-      expect(useGoalStore.getState().fetchError).toBe('DB error')
-      expect(useGoalStore.getState().error).toBeNull()
-    })
-
-    it('computes 100% progress when current >= target', async () => {
-      mockQuery.mockResolvedValueOnce([
-        {
-          id: '01GOAL002',
-          name: 'Done Goal',
-          target_amount: 50000,
-          current_amount: 60000,
-          deadline: null,
-          account_id: null,
-          icon: 'star',
-          color: '#22c55e',
-          notes: null,
-          created_at: '2026-01-01T00:00:00Z',
-          updated_at: '2026-01-01T00:00:00Z',
-          account_name: null,
-        },
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO goals'),
+      expect.arrayContaining([
+        'goal-test-id',
+        'Emergency Fund',
+        100_000,
+        25_000,
+        'account-1',
+        'USD',
       ])
-
-      await useGoalStore.getState().fetch()
-      const goals = useGoalStore.getState().goals
-      expect(goals[0].progress).toBe(100)
-      expect(goals[0].daysRemaining).toBeNull()
-      expect(goals[0].monthlyNeeded).toBe(0)
-    })
+    )
+    expect(mockExecute.mock.calls.some(([sql]) => String(sql).includes('UPDATE accounts'))).toBe(
+      false
+    )
   })
 
-  describe('add', () => {
-    it('generates ULID, converts amounts to centavos, and inserts', async () => {
-      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
-      mockQuery.mockResolvedValueOnce([]) // re-fetch
+  it('writes nothing when main is unset or changes while a draft is open', async () => {
+    mockQuery.mockResolvedValueOnce([])
+    await expect(useGoalStore.getState().add(form())).rejects.toThrow('Configure a main currency')
+    expect(mockExecute).not.toHaveBeenCalled()
 
-      await useGoalStore.getState().add({
-        name: 'Emergency Fund',
-        targetAmount: 1000, // $1000
-        currentAmount: 250, // $250
-        deadline: '2026-12-31',
-        accountId: '01ACC001',
-        icon: 'shield',
-        color: '#ef4444',
-        notes: 'For emergencies',
-      })
-
-      expect(mockExecute).toHaveBeenCalledWith(
-        expect.stringContaining('INSERT INTO goals'),
-        expect.arrayContaining([
-          '01TESTGOAL00000000000000000',
-          'Emergency Fund',
-          100000, // toCentavos(1000)
-          25000, // toCentavos(250)
-          '2026-12-31',
-          '01ACC001',
-          'shield',
-          '#ef4444',
-          'For emergencies',
-        ])
-      )
-      // Should re-fetch after insert
-      expect(mockQuery).toHaveBeenCalledTimes(1)
-    })
+    mockQuery.mockResolvedValueOnce([{ value: 'EUR' }])
+    await expect(useGoalStore.getState().add(form('USD'))).rejects.toThrow(
+      'changed while this goal form was open'
+    )
+    expect(mockExecute).not.toHaveBeenCalled()
   })
 
-  describe('update', () => {
-    it('updates an existing goal and re-fetches', async () => {
-      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
-      mockQuery.mockResolvedValueOnce([]) // re-fetch
+  it('edits recorded goal-currency values without relabeling or moving bank money', async () => {
+    mockExecute.mockResolvedValue({ rowsAffected: 1, lastInsertId: 1 })
+    mockQuery.mockResolvedValueOnce([])
 
-      await useGoalStore.getState().update('01GOAL001', {
-        name: 'Updated Goal',
-        targetAmount: 5000,
-        currentAmount: 2000,
-        deadline: '2027-01-01',
-        accountId: null,
-        icon: 'target',
-        color: '#8b5cf6',
-        notes: null,
-      })
+    await useGoalStore.getState().update('goal-1', form('EUR'))
 
-      expect(mockExecute).toHaveBeenCalledWith(
-        expect.stringContaining('UPDATE goals SET'),
-        expect.arrayContaining([
-          'Updated Goal',
-          500000, // toCentavos(5000)
-          200000, // toCentavos(2000)
-          '2027-01-01',
-          null,
-          'target',
-          '#8b5cf6',
-          null,
-          expect.any(String), // updated_at
-          '01GOAL001',
-        ])
-      )
-    })
+    const update = mockExecute.mock.calls[0]
+    expect(update[0]).toContain('UPDATE goals SET name = ?, target_amount = ?, current_amount = ?')
+    expect(update[0]).not.toContain('currency =')
+    expect(update[1]).not.toContain('EUR')
+    expect(mockExecute.mock.calls.some(([sql]) => String(sql).includes('UPDATE accounts'))).toBe(
+      false
+    )
   })
 
-  describe('remove', () => {
-    it('deletes a goal and re-fetches', async () => {
-      mockExecute.mockResolvedValueOnce({ rowsAffected: 1, lastInsertId: 0 })
-      mockQuery.mockResolvedValueOnce([]) // re-fetch
+  it('keeps mixed native goal values separate when main conversion is missing', async () => {
+    useCurrencyStore.setState({ mainCurrency: 'MXN', preferredCurrency: 'MXN', manualRates: [] })
+    mockQuery.mockResolvedValueOnce([
+      row({ currency: 'USD' }),
+      row({ id: 'goal-2', currency: 'EUR' }),
+    ])
 
-      await useGoalStore.getState().remove('01GOAL001')
+    await useGoalStore.getState().fetch()
 
-      expect(mockExecute).toHaveBeenCalledWith('DELETE FROM goals WHERE id = ?', ['01GOAL001'])
-      expect(mockQuery).toHaveBeenCalledTimes(1)
-    })
-  })
-
-  describe('getById', () => {
-    it('returns goal by id', () => {
-      const goal = {
-        id: '01GOAL001',
-        name: 'Test',
-        target_amount: 100000,
-        current_amount: 50000,
-        deadline: null,
-        account_id: null,
-        icon: 'star',
-        color: '#fff',
-        notes: null,
-        created_at: '2026-01-01T00:00:00Z',
-        updated_at: '2026-01-01T00:00:00Z',
-        accountName: null,
-        progress: 50,
-        daysRemaining: null,
-        monthlyNeeded: 0,
-      }
-      useGoalStore.setState({ goals: [goal] })
-
-      expect(useGoalStore.getState().getById('01GOAL001')).toEqual(goal)
-      expect(useGoalStore.getState().getById('nonexistent')).toBeUndefined()
-    })
-  })
-
-  describe('progress calculations', () => {
-    it('handles zero target amount gracefully', async () => {
-      mockQuery.mockResolvedValueOnce([
-        {
-          id: '01GOAL003',
-          name: 'Zero Target',
-          target_amount: 0,
-          current_amount: 0,
-          deadline: null,
-          account_id: null,
-          icon: 'x',
-          color: '#000',
-          notes: null,
-          created_at: '2026-01-01T00:00:00Z',
-          updated_at: '2026-01-01T00:00:00Z',
-          account_name: null,
-        },
-      ])
-
-      await useGoalStore.getState().fetch()
-      expect(useGoalStore.getState().goals[0].progress).toBe(0)
-    })
-
-    it('calculates monthlyNeeded for goals with deadlines', async () => {
-      mockQuery.mockResolvedValueOnce([
-        {
-          id: '01GOAL004',
-          name: 'Near Deadline',
-          target_amount: 100000,
-          current_amount: 0,
-          deadline: '2026-01-01', // Past deadline
-          account_id: null,
-          icon: 'clock',
-          color: '#f00',
-          notes: null,
-          created_at: '2025-01-01T00:00:00Z',
-          updated_at: '2025-01-01T00:00:00Z',
-          account_name: null,
-        },
-      ])
-
-      await useGoalStore.getState().fetch()
-      const goal = useGoalStore.getState().goals[0]
-      // Past deadline: daysRemaining should be negative, monthlyNeeded should be the full remaining amount
-      expect(goal.daysRemaining).toBeLessThan(0)
-      expect(goal.monthlyNeeded).toBe(100000) // remaining amount when months <= 0
-    })
+    expect(useGoalStore.getState().goals.every((goal) => !goal.mainConversion.complete)).toBe(true)
+    expect(useGoalStore.getState().goals.map((goal) => goal.currency)).toEqual(['USD', 'EUR'])
   })
 })

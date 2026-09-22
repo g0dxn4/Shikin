@@ -189,6 +189,7 @@ describe('buildAccountsLiquidTotals', () => {
       convertToPreferred: convert,
       getTotalBalanceInPreferred: totalFromConvert(convert),
       preferredCurrency: 'USD',
+      mainCurrency: 'USD',
     })
 
     expect(totals.net).toEqual({
@@ -210,6 +211,7 @@ describe('buildAccountsLiquidTotals', () => {
       convertToPreferred: convert,
       getTotalBalanceInPreferred: totalFromConvert(convert),
       preferredCurrency: 'USD',
+      mainCurrency: 'USD',
     })
 
     expect(totals.net.complete).toBe(false)
@@ -230,6 +232,7 @@ describe('buildAccountsLiquidTotals', () => {
       convertToPreferred: convert,
       getTotalBalanceInPreferred: totalFromConvert(convert),
       preferredCurrency: 'USD',
+      mainCurrency: 'USD',
     })
 
     expect(totals.net).toMatchObject({ complete: true, amountCentavos: 450_000 })
@@ -266,6 +269,7 @@ describe('buildReceivablesStatusTotals', () => {
       ],
       convertToPreferred: convert,
       preferredCurrency: 'USD',
+      mainCurrency: 'USD',
     })
 
     expect(totals.outstanding.amountCentavos).toBe(350_000)
@@ -295,6 +299,7 @@ describe('buildReceivablesStatusTotals', () => {
       ],
       convertToPreferred: convert,
       preferredCurrency: 'USD',
+      mainCurrency: 'USD',
     })
 
     expect(totals.outstanding.complete).toBe(false)

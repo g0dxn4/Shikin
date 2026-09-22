@@ -29,15 +29,16 @@ import {
   type PreparedAccountComparison,
 } from '@/components/dashboard/overview-account-comparison-helpers'
 import { useOverviewAccountComparison } from '@/components/dashboard/use-overview-account-comparison'
+import { useCurrencyStore } from '@/stores/currency-store'
 
 const PERIODS: NetWorthPeriod[] = ['3m', '6m', '1y', 'all']
 
 interface OverviewAccountComparisonProps {
   accounts: Account[]
-  preferredCurrency: string
-  rates: Readonly<Record<string, number>>
-  invalidRates: ReadonlyArray<unknown>
-  convertToPreferred: ConvertToPreferred
+  preferredCurrency?: string
+  rates?: unknown
+  invalidRates?: unknown
+  convertToPreferred?: unknown
   selection: [string, string]
   onSelectionChange: (selection: [string, string]) => void
   period: NetWorthPeriod
@@ -57,10 +58,7 @@ const INVALID_COMPARISON: PreparedAccountComparison = {
 
 export function OverviewAccountComparison({
   accounts,
-  preferredCurrency,
-  rates,
-  invalidRates,
-  convertToPreferred,
+  preferredCurrency: legacyPreferredCurrency,
   selection,
   onSelectionChange,
   period,
@@ -69,6 +67,13 @@ export function OverviewAccountComparison({
   onModeChange,
 }: OverviewAccountComparisonProps) {
   const { t } = useTranslation('dashboard')
+  const mainCurrency = useCurrencyStore((state) => state.mainCurrency)
+  const setupDraft = useCurrencyStore((state) => state.preferredCurrency)
+  const manualRates = useCurrencyStore((state) => state.manualRates)
+  const convertToPreferred: ConvertToPreferred = useCurrencyStore(
+    (state) => state.convertHistoricalToPreferred
+  )
+  const preferredCurrency = mainCurrency ?? legacyPreferredCurrency ?? setupDraft
   const accountIds = useMemo(() => accounts.map((account) => account.id), [accounts])
   const effectiveSelection = reconcileComparisonSelection(accountIds, selection)
 
@@ -81,11 +86,10 @@ export function OverviewAccountComparison({
   )
 
   const comparison = useMemo(() => {
-    // The store converter is stable; both its target currency and rates can change.
+    // The store converter is stable; manual authority is an explicit dependency.
     void preferredCurrency
-    void rates
+    void manualRates
     if (!firstAccount || !secondAccount) return INVALID_COMPARISON
-    if (invalidRates.length > 0) return INVALID_COMPARISON
     return prepareAccountComparison(
       firstHistory,
       secondHistory,
@@ -98,10 +102,9 @@ export function OverviewAccountComparison({
     convertToPreferred,
     firstAccount,
     firstHistory,
-    invalidRates,
     mode,
     preferredCurrency,
-    rates,
+    manualRates,
     secondAccount,
     secondHistory,
   ])
@@ -127,9 +130,11 @@ export function OverviewAccountComparison({
   const conversionMessage =
     comparison.reason === 'invalid_currency_data'
       ? t('overview.comparison.invalidConversion')
-      : t('overview.comparison.missingRates', {
-          currencies: comparison.missingCurrencies.join(', '),
-        })
+      : comparison.reason === 'main_currency_unconfigured'
+        ? t('overview.comparison.unavailable')
+        : t('overview.comparison.missingRates', {
+            currencies: comparison.missingCurrencies.join(', '),
+          })
 
   const selectAccount = (side: 'first' | 'second', accountId: string) => {
     const [first, second] = effectiveSelection
@@ -175,7 +180,9 @@ export function OverviewAccountComparison({
 
       <p className="text-muted-foreground mt-3 text-xs">
         {t('overview.comparison.recordedSnapshots')}
-        {firstAccount.currency !== preferredCurrency || secondAccount.currency !== preferredCurrency
+        {mainCurrency &&
+        (firstAccount.currency !== preferredCurrency ||
+          secondAccount.currency !== preferredCurrency)
           ? ` ${t('overview.comparison.currentFx', { currency: preferredCurrency })}`
           : ''}
       </p>

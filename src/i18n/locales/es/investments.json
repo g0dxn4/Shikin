@@ -57,7 +57,8 @@
   "currencyWarning": {
     "title": "Divisas mixtas",
     "body": "Algunas tenencias requieren precio verificado, resolución de propiedad o una tasa FX real. Se muestran componentes por moneda, sin suma nominal.",
-    "totalsUnavailable": "Total convertido no disponible"
+    "totalsUnavailable": "Total convertido no disponible",
+    "setupRequired": "Configura una moneda principal en Ajustes antes de mostrar los totales de la cartera."
   },
   "summary": {
     "portfolioValue": "Valor del Portafolio",

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useAccountStore } from '@/stores/account-store'
+import { useCurrencyStore } from '@/stores/currency-store'
 import type { GoalWithProgress } from '@/stores/goal-store'
 import { fromCentavos } from '@/lib/money'
 import { GoalIcon } from './goal-icon'
@@ -40,6 +41,7 @@ const goalSchema = z.object({
   icon: z.string().min(1),
   color: z.string().min(1),
   notes: z.string().optional().or(z.literal('')),
+  currency: z.string().min(1),
 })
 
 export type GoalFormValues = z.infer<typeof goalSchema>
@@ -54,6 +56,9 @@ interface GoalFormProps {
 export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormProps) {
   const { t } = useTranslation('goals')
   const { t: tCommon } = useTranslation('common')
+  const mainCurrency = useCurrencyStore((state) => state.mainCurrency)
+  const [denomination] = useState(() => goal?.currency ?? useCurrencyStore.getState().mainCurrency)
+  const denominationMismatch = !goal && denomination !== mainCurrency
   const {
     accounts,
     isLoading: accountsLoading,
@@ -82,6 +87,7 @@ export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormP
       icon: goal?.icon ?? DEFAULT_GOAL_ICON,
       color: goal?.color ?? '#7C5CFF',
       notes: goal?.notes ?? '',
+      currency: denomination ?? '',
     },
   })
 
@@ -140,7 +146,17 @@ export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormP
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+      <input type="hidden" {...register('currency')} />
       <ErrorBanner title={t('form.accountsError')} message={accountsFetchError} />
+      {!denomination ? (
+        <p className="text-warning text-sm" role="alert">
+          {t('currency.setupRequired')}
+        </p>
+      ) : denominationMismatch ? (
+        <p className="text-warning text-sm" role="alert">
+          {t('currency.changedWhileOpen')}
+        </p>
+      ) : null}
 
       <div className="space-y-1.5">
         <Label htmlFor="goal-name">{t('form.name')}</Label>
@@ -161,7 +177,9 @@ export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormP
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <Label htmlFor="goal-target-amount">{t('form.targetAmount')}</Label>
+          <Label htmlFor="goal-target-amount">
+            {t('form.targetAmountWithCurrency', { currency: denomination ?? '—' })}
+          </Label>
           <Input
             id="goal-target-amount"
             type="number"
@@ -178,7 +196,9 @@ export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormP
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="goal-current-amount">{t('form.currentAmount')}</Label>
+          <Label htmlFor="goal-current-amount">
+            {t('form.currentAmountWithCurrency', { currency: denomination ?? '—' })}
+          </Label>
           <Input
             id="goal-current-amount"
             type="number"
@@ -303,7 +323,12 @@ export function GoalForm({ goal, onSubmit, isLoading, onDirtyChange }: GoalFormP
         <Input id="notes" placeholder={t('form.notesPlaceholder')} {...register('notes')} />
       </div>
 
-      <Button type="submit" className="w-full" disabled={isLoading} aria-busy={isLoading}>
+      <Button
+        type="submit"
+        className="w-full"
+        disabled={isLoading || !denomination || denominationMismatch}
+        aria-busy={isLoading}
+      >
         {isLoading ? (
           <>
             <span className="sr-only">{tCommon('actions.saving')}</span>

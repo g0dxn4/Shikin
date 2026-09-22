@@ -3,6 +3,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { BudgetDialog } from '../budget-dialog'
 
+import { useCurrencyStore } from '@/stores/currency-store'
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
@@ -79,6 +80,7 @@ vi.mock('@/stores/category-store', () => ({
 describe('BudgetDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    useCurrencyStore.setState({ mainCurrency: 'USD', preferredCurrency: 'USD', manualRates: [] })
     mockAdd.mockReset()
     mockUpdate.mockReset()
     mockGetById.mockReturnValue(mockBudget)

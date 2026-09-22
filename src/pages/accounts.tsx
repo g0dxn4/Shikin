@@ -123,11 +123,11 @@ export function Accounts() {
     unarchive,
     setPrimary,
   } = useAccountStore()
-  const convertToPreferred = useCurrencyStore((s) => s.convertToPreferred)
+  const convertToPreferred = useCurrencyStore((s) => s.convertCurrentToPreferred)
   const getTotalBalanceInPreferred = useCurrencyStore((s) => s.getTotalBalanceInPreferred)
   const preferredCurrency = useCurrencyStore((s) => s.preferredCurrency)
-  const rates = useCurrencyStore((s) => s.rates)
-  const invalidRates = useCurrencyStore((s) => s.invalidRates)
+  const mainCurrency = useCurrencyStore((s) => s.mainCurrency)
+  const manualRates = useCurrencyStore((s) => s.manualRates)
 
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [archiveId, setArchiveId] = useState<string | null>(null)
@@ -247,22 +247,22 @@ export function Accounts() {
     [liquidAccounts]
   )
   const pageTotals = useMemo(() => {
-    // Currency actions are stable Zustand methods that read these mutable store fields.
-    void rates
-    void invalidRates
+    // Currency actions are stable Zustand methods that read current store authority.
+    void manualRates
     return buildAccountsLiquidTotals({
       liquidAccounts,
       convertToPreferred,
       getTotalBalanceInPreferred: (accounts) => getTotalBalanceInPreferred(accounts as Account[]),
       preferredCurrency,
+      mainCurrency,
     })
   }, [
     liquidAccounts,
     convertToPreferred,
     getTotalBalanceInPreferred,
     preferredCurrency,
-    rates,
-    invalidRates,
+    mainCurrency,
+    manualRates,
   ])
   const primaryAccount = useMemo(
     () =>
@@ -490,11 +490,13 @@ export function Accounts() {
                 >
                   <p className="font-semibold">{t('currency.unavailable')}</p>
                   <p className="text-muted-foreground mt-1">
-                    {pageTotals.conversionIssue.reason === 'invalid_currency_data'
-                      ? t('currency.invalidData')
-                      : t('currency.missingRates', {
-                          currencies: pageTotals.conversionIssue.missingCurrencies.join(', '),
-                        })}
+                    {pageTotals.conversionIssue.reason === 'main_currency_unconfigured'
+                      ? t('currency.setupRequired')
+                      : pageTotals.conversionIssue.reason === 'invalid_currency_data'
+                        ? t('currency.invalidData')
+                        : t('currency.missingRates', {
+                            currencies: pageTotals.conversionIssue.missingCurrencies.join(', '),
+                          })}
                   </p>
                   {pageTotals.groupedNet.length > 0 && (
                     <p className="text-muted-foreground mt-2 text-xs">

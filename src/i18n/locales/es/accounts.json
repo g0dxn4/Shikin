@@ -123,7 +123,8 @@
     "unavailable": "Total no disponible",
     "missingRates": "Faltan tipos de cambio para {{currencies}}",
     "invalidData": "Algunas cuentas tienen datos de moneda inválidos",
-    "grouped": "Se muestra por moneda porque el total convertido no está disponible"
+    "grouped": "Se muestra por moneda porque el total convertido no está disponible",
+    "setupRequired": "Configura una moneda principal en Ajustes antes de mostrar totales convertidos."
   },
   "empty": {
     "title": "Sin cuentas aún",

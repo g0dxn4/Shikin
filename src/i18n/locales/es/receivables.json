@@ -64,7 +64,8 @@
     "unavailable": "Total no disponible",
     "missingRates": "Faltan tipos de cambio para {{currencies}}",
     "invalidData": "Algunos cobros tienen datos de moneda inválidos",
-    "grouped": "Se muestra por moneda porque el total convertido no está disponible"
+    "grouped": "Se muestra por moneda porque el total convertido no está disponible",
+    "setupRequired": "Configura una moneda principal en Ajustes antes de mostrar totales convertidos."
   },
   "error": {
     "load": "No se pudieron cargar los cobros",

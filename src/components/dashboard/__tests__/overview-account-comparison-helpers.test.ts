@@ -88,11 +88,13 @@ describe('overview account comparison helpers', () => {
     ])
   })
 
-  it('converts mixed currencies using current rates and withholds every point if a rate is missing', () => {
+  it('converts mixed currencies at each snapshot date and withholds every point if a rate is missing', () => {
     const euroAccount = { ...card, currency: 'EUR' }
     let euroRate: number | null = 2
-    const convert: ConvertToPreferred = (amount, currency) =>
-      currency === 'USD' || euroRate !== null
+    const seenDates: string[] = []
+    const convert: ConvertToPreferred = (amount, currency, date) => {
+      seenDates.push(date)
+      return currency === 'USD' || euroRate !== null
         ? {
             complete: true,
             preferredCurrency: 'USD',
@@ -105,6 +107,7 @@ describe('overview account comparison helpers', () => {
             missingCurrencies: ['EUR'],
             reason: 'missing_exchange_rates',
           }
+    }
 
     expect(
       prepareAccountComparison(
@@ -116,6 +119,7 @@ describe('overview account comparison helpers', () => {
         convert
       ).points
     ).toEqual([{ date: '2026-01-01', first: 100, second: -200 }])
+    expect(seenDates).toEqual(['2026-01-01', '2026-01-01'])
 
     euroRate = null
     const unavailable = prepareAccountComparison(

@@ -3,6 +3,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { GoalDialog } from '../goal-dialog'
 
+import { useCurrencyStore } from '@/stores/currency-store'
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
@@ -67,6 +68,7 @@ vi.mock('@/stores/account-store', () => ({
 describe('GoalDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    useCurrencyStore.setState({ mainCurrency: 'USD', preferredCurrency: 'USD', manualRates: [] })
     mockAdd.mockReset()
     mockUpdate.mockReset()
     mockGetById.mockReset()
@@ -97,7 +99,7 @@ describe('GoalDialog', () => {
     // Fill the form and submit
     const user = userEvent.setup()
     await user.type(screen.getByLabelText('form.name'), 'Test Goal')
-    await user.type(screen.getByLabelText('form.targetAmount'), '1000')
+    await user.type(screen.getByLabelText('form.targetAmountWithCurrency'), '1000')
     await user.click(screen.getByRole('button', { name: 'actions.save' }))
 
     // Verify the button shows loading state (dialog should stay open)
@@ -138,7 +140,7 @@ describe('GoalDialog', () => {
 
     const user = userEvent.setup()
     await user.type(screen.getByLabelText('form.name'), 'Test Goal')
-    await user.type(screen.getByLabelText('form.targetAmount'), '1000')
+    await user.type(screen.getByLabelText('form.targetAmountWithCurrency'), '1000')
     await user.click(screen.getByRole('button', { name: 'actions.save' }))
 
     await waitFor(() => {
@@ -154,7 +156,7 @@ describe('GoalDialog', () => {
     render(<GoalDialog />)
 
     await user.type(screen.getByLabelText('form.name'), 'Failing Goal')
-    await user.type(screen.getByLabelText('form.targetAmount'), '1000')
+    await user.type(screen.getByLabelText('form.targetAmountWithCurrency'), '1000')
     await user.click(screen.getByRole('button', { name: 'actions.save' }))
 
     await waitFor(() => {

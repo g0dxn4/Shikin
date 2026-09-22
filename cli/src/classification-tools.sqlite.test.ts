@@ -111,6 +111,92 @@ describe('CLI classification catalog and batch services', () => {
     expect(invalid.applicable).toBe(false)
   })
 
+  it('preserves prefixed existing IDs and materializes new allocations by allocation identity', async () => {
+    const collidingPurchaseId = '__new__:["new-income",null]'
+    state.db!.exec(`
+      INSERT INTO transactions (id,account_id,category_id,type,amount,currency,description,date,status)
+      VALUES ('new-income','a','income','income',100,'USD','N','2026-01-03','posted');
+      INSERT INTO transaction_consumption_classifications
+        (id,transaction_id,role,referenced_purchase_id)
+      VALUES
+        ('${collidingPurchaseId}','purchase','purchase',NULL),
+        ('__new__:existing-refund','refund','other_income',NULL);
+    `)
+    const allocations = [
+      {
+        transactionId: 'refund',
+        builtinRole: 'refund' as const,
+        referencedPurchaseId: collidingPurchaseId,
+      },
+      { transactionId: 'new-income', builtinRole: 'earned_income' as const },
+    ]
+    const preview = await run('preview-consumption-classifications', { allocations })
+    expect(preview).toMatchObject({ applicable: true, changed: true })
+    expect(preview.items[0]).toMatchObject({
+      before: { id: '__new__:existing-refund' },
+      after: { id: '__new__:existing-refund', referenced_purchase_id: collidingPurchaseId },
+    })
+    expect(preview.items[1].after.id).not.toBe(collidingPurchaseId)
+
+    const applied = await run('apply-consumption-classifications', {
+      allocations,
+      previewToken: preview.previewToken,
+    })
+    const newId = applied.items[1].after.id
+    expect(applied.items[0]).toMatchObject({
+      before: { id: '__new__:existing-refund' },
+      after: { id: '__new__:existing-refund', referenced_purchase_id: collidingPurchaseId },
+    })
+    expect(newId).not.toBe(preview.items[1].after.id)
+    expect(newId).not.toBe(collidingPurchaseId)
+    expect(
+      state
+        .db!.prepare(
+          'SELECT id,transaction_id,role,referenced_purchase_id FROM transaction_consumption_classifications ORDER BY transaction_id'
+        )
+        .all()
+    ).toEqual([
+      {
+        id: newId,
+        transaction_id: 'new-income',
+        role: 'earned_income',
+        referenced_purchase_id: null,
+      },
+      {
+        id: collidingPurchaseId,
+        transaction_id: 'purchase',
+        role: 'purchase',
+        referenced_purchase_id: null,
+      },
+      {
+        id: '__new__:existing-refund',
+        transaction_id: 'refund',
+        role: 'refund',
+        referenced_purchase_id: collidingPurchaseId,
+      },
+    ])
+  })
+
+  it('rolls back every assignment when batch auditing fails', async () => {
+    const allocations = [
+      { transactionId: 'purchase', builtinRole: 'purchase' as const },
+      { transactionId: 'refund', builtinRole: 'earned_income' as const },
+    ]
+    const preview = await run('preview-consumption-classifications', { allocations })
+    state.db!.exec(
+      "CREATE TRIGGER reject_batch_audit BEFORE INSERT ON audit_log WHEN NEW.action = 'batch-classify-consumption' BEGIN SELECT RAISE(ABORT, 'synthetic batch audit failure'); END"
+    )
+    const before = snapshot()
+
+    await expect(
+      run('apply-consumption-classifications', {
+        allocations,
+        previewToken: preview.previewToken,
+      })
+    ).rejects.toThrow('synthetic batch audit failure')
+    expect(snapshot()).toEqual(before)
+  })
+
   it('rejects stale apply without partial writes and gives strict discovery effects', async () => {
     const preview = await run('preview-consumption-classifications', {
       allocations: [

@@ -270,6 +270,138 @@ describe('frontend consumption service on SQLite', () => {
     ).resolves.toMatchObject({ applicable: false })
   })
 
+  it('returns typed native source context and keeps no-op preview/apply write-free', async () => {
+    addTransaction('usd-income', 'income', 100, '2026-03-01', 'other', ' usd ')
+    addTransaction('mxn-income', 'income', 100, '2026-03-02', 'other', 'mxn')
+    const targets = [
+      { transactionId: 'usd-income', builtinRole: 'earned_income' as const },
+      { transactionId: 'mxn-income', builtinRole: 'other_income' as const },
+    ]
+    const preview = await previewConsumptionClassifications(targets)
+    expect(preview.items.map((item) => item.amountCentavos)).toEqual([100, 100])
+    expect(preview.items[0]?.source).toMatchObject({
+      transaction: {
+        id: 'usd-income',
+        amount: 100,
+        currency: ' usd ',
+        date: '2026-03-01',
+        description: 'Synthetic usd-income',
+        account_id: 'account',
+        category_id: 'other',
+      },
+      split: null,
+      currency: 'USD',
+    })
+    expect(preview.items[1]?.source).toMatchObject({
+      transaction: {
+        id: 'mxn-income',
+        amount: 100,
+        currency: 'mxn',
+        date: '2026-03-02',
+        description: 'Synthetic mxn-income',
+      },
+      split: null,
+      currency: 'MXN',
+    })
+    await applyConsumptionClassifications({ targets, previewToken: preview.previewToken })
+
+    const noOpBefore = {
+      snapshot: snapshot(),
+      state: state.db!.prepare('SELECT * FROM app_data_state').all(),
+    }
+    const noOpPreview = await previewConsumptionClassifications(targets)
+    const noOp = await applyConsumptionClassifications({
+      targets,
+      previewToken: noOpPreview.previewToken,
+    })
+    expect(noOp.batchId).toBeNull()
+    expect(noOp.items.map((item) => item.source?.currency)).toEqual(['USD', 'MXN'])
+    expect({
+      snapshot: snapshot(),
+      state: state.db!.prepare('SELECT * FROM app_data_state').all(),
+    }).toEqual(noOpBefore)
+  })
+
+  it('fingerprints selected source fields even when the database revision is held constant', async () => {
+    const targets = [{ transactionId: 'purchase', builtinRole: 'purchase' as const }]
+    const preview = await previewConsumptionClassifications(targets)
+    const revision = preview.revision
+    state.db!.prepare("UPDATE transactions SET date='2026-01-11' WHERE id='purchase'").run()
+    state.db!.prepare('UPDATE app_data_state SET data_revision = ? WHERE id = 1').run(revision)
+    const before = snapshot()
+
+    await expect(
+      applyConsumptionClassifications({ targets, previewToken: preview.previewToken })
+    ).rejects.toThrow(/stale/i)
+    expect(snapshot()).toEqual(before)
+  })
+
+  it('preserves prefixed existing IDs and materializes new allocations by allocation identity', async () => {
+    const collidingPurchaseId = '__new__:["new-income",null]'
+    addTransaction('new-income', 'income', 100, '2026-03-01', 'other')
+    state.db!.exec(`
+      INSERT INTO transaction_consumption_classifications
+        (id,transaction_id,role,referenced_purchase_id)
+      VALUES
+        ('${collidingPurchaseId}','purchase','purchase',NULL),
+        ('__new__:existing-refund','refund','other_income',NULL);
+    `)
+    const targets = [
+      {
+        transactionId: 'refund',
+        builtinRole: 'refund' as const,
+        referencedPurchaseId: collidingPurchaseId,
+      },
+      { transactionId: 'new-income', builtinRole: 'earned_income' as const },
+    ]
+    const preview = await previewConsumptionClassifications(targets)
+    expect(preview).toMatchObject({ applicable: true, changed: true })
+    expect(preview.items[0]).toMatchObject({
+      before: { id: '__new__:existing-refund' },
+      after: { id: '__new__:existing-refund', referenced_purchase_id: collidingPurchaseId },
+    })
+    expect(preview.items[1]?.after?.id).not.toBe(collidingPurchaseId)
+
+    const applied = await applyConsumptionClassifications({
+      targets,
+      previewToken: preview.previewToken,
+    })
+    const newId = applied.items[1]?.after?.id
+    expect(applied.items[0]).toMatchObject({
+      before: { id: '__new__:existing-refund' },
+      after: { id: '__new__:existing-refund', referenced_purchase_id: collidingPurchaseId },
+    })
+    expect(newId).toBeTruthy()
+    expect(newId).not.toBe(preview.items[1]?.after?.id)
+    expect(newId).not.toBe(collidingPurchaseId)
+    expect(
+      state
+        .db!.prepare(
+          'SELECT id,transaction_id,role,referenced_purchase_id FROM transaction_consumption_classifications ORDER BY transaction_id'
+        )
+        .all()
+    ).toEqual([
+      {
+        id: newId,
+        transaction_id: 'new-income',
+        role: 'earned_income',
+        referenced_purchase_id: null,
+      },
+      {
+        id: collidingPurchaseId,
+        transaction_id: 'purchase',
+        role: 'purchase',
+        referenced_purchase_id: null,
+      },
+      {
+        id: '__new__:existing-refund',
+        transaction_id: 'refund',
+        role: 'refund',
+        referenced_purchase_id: collidingPurchaseId,
+      },
+    ])
+  })
+
   it('rolls an entire batch back when assignment auditing fails', async () => {
     const targets = [
       { transactionId: 'purchase', builtinRole: 'purchase' as const },

@@ -1,6 +1,7 @@
 import {
   classificationCatalog,
   currentClassificationTypeRevision,
+  materializeClassificationBatchPlan,
   normalizeClassificationTypeDraft,
   planConsumptionClassificationBatch,
   type ClassificationBatchPlan,
@@ -331,24 +332,13 @@ export function applyConsumptionClassifications(input: {
     }
     if (!result.plan.changed) return { ...response, batchId: null }
     const batchId = generateId()
-    const final = result.plan.classifications.map((classification) =>
-      classification.id.startsWith('__new__:')
-        ? { ...classification, id: generateId() }
-        : classification
-    )
+    const materialized = materializeClassificationBatchPlan(result.plan, generateId)
+    const final = materialized.classifications
     for (const transactionId of new Set(
       result.plan.items.filter((item) => item.changed).map((item) => item.target.transactionId)
     ))
       await assertFrontendActivePaymentCapacity(tx, transactionId, { classifications: final })
-    const appliedItems = result.plan.items.map((item) => ({
-      ...item,
-      after:
-        final.find(
-          (entry) =>
-            entry.transaction_id === item.target.transactionId &&
-            entry.split_id === item.target.splitId
-        ) ?? item.after,
-    }))
+    const appliedItems = materialized.items
     for (const item of result.plan.items.filter((entry) => entry.changed)) {
       const after = final.find(
         (entry) =>

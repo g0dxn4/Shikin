@@ -56,6 +56,106 @@ const revision: ClassificationTypeRevision = {
 }
 
 describe('classification batch policy', () => {
+  it('snapshots native source context so equal amounts in different currencies stay distinguishable', () => {
+    const usd = {
+      id: 'usd-income',
+      type: 'income',
+      amount: 100,
+      currency: ' usd ',
+      category_id: 'salary',
+      description: 'USD income',
+      date: '2026-03-01',
+      account_id: 'usd-account',
+      status: 'posted',
+    }
+    const mxn = {
+      id: 'mxn-income',
+      type: 'income',
+      amount: 100,
+      currency: 'mxn',
+      category_id: 'gift',
+      description: 'MXN income',
+      date: '2026-03-02',
+      account_id: 'mxn-account',
+      status: 'posted',
+    }
+    const usdSplit = {
+      id: 'usd-split',
+      transaction_id: usd.id,
+      amount: 100,
+      category_id: 'salary',
+    }
+    const plan = planConsumptionClassificationBatch({
+      evidence: { transactions: [usd, mxn], splits: [usdSplit], classifications: [] },
+      types: [],
+      revisions: [],
+      targets: [
+        { transactionId: usd.id, splitId: usdSplit.id, builtinRole: 'earned_income' },
+        { transactionId: mxn.id, builtinRole: 'other_income' },
+      ],
+    })
+
+    expect(plan.items.map((item) => item.amountCentavos)).toEqual([100, 100])
+    expect(plan.items[0]?.source).toEqual({
+      transaction: usd,
+      split: usdSplit,
+      currency: 'USD',
+    })
+    expect(plan.items[1]?.source).toEqual({ transaction: mxn, split: null, currency: 'MXN' })
+  })
+
+  it('includes known source context on invalid plans', () => {
+    const transaction = {
+      id: 'pending',
+      type: 'income',
+      amount: 100,
+      currency: ' usd ',
+      description: 'Pending income',
+      date: '2026-03-03',
+      status: 'pending',
+    }
+    const plan = planConsumptionClassificationBatch({
+      evidence: { transactions: [transaction], splits: [], classifications: [] },
+      types: [],
+      revisions: [],
+      targets: [{ transactionId: transaction.id, builtinRole: 'earned_income' }],
+    })
+
+    expect(plan.applicable).toBe(false)
+    expect(plan.items[0]?.source).toEqual({ transaction, split: null, currency: 'USD' })
+  })
+
+  it('keeps new preview placeholders distinct from every existing classification ID', () => {
+    const collidingId = '__new__:["income",null]'
+    const plan = planConsumptionClassificationBatch({
+      evidence: {
+        transactions: [
+          { id: 'purchase', type: 'expense', amount: 100, currency: 'USD', status: 'posted' },
+          { id: 'income', type: 'income', amount: 100, currency: 'USD', status: 'posted' },
+        ],
+        splits: [],
+        classifications: [
+          {
+            id: collidingId,
+            transaction_id: 'purchase',
+            split_id: null,
+            role: 'purchase',
+            referenced_purchase_id: null,
+          },
+        ],
+      },
+      types: [],
+      revisions: [],
+      targets: [{ transactionId: 'income', builtinRole: 'earned_income' }],
+    })
+
+    expect(plan.applicable).toBe(true)
+    expect(plan.items[0]?.after?.id).not.toBe(collidingId)
+    expect(new Set(plan.classifications.map((item) => item.id)).size).toBe(
+      plan.classifications.length
+    )
+  })
+
   it('validates caps against final state independent of target order', () => {
     const targets = [
       {

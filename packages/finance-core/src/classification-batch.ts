@@ -14,6 +14,8 @@ import {
   validateConsumptionEvidence,
   type ConsumptionClassification,
   type ConsumptionEvidence,
+  type CorrectionSplit,
+  type CorrectionTransaction,
 } from './corrections.js'
 
 export interface ClassificationCatalogEntry {
@@ -144,6 +146,11 @@ export interface ClassificationBatchItemPlan {
     contribution: ClassificationContribution
   } | null
   amountCentavos: number | null
+  source: {
+    transaction: CorrectionTransaction
+    split: CorrectionSplit | null
+    currency: string | null
+  } | null
   errors: string[]
   changed: boolean
 }
@@ -163,6 +170,41 @@ function message(error: unknown): string {
 
 function targetKey(target: { transactionId: string; splitId?: string | null }): string {
   return JSON.stringify([target.transactionId, target.splitId ?? null])
+}
+
+/** Replace private preview IDs by allocation identity, never by interpreting persisted IDs. */
+export function materializeClassificationBatchPlan(
+  plan: ClassificationBatchPlan,
+  generateId: () => string
+): { classifications: readonly ConsumptionClassification[]; items: ClassificationBatchItemPlan[] } {
+  const usedIds = new Set(plan.classifications.map((classification) => classification.id))
+  const generatedByAllocation = new Map<string, string>()
+  for (const item of plan.items) {
+    if (item.before !== null || item.after === null) continue
+    const key = targetKey(item.target)
+    if (generatedByAllocation.has(key)) continue
+    let id: string
+    do id = generateId()
+    while (usedIds.has(id))
+    usedIds.add(id)
+    generatedByAllocation.set(key, id)
+  }
+  const materialize = (classification: ConsumptionClassification) => {
+    const id = generatedByAllocation.get(
+      targetKey({
+        transactionId: classification.transaction_id,
+        splitId: classification.split_id,
+      })
+    )
+    return id ? { ...classification, id } : classification
+  }
+  return {
+    classifications: plan.classifications.map(materialize),
+    items: plan.items.map((item) => ({
+      ...item,
+      after: item.after ? materialize(item.after) : null,
+    })),
+  }
 }
 
 /**
@@ -188,6 +230,19 @@ export function planConsumptionClassificationBatch(input: {
   const protectedIds = new Set(input.protectedTransactionIds ?? [])
   const items: ClassificationBatchItemPlan[] = []
   const replacements = new Map<string, ConsumptionClassification>()
+  const usedPreviewIds = new Set(input.evidence.classifications.map((entry) => entry.id))
+  const previewIds = new Map<string, string>()
+  const previewId = (key: string): string => {
+    const existing = previewIds.get(key)
+    if (existing) return existing
+    const base = `__new__:${key}`
+    let candidate = base
+    let suffix = 1
+    while (usedPreviewIds.has(candidate)) candidate = `${base}:${suffix++}`
+    usedPreviewIds.add(candidate)
+    previewIds.set(key, candidate)
+    return candidate
+  }
   for (const target of input.targets) {
     const splitId = target.splitId ?? null
     const key = targetKey(target)
@@ -195,6 +250,23 @@ export function planConsumptionClassificationBatch(input: {
       input.evidence.classifications.find(
         (entry) => entry.transaction_id === target.transactionId && entry.split_id === splitId
       ) ?? null
+    const transaction = input.evidence.transactions.find(
+      (entry) => entry.id === target.transactionId
+    )
+    const split =
+      transaction && splitId
+        ? input.evidence.splits.find(
+            (entry) => entry.id === splitId && entry.transaction_id === transaction.id
+          )
+        : undefined
+    const normalizedCurrency = transaction?.currency?.trim().toUpperCase() || null
+    const source = transaction
+      ? {
+          transaction: { ...transaction },
+          split: split ? { ...split } : null,
+          currency: normalizedCurrency,
+        }
+      : null
     const errors: string[] = []
     if (!target.transactionId.trim()) errors.push('Transaction ID is required.')
     if (duplicateKeys.has(key)) errors.push('Duplicate allocation target in batch.')
@@ -231,7 +303,7 @@ export function planConsumptionClassificationBatch(input: {
     let amountCentavos: number | null = null
     if (role) {
       after = {
-        id: before?.id ?? `__new__:${key}`,
+        id: before?.id ?? previewId(key),
         transaction_id: target.transactionId,
         split_id: splitId,
         role,
@@ -294,6 +366,7 @@ export function planConsumptionClassificationBatch(input: {
       after,
       resolved,
       amountCentavos,
+      source,
       errors,
       changed,
     })

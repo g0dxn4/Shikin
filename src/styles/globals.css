@@ -159,8 +159,7 @@ html[data-appearance='native-light'] [class*='border-white/'] {
   border-color: var(--color-border) !important;
 }
 
-html[data-appearance='native-light'] [class*='bg-white/'],
-html[data-appearance='native-light'] [class*='bg-black/'] {
+html[data-appearance='native-light'] [class*='bg-white/'] {
   background-color: var(--color-muted) !important;
 }
 

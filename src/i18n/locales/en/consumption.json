@@ -112,5 +112,103 @@
     "categoryNative": "Native currencies; categories are not converted or combined.",
     "uncategorized": "Uncategorized",
     "loadError": "Couldn’t load net consumption"
+  },
+  "bulk": {
+    "title": "Classify transactions",
+    "description": "Choose allocations from the {{count}} transactions on the current visible page, then preview their exact effects.",
+    "candidates": {
+      "title": "Current-page allocations",
+      "scope": "This session is limited to these {{count}} visible transactions. Changing filters does not add hidden results.",
+      "split": "Split allocation {{number}}",
+      "splitId": "Split {{id}}",
+      "parent": "Transaction allocation",
+      "currentCustom": "Current: {{name}} · version {{version}}",
+      "currentBuiltin": "Current: {{name}}",
+      "unclassified": "Currently unclassified",
+      "loading": "Loading allocations…",
+      "empty": "There are no transactions on this visible page."
+    },
+    "selection": {
+      "count": "{{count}} / {{max}} selected"
+    },
+    "treatment": {
+      "title": "Treatments and references",
+      "setAll": "Set one treatment for all selected allocations",
+      "chooseForAll": "Choose a treatment to set for all",
+      "override": "Treatment for this allocation",
+      "choose": "Choose a treatment",
+      "purchase": "Confirmed purchase reference",
+      "choosePurchase": "Choose an existing confirmed purchase",
+      "builtins": "Built-in treatments",
+      "custom": "Custom types",
+      "version": "version {{version}}",
+      "loading": "Loading treatment catalog…"
+    },
+    "direction": {
+      "income": "Income",
+      "expense": "Expense"
+    },
+    "roles": {
+      "purchase": "Purchase",
+      "fee": "Fee",
+      "earned_income": "Earned income",
+      "refund": "Refund",
+      "internal_inflow": "Internal inflow",
+      "cash_withdrawal": "Cash withdrawal",
+      "principal": "Principal",
+      "other_income": "Other income",
+      "principal_recovery": "Principal recovery",
+      "asset_acquisition": "Asset acquisition"
+    },
+    "auditNote": {
+      "label": "Optional audit note",
+      "placeholder": "Why these classifications were reviewed"
+    },
+    "preview": {
+      "title": "Reviewed preview",
+      "applicable": "Applicable",
+      "invalid": "Needs changes",
+      "globalErrors": "Batch validation",
+      "noChanges": "No classifications would change. Nothing will be written.",
+      "unclassified": "Unclassified",
+      "unavailable": "Unavailable",
+      "unknownTransaction": "Unknown transaction",
+      "split": "split allocation",
+      "before": "Before",
+      "after": "After",
+      "customVersion": "{{name}} · version {{version}}",
+      "confirm": "I reviewed every allocation, treatment, reference, native-currency effect, and validation message in this preview."
+    },
+    "effects": {
+      "title": "Classification-only effect",
+      "statement": "This changes classification only. Balances, amounts, dates, categories, statuses, import and FX evidence, review and duplicate decisions, receivables, and holdings remain unchanged.",
+      "consumption": "Consumption",
+      "earnedIncome": "Earned income",
+      "otherIncome": "Other income",
+      "principalRecovery": "Principal recovery",
+      "assetAcquisition": "Asset acquisition"
+    },
+    "receipt": {
+      "title": "Classifications applied",
+      "applied": "{{count}} changed assignment IDs"
+    },
+    "errors": {
+      "contextTitle": "Couldn’t load transaction allocations",
+      "catalogTitle": "Couldn’t load treatment catalog",
+      "actionTitle": "Classification batch couldn’t continue",
+      "selectionRequired": "Select at least one explicit allocation.",
+      "treatmentRequired": "Choose a treatment for every selected allocation.",
+      "purchaseRequired": "Choose an existing confirmed purchase for every treatment that requires one."
+    },
+    "actions": {
+      "open": "Classify transactions",
+      "retry": "Try again",
+      "preview": "Preview exact changes",
+      "previewing": "Preparing preview…",
+      "apply": "Apply reviewed classifications",
+      "applying": "Applying…",
+      "cancel": "Cancel",
+      "done": "Done"
+    }
   }
 }

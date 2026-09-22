@@ -112,5 +112,103 @@
     "categoryNative": "Monedas nativas; las categorías no se convierten ni se combinan.",
     "uncategorized": "Sin categoría",
     "loadError": "No se pudo cargar el consumo neto"
+  },
+  "bulk": {
+    "title": "Clasificar transacciones",
+    "description": "Elige asignaciones de las {{count}} transacciones de la página visible actual y previsualiza sus efectos exactos.",
+    "candidates": {
+      "title": "Asignaciones de la página actual",
+      "scope": "Esta sesión se limita a estas {{count}} transacciones visibles. Cambiar filtros no añade resultados ocultos.",
+      "split": "Asignación dividida {{number}}",
+      "splitId": "División {{id}}",
+      "parent": "Asignación de la transacción",
+      "currentCustom": "Actual: {{name}} · versión {{version}}",
+      "currentBuiltin": "Actual: {{name}}",
+      "unclassified": "Actualmente sin clasificar",
+      "loading": "Cargando asignaciones…",
+      "empty": "No hay transacciones en esta página visible."
+    },
+    "selection": {
+      "count": "{{count}} / {{max}} seleccionadas"
+    },
+    "treatment": {
+      "title": "Tratamientos y referencias",
+      "setAll": "Establecer un tratamiento para todas las asignaciones seleccionadas",
+      "chooseForAll": "Elige un tratamiento para todas",
+      "override": "Tratamiento de esta asignación",
+      "choose": "Elige un tratamiento",
+      "purchase": "Referencia de compra confirmada",
+      "choosePurchase": "Elige una compra confirmada existente",
+      "builtins": "Tratamientos integrados",
+      "custom": "Tipos personalizados",
+      "version": "versión {{version}}",
+      "loading": "Cargando catálogo de tratamientos…"
+    },
+    "direction": {
+      "income": "Ingreso",
+      "expense": "Gasto"
+    },
+    "roles": {
+      "purchase": "Compra",
+      "fee": "Comisión",
+      "earned_income": "Ingreso ganado",
+      "refund": "Reembolso",
+      "internal_inflow": "Entrada interna",
+      "cash_withdrawal": "Retiro de efectivo",
+      "principal": "Principal",
+      "other_income": "Otros ingresos",
+      "principal_recovery": "Recuperación de principal",
+      "asset_acquisition": "Adquisición de activo"
+    },
+    "auditNote": {
+      "label": "Nota de auditoría opcional",
+      "placeholder": "Por qué se revisaron estas clasificaciones"
+    },
+    "preview": {
+      "title": "Vista previa revisada",
+      "applicable": "Aplicable",
+      "invalid": "Requiere cambios",
+      "globalErrors": "Validación del lote",
+      "noChanges": "Ninguna clasificación cambiaría. No se escribirá nada.",
+      "unclassified": "Sin clasificar",
+      "unavailable": "No disponible",
+      "unknownTransaction": "Transacción desconocida",
+      "split": "asignación dividida",
+      "before": "Antes",
+      "after": "Después",
+      "customVersion": "{{name}} · versión {{version}}",
+      "confirm": "He revisado cada asignación, tratamiento, referencia, efecto en moneda nativa y mensaje de validación de esta vista previa."
+    },
+    "effects": {
+      "title": "Efecto solo de clasificación",
+      "statement": "Esto solo cambia la clasificación. Los saldos, importes, fechas, categorías, estados, evidencia de importación y tipo de cambio, decisiones de revisión y duplicados, cuentas por cobrar y activos no cambian.",
+      "consumption": "Consumo",
+      "earnedIncome": "Ingreso ganado",
+      "otherIncome": "Otros ingresos",
+      "principalRecovery": "Recuperación de principal",
+      "assetAcquisition": "Adquisición de activo"
+    },
+    "receipt": {
+      "title": "Clasificaciones aplicadas",
+      "applied": "{{count}} identificadores de asignación modificados"
+    },
+    "errors": {
+      "contextTitle": "No se pudieron cargar las asignaciones de la transacción",
+      "catalogTitle": "No se pudo cargar el catálogo de tratamientos",
+      "actionTitle": "El lote de clasificación no pudo continuar",
+      "selectionRequired": "Selecciona al menos una asignación explícita.",
+      "treatmentRequired": "Elige un tratamiento para cada asignación seleccionada.",
+      "purchaseRequired": "Elige una compra confirmada existente para cada tratamiento que la requiera."
+    },
+    "actions": {
+      "open": "Clasificar transacciones",
+      "retry": "Intentar de nuevo",
+      "preview": "Previsualizar cambios exactos",
+      "previewing": "Preparando vista previa…",
+      "apply": "Aplicar clasificaciones revisadas",
+      "applying": "Aplicando…",
+      "cancel": "Cancelar",
+      "done": "Listo"
+    }
   }
 }

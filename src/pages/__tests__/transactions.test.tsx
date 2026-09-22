@@ -39,16 +39,31 @@ const mockFetchAccounts = vi.fn()
 const mockFetchCategories = vi.fn()
 const mockInvalidate = vi.fn()
 const mockUseQuery = vi.fn()
-const { mockReadConsumptionContext, mockSetConsumption, mockClearConsumption } = vi.hoisted(() => ({
+const {
+  mockReadConsumptionContext,
+  mockSetConsumption,
+  mockClearConsumption,
+  mockListClassificationTypes,
+  mockPreviewClassifications,
+  mockApplyClassifications,
+} = vi.hoisted(() => ({
   mockReadConsumptionContext: vi.fn(),
   mockSetConsumption: vi.fn(),
   mockClearConsumption: vi.fn(),
+  mockListClassificationTypes: vi.fn(),
+  mockPreviewClassifications: vi.fn(),
+  mockApplyClassifications: vi.fn(),
 }))
 
 vi.mock('@/lib/consumption-service', () => ({
   readConsumptionClassificationContext: mockReadConsumptionContext,
   setConsumptionClassification: mockSetConsumption,
   clearConsumptionClassification: mockClearConsumption,
+}))
+vi.mock('@/lib/classification-type-service', () => ({
+  listClassificationTypes: mockListClassificationTypes,
+  previewConsumptionClassifications: mockPreviewClassifications,
+  applyConsumptionClassifications: mockApplyClassifications,
 }))
 
 let accounts: unknown[] = []
@@ -161,6 +176,11 @@ describe('Transactions', () => {
       referenced_purchase_id: null,
     })
     mockClearConsumption.mockResolvedValue(true)
+    mockListClassificationTypes.mockResolvedValue({
+      definitions: [],
+      types: [],
+      revisions: [],
+    })
     setRows([])
     mockUseQuery.mockImplementation(() => pageResult)
   })
@@ -404,6 +424,31 @@ describe('Transactions', () => {
 
     await waitFor(() => expect(window.location.search).not.toContain('page=2'))
     expect(mockUseQuery).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1 }))
+  })
+
+  it('opens bulk classification for only the visible page and restores its toolbar opener focus', async () => {
+    setRows(
+      [
+        makeRow({ id: 'visible-one', description: 'Visible first row' }),
+        makeRow({ id: 'visible-two', description: 'Visible second row', currency: 'EUR' }),
+      ],
+      72
+    )
+    const user = userEvent.setup()
+    render(<Transactions />)
+
+    const opener = screen.getByRole('button', { name: 'bulk.actions.open' })
+    await user.click(opener)
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent('Visible first row')
+    expect(dialog).toHaveTextContent('Visible second row')
+    expect(dialog).not.toHaveTextContent('72 transactions')
+    expect(mockReadConsumptionContext).not.toHaveBeenCalled()
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(opener).toHaveFocus())
+    expect(window.location.search).toBe('')
+    expect(window.localStorage.getItem('shikin.transactions.view')).toBe('timeline')
   })
 
   it('keeps transaction details mounted under classification and restores its launcher focus', async () => {

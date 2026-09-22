@@ -52,6 +52,7 @@ import type { TransactionSplitWithCategory } from '@/types/database'
 import { StatementImportDialog } from '@/components/transactions/statement-import-dialog'
 import { LegacyImportIdentityAction } from '@/components/transactions/legacy-import-identity-dialog'
 import { ConsumptionClassificationDialog } from '@/components/transactions/consumption-classification-dialog'
+import { ConsumptionBulkDialog } from '@/components/transactions/consumption-bulk-dialog'
 import { TransactionFxEvidenceDetails } from '@/components/transactions/transaction-fx-evidence'
 import { useTransactionPageQuery } from '@/hooks/use-transaction-page-query'
 import {
@@ -324,6 +325,7 @@ export function Transactions() {
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [statementImportOpen, setStatementImportOpen] = useState(false)
+  const [bulkClassificationOpen, setBulkClassificationOpen] = useState(false)
   const [detailTransaction, setDetailTransaction] = useState<TransactionPageRow | null>(null)
   const [classificationTransactionId, setClassificationTransactionId] = useState<string | null>(
     null
@@ -557,6 +559,14 @@ export function Transactions() {
             <Button variant="outline" size="sm" onClick={() => setStatementImportOpen(true)}>
               {t('import.button')}
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pageQuery.isLoading || pageQuery.rows.length === 0}
+              onClick={() => setBulkClassificationOpen(true)}
+            >
+              {tConsumption('bulk.actions.open')}
+            </Button>
             <Button variant="outline" size="sm" onClick={() => openRecurringDialog()}>
               {t('recurring.addRule')}
             </Button>
@@ -754,6 +764,19 @@ export function Transactions() {
         transactionId={classificationTransactionId}
         open={!!classificationTransactionId}
         onOpenChange={(nextOpen) => !nextOpen && setClassificationTransactionId(null)}
+        onChanged={() => invalidateTransactionPage('review')}
+      />
+      <ConsumptionBulkDialog
+        open={bulkClassificationOpen}
+        candidates={pageQuery.rows.map((row) => ({
+          id: row.id,
+          description: row.description,
+          date: row.date,
+          currency: row.currency,
+          type: row.type,
+          amount: row.amount,
+        }))}
+        onOpenChange={setBulkClassificationOpen}
         onChanged={() => invalidateTransactionPage('review')}
       />
       <StatementImportDialog open={statementImportOpen} onOpenChange={setStatementImportOpen} />

@@ -7,6 +7,8 @@ import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   BACKEND_FOUNDATION_MIGRATION,
+  CLASSIFICATION_TYPES_MIGRATION,
+  CLASSIFICATION_TYPES_REVISION_TABLES,
   DATED_FX_MIGRATION,
   DATED_FX_REVISION_TABLES,
   FINANCIAL_REVISION_TABLES,
@@ -399,10 +401,17 @@ describe('021 backend remediation foundation', () => {
       "SELECT name, tbl_name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'trg_data_revision_%'"
     ) as Array<{ name: string; tbl_name: string }>
     expect(revisionTriggers).toHaveLength(
-      (FINANCIAL_REVISION_TABLES.length + DATED_FX_REVISION_TABLES.length) * 3
+      (FINANCIAL_REVISION_TABLES.length +
+        DATED_FX_REVISION_TABLES.length +
+        CLASSIFICATION_TYPES_REVISION_TABLES.length) *
+        3
     )
     expect(new Set(revisionTriggers.map((t) => t.tbl_name))).toEqual(
-      new Set([...FINANCIAL_REVISION_TABLES, ...DATED_FX_REVISION_TABLES])
+      new Set([
+        ...FINANCIAL_REVISION_TABLES,
+        ...DATED_FX_REVISION_TABLES,
+        ...CLASSIFICATION_TYPES_REVISION_TABLES,
+      ])
     )
     db.exec("INSERT INTO accounts (id, name, type) VALUES ('a', 'A', 'checking')")
     expect(state(db).data_revision).toBe(1)
@@ -483,7 +492,7 @@ describe('021 backend remediation foundation', () => {
     async (engine) => {
       const db = database()
       runHostedTestMigrations(db)
-      db.exec("INSERT INTO _migrations (id, name) VALUES (23, '023_future')")
+      db.exec("INSERT INTO _migrations (id, name) VALUES (24, '024_future')")
       const before = snapshot(db)
       if (engine === 'hosted') expect(() => runHostedTestMigrations(db)).toThrow(/newer/)
       else {
@@ -502,7 +511,7 @@ describe('CLI staged restore and read-only readiness', { timeout: 20_000 }, () =
     vi.resetModules()
     return import('./database.js')
   }
-  it.each([19, 20, 21, 22] as const)(
+  it.each([19, 20, 21, 22, 23] as const)(
     'upgrades a staged %i backup, never its source, before successful restore',
     async (version) => {
       const path = home()
@@ -519,8 +528,8 @@ describe('CLI staged restore and read-only readiness', { timeout: 20_000 }, () =
       expect(digest()).toBe(sourceDigest)
       await api.restoreDatabase({ sourcePath: source, dryRun: false })
       expect(digest()).toBe(sourceDigest)
-      expect(api.query('SELECT name FROM _migrations WHERE id = 22')).toEqual([
-        { name: DATED_FX_MIGRATION },
+      expect(api.query('SELECT name FROM _migrations WHERE id = 23')).toEqual([
+        { name: CLASSIFICATION_TYPES_MIGRATION },
       ])
       api.close()
       const restored = database(api.getDatabasePath())
@@ -564,18 +573,18 @@ describe('CLI staged restore and read-only readiness', { timeout: 20_000 }, () =
     api.close()
   })
 
-  it.each([19, 20, 21, 23] as const)(
+  it.each([19, 20, 21, 22, 24] as const)(
     'does not auto-migrate normal CLI reads for schema %i',
     async (version) => {
       const path = home()
       const api = await cli(path)
       mkdirSync(join(path, 'data', 'com.asf.shikin'), { recursive: true })
       const db = database(api.getDatabasePath())
-      runHostedTestMigrations(db, version === 23 ? 22 : version)
-      if (version === 23) db.exec("INSERT INTO _migrations (id, name) VALUES (23, '023_future')")
+      runHostedTestMigrations(db, version === 24 ? 23 : version)
+      if (version === 24) db.exec("INSERT INTO _migrations (id, name) VALUES (24, '024_future')")
       const before = snapshot(db)
       db.close()
-      expect(() => api.query('SELECT 1')).toThrow(version === 23 ? /newer/ : /not ready/)
+      expect(() => api.query('SELECT 1')).toThrow(version === 24 ? /newer/ : /not ready/)
       api.close()
       expect(snapshot(database(api.getDatabasePath()))).toEqual(before)
     }
@@ -613,7 +622,7 @@ describe('022 dated FX migration boundaries', () => {
     }
   )
 
-  it.each([19, 20, 21, 22] as const)(
+  it.each([19, 20, 21, 22, 23] as const)(
     'upgrades %i preserving USD denomination without inferred FX authority',
     (version) => {
       const db = database()
@@ -673,7 +682,7 @@ describe('022 dated FX migration boundaries', () => {
     const path = home()
     const source = join(path, 'fx.db')
     const backup = database(source)
-    runHostedTestMigrations(backup)
+    runHostedTestMigrations(backup, 22)
     backup.exec(`
       INSERT INTO settings(key,value) VALUES ('main_currency','MXN');
       INSERT INTO accounts(id,name,type) VALUES ('a','Cash','checking');
@@ -731,4 +740,261 @@ describe('022 dated FX migration boundaries', () => {
       }
     }
   )
+})
+
+/** A populated, self-referenced classification graph plus untouched source/FX evidence. */
+function classificationEvidence(db: Database.Database) {
+  legacyEvidence(db)
+  db.exec(`
+    INSERT INTO transactions(id,account_id,type,amount,description,date) VALUES
+      ('principal','cash','expense',100,'Principal','2025-01-03'),
+      ('split-parent','cash','expense',300,'Split purchase','2025-01-04');
+    INSERT INTO transaction_splits(id,transaction_id,category_id,amount) VALUES
+      ('split-one','split-parent','01FOOD000000000000000000000',100),
+      ('split-two','split-parent','01FOOD000000000000000000000',200);
+    INSERT INTO transaction_consumption_classifications(id,transaction_id,split_id,role,referenced_purchase_id,created_at,updated_at) VALUES
+      ('purchase','t1',NULL,'purchase',NULL,'original-created','original-updated'),
+      ('refund','t2',NULL,'refund','purchase','refund-created','refund-updated'),
+      ('principal-class','principal',NULL,'principal','purchase','principal-created','principal-updated'),
+      ('split-class-one','split-parent','split-one','purchase',NULL,'split-created','split-updated'),
+      ('split-class-two','split-parent','split-two','fee',NULL,'split-created','split-updated');
+    INSERT INTO source_coverage(id,account_id,source_namespace,period_start,period_end,status) VALUES
+      ('coverage','cash','synthetic','2025-01-01','2025-01-31','verified');
+    INSERT INTO manual_exchange_rates(id,from_currency,to_currency,rate_decimal,effective_from,created_at) VALUES
+      ('rate','USD','MXN','17','2025-01-01','original');
+    INSERT INTO manual_exchange_rates(id,from_currency,to_currency,rate_decimal,effective_from,supersedes_rate_id,created_at) VALUES
+      ('correction','USD','MXN','18','2025-01-01','rate','corrected');
+    INSERT INTO transaction_fx_evidence(id,transaction_id,original_transaction_id,original_account_id,transaction_type,status,ledger_treatment,input_amount_centavos,input_currency,account_amount_centavos,account_currency,account_balance_delta_centavos,transaction_date,rate_id,rate_decimal,created_at) VALUES
+      ('retained',NULL,'deleted','cash','expense','posted','normal',100,'USD',1700,'MXN',-1700,'2025-01-01','rate','17','retained'),
+      ('live-fx','t1','t1','cash','expense','posted','normal',500,'USD',500,'USD',-500,'2025-01-01',NULL,'1','accepted');
+  `)
+}
+function assertIntegrity(db: Database.Database) {
+  expect(db.pragma('foreign_keys', { simple: true })).toBe(1)
+  expect(db.pragma('defer_foreign_keys', { simple: true })).toBe(0)
+  expect(db.pragma('foreign_key_check')).toEqual([])
+  expect(db.pragma('integrity_check', { simple: true })).toBe('ok')
+}
+
+describe('023 classification foundation', () => {
+  it.each(['hosted', 'native'] as const)(
+    'preserves the populated purchase/refund/principal/split graph and exact financial digest (%s)',
+    async (engine) => {
+      const db = database()
+      runHostedTestMigrations(db, 22)
+      classificationEvidence(db)
+      const before = snapshot(db)
+      const digest = createHash('sha256').update(JSON.stringify(before)).digest('hex')
+      if (engine === 'hosted') runHostedTestMigrations(db)
+      else await (await mockNative(db)).api.getDb()
+      assertPreserved(db, before)
+      const projected = Object.fromEntries(
+        Object.entries(before).map(([table, data]) => [
+          table,
+          table === '_migrations'
+            ? data
+            : {
+                columns: data.columns,
+                rows: rows(db, `SELECT ${data.columns.join(',')} FROM ${table} ORDER BY rowid`),
+              },
+        ])
+      )
+      expect(createHash('sha256').update(JSON.stringify(projected)).digest('hex')).toBe(digest)
+      expect(
+        rows(db, 'SELECT DISTINCT type_revision_id FROM transaction_consumption_classifications')
+      ).toEqual([{ type_revision_id: null }])
+      expect(rows(db, 'SELECT * FROM classification_types')).toEqual([])
+      expect(rows(db, 'SELECT name FROM _migrations WHERE id = 23')).toEqual([
+        { name: CLASSIFICATION_TYPES_MIGRATION },
+      ])
+      assertIntegrity(db)
+    }
+  )
+
+  for (const engine of ['hosted', 'native'] as const) {
+    it.each([
+      'DROP TABLE transaction_consumption_classifications',
+      'ALTER TABLE classification_assignments_023',
+      'CREATE TRIGGER trg_classification_assignment_revision_insert',
+      'INSERT INTO _migrations (id, name) VALUES (23',
+    ])(`rolls back populated schema after failure at %s (${engine})`, async (failure) => {
+      const db = database()
+      runHostedTestMigrations(db, 22)
+      classificationEvidence(db)
+      const before = snapshot(db)
+      const schema = rows(db, 'SELECT * FROM sqlite_master ORDER BY name')
+      if (engine === 'hosted') {
+        const original = db.exec.bind(db)
+        vi.spyOn(db, 'exec').mockImplementation((sql) => {
+          if (sql.includes(failure)) throw new Error('injected migration failure')
+          return original(sql)
+        })
+        expect(() => runHostedTestMigrations(db)).toThrow('injected migration failure')
+      } else
+        await expect((await mockNative(db, failure)).api.getDb()).rejects.toThrow(
+          'injected migration failure'
+        )
+      expect(snapshot(db)).toEqual(before)
+      expect(rows(db, 'SELECT * FROM sqlite_master ORDER BY name')).toEqual(schema)
+      assertIntegrity(db)
+    })
+  }
+
+  it.each(['RESTRICT', 'CASCADE', 'SET NULL'])(
+    'rolls back unsupported external %s foreign-key extensions',
+    (action) => {
+      const db = database()
+      runHostedTestMigrations(db, 22)
+      classificationEvidence(db)
+      db.exec(
+        `CREATE TABLE extension (id TEXT REFERENCES transaction_consumption_classifications(id) ON DELETE ${action}); INSERT INTO extension VALUES ('purchase')`
+      )
+      const before = snapshot(db)
+      const schema = rows(db, 'SELECT * FROM sqlite_master ORDER BY name')
+      expect(() => runHostedTestMigrations(db)).toThrow(/external_references/)
+      expect(snapshot(db)).toEqual(before)
+      expect(rows(db, 'SELECT * FROM sqlite_master ORDER BY name')).toEqual(schema)
+      assertIntegrity(db)
+    }
+  )
+
+  it('protects custom revisions, head ownership, role matching and historical assignments after archive', () => {
+    const db = database()
+    runHostedTestMigrations(db)
+    legacyEvidence(db)
+    const before = state(db).data_revision
+    db.transaction(() => {
+      db.exec(
+        "INSERT INTO classification_types(id,current_revision_id) VALUES ('type','v1'); INSERT INTO classification_type_revisions(id,type_id,version,name,financial_treatment) VALUES ('v1','type',1,'Support','other_income')"
+      )
+    })()
+    expect(state(db).data_revision).toBe(before + 2)
+    const assign = db.prepare(
+      "INSERT INTO transaction_consumption_classifications(id,transaction_id,role,type_revision_id) VALUES ('custom','t2',?,?)"
+    )
+    expect(() => assign.run('earned_income', 'v1')).toThrow(/must match/)
+    expect(() => assign.run('other_income', 'missing')).toThrow(/must match/)
+    assign.run('other_income', 'v1')
+    db.transaction(() => {
+      db.exec(
+        "INSERT INTO classification_type_revisions(id,type_id,version,name,financial_treatment) VALUES ('v2','type',2,'New name and meaning','earned_income'); UPDATE classification_types SET current_revision_id = 'v2', archived = 1"
+      )
+    })()
+    expect(
+      rows(db, 'SELECT role,type_revision_id FROM transaction_consumption_classifications')
+    ).toEqual([{ role: 'other_income', type_revision_id: 'v1' }])
+    expect(
+      rows(db, "SELECT name,financial_treatment FROM classification_type_revisions WHERE id='v1'")
+    ).toEqual([{ name: 'Support', financial_treatment: 'other_income' }])
+    db.exec(
+      "UPDATE transaction_consumption_classifications SET updated_at = 'still-valid' WHERE id = 'custom'"
+    )
+    expect(() =>
+      db.exec(
+        "UPDATE transaction_consumption_classifications SET type_revision_id='v2',role='earned_income'"
+      )
+    ).toThrow(/Archived/)
+    for (const sql of [
+      "UPDATE classification_type_revisions SET name='Changed'",
+      'DELETE FROM classification_type_revisions',
+      "INSERT OR REPLACE INTO classification_type_revisions(id,type_id,version,name,financial_treatment) VALUES ('v1','type',1,'Replace','fee')",
+      'DELETE FROM classification_types',
+    ])
+      expect(() => db.exec(sql)).toThrow(/immutable|append-only|Archive/)
+    expect(() => db.exec("UPDATE classification_types SET current_revision_id='missing'")).toThrow(
+      /FOREIGN KEY/
+    )
+    expect(() =>
+      db.transaction(() => {
+        db.exec("INSERT INTO classification_types(id,current_revision_id) VALUES ('wrong','v1')")
+      })()
+    ).toThrow(/FOREIGN KEY/)
+    assertIntegrity(db)
+  })
+
+  it.each(['hosted', 'native'] as const)(
+    'rejects incomplete schema023 without repairing it (%s)',
+    async (engine) => {
+      const db = database()
+      runHostedTestMigrations(db)
+      db.exec('DROP TRIGGER trg_classification_revision_immutable_update')
+      const schema = rows(db, 'SELECT * FROM sqlite_master ORDER BY name')
+      if (engine === 'hosted')
+        expect(() => runHostedTestMigrations(db)).toThrow(/023 schema object/)
+      else await expect((await mockNative(db)).api.getDb()).rejects.toThrow(/023 schema object/)
+      expect(rows(db, 'SELECT * FROM sqlite_master ORDER BY name')).toEqual(schema)
+    }
+  )
+
+  it.each([22, 23] as const)(
+    'restores populated schema%i including links and immutable FX history without changing source',
+    async (version) => {
+      const path = home()
+      const source = join(path, 'classification.db')
+      const backup = database(source)
+      runHostedTestMigrations(backup, version)
+      classificationEvidence(backup)
+      if (version === 23)
+        backup.transaction(() => {
+          backup.exec(
+            "INSERT INTO classification_types(id,current_revision_id) VALUES ('type','v1'); INSERT INTO classification_type_revisions(id,type_id,version,name,financial_treatment) VALUES ('v1','type',1,'Supplies','purchase'); UPDATE transaction_consumption_classifications SET type_revision_id='v1' WHERE id='purchase'; UPDATE classification_types SET archived=1"
+          )
+        })()
+      const before = snapshot(backup)
+      backup.close()
+      const sourceBytes = readFileSync(source)
+      vi.stubEnv('HOME', path)
+      vi.stubEnv('XDG_DATA_HOME', join(path, 'data'))
+      vi.resetModules()
+      const api = await import('./database.js')
+      try {
+        await api.restoreDatabase({ sourcePath: source, dryRun: true })
+        await api.restoreDatabase({ sourcePath: source, dryRun: false })
+        expect(readFileSync(source)).toEqual(sourceBytes)
+        api.close()
+        const restored = database(api.getDatabasePath())
+        const { settings: _settings, app_data_state: _state, ...financialBefore } = before
+        assertPreserved(restored, financialBefore)
+        assertIntegrity(restored)
+      } finally {
+        api.close()
+      }
+    }
+  )
+
+  it('preserves source/live bytes and removes stage after late 023 restore failure', async () => {
+    const path = home()
+    vi.stubEnv('HOME', path)
+    vi.stubEnv('XDG_DATA_HOME', join(path, 'data'))
+    vi.resetModules()
+    const api = await import('./database.js')
+    mkdirSync(join(path, 'data', 'com.asf.shikin'), { recursive: true })
+    const live = database(api.getDatabasePath())
+    runHostedTestMigrations(live)
+    live.close()
+    const source = join(path, 'failure.db')
+    const backup = database(source)
+    runHostedTestMigrations(backup, 22)
+    classificationEvidence(backup)
+    backup.exec(
+      "CREATE TRIGGER inject_023 BEFORE INSERT ON _migrations WHEN NEW.id=23 BEGIN SELECT RAISE(ABORT,'late 023 failure'); END"
+    )
+    backup.close()
+    const sourceBytes = readFileSync(source)
+    const liveBytes = readFileSync(api.getDatabasePath())
+    try {
+      await expect(api.restoreDatabase({ sourcePath: source, dryRun: false })).rejects.toThrow(
+        'late 023 failure'
+      )
+      expect(readFileSync(source)).toEqual(sourceBytes)
+      expect(readFileSync(api.getDatabasePath())).toEqual(liveBytes)
+      expect(
+        readdirSync(join(path, 'data', 'com.asf.shikin')).some((name) =>
+          name.includes('restore-candidate')
+        )
+      ).toBe(false)
+    } finally {
+      api.close()
+    }
+  })
 })

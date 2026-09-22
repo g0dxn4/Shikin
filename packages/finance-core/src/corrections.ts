@@ -1,4 +1,14 @@
+import {
+  classificationContribution,
+  financialTreatment,
+  resolveClassificationTypeRevision,
+  type ClassificationContribution,
+  type ClassificationTypeRevision,
+  type ConsumptionRole,
+} from './classification-policy.js'
 import { normalizePostingStatus } from './ledger.js'
+
+export { consumptionRoles, type ConsumptionRole } from './classification-policy.js'
 
 /** Shared, side-effect-free correction and explicit consumption policy. Amounts are centavos. */
 export interface CorrectionTransaction {
@@ -29,27 +39,19 @@ export interface CorrectionSplit {
   amount: number
   category_id: string | null
 }
-export const consumptionRoles = [
-  'purchase',
-  'fee',
-  'earned_income',
-  'refund',
-  'internal_inflow',
-  'cash_withdrawal',
-  'principal',
-] as const
-export type ConsumptionRole = (typeof consumptionRoles)[number]
 export interface ConsumptionClassification {
   id: string
   transaction_id: string
   split_id: string | null
   role: ConsumptionRole
   referenced_purchase_id: string | null
+  type_revision_id?: string | null
 }
 export interface ConsumptionEvidence {
   transactions: readonly CorrectionTransaction[]
   splits: readonly CorrectionSplit[]
   classifications: readonly ConsumptionClassification[]
+  typeRevisions?: readonly ClassificationTypeRevision[]
 }
 export interface MetadataCorrection {
   description?: string
@@ -143,11 +145,8 @@ export function owningAllocation(
     !/^[A-Z]{3}$/.test(row.currency.trim().toUpperCase())
   )
     throw new Error('Owning amount must be a positive safe integer with known currency.')
-  const expense = ['purchase', 'fee', 'principal', 'cash_withdrawal'].includes(classification.role)
-  if (
-    !consumptionRoles.includes(classification.role) ||
-    row.type !== (expense ? 'expense' : 'income')
-  )
+  resolveClassificationTypeRevision(classification, evidence.typeRevisions)
+  if (row.type !== financialTreatment(classification.role).direction)
     throw new Error('Classification role does not match transaction direction.')
   return {
     row,
@@ -170,7 +169,7 @@ export function validateConsumptionClassification(
     )
   )
     throw new Error('Allocation already classified.')
-  const needsPurchase = item.role === 'refund' || item.role === 'principal'
+  const needsPurchase = financialTreatment(item.role).requiresPurchase
   if (!needsPurchase) {
     if (item.referenced_purchase_id)
       throw new Error('Only refunds and principal may reference a purchase.')
@@ -383,10 +382,7 @@ export function netConsumption(evidence: ConsumptionEvidence, start: string, end
       )
     })
     .map((item) => item.id)
-  const totals = new Map<
-    string,
-    { currency: string; consumptionCentavos: number; earnedIncomeCentavos: number }
-  >()
+  const totals = new Map<string, { currency: string } & ClassificationContribution>()
   const categories = new Map<
     string,
     { currency: string; categoryId: string | null; amountCentavos: number }
@@ -407,28 +403,24 @@ export function netConsumption(evidence: ConsumptionEvidence, start: string, end
         validateConsumptionClassification(item, evidence)
         const owner = owningAllocation(item, evidence)
         let categoryId = owner.categoryId
-        let consumption = ['purchase', 'fee'].includes(item.role) ? owner.amount : 0
+        const contribution = classificationContribution(item.role, owner.amount)
+        const consumption = contribution.consumptionCentavos
         if (item.role === 'refund') {
           const purchase = evidence.classifications.find(
             (entry) => entry.id === item.referenced_purchase_id
           )!
           categoryId = owningAllocation(purchase, evidence).categoryId
-          consumption = -owner.amount
         }
         const total = {
           ...(totals.get(owner.currency) ?? {
             currency: owner.currency,
-            consumptionCentavos: 0,
-            earnedIncomeCentavos: 0,
+            ...classificationContribution(item.role, 0),
           }),
         }
-        total.consumptionCentavos += consumption
-        if (item.role === 'earned_income') total.earnedIncomeCentavos += owner.amount
-        if (
-          !Number.isSafeInteger(total.consumptionCentavos) ||
-          !Number.isSafeInteger(total.earnedIncomeCentavos)
-        )
-          throw new Error('Unsafe aggregate')
+        for (const field of Object.keys(contribution) as (keyof ClassificationContribution)[]) {
+          total[field] += contribution[field]
+          if (!Number.isSafeInteger(total[field])) throw new Error('Unsafe aggregate')
+        }
         if (consumption !== 0) {
           const key = JSON.stringify([owner.currency, categoryId])
           const category = {

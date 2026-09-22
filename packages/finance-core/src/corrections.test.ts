@@ -66,7 +66,13 @@ describe('shared correction policy', () => {
     'enforces direction and purchase references for %s',
     (role: ConsumptionRole) => {
       const data = evidence()
-      const expense = ['purchase', 'fee', 'principal', 'cash_withdrawal'].includes(role)
+      const expense = [
+        'purchase',
+        'fee',
+        'principal',
+        'cash_withdrawal',
+        'asset_acquisition',
+      ].includes(role)
       const item = {
         id: 'c',
         transaction_id: expense ? 'principal' : 'refund',

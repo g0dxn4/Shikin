@@ -345,3 +345,85 @@ describe('payment evidence policy', () => {
     ).toThrow()
   })
 })
+
+describe('classification extensions do not grant repayment capacity', () => {
+  it.each(['other_income', 'principal_recovery', 'asset_acquisition'] as const)(
+    'excludes %s while retaining unclassified split capacity',
+    (role) => {
+      const income = role !== 'asset_acquisition'
+      const data = evidence(
+        [
+          row({
+            type: income ? 'income' : 'expense',
+            account_id: income ? 'card' : 'bank',
+            transfer_to_account_id: null,
+          }),
+        ],
+        {
+          splits: [
+            { id: 'excluded', transaction_id: 'payment', amount: 700, category_id: null },
+            { id: 'repayment', transaction_id: 'payment', amount: 300, category_id: null },
+          ],
+          classifications: [
+            {
+              id: 'c',
+              transaction_id: 'payment',
+              split_id: 'excluded',
+              role,
+              referenced_purchase_id: null,
+            },
+          ],
+        }
+      )
+      const resolve = () =>
+        resolvePaymentEvidence({
+          transactionId: 'payment',
+          cardAccountId: 'card',
+          explicitRepaymentConfirmation: true,
+          evidence: data,
+        })
+      expect(resolve().capacity).toBe(300)
+      data.classifications = data.classifications.map((c) => ({ ...c, type_revision_id: 'v1' }))
+      expect(resolve).toThrow(/revision is missing/)
+      data.typeRevisions = [
+        {
+          id: 'v1',
+          type_id: 'type',
+          version: 1,
+          name: 'Custom',
+          financial_treatment: role,
+          created_at: '2026-01-01',
+        },
+      ]
+      expect(resolve().capacity).toBe(300)
+      data.typeRevisions = [{ ...data.typeRevisions[0]!, financial_treatment: 'earned_income' }]
+      expect(resolve).toThrow(/must match/)
+    }
+  )
+  it.each(['earned_income', 'internal_inflow'] as const)(
+    'preserves existing %s income capacity',
+    (role) => {
+      expect(
+        resolvePaymentEvidence({
+          transactionId: 'payment',
+          cardAccountId: 'card',
+          explicitRepaymentConfirmation: true,
+          evidence: evidence(
+            [row({ type: 'income', account_id: 'card', transfer_to_account_id: null })],
+            {
+              classifications: [
+                {
+                  id: 'c',
+                  transaction_id: 'payment',
+                  split_id: null,
+                  role,
+                  referenced_purchase_id: null,
+                },
+              ],
+            }
+          ),
+        }).capacity
+      ).toBe(1000)
+    }
+  )
+})

@@ -1,4 +1,8 @@
 import {
+  CLASSIFICATION_TYPES_MIGRATION,
+  CLASSIFICATION_TYPES_SCHEMA,
+  classificationTypesStatements,
+  assertClassificationTypesReady,
   DATED_FX_MIGRATION,
   DATED_FX_SCHEMA,
   datedFxStatements,
@@ -235,6 +239,7 @@ const CURRENT_SHIKIN_MIGRATIONS = [
   '020_quote_recurrence_import_identity',
   BACKEND_FOUNDATION_MIGRATION,
   DATED_FX_MIGRATION,
+  CLASSIFICATION_TYPES_MIGRATION,
 ] as const
 
 const CURRENT_SHIKIN_SCHEMA: Record<string, readonly string[]> = {
@@ -752,6 +757,18 @@ async function validateTauriCurrentDatabase(db: TauriDatabase): Promise<void> {
       (column) => column.name
     )
   }
+  const classificationColumns: Record<string, string[]> = {}
+  for (const table of Object.keys(CLASSIFICATION_TYPES_SCHEMA)) {
+    classificationColumns[table] = (
+      await db.select<{ name: string }[]>(`PRAGMA table_info(${table})`)
+    ).map((column) => column.name)
+  }
+  assertClassificationTypesReady(
+    classificationColumns,
+    await db.select<{ name: string; sql: string | null }[]>(
+      "SELECT name, sql FROM sqlite_master WHERE type IN ('table', 'index', 'trigger')"
+    )
+  )
   assertDatedFxReady(
     fxColumns,
     await db.select<{ name: string; sql: string | null }[]>(
@@ -792,7 +809,7 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
     ? await db.select<{ id: number; name: string }[]>('SELECT id, name FROM _migrations')
     : []
   assertSupportedSchemaVersion(rows)
-  if (rows.some((row) => row.name === DATED_FX_MIGRATION)) {
+  if (rows.some((row) => row.name === CLASSIFICATION_TYPES_MIGRATION)) {
     await validateTauriCurrentDatabase(db)
     return
   }
@@ -830,7 +847,7 @@ async function runTauriMigrationsOnConnection(
   const rows = await db.select<{ id: number; name: string }[]>('SELECT id, name FROM _migrations')
   assertSupportedSchemaVersion(rows)
   const applied = new Set(rows.map((r) => r.name))
-  if (applied.has(DATED_FX_MIGRATION)) {
+  if (applied.has(CLASSIFICATION_TYPES_MIGRATION)) {
     await validateTauriCurrentDatabase(db)
     return
   }
@@ -1651,6 +1668,9 @@ async function runTauriBackendFoundationUpgrade(
         )
       }
       for (const statement of datedFxStatements(columns)) await tx.execute(statement)
+    }
+    if (!migrations.some((row) => row.name === CLASSIFICATION_TYPES_MIGRATION)) {
+      for (const statement of classificationTypesStatements()) await tx.execute(statement)
     }
     await validateTauriCurrentDatabase({
       select: async <T>(sql: string, params?: unknown[]) => tx.query(sql, params) as Promise<T>,

@@ -550,6 +550,16 @@ const EXPORT_TABLES: ExportTableSpec[] = [
     orderBy: 'instrument_key ASC, quote_date ASC, id ASC',
   },
   {
+    name: 'classification_types',
+    columns: ['id', 'current_revision_id', 'archived', 'created_at', 'updated_at'],
+    orderBy: 'id ASC',
+  },
+  {
+    name: 'classification_type_revisions',
+    columns: ['id', 'type_id', 'version', 'name', 'financial_treatment', 'created_at'],
+    orderBy: 'type_id ASC, version ASC, id ASC',
+  },
+  {
     name: 'transaction_consumption_classifications',
     columns: [
       'id',
@@ -557,6 +567,7 @@ const EXPORT_TABLES: ExportTableSpec[] = [
       'split_id',
       'role',
       'referenced_purchase_id',
+      'type_revision_id',
       'created_at',
       'updated_at',
     ],
@@ -708,6 +719,8 @@ const OPTIONAL_EXPORT_TABLES = new Set([
   'credit_card_statements',
   'instrument_prices',
   'transaction_consumption_classifications',
+  'classification_types',
+  'classification_type_revisions',
   'source_coverage',
   'reconciliation_corrections',
   'transfer_match_provenance',

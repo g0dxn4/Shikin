@@ -19,3 +19,6 @@ export {
 export * from './fx.js'
 export * from './transaction-fx.js'
 export * from './022_dated_fx.js'
+
+export * from './classification-policy.js'
+export * from './023_classification_types.js'

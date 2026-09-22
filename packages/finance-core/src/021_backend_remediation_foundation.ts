@@ -1,5 +1,3 @@
-import { DATED_FX_VERSION } from './022_dated_fx.js'
-
 /** Versioned, complete SQLite statements. Never split these on semicolons (triggers).
  * Callers must check the migration marker and execute the entire list, including
  * the marker, inside one real transaction. No domain evidence is inferred here.
@@ -308,14 +306,10 @@ export function backendFoundationStatements(
   return statements
 }
 
-/** Only protects callers shipping this check; it cannot protect older binaries. */
+/** Current supported version is 023. Keep historical 021 SQL above unchanged.
+ * Only protects callers shipping this check; it cannot protect older binaries. */
 export function assertSupportedSchemaVersion(rows: readonly { id?: number; name: string }[]): void {
-  if (
-    rows.some(
-      (row) =>
-        Number(row.id ?? 0) > DATED_FX_VERSION || Number.parseInt(row.name, 10) > DATED_FX_VERSION
-    )
-  ) {
+  if (rows.some((row) => Number(row.id ?? 0) > 23 || Number.parseInt(row.name, 10) > 23)) {
     throw new Error(
       'Database schema is newer than this application supports. Upgrade the app, CLI and MCP together.'
     )

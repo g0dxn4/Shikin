@@ -121,3 +121,62 @@ describe('export-data import provenance redaction', () => {
     })
   })
 })
+
+it('exports deterministic custom roots, immutable revisions and pinned assignment identity', async () => {
+  const root = {
+    id: 'type',
+    current_revision_id: 'v2',
+    archived: 1,
+    created_at: 'original',
+    updated_at: 'archived',
+  }
+  const revisions = [
+    {
+      id: 'v1',
+      type_id: 'type',
+      version: 1,
+      name: 'Support',
+      financial_treatment: 'other_income',
+      created_at: 'original',
+    },
+    {
+      id: 'v2',
+      type_id: 'type',
+      version: 2,
+      name: 'New meaning',
+      financial_treatment: 'earned_income',
+      created_at: 'later',
+    },
+  ]
+  const assignment = {
+    id: 'c',
+    transaction_id: 't',
+    split_id: null,
+    role: 'other_income',
+    referenced_purchase_id: null,
+    type_revision_id: 'v1',
+    created_at: 'original',
+    updated_at: 'original',
+  }
+  mockQuery.mockImplementation((sql?: string) => {
+    if (sql?.includes('FROM classification_types ')) {
+      expect(sql).toContain('ORDER BY id ASC')
+      return [root]
+    }
+    if (sql?.includes('FROM classification_type_revisions ')) {
+      expect(sql).toContain('ORDER BY type_id ASC, version ASC, id ASC')
+      return revisions
+    }
+    if (sql?.includes('FROM transaction_consumption_classifications ')) {
+      expect(sql).toContain('type_revision_id')
+      return [assignment]
+    }
+    return []
+  })
+  const exported = await exportData.execute(
+    exportData.schema.parse({ format: 'json', redacted: false })
+  )
+  expect(exported.data.classification_types).toEqual([root])
+  expect(exported.data.classification_type_revisions).toEqual(revisions)
+  expect(exported.data.transaction_consumption_classifications).toEqual([assignment])
+})

@@ -24,6 +24,7 @@ export function applyBackendFoundationTestSchema(db: Database.Database): void {
       ])
     )
     for (const statement of foundation.datedFxStatements(fxColumns)) db.exec(statement)
+    for (const statement of foundation.classificationTypesStatements()) db.exec(statement)
   }).immediate()
 }
 
@@ -32,7 +33,7 @@ export function applyBackendFoundationTestSchema(db: Database.Database): void {
  */
 export function runHostedTestMigrations(
   db: Database.Database,
-  through: 19 | 20 | 21 | 22 = 22
+  through: 19 | 20 | 21 | 22 | 23 = 23
 ): void {
   const source = readFileSync(new URL('../../scripts/data-server.mjs', import.meta.url), 'utf8')
   let migrations = source.slice(
@@ -54,6 +55,15 @@ export function runHostedTestMigrations(
       .replace('  DATED_FX_MIGRATION,\n', '')
       .replace(/ {2}assertDatedFxReady\([\s\S]*?\n {2}\)/, '')
       .replace('if (!migrations.some((row) => row.name === DATED_FX_MIGRATION))', 'if (false)')
+  }
+  if (through <= 22) {
+    migrations = migrations
+      .replace('  CLASSIFICATION_TYPES_MIGRATION,\n', '')
+      .replace(/ {2}assertClassificationTypesReady\([\s\S]*?\n {2}\)/, '')
+      .replace(
+        'if (!migrations.some((row) => row.name === CLASSIFICATION_TYPES_MIGRATION))',
+        'if (false)'
+      )
   }
   runInNewContext(`${migrations}\nrunMigrations()`, { db, ...foundation, console: { log() {} } })
 }

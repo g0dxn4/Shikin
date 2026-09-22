@@ -1,3 +1,4 @@
+import type { ClassificationTypeRevision } from './classification-policy.js'
 import {
   owningAllocation,
   validateConsumptionClassification,
@@ -28,6 +29,7 @@ export interface PaymentEvidence {
   accounts: readonly PaymentAccount[]
   transactions: readonly PaymentTransaction[]
   splits: readonly CorrectionSplit[]
+  typeRevisions?: readonly ClassificationTypeRevision[]
   classifications: readonly ConsumptionClassification[]
   activeLinks: readonly ActivePaymentLink[]
 }
@@ -238,10 +240,12 @@ function ordinaryCapacity(
       validateConsumptionClassification(classification, classificationEvidence)
     }
     const excluded =
-      (row.type === 'income' && classification?.role === 'refund') ||
+      (row.type === 'income' &&
+        classification !== undefined &&
+        ['refund', 'other_income', 'principal_recovery'].includes(classification.role)) ||
       (row.type === 'expense' &&
         classification !== undefined &&
-        ['purchase', 'fee', 'cash_withdrawal'].includes(classification.role))
+        ['purchase', 'fee', 'cash_withdrawal', 'asset_acquisition'].includes(classification.role))
     if (!excluded) capacity = safeAdd(capacity, amount, 'Eligible payment capacity')
   }
   if (capacity <= 0) throw new Error('Transaction has no eligible repayment allocation capacity.')

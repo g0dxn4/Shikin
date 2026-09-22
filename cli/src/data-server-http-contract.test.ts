@@ -1201,7 +1201,7 @@ Database.prototype.backup = async function (destinationPath, ...args) {
         expect(restoredDb.pragma('integrity_check', { simple: true })).toBe('ok')
         expect(
           restoredDb.prepare('SELECT name FROM _migrations ORDER BY id DESC LIMIT 1').get()
-        ).toEqual({ name: '022_dated_fx' })
+        ).toEqual({ name: '023_classification_types' })
         expect(
           restoredDb.prepare('SELECT id, balance FROM accounts WHERE id = ?').get(restoredAccountId)
         ).toEqual({
@@ -1233,7 +1233,7 @@ describe('dated FX browser restore boundary', () => {
     expect(result.status).toBe(200)
     return result.json()
   }
-  it.each([19, 20, 21, 22] as const)(
+  it.each([19, 20, 21, 22, 23] as const)(
     'restores schema%i with empty legacy authority or exact schema22 FX snapshots',
     async (version) => {
       const fixture = new Database(':memory:')
@@ -1243,7 +1243,7 @@ describe('dated FX browser restore boundary', () => {
         fixture.exec(
           "INSERT INTO accounts(id,name,type,balance) VALUES ('fx-account','Synthetic','checking',12345)"
         )
-        if (version === 22)
+        if (version >= 22)
           fixture.exec(`
         INSERT INTO settings(key,value) VALUES ('main_currency','MXN');
         INSERT INTO manual_exchange_rates(id,from_currency,to_currency,rate_decimal,effective_from,created_at) VALUES ('fx-rate','USD','MXN','17','2025-09-01','2025-09-01T00:00:00Z');
@@ -1256,15 +1256,15 @@ describe('dated FX browser restore boundary', () => {
           body: fixture.serialize(),
         })
         expect(response.status, await response.text()).toBe(200)
-        expect(await readRows('SELECT name FROM _migrations WHERE id = 22')).toEqual([
-          { name: '022_dated_fx' },
+        expect(await readRows('SELECT name FROM _migrations WHERE id = 23')).toEqual([
+          { name: '023_classification_types' },
         ])
         expect(await readRows("SELECT value FROM settings WHERE key = 'main_currency'")).toEqual(
-          version === 22 ? [{ value: 'MXN' }] : []
+          version >= 22 ? [{ value: 'MXN' }] : []
         )
         for (const table of ['manual_exchange_rates', 'transaction_fx_evidence'])
           expect(await readRows(`SELECT * FROM ${table}`)).toEqual(
-            version === 22 ? fixture.prepare(`SELECT * FROM ${table}`).all() : []
+            version >= 22 ? fixture.prepare(`SELECT * FROM ${table}`).all() : []
           )
         const exported = await fetch(`${SERVER_URL}/api/db/export`, { headers })
         expect(exported.status).toBe(200)
@@ -1287,7 +1287,7 @@ describe('dated FX browser restore boundary', () => {
       }
     }
   )
-  it.each([19, 20, 21, 23] as const)(
+  it.each([19, 20, 21, 24] as const)(
     'restores original live data when schema%i import fails or is future',
     async (version) => {
       const before = await readRows('SELECT * FROM app_data_state')
@@ -1297,9 +1297,9 @@ describe('dated FX browser restore boundary', () => {
       const evidence = await readRows('SELECT * FROM transaction_fx_evidence')
       const fixture = new Database(':memory:')
       try {
-        runHostedTestMigrations(fixture, version === 23 ? 22 : version)
-        if (version === 23)
-          fixture.exec("INSERT INTO _migrations(id,name) VALUES (23,'023_future')")
+        runHostedTestMigrations(fixture, version === 24 ? 23 : version)
+        if (version === 24)
+          fixture.exec("INSERT INTO _migrations(id,name) VALUES (24,'024_future')")
         else fixture.exec('CREATE TABLE manual_exchange_rates (incompatible TEXT)')
         const response = await fetch(`${SERVER_URL}/api/db/import`, {
           method: 'POST',

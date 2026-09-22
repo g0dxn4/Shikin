@@ -22,6 +22,10 @@ import { ulid } from 'ulidx'
 import {
   advanceAnchoredRecurrence,
   advanceLegacyRecurrence,
+  CLASSIFICATION_TYPES_MIGRATION,
+  CLASSIFICATION_TYPES_SCHEMA,
+  classificationTypesStatements,
+  assertClassificationTypesReady,
   DATED_FX_MIGRATION,
   DATED_FX_SCHEMA,
   datedFxStatements,
@@ -411,6 +415,7 @@ const CURRENT_SHIKIN_MIGRATIONS = [
   '020_quote_recurrence_import_identity',
   BACKEND_FOUNDATION_MIGRATION,
   DATED_FX_MIGRATION,
+  CLASSIFICATION_TYPES_MIGRATION,
 ]
 
 const CURRENT_SHIKIN_SCHEMA = {
@@ -779,6 +784,20 @@ function validateCurrentDatabase() {
 
   const migrationRows = db.prepare('SELECT id, name FROM _migrations').all()
   assertSupportedSchemaVersion(migrationRows)
+  assertClassificationTypesReady(
+    Object.fromEntries(
+      Object.keys(CLASSIFICATION_TYPES_SCHEMA).map((table) => [
+        table,
+        db
+          .prepare(`PRAGMA table_info(${table})`)
+          .all()
+          .map((column) => column.name),
+      ])
+    ),
+    db
+      .prepare("SELECT name, sql FROM sqlite_master WHERE type IN ('table', 'index', 'trigger')")
+      .all()
+  )
   assertDatedFxReady(
     Object.fromEntries(
       Object.keys(DATED_FX_SCHEMA).map((table) => [
@@ -846,7 +865,7 @@ function runMigrationsOnConnection() {
   )
 
   assertSupportedSchemaVersion(db.prepare('SELECT id, name FROM _migrations').all())
-  if (applied.has(DATED_FX_MIGRATION)) {
+  if (applied.has(CLASSIFICATION_TYPES_MIGRATION)) {
     validateCurrentDatabase()
     return
   }
@@ -1720,6 +1739,9 @@ function runBackendFoundationUpgrade(applied) {
         ])
       )
       for (const statement of datedFxStatements(columns)) db.exec(statement)
+    }
+    if (!migrations.some((row) => row.name === CLASSIFICATION_TYPES_MIGRATION)) {
+      for (const statement of classificationTypesStatements()) db.exec(statement)
     }
     validateCurrentDatabase()
   }).immediate()

@@ -36,15 +36,15 @@ export function OverviewCategories({
 
   return (
     <NativePanel className="p-5 sm:p-6" aria-labelledby="overview-categories-heading">
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
           <h2 id="overview-categories-heading" className="text-base font-semibold">
             {t('overview.spendingByCategory')}
           </h2>
           <p className="text-muted-foreground mt-1 text-xs">{t('overview.categoryHint')}</p>
         </div>
-        <div className="text-right">
-          <p className="text-[17px] font-semibold tabular-nums">
+        <div className="max-w-full min-w-0 text-right">
+          <p className="text-[17px] font-semibold [overflow-wrap:anywhere] tabular-nums">
             {unavailable ? '—' : formatMoney(total, displayCurrency)}
           </p>
           <p className="text-muted-foreground mt-0.5 text-[11px]">{comparisonLabel}</p>
@@ -73,10 +73,10 @@ export function OverviewCategories({
               <Link
                 key={item.categoryId}
                 to={href}
-                className="hover:bg-muted focus-visible:ring-ring grid min-h-9 grid-cols-[minmax(92px,140px)_minmax(100px,1fr)_86px] items-center gap-3 rounded-md px-1 text-left focus-visible:ring-2 focus-visible:outline-none"
+                className="hover:bg-muted focus-visible:ring-ring grid min-h-11 min-w-0 grid-cols-2 items-center gap-x-3 gap-y-1 rounded-md px-1 py-1 text-left focus-visible:ring-2 focus-visible:outline-none sm:min-h-9 sm:grid-cols-[minmax(0,140px)_minmax(0,1fr)_minmax(0,110px)] sm:gap-3"
               >
                 <span className="truncate text-sm">{item.name}</span>
-                <span className="bg-muted h-1.5 overflow-hidden rounded-full">
+                <span className="bg-muted order-3 col-span-2 h-1.5 overflow-hidden rounded-full sm:order-none sm:col-span-1">
                   <span
                     className="block h-full rounded-full"
                     style={{
@@ -85,7 +85,7 @@ export function OverviewCategories({
                     }}
                   />
                 </span>
-                <span className="text-right text-sm tabular-nums">
+                <span className="min-w-0 text-right text-sm [overflow-wrap:anywhere] tabular-nums">
                   {formatMoney(item.amount, displayCurrency)}
                 </span>
               </Link>

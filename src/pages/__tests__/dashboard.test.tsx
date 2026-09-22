@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import dayjs from 'dayjs'
+import type { DatedExchangeRate } from '@shikin/finance-core/fx'
 import { Dashboard } from '../dashboard'
 
 // ResizeObserver polyfill for jsdom
@@ -13,14 +14,19 @@ globalThis.ResizeObserver = class {
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, options?: { currencies?: string; details?: string; count?: number }) =>
+    t: (
+      key: string,
+      options?: { currencies?: string; details?: string; message?: string; count?: number }
+    ) =>
       options?.currencies
         ? `${key}: ${options.currencies}`
         : options?.details
           ? `${key}: ${options.details}`
-          : typeof options?.count === 'number'
-            ? `${key}: ${options.count}`
-            : key,
+          : options?.message
+            ? `${key}: ${options.message}`
+            : typeof options?.count === 'number'
+              ? `${key}: ${options.count}`
+              : key,
     i18n: { language: 'en', changeLanguage: vi.fn() },
   }),
 }))
@@ -58,31 +64,54 @@ let mockNetWorthMissingCurrencies: string[] = []
 let mockNetWorthUnresolvedAccountIds: string[] = []
 let mockNetWorthIncompleteHoldingIds: string[] = []
 let mockNetWorthLoading = false
-let mockPreferredCurrency = 'USD'
-let mockRates: Record<string, number> = {}
-let mockInvalidRates: Array<{ fromCurrency: string; toCurrency: string; rate: string }> = []
-const mockConvertToPreferred = vi.fn((amount: number, currency: string) => {
-  const normalized = currency.toUpperCase()
-  if (normalized === mockPreferredCurrency) {
+let mockNetWorthHistoryComplete = true
+let mockMainCurrency: string | null = 'USD'
+let mockManualRates: DatedExchangeRate[] = []
+
+function makeRate(fromCurrency: string, toCurrency: string, rateDecimal: string) {
+  return {
+    id: `${fromCurrency}-${toCurrency}-${rateDecimal}`,
+    fromCurrency,
+    toCurrency,
+    rateDecimal,
+    effectiveFrom: '2000-01-01',
+    supersedesRateId: null,
+    createdAt: '2000-01-01T00:00:00.000Z',
+    sourceNote: null,
+  } satisfies DatedExchangeRate
+}
+
+const mockConvertHistoricalToPreferred = vi.fn((amount: number, currency: string) => {
+  if (!mockMainCurrency) {
+    return {
+      complete: false as const,
+      preferredCurrency: 'USD',
+      missingCurrencies: [] as string[],
+      reason: 'main_currency_unconfigured' as const,
+    }
+  }
+  if (currency === mockMainCurrency) {
     return {
       complete: true as const,
-      preferredCurrency: mockPreferredCurrency,
+      preferredCurrency: mockMainCurrency,
       amountCentavos: amount,
       missingCurrencies: [] as const,
     }
   }
-  const rate = mockRates[`${normalized}:${mockPreferredCurrency}`]
+  const rate = mockManualRates.find(
+    (item) => item.fromCurrency === currency && item.toCurrency === mockMainCurrency
+  )
   return rate
     ? {
         complete: true as const,
-        preferredCurrency: mockPreferredCurrency,
-        amountCentavos: Math.round(amount * rate),
+        preferredCurrency: mockMainCurrency,
+        amountCentavos: Math.round(amount * Number(rate.rateDecimal)),
         missingCurrencies: [] as const,
       }
     : {
         complete: false as const,
-        preferredCurrency: mockPreferredCurrency,
-        missingCurrencies: [normalized],
+        preferredCurrency: mockMainCurrency,
+        missingCurrencies: [currency],
         reason: 'missing_exchange_rates' as const,
       }
 })
@@ -96,6 +125,7 @@ vi.mock('@/stores/ui-store', () => ({
 let mockAccounts: unknown[] = []
 let mockInvestments: unknown[] = []
 let mockTransactions: unknown[] = []
+let mockGoals: unknown[] = []
 let mockAccountError: string | null = null
 let mockTransactionError: string | null = null
 let mockGoalError: string | null = null
@@ -130,21 +160,24 @@ vi.mock('@/stores/transaction-store', () => ({
 
 vi.mock('@/stores/goal-store', () => ({
   useGoalStore: () => ({
-    goals: [],
+    goals: mockGoals,
     fetchError: mockGoalError,
     fetch: mockFetchGoals,
   }),
 }))
 
 vi.mock('@/stores/currency-store', () => ({
-  useCurrencyStore: () => ({
-    preferredCurrency: mockPreferredCurrency,
-    error: mockCurrencyError,
-    rates: mockRates,
-    invalidRates: mockInvalidRates,
-    loadRates: mockLoadRates,
-    convertToPreferred: mockConvertToPreferred,
-  }),
+  useCurrencyStore: (selector?: (state: Record<string, unknown>) => unknown) => {
+    const state = {
+      mainCurrency: mockMainCurrency,
+      preferredCurrency: mockMainCurrency ?? 'USD',
+      manualRates: mockManualRates,
+      error: mockCurrencyError,
+      loadRates: mockLoadRates,
+      convertHistoricalToPreferred: mockConvertHistoricalToPreferred,
+    }
+    return selector ? selector(state) : state
+  },
 }))
 
 vi.mock('@/stores/achievement-store', () => ({
@@ -169,6 +202,8 @@ vi.mock('@/stores/spending-insights-store', () => ({
 vi.mock('@/stores/net-worth-store', () => ({
   useNetWorthStore: () => ({
     history: mockNetWorthHistory,
+    historyComplete: mockNetWorthHistoryComplete,
+    historyMissingCurrencies: [],
     isLoading: mockNetWorthLoading,
     loadHistory: mockLoadHistory,
     calculateCurrent: mockCalculateCurrent,
@@ -222,6 +257,7 @@ describe('Dashboard', () => {
     mockAccounts = []
     mockInvestments = []
     mockTransactions = []
+    mockGoals = []
     mockAccountError = null
     mockTransactionError = null
     mockGoalError = null
@@ -235,9 +271,9 @@ describe('Dashboard', () => {
     mockNetWorthUnresolvedAccountIds = []
     mockNetWorthIncompleteHoldingIds = []
     mockNetWorthLoading = false
-    mockPreferredCurrency = 'USD'
-    mockRates = {}
-    mockInvalidRates = []
+    mockNetWorthHistoryComplete = true
+    mockMainCurrency = 'USD'
+    mockManualRates = []
     mockDashboardQuery.mockReset()
     mockDashboardQuery.mockResolvedValue([])
     mockCalculateCurrent.mockReset()
@@ -251,7 +287,7 @@ describe('Dashboard', () => {
     render(<Dashboard />)
     await user.click(screen.getByText('analytics.categories'))
 
-    expect(screen.getByText(/analytics.categoriesUnavailable/)).toBeInTheDocument()
+    expect(screen.getAllByText(/analytics.categoriesUnavailable/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/Split query failed/).length).toBeGreaterThan(0)
     expect(screen.queryByLabelText('analytics.categoriesChartLabel')).not.toBeInTheDocument()
   })
@@ -363,9 +399,9 @@ describe('Dashboard', () => {
 
     render(<Dashboard />)
 
-    expect(screen.getByText('Some dashboard data couldn’t be loaded')).toBeInTheDocument()
-    expect(screen.getByText('Accounts: Accounts unavailable')).toBeInTheDocument()
-    expect(screen.getByText('Transactions: Transactions unavailable')).toBeInTheDocument()
+    expect(screen.getByText('errors.title')).toBeInTheDocument()
+    expect(screen.getByText('errors.accounts: Accounts unavailable')).toBeInTheDocument()
+    expect(screen.getByText('errors.transactions: Transactions unavailable')).toBeInTheDocument()
   })
 
   it('keeps goal and exchange rate partial failures visible', () => {
@@ -377,9 +413,9 @@ describe('Dashboard', () => {
 
     render(<Dashboard />)
 
-    expect(screen.getByText('Some dashboard data couldn’t be loaded')).toBeInTheDocument()
-    expect(screen.getByText('Goals: Goals unavailable')).toBeInTheDocument()
-    expect(screen.getByText('Exchange rates: Rates unavailable')).toBeInTheDocument()
+    expect(screen.getByText('errors.title')).toBeInTheDocument()
+    expect(screen.getByText('errors.goals: Goals unavailable')).toBeInTheDocument()
+    expect(screen.getByText('errors.rates: Rates unavailable')).toBeInTheDocument()
   })
 
   it('shows account load failures in the dashboard error banner', () => {
@@ -387,8 +423,8 @@ describe('Dashboard', () => {
 
     render(<Dashboard />)
 
-    expect(screen.getByText('Some dashboard data couldn’t be loaded')).toBeInTheDocument()
-    expect(screen.getByText('Accounts: Accounts unavailable')).toBeInTheDocument()
+    expect(screen.getByText('errors.title')).toBeInTheDocument()
+    expect(screen.getByText('errors.accounts: Accounts unavailable')).toBeInTheDocument()
     expect(screen.queryByText('empty.addAccount')).not.toBeInTheDocument()
   })
 
@@ -412,13 +448,14 @@ describe('Dashboard', () => {
       expect(screen.queryByRole('alert')).toBeNull()
     })
 
-    it('withholds a previously complete current value when invalid rates arrive', async () => {
+    it('withholds a previously complete current value while corrected manual-rate authority recalculates', async () => {
       mockNetWorth = 195000
       mockCalculateCurrent.mockResolvedValue(undefined)
       const { rerender } = render(<Dashboard />)
       expect(await screen.findByText('$1,950.00')).toBeInTheDocument()
 
-      mockInvalidRates = [{ fromCurrency: 'EUR', toCurrency: 'USD', rate: '0' }]
+      mockCalculateCurrent.mockImplementationOnce(() => new Promise<void>(() => {}))
+      mockManualRates = [makeRate('EUR', 'USD', '1.25')]
       rerender(<Dashboard />)
 
       expect(screen.getByRole('alert')).toHaveTextContent('currency.totalUnavailable')
@@ -677,14 +714,14 @@ describe('Dashboard', () => {
       ]
 
       const { rerender } = render(<Dashboard />)
-      expect(screen.getAllByText(/currency\.derivedUnavailable: EUR/).length).toBeGreaterThan(0)
+      expect(screen.getAllByText(/currency\.missingDatedRates: EUR/).length).toBeGreaterThan(0)
 
-      mockRates = { 'EUR:USD': 2 }
+      mockManualRates = [makeRate('EUR', 'USD', '2')]
       rerender(<Dashboard />)
       expect(screen.getAllByText('$300.00').length).toBeGreaterThan(0)
 
-      mockPreferredCurrency = 'EUR'
-      mockRates = { 'USD:EUR': 0.5 }
+      mockMainCurrency = 'EUR'
+      mockManualRates = [makeRate('USD', 'EUR', '0.5')]
       rerender(<Dashboard />)
       expect(screen.getAllByText('€150.00').length).toBeGreaterThan(0)
       expect(screen.queryByText('€300.00')).not.toBeInTheDocument()
@@ -765,17 +802,118 @@ describe('Dashboard', () => {
       await user.click(screen.getByText('analytics.categories'))
 
       expect(
-        screen.getByText('Food', { selector: 'span.truncate.font-semibold' }).parentElement
-          ?.parentElement
+        screen.getByText('Food', { selector: 'dt > span:last-child' }).parentElement?.parentElement
       ).toHaveTextContent('Food$200.00')
       expect(
-        screen.getByText('Transport', { selector: 'span.truncate.font-semibold' }).parentElement
+        screen.getByText('Transport', { selector: 'dt > span:last-child' }).parentElement
           ?.parentElement
       ).toHaveTextContent('Transport$100.00')
     })
   })
 
+  describe('goals', () => {
+    it('keeps progress in the goal durable native denomination across authority changes', () => {
+      mockGoals = [
+        {
+          id: 'goal-mxn',
+          name: 'Emergency fund',
+          icon: 'target',
+          progress: 25,
+          current_amount: 10_000,
+          target_amount: 40_000,
+          currency: 'MXN',
+          mainConversion: {
+            complete: true,
+            toCurrency: 'USD',
+          },
+        },
+      ]
+
+      const { rerender } = render(<Dashboard />)
+      expect(screen.getByText('MX$100.00')).toBeInTheDocument()
+      expect(
+        screen.getByRole('heading', { name: 'Emergency fund' }).closest('section')
+      ).toHaveTextContent('MX$400.00')
+
+      mockMainCurrency = 'EUR'
+      rerender(<Dashboard />)
+
+      expect(screen.getByText('MX$100.00')).toBeInTheDocument()
+      expect(screen.queryByText('€100.00')).not.toBeInTheDocument()
+    })
+  })
+
   describe('spending intelligence', () => {
+    it('keeps the compact view tabs keyboard-accessible and removes the budgets action', async () => {
+      const user = userEvent.setup()
+      render(<Dashboard />)
+
+      const paceTab = screen.getByRole('tab', { name: 'analytics.pace' })
+      paceTab.focus()
+      await user.keyboard('{ArrowRight}')
+
+      expect(screen.getByRole('tab', { name: 'analytics.trend' })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      )
+      expect(window.localStorage.getItem('shikin_dashboard_spending_mode')).toBe('trend')
+      expect(document.querySelector('a[href="/budgets"]')).not.toBeInTheDocument()
+    })
+
+    it('shows a deliberate main-currency setup state instead of converted zeroes', () => {
+      mockMainCurrency = null
+      mockTransactions = [
+        {
+          id: 'native-only',
+          description: 'Native expense',
+          type: 'expense',
+          amount: 12_345,
+          currency: 'MXN',
+          date: dayjs().format('YYYY-MM-DD'),
+          status: 'posted',
+          reporting_treatment: 'normal',
+          transaction_kind: 'standard',
+          is_archived: 0,
+          category_color: null,
+          category_name: null,
+          account_name: 'Cash',
+        },
+      ]
+
+      render(<Dashboard />)
+
+      const panel = document.getElementById('spending-pace-panel')
+      expect(panel).not.toBeNull()
+      expect(within(panel!).getByRole('alert')).toHaveTextContent('currency.mainRequired')
+      expect(within(panel!).queryByRole('table')).not.toBeInTheDocument()
+    })
+
+    it('withholds spending charts when the transaction source fails', () => {
+      mockTransactionError = 'Transaction read failed'
+      mockTransactions = [
+        {
+          id: 'stale-row',
+          description: 'Previously loaded',
+          type: 'expense',
+          amount: 10_000,
+          currency: 'USD',
+          date: dayjs().format('YYYY-MM-DD'),
+          category_color: null,
+          category_name: null,
+          account_name: 'Checking',
+        },
+      ]
+
+      render(<Dashboard />)
+
+      expect(screen.getByText(/analytics.sourceUnavailable/)).toHaveTextContent(
+        'Transaction read failed'
+      )
+      expect(
+        screen.queryByRole('table', { name: 'analytics.paceChartLabel' })
+      ).not.toBeInTheDocument()
+    })
+
     it('builds graph modes from transaction data', async () => {
       const user = userEvent.setup()
       mockAccounts = [

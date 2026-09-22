@@ -2,7 +2,6 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { OverviewNetWorth } from '@/components/dashboard/overview-net-worth'
-import type { ConvertToPreferred } from '@/components/dashboard/overview-account-comparison-helpers'
 import type { Account } from '@/types/database'
 
 vi.mock('react-i18next', () => ({
@@ -56,13 +55,6 @@ const accounts = [
   { id: 'savings', name: 'Savings', type: 'savings', currency: 'USD', balance: 40_000 },
 ] as Account[]
 
-const convertToPreferred: ConvertToPreferred = (amount) => ({
-  complete: true,
-  preferredCurrency: 'USD',
-  amountCentavos: amount,
-  missingCurrencies: [],
-})
-
 function renderOverview() {
   return render(
     <OverviewNetWorth
@@ -74,20 +66,19 @@ function renderOverview() {
       saved="$6.00"
       savedTone="positive"
       cashFlowLabel="April 2026 cash flow"
-      asOfLabel="As of April 18, 2026"
+      currentAsOfLabel="Current value · April 18, 2026"
+      historyAsOfLabel="History through March 1, 2026"
       history={[
         { date: '2026-01-01', netWorth: 100_000 },
         { date: '2026-03-01', netWorth: 115_000 },
       ]}
+      historyComplete
       period="6m"
       onPeriodChange={() => {}}
       historyCurrency="USD"
       emptyHistoryMessage="No history"
       accounts={accounts}
       preferredCurrency="USD"
-      rates={{}}
-      invalidRates={[]}
-      convertToPreferred={convertToPreferred}
     />
   )
 }

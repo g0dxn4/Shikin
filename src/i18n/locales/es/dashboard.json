@@ -45,6 +45,10 @@
     "cashFlow": "Flujo de caja",
     "cashFlowSubtitle": "Ingresos y gastos por mes",
     "currentMonthCashFlow": "Flujo de caja de {{month}}",
+    "currentMonthCashFlowDated": "Flujo de caja de {{month}} · tasas manuales en la fecha de cada transacción",
+    "currentValuationAsOf": "Valor actual · tasas manuales al {{date}}",
+    "historyValuationThrough": "Tasas manuales por fecha · hasta {{date}}",
+    "historyUnavailable": "Historial de patrimonio no disponible",
     "spendingByCategory": "Gastos por categoría",
     "categoryHint": "Selecciona una categoría para ver transacciones",
     "showAllCategories": "Mostrar todas las categorías",
@@ -61,7 +65,7 @@
       "change": "Cambio",
       "period": "Rango de fechas",
       "recordedSnapshots": "Las líneas conectan registros guardados; los intervalos se muestran sin datos, no como cero.",
-      "currentFx": "Los importes históricos usan los tipos de cambio actuales a {{currency}}.",
+      "currentFx": "Los importes históricos usan las tasas manuales vigentes en cada fecha registrada a {{currency}}.",
       "baseline": "El cambio inicia en el primer registro de cada cuenta: {{first}} el {{firstDate}}; {{second}} el {{secondDate}}.",
       "debtBalance": "Deuda de tarjeta (saldo negativo)",
       "lastRecorded": "Último registro: {{date}}",
@@ -89,13 +93,18 @@
     "invalidRate": "tipo de cambio {{from}} → {{to}} ({{rate}})",
     "preferredCurrency": "Moneda preferida",
     "blankValue": "moneda vacía",
-    "derivedUnavailable": "No disponible hasta completar los tipos de cambio"
+    "derivedUnavailable": "No disponible hasta completar los tipos de cambio",
+    "mainRequired": "Configura una moneda principal en Ajustes para calcular totales convertidos.",
+    "missingDatedRates": "Faltan tasas manuales vigentes en las fechas de transacción para {{currencies}}.",
+    "invalidEvidence": "Corrige los datos de moneda, fecha o centavos antes de calcular totales.",
+    "sourceUnavailable": "Las transacciones de origen no están disponibles; se ocultan los totales.",
+    "historyUnavailable": "No se pudo calcular el historial fechado con la autoridad de moneda actual.",
+    "recalculating": "Recalculando con las tasas manuales actuales."
   },
   "charts": {
     "spending": "Gastos Mensuales",
     "categories": "Por Categoría",
-    "drilldownTransactions": "Ver transacciones",
-    "drilldownBudgets": "Ver presupuestos"
+    "drilldownTransactions": "Ver transacciones"
   },
   "analytics": {
     "pace": "Ritmo",
@@ -108,11 +117,11 @@
     "categoriesChartLabel": "Composición mensual de gastos por categoría",
     "day": "Día",
     "month": "Mes",
+    "legend": "Leyenda del gráfico",
     "spentMtd": "Gastado MTD",
     "projectedMonthEnd": "Fin de mes proyectado",
     "priorAverage": "Promedio anterior",
     "vsPriorAverage": "vs promedio anterior",
-    "viewBudgets": "Ver presupuestos",
     "runRate": "Tasa de gasto",
     "currentMonth": "Mes actual",
     "previousMonth": "Mes anterior",
@@ -124,8 +133,18 @@
     "other": "Otros",
     "uncategorized": "Sin categoría",
     "noEligibleData": "No hay datos de gastos elegibles para este período.",
+    "loading": "Cargando análisis de gastos",
+    "loadingSplits": "Cargando las divisiones antes de calcular los totales por categoría.",
+    "sourceUnavailable": "El análisis de gastos no está disponible porque no se pudieron cargar las transacciones",
     "categoriesUnavailable": "El análisis por categoría no está disponible hasta cargar las divisiones de transacciones",
+    "datedManualFx": "Los totales en {{currency}} usan tasas manuales vigentes en la fecha de cada transacción.",
+    "datedManualFxUnconfigured": "Los totales por fecha requieren una moneda principal y tasas manuales configuradas.",
+    "fallbackCurrency": "Mostrando {{currency}}; la conversión a {{target}} no está disponible.",
+    "invalidCategoryAllocations": "Informe de categorías incompleto: las divisiones no coinciden con la transacción.",
     "splitIntegrityNotice": "Los totales de división difieren de los totales de transacción para {{count}} transacción(es)."
+  },
+  "goals": {
+    "of": "de"
   },
   "quickActions": {
     "addTransaction": "Agregar Transacción"

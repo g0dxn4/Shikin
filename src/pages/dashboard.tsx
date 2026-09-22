@@ -20,7 +20,8 @@ import { useNetWorthStore } from '@/stores/net-worth-store'
 import type { TransactionWithDetails } from '@/stores/transaction-store'
 import { formatMoney } from '@/lib/money'
 import { getErrorMessage } from '@/lib/errors'
-import { buildDashboardAnalytics } from '@/lib/dashboard-analytics'
+import { buildDashboardAnalytics, type ConversionState } from '@/lib/dashboard-analytics'
+import { currencyAuthorityKey } from '@/stores/currency-authority'
 import { useDashboardSplits } from '@/components/dashboard/use-dashboard-splits'
 import { SpendingAnalytics } from '@/components/dashboard/spending-analytics'
 import { OverviewNetWorth, type NetWorthPeriod } from '@/components/dashboard/overview-net-worth'
@@ -31,6 +32,24 @@ import { GoalIcon } from '@/components/goals/goal-icon'
 function describeIncompleteNetWorth(reasons: Array<string | false | undefined>, fallback: string) {
   const parts = reasons.filter((reason): reason is string => Boolean(reason))
   return parts.length > 0 ? parts.join(' ') : fallback
+}
+
+function describeIncompleteConversion(
+  conversion: ConversionState,
+  labels: {
+    mainRequired: string
+    invalidData: string
+    missingRates: (currencies: string) => string
+    unavailable: string
+  }
+): string {
+  if (conversion.kind !== 'incomplete') return ''
+  if (conversion.reason === 'main_currency_unconfigured') return labels.mainRequired
+  if (conversion.reason === 'invalid_currency_data') return labels.invalidData
+  if (conversion.missingCurrencies.length > 0) {
+    return labels.missingRates(conversion.missingCurrencies.join(', '))
+  }
+  return labels.unavailable
 }
 
 export function Dashboard() {
@@ -52,16 +71,11 @@ export function Dashboard() {
     fetch: fetchTransactions,
   } = useTransactionStore()
   const { goals, fetchError: goalsFetchError, fetch: fetchGoals } = useGoalStore()
-  const {
-    error: currencyError,
-    preferredCurrency,
-    rates,
-    invalidRates,
-    loadRates,
-    convertToPreferred,
-  } = useCurrencyStore()
+  const { error: currencyError, mainCurrency, manualRates, loadRates } = useCurrencyStore()
   const {
     history,
+    historyComplete,
+    historyMissingCurrencies,
     isLoading: netWorthLoading,
     netWorth,
     totalsComplete: netWorthComplete,
@@ -74,12 +88,16 @@ export function Dashboard() {
   } = useNetWorthStore()
   const [historyPeriod, setHistoryPeriod] = useState<NetWorthPeriod>('6m')
   const [netWorthCalculation, setNetWorthCalculation] = useState<{
-    preferredCurrency: string | null
+    authorityKey: string | null
     accounts: typeof accounts | null
     investments: typeof investments | null
     error: string | null
-  }>({ preferredCurrency: null, accounts: null, investments: null, error: null })
+  }>({ authorityKey: null, accounts: null, investments: null, error: null })
   const now = useMemo(() => dayjs(), [])
+  const authorityKey = useMemo(
+    () => currencyAuthorityKey({ mainCurrency, manualRates }),
+    [mainCurrency, manualRates]
+  )
   const splitDateRange = useMemo(
     () => ({
       start: now.subtract(11, 'month').startOf('month').format('YYYY-MM-DD'),
@@ -97,22 +115,25 @@ export function Dashboard() {
   useEffect(() => {
     void fetchAccounts().catch(() => {})
     void fetchTransactions().catch(() => {})
-    void fetchGoals().catch(() => {})
     void loadRates().catch(() => {})
-  }, [fetchAccounts, fetchTransactions, fetchGoals, loadRates])
+  }, [fetchAccounts, fetchTransactions, loadRates])
+
+  useEffect(() => {
+    void fetchGoals().catch(() => {})
+  }, [authorityKey, fetchGoals])
 
   useEffect(() => {
     let active = true
     void calculateCurrent()
       .then(() => {
         if (active) {
-          setNetWorthCalculation({ preferredCurrency, accounts, investments, error: null })
+          setNetWorthCalculation({ authorityKey, accounts, investments, error: null })
         }
       })
       .catch((error) => {
         if (active) {
           setNetWorthCalculation({
-            preferredCurrency,
+            authorityKey,
             accounts,
             investments,
             error: getErrorMessage(error),
@@ -122,33 +143,22 @@ export function Dashboard() {
     return () => {
       active = false
     }
-  }, [accounts, calculateCurrent, investments, preferredCurrency])
+  }, [accounts, authorityKey, calculateCurrent, investments])
 
   useEffect(() => {
     void loadHistory(historyPeriod).catch(() => {})
-  }, [loadHistory, historyPeriod, netWorthCurrency])
-
-  const ratesArray = useMemo(() => {
-    const result: { fromCurrency: string; toCurrency: string; rate: number }[] = []
-    for (const [pair, rate] of Object.entries(rates)) {
-      const parts = pair.split(':')
-      if (parts.length === 2 && Number.isFinite(rate) && rate > 0) {
-        result.push({ fromCurrency: parts[0], toCurrency: parts[1], rate })
-      }
-    }
-    return result
-  }, [rates])
+  }, [authorityKey, historyPeriod, loadHistory])
 
   const analytics = useMemo(
     () =>
       buildDashboardAnalytics({
         transactions,
         splits: dashboardSplits,
-        preferredCurrency,
-        rates: ratesArray,
+        preferredCurrency: mainCurrency,
+        rates: manualRates,
         now,
       }),
-    [transactions, dashboardSplits, preferredCurrency, ratesArray, now]
+    [transactions, dashboardSplits, mainCurrency, manualRates, now]
   )
 
   const currentMonth = analytics.trend.months.find((m) => m.isCurrent)
@@ -159,16 +169,18 @@ export function Dashboard() {
   const previousIncome = previousMonth?.income ?? 0
   const previousExpenses = previousMonth?.expenses ?? 0
   const cashFlowDisplayable =
-    analytics.cashFlowConversion.kind === 'complete' ||
-    analytics.cashFlowConversion.kind === 'fallback'
+    !transactionsFetchError && analytics.cashFlowConversion.kind === 'complete'
   const cashFlowDisplayCurrency = analytics.cashFlowConversion.currency
-  const cashFlowMissingCurrencies =
-    analytics.cashFlowConversion.kind === 'incomplete'
-      ? analytics.cashFlowConversion.missingCurrencies
-      : []
   const cashFlowUnavailableLabel = cashFlowDisplayable
     ? undefined
-    : `${t('currency.derivedUnavailable')}: ${cashFlowMissingCurrencies.join(', ')}`
+    : transactionsFetchError
+      ? t('currency.sourceUnavailable')
+      : describeIncompleteConversion(analytics.cashFlowConversion, {
+          mainRequired: t('currency.mainRequired'),
+          invalidData: t('currency.invalidEvidence'),
+          missingRates: (currencies) => t('currency.missingDatedRates', { currencies }),
+          unavailable: t('currency.derivedUnavailable'),
+        })
 
   const savingsRate = useMemo(() => {
     if (monthlyIncome <= 0) return 0
@@ -184,35 +196,41 @@ export function Dashboard() {
     (sum, item) => sum + item.amount,
     0
   )
-  const categoryConversionIncomplete = analytics.categories.conversion.kind === 'incomplete'
+  const categorySourceUnavailable =
+    splitsLoading ||
+    Boolean(splitsFetchError) ||
+    Boolean(transactionsFetchError) ||
+    analytics.categories.conversion.kind !== 'complete'
   const compactCashFlowMonths = analytics.trend.months.slice(-6)
 
   const recentTransactions = useMemo(() => transactions.slice(0, 8), [transactions])
   const dashboardErrors = [
-    accountsFetchError ? `Accounts: ${accountsFetchError}` : null,
+    accountsFetchError ? t('errors.accounts', { message: accountsFetchError }) : null,
     transactionsFetchError && recentTransactions.length > 0
-      ? `Transactions: ${transactionsFetchError}`
+      ? t('errors.transactions', { message: transactionsFetchError })
       : null,
-    goalsFetchError ? `Goals: ${goalsFetchError}` : null,
-    splitsFetchError ? `Transaction splits: ${splitsFetchError}` : null,
-    currencyError ? `Exchange rates: ${currencyError}` : null,
+    goalsFetchError ? t('errors.goals', { message: goalsFetchError }) : null,
+    splitsFetchError ? t('errors.splits', { message: splitsFetchError }) : null,
+    currencyError ? t('errors.rates', { message: currencyError }) : null,
   ]
 
   const hasTransactionsLoadError = !!transactionsFetchError && recentTransactions.length === 0
   const isLoading = accountsLoading || txLoading
   const netWorthCalculationCurrent =
-    netWorthCalculation.preferredCurrency === preferredCurrency &&
+    netWorthCalculation.authorityKey === authorityKey &&
     netWorthCalculation.accounts === accounts &&
     netWorthCalculation.investments === investments
   const currentNetWorthComplete =
     netWorthCalculationCurrent &&
-    netWorthCurrency === preferredCurrency &&
+    mainCurrency !== null &&
+    netWorthCurrency === mainCurrency &&
     !netWorthLoading &&
     !netWorthCalculation.error &&
-    invalidRates.length === 0 &&
-    netWorthComplete
-  const historyCurrency = netWorthCurrency
-  const lastHistoryDate = history.length > 0 ? history[history.length - 1]?.date : null
+    netWorthComplete &&
+    netWorth !== null
+  const historyDisplayable =
+    historyComplete && mainCurrency !== null && netWorthCurrency === mainCurrency
+  const lastHistoryDate = historyDisplayable ? history[history.length - 1]?.date : null
 
   if (isLoading) {
     return <DashboardSkeleton />
@@ -221,7 +239,7 @@ export function Dashboard() {
   return (
     <div className="page-content">
       <ErrorBanner
-        title="Some dashboard data couldn’t be loaded"
+        title={t('errors.title')}
         messages={dashboardErrors}
         onRetry={() => {
           retrySplits()
@@ -231,29 +249,31 @@ export function Dashboard() {
 
       <OverviewNetWorth
         currentComplete={currentNetWorthComplete}
-        currentAmount={currentNetWorthComplete && netWorth !== null ? netWorth : 0}
+        currentAmount={currentNetWorthComplete ? netWorth : null}
         currentCurrency={netWorthCurrency}
         unavailableMessage={
-          (netWorthCalculationCurrent ? netWorthCalculation.error : null) ??
-          (!netWorthComplete
-            ? describeIncompleteNetWorth(
-                [
-                  netWorthMissingCurrencies.length > 0 &&
-                    t('currency.missingRates', {
-                      currencies: netWorthMissingCurrencies.join(', '),
-                    }),
-                  netWorthIncompleteHoldingIds.length > 0 &&
-                    tAnalytics('netWorth.incompleteHoldings', {
-                      count: netWorthIncompleteHoldingIds.length,
-                    }),
-                  netWorthUnresolvedAccountIds.length > 0 &&
-                    tAnalytics('netWorth.unresolvedOwnership', {
-                      count: netWorthUnresolvedAccountIds.length,
-                    }),
-                ],
-                tAnalytics('netWorth.unavailable')
-              )
-            : undefined)
+          !mainCurrency
+            ? t('currency.mainRequired')
+            : ((netWorthCalculationCurrent ? netWorthCalculation.error : null) ??
+              (!netWorthComplete
+                ? describeIncompleteNetWorth(
+                    [
+                      netWorthMissingCurrencies.length > 0 &&
+                        t('currency.missingRates', {
+                          currencies: netWorthMissingCurrencies.join(', '),
+                        }),
+                      netWorthIncompleteHoldingIds.length > 0 &&
+                        tAnalytics('netWorth.incompleteHoldings', {
+                          count: netWorthIncompleteHoldingIds.length,
+                        }),
+                      netWorthUnresolvedAccountIds.length > 0 &&
+                        tAnalytics('netWorth.unresolvedOwnership', {
+                          count: netWorthUnresolvedAccountIds.length,
+                        }),
+                    ],
+                    tAnalytics('netWorth.unavailable')
+                  )
+                : t('currency.recalculating')))
         }
         income={cashFlowDisplayable ? formatMoney(monthlyIncome, cashFlowDisplayCurrency) : '—'}
         incomeDetail={
@@ -270,30 +290,42 @@ export function Dashboard() {
         saved={cashFlowDisplayable ? formatMoney(savedAmount, cashFlowDisplayCurrency) : '—'}
         savingsRate={cashFlowDisplayable ? `${savingsRate}%` : undefined}
         savedTone={!cashFlowDisplayable ? 'muted' : savedAmount >= 0 ? 'positive' : 'negative'}
-        cashFlowLabel={t('overview.currentMonthCashFlow', { month: now.format('MMMM YYYY') })}
-        asOfLabel={t('overview.asOf', {
+        cashFlowLabel={t('overview.currentMonthCashFlowDated', {
+          month: now.format('MMMM YYYY'),
+        })}
+        currentAsOfLabel={t('overview.currentValuationAsOf', {
+          date: now.format('MMMM D, YYYY'),
+        })}
+        historyAsOfLabel={t('overview.historyValuationThrough', {
           date: dayjs(lastHistoryDate ?? now).format('MMMM D, YYYY'),
         })}
         history={history}
+        historyComplete={historyDisplayable}
+        historyUnavailableMessage={
+          !mainCurrency
+            ? t('currency.mainRequired')
+            : historyMissingCurrencies.length > 0
+              ? t('currency.missingDatedRates', {
+                  currencies: historyMissingCurrencies.join(', '),
+                })
+              : t('currency.historyUnavailable')
+        }
         period={historyPeriod}
         onPeriodChange={setHistoryPeriod}
-        historyCurrency={historyCurrency}
+        historyCurrency={netWorthCurrency}
         emptyHistoryMessage={
           history.length === 1
             ? tAnalytics('netWorth.firstSnapshot')
             : tAnalytics('netWorth.noHistory')
         }
         accounts={accounts}
-        preferredCurrency={preferredCurrency}
-        rates={rates}
-        invalidRates={invalidRates}
-        convertToPreferred={convertToPreferred}
+        preferredCurrency={mainCurrency}
       />
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
         <OverviewCategories
-          items={analytics.categories.currentMonthBreakdown}
-          total={categoryTotal}
+          items={categorySourceUnavailable ? [] : analytics.categories.currentMonthBreakdown}
+          total={categorySourceUnavailable ? 0 : categoryTotal}
           displayCurrency={analytics.categories.conversion.currency}
           comparisonLabel={
             cashFlowDisplayable
@@ -302,39 +334,47 @@ export function Dashboard() {
           }
           dateFrom={monthStart}
           dateTo={monthEnd}
-          unavailable={categoryConversionIncomplete}
+          unavailable={categorySourceUnavailable}
           unavailableMessage={
-            categoryConversionIncomplete
-              ? `${t('currency.derivedUnavailable')}: ${analytics.categories.conversion.missingCurrencies.join(', ')}`
-              : undefined
+            splitsLoading
+              ? t('analytics.loadingSplits')
+              : splitsFetchError
+                ? t('analytics.categoriesUnavailable')
+                : transactionsFetchError
+                  ? t('currency.sourceUnavailable')
+                  : describeIncompleteConversion(analytics.categories.conversion, {
+                      mainRequired: t('currency.mainRequired'),
+                      invalidData: t('currency.invalidEvidence'),
+                      missingRates: (currencies) => t('currency.missingDatedRates', { currencies }),
+                      unavailable: t('currency.derivedUnavailable'),
+                    })
           }
         />
         <OverviewCashFlow
           months={compactCashFlowMonths}
           displayCurrency={analytics.trend.conversion.currency}
-          unavailable={analytics.trend.conversion.kind === 'incomplete'}
+          unavailable={
+            Boolean(transactionsFetchError) || analytics.trend.conversion.kind !== 'complete'
+          }
           unavailableMessage={
-            analytics.trend.conversion.kind === 'incomplete'
-              ? `${t('currency.derivedUnavailable')}: ${analytics.trend.conversion.missingCurrencies.join(', ')}`
-              : undefined
+            transactionsFetchError
+              ? t('currency.sourceUnavailable')
+              : describeIncompleteConversion(analytics.trend.conversion, {
+                  mainRequired: t('currency.mainRequired'),
+                  invalidData: t('currency.invalidEvidence'),
+                  missingRates: (currencies) => t('currency.missingDatedRates', { currencies }),
+                  unavailable: t('currency.derivedUnavailable'),
+                })
           }
         />
       </div>
 
       <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
-        <NativePanel className="self-start p-5">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 className="text-base font-semibold">{t('analytics.spendingPace')}</h2>
-            <Link
-              to="/transactions"
-              className="text-muted-foreground hover:text-foreground text-xs font-semibold"
-            >
-              {t('charts.drilldownTransactions')}
-            </Link>
-          </div>
+        <NativePanel className="self-start p-4 sm:p-5">
           <SpendingAnalytics
             analytics={analytics}
             isLoading={txLoading || splitsLoading}
+            dataError={transactionsFetchError}
             categoriesError={splitsFetchError}
           />
         </NativePanel>
@@ -437,10 +477,11 @@ export function Dashboard() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-foreground text-sm font-medium">
-                        {formatMoney(goal.current_amount)}
+                        {formatMoney(goal.current_amount, goal.currency)}
                       </p>
                       <p className="text-muted-foreground text-xs">
-                        of {formatMoney(goal.target_amount)}
+                        {t('goals.of', { defaultValue: 'of' })}{' '}
+                        {formatMoney(goal.target_amount, goal.currency)}
                       </p>
                     </div>
                   </div>

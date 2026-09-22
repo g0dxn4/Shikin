@@ -1,12 +1,11 @@
 import { useTranslation } from 'react-i18next'
-import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import { formatMoney } from '@/lib/money'
 import {
   CHART_AXIS_COLOR,
   CHART_GRID_COLOR,
   CHART_ITEM_STYLE,
   CHART_LABEL_STYLE,
-  CHART_LEGEND_STYLE,
   CHART_TOOLTIP_STYLE,
 } from '@/lib/constants'
 import type { PaceResult } from '@/lib/dashboard-analytics'
@@ -24,37 +23,74 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
   const { t, i18n } = useTranslation('dashboard')
   const locale = i18n?.resolvedLanguage ?? i18n?.language
 
-  const data = pace.points.map((p) => ({
-    day: p.day,
-    current: p.current,
-    previous: p.previous,
-    priorAverage: p.priorAverage,
-    runRate: p.runRate,
+  const data = pace.points.map((point) => ({
+    day: point.day,
+    current: point.current,
+    previous: point.previous,
+    priorAverage: point.priorAverage,
+    runRate: point.runRate,
   }))
 
-  const hasCurrent = data.some((d) => d.current !== null)
-  const hasPrevious = data.some((d) => d.previous !== null)
-  const hasPriorAverage = data.some((d) => d.priorAverage !== null && d.priorAverage > 0)
+  const hasCurrent = data.some((point) => point.current !== null)
+  const hasPrevious = data.some((point) => point.previous !== null)
+  const hasPriorAverage = data.some(
+    (point) => point.priorAverage !== null && point.priorAverage > 0
+  )
 
   return (
-    <div className="space-y-4">
-      {notice && (
-        <div
-          className="border-warning/30 bg-warning/10 text-warning rounded-xl border px-3 py-2 text-xs font-semibold"
-          role="status"
-        >
-          {notice}
-        </div>
-      )}
+    <div className="space-y-3">
+      {notice ? <Notice>{notice}</Notice> : null}
+
+      <dl className="border-border grid grid-cols-2 border-b sm:grid-cols-4">
+        <Metric
+          label={t('analytics.spentMtd')}
+          value={formatMoney(pace.spentMTD, displayCurrency, locale)}
+          color="text-destructive"
+        />
+        <Metric
+          label={t('analytics.projectedMonthEnd')}
+          value={formatMoney(pace.projectedMonthEnd, displayCurrency, locale)}
+          color="text-warning"
+        />
+        <Metric
+          label={t('analytics.priorAverage')}
+          value={formatMoney(pace.priorAverageTotal, displayCurrency, locale)}
+        />
+        <Metric
+          label={t('analytics.vsPriorAverage')}
+          value={`${pace.vsPriorAverage >= 0 ? '+' : '−'}${formatMoney(
+            Math.abs(pace.vsPriorAverage),
+            displayCurrency,
+            locale
+          )}`}
+          color={pace.vsPriorAverage >= 0 ? 'text-destructive' : 'text-success'}
+        />
+      </dl>
+
+      <ChartLegend
+        ariaLabel={t('analytics.legend')}
+        items={[
+          ...(hasCurrent
+            ? [{ label: t('analytics.currentMonth'), color: 'var(--color-chart-1)' }]
+            : []),
+          ...(hasPrevious
+            ? [{ label: t('analytics.previousMonth'), color: 'var(--color-muted-foreground)' }]
+            : []),
+          ...(hasPriorAverage
+            ? [{ label: t('analytics.priorMonthsAverage'), color: 'var(--color-success)' }]
+            : []),
+          { label: t('analytics.runRate'), color: 'var(--color-warning)' },
+        ]}
+      />
 
       <div
-        className="h-68 min-w-0 sm:h-72"
+        className="h-56 min-w-0 sm:h-60"
         role="img"
         aria-label={t('analytics.paceChartLabel')}
         aria-describedby="spending-pace-data"
       >
         <SafeChart>
-          <LineChart data={data} margin={{ top: 8, right: 6, bottom: 0, left: 0 }}>
+          <LineChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: -4 }}>
             <CartesianGrid vertical={false} strokeDasharray="2 4" stroke={CHART_GRID_COLOR} />
             <XAxis
               dataKey="day"
@@ -69,10 +105,12 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
             <YAxis
               axisLine={false}
               tickLine={false}
-              tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
-              tickMargin={6}
-              tickFormatter={(v) => formatCompactChartMoney(Number(v), displayCurrency, locale)}
-              width={62}
+              tick={{ fill: CHART_AXIS_COLOR, fontSize: 10 }}
+              tickMargin={4}
+              tickFormatter={(value) =>
+                formatCompactChartMoney(Number(value), displayCurrency, locale)
+              }
+              width={58}
             />
             <Tooltip
               contentStyle={{
@@ -81,15 +119,21 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
                 overflowWrap: 'anywhere',
                 whiteSpace: 'normal',
               }}
-              itemStyle={{ ...CHART_ITEM_STYLE, whiteSpace: 'normal' }}
+              itemStyle={{
+                ...CHART_ITEM_STYLE,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.25rem',
+                flexWrap: 'wrap',
+                whiteSpace: 'normal',
+              }}
               labelStyle={CHART_LABEL_STYLE}
               formatter={(value, name) => {
                 if (value === null || value === undefined) return ['—', name]
                 return [formatMoney(Number(value), displayCurrency, locale), name]
               }}
             />
-            <Legend wrapperStyle={{ ...CHART_LEGEND_STYLE, fontSize: 11 }} />
-            {hasPrevious && (
+            {hasPrevious ? (
               <Line
                 type="monotone"
                 dataKey="previous"
@@ -101,8 +145,8 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
                 isAnimationActive={false}
                 connectNulls
               />
-            )}
-            {hasPriorAverage && (
+            ) : null}
+            {hasPriorAverage ? (
               <Line
                 type="monotone"
                 dataKey="priorAverage"
@@ -113,7 +157,7 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
                 dot={false}
                 isAnimationActive={false}
               />
-            )}
+            ) : null}
             <Line
               type="monotone"
               dataKey="runRate"
@@ -124,7 +168,7 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
               dot={false}
               isAnimationActive={false}
             />
-            {hasCurrent && (
+            {hasCurrent ? (
               <Line
                 type="monotone"
                 dataKey="current"
@@ -135,7 +179,7 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
                 isAnimationActive={false}
                 connectNulls={false}
               />
-            )}
+            ) : null}
           </LineChart>
         </SafeChart>
       </div>
@@ -181,59 +225,61 @@ export function SpendingPacePanel({ pace, displayCurrency, notice }: SpendingPac
           </tbody>
         </table>
       </div>
-
-      <div className="grid grid-cols-1 gap-2 min-[480px]:grid-cols-2 min-[900px]:grid-cols-4 min-[900px]:gap-3">
-        <MetricPill
-          label={t('analytics.spentMtd')}
-          value={formatMoney(pace.spentMTD, displayCurrency, locale)}
-          color="text-destructive"
-        />
-        <MetricPill
-          label={t('analytics.projectedMonthEnd')}
-          value={formatMoney(pace.projectedMonthEnd, displayCurrency, locale)}
-          color="text-warning"
-        />
-        <MetricPill
-          label={t('analytics.priorAverage')}
-          value={formatMoney(pace.priorAverageTotal, displayCurrency, locale)}
-          color="text-muted-foreground"
-        />
-        <MetricPill
-          label={t('analytics.vsPriorAverage')}
-          value={formatMoney(Math.abs(pace.vsPriorAverage), displayCurrency, locale)}
-          prefix={pace.vsPriorAverage >= 0 ? '+' : '−'}
-          color={pace.vsPriorAverage >= 0 ? 'text-destructive' : 'text-success'}
-        />
-      </div>
     </div>
   )
 }
 
-function MetricPill({
-  label,
-  value,
-  prefix,
-  color,
-}: {
-  label: string
-  value: string
-  prefix?: string
-  color?: string
-}) {
+function Metric({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div className="border-border bg-muted/45 flex min-w-0 items-center justify-between gap-3 rounded-xl border px-3 py-2.5 min-[480px]:block min-[480px]:p-3">
-      <p className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
+    <div className="border-border min-w-0 px-2.5 py-2.5 odd:border-r sm:px-3 sm:odd:border-r sm:[&:not(:last-child)]:border-r">
+      <dt className="text-muted-foreground text-[10px] leading-tight font-semibold tracking-wider [overflow-wrap:anywhere] uppercase">
         {label}
-      </p>
-      <p
+      </dt>
+      <dd
         className={cn(
-          'min-w-0 text-right text-base font-semibold tracking-tight [overflow-wrap:anywhere] tabular-nums min-[480px]:mt-1 min-[480px]:text-left min-[480px]:text-lg',
+          'mt-1 text-sm leading-tight font-semibold tracking-tight [overflow-wrap:anywhere] tabular-nums sm:text-base',
           color
         )}
       >
-        {prefix}
         {value}
-      </p>
+      </dd>
+    </div>
+  )
+}
+
+function ChartLegend({
+  ariaLabel,
+  items,
+}: {
+  ariaLabel: string
+  items: Array<{ label: string; color: string }>
+}) {
+  return (
+    <ul className="flex flex-wrap gap-x-4 gap-y-1.5" aria-label={ariaLabel}>
+      {items.map((item) => (
+        <li
+          key={item.label}
+          className="flex min-w-0 items-center gap-1.5 text-[11px] leading-tight"
+        >
+          <span
+            aria-hidden="true"
+            className="h-0.5 w-4 shrink-0 rounded-full"
+            style={{ backgroundColor: item.color }}
+          />
+          <span className="text-muted-foreground [overflow-wrap:anywhere]">{item.label}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function Notice({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="border-warning/30 bg-warning/10 text-warning rounded-lg border px-3 py-2 text-xs font-semibold"
+      role="status"
+    >
+      {children}
     </div>
   )
 }

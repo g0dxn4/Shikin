@@ -45,6 +45,10 @@
     "cashFlow": "Cash flow",
     "cashFlowSubtitle": "Income and spending by month",
     "currentMonthCashFlow": "{{month}} cash flow",
+    "currentMonthCashFlowDated": "{{month}} cash flow · manual rates on each transaction date",
+    "currentValuationAsOf": "Current value · manual rates as of {{date}}",
+    "historyValuationThrough": "Dated manual rates · through {{date}}",
+    "historyUnavailable": "Net worth history unavailable",
     "spendingByCategory": "Spending by category",
     "categoryHint": "Select a category to view transactions",
     "showAllCategories": "Show all categories",
@@ -61,7 +65,7 @@
       "change": "Change",
       "period": "Date range",
       "recordedSnapshots": "Lines connect recorded snapshots; gaps are shown as missing, not zero.",
-      "currentFx": "Historical amounts use current exchange rates into {{currency}}.",
+      "currentFx": "Historical amounts use manual rates effective on each recorded date into {{currency}}.",
       "baseline": "Change starts at each account’s first snapshot: {{first}} on {{firstDate}}; {{second}} on {{secondDate}}.",
       "debtBalance": "Credit card debt (negative balance)",
       "lastRecorded": "Last recorded: {{date}}",
@@ -89,13 +93,18 @@
     "invalidRate": "exchange rate {{from}} → {{to}} ({{rate}})",
     "preferredCurrency": "Preferred currency",
     "blankValue": "blank currency",
-    "derivedUnavailable": "Unavailable until exchange rates are complete"
+    "derivedUnavailable": "Unavailable until exchange rates are complete",
+    "mainRequired": "Set a main currency in Settings to calculate converted totals.",
+    "missingDatedRates": "Missing manual rates effective on the transaction dates for {{currencies}}.",
+    "invalidEvidence": "Currency, date, or centavo evidence must be repaired before calculating totals.",
+    "sourceUnavailable": "Source transactions are unavailable; totals are withheld.",
+    "historyUnavailable": "Dated history could not be calculated with the current currency authority.",
+    "recalculating": "Recalculating with the current manual rates."
   },
   "charts": {
     "spending": "Monthly Spending",
     "categories": "By Category",
-    "drilldownTransactions": "View transactions",
-    "drilldownBudgets": "View budgets"
+    "drilldownTransactions": "View transactions"
   },
   "analytics": {
     "pace": "Pace",
@@ -108,11 +117,11 @@
     "categoriesChartLabel": "Monthly spending composition by category",
     "day": "Day",
     "month": "Month",
+    "legend": "Chart legend",
     "spentMtd": "Spent MTD",
     "projectedMonthEnd": "Projected month end",
     "priorAverage": "Prior average",
     "vsPriorAverage": "vs prior average",
-    "viewBudgets": "View budgets",
     "runRate": "Run rate",
     "currentMonth": "Current month",
     "previousMonth": "Previous month",
@@ -124,8 +133,18 @@
     "other": "Other",
     "uncategorized": "Uncategorized",
     "noEligibleData": "No eligible spending data for this period.",
+    "loading": "Loading spending analytics",
+    "loadingSplits": "Loading transaction splits before calculating category totals.",
+    "sourceUnavailable": "Spending analytics are unavailable because transactions could not be loaded",
     "categoriesUnavailable": "Category analytics are unavailable until transaction splits can be loaded",
+    "datedManualFx": "{{currency}} totals use manual rates effective on each transaction date.",
+    "datedManualFxUnconfigured": "Dated totals require a configured main currency and manual rates.",
+    "fallbackCurrency": "Showing {{currency}}; {{target}} conversion is unavailable.",
+    "invalidCategoryAllocations": "Category report incomplete: split allocations do not reconcile.",
     "splitIntegrityNotice": "Split totals differ from transaction totals for {{count}} transaction(s)."
+  },
+  "goals": {
+    "of": "of"
   },
   "quickActions": {
     "addTransaction": "Add Transaction"

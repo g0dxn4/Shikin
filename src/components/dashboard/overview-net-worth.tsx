@@ -30,8 +30,8 @@ export interface OverviewHistoryPoint {
 
 interface OverviewNetWorthProps {
   currentComplete: boolean
-  currentAmount: number
-  currentCurrency: string
+  currentAmount: number | null
+  currentCurrency: string | null
   unavailableMessage?: string
   income: string
   incomeDetail?: string
@@ -41,17 +41,17 @@ interface OverviewNetWorthProps {
   savingsRate?: string
   savedTone: 'positive' | 'negative' | 'muted'
   cashFlowLabel: string
-  asOfLabel: string
+  currentAsOfLabel: string
+  historyAsOfLabel: string
   history: OverviewHistoryPoint[]
+  historyComplete: boolean
+  historyUnavailableMessage?: string
   period: NetWorthPeriod
   onPeriodChange: (period: NetWorthPeriod) => void
-  historyCurrency: string
+  historyCurrency: string | null
   emptyHistoryMessage: string
   accounts: Account[]
-  preferredCurrency: string
-  rates?: unknown
-  invalidRates?: unknown
-  convertToPreferred?: unknown
+  preferredCurrency: string | null
 }
 
 export function OverviewNetWorth({
@@ -67,8 +67,11 @@ export function OverviewNetWorth({
   savingsRate,
   savedTone,
   cashFlowLabel,
-  asOfLabel,
+  currentAsOfLabel,
+  historyAsOfLabel,
   history,
+  historyComplete,
+  historyUnavailableMessage,
   period,
   onPeriodChange,
   historyCurrency,
@@ -85,7 +88,9 @@ export function OverviewNetWorth({
   const firstPoint = history[0]
   const lastPoint = history.length > 1 ? history[history.length - 1] : null
   const changeAmount = lastPoint && firstPoint ? lastPoint.netWorth - firstPoint.netWorth : 0
-  const hasChange = currentComplete && history.length > 1
+  const hasCurrentValue = currentComplete && currentAmount !== null && currentCurrency !== null
+  const hasHistory = historyComplete && historyCurrency !== null
+  const hasChange = hasCurrentValue && hasHistory && history.length > 1
 
   const selectTabFromKeyboard = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     let nextIndex: number | null = null
@@ -150,15 +155,15 @@ export function OverviewNetWorth({
             <MetricItem
               label={t('overview.netWorth')}
               value={
-                currentComplete ? (
+                hasCurrentValue ? (
                   formatMoney(currentAmount, currentCurrency)
                 ) : (
                   <span className="text-warning">—</span>
                 )
               }
               detail={
-                currentComplete ? (
-                  asOfLabel
+                hasCurrentValue ? (
+                  currentAsOfLabel
                 ) : (
                   <span role="alert" className="text-warning block font-normal">
                     {t('currency.totalUnavailable')}
@@ -209,16 +214,11 @@ export function OverviewNetWorth({
           </div>
 
           <div className="mt-4 flex flex-wrap items-baseline gap-x-5 gap-y-1">
-            {currentComplete ? (
+            {hasHistory && history.length > 0 ? (
               <strong className="text-2xl font-semibold tracking-tight tabular-nums">
-                {formatMoney(currentAmount, currentCurrency)}
+                {formatMoney(history[history.length - 1].netWorth, historyCurrency)}
               </strong>
-            ) : (
-              <span className="text-warning text-sm font-semibold" role="alert">
-                {t('currency.totalUnavailable')}
-                {unavailableMessage ? ` · ${unavailableMessage}` : ''}
-              </span>
-            )}
+            ) : null}
             {hasChange ? (
               <span
                 className={cn(
@@ -232,10 +232,24 @@ export function OverviewNetWorth({
                 })}
               </span>
             ) : null}
-            <span className="text-muted-foreground text-xs">{asOfLabel}</span>
+            {hasHistory ? (
+              <span className="text-muted-foreground text-xs">{historyAsOfLabel}</span>
+            ) : null}
           </div>
 
-          {history.length > 1 ? (
+          {!hasHistory ? (
+            <div
+              className="border-warning/30 bg-warning/10 mt-4 rounded-xl border px-4 py-8 text-center"
+              role="alert"
+            >
+              <p className="text-warning text-sm font-semibold">
+                {t('overview.historyUnavailable')}
+              </p>
+              {historyUnavailableMessage ? (
+                <p className="text-muted-foreground mt-1 text-xs">{historyUnavailableMessage}</p>
+              ) : null}
+            </div>
+          ) : history.length > 1 ? (
             <>
               <div
                 className="mt-3 h-64 min-w-0 sm:h-72"
@@ -328,16 +342,28 @@ export function OverviewNetWorth({
           aria-labelledby="overview-comparison-tab"
           className="min-w-0 p-4 sm:p-6"
         >
-          <OverviewAccountComparison
-            accounts={accounts}
-            preferredCurrency={preferredCurrency}
-            selection={comparisonSelection}
-            onSelectionChange={setComparisonSelection}
-            period={comparisonPeriod}
-            onPeriodChange={setComparisonPeriod}
-            mode={comparisonMode}
-            onModeChange={setComparisonMode}
-          />
+          {preferredCurrency ? (
+            <OverviewAccountComparison
+              accounts={accounts}
+              preferredCurrency={preferredCurrency}
+              selection={comparisonSelection}
+              onSelectionChange={setComparisonSelection}
+              period={comparisonPeriod}
+              onPeriodChange={setComparisonPeriod}
+              mode={comparisonMode}
+              onModeChange={setComparisonMode}
+            />
+          ) : (
+            <div
+              className="border-warning/30 bg-warning/10 rounded-xl border px-4 py-8 text-center"
+              role="alert"
+            >
+              <p className="text-warning text-sm font-semibold">
+                {t('overview.comparison.unavailable')}
+              </p>
+              <p className="text-muted-foreground mt-1 text-xs">{t('currency.mainRequired')}</p>
+            </div>
+          )}
         </div>
       ) : null}
     </NativePanel>

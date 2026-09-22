@@ -65,6 +65,11 @@ let mockNetWorthUnresolvedAccountIds: string[] = []
 let mockNetWorthIncompleteHoldingIds: string[] = []
 let mockNetWorthLoading = false
 let mockNetWorthHistoryComplete = true
+let mockNetWorthHistoryAuthorityKey = 'USD|'
+let mockNetWorthHistoryCurrency: string | null = 'USD'
+let mockNetWorthHistoryRequestedPeriod = '6m'
+let mockNetWorthHistoryLoading = false
+let mockNetWorthHistoryError: string | null = null
 let mockMainCurrency: string | null = 'USD'
 let mockManualRates: DatedExchangeRate[] = []
 
@@ -203,6 +208,11 @@ vi.mock('@/stores/net-worth-store', () => ({
   useNetWorthStore: () => ({
     history: mockNetWorthHistory,
     historyComplete: mockNetWorthHistoryComplete,
+    historyAuthorityKey: mockNetWorthHistoryAuthorityKey,
+    historyCurrency: mockNetWorthHistoryCurrency,
+    historyRequestedPeriod: mockNetWorthHistoryRequestedPeriod,
+    historyLoading: mockNetWorthHistoryLoading,
+    historyError: mockNetWorthHistoryError,
     historyMissingCurrencies: [],
     isLoading: mockNetWorthLoading,
     loadHistory: mockLoadHistory,
@@ -272,6 +282,11 @@ describe('Dashboard', () => {
     mockNetWorthIncompleteHoldingIds = []
     mockNetWorthLoading = false
     mockNetWorthHistoryComplete = true
+    mockNetWorthHistoryAuthorityKey = 'USD|'
+    mockNetWorthHistoryCurrency = 'USD'
+    mockNetWorthHistoryRequestedPeriod = '6m'
+    mockNetWorthHistoryLoading = false
+    mockNetWorthHistoryError = null
     mockMainCurrency = 'USD'
     mockManualRates = []
     mockDashboardQuery.mockReset()
@@ -332,6 +347,38 @@ describe('Dashboard', () => {
     expect(screen.getByLabelText('overview.comparison.firstAccount')).toBeInTheDocument()
     expect(screen.getByLabelText('overview.comparison.secondAccount')).toBeInTheDocument()
     await waitFor(() => expect(mockDashboardQuery).toHaveBeenCalledTimes(2))
+  })
+
+  it('withholds the history chart, table, and delta when its authority is stale', async () => {
+    mockNetWorthHistory = [
+      { date: '2026-01-01', netWorth: 12_345, assets: 12_345, liabilities: 0 },
+      { date: '2026-02-01', netWorth: 67_890, assets: 67_890, liabilities: 0 },
+    ]
+    mockNetWorthHistoryAuthorityKey = 'USD|obsolete-rate'
+
+    render(<Dashboard />)
+    await userEvent.setup().click(screen.getByRole('tab', { name: 'overview.views.history' }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('overview.historyUnavailable')
+    expect(screen.queryByLabelText('overview.chartTitle')).not.toBeInTheDocument()
+    expect(screen.queryByText('$123.45')).not.toBeInTheDocument()
+    expect(screen.queryByText('$678.90')).not.toBeInTheDocument()
+  })
+
+  it('withholds the history chart, table, and delta when its requested period is stale', async () => {
+    mockNetWorthHistory = [
+      { date: '2026-01-01', netWorth: 12_345, assets: 12_345, liabilities: 0 },
+      { date: '2026-02-01', netWorth: 67_890, assets: 67_890, liabilities: 0 },
+    ]
+    mockNetWorthHistoryRequestedPeriod = '1y'
+
+    render(<Dashboard />)
+    await userEvent.setup().click(screen.getByRole('tab', { name: 'overview.views.history' }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('overview.historyUnavailable')
+    expect(screen.queryByLabelText('overview.chartTitle')).not.toBeInTheDocument()
+    expect(screen.queryByText('$123.45')).not.toBeInTheDocument()
+    expect(screen.queryByText('$678.90')).not.toBeInTheDocument()
   })
 
   it('removes only the Overview toolbar add action', () => {

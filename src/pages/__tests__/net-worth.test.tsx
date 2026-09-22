@@ -45,6 +45,11 @@ let mockState = {
     { date: '2024-06-01', netWorth: 150000, assets: 150000, liabilities: 0 },
   ],
   historyComplete: true,
+  historyAuthorityKey: 'USD|',
+  historyCurrency: 'USD' as string | null,
+  historyRequestedPeriod: '1y',
+  historyLoading: false,
+  historyError: null as string | null,
   historyMissingCurrencies: [] as string[],
   historyNativeSnapshots: [] as Array<{
     id: string
@@ -76,6 +81,13 @@ vi.mock('@/stores/net-worth-store', () => ({
   }),
 }))
 
+vi.mock('@/stores/currency-store', () => ({
+  useCurrencyStore: () => ({
+    mainCurrency: 'USD',
+    manualRates: [],
+  }),
+}))
+
 vi.mock('@/components/ui/safe-chart', () => ({
   SafeChart: (props: { children: React.ReactNode }) => <div>{props.children}</div>,
 }))
@@ -103,6 +115,11 @@ describe('NetWorth page', () => {
       totalAssets: 200000,
       totalLiabilities: 50000,
       historyComplete: true,
+      historyAuthorityKey: 'USD|',
+      historyCurrency: 'USD',
+      historyRequestedPeriod: '1y',
+      historyLoading: false,
+      historyError: null,
       historyMissingCurrencies: [],
       historyNativeSnapshots: [],
     }
@@ -210,6 +227,33 @@ describe('NetWorth page', () => {
     expect(screen.getByText(/Jan 1, 2024: \$100\.00/)).toBeInTheDocument()
     expect(screen.getByText(/Feb 1, 2024: \$100\.00/)).toBeInTheDocument()
     expect(screen.queryByText('$200.00')).not.toBeInTheDocument()
+  })
+
+  it('withholds chart, table, and period delta for stale history authority', () => {
+    mockState = {
+      ...mockState,
+      historyAuthorityKey: 'USD|obsolete-rate',
+      historyCurrency: 'USD',
+    }
+
+    render(<NetWorth />)
+
+    expect(screen.queryByRole('img', { name: 'netWorth.chartTitle' })).not.toBeInTheDocument()
+    expect(screen.queryByText('$1,000.00')).not.toBeInTheDocument()
+    expect(screen.getAllByText('netWorth.unavailable').length).toBeGreaterThan(0)
+  })
+
+  it('withholds chart, table, and period delta for a stale requested period', () => {
+    mockState = {
+      ...mockState,
+      historyRequestedPeriod: '3m',
+    }
+
+    render(<NetWorth />)
+
+    expect(screen.queryByRole('img', { name: 'netWorth.chartTitle' })).not.toBeInTheDocument()
+    expect(screen.queryByText('$1,000.00')).not.toBeInTheDocument()
+    expect(screen.getAllByText('netWorth.unavailable').length).toBeGreaterThan(0)
   })
 
   it('falls back to generic unavailable copy when incomplete lists are empty', () => {

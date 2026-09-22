@@ -7,6 +7,8 @@ import { StatRow } from '@/components/ui/stat-row'
 import { ProgressBar } from '@/components/ui/progress-bar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { MetricItem, MetricStrip, NativePanel, PageToolbar } from '@/components/ui/native-layout'
+import { useCurrencyStore } from '@/stores/currency-store'
+import { currencyAuthorityKey } from '@/stores/currency-authority'
 import { useNetWorthStore } from '@/stores/net-worth-store'
 import { formatMoney } from '@/lib/money'
 import {
@@ -41,19 +43,35 @@ export function NetWorth() {
     assetBreakdown,
     liabilityBreakdown,
     history,
-    historyComplete = true,
+    historyComplete = false,
+    historyAuthorityKey = null,
+    historyCurrency = null,
+    historyRequestedPeriod = null,
+    historyLoading = false,
+    historyError = null,
     historyMissingCurrencies = [],
     historyNativeSnapshots = [],
     isLoading,
     refresh,
   } = useNetWorthStore()
+  const { mainCurrency, manualRates } = useCurrencyStore()
+  const currentAuthorityKey = currencyAuthorityKey({ mainCurrency, manualRates })
 
   useEffect(() => {
-    refresh(period)
+    void refresh(period).catch(() => {})
   }, [period, refresh])
 
-  const firstPoint = history.length > 0 ? history[0] : null
-  const lastPoint = history.length > 1 ? history[history.length - 1] : null
+  const historyDisplayable =
+    historyComplete &&
+    mainCurrency !== null &&
+    historyAuthorityKey === currentAuthorityKey &&
+    historyCurrency === mainCurrency &&
+    historyRequestedPeriod === period
+  const displayableHistory = historyDisplayable ? history : []
+  const historyDisplayCurrency = historyDisplayable ? historyCurrency : null
+  const firstPoint = displayableHistory.length > 0 ? displayableHistory[0] : null
+  const lastPoint =
+    displayableHistory.length > 1 ? displayableHistory[displayableHistory.length - 1] : null
   const changeAmount = lastPoint && firstPoint ? lastPoint.netWorth - firstPoint.netWorth : 0
   const changePercent =
     firstPoint && firstPoint.netWorth !== 0
@@ -121,18 +139,24 @@ export function NetWorth() {
         </div>
       )}
 
-      {!historyComplete && historyNativeSnapshots.length > 0 ? (
-        <div className="border-warning/30 bg-warning/10 text-warning rounded-xl border px-4 py-3 text-sm">
-          {t('netWorth.unavailable')}
+      {!historyDisplayable ? (
+        <div
+          className="border-warning/30 bg-warning/10 text-warning rounded-xl border px-4 py-3 text-sm"
+          role={historyLoading ? 'status' : 'alert'}
+        >
+          {historyLoading ? t('netWorth.historyLoading') : t('netWorth.unavailable')}
+          {historyError ? ` · ${historyError}` : ''}
           {historyMissingCurrencies.length > 0 ? ` · ${historyMissingCurrencies.join(', ')}` : ''}
-          <span className="text-muted-foreground mt-1 block text-xs">
-            {historyNativeSnapshots
-              .map(
-                (snapshot) =>
-                  `${dayjs(snapshot.date).format('MMM D, YYYY')}: ${formatMoney(snapshot.amountCentavos, snapshot.currency)}`
-              )
-              .join(' · ')}
-          </span>
+          {historyNativeSnapshots.length > 0 ? (
+            <span className="text-muted-foreground mt-1 block text-xs">
+              {historyNativeSnapshots
+                .map(
+                  (snapshot) =>
+                    `${dayjs(snapshot.date).format('MMM D, YYYY')}: ${formatMoney(snapshot.amountCentavos, snapshot.currency)}`
+                )
+                .join(' · ')}
+            </span>
+          ) : null}
         </div>
       ) : null}
 
@@ -145,7 +169,7 @@ export function NetWorth() {
               : '—'
           }
           detail={
-            history.length > 1 ? (
+            displayableHistory.length > 1 && historyDisplayCurrency ? (
               <span className={isPositiveChange ? 'text-success' : 'text-destructive'}>
                 {isPositiveChange ? (
                   <TrendingUp size={12} className="mr-1 inline" aria-hidden="true" />
@@ -153,10 +177,7 @@ export function NetWorth() {
                   <TrendingDown size={12} className="mr-1 inline" aria-hidden="true" />
                 )}
                 {isPositiveChange ? '+' : ''}
-                {preferredCurrency
-                  ? formatMoney(Math.round(changeAmount), preferredCurrency)
-                  : '—'}{' '}
-                ({changePercent}%)
+                {formatMoney(Math.round(changeAmount), historyDisplayCurrency)} ({changePercent}%)
               </span>
             ) : null
           }
@@ -181,11 +202,17 @@ export function NetWorth() {
 
       <NativePanel className="p-5 sm:p-6">
         <h2 className="text-base font-semibold">{t('netWorth.chartTitle')}</h2>
-        {history.length > 1 ? (
+        {!historyDisplayable ? (
+          <div className="bg-muted mt-4 flex h-52 items-center justify-center rounded-xl">
+            <p className="text-warning text-xs">
+              {historyLoading ? t('netWorth.historyLoading') : t('netWorth.unavailable')}
+            </p>
+          </div>
+        ) : displayableHistory.length > 1 ? (
           <>
             <div className="mt-4 h-56" role="img" aria-label={t('netWorth.chartTitle')}>
               <SafeChart>
-                <AreaChart data={history}>
+                <AreaChart data={displayableHistory}>
                   <defs>
                     <linearGradient id="netWorthGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="var(--color-chart-1)" stopOpacity={0.22} />
@@ -204,7 +231,7 @@ export function NetWorth() {
                     tickLine={false}
                     tick={{ fill: CHART_AXIS_COLOR, fontSize: 10 }}
                     tickFormatter={(v) =>
-                      preferredCurrency ? formatMoney(Number(v), preferredCurrency) : '—'
+                      historyDisplayCurrency ? formatMoney(Number(v), historyDisplayCurrency) : '—'
                     }
                     width={50}
                   />
@@ -214,7 +241,9 @@ export function NetWorth() {
                     labelStyle={CHART_LABEL_STYLE}
                     labelFormatter={(d) => dayjs(d).format('MMM D, YYYY')}
                     formatter={(value) => [
-                      preferredCurrency ? formatMoney(Number(value), preferredCurrency) : '—',
+                      historyDisplayCurrency
+                        ? formatMoney(Number(value), historyDisplayCurrency)
+                        : '—',
                       t('netWorth.title'),
                     ]}
                   />
@@ -241,11 +270,13 @@ export function NetWorth() {
                   </tr>
                 </thead>
                 <tbody>
-                  {history.map((point) => (
+                  {displayableHistory.map((point) => (
                     <tr key={point.date}>
                       <td className="py-0.5 pr-6">{dayjs(point.date).format('MMM D, YYYY')}</td>
                       <td className="tabular-nums">
-                        {preferredCurrency ? formatMoney(point.netWorth, preferredCurrency) : '—'}
+                        {historyDisplayCurrency
+                          ? formatMoney(point.netWorth, historyDisplayCurrency)
+                          : '—'}
                       </td>
                     </tr>
                   ))}
@@ -256,7 +287,9 @@ export function NetWorth() {
         ) : (
           <div className="bg-muted mt-4 flex h-52 items-center justify-center rounded-xl">
             <p className="text-muted-foreground text-xs">
-              {history.length === 1 ? t('netWorth.firstSnapshot') : t('netWorth.noHistory')}
+              {displayableHistory.length === 1
+                ? t('netWorth.firstSnapshot')
+                : t('netWorth.noHistory')}
             </p>
           </div>
         )}

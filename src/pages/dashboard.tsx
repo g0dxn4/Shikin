@@ -75,6 +75,11 @@ export function Dashboard() {
   const {
     history,
     historyComplete,
+    historyAuthorityKey,
+    historyCurrency,
+    historyRequestedPeriod,
+    historyLoading,
+    historyError,
     historyMissingCurrencies,
     isLoading: netWorthLoading,
     netWorth,
@@ -229,8 +234,13 @@ export function Dashboard() {
     netWorthComplete &&
     netWorth !== null
   const historyDisplayable =
-    historyComplete && mainCurrency !== null && netWorthCurrency === mainCurrency
-  const lastHistoryDate = historyDisplayable ? history[history.length - 1]?.date : null
+    historyComplete &&
+    mainCurrency !== null &&
+    historyAuthorityKey === authorityKey &&
+    historyCurrency === mainCurrency &&
+    historyRequestedPeriod === historyPeriod
+  const displayableHistory = historyDisplayable ? history : []
+  const lastHistoryDate = displayableHistory[displayableHistory.length - 1]?.date ?? null
 
   if (isLoading) {
     return <DashboardSkeleton />
@@ -299,22 +309,26 @@ export function Dashboard() {
         historyAsOfLabel={t('overview.historyValuationThrough', {
           date: dayjs(lastHistoryDate ?? now).format('MMMM D, YYYY'),
         })}
-        history={history}
+        history={displayableHistory}
         historyComplete={historyDisplayable}
         historyUnavailableMessage={
           !mainCurrency
             ? t('currency.mainRequired')
-            : historyMissingCurrencies.length > 0
-              ? t('currency.missingDatedRates', {
-                  currencies: historyMissingCurrencies.join(', '),
-                })
-              : t('currency.historyUnavailable')
+            : historyLoading
+              ? t('currency.recalculating')
+              : historyError
+                ? historyError
+                : historyMissingCurrencies.length > 0
+                  ? t('currency.missingDatedRates', {
+                      currencies: historyMissingCurrencies.join(', '),
+                    })
+                  : t('currency.historyUnavailable')
         }
         period={historyPeriod}
         onPeriodChange={setHistoryPeriod}
-        historyCurrency={netWorthCurrency}
+        historyCurrency={historyCurrency}
         emptyHistoryMessage={
-          history.length === 1
+          displayableHistory.length === 1
             ? tAnalytics('netWorth.firstSnapshot')
             : tAnalytics('netWorth.noHistory')
         }

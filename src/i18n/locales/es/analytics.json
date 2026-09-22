@@ -17,6 +17,7 @@
     "unresolvedOwnership_one": "{{count}} cuenta tiene titularidad sin resolver.",
     "unresolvedOwnership_other": "{{count}} cuentas tienen titularidad sin resolver.",
     "unavailable": "Los totales de patrimonio neto no están disponibles.",
+    "historyLoading": "El historial de patrimonio neto se está cargando.",
     "historyPeriod": "Rango de patrimonio neto",
     "viewChartData": "Ver datos del gráfico",
     "periods": {

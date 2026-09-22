@@ -35,8 +35,14 @@ describe('AppShell', () => {
   })
 
   it('renders the shared shell, route heading, and outlet', () => {
-    render(<AppShell />)
+    const { container } = render(<AppShell />)
 
+    expect(container.firstElementChild).toHaveClass(
+      'h-full',
+      'min-h-0',
+      'flex-1',
+      'overflow-hidden'
+    )
     expect(screen.getByTestId('sidebar')).toBeInTheDocument()
     expect(screen.getByTestId('bottom-nav')).toBeInTheDocument()
     const heading = screen.getByRole('heading', { level: 1, name: 'Overview' })

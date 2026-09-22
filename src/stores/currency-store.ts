@@ -233,141 +233,212 @@ function convertOne(
   }
 }
 
-export const useCurrencyStore = create<CurrencyState>((set, get) => ({
-  mainCurrency: null,
-  preferredCurrency: DEFAULT_SETUP_CURRENCY,
-  manualRates: [],
-  isLoading: false,
-  error: null,
+export const useCurrencyStore = create<CurrencyState>((set, get) => {
+  let latestOperation: object | null = null
+  let mutationQueue: Promise<void> = Promise.resolve()
 
-  loadRates: async () => {
+  const beginOperation = () => {
+    const token = {}
+    latestOperation = token
     set({ isLoading: true, error: null })
-    const setupDraft = await readLegacySetupDraft()
+    return token
+  }
+
+  const isLatestOperation = (token: object) => latestOperation === token
+
+  const finishOperation = (token: object) => {
+    if (isLatestOperation(token)) set({ isLoading: false })
+  }
+
+  const readAndCommitAuthority = async (token: object) => {
+    const setupDraftPromise = readLegacySetupDraft()
     try {
-      const [settings, manualRates] = await Promise.all([
+      const [setupDraft, settings, manualRates] = await Promise.all([
+        setupDraftPromise,
         getCurrencySettings(),
         listExchangeRates(),
       ])
+      if (!isLatestOperation(token)) return
       set({
         mainCurrency: settings.mainCurrency,
         preferredCurrency: settings.mainCurrency ?? setupDraft,
         manualRates,
       })
     } catch (error) {
-      // A failed database switch/read must never leave another database's authority in memory.
-      set({
-        mainCurrency: null,
-        preferredCurrency: setupDraft,
-        manualRates: [],
-        error: getErrorMessage(error),
+      const setupDraft = await setupDraftPromise
+      if (isLatestOperation(token)) {
+        // A current database read failure must clear authority from any previous database.
+        set({
+          mainCurrency: null,
+          preferredCurrency: setupDraft,
+          manualRates: [],
+          error: getErrorMessage(error),
+        })
+      }
+      throw error
+    }
+  }
+
+  const reconcileCurrentAuthorityAfterMutationFailure = async (
+    token: object,
+    mutationError: unknown
+  ) => {
+    if (!isLatestOperation(token)) return
+    try {
+      await readAndCommitAuthority(token)
+      if (isLatestOperation(token)) set({ error: getErrorMessage(mutationError) })
+    } catch {
+      // readAndCommitAuthority already cleared unverifiable authority and exposed the read error.
+    }
+  }
+
+  const enqueueMutation = <T>(work: (token: object) => Promise<T>): Promise<T> => {
+    const token = beginOperation()
+    const task = mutationQueue.then(
+      () => work(token),
+      () => work(token)
+    )
+    mutationQueue = task.then(
+      () => undefined,
+      () => undefined
+    )
+    return task
+  }
+
+  return {
+    mainCurrency: null,
+    preferredCurrency: DEFAULT_SETUP_CURRENCY,
+    manualRates: [],
+    isLoading: false,
+    error: null,
+
+    loadRates: async () => {
+      const token = beginOperation()
+      const writesBeforeRead = mutationQueue
+      try {
+        // A load requested during a write reads only after that write settles. A newer
+        // load/write invalidates this token before any stale result can reach state.
+        await writesBeforeRead
+        if (!isLatestOperation(token)) return
+        await readAndCommitAuthority(token)
+      } finally {
+        finishOperation(token)
+      }
+    },
+
+    setPreferredCurrency: async (currency) => {
+      const normalized = requireSupportedCurrency(currency)
+      return enqueueMutation(async (token) => {
+        try {
+          const settings = await setMainCurrency(normalized)
+          if (!settings.configured) throw new Error('Main currency was not configured')
+          if (isLatestOperation(token)) {
+            set({ mainCurrency: settings.mainCurrency, preferredCurrency: settings.mainCurrency })
+          }
+        } catch (error) {
+          await reconcileCurrentAuthorityAfterMutationFailure(token, error)
+          throw error
+        } finally {
+          finishOperation(token)
+        }
       })
-      throw error
-    } finally {
-      set({ isLoading: false })
-    }
-  },
+    },
 
-  setPreferredCurrency: async (currency) => {
-    const normalized = requireSupportedCurrency(currency)
-    set({ isLoading: true, error: null })
-    try {
-      const settings = await setMainCurrency(normalized)
-      if (!settings.configured) throw new Error('Main currency was not configured')
-      set({ mainCurrency: settings.mainCurrency, preferredCurrency: settings.mainCurrency })
-    } catch (error) {
-      set({ error: getErrorMessage(error) })
-      throw error
-    } finally {
-      set({ isLoading: false })
-    }
-  },
+    saveExchangeRate: async (input) =>
+      enqueueMutation(async (token) => {
+        let writeCompleted = false
+        try {
+          await setExchangeRate({ ...input, today: localToday() })
+          writeCompleted = true
+          if (isLatestOperation(token)) await readAndCommitAuthority(token)
+        } catch (error) {
+          // readAndCommitAuthority already clears unverifiable authority after a current
+          // reload failure. A write failure reconciles after any earlier queued write.
+          if (!writeCompleted) {
+            await reconcileCurrentAuthorityAfterMutationFailure(token, error)
+          }
+          throw error
+        } finally {
+          finishOperation(token)
+        }
+      }),
 
-  saveExchangeRate: async (input) => {
-    set({ isLoading: true, error: null })
-    try {
-      await setExchangeRate({ ...input, today: localToday() })
-      await get().loadRates()
-    } catch (error) {
-      set({ error: getErrorMessage(error), isLoading: false })
-      throw error
-    }
-  },
+    convertHistoricalToPreferred: (amountCentavos, fromCurrency, date) =>
+      convertOne(amountCentavos, fromCurrency, date, get()),
 
-  convertHistoricalToPreferred: (amountCentavos, fromCurrency, date) =>
-    convertOne(amountCentavos, fromCurrency, date, get()),
+    convertCurrentToPreferred: (amountCentavos, fromCurrency, asOfDate = localToday()) =>
+      convertOne(amountCentavos, fromCurrency, asOfDate, get()),
 
-  convertCurrentToPreferred: (amountCentavos, fromCurrency, asOfDate = localToday()) =>
-    convertOne(amountCentavos, fromCurrency, asOfDate, get()),
+    getTotalBalanceInPreferred: (accounts) => {
+      const { mainCurrency, preferredCurrency, manualRates } = get()
+      const invalidCurrencies = accounts.flatMap((account) => {
+        if (normalizeSupportedCurrency(account.currency)) return []
+        return [
+          {
+            accountId: account.id,
+            accountName: account.name,
+            value: currencyDiagnosticValue(account.currency),
+          },
+        ]
+      })
+      if (invalidCurrencies.length > 0) {
+        return invalidResult(
+          mainCurrency ?? preferredCurrency,
+          new TypeError('Unsupported account currency'),
+          invalidCurrencies
+        )
+      }
 
-  getTotalBalanceInPreferred: (accounts) => {
-    const { mainCurrency, preferredCurrency, manualRates } = get()
-    const invalidCurrencies = accounts.flatMap((account) => {
-      if (normalizeSupportedCurrency(account.currency)) return []
-      return [
-        {
-          accountId: account.id,
-          accountName: account.name,
-          value: currencyDiagnosticValue(account.currency),
-        },
-      ]
-    })
-    if (invalidCurrencies.length > 0) {
-      return invalidResult(
-        mainCurrency ?? preferredCurrency,
-        new TypeError('Unsupported account currency'),
-        invalidCurrencies
-      )
-    }
+      try {
+        const nativeTotals = accountNativeTotals(accounts)
+        if (!mainCurrency) return unconfiguredResult(preferredCurrency, undefined, nativeTotals)
 
-    try {
-      const nativeTotals = accountNativeTotals(accounts)
-      if (!mainCurrency) return unconfiguredResult(preferredCurrency, undefined, nativeTotals)
-
-      const today = localToday()
-      const result = convertDatedAmounts(
-        accounts.map((account) => ({
-          id: account.id,
-          amountCentavos: account.balance,
-          currency: requireSupportedCurrency(account.currency),
-          date: today,
-        })),
-        mainCurrency,
-        manualRates
-      )
-      if (!result.complete) {
-        const missingCurrencies = [
-          ...new Set(
-            result.converted
-              .filter((conversion) => !conversion.complete)
-              .map((conversion) => conversion.fromCurrency)
-          ),
-        ].sort()
+        const today = localToday()
+        const result = convertDatedAmounts(
+          accounts.map((account) => ({
+            id: account.id,
+            amountCentavos: account.balance,
+            currency: requireSupportedCurrency(account.currency),
+            date: today,
+          })),
+          mainCurrency,
+          manualRates
+        )
+        if (!result.complete) {
+          const missingCurrencies = [
+            ...new Set(
+              result.converted
+                .filter((conversion) => !conversion.complete)
+                .map((conversion) => conversion.fromCurrency)
+            ),
+          ].sort()
+          return {
+            complete: false,
+            preferredCurrency: mainCurrency,
+            missingCurrencies,
+            reason: 'missing_exchange_rates',
+            knownTotalCentavos: result.knownTotalCentavos,
+            nativeTotals: result.nativeTotals,
+            conversions: result.converted,
+          }
+        }
         return {
-          complete: false,
+          complete: true,
           preferredCurrency: mainCurrency,
-          missingCurrencies,
-          reason: 'missing_exchange_rates',
+          amountCentavos: result.totalCentavos!,
+          missingCurrencies: [],
           knownTotalCentavos: result.knownTotalCentavos,
           nativeTotals: result.nativeTotals,
           conversions: result.converted,
         }
+      } catch (error) {
+        return invalidResult(mainCurrency ?? preferredCurrency, error)
       }
-      return {
-        complete: true,
-        preferredCurrency: mainCurrency,
-        amountCentavos: result.totalCentavos!,
-        missingCurrencies: [],
-        knownTotalCentavos: result.knownTotalCentavos,
-        nativeTotals: result.nativeTotals,
-        conversions: result.converted,
-      }
-    } catch (error) {
-      return invalidResult(mainCurrency ?? preferredCurrency, error)
-    }
-  },
+    },
 
-  getCurrentValuationRates: (asOfDate = localToday()) => {
-    const { mainCurrency, manualRates } = get()
-    return mainCurrency ? selectValuationRatesAsOf(manualRates, mainCurrency, asOfDate) : []
-  },
-}))
+    getCurrentValuationRates: (asOfDate = localToday()) => {
+      const { mainCurrency, manualRates } = get()
+      return mainCurrency ? selectValuationRatesAsOf(manualRates, mainCurrency, asOfDate) : []
+    },
+  }
+})

@@ -269,9 +269,15 @@ export default function App() {
   return (
     <ErrorBoundary>
       <BrowserRouter>
-        <div className="relative min-h-screen" data-startup-state={startupState}>
+        <div
+          className="relative flex h-full min-h-0 flex-col overflow-hidden"
+          data-startup-state={startupState}
+        >
           {startupCompleted && mainCurrency === null && (
-            <div className="border-warning/30 bg-warning/10 border-b px-4 py-3">
+            <div
+              className="border-warning/30 bg-warning/10 shrink-0 border-b px-4 py-3"
+              data-currency-setup-banner
+            >
               <div className="mx-auto flex max-w-5xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold">{t('currencySetup.title')}</p>
@@ -290,7 +296,10 @@ export default function App() {
           )}
 
           {startupMessages.length > 0 && (
-            <div className="pointer-events-none sticky top-0 z-50 px-4 pt-4 sm:fixed sm:inset-x-0 sm:top-4 sm:pt-0">
+            <div
+              className="pointer-events-none sticky top-0 z-50 shrink-0 px-4 pt-4 sm:fixed sm:inset-x-0 sm:top-4 sm:pt-0"
+              data-startup-error-banner
+            >
               <div className="pointer-events-auto mx-auto max-w-3xl">
                 <ErrorBanner
                   title="Startup tasks need attention"

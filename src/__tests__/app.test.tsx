@@ -46,7 +46,11 @@ vi.mock('@/components/error-boundary', () => ({
 }))
 
 vi.mock('@/components/layout/app-shell', () => ({
-  AppShell: () => <div>App shell</div>,
+  AppShell: () => (
+    <div data-testid="app-shell" className="min-h-0 flex-1 overflow-hidden">
+      App shell
+    </div>
+  ),
 }))
 
 vi.mock('@/components/ui/loading-spinner', () => ({
@@ -153,6 +157,26 @@ describe('App startup orchestration', () => {
       '/settings'
     )
     await waitFor(() => expect(mockLoadRates).toHaveBeenCalledTimes(1))
+  })
+
+  it('bounds setup and startup-error banners above the remaining shell viewport', async () => {
+    mockCurrencyState.mainCurrency = null
+    mockRefreshNetWorth.mockRejectedValueOnce(new Error('Expected unadapted reporter error'))
+
+    const { container } = render(<App />)
+
+    expect(await screen.findByText('Main currency needs to be configured')).toBeInTheDocument()
+    expect(await screen.findByText('Startup tasks need attention')).toBeInTheDocument()
+    expect(container.querySelector('[data-startup-state]')).toHaveClass(
+      'flex',
+      'h-full',
+      'min-h-0',
+      'flex-col',
+      'overflow-hidden'
+    )
+    expect(container.querySelector('[data-currency-setup-banner]')).toHaveClass('shrink-0')
+    expect(container.querySelector('[data-startup-error-banner]')).toHaveClass('shrink-0')
+    expect(screen.getByTestId('app-shell')).toHaveClass('min-h-0', 'flex-1', 'overflow-hidden')
   })
 
   it('surfaces startup failures and skips dependent account tasks when accounts fail', async () => {

@@ -70,6 +70,16 @@ const history = [
   rate('future', '2026-01-01', '19'),
 ]
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 describe('currency-store dated FX adapter', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -140,6 +150,155 @@ describe('currency-store dated FX adapter', () => {
       manualRates: [],
       isLoading: false,
       error: 'database unavailable',
+    })
+  })
+
+  it('ignores a delayed load result after a newer main-currency save', async () => {
+    const oldSettings = deferred<{ configured: true; mainCurrency: string }>()
+    mockGetCurrencySettings.mockReturnValueOnce(oldSettings.promise)
+    mockListExchangeRates.mockResolvedValueOnce([])
+
+    const oldLoad = useCurrencyStore.getState().loadRates()
+    await vi.waitFor(() => expect(mockGetCurrencySettings).toHaveBeenCalledOnce())
+
+    await useCurrencyStore.getState().setPreferredCurrency('MXN')
+    oldSettings.resolve({ configured: true, mainCurrency: 'USD' })
+    await oldLoad
+
+    expect(useCurrencyStore.getState()).toMatchObject({
+      mainCurrency: 'MXN',
+      preferredCurrency: 'MXN',
+      manualRates: [],
+      isLoading: false,
+      error: null,
+    })
+  })
+
+  it('keeps the newest load pending and ignores an older load failure', async () => {
+    const oldSettings = deferred<{ configured: true; mainCurrency: string }>()
+    const newSettings = deferred<{ configured: true; mainCurrency: string }>()
+    mockGetCurrencySettings
+      .mockReturnValueOnce(oldSettings.promise)
+      .mockReturnValueOnce(newSettings.promise)
+    mockListExchangeRates
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([rate('new', '2025-09-20', '18')])
+
+    const oldLoad = useCurrencyStore.getState().loadRates()
+    await vi.waitFor(() => expect(mockGetCurrencySettings).toHaveBeenCalledOnce())
+    const newLoad = useCurrencyStore.getState().loadRates()
+
+    oldSettings.reject(new Error('stale database failure'))
+    await expect(oldLoad).rejects.toThrow('stale database failure')
+    expect(useCurrencyStore.getState()).toMatchObject({ isLoading: true, error: null })
+
+    newSettings.resolve({ configured: true, mainCurrency: 'MXN' })
+    await newLoad
+    expect(useCurrencyStore.getState()).toMatchObject({
+      mainCurrency: 'MXN',
+      preferredCurrency: 'MXN',
+      isLoading: false,
+      error: null,
+    })
+  })
+
+  it('waits for an in-flight rate save before a newer load reads authority', async () => {
+    const write = deferred<DatedExchangeRate>()
+    mockSetExchangeRate.mockReturnValueOnce(write.promise)
+    mockGetCurrencySettings.mockResolvedValue({ configured: true, mainCurrency: 'MXN' })
+    mockListExchangeRates.mockResolvedValue([rate('saved', '2025-09-20', '18')])
+
+    const save = useCurrencyStore.getState().saveExchangeRate({
+      fromCurrency: 'USD',
+      toCurrency: 'MXN',
+      rateDecimal: '18',
+      effectiveFrom: '2025-09-20',
+    })
+    await vi.waitFor(() => expect(mockSetExchangeRate).toHaveBeenCalledOnce())
+    const loadAfterSave = useCurrencyStore.getState().loadRates()
+
+    expect(mockGetCurrencySettings).not.toHaveBeenCalled()
+    expect(useCurrencyStore.getState()).toMatchObject({ isLoading: true, error: null })
+
+    write.resolve(rate('saved', '2025-09-20', '18'))
+    await Promise.all([save, loadAfterSave])
+    expect(mockGetCurrencySettings).toHaveBeenCalledOnce()
+    expect(useCurrencyStore.getState()).toMatchObject({
+      mainCurrency: 'MXN',
+      manualRates: [rate('saved', '2025-09-20', '18')],
+      isLoading: false,
+      error: null,
+    })
+  })
+
+  it('clears unverifiable authority when a successful rate write cannot reload DB state', async () => {
+    useCurrencyStore.setState({
+      mainCurrency: 'MXN',
+      preferredCurrency: 'MXN',
+      manualRates: history,
+    })
+    mockGetCurrencySettings.mockResolvedValue({ configured: true, mainCurrency: 'MXN' })
+    mockListExchangeRates.mockRejectedValue(new Error('reload failed'))
+
+    await expect(
+      useCurrencyStore.getState().saveExchangeRate({
+        fromCurrency: 'USD',
+        toCurrency: 'MXN',
+        rateDecimal: '18',
+        effectiveFrom: '2025-09-20',
+      })
+    ).rejects.toThrow('reload failed')
+
+    expect(useCurrencyStore.getState()).toMatchObject({
+      mainCurrency: null,
+      preferredCurrency: 'USD',
+      manualRates: [],
+      isLoading: false,
+      error: 'reload failed',
+    })
+  })
+
+  it('serializes main saves and suppresses a stale mutation error', async () => {
+    const oldSave = deferred<{ configured: true; mainCurrency: string }>()
+    mockSetMainCurrency
+      .mockReturnValueOnce(oldSave.promise)
+      .mockResolvedValueOnce({ configured: true, mainCurrency: 'MXN' })
+
+    const first = useCurrencyStore.getState().setPreferredCurrency('USD')
+    const second = useCurrencyStore.getState().setPreferredCurrency('MXN')
+
+    await vi.waitFor(() => expect(mockSetMainCurrency).toHaveBeenCalledTimes(1))
+    oldSave.reject(new Error('stale save failure'))
+    await expect(first).rejects.toThrow('stale save failure')
+    await second
+
+    expect(mockSetMainCurrency).toHaveBeenNthCalledWith(2, 'MXN')
+    expect(useCurrencyStore.getState()).toMatchObject({
+      mainCurrency: 'MXN',
+      preferredCurrency: 'MXN',
+      isLoading: false,
+      error: null,
+    })
+  })
+
+  it('reconciles authority when a later queued mutation fails after an earlier write', async () => {
+    mockSetMainCurrency
+      .mockResolvedValueOnce({ configured: true, mainCurrency: 'USD' })
+      .mockRejectedValueOnce(new Error('newer save failed'))
+    mockGetCurrencySettings.mockResolvedValue({ configured: true, mainCurrency: 'USD' })
+    mockListExchangeRates.mockResolvedValue(history)
+
+    const first = useCurrencyStore.getState().setPreferredCurrency('USD')
+    const second = useCurrencyStore.getState().setPreferredCurrency('MXN')
+
+    await first
+    await expect(second).rejects.toThrow('newer save failed')
+    expect(useCurrencyStore.getState()).toMatchObject({
+      mainCurrency: 'USD',
+      preferredCurrency: 'USD',
+      manualRates: history,
+      isLoading: false,
+      error: 'newer save failed',
     })
   })
 

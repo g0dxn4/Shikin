@@ -60,10 +60,8 @@ test.describe('accessible chart data tables', () => {
     const cashFlowTable = page.locator('#overview-cashflow-data')
     const paceTable = page.locator('#spending-pace-data')
 
-    await expect(page.locator('[aria-describedby="overview-cashflow-data"]')).toHaveCount(1)
+    await expect(page.locator('[aria-describedby="overview-cashflow-data"]')).toHaveCount(0)
     await expect(page.locator('[aria-describedby="spending-pace-data"]')).toHaveCount(1)
-    await expect(page.getByRole('heading', { name: 'Cash flow' })).toHaveCount(1)
-    await expectClippedTableWrapper(cashFlowTable, 'Cash flow')
     await expectClippedTableWrapper(paceTable, 'Cumulative spending pace for current month')
 
     const main = page.getByRole('main')
@@ -72,7 +70,6 @@ test.describe('accessible chart data tables', () => {
     })
     await expect.poll(() => main.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
 
-    await expectClippedTableWrapper(cashFlowTable, 'Cash flow')
     await expectClippedTableWrapper(paceTable, 'Cumulative spending pace for current month')
 
     await page.getByRole('tab', { name: 'Trend' }).click()
@@ -87,5 +84,12 @@ test.describe('accessible chart data tables', () => {
     const categoriesTable = page.locator('#spending-categories-data')
     await expect(page.locator('[aria-describedby="spending-categories-data"]')).toHaveCount(1)
     await expectClippedTableWrapper(categoriesTable, 'Monthly spending composition by category')
+
+    await page.getByRole('tab', { name: 'Cash flow' }).click()
+    await expect(page.locator('[aria-describedby="overview-cashflow-data"]')).toHaveCount(1)
+    await expect(page.getByRole('heading', { name: 'Cash flow' })).toHaveCount(1)
+    await expectClippedTableWrapper(cashFlowTable, 'Cash flow')
+    await main.evaluate((element) => element.scrollTo(0, 150))
+    await expectClippedTableWrapper(cashFlowTable, 'Cash flow')
   })
 })

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, CheckCircle2, Edit3, Loader2, Plus } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ChevronDown, Edit3, Loader2, Plus } from 'lucide-react'
 import dayjs from 'dayjs'
 import { FX_CURRENCIES, type DatedExchangeRate } from '@shikin/finance-core/fx'
 import { toast } from 'sonner'
@@ -15,7 +15,15 @@ function defaultTarget(fromCurrency: string, preferredCurrency: string): string 
   return FX_CURRENCIES.find((currency) => currency !== fromCurrency) ?? 'EUR'
 }
 
-export function CurrencySettings() {
+interface CurrencySettingsProps {
+  manualRatesOpen?: boolean
+  onManualRatesOpenChange?: (open: boolean) => void
+}
+
+export function CurrencySettings({
+  manualRatesOpen = true,
+  onManualRatesOpenChange,
+}: CurrencySettingsProps = {}) {
   const { t } = useTranslation('settings')
   const { t: tCommon } = useTranslation('common')
   const {
@@ -144,16 +152,23 @@ export function CurrencySettings() {
         </div>
       )}
 
-      <div className="space-y-3">
+      <div
+        id="main-currency"
+        tabIndex={-1}
+        className="focus-visible:ring-ring scroll-mt-4 space-y-3 rounded-lg focus-visible:ring-2 focus-visible:outline-none"
+      >
         <div className="space-y-1">
-          <Label htmlFor="main-currency" className="font-mono text-xs tracking-wider uppercase">
+          <Label
+            htmlFor="main-currency-select"
+            className="font-mono text-xs tracking-wider uppercase"
+          >
             {t('currency.mainCurrency')}
           </Label>
           <p className="text-muted-foreground text-xs">{t('currency.mainDescription')}</p>
         </div>
         <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-end">
           <select
-            id="main-currency"
+            id="main-currency-select"
             value={mainDraft}
             onChange={(event) => setMainDraft(event.target.value)}
             className="native-select min-w-0 flex-1"
@@ -184,224 +199,286 @@ export function CurrencySettings() {
         </p>
       </div>
 
-      <form
-        id="manual-fx-form"
-        className="border-border space-y-4 border-t pt-5"
-        onSubmit={saveRate}
+      <details
+        id="manual-rates"
+        tabIndex={-1}
+        open={manualRatesOpen}
+        onToggle={(event) => onManualRatesOpenChange?.(event.currentTarget.open)}
+        className="border-border focus-visible:ring-ring group scroll-mt-4 rounded-xl border focus-visible:ring-2 focus-visible:outline-none"
       >
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-semibold">
-              {t(correction ? 'currency.correctRate' : 'currency.addRate')}
-            </h3>
-            <p className="text-muted-foreground mt-1 text-xs">{t('currency.directionHelp')}</p>
-          </div>
-          {correction && (
-            <Button type="button" variant="outline" size="sm" onClick={resetRateForm}>
-              {tCommon('actions.cancel')}
-            </Button>
-          )}
-        </div>
-
-        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="min-w-0 space-y-1.5">
-            <Label htmlFor="fx-from">{t('currency.from')}</Label>
-            <select
-              id="fx-from"
-              value={fromCurrency}
-              onChange={(event) => {
-                const next = event.target.value
-                setFromCurrency(next)
-                if (next === toCurrency) {
-                  setToCurrency(defaultTarget(next, mainCurrency ?? preferredCurrency))
-                }
-              }}
-              className="native-select w-full min-w-0"
-              disabled={Boolean(correction)}
-            >
-              {FX_CURRENCIES.map((currency) => (
-                <option key={currency} value={currency}>
-                  {currency}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="min-w-0 space-y-1.5">
-            <Label htmlFor="fx-to">{t('currency.to')}</Label>
-            <select
-              id="fx-to"
-              value={toCurrency}
-              onChange={(event) => setToCurrency(event.target.value)}
-              className="native-select w-full min-w-0"
-              disabled={Boolean(correction)}
-            >
-              {FX_CURRENCIES.map((currency) => (
-                <option key={currency} value={currency}>
-                  {currency}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="min-w-0 space-y-1.5">
-            <Label htmlFor="fx-rate">{t('currency.rateDecimal')}</Label>
-            <Input
-              id="fx-rate"
-              value={rateDecimal}
-              onChange={(event) => setRateDecimal(event.target.value)}
-              inputMode="decimal"
-              placeholder="17.25"
-              autoComplete="off"
-              required
-            />
-            <p className="text-muted-foreground text-[11px]">
-              {t('currency.rateMeaning', { from: fromCurrency, to: toCurrency })}
-            </p>
-          </div>
-          <div className="min-w-0 space-y-1.5">
-            <Label htmlFor="fx-effective-from">{t('currency.effectiveFrom')}</Label>
-            <Input
-              id="fx-effective-from"
-              type="date"
-              value={effectiveFrom}
-              onChange={(event) => setEffectiveFrom(event.target.value)}
-              disabled={Boolean(correction)}
-              required
-            />
-          </div>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="fx-source-note">{t('currency.sourceNote')}</Label>
-          <Input
-            id="fx-source-note"
-            value={sourceNote}
-            onChange={(event) => setSourceNote(event.target.value)}
-            maxLength={1000}
-            placeholder={t('currency.sourceNotePlaceholder')}
+        <summary className="focus-visible:ring-ring flex min-h-16 cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-4 py-3 focus-visible:ring-2 focus-visible:outline-none [&::-webkit-details-marker]:hidden">
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold">{t('currency.manualRatesTitle')}</span>
+            <span className="text-muted-foreground mt-1 block text-xs leading-relaxed">
+              {t('currency.manualRatesSummary', { count: manualRates.length })}
+            </span>
+          </span>
+          <ChevronDown
+            size={18}
+            className="text-muted-foreground shrink-0 transition-transform group-open:rotate-180"
+            aria-hidden="true"
           />
-        </div>
-
-        {historicalChange && (
-          <div className="border-warning/30 bg-warning/10 space-y-3 rounded-xl border p-4">
-            <div className="flex items-start gap-2">
-              <AlertTriangle className="text-warning mt-0.5 size-4 shrink-0" aria-hidden="true" />
-              <p className="text-xs leading-relaxed">{t('currency.historicalWarning')}</p>
+        </summary>
+        <div className="border-border space-y-6 border-t p-4 sm:p-5">
+          <section aria-labelledby="current-rate-authority-title" className="space-y-3">
+            <div>
+              <h3 id="current-rate-authority-title" className="text-sm font-semibold">
+                {t('currency.currentAuthority')}
+              </h3>
+              <p className="text-muted-foreground mt-1 text-xs">
+                {t('currency.currentAuthorityDescription')}
+              </p>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="fx-audit-note">{t('currency.auditNote')}</Label>
-              <Input
-                id="fx-audit-note"
-                value={auditNote}
-                onChange={(event) => setAuditNote(event.target.value)}
-                maxLength={1000}
-                required
-              />
-            </div>
-            <label className="flex cursor-pointer items-start gap-2 text-xs leading-relaxed">
-              <input
-                type="checkbox"
-                checked={acknowledged}
-                onChange={(event) => setAcknowledged(event.target.checked)}
-                className="mt-0.5 size-4 shrink-0"
-                required
-              />
-              <span>{t('currency.acknowledgeHistorical')}</span>
-            </label>
-          </div>
-        )}
-
-        {fromCurrency === toCurrency && (
-          <p role="alert" className="text-destructive text-xs">
-            {t('currency.sameCurrencyError')}
-          </p>
-        )}
-        {error && (
-          <p role="alert" className="text-destructive text-xs break-words">
-            {error}
-          </p>
-        )}
-
-        <Button
-          type="submit"
-          disabled={
-            isSavingRate ||
-            isLoading ||
-            fromCurrency === toCurrency ||
-            (historicalChange && (!auditNote.trim() || !acknowledged))
-          }
-          className="w-full sm:w-auto"
-        >
-          {isSavingRate ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-          {isSavingRate
-            ? tCommon('actions.saving')
-            : t(correction ? 'currency.saveCorrection' : 'currency.saveRate')}
-        </Button>
-      </form>
-
-      <div className="border-border space-y-3 border-t pt-5">
-        <div>
-          <h3 className="text-sm font-semibold">{t('currency.history')}</h3>
-          <p className="text-muted-foreground mt-1 text-xs">{t('currency.historyDescription')}</p>
-        </div>
-        {displayedRates.length === 0 ? (
-          <p className="border-border bg-muted/30 text-muted-foreground rounded-lg border p-4 text-sm">
-            {t('currency.emptyHistory')}
-          </p>
-        ) : (
-          <ul className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
-            {displayedRates.map((rate) => {
-              const corrected = supersededIds.has(rate.id)
-              return (
-                <li key={rate.id} className="border-border min-w-0 rounded-xl border p-4">
-                  <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="font-mono text-sm font-semibold break-words">
-                        {rate.fromCurrency} → {rate.toCurrency}
-                      </p>
-                      <p className="text-muted-foreground mt-1 text-xs">
-                        {t('currency.effectiveLabel', { date: rate.effectiveFrom })}
-                      </p>
-                    </div>
-                    <span
-                      className={
-                        corrected
-                          ? 'bg-muted text-muted-foreground rounded-full px-2 py-1 text-[10px] font-semibold tracking-wide uppercase'
-                          : 'bg-success/10 text-success rounded-full px-2 py-1 text-[10px] font-semibold tracking-wide uppercase'
-                      }
+            {displayedRates.some((rate) => !supersededIds.has(rate.id)) ? (
+              <ul className="grid gap-2 sm:grid-cols-2">
+                {displayedRates
+                  .filter((rate) => !supersededIds.has(rate.id))
+                  .map((rate) => (
+                    <li
+                      key={`authority:${rate.id}`}
+                      className="border-border bg-muted/30 rounded-lg border px-3 py-2 text-xs"
                     >
-                      {t(corrected ? 'currency.statusCorrected' : 'currency.statusCurrent')}
-                    </span>
-                  </div>
-                  <p className="mt-3 font-mono text-base break-all tabular-nums">
-                    1 {rate.fromCurrency} = {rate.rateDecimal} {rate.toCurrency}
-                  </p>
-                  {rate.sourceNote && (
-                    <p className="text-muted-foreground mt-2 text-xs break-words">
-                      {rate.sourceNote}
-                    </p>
-                  )}
-                  <div className="mt-3 flex min-w-0 flex-wrap items-center justify-between gap-2">
-                    <span className="text-muted-foreground min-w-0 font-mono text-[10px] break-all">
-                      {rate.id}
-                    </span>
-                    {!corrected && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => beginCorrection(rate)}
-                      >
-                        <Edit3 className="size-3.5" />
-                        {t('currency.correct')}
-                      </Button>
-                    )}
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </div>
+                      <span className="font-mono font-semibold">
+                        {rate.fromCurrency}/{rate.toCurrency} · {rate.rateDecimal}
+                      </span>
+                      <span className="text-muted-foreground mt-1 block">
+                        {t('currency.effectiveLabel', { date: rate.effectiveFrom })}
+                      </span>
+                    </li>
+                  ))}
+              </ul>
+            ) : (
+              <p className="border-border bg-muted/30 text-muted-foreground rounded-lg border px-3 py-2 text-xs">
+                {t('currency.emptyHistory')}
+              </p>
+            )}
+          </section>
+
+          <form id="manual-fx-form" className="space-y-4" onSubmit={saveRate}>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-semibold">
+                  {t(correction ? 'currency.correctRate' : 'currency.addRate')}
+                </h3>
+                <p className="text-muted-foreground mt-1 text-xs">{t('currency.directionHelp')}</p>
+              </div>
+              {correction && (
+                <Button type="button" variant="outline" size="sm" onClick={resetRateForm}>
+                  {tCommon('actions.cancel')}
+                </Button>
+              )}
+            </div>
+
+            <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="min-w-0 space-y-1.5">
+                <Label htmlFor="fx-from">{t('currency.from')}</Label>
+                <select
+                  id="fx-from"
+                  value={fromCurrency}
+                  onChange={(event) => {
+                    const next = event.target.value
+                    setFromCurrency(next)
+                    if (next === toCurrency) {
+                      setToCurrency(defaultTarget(next, mainCurrency ?? preferredCurrency))
+                    }
+                  }}
+                  className="native-select w-full min-w-0"
+                  disabled={Boolean(correction)}
+                >
+                  {FX_CURRENCIES.map((currency) => (
+                    <option key={currency} value={currency}>
+                      {currency}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="min-w-0 space-y-1.5">
+                <Label htmlFor="fx-to">{t('currency.to')}</Label>
+                <select
+                  id="fx-to"
+                  value={toCurrency}
+                  onChange={(event) => setToCurrency(event.target.value)}
+                  className="native-select w-full min-w-0"
+                  disabled={Boolean(correction)}
+                >
+                  {FX_CURRENCIES.map((currency) => (
+                    <option key={currency} value={currency}>
+                      {currency}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="min-w-0 space-y-1.5">
+                <Label htmlFor="fx-rate">{t('currency.rateDecimal')}</Label>
+                <Input
+                  id="fx-rate"
+                  value={rateDecimal}
+                  onChange={(event) => setRateDecimal(event.target.value)}
+                  inputMode="decimal"
+                  placeholder="17.25"
+                  autoComplete="off"
+                  required
+                />
+                <p className="text-muted-foreground text-[11px]">
+                  {t('currency.rateMeaning', { from: fromCurrency, to: toCurrency })}
+                </p>
+              </div>
+              <div className="min-w-0 space-y-1.5">
+                <Label htmlFor="fx-effective-from">{t('currency.effectiveFrom')}</Label>
+                <Input
+                  id="fx-effective-from"
+                  type="date"
+                  value={effectiveFrom}
+                  onChange={(event) => setEffectiveFrom(event.target.value)}
+                  disabled={Boolean(correction)}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="fx-source-note">{t('currency.sourceNote')}</Label>
+              <Input
+                id="fx-source-note"
+                value={sourceNote}
+                onChange={(event) => setSourceNote(event.target.value)}
+                maxLength={1000}
+                placeholder={t('currency.sourceNotePlaceholder')}
+              />
+            </div>
+
+            {historicalChange && (
+              <div className="border-warning/30 bg-warning/10 space-y-3 rounded-xl border p-4">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle
+                    className="text-warning mt-0.5 size-4 shrink-0"
+                    aria-hidden="true"
+                  />
+                  <p className="text-xs leading-relaxed">{t('currency.historicalWarning')}</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="fx-audit-note">{t('currency.auditNote')}</Label>
+                  <Input
+                    id="fx-audit-note"
+                    value={auditNote}
+                    onChange={(event) => setAuditNote(event.target.value)}
+                    maxLength={1000}
+                    required
+                  />
+                </div>
+                <label className="flex cursor-pointer items-start gap-2 text-xs leading-relaxed">
+                  <input
+                    type="checkbox"
+                    checked={acknowledged}
+                    onChange={(event) => setAcknowledged(event.target.checked)}
+                    className="mt-0.5 size-4 shrink-0"
+                    required
+                  />
+                  <span>{t('currency.acknowledgeHistorical')}</span>
+                </label>
+              </div>
+            )}
+
+            {fromCurrency === toCurrency && (
+              <p role="alert" className="text-destructive text-xs">
+                {t('currency.sameCurrencyError')}
+              </p>
+            )}
+            {error && (
+              <p role="alert" className="text-destructive text-xs break-words">
+                {error}
+              </p>
+            )}
+
+            <Button
+              type="submit"
+              disabled={
+                isSavingRate ||
+                isLoading ||
+                fromCurrency === toCurrency ||
+                (historicalChange && (!auditNote.trim() || !acknowledged))
+              }
+              className="w-full sm:w-auto"
+            >
+              {isSavingRate ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Plus className="size-4" />
+              )}
+              {isSavingRate
+                ? tCommon('actions.saving')
+                : t(correction ? 'currency.saveCorrection' : 'currency.saveRate')}
+            </Button>
+          </form>
+
+          <div className="border-border space-y-3 border-t pt-5">
+            <div>
+              <h3 className="text-sm font-semibold">{t('currency.history')}</h3>
+              <p className="text-muted-foreground mt-1 text-xs">
+                {t('currency.historyDescription')}
+              </p>
+            </div>
+            {displayedRates.length === 0 ? (
+              <p className="border-border bg-muted/30 text-muted-foreground rounded-lg border p-4 text-sm">
+                {t('currency.emptyHistory')}
+              </p>
+            ) : (
+              <ul className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
+                {displayedRates.map((rate) => {
+                  const corrected = supersededIds.has(rate.id)
+                  return (
+                    <li key={rate.id} className="border-border min-w-0 rounded-xl border p-4">
+                      <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-mono text-sm font-semibold break-words">
+                            {rate.fromCurrency} → {rate.toCurrency}
+                          </p>
+                          <p className="text-muted-foreground mt-1 text-xs">
+                            {t('currency.effectiveLabel', { date: rate.effectiveFrom })}
+                          </p>
+                        </div>
+                        <span
+                          className={
+                            corrected
+                              ? 'bg-muted text-muted-foreground rounded-full px-2 py-1 text-[10px] font-semibold tracking-wide uppercase'
+                              : 'bg-success/10 text-success rounded-full px-2 py-1 text-[10px] font-semibold tracking-wide uppercase'
+                          }
+                        >
+                          {t(corrected ? 'currency.statusCorrected' : 'currency.statusCurrent')}
+                        </span>
+                      </div>
+                      <p className="mt-3 font-mono text-base break-all tabular-nums">
+                        1 {rate.fromCurrency} = {rate.rateDecimal} {rate.toCurrency}
+                      </p>
+                      {rate.sourceNote && (
+                        <p className="text-muted-foreground mt-2 text-xs break-words">
+                          {rate.sourceNote}
+                        </p>
+                      )}
+                      <div className="mt-3 flex min-w-0 flex-wrap items-center justify-between gap-2">
+                        <span className="text-muted-foreground min-w-0 font-mono text-[10px] break-all">
+                          {rate.id}
+                        </span>
+                        {!corrected && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => beginCorrection(rate)}
+                          >
+                            <Edit3 className="size-3.5" />
+                            {t('currency.correct')}
+                          </Button>
+                        )}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
+      </details>
     </div>
   )
 }

@@ -31,9 +31,6 @@ const Transactions = lazy(() =>
 )
 const Accounts = lazy(() => import('@/pages/accounts').then((m) => ({ default: m.Accounts })))
 const Budgets = lazy(() => import('@/pages/budgets').then((m) => ({ default: m.Budgets })))
-const InsightsPage = lazy(() =>
-  import('@/pages/insights').then((m) => ({ default: m.InsightsPage }))
-)
 const Investments = lazy(() =>
   import('@/pages/investments').then((m) => ({ default: m.Investments }))
 )
@@ -286,7 +283,7 @@ export default function App() {
                   </p>
                 </div>
                 <Link
-                  to="/settings"
+                  to="/settings?section=money#main-currency"
                   className="border-warning/40 bg-background hover:bg-muted focus-visible:ring-ring inline-flex min-h-9 shrink-0 items-center justify-center rounded-lg border px-3 text-xs font-semibold focus-visible:ring-2 focus-visible:outline-none"
                 >
                   {t('currencySetup.action')}
@@ -337,7 +334,7 @@ export default function App() {
                 <Route path="/accounts" element={<Accounts />} />
                 <Route path="/budgets" element={<Budgets />} />
                 <Route path="/goals" element={<Goals />} />
-                <Route path="/insights" element={<InsightsPage />} />
+                <Route path="/insights" element={<Navigate to="/reports" replace />} />
                 <Route path="/investments" element={<Investments />} />
                 <Route path="/debt-payoff" element={<DebtPayoff />} />
                 <Route path="/receivables" element={<Receivables />} />

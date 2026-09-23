@@ -156,12 +156,13 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: 'Accounts' })).toHaveAttribute('href', '/accounts')
   })
 
-  it('uses a labelled footer collapse control', async () => {
+  it('uses a labelled footer collapse control without duplicating appearance settings', async () => {
     const user = userEvent.setup()
     render(<Sidebar />)
 
     const button = screen.getByRole('button', { name: 'Collapse sidebar' })
     expect(button).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.queryByRole('button', { name: /appearance/i })).not.toBeInTheDocument()
     await user.click(button)
     expect(mockToggleSidebar).toHaveBeenCalledOnce()
   })

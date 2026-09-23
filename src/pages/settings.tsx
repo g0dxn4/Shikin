@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router'
+import { Link, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
   BadgeDollarSign,
   CheckCircle2,
+  ChevronRight,
   Database,
   Download,
   Globe2,
@@ -15,6 +16,7 @@ import {
   Palette,
   RefreshCw,
   RotateCcw,
+  Settings2,
   Tags,
   Trash2,
 } from 'lucide-react'
@@ -54,10 +56,28 @@ const DEFAULT_WEB_SERVER_PORT = 8480
 const MIN_WEB_SERVER_PORT = 1024
 const MAX_WEB_SERVER_PORT = 65535
 
+const SETTINGS_SECTIONS = ['general', 'money', 'data', 'integrations'] as const
+type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
+type SettingsTask = 'manual-rates' | 'classification-types' | 'category-rules'
+
+const HASH_SECTIONS: Record<string, SettingsSection> = {
+  'main-currency': 'money',
+  'manual-rates': 'money',
+  'classification-types': 'money',
+  'category-rules': 'money',
+  backups: 'data',
+  updates: 'data',
+  'market-data': 'integrations',
+  'hosted-access': 'integrations',
+  'data-identity': 'integrations',
+}
+
 export function SettingsPage() {
   const { t, i18n } = useTranslation('settings')
   const { t: tCommon } = useTranslation('common')
   const { t: tTransactions } = useTranslation('transactions')
+  const location = useLocation()
+  const navigate = useNavigate()
 
   const { rules, isLoading: isLoadingRules, loadRules, deleteRule } = useCategorizationStore()
 
@@ -95,9 +115,18 @@ export function SettingsPage() {
     null
   )
   const [lastCheckResult, setLastCheckResult] = useState<'available' | 'none' | null>(null)
+  const [openTasks, setOpenTasks] = useState<Set<SettingsTask>>(() =>
+    isSettingsTask(location.hash.slice(1))
+      ? new Set([location.hash.slice(1) as SettingsTask])
+      : new Set()
+  )
   const importDbInputRef = useRef<HTMLInputElement>(null)
+  const sectionTabRefs = useRef<Array<HTMLButtonElement | null>>([])
 
   const loadRates = useCurrencyStore((state) => state.loadRates)
+  const mainCurrency = useCurrencyStore((state) => state.mainCurrency)
+  const preferredCurrency = useCurrencyStore((state) => state.preferredCurrency)
+  const activeSection = getSettingsSection(location.search, location.hash)
   const webServerDisplayPort = isValidWebServerPort(Number(webServerPort))
     ? webServerPort
     : String(DEFAULT_WEB_SERVER_PORT)
@@ -112,6 +141,38 @@ export function SettingsPage() {
         .catch(() => {})
     }
   }, [loadRules, loadRates])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    if (params.get('section') !== activeSection) {
+      params.set('section', activeSection)
+      void navigate(
+        { pathname: location.pathname, search: `?${params.toString()}`, hash: location.hash },
+        { replace: true }
+      )
+    }
+  }, [activeSection, location.hash, location.pathname, location.search, navigate])
+
+  useEffect(() => {
+    const anchor = location.hash.slice(1)
+    if (!anchor) return
+
+    if (isSettingsTask(anchor)) {
+      setOpenTasks((current) => {
+        if (current.has(anchor)) return current
+        const next = new Set(current)
+        next.add(anchor)
+        return next
+      })
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById(anchor)
+      target?.scrollIntoView?.({ block: 'start' })
+      target?.focus({ preventScroll: true })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [location.hash, activeSection])
 
   useEffect(() => {
     if (isTauri) {
@@ -340,6 +401,35 @@ export function SettingsPage() {
     }
   }
 
+  const selectSection = (section: SettingsSection) => {
+    const params = new URLSearchParams(location.search)
+    params.set('section', section)
+    void navigate({ pathname: location.pathname, search: `?${params.toString()}` })
+  }
+
+  const handleSectionKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    const nextIndex =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? SETTINGS_SECTIONS.length - 1
+          : (index + (event.key === 'ArrowRight' ? 1 : -1) + SETTINGS_SECTIONS.length) %
+            SETTINGS_SECTIONS.length
+    sectionTabRefs.current[nextIndex]?.focus()
+    selectSection(SETTINGS_SECTIONS[nextIndex])
+  }
+
+  const setTaskOpen = (task: SettingsTask, open: boolean) => {
+    setOpenTasks((current) => {
+      const next = new Set(current)
+      if (open) next.add(task)
+      else next.delete(task)
+      return next
+    })
+  }
+
   return (
     <div className="page-content">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -353,186 +443,224 @@ export function SettingsPage() {
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.85fr_1.15fr]">
-        <section className="native-panel space-y-5 p-5 sm:p-6">
-          <SectionTitle icon={<Globe2 size={18} />} title={t('sections.general')} />
+      <div
+        role="tablist"
+        aria-label={t('navigation.label')}
+        className="native-panel grid grid-cols-2 gap-1 p-1.5 lg:grid-cols-4"
+      >
+        {SETTINGS_SECTIONS.map((section, index) => (
+          <button
+            key={section}
+            ref={(element) => {
+              sectionTabRefs.current[index] = element
+            }}
+            id={`settings-tab-${section}`}
+            type="button"
+            role="tab"
+            aria-selected={activeSection === section}
+            aria-controls={`settings-panel-${section}`}
+            tabIndex={activeSection === section ? 0 : -1}
+            onClick={() => selectSection(section)}
+            onKeyDown={(event) => handleSectionKeyDown(event, index)}
+            className={`focus-visible:ring-ring min-h-11 rounded-lg px-3 py-2 text-left text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none sm:text-center ${
+              activeSection === section
+                ? 'bg-accent text-accent-foreground shadow-sm'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+            }`}
+          >
+            {t(`navigation.${section}`)}
+          </button>
+        ))}
+      </div>
 
-          <div className="space-y-1">
-            <Label
-              htmlFor="language-select"
-              className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
-            >
-              {t('language.label')}
-            </Label>
-            <p className="text-muted-foreground text-xs">{t('language.description')}</p>
-            <select
-              id="language-select"
-              value={i18n.resolvedLanguage ?? i18n.language}
-              onChange={(e) => i18n.changeLanguage(e.target.value)}
-              className="native-select mt-2 w-full"
-            >
-              {SUPPORTED_LANGUAGES.map((lang) => (
-                <option key={lang.code} value={lang.code}>
-                  {lang.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="border-border bg-muted/50 flex items-center justify-between gap-4 rounded-lg border p-4">
-            <div className="min-w-0 space-y-1">
+      <div
+        id="settings-panel-general"
+        role="tabpanel"
+        aria-labelledby="settings-tab-general"
+        hidden={activeSection !== 'general'}
+        className="space-y-3"
+      >
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <section className="native-panel min-w-0 space-y-5 p-5 sm:p-6">
+            <SectionTitle icon={<Globe2 size={18} />} title={t('general.languageTitle')} />
+            <div className="space-y-1">
               <Label
-                htmlFor="close-to-tray-switch"
+                htmlFor="language-select"
                 className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
               >
-                {t('desktop.closeToTrayLabel')}
+                {t('language.label')}
               </Label>
-              <p className="text-muted-foreground text-xs">
-                {isTauri ? t('desktop.closeToTrayDescription') : t('desktop.desktopOnly')}
-              </p>
-            </div>
-            <button
-              id="close-to-tray-switch"
-              type="button"
-              role="switch"
-              aria-checked={closeToTrayEnabled}
-              aria-label={t('desktop.closeToTrayLabel')}
-              onClick={() => {
-                void handleCloseToTrayToggle()
-              }}
-              disabled={!isTauri || isSavingDesktopSettings}
-              className={`focus-visible:ring-accent focus-visible:ring-offset-background relative h-8 w-14 shrink-0 rounded-full border p-1 transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
-                closeToTrayEnabled ? 'border-accent bg-accent' : 'border-border bg-muted'
-              }`}
-            >
-              <span
-                className={`block size-6 rounded-full bg-white shadow-sm transition-transform ${
-                  closeToTrayEnabled ? 'translate-x-6' : 'translate-x-0'
-                }`}
-                aria-hidden="true"
-              />
-            </button>
-          </div>
-
-          {isTauri && (
-            <div className="border-border bg-muted/50 space-y-4 rounded-lg border p-4">
-              <div className="flex items-center justify-between gap-4">
-                <div className="min-w-0 space-y-1">
-                  <Label
-                    htmlFor="web-server-switch"
-                    className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
-                  >
-                    {t('desktop.webServer.label')}
-                  </Label>
-                  <p className="text-muted-foreground text-xs">
-                    {t('desktop.webServer.description')}
-                  </p>
-                </div>
-                <button
-                  id="web-server-switch"
-                  type="button"
-                  role="switch"
-                  aria-checked={webServerEnabled}
-                  aria-label={t('desktop.webServer.label')}
-                  onClick={() => setWebServerEnabled((enabled) => !enabled)}
-                  disabled={isLoadingWebServerSettings || isApplyingWebServer}
-                  className={`focus-visible:ring-accent focus-visible:ring-offset-background relative h-8 w-14 shrink-0 rounded-full border p-1 transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
-                    webServerEnabled ? 'border-accent bg-accent' : 'border-border bg-muted'
-                  }`}
-                >
-                  <span
-                    className={`block size-6 rounded-full bg-white shadow-sm transition-transform ${
-                      webServerEnabled ? 'translate-x-6' : 'translate-x-0'
-                    }`}
-                    aria-hidden="true"
-                  />
-                </button>
-              </div>
-
-              <div className="flex flex-wrap items-end gap-3">
-                <div className="min-w-[9rem] flex-1 space-y-1">
-                  <Label
-                    htmlFor="web-server-port"
-                    className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
-                  >
-                    {t('desktop.webServer.port')}
-                  </Label>
-                  <Input
-                    id="web-server-port"
-                    type="number"
-                    inputMode="numeric"
-                    min={MIN_WEB_SERVER_PORT}
-                    max={MAX_WEB_SERVER_PORT}
-                    step={1}
-                    value={webServerPort}
-                    onChange={(event) => setWebServerPort(event.target.value)}
-                    disabled={isLoadingWebServerSettings || isApplyingWebServer}
-                    aria-describedby="web-server-port-hint"
-                  />
-                  <p id="web-server-port-hint" className="text-muted-foreground text-[11px]">
-                    {t('desktop.webServer.portHint', {
-                      min: MIN_WEB_SERVER_PORT,
-                      max: MAX_WEB_SERVER_PORT,
-                    })}
-                  </p>
-                </div>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    void handleApplyWebServer()
-                  }}
-                  disabled={isLoadingWebServerSettings || isApplyingWebServer}
-                >
-                  {isApplyingWebServer ? <Loader2 size={14} className="animate-spin" /> : null}
-                  {isApplyingWebServer
-                    ? t('desktop.webServer.applying')
-                    : t('desktop.webServer.apply')}
-                </Button>
-              </div>
-
-              <div
-                aria-live="polite"
-                aria-atomic="true"
-                className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
+              <p className="text-muted-foreground text-xs">{t('language.description')}</p>
+              <select
+                id="language-select"
+                value={i18n.resolvedLanguage ?? i18n.language}
+                onChange={(e) => i18n.changeLanguage(e.target.value)}
+                className="native-select mt-2 w-full"
               >
-                <span
-                  className={
-                    webServerStatus.running
-                      ? 'text-success font-semibold'
-                      : 'text-muted-foreground font-semibold'
-                  }
-                >
-                  {webServerStatus.running
-                    ? t('desktop.webServer.running')
-                    : t('desktop.webServer.stopped')}
-                </span>
-                {webServerStatus.running && webServerStatus.port !== null && (
-                  <span className="text-muted-foreground font-mono">
-                    {t('desktop.webServer.statusPort', { port: webServerStatus.port })}
-                  </span>
-                )}
-              </div>
-
-              {webServerMessage && (
-                <ErrorBanner title={t('desktop.webServer.errorTitle')} message={webServerMessage} />
-              )}
-
-              <div className="border-accent/15 bg-accent/[0.06] space-y-2 rounded-xl border px-3 py-3">
-                <p className="text-foreground text-xs font-medium">
-                  {t('desktop.webServer.tailscaleTitle')}
-                </p>
-                <code className="text-accent bg-muted block overflow-x-auto rounded-lg px-3 py-2 font-mono text-[11px]">
-                  tailscale serve --bg http://127.0.0.1:{webServerDisplayPort}
-                </code>
-                <p className="text-muted-foreground text-[11px] leading-relaxed">
-                  {t('desktop.webServer.tailscaleWarning')}
-                </p>
-              </div>
+                {SUPPORTED_LANGUAGES.map((lang) => (
+                  <option key={lang.code} value={lang.code}>
+                    {lang.name}
+                  </option>
+                ))}
+              </select>
             </div>
-          )}
-        </section>
+          </section>
+
+          <section id="main-currency-summary" className="native-panel min-w-0 space-y-5 p-5 sm:p-6">
+            <SectionTitle
+              icon={<BadgeDollarSign size={18} />}
+              title={t('general.mainCurrencyTitle')}
+              description={t('general.mainCurrencyDescription')}
+            />
+            <div className="border-border bg-muted/40 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4">
+              <div>
+                <p className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
+                  {t('general.mainCurrencyStatus')}
+                </p>
+                <p className="mt-1 text-lg font-semibold tabular-nums">
+                  {mainCurrency ?? t('general.notConfigured')}
+                </p>
+                {!mainCurrency ? (
+                  <p className="text-muted-foreground mt-1 text-xs">
+                    {t('general.suggestedCurrency', { currency: preferredCurrency })}
+                  </p>
+                ) : null}
+              </div>
+              <Link
+                to="/settings?section=money#main-currency"
+                className="border-border bg-background hover:bg-muted focus-visible:ring-ring inline-flex min-h-10 items-center gap-2 rounded-lg border px-3 text-xs font-semibold focus-visible:ring-2 focus-visible:outline-none"
+              >
+                {t('general.manageCurrency')}
+                <ChevronRight size={14} aria-hidden="true" />
+              </Link>
+            </div>
+          </section>
+        </div>
 
         <section className="native-panel space-y-5 p-5 sm:p-6">
+          <SectionTitle
+            icon={<Palette size={18} />}
+            title={t('sections.theme', 'Theme & Appearance')}
+            description={t('theme.description', 'Customize the visual appearance of Shikin')}
+          />
+          <ThemeSettings />
+        </section>
+      </div>
+
+      <div
+        id="settings-panel-money"
+        role="tabpanel"
+        aria-labelledby="settings-tab-money"
+        hidden={activeSection !== 'money'}
+        className="space-y-3"
+      >
+        <section className="native-panel min-w-0 space-y-5 p-5 sm:p-6">
+          <SectionTitle
+            icon={<BadgeDollarSign size={18} />}
+            title={t('sections.currency')}
+            description={t('money.description')}
+          />
+          <CurrencySettings
+            manualRatesOpen={openTasks.has('manual-rates')}
+            onManualRatesOpenChange={(open) => setTaskOpen('manual-rates', open)}
+          />
+        </section>
+
+        <TaskDisclosure
+          id="classification-types"
+          icon={<Layers3 size={18} />}
+          title={t('sections.classificationTypes')}
+          description={t('classificationTypes.sectionDescription')}
+          open={openTasks.has('classification-types')}
+          onOpenChange={(open) => setTaskOpen('classification-types', open)}
+        >
+          <ClassificationTypesSettings />
+        </TaskDisclosure>
+
+        <TaskDisclosure
+          id="category-rules"
+          icon={<Tags size={18} />}
+          title={t('sections.categoryRules')}
+          description={tTransactions('rules.description')}
+          open={openTasks.has('category-rules')}
+          onOpenChange={(open) => setTaskOpen('category-rules', open)}
+        >
+          {isLoadingRules ? (
+            <div className="flex items-center gap-2 py-4">
+              <Loader2 size={14} className="animate-spin" />
+              <span className="text-muted-foreground text-sm">{tCommon('status.loading')}</span>
+            </div>
+          ) : rules.length === 0 ? (
+            <p className="text-muted-foreground py-4 text-sm">{tTransactions('rules.empty')}</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-muted-foreground border-border border-b text-left font-mono text-xs tracking-wider uppercase">
+                    <th scope="col" className="pr-4 pb-2">
+                      {tTransactions('rules.pattern')}
+                    </th>
+                    <th scope="col" className="pr-4 pb-2">
+                      {tTransactions('rules.category')}
+                    </th>
+                    <th scope="col" className="pr-4 pb-2">
+                      {tTransactions('rules.hits')}
+                    </th>
+                    <th scope="col" className="pb-2">
+                      {tTransactions('rules.actions')}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rules.map((rule) => (
+                    <tr key={rule.id} className="border-border border-b">
+                      <td className="py-2 pr-4 font-mono text-xs">{rule.pattern}</td>
+                      <td className="py-2 pr-4">
+                        <span className="inline-flex items-center gap-1.5">
+                          {rule.category_color ? (
+                            <span
+                              className="inline-block h-2 w-2 shrink-0 rounded-full"
+                              style={{ backgroundColor: rule.category_color }}
+                              aria-hidden="true"
+                            />
+                          ) : null}
+                          <span className="text-xs">{rule.category_name ?? rule.category_id}</span>
+                        </span>
+                      </td>
+                      <td className="text-muted-foreground py-2 pr-4 font-mono text-xs">
+                        {rule.hit_count}
+                      </td>
+                      <td className="py-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            deleteRule(rule.id)
+                            toast.success(tTransactions('rules.delete'))
+                          }}
+                          className="text-muted-foreground hover:text-destructive focus-visible:ring-ring rounded transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                          aria-label={`${tTransactions('rules.delete')}: ${rule.pattern}`}
+                          title={tTransactions('rules.delete')}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </TaskDisclosure>
+      </div>
+
+      <div
+        id="settings-panel-data"
+        role="tabpanel"
+        aria-labelledby="settings-tab-data"
+        hidden={activeSection !== 'data'}
+        className="grid grid-cols-1 gap-3 xl:grid-cols-2"
+      >
+        <section id="updates" tabIndex={-1} className="native-panel space-y-5 p-5 sm:p-6">
           <SectionTitle
             icon={<MonitorUp size={18} />}
             title={t('sections.updates')}
@@ -692,208 +820,292 @@ export function SettingsPage() {
             <p className="text-muted-foreground text-sm">{t('updates.desktopOnly')}</p>
           )}
         </section>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1fr_1fr]">
-        <section className="native-panel min-w-0 space-y-5 p-5 sm:p-6">
-          <SectionTitle icon={<BadgeDollarSign size={18} />} title={t('sections.currency')} />
-          <CurrencySettings />
-        </section>
-        <section className="native-panel min-w-0 space-y-5 p-5 sm:p-6">
+        <section id="backups" tabIndex={-1} className="native-panel space-y-5 p-5 sm:p-6">
           <SectionTitle
-            icon={<Layers3 size={18} />}
-            title={t('sections.classificationTypes')}
-            description={t('classificationTypes.sectionDescription')}
+            icon={<Database size={18} />}
+            title={t('sections.data')}
+            description={t('data.description')}
           />
-          <ClassificationTypesSettings />
-        </section>
-        <section className="native-panel space-y-5 p-5 sm:p-6 xl:col-span-2">
-          <SectionTitle
-            icon={<Tags size={18} />}
-            title={t('sections.categoryRules')}
-            description={tTransactions('rules.description')}
-          />
-
-          {isLoadingRules ? (
-            <div className="flex items-center gap-2 py-4">
-              <Loader2 size={14} className="animate-spin" />
-              <span className="text-muted-foreground text-sm">Loading...</span>
-            </div>
-          ) : rules.length === 0 ? (
-            <p className="text-muted-foreground py-4 text-sm">{tTransactions('rules.empty')}</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-muted-foreground border-border border-b text-left font-mono text-xs tracking-wider uppercase">
-                    <th scope="col" className="pr-4 pb-2">
-                      {tTransactions('rules.pattern')}
-                    </th>
-                    <th scope="col" className="pr-4 pb-2">
-                      {tTransactions('rules.category')}
-                    </th>
-                    <th scope="col" className="pr-4 pb-2">
-                      {tTransactions('rules.hits')}
-                    </th>
-                    <th scope="col" className="pb-2">
-                      {tTransactions('rules.actions')}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rules.map((rule) => (
-                    <tr key={rule.id} className="border-border border-b">
-                      <td className="py-2 pr-4 font-mono text-xs">{rule.pattern}</td>
-                      <td className="py-2 pr-4">
-                        <span className="inline-flex items-center gap-1.5">
-                          {rule.category_color && (
-                            <span
-                              className="inline-block h-2 w-2 shrink-0 rounded-full"
-                              style={{ backgroundColor: rule.category_color }}
-                              aria-hidden="true"
-                            />
-                          )}
-                          <span className="text-xs">{rule.category_name ?? rule.category_id}</span>
-                        </span>
-                      </td>
-                      <td className="text-muted-foreground py-2 pr-4 font-mono text-xs">
-                        {rule.hit_count}
-                      </td>
-                      <td className="py-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            deleteRule(rule.id)
-                            toast.success(tTransactions('rules.delete'))
-                          }}
-                          className="text-muted-foreground hover:text-destructive transition-colors"
-                          aria-label={`${tTransactions('rules.delete')}: ${rule.pattern}`}
-                          title={tTransactions('rules.delete')}
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.15fr_0.85fr]">
-        <section className="native-panel space-y-5 p-5 sm:p-6">
-          <SectionTitle
-            icon={<Palette size={18} />}
-            title={t('sections.theme', 'Theme & Appearance')}
-            description={t('theme.description', 'Customize the visual appearance of Shikin')}
-          />
-          <ThemeSettings />
-        </section>
-
-        <div className="space-y-3">
-          <section className="native-panel space-y-5 p-5 sm:p-6">
-            <SectionTitle
-              icon={<Database size={18} />}
-              title={t('sections.data')}
-              description={t('data.description')}
-            />
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                onClick={handleExportData}
-                disabled={isExportingData || isImportingData}
-              >
-                {isExportingData ? '...' : t('data.export')}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => importDbInputRef.current?.click()}
-                disabled={isExportingData || isImportingData}
-              >
-                {isImportingData ? '...' : t('data.import')}
-              </Button>
-              <input
-                ref={importDbInputRef}
-                type="file"
-                accept=".db,.sqlite,application/octet-stream"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) {
-                    void handleImportClick(file)
-                  }
-                }}
-              />
-            </div>
-            <RuntimeDiagnosticsPanel />
-          </section>
-
-          <section className="native-panel space-y-5 p-5 sm:p-6">
-            <SectionTitle
-              icon={<KeyRound size={18} />}
-              title={t('sections.dataApis')}
-              description={t('dataApis.description')}
-            />
-
-            <div className="space-y-2">
-              <Label
-                htmlFor="alpha-vantage-key"
-                className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
-              >
-                Alpha Vantage
-              </Label>
-              <p className="text-muted-foreground text-[10px]">{t('dataApis.alphaVantageHint')}</p>
-              <Input
-                id="alpha-vantage-key"
-                type="password"
-                placeholder="Alpha Vantage API key"
-                value={alphaVantageKey}
-                onChange={(e) => setAlphaVantageKey(e.target.value)}
-                className="max-w-md"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label
-                htmlFor="finnhub-key"
-                className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
-              >
-                Finnhub
-              </Label>
-              <p className="text-muted-foreground text-[10px]">{t('dataApis.finnhubHint')}</p>
-              <Input
-                id="finnhub-key"
-                type="password"
-                placeholder="Finnhub API key"
-                value={finnhubKey}
-                onChange={(e) => setFinnhubKey(e.target.value)}
-                className="max-w-md"
-              />
-            </div>
-
+          <div className="flex flex-wrap gap-2">
             <Button
-              onClick={async () => {
-                setIsSavingDataKeys(true)
-                try {
-                  const store = await load('settings.json')
-                  await store.set('alpha_vantage_key', alphaVantageKey)
-                  await store.set('finnhub_key', finnhubKey)
-                  await store.save()
-                  toast.success(tCommon('status.success'))
-                } catch (error) {
-                  toast.error(getErrorMessage(error, tCommon('status.error')))
-                } finally {
-                  setIsSavingDataKeys(false)
+              variant="outline"
+              onClick={handleExportData}
+              disabled={isExportingData || isImportingData}
+            >
+              {isExportingData ? '...' : t('data.export')}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => importDbInputRef.current?.click()}
+              disabled={isExportingData || isImportingData}
+            >
+              {isImportingData ? '...' : t('data.import')}
+            </Button>
+            <input
+              ref={importDbInputRef}
+              type="file"
+              accept=".db,.sqlite,application/octet-stream"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) {
+                  void handleImportClick(file)
                 }
               }}
-              disabled={isSavingDataKeys}
-            >
-              {isSavingDataKeys ? '...' : tCommon('actions.save')}
-            </Button>
+            />
+          </div>
+        </section>
+        {isTauri ? (
+          <section className="native-panel space-y-5 p-5 sm:p-6 xl:col-span-2">
+            <SectionTitle
+              icon={<Settings2 size={18} />}
+              title={t('appData.desktopTitle')}
+              description={t('appData.desktopDescription')}
+            />
+            <div className="border-border bg-muted/50 flex items-center justify-between gap-4 rounded-lg border p-4">
+              <div className="min-w-0 space-y-1">
+                <Label
+                  htmlFor="close-to-tray-switch"
+                  className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
+                >
+                  {t('desktop.closeToTrayLabel')}
+                </Label>
+                <p className="text-muted-foreground text-xs">
+                  {t('desktop.closeToTrayDescription')}
+                </p>
+              </div>
+              <button
+                id="close-to-tray-switch"
+                type="button"
+                role="switch"
+                aria-checked={closeToTrayEnabled}
+                aria-label={t('desktop.closeToTrayLabel')}
+                onClick={() => {
+                  void handleCloseToTrayToggle()
+                }}
+                disabled={isSavingDesktopSettings}
+                className={`focus-visible:ring-accent focus-visible:ring-offset-background relative h-8 w-14 shrink-0 rounded-full border p-1 transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+                  closeToTrayEnabled ? 'border-accent bg-accent' : 'border-border bg-muted'
+                }`}
+              >
+                <span
+                  className={`block size-6 rounded-full bg-white shadow-sm transition-transform ${
+                    closeToTrayEnabled ? 'translate-x-6' : 'translate-x-0'
+                  }`}
+                  aria-hidden="true"
+                />
+              </button>
+            </div>
           </section>
-        </div>
+        ) : (
+          <p className="border-border bg-muted/40 text-muted-foreground rounded-lg border px-4 py-3 text-xs xl:col-span-2">
+            {t('desktop.desktopOnly')}
+          </p>
+        )}
+      </div>
+
+      <div
+        id="settings-panel-integrations"
+        role="tabpanel"
+        aria-labelledby="settings-tab-integrations"
+        hidden={activeSection !== 'integrations'}
+        className="grid grid-cols-1 gap-3 xl:grid-cols-2"
+      >
+        <section id="market-data" tabIndex={-1} className="native-panel space-y-5 p-5 sm:p-6">
+          <SectionTitle
+            icon={<KeyRound size={18} />}
+            title={t('sections.dataApis')}
+            description={t('dataApis.description')}
+          />
+
+          <div className="space-y-2">
+            <Label
+              htmlFor="alpha-vantage-key"
+              className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
+            >
+              Alpha Vantage
+            </Label>
+            <p className="text-muted-foreground text-[10px]">{t('dataApis.alphaVantageHint')}</p>
+            <Input
+              id="alpha-vantage-key"
+              type="password"
+              placeholder="Alpha Vantage API key"
+              value={alphaVantageKey}
+              onChange={(e) => setAlphaVantageKey(e.target.value)}
+              className="max-w-md"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label
+              htmlFor="finnhub-key"
+              className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
+            >
+              Finnhub
+            </Label>
+            <p className="text-muted-foreground text-[10px]">{t('dataApis.finnhubHint')}</p>
+            <Input
+              id="finnhub-key"
+              type="password"
+              placeholder="Finnhub API key"
+              value={finnhubKey}
+              onChange={(e) => setFinnhubKey(e.target.value)}
+              className="max-w-md"
+            />
+          </div>
+
+          <Button
+            onClick={async () => {
+              setIsSavingDataKeys(true)
+              try {
+                const store = await load('settings.json')
+                await store.set('alpha_vantage_key', alphaVantageKey)
+                await store.set('finnhub_key', finnhubKey)
+                await store.save()
+                toast.success(tCommon('status.success'))
+              } catch (error) {
+                toast.error(getErrorMessage(error, tCommon('status.error')))
+              } finally {
+                setIsSavingDataKeys(false)
+              }
+            }}
+            disabled={isSavingDataKeys}
+          >
+            {isSavingDataKeys ? '...' : tCommon('actions.save')}
+          </Button>
+        </section>
+        <section id="hosted-access" tabIndex={-1} className="native-panel space-y-5 p-5 sm:p-6">
+          <SectionTitle
+            icon={<Globe2 size={18} />}
+            title={t('desktop.webServer.label')}
+            description={t('desktop.webServer.description')}
+          />
+          {isTauri ? (
+            <div className="border-border bg-muted/50 space-y-4 rounded-lg border p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0 space-y-1">
+                  <Label
+                    htmlFor="web-server-switch"
+                    className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
+                  >
+                    {t('desktop.webServer.label')}
+                  </Label>
+                  <p className="text-muted-foreground text-xs">
+                    {t('desktop.webServer.description')}
+                  </p>
+                </div>
+                <button
+                  id="web-server-switch"
+                  type="button"
+                  role="switch"
+                  aria-checked={webServerEnabled}
+                  aria-label={t('desktop.webServer.label')}
+                  onClick={() => setWebServerEnabled((enabled) => !enabled)}
+                  disabled={isLoadingWebServerSettings || isApplyingWebServer}
+                  className={`focus-visible:ring-accent focus-visible:ring-offset-background relative h-8 w-14 shrink-0 rounded-full border p-1 transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+                    webServerEnabled ? 'border-accent bg-accent' : 'border-border bg-muted'
+                  }`}
+                >
+                  <span
+                    className={`block size-6 rounded-full bg-white shadow-sm transition-transform ${
+                      webServerEnabled ? 'translate-x-6' : 'translate-x-0'
+                    }`}
+                    aria-hidden="true"
+                  />
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="min-w-[9rem] flex-1 space-y-1">
+                  <Label
+                    htmlFor="web-server-port"
+                    className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
+                  >
+                    {t('desktop.webServer.port')}
+                  </Label>
+                  <Input
+                    id="web-server-port"
+                    type="number"
+                    inputMode="numeric"
+                    min={MIN_WEB_SERVER_PORT}
+                    max={MAX_WEB_SERVER_PORT}
+                    step={1}
+                    value={webServerPort}
+                    onChange={(event) => setWebServerPort(event.target.value)}
+                    disabled={isLoadingWebServerSettings || isApplyingWebServer}
+                    aria-describedby="web-server-port-hint"
+                  />
+                  <p id="web-server-port-hint" className="text-muted-foreground text-[11px]">
+                    {t('desktop.webServer.portHint', {
+                      min: MIN_WEB_SERVER_PORT,
+                      max: MAX_WEB_SERVER_PORT,
+                    })}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    void handleApplyWebServer()
+                  }}
+                  disabled={isLoadingWebServerSettings || isApplyingWebServer}
+                >
+                  {isApplyingWebServer ? <Loader2 size={14} className="animate-spin" /> : null}
+                  {isApplyingWebServer
+                    ? t('desktop.webServer.applying')
+                    : t('desktop.webServer.apply')}
+                </Button>
+              </div>
+
+              <div
+                aria-live="polite"
+                aria-atomic="true"
+                className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
+              >
+                <span
+                  className={
+                    webServerStatus.running
+                      ? 'text-success font-semibold'
+                      : 'text-muted-foreground font-semibold'
+                  }
+                >
+                  {webServerStatus.running
+                    ? t('desktop.webServer.running')
+                    : t('desktop.webServer.stopped')}
+                </span>
+                {webServerStatus.running && webServerStatus.port !== null && (
+                  <span className="text-muted-foreground font-mono">
+                    {t('desktop.webServer.statusPort', { port: webServerStatus.port })}
+                  </span>
+                )}
+              </div>
+
+              {webServerMessage && (
+                <ErrorBanner title={t('desktop.webServer.errorTitle')} message={webServerMessage} />
+              )}
+
+              <div className="border-accent/15 bg-accent/[0.06] space-y-2 rounded-xl border px-3 py-3">
+                <p className="text-foreground text-xs font-medium">
+                  {t('desktop.webServer.tailscaleTitle')}
+                </p>
+                <code className="text-accent bg-muted block overflow-x-auto rounded-lg px-3 py-2 font-mono text-[11px]">
+                  tailscale serve --bg http://127.0.0.1:{webServerDisplayPort}
+                </code>
+                <p className="text-muted-foreground text-[11px] leading-relaxed">
+                  {t('desktop.webServer.tailscaleWarning')}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-sm">{t('desktop.desktopOnly')}</p>
+          )}
+        </section>
+        <section
+          id="data-identity"
+          tabIndex={-1}
+          className="native-panel scroll-mt-4 p-5 sm:p-6 xl:col-span-2"
+        >
+          <RuntimeDiagnosticsPanel />
+        </section>
       </div>
 
       <ConfirmDialog
@@ -928,6 +1140,66 @@ export function SettingsPage() {
         onConfirm={handleConfirmImport}
       />
     </div>
+  )
+}
+
+function getSettingsSection(search: string, hash: string): SettingsSection {
+  const anchorSection = HASH_SECTIONS[hash.slice(1)]
+  if (anchorSection) return anchorSection
+
+  const requested = new URLSearchParams(search).get('section')
+  return SETTINGS_SECTIONS.includes(requested as SettingsSection)
+    ? (requested as SettingsSection)
+    : 'general'
+}
+
+function isSettingsTask(value: string): value is SettingsTask {
+  return value === 'manual-rates' || value === 'classification-types' || value === 'category-rules'
+}
+
+function TaskDisclosure({
+  id,
+  icon,
+  title,
+  description,
+  open,
+  onOpenChange,
+  children,
+}: {
+  id: SettingsTask
+  icon: React.ReactNode
+  title: string
+  description: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  children: React.ReactNode
+}) {
+  return (
+    <details
+      id={id}
+      tabIndex={-1}
+      open={open}
+      onToggle={(event) => onOpenChange(event.currentTarget.open)}
+      className="native-panel focus-visible:ring-ring group scroll-mt-4 overflow-hidden focus-visible:ring-2 focus-visible:outline-none"
+    >
+      <summary className="focus-visible:ring-ring flex min-h-20 cursor-pointer list-none items-center gap-3 p-5 focus-visible:ring-2 focus-visible:outline-none sm:p-6 [&::-webkit-details-marker]:hidden">
+        <div className="border-accent/20 bg-accent/10 text-accent flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border">
+          {icon}
+        </div>
+        <span className="min-w-0 flex-1">
+          <span className="block text-base font-semibold">{title}</span>
+          <span className="text-muted-foreground mt-1 block text-xs leading-relaxed">
+            {description}
+          </span>
+        </span>
+        <ChevronRight
+          size={18}
+          className="text-muted-foreground shrink-0 transition-transform group-open:rotate-90"
+          aria-hidden="true"
+        />
+      </summary>
+      <div className="border-border border-t p-5 sm:p-6">{children}</div>
+    </details>
   )
 }
 

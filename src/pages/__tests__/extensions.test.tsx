@@ -23,5 +23,17 @@ describe('ExtensionsPage', () => {
       'href',
       '/transactions'
     )
+    expect(screen.getByRole('link', { name: /items.marketData.action/ })).toHaveAttribute(
+      'href',
+      '/settings?section=integrations#market-data'
+    )
+    expect(screen.getByRole('link', { name: /items.localData.action/ })).toHaveAttribute(
+      'href',
+      '/settings?section=data#backups'
+    )
+    expect(screen.getByRole('link', { name: /items.updates.action/ })).toHaveAttribute(
+      'href',
+      '/settings?section=data#updates'
+    )
   })
 })

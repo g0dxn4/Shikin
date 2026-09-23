@@ -83,7 +83,7 @@ describe('BottomNav', () => {
     )
   })
 
-  it('exposes all 19 routes in grouped More navigation', async () => {
+  it('exposes all 18 visible routes in grouped More navigation', async () => {
     const user = userEvent.setup()
     render(
       <MemoryRouter>
@@ -94,7 +94,8 @@ describe('BottomNav', () => {
     await user.click(screen.getByRole('button', { name: 'More pages' }))
     const dialog = await screen.findByRole('dialog')
     const destinations = within(dialog).getAllByRole('link')
-    expect(destinations).toHaveLength(19)
+    expect(destinations).toHaveLength(18)
+    expect(within(dialog).queryByRole('link', { name: 'Insights' })).not.toBeInTheDocument()
     expect(within(dialog).getByRole('heading', { name: 'Planning' })).toBeInTheDocument()
     const settingsGroup = within(dialog).getByRole('region', { name: 'Settings' })
     expect(within(settingsGroup).getByRole('link', { name: 'Categories' })).toHaveAttribute(

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router'
 import { SettingsPage } from '../settings'
 
 const mockChangeLanguage = vi.fn()
@@ -29,14 +30,6 @@ vi.mock('react-i18next', () => ({
     t: (key: string) => key,
     i18n: { language: 'en', changeLanguage: mockChangeLanguage },
   }),
-}))
-
-vi.mock('react-router', () => ({
-  Link: ({ children, to, ...props }: React.ComponentProps<'a'> & { to: string }) => (
-    <a href={to} {...props}>
-      {children}
-    </a>
-  ),
 }))
 
 vi.mock('sonner', () => ({
@@ -130,6 +123,14 @@ vi.mock('@/lib/storage', () => ({
   }),
 }))
 
+function renderSettings(initialEntry = '/settings') {
+  return render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <SettingsPage />
+    </MemoryRouter>
+  )
+}
+
 describe('SettingsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -152,11 +153,14 @@ describe('SettingsPage', () => {
   })
 
   it('renders native settings content without a redundant route heading', async () => {
-    render(<SettingsPage />)
+    renderSettings()
 
     expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
     expect(screen.getByText('settingsDescription')).toBeInTheDocument()
-    expect(screen.getByText('sections.general')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'navigation.general' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
     expect(screen.getByRole('link', { name: 'navigation.manageCategories' })).toHaveAttribute(
       'href',
       '/categories'
@@ -165,7 +169,7 @@ describe('SettingsPage', () => {
   })
 
   it('renders language selector with SUPPORTED_LANGUAGES options', async () => {
-    render(<SettingsPage />)
+    renderSettings()
 
     const select = screen.getByDisplayValue('English')
     expect(select).toBeInTheDocument()
@@ -174,32 +178,72 @@ describe('SettingsPage', () => {
   })
 
   it('renders theme settings', async () => {
-    render(<SettingsPage />)
+    renderSettings()
 
     expect(screen.getByTestId('theme-settings')).toBeInTheDocument()
     expect(await screen.findByText('0.1.0')).toBeInTheDocument()
   })
 
+  it('opens a hash-linked money task and preserves its draft across section changes', async () => {
+    const user = userEvent.setup()
+    renderSettings('/settings#manual-rates')
+
+    expect(screen.getByRole('tab', { name: 'navigation.money' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    const disclosure = document.getElementById('manual-rates')
+    expect(disclosure).toHaveAttribute('open')
+
+    const rate = screen.getByLabelText('currency.rateDecimal')
+    await user.type(rate, '17.25')
+    await user.click(screen.getByRole('tab', { name: 'navigation.general' }))
+    expect(screen.getByRole('tab', { name: 'navigation.general' })).toHaveFocus()
+    await user.click(screen.getByRole('tab', { name: 'navigation.money' }))
+
+    expect(screen.getByLabelText('currency.rateDecimal')).toHaveValue('17.25')
+  })
+
+  it('supports arrow-key section selection and focus', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+
+    const general = screen.getByRole('tab', { name: 'navigation.general' })
+    general.focus()
+    await user.keyboard('{ArrowRight}')
+
+    expect(screen.getByRole('tab', { name: 'navigation.money' })).toHaveFocus()
+    expect(screen.getByRole('tab', { name: 'navigation.money' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+  })
+
   it('renders desktop updates section', async () => {
-    render(<SettingsPage />)
+    renderSettings('/settings?section=data')
 
     expect(screen.getByText('sections.updates')).toBeInTheDocument()
     expect(await screen.findByText('0.1.0')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'updates.check' })).toBeInTheDocument()
   })
 
-  it('keeps ordinary backup, update, and theme controls with data identity nearby', async () => {
-    render(<SettingsPage />)
+  it('groups ordinary preferences, app data, and diagnostics into named task sections', async () => {
+    const user = userEvent.setup()
+    renderSettings()
 
-    expect(await screen.findByText('diagnostics.title')).toBeInTheDocument()
-    expect(screen.getByTestId('theme-settings')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'data.export' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'data.import' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'updates.check' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'diagnostics.refresh' })).toBeInTheDocument()
-    expect(screen.getByText('lineage-from-backup')).toBeInTheDocument()
-    expect(screen.getByText('local-instance-id')).toBeInTheDocument()
-    expect(screen.getByText('diagnostics.lastFinancialWriteNever')).toBeInTheDocument()
+    expect(screen.getByTestId('theme-settings')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'data.export' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'navigation.data' }))
+    expect(screen.getByRole('button', { name: 'data.export' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'data.import' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'updates.check' })).toBeVisible()
+
+    await user.click(screen.getByRole('tab', { name: 'navigation.integrations' }))
+    expect(await screen.findByRole('button', { name: 'diagnostics.refresh' })).toBeVisible()
+    expect(screen.getByText('lineage-from-backup')).toBeVisible()
+    expect(screen.getByText('local-instance-id')).toBeVisible()
+    expect(screen.getByText('diagnostics.lastFinancialWriteNever')).toBeVisible()
     expect(mockGetRuntimeDiagnostics).toHaveBeenCalledWith()
   })
 
@@ -209,7 +253,7 @@ describe('SettingsPage', () => {
       key === 'close_to_tray_enabled' ? true : ''
     )
 
-    render(<SettingsPage />)
+    renderSettings('/settings?section=data')
 
     const toggle = await screen.findByRole('switch', { name: 'desktop.closeToTrayLabel' })
     expect(toggle).toHaveAttribute('aria-checked', 'true')
@@ -230,7 +274,7 @@ describe('SettingsPage', () => {
     )
     storageMocks.set.mockRejectedValueOnce(new Error('Desktop settings failed'))
 
-    render(<SettingsPage />)
+    renderSettings('/settings?section=data')
 
     const toggle = await screen.findByRole('switch', { name: 'desktop.closeToTrayLabel' })
     await user.click(toggle)
@@ -249,7 +293,7 @@ describe('SettingsPage', () => {
     })
     mockGetWebServerStatus.mockResolvedValue({ running: true, port: 9000, error: null })
 
-    render(<SettingsPage />)
+    renderSettings('/settings?section=integrations')
 
     const toggle = await screen.findByRole('switch', { name: 'desktop.webServer.label' })
     await waitFor(() => expect(toggle).not.toBeDisabled())
@@ -260,7 +304,7 @@ describe('SettingsPage', () => {
   it('shows hosted web server status', async () => {
     mockGetWebServerStatus.mockResolvedValue({ running: true, port: 8480, error: null })
 
-    render(<SettingsPage />)
+    renderSettings('/settings?section=integrations')
 
     expect(await screen.findByText('desktop.webServer.running')).toBeInTheDocument()
     expect(screen.getByText('desktop.webServer.statusPort')).toBeInTheDocument()
@@ -270,7 +314,7 @@ describe('SettingsPage', () => {
     const user = userEvent.setup()
     mockApplyWebServerSettings.mockResolvedValue({ running: true, port: 8480, error: null })
 
-    render(<SettingsPage />)
+    renderSettings('/settings?section=integrations')
 
     const toggle = await screen.findByRole('switch', { name: 'desktop.webServer.label' })
     await waitFor(() => expect(toggle).not.toBeDisabled())
@@ -289,7 +333,7 @@ describe('SettingsPage', () => {
   it('rejects an invalid hosted web port before invoking the desktop command', async () => {
     const user = userEvent.setup()
 
-    render(<SettingsPage />)
+    renderSettings('/settings?section=integrations')
 
     const portInput = await screen.findByLabelText('desktop.webServer.port')
     await waitFor(() => expect(portInput).not.toBeDisabled())
@@ -306,7 +350,7 @@ describe('SettingsPage', () => {
     const user = userEvent.setup()
     mockApplyWebServerSettings.mockRejectedValueOnce(new Error('Hosted web failed'))
 
-    render(<SettingsPage />)
+    renderSettings('/settings?section=integrations')
 
     const applyButton = await screen.findByRole('button', { name: 'desktop.webServer.apply' })
     await waitFor(() => expect(applyButton).not.toBeDisabled())
@@ -325,7 +369,7 @@ describe('SettingsPage', () => {
       downloadAndInstall,
     })
 
-    render(<SettingsPage />)
+    renderSettings('/settings?section=data')
 
     await user.click(screen.getByRole('button', { name: 'updates.check' }))
 
@@ -351,7 +395,7 @@ describe('SettingsPage', () => {
       })
       .mockResolvedValueOnce(null)
 
-    render(<SettingsPage />)
+    renderSettings('/settings?section=data')
 
     await user.click(screen.getByRole('button', { name: 'updates.check' }))
     await user.click(await screen.findByRole('button', { name: 'updates.install' }))
@@ -371,7 +415,7 @@ describe('SettingsPage', () => {
       downloadAndInstall: vi.fn().mockResolvedValue(undefined),
     })
 
-    render(<SettingsPage />)
+    renderSettings('/settings?section=data')
 
     await user.click(screen.getByRole('button', { name: 'updates.check' }))
     await user.click(await screen.findByRole('button', { name: 'updates.install' }))
@@ -388,7 +432,7 @@ describe('SettingsPage', () => {
     const user = userEvent.setup()
     mockGetAvailableUpdate.mockRejectedValueOnce(new Error('Network error'))
 
-    render(<SettingsPage />)
+    renderSettings('/settings?section=data')
 
     await user.click(screen.getByRole('button', { name: 'updates.check' }))
 
@@ -407,7 +451,7 @@ describe('SettingsPage', () => {
       downloadAndInstall: vi.fn().mockResolvedValue(undefined),
     })
 
-    render(<SettingsPage />)
+    renderSettings('/settings?section=data')
 
     await user.click(screen.getByRole('button', { name: 'updates.check' }))
     const errorTitles = await screen.findAllByText('updates.errorTitle')
@@ -439,7 +483,7 @@ describe('SettingsPage', () => {
       downloadAndInstall: vi.fn(),
     })
 
-    render(<SettingsPage />)
+    renderSettings('/settings?section=data')
 
     await user.click(screen.getByRole('button', { name: 'updates.check' }))
     await user.click(await screen.findByRole('button', { name: 'updates.install' }))
@@ -478,7 +522,7 @@ describe('SettingsPage', () => {
       downloadAndInstall: vi.fn(),
     })
 
-    render(<SettingsPage />)
+    renderSettings('/settings?section=data')
 
     // First attempt - check then install
     await user.click(screen.getByRole('button', { name: 'updates.check' }))
@@ -510,7 +554,7 @@ describe('SettingsPage', () => {
     })
     mockRelaunchToApplyUpdate.mockRejectedValueOnce(new Error('Restart failed'))
 
-    render(<SettingsPage />)
+    renderSettings('/settings?section=data')
 
     // Install the update first
     await user.click(screen.getByRole('button', { name: 'updates.check' }))
@@ -540,7 +584,7 @@ describe('SettingsPage', () => {
     const user = userEvent.setup()
     mockExportDatabaseSnapshot.mockRejectedValueOnce(new Error('Export failed'))
 
-    render(<SettingsPage />)
+    renderSettings('/settings?section=data')
 
     await user.click(screen.getByRole('button', { name: 'data.export' }))
 
@@ -555,7 +599,7 @@ describe('SettingsPage', () => {
       const user = userEvent.setup()
       mockExportDatabaseSnapshot.mockRejectedValueOnce(new Error('backup failed'))
 
-      render(<SettingsPage />)
+      renderSettings('/settings?section=data')
 
       const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
       const file = new File(['test'], 'backup.db', { type: 'application/octet-stream' })
@@ -571,7 +615,7 @@ describe('SettingsPage', () => {
       const user = userEvent.setup()
       mockExportDatabaseSnapshot.mockResolvedValue(new Uint8Array([1, 2, 3]))
 
-      render(<SettingsPage />)
+      renderSettings('/settings?section=data')
 
       // Get the hidden file input by its accept attribute
       const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
@@ -589,7 +633,7 @@ describe('SettingsPage', () => {
       const user = userEvent.setup()
       mockExportDatabaseSnapshot.mockResolvedValue(new Uint8Array([1, 2, 3]))
 
-      render(<SettingsPage />)
+      renderSettings('/settings?section=data')
 
       const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
       const file = new File(['test'], 'backup.db', { type: 'application/octet-stream' })
@@ -610,7 +654,7 @@ describe('SettingsPage', () => {
       mockExportDatabaseSnapshot.mockResolvedValue(new Uint8Array([1, 2, 3]))
       mockImportDatabaseSnapshot.mockResolvedValue(undefined)
 
-      render(<SettingsPage />)
+      renderSettings('/settings?section=data')
 
       const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
       const file = new File(['test'], 'backup.db', { type: 'application/octet-stream' })
@@ -634,7 +678,7 @@ describe('SettingsPage', () => {
       mockExportDatabaseSnapshot.mockResolvedValue(new Uint8Array([1, 2, 3]))
       mockImportDatabaseSnapshot.mockResolvedValue(undefined)
 
-      render(<SettingsPage />)
+      renderSettings('/settings?section=data')
 
       const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
       const file = new File(['test'], 'backup.db', { type: 'application/octet-stream' })
@@ -672,7 +716,7 @@ describe('SettingsPage', () => {
         return originalCreateElement.call(document, tagName)
       })
 
-      render(<SettingsPage />)
+      renderSettings('/settings?section=data')
 
       const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
       const file = new File(['test'], 'backup.db', { type: 'application/octet-stream' })
@@ -693,7 +737,7 @@ describe('SettingsPage', () => {
       mockExportDatabaseSnapshot.mockResolvedValue(new Uint8Array([1, 2, 3]))
       mockImportDatabaseSnapshot.mockRejectedValueOnce(new Error('Import failed'))
 
-      render(<SettingsPage />)
+      renderSettings('/settings?section=data')
 
       const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
       const file = new File(['test'], 'backup.db', { type: 'application/octet-stream' })

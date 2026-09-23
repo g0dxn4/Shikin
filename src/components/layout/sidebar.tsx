@@ -1,34 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link, useLocation } from 'react-router'
-import { ChevronDown, ChevronLeft, ChevronRight, Moon, Palette, Sun } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/ui-store'
 import { SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_WIDTH } from '@/lib/constants'
-import {
-  getAppliedAppearance,
-  setAppearance,
-  subscribeAppearance,
-  type Appearance,
-} from '@/lib/theme'
 import { getNavigationGroup, NAVIGATION_GROUPS, type NavigationGroupId } from './navigation-model'
 
 export function Sidebar() {
   const { t } = useTranslation('common')
   const { pathname } = useLocation()
   const { sidebarCollapsed, toggleSidebar } = useUIStore()
-  const [appearance, setLocalAppearance] = useState<Appearance>(() => getAppliedAppearance())
   const [groupDisclosures, setGroupDisclosures] = useState<
     Map<NavigationGroupId, { pathname: string; expanded: boolean }>
   >(() => new Map())
   const activeGroup = getNavigationGroup(pathname)
-
-  useEffect(() => subscribeAppearance(setLocalAppearance), [])
-
-  const switchNativeAppearance = () => {
-    const next = appearance === 'native-dark' ? 'native-light' : 'native-dark'
-    void setAppearance(next)
-  }
 
   const toggleGroup = (groupId: NavigationGroupId, expanded: boolean) => {
     setGroupDisclosures((current) => {
@@ -168,7 +154,7 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="native-sidebar-footer space-y-1 p-2">
+      <div className="native-sidebar-footer p-2">
         <button
           type="button"
           onClick={toggleSidebar}
@@ -182,34 +168,6 @@ export function Sidebar() {
             <ChevronLeft size={17} aria-hidden="true" />
           )}
           {!sidebarCollapsed ? <span>{t('sidebar.collapse')}</span> : null}
-        </button>
-        <button
-          type="button"
-          onClick={switchNativeAppearance}
-          aria-label={t('appearance.switch', {
-            appearance: appearance === 'native-dark' ? t('appearance.light') : t('appearance.dark'),
-          })}
-          className={cn('sidebar-footer-button', sidebarCollapsed && 'justify-center px-0')}
-        >
-          {appearance === 'native-dark' ? (
-            <Moon size={16} aria-hidden="true" />
-          ) : appearance === 'custom' ? (
-            <Palette size={16} aria-hidden="true" />
-          ) : (
-            <Sun size={16} aria-hidden="true" />
-          )}
-          {!sidebarCollapsed ? (
-            <>
-              <span className="flex-1 text-left">{t('appearance.label')}</span>
-              <strong className="text-foreground text-xs font-semibold">
-                {appearance === 'native-dark'
-                  ? t('appearance.dark')
-                  : appearance === 'custom'
-                    ? t('appearance.custom')
-                    : t('appearance.light')}
-              </strong>
-            </>
-          ) : null}
         </button>
       </div>
     </aside>

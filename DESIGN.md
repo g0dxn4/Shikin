@@ -49,8 +49,9 @@ contracts in `src/lib/constants.ts`.
   balance history with explicit dates, currency conversion, and missing-data states.
 - Accounts and Budgets use full-width primary sections, followed by compact supporting sections
   (asset/liability mix and budget intelligence). Avoid sparse right-hand sidebars on these pages.
-- Mobile uses Overview, Transactions, Accounts, and More. More exposes all 19 destinations grouped
-  by the same six sections. Content reserves the bottom safe area.
+- Mobile uses Overview, Transactions, Accounts, and More. More exposes all 18 destinations grouped
+  by the same six sections. Insights opens Reports and groups Reports, Net Worth, Spending Insights,
+  and Heatmap; Forecast remains in Planning. Content reserves the bottom safe area.
 - Pages own filters and actions locally. Do not introduce globally shared financial filter state.
 
 ## Shared presentation vocabulary

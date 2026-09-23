@@ -154,7 +154,7 @@ describe('App startup orchestration', () => {
     expect(await screen.findByText('Main currency needs to be configured')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open currency settings' })).toHaveAttribute(
       'href',
-      '/settings'
+      '/settings?section=money#main-currency'
     )
     await waitFor(() => expect(mockLoadRates).toHaveBeenCalledTimes(1))
   })

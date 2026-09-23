@@ -8,7 +8,7 @@ Local-first personal finance engine. Tauri v2 desktop app + browser-first React 
 
 ```
 shikin/
-  src/                    # React frontend (19 routed pages)
+  src/                    # React frontend (18 visible routed pages; /insights redirects to Reports)
   src-tauri/              # Tauri v2 desktop shell (Rust)
   cli/                    # CLI + MCP server (Node.js, better-sqlite3)
   packages/finance-core/  # Shared ledger/import/valuation contracts

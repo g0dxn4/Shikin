@@ -232,7 +232,11 @@
     "effectiveLabel": "Vigente desde {{date}}",
     "statusCurrent": "Actual",
     "statusCorrected": "Corregida",
-    "correct": "Corregir"
+    "correct": "Corregir",
+    "manualRatesTitle": "Tasas de cambio manuales",
+    "manualRatesSummary": "{{count}} tasas directas inmutables. Abre para agregar una tasa, revisar la autoridad actual o corregir el historial.",
+    "currentAuthority": "Autoridad actual de tasas",
+    "currentAuthorityDescription": "Tasas directas activas usadas según sus fechas de vigencia. Las filas sustituidas permanecen en el historial inmutable."
   },
   "data": {
     "export": "Exportar Datos",
@@ -278,5 +282,31 @@
     "alphaVantageHint": "Nivel gratuito: 25 solicitudes/día. Soporta muchos símbolos de EE. UU. y algunos internacionales/MX.",
     "finnhubHint": "Nivel gratuito: 60 solicitudes/min. Se usa como respaldo para acciones, ETFs, fondos, bonos o símbolos tipo CETES soportados."
   },
-  "settingsDescription": "Idioma, moneda, actualizaciones, respaldos y controles locales de la app."
+  "settingsDescription": "Idioma, moneda, actualizaciones, respaldos y controles locales de la app.",
+  "navigation": {
+    "label": "Secciones de configuración",
+    "general": "General",
+    "money": "Dinero",
+    "data": "App y datos",
+    "integrations": "Integraciones y diagnóstico"
+  },
+  "general": {
+    "languageTitle": "Idioma",
+    "mainCurrencyTitle": "Moneda principal",
+    "mainCurrencyDescription": "Consulta tu moneda de informes. Los cambios y tasas se gestionan en Dinero.",
+    "mainCurrencyStatus": "Estado actual",
+    "notConfigured": "Sin configurar",
+    "suggestedCurrency": "Sugerida: {{currency}}",
+    "manageCurrency": "Gestionar moneda"
+  },
+  "money": {
+    "description": "Moneda de informes, autoridad de tasas directas y controles de clasificación."
+  },
+  "appData": {
+    "desktopTitle": "Comportamiento de escritorio",
+    "desktopDescription": "Controles que se aplican a la app de escritorio instalada."
+  },
+  "integrations": {
+    "diagnosticsDescription": "Consulta la identidad y los detalles de ejecución de esta raíz de datos local."
+  }
 }

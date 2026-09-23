@@ -6,7 +6,6 @@ import {
   ChartNoAxesCombined,
   CircleDollarSign,
   FileChartColumn,
-  Gauge,
   HandCoins,
   Landmark,
   LayoutDashboard,
@@ -129,9 +128,8 @@ export const NAVIGATION_GROUPS: readonly NavigationGroup[] = [
     labelKey: 'groups.insights',
     fallbackLabel: 'Insights',
     icon: BarChart3,
-    homePath: '/insights',
+    homePath: '/reports',
     routes: [
-      { path: '/insights', labelKey: 'nav.insights', fallbackLabel: 'Insights', icon: Gauge },
       {
         path: '/reports',
         labelKey: 'nav.reports',

@@ -18,7 +18,6 @@ const EXPECTED_ROUTES = [
   '/bill-calendar',
   '/debt-payoff',
   '/forecast',
-  '/insights',
   '/reports',
   '/net-worth',
   '/spending-insights',
@@ -39,7 +38,7 @@ describe('navigation model', () => {
       'settings',
     ])
     expect(NAVIGATION_ROUTES.map((route) => route.path)).toEqual(EXPECTED_ROUTES)
-    expect(new Set(NAVIGATION_ROUTES.map((route) => route.path)).size).toBe(19)
+    expect(new Set(NAVIGATION_ROUTES.map((route) => route.path)).size).toBe(18)
   })
 
   it('places Categories under Settings and resolves active groups', () => {
@@ -56,5 +55,7 @@ describe('navigation model', () => {
     expect(getNavigationGroup('/bill-calendar').id).toBe('planning')
     expect(getNavigationGroup('/categories').id).toBe('settings')
     expect(getNavigationGroup('/extensions').id).toBe('settings')
+    expect(NAVIGATION_GROUPS.find((group) => group.id === 'insights')?.homePath).toBe('/reports')
+    expect(NAVIGATION_GROUPS.find((group) => group.id === 'insights')?.routes).toHaveLength(4)
   })
 })

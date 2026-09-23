@@ -14,7 +14,6 @@ const ALL_ROUTES = [
   '/bill-calendar',
   '/debt-payoff',
   '/forecast',
-  '/insights',
   '/reports',
   '/net-worth',
   '/spending-insights',
@@ -74,7 +73,7 @@ test.describe('desktop native navigation', () => {
     await expect(sidebar.getByRole('link', { name: 'Budgets' })).toBeVisible()
   })
 
-  test('all 19 routes expose the shell title and browser history remains functional', async ({
+  test('all 18 visible routes expose the shell title and browser history remains functional', async ({
     page,
   }) => {
     for (const route of ALL_ROUTES) {
@@ -88,6 +87,10 @@ test.describe('desktop native navigation', () => {
       await expect(heading).toHaveClass(/sr-only/)
       await expect(page.locator('.native-topbar')).toHaveCount(0)
     }
+
+    await page.goto('/insights')
+    await page.waitForURL('/reports')
+    await expect(page.getByRole('heading', { level: 1, name: 'Reports' })).toHaveClass(/sr-only/)
 
     await page.goto('/transactions')
     await page.goto('/accounts')
@@ -125,7 +128,8 @@ test.describe('mobile native navigation', () => {
 
     await bottomNav.getByRole('button', { name: 'More pages' }).click()
     const more = page.getByRole('dialog')
-    await expect(more.getByRole('link')).toHaveCount(19)
+    await expect(more.getByRole('link')).toHaveCount(18)
+    await expect(more.getByRole('link', { name: 'Insights' })).toHaveCount(0)
     for (const group of [
       'Overview',
       'Transactions',

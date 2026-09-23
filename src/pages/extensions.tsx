@@ -12,10 +12,30 @@ import { NativePanel } from '@/components/ui/native-layout'
 
 const EXTENSIONS = [
   { key: 'csvImport', icon: FileSpreadsheet, href: '/transactions', status: 'ready' },
-  { key: 'mcp', icon: TerminalSquare, href: '/settings', status: 'ready' },
-  { key: 'marketData', icon: KeyRound, href: '/settings', status: 'configure' },
-  { key: 'localData', icon: Database, href: '/settings', status: 'ready' },
-  { key: 'updates', icon: ServerCog, href: '/settings', status: 'ready' },
+  {
+    key: 'mcp',
+    icon: TerminalSquare,
+    href: '/settings?section=integrations#hosted-access',
+    status: 'ready',
+  },
+  {
+    key: 'marketData',
+    icon: KeyRound,
+    href: '/settings?section=integrations#market-data',
+    status: 'configure',
+  },
+  {
+    key: 'localData',
+    icon: Database,
+    href: '/settings?section=data#backups',
+    status: 'ready',
+  },
+  {
+    key: 'updates',
+    icon: ServerCog,
+    href: '/settings?section=data#updates',
+    status: 'ready',
+  },
 ] as const
 
 export function ExtensionsPage() {

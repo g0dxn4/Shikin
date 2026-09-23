@@ -232,7 +232,11 @@
     "effectiveLabel": "Effective {{date}}",
     "statusCurrent": "Current",
     "statusCorrected": "Corrected",
-    "correct": "Correct"
+    "correct": "Correct",
+    "manualRatesTitle": "Manual exchange rates",
+    "manualRatesSummary": "{{count}} immutable direct rates. Open to add a rate, review current authority, or correct history.",
+    "currentAuthority": "Current rate authority",
+    "currentAuthorityDescription": "Active direct rates used according to their effective dates. Superseded rows remain in immutable history."
   },
   "data": {
     "export": "Export Data",
@@ -278,5 +282,31 @@
     "alphaVantageHint": "Free tier: 25 requests/day. Supports many US and some international/MX symbols.",
     "finnhubHint": "Free tier: 60 requests/min. Used as a fallback for supported stock, ETF, fund, bond, or CETES-style symbols."
   },
-  "settingsDescription": "Language, currency, updates, backups, and local app controls."
+  "settingsDescription": "Language, currency, updates, backups, and local app controls.",
+  "navigation": {
+    "label": "Settings sections",
+    "general": "General",
+    "money": "Money",
+    "data": "App & data",
+    "integrations": "Integrations & diagnostics"
+  },
+  "general": {
+    "languageTitle": "Language",
+    "mainCurrencyTitle": "Main currency",
+    "mainCurrencyDescription": "Your reporting currency at a glance. Changes and exchange rates are managed in Money.",
+    "mainCurrencyStatus": "Current status",
+    "notConfigured": "Not configured",
+    "suggestedCurrency": "Suggested: {{currency}}",
+    "manageCurrency": "Manage currency"
+  },
+  "money": {
+    "description": "Reporting currency, direct exchange-rate authority, and classification controls."
+  },
+  "appData": {
+    "desktopTitle": "Desktop behavior",
+    "desktopDescription": "Controls that apply to the installed desktop app."
+  },
+  "integrations": {
+    "diagnosticsDescription": "Inspect the identity and runtime details of this local data root."
+  }
 }

@@ -144,7 +144,7 @@ test.describe('Transactions', () => {
     if ((page.viewportSize()?.width ?? 0) < 768) {
       await page.getByRole('button', { name: 'Advanced filters' }).click()
     }
-    await expect(page.getByLabel('Account')).toBeVisible()
+    await expect(page.getByLabel('Account', { exact: true })).toBeVisible()
   })
 
   test('page structure has correct layout', async ({ page }) => {

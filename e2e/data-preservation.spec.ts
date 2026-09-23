@@ -258,12 +258,12 @@ test.describe('read-only app data preservation', () => {
     if ((page.viewportSize()?.width ?? 0) < 768) {
       await page.getByRole('button', { name: 'Advanced filters' }).click()
     }
-    await page.getByLabel('Account').selectOption(IDS.savings)
+    await page.getByLabel('Account', { exact: true }).selectOption(IDS.savings)
     await expect(
       page.getByRole('button', { name: new RegExp(`^${PREFIX} Transfer Ledger(?: |$)`) })
     ).toBeVisible()
     await page.getByLabel('Currency').selectOption('USD')
-    await page.getByLabel('Account').selectOption('all')
+    await page.getByLabel('Account', { exact: true }).selectOption('all')
     await page.getByLabel('Status').selectOption('pending')
     await page.getByLabel('Transaction views').selectOption({ label: 'Review' })
 

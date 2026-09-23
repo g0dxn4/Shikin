@@ -234,7 +234,7 @@ describe('CashflowBucketsPanel', () => {
     const user = userEvent.setup()
     render(<CashflowBucketsPanel />)
     await screen.findByText('Rent')
-    const deletes = screen.getAllByRole('button', { name: 'buckets.actions.delete' })
+    const deletes = await screen.findAllByRole('button', { name: 'buckets.actions.delete' })
     expect(deletes).toHaveLength(1)
 
     await user.click(screen.getByText(/buckets\.history\.title/))

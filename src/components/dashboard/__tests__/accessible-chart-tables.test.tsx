@@ -116,6 +116,19 @@ describe('accessible chart data tables', () => {
     expect(
       within(container).getByRole('heading', { name: 'overview.cashFlow' })
     ).toBeInTheDocument()
+    expect(container.querySelector('.native-panel')).toBeInTheDocument()
+    const table = expectAccessibleTable(container, 'overview-cashflow-data', 'overview.cashFlow')
+    expect(
+      within(table).getByRole('row', { name: /January \$123\.45 \$23\.45 \$100\.00/ })
+    ).toBeInTheDocument()
+  })
+
+  it('embeds cash flow without a nested card border while keeping the table', () => {
+    const { container } = render(
+      <OverviewCashFlow months={[month]} displayCurrency="USD" embedded />
+    )
+
+    expect(container.querySelector('.native-panel')).not.toBeInTheDocument()
     const table = expectAccessibleTable(container, 'overview-cashflow-data', 'overview.cashFlow')
     expect(
       within(table).getByRole('row', { name: /January \$123\.45 \$23\.45 \$100\.00/ })

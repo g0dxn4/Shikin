@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { NativePanel } from '@/components/ui/native-layout'
+import { cn } from '@/lib/utils'
 import { formatMoney } from '@/lib/money'
 import { buildTransactionsHref } from '@/lib/transaction-query-href'
 import type { CategoryBreakdownItem } from '@/lib/dashboard-analytics'
@@ -60,7 +61,12 @@ export function OverviewCategories({
           {t('analytics.noEligibleData')}
         </p>
       ) : (
-        <div className="grid gap-1.5">
+        <div
+          className={cn(
+            'grid gap-1.5',
+            showAll && items.length > PREVIEW_COUNT && 'md:grid-cols-2 md:gap-x-6'
+          )}
+        >
           {visible.map((item) => {
             const href = buildTransactionsHref({
               type: 'expense',

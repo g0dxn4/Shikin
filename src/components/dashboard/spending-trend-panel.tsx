@@ -34,7 +34,7 @@ export function SpendingTrendPanel({ trend, displayCurrency, notice }: SpendingT
   const hasData = data.some((month) => month.expenses !== 0 || month.income !== 0)
 
   return (
-    <div className="space-y-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       {notice ? <Notice>{notice}</Notice> : null}
 
       <dl className="border-border grid grid-cols-3 border-b">
@@ -61,7 +61,7 @@ export function SpendingTrendPanel({ trend, displayCurrency, notice }: SpendingT
       </ul>
 
       <div
-        className="h-56 min-w-0 sm:h-60"
+        className="min-h-56 min-w-0 flex-1 sm:min-h-60"
         role="img"
         aria-label={t('analytics.trendChartLabel')}
         aria-describedby="spending-trend-data"

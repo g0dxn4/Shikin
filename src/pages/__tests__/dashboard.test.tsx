@@ -392,7 +392,7 @@ describe('Dashboard', () => {
     it('keeps dashboard intelligence visible', () => {
       render(<Dashboard />)
 
-      expect(screen.getAllByText('analytics.spendingPace').length).toBeGreaterThanOrEqual(1)
+      expect(screen.getAllByText('analytics.spendingAndCashFlow').length).toBeGreaterThanOrEqual(1)
       expect(screen.getByText('recentActivity')).toBeInTheDocument()
       expect(screen.queryByText('empty.addAccount')).not.toBeInTheDocument()
     })
@@ -907,6 +907,73 @@ describe('Dashboard', () => {
       expect(document.querySelector('a[href="/budgets"]')).not.toBeInTheDocument()
     })
 
+    it('exposes four spending modes with wraparound arrow, Home, and End keys', async () => {
+      const user = userEvent.setup()
+      render(<Dashboard />)
+
+      const paceTab = screen.getByRole('tab', { name: 'analytics.pace' })
+      const trendTab = screen.getByRole('tab', { name: 'analytics.trend' })
+      const categoriesTab = screen.getByRole('tab', { name: 'analytics.categories' })
+      const cashFlowTab = screen.getByRole('tab', { name: 'analytics.cashflow' })
+
+      expect(paceTab).toHaveAttribute('aria-controls', 'spending-pace-panel')
+      expect(trendTab).toHaveAttribute('aria-controls', 'spending-trend-panel')
+      expect(categoriesTab).toHaveAttribute('aria-controls', 'spending-categories-panel')
+      expect(cashFlowTab).toHaveAttribute('aria-controls', 'spending-cashflow-panel')
+
+      paceTab.focus()
+      await user.keyboard('{End}')
+      expect(cashFlowTab).toHaveAttribute('aria-selected', 'true')
+      expect(cashFlowTab).toHaveFocus()
+      expect(window.localStorage.getItem('shikin_dashboard_spending_mode')).toBe('cashflow')
+
+      await user.keyboard('{ArrowRight}')
+      expect(paceTab).toHaveAttribute('aria-selected', 'true')
+      expect(paceTab).toHaveFocus()
+
+      await user.keyboard('{ArrowLeft}')
+      expect(cashFlowTab).toHaveAttribute('aria-selected', 'true')
+
+      await user.keyboard('{Home}')
+      expect(paceTab).toHaveAttribute('aria-selected', 'true')
+      expect(window.localStorage.getItem('shikin_dashboard_spending_mode')).toBe('pace')
+    })
+
+    it('restores persisted pace, trend, categories, and cashflow modes', () => {
+      for (const mode of ['pace', 'trend', 'categories', 'cashflow'] as const) {
+        window.localStorage.setItem('shikin_dashboard_spending_mode', mode)
+        const { unmount } = render(<Dashboard />)
+        expect(screen.getByRole('tab', { name: `analytics.${mode}` })).toHaveAttribute(
+          'aria-selected',
+          'true'
+        )
+        unmount()
+      }
+    })
+
+    it('does not render a standalone cash-flow card beside spending by category', async () => {
+      const user = userEvent.setup()
+      render(<Dashboard />)
+
+      expect(
+        screen.getByRole('heading', { name: 'overview.spendingByCategory' })
+      ).toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'overview.cashFlow' })).not.toBeInTheDocument()
+      expect(
+        screen
+          .getByRole('heading', { name: 'overview.spendingByCategory' })
+          .closest('.native-panel')?.parentElement
+      ).not.toHaveClass('xl:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]')
+
+      await user.click(screen.getByRole('tab', { name: 'analytics.cashflow' }))
+
+      expect(screen.getByRole('heading', { name: 'overview.cashFlow' })).toBeInTheDocument()
+      expect(screen.getByRole('table', { name: 'overview.cashFlow' })).toBeInTheDocument()
+      expect(document.querySelector('#overview-cashflow-data')?.closest('.native-panel')).toBe(
+        document.getElementById('spending-cashflow-panel')?.closest('.native-panel')
+      )
+    })
+
     it('shows a deliberate main-currency setup state instead of converted zeroes', () => {
       mockMainCurrency = null
       mockTransactions = [
@@ -1007,10 +1074,11 @@ describe('Dashboard', () => {
 
       render(<Dashboard />)
 
-      expect(screen.getAllByText('analytics.spendingPace').length).toBeGreaterThanOrEqual(1)
+      expect(screen.getAllByText('analytics.spendingAndCashFlow').length).toBeGreaterThanOrEqual(1)
       expect(screen.getByText('analytics.pace')).toBeInTheDocument()
       expect(screen.getByText('analytics.trend')).toBeInTheDocument()
       expect(screen.getByText('analytics.categories')).toBeInTheDocument()
+      expect(screen.getByText('analytics.cashflow')).toBeInTheDocument()
       expect(screen.getAllByText('$120.00').length).toBeGreaterThanOrEqual(1)
       expect(screen.getByRole('table', { name: 'analytics.paceChartLabel' })).toBeInTheDocument()
 
@@ -1026,6 +1094,12 @@ describe('Dashboard', () => {
 
       expect(screen.getByRole('table', { name: 'analytics.trendChartLabel' })).toBeInTheDocument()
       expect(screen.getAllByText('analytics.income').length).toBeGreaterThan(0)
+
+      await user.click(screen.getByText('analytics.cashflow'))
+
+      const cashFlowTable = screen.getByRole('table', { name: 'overview.cashFlow' })
+      expect(cashFlowTable).toBeInTheDocument()
+      expect(within(cashFlowTable).getAllByRole('row')).toHaveLength(7)
     })
   })
 

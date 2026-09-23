@@ -74,7 +74,7 @@ export function SpendingCategoriesPanel({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       {notice ? <Notice>{notice}</Notice> : null}
 
       {categories.splitIntegrityNotices.length > 0 ? (
@@ -146,7 +146,7 @@ export function SpendingCategoriesPanel({
       </ul>
 
       <div
-        className="h-56 min-w-0 sm:h-60"
+        className="min-h-56 min-w-0 flex-1 sm:min-h-60"
         role="img"
         aria-label={t('analytics.categoriesChartLabel')}
         aria-describedby="spending-categories-data"

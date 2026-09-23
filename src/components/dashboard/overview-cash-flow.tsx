@@ -2,12 +2,14 @@ import { useTranslation } from 'react-i18next'
 import { NativePanel } from '@/components/ui/native-layout'
 import { formatMoney } from '@/lib/money'
 import type { TrendMonth } from '@/lib/dashboard-analytics'
+import { cn } from '@/lib/utils'
 
 interface OverviewCashFlowProps {
   months: TrendMonth[]
   displayCurrency: string
   unavailable?: boolean
   unavailableMessage?: string
+  embedded?: boolean
 }
 
 export function OverviewCashFlow({
@@ -15,14 +17,15 @@ export function OverviewCashFlow({
   displayCurrency,
   unavailable = false,
   unavailableMessage,
+  embedded = false,
 }: OverviewCashFlowProps) {
   const { t, i18n } = useTranslation('dashboard')
   const locale = i18n?.resolvedLanguage ?? i18n?.language
   const maxValue = Math.max(1, ...months.flatMap((month) => [month.income, month.expenses]))
 
-  return (
-    <NativePanel className="p-5 sm:p-6" aria-labelledby="overview-cashflow-heading">
-      <div className="mb-4">
+  const body = (
+    <>
+      <div className={cn('shrink-0', embedded ? 'mb-3' : 'mb-4')}>
         <h2 id="overview-cashflow-heading" className="text-base font-semibold">
           {t('overview.cashFlow')}
         </h2>
@@ -30,13 +33,16 @@ export function OverviewCashFlow({
       </div>
 
       {unavailable ? (
-        <p className="text-warning py-10 text-center text-sm" role="status">
+        <p
+          className="text-warning flex flex-1 items-center justify-center py-10 text-center text-sm"
+          role="status"
+        >
           {unavailableMessage ?? t('currency.derivedUnavailable')}
         </p>
       ) : (
         <>
           <div
-            className="relative flex h-44 min-w-0 items-stretch gap-1 border-b border-[var(--color-border)] px-1 pt-2 sm:h-48 sm:gap-2 sm:px-2"
+            className="relative flex min-h-44 min-w-0 flex-1 items-stretch gap-1 border-b border-[var(--color-border)] px-1 pt-2 sm:min-h-48 sm:gap-2 sm:px-2"
             role="img"
             aria-label={t('overview.cashFlow')}
             aria-describedby="overview-cashflow-data"
@@ -71,7 +77,7 @@ export function OverviewCashFlow({
               </div>
             ))}
           </div>
-          <div className="text-muted-foreground mt-7 flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+          <div className="text-muted-foreground mt-7 flex shrink-0 flex-wrap gap-x-4 gap-y-1 text-[11px]">
             <span>
               <i className="bg-success mr-1.5 inline-block h-2 w-2 rounded-sm" aria-hidden="true" />
               {t('analytics.income')}
@@ -110,6 +116,16 @@ export function OverviewCashFlow({
           </div>
         </>
       )}
+    </>
+  )
+
+  if (embedded) {
+    return <div className="flex min-h-0 flex-1 flex-col">{body}</div>
+  }
+
+  return (
+    <NativePanel className="p-5 sm:p-6" aria-labelledby="overview-cashflow-heading">
+      {body}
     </NativePanel>
   )
 }

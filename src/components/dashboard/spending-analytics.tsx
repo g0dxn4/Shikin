@@ -4,20 +4,21 @@ import { Link } from 'react-router'
 import type { TFunction } from 'i18next'
 import { cn } from '@/lib/utils'
 import type { ConversionState, DashboardAnalyticsResult } from '@/lib/dashboard-analytics'
+import { OverviewCashFlow } from './overview-cash-flow'
 import { SpendingPacePanel } from './spending-pace-panel'
 import { SpendingTrendPanel } from './spending-trend-panel'
 import { SpendingCategoriesPanel } from './spending-categories-panel'
 
-type SpendingMode = 'pace' | 'trend' | 'categories'
+type SpendingMode = 'pace' | 'trend' | 'categories' | 'cashflow'
 
 const STORAGE_KEY = 'shikin_dashboard_spending_mode'
-const MODES: SpendingMode[] = ['pace', 'trend', 'categories']
+const MODES: SpendingMode[] = ['pace', 'trend', 'categories', 'cashflow']
 
 function readStoredMode(): SpendingMode | null {
   try {
     if (typeof window === 'undefined') return null
     const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (raw === 'pace' || raw === 'trend' || raw === 'categories') return raw
+    if (raw === 'pace' || raw === 'trend' || raw === 'categories' || raw === 'cashflow') return raw
   } catch {
     // Guarded access: ignore storage failures.
   }
@@ -31,6 +32,15 @@ function writeStoredMode(mode: SpendingMode): void {
   } catch {
     // Guarded access: ignore storage failures.
   }
+}
+
+function conversionForMode(
+  analytics: DashboardAnalyticsResult,
+  mode: SpendingMode
+): ConversionState {
+  if (mode === 'pace') return analytics.pace.conversion
+  if (mode === 'categories') return analytics.categories.conversion
+  return analytics.trend.conversion
 }
 
 interface SpendingAnalyticsProps {
@@ -57,8 +67,12 @@ export function SpendingAnalytics({
 
   const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     let nextIndex: number | null = null
-    if (event.key === 'ArrowRight') nextIndex = (index + 1) % MODES.length
-    if (event.key === 'ArrowLeft') nextIndex = (index - 1 + MODES.length) % MODES.length
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      nextIndex = (index + 1) % MODES.length
+    }
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      nextIndex = (index - 1 + MODES.length) % MODES.length
+    }
     if (event.key === 'Home') nextIndex = 0
     if (event.key === 'End') nextIndex = MODES.length - 1
     if (nextIndex === null) return
@@ -67,24 +81,18 @@ export function SpendingAnalytics({
     tabRefs.current[nextIndex]?.focus()
   }
 
-  const conversion = analytics
-    ? mode === 'pace'
-      ? analytics.pace.conversion
-      : mode === 'trend'
-        ? analytics.trend.conversion
-        : analytics.categories.conversion
-    : null
+  const conversion = analytics ? conversionForMode(analytics, mode) : null
   const displayCurrency = conversion?.currency ?? ''
   const categoriesUnavailable = mode === 'categories' && categoriesError
   const conversionNotice = conversion ? getLocalizedConversionNotice(conversion, t) : null
 
   return (
-    <section aria-labelledby="spending-analytics-heading">
-      <div className="border-border mb-3 grid gap-3 border-b pb-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+    <section aria-labelledby="spending-analytics-heading" className="flex min-h-0 flex-1 flex-col">
+      <div className="border-border mb-3 grid shrink-0 gap-3 border-b pb-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
         <div className="min-w-0">
           <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 lg:block">
             <h2 id="spending-analytics-heading" className="text-base font-semibold">
-              {t('analytics.spendingPace')}
+              {t('analytics.spendingAndCashFlow')}
             </h2>
             <Link
               to="/transactions"
@@ -100,7 +108,7 @@ export function SpendingAnalytics({
           </p>
         </div>
 
-        <div className="flex min-w-0 items-center justify-between gap-3 lg:justify-end">
+        <div className="flex min-w-0 flex-1 items-center justify-between gap-3 lg:flex-none lg:justify-end">
           <Link
             to="/transactions"
             className="text-accent hover:text-accent/80 focus-visible:ring-ring hidden shrink-0 rounded-sm text-xs font-semibold underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:outline-none lg:block"
@@ -108,7 +116,7 @@ export function SpendingAnalytics({
             {t('charts.drilldownTransactions')}
           </Link>
           <div
-            className="border-border bg-muted grid min-w-0 grid-cols-3 rounded-lg border p-0.5"
+            className="border-border bg-muted grid w-full min-w-0 grid-cols-2 rounded-lg border p-0.5 sm:grid-cols-4 lg:w-auto"
             role="tablist"
             aria-label={t('analytics.spendingModes')}
           >
@@ -146,10 +154,10 @@ export function SpendingAnalytics({
         id={`spending-${mode}-panel`}
         role="tabpanel"
         aria-labelledby={`spending-${mode}-tab`}
-        className="min-w-0"
+        className="flex min-h-0 min-w-0 flex-1 flex-col"
       >
         {isLoading || !analytics ? (
-          <div className="bg-muted h-60 animate-pulse rounded-xl" role="status">
+          <div className="bg-muted min-h-60 flex-1 animate-pulse rounded-xl" role="status">
             <span className="sr-only">{t('analytics.loading')}</span>
           </div>
         ) : dataError ? (
@@ -176,11 +184,17 @@ export function SpendingAnalytics({
             displayCurrency={displayCurrency}
             notice={null}
           />
-        ) : (
+        ) : mode === 'categories' ? (
           <SpendingCategoriesPanel
             categories={analytics.categories}
             displayCurrency={displayCurrency}
             notice={null}
+          />
+        ) : (
+          <OverviewCashFlow
+            months={analytics.trend.months.slice(-6)}
+            displayCurrency={displayCurrency}
+            embedded
           />
         )}
       </div>
@@ -191,7 +205,7 @@ export function SpendingAnalytics({
 function PanelMessage({ children, role }: { children: React.ReactNode; role: 'alert' | 'status' }) {
   return (
     <div
-      className="border-warning/30 bg-warning/10 text-warning flex min-h-44 items-center justify-center rounded-xl border p-4 text-center text-sm"
+      className="border-warning/30 bg-warning/10 text-warning flex min-h-44 flex-1 items-center justify-center rounded-xl border p-4 text-center text-sm"
       role={role}
     >
       <p className="max-w-lg">{children}</p>

@@ -26,7 +26,6 @@ import { useDashboardSplits } from '@/components/dashboard/use-dashboard-splits'
 import { SpendingAnalytics } from '@/components/dashboard/spending-analytics'
 import { OverviewNetWorth, type NetWorthPeriod } from '@/components/dashboard/overview-net-worth'
 import { OverviewCategories } from '@/components/dashboard/overview-categories'
-import { OverviewCashFlow } from '@/components/dashboard/overview-cash-flow'
 import { GoalIcon } from '@/components/goals/goal-icon'
 
 function describeIncompleteNetWorth(reasons: Array<string | false | undefined>, fallback: string) {
@@ -206,8 +205,6 @@ export function Dashboard() {
     Boolean(splitsFetchError) ||
     Boolean(transactionsFetchError) ||
     analytics.categories.conversion.kind !== 'complete'
-  const compactCashFlowMonths = analytics.trend.months.slice(-6)
-
   const recentTransactions = useMemo(() => transactions.slice(0, 8), [transactions])
   const dashboardErrors = [
     accountsFetchError ? t('errors.accounts', { message: accountsFetchError }) : null,
@@ -336,55 +333,36 @@ export function Dashboard() {
         preferredCurrency={mainCurrency}
       />
 
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
-        <OverviewCategories
-          items={categorySourceUnavailable ? [] : analytics.categories.currentMonthBreakdown}
-          total={categorySourceUnavailable ? 0 : categoryTotal}
-          displayCurrency={analytics.categories.conversion.currency}
-          comparisonLabel={
-            cashFlowDisplayable
-              ? `${expenseDelta >= 0 ? '+' : '-'}${formatMoney(Math.abs(expenseDelta), cashFlowDisplayCurrency)} vs last month`
-              : (cashFlowUnavailableLabel ?? t('currency.derivedUnavailable'))
-          }
-          dateFrom={monthStart}
-          dateTo={monthEnd}
-          unavailable={categorySourceUnavailable}
-          unavailableMessage={
-            splitsLoading
-              ? t('analytics.loadingSplits')
-              : splitsFetchError
-                ? t('analytics.categoriesUnavailable')
-                : transactionsFetchError
-                  ? t('currency.sourceUnavailable')
-                  : describeIncompleteConversion(analytics.categories.conversion, {
-                      mainRequired: t('currency.mainRequired'),
-                      invalidData: t('currency.invalidEvidence'),
-                      missingRates: (currencies) => t('currency.missingDatedRates', { currencies }),
-                      unavailable: t('currency.derivedUnavailable'),
-                    })
-          }
-        />
-        <OverviewCashFlow
-          months={compactCashFlowMonths}
-          displayCurrency={analytics.trend.conversion.currency}
-          unavailable={
-            Boolean(transactionsFetchError) || analytics.trend.conversion.kind !== 'complete'
-          }
-          unavailableMessage={
-            transactionsFetchError
-              ? t('currency.sourceUnavailable')
-              : describeIncompleteConversion(analytics.trend.conversion, {
-                  mainRequired: t('currency.mainRequired'),
-                  invalidData: t('currency.invalidEvidence'),
-                  missingRates: (currencies) => t('currency.missingDatedRates', { currencies }),
-                  unavailable: t('currency.derivedUnavailable'),
-                })
-          }
-        />
-      </div>
+      <OverviewCategories
+        items={categorySourceUnavailable ? [] : analytics.categories.currentMonthBreakdown}
+        total={categorySourceUnavailable ? 0 : categoryTotal}
+        displayCurrency={analytics.categories.conversion.currency}
+        comparisonLabel={
+          cashFlowDisplayable
+            ? `${expenseDelta >= 0 ? '+' : '-'}${formatMoney(Math.abs(expenseDelta), cashFlowDisplayCurrency)} vs last month`
+            : (cashFlowUnavailableLabel ?? t('currency.derivedUnavailable'))
+        }
+        dateFrom={monthStart}
+        dateTo={monthEnd}
+        unavailable={categorySourceUnavailable}
+        unavailableMessage={
+          splitsLoading
+            ? t('analytics.loadingSplits')
+            : splitsFetchError
+              ? t('analytics.categoriesUnavailable')
+              : transactionsFetchError
+                ? t('currency.sourceUnavailable')
+                : describeIncompleteConversion(analytics.categories.conversion, {
+                    mainRequired: t('currency.mainRequired'),
+                    invalidData: t('currency.invalidEvidence'),
+                    missingRates: (currencies) => t('currency.missingDatedRates', { currencies }),
+                    unavailable: t('currency.derivedUnavailable'),
+                  })
+        }
+      />
 
-      <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
-        <NativePanel className="self-start p-4 sm:p-5">
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)] xl:items-stretch">
+        <NativePanel className="flex min-h-0 flex-col p-4 sm:p-5">
           <SpendingAnalytics
             analytics={analytics}
             isLoading={txLoading || splitsLoading}
@@ -393,8 +371,8 @@ export function Dashboard() {
           />
         </NativePanel>
 
-        <NativePanel className="self-start p-5">
-          <div className="mb-4 flex items-center justify-between gap-3">
+        <NativePanel className="flex min-h-0 flex-col p-5">
+          <div className="mb-4 flex shrink-0 items-center justify-between gap-3">
             <h2 className="text-base font-semibold">{t('recentActivity')}</h2>
             <Link
               to="/transactions"
@@ -408,13 +386,13 @@ export function Dashboard() {
               <ErrorState
                 title="Couldn’t load recent transactions"
                 description={transactionsFetchError}
-                className="py-8"
+                className="flex-1 py-8"
                 onRetry={() => {
                   void fetchTransactions().catch(() => {})
                 }}
               />
             ) : (
-              <div className="flex h-72 flex-col items-center justify-center text-center">
+              <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
                 <p className="text-muted-foreground text-sm">{tTx('empty.description')}</p>
                 <Button className="mt-3" size="sm" onClick={() => openTransactionDialog()}>
                   <Plus size={14} />
@@ -423,7 +401,7 @@ export function Dashboard() {
               </div>
             )
           ) : (
-            <div className="divide-border divide-y">
+            <div className="divide-border min-h-0 divide-y">
               {recentTransactions.map((tx) => (
                 <RecentTransactionRow key={tx.id} transaction={tx} compact />
               ))}
@@ -514,9 +492,10 @@ function DashboardSkeleton() {
     <div className="page-content">
       <Skeleton className="h-10 w-40" />
       <Skeleton className="h-72 w-full" />
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <Skeleton className="h-64 w-full" />
-        <Skeleton className="h-64 w-full" />
+      <Skeleton className="h-64 w-full" />
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+        <Skeleton className="h-72 w-full" />
+        <Skeleton className="h-72 w-full" />
       </div>
     </div>
   )

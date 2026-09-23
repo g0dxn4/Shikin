@@ -13,6 +13,16 @@ function renderAccounts(path = '/accounts') {
   )
 }
 
+async function chooseAccountAction(
+  user: ReturnType<typeof userEvent.setup>,
+  accountName: string,
+  actionName: string
+) {
+  const card = screen.getByRole('article', { name: accountName })
+  await user.click(within(card).getByRole('button', { name: `actions.more — ${accountName}` }))
+  await user.click(within(card).getByRole('button', { name: actionName }))
+}
+
 globalThis.ResizeObserver = class {
   observe() {}
   unobserve() {}
@@ -68,23 +78,34 @@ vi.mock('@/components/accounts/card-statements-dialog', () => ({
     ) : null,
 }))
 
-vi.mock('@/components/shared/confirm-dialog', () => ({
-  ConfirmDialog: ({
-    open,
-    onConfirm,
-    title,
-  }: {
-    open: boolean
-    onConfirm: () => void
-    title: string
-  }) =>
-    open ? (
-      <div data-testid="confirm-dialog">
-        <span>{title}</span>
-        <button onClick={onConfirm}>Confirm</button>
-      </div>
-    ) : null,
-}))
+vi.mock('@/components/shared/confirm-dialog', async () => {
+  const { Dialog, DialogContent, DialogDescription, DialogTitle } =
+    await import('@/components/ui/dialog')
+  return {
+    ConfirmDialog: ({
+      open,
+      onOpenChange,
+      onConfirm,
+      title,
+    }: {
+      open: boolean
+      onOpenChange: (open: boolean) => void
+      onConfirm: () => void
+      title: string
+    }) => (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        {open ? (
+          <DialogContent data-testid="confirm-dialog">
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>Confirmation</DialogDescription>
+            <button onClick={() => onOpenChange(false)}>Cancel</button>
+            <button onClick={onConfirm}>Confirm</button>
+          </DialogContent>
+        ) : null}
+      </Dialog>
+    ),
+  }
+})
 
 const mockFetch = vi.fn().mockResolvedValue(undefined)
 const mockRemove = vi.fn()
@@ -257,11 +278,8 @@ describe('Accounts', () => {
     ).toBeTruthy()
     expect(screen.getByText('mix.spendable')).toBeInTheDocument()
     expect(screen.getByText('mix.cardDebt')).toBeInTheDocument()
-    // Keep the balance and fixed-width action group on separate rows on narrow screens.
-    expect(screen.getByLabelText('Delete Checking').parentElement?.parentElement).toHaveClass(
-      'flex-col',
-      'sm:flex-row'
-    )
+    // The mobile-safe action trigger remains a full-size labelled target.
+    expect(screen.getByRole('button', { name: 'actions.more — Checking' })).toHaveClass('min-h-11')
     expect(screen.getByText('metrics.net')).toBeInTheDocument()
   })
 
@@ -273,7 +291,7 @@ describe('Accounts', () => {
 
     renderAccounts()
 
-    await user.click(screen.getByLabelText('Edit Editable'))
+    await chooseAccountAction(user, 'Editable', 'actions.edit')
 
     expect(mockOpenAccountDialog).toHaveBeenCalledWith('acc-edit')
   })
@@ -289,7 +307,7 @@ describe('Accounts', () => {
 
     renderAccounts()
 
-    await user.click(screen.getByLabelText('Delete Deletable'))
+    await chooseAccountAction(user, 'Deletable', 'actions.delete')
 
     expect(screen.getByTestId('confirm-dialog')).toBeInTheDocument()
 
@@ -299,6 +317,23 @@ describe('Accounts', () => {
       expect(mockRemove).toHaveBeenCalledWith('acc-del')
       expect(toast.success).toHaveBeenCalledWith('toast.deleted')
     })
+  })
+
+  it('restores focus to the persistent account actions trigger after confirmation closes', async () => {
+    const user = userEvent.setup()
+    mockAccounts = [
+      { id: 'acc-focus', name: 'Focus Account', type: 'checking', currency: 'USD', balance: 0 },
+    ]
+
+    renderAccounts()
+
+    const more = screen.getByRole('button', { name: 'actions.more — Focus Account' })
+    await user.click(more)
+    await user.click(screen.getByRole('button', { name: 'actions.delete' }))
+    expect(screen.getByTestId('confirm-dialog')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(more).toHaveFocus())
   })
 
   it('shows a specific error toast when deleting an account fails', async () => {
@@ -318,7 +353,7 @@ describe('Accounts', () => {
 
     renderAccounts()
 
-    await user.click(screen.getByLabelText('Delete Delete Fails'))
+    await chooseAccountAction(user, 'Delete Fails', 'actions.delete')
     await user.click(screen.getByText('Confirm'))
 
     await waitFor(() => {
@@ -338,7 +373,7 @@ describe('Accounts', () => {
 
     renderAccounts()
 
-    await user.click(screen.getByLabelText('archiveAccount Archive Me'))
+    await chooseAccountAction(user, 'Archive Me', 'archiveAccount')
 
     expect(screen.getByTestId('confirm-dialog')).toBeInTheDocument()
 
@@ -366,7 +401,7 @@ describe('Accounts', () => {
 
     renderAccounts()
 
-    await user.click(screen.getByLabelText('archiveAccount Archive Fails'))
+    await chooseAccountAction(user, 'Archive Fails', 'archiveAccount')
     await user.click(screen.getByText('Confirm'))
 
     await waitFor(() => {
@@ -392,7 +427,7 @@ describe('Accounts', () => {
 
     renderAccounts()
 
-    await user.click(await screen.findByLabelText('unarchiveAccount Restore Fails'))
+    await chooseAccountAction(user, 'Restore Fails', 'unarchiveAccount')
 
     await waitFor(() => {
       expect(mockUnarchive).toHaveBeenCalledWith('acc-restore-fail')
@@ -417,7 +452,7 @@ describe('Accounts', () => {
     renderAccounts()
 
     expect(screen.getAllByText('Daily Checking').length).toBeGreaterThan(0)
-    expect(screen.getByText('Primary')).toBeInTheDocument()
+    expect(screen.getByText('actions.primaryBadge')).toBeInTheDocument()
   })
 
   it('sets a non-credit account as primary from its card action', async () => {
@@ -430,11 +465,11 @@ describe('Accounts', () => {
 
     renderAccounts()
 
-    await user.click(screen.getByLabelText('Set Daily Checking as primary'))
+    await chooseAccountAction(user, 'Daily Checking', 'actions.setPrimary')
 
     await waitFor(() => {
       expect(mockSetPrimary).toHaveBeenCalledWith('acc-primary')
-      expect(toast.success).toHaveBeenCalledWith('Primary account updated')
+      expect(toast.success).toHaveBeenCalledWith('toast.primaryUpdated')
     })
   })
 
@@ -454,7 +489,7 @@ describe('Accounts', () => {
 
     renderAccounts()
 
-    await user.click(screen.getByLabelText('Set Primary Fails as primary'))
+    await chooseAccountAction(user, 'Primary Fails', 'actions.setPrimary')
 
     await waitFor(() => {
       expect(mockSetPrimary).toHaveBeenCalledWith('acc-primary-fail')
@@ -463,14 +498,19 @@ describe('Accounts', () => {
     expect(toast.success).not.toHaveBeenCalled()
   })
 
-  it('does not offer primary action on credit cards', () => {
+  it('does not offer primary action on credit cards', async () => {
+    const user = userEvent.setup()
     mockAccounts = [
       { id: 'acc-card', name: 'Credit Card', type: 'credit_card', currency: 'USD', balance: -1000 },
     ]
 
     renderAccounts()
 
-    expect(screen.queryByLabelText('Set Credit Card as primary')).not.toBeInTheDocument()
+    const card = screen.getByRole('article', { name: 'Credit Card' })
+    await user.click(within(card).getByRole('button', { name: 'actions.more — Credit Card' }))
+    expect(
+      within(card).queryByRole('button', { name: 'actions.setPrimary' })
+    ).not.toBeInTheDocument()
   })
 
   it('shows credit card limit, available credit, statement day, and due day', () => {
@@ -610,15 +650,22 @@ describe('Accounts', () => {
     expect(screen.queryByText('empty.title')).not.toBeInTheDocument()
   })
 
-  it('keeps account actions visible on mobile while preserving desktop hover reveal', () => {
+  it('keeps account actions in a labelled mobile-safe disclosure', async () => {
+    const user = userEvent.setup()
     mockAccounts = [{ id: 'acc-1', name: 'Test', type: 'checking', currency: 'USD', balance: 0 }]
 
-    const { container } = renderAccounts()
+    renderAccounts()
 
-    const hoverDiv = container.querySelector(
-      '.opacity-100.md\\:opacity-40.md\\:group-hover\\:opacity-100.md\\:group-focus-within\\:opacity-100'
-    )
-    expect(hoverDiv).toBeInTheDocument()
+    const card = screen.getByRole('article', { name: 'Test' })
+    const more = within(card).getByRole('button', { name: 'actions.more — Test' })
+    expect(more).toHaveClass('min-h-11')
+    expect(within(card).queryByRole('button', { name: 'actions.edit' })).not.toBeInTheDocument()
+
+    await user.click(more)
+    expect(within(card).getByRole('button', { name: 'actions.setPrimary' })).toBeVisible()
+    expect(within(card).getByRole('button', { name: 'archiveAccount' })).toBeVisible()
+    expect(within(card).getByRole('button', { name: 'actions.edit' })).toBeVisible()
+    expect(within(card).getByRole('button', { name: 'actions.delete' })).toBeVisible()
   })
 
   it('shows a converted same-currency net instead of mixing display currencies', () => {

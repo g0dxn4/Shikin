@@ -4,6 +4,9 @@
   "editTransaction": "Editar Transaccion",
   "deleteTransaction": "Eliminar Transaccion",
   "deleteConfirm": "Estas seguro de que deseas eliminar esta transaccion? El saldo de la cuenta se ajustara. Esta accion no se puede deshacer.",
+  "actions": {
+    "more": "Más acciones"
+  },
   "form": {
     "amount": "Monto",
     "amountPlaceholder": "0.00",
@@ -87,6 +90,10 @@
     "clear": "Limpiar filtros",
     "toolbar": "Filtros de transacciones",
     "activeCount": "{{count}} activos",
+    "showAdvanced": "Filtros avanzados",
+    "hideAdvanced": "Ocultar filtros avanzados",
+    "activeAdvanced": "Filtros avanzados activos",
+    "remove": "Quitar filtro",
     "dates": {
       "all": "Todas las fechas",
       "month": "Mes actual",

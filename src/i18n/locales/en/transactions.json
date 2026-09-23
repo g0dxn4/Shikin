@@ -4,6 +4,9 @@
   "editTransaction": "Edit Transaction",
   "deleteTransaction": "Delete Transaction",
   "deleteConfirm": "Are you sure you want to delete this transaction? The account balance will be adjusted accordingly. This action cannot be undone.",
+  "actions": {
+    "more": "More actions"
+  },
   "form": {
     "amount": "Amount",
     "amountPlaceholder": "0.00",
@@ -87,6 +90,10 @@
     "clear": "Clear filters",
     "toolbar": "Transaction filters",
     "activeCount": "{{count}} active",
+    "showAdvanced": "Advanced filters",
+    "hideAdvanced": "Hide advanced filters",
+    "activeAdvanced": "Active advanced filters",
+    "remove": "Remove filter",
     "dates": {
       "all": "All dates",
       "month": "Current month",

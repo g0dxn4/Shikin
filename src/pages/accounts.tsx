@@ -7,21 +7,15 @@ import {
   Suspense,
   useCallback,
   type FormEvent,
-  type ReactNode,
 } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import {
   Landmark,
   Plus,
-  Pencil,
-  Trash2,
   TrendingUp,
   ChevronDown,
   ChevronUp,
-  ArchiveRestore,
-  Archive,
-  Star,
   CreditCard,
   Receipt,
 } from 'lucide-react'
@@ -29,6 +23,7 @@ import { toast } from 'sonner'
 import { AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts'
 import { SafeChart } from '@/components/ui/safe-chart'
 import { Button } from '@/components/ui/button'
+import { ActionDisclosure, type ActionDisclosureItem } from '@/components/ui/action-disclosure'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorBanner } from '@/components/ui/error-banner'
@@ -343,7 +338,7 @@ export function Accounts() {
     setSettingPrimaryId(id)
     try {
       await setPrimary(id)
-      toast.success('Primary account updated')
+      toast.success(t('toast.primaryUpdated'))
     } catch (error) {
       toast.error(getErrorMessage(error, t('toast.error')))
     } finally {
@@ -705,7 +700,6 @@ export function Accounts() {
                             onArchive={() => handleRestore(account.id)}
                             onDelete={() => setDeleteId(account.id)}
                             archiveLabel={t('unarchiveAccount')}
-                            archiveIcon={<ArchiveRestore size={12} />}
                             archived
                             t={t}
                           />
@@ -753,7 +747,6 @@ export function Accounts() {
                       onArchive={() => handleRestore(account.id)}
                       onDelete={() => setDeleteId(account.id)}
                       archiveLabel={t('unarchiveAccount')}
-                      archiveIcon={<ArchiveRestore size={12} />}
                       archived
                       t={t}
                     />
@@ -882,7 +875,6 @@ function AccountCard({
   onArchive,
   onDelete,
   archiveLabel,
-  archiveIcon,
   archived = false,
   t,
 }: {
@@ -897,7 +889,6 @@ function AccountCard({
   onArchive: () => void
   onDelete: () => void
   archiveLabel?: string
-  archiveIcon?: ReactNode
   archived?: boolean
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   t: any
@@ -938,6 +929,29 @@ function AccountCard({
 
   const nameId = `account-${account.id}-name`
   const locatedId = `account-${account.id}-located`
+  const cardActions: ActionDisclosureItem[] = []
+  if (canSetPrimary && onSetPrimary) {
+    cardActions.push({
+      label: isPrimary ? t('actions.primary') : t('actions.setPrimary'),
+      onSelect: onSetPrimary,
+      disabled: isPrimary || isSettingPrimary,
+    })
+  }
+  cardActions.push(
+    {
+      label: archiveLabel ?? t('archiveAccount'),
+      onSelect: onArchive,
+    },
+    {
+      label: t('actions.edit'),
+      onSelect: onEdit,
+    },
+    {
+      label: t('actions.delete'),
+      onSelect: onDelete,
+      destructive: true,
+    }
+  )
 
   return (
     <article
@@ -965,7 +979,7 @@ function AccountCard({
             </Badge>
             {isPrimary && (
               <Badge variant="outline" className="text-accent border-accent/40 text-xs">
-                Primary
+                {t('actions.primaryBadge')}
               </Badge>
             )}
             {archived && (
@@ -982,46 +996,12 @@ function AccountCard({
             </p>
             <p className="text-muted-foreground mt-1 text-xs tabular-nums">{account.currency}</p>
           </div>
-          <div className="flex gap-1 opacity-100 transition-opacity md:opacity-40 md:group-focus-within:opacity-100 md:group-hover:opacity-100">
-            {canSetPrimary && onSetPrimary && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={onSetPrimary}
-                disabled={isPrimary || isSettingPrimary}
-                aria-label={
-                  isPrimary ? `${account.name} is primary` : `Set ${account.name} as primary`
-                }
-              >
-                <Star size={12} className={isPrimary ? 'fill-accent text-accent' : ''} />
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onArchive}
-              aria-label={`${archiveLabel ?? t('archiveAccount')} ${account.name}`}
-            >
-              {archiveIcon ?? <Archive size={12} />}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onEdit}
-              aria-label={`Edit ${account.name}`}
-            >
-              <Pencil size={12} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="text-destructive hover:text-destructive"
-              onClick={onDelete}
-              aria-label={`Delete ${account.name}`}
-            >
-              <Trash2 size={12} />
-            </Button>
-          </div>
+          <ActionDisclosure
+            label={t('actions.more')}
+            ariaLabel={`${t('actions.more')} — ${account.name}`}
+            actions={cardActions}
+            inline
+          />
         </div>
       </div>
 

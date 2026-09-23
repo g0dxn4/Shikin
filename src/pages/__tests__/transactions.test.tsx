@@ -193,7 +193,27 @@ describe('Transactions', () => {
     expect(mockUseQuery).toHaveBeenCalledWith(expect.objectContaining({ page: 1, pageSize: 50 }))
     expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'addTransaction' })[0]).toBeVisible()
+    expect(screen.getByRole('button', { name: 'actions.more' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'import.button' })).not.toBeInTheDocument()
     expect(screen.getByText('empty.title')).toBeVisible()
+  })
+
+  it('keeps secondary launchers in More actions with native disclosure keyboard behavior', async () => {
+    setRows([makeRow()])
+    const user = userEvent.setup()
+    render(<Transactions />)
+
+    const more = screen.getByRole('button', { name: 'actions.more' })
+    await user.click(more)
+    expect(more).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: 'import.button' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'bulk.actions.open' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'recurring.addRule' })).toBeVisible()
+
+    await user.keyboard('{Escape}')
+    expect(more).toHaveFocus()
+    expect(more).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('button', { name: 'import.button' })).not.toBeInTheDocument()
   })
 
   it('reads drill-down filters from the URL and preserves them across view changes', async () => {
@@ -215,9 +235,37 @@ describe('Transactions', () => {
         status: 'posted',
       })
     )
+    expect(screen.getByRole('button', { name: 'filters.hideAdvanced (3)' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    )
+    expect(screen.getByLabelText('filters.account')).toBeVisible()
     await user.selectOptions(screen.getByLabelText('views.label'), 'ledger')
     expect(window.location.search).toContain('account=account-2')
     expect(window.location.search).toContain('view=ledger')
+  })
+
+  it('summarizes and removes active advanced filters when their mobile controls are collapsed', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/transactions?account=account-2&status=pending&currency=USD'
+    )
+    const user = userEvent.setup()
+    render(<Transactions />)
+
+    await user.click(screen.getByRole('button', { name: 'filters.hideAdvanced (3)' }))
+    expect(screen.getByLabelText('filters.activeAdvanced')).toBeVisible()
+
+    await user.click(
+      screen.getByRole('button', { name: 'filters.remove filters.account: account-2' })
+    )
+    expect(window.location.search).not.toContain('account=account-2')
+    expect(window.location.search).toContain('status=pending')
+    expect(screen.getByRole('button', { name: 'filters.showAdvanced (2)' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
   })
 
   it('opens the full unclassified review queue from its URL', () => {
@@ -274,6 +322,10 @@ describe('Transactions', () => {
     const user = userEvent.setup()
     render(<Transactions />)
 
+    expect(screen.getByRole('button', { name: 'filters.hideAdvanced (1)' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    )
     const clear = screen.getByRole('button', { name: 'filters.clear' })
     expect(clear).toHaveTextContent('3')
     expect(screen.queryByText('filters.clear')).not.toBeInTheDocument()
@@ -286,6 +338,20 @@ describe('Transactions', () => {
     expect(screen.getByLabelText('views.label')).toHaveValue('ledger')
     expect(window.localStorage.getItem('shikin.transactions.view')).toBe('ledger')
     expect(screen.queryByRole('button', { name: 'filters.clear' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'filters.showAdvanced' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
+  })
+
+  it('uses a single compact mobile row for matching, review, and currency stats', () => {
+    render(<Transactions />)
+
+    const summary = screen.getByLabelText('summary.label')
+    expect(summary).toHaveAttribute('data-mobile-layout', 'compact')
+    expect(summary).toHaveClass('!grid-cols-3')
+    expect(summary.children).toHaveLength(3)
+    expect(summary.firstElementChild).toHaveClass('p-2.5')
   })
 
   it('keeps custom date labels usable and titles long selected filter values', async () => {
@@ -439,8 +505,9 @@ describe('Transactions', () => {
     const user = userEvent.setup()
     render(<Transactions />)
 
-    const opener = screen.getByRole('button', { name: 'bulk.actions.open' })
+    const opener = screen.getByRole('button', { name: 'actions.more' })
     await user.click(opener)
+    await user.click(screen.getByRole('button', { name: 'bulk.actions.open' }))
     const dialog = screen.getByRole('dialog')
     expect(dialog).toHaveTextContent('Visible first row')
     expect(dialog).toHaveTextContent('Visible second row')

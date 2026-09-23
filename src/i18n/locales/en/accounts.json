@@ -7,6 +7,14 @@
   "unarchiveAccount": "Restore Account",
   "deleteConfirm": "Are you sure you want to delete this account? All transactions associated with this account will also be deleted. This action cannot be undone.",
   "archiveConfirm": "Archive this account? It will be removed from active totals but its history will be preserved.",
+  "actions": {
+    "more": "More actions",
+    "setPrimary": "Set as primary",
+    "primary": "Primary account",
+    "primaryBadge": "Primary",
+    "edit": "Edit account",
+    "delete": "Delete account"
+  },
   "form": {
     "name": "Account Name",
     "namePlaceholder": "e.g. Checking Account",
@@ -47,6 +55,7 @@
     "archived": "Account archived successfully",
     "restored": "Account restored successfully",
     "deleted": "Account deleted successfully",
+    "primaryUpdated": "Primary account updated",
     "error": "Something went wrong",
     "reconciliation": "Current balance: {{balance}}. Later activity retained: {{later}}. Previous stored-versus-ledger discrepancy: {{discrepancy}}."
   },

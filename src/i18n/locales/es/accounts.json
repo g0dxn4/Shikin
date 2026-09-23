@@ -7,6 +7,14 @@
   "unarchiveAccount": "Restaurar Cuenta",
   "deleteConfirm": "¿Estás seguro de que deseas eliminar esta cuenta? Todas las transacciones asociadas también serán eliminadas. Esta acción no se puede deshacer.",
   "archiveConfirm": "¿Archivar esta cuenta? Se eliminará de los totales activos, pero conservará su historial.",
+  "actions": {
+    "more": "Más acciones",
+    "setPrimary": "Establecer como principal",
+    "primary": "Cuenta principal",
+    "primaryBadge": "Principal",
+    "edit": "Editar cuenta",
+    "delete": "Eliminar cuenta"
+  },
   "form": {
     "name": "Nombre de la Cuenta",
     "namePlaceholder": "ej. Cuenta Corriente",
@@ -47,6 +55,7 @@
     "archived": "Cuenta archivada exitosamente",
     "restored": "Cuenta restaurada exitosamente",
     "deleted": "Cuenta eliminada exitosamente",
+    "primaryUpdated": "Cuenta principal actualizada",
     "error": "Algo salió mal",
     "reconciliation": "Saldo actual: {{balance}}. Actividad posterior conservada: {{later}}. Discrepancia previa entre saldo guardado y libro: {{discrepancy}}."
   },

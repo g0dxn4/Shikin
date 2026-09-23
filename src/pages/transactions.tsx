@@ -27,6 +27,7 @@ import {
 import { toast } from 'sonner'
 import dayjs from 'dayjs'
 import { Button } from '@/components/ui/button'
+import { ActionDisclosure } from '@/components/ui/action-disclosure'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -556,21 +557,29 @@ export function Transactions() {
       <PageToolbar
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => setStatementImportOpen(true)}>
-              {t('import.button')}
-            </Button>
+            <ActionDisclosure
+              label={t('actions.more')}
+              actions={[
+                {
+                  label: t('import.button'),
+                  onSelect: () => setStatementImportOpen(true),
+                },
+                {
+                  label: tConsumption('bulk.actions.open'),
+                  disabled: pageQuery.isLoading || pageQuery.rows.length === 0,
+                  onSelect: () => setBulkClassificationOpen(true),
+                },
+                {
+                  label: t('recurring.addRule'),
+                  onSelect: () => openRecurringDialog(),
+                },
+              ]}
+            />
             <Button
-              variant="outline"
               size="sm"
-              disabled={pageQuery.isLoading || pageQuery.rows.length === 0}
-              onClick={() => setBulkClassificationOpen(true)}
+              className="min-h-11 md:min-h-9"
+              onClick={() => openTransactionDialog()}
             >
-              {tConsumption('bulk.actions.open')}
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => openRecurringDialog()}>
-              {t('recurring.addRule')}
-            </Button>
-            <Button size="sm" onClick={() => openTransactionDialog()}>
               <Plus size={15} />
               {t('addTransaction')}
             </Button>
@@ -578,18 +587,25 @@ export function Transactions() {
         }
       />
 
-      <MetricStrip aria-label={t('summary.label')}>
+      <MetricStrip
+        aria-label={t('summary.label')}
+        className="!grid-cols-3"
+        data-mobile-layout="compact"
+      >
         <MetricItem
+          className="p-2.5 sm:p-3.5 [&>span:first-child]:text-[11px] sm:[&>span:first-child]:text-xs [&>span:last-child]:hidden sm:[&>span:last-child]:block [&>strong]:text-base sm:[&>strong]:text-xl"
           label={t('summary.results')}
           value={pageQuery.total}
           detail={t('summary.resultsDetail')}
         />
         <MetricItem
+          className="p-2.5 sm:p-3.5 [&>span:first-child]:text-[11px] sm:[&>span:first-child]:text-xs [&>span:last-child]:hidden sm:[&>span:last-child]:block [&>strong]:text-base sm:[&>strong]:text-xl"
           label={t('summary.review')}
           value={pageQuery.reviewCounts.all}
           detail={t('summary.reviewDetail')}
         />
         <MetricItem
+          className="p-2.5 sm:p-3.5 [&>span:first-child]:text-[11px] sm:[&>span:first-child]:text-xs [&>span:last-child]:hidden sm:[&>span:last-child]:block [&>strong]:text-base sm:[&>strong]:text-xl"
           label={t('summary.currencies')}
           value={pageQuery.currencies.length}
           detail={t('summary.currenciesDetail')}
@@ -824,8 +840,19 @@ function TransactionFilters({
   onDatePreset: (preset: DatePreset) => void
   onClear: () => void
 }) {
+  const hasAdvancedFilters =
+    state.account !== 'all' ||
+    state.category !== 'all' ||
+    state.status !== 'all' ||
+    state.currency !== 'all'
   const [customRangeRequested, setCustomRangeRequested] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(hasAdvancedFilters)
   const activeFilterCount = countActiveFilters(state)
+  const advancedFilterCount =
+    Number(state.account !== 'all') +
+    Number(state.category !== 'all') +
+    Number(state.status !== 'all') +
+    Number(state.currency !== 'all')
   const showCustomDates = customRangeRequested || datePreset === 'custom'
   const dateSelectValue = showCustomDates ? 'custom' : datePreset
 
@@ -841,8 +868,44 @@ function TransactionFilters({
 
   const handleClear = () => {
     setCustomRangeRequested(false)
+    setAdvancedOpen(false)
     onClear()
   }
+
+  const accountLabel =
+    accounts.find((account) => account.id === state.account)?.name ?? state.account
+  const categoryLabel =
+    categories.find((category) => category.id === state.category)?.name ?? state.category
+  const advancedChips = [
+    state.account !== 'all'
+      ? {
+          key: 'account',
+          text: `${t('filters.account')}: ${accountLabel}`,
+          clear: () => onPatch({ account: 'all' }),
+        }
+      : null,
+    state.category !== 'all'
+      ? {
+          key: 'category',
+          text: `${t('filters.category')}: ${categoryLabel}`,
+          clear: () => onPatch({ category: 'all' }),
+        }
+      : null,
+    state.status !== 'all'
+      ? {
+          key: 'status',
+          text: `${t('filters.status')}: ${t(`status.${state.status}`)}`,
+          clear: () => onPatch({ status: 'all' }),
+        }
+      : null,
+    state.currency !== 'all'
+      ? {
+          key: 'currency',
+          text: `${t('filters.currency')}: ${state.currency}`,
+          clear: () => onPatch({ currency: 'all' }),
+        }
+      : null,
+  ].filter((chip): chip is { key: string; text: string; clear: () => void } => chip !== null)
 
   return (
     <NativePanel as="div" className="min-w-0 p-3">
@@ -922,33 +985,24 @@ function TransactionFilters({
               label: t(`filters.dates.${value}`),
             }))}
           />
-          <FilterSelect
-            label={t('filters.account')}
-            value={state.account}
-            onChange={(account) => onPatch({ account })}
-            options={accounts.map((account) => ({ value: account.id, label: account.name }))}
-          />
-          <FilterSelect
-            label={t('filters.category')}
-            value={state.category}
-            onChange={(category) => onPatch({ category })}
-            options={categories.map((category) => ({ value: category.id, label: category.name }))}
-          />
-          <FilterSelect
-            label={t('filters.status')}
-            value={state.status}
-            onChange={(status) => onPatch({ status: status as TransactionQueryStatus })}
-            options={(['posted', 'pending', 'cleared'] as const).map((status) => ({
-              value: status,
-              label: t(`status.${status}`),
-            }))}
-          />
-          <FilterSelect
-            label={t('filters.currency')}
-            value={state.currency}
-            onChange={(currency) => onPatch({ currency })}
-            options={currencies.map((currency) => ({ value: currency, label: currency }))}
-          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="min-h-11 justify-between md:hidden"
+            aria-expanded={advancedOpen}
+            aria-controls="transaction-advanced-filters"
+            onClick={() => setAdvancedOpen((open) => !open)}
+          >
+            <span>
+              {advancedOpen ? t('filters.hideAdvanced') : t('filters.showAdvanced')}
+              {advancedFilterCount > 0 ? ` (${advancedFilterCount})` : ''}
+            </span>
+            <ChevronDown
+              aria-hidden="true"
+              className={cn('transition-transform', advancedOpen ? 'rotate-180' : '')}
+            />
+          </Button>
           {showCustomDates ? (
             <div className="col-span-2 grid w-full min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 md:w-auto">
               <label className="text-muted-foreground min-w-0 text-xs">
@@ -971,6 +1025,60 @@ function TransactionFilters({
               </label>
             </div>
           ) : null}
+          {!advancedOpen && advancedChips.length > 0 ? (
+            <div
+              className="col-span-2 flex min-w-0 flex-wrap gap-1.5 md:hidden"
+              aria-label={t('filters.activeAdvanced')}
+            >
+              {advancedChips.map((chip) => (
+                <button
+                  key={chip.key}
+                  type="button"
+                  className="border-border bg-muted text-foreground focus-visible:ring-ring inline-flex min-h-11 max-w-full items-center gap-1 rounded-lg border px-2.5 text-xs focus-visible:ring-2 focus-visible:outline-none"
+                  aria-label={`${t('filters.remove')} ${chip.text}`}
+                  onClick={chip.clear}
+                >
+                  <span className="truncate">{chip.text}</span>
+                  <X size={13} aria-hidden="true" />
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <div
+            id="transaction-advanced-filters"
+            className={cn(
+              'col-span-2 min-w-0 grid-cols-2 gap-1.5 md:flex md:flex-wrap',
+              advancedOpen ? 'grid' : 'hidden md:flex'
+            )}
+          >
+            <FilterSelect
+              label={t('filters.account')}
+              value={state.account}
+              onChange={(account) => onPatch({ account })}
+              options={accounts.map((account) => ({ value: account.id, label: account.name }))}
+            />
+            <FilterSelect
+              label={t('filters.category')}
+              value={state.category}
+              onChange={(category) => onPatch({ category })}
+              options={categories.map((category) => ({ value: category.id, label: category.name }))}
+            />
+            <FilterSelect
+              label={t('filters.status')}
+              value={state.status}
+              onChange={(status) => onPatch({ status: status as TransactionQueryStatus })}
+              options={(['posted', 'pending', 'cleared'] as const).map((status) => ({
+                value: status,
+                label: t(`status.${status}`),
+              }))}
+            />
+            <FilterSelect
+              label={t('filters.currency')}
+              value={state.currency}
+              onChange={(currency) => onPatch({ currency })}
+              options={currencies.map((currency) => ({ value: currency, label: currency }))}
+            />
+          </div>
         </div>
       </div>
     </NativePanel>

@@ -26,7 +26,9 @@ test.describe('Settings', () => {
     await page.getByRole('tab', { name: 'Money' }).click()
     await expect(page.getByRole('heading', { name: 'Currency' })).toBeVisible()
     await expect(page.getByLabel('Main currency')).toBeVisible()
-    await expect(page.getByRole('button', { name: /Refresh Rates/i })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Save main currency' })).toBeVisible()
+    await page.locator('#manual-rates > summary').click()
+    await expect(page.locator('#manual-fx-form')).toBeVisible()
   })
 
   test('market data API section shows provider inputs', async ({ page }) => {

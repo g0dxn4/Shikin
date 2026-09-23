@@ -21,7 +21,7 @@ async function queryE2eSql<T extends Record<string, unknown>>(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Origin: 'http://localhost:1420',
+      Origin: process.env.SHIKIN_E2E_ORIGIN || 'http://localhost:1420',
       'X-Shikin-Bridge': BRIDGE_TOKEN,
     },
     body: JSON.stringify({ sql, params }),
@@ -41,7 +41,7 @@ async function executeE2eSql(sql: string, params: unknown[] = []) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Origin: 'http://localhost:1420',
+          Origin: process.env.SHIKIN_E2E_ORIGIN || 'http://localhost:1420',
           'X-Shikin-Bridge': BRIDGE_TOKEN,
         },
         body: JSON.stringify({ sql, params }),
@@ -141,6 +141,9 @@ test.describe('Transactions', () => {
     await expect(page.getByRole('button', { name: 'All' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Expense' })).toBeVisible()
     await expect(page.getByLabel('Date range')).toBeVisible()
+    if ((page.viewportSize()?.width ?? 0) < 768) {
+      await page.getByRole('button', { name: 'Advanced filters' }).click()
+    }
     await expect(page.getByLabel('Account')).toBeVisible()
   })
 

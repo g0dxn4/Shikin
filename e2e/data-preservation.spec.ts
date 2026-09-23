@@ -51,7 +51,7 @@ async function dbRequest<T>(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Origin: 'http://localhost:1420',
+      Origin: process.env.SHIKIN_E2E_ORIGIN || 'http://localhost:1420',
       'X-Shikin-Bridge': BRIDGE_TOKEN,
     },
     body: JSON.stringify({ sql, params }),

@@ -29,7 +29,7 @@ test.describe('Dashboard', () => {
     await page.goto('/')
     await page.waitForLoadState('networkidle')
 
-    await expect(page.getByText('Net worth').first()).toBeVisible()
+    await expect(page.getByRole('main').getByText('Net worth', { exact: true })).toBeVisible()
     await expect(page.getByText('Income').first()).toBeVisible()
     await expect(page.getByText('Spent').first()).toBeVisible()
     await expect(page.getByRole('img', { name: 'Net worth over time' })).toHaveCount(0)

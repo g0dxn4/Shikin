@@ -87,7 +87,7 @@ test.describe('accessible chart data tables', () => {
 
     await page.getByRole('tab', { name: 'Cash flow' }).click()
     await expect(page.locator('[aria-describedby="overview-cashflow-data"]')).toHaveCount(1)
-    await expect(page.getByRole('heading', { name: 'Cash flow' })).toHaveCount(1)
+    await expect(page.getByRole('heading', { name: 'Cash flow', exact: true })).toHaveCount(1)
     await expectClippedTableWrapper(cashFlowTable, 'Cash flow')
     await main.evaluate((element) => element.scrollTo(0, 150))
     await expectClippedTableWrapper(cashFlowTable, 'Cash flow')

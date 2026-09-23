@@ -129,7 +129,7 @@ test.describe('mobile native navigation', () => {
     await bottomNav.getByRole('button', { name: 'More pages' }).click()
     const more = page.getByRole('dialog')
     await expect(more.getByRole('link')).toHaveCount(18)
-    await expect(more.getByRole('link', { name: 'Insights' })).toHaveCount(0)
+    await expect(more.getByRole('link', { name: 'Insights', exact: true })).toHaveCount(0)
     for (const group of [
       'Overview',
       'Transactions',

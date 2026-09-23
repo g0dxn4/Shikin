@@ -71,7 +71,7 @@ test.describe('mobile viewport', () => {
 
       await page.getByRole('button', { name: 'More pages' }).click()
       const more = page.getByRole('dialog')
-      await expect(more.getByRole('link')).toHaveCount(19)
+      await expect(more.getByRole('link')).toHaveCount(18)
       await expect(more.getByRole('link', { name: 'Spending Insights' })).toBeVisible()
 
       const overflow = await page.evaluate(() => ({

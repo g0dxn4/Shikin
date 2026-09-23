@@ -14,20 +14,24 @@ vi.mock('@/stores/ui-store', () => ({ useUIStore: () => ({ openBudgetDialog: vi.
 vi.mock('@/stores/currency-store', () => ({
   useCurrencyStore: () => ({ preferredCurrency: 'USD' }),
 }))
+const budgetStore = vi.hoisted(() => ({
+  budgets: [
+    {
+      id: 'budget-1',
+      name: 'Monthly food',
+      categoryName: 'Food',
+      amount: 50_00,
+      spent: 20_00,
+      remaining: 30_00,
+      percentUsed: 40,
+      period: 'monthly',
+    },
+  ] as Array<Record<string, unknown>>,
+}))
+
 vi.mock('@/stores/budget-store', () => ({
   useBudgetStore: () => ({
-    budgets: [
-      {
-        id: 'budget-1',
-        name: 'Monthly food',
-        categoryName: 'Food',
-        amount: 50_00,
-        spent: 20_00,
-        remaining: 30_00,
-        percentUsed: 40,
-        period: 'monthly',
-      },
-    ],
+    budgets: budgetStore.budgets,
     isLoading: false,
     fetchError: null,
     fetch: vi.fn().mockResolvedValue(undefined),
@@ -42,6 +46,18 @@ import { Budgets } from '../budgets'
 
 describe('Budgets cashflow bucket panel integration', () => {
   it('mounts the compact panel below existing budget intelligence without a new page title', () => {
+    budgetStore.budgets = [
+      {
+        id: 'budget-1',
+        name: 'Monthly food',
+        categoryName: 'Food',
+        amount: 50_00,
+        spent: 20_00,
+        remaining: 30_00,
+        percentUsed: 40,
+        period: 'monthly',
+      },
+    ]
     render(<Budgets />)
     const intelligence = screen.getByRole('heading', { name: 'intelligence.title' })
     const buckets = screen.getByRole('region', { name: 'virtual buckets' })
@@ -50,5 +66,12 @@ describe('Budgets cashflow bucket panel integration', () => {
     ).toBeTruthy()
     expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
     expect(screen.getByText('progress.title')).toBeInTheDocument()
+  })
+
+  it('still mounts virtual buckets when there are no budgets', () => {
+    budgetStore.budgets = []
+    render(<Budgets />)
+    expect(screen.getByText('empty.title')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'virtual buckets' })).toBeInTheDocument()
   })
 })

@@ -31,11 +31,14 @@
     "title": "Analisis de Gastos",
     "description": "Patrones sin analiticas en la nube",
     "tabs": {
-      "insights": "Ideas",
+      "insights": "Destacados",
       "mom": "Mes / Mes",
       "yoy": "Ano / Ano"
     },
     "insightsEmpty": "Sin cambios notables de gastos este mes. Sigue asi!",
+    "quietNextSteps": "Revisa los totales mensuales en Informes, o el gasto diario en el Mapa de calor.",
+    "openReports": "Abrir informes",
+    "openHeatmap": "Abrir mapa de calor de gastos",
     "totalChange": "Cambio Total",
     "category": "Categoria",
     "current": "Actual",

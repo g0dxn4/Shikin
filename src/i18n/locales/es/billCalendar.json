@@ -9,7 +9,7 @@
     "upcomingDescription": "Ordenado por proximo vencimiento desde reglas de gastos recurrentes.",
     "onTrack": "En orden",
     "emptyTitle": "Aun no hay facturas recurrentes",
-    "emptyDescription": "Crea gastos recurrentes desde Transacciones para convertir esto en tu centro de facturas personal."
+    "emptyDescription": "Agrega una factura recurrente para seguir los próximos vencimientos desde tu agenda local."
   },
   "prevMonth": "Mes anterior",
   "nextMonth": "Mes siguiente",
@@ -40,7 +40,8 @@
     "all": "Todos los estados",
     "soon": "Próximos 30 días",
     "overdue": "Vencidos",
-    "empty": "No hay facturas con este estado"
+    "empty": "No hay facturas con este estado",
+    "emptyDescription": "Ninguna factura coincide con este estado. Prueba otro filtro para ver las facturas programadas."
   },
   "error": {
     "load": "No se pudieron cargar las facturas"

@@ -9,7 +9,7 @@
     "upcomingDescription": "Sorted by next due date from recurring expense rules.",
     "onTrack": "On track",
     "emptyTitle": "No recurring bills yet",
-    "emptyDescription": "Create recurring expenses from Transactions to turn this into your personal bill command center."
+    "emptyDescription": "Add a recurring bill to track upcoming due dates from your local schedule."
   },
   "prevMonth": "Previous month",
   "nextMonth": "Next month",
@@ -40,7 +40,8 @@
     "all": "All statuses",
     "soon": "Next 30 days",
     "overdue": "Overdue",
-    "empty": "No bills with this status"
+    "empty": "No bills with this status",
+    "emptyDescription": "No bills match this status. Try another filter to see your scheduled bills."
   },
   "error": {
     "load": "Could not load bills"

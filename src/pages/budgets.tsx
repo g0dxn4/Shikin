@@ -257,7 +257,6 @@ export function Budgets() {
                 </option>
               ))}
             </select>
-            <span>{t('scope', { currency: preferredCurrency })}</span>
           </label>
         }
         actions={
@@ -267,6 +266,9 @@ export function Budgets() {
           </Button>
         }
       />
+      <p className="text-muted-foreground w-full min-w-0 text-xs leading-relaxed text-pretty">
+        {t('scope', { currency: preferredCurrency })}
+      </p>
 
       {storedBudgets.length > 0 && !complete && (
         <p role="status" className="text-warning text-xs">

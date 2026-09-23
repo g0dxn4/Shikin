@@ -269,7 +269,15 @@ export function BillsPage() {
             <h3 className="mb-2 text-lg font-semibold">
               {t(bills.length ? 'filter.empty' : 'bills.emptyTitle')}
             </h3>
-            <p className="text-muted-foreground max-w-md text-sm">{t('bills.emptyDescription')}</p>
+            <p className="text-muted-foreground max-w-md text-sm">
+              {t(bills.length ? 'filter.emptyDescription' : 'bills.emptyDescription')}
+            </p>
+            {bills.length === 0 ? (
+              <Button className="mt-4" onClick={() => openRecurringDialog()}>
+                <Plus size={16} aria-hidden="true" />
+                {t('bills.addRecurring')}
+              </Button>
+            ) : null}
           </div>
         ) : (
           <div>

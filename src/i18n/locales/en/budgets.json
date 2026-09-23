@@ -93,6 +93,9 @@
     "title": "Virtual cashflow buckets",
     "description": "Reserve recorded income for upcoming priorities, grouped in each bucket's native currency.",
     "disclaimer": "Virtual balances organize your plan only. They do not change bank accounts or transactions.",
+    "count": "{{count}}",
+    "count_one": "{{count}} bucket",
+    "count_other": "{{count}} buckets",
     "noTarget": "No target",
     "target": "Target {{amount}}",
     "status": {

@@ -189,4 +189,18 @@ describe('BillsPage', () => {
     expect(screen.queryByText('Rent')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'bills.addRecurring' })).toBeInTheDocument()
   })
+
+  it('keeps filtered-empty distinct from a true zero-bill state', async () => {
+    render(
+      <MemoryRouter>
+        <BillsPage />
+      </MemoryRouter>
+    )
+    await userEvent.setup().selectOptions(screen.getByRole('combobox'), 'overdue')
+    expect(screen.getByText('filter.empty')).toBeInTheDocument()
+    expect(screen.getByText('filter.emptyDescription')).toBeInTheDocument()
+    expect(screen.queryByText('bills.emptyTitle')).not.toBeInTheDocument()
+    expect(screen.queryByText('bills.emptyDescription')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'bills.addRecurring' })).toHaveLength(1)
+  })
 })

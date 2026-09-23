@@ -93,6 +93,9 @@
     "title": "Fondos virtuales de flujo de caja",
     "description": "Reserva ingresos registrados para próximas prioridades, agrupados en la moneda nativa de cada fondo.",
     "disclaimer": "Los saldos virtuales solo organizan tu plan. No cambian cuentas bancarias ni transacciones.",
+    "count": "{{count}}",
+    "count_one": "{{count}} fondo",
+    "count_other": "{{count}} fondos",
     "noTarget": "Sin objetivo",
     "target": "Objetivo {{amount}}",
     "status": {

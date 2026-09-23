@@ -31,11 +31,14 @@
     "title": "Spending Insights",
     "description": "Patterns without cloud analytics",
     "tabs": {
-      "insights": "Insights",
+      "insights": "Highlights",
       "mom": "Month / Month",
       "yoy": "Year / Year"
     },
     "insightsEmpty": "No notable spending changes this month. Keep it up!",
+    "quietNextSteps": "Review monthly totals in Reports, or inspect daily spending on the Heatmap.",
+    "openReports": "Open Reports",
+    "openHeatmap": "Open Spending Heatmap",
     "totalChange": "Total Change",
     "category": "Category",
     "current": "Current",

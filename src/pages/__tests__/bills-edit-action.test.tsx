@@ -108,6 +108,21 @@ describe('BillsPage edit action', () => {
     expect(mockOpenRecurringDialog.mock.calls[0]).toEqual([])
   })
 
+  it('uses the toolbar Add recurring bill workflow when there are no bills', async () => {
+    const user = userEvent.setup()
+    recurringStoreMock.rules = []
+    renderPage()
+
+    expect(screen.getByText('bills.emptyTitle')).toBeInTheDocument()
+    expect(screen.getByText('bills.emptyDescription')).toBeInTheDocument()
+    expect(screen.queryByText('filter.empty')).not.toBeInTheDocument()
+    const addButtons = screen.getAllByRole('button', { name: 'bills.addRecurring' })
+    expect(addButtons.length).toBe(2)
+    await user.click(addButtons[1])
+    expect(mockOpenRecurringDialog).toHaveBeenCalledTimes(1)
+    expect(mockOpenRecurringDialog).toHaveBeenCalledWith()
+  })
+
   it('activates the row edit button with keyboard', async () => {
     const user = userEvent.setup()
     renderPage()

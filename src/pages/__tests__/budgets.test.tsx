@@ -83,6 +83,15 @@ describe('Budgets', () => {
     expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
   })
 
+  it('puts the currency scope caption on its own wrapping row', () => {
+    render(<Budgets />)
+    const caption = screen.getByText('scope')
+    expect(caption.tagName).toBe('P')
+    expect(caption).toHaveClass('w-full')
+    expect(caption.closest('label')).toBeNull()
+    expect(screen.getByRole('combobox')).toBeInTheDocument()
+  })
+
   describe('failure/retry boundary behavior', () => {
     it('shows ErrorState (not empty CTA) when initial fetch fails with empty dataset', () => {
       mockFetchError = 'Database connection failed'
@@ -111,6 +120,8 @@ describe('Budgets', () => {
 
       // Should NOT show error state
       expect(screen.queryByText('error.loadDetailed')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'buckets.title' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'buckets.actions.create' })).toBeEnabled()
     })
 
     it('calls fetch when retry button is clicked', async () => {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import {
   TrendingUp,
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { ErrorState } from '@/components/ui/error-state'
 import { NativePanel, PageToolbar } from '@/components/ui/native-layout'
 import { useSpendingInsightsStore } from '@/stores/spending-insights-store'
@@ -175,10 +177,21 @@ function InsightsTab({ insights, currency }: { insights: SpendingInsight[]; curr
   const { t } = useTranslation('analytics')
   if (insights.length === 0) {
     return (
-      <NativePanel className="flex h-64 items-center justify-center p-5">
-        <div className="text-center">
+      <NativePanel className="flex min-h-64 items-center justify-center p-5">
+        <div className="max-w-md text-center">
           <Lightbulb size={24} className="text-muted-foreground mx-auto mb-2" aria-hidden="true" />
           <p className="text-muted-foreground text-sm">{t('spendingInsights.insightsEmpty')}</p>
+          <p className="text-muted-foreground mt-3 text-sm">
+            {t('spendingInsights.quietNextSteps')}
+          </p>
+          <div className="mt-4 flex flex-col items-stretch justify-center gap-2 sm:flex-row sm:items-center">
+            <Button variant="secondary" asChild className="min-h-11">
+              <Link to="/reports">{t('spendingInsights.openReports')}</Link>
+            </Button>
+            <Button variant="secondary" asChild className="min-h-11">
+              <Link to="/spending-heatmap">{t('spendingInsights.openHeatmap')}</Link>
+            </Button>
+          </div>
         </div>
       </NativePanel>
     )

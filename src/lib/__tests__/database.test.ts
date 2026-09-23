@@ -18,6 +18,30 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
+async function within<T>(promise: Promise<T>, timeoutMs = 250): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('Operation timed out')), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timeout) clearTimeout(timeout)
+  }
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllEnvs()
@@ -311,6 +335,342 @@ describe('database browser transactions', () => {
       'http://127.0.0.1:1480/api/db/execute',
       'http://127.0.0.1:1480/api/db/transaction',
     ])
+  })
+
+  it('keeps the transaction owner moving ahead of six connection-blocking browser operations', async () => {
+    vi.stubEnv('VITE_DATA_SERVER_URL', 'http://127.0.0.1:1480')
+
+    const transactionId = 'browser-owner'
+    const callbackStarted = deferred<void>()
+    const releaseCallback = deferred<void>()
+    const ownershipReleased = deferred<void>()
+    const events: string[] = []
+    const waiters: Array<() => void> = []
+    let availableConnections = 6
+    let ownerActive = false
+
+    const acquireConnection = async () => {
+      if (availableConnections > 0) {
+        availableConnections -= 1
+        return
+      }
+      await new Promise<void>((resolve) => waiters.push(resolve))
+    }
+    const releaseConnection = () => {
+      const next = waiters.shift()
+      if (next) next()
+      else availableConnections += 1
+    }
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      await acquireConnection()
+      try {
+        const url = String(input)
+        const body = init?.body instanceof Uint8Array ? {} : JSON.parse(String(init?.body ?? '{}'))
+        const owned = body.transactionId === transactionId
+
+        if (ownerActive && !owned) await ownershipReleased.promise
+
+        if (url.endsWith('/api/db/transaction') && body.action === 'begin') {
+          events.push('begin')
+          ownerActive = true
+          return jsonResponse({ transactionId })
+        }
+        if (url.endsWith('/api/db/transaction') && body.action === 'commit') {
+          events.push('commit')
+          ownerActive = false
+          ownershipReleased.resolve()
+          return jsonResponse({ ok: true, status: 'committed' })
+        }
+        if (url.endsWith('/api/db/query')) {
+          events.push(owned ? `tx-query:${body.sql}` : `query:${body.sql}`)
+          return jsonResponse([])
+        }
+        if (url.endsWith('/api/db/execute')) {
+          events.push(owned ? `tx-execute:${body.sql}` : `execute:${body.sql}`)
+          return jsonResponse({ rowsAffected: 1, lastInsertId: 0 })
+        }
+        if (url.endsWith('/api/recurring/materialize')) {
+          events.push('recurring')
+          return jsonResponse({ success: true, created: 0, message: 'none due' })
+        }
+        if (url.endsWith('/api/runtime/diagnostics')) {
+          events.push('diagnostics')
+          return jsonResponse({
+            success: true,
+            build: 'hosted-web',
+            version: '1.1.0',
+            schemaVersion: 24,
+            schemaMigration: '024_classification_types',
+            databaseLineageId: 'lineage',
+            localInstance: { status: 'available', id: 'instance' },
+            dataRevision: 1,
+            lastFinancialWriteAt: null,
+          })
+        }
+        if (url.endsWith('/api/db/export')) {
+          events.push('export')
+          return new Response(new Uint8Array([1, 2, 3]))
+        }
+        if (url.endsWith('/api/db/import')) {
+          events.push('import')
+          return jsonResponse({ ok: true })
+        }
+        throw new Error(`Unexpected fetch: ${url}`)
+      } finally {
+        releaseConnection()
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const database = await import('@/lib/database')
+    const { getRuntimeDiagnostics } = await import('@/lib/runtime-diagnostics')
+    const db = await database.getDb()
+    events.length = 0
+
+    const transaction = database.withTransaction(async (tx) => {
+      callbackStarted.resolve()
+      await releaseCallback.promise
+      await Promise.all([
+        tx.query('owner query 1'),
+        tx.query('owner query 2'),
+        tx.execute('owner execute'),
+      ])
+      return 'committed'
+    })
+    await callbackStarted.promise
+
+    const nonOwners = [
+      database.query('outside query'),
+      database.execute('outside execute'),
+      db.select('shim query'),
+      db.execute('shim execute'),
+      database.getDb(),
+      database.materializeRecurringTransactionsBrowser(),
+      getRuntimeDiagnostics(),
+      database.exportDatabaseSnapshot(),
+      database.importDatabaseSnapshot(new Uint8Array([4, 5, 6])),
+    ]
+
+    // Let all current-code fetches take browser slots before the owner callback continues.
+    await Promise.resolve()
+    await Promise.resolve()
+    releaseCallback.resolve()
+
+    try {
+      await expect(within(transaction)).resolves.toBe('committed')
+      await expect(Promise.all(nonOwners)).resolves.toHaveLength(9)
+    } finally {
+      ownershipReleased.resolve()
+      releaseCallback.resolve()
+      await Promise.allSettled([transaction, ...nonOwners])
+    }
+
+    expect(events.slice(0, 5)).toEqual([
+      'begin',
+      'tx-query:owner query 1',
+      'tx-query:owner query 2',
+      'tx-execute:owner execute',
+      'commit',
+    ])
+    expect(events.slice(5)).toEqual([
+      'query:outside query',
+      'execute:outside execute',
+      'query:shim query',
+      'execute:shim execute',
+      'query:SELECT 1 AS ok',
+      'recurring',
+      'diagnostics',
+      'export',
+      'import',
+    ])
+  })
+
+  it('waits for the first browser transaction before beginning a second one', async () => {
+    vi.stubEnv('VITE_DATA_SERVER_URL', 'http://127.0.0.1:1480')
+    const releaseFirst = deferred<void>()
+    const firstStarted = deferred<void>()
+    const events: string[] = []
+    let sequence = 0
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? '{}'))
+        if (body.action === 'begin') {
+          sequence += 1
+          events.push(`begin:${sequence}`)
+          return jsonResponse({ transactionId: `tx-${sequence}` })
+        }
+        if (body.action === 'commit') {
+          events.push(`commit:${body.transactionId}`)
+          return jsonResponse({ ok: true, status: 'committed' })
+        }
+        throw new Error('Unexpected request')
+      })
+    )
+
+    const { withTransaction } = await import('@/lib/database')
+    const first = withTransaction(async () => {
+      firstStarted.resolve()
+      await releaseFirst.promise
+      return 'first'
+    })
+    await firstStarted.promise
+    const second = withTransaction(async () => 'second')
+    await Promise.resolve()
+
+    expect(events).toEqual(['begin:1'])
+    releaseFirst.resolve()
+    await expect(Promise.all([first, second])).resolves.toEqual(['first', 'second'])
+    expect(events).toEqual(['begin:1', 'commit:tx-1', 'begin:2', 'commit:tx-2'])
+  })
+
+  it('holds the browser queue until a response body is consumed', async () => {
+    vi.stubEnv('VITE_DATA_SERVER_URL', 'http://127.0.0.1:1480')
+    const bodyStarted = deferred<void>()
+    const releaseBody = deferred<void>()
+    const events: string[] = []
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/api/db/query')) {
+          events.push('query-fetch')
+          return {
+            ok: true,
+            json: async () => {
+              bodyStarted.resolve()
+              await releaseBody.promise
+              return []
+            },
+          } as Response
+        }
+        events.push('execute-fetch')
+        return jsonResponse({ rowsAffected: 1, lastInsertId: 0 })
+      })
+    )
+
+    const { execute, query } = await import('@/lib/database')
+    const first = query('SELECT 1')
+    await bodyStarted.promise
+    const second = execute('UPDATE settings SET value = value')
+    await Promise.resolve()
+    expect(events).toEqual(['query-fetch'])
+
+    releaseBody.resolve()
+    await Promise.all([first, second])
+    expect(events).toEqual(['query-fetch', 'execute-fetch'])
+  })
+
+  it('releases the browser queue after begin fails', async () => {
+    vi.stubEnv('VITE_DATA_SERVER_URL', 'http://127.0.0.1:1480')
+    const releaseBegin = deferred<void>()
+    const events: string[] = []
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/api/db/transaction')) {
+          events.push('begin')
+          await releaseBegin.promise
+          return jsonResponse({ error: 'begin failed' }, 500)
+        }
+        events.push('query')
+        return jsonResponse([])
+      })
+    )
+
+    const { query, withTransaction } = await import('@/lib/database')
+    const failed = withTransaction(async () => undefined)
+    await Promise.resolve()
+    const next = query('SELECT 1')
+    await Promise.resolve()
+    expect(events).toEqual(['begin'])
+
+    releaseBegin.resolve()
+    await expect(failed).rejects.toThrow('begin failed')
+    await expect(next).resolves.toEqual([])
+    expect(events).toEqual(['begin', 'query'])
+  })
+
+  it('preserves a callback error when rollback fails and then continues the browser queue', async () => {
+    vi.stubEnv('VITE_DATA_SERVER_URL', 'http://127.0.0.1:1480')
+    const rollbackStarted = deferred<void>()
+    const releaseRollback = deferred<void>()
+    const events: string[] = []
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? '{}'))
+        if (body.action === 'begin') return jsonResponse({ transactionId: 'callback-failure' })
+        if (body.action === 'rollback') {
+          events.push('rollback')
+          rollbackStarted.resolve()
+          await releaseRollback.promise
+          return jsonResponse({ error: 'rollback transport failed' }, 500)
+        }
+        if (String(input).endsWith('/api/db/query')) {
+          events.push('query')
+          return jsonResponse([])
+        }
+        throw new Error('Unexpected request')
+      })
+    )
+
+    const { query, withTransaction } = await import('@/lib/database')
+    const failed = withTransaction(async () => {
+      throw new Error('original callback failure')
+    })
+    await rollbackStarted.promise
+    const next = query('SELECT 1')
+    await Promise.resolve()
+    expect(events).toEqual(['rollback'])
+
+    releaseRollback.resolve()
+    await expect(failed).rejects.toThrow('original callback failure')
+    await expect(next).resolves.toEqual([])
+    expect(events).toEqual(['rollback', 'query'])
+  })
+
+  it('preserves a commit error when rollback fails and then continues the browser queue', async () => {
+    vi.stubEnv('VITE_DATA_SERVER_URL', 'http://127.0.0.1:1480')
+    const rollbackStarted = deferred<void>()
+    const releaseRollback = deferred<void>()
+    const events: string[] = []
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? '{}'))
+        if (body.action === 'begin') return jsonResponse({ transactionId: 'commit-failure' })
+        if (body.action === 'commit') return jsonResponse({ error: 'commit transport failed' }, 500)
+        if (body.action === 'rollback') {
+          events.push('rollback')
+          rollbackStarted.resolve()
+          await releaseRollback.promise
+          return jsonResponse({ error: 'rollback transport failed' }, 500)
+        }
+        if (String(input).endsWith('/api/db/query')) {
+          events.push('query')
+          return jsonResponse([])
+        }
+        throw new Error('Unexpected request')
+      })
+    )
+
+    const { query, withTransaction } = await import('@/lib/database')
+    const failed = withTransaction(async () => 'result')
+    await rollbackStarted.promise
+    const next = query('SELECT 1')
+    await Promise.resolve()
+    expect(events).toEqual(['rollback'])
+
+    releaseRollback.resolve()
+    await expect(failed).rejects.toThrow('commit transport failed')
+    await expect(next).resolves.toEqual([])
+    expect(events).toEqual(['rollback', 'query'])
   })
 
   it('rolls back the browser transaction when the callback fails', async () => {

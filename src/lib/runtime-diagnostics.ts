@@ -1,3 +1,4 @@
+import { enqueueBrowserOperation } from './browser-operation-queue'
 import { DATA_SERVER_URL, isTauri, withDataServerHeaders } from './runtime'
 
 export type RuntimeIdentityStatus =
@@ -56,12 +57,15 @@ export async function getRuntimeDiagnostics(): Promise<RuntimeDiagnostics> {
     return validateDiagnostics(await invoke<unknown>('read_runtime_diagnostics'))
   }
 
-  const response = await fetch(`${DATA_SERVER_URL}/api/runtime/diagnostics`, {
-    method: 'GET',
-    headers: withDataServerHeaders(),
+  return enqueueBrowserOperation(async () => {
+    const response = await fetch(`${DATA_SERVER_URL}/api/runtime/diagnostics`, {
+      method: 'GET',
+      headers: withDataServerHeaders(),
+    })
+    if (!response.ok) {
+      await response.arrayBuffer().catch(() => {})
+      throw new Error(`Runtime diagnostics request failed (${response.status}).`)
+    }
+    return validateDiagnostics(await response.json())
   })
-  if (!response.ok) {
-    throw new Error(`Runtime diagnostics request failed (${response.status}).`)
-  }
-  return validateDiagnostics(await response.json())
 }

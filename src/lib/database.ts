@@ -13,6 +13,7 @@ import {
   assertBackendFoundationReady,
   assertSupportedSchemaVersion,
 } from '@shikin/finance-core'
+import { enqueueBrowserOperation } from '@/lib/browser-operation-queue'
 import { isTauri, DATA_SERVER_URL, withDataServerHeaders } from '@/lib/runtime'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -1813,27 +1814,29 @@ export async function withTransaction<T>(fn: (tx: TransactionClient) => Promise<
     return enqueueTauriDbOperation(() => runTauriWithTransaction(fn))
   }
 
-  const transactionId = await beginBrowserTransaction()
-  const tx = createBrowserTransactionClient(transactionId)
+  return enqueueBrowserOperation(async () => {
+    const transactionId = await beginBrowserTransaction()
+    const tx = createBrowserTransactionClient(transactionId)
 
-  try {
-    const result = await fn(tx)
-    assertBrowserTransactionFinalStatus(
-      'commit',
-      await finalizeBrowserTransaction('commit', transactionId)
-    )
-    return result
-  } catch (error) {
     try {
+      const result = await fn(tx)
       assertBrowserTransactionFinalStatus(
-        'rollback',
-        await finalizeBrowserTransaction('rollback', transactionId)
+        'commit',
+        await finalizeBrowserTransaction('commit', transactionId)
       )
-    } catch {
-      // Preserve the original application error when rollback transport also fails.
+      return result
+    } catch (error) {
+      try {
+        assertBrowserTransactionFinalStatus(
+          'rollback',
+          await finalizeBrowserTransaction('rollback', transactionId)
+        )
+      } catch {
+        // Preserve the original application error when rollback transport also fails.
+      }
+      throw error
     }
-    throw error
-  }
+  })
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────
@@ -1846,13 +1849,13 @@ export async function getDb(): Promise<TauriDatabase> {
   }
   // In browser mode, return a shim that delegates to the HTTP API.
   // getDb() is only used internally, but we expose it for compatibility.
-  await verifyBrowserServer()
+  await enqueueBrowserOperation(verifyBrowserServer)
   return {
     select: async <T>(sql: string, params?: unknown[]): Promise<T> => {
-      return browserQuery<T>(sql, params || []) as Promise<T>
+      return enqueueBrowserOperation(() => browserQuery<T>(sql, params || [])) as Promise<T>
     },
     execute: async (sql: string, params?: unknown[]) => {
-      return browserExecute(sql, params || [])
+      return enqueueBrowserOperation(() => browserExecute(sql, params || []))
     },
     close: async () => {
       // No-op for browser mode
@@ -1867,7 +1870,7 @@ export async function query<T>(sql: string, bindValues?: unknown[]): Promise<T[]
       return database.select<T[]>(sql, bindValues || [])
     })
   }
-  return browserQuery<T>(sql, bindValues || [])
+  return enqueueBrowserOperation(() => browserQuery<T>(sql, bindValues || []))
 }
 
 export async function execute(
@@ -1880,7 +1883,7 @@ export async function execute(
       return database.execute(sql, bindValues || [])
     })
   }
-  return browserExecute(sql, bindValues || [])
+  return enqueueBrowserOperation(() => browserExecute(sql, bindValues || []))
 }
 
 export async function runInTransaction<T>(_fn: () => Promise<T>): Promise<T> {
@@ -1894,22 +1897,24 @@ export async function materializeRecurringTransactionsBrowser(): Promise<{
   created: number
   message: string
 }> {
-  const result = await browserFetch<{
-    success: boolean
-    created?: number
-    message?: string
-    reason?: string
-  }>('/api/recurring/materialize', {})
+  return enqueueBrowserOperation(async () => {
+    const result = await browserFetch<{
+      success: boolean
+      created?: number
+      message?: string
+      reason?: string
+    }>('/api/recurring/materialize', {})
 
-  if (!result.success) {
-    throw new Error(result.message || 'Recurring materialization failed.')
-  }
+    if (!result.success) {
+      throw new Error(result.message || 'Recurring materialization failed.')
+    }
 
-  return {
-    success: true,
-    created: result.created ?? 0,
-    message: result.message ?? 'No recurring transactions were due.',
-  }
+    return {
+      success: true,
+      created: result.created ?? 0,
+      message: result.message ?? 'No recurring transactions were due.',
+    }
+  })
 }
 
 // ── Import / Export ────────────────────────────────────────────────────────
@@ -1928,15 +1933,17 @@ export async function exportDatabaseSnapshot(): Promise<Uint8Array> {
   }
 
   // Browser mode: fetch raw binary from data server
-  const res = await fetch(`${DATA_SERVER_URL}/api/db/export`, {
-    headers: withDataServerHeaders(),
+  return enqueueBrowserOperation(async () => {
+    const res = await fetch(`${DATA_SERVER_URL}/api/db/export`, {
+      headers: withDataServerHeaders(),
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`Export failed (${res.status}): ${text}`)
+    }
+    const buffer = await res.arrayBuffer()
+    return new Uint8Array(buffer)
   })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`Export failed (${res.status}): ${text}`)
-  }
-  const buffer = await res.arrayBuffer()
-  return new Uint8Array(buffer)
 }
 
 export async function importDatabaseSnapshot(data: Uint8Array): Promise<void> {
@@ -1998,13 +2005,16 @@ export async function importDatabaseSnapshot(data: Uint8Array): Promise<void> {
   }
 
   // Browser mode: POST binary to data server
-  const res = await fetch(`${DATA_SERVER_URL}/api/db/import`, {
-    method: 'POST',
-    headers: withDataServerHeaders({ 'Content-Type': 'application/octet-stream' }),
-    body: data,
+  return enqueueBrowserOperation(async () => {
+    const res = await fetch(`${DATA_SERVER_URL}/api/db/import`, {
+      method: 'POST',
+      headers: withDataServerHeaders({ 'Content-Type': 'application/octet-stream' }),
+      body: data,
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`Import failed (${res.status}): ${text}`)
+    }
+    await res.arrayBuffer()
   })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`Import failed (${res.status}): ${text}`)
-  }
 }

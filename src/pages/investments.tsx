@@ -56,6 +56,8 @@ const InvestmentDialog = lazy(() =>
 const TIME_RANGES = ['1W', '1M', '3M', '6M', '1Y', 'All'] as const
 type TimeRange = (typeof TIME_RANGES)[number]
 const INVESTMENTS_PAGE_SIZE = 24
+const HOLDINGS_DESKTOP_GRID =
+  'grid min-w-[60rem] grid-cols-[minmax(10rem,2fr)_minmax(5rem,1fr)_minmax(4.5rem,0.75fr)_minmax(7rem,1fr)_minmax(7rem,1fr)_minmax(7rem,1fr)_minmax(7rem,1fr)_3.75rem] gap-4'
 
 const ASSET_TYPES: { key: string; labelKey: string }[] = [
   { key: 'all', labelKey: 'filters.all' },
@@ -642,15 +644,19 @@ export function Investments() {
           </div>
         </div>
 
-        <div className="hidden md:block">
-          <div className="text-muted-foreground border-border grid grid-cols-8 gap-4 border-y px-2 py-3 text-xs tracking-wide uppercase">
-            <span className="col-span-2">{t('holdings.header.name')}</span>
+        <div className="hidden overflow-x-auto md:block">
+          <div
+            data-testid="desktop-holdings-header"
+            className={`${HOLDINGS_DESKTOP_GRID} text-muted-foreground border-border border-y px-2 py-3 text-xs tracking-wide uppercase`}
+          >
+            <span>{t('holdings.header.name')}</span>
             <span>{t('holdings.header.type')}</span>
             <span className="text-right">{t('holdings.header.shares')}</span>
             <span className="text-right">{t('holdings.header.avgCost')}</span>
             <span className="text-right">{t('holdings.header.price')}</span>
             <span className="text-right">{t('holdings.header.value')}</span>
             <span className="text-right">{t('holdings.header.gainLoss')}</span>
+            <span aria-hidden="true" />
           </div>
           <div>
             {visibleInvestments.map((inv) => (
@@ -762,9 +768,12 @@ function HoldingRow({
   const gainPositive = (inv.gainLoss ?? 0) >= 0
 
   return (
-    <div className="group border-border hover:bg-muted/50 grid grid-cols-8 items-center gap-4 border-b px-2 py-3 last:border-b-0">
-      <div className="col-span-2 flex items-center gap-2">
-        <div>
+    <div
+      data-testid="desktop-holding-row"
+      className={`${HOLDINGS_DESKTOP_GRID} group border-border hover:bg-muted/50 items-center border-b px-2 py-3 last:border-b-0`}
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="min-w-0">
           <p className="text-sm font-semibold">{inv.symbol}</p>
           <p className="text-muted-foreground text-xs">{inv.name}</p>
         </div>
@@ -779,66 +788,69 @@ function HoldingRow({
           {t(`types.${inv.type}`)}
         </Badge>
       </div>
-      <p className="text-right text-sm tabular-nums">{inv.quantityDecimal ?? inv.shares}</p>
-      <p className="text-right text-sm tabular-nums">
+      <p className="text-right text-sm whitespace-nowrap tabular-nums">
+        {inv.quantityDecimal ?? inv.shares}
+      </p>
+      <p className="text-right text-sm whitespace-nowrap tabular-nums">
         {inv.costBasisKnown && inv.avgCostBasisDecimal !== null
           ? `${inv.currency} ${inv.avgCostBasisDecimal}`
           : '—'}
       </p>
-      <p className="text-right text-sm tabular-nums">
+      <p className="text-right text-sm whitespace-nowrap tabular-nums">
         {inv.currentPriceDecimal !== null
           ? `${inv.currentPriceCurrency ?? inv.currency} ${inv.currentPriceDecimal}`
           : '—'}
       </p>
-      <p className="text-right text-sm font-semibold tabular-nums">
+      <p className="text-right text-sm font-semibold whitespace-nowrap tabular-nums">
         {inv.marketValue !== null
           ? formatMoney(inv.marketValue, inv.currentPriceCurrency ?? inv.currency)
           : '—'}
       </p>
-      <div className="flex items-center justify-end gap-2">
-        <div className="text-right">
-          <p
-            className={`text-sm font-semibold tabular-nums ${gainPositive ? 'text-success' : 'text-destructive'}`}
-          >
-            {inv.gainLoss !== null ? (
-              <>
-                {gainPositive ? '+' : ''}
-                {formatMoney(inv.gainLoss, gainCurrency)}
-              </>
-            ) : (
-              '—'
-            )}
-          </p>
-          {inv.gainLossPercent !== null && (
-            <p
-              className={`flex items-center justify-end gap-0.5 text-xs tabular-nums ${gainPositive ? 'text-success' : 'text-destructive'}`}
-            >
-              {gainPositive ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+      <div className="text-right whitespace-nowrap">
+        <p
+          className={`text-sm font-semibold tabular-nums ${gainPositive ? 'text-success' : 'text-destructive'}`}
+        >
+          {inv.gainLoss !== null ? (
+            <>
               {gainPositive ? '+' : ''}
-              {inv.gainLossPercent.toFixed(2)}%
-            </p>
+              {formatMoney(inv.gainLoss, gainCurrency)}
+            </>
+          ) : (
+            '—'
           )}
-        </div>
-        <div className="flex gap-0.5 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={onEdit}
-            aria-label={`Edit ${inv.symbol}`}
+        </p>
+        {inv.gainLossPercent !== null && (
+          <p
+            className={`flex items-center justify-end gap-0.5 text-xs tabular-nums ${gainPositive ? 'text-success' : 'text-destructive'}`}
           >
-            <Pencil size={12} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-destructive hover:text-destructive h-7 w-7"
-            onClick={onDelete}
-            aria-label={`Delete ${inv.symbol}`}
-          >
-            <Trash2 size={12} />
-          </Button>
-        </div>
+            {gainPositive ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+            {gainPositive ? '+' : ''}
+            {inv.gainLossPercent.toFixed(2)}%
+          </p>
+        )}
+      </div>
+      <div
+        data-testid="desktop-holding-actions"
+        className="flex justify-end gap-0.5 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100"
+      >
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={onEdit}
+          aria-label={`Edit ${inv.symbol}`}
+        >
+          <Pencil size={12} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="text-destructive hover:text-destructive h-7 w-7"
+          onClick={onDelete}
+          aria-label={`Delete ${inv.symbol}`}
+        >
+          <Trash2 size={12} />
+        </Button>
       </div>
     </div>
   )

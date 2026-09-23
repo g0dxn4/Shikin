@@ -146,6 +146,67 @@ describe('Investments', () => {
     expect(screen.getByText('empty.title')).toBeInTheDocument()
   })
 
+  it('keeps desktop financial columns aligned with a separate accessible action track', () => {
+    mockInvestments = [
+      {
+        id: 'inv-layout',
+        account_id: null,
+        symbol: 'LAYOUT',
+        name: 'Desktop layout regression holding',
+        type: 'stock',
+        shares: 10,
+        quantityDecimal: '10',
+        avg_cost_basis: 774800,
+        avgCostBasisDecimal: '774.80',
+        costBasisKnown: true,
+        currency: 'USD',
+        notes: null,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        currentPriceDecimal: '881.238',
+        currentPriceCurrency: 'USD',
+        marketValue: 881238,
+        convertedMarketValue: 881238,
+        gainLoss: 106438,
+        gainLossPercent: 13.74,
+        lastPriceDate: '2024-01-10',
+      },
+    ]
+    mockPortfolioSummary = {
+      ...mockPortfolioSummary,
+      preferredCurrency: 'USD',
+      totalMarketValue: 881238,
+      totalCostBasis: 774800,
+      totalGainLoss: 106438,
+      totalGainLossPercent: 13.74,
+    }
+
+    render(<Investments />)
+
+    const header = screen.getByTestId('desktop-holdings-header')
+    const row = screen.getByTestId('desktop-holding-row')
+    const actions = screen.getByTestId('desktop-holding-actions')
+    const gridTemplateClass = [...header.classList].find((name) => name.startsWith('grid-cols-'))
+
+    expect(gridTemplateClass).toBeDefined()
+    expect(row).toHaveClass(gridTemplateClass!)
+    expect(header.children).toHaveLength(8)
+    expect(header.lastElementChild).toHaveAttribute('aria-hidden', 'true')
+    expect(row.children).toHaveLength(8)
+    expect(row.lastElementChild).toBe(actions)
+    expect(row).toHaveTextContent('$8,812.38')
+    expect(row).toHaveTextContent('+$1,064.38')
+
+    const edit = actions.querySelector('button[aria-label="Edit LAYOUT"]')
+    const remove = actions.querySelector('button[aria-label="Delete LAYOUT"]')
+    expect(edit).toBeInTheDocument()
+    expect(remove).toBeInTheDocument()
+    expect(edit).toHaveAccessibleName('Edit LAYOUT')
+    expect(remove).toHaveAccessibleName('Delete LAYOUT')
+    expect((edit as HTMLButtonElement).tabIndex).toBe(0)
+    expect((remove as HTMLButtonElement).tabIndex).toBe(0)
+  })
+
   it('does not render the old page guidance card', () => {
     render(<Investments />)
 

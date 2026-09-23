@@ -773,7 +773,7 @@ function HoldingRow({
       className={`${HOLDINGS_DESKTOP_GRID} group border-border hover:bg-muted/50 items-center border-b px-2 py-3 last:border-b-0`}
     >
       <div className="flex min-w-0 items-center gap-2">
-        <div className="min-w-0">
+        <div className="min-w-0 wrap-anywhere whitespace-normal">
           <p className="text-sm font-semibold">{inv.symbol}</p>
           <p className="text-muted-foreground text-xs">{inv.name}</p>
         </div>
@@ -788,25 +788,25 @@ function HoldingRow({
           {t(`types.${inv.type}`)}
         </Badge>
       </div>
-      <p className="text-right text-sm whitespace-nowrap tabular-nums">
+      <p className="min-w-0 text-right text-sm wrap-anywhere whitespace-normal tabular-nums">
         {inv.quantityDecimal ?? inv.shares}
       </p>
-      <p className="text-right text-sm whitespace-nowrap tabular-nums">
+      <p className="min-w-0 text-right text-sm wrap-anywhere whitespace-normal tabular-nums">
         {inv.costBasisKnown && inv.avgCostBasisDecimal !== null
           ? `${inv.currency} ${inv.avgCostBasisDecimal}`
           : '—'}
       </p>
-      <p className="text-right text-sm whitespace-nowrap tabular-nums">
+      <p className="min-w-0 text-right text-sm wrap-anywhere whitespace-normal tabular-nums">
         {inv.currentPriceDecimal !== null
           ? `${inv.currentPriceCurrency ?? inv.currency} ${inv.currentPriceDecimal}`
           : '—'}
       </p>
-      <p className="text-right text-sm font-semibold whitespace-nowrap tabular-nums">
+      <p className="min-w-0 text-right text-sm font-semibold wrap-anywhere whitespace-normal tabular-nums">
         {inv.marketValue !== null
           ? formatMoney(inv.marketValue, inv.currentPriceCurrency ?? inv.currency)
           : '—'}
       </p>
-      <div className="text-right whitespace-nowrap">
+      <div className="min-w-0 text-right wrap-anywhere whitespace-normal">
         <p
           className={`text-sm font-semibold tabular-nums ${gainPositive ? 'text-success' : 'text-destructive'}`}
         >

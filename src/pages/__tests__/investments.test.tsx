@@ -207,6 +207,63 @@ describe('Investments', () => {
     expect((remove as HTMLButtonElement).tabIndex).toBe(0)
   })
 
+  it('wraps long desktop financial figures without truncating their text', () => {
+    mockInvestments = [
+      {
+        id: 'inv-long-figures',
+        account_id: null,
+        symbol: 'UNBROKEN-LONG-SYMBOL-1234567890',
+        name: 'UnbrokenLongHoldingName12345678901234567890',
+        type: 'stock',
+        shares: 1,
+        quantityDecimal: '1234567890.123456789',
+        avg_cost_basis: 1,
+        avgCostBasisDecimal: '123456789012.34567890',
+        costBasisKnown: true,
+        currency: 'USD',
+        notes: null,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        currentPriceDecimal: '987654321098.76543210',
+        currentPriceCurrency: 'USD',
+        marketValue: 123456789012345,
+        convertedMarketValue: 123456789012345,
+        gainLoss: 98765432109876,
+        gainLossPercent: 123456.78,
+        lastPriceDate: '2024-01-10',
+      },
+    ]
+    mockPortfolioSummary = {
+      ...mockPortfolioSummary,
+      preferredCurrency: 'USD',
+      totalMarketValue: 123456789012345,
+      totalGainLoss: 98765432109876,
+      totalGainLossPercent: 123456.78,
+    }
+
+    render(<Investments />)
+
+    const row = screen.getByTestId('desktop-holding-row')
+    const financialCells = Array.from(row.children).slice(2, 7)
+
+    expect(row).toHaveTextContent('UNBROKEN-LONG-SYMBOL-1234567890')
+    expect(row).toHaveTextContent('UnbrokenLongHoldingName12345678901234567890')
+    expect(row).toHaveTextContent('1234567890.123456789')
+    expect(row).toHaveTextContent('USD 123456789012.34567890')
+    expect(row).toHaveTextContent('USD 987654321098.76543210')
+    expect(row).toHaveTextContent('$1,234,567,890,123.45')
+    expect(row).toHaveTextContent('+$987,654,321,098.76')
+    expect(row.firstElementChild?.firstElementChild).toHaveClass(
+      'min-w-0',
+      'wrap-anywhere',
+      'whitespace-normal'
+    )
+    for (const cell of financialCells) {
+      expect(cell).toHaveClass('min-w-0', 'wrap-anywhere', 'whitespace-normal')
+      expect(cell).not.toHaveClass('whitespace-nowrap')
+    }
+  })
+
   it('does not render the old page guidance card', () => {
     render(<Investments />)
 

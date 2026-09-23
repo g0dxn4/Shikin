@@ -13,6 +13,7 @@ test.describe('Settings', () => {
   })
 
   test('language dropdown is present', async ({ page }) => {
+    await page.getByRole('tab', { name: 'General' }).click()
     const languageSelect = page.locator('select').first()
     await expect(languageSelect).toBeVisible()
 
@@ -22,12 +23,14 @@ test.describe('Settings', () => {
   })
 
   test('currency section is present', async ({ page }) => {
+    await page.getByRole('tab', { name: 'Money' }).click()
     await expect(page.getByRole('heading', { name: 'Currency' })).toBeVisible()
-    await expect(page.getByLabel('Preferred Currency')).toBeVisible()
+    await expect(page.getByLabel('Main currency')).toBeVisible()
     await expect(page.getByRole('button', { name: /Refresh Rates/i })).toBeVisible()
   })
 
   test('market data API section shows provider inputs', async ({ page }) => {
+    await page.getByRole('tab', { name: 'Integrations & diagnostics' }).click()
     await expect(page.getByRole('heading', { name: 'Market Data APIs' })).toBeVisible()
     await expect(page.getByText('Alpha Vantage', { exact: true })).toBeVisible()
     await expect(page.getByText('Finnhub', { exact: true })).toBeVisible()
@@ -36,11 +39,13 @@ test.describe('Settings', () => {
   })
 
   test('theme section is present', async ({ page }) => {
+    await page.getByRole('tab', { name: 'General' }).click()
     await expect(page.getByRole('heading', { name: 'Theme & Appearance' })).toBeVisible()
     await expect(page.getByText('Customize the visual appearance of Shikin')).toBeVisible()
   })
 
   test('data backup controls are present', async ({ page }) => {
+    await page.getByRole('tab', { name: 'App & data' }).click()
     await expect(page.getByRole('button', { name: /Export Data/i })).toBeVisible()
     await expect(page.getByRole('button', { name: /Import Data/i })).toBeVisible()
   })

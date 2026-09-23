@@ -101,8 +101,13 @@ export function CashflowBucketsPanel() {
   const deepLink = hasVirtualBucketsDeepLink()
 
   useEffect(() => {
-    if (loading || userTouchedRef.current) return
-    if (error || view.buckets.length > 0 || deepLink) {
+    if (loading) return
+    if (error) {
+      setExpanded(true)
+      return
+    }
+    if (userTouchedRef.current) return
+    if (view.buckets.length > 0 || deepLink) {
       setExpanded(true)
     }
   }, [deepLink, error, loading, view.buckets.length])

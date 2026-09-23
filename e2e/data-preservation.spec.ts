@@ -255,6 +255,9 @@ test.describe('read-only app data preservation', () => {
     ).toBeVisible()
     await page.getByLabel('Transaction views').selectOption({ label: 'Timeline' })
     await page.getByLabel('Transaction views').selectOption({ label: 'Ledger' })
+    if ((page.viewportSize()?.width ?? 0) < 768) {
+      await page.getByRole('button', { name: 'Advanced filters' }).click()
+    }
     await page.getByLabel('Account').selectOption(IDS.savings)
     await expect(
       page.getByRole('button', { name: new RegExp(`^${PREFIX} Transfer Ledger(?: |$)`) })
@@ -290,18 +293,20 @@ test.describe('read-only app data preservation', () => {
       await expect(page.locator('[data-startup-state="ready"]')).toBeVisible()
     }
 
+    await page.goto('/settings')
+    await expect(page.locator('[data-startup-state="ready"]')).toBeVisible()
+    await page.getByRole('tab', { name: 'General' }).click()
+    const darkAppearance = page.getByRole('radio', { name: /^Dark / })
+    const wasDark = (await darkAppearance.getAttribute('aria-checked')) === 'true'
+    await page.getByRole('radio', { name: wasDark ? /^Light / : /^Dark / }).click()
+    await expect(page.locator('html')).toHaveAttribute(
+      'data-appearance',
+      wasDark ? 'native-light' : 'native-dark'
+    )
+
     if ((page.viewportSize()?.width ?? 0) >= 768) {
-      await page.getByRole('button', { name: /Switch to (dark|light)/i }).click()
-      await page.getByRole('button', { name: /Collapse sidebar|Expand sidebar/i }).click()
-    } else {
-      await page.goto('/settings')
-      const darkAppearance = page.getByRole('radio', { name: /^Dark / })
-      const wasDark = (await darkAppearance.getAttribute('aria-checked')) === 'true'
-      await page.getByRole('radio', { name: wasDark ? /^Light / : /^Dark / }).click()
-      await expect(page.locator('html')).toHaveAttribute(
-        'data-appearance',
-        wasDark ? 'native-light' : 'native-dark'
-      )
+      await page.getByRole('button', { name: 'Collapse sidebar' }).click()
+      await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible()
     }
     await page.reload()
     await expect(page.locator('[data-startup-state="ready"]')).toBeVisible()

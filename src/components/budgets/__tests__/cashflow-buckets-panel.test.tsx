@@ -16,8 +16,13 @@ vi.mock('@/lib/cashflow-bucket-service', () => ({
   updateCashflowBucket: mocks.update,
 }))
 vi.mock('@/components/budgets/cashflow-bucket-dialogs', () => ({
-  CashflowBucketEditorDialog: ({ open }: { open: boolean }) =>
-    open ? <div role="dialog">bucket-editor</div> : null,
+  CashflowBucketEditorDialog: ({ open, onSaved }: { open: boolean; onSaved: () => void }) =>
+    open ? (
+      <div role="dialog">
+        bucket-editor
+        <button onClick={onSaved}>save-bucket</button>
+      </div>
+    ) : null,
   CashflowAllocationDialog: ({ open }: { open: boolean }) =>
     open ? <div role="dialog">bucket-allocation</div> : null,
   CashflowCorrectionDialog: ({ open }: { open: boolean }) =>
@@ -202,6 +207,27 @@ describe('CashflowBucketsPanel', () => {
     )
     expect(mocks.list).toHaveBeenCalledTimes(calls)
     expect(screen.getByRole('button', { name: 'buckets.actions.create' })).toBeEnabled()
+  })
+
+  it('reopens a user-collapsed panel when a save refresh fails', async () => {
+    const user = userEvent.setup()
+    render(<CashflowBucketsPanel />)
+    await screen.findByText('Rent')
+    const toggle = screen.getByRole('button', { name: 'buckets.title' })
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'true'))
+
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+    mocks.list.mockRejectedValueOnce(new Error('refresh offline'))
+    await user.click(screen.getByRole('button', { name: 'buckets.actions.create' }))
+    await user.click(screen.getByRole('button', { name: 'save-bucket' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toBeVisible()
+    expect(alert).toHaveTextContent('refresh offline')
+    expect(screen.getByRole('button', { name: 'buckets.actions.retry' })).toBeVisible()
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
   })
 
   it('shows delete only for empty unreferenced buckets and confirms one reversal', async () => {

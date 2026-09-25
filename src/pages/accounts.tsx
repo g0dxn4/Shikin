@@ -549,7 +549,7 @@ export function Accounts() {
                     </p>
                   </div>
                   {liquidAccounts.length > 0 ? (
-                    <div className="flex flex-col gap-3 p-4 sm:px-5 sm:pb-5">
+                    <div className="grid grid-cols-1 items-start gap-3 p-4 sm:px-5 sm:pb-5 xl:grid-cols-2">
                       {liquidAccounts.map((account) => (
                         <AccountCard
                           key={account.id}
@@ -671,7 +671,7 @@ export function Accounts() {
               {showInvestments ? (
                 <div className="space-y-3">
                   {investmentLikeAccounts.length > 0 ? (
-                    <div className="flex flex-col gap-3">
+                    <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-2">
                       {investmentLikeAccounts.map((account) => (
                         <AccountCard
                           key={account.id}
@@ -692,7 +692,7 @@ export function Accounts() {
                   {archivedInvestmentLikeAccounts.length > 0 ? (
                     <div className="space-y-2">
                       <h3 className="text-sm font-semibold">{t('list.investmentsArchived')}</h3>
-                      <div className="flex flex-col gap-3">
+                      <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-2">
                         {archivedInvestmentLikeAccounts.map((account) => (
                           <AccountCard
                             key={account.id}
@@ -739,7 +739,7 @@ export function Accounts() {
                 </Button>
               </div>
               {showArchived && (
-                <div className="flex flex-col gap-3">
+                <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-2">
                   {archivedLiquidAccounts.map((account) => (
                     <AccountCard
                       key={account.id}

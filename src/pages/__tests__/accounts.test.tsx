@@ -247,6 +247,10 @@ describe('Accounts', () => {
 
     expect(screen.getAllByText('Checking').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Savings').length).toBeGreaterThan(0)
+    const checking = screen.getByRole('article', { name: 'Checking' })
+    const savings = screen.getByRole('article', { name: 'Savings' })
+    expect(checking.parentElement).toBe(savings.parentElement)
+    expect(checking.parentElement).toHaveClass('grid-cols-1', 'items-start', 'xl:grid-cols-2')
     expect(screen.getAllByText('$2,500.00').length).toBeGreaterThan(0)
     expect(screen.getByText('USD')).toBeInTheDocument()
     expect(screen.getByText('EUR')).toBeInTheDocument()
@@ -297,17 +301,22 @@ describe('Accounts', () => {
     expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
   })
 
-  it('stacks the full-width account list above the asset mix', () => {
+  it('stacks the account collection above the asset mix while gridding cards at xl', () => {
     mockAccounts = [
       { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 250000 },
       { id: 'acc-2', name: 'Travel Card', type: 'credit_card', currency: 'USD', balance: -10000 },
     ]
 
-    const { container } = renderAccounts()
+    renderAccounts()
     const listHeading = screen.getByRole('heading', { name: 'list.title' })
     const mixHeading = screen.getByRole('heading', { name: 'mix.title' })
 
-    expect(container.querySelector('[class*="xl:grid-cols-"]')).not.toBeInTheDocument()
+    expect(listHeading.closest('.native-panel')?.parentElement).toHaveClass('flex-col')
+    expect(screen.getByRole('article', { name: 'Checking' }).parentElement).toHaveClass(
+      'grid-cols-1',
+      'items-start',
+      'xl:grid-cols-2'
+    )
     expect(
       listHeading.compareDocumentPosition(mixHeading) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
@@ -671,6 +680,11 @@ describe('Accounts', () => {
     await user.click(screen.getByRole('button', { name: /archived.show/i }))
 
     expect(screen.getByText('Old Account')).toBeInTheDocument()
+    expect(screen.getByRole('article', { name: 'Old Account' }).parentElement).toHaveClass(
+      'grid-cols-1',
+      'items-start',
+      'xl:grid-cols-2'
+    )
   })
 
   it('shows archived accounts when there are no active accounts', () => {
@@ -921,6 +935,7 @@ describe('Accounts', () => {
     await user.click(screen.getByRole('button', { name: /list.investmentsShow/i }))
     const brokerage = screen.getByRole('article', { name: 'Brokerage' })
     expect(brokerage).toBeInTheDocument()
+    expect(brokerage.parentElement).toHaveClass('grid-cols-1', 'items-start', 'xl:grid-cols-2')
     expect(screen.getByText('$99,900.00')).toBeInTheDocument()
     expect(within(brokerage).getByRole('button', { name: 'action' })).toBeInTheDocument()
   })
@@ -958,7 +973,8 @@ describe('Accounts', () => {
 
     expect(screen.getByText('noActive.title')).toBeInTheDocument()
     expect(screen.queryByText('archived.title')).not.toBeInTheDocument()
-    expect(await screen.findByRole('article', { name: 'Old Brokerage' })).toBeInTheDocument()
+    const oldBrokerage = await screen.findByRole('article', { name: 'Old Brokerage' })
+    expect(oldBrokerage.parentElement).toHaveClass('grid-cols-1', 'items-start', 'xl:grid-cols-2')
   })
 
   it('focuses an active cash account from the account query after load', async () => {

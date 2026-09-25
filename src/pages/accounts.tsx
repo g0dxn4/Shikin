@@ -1031,14 +1031,14 @@ function AccountCard({
         <div className="bg-muted/40 border-border mt-4 grid grid-cols-3 gap-2 rounded-lg border p-3">
           <div>
             <p className="text-muted-foreground text-xs">{t('credit.limit')}</p>
-            <p className="mt-1 text-xs font-semibold tabular-nums">
+            <p className="mt-1 min-w-0 text-xs font-semibold break-all tabular-nums">
               {formatMoney(creditLimit, account.currency)}
             </p>
           </div>
           <div>
             <p className="text-muted-foreground text-xs">{t('credit.available')}</p>
             <p
-              className={`mt-1 text-xs font-semibold tabular-nums ${availableCredit !== null && availableCredit < 0 ? 'text-destructive' : 'text-success'}`}
+              className={`mt-1 min-w-0 text-xs font-semibold break-all tabular-nums ${availableCredit !== null && availableCredit < 0 ? 'text-destructive' : 'text-success'}`}
             >
               {formatMoney(availableCredit ?? 0, account.currency)}
             </p>

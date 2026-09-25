@@ -160,6 +160,50 @@ describe('OverviewNetWorth shared panel geometry and evidence', () => {
     expect(panels[2]).toHaveAttribute('inert')
   })
 
+  it('keeps the four summary metrics, source details and cash-flow comparison together', () => {
+    const { rerender } = renderOverview()
+    const summary = document.getElementById('overview-summary-panel')!
+    const metricGrid = summary.querySelector('[aria-label="overview.views.summary"]')!
+    expect(metricGrid).toHaveClass('grid-cols-2')
+    expect(metricGrid.children).toHaveLength(4)
+    expect(summary).not.toHaveClass('justify-center')
+    expect(summary).toHaveTextContent('Current value · April 18, 2026')
+
+    rerender(
+      <OverviewNetWorth
+        currentComplete={false}
+        currentAmount={null}
+        currentCurrency={null}
+        unavailableMessage="Missing rate evidence"
+        income="$10.00"
+        incomeDetail="vs last month"
+        spent="$4.00"
+        spentDetail="vs last month"
+        saved="$6.00"
+        savingsRate="60%"
+        savedTone="positive"
+        cashFlowLabel="April 2026 cash flow"
+        currentAsOfLabel=""
+        historyAsOfLabel=""
+        history={[]}
+        historyComplete={false}
+        period="6m"
+        onPeriodChange={() => {}}
+        historyCurrency={null}
+        emptyHistoryMessage="No history"
+        accounts={accounts}
+        preferredCurrency="USD"
+        incomeAmount={10}
+        spentAmount={4}
+        cashFlowCurrency="USD"
+      />
+    )
+    expect(summary).toHaveTextContent('Missing rate evidence')
+    expect(summary).toHaveTextContent('vs last month')
+    expect(summary).toHaveTextContent('60%')
+    expect(screen.getByRole('img', { name: /overview.cashFlowComparison/ })).toBeInTheDocument()
+  })
+
   it('shows the income/spending visual only with explicit complete nonzero raw evidence', () => {
     const { rerender } = renderOverview()
     expect(

@@ -2,7 +2,7 @@ import { useRef, useState, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts'
 import dayjs from 'dayjs'
-import { MetricItem, MetricStrip, NativePanel } from '@/components/ui/native-layout'
+import { NativePanel } from '@/components/ui/native-layout'
 import { SafeChart } from '@/components/ui/safe-chart'
 import {
   CHART_AXIS_COLOR,
@@ -165,89 +165,105 @@ export function OverviewNetWorth({
           role="tabpanel"
           aria-labelledby="overview-summary-tab"
           className={cn(
-            'col-start-1 row-start-1 flex min-w-0 flex-col justify-center p-4 sm:p-6',
+            'col-start-1 row-start-1 min-w-0 p-4 sm:p-6',
             view !== 'summary' && 'pointer-events-none invisible'
           )}
           aria-hidden={view !== 'summary'}
           inert={view !== 'summary'}
         >
-          <p className="text-muted-foreground mb-3 text-xs">{cashFlowLabel}</p>
-          <MetricStrip className="[&_strong]:break-words" aria-label={t('overview.views.summary')}>
-            <MetricItem
-              label={t('overview.netWorth')}
-              value={
-                hasCurrentValue ? (
+          <p className="text-muted-foreground mb-3 text-xs sm:mb-4">{cashFlowLabel}</p>
+          <div
+            className="grid min-w-0 grid-cols-2 gap-2.5 sm:gap-4"
+            aria-label={t('overview.views.summary')}
+          >
+            <div className="border-border min-w-0 rounded-xl border p-3 sm:p-5 lg:p-6">
+              <span className="text-muted-foreground text-xs">{t('overview.netWorth')}</span>
+              <strong className="mt-2 block text-2xl font-semibold tracking-tight break-all tabular-nums sm:text-3xl">
+                {hasCurrentValue ? (
                   formatMoney(currentAmount, currentCurrency)
                 ) : (
                   <span className="text-warning">—</span>
-                )
-              }
-              detail={
-                hasCurrentValue ? (
-                  currentAsOfLabel
-                ) : (
-                  <span role="alert" className="text-warning block font-normal">
-                    {t('currency.totalUnavailable')}
-                    {unavailableMessage ? ` · ${unavailableMessage}` : ''}
-                  </span>
-                )
-              }
-            />
-            <MetricItem label={t('cards.income')} value={income} detail={incomeDetail} />
-            <MetricItem label={t('cards.spent')} value={spent} detail={spentDetail} />
-            <MetricItem
-              label={t('cards.saved')}
-              value={
-                <span
-                  className={cn(
-                    savedTone === 'positive' && 'text-accent',
-                    savedTone === 'negative' && 'text-destructive'
-                  )}
-                >
-                  {saved}
-                </span>
-              }
-              detail={
-                savingsRate ? (
-                  <span>
-                    <span>{savingsRate}</span> {t('cards.savings')}
-                  </span>
-                ) : undefined
-              }
-            />
-          </MetricStrip>
+                )}
+              </strong>
+              {hasCurrentValue ? (
+                <p className="text-muted-foreground mt-2 text-xs break-words">{currentAsOfLabel}</p>
+              ) : (
+                <p role="alert" className="text-warning mt-2 text-xs break-words">
+                  {t('currency.totalUnavailable')}
+                  {unavailableMessage ? ` · ${unavailableMessage}` : ''}
+                </p>
+              )}
+            </div>
+            <div className="border-border min-w-0 rounded-xl border p-3 sm:p-5 lg:p-6">
+              <span className="text-muted-foreground text-xs">{t('cards.income')}</span>
+              <strong className="mt-2 block text-xl font-semibold break-all tabular-nums sm:text-2xl">
+                {income}
+              </strong>
+              {incomeDetail ? (
+                <p className="text-muted-foreground mt-2 text-xs break-words">{incomeDetail}</p>
+              ) : null}
+            </div>
+            <div className="border-border min-w-0 rounded-xl border p-3 sm:p-5 lg:p-6">
+              <span className="text-muted-foreground text-xs">{t('cards.spent')}</span>
+              <strong className="mt-2 block text-xl font-semibold break-all tabular-nums sm:text-2xl">
+                {spent}
+              </strong>
+              {spentDetail ? (
+                <p className="text-muted-foreground mt-2 text-xs break-words">{spentDetail}</p>
+              ) : null}
+            </div>
+            <div className="border-border min-w-0 rounded-xl border p-3 sm:p-5 lg:p-6">
+              <span className="text-muted-foreground text-xs">{t('cards.saved')}</span>
+              <strong
+                className={cn(
+                  'mt-2 block text-xl font-semibold break-all tabular-nums sm:text-2xl',
+                  savedTone === 'positive' && 'text-accent',
+                  savedTone === 'negative' && 'text-destructive'
+                )}
+              >
+                {saved}
+              </strong>
+              {savingsRate ? (
+                <p className="text-muted-foreground mt-2 text-xs break-words">
+                  <span>{savingsRate}</span> {t('cards.savings')}
+                </p>
+              ) : null}
+            </div>
+          </div>
           {hasCashFlowVisual ? (
-            <div
-              className="border-border mt-6 border-t pt-5"
-              role="img"
-              aria-label={t('overview.cashFlowComparison', {
-                income: formatMoney(incomeAmount, cashFlowCurrency),
-                spent: formatMoney(spentAmount, cashFlowCurrency),
-              })}
-            >
+            <div className="border-border mt-5 border-t pt-4 sm:mt-6 sm:pt-5">
               <p className="mb-3 text-sm font-semibold">{t('overview.cashFlow')}</p>
-              {(
-                [
-                  { label: t('cards.income'), amount: incomeAmount, color: 'bg-chart-1' },
-                  { label: t('cards.spent'), amount: spentAmount, color: 'bg-chart-2' },
-                ] as const
-              ).map(({ label, amount, color }) => (
-                <div
-                  key={label}
-                  className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-xs"
-                >
-                  <span>{label}</span>
-                  <span className="min-w-0 text-right break-all tabular-nums">
-                    {formatMoney(amount, cashFlowCurrency)}
-                  </span>
-                  <div className="bg-muted col-span-2 h-2 overflow-hidden rounded-full">
-                    <div
-                      className={cn('h-full rounded-full', color)}
-                      style={{ width: `${(amount / Math.max(incomeAmount, spentAmount)) * 100}%` }}
-                    />
+              <div
+                role="img"
+                aria-label={t('overview.cashFlowComparison', {
+                  income: formatMoney(incomeAmount, cashFlowCurrency),
+                  spent: formatMoney(spentAmount, cashFlowCurrency),
+                })}
+              >
+                {(
+                  [
+                    { label: t('cards.income'), amount: incomeAmount, color: 'bg-chart-1' },
+                    { label: t('cards.spent'), amount: spentAmount, color: 'bg-chart-2' },
+                  ] as const
+                ).map(({ label, amount, color }) => (
+                  <div key={label} className="mt-3 min-w-0">
+                    <div className="mb-1.5 flex min-w-0 flex-wrap justify-between gap-x-3 text-xs">
+                      <span>{label}</span>
+                      <span className="min-w-0 break-all tabular-nums">
+                        {formatMoney(amount, cashFlowCurrency)}
+                      </span>
+                    </div>
+                    <div className="bg-muted h-3 overflow-hidden rounded-full sm:h-6">
+                      <div
+                        className={cn('h-full rounded-full', color)}
+                        style={{
+                          width: `${(amount / Math.max(incomeAmount, spentAmount)) * 100}%`,
+                        }}
+                      />
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           ) : null}
         </div>

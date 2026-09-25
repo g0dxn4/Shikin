@@ -1245,7 +1245,7 @@ describe('Dashboard', () => {
 
       const pendingWarning = screen.getByRole('alert')
       expect(pendingWarning).toHaveTextContent('currency.totalUnavailable')
-      expect(pendingWarning.closest('.metric-item')).toHaveTextContent('overview.netWorth')
+      expect(pendingWarning.parentElement).toHaveTextContent('overview.netWorth')
       await waitFor(() => expect(mockCalculateCurrent).toHaveBeenCalledTimes(1))
 
       // The complete calculation includes a valid $10,000 holding with no accountId.
@@ -1275,8 +1275,9 @@ describe('Dashboard', () => {
 
       render(<Dashboard />)
 
-      const warning = await screen.findByRole('alert')
-      expect(warning).toHaveTextContent('Net worth query failed')
+      await waitFor(() =>
+        expect(screen.getByRole('alert')).toHaveTextContent('Net worth query failed')
+      )
       expect(screen.queryByText('$5,000.00')).not.toBeInTheDocument()
     })
   })

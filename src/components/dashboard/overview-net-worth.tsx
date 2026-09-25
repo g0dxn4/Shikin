@@ -178,7 +178,7 @@ export function OverviewNetWorth({
           >
             <div className="border-border min-w-0 rounded-xl border p-3 sm:p-5 lg:p-6">
               <span className="text-muted-foreground text-xs">{t('overview.netWorth')}</span>
-              <strong className="mt-2 block text-2xl font-semibold tracking-tight break-all tabular-nums sm:text-3xl">
+              <strong className="mt-2 block text-lg font-semibold tracking-tight break-all tabular-nums min-[380px]:text-2xl sm:text-3xl">
                 {hasCurrentValue ? (
                   formatMoney(currentAmount, currentCurrency)
                 ) : (
@@ -196,7 +196,7 @@ export function OverviewNetWorth({
             </div>
             <div className="border-border min-w-0 rounded-xl border p-3 sm:p-5 lg:p-6">
               <span className="text-muted-foreground text-xs">{t('cards.income')}</span>
-              <strong className="mt-2 block text-xl font-semibold break-all tabular-nums sm:text-2xl">
+              <strong className="mt-2 block text-lg font-semibold break-all tabular-nums min-[380px]:text-xl sm:text-2xl">
                 {income}
               </strong>
               {incomeDetail ? (
@@ -205,7 +205,7 @@ export function OverviewNetWorth({
             </div>
             <div className="border-border min-w-0 rounded-xl border p-3 sm:p-5 lg:p-6">
               <span className="text-muted-foreground text-xs">{t('cards.spent')}</span>
-              <strong className="mt-2 block text-xl font-semibold break-all tabular-nums sm:text-2xl">
+              <strong className="mt-2 block text-lg font-semibold break-all tabular-nums min-[380px]:text-xl sm:text-2xl">
                 {spent}
               </strong>
               {spentDetail ? (
@@ -216,7 +216,7 @@ export function OverviewNetWorth({
               <span className="text-muted-foreground text-xs">{t('cards.saved')}</span>
               <strong
                 className={cn(
-                  'mt-2 block text-xl font-semibold break-all tabular-nums sm:text-2xl',
+                  'mt-2 block text-lg font-semibold break-all tabular-nums min-[380px]:text-xl sm:text-2xl',
                   savedTone === 'positive' && 'text-accent',
                   savedTone === 'negative' && 'text-destructive'
                 )}

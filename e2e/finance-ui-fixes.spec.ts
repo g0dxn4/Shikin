@@ -144,6 +144,7 @@ test.describe('finance nested dialog wrapping', () => {
       }
 
       await staged.first().click()
+      await page.getByText('Details and evidence', { exact: true }).click()
       const classify = page.getByRole('button', { name: /Classify consumption/ })
       await expect(classify).toBeVisible()
       await classify.click()
@@ -159,7 +160,7 @@ test.describe('finance nested dialog wrapping', () => {
       await page.keyboard.press('Escape')
       if (viewport.width === 320) await page.setViewportSize({ width: 390, height: 844 })
 
-      await staged.first().click()
+      // Closing the nested dialog returns to the same transaction modal.
       const bind = page.getByRole('button', { name: 'Bind verified ID' })
       if ((await bind.count()) === 0) {
         return

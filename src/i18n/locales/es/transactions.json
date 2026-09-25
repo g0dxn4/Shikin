@@ -321,6 +321,7 @@
   "dialog": {
     "addDescription": "Registra un ingreso, gasto, transferencia o división.",
     "editDescription": "Cargar el registro actual evita editar datos obsoletos.",
+    "readOnlyDescription": "Registro del libro mayor de solo lectura. Los cambios financieros requieren su flujo de trabajo específico.",
     "loading": "Cargando transacción",
     "archived": "Las transacciones archivadas requieren su flujo de trabajo específico.",
     "saveOrDiscard": "Guarda o descarta los cambios antes de usar otras acciones.",
@@ -334,6 +335,7 @@
   },
   "detail": {
     "details": "Detalles y evidencia",
+    "readOnlyTitle": "Detalles de la transacción",
     "notes": "Notas",
     "reference": "Referencia"
   },

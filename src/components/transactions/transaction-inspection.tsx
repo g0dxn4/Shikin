@@ -12,9 +12,9 @@ import {
 
 function DetailItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className="grid grid-cols-[110px_1fr] gap-4 py-2">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="text-right break-words">{value}</dd>
+    <div className="grid grid-cols-[110px_minmax(0,1fr)] gap-4 py-2">
+      <dt className="text-muted-foreground break-words">{label}</dt>
+      <dd className="min-w-0 text-right [overflow-wrap:anywhere]">{value}</dd>
     </div>
   )
 }
@@ -42,11 +42,11 @@ export function TransactionInspection({
   const { t: tConsumption } = useTranslation('consumption')
   const protection = transactionProtection(transaction)
   const status = transaction.status?.trim()
-  return (
-    <details className="border-border mt-2 rounded-lg border p-3 text-sm">
-      <summary data-transaction-details-summary className="cursor-pointer font-medium">
-        {t('detail.details')}
-      </summary>
+  const content = (
+    <>
+      {protection && (
+        <p className="mt-3 font-medium break-words">{transaction.description || '—'}</p>
+      )}
       <p className="mt-3 font-semibold tabular-nums">
         {formatMoney(transaction.amount, transaction.currency)}
       </p>
@@ -99,7 +99,7 @@ export function TransactionInspection({
             {tConsumption('actions.classify')}
           </Button>
         )}
-        {isEligibleLegacyImportIdentityRow(transaction) && !protection && (
+        {isEligibleLegacyImportIdentityRow(transaction) && (
           <div
             className={actionsDisabled ? 'pointer-events-none opacity-50' : ''}
             aria-disabled={actionsDisabled}
@@ -125,6 +125,23 @@ export function TransactionInspection({
           </Button>
         )}
       </div>
+    </>
+  )
+  return protection ? (
+    <section
+      data-transaction-details-readonly
+      tabIndex={-1}
+      aria-label={t('detail.details')}
+      className="border-border mt-2 rounded-lg border p-3 text-sm"
+    >
+      {content}
+    </section>
+  ) : (
+    <details className="border-border mt-2 rounded-lg border p-3 text-sm">
+      <summary data-transaction-details-summary className="cursor-pointer font-medium">
+        {t('detail.details')}
+      </summary>
+      {content}
     </details>
   )
 }

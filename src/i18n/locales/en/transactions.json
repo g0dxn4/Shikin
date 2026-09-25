@@ -321,6 +321,7 @@
   "dialog": {
     "addDescription": "Record an income, expense, transfer, or split.",
     "editDescription": "Loading the current ledger record protects against editing stale data.",
+    "readOnlyDescription": "Read-only ledger record. Financial changes require its dedicated workflow.",
     "loading": "Loading transaction",
     "archived": "Archived transactions require their dedicated workflow.",
     "saveOrDiscard": "Save or discard changes before using other actions.",
@@ -334,6 +335,7 @@
   },
   "detail": {
     "details": "Details and evidence",
+    "readOnlyTitle": "Transaction details",
     "notes": "Notes",
     "reference": "Reference"
   },

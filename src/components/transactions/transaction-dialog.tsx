@@ -42,9 +42,11 @@ export function TransactionDialog() {
   const [loadedSplits, setLoadedSplits] = useState<SplitRowData[]>([])
   const lookupSequence = useRef(0)
   const identityChanged = useRef(false)
+  const focusAfterIdentity = useRef(false)
   const classificationChanged = useRef(false)
   const committedClose = useRef(false)
   const protectLoadedForm = useRef(false)
+  const loadedTransactionId = useRef<string | undefined>(undefined)
   const currentSession = useRef<{ open: boolean; id: string | null }>({ open: false, id: null })
   const {
     transactionDialogOpen,
@@ -61,6 +63,7 @@ export function TransactionDialog() {
         sessionId !== undefined &&
         (isDirty || isLoading || deleteOpen || classificationOpen || identityOpen)
       ) {
+        setRequestedId(undefined)
         openTransactionDialog(sessionId === 'new' ? undefined : sessionId)
         if (isDirty && !isLoading && !deleteOpen && !classificationOpen && !identityOpen)
           setConfirmDiscardOpen(true)
@@ -76,10 +79,10 @@ export function TransactionDialog() {
       sessionId !== undefined &&
       (isDirty || isLoading || deleteOpen || classificationOpen || identityOpen)
     ) {
-      setRequestedId(editingTransactionId)
+      const canDiscard = !isLoading && !deleteOpen && !classificationOpen && !identityOpen
+      setRequestedId(canDiscard ? editingTransactionId : undefined)
       openTransactionDialog(sessionId === 'new' ? undefined : sessionId)
-      if (!isLoading && !deleteOpen && !classificationOpen && !identityOpen)
-        setConfirmDiscardOpen(true)
+      if (canDiscard) setConfirmDiscardOpen(true)
       return
     }
     setIsDirty(false)
@@ -104,6 +107,7 @@ export function TransactionDialog() {
       : editingTransactionId
   protectLoadedForm.current =
     isDirty || isLoading || deleteOpen || classificationOpen || identityOpen
+  loadedTransactionId.current = loadedTransaction?.id
   currentSession.current = { open: transactionDialogOpen, id: activeEditingId }
   const isEditing = !!activeEditingId
 
@@ -138,6 +142,17 @@ export function TransactionDialog() {
       )
       setLoadedTransaction(transaction)
       setEditLoadState('ready')
+      if (focusAfterIdentity.current) {
+        focusAfterIdentity.current = false
+        setTimeout(() => {
+          if (isCurrent())
+            document
+              .querySelector<HTMLElement>(
+                '[data-transaction-details-summary], [data-transaction-details-readonly]'
+              )
+              ?.focus()
+        }, 0)
+      }
     } catch (error) {
       if (!isCurrent()) return
       setEditLoadError(getErrorMessage(error))
@@ -155,6 +170,9 @@ export function TransactionDialog() {
       setEditLoadState('idle')
       return
     }
+    // The store may briefly request another row before restoring a blocked dirty switch.
+    // Do not reset the still-mounted form when its original ID returns.
+    if (protectLoadedForm.current && loadedTransactionId.current === editingTransactionId) return
     void loadEditingTransaction(editingTransactionId)
   }, [editingTransactionId, loadEditingTransaction, transactionDialogOpen, sessionId])
 
@@ -232,6 +250,7 @@ export function TransactionDialog() {
 
   const handleRequestClose = () => {
     if (isLoading || deleteOpen || classificationOpen || identityOpen) return
+    setRequestedId(undefined)
     if (isDirty) {
       setConfirmDiscardOpen(true)
       return
@@ -259,10 +278,13 @@ export function TransactionDialog() {
   const refreshAfterIdentity = () => {
     if (!identityChanged.current) return
     identityChanged.current = false
+    focusAfterIdentity.current = true
     // The nested dialog has closed; keep its launcher mounted through focus restoration.
     setTimeout(() => {
-      const summary = document.querySelector<HTMLElement>('[data-transaction-details-summary]')
-      summary?.focus()
+      const inspection = document.querySelector<HTMLElement>(
+        '[data-transaction-details-summary], [data-transaction-details-readonly]'
+      )
+      inspection?.focus()
       refreshInspection()
     }, 0)
   }
@@ -288,9 +310,19 @@ export function TransactionDialog() {
       <Dialog open={transactionDialogOpen} onOpenChange={(open) => !open && handleRequestClose()}>
         <DialogContent className="border-border bg-surface max-h-[90vh] max-w-lg overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{isEditing ? t('editTransaction') : t('addTransaction')}</DialogTitle>
+            <DialogTitle>
+              {protectedRow
+                ? t('detail.readOnlyTitle')
+                : isEditing
+                  ? t('editTransaction')
+                  : t('addTransaction')}
+            </DialogTitle>
             <DialogDescription>
-              {isEditing ? t('dialog.editDescription') : t('dialog.addDescription')}
+              {protectedRow
+                ? t('dialog.readOnlyDescription')
+                : isEditing
+                  ? t('dialog.editDescription')
+                  : t('dialog.addDescription')}
             </DialogDescription>
           </DialogHeader>
 
@@ -327,9 +359,10 @@ export function TransactionDialog() {
           {canRenderEditForm && !protectedRow && (
             <TransactionForm
               key={`form-${activeEditingId || 'new'}`}
-              transaction={loadedTransaction ?? undefined}
-              initialSplits={loadedSplits}
+              transaction={isEditing ? (loadedTransaction ?? undefined) : undefined}
+              initialSplits={isEditing ? loadedSplits : undefined}
               metadataOnly={
+                isEditing &&
                 !!(
                   loadedTransaction?.has_splits ||
                   loadedTransaction?.is_finalized_statement ||
@@ -391,7 +424,10 @@ export function TransactionDialog() {
       />
       <ConfirmDialog
         open={confirmDiscardOpen}
-        onOpenChange={setConfirmDiscardOpen}
+        onOpenChange={(open) => {
+          setConfirmDiscardOpen(open)
+          if (!open) setRequestedId(undefined)
+        }}
         title={t('dialog.discardTitle')}
         description={t('dialog.discardDescription')}
         confirmLabel={t('dialog.discard')}

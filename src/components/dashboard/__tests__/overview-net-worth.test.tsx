@@ -139,7 +139,13 @@ describe('OverviewNetWorth comparison controls', () => {
       'false'
     )
     expect(document.getElementById('overview-comparison-panel')).not.toHaveAttribute('inert')
-    expect(screen.queryByRole('button', { name: 'overview.period.1y' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'overview.period.1y' }))
+    expect(screen.getByRole('button', { name: 'overview.period.1y' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
+    await user.click(screen.getByRole('tab', { name: 'overview.views.history' }))
+    expect(screen.getByRole('button', { name: 'overview.period.1y' })).toBeVisible()
   })
 })
 

@@ -45,7 +45,7 @@ interface OverviewAccountComparisonProps {
   onModeChange: (mode: ComparisonDisplayMode) => void
 }
 
-const PERIODS: NetWorthPeriod[] = ['month', '3m', '6m', 'ytd', 'all']
+const PERIODS: NetWorthPeriod[] = ['month', '3m', '6m', 'ytd', '1y', 'all']
 
 const INVALID_COMPARISON: PreparedAccountComparison = {
   complete: false,

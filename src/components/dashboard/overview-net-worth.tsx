@@ -20,7 +20,7 @@ import { OverviewAccountComparison } from '@/components/dashboard/overview-accou
 export type NetWorthPeriod = 'month' | '3m' | '6m' | 'ytd' | '1y' | 'all'
 type OverviewView = 'summary' | 'history' | 'comparison'
 
-const OVERVIEW_PERIODS: NetWorthPeriod[] = ['month', '3m', '6m', 'ytd', 'all']
+const OVERVIEW_PERIODS: NetWorthPeriod[] = ['month', '3m', '6m', 'ytd', '1y', 'all']
 const OVERVIEW_VIEWS: OverviewView[] = ['summary', 'history', 'comparison']
 
 export interface OverviewHistoryPoint {

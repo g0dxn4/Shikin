@@ -191,7 +191,8 @@ test.describe('Transactions', () => {
     await accountDialog.getByLabel('Observed balance').fill('100')
     await accountDialog.getByRole('button', { name: 'Save' }).click()
 
-    await expect(page.getByText(qaName('Checking')).first()).toBeVisible()
+    await expect(accountDialog).not.toBeVisible()
+    await expect(page.getByRole('article', { name: qaName('Checking'), exact: true })).toBeVisible()
 
     await page.goto('/transactions')
     await expect(page.locator('[data-startup-state="ready"]')).toBeVisible()

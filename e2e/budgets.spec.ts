@@ -20,7 +20,7 @@ test.describe('Budgets', () => {
     await expect(page.getByText('No budgets yet')).toBeVisible()
   })
   test('retains period filtering and the real budget form', async ({ page }) => {
-    const period = page.getByRole('combobox', { name: /Period/ })
+    const period = page.getByRole('combobox', { name: 'Current plan period', exact: true })
     await period.selectOption('weekly')
     await expect(period).toHaveValue('weekly')
     await page

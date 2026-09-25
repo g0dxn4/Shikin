@@ -697,6 +697,10 @@ describe('Accounts', () => {
     expect(within(card).queryByRole('button', { name: 'actions.edit' })).not.toBeInTheDocument()
 
     await user.click(more)
+    // The ellipsis shares a row with the name: its expanded panel must not consume that width.
+    expect(document.getElementById(more.getAttribute('aria-controls') ?? '')).toHaveClass(
+      'absolute'
+    )
     expect(within(card).getByRole('button', { name: 'actions.setPrimary' })).toBeVisible()
     expect(within(card).getByRole('button', { name: 'archiveAccount' })).toBeVisible()
     expect(within(card).getByRole('button', { name: 'actions.edit' })).toBeVisible()

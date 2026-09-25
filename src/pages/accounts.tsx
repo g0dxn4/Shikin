@@ -1016,7 +1016,6 @@ function AccountCard({
               ariaLabel={`${t('actions.more')} — ${account.name}`}
               trigger={<EllipsisVertical aria-hidden="true" />}
               actions={cardActions}
-              inline
               className="shrink-0"
               triggerClassName="min-h-11 min-w-11 px-2"
             />

@@ -29,7 +29,9 @@ test.describe('Dashboard', () => {
     await page.goto('/')
     await page.waitForLoadState('networkidle')
 
-    await expect(page.getByRole('main').getByText('Net worth', { exact: true })).toBeVisible()
+    await expect(
+      page.locator('#overview-summary-panel').getByText('Net worth', { exact: true })
+    ).toBeVisible()
     await expect(page.getByText('Income').first()).toBeVisible()
     await expect(page.getByText('Spent').first()).toBeVisible()
     await expect(page.getByRole('img', { name: 'Net worth over time' })).toHaveCount(0)
@@ -90,7 +92,7 @@ test.describe('Dashboard', () => {
     await page.goto('/')
     await page.waitForLoadState('networkidle')
 
-    await expect(page.getByText('$0.00').first()).toBeVisible()
+    await expect(page.locator('#overview-summary-panel').getByText('$0.00').first()).toBeVisible()
   })
 
   test('has correct page structure', async ({ page }) => {

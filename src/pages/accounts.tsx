@@ -17,6 +17,7 @@ import {
   ChevronDown,
   ChevronUp,
   CreditCard,
+  EllipsisVertical,
   Receipt,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -49,6 +50,11 @@ import {
 import { MetricItem, MetricStrip, NativePanel, PageToolbar } from '@/components/ui/native-layout'
 import { AccountMaintenanceAction } from '@/components/accounts/account-maintenance-dialog'
 import { CardStatementsAction } from '@/components/accounts/card-statements-dialog'
+import {
+  ACCOUNT_TYPE_ICONS,
+  accountAccentColor,
+  accountCardSurfaceStyle,
+} from '@/components/accounts/account-visuals'
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
 import { useTransactionStore } from '@/stores/transaction-store'
@@ -532,7 +538,7 @@ export function Accounts() {
               </MetricStrip>
 
               <div className="flex flex-col gap-3">
-                <NativePanel className="overflow-hidden p-0">
+                <NativePanel className="p-0">
                   <div className="border-border flex flex-col gap-1 border-b px-5 py-4 sm:flex-row sm:items-end sm:justify-between">
                     <div>
                       <h2 className="text-base font-semibold">{t('list.title')}</h2>
@@ -543,7 +549,7 @@ export function Accounts() {
                     </p>
                   </div>
                   {liquidAccounts.length > 0 ? (
-                    <div className="divide-border divide-y">
+                    <div className="flex flex-col gap-3 p-4 sm:px-5 sm:pb-5">
                       {liquidAccounts.map((account) => (
                         <AccountCard
                           key={account.id}
@@ -665,7 +671,7 @@ export function Accounts() {
               {showInvestments ? (
                 <div className="space-y-3">
                   {investmentLikeAccounts.length > 0 ? (
-                    <div className="divide-border border-border divide-y rounded-lg border">
+                    <div className="flex flex-col gap-3">
                       {investmentLikeAccounts.map((account) => (
                         <AccountCard
                           key={account.id}
@@ -686,7 +692,7 @@ export function Accounts() {
                   {archivedInvestmentLikeAccounts.length > 0 ? (
                     <div className="space-y-2">
                       <h3 className="text-sm font-semibold">{t('list.investmentsArchived')}</h3>
-                      <div className="divide-border border-border divide-y rounded-lg border">
+                      <div className="flex flex-col gap-3">
                         {archivedInvestmentLikeAccounts.map((account) => (
                           <AccountCard
                             key={account.id}
@@ -733,7 +739,7 @@ export function Accounts() {
                 </Button>
               </div>
               {showArchived && (
-                <div className="divide-border border-border divide-y rounded-lg border">
+                <div className="flex flex-col gap-3">
                   {archivedLiquidAccounts.map((account) => (
                     <AccountCard
                       key={account.id}
@@ -898,7 +904,8 @@ function AccountCard({
     isExpanded && !balanceHistory.get(account.id)
   )
 
-  const accentColor = account.color || 'var(--color-accent)'
+  const accentColor = accountAccentColor(account.color)
+  const TypeIcon = ACCOUNT_TYPE_ICONS[account.type] ?? Landmark
   const isCreditCard = account.type === 'credit_card'
   const canSetPrimary =
     !archived && !isCreditCard && account.type !== 'investment' && account.type !== 'crypto'
@@ -960,48 +967,64 @@ function AccountCard({
       aria-labelledby={nameId}
       aria-describedby={linked ? locatedId : undefined}
       aria-current={linked ? 'true' : undefined}
-      className={`group focus-visible:ring-ring relative px-5 py-4 outline-none focus-visible:ring-2 ${archived ? 'bg-muted/30' : ''} ${linked ? 'ring-ring ring-2' : ''}`}
-      style={{ borderLeft: `3px solid ${accentColor}` }}
+      className={`group border-border focus-visible:ring-ring relative min-w-0 rounded-[var(--radius-xl)] border px-4 py-4 outline-none focus-visible:ring-2 sm:px-5 ${archived && !account.color?.trim() ? 'bg-muted/30' : 'bg-surface'} ${linked ? 'ring-ring ring-2' : ''}`}
+      style={accountCardSurfaceStyle(account.color, archived)}
     >
       {linked ? (
         <span id={locatedId} className="sr-only">
           {t('link.located')}
         </span>
       ) : null}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 id={nameId} className="text-base font-semibold">
-              {account.name}
-            </h3>
-            <Badge variant="secondary" className="text-xs">
-              {t(`types.${account.type}`)}
-            </Badge>
-            {isPrimary && (
-              <Badge variant="outline" className="text-accent border-accent/40 text-xs">
-                {t('actions.primaryBadge')}
-              </Badge>
-            )}
-            {archived && (
-              <Badge variant="outline" className="text-xs">
-                {t('archived.badge')}
-              </Badge>
-            )}
-          </div>
+      <div className="flex items-start gap-3">
+        <div
+          className="account-type-mark mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
+          style={{
+            backgroundColor: `color-mix(in srgb, ${accentColor} 18%, var(--color-surface))`,
+            color: accentColor,
+          }}
+          aria-hidden="true"
+        >
+          <TypeIcon size={18} />
         </div>
-        <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-end sm:gap-4">
-          <div className="sm:text-right">
-            <p className="text-2xl font-semibold tracking-tight tabular-nums">
-              {formatMoney(account.balance, account.currency)}
-            </p>
-            <p className="text-muted-foreground mt-1 text-xs tabular-nums">{account.currency}</p>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <h3
+                id={nameId}
+                className="text-foreground min-w-0 text-base font-semibold break-words"
+              >
+                {account.name}
+              </h3>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <Badge variant="secondary" className="text-xs">
+                  {t(`types.${account.type}`)}
+                </Badge>
+                {isPrimary && (
+                  <Badge variant="outline" className="text-accent border-accent/40 text-xs">
+                    {t('actions.primaryBadge')}
+                  </Badge>
+                )}
+                {archived && (
+                  <Badge variant="outline" className="text-xs">
+                    {t('archived.badge')}
+                  </Badge>
+                )}
+              </div>
+            </div>
+            <ActionDisclosure
+              label={t('actions.more')}
+              ariaLabel={`${t('actions.more')} — ${account.name}`}
+              trigger={<EllipsisVertical aria-hidden="true" />}
+              actions={cardActions}
+              inline
+              className="shrink-0"
+              triggerClassName="min-h-11 min-w-11 px-2"
+            />
           </div>
-          <ActionDisclosure
-            label={t('actions.more')}
-            ariaLabel={`${t('actions.more')} — ${account.name}`}
-            actions={cardActions}
-            inline
-          />
+          <p className="text-foreground mt-3 min-w-0 text-2xl font-semibold tracking-tight break-words tabular-nums">
+            {formatMoney(account.balance, account.currency)}
+          </p>
+          <p className="text-muted-foreground mt-1 text-xs tabular-nums">{account.currency}</p>
         </div>
       </div>
 

@@ -18,6 +18,14 @@ import type { Account } from '@/types/database'
 import { accountValuationDeclaration } from '@shikin/finance-core/reconciliation'
 import dayjs from 'dayjs'
 import { fromCentavos } from '@/lib/money'
+import { cn } from '@/lib/utils'
+import {
+  ACCOUNT_COLOR_SWATCHES,
+  ACCOUNT_TYPE_ICONS,
+  accountAccentColor,
+  accountCardSurfaceStyle,
+  toColorPickerValue,
+} from './account-visuals'
 
 const ACCOUNT_TYPES = [
   'checking',
@@ -102,10 +110,14 @@ export function AccountForm({ account, onSubmit, isLoading, onDirtyChange }: Acc
   const currencyValue = watch('currency')
   const valuationMode = watch('valuationMode')
   const accountMode = watch('accountMode')
+  const nameValue = watch('name')
+  const colorValue = watch('color')
 
   useEffect(() => {
     onDirtyChange?.(isDirty)
   }, [isDirty, onDirtyChange])
+
+  const PreviewIcon = ACCOUNT_TYPE_ICONS[typeValue]
 
   return (
     <form
@@ -261,20 +273,88 @@ export function AccountForm({ account, onSubmit, isLoading, onDirtyChange }: Acc
           {t('form.observedDateHelp')}
         </p>
       </div>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="account-icon">{t('form.icon')}</Label>
-          <Input
-            id="account-icon"
-            {...register('icon', { setValueAs: (value) => (value === '' ? null : value) })}
-          />
-        </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="account-icon">{t('form.icon')}</Label>
+        <Input
+          id="account-icon"
+          {...register('icon', { setValueAs: (value) => (value === '' ? null : value) })}
+        />
+      </div>
+
+      <div className="space-y-2">
         <div className="space-y-1.5">
           <Label htmlFor="account-color">{t('form.color')}</Label>
+          <p id="account-color-help" className="text-muted-foreground text-xs">
+            {t('form.colorHelp')}
+          </p>
+        </div>
+        <figure
+          className="border-border min-w-0 rounded-xl border px-3 py-3"
+          style={accountCardSurfaceStyle(colorValue)}
+          aria-label={t('form.colorPreview')}
+        >
+          <div className="flex items-start gap-3">
+            <div
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
+              style={{
+                backgroundColor: `color-mix(in srgb, ${accountAccentColor(colorValue)} 18%, var(--color-surface))`,
+                color: accountAccentColor(colorValue),
+              }}
+              aria-hidden="true"
+            >
+              <PreviewIcon size={18} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-foreground text-sm font-semibold break-words">
+                {(nameValue ?? '').trim() ? nameValue : t('form.namePlaceholder')}
+              </p>
+              <p className="text-muted-foreground mt-1 text-xs">{t(`types.${typeValue}`)}</p>
+            </div>
+          </div>
+        </figure>
+        <div className="flex flex-wrap gap-2" role="group" aria-label={t('form.colorSwatches')}>
+          {ACCOUNT_COLOR_SWATCHES.map((swatch) => {
+            const selected = (colorValue ?? '').trim().toLowerCase() === swatch.value
+            return (
+              <button
+                key={swatch.value}
+                type="button"
+                aria-label={t(`form.colors.${swatch.key}`)}
+                aria-pressed={selected}
+                onClick={() => setValue('color', swatch.value, { shouldDirty: true })}
+                className={cn(
+                  'focus-visible:ring-ring border-border h-11 w-11 rounded-full border focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none',
+                  selected ? 'ring-ring ring-2 ring-offset-2' : ''
+                )}
+                style={{ backgroundColor: swatch.value }}
+              />
+            )
+          })}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            id="account-color-picker"
+            type="color"
+            value={toColorPickerValue(colorValue)}
+            onChange={(event) => setValue('color', event.target.value, { shouldDirty: true })}
+            aria-label={t('form.colorPicker')}
+            className="h-11 w-11 cursor-pointer p-1"
+          />
           <Input
             id="account-color"
+            aria-describedby="account-color-help"
+            placeholder="#3d6ea8"
+            className="min-w-0 flex-1"
             {...register('color', { setValueAs: (value) => (value === '' ? null : value) })}
           />
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-11"
+            onClick={() => setValue('color', null, { shouldDirty: true })}
+          >
+            {t('form.colorClear')}
+          </Button>
         </div>
       </div>
 

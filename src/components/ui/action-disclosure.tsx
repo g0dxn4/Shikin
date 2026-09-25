@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -13,6 +13,7 @@ export interface ActionDisclosureItem {
 interface ActionDisclosureProps {
   label: string
   ariaLabel?: string
+  trigger?: ReactNode
   actions: ActionDisclosureItem[]
   align?: 'start' | 'end'
   inline?: boolean
@@ -27,6 +28,7 @@ interface ActionDisclosureProps {
 export function ActionDisclosure({
   label,
   ariaLabel,
+  trigger,
   actions,
   align = 'end',
   inline = false,
@@ -74,16 +76,20 @@ export function ActionDisclosure({
         variant="outline"
         size="sm"
         className={cn('min-h-11 md:min-h-9', triggerClassName)}
-        aria-label={ariaLabel}
+        aria-label={ariaLabel ?? (trigger ? label : undefined)}
         aria-expanded={open}
         aria-controls={id}
         onClick={() => setOpen((current) => !current)}
       >
-        {label}
-        <ChevronDown
-          aria-hidden="true"
-          className={cn('transition-transform', open ? 'rotate-180' : '')}
-        />
+        {trigger ?? (
+          <>
+            {label}
+            <ChevronDown
+              aria-hidden="true"
+              className={cn('transition-transform', open ? 'rotate-180' : '')}
+            />
+          </>
+        )}
       </Button>
       {open ? (
         <div

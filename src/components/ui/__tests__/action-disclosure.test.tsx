@@ -50,4 +50,35 @@ describe('ActionDisclosure', () => {
     expect(onSelect).toHaveBeenCalledOnce()
     expect(trigger).toHaveFocus()
   })
+
+  it('renders optional trigger content while keeping native disclosure behavior', async () => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    render(
+      <ActionDisclosure
+        label="More actions"
+        trigger={<span data-testid="custom-trigger">Open</span>}
+        actions={[{ label: 'Edit account', onSelect }]}
+      />
+    )
+
+    const trigger = screen.getByRole('button', { name: 'More actions' })
+    expect(screen.getByTestId('custom-trigger')).toBeInTheDocument()
+    expect(trigger.querySelector('svg')).not.toBeInTheDocument()
+
+    await user.click(trigger)
+    const action = screen.getByRole('button', { name: 'Edit account' })
+    expect(action).toBeVisible()
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    expect(trigger).toHaveFocus()
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('button', { name: 'Edit account' })).not.toBeInTheDocument()
+
+    await user.click(trigger)
+    await user.click(screen.getByRole('button', { name: 'Edit account' }))
+    expect(onSelect).toHaveBeenCalledOnce()
+    expect(trigger).toHaveFocus()
+  })
 })

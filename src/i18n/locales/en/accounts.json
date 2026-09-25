@@ -38,7 +38,22 @@
     "observedDate": "Observed date (end of day)",
     "observedDateHelp": "Balance edits reconcile the ledger at this date and retain later activity. Nonzero changes crossing a later reconciliation require bridge supersession. No intraday balance is implied.",
     "icon": "Icon (blank clears)",
-    "color": "Color (blank clears)"
+    "color": "Color (blank clears)",
+    "colorHelp": "Tints this account's card. Leave blank to use the default surface.",
+    "colorSwatches": "Suggested colors",
+    "colorPicker": "Custom color",
+    "colorPreview": "Card color preview",
+    "colorClear": "Clear color",
+    "colors": {
+      "blue": "Blue",
+      "teal": "Teal",
+      "forest": "Forest",
+      "clay": "Clay",
+      "plum": "Plum",
+      "graphite": "Graphite",
+      "ocean": "Ocean",
+      "sand": "Sand"
+    }
   },
   "types": {
     "checking": "Checking",

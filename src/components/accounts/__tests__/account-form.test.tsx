@@ -148,6 +148,41 @@ describe('AccountForm', () => {
     expect(grid).toBeInTheDocument()
   })
 
+  it('updates color from an accessible swatch with a live card preview', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    const onDirtyChange = vi.fn()
+    render(<AccountForm onSubmit={onSubmit} onDirtyChange={onDirtyChange} />)
+
+    expect(screen.getByRole('figure', { name: 'form.colorPreview' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'form.colorSwatches' })).toBeInTheDocument()
+    expect(screen.getByLabelText('form.colorPicker')).toHaveAttribute('type', 'color')
+
+    await user.click(screen.getByRole('button', { name: 'form.colors.teal' }))
+    await waitFor(() => expect(onDirtyChange).toHaveBeenCalledWith(true))
+    expect(screen.getByLabelText('form.color')).toHaveValue('#2a7a78')
+    expect(screen.getByRole('button', { name: 'form.colors.teal' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
+    expect(
+      screen.getByRole('figure', { name: 'form.colorPreview' }).getAttribute('style')
+    ).toContain('#2a7a78')
+
+    await user.type(screen.getByLabelText('form.name'), 'Teal Checking')
+    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Teal Checking',
+          color: '#2a7a78',
+        }),
+        expect.anything()
+      )
+    })
+  })
+
   describe('accessibility', () => {
     it('has proper label associations for all fields', () => {
       render(<AccountForm onSubmit={vi.fn()} />)

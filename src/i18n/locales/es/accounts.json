@@ -38,7 +38,22 @@
     "observedDate": "Fecha observada (fin del día)",
     "observedDateHelp": "Los cambios concilian el libro a esta fecha y conservan la actividad posterior. Los ajustes no nulos que cruzan una conciliación posterior requieren sustituir el puente. No se implica precisión intradía.",
     "icon": "Icono (vacío borra)",
-    "color": "Color (vacío borra)"
+    "color": "Color (vacío borra)",
+    "colorHelp": "Tiñe la tarjeta de esta cuenta. Déjalo en blanco para usar la superficie predeterminada.",
+    "colorSwatches": "Colores sugeridos",
+    "colorPicker": "Color personalizado",
+    "colorPreview": "Vista previa del color de la tarjeta",
+    "colorClear": "Quitar color",
+    "colors": {
+      "blue": "Azul",
+      "teal": "Verde azulado",
+      "forest": "Bosque",
+      "clay": "Arcilla",
+      "plum": "Ciruela",
+      "graphite": "Grafito",
+      "ocean": "Océano",
+      "sand": "Arena"
+    }
   },
   "types": {
     "checking": "Corriente",

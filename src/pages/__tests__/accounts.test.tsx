@@ -252,6 +252,41 @@ describe('Accounts', () => {
     expect(screen.getByText('EUR')).toBeInTheDocument()
   })
 
+  it('tints cards from persisted color and identifies types without fabricated numbers', () => {
+    mockAccounts = [
+      {
+        id: 'acc-1',
+        name: 'Everyday Checking',
+        type: 'checking',
+        currency: 'USD',
+        balance: 250000,
+        color: '#3d6ea8',
+      },
+      {
+        id: 'acc-2',
+        name: 'Emergency Savings',
+        type: 'savings',
+        currency: 'USD',
+        balance: 100000,
+        color: null,
+      },
+    ]
+
+    renderAccounts()
+
+    const checking = screen.getByRole('article', { name: 'Everyday Checking' })
+    expect(checking.getAttribute('style')).toContain('#3d6ea8')
+    expect(checking.getAttribute('style')).toContain('color-mix')
+    expect(checking.querySelector('.account-type-mark')).toBeInTheDocument()
+    expect(within(checking).getByRole('heading', { level: 3 })).toHaveClass('break-words')
+    expect(within(checking).getByText('$2,500.00')).toHaveClass('break-words')
+    expect(checking).not.toHaveTextContent(/\*\*\*\*|••••|1234/)
+
+    const savings = screen.getByRole('article', { name: 'Emergency Savings' })
+    expect(savings.querySelector('.account-type-mark')).toBeInTheDocument()
+    expect(savings.getAttribute('style') ?? '').not.toContain('color-mix')
+  })
+
   it('renders accounts on native panels without a promotional page header', () => {
     mockAccounts = [{ id: 'acc-1', name: 'Test', type: 'checking', currency: 'USD', balance: 0 }]
 

@@ -1,4 +1,12 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react'
 import { ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -39,6 +47,62 @@ export function ActionDisclosure({
   const id = useId()
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [placement, setPlacement] = useState<{ top: number; maxHeight: number } | null>(null)
+
+  useLayoutEffect(() => {
+    if (!open || inline) return
+
+    const updatePlacement = () => {
+      const root = rootRef.current
+      const trigger = triggerRef.current
+      const panel = panelRef.current
+      if (!root || !trigger || !panel) return
+
+      const rootRect = root.getBoundingClientRect()
+      const triggerRect = trigger.getBoundingClientRect()
+      const mainRect = root.closest('main')?.getBoundingClientRect()
+      const bottomNav = document.querySelector<HTMLElement>('.native-bottom-nav')
+      const navRect =
+        bottomNav && getComputedStyle(bottomNav).display !== 'none'
+          ? bottomNav.getBoundingClientRect()
+          : null
+      const gap = 4
+      const topEdge = Math.max(0, mainRect?.top ?? 0) + gap
+      const bottomEdge =
+        Math.min(
+          window.innerHeight,
+          mainRect?.bottom ?? window.innerHeight,
+          navRect && navRect.top < window.innerHeight && navRect.bottom > 0
+            ? navRect.top
+            : window.innerHeight
+        ) - gap
+      // scrollHeight stays intrinsic even when the panel has already been clamped.
+      const height = Math.max(
+        panel.scrollHeight + panel.clientTop * 2,
+        panel.getBoundingClientRect().height
+      )
+      const belowTop = Math.max(topEdge, triggerRect.bottom + gap)
+      const aboveBottom = Math.min(bottomEdge, triggerRect.top - gap)
+      const belowSpace = Math.max(0, bottomEdge - belowTop)
+      const aboveSpace = Math.max(0, aboveBottom - topEdge)
+      const above = height > belowSpace && (height <= aboveSpace || aboveSpace > belowSpace)
+      const maxHeight = above ? aboveSpace : belowSpace
+      const top = (above ? aboveBottom - Math.min(height, maxHeight) : belowTop) - rootRect.top
+      setPlacement((previous) =>
+        previous?.top === top && previous.maxHeight === maxHeight ? previous : { top, maxHeight }
+      )
+    }
+
+    updatePlacement()
+    // The route scrolls in main, not window; capture also covers nested scroll containers.
+    window.addEventListener('scroll', updatePlacement, true)
+    window.addEventListener('resize', updatePlacement)
+    return () => {
+      window.removeEventListener('scroll', updatePlacement, true)
+      window.removeEventListener('resize', updatePlacement)
+    }
+  }, [open, inline, actions.length])
 
   useEffect(() => {
     if (!open) return
@@ -93,10 +157,21 @@ export function ActionDisclosure({
       </Button>
       {open ? (
         <div
+          ref={panelRef}
           id={id}
+          style={
+            !inline && placement
+              ? ({ top: placement.top, maxHeight: placement.maxHeight } satisfies CSSProperties)
+              : undefined
+          }
           className={cn(
-            'border-border bg-surface z-30 mt-1 min-w-48 rounded-lg border p-1 shadow-[var(--shadow-dialog)]',
-            inline ? 'relative' : cn('absolute top-full', align === 'end' ? 'right-0' : 'left-0')
+            'border-border bg-surface z-30 min-w-48 rounded-lg border p-1 shadow-[var(--shadow-dialog)]',
+            inline
+              ? 'relative mt-1'
+              : cn(
+                  'absolute top-full overflow-y-auto overscroll-contain',
+                  align === 'end' ? 'right-0' : 'left-0'
+                )
           )}
         >
           {actions.map((action) => (

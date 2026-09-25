@@ -188,6 +188,10 @@ describe('TransactionDialog', () => {
     expect(await screen.findByText('review.protected.workflow')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'actions.save' })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'detail.readOnlyTitle' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'detail.readOnlyTitle' })).toHaveClass(
+      'pr-8',
+      'break-words'
+    )
     expect(screen.getByText('Test expense')).toBeVisible()
     expect(screen.getByText('review.protected.workflow')).toBeVisible()
     expect(screen.getByText('statement')).toBeVisible()

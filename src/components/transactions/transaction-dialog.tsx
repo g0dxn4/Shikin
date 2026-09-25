@@ -310,7 +310,7 @@ export function TransactionDialog() {
       <Dialog open={transactionDialogOpen} onOpenChange={(open) => !open && handleRequestClose()}>
         <DialogContent className="border-border bg-surface max-h-[90vh] max-w-lg overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle className="pr-8 break-words">
               {protectedRow
                 ? t('detail.readOnlyTitle')
                 : isEditing

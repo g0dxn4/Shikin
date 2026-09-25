@@ -34,13 +34,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { ErrorState } from '@/components/ui/error-state'
 import { MetricItem, MetricStrip, NativePanel, PageToolbar } from '@/components/ui/native-layout'
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
 import { useUIStore } from '@/stores/ui-store'
 import { useTransactionStore } from '@/stores/transaction-store'
 import type { ReviewFieldUpdate } from '@/stores/transaction-store'
@@ -51,10 +44,8 @@ import { getErrorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import type { TransactionSplitWithCategory } from '@/types/database'
 import { StatementImportDialog } from '@/components/transactions/statement-import-dialog'
-import { LegacyImportIdentityAction } from '@/components/transactions/legacy-import-identity-dialog'
-import { ConsumptionClassificationDialog } from '@/components/transactions/consumption-classification-dialog'
+import { transactionProtection } from '@/components/transactions/transaction-inspection-eligibility'
 import { ConsumptionBulkDialog } from '@/components/transactions/consumption-bulk-dialog'
-import { TransactionFxEvidenceDetails } from '@/components/transactions/transaction-fx-evidence'
 import { useTransactionPageQuery } from '@/hooks/use-transaction-page-query'
 import {
   TRANSACTION_PAGE_SIZES,
@@ -68,6 +59,11 @@ import {
   type TransactionSortDirection,
 } from '@/lib/transaction-query'
 import { invalidateTransactionPage } from '@/lib/transaction-query-events'
+import {
+  getTransactionDatePreset,
+  transactionDateBounds,
+  type TransactionDatePreset,
+} from '@/lib/transaction-date-presets'
 
 const ConfirmDialog = lazy(() =>
   import('@/components/shared/confirm-dialog').then((module) => ({
@@ -90,7 +86,7 @@ const reviewFilters: TransactionReviewReason[] = [
 const sortableFields: TransactionSort[] = ['date', 'description', 'amount']
 
 type TransactionView = (typeof transactionViews)[number]
-type DatePreset = 'all' | 'month' | '30-days' | '90-days' | 'custom'
+type DatePreset = TransactionDatePreset
 type ReviewProtectionKey =
   | 'review.protected.split'
   | 'review.protected.receivable'
@@ -108,6 +104,7 @@ interface TransactionUrlState {
   category: string
   dateFrom: string
   dateTo: string
+  datePreset: DatePreset | null
   status: TransactionQueryStatus
   currency: string
   view: TransactionView
@@ -148,6 +145,10 @@ function readUrlState(): TransactionUrlState {
     category: params.get('category') || 'all',
     dateFrom: params.get('dateFrom') ?? '',
     dateTo: params.get('dateTo') ?? '',
+    datePreset:
+      (['this-month', 'three-months', 'six-months', 'this-year'] as const).find(
+        (value) => value === params.get('datePreset')
+      ) ?? null,
     status: enumParam(params.get('status'), ['all', 'posted', 'pending', 'cleared'], 'all'),
     currency: params.get('currency') || 'all',
     view: enumParam(
@@ -177,6 +178,7 @@ function serializeUrlState(state: TransactionUrlState): string {
   if (state.category !== 'all') params.set('category', state.category)
   if (state.dateFrom) params.set('dateFrom', state.dateFrom)
   if (state.dateTo) params.set('dateTo', state.dateTo)
+  if (state.datePreset) params.set('datePreset', state.datePreset)
   if (state.status !== 'all') params.set('status', state.status)
   if (state.currency !== 'all') params.set('currency', state.currency)
   if (state.view !== 'timeline') params.set('view', state.view)
@@ -187,21 +189,6 @@ function serializeUrlState(state: TransactionUrlState): string {
   if (state.reviewReason !== 'all') params.set('reviewReason', state.reviewReason)
   const queryString = params.toString()
   return `${window.location.pathname}${queryString ? `?${queryString}` : ''}${window.location.hash}`
-}
-
-function getDatePreset(dateFrom: string, dateTo: string): DatePreset {
-  if (!dateFrom && !dateTo) return 'all'
-  const today = dayjs().format('YYYY-MM-DD')
-  if (
-    dateFrom === dayjs().startOf('month').format('YYYY-MM-DD') &&
-    dateTo === dayjs().endOf('month').format('YYYY-MM-DD')
-  )
-    return 'month'
-  if (dateFrom === dayjs().subtract(29, 'day').format('YYYY-MM-DD') && dateTo === today)
-    return '30-days'
-  if (dateFrom === dayjs().subtract(89, 'day').format('YYYY-MM-DD') && dateTo === today)
-    return '90-days'
-  return 'custom'
 }
 
 function countActiveFilters(state: TransactionUrlState): number {
@@ -272,23 +259,6 @@ function getReviewProtectionKey(transaction: TransactionPageRow): ReviewProtecti
   return null
 }
 
-function isEligibleLegacyImportIdentityRow(transaction: TransactionPageRow): boolean {
-  if (transaction.is_archived === 1) return false
-  if ((transaction.transaction_kind ?? 'standard') !== 'standard') return false
-  if (
-    transaction.import_content_fingerprint !== null &&
-    transaction.import_content_fingerprint !== undefined
-  ) {
-    return false
-  }
-  // Missing projection fields are not evidence of an unbound row.
-  return (
-    transaction.import_source === null &&
-    transaction.import_external_id === null &&
-    transaction.import_fingerprint === null
-  )
-}
-
 function isEditingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
   return (
@@ -327,10 +297,6 @@ export function Transactions() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [statementImportOpen, setStatementImportOpen] = useState(false)
   const [bulkClassificationOpen, setBulkClassificationOpen] = useState(false)
-  const [detailTransaction, setDetailTransaction] = useState<TransactionPageRow | null>(null)
-  const [classificationTransactionId, setClassificationTransactionId] = useState<string | null>(
-    null
-  )
   const [activeReviewId, setActiveReviewId] = useState<string | null>(null)
   const [reviewMutationId, setReviewMutationId] = useState<string | null>(null)
   const [reviewAnnouncement, setReviewAnnouncement] = useState('')
@@ -398,7 +364,14 @@ export function Transactions() {
     () => [...accounts, ...archivedAccounts],
     [accounts, archivedAccounts]
   )
-  const datePreset = getDatePreset(urlState.dateFrom, urlState.dateTo)
+  const datePreset =
+    urlState.datePreset &&
+    (() => {
+      const bounds = transactionDateBounds(urlState.datePreset)
+      return bounds.dateFrom === urlState.dateFrom && bounds.dateTo === urlState.dateTo
+    })()
+      ? urlState.datePreset
+      : getTransactionDatePreset(urlState.dateFrom, urlState.dateTo)
   const hasActiveFilters = countActiveFilters(urlState) > 0
 
   useEffect(() => {
@@ -406,16 +379,6 @@ export function Transactions() {
       updateUrlState({ page: totalPages }, { resetPage: false, replace: true })
     }
   }, [pageQuery.isLoading, totalPages, updateUrlState, urlState.page])
-
-  useEffect(() => {
-    if (
-      detailTransaction &&
-      !pageQuery.isLoading &&
-      !pageQuery.rows.some((row) => row.id === detailTransaction.id)
-    ) {
-      setDetailTransaction(null)
-    }
-  }, [detailTransaction, pageQuery.isLoading, pageQuery.rows])
 
   const groupedByDate = useMemo(() => {
     const groups = new Map<string, TransactionPageRow[]>()
@@ -435,29 +398,23 @@ export function Transactions() {
       category: 'all',
       dateFrom: '',
       dateTo: '',
+      datePreset: null,
       status: 'all',
       currency: 'all',
     })
 
   const handleDatePreset = (preset: DatePreset) => {
-    const today = dayjs().format('YYYY-MM-DD')
-    if (preset === 'all') return updateUrlState({ dateFrom: '', dateTo: '' })
-    if (preset === 'month')
-      return updateUrlState({
-        dateFrom: dayjs().startOf('month').format('YYYY-MM-DD'),
-        dateTo: dayjs().endOf('month').format('YYYY-MM-DD'),
+    if (preset !== 'custom')
+      updateUrlState({
+        ...transactionDateBounds(preset),
+        datePreset:
+          preset === 'this-month' ||
+          preset === 'three-months' ||
+          preset === 'six-months' ||
+          preset === 'this-year'
+            ? preset
+            : null,
       })
-    if (preset === '30-days')
-      return updateUrlState({
-        dateFrom: dayjs().subtract(29, 'day').format('YYYY-MM-DD'),
-        dateTo: today,
-      })
-    if (preset === '90-days')
-      return updateUrlState({
-        dateFrom: dayjs().subtract(89, 'day').format('YYYY-MM-DD'),
-        dateTo: today,
-      })
-    updateUrlState({ dateFrom: urlState.dateFrom, dateTo: urlState.dateTo })
   }
 
   const handleSort = (field: TransactionSort) => {
@@ -483,7 +440,6 @@ export function Transactions() {
       invalidateTransactionPage('delete')
       toast.success(t('toast.deleted'))
       setDeleteId(null)
-      setDetailTransaction(null)
     } catch (error) {
       toast.error(getErrorMessage(error, t('toast.error')))
     } finally {
@@ -716,7 +672,7 @@ export function Transactions() {
                         key={transaction.id}
                         transaction={transaction}
                         getSplits={getSplits}
-                        onDetails={() => setDetailTransaction(transaction)}
+                        onDetails={() => openTransactionDialog(transaction.id)}
                         onEdit={() => openTransactionDialog(transaction.id)}
                         onDelete={() => setDeleteId(transaction.id)}
                       />
@@ -731,7 +687,7 @@ export function Transactions() {
               transactions={pageQuery.rows}
               sort={{ field: urlState.sort, direction: urlState.direction }}
               onSort={handleSort}
-              onDetails={setDetailTransaction}
+              onDetails={(transaction) => openTransactionDialog(transaction.id)}
               onEdit={(id) => openTransactionDialog(id)}
               onDelete={setDeleteId}
             />
@@ -765,23 +721,6 @@ export function Transactions() {
         </div>
       )}
 
-      <TransactionDetail
-        transaction={detailTransaction}
-        open={!!detailTransaction}
-        onOpenChange={(open) => !open && setDetailTransaction(null)}
-        onEdit={(id) => {
-          setDetailTransaction(null)
-          openTransactionDialog(id)
-        }}
-        onDelete={(id) => setDeleteId(id)}
-        onClassify={setClassificationTransactionId}
-      />
-      <ConsumptionClassificationDialog
-        transactionId={classificationTransactionId}
-        open={!!classificationTransactionId}
-        onOpenChange={(nextOpen) => !nextOpen && setClassificationTransactionId(null)}
-        onChanged={() => invalidateTransactionPage('review')}
-      />
       <ConsumptionBulkDialog
         open={bulkClassificationOpen}
         candidates={pageQuery.rows.map((row) => ({
@@ -980,7 +919,19 @@ function TransactionFilters({
             label={t('filters.dateRange')}
             value={dateSelectValue}
             onChange={(value) => handleDateSelect(value as DatePreset)}
-            options={(['all', 'month', '30-days', '90-days', 'custom'] as const).map((value) => ({
+            options={(
+              [
+                'this-month',
+                'three-months',
+                'six-months',
+                'this-year',
+                'all',
+                ...(datePreset === 'month' || datePreset === '30-days' || datePreset === '90-days'
+                  ? [datePreset]
+                  : []),
+                'custom',
+              ] as DatePreset[]
+            ).map((value) => ({
               value,
               label: t(`filters.dates.${value}`),
             }))}
@@ -1010,7 +961,7 @@ function TransactionFilters({
                 <Input
                   type="date"
                   value={state.dateFrom}
-                  onChange={(event) => onPatch({ dateFrom: event.target.value })}
+                  onChange={(event) => onPatch({ dateFrom: event.target.value, datePreset: null })}
                   className="text-foreground mt-1 min-h-11 w-full min-w-0 md:min-h-10 md:w-40"
                 />
               </label>
@@ -1019,7 +970,7 @@ function TransactionFilters({
                 <Input
                   type="date"
                   value={state.dateTo}
-                  onChange={(event) => onPatch({ dateTo: event.target.value })}
+                  onChange={(event) => onPatch({ dateTo: event.target.value, datePreset: null })}
                   className="text-foreground mt-1 min-h-11 w-full min-w-0 md:min-h-10 md:w-40"
                 />
               </label>
@@ -1215,7 +1166,8 @@ function LedgerView({
                       !transaction.matched_transaction_id &&
                       !transaction.is_receivable_payment &&
                       !transaction.is_reconciliation_adjustment &&
-                      (transaction.transaction_kind ?? 'standard') === 'standard'
+                      (transaction.transaction_kind ?? 'standard') === 'standard' &&
+                      !transactionProtection(transaction)
                     }
                     onEdit={() => onEdit(transaction.id)}
                     onDelete={() => onDelete(transaction.id)}
@@ -1262,7 +1214,8 @@ function LedgerView({
                   !transaction.matched_transaction_id &&
                   !transaction.is_receivable_payment &&
                   !transaction.is_reconciliation_adjustment &&
-                  (transaction.transaction_kind ?? 'standard') === 'standard'
+                  (transaction.transaction_kind ?? 'standard') === 'standard' &&
+                  !transactionProtection(transaction)
                 }
                 onEdit={() => onEdit(transaction.id)}
                 onDelete={() => onDelete(transaction.id)}
@@ -1387,7 +1340,8 @@ function TransactionRow({
               !transaction.matched_transaction_id &&
               !transaction.is_receivable_payment &&
               !transaction.is_reconciliation_adjustment &&
-              (transaction.transaction_kind ?? 'standard') === 'standard'
+              (transaction.transaction_kind ?? 'standard') === 'standard' &&
+              !transactionProtection(transaction)
             }
             onEdit={onEdit}
             onDelete={onDelete}
@@ -1681,114 +1635,6 @@ function Pagination({
   )
 }
 
-function TransactionDetail({
-  transaction,
-  open,
-  onOpenChange,
-  onEdit,
-  onDelete,
-  onClassify,
-}: {
-  transaction: TransactionPageRow | null
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onEdit: (id: string) => void
-  onDelete: (id: string) => void
-  onClassify: (id: string) => void
-}) {
-  const { t } = useTranslation('transactions')
-  const { t: tConsumption } = useTranslation('consumption')
-  if (!transaction) return null
-  const protection = getReviewProtectionKey(transaction)
-  return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
-        <SheetHeader>
-          <p className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-            {t(`types.${transaction.type}`)}
-          </p>
-          <SheetTitle>{transaction.description}</SheetTitle>
-          <SheetDescription>{dayjs(transaction.date).format('MMMM D, YYYY')}</SheetDescription>
-        </SheetHeader>
-        <p
-          className={cn(
-            'mt-7 text-3xl font-semibold tabular-nums',
-            transaction.type === 'income' ? 'text-success' : 'text-foreground'
-          )}
-        >
-          {transaction.type === 'income' ? '+' : transaction.type === 'expense' ? '-' : ''}
-          {formatMoney(transaction.amount, transaction.currency)}
-        </p>
-        <dl className="divide-border border-border mt-7 divide-y border-y text-sm">
-          <DetailItem label={t('ledger.account')} value={getLedgerAccountLabel(transaction)} />
-          <DetailItem
-            label={t('ledger.category')}
-            value={transaction.has_splits ? t('split.badge') : (transaction.category_name ?? '—')}
-          />
-          <DetailItem
-            label={t('ledger.status')}
-            value={t(`status.${getTransactionStatus(transaction)}`)}
-          />
-          <DetailItem label={t('ledger.source')} value={getTransactionSource(transaction)} />
-          <DetailItem
-            label={t('detail.notes')}
-            value={transaction.notes ?? transaction.note ?? '—'}
-          />
-          <DetailItem label={t('detail.reference')} value={transaction.id} />
-        </dl>
-        <TransactionFxEvidenceDetails transactionId={transaction.id} />
-        {protection && (
-          <p className="border-warning/30 bg-warning/10 mt-5 rounded-lg border p-3 text-xs">
-            {t(protection)}
-          </p>
-        )}
-        <div className="mt-6 grid gap-2 sm:grid-cols-2">
-          {(transaction.type === 'expense' || transaction.type === 'income') && (
-            <Button
-              variant="outline"
-              className="min-h-11 sm:col-span-2"
-              onClick={() => onClassify(transaction.id)}
-            >
-              {tConsumption('actions.classify')}
-            </Button>
-          )}
-          {isEligibleLegacyImportIdentityRow(transaction) && (
-            <div className="sm:col-span-2">
-              <LegacyImportIdentityAction
-                transactionId={transaction.id}
-                onChanged={() => onOpenChange(false)}
-              />
-            </div>
-          )}
-          {!transaction.has_splits && (
-            <Button className="min-h-11" onClick={() => onEdit(transaction.id)}>
-              <Pencil size={15} />
-              {t('editTransaction')}
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            className="text-destructive min-h-11"
-            onClick={() => onDelete(transaction.id)}
-          >
-            <Trash2 size={15} />
-            {t('deleteTransaction')}
-          </Button>
-        </div>
-      </SheetContent>
-    </Sheet>
-  )
-}
-
-function DetailItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="grid grid-cols-[110px_1fr] gap-4 py-3">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="text-right break-words">{value}</dd>
-    </div>
-  )
-}
-
 function TransactionActions({
   transaction,
   onEdit,
@@ -1820,15 +1666,19 @@ function TransactionActions({
           <Pencil size={13} />
         </Button>
       )}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="text-destructive hover:text-destructive h-8 w-8"
-        onClick={onDelete}
-        aria-label={`Delete ${transaction.description}`}
-      >
-        <Trash2 size={13} />
-      </Button>
+      {!transactionProtection(transaction) &&
+        !transaction.is_finalized_statement &&
+        !transaction.finalization_id && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-destructive hover:text-destructive h-8 w-8"
+            onClick={onDelete}
+            aria-label={`Delete ${transaction.description}`}
+          >
+            <Trash2 size={13} />
+          </Button>
+        )}
     </div>
   )
 }

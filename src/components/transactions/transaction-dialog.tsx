@@ -19,6 +19,9 @@ import { getErrorMessage } from '@/lib/errors'
 import { getTransactionById, type TransactionPageRow } from '@/lib/transaction-query'
 import { invalidateTransactionPage } from '@/lib/transaction-query-events'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
+import { ConsumptionClassificationDialog } from './consumption-classification-dialog'
+import { TransactionInspection } from './transaction-inspection'
+import { transactionProtection } from './transaction-inspection-eligibility'
 
 type EditLoadState = 'idle' | 'loading' | 'ready' | 'not-found' | 'error'
 
@@ -28,30 +31,103 @@ export function TransactionDialog() {
   const [isLoading, setIsLoading] = useState(false)
   const [isDirty, setIsDirty] = useState(false)
   const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [classificationOpen, setClassificationOpen] = useState(false)
+  const [identityOpen, setIdentityOpen] = useState(false)
+  const [sessionId, setSessionId] = useState<string | undefined>(undefined)
+  const [requestedId, setRequestedId] = useState<string | null | undefined>(undefined)
   const [editLoadState, setEditLoadState] = useState<EditLoadState>('idle')
   const [editLoadError, setEditLoadError] = useState<string | null>(null)
   const [loadedTransaction, setLoadedTransaction] = useState<TransactionPageRow | null>(null)
   const [loadedSplits, setLoadedSplits] = useState<SplitRowData[]>([])
   const lookupSequence = useRef(0)
-  const { transactionDialogOpen, editingTransactionId, closeTransactionDialog } = useUIStore()
-  const { add, addWithSplits, update, correctMetadata } = useTransactionStore()
-  const isEditing = !!editingTransactionId
+  const identityChanged = useRef(false)
+  const classificationChanged = useRef(false)
+  const committedClose = useRef(false)
+  const protectLoadedForm = useRef(false)
+  const currentSession = useRef<{ open: boolean; id: string | null }>({ open: false, id: null })
+  const {
+    transactionDialogOpen,
+    editingTransactionId,
+    closeTransactionDialog,
+    openTransactionDialog,
+  } = useUIStore()
+  const { add, addWithSplits, update, correctMetadata, remove } = useTransactionStore()
+  // Keep the current form mounted until a dirty session explicitly discards changes.
+  useEffect(() => {
+    if (!transactionDialogOpen) {
+      if (
+        !committedClose.current &&
+        sessionId !== undefined &&
+        (isDirty || isLoading || deleteOpen || classificationOpen || identityOpen)
+      ) {
+        openTransactionDialog(sessionId === 'new' ? undefined : sessionId)
+        if (isDirty && !isLoading && !deleteOpen && !classificationOpen && !identityOpen)
+          setConfirmDiscardOpen(true)
+        return
+      }
+      committedClose.current = false
+      setSessionId(undefined)
+      setRequestedId(undefined)
+      return
+    }
+    if (sessionId === (editingTransactionId ?? 'new')) return
+    if (
+      sessionId !== undefined &&
+      (isDirty || isLoading || deleteOpen || classificationOpen || identityOpen)
+    ) {
+      setRequestedId(editingTransactionId)
+      openTransactionDialog(sessionId === 'new' ? undefined : sessionId)
+      if (!isLoading && !deleteOpen && !classificationOpen && !identityOpen)
+        setConfirmDiscardOpen(true)
+      return
+    }
+    setIsDirty(false)
+    setSessionId(editingTransactionId ?? 'new')
+  }, [
+    identityOpen,
+    transactionDialogOpen,
+    editingTransactionId,
+    sessionId,
+    isDirty,
+    isLoading,
+    deleteOpen,
+    classificationOpen,
+    openTransactionDialog,
+  ])
+  const activeEditingId =
+    sessionId !== undefined &&
+    (isDirty || isLoading || deleteOpen || classificationOpen || identityOpen)
+      ? sessionId === 'new'
+        ? null
+        : sessionId
+      : editingTransactionId
+  protectLoadedForm.current =
+    isDirty || isLoading || deleteOpen || classificationOpen || identityOpen
+  currentSession.current = { open: transactionDialogOpen, id: activeEditingId }
+  const isEditing = !!activeEditingId
 
-  const loadEditingTransaction = useCallback(async (id: string) => {
+  const loadEditingTransaction = useCallback(async (id: string, refresh = false) => {
     const sequence = ++lookupSequence.current
-    setEditLoadState('loading')
-    setEditLoadError(null)
-    setLoadedTransaction(null)
-    setLoadedSplits([])
+    const isCurrent = () =>
+      sequence === lookupSequence.current &&
+      currentSession.current.open &&
+      currentSession.current.id === id
+    if (!refresh) {
+      setEditLoadState('loading')
+      setEditLoadError(null)
+      setLoadedTransaction(null)
+      setLoadedSplits([])
+    }
     try {
       const transaction = await getTransactionById(id)
-      if (sequence !== lookupSequence.current) return
+      if (!isCurrent()) return
       if (!transaction) {
         setEditLoadState('not-found')
         return
       }
       const splits = transaction.has_splits ? await getSplits(id) : []
-      if (sequence !== lookupSequence.current) return
+      if (!isCurrent()) return
       setLoadedSplits(
         splits.map((split) => ({
           categoryId: split.category_id ?? '',
@@ -63,14 +139,16 @@ export function TransactionDialog() {
       setLoadedTransaction(transaction)
       setEditLoadState('ready')
     } catch (error) {
-      if (sequence !== lookupSequence.current) return
+      if (!isCurrent()) return
       setEditLoadError(getErrorMessage(error))
       setEditLoadState('error')
     }
   }, [])
 
   useEffect(() => {
-    if (!transactionDialogOpen || !editingTransactionId) {
+    if (!transactionDialogOpen || !editingTransactionId || sessionId !== editingTransactionId) {
+      // A rejected close/switch must not unmount the dirty form while the store reverts.
+      if (sessionId !== undefined && protectLoadedForm.current) return
       lookupSequence.current += 1
       setLoadedTransaction(null)
       setEditLoadError(null)
@@ -78,15 +156,14 @@ export function TransactionDialog() {
       return
     }
     void loadEditingTransaction(editingTransactionId)
-  }, [editingTransactionId, loadEditingTransaction, transactionDialogOpen])
+  }, [editingTransactionId, loadEditingTransaction, transactionDialogOpen, sessionId])
 
   const handleSubmit = async (data: TransactionFormValues, splits?: SplitRowData[]) => {
-    if (isEditing && (!editingTransactionId || editLoadState !== 'ready' || !loadedTransaction))
-      return
+    if (isEditing && (!activeEditingId || editLoadState !== 'ready' || !loadedTransaction)) return
 
     setIsLoading(true)
     try {
-      if (isEditing && editingTransactionId) {
+      if (isEditing && activeEditingId) {
         const replacement = splits?.map((split) => ({
           categoryId: split.categoryId,
           subcategoryId: split.subcategoryId,
@@ -112,7 +189,7 @@ export function TransactionDialog() {
           )
             throw new Error(t('correction.financialLocked'))
           await correctMetadata(
-            editingTransactionId,
+            activeEditingId,
             {
               description: data.description,
               category_id: data.categoryId,
@@ -123,7 +200,7 @@ export function TransactionDialog() {
             splitsChanged ? replacement : undefined
           )
         } else {
-          await update(editingTransactionId, data)
+          await update(activeEditingId, data)
         }
         invalidateTransactionPage('edit')
         toast.success(t('toast.updated'))
@@ -144,6 +221,7 @@ export function TransactionDialog() {
         toast.success(t('toast.created'))
       }
       setIsDirty(false)
+      committedClose.current = true
       closeTransactionDialog()
     } catch (error) {
       toast.error(getErrorMessage(error, t('toast.error')))
@@ -153,7 +231,7 @@ export function TransactionDialog() {
   }
 
   const handleRequestClose = () => {
-    if (isLoading) return
+    if (isLoading || deleteOpen || classificationOpen || identityOpen) return
     if (isDirty) {
       setConfirmDiscardOpen(true)
       return
@@ -161,8 +239,49 @@ export function TransactionDialog() {
     closeTransactionDialog()
   }
 
+  const handleDelete = async () => {
+    if (!activeEditingId || isLoading || isDirty) return
+    setIsLoading(true)
+    try {
+      await remove(activeEditingId)
+      invalidateTransactionPage('delete')
+      toast.success(t('toast.deleted'))
+      setDeleteOpen(false)
+      committedClose.current = true
+      closeTransactionDialog()
+    } catch (error) {
+      toast.error(getErrorMessage(error, t('toast.error')))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const refreshAfterIdentity = () => {
+    if (!identityChanged.current) return
+    identityChanged.current = false
+    // The nested dialog has closed; keep its launcher mounted through focus restoration.
+    setTimeout(() => {
+      const summary = document.querySelector<HTMLElement>('[data-transaction-details-summary]')
+      summary?.focus()
+      refreshInspection()
+    }, 0)
+  }
+
+  const refreshInspection = () => {
+    if (
+      !activeEditingId ||
+      isDirty ||
+      !currentSession.current.open ||
+      currentSession.current.id !== activeEditingId
+    )
+      return
+    invalidateTransactionPage('review')
+    void loadEditingTransaction(activeEditingId, true)
+  }
+
+  const protectedRow = loadedTransaction && transactionProtection(loadedTransaction)
   const canRenderEditForm =
-    !isEditing || (editLoadState === 'ready' && loadedTransaction?.id === editingTransactionId)
+    !isEditing || (editLoadState === 'ready' && loadedTransaction?.id === activeEditingId)
 
   return (
     <>
@@ -205,9 +324,9 @@ export function TransactionDialog() {
               </Button>
             </div>
           )}
-          {canRenderEditForm && (
+          {canRenderEditForm && !protectedRow && (
             <TransactionForm
-              key={editingTransactionId || 'new'}
+              key={`form-${activeEditingId || 'new'}`}
               transaction={loadedTransaction ?? undefined}
               initialSplits={loadedSplits}
               metadataOnly={
@@ -222,8 +341,54 @@ export function TransactionDialog() {
               onDirtyChange={setIsDirty}
             />
           )}
+          {isEditing && editLoadState === 'ready' && loadedTransaction && (
+            <TransactionInspection
+              key={`inspection-${loadedTransaction.id}`}
+              transaction={loadedTransaction}
+              onClassify={() => setClassificationOpen(true)}
+              onIdentityChanged={() => {
+                identityChanged.current = true
+                invalidateTransactionPage('review')
+              }}
+              onIdentityClosed={refreshAfterIdentity}
+              onIdentityOpenChange={setIdentityOpen}
+              onDelete={() => setDeleteOpen(true)}
+              actionsDisabled={
+                isLoading || isDirty || deleteOpen || classificationOpen || identityOpen
+              }
+              dirty={isDirty}
+            />
+          )}
         </DialogContent>
       </Dialog>
+      <ConsumptionClassificationDialog
+        transactionId={classificationOpen ? activeEditingId : null}
+        open={classificationOpen}
+        onOpenChange={(open) => {
+          setClassificationOpen(open)
+          if (!open && classificationChanged.current) {
+            classificationChanged.current = false
+            setTimeout(refreshInspection, 0)
+          }
+        }}
+        onChanged={() => {
+          classificationChanged.current = true
+          invalidateTransactionPage('review')
+        }}
+      />
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          if (!isLoading) setDeleteOpen(open)
+        }}
+        title={t('deleteTransaction')}
+        description={t('deleteConfirm')}
+        confirmLabel={tCommon('actions.delete')}
+        cancelLabel={tCommon('actions.cancel')}
+        variant="destructive"
+        isLoading={isLoading}
+        onConfirm={handleDelete}
+      />
       <ConfirmDialog
         open={confirmDiscardOpen}
         onOpenChange={setConfirmDiscardOpen}
@@ -234,7 +399,13 @@ export function TransactionDialog() {
         variant="destructive"
         onConfirm={() => {
           setConfirmDiscardOpen(false)
-          closeTransactionDialog()
+          setIsDirty(false)
+          if (requestedId !== undefined) {
+            const next = requestedId
+            setRequestedId(undefined)
+            setSessionId(next ?? 'new')
+            openTransactionDialog(next ?? undefined)
+          } else closeTransactionDialog()
         }}
       />
     </>

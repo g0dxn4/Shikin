@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { classificationCatalog } from '@shikin/finance-core'
 import { Transactions } from '../transactions'
+import { transactionDateBounds } from '@/lib/transaction-date-presets'
 import type { TransactionPageResult, TransactionPageRow } from '@/lib/transaction-query'
 
 vi.mock('react-i18next', () => ({
@@ -520,151 +521,59 @@ describe('Transactions', () => {
     expect(window.localStorage.getItem('shikin.transactions.view')).toBe('timeline')
   })
 
-  it('keeps transaction details mounted under classification and restores its launcher focus', async () => {
-    setRows([makeRow()])
-    const user = userEvent.setup()
-    render(<Transactions />)
-
-    await user.click(screen.getByRole('button', { name: /^Coffee/ }))
-    const classify = screen.getByRole('button', { name: 'actions.classify' })
-    await user.click(classify)
-    expect(await screen.findByRole('dialog')).toHaveTextContent('dialog.title')
-    expect(screen.getByRole('heading', { name: 'Coffee', hidden: true })).toBeInTheDocument()
-
-    await user.keyboard('{Escape}')
-    await waitFor(() => expect(classify).toHaveFocus())
-    expect(screen.getByRole('heading', { name: 'Coffee' })).toBeVisible()
-
-    await user.click(classify)
-    await user.selectOptions(await screen.findByLabelText('fields.role'), 'builtin:purchase')
-    await user.click(await screen.findByRole('button', { name: 'actions.save' }))
-    await waitFor(() =>
-      expect(mockSetConsumption).toHaveBeenCalledWith({
-        transactionId: 'tx-1',
-        splitId: null,
-        role: 'purchase',
-        referencedPurchaseId: null,
-      })
-    )
-    expect(mockInvalidate).toHaveBeenCalledWith('review')
-    await user.click(screen.getByRole('button', { name: 'actions.done' }))
-    await waitFor(() => expect(classify).toHaveFocus())
-    expect(screen.getByRole('heading', { name: 'Coffee' })).toBeVisible()
-  })
-
-  it('keeps large-money ledger details reachable in the wrapped mobile row layout', async () => {
-    setRows([
-      makeRow({
-        id: 'large-staged',
-        amount: 987654321,
-        description: 'A long staged transaction description',
-        status: 'pending',
-        ledger_treatment: 'staged_no_balance_impact',
-      }),
-    ])
-    const user = userEvent.setup()
-    render(<Transactions />)
-    await user.selectOptions(screen.getByLabelText('views.label'), 'ledger')
-
-    const details = screen
-      .getAllByRole('button', { name: /^A long staged transaction description/ })
-      .find((button) => button.classList.contains('min-h-11'))!
-    expect(details).toHaveClass('min-h-11', 'min-w-0', 'w-full')
-    expect(
-      screen.getAllByText('-$9,876,543.21').some((amount) => amount.classList.contains('block'))
-    ).toBe(true)
-    await user.click(details)
-    expect(
-      screen.getByRole('heading', { name: 'A long staged transaction description' })
-    ).toBeVisible()
-  })
-
-  it('opens native transaction details while preserving edit actions', async () => {
+  it('opens the same global edit session from timeline row and pencil', async () => {
     setRows([makeRow({ id: 'page-2-row', description: 'Page two record' })], 75)
     const user = userEvent.setup()
     render(<Transactions />)
-
     await user.click(screen.getByRole('button', { name: /^Page two record/ }))
-    expect(screen.getByRole('dialog')).toHaveTextContent('Page two record')
-    await user.click(screen.getByRole('button', { name: 'editTransaction' }))
-    expect(mockOpenTransactionDialog).toHaveBeenCalledWith('page-2-row')
+    await user.click(screen.getByRole('button', { name: 'Edit Page two record' }))
+    expect(mockOpenTransactionDialog).toHaveBeenNthCalledWith(1, 'page-2-row')
+    expect(mockOpenTransactionDialog).toHaveBeenNthCalledWith(2, 'page-2-row')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  it('mounts legacy import identity for eligible unbound rows and closes stale details after change', async () => {
-    setRows([
-      makeRow({
-        id: 'eligible',
-        description: 'Eligible coffee',
-        import_source: null,
-        import_external_id: null,
-        import_fingerprint: null,
-        import_content_fingerprint: null,
-        transaction_kind: 'standard',
-        is_archived: 0,
-      }),
-    ])
+  it('opens the same edit session from desktop and mobile ledger descriptions and pencil', async () => {
+    setRows([makeRow({ id: 'ledger-row', description: 'Ledger coffee' })])
     const user = userEvent.setup()
     render(<Transactions />)
-
-    await user.click(screen.getByRole('button', { name: /^Eligible coffee/ }))
-    const action = screen.getByRole('button', { name: 'identity.action' })
-    expect(action).toBeVisible()
-    expect(action).toHaveClass('min-h-11')
-    await user.click(action)
-    await waitFor(() =>
-      expect(screen.queryByRole('heading', { name: 'Eligible coffee' })).not.toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('views.label'), 'ledger')
+    const descriptions = Array.from(document.querySelectorAll('button')).filter(
+      (button) =>
+        button.textContent?.includes('Ledger coffee') && !button.getAttribute('aria-label')
     )
+    expect(descriptions).toHaveLength(2)
+    expect(descriptions[1]).toHaveClass('min-h-11', 'min-w-0', 'w-full')
+    for (const button of descriptions) await user.click(button)
+    for (const button of screen.getAllByRole('button', { name: 'Edit Ledger coffee' }))
+      await user.click(button)
+    expect(mockOpenTransactionDialog).toHaveBeenCalledTimes(4)
+    for (const call of mockOpenTransactionDialog.mock.calls) expect(call).toEqual(['ledger-row'])
   })
 
-  it('hides legacy import identity unless the page row is an eligible active ordinary unbound row', async () => {
-    setRows([
-      makeRow({ id: 'missing', description: 'Missing projection' }),
-      makeRow({
-        id: 'bound',
-        description: 'Already bound',
-        import_source: 'Bank',
-        import_external_id: 'x',
-        import_fingerprint: '{id}',
-      }),
-      makeRow({
-        id: 'bridge',
-        description: 'Bridge row',
-        import_source: null,
-        import_external_id: null,
-        import_fingerprint: null,
-        transaction_kind: 'reconciliation_bridge',
-      }),
-      makeRow({
-        id: 'immutable',
-        description: 'Immutable import',
-        import_source: null,
-        import_external_id: null,
-        import_fingerprint: null,
-        import_content_fingerprint: 'sha256:abc',
-      }),
-      makeRow({
-        id: 'archived',
-        description: 'Archived row',
-        import_source: null,
-        import_external_id: null,
-        import_fingerprint: null,
-        is_archived: 1,
-      }),
-    ])
+  it('selects actual calendar windows and retains legacy URL labels and custom filters', async () => {
+    setRows([makeRow()])
     const user = userEvent.setup()
     render(<Transactions />)
-
-    for (const name of [
-      /^Missing projection/,
-      /^Already bound/,
-      /^Bridge row/,
-      /^Immutable import/,
-      /^Archived row/,
-    ]) {
-      await user.click(screen.getByRole('button', { name }))
-      expect(screen.queryByRole('button', { name: 'identity.action' })).not.toBeInTheDocument()
-      await user.click(screen.getByRole('button', { name: 'Close' }))
-      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    const date = screen.getByLabelText('filters.dateRange') as HTMLSelectElement
+    for (const preset of ['this-month', 'three-months', 'six-months', 'this-year', 'all']) {
+      await user.selectOptions(date, preset)
+      expect(date.value).toBe(preset)
+      expect(mockUseQuery).toHaveBeenLastCalledWith(
+        expect.objectContaining(
+          transactionDateBounds(preset as Parameters<typeof transactionDateBounds>[0])
+        )
+      )
     }
+    const legacy = transactionDateBounds('90-days')
+    window.history.replaceState(
+      null,
+      '',
+      `/transactions?dateFrom=${legacy.dateFrom}&dateTo=${legacy.dateTo}`
+    )
+    act(() => window.dispatchEvent(new PopStateEvent('popstate')))
+    expect(date.value).toBe('90-days')
+    expect(window.location.search).not.toContain('datePreset=')
+    await user.selectOptions(date, 'custom')
+    expect(screen.getByLabelText('filters.from')).toBeInTheDocument()
   })
 })

@@ -95,7 +95,11 @@
     "activeAdvanced": "Filtros avanzados activos",
     "remove": "Quitar filtro",
     "dates": {
-      "all": "Todas las fechas",
+      "all": "Todo el tiempo",
+      "this-month": "Este mes",
+      "three-months": "3 meses",
+      "six-months": "6 meses",
+      "this-year": "Este año",
       "month": "Mes actual",
       "30-days": "Últimos 30 días",
       "90-days": "Últimos 90 días",
@@ -318,6 +322,8 @@
     "addDescription": "Registra un ingreso, gasto, transferencia o división.",
     "editDescription": "Cargar el registro actual evita editar datos obsoletos.",
     "loading": "Cargando transacción",
+    "archived": "Las transacciones archivadas requieren su flujo de trabajo específico.",
+    "saveOrDiscard": "Guarda o descarta los cambios antes de usar otras acciones.",
     "notFound": "Transacción no encontrada",
     "notFoundDescription": "Este registro puede haberse eliminado o archivado.",
     "loadError": "No se pudo cargar esta transacción",
@@ -327,6 +333,7 @@
     "discard": "Descartar"
   },
   "detail": {
+    "details": "Detalles y evidencia",
     "notes": "Notas",
     "reference": "Referencia"
   },

@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { TransactionDialog } from '../transaction-dialog'
 import type { TransactionPageRow } from '@/lib/transaction-query'
+import { classificationCatalog } from '@shikin/finance-core'
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -20,22 +21,48 @@ vi.mock('@/components/shared/confirm-dialog', () => ({
     open,
     title,
     onConfirm,
+    isLoading,
   }: {
     open: boolean
     title: string
     onConfirm: () => void
+    isLoading?: boolean
   }) =>
     open ? (
       <div data-testid="discard-confirm">
         <span>{title}</span>
-        <button onClick={onConfirm}>Discard</button>
+        <button disabled={isLoading} onClick={onConfirm}>
+          Confirm action
+        </button>
       </div>
     ) : null,
 }))
 
+const { mockReadIdentity, mockPreviewIdentity, mockBindIdentity } = vi.hoisted(() => ({
+  mockReadIdentity: vi.fn(),
+  mockPreviewIdentity: vi.fn(),
+  mockBindIdentity: vi.fn(),
+}))
+vi.mock('@/lib/import-identity-service', () => ({
+  readLegacyImportIdentityTransaction: mockReadIdentity,
+  previewLegacyImportIdentity: mockPreviewIdentity,
+  bindLegacyImportIdentity: mockBindIdentity,
+}))
 const mockCloseTransactionDialog = vi.fn()
+const mockOpenTransactionDialog = vi.fn()
+const { mockReadConsumptionContext, mockSetConsumption } = vi.hoisted(() => ({
+  mockReadConsumptionContext: vi.fn(),
+  mockSetConsumption: vi.fn(),
+}))
+vi.mock('@/lib/consumption-service', () => ({
+  readConsumptionClassificationContext: mockReadConsumptionContext,
+  setConsumptionClassification: mockSetConsumption,
+  clearConsumptionClassification: vi.fn(),
+}))
 const mockAdd = vi.fn()
 const mockUpdate = vi.fn()
+const mockCorrectMetadata = vi.fn()
+const mockRemove = vi.fn()
 const mockGetTransactionById = vi.fn()
 const mockInvalidateTransactionPage = vi.fn()
 
@@ -46,6 +73,7 @@ vi.mock('@/stores/ui-store', () => ({
     transactionDialogOpen: true,
     editingTransactionId: mockEditingTransactionId,
     closeTransactionDialog: mockCloseTransactionDialog,
+    openTransactionDialog: mockOpenTransactionDialog,
   }),
 }))
 
@@ -54,8 +82,12 @@ vi.mock('@/stores/transaction-store', () => ({
     add: mockAdd,
     addWithSplits: vi.fn(),
     update: mockUpdate,
+    correctMetadata: mockCorrectMetadata,
+    remove: mockRemove,
   }),
 }))
+
+vi.mock('@/lib/split-service', () => ({ getSplits: vi.fn().mockResolvedValue([]) }))
 
 vi.mock('@/lib/transaction-query', () => ({
   getTransactionById: (id: string) => mockGetTransactionById(id),
@@ -111,8 +143,213 @@ const mockTransaction: TransactionPageRow = {
 describe('TransactionDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockCorrectMetadata.mockResolvedValue(undefined)
+    mockRemove.mockResolvedValue(undefined)
     mockEditingTransactionId = null
     mockGetTransactionById.mockResolvedValue(mockTransaction)
+    mockReadConsumptionContext.mockResolvedValue({
+      transaction: mockTransaction,
+      allocations: [
+        {
+          transactionId: 'tx-edit',
+          splitId: null,
+          amountCentavos: 2500,
+          categoryId: null,
+          categoryName: null,
+          classification: null,
+        },
+      ],
+      purchaseOptions: [],
+      classificationTypes: classificationCatalog([], []),
+    })
+    mockSetConsumption.mockResolvedValue({ id: 'classification' })
+    mockReadIdentity.mockResolvedValue({ ...mockTransaction, status: 'posted' })
+    mockPreviewIdentity.mockResolvedValue({
+      previewToken: 'token',
+      binding: { importSource: 'bank', importExternalId: 'abc' },
+    })
+    mockBindIdentity.mockResolvedValue({ refreshIncomplete: false })
+  })
+
+  it('inspects the fetched row, protects workflow rows and permits ordinary transfers', async () => {
+    mockEditingTransactionId = 'tx-edit'
+    mockGetTransactionById.mockResolvedValueOnce({
+      ...mockTransaction,
+      transaction_kind: 'reconciliation_bridge',
+      source: 'statement',
+      status: 'pending',
+    })
+    const { unmount } = render(<TransactionDialog />)
+    expect(await screen.findByText('review.protected.workflow')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'actions.save' })).not.toBeInTheDocument()
+    await userEvent.setup().click(screen.getByText('detail.details'))
+    expect(screen.getByText('statement')).toBeInTheDocument()
+    expect(screen.getByText('tx-edit')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'deleteTransaction' })).not.toBeInTheDocument()
+    unmount()
+    mockGetTransactionById.mockResolvedValueOnce({
+      ...mockTransaction,
+      type: 'transfer',
+      transfer_to_account_id: 'acc-2',
+    })
+    render(<TransactionDialog />)
+    expect(await screen.findByRole('button', { name: 'actions.save' })).toBeInTheDocument()
+  })
+
+  it.each([
+    ['archived', { is_archived: 1 }],
+    ['matched', { matched_transaction_id: 'other' }],
+    ['receivable', { is_receivable_payment: 1 }],
+    ['reconciliation', { is_reconciliation_adjustment: 1 }],
+    ['completed placeholder', { is_placeholder: 1, placeholder_status: 'completed' }],
+  ])('offers inspection but no generic form or delete for %s rows', async (_, patch) => {
+    mockEditingTransactionId = 'tx-edit'
+    mockGetTransactionById.mockResolvedValueOnce({ ...mockTransaction, ...patch })
+    render(<TransactionDialog />)
+    await userEvent.setup().click(await screen.findByText('detail.details'))
+    expect(screen.getByText('tx-edit')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'actions.save' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'deleteTransaction' })).not.toBeInTheDocument()
+  })
+
+  it('keeps split/finalized financial fields locked and uses metadata correction', async () => {
+    mockEditingTransactionId = 'tx-edit'
+    mockGetTransactionById.mockResolvedValueOnce({
+      ...mockTransaction,
+      has_splits: 1,
+      is_finalized_statement: 1,
+    })
+    render(<TransactionDialog />)
+    const save = await screen.findByRole('button', { name: 'actions.save' })
+    await userEvent.setup().click(save)
+    await waitFor(() => expect(mockCorrectMetadata).toHaveBeenCalled())
+    expect(mockUpdate).not.toHaveBeenCalled()
+  })
+
+  it('does not expose secondary mutations for a dirty form', async () => {
+    mockEditingTransactionId = 'tx-edit'
+    render(<TransactionDialog />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByText('detail.details'))
+    expect(screen.getByRole('button', { name: 'deleteTransaction' })).toBeEnabled()
+    await user.type(screen.getByLabelText('form.description'), ' changed')
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'deleteTransaction' })).toBeDisabled()
+    )
+    expect(screen.getByText('dialog.saveOrDiscard')).toBeInTheDocument()
+  })
+
+  it('confirms deletion, invalidates on success, and retains the dialog after failure', async () => {
+    mockEditingTransactionId = 'tx-edit'
+    mockRemove.mockRejectedValueOnce(new Error('Denied'))
+    render(<TransactionDialog />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByText('detail.details'))
+    await user.click(screen.getByRole('button', { name: 'deleteTransaction' }))
+    fireEvent.click(screen.getByText('Confirm action'))
+    await waitFor(() => expect(mockRemove).toHaveBeenCalledWith('tx-edit'))
+    expect(mockCloseTransactionDialog).not.toHaveBeenCalled()
+    expect(mockInvalidateTransactionPage).not.toHaveBeenCalledWith('delete')
+    fireEvent.click(screen.getByText('Confirm action'))
+    await waitFor(() => expect(mockInvalidateTransactionPage).toHaveBeenCalledWith('delete'))
+    expect(mockCloseTransactionDialog).toHaveBeenCalled()
+  })
+
+  it('keeps classification nested under the dialog and returns focus to its launcher after save', async () => {
+    mockEditingTransactionId = 'tx-edit'
+    render(<TransactionDialog />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByText('detail.details'))
+    const classify = screen.getByRole('button', { name: 'actions.classify' })
+    await user.click(classify)
+    expect(await screen.findByRole('dialog', { name: 'dialog.title' })).toBeInTheDocument()
+    await user.selectOptions(await screen.findByLabelText('fields.role'), 'builtin:purchase')
+    await user.click(screen.getByRole('button', { name: 'actions.save' }))
+    await waitFor(() => expect(mockSetConsumption).toHaveBeenCalled())
+    await user.click(screen.getByRole('button', { name: 'actions.done' }))
+    await waitFor(() => expect(classify).toHaveFocus())
+    expect(mockInvalidateTransactionPage).toHaveBeenCalledWith('review')
+    expect(mockGetTransactionById).toHaveBeenCalledTimes(2)
+  })
+
+  it('uses the fetched identity projections, not missing cache fields, for legacy binding eligibility', async () => {
+    mockEditingTransactionId = 'tx-edit'
+    mockGetTransactionById.mockResolvedValueOnce({
+      ...mockTransaction,
+      import_source: null,
+      import_external_id: null,
+      import_fingerprint: null,
+      import_content_fingerprint: null,
+    })
+    render(<TransactionDialog />)
+    await userEvent.setup().click(await screen.findByText('detail.details'))
+    expect(screen.getByRole('button', { name: 'identity.action' })).toBeInTheDocument()
+  })
+
+  it('binds an eligible legacy identity through nested review then refreshes by ID', async () => {
+    mockEditingTransactionId = 'tx-edit'
+    const eligible = {
+      ...mockTransaction,
+      import_source: null,
+      import_external_id: null,
+      import_fingerprint: null,
+      import_content_fingerprint: null,
+    }
+    mockGetTransactionById
+      .mockResolvedValueOnce(eligible)
+      .mockResolvedValue({ ...eligible, import_source: 'bank', import_external_id: 'abc' })
+    render(<TransactionDialog />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByText('detail.details'))
+    await user.click(screen.getByRole('button', { name: 'identity.action' }))
+    expect(await screen.findByRole('heading', { name: 'identity.title' })).toBeInTheDocument()
+    await user.type(screen.getByLabelText('identity.sourceNamespace'), 'bank')
+    await user.type(screen.getByLabelText('identity.externalId'), 'abc')
+    await user.click(screen.getByText('identity.verifiedConfirmation'))
+    await user.click(screen.getByRole('button', { name: 'identity.review' }))
+    await user.click(await screen.findByRole('button', { name: 'identity.confirm' }))
+    await waitFor(() =>
+      expect(mockBindIdentity).toHaveBeenCalledWith(
+        expect.objectContaining({ transactionId: 'tx-edit', previewToken: 'token' })
+      )
+    )
+    await waitFor(() => expect(mockGetTransactionById).toHaveBeenCalledTimes(2))
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'identity.action' })).not.toBeInTheDocument()
+    )
+    expect(mockInvalidateTransactionPage).toHaveBeenCalledWith('review')
+  })
+
+  it('ignores stale by-ID lookup results after switching an unmodified session', async () => {
+    let resolveOld!: (row: TransactionPageRow) => void
+    mockEditingTransactionId = 'tx-edit'
+    mockGetTransactionById
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOld = resolve
+          })
+      )
+      .mockResolvedValueOnce({ ...mockTransaction, id: 'new-id', description: 'New record' })
+    const { rerender } = render(<TransactionDialog />)
+    await waitFor(() => expect(mockGetTransactionById).toHaveBeenCalledWith('tx-edit'))
+    mockEditingTransactionId = 'new-id'
+    rerender(<TransactionDialog />)
+    expect(await screen.findByDisplayValue('New record')).toBeInTheDocument()
+    await act(async () => resolveOld(mockTransaction))
+    expect(screen.queryByDisplayValue('Test expense')).not.toBeInTheDocument()
+  })
+
+  it('blocks a dirty session replacement until discard is confirmed', async () => {
+    mockEditingTransactionId = 'tx-edit'
+    const { rerender } = render(<TransactionDialog />)
+    await userEvent.setup().type(await screen.findByLabelText('form.description'), ' changed')
+    mockEditingTransactionId = 'another-row'
+    rerender(<TransactionDialog />)
+    await waitFor(() => expect(mockOpenTransactionDialog).toHaveBeenCalledWith('tx-edit'))
+    expect(screen.getByText('dialog.discardTitle')).toBeInTheDocument()
+    expect(mockGetTransactionById).not.toHaveBeenCalledWith('another-row')
+    expect(screen.getByLabelText('form.description')).toHaveValue('Test expense changed')
   })
 
   it('prevents dialog closure while mutation is in flight', async () => {
@@ -137,7 +374,7 @@ describe('TransactionDialog', () => {
       expect(screen.getByRole('button', { name: '...' })).toBeInTheDocument()
     })
 
-    // Verify close was NOT called while loading
+    await user.click(screen.getByRole('button', { name: 'Close' }))
     expect(mockCloseTransactionDialog).not.toHaveBeenCalled()
 
     await act(async () => {
@@ -157,7 +394,7 @@ describe('TransactionDialog', () => {
     expect(mockCloseTransactionDialog).not.toHaveBeenCalled()
 
     await act(async () => {
-      screen.getByText('Discard').click()
+      screen.getByText('Confirm action').click()
     })
 
     expect(mockCloseTransactionDialog).toHaveBeenCalled()

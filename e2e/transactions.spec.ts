@@ -140,7 +140,26 @@ test.describe('Transactions', () => {
     await expect(display.locator('option[value="review"]')).toHaveText('Review')
     await expect(page.getByRole('button', { name: 'All' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Expense' })).toBeVisible()
-    await expect(page.getByLabel('Date range')).toBeVisible()
+    const dateRange = page.getByLabel('Date range')
+    await expect(dateRange).toBeVisible()
+    for (const [value, label] of [
+      ['this-month', 'This month'],
+      ['three-months', '3 months'],
+      ['six-months', '6 months'],
+      ['this-year', 'This year'],
+      ['all', 'All time'],
+    ]) {
+      await expect(dateRange.locator(`option[value="${value}"]`)).toHaveText(label)
+    }
+    await dateRange.selectOption('three-months')
+    const start = await page.evaluate(() => {
+      const now = new Date()
+      const date = new Date(now.getFullYear(), now.getMonth() - 2, 1)
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`
+    })
+    await expect.poll(() => new URL(page.url()).searchParams.get('dateFrom')).toBe(start)
+    await dateRange.selectOption('all')
+    await expect.poll(() => new URL(page.url()).searchParams.has('dateFrom')).toBe(false)
     if ((page.viewportSize()?.width ?? 0) < 768) {
       await page.getByRole('button', { name: 'Advanced filters' }).click()
     }
@@ -191,6 +210,15 @@ test.describe('Transactions', () => {
     await expect(page.getByText(qaName('Lunch'))).toBeVisible()
     await expect(page.getByText('-$12.34')).toBeVisible()
 
+    await page
+      .getByRole('button', { name: new RegExp(qaName('Lunch')) })
+      .first()
+      .click()
+    const rowDialog = page.getByRole('dialog', { name: /Edit Transaction/i })
+    await expect(rowDialog.getByLabel('Description')).toHaveValue(qaName('Lunch'))
+    await rowDialog.getByText('Details and evidence').click()
+    await expect(rowDialog.getByText('Reference')).toBeVisible()
+    await rowDialog.getByRole('button', { name: 'Close' }).click()
     await page.getByLabel(`Edit ${qaName('Lunch')}`).click()
 
     const editDialog = page.getByRole('dialog', { name: /Edit Transaction/i })
@@ -223,7 +251,18 @@ test.describe('Transactions', () => {
     await expect(page.getByText(qaName('Lunch Edited'))).toBeVisible()
     await expect(page.getByText('-$45.67')).toBeVisible()
 
-    await page.getByLabel(`Delete ${qaName('Lunch Edited')}`).click()
+    await page
+      .getByRole('button', { name: new RegExp(qaName('Lunch Edited')) })
+      .first()
+      .click()
+    await page
+      .getByRole('dialog', { name: /Edit Transaction/i })
+      .getByText('Details and evidence')
+      .click()
+    await page
+      .getByRole('dialog', { name: /Edit Transaction/i })
+      .getByRole('button', { name: 'Delete Transaction' })
+      .click()
     await page.getByRole('button', { name: 'Delete' }).last().click()
     await expect(page.getByText(qaName('Lunch Edited'))).not.toBeVisible()
     await expect

@@ -27,22 +27,41 @@ import {
 export function LegacyImportIdentityAction({
   transactionId,
   onChanged,
+  disabled,
+  onClosed,
+  onActionOpenChange,
 }: {
   transactionId: string
   onChanged?: () => void
+  disabled?: boolean
+  onClosed?: () => void
+  onActionOpenChange?: (open: boolean) => void
 }) {
   const { t } = useTranslation('accountHistory')
   const [open, setOpen] = useState(false)
   return (
     <>
-      <Button type="button" variant="outline" className="min-h-11" onClick={() => setOpen(true)}>
+      <Button
+        type="button"
+        variant="outline"
+        className="min-h-11"
+        disabled={disabled}
+        onClick={() => {
+          setOpen(true)
+          onActionOpenChange?.(true)
+        }}
+      >
         <Fingerprint aria-hidden="true" />
         {t('identity.action')}
       </Button>
       <LegacyImportIdentityDialog
         transactionId={transactionId}
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={(next) => {
+          setOpen(next)
+          onActionOpenChange?.(next)
+          if (!next) onClosed?.()
+        }}
         onChanged={onChanged}
       />
     </>
@@ -182,6 +201,7 @@ function LegacyImportIdentityDialog({
     <Dialog
       open={open}
       onOpenChange={(next) => {
+        if (!next && busy) return
         if (!next) requestRef.current += 1
         onOpenChange(next)
       }}
@@ -301,6 +321,7 @@ function LegacyImportIdentityDialog({
             variant="ghost"
             className="max-w-full min-w-0"
             onClick={() => onOpenChange(false)}
+            disabled={busy}
           >
             {t('cancel')}
           </Button>

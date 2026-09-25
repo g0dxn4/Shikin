@@ -95,7 +95,11 @@
     "activeAdvanced": "Active advanced filters",
     "remove": "Remove filter",
     "dates": {
-      "all": "All dates",
+      "all": "All time",
+      "this-month": "This month",
+      "three-months": "3 months",
+      "six-months": "6 months",
+      "this-year": "This year",
       "month": "Current month",
       "30-days": "Last 30 days",
       "90-days": "Last 90 days",
@@ -318,6 +322,8 @@
     "addDescription": "Record an income, expense, transfer, or split.",
     "editDescription": "Loading the current ledger record protects against editing stale data.",
     "loading": "Loading transaction",
+    "archived": "Archived transactions require their dedicated workflow.",
+    "saveOrDiscard": "Save or discard changes before using other actions.",
     "notFound": "Transaction not found",
     "notFoundDescription": "This record may have been removed or archived.",
     "loadError": "Couldn’t load this transaction",
@@ -327,6 +333,7 @@
     "discard": "Discard"
   },
   "detail": {
+    "details": "Details and evidence",
     "notes": "Notes",
     "reference": "Reference"
   },

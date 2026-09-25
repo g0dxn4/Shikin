@@ -94,11 +94,11 @@ describe('OverviewNetWorth comparison controls', () => {
 
     await user.click(screen.getByLabelText('overview.comparison.secondAccount'))
     await user.click(await screen.findByRole('option', { name: 'Savings' }))
-    await user.click(screen.getByRole('button', { name: 'overview.period.1y' }))
+    await user.click(screen.getByRole('button', { name: 'overview.period.ytd' }))
     await user.click(screen.getByRole('button', { name: 'overview.comparison.change' }))
 
     expect(screen.getByLabelText('overview.comparison.secondAccount')).toHaveTextContent('Savings')
-    expect(screen.getByRole('button', { name: 'overview.period.1y' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'overview.period.ytd' })).toHaveAttribute(
       'aria-pressed',
       'true'
     )
@@ -108,15 +108,21 @@ describe('OverviewNetWorth comparison controls', () => {
     )
 
     await user.click(screen.getByRole('tab', { name: 'overview.views.summary' }))
-    expect(screen.queryByLabelText('overview.comparison.firstAccount')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('combobox', { name: 'overview.comparison.firstAccount' })
+    ).not.toBeInTheDocument()
+    expect(document.getElementById('overview-comparison-panel')).toHaveAttribute('inert')
+    expect(document.getElementById('overview-history-panel')).toHaveAttribute('aria-hidden', 'true')
+    expect(document.getElementById('overview-summary-panel')).not.toHaveAttribute('inert')
 
     await user.click(screen.getByRole('tab', { name: 'overview.views.history' }))
     expect(screen.getByText('overview.netWorthHistory')).toBeInTheDocument()
+    expect(document.getElementById('overview-history-panel')).not.toHaveAttribute('inert')
 
     await user.click(screen.getByRole('tab', { name: 'overview.views.comparison' }))
     expect(screen.getByLabelText('overview.comparison.firstAccount')).toHaveTextContent('Nu Card')
     expect(screen.getByLabelText('overview.comparison.secondAccount')).toHaveTextContent('Savings')
-    expect(screen.getByRole('button', { name: 'overview.period.1y' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'overview.period.ytd' })).toHaveAttribute(
       'aria-pressed',
       'true'
     )
@@ -132,5 +138,74 @@ describe('OverviewNetWorth comparison controls', () => {
       'aria-pressed',
       'false'
     )
+    expect(document.getElementById('overview-comparison-panel')).not.toHaveAttribute('inert')
+    expect(screen.queryByRole('button', { name: 'overview.period.1y' })).not.toBeInTheDocument()
+  })
+})
+
+describe('OverviewNetWorth shared panel geometry and evidence', () => {
+  it('keeps all three panels in the same grid cell without exposing inactive controls', async () => {
+    const user = userEvent.setup()
+    renderOverview()
+    const panels = ['summary', 'history', 'comparison'].map(
+      (name) => document.getElementById(`overview-${name}-panel`)!
+    )
+    expect(new Set(panels.map((panel) => panel.parentElement))).toHaveProperty('size', 1)
+    expect(panels[0].parentElement).toHaveClass('grid')
+    for (const panel of panels) expect(panel).toHaveClass('col-start-1', 'row-start-1')
+    expect(screen.queryByRole('button', { name: 'overview.period.ytd' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'overview.views.history' }))
+    expect(screen.getByRole('button', { name: 'overview.period.ytd' })).toBeInTheDocument()
+    expect(panels[0]).toHaveAttribute('inert')
+    expect(panels[2]).toHaveAttribute('inert')
+  })
+
+  it('shows the income/spending visual only with explicit complete nonzero raw evidence', () => {
+    const { rerender } = renderOverview()
+    expect(
+      screen.queryByRole('img', { name: /overview.cashFlowComparison/ })
+    ).not.toBeInTheDocument()
+    const props = {
+      currentComplete: false,
+      currentAmount: null,
+      currentCurrency: null,
+      income: '—',
+      spent: '—',
+      saved: '—',
+      savedTone: 'muted' as const,
+      cashFlowLabel: 'This month',
+      currentAsOfLabel: '',
+      historyAsOfLabel: '',
+      history: [],
+      historyComplete: false,
+      period: 'month' as const,
+      onPeriodChange: () => {},
+      historyCurrency: null,
+      emptyHistoryMessage: 'No history',
+      accounts: [] as Account[],
+      preferredCurrency: null,
+    }
+    rerender(<OverviewNetWorth {...props} incomeAmount={100} spentAmount={50} />)
+    expect(
+      screen.queryByRole('img', { name: /overview.cashFlowComparison/ })
+    ).not.toBeInTheDocument()
+    rerender(
+      <OverviewNetWorth {...props} incomeAmount={0} spentAmount={0} cashFlowCurrency="USD" />
+    )
+    expect(
+      screen.queryByRole('img', { name: /overview.cashFlowComparison/ })
+    ).not.toBeInTheDocument()
+    rerender(
+      <OverviewNetWorth
+        {...props}
+        income="$1.00"
+        spent="$0.50"
+        incomeAmount={100}
+        spentAmount={50}
+        cashFlowCurrency="USD"
+      />
+    )
+    expect(screen.getByRole('img', { name: /overview.cashFlowComparison/ })).toBeInTheDocument()
+    expect(document.getElementById('overview-comparison-panel')).toHaveAttribute('inert')
   })
 })

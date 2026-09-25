@@ -42,6 +42,7 @@
     "historyPeriod": "Rango de patrimonio neto",
     "asOf": "Al {{date}}",
     "changeOverPeriod": "{{delta}} en {{period}}",
+    "cashFlowComparison": "Ingresos {{income}}; gastos {{spent}} este mes.",
     "cashFlow": "Flujo de caja",
     "cashFlowSubtitle": "Ingresos y gastos por mes",
     "currentMonthCashFlow": "Flujo de caja de {{month}}",
@@ -80,10 +81,12 @@
       "noHistory": "No hay historial de saldo registrado para {{accounts}} en este rango."
     },
     "period": {
-      "3m": "3M",
-      "6m": "6M",
+      "month": "Este mes",
+      "ytd": "Este año",
+      "3m": "3 meses",
+      "6m": "6 meses",
       "1y": "1A",
-      "all": "TODO"
+      "all": "Todo el historial"
     }
   },
   "currency": {

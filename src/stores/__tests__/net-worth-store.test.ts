@@ -290,6 +290,25 @@ describe('ownership-aware net-worth store', () => {
     ])
   })
 
+  it('queries calendar month and year-to-date starts while retaining rolling 3m/6m/1y', async () => {
+    mockQuery.mockResolvedValue([])
+    const today = (await import('dayjs')).default()
+    for (const [period, expected] of [
+      ['month', today.startOf('month').format('YYYY-MM-DD')],
+      ['ytd', today.startOf('year').format('YYYY-MM-DD')],
+      ['3m', today.subtract(3, 'month').format('YYYY-MM-DD')],
+      ['6m', today.subtract(6, 'month').format('YYYY-MM-DD')],
+      ['1y', today.subtract(1, 'year').format('YYYY-MM-DD')],
+    ]) {
+      await useNetWorthStore.getState().loadHistory(period)
+      expect(mockQuery).toHaveBeenLastCalledWith(
+        expect.stringContaining('date >= ?'),
+        period === 'month' || period === 'ytd' ? [expected, today.format('YYYY-MM-DD')] : [expected]
+      )
+      expect(useNetWorthStore.getState().historyRequestedPeriod).toBe(period)
+    }
+  })
+
   it('keeps same-currency historical stocks as separate dated native evidence', async () => {
     useCurrencyStore.setState({ mainCurrency: 'MXN', preferredCurrency: 'MXN', manualRates: [] })
     mockQuery.mockResolvedValueOnce([

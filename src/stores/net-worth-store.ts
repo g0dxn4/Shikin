@@ -290,17 +290,27 @@ export const useNetWorthStore = create<NetWorthState>((set, get) => ({
     try {
       const now = dayjs()
       const startDate =
-        period === '3m'
-          ? now.subtract(3, 'month').format('YYYY-MM-DD')
-          : period === '6m'
-            ? now.subtract(6, 'month').format('YYYY-MM-DD')
-            : period === '1y'
-              ? now.subtract(1, 'year').format('YYYY-MM-DD')
-              : '1970-01-01'
-      const rows = await query<NetWorthSnapshot>(
-        'SELECT * FROM net_worth_snapshots WHERE date >= ? ORDER BY date ASC, id ASC',
-        [startDate]
-      )
+        period === 'month'
+          ? now.startOf('month').format('YYYY-MM-DD')
+          : period === 'ytd'
+            ? now.startOf('year').format('YYYY-MM-DD')
+            : period === '3m'
+              ? now.subtract(3, 'month').format('YYYY-MM-DD')
+              : period === '6m'
+                ? now.subtract(6, 'month').format('YYYY-MM-DD')
+                : period === '1y'
+                  ? now.subtract(1, 'year').format('YYYY-MM-DD')
+                  : '1970-01-01'
+      const rows =
+        period === 'month' || period === 'ytd'
+          ? await query<NetWorthSnapshot>(
+              'SELECT * FROM net_worth_snapshots WHERE date >= ? AND date <= ? ORDER BY date ASC, id ASC',
+              [startDate, now.format('YYYY-MM-DD')]
+            )
+          : await query<NetWorthSnapshot>(
+              'SELECT * FROM net_worth_snapshots WHERE date >= ? ORDER BY date ASC, id ASC',
+              [startDate]
+            )
       if (!requestIsCurrent()) return
 
       const nativeSnapshots = snapshotNativeEvidence(rows)

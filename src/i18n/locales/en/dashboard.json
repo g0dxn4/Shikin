@@ -42,6 +42,7 @@
     "historyPeriod": "Net worth date range",
     "asOf": "As of {{date}}",
     "changeOverPeriod": "{{delta}} over {{period}}",
+    "cashFlowComparison": "Income {{income}}; spending {{spent}} this month.",
     "cashFlow": "Cash flow",
     "cashFlowSubtitle": "Income and spending by month",
     "currentMonthCashFlow": "{{month}} cash flow",
@@ -80,10 +81,12 @@
       "noHistory": "No recorded balance history for {{accounts}} in this date range."
     },
     "period": {
-      "3m": "3M",
-      "6m": "6M",
+      "month": "This month",
+      "ytd": "This year",
+      "3m": "3 months",
+      "6m": "6 months",
       "1y": "1Y",
-      "all": "ALL"
+      "all": "All time"
     }
   },
   "currency": {

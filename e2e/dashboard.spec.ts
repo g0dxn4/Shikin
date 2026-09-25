@@ -43,6 +43,49 @@ test.describe('Dashboard', () => {
     await expect(page.getByLabel('Second account')).toHaveCount(0)
   })
 
+  test('keeps the finance panel and following content stationary across tabs on desktop and mobile', async ({
+    page,
+  }) => {
+    for (const width of [1280, 390, 320]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto('/')
+      await page.waitForLoadState('networkidle')
+      const measures = []
+      for (const tab of ['Summary', 'History', 'Compare accounts']) {
+        await page.getByRole('tab', { name: tab }).click()
+        measures.push(
+          await page.locator('#overview-summary-panel').evaluate((summary) => {
+            const panels = ['summary', 'history', 'comparison'].map(
+              (name) => document.getElementById(`overview-${name}-panel`)!
+            )
+            const card = summary.closest('.native-panel')!
+            const following = card.nextElementSibling!
+            return {
+              card: [card.getBoundingClientRect().width, card.getBoundingClientRect().height],
+              panels: panels.map((panel) => [
+                panel.getBoundingClientRect().width,
+                panel.getBoundingClientRect().height,
+              ]),
+              followingTop: following.getBoundingClientRect().top,
+              hiddenInert: panels
+                .filter((panel) => panel.getAttribute('aria-hidden') === 'true')
+                .every((panel) => panel.hasAttribute('inert')),
+            }
+          })
+        )
+      }
+      expect(measures[0].card).toEqual(measures[1].card)
+      expect(measures[1].card).toEqual(measures[2].card)
+      expect(measures[0].followingTop).toBe(measures[1].followingTop)
+      expect(measures[1].followingTop).toBe(measures[2].followingTop)
+      for (const measure of measures) {
+        expect(measure.panels[0]).toEqual(measure.panels[1])
+        expect(measure.panels[1]).toEqual(measure.panels[2])
+        expect(measure.hiddenInert).toBe(true)
+      }
+    }
+  })
+
   test('metric cards display values', async ({ page }) => {
     await page.goto('/')
     await page.waitForLoadState('networkidle')

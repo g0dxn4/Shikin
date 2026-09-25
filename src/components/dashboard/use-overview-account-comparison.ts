@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import dayjs from 'dayjs'
 import { query } from '@/lib/database'
 import { getErrorMessage } from '@/lib/errors'
 import type { NetWorthPeriod } from '@/components/dashboard/overview-net-worth'
@@ -28,7 +29,7 @@ export async function loadOverviewAccountHistory(
   period: NetWorthPeriod,
   endDate: string
 ): Promise<AccountBalanceSnapshot[]> {
-  const { startDate } = getOverviewComparisonDateRange(period)
+  const { startDate } = getOverviewComparisonDateRange(period, dayjs(endDate))
   if (startDate) {
     return query<AccountBalanceSnapshot>(
       'SELECT date, balance FROM account_balance_history WHERE account_id = ? AND date >= ? AND date <= ? ORDER BY date ASC',

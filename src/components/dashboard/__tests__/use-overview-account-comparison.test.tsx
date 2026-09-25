@@ -22,6 +22,18 @@ describe('overview account comparison history loading', () => {
       ['account-a', expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), '2026-04-18']
     )
 
+    await loadOverviewAccountHistory('account-a', 'month', '2026-04-18')
+    expect(mockQuery).toHaveBeenLastCalledWith(
+      expect.stringContaining('account_id = ? AND date >= ? AND date <= ?'),
+      ['account-a', '2026-04-01', '2026-04-18']
+    )
+
+    await loadOverviewAccountHistory('account-a', 'ytd', '2026-04-18')
+    expect(mockQuery).toHaveBeenLastCalledWith(
+      expect.stringContaining('account_id = ? AND date >= ? AND date <= ?'),
+      ['account-a', '2026-01-01', '2026-04-18']
+    )
+
     await loadOverviewAccountHistory('account-b', 'all', '2026-04-18')
     expect(mockQuery).toHaveBeenLastCalledWith(
       expect.stringContaining('account_id = ? AND date <= ?'),

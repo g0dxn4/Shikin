@@ -31,8 +31,6 @@ import {
 import { useOverviewAccountComparison } from '@/components/dashboard/use-overview-account-comparison'
 import { useCurrencyStore } from '@/stores/currency-store'
 
-const PERIODS: NetWorthPeriod[] = ['3m', '6m', '1y', 'all']
-
 interface OverviewAccountComparisonProps {
   accounts: Account[]
   preferredCurrency?: string
@@ -46,6 +44,8 @@ interface OverviewAccountComparisonProps {
   mode: ComparisonDisplayMode
   onModeChange: (mode: ComparisonDisplayMode) => void
 }
+
+const PERIODS: NetWorthPeriod[] = ['month', '3m', '6m', 'ytd', 'all']
 
 const INVALID_COMPARISON: PreparedAccountComparison = {
   complete: false,
@@ -147,7 +147,7 @@ export function OverviewAccountComparison({
 
   return (
     <div className="min-w-0">
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="grid grid-cols-2 items-end gap-3 sm:flex sm:flex-wrap">
         <AccountSelect
           id="overview-compare-first"
           label={t('overview.comparison.firstAccount')}
@@ -162,20 +162,24 @@ export function OverviewAccountComparison({
           accounts={accounts}
           onChange={(value) => selectAccount('second', value)}
         />
-        <SegmentedControl
-          label={t('overview.comparison.display')}
-          value={mode}
-          items={[
-            { value: 'balance', label: t('overview.comparison.balance') },
-            { value: 'change', label: t('overview.comparison.change') },
-          ]}
-          onChange={(value) => onModeChange(value as ComparisonDisplayMode)}
-        />
-        <PeriodControl
-          period={period}
-          onChange={onPeriodChange}
-          label={t('overview.comparison.period')}
-        />
+        <div className="col-span-2 min-w-0">
+          <SegmentedControl
+            label={t('overview.comparison.display')}
+            value={mode}
+            items={[
+              { value: 'balance', label: t('overview.comparison.balance') },
+              { value: 'change', label: t('overview.comparison.change') },
+            ]}
+            onChange={(value) => onModeChange(value as ComparisonDisplayMode)}
+          />
+        </div>
+        <div className="col-span-2 min-w-0">
+          <PeriodControl
+            period={period}
+            onChange={onPeriodChange}
+            label={t('overview.comparison.period')}
+          />
+        </div>
       </div>
 
       <p className="text-muted-foreground mt-3 text-xs">
@@ -200,7 +204,7 @@ export function OverviewAccountComparison({
 
       {isLoading ? (
         <div
-          className="bg-muted mt-4 flex h-64 items-center justify-center rounded-xl"
+          className="bg-muted mt-4 flex h-48 items-center justify-center rounded-xl"
           role="status"
         >
           <p className="text-muted-foreground text-sm">{t('overview.comparison.loading')}</p>
@@ -226,7 +230,7 @@ export function OverviewAccountComparison({
           <p className="text-muted-foreground mt-1 text-xs">{conversionMessage}</p>
         </div>
       ) : hasNoHistory ? (
-        <div className="bg-muted mt-4 flex h-64 items-center justify-center rounded-xl px-5 text-center">
+        <div className="bg-muted mt-4 flex h-48 items-center justify-center rounded-xl px-5 text-center">
           <p className="text-muted-foreground text-sm">
             {t('overview.comparison.noHistory', {
               accounts: [
@@ -240,7 +244,7 @@ export function OverviewAccountComparison({
         </div>
       ) : (
         <>
-          <dl className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <dl className="mt-4 grid grid-cols-2 gap-2">
             <ComparisonValue
               name={firstAccount.name}
               value={firstLatest?.value ?? null}
@@ -283,7 +287,7 @@ export function OverviewAccountComparison({
             />
           </dl>
           <div
-            className="mt-3 h-64 min-w-0 sm:h-72"
+            className="mt-3 h-48 min-w-0 sm:h-72"
             role="img"
             aria-label={t('overview.comparison.chartLabel', {
               first: firstAccount.name,
@@ -398,7 +402,7 @@ function AccountSelect({
   onChange: (value: string) => void
 }) {
   return (
-    <div className="min-w-0 flex-1 basis-44">
+    <div className="min-w-0 sm:flex-1 sm:basis-44">
       <label htmlFor={id} className="text-muted-foreground mb-1 block text-xs font-medium">
         {label}
       </label>
@@ -472,7 +476,7 @@ function PeriodControl({
     <div>
       <span className="text-muted-foreground mb-1 block text-xs font-medium">{label}</span>
       <div
-        className="border-border bg-muted flex min-h-10 rounded-lg border p-0.5"
+        className="border-border bg-muted flex min-h-10 max-w-full overflow-x-auto rounded-lg border p-0.5"
         role="group"
         aria-label={label}
       >
@@ -483,7 +487,7 @@ function PeriodControl({
             aria-pressed={period === item}
             onClick={() => onChange(item)}
             className={cn(
-              'min-w-10 rounded-md px-2 py-2 text-xs font-semibold',
+              'min-w-10 shrink-0 rounded-md px-2 py-2 text-xs font-semibold',
               period === item
                 ? 'bg-surface text-foreground shadow-sm'
                 : 'text-muted-foreground hover:text-foreground'
@@ -515,10 +519,12 @@ function ComparisonValue({
   lastRecordedLabel: string | null
 }) {
   return (
-    <div className="border-border rounded-lg border px-3 py-2">
-      <dt className="text-muted-foreground text-xs">{name}</dt>
+    <div className="border-border min-w-0 rounded-lg border px-3 py-2">
+      <dt className="text-muted-foreground text-xs break-words">{name}</dt>
       <dd className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className="font-semibold tabular-nums">{formatOptionalMoney(value, currency)}</span>
+        <span className="min-w-0 font-semibold break-all tabular-nums">
+          {formatOptionalMoney(value, currency)}
+        </span>
         {recordedAt && lastRecordedLabel ? (
           <span className="text-muted-foreground text-xs font-normal">{lastRecordedLabel}</span>
         ) : null}

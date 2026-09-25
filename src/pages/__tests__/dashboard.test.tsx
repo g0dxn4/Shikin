@@ -338,7 +338,7 @@ describe('Dashboard', () => {
       'aria-selected',
       'true'
     )
-    expect(screen.queryByLabelText('overview.chartTitle')).not.toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: 'overview.chartTitle' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: 'overview.views.history' }))
     expect(screen.getByLabelText('overview.chartTitle')).toBeInTheDocument()
@@ -360,7 +360,7 @@ describe('Dashboard', () => {
     await userEvent.setup().click(screen.getByRole('tab', { name: 'overview.views.history' }))
 
     expect(screen.getByRole('alert')).toHaveTextContent('overview.historyUnavailable')
-    expect(screen.queryByLabelText('overview.chartTitle')).not.toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: 'overview.chartTitle' })).not.toBeInTheDocument()
     expect(screen.queryByText('$123.45')).not.toBeInTheDocument()
     expect(screen.queryByText('$678.90')).not.toBeInTheDocument()
   })
@@ -376,7 +376,7 @@ describe('Dashboard', () => {
     await userEvent.setup().click(screen.getByRole('tab', { name: 'overview.views.history' }))
 
     expect(screen.getByRole('alert')).toHaveTextContent('overview.historyUnavailable')
-    expect(screen.queryByLabelText('overview.chartTitle')).not.toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: 'overview.chartTitle' })).not.toBeInTheDocument()
     expect(screen.queryByText('$123.45')).not.toBeInTheDocument()
     expect(screen.queryByText('$678.90')).not.toBeInTheDocument()
   })
@@ -579,13 +579,20 @@ describe('Dashboard', () => {
       expect(warning).not.toHaveTextContent('currency.missingRates')
     })
 
-    it('does not render account preview cards', () => {
+    it('does not render account preview cards', async () => {
       render(<Dashboard />)
+      await waitFor(() =>
+        expect(
+          within(document.getElementById('overview-comparison-panel')!).queryByText(
+            'overview.comparison.loading'
+          )
+        ).not.toBeInTheDocument()
+      )
 
-      expect(screen.queryByText('Checking')).not.toBeInTheDocument()
-      expect(screen.queryByText('Savings')).not.toBeInTheDocument()
-      expect(screen.queryByText('Credit')).not.toBeInTheDocument()
-      expect(screen.queryByText('Extra')).not.toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Checking' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Savings' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Credit' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Extra' })).not.toBeInTheDocument()
     })
 
     it('renders zero and negative complete net worth without inventing a mixed total', async () => {
@@ -859,6 +866,25 @@ describe('Dashboard', () => {
   })
 
   describe('goals', () => {
+    it('groups up to three distinct goal sections with a single internal heading and action', () => {
+      mockGoals = Array.from({ length: 4 }, (_, index) => ({
+        id: `goal-${index}`,
+        name: `Goal ${index}`,
+        icon: 'target',
+        progress: 25,
+        current_amount: 10_000,
+        target_amount: 40_000,
+        currency: 'USD',
+      }))
+      render(<Dashboard />)
+      const card = screen.getByRole('heading', { name: 'goals.title' }).closest('section')!
+      expect(card).toContainElement(screen.getByRole('link', { name: 'goals.viewAll' }))
+      expect(card.querySelectorAll('.native-panel')).toHaveLength(0)
+      expect(card).toHaveTextContent('Goal 0')
+      expect(card).toHaveTextContent('Goal 2')
+      expect(card).not.toHaveTextContent('Goal 3')
+    })
+
     it('keeps progress in the goal durable native denomination across authority changes', () => {
       mockGoals = [
         {
@@ -1228,11 +1254,19 @@ describe('Dashboard', () => {
       await act(async () => resolveCalculation?.())
 
       await waitFor(() => {
-        expect(screen.getByText('$11,950.00')).toBeInTheDocument()
+        expect(
+          within(screen.getByRole('tabpanel', { name: 'overview.views.summary' })).getByText(
+            '$11,950.00'
+          )
+        ).toBeInTheDocument()
       })
 
       await userEvent.setup().click(screen.getByRole('tab', { name: 'overview.views.history' }))
-      expect(screen.getAllByText('$11,950.00')).toHaveLength(2)
+      expect(
+        within(screen.getByRole('tabpanel', { name: 'overview.views.history' })).getAllByText(
+          '$11,950.00'
+        )
+      ).toHaveLength(2)
     })
 
     it('withholds a stale current amount when calculation fails', async () => {

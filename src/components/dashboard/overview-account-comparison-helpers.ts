@@ -52,6 +52,8 @@ export interface PreparedAccountComparison {
 export function getOverviewComparisonDateRange(period: NetWorthPeriod, today: Dayjs = dayjs()) {
   const endDate = today.format('YYYY-MM-DD')
   if (period === 'all') return { startDate: null, endDate }
+  if (period === 'month') return { startDate: today.startOf('month').format('YYYY-MM-DD'), endDate }
+  if (period === 'ytd') return { startDate: today.startOf('year').format('YYYY-MM-DD'), endDate }
   const amount = period === '3m' ? 3 : period === '6m' ? 6 : 1
   const unit = period === '1y' ? 'year' : 'month'
   return { startDate: today.subtract(amount, unit).format('YYYY-MM-DD'), endDate }

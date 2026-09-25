@@ -17,10 +17,10 @@ import type { Account } from '@/types/database'
 import type { ComparisonDisplayMode } from '@/components/dashboard/overview-account-comparison-helpers'
 import { OverviewAccountComparison } from '@/components/dashboard/overview-account-comparison'
 
-export type NetWorthPeriod = '3m' | '6m' | '1y' | 'all'
+export type NetWorthPeriod = 'month' | '3m' | '6m' | 'ytd' | '1y' | 'all'
 type OverviewView = 'summary' | 'history' | 'comparison'
 
-const NET_WORTH_PERIODS: NetWorthPeriod[] = ['3m', '6m', '1y', 'all']
+const OVERVIEW_PERIODS: NetWorthPeriod[] = ['month', '3m', '6m', 'ytd', 'all']
 const OVERVIEW_VIEWS: OverviewView[] = ['summary', 'history', 'comparison']
 
 export interface OverviewHistoryPoint {
@@ -36,6 +36,9 @@ interface OverviewNetWorthProps {
   income: string
   incomeDetail?: string
   spent: string
+  incomeAmount?: number
+  spentAmount?: number
+  cashFlowCurrency?: string | null
   spentDetail?: string
   saved: string
   savingsRate?: string
@@ -62,6 +65,9 @@ export function OverviewNetWorth({
   income,
   incomeDetail,
   spent,
+  incomeAmount,
+  spentAmount,
+  cashFlowCurrency,
   spentDetail,
   saved,
   savingsRate,
@@ -91,6 +97,16 @@ export function OverviewNetWorth({
   const hasCurrentValue = currentComplete && currentAmount !== null && currentCurrency !== null
   const hasHistory = historyComplete && historyCurrency !== null
   const hasChange = hasCurrentValue && hasHistory && history.length > 1
+  const hasCashFlowVisual =
+    incomeAmount !== undefined &&
+    spentAmount !== undefined &&
+    cashFlowCurrency !== null &&
+    cashFlowCurrency !== undefined &&
+    Number.isFinite(incomeAmount) &&
+    Number.isFinite(spentAmount) &&
+    incomeAmount >= 0 &&
+    spentAmount >= 0 &&
+    Math.max(incomeAmount, spentAmount) > 0
 
   const selectTabFromKeyboard = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     let nextIndex: number | null = null
@@ -143,15 +159,20 @@ export function OverviewNetWorth({
         </div>
       </div>
 
-      {view === 'summary' ? (
+      <div className="grid min-w-0">
         <div
           id="overview-summary-panel"
           role="tabpanel"
           aria-labelledby="overview-summary-tab"
-          className="p-4 sm:p-6"
+          className={cn(
+            'col-start-1 row-start-1 flex min-w-0 flex-col justify-center p-4 sm:p-6',
+            view !== 'summary' && 'pointer-events-none invisible'
+          )}
+          aria-hidden={view !== 'summary'}
+          inert={view !== 'summary'}
         >
           <p className="text-muted-foreground mb-3 text-xs">{cashFlowLabel}</p>
-          <MetricStrip aria-label={t('overview.views.summary')}>
+          <MetricStrip className="[&_strong]:break-words" aria-label={t('overview.views.summary')}>
             <MetricItem
               label={t('overview.netWorth')}
               value={
@@ -195,15 +216,52 @@ export function OverviewNetWorth({
               }
             />
           </MetricStrip>
+          {hasCashFlowVisual ? (
+            <div
+              className="border-border mt-6 border-t pt-5"
+              role="img"
+              aria-label={t('overview.cashFlowComparison', {
+                income: formatMoney(incomeAmount, cashFlowCurrency),
+                spent: formatMoney(spentAmount, cashFlowCurrency),
+              })}
+            >
+              <p className="mb-3 text-sm font-semibold">{t('overview.cashFlow')}</p>
+              {(
+                [
+                  { label: t('cards.income'), amount: incomeAmount, color: 'bg-chart-1' },
+                  { label: t('cards.spent'), amount: spentAmount, color: 'bg-chart-2' },
+                ] as const
+              ).map(({ label, amount, color }) => (
+                <div
+                  key={label}
+                  className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-xs"
+                >
+                  <span>{label}</span>
+                  <span className="min-w-0 text-right break-all tabular-nums">
+                    {formatMoney(amount, cashFlowCurrency)}
+                  </span>
+                  <div className="bg-muted col-span-2 h-2 overflow-hidden rounded-full">
+                    <div
+                      className={cn('h-full rounded-full', color)}
+                      style={{ width: `${(amount / Math.max(incomeAmount, spentAmount)) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
-      ) : null}
 
-      {view === 'history' ? (
         <div
           id="overview-history-panel"
           role="tabpanel"
           aria-labelledby="overview-history-tab"
-          className="min-w-0 p-4 sm:p-6"
+          className={cn(
+            'col-start-1 row-start-1 min-w-0 p-4 sm:p-6',
+            view !== 'history' && 'pointer-events-none invisible'
+          )}
+          aria-hidden={view !== 'history'}
+          inert={view !== 'history'}
         >
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -252,7 +310,7 @@ export function OverviewNetWorth({
           ) : history.length > 1 ? (
             <>
               <div
-                className="mt-3 h-64 min-w-0 sm:h-72"
+                className="mt-3 h-48 min-w-0 sm:h-72"
                 role="img"
                 aria-label={t('overview.chartTitle')}
               >
@@ -328,19 +386,22 @@ export function OverviewNetWorth({
               </details>
             </>
           ) : (
-            <div className="bg-muted mt-4 flex h-64 items-center justify-center rounded-xl px-4 text-center">
+            <div className="bg-muted mt-4 flex h-48 items-center justify-center rounded-xl px-4 text-center">
               <p className="text-muted-foreground text-sm">{emptyHistoryMessage}</p>
             </div>
           )}
         </div>
-      ) : null}
 
-      {view === 'comparison' ? (
         <div
           id="overview-comparison-panel"
           role="tabpanel"
           aria-labelledby="overview-comparison-tab"
-          className="min-w-0 p-4 sm:p-6"
+          className={cn(
+            'col-start-1 row-start-1 min-w-0 p-4 sm:p-6',
+            view !== 'comparison' && 'pointer-events-none invisible'
+          )}
+          aria-hidden={view !== 'comparison'}
+          inert={view !== 'comparison'}
         >
           {preferredCurrency ? (
             <OverviewAccountComparison
@@ -365,7 +426,7 @@ export function OverviewNetWorth({
             </div>
           )}
         </div>
-      ) : null}
+      </div>
     </NativePanel>
   )
 }
@@ -380,18 +441,18 @@ function HistoryPeriodControl({
   const { t } = useTranslation('dashboard')
   return (
     <div
-      className="border-border bg-muted flex rounded-lg border p-0.5"
+      className="border-border bg-muted flex max-w-full overflow-x-auto rounded-lg border p-0.5"
       role="group"
       aria-label={t('overview.historyPeriod')}
     >
-      {NET_WORTH_PERIODS.map((item) => (
+      {OVERVIEW_PERIODS.map((item) => (
         <button
           key={item}
           type="button"
           aria-pressed={period === item}
           onClick={() => onPeriodChange(item)}
           className={cn(
-            'min-h-10 min-w-10 rounded-md px-2 py-2 text-xs font-semibold sm:min-h-0 sm:min-w-11 sm:py-1.5',
+            'min-h-10 min-w-10 shrink-0 rounded-md px-2 py-2 text-xs font-semibold sm:min-h-0 sm:min-w-11 sm:py-1.5',
             period === item
               ? 'bg-surface text-foreground shadow-sm'
               : 'text-muted-foreground hover:text-foreground'

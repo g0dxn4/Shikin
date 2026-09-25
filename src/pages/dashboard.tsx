@@ -289,6 +289,9 @@ export function Dashboard() {
             : cashFlowUnavailableLabel
         }
         spent={cashFlowDisplayable ? formatMoney(monthlyExpenses, cashFlowDisplayCurrency) : '—'}
+        incomeAmount={cashFlowDisplayable ? monthlyIncome : undefined}
+        spentAmount={cashFlowDisplayable ? monthlyExpenses : undefined}
+        cashFlowCurrency={cashFlowDisplayable ? cashFlowDisplayCurrency : null}
         spentDetail={
           cashFlowDisplayable
             ? `${expenseDelta >= 0 ? '+' : '-'}${formatMoney(Math.abs(expenseDelta), cashFlowDisplayCurrency)} vs last month`
@@ -411,10 +414,13 @@ export function Dashboard() {
       </div>
 
       {goals.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-base font-semibold">
-              <Target size={16} className="text-accent mr-2 inline" />
+        <NativePanel className="p-4 sm:p-5" aria-labelledby="overview-goals-heading">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2
+              id="overview-goals-heading"
+              className="flex items-center gap-2 text-base font-semibold"
+            >
+              <Target size={16} className="text-accent shrink-0" aria-hidden="true" />
               {t('goals.title', { ns: 'goals', defaultValue: 'Savings Goals' })}
             </h2>
             <Button variant="ghost" size="sm" asChild>
@@ -424,7 +430,7 @@ export function Dashboard() {
               </Link>
             </Button>
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="border-border mt-4 grid grid-cols-1 divide-y border-t sm:grid-cols-3 sm:divide-y-0">
             {goals.slice(0, 3).map((goal) => {
               const progressColor =
                 goal.progress >= 75
@@ -433,10 +439,13 @@ export function Dashboard() {
                     ? 'var(--color-warning)'
                     : 'var(--color-destructive)'
               return (
-                <NativePanel key={goal.id} className="p-5">
+                <div
+                  key={goal.id}
+                  className="min-w-0 py-4 sm:border-l sm:px-4 sm:py-2 sm:first:border-l-0 sm:first:pl-0"
+                >
                   <div className="mb-2 flex items-center gap-2">
                     <GoalIcon icon={goal.icon} size={16} className="shrink-0" />
-                    <h3 className="truncate text-sm font-semibold">{goal.name}</h3>
+                    <h3 className="min-w-0 text-sm font-semibold break-words">{goal.name}</h3>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="relative h-10 w-10 shrink-0">
@@ -468,20 +477,20 @@ export function Dashboard() {
                       </span>
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-foreground text-sm font-medium">
+                      <p className="text-foreground text-sm font-medium break-all tabular-nums">
                         {formatMoney(goal.current_amount, goal.currency)}
                       </p>
-                      <p className="text-muted-foreground text-xs">
+                      <p className="text-muted-foreground text-xs break-all tabular-nums">
                         {t('goals.of', { defaultValue: 'of' })}{' '}
                         {formatMoney(goal.target_amount, goal.currency)}
                       </p>
                     </div>
                   </div>
-                </NativePanel>
+                </div>
               )
             })}
           </div>
-        </div>
+        </NativePanel>
       )}
     </div>
   )

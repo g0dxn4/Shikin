@@ -19,6 +19,14 @@ const sameCurrency: ConvertToPreferred = (amount, currency) => ({
 describe('overview account comparison helpers', () => {
   it('creates bounded period dates ending today and leaves all-time unbounded at the start', () => {
     const today = dayjs('2026-04-18')
+    expect(getOverviewComparisonDateRange('month', today)).toEqual({
+      startDate: '2026-04-01',
+      endDate: '2026-04-18',
+    })
+    expect(getOverviewComparisonDateRange('ytd', today)).toEqual({
+      startDate: '2026-01-01',
+      endDate: '2026-04-18',
+    })
     expect(getOverviewComparisonDateRange('3m', today)).toEqual({
       startDate: '2026-01-18',
       endDate: '2026-04-18',

@@ -1,9 +1,9 @@
 import { useBudgetDisplay, type DisplayBudget } from '@/components/budgets/use-budget-display'
 import { useCurrencyStore } from '@/stores/currency-store'
-import { PageToolbar, MetricStrip, MetricItem } from '@/components/ui/native-layout'
+import { PageToolbar } from '@/components/ui/native-layout'
 import { useEffect, useState, useMemo, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, Lightbulb, PiggyBank, Plus, Pencil, Trash2 } from 'lucide-react'
+import { PiggyBank, Plus, Pencil, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -15,7 +15,7 @@ import { useUIStore } from '@/stores/ui-store'
 import { useBudgetStore } from '@/stores/budget-store'
 import { formatMoney } from '@/lib/money'
 import { getErrorMessage } from '@/lib/errors'
-import { CashflowBucketsPanel } from '@/components/budgets/cashflow-buckets-panel'
+import { CategorySpendingPanel } from '@/components/budgets/category-spending-panel'
 
 const ConfirmDialog = lazy(() =>
   import('@/components/shared/confirm-dialog').then((m) => ({
@@ -134,44 +134,23 @@ export function Budgets() {
     () => (period === 'all' ? budgets : budgets.filter((budget) => budget.period === period)),
     [budgets, period]
   )
+  const categoryActuals = useMemo(
+    () =>
+      budgets
+        .filter((budget) => budget.category_id !== null)
+        .map((budget) => ({
+          categoryId: budget.category_id!,
+          name: budget.categoryName,
+          currency: budget.currency,
+        })),
+    [budgets]
+  )
   const complete = scopedBudgets.every((budget) => budget.mainComplete)
-  const money = (amount: number) => (complete ? formatMoney(amount, preferredCurrency) : '—')
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [visibleBudgetCount, setVisibleBudgetCount] = useState(BUDGETS_PAGE_SIZE)
 
   const hasInitialLoadError = !!fetchError && budgets.length === 0
-
-  const summary = useMemo(() => {
-    const totalBudgeted = scopedBudgets.reduce((sum, b) => sum + cents(b.mainAmount), 0)
-    const totalSpent = scopedBudgets.reduce((sum, b) => sum + cents(b.mainSpent), 0)
-    const totalRemaining = scopedBudgets.reduce(
-      (sum, b) => sum + Math.max(0, cents(b.mainRemaining)),
-      0
-    )
-    const rawRemaining = totalBudgeted - totalSpent
-    const avgPercent =
-      scopedBudgets.length > 0
-        ? Math.round(
-            scopedBudgets.reduce((sum, b) => sum + (b.percentUsed ?? 0), 0) / scopedBudgets.length
-          )
-        : 0
-    const overBudgetCount = scopedBudgets.filter(
-      (b) => b.percentUsed !== null && b.percentUsed > 100
-    ).length
-    const warningCount = scopedBudgets.filter(
-      (b) => b.percentUsed !== null && b.percentUsed > 80 && b.percentUsed <= 100
-    ).length
-    return {
-      totalBudgeted,
-      totalSpent,
-      totalRemaining,
-      rawRemaining,
-      avgPercent,
-      overBudgetCount,
-      warningCount,
-    }
-  }, [scopedBudgets])
 
   const progressBudgets = useMemo(
     () => [...scopedBudgets].sort((a, b) => (b.percentUsed ?? -1) - (a.percentUsed ?? -1)),
@@ -179,45 +158,6 @@ export function Budgets() {
   )
 
   const visibleProgressBudgets = progressBudgets.slice(0, visibleBudgetCount)
-
-  const intelligence = useMemo(() => {
-    const overBudget = scopedBudgets.find(
-      (budget) => budget.percentUsed !== null && budget.percentUsed > 100
-    )
-    if (overBudget) {
-      return {
-        tone: 'danger' as const,
-        title: t('intelligence.overTitle'),
-        message: t('intelligence.overMessage', {
-          category: overBudget.categoryName,
-          amount: formatMoney(Math.abs(overBudget.remaining ?? 0), preferredCurrency),
-        }),
-      }
-    }
-
-    const nearLimit = scopedBudgets.find(
-      (budget) => budget.percentUsed !== null && budget.percentUsed > 80
-    )
-    if (nearLimit) {
-      return {
-        tone: 'warning' as const,
-        title: t('intelligence.warningTitle'),
-        message: t('intelligence.warningMessage', {
-          category: nearLimit.categoryName,
-          percent: nearLimit.percentUsed,
-          amount: formatMoney(Math.max(0, nearLimit.remaining ?? 0), preferredCurrency),
-        }),
-      }
-    }
-
-    return {
-      tone: 'safe' as const,
-      title: t('intelligence.safeTitle'),
-      message: t('intelligence.safeMessage', {
-        amount: formatMoney(summary.totalRemaining, preferredCurrency),
-      }),
-    }
-  }, [scopedBudgets, summary.totalRemaining, t, preferredCurrency])
 
   useEffect(() => {
     void fetch().catch(() => {})
@@ -242,7 +182,7 @@ export function Budgets() {
       <PageToolbar
         leading={
           <label className="text-muted-foreground flex items-center gap-2 text-xs">
-            {t('form.period')}
+            {t('currentPeriodFilter')}
             <select
               className="bg-background text-foreground border-border min-h-10 rounded-lg border px-3"
               value={period}
@@ -286,14 +226,6 @@ export function Budgets() {
       {isLoading ? (
         <div role="status" aria-busy="true">
           <span className="sr-only">{tCommon('status.loading')}</span>
-          <div className="metric-strip">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="metric-item space-y-2">
-                <Skeleton className="h-3 w-20" />
-                <Skeleton className="h-7 w-28" />
-              </div>
-            ))}
-          </div>
           <div className="flex flex-col gap-3">
             <div className="native-panel space-y-3 p-5 sm:p-6">
               {Array.from({ length: 3 }).map((_, i) => (
@@ -331,17 +263,10 @@ export function Budgets() {
         </div>
       ) : (
         <>
-          <MetricStrip>
-            <MetricItem label={t('hero.totalBudgeted')} value={money(summary.totalBudgeted)} />
-            <MetricItem label={t('hero.totalSpent')} value={money(summary.totalSpent)} />
-            <MetricItem label={t('hero.totalRemaining')} value={money(summary.rawRemaining)} />
-            <MetricItem
-              label={t('hero.overCount')}
-              value={complete ? summary.overBudgetCount : '—'}
-              detail={complete ? `${summary.avgPercent}% ${t('hero.used')}` : undefined}
-            />
-          </MetricStrip>
-
+          <CategorySpendingPanel categories={categoryActuals} />
+          <p className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
+            {t('currentContext')}
+          </p>
           <div className="flex flex-col gap-3">
             <div className="native-panel p-5 sm:p-6">
               <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
@@ -383,61 +308,6 @@ export function Budgets() {
                 className="mt-4"
               />
             </div>
-
-            <div className="native-panel p-4 sm:px-5 sm:py-4">
-              <div className="flex flex-col gap-4 md:flex-row md:items-center md:gap-6">
-                <div className="flex min-w-0 flex-1 items-start gap-3">
-                  <div
-                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl sm:h-10 sm:w-10"
-                    style={{
-                      background:
-                        intelligence.tone === 'danger'
-                          ? 'color-mix(in srgb, var(--color-destructive) 12%, transparent)'
-                          : intelligence.tone === 'warning'
-                            ? 'color-mix(in srgb, var(--color-warning) 12%, transparent)'
-                            : 'color-mix(in srgb, var(--color-success) 12%, transparent)',
-                      color:
-                        intelligence.tone === 'danger'
-                          ? 'var(--color-destructive)'
-                          : intelligence.tone === 'warning'
-                            ? 'var(--color-warning)'
-                            : 'var(--color-success)',
-                    }}
-                  >
-                    {intelligence.tone === 'safe' ? (
-                      <Lightbulb size={18} />
-                    ) : (
-                      <AlertTriangle size={18} />
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <h2 className="text-base font-semibold">{t('intelligence.title')}</h2>
-                    <p className="mt-1 text-sm leading-snug font-semibold">
-                      {complete ? intelligence.title : t('currency.unavailable')}
-                    </p>
-                    <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
-                      {complete ? intelligence.message : t('currency.description')}
-                    </p>
-                  </div>
-                </div>
-                <div className="grid shrink-0 grid-cols-2 gap-3 md:w-56">
-                  <div className="border-border bg-muted/50 rounded-xl border p-3">
-                    <p className="text-muted-foreground text-xs font-bold">{t('status.warning')}</p>
-                    <p className="text-lg font-bold tabular-nums">
-                      {complete ? summary.warningCount : '—'}
-                    </p>
-                  </div>
-                  <div className="border-border bg-muted/50 rounded-xl border p-3">
-                    <p className="text-muted-foreground text-xs font-bold">
-                      {t('status.overBudget')}
-                    </p>
-                    <p className="text-lg font-bold tabular-nums">
-                      {complete ? summary.overBudgetCount : '—'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
 
           <Suspense>
@@ -455,8 +325,6 @@ export function Budgets() {
           </Suspense>
         </>
       )}
-
-      <CashflowBucketsPanel />
     </div>
   )
 }

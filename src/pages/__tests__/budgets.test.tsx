@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+vi.mock('@/components/budgets/category-spending-panel', () => ({
+  CategorySpendingPanel: () => <section aria-label="category actuals" />,
+}))
+
 import { Budgets } from '../budgets'
 
 vi.mock('@/components/budgets/use-budget-display', () => ({
@@ -120,8 +124,7 @@ describe('Budgets', () => {
 
       // Should NOT show error state
       expect(screen.queryByText('error.loadDetailed')).not.toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'buckets.title' })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'buckets.actions.create' })).toBeEnabled()
+      expect(screen.queryByRole('region', { name: 'category actuals' })).not.toBeInTheDocument()
     })
 
     it('calls fetch when retry button is clicked', async () => {
@@ -175,7 +178,7 @@ describe('Budgets', () => {
       const skeletons = document.querySelectorAll('.skeleton')
       expect(skeletons.length).toBeGreaterThan(0)
       expect(document.querySelector('[class*="xl:grid-cols-"]')).not.toBeInTheDocument()
-      expect(document.querySelector('.metric-strip')).toBeInTheDocument()
+      expect(document.querySelector('.native-panel')).toBeInTheDocument()
     })
 
     it('marks loading skeleton container with aria-busy', () => {
@@ -191,7 +194,7 @@ describe('Budgets', () => {
   })
 
   describe('hero section', () => {
-    it('renders hero summary with budget totals', () => {
+    it('renders current-plan rows without a fabricated cross-frequency total', () => {
       mockBudgets = [
         {
           id: 'budget-1',
@@ -219,15 +222,13 @@ describe('Budgets', () => {
 
       render(<Budgets />)
 
-      expect(screen.getByText('hero.totalBudgeted')).toBeInTheDocument()
-      expect(screen.getByText('hero.totalSpent')).toBeInTheDocument()
-      expect(screen.getByText('hero.totalRemaining')).toBeInTheDocument()
+      expect(screen.queryByText('hero.totalBudgeted')).not.toBeInTheDocument()
       expect(screen.getByText('progress.title')).toBeInTheDocument()
-      expect(screen.getByText('intelligence.title')).toBeInTheDocument()
+      expect(screen.getByText('currentContext')).toBeInTheDocument()
       expect(screen.getByText('2 hero.budgetCount')).toBeInTheDocument()
     })
 
-    it('stacks full-width progress above compact budget intelligence', () => {
+    it('keeps current-plan rows distinct from category actuals', () => {
       mockBudgets = [
         {
           id: 'budget-1',
@@ -244,15 +245,13 @@ describe('Budgets', () => {
 
       const { container } = render(<Budgets />)
       const progress = screen.getByRole('heading', { name: 'progress.title' })
-      const intelligence = screen.getByRole('heading', { name: 'intelligence.title' })
+      const actuals = screen.getByRole('region', { name: 'category actuals' })
 
       expect(container.querySelector('[class*="xl:grid-cols-"]')).not.toBeInTheDocument()
       expect(
-        progress.compareDocumentPosition(intelligence) & Node.DOCUMENT_POSITION_FOLLOWING
+        actuals.compareDocumentPosition(progress) & Node.DOCUMENT_POSITION_FOLLOWING
       ).toBeTruthy()
-      expect(screen.getByText('hero.totalBudgeted')).toBeInTheDocument()
-      expect(screen.getByText('status.warning')).toBeInTheDocument()
-      expect(screen.getByText('status.overBudget')).toBeInTheDocument()
+      expect(screen.getByText('currentContext')).toBeInTheDocument()
     })
   })
 

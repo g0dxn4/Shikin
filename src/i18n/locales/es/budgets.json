@@ -82,7 +82,33 @@
     "title": "Sin presupuestos aún",
     "description": "Crea tu primer presupuesto para comenzar a rastrear tus límites de gasto."
   },
-  "scope": "Monedas duraderas del plan · mostrado en {{currency}} · períodos actuales",
+  "scope": "Períodos configurados actuales · monedas duraderas del plan · mostrado en {{currency}}",
+  "currentContext": "Período configurado actual · estado del plan (no del rango de gastos seleccionado)",
+  "currentPeriodFilter": "Período del plan actual",
+  "actual": {
+    "title": "Gastos por categoría",
+    "scope": "Gastos reales solo en categorías con presupuesto activo · sin comparación con límites históricos",
+    "rangeLabel": "Fechas de gastos reales",
+    "presets": {
+      "this-month": "Este mes",
+      "3-months": "3 meses",
+      "6-months": "6 meses",
+      "this-year": "Este año",
+      "all-time": "Todo el tiempo"
+    },
+    "dates": "Del {{start}} al {{end}} · ambos días incluidos",
+    "through": "Todas las fechas registradas hasta el {{end}} · día incluido",
+    "chartHint": "Las barras comparan solo gastos reales completos; no representan límites.",
+    "noMain": "Configura una moneda principal en Ajustes para comparar categorías. Se muestran los importes originales abajo.",
+    "unavailable": "No disponible",
+    "incomplete": "Incompleto: faltan tipos de cambio directos fechados para {{count}} transacción(es)",
+    "native": "Importes originales registrados: {{values}}",
+    "noNative": "Sin importes originales registrados",
+    "emptyCategories": "Agrega un presupuesto para seguir una categoría aquí.",
+    "emptySpending": "No hay gastos elegibles registrados en estas categorías durante estas fechas.",
+    "error": "No se pudieron cargar los gastos por categoría: {{message}}",
+    "retry": "Reintentar"
+  },
   "currency": {
     "unavailable": "Totales no disponibles",
     "description": "Se necesitan los gastos completos y tipos de cambio válidos para mostrar el progreso.",

@@ -7,6 +7,9 @@ vi.mock('@/components/budgets/use-budget-display', () => ({
     error: null,
   }),
 }))
+vi.mock('@/components/budgets/category-spending-panel', () => ({
+  CategorySpendingPanel: () => <section aria-label="category actuals">category-actuals</section>,
+}))
 vi.mock('@/components/budgets/cashflow-buckets-panel', () => ({
   CashflowBucketsPanel: () => <section aria-label="virtual buckets">bucket-panel</section>,
 }))
@@ -16,19 +19,9 @@ vi.mock('@/stores/currency-store', () => ({
 }))
 const budgetStore = vi.hoisted(() => ({
   budgets: [
-    {
-      id: 'budget-1',
-      name: 'Monthly food',
-      categoryName: 'Food',
-      amount: 50_00,
-      spent: 20_00,
-      remaining: 30_00,
-      percentUsed: 40,
-      period: 'monthly',
-    },
+    { id: 'budget-1', name: 'Food', categoryName: 'Food', amount: 5000, period: 'monthly' },
   ] as Array<Record<string, unknown>>,
 }))
-
 vi.mock('@/stores/budget-store', () => ({
   useBudgetStore: () => ({
     budgets: budgetStore.budgets,
@@ -38,40 +31,23 @@ vi.mock('@/stores/budget-store', () => ({
     remove: vi.fn(),
   }),
 }))
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
-}))
+vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 
 import { Budgets } from '../budgets'
 
-describe('Budgets cashflow bucket panel integration', () => {
-  it('mounts the compact panel below existing budget intelligence without a new page title', () => {
-    budgetStore.budgets = [
-      {
-        id: 'budget-1',
-        name: 'Monthly food',
-        categoryName: 'Food',
-        amount: 50_00,
-        spent: 20_00,
-        remaining: 30_00,
-        percentUsed: 40,
-        period: 'monthly',
-      },
-    ]
+describe('Budgets page scope', () => {
+  it('shows category actuals beside current-plan cards but does not mount virtual buckets', () => {
     render(<Budgets />)
-    const intelligence = screen.getByRole('heading', { name: 'intelligence.title' })
-    const buckets = screen.getByRole('region', { name: 'virtual buckets' })
-    expect(
-      intelligence.compareDocumentPosition(buckets) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'category actuals' })).toBeInTheDocument()
+    expect(screen.getByText('currentContext')).toBeInTheDocument()
     expect(screen.getByText('progress.title')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'virtual buckets' })).not.toBeInTheDocument()
   })
 
-  it('still mounts virtual buckets when there are no budgets', () => {
+  it('retains empty budget state without mounting virtual buckets', () => {
     budgetStore.budgets = []
     render(<Budgets />)
     expect(screen.getByText('empty.title')).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'virtual buckets' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'virtual buckets' })).not.toBeInTheDocument()
   })
 })

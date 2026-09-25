@@ -56,7 +56,7 @@ export class ReportingReadError extends Error {
 
 /** Validate eligible rows before a consumer publishes a complete aggregate. */
 export async function assertReportingReadComplete(start?: string, end?: string): Promise<void> {
-  const dateFilter = start && end ? ' AND t.date >= ? AND t.date <= ?' : ''
+  const dateFilter = `${start ? ' AND t.date >= ?' : ''}${end ? ' AND t.date <= ?' : ''}`
   const rows = await query<{
     id: string
     type: string
@@ -72,7 +72,7 @@ export async function assertReportingReadComplete(start?: string, end?: string):
        (SELECT COUNT(*) FROM transaction_splits s WHERE s.transaction_id = t.id
          AND (typeof(s.amount) != 'integer' OR s.amount <= 0)) AS invalid_splits
      FROM transactions t WHERE ${CASH_FLOW_SQL}${dateFilter}`,
-    start && end ? [start, end] : []
+    [...(start ? [start] : []), ...(end ? [end] : [])]
   )
 
   const totals = new Map<string, number>()

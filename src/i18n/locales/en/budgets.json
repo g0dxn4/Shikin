@@ -82,7 +82,33 @@
     "title": "No budgets yet",
     "description": "Create your first budget to start tracking your spending limits."
   },
-  "scope": "Durable plan currencies · displayed in {{currency}} · current periods",
+  "scope": "Current configured periods · durable plan currencies · displayed in {{currency}}",
+  "currentContext": "Current configured period · plan status (not the selected actual-spending range)",
+  "currentPeriodFilter": "Current plan period",
+  "actual": {
+    "title": "Category spending",
+    "scope": "Actual expenses in active budget categories only · no historical budget-limit comparison",
+    "rangeLabel": "Actual dates",
+    "presets": {
+      "this-month": "This month",
+      "3-months": "3 months",
+      "6-months": "6 months",
+      "this-year": "This year",
+      "all-time": "All time"
+    },
+    "dates": "{{start}} through {{end}} · inclusive",
+    "through": "All recorded dates through {{end}} · inclusive",
+    "chartHint": "Bars compare complete actual spending only; no budget targets.",
+    "noMain": "Set a main currency in Settings to see comparable category amounts. Native evidence is shown below.",
+    "unavailable": "Unavailable",
+    "incomplete": "Incomplete: {{count}} transaction(s) lack a dated direct exchange rate",
+    "native": "Recorded native amounts: {{values}}",
+    "noNative": "No native amounts recorded",
+    "emptyCategories": "Add a budget to track a category here.",
+    "emptySpending": "No eligible expenses recorded in these categories for these dates.",
+    "error": "Could not load category spending: {{message}}",
+    "retry": "Try again"
+  },
   "currency": {
     "unavailable": "Totals unavailable",
     "description": "Complete spending data and valid exchange rates are required to display progress.",

@@ -44,21 +44,21 @@ function safeSum(values: readonly number[]): number {
  */
 export async function readBudgetSpending(input: {
   categoryId: string | null
-  start: string
+  start: string | null
   end: string
   currency: string
   rates: readonly DatedExchangeRate[]
 }): Promise<BudgetSpendingRead> {
-  await assertReportingReadComplete(input.start, input.end)
+  await assertReportingReadComplete(input.start ?? undefined, input.end)
   const rows = await query<SpendingAllocationRow>(
     `SELECT t.id AS transaction_id, t.amount, t.currency, t.date, t.category_id,
             s.id AS split_id, s.amount AS split_amount, s.category_id AS split_category_id
      FROM transactions t
      LEFT JOIN transaction_splits s ON s.transaction_id = t.id
      WHERE ${CASH_FLOW_SQL}
-       AND t.type = 'expense' AND t.date >= ? AND t.date <= ?
+       AND t.type = 'expense'${input.start === null ? '' : ' AND t.date >= ?'} AND t.date <= ?
      ORDER BY t.date, t.id, s.id`,
-    [input.start, input.end]
+    input.start === null ? [input.end] : [input.start, input.end]
   )
 
   const grouped = new Map<string, SpendingAllocationRow[]>()

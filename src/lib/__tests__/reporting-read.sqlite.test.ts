@@ -98,6 +98,17 @@ it.each([
   expect(useBudgetStore.getState().budgets).toEqual([])
 })
 
+it('validates an all-time upper bound without rejecting future or omitting old invalid rows', async () => {
+  state.db!.exec(
+    "INSERT INTO transactions (id, type, amount, currency, date) VALUES ('future', 'expense', 100, '', '2027-01-01'), ('old', 'expense', 100, '', '1969-12-31')"
+  )
+  await expect(assertReportingReadComplete(undefined, '2026-06-18')).rejects.toMatchObject({
+    transactionIds: ['old'],
+  })
+  state.db!.exec("UPDATE transactions SET currency = 'USD' WHERE id = 'old'")
+  await expect(assertReportingReadComplete(undefined, '2026-06-18')).resolves.toBeUndefined()
+})
+
 it('actual frontend validation withholds malformed split evidence', async () => {
   state.db!.exec("UPDATE transaction_splits SET amount = 400 WHERE id = 'food-split'")
   await expect(assertReportingReadComplete('2026-06-01', '2026-06-30')).rejects.toMatchObject({

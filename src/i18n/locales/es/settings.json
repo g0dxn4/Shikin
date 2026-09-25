@@ -129,7 +129,8 @@
       "statusError": "No se pudo obtener el estado del servidor web alojado",
       "errorTitle": "Problema con el servidor web alojado",
       "tailscaleTitle": "Comparte con tu tailnet",
-      "tailscaleWarning": "Esto solo está disponible en tu tailnet. Ejecuta tailscale serve reset para detener la exposición."
+      "tailscaleWarning": "Esto solo está disponible en tu tailnet. Ejecuta tailscale serve reset para detener la exposición.",
+      "webSummary": "Disponible en la app de escritorio"
     }
   },
   "updates": {
@@ -198,7 +199,8 @@
     "archive": "Archivar",
     "cancel": "Cancelar",
     "saveRevision": "Crear versión nueva",
-    "saving": "Guardando…"
+    "saving": "Guardando…",
+    "summary": "Nombres versionados; las asignaciones históricas permanecen fijadas."
   },
   "currency": {
     "setupRequiredTitle": "Elige tu moneda principal",
@@ -247,7 +249,13 @@
     "importError": "No se pudo importar el respaldo",
     "reset": "Restablecer Datos",
     "resetWarning": "Esto eliminará permanentemente todos tus datos. Esta acción no se puede deshacer.",
-    "description": "Exporta un respaldo o importa una instantánea de la base de datos. Las importaciones requieren confirmación y reemplazan la base de datos actual."
+    "description": "Exporta un respaldo o importa una instantánea de la base de datos. Las importaciones requieren confirmación y reemplazan la base de datos actual.",
+    "preImportBackupError": "No se pudo crear el respaldo obligatorio antes de importar. Se canceló la importación.",
+    "preImportBackupDownloaded": "Se descargó el respaldo previo a la importación",
+    "importConfirmTitle": "Confirmación de importación destructiva",
+    "importConfirmDescription": "Importar una base de datos reemplazará por completo todos los datos actuales, incluidas cuentas, transacciones y ajustes. Esta acción no se puede deshacer. Se ha preparado un respaldo de tus datos actuales que se descargará si cancelas.",
+    "importConfirmLabel": "Sí, reemplazar todos los datos",
+    "importCancelLabel": "Cancelar y conservar los datos actuales"
   },
   "diagnostics": {
     "title": "Identidad de los datos",
@@ -280,7 +288,8 @@
   "dataApis": {
     "description": "Claves API opcionales para actualizar precios de inversiones. Alpha Vantage se intenta primero y luego Finnhub; usa símbolos del proveedor como WALMEX.MX cuando estén soportados.",
     "alphaVantageHint": "Nivel gratuito: 25 solicitudes/día. Soporta muchos símbolos de EE. UU. y algunos internacionales/MX.",
-    "finnhubHint": "Nivel gratuito: 60 solicitudes/min. Se usa como respaldo para acciones, ETFs, fondos, bonos o símbolos tipo CETES soportados."
+    "finnhubHint": "Nivel gratuito: 60 solicitudes/min. Se usa como respaldo para acciones, ETFs, fondos, bonos o símbolos tipo CETES soportados.",
+    "summary": "Las claves son opcionales; las tasas directas para informes se gestionan por separado."
   },
   "settingsDescription": "Idioma, moneda, actualizaciones, respaldos y controles locales de la app.",
   "navigation": {
@@ -293,20 +302,26 @@
   "general": {
     "languageTitle": "Idioma",
     "mainCurrencyTitle": "Moneda principal",
-    "mainCurrencyDescription": "Consulta tu moneda de informes. Los cambios y tasas se gestionan en Dinero.",
+    "mainCurrencyDescription": "Tu destino de informes guardado. Los importes y registros mantienen sus monedas originales.",
     "mainCurrencyStatus": "Estado actual",
     "notConfigured": "Sin configurar",
-    "suggestedCurrency": "Sugerida: {{currency}}",
-    "manageCurrency": "Gestionar moneda"
+    "suggestedCurrency": "Sugerencia inicial: {{currency}} (sin guardar)",
+    "manageCurrency": "Gestionar moneda",
+    "description": "Preferencias cotidianas de tu espacio e informes."
   },
   "money": {
     "description": "Moneda de informes, autoridad de tasas directas y controles de clasificación."
   },
   "appData": {
     "desktopTitle": "Comportamiento de escritorio",
-    "desktopDescription": "Controles que se aplican a la app de escritorio instalada."
+    "desktopDescription": "Controles que se aplican a la app de escritorio instalada.",
+    "description": "Actualizaciones, respaldos y comportamiento de la app instalada."
   },
   "integrations": {
-    "diagnosticsDescription": "Consulta la identidad y los detalles de ejecución de esta raíz de datos local."
+    "diagnosticsDescription": "Consulta la identidad y los detalles de ejecución de esta raíz de datos local.",
+    "description": "Conexiones opcionales de mercado y herramientas de acceso local."
+  },
+  "categoryRules": {
+    "summary": "{{count}} reglas guardadas"
   }
 }

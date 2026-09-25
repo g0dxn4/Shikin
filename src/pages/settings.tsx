@@ -58,7 +58,13 @@ const MAX_WEB_SERVER_PORT = 65535
 
 const SETTINGS_SECTIONS = ['general', 'money', 'data', 'integrations'] as const
 type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
-type SettingsTask = 'manual-rates' | 'classification-types' | 'category-rules'
+type SettingsTask =
+  | 'manual-rates'
+  | 'classification-types'
+  | 'category-rules'
+  | 'market-data'
+  | 'hosted-access'
+  | 'data-identity'
 
 const HASH_SECTIONS: Record<string, SettingsSection> = {
   'main-currency': 'money',
@@ -121,7 +127,6 @@ export function SettingsPage() {
       : new Set()
   )
   const importDbInputRef = useRef<HTMLInputElement>(null)
-  const sectionTabRefs = useRef<Array<HTMLButtonElement | null>>([])
 
   const loadRates = useCurrencyStore((state) => state.loadRates)
   const mainCurrency = useCurrencyStore((state) => state.mainCurrency)
@@ -144,7 +149,8 @@ export function SettingsPage() {
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
-    if (params.get('section') !== activeSection) {
+    // Only normalize a conflicting deep link; the plain page should stay at its top.
+    if (HASH_SECTIONS[location.hash.slice(1)] && params.get('section') !== activeSection) {
       params.set('section', activeSection)
       void navigate(
         { pathname: location.pathname, search: `?${params.toString()}`, hash: location.hash },
@@ -155,7 +161,8 @@ export function SettingsPage() {
 
   useEffect(() => {
     const anchor = location.hash.slice(1)
-    if (!anchor) return
+    const hasRequestedSection = new URLSearchParams(location.search).has('section')
+    if (!anchor && !hasRequestedSection) return
 
     if (isSettingsTask(anchor)) {
       setOpenTasks((current) => {
@@ -167,12 +174,12 @@ export function SettingsPage() {
     }
 
     const frame = window.requestAnimationFrame(() => {
-      const target = document.getElementById(anchor)
+      const target = document.getElementById(anchor || `settings-${activeSection}`)
       target?.scrollIntoView?.({ block: 'start' })
       target?.focus({ preventScroll: true })
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [location.hash, activeSection])
+  }, [location.hash, location.search, activeSection])
 
   useEffect(() => {
     if (isTauri) {
@@ -369,9 +376,7 @@ export function SettingsPage() {
     } catch (error) {
       setPreImportBackupBytes(null)
       if (importDbInputRef.current) importDbInputRef.current.value = ''
-      toast.error(
-        getErrorMessage(error, 'Could not create the required pre-import backup. Import cancelled.')
-      )
+      toast.error(getErrorMessage(error, t('data.preImportBackupError')))
       return
     }
 
@@ -401,26 +406,6 @@ export function SettingsPage() {
     }
   }
 
-  const selectSection = (section: SettingsSection) => {
-    const params = new URLSearchParams(location.search)
-    params.set('section', section)
-    void navigate({ pathname: location.pathname, search: `?${params.toString()}` })
-  }
-
-  const handleSectionKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
-    event.preventDefault()
-    const nextIndex =
-      event.key === 'Home'
-        ? 0
-        : event.key === 'End'
-          ? SETTINGS_SECTIONS.length - 1
-          : (index + (event.key === 'ArrowRight' ? 1 : -1) + SETTINGS_SECTIONS.length) %
-            SETTINGS_SECTIONS.length
-    sectionTabRefs.current[nextIndex]?.focus()
-    selectSection(SETTINGS_SECTIONS[nextIndex])
-  }
-
   const setTaskOpen = (task: SettingsTask, open: boolean) => {
     setOpenTasks((current) => {
       const next = new Set(current)
@@ -443,43 +428,17 @@ export function SettingsPage() {
         </Link>
       </div>
 
-      <div
-        role="tablist"
-        aria-label={t('navigation.label')}
-        className="native-panel grid grid-cols-2 gap-1 p-1.5 lg:grid-cols-4"
+      <section
+        id="settings-general"
+        tabIndex={-1}
+        aria-labelledby="settings-general-title"
+        className="scroll-mt-4 space-y-3"
       >
-        {SETTINGS_SECTIONS.map((section, index) => (
-          <button
-            key={section}
-            ref={(element) => {
-              sectionTabRefs.current[index] = element
-            }}
-            id={`settings-tab-${section}`}
-            type="button"
-            role="tab"
-            aria-selected={activeSection === section}
-            aria-controls={`settings-panel-${section}`}
-            tabIndex={activeSection === section ? 0 : -1}
-            onClick={() => selectSection(section)}
-            onKeyDown={(event) => handleSectionKeyDown(event, index)}
-            className={`focus-visible:ring-ring min-h-11 rounded-lg px-3 py-2 text-left text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none sm:text-center ${
-              activeSection === section
-                ? 'bg-accent text-accent-foreground shadow-sm'
-                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-            }`}
-          >
-            {t(`navigation.${section}`)}
-          </button>
-        ))}
-      </div>
-
-      <div
-        id="settings-panel-general"
-        role="tabpanel"
-        aria-labelledby="settings-tab-general"
-        hidden={activeSection !== 'general'}
-        className="space-y-3"
-      >
+        <SettingsGroupTitle
+          id="settings-general-title"
+          title={t('navigation.general')}
+          description={t('general.description')}
+        />
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           <section className="native-panel min-w-0 space-y-5 p-5 sm:p-6">
             <SectionTitle icon={<Globe2 size={18} />} title={t('general.languageTitle')} />
@@ -512,7 +471,11 @@ export function SettingsPage() {
               title={t('general.mainCurrencyTitle')}
               description={t('general.mainCurrencyDescription')}
             />
-            <div className="border-border bg-muted/40 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4">
+            <div
+              className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 ${
+                mainCurrency ? 'border-border bg-muted/40' : 'border-warning/30 bg-warning/10'
+              }`}
+            >
               <div>
                 <p className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
                   {t('general.mainCurrencyStatus')}
@@ -545,15 +508,19 @@ export function SettingsPage() {
           />
           <ThemeSettings />
         </section>
-      </div>
+      </section>
 
-      <div
-        id="settings-panel-money"
-        role="tabpanel"
-        aria-labelledby="settings-tab-money"
-        hidden={activeSection !== 'money'}
-        className="space-y-3"
+      <section
+        id="settings-money"
+        tabIndex={-1}
+        aria-labelledby="settings-money-title"
+        className="scroll-mt-4 space-y-3"
       >
+        <SettingsGroupTitle
+          id="settings-money-title"
+          title={t('navigation.money')}
+          description={t('money.description')}
+        />
         <section className="native-panel min-w-0 space-y-5 p-5 sm:p-6">
           <SectionTitle
             icon={<BadgeDollarSign size={18} />}
@@ -571,6 +538,7 @@ export function SettingsPage() {
           icon={<Layers3 size={18} />}
           title={t('sections.classificationTypes')}
           description={t('classificationTypes.sectionDescription')}
+          summary={t('classificationTypes.summary')}
           open={openTasks.has('classification-types')}
           onOpenChange={(open) => setTaskOpen('classification-types', open)}
         >
@@ -582,6 +550,7 @@ export function SettingsPage() {
           icon={<Tags size={18} />}
           title={t('sections.categoryRules')}
           description={tTransactions('rules.description')}
+          summary={t('categoryRules.summary', { count: rules.length })}
           open={openTasks.has('category-rules')}
           onOpenChange={(open) => setTaskOpen('category-rules', open)}
         >
@@ -651,462 +620,493 @@ export function SettingsPage() {
             </div>
           )}
         </TaskDisclosure>
-      </div>
+      </section>
 
-      <div
-        id="settings-panel-data"
-        role="tabpanel"
-        aria-labelledby="settings-tab-data"
-        hidden={activeSection !== 'data'}
-        className="grid grid-cols-1 gap-3 xl:grid-cols-2"
+      <section
+        id="settings-data"
+        tabIndex={-1}
+        aria-labelledby="settings-data-title"
+        className="scroll-mt-4 space-y-3"
       >
-        <section id="updates" tabIndex={-1} className="native-panel space-y-5 p-5 sm:p-6">
-          <SectionTitle
-            icon={<MonitorUp size={18} />}
-            title={t('sections.updates')}
-            description={t('updates.description')}
-          />
+        <SettingsGroupTitle
+          id="settings-data-title"
+          title={t('navigation.data')}
+          description={t('appData.description')}
+        />
+        <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-2">
+          <section id="updates" tabIndex={-1} className="native-panel space-y-5 p-5 sm:p-6">
+            <SectionTitle
+              icon={<MonitorUp size={18} />}
+              title={t('sections.updates')}
+              description={t('updates.description')}
+            />
 
-          {isTauri ? (
-            <>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="border-border bg-muted/50 rounded-lg border px-4 py-3">
-                  <p className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
-                    {t('updates.currentVersion')}
-                  </p>
-                  <p className="mt-1 text-base font-semibold">
-                    {currentVersion ?? t('updates.loadingVersion')}
-                  </p>
-                </div>
-                <div className="border-border bg-muted/50 rounded-lg border px-4 py-3">
-                  <p className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
-                    {t('updates.status')}
-                  </p>
-                  <p className="mt-1 text-base font-semibold">
-                    {readyUpdateVersion
-                      ? t('updates.readyShort')
-                      : availableUpdate
-                        ? t('updates.available', { version: availableUpdate.version })
-                        : t('updates.idle')}
-                  </p>
-                  {updateCheckedAt && (
-                    <p className="text-muted-foreground mt-1 text-[11px]">
-                      {t('updates.lastChecked', {
-                        timestamp: new Date(updateCheckedAt).toLocaleString(),
-                      })}
+            {isTauri ? (
+              <>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="border-border bg-muted/50 rounded-lg border px-4 py-3">
+                    <p className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
+                      {t('updates.currentVersion')}
                     </p>
-                  )}
+                    <p className="mt-1 text-base font-semibold">
+                      {currentVersion ?? t('updates.loadingVersion')}
+                    </p>
+                  </div>
+                  <div className="border-border bg-muted/50 rounded-lg border px-4 py-3">
+                    <p className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
+                      {t('updates.status')}
+                    </p>
+                    <p className="mt-1 text-base font-semibold">
+                      {readyUpdateVersion
+                        ? t('updates.readyShort')
+                        : availableUpdate
+                          ? t('updates.available', { version: availableUpdate.version })
+                          : t('updates.idle')}
+                    </p>
+                    {updateCheckedAt && (
+                      <p className="text-muted-foreground mt-1 text-[11px]">
+                        {t('updates.lastChecked', {
+                          timestamp: new Date(updateCheckedAt).toLocaleString(),
+                        })}
+                      </p>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              {/* Live status announcements for screen readers */}
-              <div aria-live="polite" aria-atomic="true" className="sr-only">
-                {isCheckingUpdates && t('updates.checking')}
-                {!isCheckingUpdates &&
-                  lastCheckResult === 'available' &&
-                  availableUpdate &&
-                  t('updates.availableToast', { version: availableUpdate.version })}
-                {!isCheckingUpdates && lastCheckResult === 'none' && t('updates.noneToast')}
-                {isInstallingUpdate &&
-                  downloadTotalBytes &&
-                  t('updates.downloadProgress', {
-                    downloaded: formatBytes(downloadedBytes),
-                    total: formatBytes(downloadTotalBytes),
-                  })}
-                {readyUpdateVersion && t('updates.readyTitle', { version: readyUpdateVersion })}
-                {updateError && t('updates.errorTitle')}
-              </div>
-
-              {downloadTotalBytes && isInstallingUpdate && (
-                <div className="space-y-2">
-                  <ProgressBar
-                    value={(downloadedBytes / downloadTotalBytes) * 100}
-                    color="accent"
-                    showLabel
-                    size="md"
-                    ariaLabel={t('updates.downloadProgressAria')}
-                  />
-                  <p className="text-muted-foreground text-xs">
-                    {t('updates.downloadProgress', {
+                {/* Live status announcements for screen readers */}
+                <div aria-live="polite" aria-atomic="true" className="sr-only">
+                  {isCheckingUpdates && t('updates.checking')}
+                  {!isCheckingUpdates &&
+                    lastCheckResult === 'available' &&
+                    availableUpdate &&
+                    t('updates.availableToast', { version: availableUpdate.version })}
+                  {!isCheckingUpdates && lastCheckResult === 'none' && t('updates.noneToast')}
+                  {isInstallingUpdate &&
+                    downloadTotalBytes &&
+                    t('updates.downloadProgress', {
                       downloaded: formatBytes(downloadedBytes),
                       total: formatBytes(downloadTotalBytes),
                     })}
-                  </p>
+                  {readyUpdateVersion && t('updates.readyTitle', { version: readyUpdateVersion })}
+                  {updateError && t('updates.errorTitle')}
                 </div>
-              )}
 
-              {updateError && (
-                <ErrorBanner
-                  title={t('updates.errorTitle')}
-                  message={updateError}
-                  retryLabel={t('updates.retry')}
-                  onRetry={() => {
-                    // Retry the explicitly tracked last action
-                    if (lastUpdateAction === 'install') {
-                      void handleInstallUpdate()
-                    } else if (lastUpdateAction === 'restart') {
-                      void handleRestartToApplyUpdate()
-                    } else {
-                      void handleCheckForUpdates()
-                    }
-                  }}
-                />
-              )}
-
-              {readyUpdateVersion && !updateError && (
-                <div className="border-success/20 bg-success/10 flex items-start gap-3 rounded-xl border px-4 py-3">
-                  <CheckCircle2 size={18} className="text-success mt-0.5 shrink-0" />
-                  <div className="flex-1">
-                    <p className="text-foreground text-sm font-medium">
-                      {t('updates.readyTitle', { version: readyUpdateVersion })}
-                    </p>
-                    <p className="text-muted-foreground mt-1 text-xs">
-                      {t('updates.readyDescription')}
+                {downloadTotalBytes && isInstallingUpdate && (
+                  <div className="space-y-2">
+                    <ProgressBar
+                      value={(downloadedBytes / downloadTotalBytes) * 100}
+                      color="accent"
+                      showLabel
+                      size="md"
+                      ariaLabel={t('updates.downloadProgressAria')}
+                    />
+                    <p className="text-muted-foreground text-xs">
+                      {t('updates.downloadProgress', {
+                        downloaded: formatBytes(downloadedBytes),
+                        total: formatBytes(downloadTotalBytes),
+                      })}
                     </p>
                   </div>
-                </div>
-              )}
+                )}
 
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    void handleCheckForUpdates()
-                  }}
-                  disabled={isCheckingUpdates || isInstallingUpdate || isRestartingForUpdate}
-                >
-                  {isCheckingUpdates ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <RefreshCw size={14} />
+                {updateError && (
+                  <ErrorBanner
+                    title={t('updates.errorTitle')}
+                    message={updateError}
+                    retryLabel={t('updates.retry')}
+                    onRetry={() => {
+                      // Retry the explicitly tracked last action
+                      if (lastUpdateAction === 'install') {
+                        void handleInstallUpdate()
+                      } else if (lastUpdateAction === 'restart') {
+                        void handleRestartToApplyUpdate()
+                      } else {
+                        void handleCheckForUpdates()
+                      }
+                    }}
+                  />
+                )}
+
+                {readyUpdateVersion && !updateError && (
+                  <div className="border-success/20 bg-success/10 flex items-start gap-3 rounded-xl border px-4 py-3">
+                    <CheckCircle2 size={18} className="text-success mt-0.5 shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-foreground text-sm font-medium">
+                        {t('updates.readyTitle', { version: readyUpdateVersion })}
+                      </p>
+                      <p className="text-muted-foreground mt-1 text-xs">
+                        {t('updates.readyDescription')}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      void handleCheckForUpdates()
+                    }}
+                    disabled={isCheckingUpdates || isInstallingUpdate || isRestartingForUpdate}
+                  >
+                    {isCheckingUpdates ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <RefreshCw size={14} />
+                    )}
+                    {isCheckingUpdates ? t('updates.checking') : t('updates.check')}
+                  </Button>
+
+                  {availableUpdate && (
+                    <Button
+                      onClick={() => {
+                        void handleInstallUpdate()
+                      }}
+                      disabled={isInstallingUpdate || isRestartingForUpdate}
+                    >
+                      {isInstallingUpdate ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <Download size={14} />
+                      )}
+                      {isInstallingUpdate ? t('updates.installing') : t('updates.install')}
+                    </Button>
                   )}
-                  {isCheckingUpdates ? t('updates.checking') : t('updates.check')}
-                </Button>
 
-                {availableUpdate && (
-                  <Button
-                    onClick={() => {
-                      void handleInstallUpdate()
-                    }}
-                    disabled={isInstallingUpdate || isRestartingForUpdate}
-                  >
-                    {isInstallingUpdate ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <Download size={14} />
-                    )}
-                    {isInstallingUpdate ? t('updates.installing') : t('updates.install')}
-                  </Button>
-                )}
-
-                {readyUpdateVersion && (
-                  <Button
-                    onClick={() => {
-                      void handleRestartToApplyUpdate()
-                    }}
-                    disabled={isRestartingForUpdate}
-                  >
-                    {isRestartingForUpdate ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <RotateCcw size={14} />
-                    )}
-                    {isRestartingForUpdate ? t('updates.restarting') : t('updates.restart')}
-                  </Button>
-                )}
-              </div>
-            </>
-          ) : (
-            <p className="text-muted-foreground text-sm">{t('updates.desktopOnly')}</p>
-          )}
-        </section>
-        <section id="backups" tabIndex={-1} className="native-panel space-y-5 p-5 sm:p-6">
-          <SectionTitle
-            icon={<Database size={18} />}
-            title={t('sections.data')}
-            description={t('data.description')}
-          />
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              onClick={handleExportData}
-              disabled={isExportingData || isImportingData}
-            >
-              {isExportingData ? '...' : t('data.export')}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => importDbInputRef.current?.click()}
-              disabled={isExportingData || isImportingData}
-            >
-              {isImportingData ? '...' : t('data.import')}
-            </Button>
-            <input
-              ref={importDbInputRef}
-              type="file"
-              accept=".db,.sqlite,application/octet-stream"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0]
-                if (file) {
-                  void handleImportClick(file)
-                }
-              }}
-            />
-          </div>
-        </section>
-        {isTauri ? (
-          <section className="native-panel space-y-5 p-5 sm:p-6 xl:col-span-2">
+                  {readyUpdateVersion && (
+                    <Button
+                      onClick={() => {
+                        void handleRestartToApplyUpdate()
+                      }}
+                      disabled={isRestartingForUpdate}
+                    >
+                      {isRestartingForUpdate ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <RotateCcw size={14} />
+                      )}
+                      {isRestartingForUpdate ? t('updates.restarting') : t('updates.restart')}
+                    </Button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <p className="text-muted-foreground text-sm">{t('updates.desktopOnly')}</p>
+            )}
+          </section>
+          <section id="backups" tabIndex={-1} className="native-panel space-y-5 p-5 sm:p-6">
             <SectionTitle
-              icon={<Settings2 size={18} />}
-              title={t('appData.desktopTitle')}
-              description={t('appData.desktopDescription')}
+              icon={<Database size={18} />}
+              title={t('sections.data')}
+              description={t('data.description')}
             />
-            <div className="border-border bg-muted/50 flex items-center justify-between gap-4 rounded-lg border p-4">
-              <div className="min-w-0 space-y-1">
-                <Label
-                  htmlFor="close-to-tray-switch"
-                  className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
-                >
-                  {t('desktop.closeToTrayLabel')}
-                </Label>
-                <p className="text-muted-foreground text-xs">
-                  {t('desktop.closeToTrayDescription')}
-                </p>
-              </div>
-              <button
-                id="close-to-tray-switch"
-                type="button"
-                role="switch"
-                aria-checked={closeToTrayEnabled}
-                aria-label={t('desktop.closeToTrayLabel')}
-                onClick={() => {
-                  void handleCloseToTrayToggle()
-                }}
-                disabled={isSavingDesktopSettings}
-                className={`focus-visible:ring-accent focus-visible:ring-offset-background relative h-8 w-14 shrink-0 rounded-full border p-1 transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
-                  closeToTrayEnabled ? 'border-accent bg-accent' : 'border-border bg-muted'
-                }`}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                onClick={handleExportData}
+                disabled={isExportingData || isImportingData}
               >
-                <span
-                  className={`block size-6 rounded-full bg-white shadow-sm transition-transform ${
-                    closeToTrayEnabled ? 'translate-x-6' : 'translate-x-0'
-                  }`}
-                  aria-hidden="true"
-                />
-              </button>
+                {isExportingData ? '...' : t('data.export')}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => importDbInputRef.current?.click()}
+                disabled={isExportingData || isImportingData}
+              >
+                {isImportingData ? '...' : t('data.import')}
+              </Button>
+              <input
+                ref={importDbInputRef}
+                type="file"
+                accept=".db,.sqlite,application/octet-stream"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) {
+                    void handleImportClick(file)
+                  }
+                }}
+              />
             </div>
           </section>
-        ) : (
-          <p className="border-border bg-muted/40 text-muted-foreground rounded-lg border px-4 py-3 text-xs xl:col-span-2">
-            {t('desktop.desktopOnly')}
-          </p>
-        )}
-      </div>
-
-      <div
-        id="settings-panel-integrations"
-        role="tabpanel"
-        aria-labelledby="settings-tab-integrations"
-        hidden={activeSection !== 'integrations'}
-        className="grid grid-cols-1 gap-3 xl:grid-cols-2"
-      >
-        <section id="market-data" tabIndex={-1} className="native-panel space-y-5 p-5 sm:p-6">
-          <SectionTitle
-            icon={<KeyRound size={18} />}
-            title={t('sections.dataApis')}
-            description={t('dataApis.description')}
-          />
-
-          <div className="space-y-2">
-            <Label
-              htmlFor="alpha-vantage-key"
-              className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
-            >
-              Alpha Vantage
-            </Label>
-            <p className="text-muted-foreground text-[10px]">{t('dataApis.alphaVantageHint')}</p>
-            <Input
-              id="alpha-vantage-key"
-              type="password"
-              placeholder="Alpha Vantage API key"
-              value={alphaVantageKey}
-              onChange={(e) => setAlphaVantageKey(e.target.value)}
-              className="max-w-md"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label
-              htmlFor="finnhub-key"
-              className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
-            >
-              Finnhub
-            </Label>
-            <p className="text-muted-foreground text-[10px]">{t('dataApis.finnhubHint')}</p>
-            <Input
-              id="finnhub-key"
-              type="password"
-              placeholder="Finnhub API key"
-              value={finnhubKey}
-              onChange={(e) => setFinnhubKey(e.target.value)}
-              className="max-w-md"
-            />
-          </div>
-
-          <Button
-            onClick={async () => {
-              setIsSavingDataKeys(true)
-              try {
-                const store = await load('settings.json')
-                await store.set('alpha_vantage_key', alphaVantageKey)
-                await store.set('finnhub_key', finnhubKey)
-                await store.save()
-                toast.success(tCommon('status.success'))
-              } catch (error) {
-                toast.error(getErrorMessage(error, tCommon('status.error')))
-              } finally {
-                setIsSavingDataKeys(false)
-              }
-            }}
-            disabled={isSavingDataKeys}
-          >
-            {isSavingDataKeys ? '...' : tCommon('actions.save')}
-          </Button>
-        </section>
-        <section id="hosted-access" tabIndex={-1} className="native-panel space-y-5 p-5 sm:p-6">
-          <SectionTitle
-            icon={<Globe2 size={18} />}
-            title={t('desktop.webServer.label')}
-            description={t('desktop.webServer.description')}
-          />
           {isTauri ? (
-            <div className="border-border bg-muted/50 space-y-4 rounded-lg border p-4">
-              <div className="flex items-center justify-between gap-4">
+            <section className="native-panel space-y-5 p-5 sm:p-6 xl:col-span-2">
+              <SectionTitle
+                icon={<Settings2 size={18} />}
+                title={t('appData.desktopTitle')}
+                description={t('appData.desktopDescription')}
+              />
+              <div className="border-border bg-muted/50 flex items-center justify-between gap-4 rounded-lg border p-4">
                 <div className="min-w-0 space-y-1">
                   <Label
-                    htmlFor="web-server-switch"
+                    htmlFor="close-to-tray-switch"
                     className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
                   >
-                    {t('desktop.webServer.label')}
+                    {t('desktop.closeToTrayLabel')}
                   </Label>
                   <p className="text-muted-foreground text-xs">
-                    {t('desktop.webServer.description')}
+                    {t('desktop.closeToTrayDescription')}
                   </p>
                 </div>
                 <button
-                  id="web-server-switch"
+                  id="close-to-tray-switch"
                   type="button"
                   role="switch"
-                  aria-checked={webServerEnabled}
-                  aria-label={t('desktop.webServer.label')}
-                  onClick={() => setWebServerEnabled((enabled) => !enabled)}
-                  disabled={isLoadingWebServerSettings || isApplyingWebServer}
+                  aria-checked={closeToTrayEnabled}
+                  aria-label={t('desktop.closeToTrayLabel')}
+                  onClick={() => {
+                    void handleCloseToTrayToggle()
+                  }}
+                  disabled={isSavingDesktopSettings}
                   className={`focus-visible:ring-accent focus-visible:ring-offset-background relative h-8 w-14 shrink-0 rounded-full border p-1 transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
-                    webServerEnabled ? 'border-accent bg-accent' : 'border-border bg-muted'
+                    closeToTrayEnabled ? 'border-accent bg-accent' : 'border-border bg-muted'
                   }`}
                 >
                   <span
                     className={`block size-6 rounded-full bg-white shadow-sm transition-transform ${
-                      webServerEnabled ? 'translate-x-6' : 'translate-x-0'
+                      closeToTrayEnabled ? 'translate-x-6' : 'translate-x-0'
                     }`}
                     aria-hidden="true"
                   />
                 </button>
               </div>
+            </section>
+          ) : (
+            <p className="border-border bg-muted/40 text-muted-foreground rounded-lg border px-4 py-3 text-xs xl:col-span-2">
+              {t('desktop.desktopOnly')}
+            </p>
+          )}
+        </div>
+      </section>
 
-              <div className="flex flex-wrap items-end gap-3">
-                <div className="min-w-[9rem] flex-1 space-y-1">
-                  <Label
-                    htmlFor="web-server-port"
-                    className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
-                  >
-                    {t('desktop.webServer.port')}
-                  </Label>
-                  <Input
-                    id="web-server-port"
-                    type="number"
-                    inputMode="numeric"
-                    min={MIN_WEB_SERVER_PORT}
-                    max={MAX_WEB_SERVER_PORT}
-                    step={1}
-                    value={webServerPort}
-                    onChange={(event) => setWebServerPort(event.target.value)}
+      <section
+        id="settings-integrations"
+        tabIndex={-1}
+        aria-labelledby="settings-integrations-title"
+        className="scroll-mt-4 space-y-3"
+      >
+        <SettingsGroupTitle
+          id="settings-integrations-title"
+          title={t('navigation.integrations')}
+          description={t('integrations.description')}
+        />
+        <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-2">
+          <TaskDisclosure
+            id="market-data"
+            icon={<KeyRound size={18} />}
+            title={t('sections.dataApis')}
+            description={t('dataApis.description')}
+            summary={t('dataApis.summary')}
+            open={openTasks.has('market-data')}
+            onOpenChange={(open) => setTaskOpen('market-data', open)}
+          >
+            <div className="space-y-2">
+              <Label
+                htmlFor="alpha-vantage-key"
+                className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
+              >
+                Alpha Vantage
+              </Label>
+              <p className="text-muted-foreground text-[10px]">{t('dataApis.alphaVantageHint')}</p>
+              <Input
+                id="alpha-vantage-key"
+                type="password"
+                placeholder="Alpha Vantage API key"
+                value={alphaVantageKey}
+                onChange={(e) => setAlphaVantageKey(e.target.value)}
+                className="max-w-md"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label
+                htmlFor="finnhub-key"
+                className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
+              >
+                Finnhub
+              </Label>
+              <p className="text-muted-foreground text-[10px]">{t('dataApis.finnhubHint')}</p>
+              <Input
+                id="finnhub-key"
+                type="password"
+                placeholder="Finnhub API key"
+                value={finnhubKey}
+                onChange={(e) => setFinnhubKey(e.target.value)}
+                className="max-w-md"
+              />
+            </div>
+
+            <Button
+              onClick={async () => {
+                setIsSavingDataKeys(true)
+                try {
+                  const store = await load('settings.json')
+                  await store.set('alpha_vantage_key', alphaVantageKey)
+                  await store.set('finnhub_key', finnhubKey)
+                  await store.save()
+                  toast.success(tCommon('status.success'))
+                } catch (error) {
+                  toast.error(getErrorMessage(error, tCommon('status.error')))
+                } finally {
+                  setIsSavingDataKeys(false)
+                }
+              }}
+              disabled={isSavingDataKeys}
+            >
+              {isSavingDataKeys ? '...' : tCommon('actions.save')}
+            </Button>
+          </TaskDisclosure>
+          <TaskDisclosure
+            id="hosted-access"
+            icon={<Globe2 size={18} />}
+            title={t('desktop.webServer.label')}
+            description={t('desktop.webServer.description')}
+            summary={
+              isTauri
+                ? webServerStatus.running
+                  ? t('desktop.webServer.running')
+                  : t('desktop.webServer.stopped')
+                : t('desktop.webServer.webSummary')
+            }
+            open={openTasks.has('hosted-access')}
+            onOpenChange={(open) => setTaskOpen('hosted-access', open)}
+          >
+            {isTauri ? (
+              <div className="border-border bg-muted/50 space-y-4 rounded-lg border p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0 space-y-1">
+                    <Label
+                      htmlFor="web-server-switch"
+                      className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
+                    >
+                      {t('desktop.webServer.label')}
+                    </Label>
+                    <p className="text-muted-foreground text-xs">
+                      {t('desktop.webServer.description')}
+                    </p>
+                  </div>
+                  <button
+                    id="web-server-switch"
+                    type="button"
+                    role="switch"
+                    aria-checked={webServerEnabled}
+                    aria-label={t('desktop.webServer.label')}
+                    onClick={() => setWebServerEnabled((enabled) => !enabled)}
                     disabled={isLoadingWebServerSettings || isApplyingWebServer}
-                    aria-describedby="web-server-port-hint"
+                    className={`focus-visible:ring-accent focus-visible:ring-offset-background relative h-8 w-14 shrink-0 rounded-full border p-1 transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+                      webServerEnabled ? 'border-accent bg-accent' : 'border-border bg-muted'
+                    }`}
+                  >
+                    <span
+                      className={`block size-6 rounded-full bg-white shadow-sm transition-transform ${
+                        webServerEnabled ? 'translate-x-6' : 'translate-x-0'
+                      }`}
+                      aria-hidden="true"
+                    />
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="min-w-[9rem] flex-1 space-y-1">
+                    <Label
+                      htmlFor="web-server-port"
+                      className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
+                    >
+                      {t('desktop.webServer.port')}
+                    </Label>
+                    <Input
+                      id="web-server-port"
+                      type="number"
+                      inputMode="numeric"
+                      min={MIN_WEB_SERVER_PORT}
+                      max={MAX_WEB_SERVER_PORT}
+                      step={1}
+                      value={webServerPort}
+                      onChange={(event) => setWebServerPort(event.target.value)}
+                      disabled={isLoadingWebServerSettings || isApplyingWebServer}
+                      aria-describedby="web-server-port-hint"
+                    />
+                    <p id="web-server-port-hint" className="text-muted-foreground text-[11px]">
+                      {t('desktop.webServer.portHint', {
+                        min: MIN_WEB_SERVER_PORT,
+                        max: MAX_WEB_SERVER_PORT,
+                      })}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      void handleApplyWebServer()
+                    }}
+                    disabled={isLoadingWebServerSettings || isApplyingWebServer}
+                  >
+                    {isApplyingWebServer ? <Loader2 size={14} className="animate-spin" /> : null}
+                    {isApplyingWebServer
+                      ? t('desktop.webServer.applying')
+                      : t('desktop.webServer.apply')}
+                  </Button>
+                </div>
+
+                <div
+                  aria-live="polite"
+                  aria-atomic="true"
+                  className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
+                >
+                  <span
+                    className={
+                      webServerStatus.running
+                        ? 'text-success font-semibold'
+                        : 'text-muted-foreground font-semibold'
+                    }
+                  >
+                    {webServerStatus.running
+                      ? t('desktop.webServer.running')
+                      : t('desktop.webServer.stopped')}
+                  </span>
+                  {webServerStatus.running && webServerStatus.port !== null && (
+                    <span className="text-muted-foreground font-mono">
+                      {t('desktop.webServer.statusPort', { port: webServerStatus.port })}
+                    </span>
+                  )}
+                </div>
+
+                {webServerMessage && (
+                  <ErrorBanner
+                    title={t('desktop.webServer.errorTitle')}
+                    message={webServerMessage}
                   />
-                  <p id="web-server-port-hint" className="text-muted-foreground text-[11px]">
-                    {t('desktop.webServer.portHint', {
-                      min: MIN_WEB_SERVER_PORT,
-                      max: MAX_WEB_SERVER_PORT,
-                    })}
+                )}
+
+                <div className="border-accent/15 bg-accent/[0.06] space-y-2 rounded-xl border px-3 py-3">
+                  <p className="text-foreground text-xs font-medium">
+                    {t('desktop.webServer.tailscaleTitle')}
+                  </p>
+                  <code className="text-accent bg-muted block overflow-x-auto rounded-lg px-3 py-2 font-mono text-[11px]">
+                    tailscale serve --bg http://127.0.0.1:{webServerDisplayPort}
+                  </code>
+                  <p className="text-muted-foreground text-[11px] leading-relaxed">
+                    {t('desktop.webServer.tailscaleWarning')}
                   </p>
                 </div>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    void handleApplyWebServer()
-                  }}
-                  disabled={isLoadingWebServerSettings || isApplyingWebServer}
-                >
-                  {isApplyingWebServer ? <Loader2 size={14} className="animate-spin" /> : null}
-                  {isApplyingWebServer
-                    ? t('desktop.webServer.applying')
-                    : t('desktop.webServer.apply')}
-                </Button>
               </div>
-
-              <div
-                aria-live="polite"
-                aria-atomic="true"
-                className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
-              >
-                <span
-                  className={
-                    webServerStatus.running
-                      ? 'text-success font-semibold'
-                      : 'text-muted-foreground font-semibold'
-                  }
-                >
-                  {webServerStatus.running
-                    ? t('desktop.webServer.running')
-                    : t('desktop.webServer.stopped')}
-                </span>
-                {webServerStatus.running && webServerStatus.port !== null && (
-                  <span className="text-muted-foreground font-mono">
-                    {t('desktop.webServer.statusPort', { port: webServerStatus.port })}
-                  </span>
-                )}
-              </div>
-
-              {webServerMessage && (
-                <ErrorBanner title={t('desktop.webServer.errorTitle')} message={webServerMessage} />
-              )}
-
-              <div className="border-accent/15 bg-accent/[0.06] space-y-2 rounded-xl border px-3 py-3">
-                <p className="text-foreground text-xs font-medium">
-                  {t('desktop.webServer.tailscaleTitle')}
-                </p>
-                <code className="text-accent bg-muted block overflow-x-auto rounded-lg px-3 py-2 font-mono text-[11px]">
-                  tailscale serve --bg http://127.0.0.1:{webServerDisplayPort}
-                </code>
-                <p className="text-muted-foreground text-[11px] leading-relaxed">
-                  {t('desktop.webServer.tailscaleWarning')}
-                </p>
-              </div>
-            </div>
-          ) : (
-            <p className="text-muted-foreground text-sm">{t('desktop.desktopOnly')}</p>
-          )}
-        </section>
-        <section
-          id="data-identity"
-          tabIndex={-1}
-          className="native-panel scroll-mt-4 p-5 sm:p-6 xl:col-span-2"
-        >
-          <RuntimeDiagnosticsPanel />
-        </section>
-      </div>
+            ) : (
+              <p className="text-muted-foreground text-sm">{t('desktop.desktopOnly')}</p>
+            )}
+          </TaskDisclosure>
+          <div className="xl:col-span-2">
+            <TaskDisclosure
+              id="data-identity"
+              icon={<Database size={18} />}
+              title={t('diagnostics.title')}
+              description={t('integrations.diagnosticsDescription')}
+              open={openTasks.has('data-identity')}
+              onOpenChange={(open) => setTaskOpen('data-identity', open)}
+            >
+              <RuntimeDiagnosticsPanel />
+            </TaskDisclosure>
+          </div>
+        </div>
+      </section>
 
       <ConfirmDialog
         open={importConfirmOpen}
@@ -1121,7 +1121,7 @@ export function SettingsPage() {
               a.download = `shikin-pre-import-backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.db`
               a.click()
               URL.revokeObjectURL(url)
-              toast.success('Pre-import backup downloaded')
+              toast.success(t('data.preImportBackupDownloaded'))
             }
             setPendingImportFile(null)
             setPreImportBackupBytes(null)
@@ -1131,10 +1131,10 @@ export function SettingsPage() {
           }
           setImportConfirmOpen(open)
         }}
-        title="Destructive Import Confirmation"
-        description="Importing a database will completely replace all current data including accounts, transactions, and settings. This action cannot be undone. A backup of your current data has been prepared and will be downloaded if you cancel."
-        confirmLabel="Yes, Replace All Data"
-        cancelLabel="Cancel and Keep Current Data"
+        title={t('data.importConfirmTitle')}
+        description={t('data.importConfirmDescription')}
+        confirmLabel={t('data.importConfirmLabel')}
+        cancelLabel={t('data.importCancelLabel')}
         variant="destructive"
         isLoading={isImportingData}
         onConfirm={handleConfirmImport}
@@ -1154,7 +1154,14 @@ function getSettingsSection(search: string, hash: string): SettingsSection {
 }
 
 function isSettingsTask(value: string): value is SettingsTask {
-  return value === 'manual-rates' || value === 'classification-types' || value === 'category-rules'
+  return (
+    value === 'manual-rates' ||
+    value === 'classification-types' ||
+    value === 'category-rules' ||
+    value === 'market-data' ||
+    value === 'hosted-access' ||
+    value === 'data-identity'
+  )
 }
 
 function TaskDisclosure({
@@ -1162,6 +1169,7 @@ function TaskDisclosure({
   icon,
   title,
   description,
+  summary,
   open,
   onOpenChange,
   children,
@@ -1170,6 +1178,7 @@ function TaskDisclosure({
   icon: React.ReactNode
   title: string
   description: string
+  summary?: string
   open: boolean
   onOpenChange: (open: boolean) => void
   children: React.ReactNode
@@ -1180,26 +1189,48 @@ function TaskDisclosure({
       tabIndex={-1}
       open={open}
       onToggle={(event) => onOpenChange(event.currentTarget.open)}
-      className="native-panel focus-visible:ring-ring group scroll-mt-4 overflow-hidden focus-visible:ring-2 focus-visible:outline-none"
+      className="native-panel focus-visible:ring-ring group min-w-0 scroll-mt-4 overflow-hidden focus-visible:ring-2 focus-visible:outline-none"
     >
       <summary className="focus-visible:ring-ring flex min-h-20 cursor-pointer list-none items-center gap-3 p-5 focus-visible:ring-2 focus-visible:outline-none sm:p-6 [&::-webkit-details-marker]:hidden">
         <div className="border-accent/20 bg-accent/10 text-accent flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border">
           {icon}
         </div>
         <span className="min-w-0 flex-1">
-          <span className="block text-base font-semibold">{title}</span>
+          <span className="block text-base font-semibold break-words">{title}</span>
           <span className="text-muted-foreground mt-1 block text-xs leading-relaxed">
             {description}
           </span>
+          {summary ? (
+            <span className="text-accent mt-1 block text-xs font-medium">{summary}</span>
+          ) : null}
         </span>
         <ChevronRight
           size={18}
-          className="text-muted-foreground shrink-0 transition-transform group-open:rotate-90"
+          className="text-muted-foreground shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none"
           aria-hidden="true"
         />
       </summary>
       <div className="border-border border-t p-5 sm:p-6">{children}</div>
     </details>
+  )
+}
+
+function SettingsGroupTitle({
+  id,
+  title,
+  description,
+}: {
+  id: string
+  title: string
+  description: string
+}) {
+  return (
+    <div className="px-1 pt-3">
+      <h2 id={id} className="text-foreground text-lg font-semibold tracking-tight">
+        {title}
+      </h2>
+      <p className="text-muted-foreground mt-1 text-xs leading-relaxed">{description}</p>
+    </div>
   )
 }
 
@@ -1234,7 +1265,7 @@ function SectionTitle({
         {icon}
       </div>
       <div className="min-w-0">
-        <h2 className="text-base font-semibold">{title}</h2>
+        <h3 className="text-base font-semibold">{title}</h3>
         {description && <p className="text-muted-foreground mt-1 text-xs">{description}</p>}
       </div>
     </div>

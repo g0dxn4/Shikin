@@ -295,7 +295,7 @@ test.describe('read-only app data preservation', () => {
 
     await page.goto('/settings')
     await expect(page.locator('[data-startup-state="ready"]')).toBeVisible()
-    await page.getByRole('tab', { name: 'General' }).click()
+    await expect(page.getByRole('heading', { name: 'Theme & Appearance' })).toBeVisible()
     const darkAppearance = page.getByRole('radio', { name: /^Dark / })
     const wasDark = (await darkAppearance.getAttribute('aria-checked')) === 'true'
     await page.getByRole('radio', { name: wasDark ? /^Light / : /^Dark / }).click()

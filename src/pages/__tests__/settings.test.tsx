@@ -157,10 +157,10 @@ describe('SettingsPage', () => {
 
     expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
     expect(screen.getByText('settingsDescription')).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'navigation.general' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    )
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'navigation.general' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'navigation.money' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'navigation.data' })).toBeVisible()
     expect(screen.getByRole('link', { name: 'navigation.manageCategories' })).toHaveAttribute(
       'href',
       '/categories'
@@ -184,39 +184,71 @@ describe('SettingsPage', () => {
     expect(await screen.findByText('0.1.0')).toBeInTheDocument()
   })
 
-  it('opens a hash-linked money task and preserves its draft across section changes', async () => {
+  it('opens a hash-linked money task and preserves its draft while other sections remain visible', async () => {
     const user = userEvent.setup()
     renderSettings('/settings#manual-rates')
 
-    expect(screen.getByRole('tab', { name: 'navigation.money' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    )
     const disclosure = document.getElementById('manual-rates')
     expect(disclosure).toHaveAttribute('open')
-
     const rate = screen.getByLabelText('currency.rateDecimal')
     await user.type(rate, '17.25')
-    await user.click(screen.getByRole('tab', { name: 'navigation.general' }))
-    expect(screen.getByRole('tab', { name: 'navigation.general' })).toHaveFocus()
-    await user.click(screen.getByRole('tab', { name: 'navigation.money' }))
-
+    expect(screen.getByTestId('theme-settings')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'data.export' })).toBeVisible()
+    await user.click(disclosure!.querySelector('summary')!)
+    await user.click(disclosure!.querySelector('summary')!)
     expect(screen.getByLabelText('currency.rateDecimal')).toHaveValue('17.25')
   })
 
-  it('supports arrow-key section selection and focus', async () => {
+  it.each([
+    ['classification-types', 'money'],
+    ['category-rules', 'money'],
+    ['market-data', 'integrations'],
+    ['hosted-access', 'integrations'],
+    ['data-identity', 'integrations'],
+  ])('opens #%s directly without hiding the rest of the page', async (anchor, section) => {
+    renderSettings(`/settings?section=${section}#${anchor}`)
+    expect(document.getElementById(anchor)).toHaveAttribute('open')
+    expect(screen.getByRole('heading', { name: 'navigation.general' })).toBeVisible()
+    expect(await screen.findByText('lineage-from-backup')).toBeInTheDocument()
+    expect(await screen.findByText('0.1.0')).toBeInTheDocument()
+  })
+
+  it.each(['general', 'money', 'data', 'integrations'])(
+    'keeps all sections mounted for ?section=%s',
+    async (section) => {
+      renderSettings(`/settings?section=${section}`)
+      expect(screen.getByRole('heading', { name: 'navigation.general' })).toBeVisible()
+      expect(screen.getByRole('heading', { name: 'navigation.money' })).toBeVisible()
+      expect(screen.getByRole('heading', { name: 'navigation.data' })).toBeVisible()
+      expect(screen.getByRole('heading', { name: 'navigation.integrations' })).toBeVisible()
+      expect(await screen.findByText('0.1.0')).toBeInTheDocument()
+    }
+  )
+
+  it('scrolls and focuses the canonical query target without hiding other sections', async () => {
+    const scroll = vi.fn()
+    const original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = scroll
+    try {
+      renderSettings('/settings?section=data')
+      await waitFor(() => expect(scroll).toHaveBeenCalled())
+      expect(document.activeElement).toBe(document.getElementById('settings-data'))
+      expect(screen.getByRole('heading', { name: 'navigation.general' })).toBeVisible()
+    } finally {
+      Element.prototype.scrollIntoView = original
+    }
+  })
+
+  it('retains an unsaved provider-key draft when its named disclosure closes', async () => {
     const user = userEvent.setup()
-    renderSettings()
-
-    const general = screen.getByRole('tab', { name: 'navigation.general' })
-    general.focus()
-    await user.keyboard('{ArrowRight}')
-
-    expect(screen.getByRole('tab', { name: 'navigation.money' })).toHaveFocus()
-    expect(screen.getByRole('tab', { name: 'navigation.money' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    )
+    renderSettings('/settings#market-data')
+    const key = screen.getByPlaceholderText('Alpha Vantage API key')
+    await user.type(key, 'unsaved-key')
+    const disclosure = document.getElementById('market-data')!
+    await user.click(disclosure.querySelector('summary')!)
+    await user.click(disclosure.querySelector('summary')!)
+    expect(screen.getByPlaceholderText('Alpha Vantage API key')).toHaveValue('unsaved-key')
+    expect(storageMocks.set).not.toHaveBeenCalledWith('alpha_vantage_key', 'unsaved-key')
   })
 
   it('renders desktop updates section', async () => {
@@ -227,19 +259,17 @@ describe('SettingsPage', () => {
     expect(screen.getByRole('button', { name: 'updates.check' })).toBeInTheDocument()
   })
 
-  it('groups ordinary preferences, app data, and diagnostics into named task sections', async () => {
+  it('places backups and updates on the page and diagnostics in a named disclosure', async () => {
     const user = userEvent.setup()
     renderSettings()
 
     expect(screen.getByTestId('theme-settings')).toBeVisible()
-    expect(screen.queryByRole('button', { name: 'data.export' })).not.toBeInTheDocument()
-
-    await user.click(screen.getByRole('tab', { name: 'navigation.data' }))
     expect(screen.getByRole('button', { name: 'data.export' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'data.import' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'updates.check' })).toBeVisible()
+    expect(document.getElementById('data-identity')).not.toHaveAttribute('open')
 
-    await user.click(screen.getByRole('tab', { name: 'navigation.integrations' }))
+    await user.click(document.querySelector('#data-identity > summary')!)
     expect(await screen.findByRole('button', { name: 'diagnostics.refresh' })).toBeVisible()
     expect(screen.getByText('lineage-from-backup')).toBeVisible()
     expect(screen.getByText('local-instance-id')).toBeVisible()
@@ -293,7 +323,7 @@ describe('SettingsPage', () => {
     })
     mockGetWebServerStatus.mockResolvedValue({ running: true, port: 9000, error: null })
 
-    renderSettings('/settings?section=integrations')
+    renderSettings('/settings?section=integrations#hosted-access')
 
     const toggle = await screen.findByRole('switch', { name: 'desktop.webServer.label' })
     await waitFor(() => expect(toggle).not.toBeDisabled())
@@ -304,9 +334,9 @@ describe('SettingsPage', () => {
   it('shows hosted web server status', async () => {
     mockGetWebServerStatus.mockResolvedValue({ running: true, port: 8480, error: null })
 
-    renderSettings('/settings?section=integrations')
+    renderSettings('/settings?section=integrations#hosted-access')
 
-    expect(await screen.findByText('desktop.webServer.running')).toBeInTheDocument()
+    expect(await screen.findAllByText('desktop.webServer.running')).toHaveLength(2)
     expect(screen.getByText('desktop.webServer.statusPort')).toBeInTheDocument()
   })
 
@@ -314,7 +344,7 @@ describe('SettingsPage', () => {
     const user = userEvent.setup()
     mockApplyWebServerSettings.mockResolvedValue({ running: true, port: 8480, error: null })
 
-    renderSettings('/settings?section=integrations')
+    renderSettings('/settings?section=integrations#hosted-access')
 
     const toggle = await screen.findByRole('switch', { name: 'desktop.webServer.label' })
     await waitFor(() => expect(toggle).not.toBeDisabled())
@@ -333,7 +363,7 @@ describe('SettingsPage', () => {
   it('rejects an invalid hosted web port before invoking the desktop command', async () => {
     const user = userEvent.setup()
 
-    renderSettings('/settings?section=integrations')
+    renderSettings('/settings?section=integrations#hosted-access')
 
     const portInput = await screen.findByLabelText('desktop.webServer.port')
     await waitFor(() => expect(portInput).not.toBeDisabled())
@@ -350,7 +380,7 @@ describe('SettingsPage', () => {
     const user = userEvent.setup()
     mockApplyWebServerSettings.mockRejectedValueOnce(new Error('Hosted web failed'))
 
-    renderSettings('/settings?section=integrations')
+    renderSettings('/settings?section=integrations#hosted-access')
 
     const applyButton = await screen.findByRole('button', { name: 'desktop.webServer.apply' })
     await waitFor(() => expect(applyButton).not.toBeDisabled())
@@ -607,7 +637,7 @@ describe('SettingsPage', () => {
       await user.upload(fileInput, file)
 
       await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('backup failed'))
-      expect(screen.queryByText('Destructive Import Confirmation')).not.toBeInTheDocument()
+      expect(screen.queryByText('data.importConfirmTitle')).not.toBeInTheDocument()
       expect(mockImportDatabaseSnapshot).not.toHaveBeenCalled()
     })
 
@@ -623,10 +653,8 @@ describe('SettingsPage', () => {
 
       await user.upload(fileInput, file)
 
-      expect(await screen.findByText('Destructive Import Confirmation')).toBeInTheDocument()
-      expect(
-        screen.getByText(/Importing a database will completely replace all current data/)
-      ).toBeInTheDocument()
+      expect(await screen.findByText('data.importConfirmTitle')).toBeInTheDocument()
+      expect(screen.getByText('data.importConfirmDescription')).toBeInTheDocument()
     })
 
     it('creates pre-import backup before showing confirmation', async () => {
@@ -660,7 +688,7 @@ describe('SettingsPage', () => {
       const file = new File(['test'], 'backup.db', { type: 'application/octet-stream' })
 
       await user.upload(fileInput, file)
-      await user.click(screen.getByRole('button', { name: /Yes, Replace All Data/ }))
+      await user.click(screen.getByRole('button', { name: 'data.importConfirmLabel' }))
 
       expect(mockImportDatabaseSnapshot).toHaveBeenCalledOnce()
 
@@ -684,7 +712,7 @@ describe('SettingsPage', () => {
       const file = new File(['test'], 'backup.db', { type: 'application/octet-stream' })
 
       await user.upload(fileInput, file)
-      await user.click(screen.getByRole('button', { name: /Yes, Replace All Data/ }))
+      await user.click(screen.getByRole('button', { name: 'data.importConfirmLabel' }))
 
       expect(mockImportDatabaseSnapshot).toHaveBeenCalledOnce()
       expect(reloadMock).toHaveBeenCalledTimes(1)
@@ -722,11 +750,11 @@ describe('SettingsPage', () => {
       const file = new File(['test'], 'backup.db', { type: 'application/octet-stream' })
 
       await user.upload(fileInput, file)
-      await user.click(screen.getByRole('button', { name: /Cancel and Keep Current Data/ }))
+      await user.click(screen.getByRole('button', { name: 'data.importCancelLabel' }))
 
       expect(mockCreateObjectURL).toHaveBeenCalledOnce()
       expect(mockClick).toHaveBeenCalledOnce()
-      expect(mockToastSuccess).toHaveBeenCalledWith('Pre-import backup downloaded')
+      expect(mockToastSuccess).toHaveBeenCalledWith('data.preImportBackupDownloaded')
 
       vi.unstubAllGlobals()
       vi.restoreAllMocks()
@@ -743,7 +771,7 @@ describe('SettingsPage', () => {
       const file = new File(['test'], 'backup.db', { type: 'application/octet-stream' })
 
       await user.upload(fileInput, file)
-      await user.click(screen.getByRole('button', { name: /Yes, Replace All Data/ }))
+      await user.click(screen.getByRole('button', { name: 'data.importConfirmLabel' }))
 
       await waitFor(() => {
         expect(mockToastError).toHaveBeenCalledWith('Import failed')

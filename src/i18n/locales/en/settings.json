@@ -129,7 +129,8 @@
       "statusError": "Could not get hosted web server status",
       "errorTitle": "Hosted web server issue",
       "tailscaleTitle": "Share with your tailnet",
-      "tailscaleWarning": "This is tailnet-only. Run tailscale serve reset to stop exposure."
+      "tailscaleWarning": "This is tailnet-only. Run tailscale serve reset to stop exposure.",
+      "webSummary": "Available in the desktop app"
     }
   },
   "updates": {
@@ -198,7 +199,8 @@
     "archive": "Archive",
     "cancel": "Cancel",
     "saveRevision": "Create new version",
-    "saving": "Saving…"
+    "saving": "Saving…",
+    "summary": "Versioned names; historical assignments stay pinned."
   },
   "currency": {
     "setupRequiredTitle": "Choose your main currency",
@@ -247,7 +249,13 @@
     "importError": "Failed to import backup",
     "reset": "Reset All Data",
     "resetWarning": "This will permanently delete all your data. This action cannot be undone.",
-    "description": "Export a backup or import a database snapshot. Imports require confirmation and replace the current database."
+    "description": "Export a backup or import a database snapshot. Imports require confirmation and replace the current database.",
+    "preImportBackupError": "Could not create the required pre-import backup. Import cancelled.",
+    "preImportBackupDownloaded": "Pre-import backup downloaded",
+    "importConfirmTitle": "Destructive import confirmation",
+    "importConfirmDescription": "Importing a database will completely replace all current data including accounts, transactions, and settings. This action cannot be undone. A backup of your current data has been prepared and will be downloaded if you cancel.",
+    "importConfirmLabel": "Yes, replace all data",
+    "importCancelLabel": "Cancel and keep current data"
   },
   "diagnostics": {
     "title": "Data identity",
@@ -280,7 +288,8 @@
   "dataApis": {
     "description": "Optional API keys for refreshing investment prices. Alpha Vantage is tried first, then Finnhub; use provider symbols such as WALMEX.MX when supported.",
     "alphaVantageHint": "Free tier: 25 requests/day. Supports many US and some international/MX symbols.",
-    "finnhubHint": "Free tier: 60 requests/min. Used as a fallback for supported stock, ETF, fund, bond, or CETES-style symbols."
+    "finnhubHint": "Free tier: 60 requests/min. Used as a fallback for supported stock, ETF, fund, bond, or CETES-style symbols.",
+    "summary": "Keys are optional; direct reporting FX rates are managed separately."
   },
   "settingsDescription": "Language, currency, updates, backups, and local app controls.",
   "navigation": {
@@ -293,20 +302,26 @@
   "general": {
     "languageTitle": "Language",
     "mainCurrencyTitle": "Main currency",
-    "mainCurrencyDescription": "Your reporting currency at a glance. Changes and exchange rates are managed in Money.",
+    "mainCurrencyDescription": "Your saved reporting target. Source amounts and records keep their original currencies.",
     "mainCurrencyStatus": "Current status",
     "notConfigured": "Not configured",
-    "suggestedCurrency": "Suggested: {{currency}}",
-    "manageCurrency": "Manage currency"
+    "suggestedCurrency": "Setup suggestion: {{currency}} (not saved)",
+    "manageCurrency": "Manage currency",
+    "description": "Everyday preferences for your workspace and reporting."
   },
   "money": {
     "description": "Reporting currency, direct exchange-rate authority, and classification controls."
   },
   "appData": {
     "desktopTitle": "Desktop behavior",
-    "desktopDescription": "Controls that apply to the installed desktop app."
+    "desktopDescription": "Controls that apply to the installed desktop app.",
+    "description": "Updates, backups, and installed-app behavior."
   },
   "integrations": {
-    "diagnosticsDescription": "Inspect the identity and runtime details of this local data root."
+    "diagnosticsDescription": "Inspect the identity and runtime details of this local data root.",
+    "description": "Optional market connections and local access tools."
+  },
+  "categoryRules": {
+    "summary": "{{count}} saved rules"
   }
 }

@@ -6,8 +6,10 @@ import {
   type ScopedReportDataset,
   type ScopedEstimateDataset,
   type ReportWindowInput,
+  type ReportWindow,
   type ScopedActualBasis,
   type ScopedReportGroupBy,
+  type ScopedReportResult,
 } from '@shikin/finance-core'
 import { query, transaction } from './database.js'
 import { listExchangeRates } from './fx-service.js'
@@ -60,7 +62,7 @@ export function scopedActual(input: {
   currency: string
   basis: ScopedActualBasis
   groupBy?: ScopedReportGroupBy
-  window: ReportWindowInput
+  window: ReportWindowInput | ReportWindow
 }) {
   return projectScopedReport({
     dataset: input.dataset,
@@ -68,8 +70,22 @@ export function scopedActual(input: {
     currency: input.currency,
     basis: input.basis,
     groupBy: input.groupBy,
-    window: resolveReportWindow(input.window),
+    window: 'requested' in input.window ? input.window : resolveReportWindow(input.window),
   })
+}
+
+// Legacy dated-read conversion entries are flat; null core evidence must remain incomplete.
+export function flatDatedConversions(entries: ScopedReportResult['conversions']) {
+  return entries.map(({ id, conversion }) =>
+    conversion
+      ? { id, ...conversion }
+      : {
+          id,
+          complete: false as const,
+          amountCentavos: null,
+          missingReason: 'invalid_conversion_evidence' as const,
+        }
+  )
 }
 
 export function scopedEstimate(input: {

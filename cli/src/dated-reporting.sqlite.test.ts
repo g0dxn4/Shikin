@@ -20,6 +20,7 @@ import { analyticsTools } from './tools/analytics.js'
 import { budgetsandnetworthTools } from './tools/budgets-and-net-worth.js'
 import { transactionsTools } from './tools/transactions.js'
 import { auditAndContextTools } from './tools/audit-and-context.js'
+import { flatDatedConversions } from './scoped-report-read.js'
 import { goalsTools } from './tools/goals.js'
 
 const tools = [
@@ -763,5 +764,97 @@ describe('budget delete audit atomicity', () => {
       audits: rows('audit_log'),
       revision: rows('app_data_state'),
     }).toEqual(before)
+  })
+})
+
+describe('resolved summary windows and conversion compatibility', () => {
+  it('passes one resolved default-month window unchanged to the canonical report', async () => {
+    const result = await run('get-spending-summary', {
+      currency: 'MXN',
+      period: 'month',
+      asOf: '2026-09-20',
+      timeZone: 'America/Mexico_City',
+    })
+    expect(result.window).toBe(result.report.window)
+    expect(result.window).toMatchObject({
+      period: 'month',
+      start: '2026-09-01',
+      end: '2026-09-20',
+      periodEnd: '2026-09-30',
+      requested: { start: null, end: null },
+      asOf: '2026-09-20',
+      timeZone: 'America/Mexico_City',
+    })
+  })
+  it('retains requested future boundary while capping custom actual end at asOf', async () => {
+    const result = await run('get-spending-summary', {
+      currency: 'MXN',
+      start: '2026-09-15',
+      end: '2026-09-30',
+      asOf: '2026-09-20',
+      timeZone: 'UTC',
+    })
+    expect(result.window).toBe(result.report.window)
+    expect(result.window).toMatchObject({
+      period: 'custom',
+      start: '2026-09-15',
+      end: '2026-09-20',
+      periodEnd: '2026-09-30',
+      requested: { start: '2026-09-15', end: '2026-09-30' },
+      through: 'as_of',
+    })
+  })
+  it('retains flat dated conversion alias entries, including incomplete and null evidence', async () => {
+    setMainCurrency('MXN')
+    tx('buy', 1000, '2026-09-14', 'USD')
+    state.db
+      .exec(`INSERT INTO transaction_consumption_classifications(id,transaction_id,role) VALUES ('c-buy','buy','purchase');
+      INSERT INTO source_coverage(id,account_id,source_namespace,period_start,period_end,status) VALUES ('cov','cash','source','2026-09-01','2026-09-30','verified')`)
+    const input = { basis: 'net_consumption', currency: 'MXN', asOf: '2026-09-20' }
+    const missing = await run('get-spending-summary', input)
+    expect(missing.mainConversion.conversion.converted).toEqual([
+      {
+        id: 'buy',
+        complete: false,
+        amountCentavos: null,
+        missingReason: 'missing_direct_rate',
+        fromCurrency: 'USD',
+        toCurrency: 'MXN',
+        asOfDate: '2026-09-14',
+        rateId: null,
+        effectiveFrom: null,
+        rateDecimal: null,
+        direction: 'USD->MXN',
+      },
+    ])
+    expect(missing.report.conversions).toMatchObject([
+      { id: 'buy', conversion: { complete: false } },
+    ])
+    const directRate = rate('2026-09-01', '17')
+    const converted = await run('get-spending-summary', input)
+    expect(converted.mainConversion.conversion.converted).toEqual([
+      {
+        id: 'buy',
+        complete: true,
+        amountCentavos: 17000,
+        missingReason: null,
+        fromCurrency: 'USD',
+        toCurrency: 'MXN',
+        asOfDate: '2026-09-14',
+        rateId: directRate.id,
+        effectiveFrom: '2026-09-01',
+        rateDecimal: '17',
+        direction: 'USD->MXN',
+      },
+    ])
+    expect(converted.mainConversion.conversion.converted[0]).not.toHaveProperty('conversion')
+    expect(flatDatedConversions([{ id: 'corrupt', conversion: null }])).toEqual([
+      {
+        id: 'corrupt',
+        complete: false,
+        amountCentavos: null,
+        missingReason: 'invalid_conversion_evidence',
+      },
+    ])
   })
 })

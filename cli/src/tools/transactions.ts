@@ -23,6 +23,7 @@ import {
   scopedEstimate,
   storedBudgetScope,
   contributorInspection,
+  flatDatedConversions,
 } from '../scoped-report-read.js'
 import { getCurrencySettings } from '../fx-service.js'
 import { normalizeReportScope, resolveReportWindow, sumScopedCentavos } from '@shikin/finance-core'
@@ -4476,6 +4477,7 @@ const getSpendingSummary: ToolDefinition = {
                 }
               })
           : []
+      const flatConversions = flatDatedConversions(result.conversions)
       const convertedNet = {
         complete: result.complete,
         currency,
@@ -4503,9 +4505,13 @@ const getSpendingSummary: ToolDefinition = {
             : [],
         allocations: result.allocations,
         conversion: {
-          complete: !result.issues.some((issue) => issue.code === 'fx'),
+          complete: flatConversions.every((entry) => entry.complete),
           toCurrency: currency,
-          converted: result.conversions,
+          converted: flatConversions,
+          unresolvedIds: flatConversions
+            .filter((entry) => !entry.complete)
+            .map((entry) => entry.id)
+            .sort(),
           totalCentavos: null,
           reason:
             'Full parent conversion totals are not selected allocation totals; use report.totals.',

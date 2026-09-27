@@ -30,6 +30,11 @@ beforeEach(() => {
   useCurrencyStore.setState({ mainCurrency: 'MXN', preferredCurrency: 'USD', manualRates: [] })
 })
 describe('BudgetDialog protections with authoritative inactive inspection', () => {
+  it('bounds the expanded form to the viewport with local scrolling', async () => {
+    render(<BudgetDialog />)
+    await screen.findByDisplayValue('Food plan')
+    expect(screen.getByRole('dialog')).toHaveClass('max-h-[calc(100dvh-2rem)]', 'overflow-y-auto')
+  })
   it('loads a by-ID inactive plan even when absent from the active list and saves reactivation', async () => {
     const user = userEvent.setup()
     render(<BudgetDialog />)

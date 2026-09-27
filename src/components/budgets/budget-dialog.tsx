@@ -63,7 +63,7 @@ export function BudgetDialog() {
   return (
     <>
       <Dialog open={budgetDialogOpen} onOpenChange={(open) => !open && handleRequestClose()}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-md overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{isEditing ? t('editBudget') : t('addBudget')}</DialogTitle>
             <DialogDescription>

@@ -15,8 +15,7 @@ const categories = [
   { categoryId: 'food', currency: 'EUR' },
   { categoryId: 'food', currency: 'EUR' },
 ]
-function response(): ScopedRead {
-  const s = scopedFixture()
+function response(s = scopedFixture()): ScopedRead {
   const window = resolveReportWindow(fixtureWindow)
   return {
     result: projectScopedReport({
@@ -52,6 +51,32 @@ describe('canonical category actuals', () => {
       rows: [{ categoryId: 'food', spending: { totalCentavos: 25000 } }],
     })
   })
+  it.each(['income', 'expense'] as const)(
+    'uses expense completeness when a selected %s lacks FX',
+    async (type) => {
+      const snapshot = scopedFixture()
+      snapshot.dataset.transactions = [
+        ...snapshot.dataset.transactions,
+        {
+          ...snapshot.dataset.transactions[0],
+          id: 'missing-fx',
+          type,
+          amount: 10000,
+          currency: 'EUR',
+        },
+      ]
+      read.mockResolvedValue(response(snapshot))
+      const { result } = renderHook(() => useBudgetRangeSpending(categories, 'this-month'))
+      await waitFor(() => expect(result.current.loading).toBe(false))
+      expect(result.current.result?.complete).toBe(false)
+      expect(result.current.rows[0].spending).toMatchObject({
+        complete: type === 'income',
+        totalCentavos: type === 'income' ? 25000 : null,
+        knownTotalCentavos: 25000,
+        unresolvedIds: type === 'income' ? [] : ['missing-fx'],
+      })
+    }
+  )
   it('withholds old range and currency-authority responses, stops updates after unmount', async () => {
     const old = deferred<ScopedRead>()
     read.mockReturnValueOnce(old.promise)

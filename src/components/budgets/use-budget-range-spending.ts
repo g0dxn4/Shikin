@@ -38,9 +38,11 @@ export function useBudgetRangeSpending(
           return {
             categoryId,
             spending: {
-              complete: result.complete,
+              complete: result.budgetUsage.complete,
               currency: result.currency,
-              totalCentavos: result.complete ? (group?.totals.expenseCentavos ?? 0) : null,
+              totalCentavos: result.budgetUsage.complete
+                ? (group?.known.expenseCentavos ?? 0)
+                : null,
               knownTotalCentavos: group?.known.expenseCentavos ?? 0,
               nativeTotals: currencies.map((currency) => ({
                 currency,
@@ -54,7 +56,7 @@ export function useBudgetRangeSpending(
                     )
                 ),
               })),
-              unresolvedIds: result.issues.flatMap((i) => (i.id ? [i.id] : [])),
+              unresolvedIds: result.budgetUsage.issues.flatMap((i) => (i.id ? [i.id] : [])),
               conversions: [],
             },
           }

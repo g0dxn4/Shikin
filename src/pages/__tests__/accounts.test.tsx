@@ -282,8 +282,27 @@ describe('Accounts', () => {
     expect(checking.parentElement).toBe(savings.parentElement)
     expect(checking.parentElement).toHaveClass('grid-cols-1', 'items-start', 'xl:grid-cols-2')
     expect(screen.getAllByText('$2,500.00').length).toBeGreaterThan(0)
-    expect(screen.getByText('USD')).toBeInTheDocument()
-    expect(screen.getByText('EUR')).toBeInTheDocument()
+    const checkingBalance = within(checking).getByText('$2,500.00')
+    const checkingCurrency = within(checking).getByText('USD')
+    expect(checkingBalance.parentElement).toBe(checkingCurrency.parentElement)
+    expect(checkingBalance.parentElement).toHaveClass(
+      'flex',
+      'min-w-0',
+      'flex-wrap',
+      'items-baseline'
+    )
+    expect(checkingBalance.parentElement).not.toHaveClass('truncate', 'overflow-hidden')
+    expect(checkingBalance).toHaveClass(
+      'min-w-0',
+      'max-w-full',
+      'break-words',
+      'text-xl',
+      'min-[380px]:text-2xl'
+    )
+    expect(checkingBalance).not.toHaveClass('truncate')
+    expect(within(savings).getByText('EUR').parentElement).toBe(
+      within(savings).getByText('€1,000.00').parentElement
+    )
   })
 
   it('tints cards from persisted color and identifies types without fabricated numbers', () => {
@@ -587,7 +606,7 @@ describe('Accounts', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('shows credit details only on request, retaining the existing values', async () => {
+  it('shows credit limit and available by default, with dates and utilization on request', async () => {
     const user = userEvent.setup()
     mockAccounts = [
       {
@@ -606,18 +625,32 @@ describe('Accounts', () => {
 
     const card = screen.getByRole('article', { name: 'Travel Card' })
     expect(within(card).getAllByRole('button')).toHaveLength(1)
-    expect(within(card).queryByText('credit.limit')).not.toBeInTheDocument()
+    expect(within(card).getByText('credit.limit')).toBeInTheDocument()
+    expect(within(card).getByText('credit.available')).toBeInTheDocument()
+    expect(within(card).getByText('$27,000.00')).toBeInTheDocument()
+    expect(within(card).getByText('$26,000.00')).toBeInTheDocument()
+    expect(within(card).getByText('credit.limit').parentElement?.parentElement).toHaveClass(
+      'grid-cols-2'
+    )
+    expect(within(card).getByText('credit.limit').parentElement?.parentElement).not.toHaveClass(
+      'grid-cols-3'
+    )
     expect(within(card).queryByText('utilization.label')).not.toBeInTheDocument()
+    expect(within(card).queryByText(/C 15/)).not.toBeInTheDocument()
+    expect(within(card).queryByText(/D 5/)).not.toBeInTheDocument()
     await chooseAccountAction(user, 'Travel Card', 'credit.showDetails')
-    expect(within(card).queryByText('credit.limit')).toBeInTheDocument()
-    expect(screen.getByText('credit.available')).toBeInTheDocument()
-    expect(screen.getByText('$27,000.00')).toBeInTheDocument()
-    expect(screen.getByText('$26,000.00')).toBeInTheDocument()
+    expect(within(card).getByText('credit.limit')).toBeInTheDocument()
+    expect(within(card).getByText('credit.available')).toBeInTheDocument()
+    expect(within(card).getByText('$27,000.00')).toBeInTheDocument()
+    expect(within(card).getByText('$26,000.00')).toBeInTheDocument()
     expect(screen.getByText(/C 15/)).toBeInTheDocument()
     expect(screen.getByText(/D 5/)).toBeInTheDocument()
     expect(within(card).getByText('utilization.label')).toBeInTheDocument()
     await chooseAccountAction(user, 'Travel Card', 'credit.hideDetails')
-    expect(within(card).queryByText('credit.limit')).not.toBeInTheDocument()
+    expect(within(card).getByText('credit.limit')).toBeInTheDocument()
+    expect(within(card).getByText('credit.available')).toBeInTheDocument()
+    expect(within(card).queryByText('utilization.label')).not.toBeInTheDocument()
+    expect(within(card).queryByText(/C 15/)).not.toBeInTheDocument()
   })
 
   it('omits the details toggle when a card has no credit details to display', async () => {
@@ -631,6 +664,9 @@ describe('Accounts', () => {
       },
     ]
     renderAccounts()
+    const card = screen.getByRole('article', { name: 'No limit card' })
+    expect(within(card).queryByText('credit.limit')).not.toBeInTheDocument()
+    expect(within(card).queryByText('credit.available')).not.toBeInTheDocument()
     await userEvent
       .setup()
       .click(screen.getByRole('button', { name: 'actions.more — No limit card' }))

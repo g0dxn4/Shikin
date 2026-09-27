@@ -1039,36 +1039,43 @@ function AccountCard({
               triggerClassName="min-h-11 min-w-11 px-2"
             />
           </div>
-          <p className="text-foreground mt-3 min-w-0 text-2xl font-semibold tracking-tight break-words tabular-nums">
-            {formatMoney(account.balance, account.currency)}
-          </p>
-          <p className="text-muted-foreground mt-1 text-xs tabular-nums">{account.currency}</p>
+          <div className="mt-3 flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+            <p className="text-foreground max-w-full min-w-0 shrink-0 text-xl font-semibold tracking-tight break-words tabular-nums min-[380px]:text-2xl">
+              {formatMoney(account.balance, account.currency)}
+            </p>
+            <p className="text-muted-foreground shrink-0 text-xs tabular-nums">
+              {account.currency}
+            </p>
+          </div>
         </div>
       </div>
 
-      {showCreditDetails && isCreditCard && creditLimit !== null && (
-        <div className="bg-muted/40 border-border mt-4 grid grid-cols-3 gap-2 rounded-lg border p-3">
-          <div>
+      {isCreditCard && creditLimit !== null && (
+        <div className="mt-4 grid min-w-0 grid-cols-2 gap-x-4 gap-y-1">
+          <div className="min-w-0">
             <p className="text-muted-foreground text-xs">{t('credit.limit')}</p>
-            <p className="mt-1 min-w-0 text-xs font-semibold break-all tabular-nums">
+            <p className="text-foreground mt-1 max-w-full min-w-0 text-sm font-semibold break-words tabular-nums">
               {formatMoney(creditLimit, account.currency)}
             </p>
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="text-muted-foreground text-xs">{t('credit.available')}</p>
             <p
-              className={`mt-1 min-w-0 text-xs font-semibold break-all tabular-nums ${availableCredit !== null && availableCredit < 0 ? 'text-destructive' : 'text-success'}`}
+              className={`mt-1 max-w-full min-w-0 text-sm font-semibold break-words tabular-nums ${availableCredit !== null && availableCredit < 0 ? 'text-destructive' : 'text-success'}`}
             >
               {formatMoney(availableCredit ?? 0, account.currency)}
             </p>
           </div>
-          <div>
-            <p className="text-muted-foreground text-xs">{t('credit.dates')}</p>
-            <p className="mt-1 text-xs font-semibold tabular-nums">
-              {account.statement_closing_day ? `C ${account.statement_closing_day}` : 'C --'} /{' '}
-              {account.payment_due_day ? `D ${account.payment_due_day}` : 'D --'}
-            </p>
-          </div>
+        </div>
+      )}
+
+      {showCreditDetails && isCreditCard && creditLimit !== null && (
+        <div className="mt-3 min-w-0">
+          <p className="text-muted-foreground text-xs">{t('credit.dates')}</p>
+          <p className="mt-1 text-xs font-semibold tabular-nums">
+            {account.statement_closing_day ? `C ${account.statement_closing_day}` : 'C --'} /{' '}
+            {account.payment_due_day ? `D ${account.payment_due_day}` : 'D --'}
+          </p>
         </div>
       )}
 

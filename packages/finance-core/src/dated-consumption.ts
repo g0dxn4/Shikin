@@ -4,6 +4,7 @@ import {
   owningAllocation,
   validateConsumptionClassification,
   type ConsumptionEvidence,
+  type ConsumptionAllocationSelection,
 } from './corrections.js'
 import { apportionConvertedAmount } from './fx.js'
 
@@ -49,8 +50,9 @@ export function projectDatedNetConsumption(input: {
   end: string
   conversion: DatedConsumptionConversion
   coverageComplete: boolean
+  selectAllocation?: ConsumptionAllocationSelection
 }) {
-  const native = netConsumption(input.evidence, input.start, input.end)
+  const native = netConsumption(input.evidence, input.start, input.end, input.selectAllocation)
   const recognized = input.evidence.classifications.flatMap((item) => {
     try {
       validateConsumptionClassification(item, input.evidence)
@@ -68,15 +70,21 @@ export function projectDatedNetConsumption(input: {
               (entry) => entry.id === item.referenced_purchase_id
             )!
           : null
-      return [
-        {
-          item,
-          owner,
-          categoryId: purchase
-            ? owningAllocation(purchase, input.evidence).categoryId
-            : owner.categoryId,
-        },
-      ]
+      const categoryId = purchase
+        ? owningAllocation(purchase, input.evidence).categoryId
+        : owner.categoryId
+      if (
+        input.selectAllocation &&
+        !input.selectAllocation({
+          transaction: owner.row,
+          allocationId: item.split_id ?? item.transaction_id,
+          categoryId,
+          classification: item,
+          classificationValid: true,
+        })
+      )
+        return []
+      return [{ item, owner, categoryId }]
     } catch {
       return []
     }

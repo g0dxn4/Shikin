@@ -367,11 +367,37 @@ function isConsumptionReportRelevant(row: CorrectionTransaction): boolean {
   )
 }
 
+/** Selection never removes reference/capacity evidence. Unknown income can refund any category. */
+export interface ConsumptionSelectionContext {
+  transaction: CorrectionTransaction | null
+  allocationId: string
+  categoryId: string | null
+  classification: ConsumptionClassification | null
+  classificationValid: boolean
+}
+export type ConsumptionAllocationSelection = (context: ConsumptionSelectionContext) => boolean
+
 /** Known native-currency subtotals only. Coverage is independently verified by the caller. */
-export function netConsumption(evidence: ConsumptionEvidence, start: string, end: string) {
+export function netConsumption(
+  evidence: ConsumptionEvidence,
+  start: string,
+  end: string,
+  selectAllocation?: ConsumptionAllocationSelection
+) {
   const unresolvedIds: string[] = evidence.classifications
     .filter((item) => {
       const row = evidence.transactions.find((tx) => tx.id === item.transaction_id)
+      if (
+        selectAllocation &&
+        !selectAllocation({
+          transaction: row ?? null,
+          allocationId: item.split_id ?? item.transaction_id,
+          categoryId: row?.category_id ?? null,
+          classification: item,
+          classificationValid: false,
+        })
+      )
+        return false
       return (
         !row ||
         (row.date &&
@@ -390,7 +416,18 @@ export function netConsumption(evidence: ConsumptionEvidence, start: string, end
   for (const row of evidence.transactions) {
     if (!row.date || row.date < start || row.date > end) continue
     if (!isConsumptionEligible(row)) {
-      if (isConsumptionReportRelevant(row)) unresolvedIds.push(row.id)
+      if (
+        isConsumptionReportRelevant(row) &&
+        (!selectAllocation ||
+          selectAllocation({
+            transaction: row,
+            allocationId: row.id,
+            categoryId: row.category_id ?? null,
+            classification: null,
+            classificationValid: false,
+          }))
+      )
+        unresolvedIds.push(row.id)
       continue
     }
     const splits = evidence.splits.filter((split) => split.transaction_id === row.id)
@@ -411,6 +448,17 @@ export function netConsumption(evidence: ConsumptionEvidence, start: string, end
           )!
           categoryId = owningAllocation(purchase, evidence).categoryId
         }
+        if (
+          selectAllocation &&
+          !selectAllocation({
+            transaction: row,
+            allocationId: splitId ?? row.id,
+            categoryId,
+            classification: item,
+            classificationValid: true,
+          })
+        )
+          continue
         const total = {
           ...(totals.get(owner.currency) ?? {
             currency: owner.currency,
@@ -437,7 +485,21 @@ export function netConsumption(evidence: ConsumptionEvidence, start: string, end
         }
         totals.set(owner.currency, total)
       } catch {
-        unresolvedIds.push(splitId ?? row.id)
+        const categoryId =
+          splitId === null
+            ? (row.category_id ?? null)
+            : splits.find((split) => split.id === splitId)!.category_id
+        if (
+          !selectAllocation ||
+          selectAllocation({
+            transaction: row,
+            allocationId: splitId ?? row.id,
+            categoryId,
+            classification: item ?? null,
+            classificationValid: false,
+          })
+        )
+          unresolvedIds.push(splitId ?? row.id)
       }
     }
   }

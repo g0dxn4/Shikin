@@ -25,7 +25,7 @@ import {
   contributorInspection,
 } from '../scoped-report-read.js'
 import { getCurrencySettings } from '../fx-service.js'
-import { normalizeReportScope, resolveReportWindow } from '@shikin/finance-core'
+import { normalizeReportScope, resolveReportWindow, sumScopedCentavos } from '@shikin/finance-core'
 import {
   z,
   query,
@@ -43,6 +43,7 @@ import {
   crossCurrencyMoveMessage,
   unknownTransactionCurrencyFailure,
   normalizeCurrencyCode,
+  getCategoryIdentity,
   resolveCategoryId,
   writeAuditLog,
   type ToolDefinition,
@@ -4317,8 +4318,20 @@ const getSpendingSummary: ToolDefinition = {
     groupBy: z.enum(['category', 'account', 'month', 'none']).optional().default('category'),
   }),
   effects: { readOnly: true, writesTo: [] },
-  execute: async (input) =>
-    transaction(() => {
+  execute: async (input) => {
+    const start = input.start ?? input.startDate
+    const end = input.end ?? input.endDate
+    if (input.period === 'custom' && (!start || !end))
+      return {
+        success: false,
+        message: 'Custom spending summaries require both startDate and endDate.',
+      }
+    if (start && end && start > end)
+      return {
+        success: false,
+        message: 'Custom spending summaries require startDate to be on or before endDate.',
+      }
+    return transaction(() => {
       if (
         (input.start && input.startDate && input.start !== input.startDate) ||
         (input.end && input.endDate && input.end !== input.endDate)
@@ -4386,48 +4399,158 @@ const getSpendingSummary: ToolDefinition = {
         weekStartsOn: window.weekStartsOn,
         timeZone: window.timeZone,
       }
+      // Compatibility aliases are derived exclusively from selected core allocations.
+      // Native amounts are never added across currencies or mistaken for converted totals.
+      const nativeGross = result.nativeTotals.map(({ currency: nativeCurrency, known }) => {
+        const totalExpenses = fromCentavos(known.expenseCentavos ?? 0)
+        const totalIncome = fromCentavos(known.incomeCentavos ?? 0)
+        return {
+          currency: nativeCurrency,
+          totalExpenses,
+          totalIncome,
+          netSavings: totalIncome - totalExpenses,
+        }
+      })
+      const nativeNet = result.nativeTotals.map(({ currency: nativeCurrency, known }) => ({
+        currency: nativeCurrency,
+        consumptionCentavos: known.consumptionCentavos ?? 0,
+        earnedIncomeCentavos: known.earnedIncomeCentavos ?? 0,
+        otherIncomeCentavos: known.otherIncomeCentavos ?? 0,
+        principalRecoveryCentavos: known.principalRecoveryCentavos ?? 0,
+        assetAcquisitionCentavos: known.assetAcquisitionCentavos ?? 0,
+      }))
+      const nativeCategories = [
+        ...new Set(
+          result.allocations
+            .filter(
+              (row) =>
+                row.nativeAmounts.consumptionCentavos !== null &&
+                row.nativeAmounts.consumptionCentavos !== 0
+            )
+            .map((row) => JSON.stringify([row.currency, row.categoryId]))
+        ),
+      ]
+        .sort()
+        .map((key) => {
+          const [nativeCurrency, categoryId] = JSON.parse(key) as [string, string | null]
+          const amountCentavos = sumScopedCentavos(
+            result.allocations
+              .filter((row) => row.currency === nativeCurrency && row.categoryId === categoryId)
+              .map((row) => row.nativeAmounts.consumptionCentavos ?? 0)
+          )
+          return { currency: nativeCurrency, categoryId, amountCentavos }
+        })
+      const expenseRows = result.allocations.filter(
+        (row) =>
+          row.nativeAmounts.expenseCentavos !== null && row.nativeAmounts.expenseCentavos !== 0
+      )
+      const legacyGrossCategories =
+        input.groupBy === 'category'
+          ? [...new Set(expenseRows.map((row) => JSON.stringify([row.currency, row.categoryId])))]
+              .sort()
+              .map((key) => {
+                const [nativeCurrency, categoryId] = JSON.parse(key) as [string, string | null]
+                const rows = expenseRows.filter(
+                  (row) => row.currency === nativeCurrency && row.categoryId === categoryId
+                )
+                const amount = fromCentavos(
+                  sumScopedCentavos(rows.map((row) => row.nativeAmounts.expenseCentavos ?? 0))
+                )
+                const denominator =
+                  nativeGross.find((row) => row.currency === nativeCurrency)?.totalExpenses ?? 0
+                const categoryName =
+                  categoryId === null
+                    ? 'Uncategorized'
+                    : ((
+                        dataset.categories.find((row) => row.id === categoryId) as
+                          | { id: string; name?: string }
+                          | undefined
+                      )?.name ?? categoryId)
+                return {
+                  currency: nativeCurrency,
+                  categoryId,
+                  ...getCategoryIdentity(categoryId, categoryName),
+                  amount,
+                  transactionCount: new Set(rows.map((row) => row.transactionId)).size,
+                  percentage: denominator > 0 ? Math.round((amount / denominator) * 100) : 0,
+                }
+              })
+          : []
+      const convertedNet = {
+        complete: result.complete,
+        currency,
+        toCurrency: currency,
+        consumptionCentavos: result.totals.consumptionCentavos,
+        earnedIncomeCentavos: result.totals.earnedIncomeCentavos,
+        otherIncomeCentavos: result.totals.otherIncomeCentavos,
+        principalRecoveryCentavos: result.totals.principalRecoveryCentavos,
+        assetAcquisitionCentavos: result.totals.assetAcquisitionCentavos,
+        knownConsumptionCentavos: result.known.consumptionCentavos,
+        knownEarnedIncomeCentavos: result.known.earnedIncomeCentavos,
+        knownOtherIncomeCentavos: result.known.otherIncomeCentavos,
+        knownPrincipalRecoveryCentavos: result.known.principalRecoveryCentavos,
+        knownAssetAcquisitionCentavos: result.known.assetAcquisitionCentavos,
+        classificationComplete: result.classificationComplete,
+        coverageComplete: result.coverage.complete,
+        unresolvedClassificationIds: result.unresolvedClassificationIds,
+        byCategory:
+          input.groupBy === 'category'
+            ? result.groups.map((group) => ({
+                categoryId: group.key,
+                amountCentavos: group.totals.consumptionCentavos,
+                knownAmountCentavos: group.known.consumptionCentavos,
+              }))
+            : [],
+        allocations: result.allocations,
+        conversion: {
+          complete: !result.issues.some((issue) => issue.code === 'fx'),
+          toCurrency: currency,
+          converted: result.conversions,
+          totalCentavos: null,
+          reason:
+            'Full parent conversion totals are not selected allocation totals; use report.totals.',
+        },
+        conversions: result.conversions,
+        reason: result.complete ? null : (result.issues[0]?.code ?? 'incomplete_report'),
+        uncoveredAccountIds: result.coverage.uncoveredAccountIds,
+        policy: result.fxPolicy,
+      }
       return {
-        success: true,
+        success: input.basis === 'net_consumption' || result.complete,
+        reason: result.complete ? null : (result.issues[0]?.code ?? 'incomplete_report'),
         ...result,
+        report: result,
         period: { start: window.start, end: window.end },
         window,
         totalExpenses: expense,
         totalIncome: income,
         netSavings: expense === null || income === null ? null : income - expense,
-        totalsByCurrency: result.complete
-          ? [
-              {
-                currency,
-                totalExpenses: expense,
-                totalIncome: income,
-                netSavings: expense === null || income === null ? null : income - expense,
-              },
-            ]
-          : [],
-        mixedCurrency: false,
-        byCategory:
-          input.groupBy === 'category'
-            ? result.groups.map((g) => ({
-                categoryId: g.key,
-                category:
-                  g.key === null
-                    ? 'Uncategorized'
-                    : ((
-                        dataset.categories.find((row) => row.id === g.key) as
-                          | { id: string; name?: string }
-                          | undefined
-                      )?.name ?? g.key),
-                currency,
-                amount: cents(g.totals.expenseCentavos ?? g.totals.consumptionCentavos),
-                transactionCount: g.transactionIds.length,
-              }))
-            : [],
+        totalsByCurrency: input.basis === 'net_consumption' ? nativeNet : nativeGross,
+        nativeTotalsComplete: result.complete,
+        nativeTotalsReason: result.complete
+          ? null
+          : 'Known native subtotals only; unresolved selected evidence may affect any currency.',
+        mixedCurrency: result.nativeTotals.length > 1,
+        byCategory: input.basis === 'net_consumption' ? nativeCategories : legacyGrossCategories,
+        ...(input.basis === 'net_consumption'
+          ? {
+              // The legacy `totals` is a native-currency array; the canonical converted
+              // seven-field object remains available at `report.totals`.
+              totals: nativeNet,
+              unresolvedIds: result.unresolvedClassificationIds,
+              coverageComplete: result.coverage.complete,
+              uncoveredAccountIds: result.coverage.uncoveredAccountIds,
+              currencyScope: 'all',
+              mainConversion: convertedNet,
+            }
+          : {}),
         ...contributorInspection(result, descriptor),
         message: result.complete
           ? 'Scoped actual spending is complete.'
           : 'Scoped actual spending incomplete; inspect known subtotals and issues.',
       }
-    }),
+    })
+  },
 }
 
 // ---------------------------------------------------------------------------

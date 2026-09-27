@@ -1,5 +1,7 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import Database from 'better-sqlite3'
+import { runHostedTestMigrations } from './backend-foundation-test-schema.js'
 import dayjs from 'dayjs'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -8,6 +10,7 @@ import { join } from 'node:path'
 const {
   mockQuery,
   mockExecute,
+  mockGenerateId,
   mockTransaction,
   mockNoteExists,
   mockWriteNote,
@@ -16,6 +19,7 @@ const {
 } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockExecute: vi.fn(),
+  mockGenerateId: vi.fn(() => 'tx_test_123'),
   mockTransaction: vi.fn((fn: () => unknown) => fn()),
   mockNoteExists: vi.fn(),
   mockWriteNote: vi.fn(),
@@ -33,9 +37,7 @@ vi.mock('./database.js', () => ({
   DATABASE_BACKUP_SETTING_KEY: 'database_backups',
 }))
 
-vi.mock('./ulid.js', () => ({
-  generateId: () => 'tx_test_123',
-}))
+vi.mock('./ulid.js', () => ({ generateId: mockGenerateId }))
 
 vi.mock('./notebook.js', () => ({
   readNote: vi.fn(),
@@ -147,10 +149,49 @@ const lastSixMonthLabels = Array.from({ length: 6 }, (_, index) =>
     .format('YYYY-MM')
 )
 
+const scopedFixtures: Database.Database[] = []
+afterEach(() => {
+  for (const db of scopedFixtures.splice(0)) db.close()
+})
+
+function scopedSummaryFixture() {
+  const db = new Database(':memory:')
+  scopedFixtures.push(db)
+  db.pragma('foreign_keys = ON')
+  runHostedTestMigrations(db)
+  db.exec(`INSERT INTO settings (key,value,updated_at) VALUES ('main_currency','USD','2026-01-01');
+    INSERT INTO accounts (id,name,type,currency,account_mode) VALUES ('bank','Bank','checking','USD','transactional');
+    DELETE FROM categories;
+    INSERT INTO categories (id,name,type) VALUES ('food','Food','expense'),('travel','Travel','expense'),('cat-uncat','Uncategorized','expense');`)
+  mockQuery.mockImplementation((sql: string, params: unknown[] = []) =>
+    db.prepare(sql.replace(/\$\d+/g, '?')).all(...params)
+  )
+  mockExecute.mockImplementation((sql: string, params: unknown[] = []) => ({
+    rowsAffected: db.prepare(sql.replace(/\$\d+/g, '?')).run(...params).changes,
+  }))
+  mockTransaction.mockImplementation((fn: () => unknown) => db.transaction(fn).immediate())
+  return db
+}
+function scopedFixtureTransaction(
+  db: Database.Database,
+  id: string,
+  amount: number,
+  currency = 'USD',
+  categoryId: string | null = 'food',
+  type = 'expense'
+) {
+  db.prepare(
+    `INSERT INTO transactions (id,account_id,type,amount,currency,description,date,category_id)
+    VALUES (?, 'bank', ?, ?, ?, ?, ?, ?)`
+  ).run(id, type, amount, currency, id, dayjs().format('YYYY-MM-DD'), categoryId)
+}
+
 describe('CLI tool validation regressions', () => {
   beforeEach(() => {
     mockQuery.mockReset()
     mockExecute.mockReset()
+    mockGenerateId.mockReset()
+    mockGenerateId.mockReturnValue('tx_test_123')
     mockTransaction.mockClear()
     mockNoteExists.mockReset()
     mockWriteNote.mockReset()
@@ -1310,24 +1351,17 @@ describe('CLI tool validation regressions', () => {
     expect(mockExecute).not.toHaveBeenCalled()
   })
 
-  it('returns a per-currency spending summary for mixed-currency ledgers', async () => {
-    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
-    mockQuery
-      .mockReturnValueOnce([
-        { currency: 'USD', category_name: 'Food', total: 12000, count: 3 },
-        { currency: 'EUR', category_name: 'Travel', total: 9000, count: 1 },
-      ])
-      .mockReturnValueOnce([
-        { currency: 'USD', type: 'expense', total: 12000 },
-        { currency: 'USD', type: 'income', total: 50000 },
-        { currency: 'EUR', type: 'expense', total: 9000 },
-        { currency: 'EUR', type: 'income', total: 0 },
-      ])
-
-    const result = await getSpendingSummary.execute({ period: 'month' })
-
+  it('returns native per-currency evidence without inventing a missing FX rate', async () => {
+    const db = scopedSummaryFixture()
+    scopedFixtureTransaction(db, 'usd-food', 12000)
+    scopedFixtureTransaction(db, 'usd-income', 50000, 'USD', 'food', 'income')
+    scopedFixtureTransaction(db, 'eur-travel', 9000, 'EUR', 'travel')
+    const result = await getSpendingSummary.execute(
+      getSpendingSummary.schema.parse({ period: 'month' })
+    )
     expect(result).toMatchObject({
       mixedCurrency: true,
+      complete: false,
       totalExpenses: null,
       totalIncome: null,
       netSavings: null,
@@ -1335,44 +1369,40 @@ describe('CLI tool validation regressions', () => {
         { currency: 'EUR', totalExpenses: 90, totalIncome: 0, netSavings: -90 },
         { currency: 'USD', totalExpenses: 120, totalIncome: 500, netSavings: 380 },
       ],
-      byCategory: [
-        expect.objectContaining({ currency: 'USD', category: 'Food', amount: 120 }),
-        expect.objectContaining({ currency: 'EUR', category: 'Travel', amount: 90 }),
-      ],
+      byCategory: expect.arrayContaining([
+        expect.objectContaining({
+          currency: 'USD',
+          category: 'Food',
+          amount: 120,
+          percentage: 100,
+        }),
+        expect.objectContaining({
+          currency: 'EUR',
+          category: 'Travel',
+          amount: 90,
+          percentage: 100,
+        }),
+      ]),
     })
-    expect(result.message).toContain('no FX conversion was applied')
+    expect(result.report.issues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'fx' })])
+    )
   })
 
-  it('fails spending summary when aggregate rows have missing currency', async () => {
-    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
-    mockQuery
-      .mockReturnValueOnce([
-        {
-          currency: null,
-          category_id: null,
-          category_name: 'Uncategorized',
-          total: 1200,
-          count: 1,
-        },
-      ])
-      .mockReturnValueOnce([])
-
-    const result = await getSpendingSummary.execute({ period: 'month' })
-
-    expect(result).toEqual({
-      success: false,
-      reason: 'repair_needed_missing_currency',
-      message:
-        'Spending summary encountered rows with missing currency. Repair or recreate the affected data before using this summary.',
-    })
+  it('rejects missing currency at the current schema write boundary', async () => {
+    const db = scopedSummaryFixture()
+    expect(() => scopedFixtureTransaction(db, 'bad', 1200, null as never, null)).toThrow()
+    const result = await getSpendingSummary.execute(
+      getSpendingSummary.schema.parse({ period: 'month' })
+    )
+    expect(result).toMatchObject({ complete: true, totalExpenses: 0, totalsByCurrency: [] })
   })
 
   it('returns zero top-level spending totals for an empty period', async () => {
-    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
-    mockQuery.mockReturnValueOnce([]).mockReturnValueOnce([])
-
-    const result = await getSpendingSummary.execute({ period: 'month' })
-
+    scopedSummaryFixture()
+    const result = await getSpendingSummary.execute(
+      getSpendingSummary.schema.parse({ period: 'month' })
+    )
     expect(result).toMatchObject({
       mixedCurrency: false,
       totalExpenses: 0,
@@ -1381,12 +1411,10 @@ describe('CLI tool validation regressions', () => {
       totalsByCurrency: [],
       byCategory: [],
     })
-    expect(result.message).toContain('No expenses found')
   })
 
   it('fails fast when a custom spending summary omits one boundary date', async () => {
     const result = await getSpendingSummary.execute({ period: 'custom', startDate: '2026-01-01' })
-
     expect(result).toEqual({
       success: false,
       message: 'Custom spending summaries require both startDate and endDate.',
@@ -1400,7 +1428,6 @@ describe('CLI tool validation regressions', () => {
       startDate: '2026-02-01',
       endDate: '2026-01-01',
     })
-
     expect(result).toEqual({
       success: false,
       message: 'Custom spending summaries require startDate to be on or before endDate.',
@@ -1408,47 +1435,34 @@ describe('CLI tool validation regressions', () => {
     expect(mockQuery).not.toHaveBeenCalled()
   })
 
-  it('uses an inclusive 7-day window for weekly spending summaries', async () => {
-    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
-    mockQuery.mockReturnValueOnce([]).mockReturnValueOnce([])
-
-    const result = await getSpendingSummary.execute({ period: 'week' })
-
-    expect(dayjs(result.period.end).diff(dayjs(result.period.start), 'day')).toBe(6)
+  it('uses a Sunday-start seven-day calendar week and caps default actuals at asOf', async () => {
+    scopedSummaryFixture()
+    const result = await getSpendingSummary.execute(
+      getSpendingSummary.schema.parse({ period: 'week', asOf: '2026-02-18', timeZone: 'UTC' })
+    )
+    expect(dayjs(result.window.periodEnd).diff(dayjs(result.window.periodStart), 'day')).toBe(6)
+    expect(result.period.end).toBe('2026-02-18')
+    expect(result.window.weekStartsOn).toBe(0)
   })
 
   it('keeps real Uncategorized categories distinct from uncategorized transactions', async () => {
-    mockQuery.mockReturnValueOnce([]) // reporting integrity preflight
-    mockQuery
-      .mockReturnValueOnce([
-        {
-          currency: 'USD',
-          category_id: null,
-          category_name: 'Uncategorized',
-          total: 1200,
-          count: 1,
-        },
-        {
-          currency: 'USD',
-          category_id: 'cat-uncat',
-          category_name: 'Uncategorized',
-          total: 800,
-          count: 2,
-        },
-      ])
-      .mockReturnValueOnce([
-        { currency: 'USD', type: 'expense', total: 2000 },
-        { currency: 'USD', type: 'income', total: 0 },
-      ])
-
-    const result = await getSpendingSummary.execute({ period: 'month' })
-
+    const db = scopedSummaryFixture()
+    scopedFixtureTransaction(db, 'no-cat', 1200, 'USD', null)
+    scopedFixtureTransaction(db, 'real-cat', 800, 'USD', 'cat-uncat')
+    const result = await getSpendingSummary.execute(
+      getSpendingSummary.schema.parse({ period: 'month' })
+    )
     expect(result.byCategory).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ category: 'Uncategorized', categoryKey: '__uncategorized__' }),
+        expect.objectContaining({
+          category: 'Uncategorized',
+          categoryKey: '__uncategorized__',
+          amount: 12,
+        }),
         expect.objectContaining({
           category: 'Uncategorized (category)',
           categoryKey: 'cat-uncat',
+          amount: 8,
         }),
       ])
     )
@@ -2191,15 +2205,11 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('previews budget upserts by category and default monthly period', async () => {
-    mockQuery
-      .mockReturnValueOnce([{ id: 'cat-food', name: 'Food' }])
-      .mockReturnValueOnce([])
-      .mockReturnValueOnce([{ value: 'USD' }])
-
+    const db = scopedSummaryFixture()
+    const before = db.prepare('SELECT * FROM budgets').all()
     const result = await upsertBudget.execute(
       upsertBudget.schema.parse({ categoryName: 'Food', amount: 500, dryRun: true })
     )
-
     expect(result).toMatchObject({
       success: true,
       action: 'created',
@@ -2208,29 +2218,21 @@ describe('CLI tool validation regressions', () => {
         name: 'Food Budget',
         amount: 500,
         period: 'monthly',
-        categoryId: 'cat-food',
+        categoryId: 'food',
       }),
     })
-    expect(mockExecute).not.toHaveBeenCalled()
+    expect(db.prepare('SELECT * FROM budgets').all()).toEqual(before)
+    expect(db.prepare("SELECT * FROM audit_log WHERE entity='budget'").all()).toEqual([])
   })
 
   it('matches category budgets without defaulting the lookup period', async () => {
-    mockQuery.mockReturnValueOnce([{ id: 'cat-food', name: 'Food' }]).mockReturnValueOnce([
-      {
-        id: 'budget-yearly',
-        name: 'Annual Food',
-        amount: 120000,
-        period: 'yearly',
-        category_id: 'cat-food',
-        category_name: 'Food',
-        is_active: 1,
-      },
-    ])
-
+    const db = scopedSummaryFixture()
+    db.exec(
+      "INSERT INTO budgets(id,name,amount,period,category_id,currency) VALUES ('budget-yearly','Annual Food',120000,'yearly','food','USD')"
+    )
     const result = await upsertBudget.execute(
       upsertBudget.schema.parse({ categoryName: 'Food', amount: 1500, dryRun: true })
     )
-
     expect(result).toMatchObject({
       success: true,
       action: 'updated',
@@ -2241,58 +2243,35 @@ describe('CLI tool validation regressions', () => {
         after: expect.objectContaining({ period: 'yearly', amount: 1500 }),
       },
     })
-    expect(mockExecute).not.toHaveBeenCalled()
+    expect(db.prepare('SELECT amount FROM budgets WHERE id=?').get('budget-yearly')).toEqual({
+      amount: 120000,
+    })
   })
 
   it('writes audit rows for budget create, update, and delete writes', async () => {
-    mockQuery.mockImplementation((sql: string) =>
-      sql.includes("key = 'main_currency'") ? [{ value: 'USD' }] : []
-    )
+    const db = scopedSummaryFixture()
+    mockGenerateId
+      .mockReturnValueOnce('tx_test_123')
+      .mockReturnValueOnce('audit-create')
+      .mockReturnValueOnce('audit-update')
+      .mockReturnValueOnce('audit-delete')
     await createBudget.execute(
       createBudget.schema.parse({ name: 'Monthly Food', amount: 500, period: 'monthly' })
     )
-    expect(mockExecute).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT INTO audit_log'),
-      expect.arrayContaining(['budget', 'tx_test_123', 'create'])
-    )
-
-    mockExecute.mockClear()
-    mockQuery.mockReset()
-    mockQuery.mockReturnValueOnce([
-      {
-        id: 'budget-1',
-        name: 'Monthly Food',
-        amount: 50000,
-        period: 'monthly',
-        category_id: null,
-        category_name: null,
-        is_active: 1,
-      },
-    ])
     await upsertBudget.execute(upsertBudget.schema.parse({ name: 'Monthly Food', amount: 600 }))
-    expect(mockExecute).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT INTO audit_log'),
-      expect.arrayContaining(['budget', 'budget-1', 'update'])
-    )
-
-    mockExecute.mockClear()
-    mockQuery.mockReset()
-    mockQuery.mockReturnValueOnce([
-      {
-        id: 'budget-1',
-        name: 'Monthly Food',
-        amount: 60000,
-        period: 'monthly',
-        category_id: null,
-        category_name: null,
-        is_active: 1,
-      },
+    await deleteBudget.execute(deleteBudget.schema.parse({ budgetId: 'tx_test_123' }))
+    expect(
+      db
+        .prepare(
+          "SELECT entity,entity_id,action FROM audit_log WHERE entity='budget' ORDER BY rowid"
+        )
+        .all()
+    ).toEqual([
+      { entity: 'budget', entity_id: 'tx_test_123', action: 'create' },
+      { entity: 'budget', entity_id: 'tx_test_123', action: 'update' },
+      { entity: 'budget', entity_id: 'tx_test_123', action: 'delete' },
     ])
-    await deleteBudget.execute(deleteBudget.schema.parse({ budgetId: 'budget-1' }))
-    expect(mockExecute).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT INTO audit_log'),
-      expect.arrayContaining(['budget', 'budget-1', 'delete'])
-    )
+    expect(db.prepare('SELECT * FROM budgets').all()).toEqual([])
   })
 
   it('requires a stable match key for budget upserts', async () => {
@@ -5886,7 +5865,17 @@ describe('CLI tool validation regressions', () => {
     mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
       if (sql.includes('sqlite_master')) return [{ count: 1 }]
       if (sql.includes('PRAGMA table_info(budgets)')) {
-        return ['id', 'name', 'amount', 'period', 'category_id', 'is_active'].map((name) => ({
+        return [
+          'id',
+          'name',
+          'amount',
+          'currency',
+          'scope_json',
+          'basis',
+          'period',
+          'category_id',
+          'is_active',
+        ].map((name) => ({
           name,
         }))
       }
@@ -6025,6 +6014,9 @@ describe('CLI tool validation regressions', () => {
             id: 'budget-1',
             name: 'Groceries Budget',
             amount: 50000,
+            currency: 'USD',
+            scope_json: '{"categoryIds":["cat-food"]}',
+            basis: 'gross_cashflow',
             period: 'monthly',
             category_id: 'cat-food',
             category_name: 'Groceries',
@@ -6292,7 +6284,17 @@ describe('CLI tool validation regressions', () => {
     mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
       if (sql.includes('sqlite_master')) return [{ count: 1 }]
       if (sql.includes('PRAGMA table_info(budgets)')) {
-        return ['id', 'name', 'amount', 'period', 'category_id', 'is_active'].map((name) => ({
+        return [
+          'id',
+          'name',
+          'amount',
+          'currency',
+          'scope_json',
+          'basis',
+          'period',
+          'category_id',
+          'is_active',
+        ].map((name) => ({
           name,
         }))
       }

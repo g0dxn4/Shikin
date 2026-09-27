@@ -346,6 +346,7 @@ describe('audited transaction correction SQLite preservation', () => {
         startDate: '2026-09-01',
         endDate: '2026-09-30',
         basis: 'net_consumption',
+        currency: 'USD',
       })
     ).toMatchObject({ complete: false, unresolvedIds: ['unsafe-1', 'unsafe-2'] })
   })
@@ -360,6 +361,7 @@ describe('audited transaction correction SQLite preservation', () => {
         startDate: '2026-09-01',
         endDate: '2026-09-30',
         basis: 'net_consumption',
+        currency: 'USD',
       })
     ).toMatchObject({
       complete: false,
@@ -678,6 +680,7 @@ describe('audited transaction correction SQLite preservation', () => {
       startDate: '2026-02-01',
       endDate: '2026-02-28',
       basis: 'net_consumption',
+      currency: 'USD',
     })
     expect(summary).toMatchObject({
       complete: false,
@@ -773,6 +776,7 @@ describe('audited transaction correction SQLite preservation', () => {
       startDate: '2026-02-01',
       endDate: '2026-02-28',
       basis: 'net_consumption',
+      currency: 'USD',
     }
     expect(await run('get-spending-summary', input)).toMatchObject({
       complete: false,

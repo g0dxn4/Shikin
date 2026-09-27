@@ -19,9 +19,16 @@ import { setMainCurrency, setExchangeRate } from './fx-service.js'
 import { analyticsTools } from './tools/analytics.js'
 import { budgetsandnetworthTools } from './tools/budgets-and-net-worth.js'
 import { transactionsTools } from './tools/transactions.js'
+import { auditAndContextTools } from './tools/audit-and-context.js'
 import { goalsTools } from './tools/goals.js'
 
-const tools = [...analyticsTools, ...budgetsandnetworthTools, ...goalsTools, ...transactionsTools]
+const tools = [
+  ...analyticsTools,
+  ...budgetsandnetworthTools,
+  ...goalsTools,
+  ...transactionsTools,
+  ...auditAndContextTools,
+]
 const run = (name: string, input: Record<string, unknown> = {}) => {
   const tool = tools.find((item) => item.name === name)!
   return tool.execute(tool.schema.parse(input))
@@ -539,15 +546,15 @@ describe('net evidence and planning sources on SQLite', () => {
     const report = await run('get-spending-summary', options)
     expect(report).toMatchObject({
       complete: true,
-      totals: { consumptionCentavos: -2500, earnedIncomeCentavos: 0 },
+      totals: [{ currency: 'MXN', consumptionCentavos: -2500, earnedIncomeCentavos: 0 }],
+      report: { totals: { consumptionCentavos: -2500, earnedIncomeCentavos: 0 } },
       allocations: [{ transactionId: 'refund', categoryId: 'food', referencedPurchaseId: 'cp' }],
     })
     expect(rows('transactions')).toEqual(before)
     state.db.exec('DELETE FROM source_coverage')
     expect(await run('get-spending-summary', options)).toMatchObject({
       complete: false,
-      totals: { consumptionCentavos: null },
-      known: { consumptionCentavos: -2500 },
+      report: { totals: { consumptionCentavos: null }, known: { consumptionCentavos: -2500 } },
     })
   })
 
@@ -618,5 +625,143 @@ describe('budget mutation preservation', () => {
     expect(rows('app_data_state')).toEqual(before.revision)
     await run('upsert-budget', { budgetId: 'future', scope: {} })
     expect(rows('budgets')[0]).toMatchObject({ category_id: null, currency: 'MXN', amount: 10000 })
+  })
+})
+
+describe('scoped budget replay and audited deletion', () => {
+  it('conflicts when explicit-ID create omits original advanced scope or NET basis', async () => {
+    setMainCurrency('MXN')
+    const input = {
+      budgetId: 'replay',
+      amount: 100,
+      currency: 'MXN',
+      name: 'Business',
+      basis: 'net_consumption',
+      scope: { accountIds: ['cash'], categoryIds: ['food', 'other'], tags: ['business'] },
+      active: false,
+    }
+    await run('create-budget', input)
+    const before = {
+      budgets: rows('budgets'),
+      audits: rows('audit_log'),
+      revision: rows('app_data_state'),
+    }
+    expect(
+      await run('create-budget', {
+        budgetId: 'replay',
+        amount: 100,
+        currency: 'MXN',
+        name: 'Business',
+      })
+    ).toMatchObject({ success: false, reason: 'budget_id_conflict' })
+    expect(await run('create-budget', input)).toMatchObject({
+      success: true,
+      action: 'noop',
+      changed: false,
+    })
+    expect({
+      budgets: rows('budgets'),
+      audits: rows('audit_log'),
+      revision: rows('app_data_state'),
+    }).toEqual(before)
+  })
+
+  it('audits full NET scope before delete, states generic undo and budget-period cascade limits', async () => {
+    setMainCurrency('MXN')
+    state.db.exec(
+      "INSERT INTO accounts(id,name,type,currency) VALUES ('second','Other','checking','MXN')"
+    )
+    const input = {
+      budgetId: 'advanced',
+      amount: 215,
+      currency: 'MXN',
+      period: 'yearly',
+      name: 'Business',
+      basis: 'net_consumption',
+      active: false,
+      scope: {
+        accountIds: ['cash', 'second'],
+        categoryIds: ['food', 'other'],
+        tags: ['business'],
+        excludeTags: ['personal'],
+      },
+    }
+    await run('create-budget', input)
+    state.db.exec(
+      "INSERT INTO budget_periods(id,budget_id,start_date,end_date,spent) VALUES ('historic','advanced','2026-01-01','2026-12-31',5000)"
+    )
+    const prior = rows('budgets')[0]
+    const dry = await run('delete-budget', { budgetId: 'advanced', dryRun: true })
+    expect(dry.wouldDelete.budget).toMatchObject({
+      basis: 'net_consumption',
+      currency: 'MXN',
+      isActive: false,
+      scope: {
+        accountIds: ['cash', 'second'],
+        categoryIds: ['food', 'other'],
+        tags: ['business'],
+        excludeTags: ['personal'],
+      },
+    })
+    expect(rows('budgets')[0]).toEqual(prior)
+    const deletion = await run('delete-budget', { budgetId: 'advanced' })
+    expect(deletion).toMatchObject({
+      success: true,
+      undoSupport: 'unsupported_budget_undo',
+      budgetPeriods: 'deleted_by_foreign_key_cascade_not_restorable_by_generic_undo',
+    })
+    const audit = state.db
+      .prepare("SELECT id,before_json FROM audit_log WHERE entity='budget' AND action='delete'")
+      .get() as { id: string; before_json: string }
+    expect(JSON.parse(audit.before_json).budget).toMatchObject({
+      amountCentavos: 21500,
+      currency: 'MXN',
+      period: 'yearly',
+      basis: 'net_consumption',
+      isActive: false,
+      scope: {
+        accountIds: ['cash', 'second'],
+        categoryIds: ['food', 'other'],
+        tags: ['business'],
+        excludeTags: ['personal'],
+      },
+    })
+    expect(rows('budget_periods')).toEqual([])
+    expect(await run('undo', { auditId: audit.id, apply: true })).toMatchObject({
+      success: false,
+      reason: 'undo_target_not_found',
+    })
+    expect(rows('budgets')).toEqual([])
+  })
+})
+
+describe('budget delete audit atomicity', () => {
+  it('rolls back deleted budget, scope, and legacy periods when audit insertion fails', async () => {
+    setMainCurrency('MXN')
+    await run('create-budget', {
+      budgetId: 'keep',
+      amount: 30,
+      currency: 'MXN',
+      basis: 'net_consumption',
+      scope: { categoryIds: ['food', 'other'], tags: ['business'] },
+    })
+    state.db.exec(
+      "INSERT INTO budget_periods(id,budget_id,start_date,end_date,spent) VALUES ('period','keep','2026-01-01','2026-12-31',100)"
+    )
+    const before = {
+      budgets: rows('budgets'),
+      periods: rows('budget_periods'),
+      audits: rows('audit_log'),
+      revision: rows('app_data_state'),
+    }
+    state.db.exec(`CREATE TRIGGER reject_delete_audit BEFORE INSERT ON audit_log
+      WHEN NEW.entity='budget' AND NEW.action='delete' BEGIN SELECT RAISE(ABORT,'audit failure'); END`)
+    await expect(run('delete-budget', { budgetId: 'keep' })).rejects.toThrow('audit failure')
+    expect({
+      budgets: rows('budgets'),
+      periods: rows('budget_periods'),
+      audits: rows('audit_log'),
+      revision: rows('app_data_state'),
+    }).toEqual(before)
   })
 })

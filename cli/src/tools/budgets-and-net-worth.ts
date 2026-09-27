@@ -143,7 +143,7 @@ function saveBudget(input: BudgetInput, mode: 'create' | 'upsert') {
           ? findBudget(input, category.id)
           : null
     const scopeDefinition = resolveBudgetScope({
-      ...(existing
+      ...(existing && mode === 'upsert'
         ? { storedScope: JSON.parse(existing.scope_json), storedCategoryId: existing.category_id }
         : {}),
       ...(input.scope !== undefined ? { scope: input.scope } : {}),
@@ -158,11 +158,13 @@ function saveBudget(input: BudgetInput, mode: 'create' | 'upsert') {
     if (references.issues.length)
       throw new Error(references.issues.map((issue) => issue.message).join('; '))
     const settings = getCurrencySettings()
-    if (!existing && !input.currency && !settings.configured) return mainCurrencySetupNeeded
+    if ((!existing || mode === 'create') && !input.currency && !settings.configured)
+      return mainCurrencySetupNeeded
     if (!existing && input.amount === undefined)
       return { success: false, message: 'amount is required when creating a budget.' }
     if (
       existing &&
+      mode === 'upsert' &&
       input.currency &&
       input.currency !== existing.currency &&
       input.amount === undefined
@@ -176,18 +178,31 @@ function saveBudget(input: BudgetInput, mode: 'create' | 'upsert') {
     }
     const after: BudgetRow = {
       id: existing?.id ?? input.budgetId ?? generateId(),
-      name: input.name ?? existing?.name ?? (category.name ? `${category.name} Budget` : 'Budget'),
+      name:
+        input.name ??
+        (mode === 'upsert' ? existing?.name : undefined) ??
+        (category.name ? `${category.name} Budget` : 'Budget'),
       amount: input.amount === undefined ? existing!.amount : toCentavos(input.amount),
-      currency: input.currency ?? existing?.currency ?? settings.mainCurrency!,
-      period: input.period ?? existing?.period ?? 'monthly',
+      currency:
+        input.currency ??
+        (mode === 'upsert' ? existing?.currency : undefined) ??
+        settings.mainCurrency!,
+      period: input.period ?? (mode === 'upsert' ? existing?.period : undefined) ?? 'monthly',
       category_id: scopeDefinition.categoryId,
       category_name:
         scopeDefinition.categoryId === existing?.category_id
           ? (existing?.category_name ?? null)
           : category.name,
       scope_json: JSON.stringify(scopeDefinition.scope),
-      basis: input.basis ?? existing?.basis ?? 'gross_cashflow',
-      is_active: input.active === undefined ? (existing?.is_active ?? 1) : input.active ? 1 : 0,
+      basis: input.basis ?? (mode === 'upsert' ? existing?.basis : undefined) ?? 'gross_cashflow',
+      is_active:
+        input.active === undefined
+          ? mode === 'upsert'
+            ? (existing?.is_active ?? 1)
+            : 1
+          : input.active
+            ? 1
+            : 0,
     }
     const equal =
       existing !== null &&
@@ -204,12 +219,20 @@ function saveBudget(input: BudgetInput, mode: 'create' | 'upsert') {
       }
     const changed = !equal
     const action = existing ? 'updated' : 'created'
+    const matchedBy = input.budgetId
+      ? 'budgetId'
+      : existing
+        ? category.id
+          ? 'category'
+          : 'name'
+        : 'new'
     if (input.dryRun)
       return {
         success: true,
         dryRun: true,
         action,
         changed,
+        matchedBy,
         wouldCreate: existing ? undefined : budgetSnapshot(after),
         wouldUpdate: existing
           ? {
@@ -265,13 +288,7 @@ function saveBudget(input: BudgetInput, mode: 'create' | 'upsert') {
       success: true,
       action: equal && mode === 'create' ? 'noop' : action,
       changed,
-      matchedBy: input.budgetId
-        ? 'budgetId'
-        : existing
-          ? category.id
-            ? 'category'
-            : 'name'
-          : 'new',
+      matchedBy,
       budget: budgetSnapshot(after),
       message: changed ? `${action} budget "${after.name}".` : `Budget "${after.name}" unchanged.`,
     }
@@ -450,8 +467,13 @@ const getBudgetStatus: ToolDefinition = {
               ? 'independent_budgets_nonadditive'
               : (single?.comparison.reason ?? (single?.complete ? null : 'incomplete_usage')),
         }))
+      const failureIssue = statuses.flatMap((row) => row.spending.budgetUsage.issues)[0]
       return {
         success: statuses.every((row) => row.complete),
+        reason:
+          failureIssue?.code === 'fx'
+            ? 'budget_currency_conversion_required'
+            : (failureIssue?.code ?? null),
         complete: statuses.every((row) => row.complete),
         basis: single?.basis ?? null,
         currency: statuses.length === 1 ? (single?.currency ?? null) : null,
@@ -488,47 +510,34 @@ const deleteBudget: ToolDefinition = {
       .default(false)
       .describe('Validate and preview the budget deletion without writing it'),
   }),
-  execute: async ({ budgetId, dryRun }) => {
-    const existing = await query<BudgetRow>(
-      `SELECT b.id, b.name, b.amount, b.currency, b.period, b.category_id, b.is_active, c.name as category_name
-       FROM budgets b
-       LEFT JOIN categories c ON b.category_id = c.id
-       WHERE b.id = $1`,
-      [budgetId]
-    )
-
-    if (existing.length === 0) {
-      return { success: false, message: `Budget ${budgetId} not found.` }
-    }
-
-    if (dryRun) {
-      return {
-        success: true,
-        dryRun: true,
-        wouldDelete: {
-          id: existing[0].id,
-          name: existing[0].name,
-        },
-        message: `Dry run: budget "${existing[0].name}" would be deleted.`,
-      }
-    }
-
+  execute: async ({ budgetId, dryRun }) =>
     transaction(() => {
-      execute('DELETE FROM budgets WHERE id = $1', [budgetId])
+      const existing = query<BudgetRow>(`${budgetSelect} WHERE b.id = $1`, [budgetId])[0]
+      if (!existing) return { success: false, message: `Budget ${budgetId} not found.` }
+      if (dryRun)
+        return {
+          success: true,
+          dryRun: true,
+          wouldDelete: { id: existing.id, name: existing.name, budget: budgetSnapshot(existing) },
+          message: `Dry run: budget "${existing.name}" would be deleted.`,
+        }
+      const result = execute('DELETE FROM budgets WHERE id = $1', [budgetId])
+      if (result.rowsAffected !== 1)
+        throw new Error(`Budget ${budgetId} could not be deleted safely.`)
       writeAuditLog({
         entity: 'budget',
         entityId: budgetId,
         action: 'delete',
-        before: { budget: budgetSnapshot(existing[0]) },
+        before: { budget: budgetSnapshot(existing) },
         after: null,
       })
-    })
-
-    return {
-      success: true,
-      message: `Deleted budget "${existing[0].name}".`,
-    }
-  },
+      return {
+        success: true,
+        message: `Deleted budget "${existing.name}".`,
+        undoSupport: 'unsupported_budget_undo',
+        budgetPeriods: 'deleted_by_foreign_key_cascade_not_restorable_by_generic_undo',
+      }
+    }),
 }
 
 // ---------------------------------------------------------------------------

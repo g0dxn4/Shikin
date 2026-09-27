@@ -858,3 +858,70 @@ describe('resolved summary windows and conversion compatibility', () => {
     ])
   })
 })
+
+describe('budget context scope redaction and one-clock status', () => {
+  it('redacts sensitive include/exclude tag labels in context and audit, not scope reference IDs', async () => {
+    setMainCurrency('MXN')
+    const include = 'SENTINEL-INCLUDE-PRIVATE-THERAPY'
+    const exclude = 'SENTINEL-EXCLUDE-PRIVATE-DEBT'
+    await run('create-budget', {
+      budgetId: 'private-plan',
+      name: 'Private',
+      amount: 100,
+      currency: 'MXN',
+      scope: {
+        accountIds: ['cash'],
+        categoryIds: ['food'],
+        tags: [include],
+        excludeTags: [exclude],
+      },
+    })
+    const plain = await run('automation-context', { redacted: false })
+    expect(JSON.stringify(plain)).toContain(include.toLowerCase())
+    expect(JSON.stringify(plain)).toContain(exclude.toLowerCase())
+    const hidden = await run('automation-context', { redacted: true })
+    expect(JSON.stringify(hidden)).not.toContain(include.toLowerCase())
+    expect(JSON.stringify(hidden)).not.toContain(exclude.toLowerCase())
+    expect(hidden.budgets.active[0].scope).toMatchObject({
+      accountIds: ['cash'],
+      categoryIds: ['food'],
+      tags: ['[REDACTED]'],
+      excludeTags: ['[REDACTED]'],
+    })
+    const audits = await run('audit-list', { entity: 'budget', redacted: true })
+    expect(JSON.stringify(audits)).not.toContain(include.toLowerCase())
+    expect(JSON.stringify(audits)).not.toContain(exclude.toLowerCase())
+  })
+
+  it('captures one reference instant even if the clock advances while projecting first budget', async () => {
+    setMainCurrency('MXN')
+    await run('create-budget', { budgetId: 'first', amount: 100, currency: 'MXN' })
+    await run('create-budget', { budgetId: 'second', amount: 100, currency: 'MXN' })
+    vi.setSystemTime(new Date('2026-09-30T23:59:00Z'))
+    const original = state.db.prepare.bind(state.db)
+    let advanced = false
+    const spy = vi.spyOn(state.db, 'prepare').mockImplementation(((sql: string) => {
+      if (!advanced && sql.includes("key = 'main_currency'")) {
+        advanced = true
+        vi.setSystemTime(new Date('2026-10-01T00:01:00Z'))
+      }
+      return original(sql)
+    }) as typeof state.db.prepare)
+    try {
+      const result = await run('get-budget-status', { timeZone: 'UTC' })
+      expect(advanced).toBe(true)
+      expect(result.budgets).toHaveLength(2)
+      for (const budget of result.budgets) {
+        expect(budget.window).toMatchObject({
+          asOf: '2026-09-30',
+          period: 'month',
+          periodStart: '2026-09-01',
+          periodEnd: '2026-09-30',
+        })
+        expect(budget.mainComparison.spending.window.asOf).toBe('2026-09-30')
+      }
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})

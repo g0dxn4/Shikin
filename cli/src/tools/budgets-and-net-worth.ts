@@ -2,6 +2,7 @@ import {
   budgetWindowComparability,
   inspectReportScope,
   resolveBudgetScope,
+  resolveReportWindow,
 } from '@shikin/finance-core'
 import { getCurrencySettings } from '../fx-service.js'
 import { mainCurrencySetupNeeded, readCurrentAmounts } from '../dated-read.js'
@@ -330,6 +331,8 @@ const getBudgetStatus: ToolDefinition = {
   effects: { readOnly: true, writesTo: [] },
   execute: async (input) =>
     transaction(() => {
+      const now = new Date()
+      const reference = resolveReportWindow({ asOf: input.asOf, timeZone: input.timeZone, now })
       const conditions = [
         input.budgetId ? 'b.id = $1' : input.includeInactive ? '1=1' : 'b.is_active = 1',
       ]
@@ -350,12 +353,13 @@ const getBudgetStatus: ToolDefinition = {
           ({ weekly: 'week', monthly: 'month', yearly: 'year' } as const)[budget.period]
         const window = {
           period,
-          asOf: input.asOf,
+          asOf: reference.asOf,
+          now,
           start: input.start,
           end: input.end,
           through: input.through,
           weekStartsOn: input.weekStartsOn,
-          timeZone: input.timeZone,
+          timeZone: reference.timeZone,
         }
         let scope: unknown
         try {

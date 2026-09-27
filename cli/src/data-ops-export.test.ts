@@ -203,3 +203,40 @@ it('exports budget scope and basis with their original denomination', async () =
   )
   expect(exported.data.budgets).toEqual([budget])
 })
+
+it('redacts budget scope JSON in every export format while retaining unredacted scope and numeric fields', async () => {
+  const include = 'SENTINEL-INCLUDE-PRIVATE-THERAPY'
+  const exclude = 'SENTINEL-EXCLUDE-PRIVATE-DEBT'
+  const budget = {
+    id: 'private-plan',
+    currency: 'MXN',
+    category_id: 'food',
+    basis: 'net_consumption',
+    amount: 10000,
+    scope_json: JSON.stringify({
+      accountIds: ['bank'],
+      categoryIds: ['food'],
+      tags: [include],
+      excludeTags: [exclude],
+    }),
+  }
+  mockQuery.mockImplementation((sql?: string) => (sql?.includes('FROM budgets ') ? [budget] : []))
+  for (const format of ['json', 'csv', 'markdown'] as const) {
+    const plain = await exportData.execute(exportData.schema.parse({ format, redacted: false }))
+    const hidden = await exportData.execute(exportData.schema.parse({ format, redacted: true }))
+    for (const label of [include, exclude]) {
+      expect(JSON.stringify(plain)).toContain(label)
+      expect(JSON.stringify(hidden)).not.toContain(label)
+    }
+    if (format === 'json') {
+      expect(plain.data.budgets).toEqual([budget])
+      expect(hidden.data.budgets).toEqual([{ ...budget, scope_json: '[REDACTED]' }])
+    } else if (format === 'csv') {
+      expect(hidden.files.budgets).toContain('[REDACTED]')
+      expect(hidden.files.budgets).toContain('10000')
+    } else {
+      expect(hidden.content).toContain('[REDACTED]')
+      expect(hidden.content).toContain('10000')
+    }
+  }
+})

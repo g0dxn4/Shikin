@@ -566,13 +566,16 @@ function getBudgetsContext(redacted: boolean, warnings: ContextWarning[]) {
       amount: fromCentavos(budget.amount),
       amountCentavos: budget.amount,
       currency: budget.currency,
-      scope: (() => {
-        try {
-          return JSON.parse(budget.scope_json)
-        } catch {
-          return null
-        }
-      })(),
+      scope: maybeRedactObject(
+        (() => {
+          try {
+            return JSON.parse(budget.scope_json)
+          } catch {
+            return null
+          }
+        })(),
+        redacted
+      ),
       basis: budget.basis,
       period: budget.period,
       isActive: budget.is_active === 1,

@@ -1,4 +1,9 @@
 import {
+  SCOPED_BUDGETS_MIGRATION,
+  scopedBudgetsStatements,
+  assertScopedBudgetsReady,
+} from '@shikin/finance-core/scoped-budgets-migration'
+import {
   CLASSIFICATION_TYPES_MIGRATION,
   CLASSIFICATION_TYPES_SCHEMA,
   classificationTypesStatements,
@@ -241,6 +246,7 @@ const CURRENT_SHIKIN_MIGRATIONS = [
   BACKEND_FOUNDATION_MIGRATION,
   DATED_FX_MIGRATION,
   CLASSIFICATION_TYPES_MIGRATION,
+  SCOPED_BUDGETS_MIGRATION,
 ] as const
 
 const CURRENT_SHIKIN_SCHEMA: Record<string, readonly string[]> = {
@@ -288,7 +294,7 @@ const CURRENT_SHIKIN_SCHEMA: Record<string, readonly string[]> = {
     'import_fingerprint',
   ],
   subscriptions: ['id', 'name', 'amount', 'billing_cycle', 'next_billing_date'],
-  budgets: ['id', 'name', 'amount', 'period'],
+  budgets: ['id', 'name', 'amount', 'period', 'currency', 'scope_json', 'basis'],
   budget_periods: ['id', 'budget_id', 'start_date', 'end_date', 'spent'],
   investments: ['id', 'symbol', 'name', 'type', 'shares'],
   stock_prices: ['id', 'symbol', 'price', 'currency', 'quote_currency', 'date'],
@@ -764,6 +770,16 @@ async function validateTauriCurrentDatabase(db: TauriDatabase): Promise<void> {
       await db.select<{ name: string }[]>(`PRAGMA table_info(${table})`)
     ).map((column) => column.name)
   }
+  assertScopedBudgetsReady(
+    {
+      budgets: (await db.select<{ name: string }[]>('PRAGMA table_info(budgets)')).map(
+        (column) => column.name
+      ),
+    },
+    await db.select<{ name: string; sql: string | null }[]>(
+      "SELECT name, sql FROM sqlite_master WHERE type IN ('index', 'trigger')"
+    )
+  )
   assertClassificationTypesReady(
     classificationColumns,
     await db.select<{ name: string; sql: string | null }[]>(
@@ -810,7 +826,7 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
     ? await db.select<{ id: number; name: string }[]>('SELECT id, name FROM _migrations')
     : []
   assertSupportedSchemaVersion(rows)
-  if (rows.some((row) => row.name === CLASSIFICATION_TYPES_MIGRATION)) {
+  if (rows.some((row) => row.name === SCOPED_BUDGETS_MIGRATION)) {
     await validateTauriCurrentDatabase(db)
     return
   }
@@ -848,7 +864,7 @@ async function runTauriMigrationsOnConnection(
   const rows = await db.select<{ id: number; name: string }[]>('SELECT id, name FROM _migrations')
   assertSupportedSchemaVersion(rows)
   const applied = new Set(rows.map((r) => r.name))
-  if (applied.has(CLASSIFICATION_TYPES_MIGRATION)) {
+  if (applied.has(SCOPED_BUDGETS_MIGRATION)) {
     await validateTauriCurrentDatabase(db)
     return
   }
@@ -1672,6 +1688,14 @@ async function runTauriBackendFoundationUpgrade(
     }
     if (!migrations.some((row) => row.name === CLASSIFICATION_TYPES_MIGRATION)) {
       for (const statement of classificationTypesStatements()) await tx.execute(statement)
+    }
+    if (!migrations.some((row) => row.name === SCOPED_BUDGETS_MIGRATION)) {
+      const columns = {
+        budgets: (await tx.query<{ name: string }>('PRAGMA table_info(budgets)')).map(
+          (column) => column.name
+        ),
+      }
+      for (const statement of scopedBudgetsStatements(columns)) await tx.execute(statement)
     }
     await validateTauriCurrentDatabase({
       select: async <T>(sql: string, params?: unknown[]) => tx.query(sql, params) as Promise<T>,

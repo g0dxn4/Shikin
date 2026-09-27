@@ -1,4 +1,9 @@
 import {
+  SCOPED_BUDGETS_MIGRATION,
+  SCOPED_BUDGETS_SCHEMA,
+  SCOPED_BUDGETS_OBJECTS,
+} from '@shikin/finance-core/scoped-budgets-migration'
+import {
   CLASSIFICATION_TYPES_MIGRATION,
   CLASSIFICATION_TYPES_SCHEMA,
   CLASSIFICATION_TYPES_OBJECTS,
@@ -74,6 +79,7 @@ function mockTauriDatabaseModules() {
     BACKEND_FOUNDATION_MIGRATION,
     DATED_FX_MIGRATION,
     CLASSIFICATION_TYPES_MIGRATION,
+    SCOPED_BUDGETS_MIGRATION,
   ].map((name) => ({ name }))
   const tableRows = [
     '_migrations',
@@ -106,11 +112,13 @@ function mockTauriDatabaseModules() {
     ...Object.keys(BACKEND_FOUNDATION_SCHEMA),
     ...Object.keys(DATED_FX_SCHEMA),
     ...Object.keys(CLASSIFICATION_TYPES_SCHEMA),
+    ...Object.keys(SCOPED_BUDGETS_SCHEMA),
   ].map((name) => ({ name }))
   const columnRows = [
     ...Object.values(BACKEND_FOUNDATION_SCHEMA).flat(),
     ...Object.values(DATED_FX_SCHEMA).flat(),
     ...Object.values(CLASSIFICATION_TYPES_SCHEMA).flat(),
+    ...Object.values(SCOPED_BUDGETS_SCHEMA).flat(),
     'id',
     'name',
     'applied_at',
@@ -254,6 +262,7 @@ function mockTauriDatabaseModules() {
           ...BACKEND_FOUNDATION_OBJECTS,
           ...DATED_FX_OBJECTS,
           ...CLASSIFICATION_TYPES_OBJECTS,
+          ...SCOPED_BUDGETS_OBJECTS,
         }).map(([name, sql]) => ({ name, sql }))
       if (sql.includes("sqlite_master WHERE type = 'table'")) return tableRows
       if (sql.startsWith('PRAGMA table_info(')) return columnRows

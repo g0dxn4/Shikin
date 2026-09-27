@@ -12,6 +12,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./scoped-budgets-migration": {
+      "types": "./dist/024_scoped_budgets.d.ts",
+      "import": "./dist/024_scoped_budgets.js",
+      "default": "./dist/024_scoped_budgets.js"
+    },
     "./cashflow-buckets": {
       "types": "./dist/cashflow-buckets.d.ts",
       "import": "./dist/cashflow-buckets.js",

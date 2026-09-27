@@ -1,3 +1,8 @@
+import {
+  SCOPED_BUDGETS_MIGRATION,
+  scopedBudgetsStatements,
+  assertScopedBudgetsReady,
+} from '@shikin/finance-core/scoped-budgets-migration'
 import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import dayjs from 'dayjs'
@@ -416,6 +421,7 @@ const CURRENT_SHIKIN_MIGRATIONS = [
   BACKEND_FOUNDATION_MIGRATION,
   DATED_FX_MIGRATION,
   CLASSIFICATION_TYPES_MIGRATION,
+  SCOPED_BUDGETS_MIGRATION,
 ]
 
 const CURRENT_SHIKIN_SCHEMA = {
@@ -463,7 +469,7 @@ const CURRENT_SHIKIN_SCHEMA = {
     'import_fingerprint',
   ],
   subscriptions: ['id', 'name', 'amount', 'billing_cycle', 'next_billing_date'],
-  budgets: ['id', 'name', 'amount', 'period'],
+  budgets: ['id', 'name', 'amount', 'period', 'currency', 'scope_json', 'basis'],
   budget_periods: ['id', 'budget_id', 'start_date', 'end_date', 'spent'],
   investments: ['id', 'symbol', 'name', 'type', 'shares'],
   stock_prices: ['id', 'symbol', 'price', 'currency', 'quote_currency', 'date'],
@@ -784,6 +790,10 @@ function validateCurrentDatabase() {
 
   const migrationRows = db.prepare('SELECT id, name FROM _migrations').all()
   assertSupportedSchemaVersion(migrationRows)
+  assertScopedBudgetsReady(
+    { budgets: db.pragma('table_info(budgets)').map((column) => column.name) },
+    db.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger'").all()
+  )
   assertClassificationTypesReady(
     Object.fromEntries(
       Object.keys(CLASSIFICATION_TYPES_SCHEMA).map((table) => [
@@ -865,7 +875,7 @@ function runMigrationsOnConnection() {
   )
 
   assertSupportedSchemaVersion(db.prepare('SELECT id, name FROM _migrations').all())
-  if (applied.has(CLASSIFICATION_TYPES_MIGRATION)) {
+  if (applied.has(SCOPED_BUDGETS_MIGRATION)) {
     validateCurrentDatabase()
     return
   }
@@ -1742,6 +1752,12 @@ function runBackendFoundationUpgrade(applied) {
     }
     if (!migrations.some((row) => row.name === CLASSIFICATION_TYPES_MIGRATION)) {
       for (const statement of classificationTypesStatements()) db.exec(statement)
+    }
+    if (!migrations.some((row) => row.name === SCOPED_BUDGETS_MIGRATION)) {
+      for (const statement of scopedBudgetsStatements({
+        budgets: db.pragma('table_info(budgets)').map((column) => column.name),
+      }))
+        db.exec(statement)
     }
     validateCurrentDatabase()
   }).immediate()

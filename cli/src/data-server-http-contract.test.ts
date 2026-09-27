@@ -1201,7 +1201,7 @@ Database.prototype.backup = async function (destinationPath, ...args) {
         expect(restoredDb.pragma('integrity_check', { simple: true })).toBe('ok')
         expect(
           restoredDb.prepare('SELECT name FROM _migrations ORDER BY id DESC LIMIT 1').get()
-        ).toEqual({ name: '023_classification_types' })
+        ).toEqual({ name: '024_scoped_budgets' })
         expect(
           restoredDb.prepare('SELECT id, balance FROM accounts WHERE id = ?').get(restoredAccountId)
         ).toEqual({
@@ -1256,8 +1256,8 @@ describe('dated FX browser restore boundary', () => {
           body: fixture.serialize(),
         })
         expect(response.status, await response.text()).toBe(200)
-        expect(await readRows('SELECT name FROM _migrations WHERE id = 23')).toEqual([
-          { name: '023_classification_types' },
+        expect(await readRows('SELECT name FROM _migrations WHERE id = 24')).toEqual([
+          { name: '024_scoped_budgets' },
         ])
         expect(await readRows("SELECT value FROM settings WHERE key = 'main_currency'")).toEqual(
           version >= 22 ? [{ value: 'MXN' }] : []
@@ -1287,7 +1287,7 @@ describe('dated FX browser restore boundary', () => {
       }
     }
   )
-  it.each([19, 20, 21, 24] as const)(
+  it.each([19, 20, 21, 25] as const)(
     'restores original live data when schema%i import fails or is future',
     async (version) => {
       const before = await readRows('SELECT * FROM app_data_state')
@@ -1297,9 +1297,9 @@ describe('dated FX browser restore boundary', () => {
       const evidence = await readRows('SELECT * FROM transaction_fx_evidence')
       const fixture = new Database(':memory:')
       try {
-        runHostedTestMigrations(fixture, version === 24 ? 23 : version)
-        if (version === 24)
-          fixture.exec("INSERT INTO _migrations(id,name) VALUES (24,'024_future')")
+        runHostedTestMigrations(fixture, version === 25 ? 24 : version)
+        if (version === 25)
+          fixture.exec("INSERT INTO _migrations(id,name) VALUES (25,'025_future')")
         else fixture.exec('CREATE TABLE manual_exchange_rates (incompatible TEXT)')
         const response = await fetch(`${SERVER_URL}/api/db/import`, {
           method: 'POST',

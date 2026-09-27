@@ -180,3 +180,26 @@ it('exports deterministic custom roots, immutable revisions and pinned assignmen
   expect(exported.data.classification_type_revisions).toEqual(revisions)
   expect(exported.data.transaction_consumption_classifications).toEqual([assignment])
 })
+
+it('exports budget scope and basis with their original denomination', async () => {
+  const budget = {
+    id: 'plan',
+    currency: 'MXN',
+    category_id: null,
+    scope_json: '{"categoryIds":["deleted-category"],"tags":["essential"]}',
+    basis: 'net_consumption',
+    amount: 12345,
+  }
+  mockQuery.mockImplementation((sql?: string) => {
+    if (sql?.includes('FROM budgets ')) {
+      expect(sql).toContain('scope_json')
+      expect(sql).toContain('basis')
+      return [budget]
+    }
+    return []
+  })
+  const exported = await exportData.execute(
+    exportData.schema.parse({ format: 'json', redacted: false })
+  )
+  expect(exported.data.budgets).toEqual([budget])
+})

@@ -1,4 +1,9 @@
 import {
+  SCOPED_BUDGETS_MIGRATION,
+  scopedBudgetsStatements,
+  assertScopedBudgetsReady,
+} from '@shikin/finance-core/scoped-budgets-migration'
+import {
   CLASSIFICATION_TYPES_MIGRATION,
   CLASSIFICATION_TYPES_SCHEMA,
   classificationTypesStatements,
@@ -636,6 +641,12 @@ function applyRestoreCompatibleMigrations(db: Database.Database): void {
     if (!migrations.some((row) => row.name === CLASSIFICATION_TYPES_MIGRATION)) {
       for (const statement of classificationTypesStatements()) db.exec(statement)
     }
+    if (!migrations.some((row) => row.name === SCOPED_BUDGETS_MIGRATION)) {
+      for (const statement of scopedBudgetsStatements({
+        budgets: [...getColumnNames(db, 'budgets')],
+      }))
+        db.exec(statement)
+    }
     assertShikinSchemaReady(db)
   }).immediate()
 }
@@ -1079,6 +1090,13 @@ export function assertShikinSchemaReady(db: Database.Database, dbPath = DB_PATH)
       throw new Error(`Database is not ready for CLI/MCP use. Missing 020 columns on ${table}.`)
     }
   }
+  assertScopedBudgetsReady(
+    { budgets: [...getColumnNames(db, 'budgets')] },
+    db.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger'").all() as Array<{
+      name: string
+      sql: string | null
+    }>
+  )
   assertClassificationTypesReady(
     Object.fromEntries(
       Object.keys(CLASSIFICATION_TYPES_SCHEMA).map((table) => [

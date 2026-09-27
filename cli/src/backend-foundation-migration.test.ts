@@ -1,3 +1,4 @@
+import { SCOPED_BUDGETS_MIGRATION } from '@shikin/finance-core/scoped-budgets-migration'
 // @vitest-environment node
 import { createHash } from 'node:crypto'
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
@@ -492,7 +493,7 @@ describe('021 backend remediation foundation', () => {
     async (engine) => {
       const db = database()
       runHostedTestMigrations(db)
-      db.exec("INSERT INTO _migrations (id, name) VALUES (24, '024_future')")
+      db.exec("INSERT INTO _migrations (id, name) VALUES (25, '025_future')")
       const before = snapshot(db)
       if (engine === 'hosted') expect(() => runHostedTestMigrations(db)).toThrow(/newer/)
       else {
@@ -511,7 +512,7 @@ describe('CLI staged restore and read-only readiness', { timeout: 20_000 }, () =
     vi.resetModules()
     return import('./database.js')
   }
-  it.each([19, 20, 21, 22, 23] as const)(
+  it.each([19, 20, 21, 22, 23, 24] as const)(
     'upgrades a staged %i backup, never its source, before successful restore',
     async (version) => {
       const path = home()
@@ -530,6 +531,9 @@ describe('CLI staged restore and read-only readiness', { timeout: 20_000 }, () =
       expect(digest()).toBe(sourceDigest)
       expect(api.query('SELECT name FROM _migrations WHERE id = 23')).toEqual([
         { name: CLASSIFICATION_TYPES_MIGRATION },
+      ])
+      expect(api.query('SELECT name FROM _migrations WHERE id = 24')).toEqual([
+        { name: SCOPED_BUDGETS_MIGRATION },
       ])
       api.close()
       const restored = database(api.getDatabasePath())
@@ -573,18 +577,18 @@ describe('CLI staged restore and read-only readiness', { timeout: 20_000 }, () =
     api.close()
   })
 
-  it.each([19, 20, 21, 22, 24] as const)(
+  it.each([19, 20, 21, 22, 23, 25] as const)(
     'does not auto-migrate normal CLI reads for schema %i',
     async (version) => {
       const path = home()
       const api = await cli(path)
       mkdirSync(join(path, 'data', 'com.asf.shikin'), { recursive: true })
       const db = database(api.getDatabasePath())
-      runHostedTestMigrations(db, version === 24 ? 23 : version)
-      if (version === 24) db.exec("INSERT INTO _migrations (id, name) VALUES (24, '024_future')")
+      runHostedTestMigrations(db, version === 25 ? 24 : version)
+      if (version === 25) db.exec("INSERT INTO _migrations (id, name) VALUES (25, '025_future')")
       const before = snapshot(db)
       db.close()
-      expect(() => api.query('SELECT 1')).toThrow(version === 24 ? /newer/ : /not ready/)
+      expect(() => api.query('SELECT 1')).toThrow(version === 25 ? /newer/ : /not ready/)
       api.close()
       expect(snapshot(database(api.getDatabasePath()))).toEqual(before)
     }
@@ -622,7 +626,7 @@ describe('022 dated FX migration boundaries', () => {
     }
   )
 
-  it.each([19, 20, 21, 22, 23] as const)(
+  it.each([19, 20, 21, 22, 23, 24] as const)(
     'upgrades %i preserving USD denomination without inferred FX authority',
     (version) => {
       const db = database()
@@ -996,5 +1000,227 @@ describe('023 classification foundation', () => {
     } finally {
       api.close()
     }
+  })
+})
+
+describe('024 scoped budget storage', () => {
+  it.each(['hosted', 'native'] as const)(
+    'upgrades without changing legacy financial rows and preserves scoped budgets on category deletion (%s)',
+    async (engine) => {
+      const db = database()
+      runHostedTestMigrations(db, 23)
+      db.exec(`
+        INSERT INTO categories(id,name,type) VALUES ('food','Food','expense'),('travel','Travel','expense'),('other','Other','expense');
+        INSERT INTO accounts(id,name,type) VALUES ('bank','Bank','checking');
+        INSERT INTO transactions(id,account_id,category_id,type,amount,description,date)
+          VALUES ('purchase','bank','food','expense',123,'Purchase','2025-02-01');
+        INSERT INTO budgets(id,category_id,name,amount,currency,period,is_active)
+          VALUES ('legacy','food','Legacy',1000,'MXN','monthly',0),
+            ('single','food','Single',2000,'USD','weekly',1),
+            ('multi','food','Multi',3000,'MXN','yearly',1),
+            ('unrelated','other','Other',4000,'USD','monthly',1);
+        INSERT INTO budget_periods(id,budget_id,start_date,end_date,spent)
+          VALUES ('period','legacy','2025-02-01','2025-02-28',250);
+      `)
+      const before = snapshot(db)
+      if (engine === 'hosted') runHostedTestMigrations(db)
+      else await (await mockNative(db)).api.getDb()
+      assertPreserved(db, before)
+      expect(
+        rows(
+          db,
+          'SELECT id,category_id,amount,currency,period,is_active,scope_json,basis FROM budgets ORDER BY id'
+        )
+      ).toEqual([
+        {
+          id: 'legacy',
+          category_id: 'food',
+          amount: 1000,
+          currency: 'MXN',
+          period: 'monthly',
+          is_active: 0,
+          scope_json: '{}',
+          basis: 'gross_cashflow',
+        },
+        {
+          id: 'multi',
+          category_id: 'food',
+          amount: 3000,
+          currency: 'MXN',
+          period: 'yearly',
+          is_active: 1,
+          scope_json: '{}',
+          basis: 'gross_cashflow',
+        },
+        {
+          id: 'single',
+          category_id: 'food',
+          amount: 2000,
+          currency: 'USD',
+          period: 'weekly',
+          is_active: 1,
+          scope_json: '{}',
+          basis: 'gross_cashflow',
+        },
+        {
+          id: 'unrelated',
+          category_id: 'other',
+          amount: 4000,
+          currency: 'USD',
+          period: 'monthly',
+          is_active: 1,
+          scope_json: '{}',
+          basis: 'gross_cashflow',
+        },
+      ])
+      db.exec(`
+        UPDATE budgets SET scope_json='{"categoryIds":["food"],"tags":["grocery"]}' WHERE id='single';
+        UPDATE budgets SET scope_json='{"categoryIds":["food","travel"],"excludeAccountIds":["bank"]}' WHERE id='multi';
+      `)
+      expect(() => db.exec("UPDATE budgets SET basis='not_a_basis' WHERE id='single'")).toThrow(
+        /CHECK/
+      )
+      for (const invalid of ['[]', 'null', 'not json'])
+        expect(() =>
+          db.prepare('UPDATE budgets SET scope_json=? WHERE id=?').run(invalid, 'single')
+        ).toThrow(/CHECK/)
+      const periods = rows(db, 'SELECT * FROM budget_periods')
+      const original = rows(
+        db,
+        'SELECT id,name,amount,currency,period,is_active,created_at,updated_at FROM budgets ORDER BY id'
+      )
+      db.exec("DELETE FROM categories WHERE id='food'")
+      expect(rows(db, 'SELECT id,category_id,scope_json FROM budgets ORDER BY id')).toEqual([
+        { id: 'legacy', category_id: null, scope_json: '{"categoryIds":["food"]}' },
+        {
+          id: 'multi',
+          category_id: null,
+          scope_json: '{"categoryIds":["food","travel"],"excludeAccountIds":["bank"]}',
+        },
+        {
+          id: 'single',
+          category_id: null,
+          scope_json: '{"categoryIds":["food"],"tags":["grocery"]}',
+        },
+        { id: 'unrelated', category_id: 'other', scope_json: '{}' },
+      ])
+      expect(
+        rows(
+          db,
+          'SELECT id,name,amount,currency,period,is_active,created_at,updated_at FROM budgets ORDER BY id'
+        )
+      ).toEqual(original)
+      expect(rows(db, 'SELECT * FROM budget_periods')).toEqual(periods)
+      expect(rows(db, 'SELECT id,amount,category_id FROM transactions')).toEqual([
+        { id: 'purchase', amount: 123, category_id: null },
+      ])
+      expect(db.pragma('foreign_key_check')).toEqual([])
+      const after = snapshot(db)
+      runHostedTestMigrations(db)
+      expect(snapshot(db)).toEqual(after)
+    }
+  )
+
+  it.each(['hosted', 'native'] as const)('rolls back a late 024 failure (%s)', async (engine) => {
+    const db = database()
+    runHostedTestMigrations(db, 23)
+    db.exec("INSERT INTO budgets(id,name,amount,period) VALUES ('old','Original',123,'monthly')")
+    const before = snapshot(db)
+    const schema = rows(db, 'SELECT * FROM sqlite_master ORDER BY name')
+    if (engine === 'hosted') {
+      db.exec(
+        "CREATE TRIGGER inject_024 BEFORE INSERT ON _migrations WHEN NEW.id=24 BEGIN SELECT RAISE(ABORT,'late 024 failure'); END"
+      )
+      expect(() => runHostedTestMigrations(db)).toThrow(/late 024 failure/)
+    } else {
+      await expect(
+        (await mockNative(db, 'INSERT INTO _migrations (id, name) VALUES (24')).api.getDb()
+      ).rejects.toThrow(/injected migration failure/)
+    }
+    expect(snapshot(db)).toEqual(before)
+    if (engine === 'native')
+      expect(rows(db, 'SELECT * FROM sqlite_master ORDER BY name')).toEqual(schema)
+    else
+      expect(
+        rows(
+          db,
+          "SELECT name FROM sqlite_master WHERE name IN ('scope_json','trg_scoped_budgets_category_delete')"
+        )
+      ).toEqual([])
+  })
+
+  it.each(['hosted', 'native'] as const)(
+    'refuses missing or incompatible 024 trigger (%s)',
+    async (engine) => {
+      const db = database()
+      runHostedTestMigrations(db)
+      db.exec('DROP TRIGGER trg_scoped_budgets_category_delete')
+      const before = snapshot(db)
+      if (engine === 'hosted')
+        expect(() => runHostedTestMigrations(db)).toThrow(/024 schema object/)
+      else await expect((await mockNative(db)).api.getDb()).rejects.toThrow(/024 schema object/)
+      expect(snapshot(db)).toEqual(before)
+    }
+  )
+})
+
+describe('024 staged restore validation', () => {
+  it('rejects a 024 backup missing category-retention protection without changing source or live data', async () => {
+    const path = home()
+    const api = await (async () => {
+      vi.stubEnv('HOME', path)
+      vi.stubEnv('XDG_DATA_HOME', join(path, 'data'))
+      vi.resetModules()
+      return import('./database.js')
+    })()
+    mkdirSync(join(path, 'data', 'com.asf.shikin'), { recursive: true })
+    const live = database(api.getDatabasePath())
+    runHostedTestMigrations(live)
+    live.close()
+    const source = join(path, 'unsafe24.db')
+    const backup = database(source)
+    runHostedTestMigrations(backup)
+    backup.exec('DROP TRIGGER trg_scoped_budgets_category_delete')
+    backup.close()
+    const originalSource = readFileSync(source)
+    const originalLive = readFileSync(api.getDatabasePath())
+    await expect(api.restoreDatabase({ sourcePath: source, dryRun: true })).rejects.toThrow(
+      /024 schema object/
+    )
+    expect(readFileSync(source)).toEqual(originalSource)
+    expect(readFileSync(api.getDatabasePath())).toEqual(originalLive)
+    api.close()
+  })
+
+  it('rolls back a late 024 upgrade on the staged copy only', async () => {
+    const path = home()
+    vi.stubEnv('HOME', path)
+    vi.stubEnv('XDG_DATA_HOME', join(path, 'data'))
+    vi.resetModules()
+    const api = await import('./database.js')
+    mkdirSync(join(path, 'data', 'com.asf.shikin'), { recursive: true })
+    const live = database(api.getDatabasePath())
+    runHostedTestMigrations(live)
+    live.close()
+    const source = join(path, 'old23.db')
+    const backup = database(source)
+    runHostedTestMigrations(backup, 23)
+    backup.exec(
+      "CREATE TRIGGER inject_024 BEFORE INSERT ON _migrations WHEN NEW.id=24 BEGIN SELECT RAISE(ABORT,'late 024 failure'); END"
+    )
+    backup.close()
+    const originalSource = readFileSync(source)
+    const originalLive = readFileSync(api.getDatabasePath())
+    await expect(api.restoreDatabase({ sourcePath: source, dryRun: true })).rejects.toThrow(
+      /late 024 failure/
+    )
+    expect(readFileSync(source)).toEqual(originalSource)
+    expect(readFileSync(api.getDatabasePath())).toEqual(originalLive)
+    expect(
+      readdirSync(join(path, 'data', 'com.asf.shikin')).some((name) =>
+        name.includes('restore-candidate')
+      )
+    ).toBe(false)
+    api.close()
   })
 })

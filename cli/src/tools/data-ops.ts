@@ -289,6 +289,8 @@ const EXPORT_TABLES: ExportTableSpec[] = [
       'id',
       'currency',
       'category_id',
+      'scope_json',
+      'basis',
       'name',
       'amount',
       'period',

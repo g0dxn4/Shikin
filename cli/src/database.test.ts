@@ -235,12 +235,17 @@ function seedCoreShikinSchema(
         ].includes(table)
       )
         continue
-      db.exec(`CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY)`)
+      db.exec(
+        table === 'budgets'
+          ? 'CREATE TABLE IF NOT EXISTS budgets (id TEXT PRIMARY KEY, category_id TEXT)'
+          : `CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY)`
+      )
     }
     db.exec(
       'CREATE TABLE IF NOT EXISTS recaps (id TEXT PRIMARY KEY); ALTER TABLE investments ADD COLUMN avg_cost_basis INTEGER NOT NULL DEFAULT 0'
     )
-    if (migrations.includes(BACKEND_FOUNDATION_MIGRATION)) applyBackendFoundationTestSchema(db)
+    if (migrations.includes(BACKEND_FOUNDATION_MIGRATION))
+      applyBackendFoundationTestSchema(db, migrations.includes('024_scoped_budgets'))
   }
 
   for (const migration of migrations) {

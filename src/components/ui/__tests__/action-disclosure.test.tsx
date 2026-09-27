@@ -110,6 +110,32 @@ describe('ActionDisclosure', () => {
     expect(panel).toHaveStyle({ top: '48px', maxHeight: '388px' })
   })
 
+  it('keeps a long clamped disclosure keyboard reachable through its final action', async () => {
+    mockGeometry({ triggerTop: 300, panelHeight: 550, navTop: 576, mainTop: 58 })
+    const user = userEvent.setup()
+    render(
+      <main>
+        <ActionDisclosure
+          label="Account actions"
+          actions={Array.from({ length: 10 }, (_, i) => ({
+            label: `Action ${i + 1}`,
+            onSelect: vi.fn(),
+          }))}
+        />
+        <nav className="native-bottom-nav" style={{ display: 'block' }} />
+      </main>
+    )
+    const opener = screen.getByRole('button', { name: 'Account actions' })
+    await user.click(opener)
+    const last = screen.getByRole('button', { name: 'Action 10' })
+    expect(last.parentElement).toHaveClass('overflow-y-auto')
+    expect(last.parentElement).toHaveStyle({ maxHeight: '234px' })
+    for (let i = 0; i < 10; i++) await user.tab()
+    expect(last).toHaveFocus()
+    await user.keyboard('{Escape}')
+    expect(opener).toHaveFocus()
+  })
+
   it('uses native button semantics and closes on Escape with focus restored', async () => {
     const user = userEvent.setup()
     render(

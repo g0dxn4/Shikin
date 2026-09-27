@@ -16,6 +16,7 @@ export interface ActionDisclosureItem {
   onSelect: () => void
   disabled?: boolean
   destructive?: boolean
+  expanded?: boolean
 }
 
 interface ActionDisclosureProps {
@@ -179,6 +180,7 @@ export function ActionDisclosure({
               key={action.label}
               type="button"
               disabled={action.disabled}
+              aria-expanded={action.expanded}
               className={cn(
                 'hover:bg-muted focus-visible:ring-ring flex min-h-11 w-full items-center rounded-md px-3 py-2 text-left text-sm font-medium outline-none focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-50',
                 action.destructive ? 'text-destructive' : 'text-foreground'

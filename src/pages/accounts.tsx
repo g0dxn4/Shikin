@@ -8,18 +8,9 @@ import {
   useCallback,
   type FormEvent,
 } from 'react'
-import { Link, useSearchParams } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import {
-  Landmark,
-  Plus,
-  TrendingUp,
-  ChevronDown,
-  ChevronUp,
-  CreditCard,
-  EllipsisVertical,
-  Receipt,
-} from 'lucide-react'
+import { Landmark, Plus, EllipsisVertical } from 'lucide-react'
 import { toast } from 'sonner'
 import { AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts'
 import { SafeChart } from '@/components/ui/safe-chart'
@@ -48,8 +39,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { MetricItem, MetricStrip, NativePanel, PageToolbar } from '@/components/ui/native-layout'
-import { AccountMaintenanceAction } from '@/components/accounts/account-maintenance-dialog'
-import { CardStatementsAction } from '@/components/accounts/card-statements-dialog'
+import { AccountMaintenanceDialog } from '@/components/accounts/account-maintenance-dialog'
+import { CardStatementsDialog } from '@/components/accounts/card-statements-dialog'
 import {
   ACCOUNT_TYPE_ICONS,
   accountAccentColor,
@@ -899,7 +890,14 @@ function AccountCard({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   t: any
 }) {
+  const navigate = useNavigate()
+  const { t: tHistory } = useTranslation('accountHistory')
+  const { t: tStatements } = useTranslation('cardPayments')
   const { loadBalanceHistory, balanceHistory } = useAccountStore()
+  const refreshAccounts = useAccountStore((state) => state.fetch)
+  const [maintenanceOpen, setMaintenanceOpen] = useState(false)
+  const [statementsOpen, setStatementsOpen] = useState(false)
+  const [showCreditDetails, setShowCreditDetails] = useState(false)
   const [historyLoading, setHistoryLoading] = useState(
     isExpanded && !balanceHistory.get(account.id)
   )
@@ -936,7 +934,32 @@ function AccountCard({
 
   const nameId = `account-${account.id}-name`
   const locatedId = `account-${account.id}-located`
-  const cardActions: ActionDisclosureItem[] = []
+  const cardActions: ActionDisclosureItem[] = [
+    {
+      label: t('viewTransactions'),
+      onSelect: () => navigate(`/transactions?account=${encodeURIComponent(account.id)}`),
+    },
+  ]
+  if (isCreditCard) {
+    if (onPayCreditCard) cardActions.push({ label: t('credit.pay'), onSelect: onPayCreditCard })
+    cardActions.push({ label: tStatements('action'), onSelect: () => setStatementsOpen(true) })
+  }
+  cardActions.push({
+    label: isExpanded ? t('history.hide') : t('history.show'),
+    onSelect: onToggleExpand,
+    expanded: isExpanded,
+  })
+  if (isCreditCard) {
+    cardActions.push({
+      label: showCreditDetails ? t('credit.hideDetails') : t('credit.showDetails'),
+      onSelect: () => setShowCreditDetails((current) => !current),
+      expanded: showCreditDetails,
+    })
+  }
+  cardActions.push({ label: t('actions.edit'), onSelect: onEdit })
+  if (account.account_mode !== 'snapshot_only') {
+    cardActions.push({ label: tHistory('action'), onSelect: () => setMaintenanceOpen(true) })
+  }
   if (canSetPrimary && onSetPrimary) {
     cardActions.push({
       label: isPrimary ? t('actions.primary') : t('actions.setPrimary'),
@@ -948,10 +971,6 @@ function AccountCard({
     {
       label: archiveLabel ?? t('archiveAccount'),
       onSelect: onArchive,
-    },
-    {
-      label: t('actions.edit'),
-      onSelect: onEdit,
     },
     {
       label: t('actions.delete'),
@@ -1027,7 +1046,7 @@ function AccountCard({
         </div>
       </div>
 
-      {isCreditCard && creditLimit !== null && (
+      {showCreditDetails && isCreditCard && creditLimit !== null && (
         <div className="bg-muted/40 border-border mt-4 grid grid-cols-3 gap-2 rounded-lg border p-3">
           <div>
             <p className="text-muted-foreground text-xs">{t('credit.limit')}</p>
@@ -1053,43 +1072,7 @@ function AccountCard({
         </div>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Button variant="outline" size="sm" className="min-h-11" asChild>
-          <Link to={`/transactions?account=${account.id}`}>
-            <Receipt size={14} />
-            {t('viewTransactions')}
-          </Link>
-        </Button>
-        <AccountMaintenanceAction account={account} />
-        <CardStatementsAction account={account} />
-        {isCreditCard && onPayCreditCard && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="min-h-11"
-            onClick={onPayCreditCard}
-            aria-label={`Pay ${account.name}`}
-          >
-            <CreditCard size={14} />
-            {t('credit.pay')}
-          </Button>
-        )}
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="min-h-11"
-          onClick={onToggleExpand}
-          aria-expanded={isExpanded}
-        >
-          <TrendingUp size={14} />
-          {isExpanded ? t('history.hide') : t('history.show')}
-          {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-        </Button>
-      </div>
-
-      {utilization !== null && (
+      {showCreditDetails && utilization !== null && (
         <div className="mt-3">
           <div className="mb-1 flex items-center justify-between">
             <span className="text-muted-foreground text-xs">{t('utilization.label')}</span>
@@ -1198,6 +1181,21 @@ function AccountCard({
             </div>
           )}
         </div>
+      )}
+      {account.account_mode !== 'snapshot_only' && (
+        <AccountMaintenanceDialog
+          account={account}
+          open={maintenanceOpen}
+          onOpenChange={setMaintenanceOpen}
+        />
+      )}
+      {isCreditCard && (
+        <CardStatementsDialog
+          account={account}
+          open={statementsOpen}
+          onOpenChange={setStatementsOpen}
+          onChanged={() => refreshAccounts()}
+        />
       )}
     </article>
   )

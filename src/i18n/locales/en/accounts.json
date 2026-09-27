@@ -78,8 +78,8 @@
   "totalBalance": "Total Balance",
   "accountCount": "account(s)",
   "history": {
-    "show": "Balance history",
-    "hide": "Hide history",
+    "show": "Show balance history",
+    "hide": "Hide balance history",
     "empty": "First snapshot recorded. Come back tomorrow for trend data.",
     "none": "No history yet. Balance is recorded daily."
   },
@@ -93,6 +93,8 @@
     "limit": "Limit",
     "available": "Available",
     "dates": "Dates",
+    "showDetails": "Show card details",
+    "hideDetails": "Hide card details",
     "pay": "Pay card",
     "paymentTitle": "Pay credit card",
     "paymentDescription": "Record a payment to {{card}} from one of your cash accounts.",

@@ -78,8 +78,8 @@
   "totalBalance": "Balance Total",
   "accountCount": "cuenta(s)",
   "history": {
-    "show": "Historial de balance",
-    "hide": "Ocultar historial",
+    "show": "Mostrar historial de balance",
+    "hide": "Ocultar historial de balance",
     "empty": "Primera instantánea registrada. Vuelve mañana para ver tendencias.",
     "none": "Sin historial aún. El balance se registra diariamente."
   },
@@ -93,6 +93,8 @@
     "limit": "Límite",
     "available": "Disponible",
     "dates": "Fechas",
+    "showDetails": "Mostrar detalles de tarjeta",
+    "hideDetails": "Ocultar detalles de tarjeta",
     "pay": "Pagar tarjeta",
     "paymentTitle": "Pagar tarjeta de crédito",
     "paymentDescription": "Registra un pago a {{card}} desde una de tus cuentas de efectivo.",

@@ -1,14 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, useLocation } from 'react-router'
 import { Accounts } from '../accounts'
 import { useCurrencyStore } from '@/stores/currency-store'
+
+function CurrentLocation() {
+  const location = useLocation()
+  return <div data-testid="location">{location.pathname + location.search}</div>
+}
 
 function renderAccounts(path = '/accounts') {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Accounts />
+      <CurrentLocation />
     </MemoryRouter>
   )
 }
@@ -42,8 +48,9 @@ vi.mock('recharts', () => ({
 }))
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string) => key,
+  useTranslation: (namespace: string) => ({
+    t: (key: string) =>
+      key === 'action' && namespace === 'cardPayments' ? 'statements.action' : key,
     i18n: { language: 'en', changeLanguage: vi.fn() },
   }),
 }))
@@ -52,31 +59,51 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
 
-vi.mock('@/components/accounts/account-maintenance-dialog', async () => {
-  const { useState } = await import('react')
-  return {
-    AccountMaintenanceAction: ({ account }: { account: { account_mode?: string } }) => {
-      const [open, setOpen] = useState(false)
-      if (account.account_mode === 'snapshot_only') return null
-      return (
-        <>
-          <button type="button" onClick={() => setOpen(true)}>
-            action
-          </button>
-          {open ? <div role="status">errors.savedRefreshFailed</div> : null}
-        </>
-      )
-    },
-  }
-})
-vi.mock('@/components/accounts/card-statements-dialog', () => ({
-  CardStatementsAction: ({ account }: { account: { type: string; name: string } }) =>
-    account.type === 'credit_card' ? (
-      <button type="button" className="min-h-11">
-        {`statements ${account.name}`}
-      </button>
+vi.mock('@/components/accounts/account-maintenance-dialog', () => ({
+  AccountMaintenanceDialog: ({
+    account,
+    open,
+    onOpenChange,
+  }: {
+    account: { name: string }
+    open: boolean
+    onOpenChange: (open: boolean) => void
+  }) =>
+    open ? (
+      <div role="dialog" aria-label={`Maintain ${account.name}`}>
+        <span role="status">errors.savedRefreshFailed</span>
+        <button onClick={() => onOpenChange(false)}>Close maintenance</button>
+      </div>
     ) : null,
 }))
+vi.mock('@/components/accounts/card-statements-dialog', async () => {
+  const { Dialog, DialogContent, DialogDescription, DialogTitle } =
+    await import('@/components/ui/dialog')
+  return {
+    CardStatementsDialog: ({
+      account,
+      open,
+      onOpenChange,
+      onChanged,
+    }: {
+      account: { name: string }
+      open: boolean
+      onOpenChange: (open: boolean) => void
+      onChanged: () => void
+    }) => (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        {open && (
+          <DialogContent>
+            <DialogTitle>{`Statements ${account.name}`}</DialogTitle>
+            <DialogDescription>Statement actions</DialogDescription>
+            <button onClick={onChanged}>Change statement</button>
+            <button onClick={() => onOpenChange(false)}>Close statements</button>
+          </DialogContent>
+        )}
+      </Dialog>
+    ),
+  }
+})
 
 vi.mock('@/components/shared/confirm-dialog', async () => {
   const { Dialog, DialogContent, DialogDescription, DialogTitle } =
@@ -129,19 +156,22 @@ vi.mock('@/stores/ui-store', () => ({
 }))
 
 vi.mock('@/stores/account-store', () => ({
-  useAccountStore: () => ({
-    accounts: mockAccounts,
-    isLoading: mockIsLoading,
-    fetchError: mockFetchError,
-    fetch: mockFetch,
-    archivedAccounts: mockArchivedAccounts,
-    archive: mockArchive,
-    unarchive: mockUnarchive,
-    setPrimary: mockSetPrimary,
-    remove: mockRemove,
-    balanceHistory: mockBalanceHistory,
-    loadBalanceHistory: mockLoadBalanceHistory,
-  }),
+  useAccountStore: (selector?: (state: { fetch: typeof mockFetch }) => unknown) => {
+    const state = {
+      accounts: mockAccounts,
+      isLoading: mockIsLoading,
+      fetchError: mockFetchError,
+      fetch: mockFetch,
+      archivedAccounts: mockArchivedAccounts,
+      archive: mockArchive,
+      unarchive: mockUnarchive,
+      setPrimary: mockSetPrimary,
+      remove: mockRemove,
+      balanceHistory: mockBalanceHistory,
+      loadBalanceHistory: mockLoadBalanceHistory,
+    }
+    return selector ? selector(state) : state
+  },
 }))
 
 vi.mock('@/stores/transaction-store', () => ({
@@ -216,7 +246,7 @@ describe('Accounts', () => {
 
     expect(screen.getByRole('article', { name: 'Checking' })).toBeInTheDocument()
     expect(container.querySelector('.skeleton')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'action' }))
+    await chooseAccountAction(user, 'Checking', 'action')
     expect(screen.getByRole('status')).toHaveTextContent('errors.savedRefreshFailed')
   })
 
@@ -557,7 +587,8 @@ describe('Accounts', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('shows credit card limit, available credit, statement day, and due day', () => {
+  it('shows credit details only on request, retaining the existing values', async () => {
+    const user = userEvent.setup()
     mockAccounts = [
       {
         id: 'acc-card',
@@ -573,12 +604,20 @@ describe('Accounts', () => {
 
     renderAccounts()
 
-    expect(screen.getByText('credit.limit')).toBeInTheDocument()
+    const card = screen.getByRole('article', { name: 'Travel Card' })
+    expect(within(card).getAllByRole('button')).toHaveLength(1)
+    expect(within(card).queryByText('credit.limit')).not.toBeInTheDocument()
+    expect(within(card).queryByText('utilization.label')).not.toBeInTheDocument()
+    await chooseAccountAction(user, 'Travel Card', 'credit.showDetails')
+    expect(within(card).queryByText('credit.limit')).toBeInTheDocument()
     expect(screen.getByText('credit.available')).toBeInTheDocument()
     expect(screen.getByText('$27,000.00')).toBeInTheDocument()
     expect(screen.getByText('$26,000.00')).toBeInTheDocument()
     expect(screen.getByText(/C 15/)).toBeInTheDocument()
     expect(screen.getByText(/D 5/)).toBeInTheDocument()
+    expect(within(card).getByText('utilization.label')).toBeInTheDocument()
+    await chooseAccountAction(user, 'Travel Card', 'credit.hideDetails')
+    expect(within(card).queryByText('credit.limit')).not.toBeInTheDocument()
   })
 
   it('records a credit card payment as a transfer from a cash account', async () => {
@@ -606,7 +645,7 @@ describe('Accounts', () => {
 
     renderAccounts()
 
-    await user.click(screen.getByLabelText('Pay Travel Card'))
+    await chooseAccountAction(user, 'Travel Card', 'credit.pay')
     await user.clear(screen.getByLabelText('credit.amount'))
     await user.type(screen.getByLabelText('credit.amount'), '25')
     await user.click(screen.getByRole('button', { name: 'credit.confirmPayment' }))
@@ -653,7 +692,7 @@ describe('Accounts', () => {
 
     renderAccounts()
 
-    await user.click(screen.getByLabelText('Pay Travel Card'))
+    await chooseAccountAction(user, 'Travel Card', 'credit.pay')
     await user.clear(screen.getByLabelText('credit.amount'))
     await user.type(screen.getByLabelText('credit.amount'), '25')
     await user.click(screen.getByRole('button', { name: 'credit.confirmPayment' }))
@@ -663,6 +702,20 @@ describe('Accounts', () => {
       expect(toast.error).toHaveBeenCalledWith('Payment DB error')
     })
     expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it('keeps card maintenance attached to the selected account after the disclosure closes', async () => {
+    const user = userEvent.setup()
+    mockAccounts = [
+      { id: 'acc-a', name: 'Checking', type: 'checking', currency: 'USD', balance: 100 },
+      { id: 'acc-b', name: 'Savings', type: 'savings', currency: 'USD', balance: 200 },
+    ]
+    renderAccounts()
+    await chooseAccountAction(user, 'Savings', 'action')
+    expect(screen.getByRole('dialog', { name: 'Maintain Savings' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Maintain Checking' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Close maintenance' }))
+    expect(screen.queryByRole('dialog', { name: 'Maintain Savings' })).not.toBeInTheDocument()
   })
 
   it('renders archived accounts behind a toggle', async () => {
@@ -680,11 +733,19 @@ describe('Accounts', () => {
     await user.click(screen.getByRole('button', { name: /archived.show/i }))
 
     expect(screen.getByText('Old Account')).toBeInTheDocument()
-    expect(screen.getByRole('article', { name: 'Old Account' }).parentElement).toHaveClass(
-      'grid-cols-1',
-      'items-start',
-      'xl:grid-cols-2'
+    const archivedCard = screen.getByRole('article', { name: 'Old Account' })
+    expect(within(archivedCard).getByText('archived.badge')).toBeInTheDocument()
+    expect(within(archivedCard).getAllByRole('button')).toHaveLength(1)
+    await user.click(
+      within(archivedCard).getByRole('button', { name: 'actions.more — Old Account' })
     )
+    expect(
+      within(archivedCard).getByRole('button', { name: 'unarchiveAccount' })
+    ).toBeInTheDocument()
+    expect(
+      within(archivedCard).queryByRole('button', { name: 'actions.setPrimary' })
+    ).not.toBeInTheDocument()
+    expect(archivedCard.parentElement).toHaveClass('grid-cols-1', 'items-start', 'xl:grid-cols-2')
   })
 
   it('shows archived accounts when there are no active accounts', () => {
@@ -778,20 +839,19 @@ describe('Accounts', () => {
     expect(screen.getByText('EUR')).toBeInTheDocument()
   })
 
-  it('links an account to the transactions ledger filter', () => {
+  it('navigates from the disclosure to the encoded account ledger filter', async () => {
+    const user = userEvent.setup()
     mockAccounts = [
-      { id: 'acc-ledger', name: 'Daily Checking', type: 'checking', currency: 'USD', balance: 0 },
+      { id: 'acc&ledger', name: 'Daily Checking', type: 'checking', currency: 'USD', balance: 0 },
     ]
-
     renderAccounts()
-
-    expect(screen.getByRole('link', { name: 'viewTransactions' })).toHaveAttribute(
-      'href',
-      '/transactions?account=acc-ledger'
-    )
+    const card = screen.getByRole('article', { name: 'Daily Checking' })
+    expect(within(card).getAllByRole('button')).toHaveLength(1)
+    await chooseAccountAction(user, 'Daily Checking', 'viewTransactions')
+    expect(screen.getByTestId('location')).toHaveTextContent('/transactions?account=acc%26ledger')
   })
 
-  it('keeps card actions in one wrapping row and toggles balance history', async () => {
+  it('toggles balance history from the menu with focus returned to the ellipsis', async () => {
     const user = userEvent.setup()
     mockAccounts = [
       { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 0 },
@@ -804,34 +864,27 @@ describe('Accounts', () => {
         credit_limit: 100000,
       },
     ]
-
     renderAccounts()
-
-    const viewTransactions = screen.getAllByRole('link', { name: 'viewTransactions' })[0]
-    const historyToggle = screen.getAllByRole('button', { name: 'history.show' })[0]
-    const actionRow = viewTransactions.parentElement
-    expect(actionRow).toBe(historyToggle.parentElement)
-    expect(actionRow).toHaveClass('flex-wrap')
-    expect(viewTransactions).toHaveClass('min-h-11')
-    expect(historyToggle).toHaveClass('min-h-11')
-    expect(historyToggle).toHaveAttribute('aria-expanded', 'false')
-
-    const payCard = screen.getByLabelText('Pay Travel Card')
-    const cardHistory = screen.getAllByRole('button', { name: 'history.show' })[1]
-    expect(payCard.parentElement).toBe(cardHistory.parentElement)
-    expect(payCard).toHaveClass('min-h-11')
-    expect(payCard.parentElement).not.toHaveTextContent('utilization.label')
-    expect(screen.getByText('utilization.label')).toBeInTheDocument()
-
-    await user.click(historyToggle)
-    expect(historyToggle).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('button', { name: 'history.hide' })).toBeInTheDocument()
-    expect(screen.getByText('history.none')).toBeInTheDocument()
-    expect(actionRow).not.toContainElement(screen.getByText('history.none'))
-
-    await user.click(screen.getByRole('button', { name: 'history.hide' }))
-    expect(screen.queryByText('history.none')).not.toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: 'history.show' })).toHaveLength(2)
+    const checking = screen.getByRole('article', { name: 'Checking' })
+    const more = within(checking).getByRole('button', { name: 'actions.more — Checking' })
+    expect(within(checking).getAllByRole('button')).toHaveLength(1)
+    expect(within(checking).queryByText('history.none')).not.toBeInTheDocument()
+    await user.click(more)
+    expect(within(checking).getByRole('button', { name: 'history.show' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
+    await user.click(within(checking).getByRole('button', { name: 'history.show' }))
+    expect(more).toHaveFocus()
+    expect(within(checking).getByText('history.none')).toBeInTheDocument()
+    await user.click(more)
+    expect(within(checking).getByRole('button', { name: 'history.hide' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    )
+    await user.click(within(checking).getByRole('button', { name: 'history.hide' }))
+    expect(within(checking).queryByText('history.none')).not.toBeInTheDocument()
+    expect(mockLoadBalanceHistory).toHaveBeenCalledWith('acc-1', 6)
   })
 
   it('announces balance-history points in original minor units', async () => {
@@ -873,7 +926,7 @@ describe('Accounts', () => {
     renderAccounts()
 
     const checking = screen.getByRole('article', { name: 'Everyday Checking' })
-    await user.click(within(checking).getByRole('button', { name: 'history.show' }))
+    await chooseAccountAction(user, 'Everyday Checking', 'history.show')
     const checkingChart = within(checking).getByRole('img', {
       name: 'history.show for Everyday Checking',
     })
@@ -883,13 +936,14 @@ describe('Accounts', () => {
     expect(checkingChart).not.toHaveTextContent('$257.82')
 
     const card = screen.getByRole('article', { name: 'Travel Card' })
-    await user.click(within(card).getByRole('button', { name: 'history.show' }))
+    await chooseAccountAction(user, 'Travel Card', 'history.show')
     const cardChart = within(card).getByRole('img', { name: 'history.show for Travel Card' })
     expect(cardChart).toHaveTextContent('Sep 18: -$1,582.77')
     expect(cardChart).toHaveTextContent('Sep 20: -$1,572.77')
   })
 
-  it('mounts card statement actions next to credit-card payment shortcuts', () => {
+  it('opens the target card statements dialog from the menu and refreshes after changes', async () => {
+    const user = userEvent.setup()
     mockAccounts = [
       { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 0 },
       {
@@ -898,17 +952,22 @@ describe('Accounts', () => {
         type: 'credit_card',
         currency: 'USD',
         balance: -10000,
-        credit_limit: 100000,
       },
     ]
-
     renderAccounts()
-
-    const statements = screen.getByRole('button', { name: 'statements Travel Card' })
-    const payCard = screen.getByLabelText('Pay Travel Card')
-    expect(statements).toHaveClass('min-h-11')
-    expect(statements.parentElement).toBe(payCard.parentElement)
-    expect(screen.queryByRole('button', { name: 'statements Checking' })).not.toBeInTheDocument()
+    await chooseAccountAction(user, 'Travel Card', 'statements.action')
+    expect(screen.getByRole('dialog', { name: 'Statements Travel Card' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Change statement' }))
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+    await user.click(screen.getByRole('button', { name: 'Close statements' }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'actions.more — Travel Card' })).toHaveFocus()
+    )
+    const checking = screen.getByRole('article', { name: 'Checking' })
+    await user.click(within(checking).getByRole('button', { name: 'actions.more — Checking' }))
+    expect(
+      within(checking).queryByRole('button', { name: 'statements.action' })
+    ).not.toBeInTheDocument()
   })
 
   it('keeps investment accounts out of liquidity figures until the separate list is opened', async () => {
@@ -937,10 +996,12 @@ describe('Accounts', () => {
     expect(brokerage).toBeInTheDocument()
     expect(brokerage.parentElement).toHaveClass('grid-cols-1', 'items-start', 'xl:grid-cols-2')
     expect(screen.getByText('$99,900.00')).toBeInTheDocument()
+    await user.click(within(brokerage).getByRole('button', { name: 'actions.more — Brokerage' }))
     expect(within(brokerage).getByRole('button', { name: 'action' })).toBeInTheDocument()
   })
 
   it('hides history maintenance on snapshot-only investment accounts', async () => {
+    const user = userEvent.setup()
     mockAccounts = [
       {
         id: 'acc-crypto',
@@ -955,6 +1016,7 @@ describe('Accounts', () => {
     renderAccounts()
 
     expect(await screen.findByRole('article', { name: 'Hardware Wallet' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'actions.more — Hardware Wallet' }))
     expect(screen.queryByRole('button', { name: 'action' })).not.toBeInTheDocument()
   })
 

@@ -949,7 +949,7 @@ function AccountCard({
     onSelect: onToggleExpand,
     expanded: isExpanded,
   })
-  if (isCreditCard) {
+  if (isCreditCard && creditLimit !== null) {
     cardActions.push({
       label: showCreditDetails ? t('credit.hideDetails') : t('credit.showDetails'),
       onSelect: () => setShowCreditDetails((current) => !current),

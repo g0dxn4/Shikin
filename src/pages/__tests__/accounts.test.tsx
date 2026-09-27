@@ -620,6 +620,24 @@ describe('Accounts', () => {
     expect(within(card).queryByText('credit.limit')).not.toBeInTheDocument()
   })
 
+  it('omits the details toggle when a card has no credit details to display', async () => {
+    mockAccounts = [
+      {
+        id: 'no-limit',
+        name: 'No limit card',
+        type: 'credit_card',
+        currency: 'USD',
+        balance: -100,
+      },
+    ]
+    renderAccounts()
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: 'actions.more — No limit card' }))
+    expect(screen.queryByRole('button', { name: 'credit.showDetails' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'statements.action' })).toBeInTheDocument()
+  })
+
   it('records a credit card payment as a transfer from a cash account', async () => {
     const { toast } = await import('sonner')
     const user = userEvent.setup()

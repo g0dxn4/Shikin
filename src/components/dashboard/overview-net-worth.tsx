@@ -150,19 +150,19 @@ export function OverviewNetWorth({
           role="tabpanel"
           aria-labelledby="overview-summary-tab"
           className={cn(
-            'col-start-1 row-start-1 min-w-0 p-4 sm:p-6',
+            'col-start-1 row-start-1 min-w-0 p-4 sm:p-6 lg:flex lg:items-center',
             view !== 'summary' && 'pointer-events-none invisible'
           )}
           aria-hidden={view !== 'summary'}
           inert={view !== 'summary'}
         >
           <div
-            className="grid min-w-0 items-start gap-6 md:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] md:items-center md:gap-0"
+            className="grid w-full min-w-0 items-start gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:items-center lg:gap-0"
             aria-label={t('overview.views.summary')}
           >
-            <div className="min-w-0 md:pr-8">
+            <div className="min-w-0 lg:pr-8">
               <span className="text-muted-foreground text-xs">{t('overview.netWorth')}</span>
-              <strong className="mt-1.5 block text-3xl font-semibold tracking-tight break-all tabular-nums sm:text-4xl">
+              <strong className="mt-1.5 block text-3xl font-semibold tracking-tight break-all tabular-nums sm:text-4xl xl:text-5xl">
                 {hasCurrentValue ? (
                   formatMoney(currentAmount, currentCurrency)
                 ) : (
@@ -178,7 +178,7 @@ export function OverviewNetWorth({
                 </p>
               )}
             </div>
-            <div className="border-border min-w-0 md:border-l md:pl-8">
+            <div className="border-border min-w-0 lg:border-l lg:pl-8">
               <p className="text-muted-foreground mb-1 text-xs">{monthlySummaryLabel}</p>
               <div className="divide-border divide-y">
                 <MonthlyMetricRow
@@ -446,22 +446,22 @@ function MonthlyMetricRow({
   detail?: ReactNode
 }) {
   return (
-    <div className="flex min-w-0 items-start gap-3 py-2.5 first:pt-0 last:pb-0">
+    <div className="flex min-w-0 items-start gap-3 py-2.5 first:pt-0 last:pb-0 md:gap-4 md:py-5">
       <span
         className={cn(
-          'mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg',
+          'mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg md:size-10',
           iconClassName
         )}
         aria-hidden="true"
       >
-        <Icon className="size-4" strokeWidth={1.75} />
+        <Icon className="size-4 md:size-5" strokeWidth={1.75} />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-baseline justify-between gap-x-3">
-          <span className="text-muted-foreground shrink-0 text-xs">{label}</span>
+          <span className="text-muted-foreground shrink-0 text-xs md:text-sm">{label}</span>
           <strong
             className={cn(
-              'min-w-0 text-right text-base font-semibold break-all tabular-nums sm:text-lg',
+              'min-w-0 text-right text-base font-semibold break-all tabular-nums md:text-2xl',
               valueClassName
             )}
           >

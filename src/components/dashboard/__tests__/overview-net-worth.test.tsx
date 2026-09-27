@@ -173,6 +173,8 @@ describe('OverviewNetWorth shared panel geometry and evidence', () => {
     expect(metricGrid).not.toHaveClass('grid-cols-2')
     expect(metricGrid?.children).toHaveLength(2)
     expect(summary.querySelectorAll('.rounded-xl.border')).toHaveLength(0)
+    expect(summary).toHaveClass('lg:flex', 'lg:items-center')
+    expect(metricGrid).toHaveClass('w-full')
     expect(summary).not.toHaveClass('justify-center')
     expect(summary).toHaveTextContent('$1,150.00')
     expect(summary).toHaveTextContent('$10.00')

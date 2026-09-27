@@ -65,8 +65,10 @@ describe('scoped Reports UI', () => {
         'net_consumption'
       )
       expect(
-        screen.getByRole('button', { name: 'Actualizar desde la base de datos' })
-      ).toBeInTheDocument()
+        screen
+          .getByRole('button', { name: 'Actualizar desde la base de datos' })
+          .closest('.page-toolbar')
+      ).toHaveClass('flex-col', 'items-stretch', 'sm:flex-row')
     } finally {
       await act(async () => {
         await i18n.changeLanguage('en')

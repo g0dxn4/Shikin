@@ -38,6 +38,7 @@ export function ReportsPage() {
   return (
     <div className="page-content">
       <PageToolbar
+        className="flex-col items-stretch sm:flex-row sm:items-center"
         leading={<p className="text-muted-foreground text-sm">{t('scoped.reportDescription')}</p>}
         actions={
           <Button variant="outline" onClick={refresh}>

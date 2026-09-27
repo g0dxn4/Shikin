@@ -66,6 +66,9 @@ type AccountContextRow = {
 type BudgetContextRow = {
   id: string
   name: string
+  currency: string
+  scope_json: string
+  basis: string
   amount: number
   period: string
   category_id: string | null
@@ -520,7 +523,19 @@ function getFinanceProfileContext(redacted: boolean) {
 }
 
 function getBudgetsContext(redacted: boolean, warnings: ContextWarning[]) {
-  if (!tableHasColumns('budgets', ['id', 'name', 'amount', 'period', 'category_id', 'is_active'])) {
+  if (
+    !tableHasColumns('budgets', [
+      'id',
+      'name',
+      'amount',
+      'currency',
+      'scope_json',
+      'basis',
+      'period',
+      'category_id',
+      'is_active',
+    ])
+  ) {
     warnings.push({
       section: 'budgets',
       severity: 'gap',
@@ -530,7 +545,7 @@ function getBudgetsContext(redacted: boolean, warnings: ContextWarning[]) {
   }
 
   const budgets = query<BudgetContextRow>(
-    `SELECT b.id, b.name, b.amount, b.period, b.category_id, b.is_active,
+    `SELECT b.id, b.name, b.amount, b.currency, b.scope_json, b.basis, b.period, b.category_id, b.is_active,
             c.name AS category_name
      FROM budgets b
      LEFT JOIN categories c ON c.id = b.category_id
@@ -538,7 +553,7 @@ function getBudgetsContext(redacted: boolean, warnings: ContextWarning[]) {
      ORDER BY b.period ASC, b.name ASC, b.id ASC`
   )
   const totals = new Map<string, number>()
-  for (const budget of budgets) addCurrencyTotal(totals, 'mixed', budget.amount)
+  if (budgets.length === 1) addCurrencyTotal(totals, budgets[0].currency, budgets[0].amount)
 
   return {
     available: true,
@@ -550,13 +565,25 @@ function getBudgetsContext(redacted: boolean, warnings: ContextWarning[]) {
       categoryName: redactText(budget.category_name, redacted),
       amount: fromCentavos(budget.amount),
       amountCentavos: budget.amount,
+      currency: budget.currency,
+      scope: (() => {
+        try {
+          return JSON.parse(budget.scope_json)
+        } catch {
+          return null
+        }
+      })(),
+      basis: budget.basis,
       period: budget.period,
       isActive: budget.is_active === 1,
     })),
     summary: {
       activeCount: budgets.length,
       totalsByCurrency: currencyTotalsSnapshot(totals),
-      currencyNote: 'Budgets do not store currency directly; totals are reported under mixed.',
+      currencyNote:
+        budgets.length > 1
+          ? 'Independent budgets are nonadditive; no aggregate total.'
+          : 'Stored native plan currency; not a dated valuation.',
     },
   }
 }

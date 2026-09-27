@@ -1841,3 +1841,39 @@ describe('CLI command execution', () => {
     expect(close).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('scoped budget CLI structured arguments', () => {
+  it('passes JSON scope arrays through the actual shared tool schema', async () => {
+    const tool = actualTools.find((item) => item.name === 'create-budget')!
+    const execute = vi.fn(async (input: unknown) => ({ success: true, input }))
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const program = createProgram([{ ...tool, execute }])
+    await program.parseAsync([
+      'node',
+      'shikin',
+      'create-budget',
+      '--budget-id',
+      'stable',
+      '--amount',
+      '1000',
+      '--currency',
+      'MXN',
+      '--scope',
+      '{"accountIds":["bank"],"categoryIds":["food","pets"],"tags":["business"],"excludeTags":["personal"]}',
+      '--json',
+    ])
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 1000,
+        currency: 'MXN',
+        scope: {
+          accountIds: ['bank'],
+          categoryIds: ['food', 'pets'],
+          tags: ['business'],
+          excludeTags: ['personal'],
+        },
+      })
+    )
+    expect(log).toHaveBeenCalled()
+  })
+})

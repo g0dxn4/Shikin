@@ -1,6 +1,16 @@
+import {
+  budgetWindowComparability,
+  inspectReportScope,
+  resolveBudgetScope,
+} from '@shikin/finance-core'
 import { getCurrencySettings } from '../fx-service.js'
-import { mainCurrencySetupNeeded, readCurrentAmounts, sumCentavos } from '../dated-read.js'
-import { readBudgetSpending, readConvertedCashFlow } from '../reporting-read.js'
+import { mainCurrencySetupNeeded, readCurrentAmounts } from '../dated-read.js'
+import {
+  loadScopedDataset,
+  scopedActual,
+  contributorInspection,
+  storedBudgetScope,
+} from '../scoped-report-read.js'
 import { readMainOwnershipValuation } from '../valuation-read.js'
 import {
   z,
@@ -10,9 +20,9 @@ import {
   generateId,
   toCentavos,
   fromCentavos,
-  dayjs,
   boundedText,
   positiveMoneyAmount,
+  currencyCode,
   resolveCategoryId,
   writeAuditLog,
   type ToolDefinition,
@@ -26,600 +36,448 @@ type BudgetRow = {
   period: 'weekly' | 'monthly' | 'yearly'
   category_id: string | null
   category_name: string | null
-  is_active?: number
+  scope_json: string
+  basis: 'gross_cashflow' | 'net_consumption'
+  is_active: number
 }
-
-function assertSingleRowUpdated(result: { rowsAffected: number }, message: string) {
-  if (result.rowsAffected !== 1) {
-    throw new Error(message)
-  }
+const budgetSelect = `SELECT b.*, c.name AS category_name FROM budgets b LEFT JOIN categories c ON c.id = b.category_id`
+const scopeSchema = z
+  .object({
+    accountIds: z.array(z.string()).optional(),
+    excludeAccountIds: z.array(z.string()).optional(),
+    categoryIds: z.array(z.string().nullable()).optional(),
+    excludeCategoryIds: z.array(z.string().nullable()).optional(),
+    tags: z.array(z.string()).optional(),
+    excludeTags: z.array(z.string()).optional(),
+  })
+  .strict()
+const fields = {
+  budgetId: boundedText('Budget ID', 'Stable budget ID', 128).optional(),
+  categoryId: boundedText('Category ID', 'Exact category ID', 128).nullable().optional(),
+  categoryName: boundedText('Category name', 'Category name', 120).optional(),
+  scope: scopeSchema
+    .optional()
+    .describe('Exact source-account, allocation-category and recognition-tag scope'),
+  currency: currencyCode('Stored plan currency; changing it requires amount').optional(),
+  basis: z.enum(['gross_cashflow', 'net_consumption']).optional(),
+  amount: positiveMoneyAmount('Amount in the plan currency').optional(),
+  period: z.enum(['weekly', 'monthly', 'yearly']).optional(),
+  name: boundedText('Budget name', 'Budget name', 120).optional(),
+  active: z.boolean().optional(),
+  dryRun: z.boolean().optional().default(false),
 }
-
-type BudgetUpsertMatch =
-  | { success: true; budget: BudgetRow; matchedBy: 'budgetId' | 'category' | 'name' }
-  | { success: true; budget: null; matchedBy: 'new' }
-  | { success: false; reason?: string; message: string }
-
-function budgetSnapshot(budget: BudgetRow) {
+type BudgetInput = z.infer<z.ZodObject<typeof fields>>
+function budgetSnapshot(row: BudgetRow) {
   return {
-    id: budget.id,
-    name: budget.name,
-    amount: fromCentavos(budget.amount),
-    amountCentavos: budget.amount,
-    currency: budget.currency,
-    period: budget.period,
-    categoryId: budget.category_id,
-    categoryName: budget.category_name ?? null,
-    isActive: budget.is_active === undefined ? true : budget.is_active === 1,
+    id: row.id,
+    name: row.name,
+    amount: fromCentavos(row.amount),
+    amountCentavos: row.amount,
+    currency: row.currency,
+    period: row.period,
+    categoryId: row.category_id,
+    categoryName: row.category_name ?? null,
+    scope: storedBudgetScope(row),
+    basis: row.basis,
+    isActive: row.is_active === 1,
   }
 }
-
-function resolveBudgetCategory(categoryId?: string, categoryName?: string) {
+function findBudget(input: BudgetInput, categoryId: string | null): BudgetRow | null {
+  if (input.budgetId)
+    return query<BudgetRow>(`${budgetSelect} WHERE b.id = $1`, [input.budgetId])[0] ?? null
   if (categoryId) {
-    const rows = query<{ id: string; name: string }>(
-      'SELECT id, name FROM categories WHERE id = $1 LIMIT 1',
-      [categoryId]
+    const rows = query<BudgetRow>(
+      `${budgetSelect} WHERE b.category_id = $1 ${input.period ? 'AND b.period = $2' : ''} ORDER BY b.is_active DESC, b.name, b.id LIMIT 2`,
+      input.period ? [categoryId, input.period] : [categoryId]
     )
-    if (rows.length === 0) {
-      return { success: false as const, message: `Category ${categoryId} not found.` }
-    }
-    return { success: true as const, id: rows[0].id, name: rows[0].name }
+    if (rows.length > 1)
+      throw new Error('Multiple budgets match this category. Supply budgetId or period.')
+    if (rows.length) return rows[0]
   }
-
-  if (!categoryName) return { success: true as const, id: null, name: null }
-  return resolveCategoryId(categoryName)
-}
-
-function findBudgetForUpsert(input: {
-  budgetId?: string
-  name?: string
-  categoryId: string | null
-  period?: 'weekly' | 'monthly' | 'yearly'
-}): BudgetUpsertMatch {
-  if (input.budgetId) {
-    const budget = query<BudgetRow>(
-      `SELECT b.id, b.name, b.amount, b.currency, b.period, b.category_id, b.is_active, c.name as category_name
-       FROM budgets b
-       LEFT JOIN categories c ON b.category_id = c.id
-       WHERE b.id = $1
-       LIMIT 1`,
-      [input.budgetId]
-    )[0]
-    return budget
-      ? { success: true, budget, matchedBy: 'budgetId' }
-      : { success: true, budget: null, matchedBy: 'new' }
-  }
-
-  if (input.categoryId) {
-    const periodFilter = input.period ? ' AND b.period = $2' : ''
-    const params = input.period ? [input.categoryId, input.period] : [input.categoryId]
-    const matches = query<BudgetRow>(
-      `SELECT b.id, b.name, b.amount, b.currency, b.period, b.category_id, b.is_active, c.name as category_name
-       FROM budgets b
-       LEFT JOIN categories c ON b.category_id = c.id
-        WHERE b.category_id = $1${periodFilter}
-        ORDER BY b.is_active DESC, b.name ASC, b.id ASC
-        LIMIT 2`,
-      params
-    )
-    if (matches.length === 1) return { success: true, budget: matches[0], matchedBy: 'category' }
-    if (matches.length > 1) {
-      const periodLabel = input.period ? `${input.period} budgets` : 'budgets'
-      return {
-        success: false,
-        reason: 'budget_match_ambiguous',
-        message: `Multiple ${periodLabel} already exist for category ${input.categoryId}. Use budgetId or period to update the intended one.`,
-      }
-    }
-  }
-
   if (input.name) {
-    const matches = query<BudgetRow>(
-      `SELECT b.id, b.name, b.amount, b.currency, b.period, b.category_id, b.is_active, c.name as category_name
-       FROM budgets b
-       LEFT JOIN categories c ON b.category_id = c.id
-       WHERE LOWER(b.name) = LOWER($1)
-       ORDER BY b.is_active DESC, b.name ASC, b.id ASC
-       LIMIT 2`,
+    const rows = query<BudgetRow>(
+      `${budgetSelect} WHERE LOWER(b.name) = LOWER($1) ORDER BY b.is_active DESC, b.name, b.id LIMIT 2`,
       [input.name]
     )
-    if (matches.length === 1) return { success: true, budget: matches[0], matchedBy: 'name' }
-    if (matches.length > 1) {
-      return {
-        success: false,
-        reason: 'budget_match_ambiguous',
-        message: `Budget name "${input.name}" matches multiple budgets. Use budgetId to update the intended one.`,
-      }
+    if (rows.length > 1) throw new Error('Multiple budgets match this name. Supply budgetId.')
+    return rows[0] ?? null
+  }
+  return null
+}
+function resolveCategory(input: BudgetInput) {
+  if (input.categoryId !== undefined) {
+    if (input.categoryId === null) return { id: null, name: null }
+    const row = query<{ id: string; name: string }>(
+      'SELECT id, name FROM categories WHERE id = $1',
+      [input.categoryId]
+    )[0]
+    if (!row) throw new Error(`Category ${input.categoryId} not found.`)
+    return row
+  }
+  if (!input.categoryName) return { id: null, name: null }
+  const result = resolveCategoryId(input.categoryName)
+  if (!result.success) throw new Error(result.message)
+  return { id: result.id, name: result.name }
+}
+function saveBudget(input: BudgetInput, mode: 'create' | 'upsert') {
+  if (
+    mode === 'upsert' &&
+    !input.budgetId &&
+    !input.name &&
+    !input.categoryId &&
+    !input.categoryName
+  ) {
+    return {
+      success: false,
+      reason: 'budget_stable_match_required',
+      message:
+        'Provide budgetId, name, categoryId, or categoryName so upsert-budget has a stable match key.',
     }
   }
-
-  return { success: true, budget: null, matchedBy: 'new' }
-}
-
-// ---------------------------------------------------------------------------
-// 17. create-budget
-// ---------------------------------------------------------------------------
-
-const createBudget: ToolDefinition = {
-  name: 'create-budget',
-  description:
-    'Create a budget for a spending category. Use this when the user wants to set a spending limit for a category.',
-  schema: z.object({
-    categoryId: z
-      .string()
-      .optional()
-      .describe('Category ID to budget. If not provided, use categoryName to find it.'),
-    categoryName: z
-      .string()
-      .optional()
-      .describe('Category name to match (e.g. "Food & Dining"). Used if categoryId not provided.'),
-    amount: z
-      .number()
-      .positive()
-      .describe('Budget amount in the main currency unit (e.g. 500 for $500)'),
-    period: z
-      .enum(['weekly', 'monthly', 'yearly'])
-      .optional()
-      .default('monthly')
-      .describe('Budget period (default: monthly)'),
-    name: z
-      .string()
-      .optional()
-      .describe('Budget name. Defaults to the category name if not provided.'),
-    dryRun: z
-      .boolean()
-      .optional()
-      .default(false)
-      .describe('Validate and preview the budget without writing it'),
-  }),
-  execute: async ({ categoryId, categoryName, amount, period, name, dryRun }) => {
-    let resolvedCategoryId = categoryId ?? null
-    let resolvedCategoryName: string | null = null
-    let resolvedName = name
-
-    if (!resolvedCategoryId && categoryName) {
-      const categories = await query<{ id: string; name: string }>(
-        'SELECT id, name FROM categories WHERE LOWER(name) LIKE LOWER($1) LIMIT 1',
-        [`%${categoryName}%`]
-      )
-      if (categories.length > 0) {
-        resolvedCategoryId = categories[0].id
-        resolvedCategoryName = categories[0].name
-        if (!resolvedName) resolvedName = categories[0].name + ' Budget'
-      }
-    }
-
-    if (!resolvedName) resolvedName = 'Budget'
-
-    const settings = getCurrencySettings()
-    if (!settings.configured) return mainCurrencySetupNeeded
-    const id = generateId()
-    const amountCentavos = toCentavos(amount)
-    const createdBudget: BudgetRow = {
-      id,
-      name: resolvedName,
-      amount: amountCentavos,
-      currency: settings.mainCurrency,
-      period,
-      category_id: resolvedCategoryId,
-      category_name: resolvedCategoryName,
-      is_active: 1,
-    }
-
-    if (dryRun) {
-      return {
-        success: true,
-        dryRun: true,
-        wouldCreate: {
-          id,
-          name: resolvedName,
-          categoryId: resolvedCategoryId,
-          amount,
-          amountCentavos,
-          currency: createdBudget.currency,
-          period,
-        },
-        message: `Dry run: ${period} budget "${resolvedName}" for ${createdBudget.currency} ${amount.toFixed(2)} would be created.`,
-      }
-    }
-
-    transaction(() => {
-      const current = getCurrencySettings()
-      if (!current.configured) throw new Error(mainCurrencySetupNeeded.message)
-      createdBudget.currency = current.mainCurrency
-      execute(
-        `INSERT INTO budgets (id, category_id, name, amount, period, is_active, currency)
-         VALUES ($1, $2, $3, $4, $5, 1, $6)`,
-        [id, resolvedCategoryId, resolvedName, amountCentavos, period, createdBudget.currency]
-      )
-      writeAuditLog({
-        entity: 'budget',
-        entityId: id,
-        action: 'create',
-        before: null,
-        after: { budget: budgetSnapshot(createdBudget) },
-      })
+  return transaction(() => {
+    const category = resolveCategory(input)
+    const existing =
+      input.budgetId && mode === 'create'
+        ? (query<BudgetRow>(`${budgetSelect} WHERE b.id = $1`, [input.budgetId])[0] ?? null)
+        : mode === 'upsert'
+          ? findBudget(input, category.id)
+          : null
+    const scopeDefinition = resolveBudgetScope({
+      ...(existing
+        ? { storedScope: JSON.parse(existing.scope_json), storedCategoryId: existing.category_id }
+        : {}),
+      ...(input.scope !== undefined ? { scope: input.scope } : {}),
+      ...(input.categoryId !== undefined || input.categoryName !== undefined
+        ? { categoryId: category.id }
+        : {}),
     })
-
-    return {
-      success: true,
-      budget: {
-        id,
-        name: resolvedName,
-        categoryId: resolvedCategoryId,
-        amount,
-        currency: createdBudget.currency,
-        period,
-      },
-      message: `Created ${period} budget "${resolvedName}" for ${createdBudget.currency} ${amount.toFixed(2)}.`,
-    }
-  },
-}
-
-const upsertBudget: ToolDefinition = {
-  name: 'upsert-budget',
-  description:
-    'Idempotently create or update a budget by budgetId, exact budget name, or category/period.',
-  schema: z.object({
-    budgetId: boundedText('Budget ID', 'Stable budget ID to update or create', 128).optional(),
-    categoryId: boundedText('Category ID', 'Category ID to budget', 128).optional(),
-    categoryName: boundedText(
-      'Category name',
-      'Category name to resolve for the budget (e.g. "Food & Dining")',
-      120
-    ).optional(),
-    amount: positiveMoneyAmount(
-      'Budget amount: configured main on creation; original budget currency on edits'
-    ).optional(),
-    period: z
-      .enum(['weekly', 'monthly', 'yearly'])
-      .optional()
-      .describe('Budget period. Defaults to monthly when creating.'),
-    name: boundedText('Budget name', 'Budget name to create or set', 120).optional(),
-    active: z.boolean().optional().describe('Whether the budget should be active'),
-    dryRun: z
-      .boolean()
-      .optional()
-      .default(false)
-      .describe('Validate and preview the budget upsert without writing it'),
-  }),
-  execute: async ({ budgetId, categoryId, categoryName, amount, period, name, active, dryRun }) => {
-    if (!budgetId && !categoryId && !categoryName && !name) {
+    const references = inspectReportScope(scopeDefinition.scope, {
+      accounts: query<{ id: string }>('SELECT id FROM accounts'),
+      categories: query<{ id: string }>('SELECT id FROM categories'),
+    })
+    if (references.issues.length)
+      throw new Error(references.issues.map((issue) => issue.message).join('; '))
+    const settings = getCurrencySettings()
+    if (!existing && !input.currency && !settings.configured) return mainCurrencySetupNeeded
+    if (!existing && input.amount === undefined)
+      return { success: false, message: 'amount is required when creating a budget.' }
+    if (
+      existing &&
+      input.currency &&
+      input.currency !== existing.currency &&
+      input.amount === undefined
+    ) {
       return {
         success: false,
-        reason: 'budget_stable_match_required',
+        reason: 'amount_required_for_currency_change',
         message:
-          'Provide budgetId, name, categoryId, or categoryName so upsert-budget has a stable match key.',
+          'Changing currency requires an explicit new amount; amounts are not converted automatically.',
       }
     }
-
-    const resolvedCategory = resolveBudgetCategory(categoryId, categoryName)
-    if (!resolvedCategory.success) return resolvedCategory
-
-    const match = findBudgetForUpsert({
-      budgetId,
-      name,
-      categoryId: resolvedCategory.id,
-      period,
-    })
-    if (!match.success) return match
-
-    if (!match.budget) {
-      if (amount === undefined) {
-        return { success: false, message: 'amount is required when creating a budget.' }
+    const after: BudgetRow = {
+      id: existing?.id ?? input.budgetId ?? generateId(),
+      name: input.name ?? existing?.name ?? (category.name ? `${category.name} Budget` : 'Budget'),
+      amount: input.amount === undefined ? existing!.amount : toCentavos(input.amount),
+      currency: input.currency ?? existing?.currency ?? settings.mainCurrency!,
+      period: input.period ?? existing?.period ?? 'monthly',
+      category_id: scopeDefinition.categoryId,
+      category_name:
+        scopeDefinition.categoryId === existing?.category_id
+          ? (existing?.category_name ?? null)
+          : category.name,
+      scope_json: JSON.stringify(scopeDefinition.scope),
+      basis: input.basis ?? existing?.basis ?? 'gross_cashflow',
+      is_active: input.active === undefined ? (existing?.is_active ?? 1) : input.active ? 1 : 0,
+    }
+    const equal =
+      existing !== null &&
+      existing !== undefined &&
+      ['name', 'amount', 'currency', 'period', 'category_id', 'basis', 'is_active'].every(
+        (key) => existing[key as keyof BudgetRow] === after[key as keyof BudgetRow]
+      ) &&
+      JSON.stringify(storedBudgetScope(existing)) === after.scope_json
+    if (mode === 'create' && existing && !equal)
+      return {
+        success: false,
+        reason: 'budget_id_conflict',
+        message: 'Budget ID exists with a different definition; use upsert-budget.',
       }
-
-      const settings = getCurrencySettings()
-      if (!settings.configured) return mainCurrencySetupNeeded
-      const id = budgetId ?? generateId()
-      const createdPeriod = period ?? 'monthly'
-      const resolvedName =
-        name ?? (resolvedCategory.name ? `${resolvedCategory.name} Budget` : 'Budget')
-      const amountCentavos = toCentavos(amount)
-      const createdBudget: BudgetRow = {
-        id,
-        name: resolvedName,
-        amount: amountCentavos,
-        currency: settings.mainCurrency,
-        period: createdPeriod,
-        category_id: resolvedCategory.id,
-        category_name: resolvedCategory.name,
-        is_active: active === false ? 0 : 1,
+    const changed = !equal
+    const action = existing ? 'updated' : 'created'
+    if (input.dryRun)
+      return {
+        success: true,
+        dryRun: true,
+        action,
+        changed,
+        wouldCreate: existing ? undefined : budgetSnapshot(after),
+        wouldUpdate: existing
+          ? {
+              budgetId: existing.id,
+              before: budgetSnapshot(existing),
+              after: budgetSnapshot(after),
+            }
+          : undefined,
+        message: `Dry run: budget "${after.name}" would be ${action}.`,
       }
-
-      if (dryRun) {
-        return {
-          success: true,
-          action: 'created' as const,
-          dryRun: true,
-          matchedBy: match.matchedBy,
-          wouldCreate: budgetSnapshot(createdBudget),
-          message: `Dry run: ${createdPeriod} budget "${resolvedName}" would be created.`,
-        }
-      }
-
-      transaction(() => {
-        const current = getCurrencySettings()
-        if (!current.configured) throw new Error(mainCurrencySetupNeeded.message)
-        createdBudget.currency = current.mainCurrency
+    if (changed) {
+      if (!existing)
         execute(
-          `INSERT INTO budgets (id, category_id, name, amount, period, is_active, currency)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          `INSERT INTO budgets (id, name, amount, currency, period, category_id, scope_json, basis, is_active)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
           [
-            id,
-            resolvedCategory.id,
-            resolvedName,
-            amountCentavos,
-            createdPeriod,
-            active === false ? 0 : 1,
-            createdBudget.currency,
+            after.id,
+            after.name,
+            after.amount,
+            after.currency,
+            after.period,
+            after.category_id,
+            after.scope_json,
+            after.basis,
+            after.is_active,
           ]
         )
-        writeAuditLog({
-          entity: 'budget',
-          entityId: id,
-          action: 'create',
-          before: null,
-          after: { budget: budgetSnapshot(createdBudget) },
-        })
-      })
-
-      return {
-        success: true,
-        action: 'created' as const,
-        matchedBy: match.matchedBy,
-        budget: budgetSnapshot(createdBudget),
-        message: `Created ${createdPeriod} budget "${resolvedName}".`,
-      }
-    }
-
-    const existing = match.budget
-    const updatedBudget: BudgetRow = {
-      ...existing,
-      name: name ?? existing.name,
-      amount: amount !== undefined ? toCentavos(amount) : existing.amount,
-      period: period ?? existing.period,
-      category_id:
-        categoryId !== undefined || categoryName !== undefined
-          ? resolvedCategory.id
-          : existing.category_id,
-      category_name:
-        categoryId !== undefined || categoryName !== undefined
-          ? resolvedCategory.name
-          : existing.category_name,
-      is_active: active !== undefined ? (active ? 1 : 0) : existing.is_active,
-    }
-
-    const setClauses: string[] = []
-    const params: unknown[] = []
-    let paramIdx = 1
-    const addSet = (column: string, value: unknown) => {
-      setClauses.push(`${column} = $${paramIdx++}`)
-      params.push(value)
-    }
-
-    if (name !== undefined && name !== existing.name) addSet('name', name)
-    if (amount !== undefined && toCentavos(amount) !== existing.amount) {
-      addSet('amount', toCentavos(amount))
-    }
-    if (period !== undefined && period !== existing.period) addSet('period', period)
-    if (
-      (categoryId !== undefined || categoryName !== undefined) &&
-      resolvedCategory.id !== existing.category_id
-    ) {
-      addSet('category_id', resolvedCategory.id)
-    }
-    const activeValue = active === undefined ? undefined : active ? 1 : 0
-    if (activeValue !== undefined && activeValue !== (existing.is_active ?? 1)) {
-      addSet('is_active', activeValue)
-    }
-
-    if (dryRun) {
-      return {
-        success: true,
-        action: 'updated' as const,
-        dryRun: true,
-        matchedBy: match.matchedBy,
-        changed: setClauses.length > 0,
-        wouldUpdate: {
-          budgetId: existing.id,
-          before: budgetSnapshot(existing),
-          after: budgetSnapshot(updatedBudget),
-        },
-        message: `Dry run: budget "${updatedBudget.name}" would be updated.`,
-      }
-    }
-
-    if (setClauses.length > 0) {
-      transaction(() => {
-        setClauses.push(`updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`)
-        params.push(existing.id)
-        const updateResult = execute(
-          `UPDATE budgets SET ${setClauses.join(', ')} WHERE id = $${paramIdx}`,
-          params
+      else
+        execute(
+          `UPDATE budgets SET name=$1, amount=$2, currency=$3, period=$4, category_id=$5, scope_json=$6, basis=$7, is_active=$8,
+        updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=$9`,
+          [
+            after.name,
+            after.amount,
+            after.currency,
+            after.period,
+            after.category_id,
+            after.scope_json,
+            after.basis,
+            after.is_active,
+            after.id,
+          ]
         )
-        assertSingleRowUpdated(updateResult, `Budget ${existing.id} could not be updated safely.`)
-        writeAuditLog({
-          entity: 'budget',
-          entityId: existing.id,
-          action: 'update',
-          before: { budget: budgetSnapshot(existing) },
-          after: { budget: budgetSnapshot(updatedBudget) },
-        })
+      writeAuditLog({
+        entity: 'budget',
+        entityId: after.id,
+        action: existing ? 'update' : 'create',
+        before: existing ? { budget: budgetSnapshot(existing) } : null,
+        after: { budget: budgetSnapshot(after) },
       })
     }
-
     return {
       success: true,
-      action: 'updated' as const,
-      matchedBy: match.matchedBy,
-      changed: setClauses.length > 0,
-      budget: budgetSnapshot(updatedBudget),
-      message: `Updated budget "${updatedBudget.name}".`,
+      action: equal && mode === 'create' ? 'noop' : action,
+      changed,
+      matchedBy: input.budgetId
+        ? 'budgetId'
+        : existing
+          ? category.id
+            ? 'category'
+            : 'name'
+          : 'new',
+      budget: budgetSnapshot(after),
+      message: changed ? `${action} budget "${after.name}".` : `Budget "${after.name}" unchanged.`,
     }
-  },
+  })
 }
-
-// ---------------------------------------------------------------------------
-// 18. get-budget-status
-// ---------------------------------------------------------------------------
-
+const createBudget: ToolDefinition = {
+  name: 'create-budget',
+  description: 'Create a scoped budget; optional budgetId makes identical replays a no-op.',
+  schema: z.object({
+    ...fields,
+    amount: positiveMoneyAmount('Amount in the plan currency'),
+    period: fields.period.default('monthly'),
+  }),
+  effects: { idempotent: false, writesTo: ['budgets', 'audit_log', 'app_data_state'] },
+  execute: async (input) => saveBudget(input, 'create'),
+}
+const upsertBudget: ToolDefinition = {
+  name: 'upsert-budget',
+  description: 'Idempotently create or update a scoped budget.',
+  schema: z.object(fields),
+  effects: { idempotent: true, writesTo: ['budgets', 'audit_log', 'app_data_state'] },
+  execute: async (input) => saveBudget(input, 'upsert'),
+}
 const getBudgetStatus: ToolDefinition = {
   name: 'get-budget-status',
-  description:
-    'Get budget status showing how much has been spent vs the budget amount for the current period.',
+  description: 'Inspect current-definition budget usage in inclusive resolved windows.',
   schema: z.object({
-    categoryId: z.string().optional().describe('Filter by category ID. Omit to see all budgets.'),
+    categoryId: z.string().optional(),
+    budgetId: z.string().optional(),
+    includeInactive: z.boolean().optional().default(false),
+    asOf: z.string().optional(),
+    start: z.string().optional(),
+    end: z.string().optional(),
+    through: z.enum(['as_of', 'period_end']).optional(),
+    weekStartsOn: z.number().int().min(0).max(6).optional(),
+    timeZone: z.string().optional(),
+    period: z.enum(['week', 'month', 'year', 'custom']).optional(),
   }),
-  execute: async ({ categoryId }) => {
-    let budgets: BudgetRow[]
-
-    if (categoryId) {
-      budgets = await query<BudgetRow>(
-        `SELECT b.id, b.name, b.amount, b.currency, b.period, b.category_id, c.name as category_name
-         FROM budgets b
-         LEFT JOIN categories c ON b.category_id = c.id
-         WHERE b.is_active = 1 AND b.category_id = $1`,
-        [categoryId]
+  effects: { readOnly: true, writesTo: [] },
+  execute: async (input) =>
+    transaction(() => {
+      const conditions = [
+        input.budgetId ? 'b.id = $1' : input.includeInactive ? '1=1' : 'b.is_active = 1',
+      ]
+      const params: unknown[] = input.budgetId ? [input.budgetId] : []
+      if (input.categoryId) {
+        params.push(input.categoryId)
+        conditions.push(`b.category_id = $${params.length}`)
+      }
+      const budgets = query<BudgetRow>(
+        `${budgetSelect} WHERE ${conditions.join(' AND ')} ORDER BY b.name,b.id`,
+        params
       )
-    } else {
-      budgets = await query<BudgetRow>(
-        `SELECT b.id, b.name, b.amount, b.currency, b.period, b.category_id, c.name as category_name
-         FROM budgets b
-         LEFT JOIN categories c ON b.category_id = c.id
-         WHERE b.is_active = 1
-         ORDER BY b.name`
-      )
-    }
-
-    if (budgets.length === 0) {
-      return { success: true, budgets: [], message: 'No active budgets found.' }
-    }
-
-    const today = dayjs()
-
-    const statuses = await Promise.all(
-      budgets.map(async (budget) => {
-        let periodStart: string
-        let periodEnd: string
-
-        if (budget.period === 'weekly') {
-          periodStart = today.startOf('week').format('YYYY-MM-DD')
-          periodEnd = today.endOf('week').format('YYYY-MM-DD')
-        } else if (budget.period === 'yearly') {
-          periodStart = today.startOf('year').format('YYYY-MM-DD')
-          periodEnd = today.endOf('year').format('YYYY-MM-DD')
-        } else {
-          periodStart = today.startOf('month').format('YYYY-MM-DD')
-          periodEnd = today.endOf('month').format('YYYY-MM-DD')
+      if (!budgets.length) return { success: true, budgets: [], message: 'No budgets found.' }
+      const dataset = loadScopedDataset()
+      const statuses = budgets.map((budget) => {
+        const period =
+          input.period ??
+          ({ weekly: 'week', monthly: 'month', yearly: 'year' } as const)[budget.period]
+        const window = {
+          period,
+          asOf: input.asOf,
+          start: input.start,
+          end: input.end,
+          through: input.through,
+          weekStartsOn: input.weekStartsOn,
+          timeZone: input.timeZone,
         }
-
-        const spending = readBudgetSpending(
-          budget.category_id,
-          periodStart,
-          periodEnd,
-          budget.currency
-        )
+        let scope: unknown
+        try {
+          scope = storedBudgetScope(budget)
+        } catch {
+          scope = budget.scope_json
+        }
+        const result = scopedActual({
+          dataset,
+          scope,
+          currency: budget.currency,
+          basis: budget.basis,
+          window,
+          groupBy: 'category',
+        })
+        const comparison = budgetWindowComparability(result.window, budget.period)
+        const spent = result.budgetUsage.amountCentavos
+        const remaining =
+          comparison.limitComparable && spent !== null ? budget.amount - spent : null
+        const descriptor = {
+          budgetId: budget.id,
+          asOf: result.window.asOf,
+          start: result.window.requested.start ?? result.window.periodStart,
+          end: result.window.requested.end ?? result.window.periodEnd,
+          through: result.window.through,
+          weekStartsOn: result.window.weekStartsOn,
+          timeZone: result.window.timeZone,
+          period: result.window.period,
+        }
+        const mainCurrency = getCurrencySettings().mainCurrency
+        const simpleScope =
+          result.scope &&
+          !result.scope.accountIds.length &&
+          !result.scope.excludeAccountIds.length &&
+          !result.scope.excludeCategoryIds.length &&
+          !result.scope.tags.length &&
+          !result.scope.excludeTags.length &&
+          result.scope.categoryIds.length === (budget.category_id ? 1 : 0) &&
+          (!budget.category_id || result.scope.categoryIds[0] === budget.category_id)
         const plan = readCurrentAmounts([
           { id: budget.id, amountCentavos: budget.amount, currency: budget.currency },
         ])
-        const realized = readConvertedCashFlow(periodStart, periodEnd, undefined, {
-          categoryId: budget.category_id,
-          expensesOnly: true,
-        })
-        const mainComplete = plan.complete && realized.success && realized.complete
-        const budgetAmount = fromCentavos(budget.amount)
-        const spentAmount = spending.success ? fromCentavos(spending.total) : null
-        const remaining = spentAmount === null ? null : budgetAmount - spentAmount
+        const mainSpending =
+          mainCurrency && simpleScope && budget.basis === 'gross_cashflow'
+            ? scopedActual({
+                dataset,
+                scope: result.scope,
+                currency: mainCurrency,
+                basis: 'gross_cashflow',
+                window,
+                groupBy: 'none',
+              })
+            : null
+        const mainComplete = Boolean(
+          comparison.limitComparable && plan.complete && mainSpending?.budgetUsage.complete
+        )
         return {
-          id: budget.id,
-          name: budget.name,
-          currency: budget.currency,
-          categoryName: budget.category_name ?? 'All categories',
-          complete: spending.success,
-          budgetAmount,
-          spentAmount,
-          remaining,
-          percentUsed:
-            spentAmount === null
-              ? null
-              : budgetAmount > 0
-                ? Math.round((spentAmount / budgetAmount) * 100)
-                : 0,
-          period: budget.period,
-          periodStart,
-          periodEnd,
+          ...budgetSnapshot({ ...budget, scope_json: JSON.stringify(result.scope ?? {}) }),
+          categoryName:
+            budget.category_name ??
+            (result.scope?.categoryIds.length === 1 && result.scope.categoryIds[0] === null
+              ? 'Uncategorized'
+              : result.scope?.categoryIds.length
+                ? null
+                : 'All categories'),
+          complete: result.budgetUsage.complete,
+          budgetAmount: comparison.limitComparable ? fromCentavos(budget.amount) : null,
+          spentAmount: spent === null ? null : fromCentavos(spent),
+          knownSpentAmount: fromCentavos(result.budgetUsage.knownAmountCentavos ?? 0),
+          remaining: remaining === null ? null : fromCentavos(remaining),
+          percentUsed: remaining === null ? null : Math.round((spent! / budget.amount) * 100),
           isOverBudget: remaining === null ? null : remaining < 0,
-          spending,
+          periodStart: result.window.start,
+          periodEnd: result.window.end,
+          window: result.window,
+          comparison,
+          definitionPolicy: result.definitionPolicy,
           mainComparison: {
             complete: mainComplete,
             policy: 'current_plan_today_vs_transaction_date_spending',
             toCurrency: plan.toCurrency,
             plan,
-            spending: realized,
-            remainingCentavos:
-              mainComplete && realized.success
-                ? sumCentavos([plan.totalCentavos!, -realized.expenseCentavos!])
-                : null,
+            spending: mainSpending
+              ? { ...mainSpending, expenseCentavos: mainSpending.budgetUsage.amountCentavos }
+              : null,
+            remainingCentavos: mainComplete
+              ? plan.totalCentavos! - mainSpending!.budgetUsage.amountCentavos!
+              : null,
           },
+          spending: result,
+          scope: result.scope,
+          basis: budget.basis,
+          ...contributorInspection(result, descriptor),
         }
       })
-    )
-
-    const totalsByCurrency = [...new Set(statuses.map((row) => row.currency))]
-      .sort()
-      .map((currency) => {
-        const rows = statuses.filter((row) => row.currency === currency)
-        const complete = rows.every((row) => row.complete)
-        const totalBudget = fromCentavos(
-          sumCentavos(budgets.filter((row) => row.currency === currency).map((row) => row.amount))
-        )
-        const totalSpent = complete
-          ? fromCentavos(
-              sumCentavos(rows.map((row) => (row.spending.success ? row.spending.total : 0)))
-            )
-          : null
-        return {
+      const single = statuses.length === 1 ? statuses[0] : null
+      const additive = single && single.comparison.limitComparable
+      const totalsByCurrency = [...new Set(statuses.map((row) => row.currency))]
+        .sort()
+        .map((currency) => ({
           currency,
-          complete,
-          totalBudget,
-          totalSpent,
-          totalRemaining: totalSpent === null ? null : totalBudget - totalSpent,
-          overallPercentUsed:
-            totalSpent === null
-              ? null
-              : totalBudget > 0
-                ? Math.round((totalSpent / totalBudget) * 100)
-                : 0,
-        }
-      })
-    const single = totalsByCurrency.length === 1 ? totalsByCurrency[0] : null
-    const failure = statuses.find((row) => !row.spending.success)?.spending
-    return {
-      success: statuses.every((row) => row.complete),
-      reason: failure && !failure.success ? failure.reason : null,
-      basis: 'gross_cashflow',
-      complete: statuses.every((row) => row.complete),
-      currency: single?.currency ?? null,
-      budgets: statuses,
-      totalsByCurrency,
-      summary: {
-        totalBudget: single?.totalBudget ?? null,
-        totalSpent: single?.totalSpent ?? null,
-        totalRemaining: single?.totalRemaining ?? null,
-        overallPercentUsed: single?.overallPercentUsed ?? null,
-      },
-      message: `${statuses.length} active budget(s). Native plan comparisons are grouped by denomination; main comparisons use today's plan rates and dated realized spending.`,
-    }
-  },
+          complete: Boolean(additive && single?.currency === currency && single.complete),
+          totalBudget: additive && single?.currency === currency ? single.budgetAmount : null,
+          totalSpent: additive && single?.currency === currency ? single.spentAmount : null,
+          totalRemaining: additive && single?.currency === currency ? single.remaining : null,
+          overallPercentUsed: additive && single?.currency === currency ? single.percentUsed : null,
+          reason:
+            statuses.length > 1
+              ? 'independent_budgets_nonadditive'
+              : (single?.comparison.reason ?? (single?.complete ? null : 'incomplete_usage')),
+        }))
+      return {
+        success: statuses.every((row) => row.complete),
+        complete: statuses.every((row) => row.complete),
+        basis: single?.basis ?? null,
+        currency: statuses.length === 1 ? (single?.currency ?? null) : null,
+        budgets: statuses,
+        totalsByCurrency,
+        summary: {
+          totalBudget: additive ? single.budgetAmount : null,
+          totalSpent: additive ? single.spentAmount : null,
+          totalRemaining: additive ? single.remaining : null,
+          overallPercentUsed: additive ? single.percentUsed : null,
+          reason:
+            statuses.length > 1
+              ? 'independent_budgets_nonadditive'
+              : (single?.comparison.reason ?? null),
+        },
+        message: `${statuses.length} budget(s); independent limits are not additive.`,
+      }
+    }),
 }
-
 // ---------------------------------------------------------------------------
 // 19. delete-budget
 // ---------------------------------------------------------------------------
 
 const deleteBudget: ToolDefinition = {
   name: 'delete-budget',
+  effects: { writesTo: ['budgets', 'audit_log', 'budget_periods', 'app_data_state'] },
   description:
     'Delete a budget. Use this when the user wants to remove a budget they no longer need.',
   schema: z.object({
@@ -679,6 +537,7 @@ const deleteBudget: ToolDefinition = {
 
 const getNetWorth: ToolDefinition = {
   name: 'get-net-worth',
+  effects: { readOnly: true, writesTo: [] },
   description:
     'Calculate ownership-aware net worth. Returns native-currency components and only returns a converted total when ownership, verified prices, and FX are complete.',
   schema: z.object({}),

@@ -18,9 +18,10 @@ import { readMainOwnershipValuation, readValuationRates } from './valuation-read
 import { setMainCurrency, setExchangeRate } from './fx-service.js'
 import { analyticsTools } from './tools/analytics.js'
 import { budgetsandnetworthTools } from './tools/budgets-and-net-worth.js'
+import { transactionsTools } from './tools/transactions.js'
 import { goalsTools } from './tools/goals.js'
 
-const tools = [...analyticsTools, ...budgetsandnetworthTools, ...goalsTools]
+const tools = [...analyticsTools, ...budgetsandnetworthTools, ...goalsTools, ...transactionsTools]
 const run = (name: string, input: Record<string, unknown> = {}) => {
   const tool = tools.find((item) => item.name === name)!
   return tool.execute(tool.schema.parse(input))
@@ -407,5 +408,215 @@ describe('dated CLI readers on schema 22 SQLite', () => {
       audit: rows('audit_log'),
       revision: rows('app_data_state'),
     }).toEqual(before)
+  })
+})
+
+describe('scoped budget adapter on disposable SQLite', () => {
+  it('replays an explicit native budget ID without writes and retains dangling category scope', async () => {
+    setMainCurrency('MXN')
+    state.db.exec("UPDATE accounts SET currency='MXN' WHERE id='cash'")
+    tx('food-expense', 25000, '2026-09-14', 'MXN')
+    const input = {
+      budgetId: 'stable-food',
+      name: 'Food',
+      categoryId: 'food',
+      amount: 1000,
+      currency: 'MXN',
+      scope: { categoryIds: ['food'], accountIds: ['cash'] },
+      basis: 'gross_cashflow',
+    }
+    const first = await run('create-budget', input)
+    expect(first).toMatchObject({
+      success: true,
+      budget: { id: 'stable-food', currency: 'MXN', scope: { accountIds: ['cash'] } },
+    })
+    expect(
+      await run('get-budget-status', { budgetId: 'stable-food', asOf: '2026-09-20' })
+    ).toMatchObject({
+      budgets: [{ spentAmount: 250, remaining: 750, complete: true, contributorCount: 1 }],
+    })
+    const before = rows('audit_log')
+    expect(await run('create-budget', input)).toMatchObject({
+      success: true,
+      action: 'noop',
+      changed: false,
+    })
+    expect(rows('audit_log')).toEqual(before)
+    expect(await run('upsert-budget', { budgetId: 'stable-food', currency: 'USD' })).toMatchObject({
+      success: false,
+      reason: 'amount_required_for_currency_change',
+    })
+    state.db.exec("DELETE FROM categories WHERE id='food'")
+    expect(await run('get-budget-status', { budgetId: 'stable-food' })).toMatchObject({
+      budgets: [{ complete: false, spentAmount: null, scope: { categoryIds: ['food'] } }],
+    })
+  })
+
+  it('does not add overlapping budget totals or include future rows by default', async () => {
+    setMainCurrency('MXN')
+    state.db.exec("UPDATE accounts SET currency='MXN' WHERE id='cash'")
+    tx('now', 5000, '2026-09-14', 'MXN')
+    tx('future', 2000, '2026-09-27', 'MXN')
+    await run('create-budget', { budgetId: 'a', amount: 100, scope: { categoryIds: ['food'] } })
+    expect(await run('get-budget-status', { budgetId: 'a', asOf: '2026-09-20' })).toMatchObject({
+      budgets: [{ spentAmount: 50 }],
+    })
+    expect(
+      await run('get-budget-status', { budgetId: 'a', asOf: '2026-09-20', through: 'period_end' })
+    ).toMatchObject({ budgets: [{ spentAmount: 70 }] })
+    await run('create-budget', { budgetId: 'b', amount: 100, scope: { categoryIds: ['food'] } })
+    expect(await run('get-budget-status', { asOf: '2026-09-20' })).toMatchObject({
+      summary: { totalSpent: null, reason: 'independent_budgets_nonadditive' },
+    })
+  })
+})
+
+describe('scoped report and contributor traversal', () => {
+  it('selects source-account/category allocations, paginates parents, rejects stale or altered cursors', async () => {
+    setMainCurrency('MXN')
+    state.db.exec("UPDATE accounts SET currency='MXN' WHERE id='cash'")
+    tx('one', 1000, '2026-09-14', 'MXN')
+    tx('two', 2000, '2026-09-15', 'MXN')
+    const scope = { categoryIds: ['food'], accountIds: ['cash'] }
+    const summary = await run('get-spending-summary', {
+      currency: 'MXN',
+      scope,
+      asOf: '2026-09-20',
+    })
+    expect(summary).toMatchObject({
+      complete: true,
+      totalExpenses: 30,
+      contributorCount: 2,
+      contributorQuery: { scope: { categoryIds: ['food'], accountIds: ['cash'] } },
+    })
+    const params = { ...summary.contributorQuery, limit: 1 }
+    const first = await run('query-transactions', params)
+    expect(first).toMatchObject({
+      success: true,
+      totalMatched: 2,
+      hasMore: true,
+      transactions: [{ id: 'two' }],
+    })
+    const second = await run('query-transactions', { ...params, cursor: first.nextCursor })
+    expect(second).toMatchObject({ success: true, hasMore: false, transactions: [{ id: 'one' }] })
+    expect(
+      await run('query-transactions', {
+        ...params,
+        scope: { categoryIds: ['other'] },
+        cursor: first.nextCursor,
+      })
+    ).toMatchObject({ success: false, reason: 'cursor_filter_mismatch' })
+    expect(
+      await run('query-transactions', { ...params, cursor: first.nextCursor + 'x' })
+    ).toMatchObject({ success: false, reason: 'invalid_cursor' })
+    state.db.exec("UPDATE transactions SET amount=3000 WHERE id='one'")
+    expect(await run('query-transactions', { ...params, cursor: first.nextCursor })).toMatchObject({
+      success: false,
+      reason: 'cursor_stale',
+    })
+  })
+})
+
+describe('net evidence and planning sources on SQLite', () => {
+  it('keeps referenced purchases outside the window, recognizes refunds by refund tags and category', async () => {
+    setMainCurrency('MXN')
+    state.db.exec("UPDATE accounts SET currency='MXN' WHERE id='cash'")
+    tx('purchase', 10000, '2026-08-14', 'MXN')
+    tx('refund', 2500, '2026-09-14', 'MXN', 'income')
+    state.db
+      .exec(`UPDATE transactions SET category_id='other', tags='["business"]' WHERE id='refund';
+      INSERT INTO transaction_consumption_classifications (id,transaction_id,role) VALUES ('cp','purchase','purchase');
+      INSERT INTO transaction_consumption_classifications (id,transaction_id,role,referenced_purchase_id) VALUES ('cr','refund','refund','cp');
+      INSERT INTO source_coverage (id,account_id,source_namespace,period_start,period_end,status)
+        VALUES ('coverage','cash','statement','2026-09-01','2026-09-30','verified');`)
+    const options = {
+      basis: 'net_consumption',
+      currency: 'MXN',
+      scope: { categoryIds: ['food'], tags: ['business'] },
+      asOf: '2026-09-20',
+    }
+    const before = rows('transactions')
+    const report = await run('get-spending-summary', options)
+    expect(report).toMatchObject({
+      complete: true,
+      totals: { consumptionCentavos: -2500, earnedIncomeCentavos: 0 },
+      allocations: [{ transactionId: 'refund', categoryId: 'food', referencedPurchaseId: 'cp' }],
+    })
+    expect(rows('transactions')).toEqual(before)
+    state.db.exec('DELETE FROM source_coverage')
+    expect(await run('get-spending-summary', options)).toMatchObject({
+      complete: false,
+      totals: { consumptionCentavos: null },
+      known: { consumptionCentavos: -2500 },
+    })
+  })
+
+  it('keeps recurring rules and subscriptions separate, never materializes transactions', async () => {
+    setMainCurrency('MXN')
+    state.db.exec("UPDATE accounts SET currency='MXN' WHERE id='cash'")
+    state.db
+      .prepare(
+        `INSERT INTO subscriptions (id,name,amount,currency,billing_cycle,next_billing_date,account_id,category_id)
+      VALUES ('sub','Plan',12000,'MXN','monthly','2026-09-22','cash','food')`
+      )
+      .run()
+    const before = rows('transactions')
+    const estimate = await run('get-spending-summary', {
+      basis: 'recurring_estimate',
+      currency: 'MXN',
+      asOf: '2026-09-20',
+    })
+    expect(estimate).toMatchObject({
+      subscriptions: { monthlyCentavos: 12000 },
+      combinedMonthlyCentavos: null,
+      totalExpenses: null,
+    })
+    const tagged = await run('get-spending-summary', {
+      basis: 'recurring_estimate',
+      currency: 'MXN',
+      scope: { tags: ['business'] },
+      asOf: '2026-09-20',
+    })
+    expect(tagged).toMatchObject({ subscriptions: { complete: false, monthlyCentavos: null } })
+    expect(rows('transactions')).toEqual(before)
+  })
+})
+
+describe('budget mutation preservation', () => {
+  it('preserves omitted fields, explicitly clears scope, and inspects inactive plans by ID', async () => {
+    setMainCurrency('MXN')
+    const created = await run('upsert-budget', {
+      budgetId: 'future',
+      amount: 100,
+      currency: 'MXN',
+      scope: { tags: ['business'], categoryIds: ['food'] },
+      active: false,
+    })
+    expect(created).toMatchObject({ success: true, budget: { id: 'future', isActive: false } })
+    expect(await run('get-budget-status')).toMatchObject({ budgets: [] })
+    expect(await run('get-budget-status', { budgetId: 'future' })).toMatchObject({
+      budgets: [{ id: 'future', isActive: false }],
+    })
+    const before = {
+      budget: rows('budgets'),
+      audit: rows('audit_log'),
+      revision: rows('app_data_state'),
+    }
+    expect(
+      await run('upsert-budget', { budgetId: 'future', dryRun: true, scope: {} })
+    ).toMatchObject({ success: true, dryRun: true, changed: true })
+    expect({
+      budget: rows('budgets'),
+      audit: rows('audit_log'),
+      revision: rows('app_data_state'),
+    }).toEqual(before)
+    expect(await run('upsert-budget', { budgetId: 'future', amount: 100 })).toMatchObject({
+      success: true,
+      changed: false,
+      budget: { currency: 'MXN', scope: { tags: ['business'], categoryIds: ['food'] } },
+    })
+    expect(rows('app_data_state')).toEqual(before.revision)
+    await run('upsert-budget', { budgetId: 'future', scope: {} })
+    expect(rows('budgets')[0]).toMatchObject({ category_id: null, currency: 'MXN', amount: 10000 })
   })
 })

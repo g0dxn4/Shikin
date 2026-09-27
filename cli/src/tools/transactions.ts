@@ -17,8 +17,15 @@ import {
   clearTransactionConsumption,
   guardTransactionEvidence,
 } from '../transaction-corrections.js'
-import { readNetConsumption } from '../consumption-read.js'
-import { REPORTING_CTE, reportingReadFailure } from '../reporting-read.js'
+import {
+  loadScopedDataset,
+  scopedActual,
+  scopedEstimate,
+  storedBudgetScope,
+  contributorInspection,
+} from '../scoped-report-read.js'
+import { getCurrencySettings } from '../fx-service.js'
+import { normalizeReportScope, resolveReportWindow } from '@shikin/finance-core'
 import {
   z,
   query,
@@ -35,10 +42,6 @@ import {
   resolveAccountId,
   crossCurrencyMoveMessage,
   unknownTransactionCurrencyFailure,
-  getDistinctCurrencies,
-  getCategoryIdentity,
-  missingCurrencyRepairFailure,
-  hasMissingCurrency,
   normalizeCurrencyCode,
   resolveCategoryId,
   writeAuditLog,
@@ -2462,7 +2465,10 @@ function encodeTransactionCursor(payload: TransactionCursorPayload): string {
 
 function decodeTransactionCursor(value: string): TransactionCursorPayload {
   try {
-    const wrapper = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as {
+    const decodedBody = Buffer.from(value, 'base64url').toString('utf8')
+    if (Buffer.from(decodedBody, 'utf8').toString('base64url') !== value)
+      throw new Error('noncanonical cursor')
+    const wrapper = JSON.parse(decodedBody) as {
       body?: unknown
       checksum?: unknown
     }
@@ -2510,6 +2516,30 @@ const queryTransactions: ToolDefinition = {
       4096
     ).optional(),
     limit: z.number().int().min(1).max(100).optional().default(20),
+    budgetId: boundedText('Budget ID', 'Select contributors to this stored budget', 128).optional(),
+    scope: z
+      .object({
+        accountIds: z.array(z.string()).optional(),
+        excludeAccountIds: z.array(z.string()).optional(),
+        categoryIds: z.array(z.string().nullable()).optional(),
+        excludeCategoryIds: z.array(z.string().nullable()).optional(),
+        tags: z.array(z.string()).optional(),
+        excludeTags: z.array(z.string()).optional(),
+      })
+      .strict()
+      .optional(),
+    basis: z.enum(['gross_cashflow', 'net_consumption']).optional(),
+    currency: z
+      .string()
+      .regex(/^[A-Z]{3}$/)
+      .optional(),
+    asOf: isoDate('Reference date').optional(),
+    start: isoDate('Window start').optional(),
+    end: isoDate('Window end').optional(),
+    through: z.enum(['as_of', 'period_end']).optional(),
+    weekStartsOn: z.number().int().min(0).max(6).optional(),
+    timeZone: z.string().optional(),
+    period: z.enum(['week', 'month', 'year', 'custom']).optional(),
   }),
   effects: { readOnly: true, writesTo: [] },
   execute: async (input) => {
@@ -2531,6 +2561,18 @@ const queryTransactions: ToolDefinition = {
           cursor,
           limit,
         } = input
+        const scoped =
+          input.budgetId !== undefined ||
+          input.scope !== undefined ||
+          input.basis !== undefined ||
+          input.currency !== undefined ||
+          input.asOf !== undefined ||
+          input.start !== undefined ||
+          input.end !== undefined ||
+          input.through !== undefined ||
+          input.weekStartsOn !== undefined ||
+          input.timeZone !== undefined ||
+          input.period !== undefined
         const tagKey = tag ? normalizeTransactionTagKey(tag) : null
         if (tag && !tagKey) return { success: false, message: 'Tag filter must not be empty.' }
         const canonicalFilters = {
@@ -2548,7 +2590,117 @@ const queryTransactions: ToolDefinition = {
           tagKey,
           order: ['date:desc', 'created_at:desc', 'id:desc'],
         }
-        const filtersFingerprint = sha256Fingerprint(JSON.stringify(canonicalFilters))
+        let selection: ReturnType<typeof scopedActual> | null = null
+        let scopedDefinition: unknown = null
+        if (scoped) {
+          if (
+            [
+              accountId,
+              categoryId,
+              type,
+              status,
+              ledgerTreatment,
+              reportingTreatment,
+              stagingBatchId,
+              includeArchived,
+              startDate,
+              endDate,
+              search,
+              tag,
+            ].some((value) => value !== undefined && value !== false)
+          )
+            return {
+              success: false,
+              reason: 'conflicting_filters',
+              message: 'Scoped contributor queries cannot combine legacy transaction filters.',
+            }
+          const budget = input.budgetId
+            ? query<{
+                id: string
+                currency: string
+                basis: 'gross_cashflow' | 'net_consumption'
+                period: 'weekly' | 'monthly' | 'yearly'
+                scope_json: string
+                category_id: string | null
+                amount: number
+                is_active: number
+              }>(
+                'SELECT id,currency,basis,period,scope_json,category_id,amount,is_active FROM budgets WHERE id=$1',
+                [input.budgetId]
+              )[0]
+            : null
+          if (input.budgetId && !budget)
+            return { success: false, reason: 'budget_not_found', message: 'Budget not found.' }
+          if (
+            budget &&
+            (input.scope !== undefined || input.basis !== undefined || input.currency !== undefined)
+          )
+            return {
+              success: false,
+              reason: 'conflicting_definition',
+              message: 'Budget contributor definition cannot be overridden.',
+            }
+          const currency = budget?.currency ?? input.currency ?? getCurrencySettings().mainCurrency
+          if (!currency)
+            return {
+              success: false,
+              reason: 'main_currency_unconfigured',
+              message: 'Supply currency or configure main currency.',
+            }
+          let scope: unknown = normalizeReportScope(input.scope)
+          if (budget) {
+            try {
+              scope = storedBudgetScope(budget)
+            } catch {
+              scope = budget.scope_json
+            }
+          }
+          const period =
+            input.period ??
+            (budget
+              ? ({ weekly: 'week', monthly: 'month', yearly: 'year' } as const)[budget.period]
+              : undefined)
+          selection = scopedActual({
+            dataset: loadScopedDataset(),
+            scope,
+            currency,
+            basis: budget?.basis ?? input.basis ?? 'gross_cashflow',
+            window: {
+              period,
+              asOf: input.asOf,
+              start: input.start,
+              end: input.end,
+              through: input.through,
+              weekStartsOn: input.weekStartsOn,
+              timeZone: input.timeZone,
+            },
+          })
+          scopedDefinition = {
+            budget: budget
+              ? {
+                  id: budget.id,
+                  scope: budget.scope_json,
+                  categoryId: budget.category_id,
+                  currency: budget.currency,
+                  basis: budget.basis,
+                  period: budget.period,
+                  amount: budget.amount,
+                  isActive: budget.is_active,
+                }
+              : null,
+            scope: selection.scope,
+            currency: selection.currency,
+            basis: selection.basis,
+            window: selection.window,
+          }
+        }
+        const filtersFingerprint = sha256Fingerprint(
+          JSON.stringify(
+            scoped
+              ? { definition: scopedDefinition, order: canonicalFilters.order }
+              : canonicalFilters
+          )
+        )
         const state = query<{ database_id: string; data_revision: number }>(
           'SELECT database_id, data_revision FROM app_data_state WHERE id = 1'
         )[0]
@@ -2621,6 +2773,12 @@ const queryTransactions: ToolDefinition = {
                  OR lower(trim(COALESCE(json_extract(tag_value.value, '$.name'), ''))) = $${first + 3}
                  OR lower(trim(COALESCE(json_extract(tag_value.value, '$.value'), ''))) = $${first + 4}
                )))`)
+        }
+        if (selection) {
+          if (selection.transactionIds.length) {
+            params.push(JSON.stringify(selection.transactionIds))
+            conditions.push(`t.id IN (SELECT value FROM json_each($${params.length}))`)
+          } else conditions.push('0=1')
         }
         const baseWhere = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
         const countParams = [...params]
@@ -2777,6 +2935,26 @@ const queryTransactions: ToolDefinition = {
         }))
         return {
           success: true,
+          ...(selection
+            ? {
+                selection: {
+                  basis: selection.basis,
+                  currency: selection.currency,
+                  scope: selection.scope,
+                  window: selection.window,
+                  complete: selection.complete,
+                  issues: selection.issues,
+                  budgetUsage: selection.budgetUsage,
+                  definitionPolicy: selection.definitionPolicy,
+                },
+                contributors: pageRows.map(
+                  (row) => selection!.contributors.find((c) => c.transactionId === row.id) ?? null
+                ),
+                allocations: selection.allocations.filter((a) =>
+                  pageRows.some((row) => row.id === a.transactionId)
+                ),
+              }
+            : {}),
           transactions,
           count: transactions.length,
           totalMatched,
@@ -4106,145 +4284,150 @@ const splitPlaceholderTransaction: ToolDefinition = {
 
 const getSpendingSummary: ToolDefinition = {
   name: 'get-spending-summary',
-  description:
-    'Get a summary of spending by category for a given time period. Use this when the user asks about their spending, expenses, or budget status.',
+  description: 'Scoped gross, net consumption, or separate recurring planning equivalents.',
   schema: z.object({
-    basis: z.enum(['gross_cashflow', 'net_consumption']).optional().default('gross_cashflow'),
-    period: z
-      .enum(['week', 'month', 'year', 'custom'])
+    basis: z
+      .enum(['gross_cashflow', 'net_consumption', 'recurring_estimate'])
       .optional()
-      .default('month')
-      .describe('The time period to summarize'),
-    startDate: isoDate('Start date (YYYY-MM-DD) for custom period').optional(),
-    endDate: isoDate('End date (YYYY-MM-DD) for custom period').optional(),
+      .default('gross_cashflow'),
+    period: z.enum(['week', 'month', 'year', 'custom']).optional(),
+    startDate: isoDate('Inclusive start date').optional(),
+    endDate: isoDate('Inclusive end date').optional(),
+    start: isoDate('Inclusive start date').optional(),
+    end: isoDate('Inclusive end date').optional(),
+    asOf: isoDate('Reference date').optional(),
+    through: z.enum(['as_of', 'period_end']).optional(),
+    weekStartsOn: z.number().int().min(0).max(6).optional(),
+    timeZone: z.string().optional(),
+    currency: z
+      .string()
+      .regex(/^[A-Z]{3}$/)
+      .optional(),
+    scope: z
+      .object({
+        accountIds: z.array(z.string()).optional(),
+        excludeAccountIds: z.array(z.string()).optional(),
+        categoryIds: z.array(z.string().nullable()).optional(),
+        excludeCategoryIds: z.array(z.string().nullable()).optional(),
+        tags: z.array(z.string()).optional(),
+        excludeTags: z.array(z.string()).optional(),
+      })
+      .strict()
+      .optional(),
+    groupBy: z.enum(['category', 'account', 'month', 'none']).optional().default('category'),
   }),
-  execute: async ({ period, startDate, endDate, basis }) => {
-    let start: string
-    let end: string
-
-    if (period === 'custom' && (!startDate || !endDate)) {
-      return {
-        success: false,
-        message: 'Custom spending summaries require both startDate and endDate.',
-      }
-    }
-
-    if (period === 'custom' && startDate && endDate) {
-      start = startDate
-      end = endDate
-      if (dayjs(start).isAfter(dayjs(end), 'day')) {
+  effects: { readOnly: true, writesTo: [] },
+  execute: async (input) =>
+    transaction(() => {
+      if (
+        (input.start && input.startDate && input.start !== input.startDate) ||
+        (input.end && input.endDate && input.end !== input.endDate)
+      )
+        return { success: false, message: 'Conflicting start/end aliases.' }
+      const window = resolveReportWindow({
+        period: input.period,
+        start: input.start ?? input.startDate,
+        end: input.end ?? input.endDate,
+        asOf: input.asOf,
+        through: input.through,
+        weekStartsOn: input.weekStartsOn,
+        timeZone: input.timeZone,
+      })
+      const currency = input.currency ?? getCurrencySettings().mainCurrency
+      if (!currency)
         return {
           success: false,
-          message: 'Custom spending summaries require startDate to be on or before endDate.',
+          reason: 'main_currency_unconfigured',
+          message: 'Supply currency or configure main currency.',
+        }
+      const dataset = loadScopedDataset()
+      const scope = normalizeReportScope(input.scope)
+      if (input.basis === 'recurring_estimate') {
+        const estimate = scopedEstimate({
+          dataset,
+          scope,
+          currency,
+          groupBy: input.groupBy,
+          asOf: window.asOf,
+        })
+        return {
+          success: true,
+          ...estimate,
+          window,
+          period: { start: window.start, end: window.end },
+          totalExpenses: null,
+          totalIncome: null,
+          netSavings: null,
+          combinedEstimate: null,
+          message:
+            'Separate current-definition recurring equivalents; sources may overlap and are not actual spending.',
         }
       }
-    } else {
-      const now = dayjs()
-      end = now.format('YYYY-MM-DD')
-      switch (period) {
-        case 'week':
-          start = now.subtract(6, 'day').format('YYYY-MM-DD')
-          break
-        case 'year':
-          start = now.startOf('year').format('YYYY-MM-DD')
-          break
-        default:
-          start = now.startOf('month').format('YYYY-MM-DD')
-      }
-    }
-
-    if (basis === 'net_consumption') return readNetConsumption(start, end)
-
-    const failure = reportingReadFailure(start, end)
-    if (failure) return failure
-
-    const spending = await query<{
-      currency: string
-      category_id: string | null
-      category_name: string
-      total: number
-      count: number
-    }>(
-      `${REPORTING_CTE}
-       SELECT
-         t.currency as currency,
-         t.category_id as category_id,
-         COALESCE(c.name, 'Uncategorized') as category_name,
-         SUM(t.amount) as total,
-         COUNT(DISTINCT t.id) as count
-       FROM category_allocations t
-       LEFT JOIN categories c ON t.category_id = c.id
-        WHERE t.type = 'expense'
-          AND t.date >= $1
-          AND t.date <= $2
-        GROUP BY t.currency, t.category_id, c.name
-        ORDER BY t.currency ASC, total DESC`,
-      [start, end]
-    )
-
-    const totals = await query<{ currency: string; type: string; total: number }>(
-      `${REPORTING_CTE} SELECT currency, type, COALESCE(SUM(amount), 0) as total
-       FROM cash_flow
-       WHERE type IN ('income', 'expense')
-         AND date >= $1 AND date <= $2
-       GROUP BY currency, type`,
-      [start, end]
-    )
-
-    if (hasMissingCurrency([...spending, ...totals])) {
-      return missingCurrencyRepairFailure('Spending summary')
-    }
-
-    const currencies = getDistinctCurrencies([...spending, ...totals])
-    const totalsByCurrency = currencies.map((currency) => {
-      const expenses =
-        totals.find((row) => row.currency === currency && row.type === 'expense')?.total || 0
-      const income =
-        totals.find((row) => row.currency === currency && row.type === 'income')?.total || 0
-      return {
+      const result = scopedActual({
+        dataset,
+        scope,
         currency,
-        totalExpenses: fromCentavos(expenses),
-        totalIncome: fromCentavos(income),
-        netSavings: fromCentavos(income - expenses),
+        basis: input.basis,
+        groupBy: input.groupBy,
+        window,
+      })
+      const cents = (value: number | null) => (value === null ? null : fromCentavos(value))
+      const expense = cents(result.totals.expenseCentavos),
+        income = cents(result.totals.incomeCentavos)
+      const descriptor = {
+        scope: result.scope,
+        basis: result.basis,
+        currency,
+        period: window.period,
+        asOf: window.asOf,
+        start: window.requested.start ?? window.periodStart,
+        end: window.requested.end ?? window.periodEnd,
+        through: window.through,
+        weekStartsOn: window.weekStartsOn,
+        timeZone: window.timeZone,
       }
-    })
-    const singleCurrency = totalsByCurrency.length === 1 ? totalsByCurrency[0] : null
-    const emptyPeriodTotals =
-      totalsByCurrency.length === 0 ? { totalExpenses: 0, totalIncome: 0, netSavings: 0 } : null
-
-    return {
-      basis: 'gross_cashflow',
-      complete: true,
-      period: { start, end },
-      mixedCurrency: totalsByCurrency.length > 1,
-      totalExpenses: singleCurrency?.totalExpenses ?? emptyPeriodTotals?.totalExpenses ?? null,
-      totalIncome: singleCurrency?.totalIncome ?? emptyPeriodTotals?.totalIncome ?? null,
-      netSavings: singleCurrency?.netSavings ?? emptyPeriodTotals?.netSavings ?? null,
-      totalsByCurrency,
-      byCategory: spending.map((row) => ({
-        currency: row.currency,
-        ...getCategoryIdentity(row.category_id, row.category_name),
-        amount: fromCentavos(row.total),
-        transactionCount: row.count,
-        percentage:
-          (totalsByCurrency.find((totalsRow) => totalsRow.currency === row.currency)
-            ?.totalExpenses ?? 0) > 0
-            ? Math.round(
-                (fromCentavos(row.total) /
-                  (totalsByCurrency.find((totalsRow) => totalsRow.currency === row.currency)
-                    ?.totalExpenses ?? 0)) *
-                  100
-              )
-            : 0,
-      })),
-      message:
-        spending.length === 0
-          ? `No expenses found for ${start} to ${end}.`
-          : singleCurrency
-            ? `Total spending from ${start} to ${end}: ${singleCurrency.currency} ${singleCurrency.totalExpenses.toFixed(2)} across ${spending.length} categories.`
-            : `Found spending from ${start} to ${end} across ${totalsByCurrency.length} currencies. See totalsByCurrency and byCategory for per-currency breakdowns; no FX conversion was applied.`,
-    }
-  },
+      return {
+        success: true,
+        ...result,
+        period: { start: window.start, end: window.end },
+        window,
+        totalExpenses: expense,
+        totalIncome: income,
+        netSavings: expense === null || income === null ? null : income - expense,
+        totalsByCurrency: result.complete
+          ? [
+              {
+                currency,
+                totalExpenses: expense,
+                totalIncome: income,
+                netSavings: expense === null || income === null ? null : income - expense,
+              },
+            ]
+          : [],
+        mixedCurrency: false,
+        byCategory:
+          input.groupBy === 'category'
+            ? result.groups.map((g) => ({
+                categoryId: g.key,
+                category:
+                  g.key === null
+                    ? 'Uncategorized'
+                    : ((
+                        dataset.categories.find((row) => row.id === g.key) as
+                          | { id: string; name?: string }
+                          | undefined
+                      )?.name ?? g.key),
+                currency,
+                amount: cents(g.totals.expenseCentavos ?? g.totals.consumptionCentavos),
+                transactionCount: g.transactionIds.length,
+              }))
+            : [],
+        ...contributorInspection(result, descriptor),
+        message: result.complete
+          ? 'Scoped actual spending is complete.'
+          : 'Scoped actual spending incomplete; inspect known subtotals and issues.',
+      }
+    }),
 }
 
 // ---------------------------------------------------------------------------

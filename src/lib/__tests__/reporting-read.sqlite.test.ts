@@ -5,6 +5,18 @@ const state = vi.hoisted(() => ({ db: null as Database.Database | null }))
 vi.mock('@/lib/database', () => ({
   query: async (sql: string, params: unknown[] = []) => state.db!.prepare(sql).all(...params),
   execute: vi.fn(),
+  withTransaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+    const { query, execute } = await import('@/lib/database')
+    state.db!.exec('BEGIN')
+    try {
+      const result = await fn({ query, execute })
+      state.db!.exec('COMMIT')
+      return result
+    } catch (error) {
+      state.db!.exec('ROLLBACK')
+      throw error
+    }
+  },
 }))
 import { useSpendingInsightsStore } from '@/stores/spending-insights-store'
 import { useBudgetStore } from '@/stores/budget-store'
@@ -32,6 +44,19 @@ beforeEach(() => {
     INSERT INTO transaction_splits VALUES ('food-split', 'split', 'food', 401), ('other-split', 'split', 'other', 600);
     ALTER TABLE transactions ADD COLUMN account_id TEXT;
     ALTER TABLE transactions ADD COLUMN description TEXT;
+    CREATE TABLE accounts (id TEXT, name TEXT, type TEXT, balance INTEGER, currency TEXT, is_archived INTEGER);
+    INSERT INTO accounts VALUES ('bank','Bank','checking',0,'USD',0);
+    UPDATE transactions SET account_id='bank';
+    CREATE TABLE subscriptions (id TEXT, amount INTEGER, currency TEXT, billing_cycle TEXT, account_id TEXT, is_active INTEGER, next_billing_date TEXT);
+    CREATE TABLE recurring_rules (id TEXT, active INTEGER);
+    CREATE TABLE transaction_consumption_classifications (id TEXT);
+    CREATE TABLE classification_type_revisions (id TEXT);
+    CREATE TABLE source_coverage (id TEXT);
+    CREATE TABLE card_statement_payment_links (id TEXT,statement_id TEXT,transaction_id TEXT,amount INTEGER,voided_at TEXT);
+    CREATE TABLE credit_card_statements (id TEXT,account_id TEXT);
+    CREATE TABLE settings (key TEXT,value TEXT);
+    INSERT INTO settings VALUES ('main_currency','USD');
+    CREATE TABLE manual_exchange_rates (id TEXT,from_currency TEXT,to_currency TEXT,rate_decimal TEXT,effective_from TEXT,supersedes_rate_id TEXT,created_at TEXT,source_note TEXT);
   `)
   useCurrencyStore.setState({
     preferredCurrency: 'USD',
@@ -39,7 +64,13 @@ beforeEach(() => {
     manualRates: [],
     loadRates: async () => {},
   })
-  useBudgetStore.setState({ budgets: [], isLoading: false, fetchError: null, error: null })
+  useBudgetStore.setState({
+    budgets: [],
+    isLoading: false,
+    fetchError: null,
+    error: null,
+    options: {},
+  })
 })
 afterEach(() => {
   state.db?.close()
@@ -91,11 +122,17 @@ it.each([
     momComparisons: [],
     momCurrentTotal: null,
   })
-  await expect(useBudgetStore.getState().fetch()).rejects.toMatchObject({
-    name: 'ReportingReadError',
-    transactionIds: ['unsplit'],
+  // Unrelated Other-category evidence does not poison a Food scope.
+  await useBudgetStore.getState().fetch()
+  expect(useBudgetStore.getState().budgets[0]).toMatchObject({ spent: 401, complete: true })
+  state.db!.exec('UPDATE budgets SET category_id=NULL')
+  await useBudgetStore.getState().fetch()
+  expect(useBudgetStore.getState().budgets[0]).toMatchObject({
+    spent: null,
+    remaining: null,
+    percentUsed: null,
+    complete: false,
   })
-  expect(useBudgetStore.getState().budgets).toEqual([])
 })
 
 it('validates an all-time upper bound without rejecting future or omitting old invalid rows', async () => {
@@ -204,8 +241,8 @@ function seedDatedRows() {
 }
 function seedServiceTables() {
   state.db!
-    .exec(`CREATE TABLE accounts (id TEXT, name TEXT, type TEXT, balance INTEGER, currency TEXT, is_archived INTEGER);
-    CREATE TABLE subscriptions (id TEXT, amount INTEGER, currency TEXT, billing_cycle TEXT, account_id TEXT, is_active INTEGER, next_billing_date TEXT);
+    .exec(`CREATE TABLE IF NOT EXISTS accounts (id TEXT, name TEXT, type TEXT, balance INTEGER, currency TEXT, is_archived INTEGER);
+    CREATE TABLE IF NOT EXISTS subscriptions (id TEXT, amount INTEGER, currency TEXT, billing_cycle TEXT, account_id TEXT, is_active INTEGER, next_billing_date TEXT);
     INSERT INTO accounts VALUES ('usd','USD cash','savings',10000,'USD',0);
     UPDATE transactions SET account_id = 'usd';`)
 }
@@ -323,15 +360,15 @@ it('uses local today for current stocks and future subscription estimates, but h
   })
 })
 
-it('health compares a durable USD plan valued today against individually dated MXN main spending', async () => {
+it('health compares the durable native plan and scoped usage without relabeling main valuations', async () => {
   seedDatedRows()
   seedServiceTables()
   state.db!.exec(
     `DELETE FROM transactions WHERE id = 'after'; UPDATE budgets SET amount = 9500, currency = 'USD';`
   )
   const score = await calculateHealthScore()
-  // Native USD spend100 exceeds plan95, but main spending1700 is below today's plan1710.
-  expect(score.subscores.find((s) => s.name === 'Budget Adherence')?.score).toBe(100)
+  // Native USD spend100 exceeds plan95, regardless of an unrelated main-currency valuation.
+  expect(score.subscores.find((s) => s.name === 'Budget Adherence')?.score).toBe(0)
   state.db!.exec(`UPDATE budgets SET currency = 'EUR'`)
   await expect(calculateHealthScore()).rejects.toThrow(/unavailable/)
 })

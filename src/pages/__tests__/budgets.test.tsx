@@ -1,315 +1,84 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import type * as ScopedReadModule from '@/lib/scoped-report-read'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router'
+import '@/i18n'
 vi.mock('@/components/budgets/category-spending-panel', () => ({
   CategorySpendingPanel: () => <section aria-label="category actuals" />,
 }))
-
+vi.mock('@/lib/scoped-report-read', async (original) => ({
+  ...(await original<typeof ScopedReadModule>()),
+  readScopedSnapshot: vi.fn(),
+}))
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+import { readScopedSnapshot } from '@/lib/scoped-report-read'
+import { scopedFixture } from '@/test/scoped-fixture'
+import { useBudgetStore } from '@/stores/budget-store'
+import { useUIStore } from '@/stores/ui-store'
+import { useCurrencyStore } from '@/stores/currency-store'
+import { TRANSACTION_PAGE_INVALIDATION_EVENT } from '@/lib/transaction-query-events'
 import { Budgets } from '../budgets'
-
-vi.mock('@/components/budgets/use-budget-display', () => ({
-  useBudgetDisplay: (budgets: Array<Record<string, unknown>>) => ({
-    budgets: budgets.map((budget) => ({ ...budget, complete: true, currency: 'USD' })),
-    complete: true,
-    error: null,
-  }),
-}))
-
-// ResizeObserver polyfill for jsdom
-globalThis.ResizeObserver = class {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-} as unknown as typeof ResizeObserver
-
-const mockFetch = vi.fn().mockResolvedValue(undefined)
-const mockRemove = vi.fn()
-let mockBudgets: Array<Record<string, unknown>> = []
-let mockFetchError: string | null = null
-let mockIsLoading = false
-
-vi.mock('sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
-}))
-
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string) => key,
-    i18n: { language: 'en', changeLanguage: vi.fn() },
-  }),
-}))
-
-vi.mock('@/stores/ui-store', () => ({
-  useUIStore: () => ({
-    openBudgetDialog: vi.fn(),
-  }),
-}))
-
-vi.mock('@/stores/budget-store', () => ({
-  useBudgetStore: () => ({
-    budgets: mockBudgets,
-    isLoading: mockIsLoading,
-    fetchError: mockFetchError,
-    fetch: mockFetch,
-    remove: mockRemove,
-  }),
-}))
-
-vi.mock('@/components/shared/confirm-dialog', () => ({
-  ConfirmDialog: ({
-    open,
-    onConfirm,
-    title,
-  }: {
-    open: boolean
-    onConfirm: () => void
-    title: string
-  }) =>
-    open ? (
-      <div data-testid="confirm-dialog">
-        <span>{title}</span>
-        <button onClick={onConfirm}>Confirm</button>
-      </div>
-    ) : null,
-}))
-
-describe('Budgets', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockRemove.mockReset()
-    mockBudgets = []
-    mockFetchError = null
-    mockIsLoading = false
-  })
-
-  it('renders title', () => {
-    render(<Budgets />)
-    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
-  })
-
-  it('puts the currency scope caption on its own wrapping row', () => {
-    render(<Budgets />)
-    const caption = screen.getByText('scope')
-    expect(caption.tagName).toBe('P')
-    expect(caption).toHaveClass('w-full')
-    expect(caption.closest('label')).toBeNull()
-    expect(screen.getByRole('combobox')).toBeInTheDocument()
-  })
-
-  describe('failure/retry boundary behavior', () => {
-    it('shows ErrorState (not empty CTA) when initial fetch fails with empty dataset', () => {
-      mockFetchError = 'Database connection failed'
-      mockBudgets = []
-
-      render(<Budgets />)
-
-      // Should show error state, not empty state
-      expect(screen.getByText('error.loadDetailed')).toBeInTheDocument()
-      expect(screen.getByText('Database connection failed')).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /Try again/i })).toBeInTheDocument()
-
-      // Should NOT show empty state CTA
-      expect(screen.queryByText('empty.title')).not.toBeInTheDocument()
-    })
-
-    it('shows empty state CTA (not ErrorState) when fetch succeeds with no budgets', () => {
-      mockFetchError = null
-      mockBudgets = []
-
-      render(<Budgets />)
-
-      // Should show empty state
-      expect(screen.getByText('empty.title')).toBeInTheDocument()
-      expect(screen.getByText('empty.description')).toBeInTheDocument()
-
-      // Should NOT show error state
-      expect(screen.queryByText('error.loadDetailed')).not.toBeInTheDocument()
-      expect(screen.queryByRole('region', { name: 'category actuals' })).not.toBeInTheDocument()
-    })
-
-    it('calls fetch when retry button is clicked', async () => {
-      const user = userEvent.setup()
-      mockFetchError = 'Network error'
-      mockBudgets = []
-
-      render(<Budgets />)
-
-      const retryButton = screen.getByRole('button', { name: /Try again/i })
-      await user.click(retryButton)
-
-      expect(mockFetch).toHaveBeenCalledTimes(2) // Once on mount, once on retry
-    })
-
-    it('shows ErrorBanner (not ErrorState) when fetch fails but has cached budgets', () => {
-      mockFetchError = 'Refresh failed'
-      mockBudgets = [
-        {
-          id: 'budget-1',
-          name: 'Groceries',
-          categoryName: 'Food',
-          categoryColor: '#ff0000',
-          spent: 30000,
-          remaining: 20000,
-          percentUsed: 60,
-          period: 'monthly',
-        },
-      ]
-
-      render(<Budgets />)
-
-      // Should show error banner, not full error state
-      expect(screen.getByText('error.load')).toBeInTheDocument()
-
-      // But should still show the budget
-      expect(screen.getAllByText('Groceries').length).toBeGreaterThan(0)
-
-      // Should NOT show error state (full page error)
-      expect(screen.queryByText('error.loadDetailed')).not.toBeInTheDocument()
-    })
-
-    it('shows loading skeleton when isLoading is true', () => {
-      mockIsLoading = true
-      mockBudgets = []
-      mockFetchError = null
-
-      render(<Budgets />)
-
-      // Should show skeleton loaders (Skeleton component uses 'skeleton' class)
-      const skeletons = document.querySelectorAll('.skeleton')
-      expect(skeletons.length).toBeGreaterThan(0)
-      expect(document.querySelector('[class*="xl:grid-cols-"]')).not.toBeInTheDocument()
-      expect(document.querySelector('.native-panel')).toBeInTheDocument()
-    })
-
-    it('marks loading skeleton container with aria-busy', () => {
-      mockIsLoading = true
-      mockBudgets = []
-      mockFetchError = null
-
-      render(<Budgets />)
-
-      const busyContainer = document.querySelector('[aria-busy="true"]')
-      expect(busyContainer).toBeInTheDocument()
-    })
-  })
-
-  describe('hero section', () => {
-    it('renders current-plan rows without a fabricated cross-frequency total', () => {
-      mockBudgets = [
-        {
-          id: 'budget-1',
-          name: 'Groceries',
-          categoryName: 'Food',
-          categoryColor: '#ff0000',
-          amount: 50000,
-          spent: 30000,
-          remaining: 20000,
-          percentUsed: 60,
-          period: 'monthly',
-        },
-        {
-          id: 'budget-2',
-          name: 'Rent',
-          categoryName: 'Housing',
-          categoryColor: '#00ff00',
-          amount: 100000,
-          spent: 100000,
-          remaining: 0,
-          percentUsed: 100,
-          period: 'monthly',
-        },
-      ]
-
-      render(<Budgets />)
-
-      expect(screen.queryByText('hero.totalBudgeted')).not.toBeInTheDocument()
-      expect(screen.getByText('progress.title')).toBeInTheDocument()
-      expect(screen.getByText('currentContext')).toBeInTheDocument()
-      expect(screen.getByText('2 hero.budgetCount')).toBeInTheDocument()
-    })
-
-    it('keeps current-plan rows distinct from category actuals', () => {
-      mockBudgets = [
-        {
-          id: 'budget-1',
-          name: 'Groceries',
-          categoryName: 'Food',
-          categoryColor: '#ff0000',
-          amount: 50000,
-          spent: 30000,
-          remaining: 20000,
-          percentUsed: 60,
-          period: 'monthly',
-        },
-      ]
-
-      const { container } = render(<Budgets />)
-      const progress = screen.getByRole('heading', { name: 'progress.title' })
-      const actuals = screen.getByRole('region', { name: 'category actuals' })
-
-      expect(container.querySelector('[class*="xl:grid-cols-"]')).not.toBeInTheDocument()
-      expect(
-        actuals.compareDocumentPosition(progress) & Node.DOCUMENT_POSITION_FOLLOWING
-      ).toBeTruthy()
-      expect(screen.getByText('currentContext')).toBeInTheDocument()
-    })
-  })
-
-  it('renders long budget lists in pages', async () => {
+const read = vi.mocked(readScopedSnapshot)
+const remove = vi.fn()
+beforeEach(() => {
+  read.mockReset()
+  read.mockResolvedValue(scopedFixture())
+  remove.mockReset()
+  remove.mockResolvedValue(undefined)
+  useBudgetStore.setState({ budgets: [], options: {}, fetchError: null, isLoading: false, remove })
+  useUIStore.setState({ openBudgetDialog: vi.fn(), openTransactionDialog: vi.fn() })
+  useCurrencyStore.setState({ mainCurrency: 'MXN', preferredCurrency: 'USD', manualRates: [] })
+})
+const renderPage = (url = '/budgets') =>
+  render(
+    <MemoryRouter initialEntries={[url]}>
+      <Budgets />
+    </MemoryRouter>
+  )
+describe('Budgets scoped page', () => {
+  it('keeps native currency, nonadditive labels, existing add/edit/delete confirmations', async () => {
     const user = userEvent.setup()
-    mockBudgets = Array.from({ length: 21 }, (_, index) => {
-      const suffix = String(index).padStart(2, '0')
-      return {
-        id: `budget-${suffix}`,
-        name: `Budget ${suffix}`,
-        categoryName: `Category ${suffix}`,
-        categoryColor: '#ff0000',
-        amount: 50000,
-        spent: 25000,
-        remaining: 25000,
-        percentUsed: 100 - index,
-        period: 'monthly',
-      }
-    })
-
-    render(<Budgets />)
-
-    expect(screen.getByText('Category 00')).toBeInTheDocument()
-    expect(screen.getByText('Category 19')).toBeInTheDocument()
-    expect(screen.queryByText('Category 20')).not.toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: /pagination\.showMore/i }))
-
-    expect(screen.getByText('Category 20')).toBeInTheDocument()
+    renderPage()
+    await screen.findByText('Food plan')
+    expect(screen.getByText(/Budgets may overlap/)).toBeInTheDocument()
+    expect(screen.getByText(/Actual gross · MXN/)).toBeInTheDocument()
+    await user.click(screen.getAllByRole('button', { name: 'Add Budget' })[0])
+    expect(useUIStore.getState().openBudgetDialog).toHaveBeenCalledWith()
+    await user.click(screen.getByRole('button', { name: 'Edit Food plan' }))
+    expect(useUIStore.getState().openBudgetDialog).toHaveBeenCalledWith('budget')
+    await user.click(screen.getByRole('button', { name: 'Delete Food plan' }))
+    await screen.findByRole('dialog')
+    expect(remove).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(remove).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Delete Food plan' }))
+    await screen.findByRole('dialog')
+    await user.click(screen.getByRole('button', { name: 'Delete Budget' }))
+    await waitFor(() => expect(remove).toHaveBeenCalledWith('budget'))
   })
-
-  it('shows a specific error toast when deleting a budget fails', async () => {
-    const { toast } = await import('sonner')
+  it('inspects inactive plans through an explicit deep link and retains windows across event refresh', async () => {
+    const snapshot = scopedFixture()
+    snapshot.budgets[0].is_active = 0
+    read.mockResolvedValue(snapshot)
     const user = userEvent.setup()
-    mockRemove.mockRejectedValueOnce(new Error('Budget delete DB error'))
-    mockBudgets = [
-      {
-        id: 'budget-delete-fail',
-        name: 'Groceries',
-        categoryName: 'Food',
-        categoryColor: '#ff0000',
-        amount: 50000,
-        spent: 30000,
-        remaining: 20000,
-        percentUsed: 60,
-        period: 'monthly',
-      },
-    ]
-
-    render(<Budgets />)
-
-    await user.click(screen.getByLabelText('actions.delete Groceries'))
-    await user.click(screen.getByText('Confirm'))
-
-    await waitFor(() => {
-      expect(mockRemove).toHaveBeenCalledWith('budget-delete-fail')
-      expect(toast.error).toHaveBeenCalledWith('Budget delete DB error')
-    })
-    expect(toast.success).not.toHaveBeenCalled()
+    renderPage('/budgets?budget=budget')
+    await screen.findByText('Inactive budget · editable for reactivation')
+    await user.click(screen.getByText('Dates & window'))
+    fireEvent.change(screen.getByLabelText('As of'), { target: { value: '2026-01-20' } })
+    await waitFor(() => expect(useBudgetStore.getState().options.asOf).toBe('2026-01-20'))
+    // Explicit refresh and transaction-dialog invalidation use the same current options.
+    const previous = read.mock.calls.length
+    act(() => window.dispatchEvent(new CustomEvent(TRANSACTION_PAGE_INVALIDATION_EVENT)))
+    await waitFor(() => expect(read.mock.calls.length).toBeGreaterThan(previous))
+    expect(useBudgetStore.getState().options.budgetId).toBe('budget')
+    await user.click(screen.getByRole('button', { name: 'Refresh from database' }))
+    await screen.findByText('Food plan')
+  })
+  it('surfaces read failure without showing stale plan values', async () => {
+    read.mockRejectedValue(new Error('snapshot failure'))
+    renderPage()
+    await screen.findByText('snapshot failure')
+    expect(screen.queryByText('Food plan')).not.toBeInTheDocument()
   })
 })

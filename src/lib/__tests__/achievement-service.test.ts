@@ -23,6 +23,10 @@ vi.mock('@/lib/storage', () => ({
 vi.mock('@/lib/database', () => ({
   query: vi.fn(),
   execute: vi.fn(),
+  withTransaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+    const { query, execute } = await import('@/lib/database')
+    return fn({ query, execute })
+  },
 }))
 
 import { query } from '@/lib/database'

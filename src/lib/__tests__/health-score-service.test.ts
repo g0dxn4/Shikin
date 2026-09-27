@@ -14,6 +14,10 @@ vi.mock('@/lib/storage', () => ({
 vi.mock('@/lib/database', () => ({
   query: vi.fn(),
   execute: vi.fn(),
+  withTransaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+    const { query, execute } = await import('@/lib/database')
+    return fn({ query, execute })
+  },
 }))
 
 vi.mock('@/lib/money', () => ({
@@ -42,7 +46,14 @@ describe('health-score-service', () => {
     overrides: {
       income?: number
       expenses?: number
-      budgets?: { id: string; amount: number; category_id: string; period: string }[]
+      budgets?: {
+        id: string
+        amount: number
+        category_id: string
+        period: string
+        basis?: string
+        scope_json?: string
+      }[]
       budgetSpent?: number
       ccDebt?: number
       savings?: number
@@ -64,7 +75,33 @@ describe('health-score-service', () => {
     mockQuery.mockImplementation(async (sql: string) => {
       const s = sql as string
       if (s.includes('AS split_count')) return []
-      if (s.includes('FROM budgets')) return budgets
+      if (s.includes('FROM budgets'))
+        return budgets.map((b) => ({
+          ...b,
+          currency: 'USD',
+          is_active: 1,
+          name: b.id,
+          created_at: '',
+          updated_at: '',
+        }))
+      if (s === 'SELECT * FROM transactions')
+        return budgetSpent > 0
+          ? [
+              {
+                id: 'budget-expense',
+                account_id: 'bank',
+                type: 'expense',
+                amount: budgetSpent,
+                currency: 'USD',
+                date: dayjs().format('YYYY-MM-DD'),
+                category_id: budgets[0]?.category_id,
+              },
+            ]
+          : []
+      if (s === 'SELECT * FROM accounts')
+        return [{ id: 'bank', name: 'Bank', type: 'checking', currency: 'USD' }]
+      if (s.includes('FROM categories'))
+        return budgets.map((b) => ({ id: b.category_id, name: b.category_id }))
       if (s.includes("type IN ('credit_card', 'savings')")) {
         return [
           { type: 'credit_card', balance: -ccDebt, currency: 'USD' },
@@ -114,6 +151,23 @@ describe('health-score-service', () => {
       return []
     })
   }
+
+  it('compares each scoped plan natively and refuses unknown net usage', async () => {
+    const budgets = [{ id: 'plan', amount: 10000, category_id: 'food', period: 'monthly' }]
+    setupQueryMock({ budgets, budgetSpent: 20000 })
+    expect(
+      (await calculateHealthScore()).subscores.find((s) => s.name === 'Budget Adherence')?.score
+    ).toBe(0)
+    setupQueryMock({
+      budgets: [{ ...budgets[0], scope_json: '{"excludeCategoryIds":["food"]}' }],
+      budgetSpent: 20000,
+    })
+    expect(
+      (await calculateHealthScore()).subscores.find((s) => s.name === 'Budget Adherence')?.score
+    ).toBe(100)
+    setupQueryMock({ budgets: [{ ...budgets[0], basis: 'net_consumption' }], budgetSpent: 20000 })
+    await expect(calculateHealthScore()).rejects.toThrow(/scoped budget evidence/)
+  })
 
   it('returns a score between 0 and 100', async () => {
     setupQueryMock()

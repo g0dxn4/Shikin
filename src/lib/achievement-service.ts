@@ -13,7 +13,7 @@ import {
   sumReportingAmounts,
   type ReportingContext,
 } from '@/lib/dated-reporting-read'
-import { readBudgetSpending } from '@/lib/budget-dated-read'
+import { readScopedSnapshot, projectBudget } from '@/lib/scoped-report-read'
 import dayjs from 'dayjs'
 
 // --- Types ---
@@ -161,37 +161,17 @@ async function checkWeekWarrior(): Promise<boolean> {
 }
 
 async function checkBudgetBoss(): Promise<boolean> {
-  const context = captureReportingContext()
-  if (!context.mainCurrency) return false
-  // Check if all active budgets with monthly period are under limit for last completed month
   const lastMonth = dayjs().subtract(1, 'month')
-  const start = lastMonth.startOf('month').format('YYYY-MM-DD')
   const end = lastMonth.endOf('month').format('YYYY-MM-DD')
-
-  const budgets = await query<{
-    id: string
-    category_id: string | null
-    amount: number
-    currency: string
-  }>(
-    `SELECT id, category_id, amount, currency FROM budgets WHERE is_active = 1 AND period = 'monthly'`
+  const snapshot = await readScopedSnapshot()
+  const budgets = snapshot.budgets.filter(
+    (budget) => budget.is_active === 1 && budget.period === 'monthly'
   )
-
   if (budgets.length === 0) return false
-
-  await assertReportingReadComplete(start, end)
-  for (const b of budgets) {
-    const spent = await readBudgetSpending({
-      categoryId: b.category_id,
-      start,
-      end,
-      currency: b.currency,
-      rates: context.manualRates,
-    })
-    if (!spent.complete || spent.totalCentavos! > b.amount) return false
-  }
-  assertReportingContextCurrent(context)
-  return true
+  return budgets.every((budget) => {
+    const status = projectBudget(snapshot, budget, { asOf: end })
+    return status.complete && status.spent !== null && status.spent <= budget.amount
+  })
 }
 
 async function checkSavingsStar(): Promise<boolean> {

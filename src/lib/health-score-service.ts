@@ -6,7 +6,7 @@ import {
   convertReportingAmount,
   readGrossProjection,
 } from '@/lib/dated-reporting-read'
-import { readBudgetSpending } from '@/lib/budget-dated-read'
+import { readScopedSnapshot, projectBudget } from '@/lib/scoped-report-read'
 import { load } from '@/lib/storage'
 import dayjs from 'dayjs'
 
@@ -30,13 +30,7 @@ export interface HealthScore {
   calculatedAt: string
 }
 
-type BudgetRow = {
-  currency: string
-  id: string
-  amount: number
-  category_id: string | null
-  period: string
-}
+type BudgetRow = { id: string; amount: number }
 type AccountRow = { type: string; balance: number; currency: string }
 
 function scoreToGrade(score: number): Grade {
@@ -194,11 +188,9 @@ export async function calculateHealthScore(): Promise<HealthScore> {
     .map((date) => date.format('YYYY-MM-DD'))
     .sort()[0]
   const readEnd = today.format('YYYY-MM-DD')
-  const [projection, budgets, accounts] = await Promise.all([
+  const [projection, budgetSnapshot, accounts] = await Promise.all([
     readGrossProjection(readStart, readEnd, context),
-    query<BudgetRow>(
-      'SELECT id, amount, currency, category_id, period FROM budgets WHERE is_active = 1'
-    ),
+    readScopedSnapshot(),
     query<AccountRow>(
       "SELECT type, balance, currency FROM accounts WHERE is_archived = 0 AND type IN ('credit_card', 'savings')"
     ),
@@ -258,36 +250,14 @@ export async function calculateHealthScore(): Promise<HealthScore> {
     }
   }
 
+  const budgets = budgetSnapshot.budgets.filter((budget) => budget.is_active === 1)
   const budgetSpending = new Map<string, number>()
   for (const budget of budgets) {
-    const start =
-      budget.period === 'weekly'
-        ? today.subtract(6, 'day').format('YYYY-MM-DD')
-        : budget.period === 'yearly'
-          ? today.startOf('year').format('YYYY-MM-DD')
-          : monthStart
-    const spending = await readBudgetSpending({
-      categoryId: budget.category_id,
-      start,
-      end: readEnd,
-      currency: budget.currency,
-      rates: context.manualRates,
-    })
-    if (!spending.complete)
-      throw new Error('Financial health is unavailable until budget history can be converted.')
-    budget.amount = convert(budget.amount, budget.currency)
-    budgetSpending.set(
-      budget.id,
-      sumRows(
-        convertedRows.filter(
-          (row) =>
-            row.type === 'expense' &&
-            row.date >= start &&
-            row.date <= readEnd &&
-            (budget.category_id === null || row.category_id === budget.category_id)
-        )
-      )
-    )
+    const status = projectBudget(budgetSnapshot, budget, { asOf: readEnd })
+    if (!status.complete || status.spent === null)
+      throw new Error('Financial health is unavailable until scoped budget evidence is complete.')
+    // Each adherence comparison is native to its own plan; never add overlapping plans.
+    budgetSpending.set(budget.id, status.spent)
   }
 
   const monthKeys = Array.from({ length: 6 }, (_, index) =>

@@ -1,5 +1,14 @@
 import { useBudgetDisplay, type DisplayBudget } from '@/components/budgets/use-budget-display'
 import { useCurrencyStore } from '@/stores/currency-store'
+import { currencyAuthorityKey } from '@/stores/currency-authority'
+import { useSearchParams } from 'react-router'
+import type { ReportWindowInput } from '@shikin/finance-core'
+import { WindowControls } from '@/components/budgets/scoped-controls'
+import { ScopedActualResult } from '@/components/budgets/scoped-result'
+import {
+  TRANSACTION_PAGE_INVALIDATION_EVENT,
+  invalidateTransactionPage,
+} from '@/lib/transaction-query-events'
 import { PageToolbar } from '@/components/ui/native-layout'
 import { useEffect, useState, useMemo, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -33,10 +42,6 @@ function getProgressColor(percent: number | null): string {
   return 'var(--color-success)'
 }
 
-function cents(value: number | null | undefined): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0
-}
-
 function CompactBudgetRow({
   budget,
   onEdit,
@@ -52,15 +57,18 @@ function CompactBudgetRow({
   const progressColor = getProgressColor(budget.percentUsed)
   const money = (value: number | null) =>
     value === null ? '—' : formatMoney(value, budget.currency)
-  const amount = cents(budget.amount)
-  const spent = budget.complete ? cents(budget.spent) : null
-  const remaining = budget.complete ? cents(budget.remaining) : null
+  const amount = budget.limitCentavos
+  const spent = budget.spent
+  const remaining = budget.remaining
+  const references = useBudgetStore((state) => state.references)
 
   return (
     <div className="group border-border bg-muted/50 hover:bg-muted/50 rounded-xl border p-4 transition-colors">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-base font-bold">{budget.categoryName}</p>
+          <p className="truncate text-base font-bold">
+            {budget.categoryName || t('scoped.allCategories')}
+          </p>
           <p className="text-muted-foreground mt-1 truncate text-xs font-medium">
             <span>{budget.name}</span> · {t(`periods.${budget.period}`)}
           </p>
@@ -118,6 +126,20 @@ function CompactBudgetRow({
               : `${money(remaining)} ${t('card.remaining')}`}
         </span>
       </div>
+      <div className="mt-3 space-y-2">
+        {!budget.is_active && (
+          <p className="text-muted-foreground text-xs">{t('scoped.inactive')}</p>
+        )}
+        {!budget.comparison.limitComparable && (
+          <p className="text-warning text-xs">{t('scoped.notComparable')}</p>
+        )}
+        <ScopedActualResult
+          key={JSON.stringify(budget.result.window)}
+          compact
+          result={budget.result}
+          {...references}
+        />
+      </div>
     </div>
   )
 }
@@ -126,9 +148,30 @@ export function Budgets() {
   const { t } = useTranslation('budgets')
   const { t: tCommon } = useTranslation('common')
   const { openBudgetDialog } = useUIStore()
-  const { budgets: storedBudgets, isLoading, fetchError, fetch, remove } = useBudgetStore()
+  const {
+    budgets: storedBudgets,
+    isLoading: storeLoading,
+    fetchError,
+    fetch,
+    remove,
+    options: loadedOptions,
+  } = useBudgetStore()
+  const [searchParams] = useSearchParams()
+  const budgetId = searchParams.get('budget') ?? undefined
+  const [includeInactive, setIncludeInactive] = useState(false)
+  const [windowOptions, setWindowOptions] = useState<ReportWindowInput>({})
+  const authority = useCurrencyStore(currencyAuthorityKey)
+  const options = useMemo(
+    () => ({ ...windowOptions, includeInactive, budgetId }),
+    [windowOptions, includeInactive, budgetId]
+  )
+  const requestKey = JSON.stringify([options, authority])
+  const [ownedKey, setOwnedKey] = useState<string | null>(null)
+  const isLoading =
+    storeLoading ||
+    ownedKey !== requestKey ||
+    JSON.stringify(options) !== JSON.stringify(loadedOptions)
   const { budgets, error: displayError } = useBudgetDisplay(storedBudgets)
-  const { preferredCurrency } = useCurrencyStore()
   const [period, setPeriod] = useState('all')
   const scopedBudgets = useMemo(
     () => (period === 'all' ? budgets : budgets.filter((budget) => budget.period === period)),
@@ -137,7 +180,7 @@ export function Budgets() {
   const categoryActuals = useMemo(
     () =>
       budgets
-        .filter((budget) => budget.category_id !== null)
+        .filter((budget) => budget.is_active === 1 && budget.category_id !== null)
         .map((budget) => ({
           categoryId: budget.category_id!,
           name: budget.categoryName,
@@ -145,7 +188,6 @@ export function Budgets() {
         })),
     [budgets]
   )
-  const complete = scopedBudgets.every((budget) => budget.mainComplete)
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [visibleBudgetCount, setVisibleBudgetCount] = useState(BUDGETS_PAGE_SIZE)
@@ -160,8 +202,21 @@ export function Budgets() {
   const visibleProgressBudgets = progressBudgets.slice(0, visibleBudgetCount)
 
   useEffect(() => {
-    void fetch().catch(() => {})
-  }, [fetch])
+    let cancelled = false
+    const refresh = () => {
+      void fetch(options)
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setOwnedKey(requestKey)
+        })
+    }
+    refresh()
+    window.addEventListener(TRANSACTION_PAGE_INVALIDATION_EVENT, refresh)
+    return () => {
+      cancelled = true
+      window.removeEventListener(TRANSACTION_PAGE_INVALIDATION_EVENT, refresh)
+    }
+  }, [fetch, options, requestKey])
 
   const handleDelete = async () => {
     if (!deleteId) return
@@ -200,21 +255,30 @@ export function Budgets() {
           </label>
         }
         actions={
-          <Button onClick={() => openBudgetDialog()}>
-            <Plus size={16} />
-            {t('addBudget')}
-          </Button>
+          <>
+            <Button variant="outline" onClick={() => invalidateTransactionPage('store-refresh')}>
+              {t('scoped.refresh')}
+            </Button>
+            <Button onClick={() => openBudgetDialog()}>
+              <Plus size={16} />
+              {t('addBudget')}
+            </Button>
+          </>
         }
       />
       <p className="text-muted-foreground w-full min-w-0 text-xs leading-relaxed text-pretty">
-        {t('scope', { currency: preferredCurrency })}
+        {t('scoped.budgetScope')}
       </p>
 
-      {storedBudgets.length > 0 && !complete && (
-        <p role="status" className="text-warning text-xs">
-          {t('currency.unavailable')}
-        </p>
-      )}
+      <label className="flex min-h-11 items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={includeInactive}
+          onChange={(event) => setIncludeInactive(event.target.checked)}
+        />
+        {t('scoped.includeInactive')}
+      </label>
+      <WindowControls budget value={windowOptions} onChange={setWindowOptions} />
       <ErrorBanner
         title={t('error.load')}
         message={displayError || (!hasInitialLoadError ? fetchError : null)}
@@ -223,6 +287,9 @@ export function Budgets() {
         }}
       />
 
+      <div hidden={categoryActuals.length === 0 || ownedKey === null}>
+        <CategorySpendingPanel categories={categoryActuals} />
+      </div>
       {isLoading ? (
         <div role="status" aria-busy="true">
           <span className="sr-only">{tCommon('status.loading')}</span>
@@ -263,9 +330,8 @@ export function Budgets() {
         </div>
       ) : (
         <>
-          <CategorySpendingPanel categories={categoryActuals} />
-          <p className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-            {t('currentContext')}
+          <p className="text-muted-foreground text-xs">
+            {t('scoped.currentDefinition')} {t('scoped.nonAdditive')}
           </p>
           <div className="flex flex-col gap-3">
             <div className="native-panel p-5 sm:p-6">

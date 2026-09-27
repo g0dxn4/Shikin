@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
+import { MemoryRouter } from 'react-router'
 import { render, screen } from '@testing-library/react'
 
+vi.mock('@/components/budgets/scoped-result', () => ({ ScopedActualResult: () => null }))
 vi.mock('@/components/budgets/use-budget-display', () => ({
   useBudgetDisplay: (budgets: Array<Record<string, unknown>>) => ({
     budgets: budgets.map((budget) => ({ ...budget, complete: true, currency: 'USD' })),
@@ -19,12 +21,23 @@ vi.mock('@/stores/currency-store', () => ({
 }))
 const budgetStore = vi.hoisted(() => ({
   budgets: [
-    { id: 'budget-1', name: 'Food', categoryName: 'Food', amount: 5000, period: 'monthly' },
+    {
+      id: 'budget-1',
+      name: 'Food',
+      categoryName: 'Food',
+      amount: 5000,
+      period: 'monthly',
+      category_id: 'food',
+      is_active: 1,
+      comparison: { limitComparable: true },
+      result: { window: {} },
+    },
   ] as Array<Record<string, unknown>>,
 }))
 vi.mock('@/stores/budget-store', () => ({
   useBudgetStore: () => ({
     budgets: budgetStore.budgets,
+    options: { includeInactive: false },
     isLoading: false,
     fetchError: null,
     fetch: vi.fn().mockResolvedValue(undefined),
@@ -36,18 +49,26 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => k
 import { Budgets } from '../budgets'
 
 describe('Budgets page scope', () => {
-  it('shows category actuals beside current-plan cards but does not mount virtual buckets', () => {
-    render(<Budgets />)
-    expect(screen.getByRole('region', { name: 'category actuals' })).toBeInTheDocument()
-    expect(screen.getByText('currentContext')).toBeInTheDocument()
+  it('shows category actuals beside current-plan cards but does not mount virtual buckets', async () => {
+    render(
+      <MemoryRouter>
+        <Budgets />
+      </MemoryRouter>
+    )
+    expect(await screen.findByRole('region', { name: 'category actuals' })).toBeInTheDocument()
+    expect(screen.getByText(/scoped.currentDefinition/)).toBeInTheDocument()
     expect(screen.getByText('progress.title')).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'virtual buckets' })).not.toBeInTheDocument()
   })
 
-  it('retains empty budget state without mounting virtual buckets', () => {
+  it('retains empty budget state without mounting virtual buckets', async () => {
     budgetStore.budgets = []
-    render(<Budgets />)
-    expect(screen.getByText('empty.title')).toBeInTheDocument()
+    render(
+      <MemoryRouter>
+        <Budgets />
+      </MemoryRouter>
+    )
+    expect(await screen.findByText('empty.title')).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'virtual buckets' })).not.toBeInTheDocument()
   })
 })

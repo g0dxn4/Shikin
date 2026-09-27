@@ -1,841 +1,219 @@
-import type { DatedExchangeRate } from '@shikin/finance-core/fx'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import type * as ScopedReadModule from '@/lib/scoped-report-read'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router'
-import dayjs from 'dayjs'
+import {
+  projectScopedReport,
+  projectScopedRecurringEstimate,
+  resolveReportWindow,
+} from '@shikin/finance-core'
+import i18n from '@/i18n'
+vi.mock('@/lib/scoped-report-read', async (original) => ({
+  ...(await original<typeof ScopedReadModule>()),
+  readScopedReport: vi.fn(),
+}))
+import { readScopedReport, type ScopedRead, type ScopedReadInput } from '@/lib/scoped-report-read'
+import { scopedFixture, fixtureWindow, deferred } from '@/test/scoped-fixture'
+import { useCurrencyStore } from '@/stores/currency-store'
+import { useUIStore } from '@/stores/ui-store'
+import { TRANSACTION_PAGE_INVALIDATION_EVENT } from '@/lib/transaction-query-events'
 import { ReportsPage } from '../reports'
-import type { FrontendNetConsumptionReport } from '@/lib/consumption-service'
-
-async function renderReports() {
-  const result = render(
-    <MemoryRouter>
-      <ReportsPage />
-    </MemoryRouter>
-  )
-  await act(async () => {})
-  return result
-}
-vi.mock('@/lib/database', () => ({ query: async () => mockTransactions }))
-
-const mockFetchAccounts = vi.fn().mockResolvedValue(undefined)
-const mockFetchBudgets = vi.fn().mockResolvedValue(undefined)
-const mockFetchTransactions = vi.fn().mockResolvedValue(undefined)
-const mockLoadRates = vi.fn().mockResolvedValue(undefined)
-const { mockReadNetConsumptionReport } = vi.hoisted(() => ({
-  mockReadNetConsumptionReport: vi.fn(),
-}))
-
-vi.mock('@/lib/consumption-service', () => ({
-  readNetConsumptionReport: mockReadNetConsumptionReport,
-  isValidNetConsumptionPeriod: (start: string, end: string) => {
-    const realDate = (value: string) => {
-      if (!/^\d{4}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/.test(value)) return false
-      const parsed = new Date(`${value}T00:00:00.000Z`)
-      return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
-    }
-    return realDate(start) && realDate(end) && start <= end
-  },
-}))
-
-let mockAccounts: Array<Record<string, unknown>> = []
-let mockArchivedAccounts: Array<Record<string, unknown>> = []
-let mockBudgets: Array<Record<string, unknown>> = []
-let mockTransactions: Array<Record<string, unknown>> = []
-let mockPreferredCurrency = 'USD'
-let mockMainCurrency: string | null | undefined
-let mockManualRates: DatedExchangeRate[] = []
-function rate(fromCurrency: string, toCurrency: string, rateDecimal: string) {
+const read = vi.mocked(readScopedReport)
+let snapshot = scopedFixture()
+function projection(input: ScopedReadInput): ScopedRead {
+  const window = resolveReportWindow({ ...fixtureWindow, ...input.window })
+  const currency = input.currency || snapshot.mainCurrency!
   return {
-    id: fromCurrency + toCurrency,
-    fromCurrency,
-    toCurrency,
-    rateDecimal,
-    effectiveFrom: '2000-01-01',
-    supersedesRateId: null,
-    sourceNote: null,
-    createdAt: '2000-01-01',
+    result:
+      input.basis === 'recurring_estimate'
+        ? projectScopedRecurringEstimate({
+            dataset: snapshot.estimates,
+            scope: input.scope,
+            currency,
+            asOf: window.asOf,
+            groupBy: input.groupBy,
+          })
+        : projectScopedReport({
+            dataset: snapshot.dataset,
+            scope: input.scope,
+            currency,
+            window,
+            basis: input.basis,
+            groupBy: input.groupBy,
+          }),
+    window,
+    accounts: snapshot.accounts,
+    categories: snapshot.categories,
+    mainCurrency: snapshot.mainCurrency,
   }
 }
-let mockTotalBalanceResult:
-  | {
-      complete: true
-      preferredCurrency: string
-      amountCentavos: number
-      missingCurrencies: readonly []
-    }
-  | {
-      complete: false
-      preferredCurrency: string
-      missingCurrencies: string[]
-      reason: 'missing_exchange_rates' | 'invalid_currency_data'
-      invalidCurrencies?: Array<{
-        accountId: string | null
-        accountName: string | null
-        value: string
-      }>
-      invalidRates?: Array<{ fromCurrency: string; toCurrency: string; rate: string }>
-    }
-  | null = null
-
-let mockBudgetDisplayComplete = true
-let mockBudgetDisplayError: string | null = null
-
-vi.mock('@/components/budgets/use-budget-display', () => ({
-  useBudgetDisplay: (stored: Array<{ amount: number; spent: number }>) => ({
-    budgets: stored.map((budget) => ({
-      ...budget,
-      complete: mockBudgetDisplayComplete,
-      currency: 'USD',
-    })),
-    complete: mockBudgetDisplayComplete,
-    error: mockBudgetDisplayError,
-  }),
-}))
-
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string, options?: { currencies?: string; details?: string; message?: string }) =>
-      options?.currencies
-        ? `${key}: ${options.currencies}`
-        : options?.details
-          ? `${key}: ${options.details}`
-          : options?.message
-            ? `${key}: ${options.message}`
-            : key,
-    i18n: { language: 'en', changeLanguage: vi.fn() },
-  }),
-}))
-
-vi.mock('@/stores/account-store', () => ({
-  useAccountStore: () => ({
-    accounts: mockAccounts,
-    archivedAccounts: mockArchivedAccounts,
-    fetch: mockFetchAccounts,
-    isLoading: false,
-  }),
-}))
-
-vi.mock('@/stores/budget-store', () => ({
-  useBudgetStore: () => ({
-    budgets: mockBudgets,
-    fetch: mockFetchBudgets,
-    isLoading: false,
-  }),
-}))
-
-vi.mock('@/stores/transaction-store', () => ({
-  useTransactionStore: () => ({
-    transactions: mockTransactions,
-    fetch: mockFetchTransactions,
-    isLoading: false,
-  }),
-}))
-
-const stableGetTotalBalanceInPreferred = (accounts: Array<{ balance: number }>) =>
-  mockTotalBalanceResult ?? {
-    complete: true as const,
-    preferredCurrency: mockPreferredCurrency,
-    amountCentavos: accounts.reduce((sum, account) => sum + account.balance, 0),
-    missingCurrencies: [] as const,
-  }
-
-vi.mock('@/stores/currency-store', () => ({
-  useCurrencyStore: () => ({
-    preferredCurrency: mockPreferredCurrency,
-    mainCurrency: mockMainCurrency === undefined ? mockPreferredCurrency : mockMainCurrency,
-    manualRates: mockManualRates,
-    getTotalBalanceInPreferred: stableGetTotalBalanceInPreferred,
-    loadRates: mockLoadRates,
-  }),
-}))
-
-function transaction(
-  id: string,
-  type: string,
-  amount: number,
-  overrides: Record<string, unknown> = {}
-) {
-  return {
-    id,
-    type,
-    amount,
-    currency: 'USD',
-    category_id: type === 'expense' ? String(overrides.category_name ?? 'Food') : null,
-    date: dayjs().format('YYYY-MM-DD'),
-    status: 'posted',
-    reporting_treatment: 'normal',
-    transaction_kind: 'standard',
-    is_archived: 0,
-    category_name: type === 'expense' ? 'Food' : null,
-    category_color: '#30d158',
-    ...overrides,
-  }
-}
-
-describe('ReportsPage', async () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockAccounts = [
-      {
-        id: 'account-1',
-        name: 'Daily Checking',
-        balance: 250_000,
-        currency: 'USD',
-        is_archived: 0,
-      },
-    ]
-    mockArchivedAccounts = []
-    mockBudgets = [{ id: 'budget-1', amount: 100_000, spent: 25_000 }]
-    mockTransactions = [
-      transaction('tx-expense', 'expense', 25_000),
-      transaction('tx-income', 'income', 500_000),
-    ]
-    mockTotalBalanceResult = null
-    mockPreferredCurrency = 'USD'
-    mockMainCurrency = undefined
-    mockManualRates = []
-    mockBudgetDisplayComplete = true
-    mockBudgetDisplayError = null
-    mockReadNetConsumptionReport.mockResolvedValue({
-      basis: 'net_consumption',
-      complete: false,
-      classificationComplete: false,
-      coverageComplete: false,
-      unresolvedIds: ['allocation-1'],
-      uncoveredAccountIds: ['account-1'],
-      totalsByCurrency: [
-        { currency: 'USD', consumptionCentavos: 7500, earnedIncomeCentavos: 20000 },
-      ],
-      byCategory: [
-        {
-          currency: 'USD',
-          categoryId: 'food',
-          categoryName: 'Food',
-          amountCentavos: 7500,
-        },
-      ],
-      period: {
-        start: dayjs().startOf('month').format('YYYY-MM-DD'),
-        end: dayjs().endOf('month').format('YYYY-MM-DD'),
-      },
-      currencyScope: 'all',
-      message: 'Known subtotals only.',
-    })
-  })
-
-  it('renders a usable monthly report and its complete cash total', async () => {
-    await renderReports()
-
-    expect(screen.getByText('reports.title')).toBeInTheDocument()
-    expect(screen.getByText('reports.categoryBreakdown')).toBeInTheDocument()
-    expect(screen.getByText('Food')).toBeInTheDocument()
-    expect(screen.getByText('25%')).toBeInTheDocument()
-    expect(screen.getByText('$2,500.00')).toBeInTheDocument()
-    expect(mockLoadRates).toHaveBeenCalled()
-  })
-
-  it('keeps gross cash flow as default and loads page-owned native-currency net consumption on demand', async () => {
-    const user = userEvent.setup()
-    await renderReports()
-
-    expect(screen.getByRole('button', { name: 'basis.gross' })).toHaveAttribute(
-      'aria-pressed',
-      'true'
-    )
-    expect(mockReadNetConsumptionReport).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: 'basis.net' }))
-
-    expect(await screen.findAllByText('$75.00')).toHaveLength(2)
-    expect(screen.getByText('$200.00')).toBeInTheDocument()
-    expect(screen.queryByText(/allocation-1/)).not.toBeInTheDocument()
-    expect(screen.getAllByText('report.incompleteStatus · 1').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByRole('link', { name: 'actions.reviewUnclassified' })).toHaveAttribute(
-      'href',
-      expect.stringContaining('reviewReason=unclassified')
-    )
-    expect(
-      screen.getByRole('link', { name: 'actions.reviewAccount · Daily Checking' })
-    ).toHaveAttribute('href', '/accounts?account=account-1')
-    expect(mockReadNetConsumptionReport).toHaveBeenCalledWith(
-      dayjs().startOf('month').format('YYYY-MM-DD'),
-      dayjs().endOf('month').format('YYYY-MM-DD')
-    )
-    expect(screen.queryByText('$2,500.00')).not.toBeInTheDocument()
-  })
-
-  it('shows all five complete dated main-currency totals separately from native evidence', async () => {
-    mockReadNetConsumptionReport.mockResolvedValueOnce({
-      basis: 'net_consumption',
-      complete: true,
-      classificationComplete: true,
-      coverageComplete: true,
-      unresolvedIds: [],
-      uncoveredAccountIds: [],
-      totalsByCurrency: [
-        {
-          currency: 'EUR',
-          consumptionCentavos: 1101,
-          earnedIncomeCentavos: 2202,
-          otherIncomeCentavos: 3303,
-          principalRecoveryCentavos: 4404,
-          assetAcquisitionCentavos: 5505,
-        },
-      ],
-      mainConversion: {
-        complete: true,
-        toCurrency: 'USD',
-        reason: null,
-        policy: 'recognition_transaction_date_parent_then_allocation',
-        consumptionCentavos: 101,
-        earnedIncomeCentavos: 202,
-        otherIncomeCentavos: 303,
-        principalRecoveryCentavos: 404,
-        assetAcquisitionCentavos: 505,
-        knownConsumptionCentavos: 101,
-        knownEarnedIncomeCentavos: 202,
-        knownOtherIncomeCentavos: 303,
-        knownPrincipalRecoveryCentavos: 404,
-        knownAssetAcquisitionCentavos: 505,
-        classificationComplete: true,
-        coverageComplete: true,
-        unresolvedClassificationIds: [],
-        native: {
-          basis: 'net_consumption',
-          classificationComplete: true,
-          unresolvedIds: [],
-          totalsByCurrency: [],
-          byCategory: [],
-        },
-        allocations: [],
-        byCategory: [],
-        conversion: {},
-        uncoveredAccountIds: [],
-      },
-      byCategory: [],
-      period: { start: '2026-01-01', end: '2026-01-31' },
-      currencyScope: 'all',
-      message: 'Complete',
-    })
-    const user = userEvent.setup()
-    await renderReports()
-    await user.click(screen.getByRole('button', { name: 'basis.net' }))
-
-    const main = await screen.findByRole('heading', { name: 'report.mainCurrencyTitle' })
-    const mainSection = main.closest('section')!
-    expect(within(mainSection).getByText('$1.01')).toBeInTheDocument()
-    expect(within(mainSection).getByText('$2.02')).toBeInTheDocument()
-    expect(within(mainSection).getByText('$3.03')).toBeInTheDocument()
-    expect(within(mainSection).getByText('$4.04')).toBeInTheDocument()
-    expect(within(mainSection).getByText('$5.05')).toBeInTheDocument()
-    expect(screen.getByText('€11.01')).toBeInTheDocument()
-    expect(screen.getByText('€55.05')).toBeInTheDocument()
-  })
-
-  it('labels known converted values as partial and never renders missing full totals as zero', async () => {
-    mockReadNetConsumptionReport.mockResolvedValueOnce({
-      basis: 'net_consumption',
-      complete: false,
-      classificationComplete: false,
-      coverageComplete: true,
-      unresolvedIds: ['missing'],
-      uncoveredAccountIds: [],
-      totalsByCurrency: [],
-      mainConversion: {
-        complete: false,
-        toCurrency: 'USD',
-        reason: 'missing_direct_rate',
-        consumptionCentavos: null,
-        earnedIncomeCentavos: null,
-        otherIncomeCentavos: null,
-        principalRecoveryCentavos: null,
-        assetAcquisitionCentavos: null,
-        knownConsumptionCentavos: 111,
-        knownEarnedIncomeCentavos: 222,
-        knownOtherIncomeCentavos: 333,
-        knownPrincipalRecoveryCentavos: null,
-        knownAssetAcquisitionCentavos: 555,
-        native: {
-          basis: 'net_consumption',
-          classificationComplete: false,
-          unresolvedIds: ['missing'],
-          totalsByCurrency: [],
-          byCategory: [],
-        },
-        allocations: [],
-        policy: 'recognition_transaction_date_parent_then_allocation',
-        classificationComplete: false,
-        coverageComplete: true,
-        unresolvedClassificationIds: ['missing'],
-        byCategory: [],
-        conversion: {},
-        uncoveredAccountIds: [],
-      },
-      byCategory: [],
-      period: { start: '2026-01-01', end: '2026-01-31' },
-      currencyScope: 'all',
-      message: 'Partial',
-    })
-    const user = userEvent.setup()
-    await renderReports()
-    await user.click(screen.getByRole('button', { name: 'basis.net' }))
-
-    expect(await screen.findByText('report.partialStatus')).toBeInTheDocument()
-    const mainSection = screen
-      .getByRole('heading', { name: 'report.mainCurrencyTitle' })
-      .closest('section')!
-    expect(within(mainSection).getByText('$1.11')).toBeInTheDocument()
-    expect(within(mainSection).getByText('$3.33')).toBeInTheDocument()
-    expect(within(mainSection).getByText('—')).toBeInTheDocument()
-    expect(within(mainSection).queryByText('$0.00')).not.toBeInTheDocument()
-  })
-
-  it('states that main conversion is unavailable when no report currency is configured', async () => {
-    mockMainCurrency = null
-    mockReadNetConsumptionReport.mockResolvedValueOnce({
-      basis: 'net_consumption',
-      complete: true,
-      classificationComplete: true,
-      coverageComplete: true,
-      unresolvedIds: [],
-      uncoveredAccountIds: [],
-      totalsByCurrency: [
-        {
-          currency: 'MXN',
-          consumptionCentavos: 1234,
-          earnedIncomeCentavos: 0,
-          otherIncomeCentavos: 0,
-          principalRecoveryCentavos: 0,
-          assetAcquisitionCentavos: 0,
-        },
-      ],
-      mainConversion: {
-        complete: false,
-        toCurrency: null,
-        reason: 'main_currency_unconfigured',
-        consumptionCentavos: null,
-        earnedIncomeCentavos: null,
-        otherIncomeCentavos: null,
-        principalRecoveryCentavos: null,
-        assetAcquisitionCentavos: null,
-        knownConsumptionCentavos: null,
-        knownEarnedIncomeCentavos: null,
-        knownOtherIncomeCentavos: null,
-        knownPrincipalRecoveryCentavos: null,
-        knownAssetAcquisitionCentavos: null,
-        native: {
-          basis: 'net_consumption',
-          classificationComplete: true,
-          unresolvedIds: [],
-          totalsByCurrency: [],
-          byCategory: [],
-        },
-        allocations: [],
-        policy: 'recognition_transaction_date_parent_then_allocation',
-        classificationComplete: true,
-        coverageComplete: true,
-        unresolvedClassificationIds: [],
-        byCategory: [],
-        conversion: {},
-        uncoveredAccountIds: [],
-      },
-      byCategory: [],
-      period: { start: '2026-01-01', end: '2026-01-31' },
-      currencyScope: 'all',
-      message: 'Native only',
-    })
-    const user = userEvent.setup()
-    await renderReports()
-    await user.click(screen.getByRole('button', { name: 'basis.net' }))
-
-    expect(await screen.findByText('report.mainUnavailable')).toBeInTheDocument()
-    expect(screen.queryByText('report.partialStatus')).not.toBeInTheDocument()
-    expect(screen.getByText('MX$12.34')).toBeInTheDocument()
-  })
-
-  it('suppresses an initial read when currency authority changes before it resolves', async () => {
-    let resolveInitial!: (value: FrontendNetConsumptionReport) => void
-    mockReadNetConsumptionReport
-      .mockImplementationOnce(() => new Promise((resolve) => (resolveInitial = resolve)))
-      .mockResolvedValueOnce({
-        basis: 'net_consumption',
-        complete: true,
-        classificationComplete: true,
-        coverageComplete: true,
-        unresolvedIds: [],
-        uncoveredAccountIds: [],
-        totalsByCurrency: [],
-        byCategory: [],
-        period: { start: '2026-01-01', end: '2026-01-31' },
-        currencyScope: 'all',
-        message: 'New authority',
+beforeEach(() => {
+  snapshot = scopedFixture()
+  read.mockReset()
+  read.mockImplementation(async (input) => projection(input))
+  useCurrencyStore.setState({ mainCurrency: 'MXN', preferredCurrency: 'USD', manualRates: [] })
+  useUIStore.setState({ openTransactionDialog: vi.fn() })
+})
+describe('scoped Reports UI', () => {
+  it('renders Spanish labels without changing the captured measure contract', async () => {
+    await i18n.changeLanguage('es')
+    try {
+      render(<ReportsPage />)
+      await screen.findByText('Completo')
+      expect(screen.getByLabelText('Medida')).toHaveValue('gross_cashflow')
+      expect(screen.getByRole('option', { name: 'Neto clasificado' })).toHaveValue(
+        'net_consumption'
+      )
+      expect(
+        screen.getByRole('button', { name: 'Actualizar desde la base de datos' })
+      ).toBeInTheDocument()
+    } finally {
+      await act(async () => {
+        await i18n.changeLanguage('en')
       })
+    }
+  })
+  it('exposes gross/net/estimates, account/category/tag scope and grouping without unscoped metrics', async () => {
     const user = userEvent.setup()
-    const { rerender } = await renderReports()
-    await user.click(screen.getByRole('button', { name: 'basis.net' }))
-
-    mockMainCurrency = 'EUR'
-    rerender(
-      <MemoryRouter>
-        <ReportsPage />
-      </MemoryRouter>
+    render(<ReportsPage />)
+    await screen.findByText('Complete')
+    expect(screen.getByLabelText('Measure')).toHaveValue('gross_cashflow')
+    expect(screen.queryByText('Total Balance')).not.toBeInTheDocument()
+    await user.click(screen.getByText('Advanced scope · accounts, categories & tags'))
+    await user.click(
+      within(screen.getByRole('group', { name: 'Exclude categories' })).getByLabelText('Food')
     )
-    await screen.findByText('report.noKnownTotals')
-    resolveInitial({
-      basis: 'net_consumption',
-      complete: true,
-      classificationComplete: true,
-      coverageComplete: true,
-      unresolvedIds: [],
-      uncoveredAccountIds: [],
-      totalsByCurrency: [{ currency: 'USD', consumptionCentavos: 99999, earnedIncomeCentavos: 0 }],
-      byCategory: [],
-      period: { start: '2026-01-01', end: '2026-01-31' },
-      currencyScope: 'all',
-      message: 'Stale authority',
-    })
-    await act(async () => {})
-    expect(screen.queryByText('$999.99')).not.toBeInTheDocument()
-  })
-
-  it('surfaces net-basis read failures without replacing the gross report', async () => {
-    mockReadNetConsumptionReport.mockRejectedValueOnce(new Error('Synthetic read failure'))
-    const user = userEvent.setup()
-    await renderReports()
-
-    await user.click(screen.getByRole('button', { name: 'basis.net' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'report.loadError: Synthetic read failure'
+    await waitFor(() =>
+      expect(read).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          scope: expect.objectContaining({ excludeCategoryIds: ['food'] }),
+        })
+      )
     )
-    await user.click(screen.getByRole('button', { name: 'basis.gross' }))
-    expect(screen.getByText('reports.categoryBreakdown')).toBeInTheDocument()
-  })
-
-  it('ignores a stale net response after returning to gross basis', async () => {
-    let resolveNet!: (value: FrontendNetConsumptionReport) => void
-    mockReadNetConsumptionReport.mockImplementationOnce(
-      () => new Promise((resolve) => (resolveNet = resolve))
+    await user.selectOptions(screen.getByLabelText('Group by'), 'account')
+    await waitFor(() =>
+      expect(read).toHaveBeenLastCalledWith(expect.objectContaining({ groupBy: 'account' }))
     )
-    const user = userEvent.setup()
-    await renderReports()
-
-    await user.click(screen.getByRole('button', { name: 'basis.net' }))
-    await user.click(screen.getByRole('button', { name: 'basis.gross' }))
-    resolveNet({
-      basis: 'net_consumption',
-      complete: true,
-      classificationComplete: true,
-      coverageComplete: true,
-      unresolvedIds: [],
-      uncoveredAccountIds: [],
-      totalsByCurrency: [],
-      byCategory: [],
-      period: { start: '2026-09-01', end: '2026-09-30' },
-      currencyScope: 'all',
-      message: 'Complete',
-    })
-    await Promise.resolve()
-    expect(screen.getByText('reports.categoryBreakdown')).toBeInTheDocument()
-    expect(screen.queryByText('report.title')).not.toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('Measure'), 'net_consumption')
+    await screen.findAllByText('Net consumption')
+    expect(screen.getAllByText(/Incomplete · totals/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Earned income').length).toBeGreaterThan(0)
   })
-
-  it('converts mixed-currency cash flow before aggregating it', async () => {
-    mockTransactions = [
-      transaction('tx-usd', 'expense', 10_000, { currency: 'USD' }),
-      transaction('tx-eur', 'expense', 10_000, { currency: 'EUR' }),
-    ]
-    mockManualRates = [rate('EUR', 'USD', '2')]
-
-    await renderReports()
-
-    expect(screen.getAllByText('$300.00').length).toBeGreaterThan(0)
-  })
-
-  it('recomputes stable converter results after deferred rates, currency switches, and invalid-rate updates', async () => {
-    mockTransactions = [transaction('tx-eur', 'expense', 10_000, { currency: 'EUR' })]
-    mockTotalBalanceResult = {
-      complete: false,
-      preferredCurrency: 'USD',
-      missingCurrencies: ['EUR'],
-      reason: 'missing_exchange_rates',
-    }
-    const { rerender } = await renderReports()
-    expect(screen.getAllByText('reports.cashUnavailable: EUR').length).toBeGreaterThan(0)
-
-    mockManualRates = [rate('EUR', 'USD', '2')]
-    mockTotalBalanceResult = {
-      complete: true,
-      preferredCurrency: 'USD',
-      amountCentavos: 50000,
-      missingCurrencies: [],
-    }
-    rerender(
-      <MemoryRouter>
-        <ReportsPage />
-      </MemoryRouter>
-    )
-    expect(screen.getAllByText('$200.00').length).toBeGreaterThan(0)
-    expect(screen.getByText('$500.00')).toBeInTheDocument()
-
-    mockPreferredCurrency = 'EUR'
-    mockManualRates = []
-    mockTotalBalanceResult = {
-      complete: true,
-      preferredCurrency: 'EUR',
-      amountCentavos: 25000,
-      missingCurrencies: [],
-    }
-    rerender(
-      <MemoryRouter>
-        <ReportsPage />
-      </MemoryRouter>
-    )
-    expect(screen.getAllByText('€100.00').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('€250.00').length).toBeGreaterThan(0)
-    expect(screen.queryByText('€200.00')).not.toBeInTheDocument()
-
-    mockManualRates = [rate('USD', 'EUR', '0')]
-    mockTotalBalanceResult = {
-      complete: false,
-      preferredCurrency: 'EUR',
-      missingCurrencies: [],
-      reason: 'invalid_currency_data',
-    }
-    rerender(
-      <MemoryRouter>
-        <ReportsPage />
-      </MemoryRouter>
-    )
-    expect(screen.getAllByText(/reports\.cashUnavailable/).length).toBeGreaterThan(0)
-    expect(screen.getByText(/reports\.cashInvalidData/)).toBeInTheDocument()
-    expect(screen.queryByText('€100.00')).not.toBeInTheDocument()
-  })
-
-  it('uses migration-019 eligibility for income, expense, count, net flow, and categories', async () => {
-    mockTransactions = [
-      transaction('posted-income', 'income', 100_000),
-      transaction('cleared-income', 'income', 50_000, { status: 'cleared' }),
-      transaction('posted-food', 'expense', 20_000),
-      transaction('cleared-transport', 'expense', 10_000, {
-        status: 'cleared',
-        category_name: 'Transport',
-        category_color: '#38bdf8',
-      }),
-      transaction('pending', 'expense', 901_000, { status: 'pending' }),
-      transaction('staged', 'expense', 911_000, {
-        ledger_treatment: 'staged_no_balance_impact',
-      }),
-      transaction('reconciliation-bridge', 'expense', 902_000, {
-        reporting_treatment: 'exclude_from_cashflow',
-        transaction_kind: 'reconciliation_bridge',
-      }),
-      transaction('archived-mirror', 'expense', 903_000, {
-        transaction_kind: 'archived_transfer_mirror',
-      }),
-      transaction('archived-standard', 'expense', 904_000, { is_archived: 1 }),
-      transaction('transfer', 'transfer', 905_000),
-      transaction('malformed-status', 'expense', 906_000, { status: 'unknown' }),
-      transaction('malformed-reporting', 'expense', 907_000, {
-        reporting_treatment: 'unknown',
-      }),
-      transaction('malformed-kind', 'expense', 908_000, { transaction_kind: 'unknown' }),
-      transaction('malformed-type', 'refund', 909_000),
-      transaction('malformed-archive', 'expense', 910_000, { is_archived: 'yes' }),
-    ]
-
-    await renderReports()
-
-    expect(screen.getByText('$1,500.00')).toBeInTheDocument()
-    expect(screen.getByText('$1,200.00')).toBeInTheDocument()
-    expect(screen.getByText('$300.00')).toBeInTheDocument()
-    expect(screen.getByText('$200.00')).toBeInTheDocument()
-    expect(screen.getByText('$100.00')).toBeInTheDocument()
-    expect(screen.getByText('4')).toBeInTheDocument()
-  })
-
-  it('shows accessible invalid-currency account diagnostics without crashing', async () => {
-    mockTotalBalanceResult = {
-      complete: false,
-      preferredCurrency: 'USD',
-      missingCurrencies: [],
-      reason: 'invalid_currency_data',
-      invalidCurrencies: [{ accountId: 'account-1', accountName: 'Broken cash', value: 'US D' }],
-    }
-
-    await renderReports()
-
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'reports.cashInvalidData: Broken cash (US D)'
-    )
-    expect(screen.queryByText('$2,500.00')).not.toBeInTheDocument()
-  })
-
-  it('shows an accessible missing-rate warning without a false cash scalar', async () => {
-    mockAccounts = [
-      { id: 'account-usd', balance: 100_000, currency: 'USD', is_archived: 0 },
-      { id: 'account-eur', balance: 200_000, currency: 'EUR', is_archived: 0 },
-    ]
-    mockTotalBalanceResult = {
-      complete: false,
-      preferredCurrency: 'USD',
-      missingCurrencies: ['EUR'],
-      reason: 'missing_exchange_rates',
-    }
-
-    await renderReports()
-
-    expect(screen.getByRole('alert')).toHaveTextContent('reports.cashUnavailable: EUR')
-    expect(screen.queryByText('$3,000.00')).not.toBeInTheDocument()
-  })
-
-  it('withholds budget health when converted budget totals are incomplete', async () => {
-    mockBudgetDisplayComplete = false
-
-    await renderReports()
-
-    expect(screen.getByRole('alert')).toHaveTextContent('reports.budgetUnavailable')
-    expect(screen.queryByText('25%')).not.toBeInTheDocument()
-    expect(screen.queryByText('$1,000.00')).not.toBeInTheDocument()
-  })
-
-  it('shows a budget-health read error instead of stored raw sums', async () => {
-    mockBudgetDisplayComplete = false
-    mockBudgetDisplayError = 'Read failed'
-
-    await renderReports()
-
-    expect(screen.getByRole('alert')).toHaveTextContent('reports.budgetReadError: Read failed')
-    expect(screen.queryByText('25%')).not.toBeInTheDocument()
-  })
-
-  it('loads a historical native-currency net period and keeps it across basis switches', async () => {
-    const previousStart = dayjs().subtract(1, 'month').startOf('month').format('YYYY-MM-DD')
-    const previousEnd = dayjs().subtract(1, 'month').endOf('month').format('YYYY-MM-DD')
-    mockReadNetConsumptionReport.mockImplementation(async (start: string, end: string) => ({
-      basis: 'net_consumption',
-      complete: true,
-      classificationComplete: true,
-      coverageComplete: true,
-      unresolvedIds: [],
-      uncoveredAccountIds: [],
-      totalsByCurrency: [
-        { currency: 'MXN', consumptionCentavos: 12345, earnedIncomeCentavos: 20000 },
+  it('opens each selected parent once through the authoritative global dialog and refreshes on the existing event', async () => {
+    snapshot.dataset = {
+      ...snapshot.dataset,
+      splits: [
+        { id: 'a', transaction_id: 'expense', category_id: 'food', amount: 15000 },
+        { id: 'b', transaction_id: 'expense', category_id: 'other', amount: 10000 },
       ],
-      byCategory: [
+    }
+    const user = userEvent.setup()
+    render(<ReportsPage />)
+    await screen.findByText('Complete')
+    await user.click(screen.getByText(/Inspect contributing transactions/))
+    const parents = screen.getAllByRole('button', { name: /2026-01-10 · expense/ })
+    expect(parents).toHaveLength(1)
+    await user.click(parents[0])
+    expect(useUIStore.getState().openTransactionDialog).toHaveBeenCalledWith('expense')
+    expect(screen.getByText(/Full parent · context only/)).toHaveTextContent('250')
+    expect(screen.getByText(/Selected allocation: a/)).toBeInTheDocument()
+    const previous = read.mock.calls.length
+    act(() => window.dispatchEvent(new CustomEvent(TRANSACTION_PAGE_INVALIDATION_EVENT)))
+    await waitFor(() => expect(read.mock.calls.length).toBe(previous + 1))
+    expect(read.mock.calls[read.mock.calls.length - 1][0]).toMatchObject({
+      basis: 'gross_cashflow',
+      groupBy: 'category',
+    })
+    await user.click(screen.getByRole('button', { name: 'Refresh from database' }))
+    await waitFor(() => expect(read.mock.calls.length).toBe(previous + 2))
+  })
+  it('resolves custom/as-of/week/timezone/through with the same controls', async () => {
+    const user = userEvent.setup()
+    render(<ReportsPage />)
+    await screen.findByText('Complete')
+    await user.click(screen.getByText('Dates & window'))
+    fireEvent.change(screen.getByLabelText('As of'), { target: { value: '2026-01-12' } })
+    await user.selectOptions(screen.getByLabelText('Include through'), 'period_end')
+    await user.selectOptions(screen.getByLabelText('Week starts on'), '1')
+    fireEvent.change(screen.getByLabelText('Time zone (IANA)'), {
+      target: { value: 'America/Mexico_City' },
+    })
+    await waitFor(() =>
+      expect(read).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          window: {
+            asOf: '2026-01-12',
+            through: 'period_end',
+            weekStartsOn: 1,
+            timeZone: 'America/Mexico_City',
+          },
+        })
+      )
+    )
+    fireEvent.change(screen.getByLabelText('Custom start'), { target: { value: '2026-02-01' } })
+    await screen.findByRole('alert')
+  })
+  it('withholds old results during rapid currency changes and ignores late/unmounted responses', async () => {
+    const user = userEvent.setup()
+    const { unmount } = render(<ReportsPage />)
+    await screen.findByText('Complete')
+    const old = deferred<ScopedRead>()
+    read.mockReturnValueOnce(old.promise)
+    await user.selectOptions(screen.getByLabelText('Currency'), 'USD')
+    expect(screen.getByRole('status')).toHaveTextContent('Loading snapshot')
+    expect(screen.queryByText('Actual expenses')).not.toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('Currency'), 'MXN')
+    await screen.findByText('Complete')
+    await act(async () => old.resolve(projection({ basis: 'gross_cashflow', currency: 'USD' })))
+    expect(screen.queryByText(/Incomplete · totals/)).not.toBeInTheDocument()
+    const pending = deferred<ScopedRead>()
+    read.mockReturnValueOnce(pending.promise)
+    await user.click(screen.getByRole('button', { name: 'Refresh from database' }))
+    unmount()
+    await act(async () => pending.resolve(projection({ basis: 'gross_cashflow' })))
+  })
+  it('shows separate current recurring sources, never a combined total, tags explicitly unsupported for subscriptions', async () => {
+    snapshot.estimates = {
+      ...snapshot.estimates,
+      recurringRules: [
         {
+          id: 'rule',
+          amount: 10000,
           currency: 'MXN',
-          categoryId: 'food',
-          categoryName: 'Food',
-          amountCentavos: 12345,
+          account_id: 'bank',
+          category_id: 'food',
+          is_active: 1,
+          type: 'expense',
+          frequency: 'monthly',
+          tags: '["business"]',
         },
       ],
-      period: { start, end },
-      currencyScope: 'all',
-      message: 'Complete',
-    }))
-    const user = userEvent.setup()
-    await renderReports()
-
-    await user.click(screen.getByRole('button', { name: 'basis.net' }))
-    await user.click(screen.getByRole('button', { name: 'period.previousMonth' }))
-
-    expect(await screen.findByText('MXN')).toBeInTheDocument()
-    expect(mockReadNetConsumptionReport).toHaveBeenCalledWith(previousStart, previousEnd)
-    expect(screen.getByRole('button', { name: 'period.previousMonth' })).toHaveAttribute(
-      'aria-pressed',
-      'true'
-    )
-
-    await user.click(screen.getByRole('button', { name: 'basis.gross' }))
-    expect(screen.getByText('reports.categoryBreakdown')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'basis.net' }))
-    expect(await screen.findByText('MXN')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'period.previousMonth' })).toHaveAttribute(
-      'aria-pressed',
-      'true'
-    )
-    expect(mockReadNetConsumptionReport).toHaveBeenLastCalledWith(previousStart, previousEnd)
-  })
-
-  it('rejects an inverted net period before querying', async () => {
-    const user = userEvent.setup()
-    await renderReports()
-
-    await user.click(screen.getByRole('button', { name: 'basis.net' }))
-    await screen.findByLabelText('period.start')
-    mockReadNetConsumptionReport.mockClear()
-    fireEvent.change(screen.getByLabelText('period.end'), { target: { value: '2020-01-01' } })
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('period.invalid')
-    expect(mockReadNetConsumptionReport).not.toHaveBeenCalled()
-    expect(screen.queryByText('report.title')).not.toBeInTheDocument()
-  })
-
-  it('clears the previous net report, shows retry, and ignores an obsolete response', async () => {
-    const currentStart = dayjs().startOf('month').format('YYYY-MM-DD')
-    const currentEnd = dayjs().endOf('month').format('YYYY-MM-DD')
-    const previousStart = dayjs().subtract(1, 'month').startOf('month').format('YYYY-MM-DD')
-    const previousEnd = dayjs().subtract(1, 'month').endOf('month').format('YYYY-MM-DD')
-    let resolveCurrent!: (value: FrontendNetConsumptionReport) => void
-    mockReadNetConsumptionReport.mockImplementationOnce(
-      () => new Promise((resolve) => (resolveCurrent = resolve))
-    )
-    mockReadNetConsumptionReport.mockRejectedValueOnce(new Error('Range read failure'))
-    const user = userEvent.setup()
-    await renderReports()
-
-    await user.click(screen.getByRole('button', { name: 'basis.net' }))
-    await user.click(screen.getByRole('button', { name: 'period.previousMonth' }))
-    resolveCurrent({
-      basis: 'net_consumption',
-      complete: true,
-      classificationComplete: true,
-      coverageComplete: true,
-      unresolvedIds: [],
-      uncoveredAccountIds: [],
-      totalsByCurrency: [
-        { currency: 'USD', consumptionCentavos: 7500, earnedIncomeCentavos: 20000 },
+      subscriptions: [
+        {
+          id: 'sub',
+          amount: 20000,
+          currency: 'MXN',
+          account_id: 'bank',
+          category_id: 'food',
+          is_active: 1,
+          billing_cycle: 'monthly',
+        },
       ],
-      byCategory: [],
-      period: { start: currentStart, end: currentEnd },
-      currencyScope: 'all',
-      message: 'Complete',
-    })
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'report.loadError: Range read failure'
-    )
-    expect(screen.getByRole('button', { name: 'actions.retry' })).toHaveClass('min-h-11')
-    expect(screen.queryByText('$75.00')).not.toBeInTheDocument()
-    expect(screen.queryByText(`${currentStart} – ${currentEnd}`)).not.toBeInTheDocument()
-
-    mockReadNetConsumptionReport.mockResolvedValueOnce({
-      basis: 'net_consumption',
-      complete: false,
-      classificationComplete: false,
-      coverageComplete: true,
-      unresolvedIds: ['allocation-1'],
-      uncoveredAccountIds: ['01HUNKNOWNACCOUNTIDENTLONGULID'],
-      totalsByCurrency: [{ currency: 'EUR', consumptionCentavos: 4400, earnedIncomeCentavos: 0 }],
-      byCategory: [],
-      period: { start: previousStart, end: previousEnd },
-      currencyScope: 'all',
-      message: 'Known subtotals only.',
-    })
-    await user.click(screen.getByRole('button', { name: 'actions.retry' }))
-
-    expect(await screen.findByText('€44.00')).toBeInTheDocument()
-    expect(screen.queryByText(/allocation-1/)).not.toBeInTheDocument()
-    expect(screen.getByText('report.incompleteStatus · 1')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'actions.reviewUnclassified' })).toHaveAttribute(
-      'href',
-      expect.stringContaining(`dateFrom=${previousStart}&dateTo=${previousEnd}`)
-    )
-    const unknownAccountLink = screen.getByRole('link', {
-      name: /actions.reviewAccount · 01HUNKNOWNACCOUNTIDENTLONGULID/,
-    })
-    expect(unknownAccountLink).toHaveClass('max-w-full')
-    expect(unknownAccountLink.querySelector('.break-all')).not.toBeNull()
-    expect(mockReadNetConsumptionReport).toHaveBeenLastCalledWith(previousStart, previousEnd)
+    }
+    const user = userEvent.setup()
+    render(<ReportsPage />)
+    await screen.findByText('Complete')
+    await user.selectOptions(screen.getByLabelText('Measure'), 'recurring_estimate')
+    await screen.findByRole('heading', { name: 'Recurring rules · separate source' })
+    expect(
+      screen.getByRole('heading', { name: 'Subscriptions · separate source' })
+    ).toBeInTheDocument()
+    expect(screen.getByText(/No combined total/)).toBeInTheDocument()
+    await user.click(screen.getByText('Advanced scope · accounts, categories & tags'))
+    await user.type(screen.getByLabelText('Include tags'), 'business')
+    await screen.findByText(/Subscriptions do not support tag filtering/)
+    expect(
+      screen.getByRole('heading', { name: 'Subscriptions · separate source' }).parentElement
+    ).toHaveTextContent('Incomplete')
   })
 })

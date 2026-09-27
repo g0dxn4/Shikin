@@ -4,261 +4,309 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useTranslation } from 'react-i18next'
 import {
-  ArrowRightLeft,
-  Banknote,
-  Briefcase,
-  Car,
-  GraduationCap,
-  HeartPulse,
-  Home,
-  MoreHorizontal,
-  Repeat,
-  ShoppingBag,
-  Tag,
-  TrendingUp,
-  Tv,
-  Utensils,
-  Zap,
-  type LucideIcon,
-} from 'lucide-react'
+  normalizeReportScope,
+  inspectReportScope,
+  type NormalizedReportScope,
+} from '@shikin/finance-core'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
-import { ErrorBanner } from '@/components/ui/error-banner'
+import { CurrencyControl, ScopeControls, scopedSelectClass } from './scoped-controls'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { useCategoryStore } from '@/stores/category-store'
+  readScopedSnapshot,
+  storedBudgetScope,
+  type ScopedSnapshot,
+} from '@/lib/scoped-report-read'
 import { useCurrencyStore } from '@/stores/currency-store'
-import type { BudgetWithStatus } from '@/stores/budget-store'
+import type { BudgetWithStatus, BudgetFormData } from '@/stores/budget-store'
 import { fromCentavos } from '@/lib/money'
-
-const BUDGET_PERIODS = ['weekly', 'monthly', 'yearly'] as const
-
-const CATEGORY_ICON_MAP: Record<string, LucideIcon> = {
-  tag: Tag,
-  utensils: Utensils,
-  car: Car,
-  home: Home,
-  tv: Tv,
-  'heart-pulse': HeartPulse,
-  'shopping-bag': ShoppingBag,
-  'graduation-cap': GraduationCap,
-  zap: Zap,
-  repeat: Repeat,
-  'more-horizontal': MoreHorizontal,
-  banknote: Banknote,
-  briefcase: Briefcase,
-  'trending-up': TrendingUp,
-  'arrow-right-left': ArrowRightLeft,
-}
-
-function CategoryIcon({ name }: { name: string | null | undefined }) {
-  const Icon = name ? CATEGORY_ICON_MAP[name] : null
-  return (
-    <span className="inline-flex h-4 w-4 items-center justify-center">
-      {Icon && <Icon size={14} />}
-    </span>
-  )
-}
+import { getErrorMessage } from '@/lib/errors'
 
 const budgetSchema = z.object({
-  name: z.string().min(1),
-  categoryId: z.string().min(1),
+  name: z.string().trim().min(1),
   amount: z.number().positive(),
-  period: z.enum(BUDGET_PERIODS),
+  period: z.enum(['weekly', 'monthly', 'yearly']),
   currency: z.string().min(1),
+  basis: z.enum(['gross_cashflow', 'net_consumption']),
+  isActive: z.boolean(),
 })
-
-export type BudgetFormValues = z.infer<typeof budgetSchema>
-
+type Fields = z.infer<typeof budgetSchema>
+export type BudgetFormValues = Omit<BudgetFormData, 'amount'> & { amount?: number }
 interface BudgetFormProps {
   budget?: BudgetWithStatus
   onSubmit: (data: BudgetFormValues) => void
   isLoading?: boolean
   onDirtyChange?: (isDirty: boolean) => void
 }
-
 export function BudgetForm({ budget, onSubmit, isLoading, onDirtyChange }: BudgetFormProps) {
   const { t } = useTranslation('budgets')
   const { t: tCommon } = useTranslation('common')
-  const mainCurrency = useCurrencyStore((state) => state.mainCurrency)
-  const [denomination] = useState(
-    () => budget?.currency ?? useCurrencyStore.getState().mainCurrency
-  )
-  const denominationMismatch = !budget && denomination !== mainCurrency
-  const {
-    categories,
-    isLoading: categoriesLoading,
-    fetchError: categoriesFetchError,
-    fetch: fetchCategories,
-  } = useCategoryStore()
-
-  useEffect(() => {
-    void fetchCategories().catch(() => {})
-  }, [fetchCategories])
-
-  const expenseCategories = categories.filter((c) => c.type === 'expense')
-  const isCategorySelectDisabled = categoriesLoading || !!categoriesFetchError
-  const isSubmitDisabled =
-    isLoading ||
-    categoriesLoading ||
-    !!categoriesFetchError ||
-    !denomination ||
-    denominationMismatch
-
+  const authorityMain = useCurrencyStore((state) => state.mainCurrency)
+  const [initialAuthority] = useState(authorityMain)
+  const [snapshot, setSnapshot] = useState<ScopedSnapshot | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [retry, setRetry] = useState(0)
+  const [explicitCurrency, setExplicitCurrency] = useState(Boolean(budget))
+  const [scope, setScope] = useState<NormalizedReportScope | null>(() => {
+    try {
+      return normalizeReportScope(budget ? storedBudgetScope(budget) : undefined)
+    } catch {
+      return null
+    }
+  })
+  const [scopeDirty, setScopeDirty] = useState(false)
   const {
     register,
     handleSubmit,
     setValue,
     watch,
-    formState: { errors, isDirty },
-  } = useForm<BudgetFormValues>({
+    formState: { errors, isDirty, dirtyFields },
+  } = useForm<Fields>({
     resolver: zodResolver(budgetSchema),
     defaultValues: {
       name: budget?.name ?? '',
-      categoryId: budget?.category_id ?? '',
       amount: budget ? fromCentavos(budget.amount) : 0,
       period: budget?.period ?? 'monthly',
-      currency: denomination ?? '',
+      currency: budget?.currency ?? '',
+      basis: budget?.basis ?? 'gross_cashflow',
+      isActive: budget ? budget.is_active === 1 : true,
     },
   })
-
   // eslint-disable-next-line react-hooks/incompatible-library -- react-hook-form watch
-  const categoryValue = watch('categoryId')
-  const periodValue = watch('period')
-
+  const currency = watch('currency')
+  const basis = watch('basis')
+  const period = watch('period')
   useEffect(() => {
-    onDirtyChange?.(isDirty)
-  }, [isDirty, onDirtyChange])
-
+    let cancelled = false
+    void readScopedSnapshot()
+      .then((data) => {
+        if (cancelled) return
+        setSnapshot(data)
+        setLoadError(null)
+        if (!budget) setValue('currency', data.mainCurrency ?? '')
+      })
+      .catch((error) => {
+        if (!cancelled) setLoadError(getErrorMessage(error))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [budget, retry, setValue])
+  useEffect(() => {
+    onDirtyChange?.(isDirty || scopeDirty || (explicitCurrency && !budget))
+  }, [isDirty, scopeDirty, explicitCurrency, budget, onDirtyChange])
+  const mismatch =
+    !budget &&
+    !explicitCurrency &&
+    snapshot?.mainCurrency &&
+    authorityMain !== initialAuthority &&
+    snapshot.mainCurrency !== authorityMain
+  const scopeIssues = scope && snapshot ? inspectReportScope(scope, snapshot).issues : []
+  const changeScope = (next: NormalizedReportScope) => {
+    setScope(next)
+    setScopeDirty(true)
+  }
+  const categoryValue =
+    scope?.categoryIds.length === 1
+      ? (scope.categoryIds[0] ?? '__uncategorized')
+      : scope?.categoryIds.length
+        ? '__multiple'
+        : '__all'
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-      <input type="hidden" {...register('currency')} />
-      {!denomination ? (
-        <p className="text-warning text-sm" role="alert">
-          {t('currency.setupRequired')}
-        </p>
-      ) : denominationMismatch ? (
-        <p className="text-warning text-sm" role="alert">
+    <form
+      className="min-w-0 space-y-5"
+      onSubmit={handleSubmit((data) => {
+        if (!scope || !snapshot || mismatch) return
+        onSubmit({
+          ...data,
+          // Preserve the exact persisted cents when the amount was not edited.
+          amount:
+            budget && !dirtyFields.amount && data.currency === budget.currency
+              ? undefined
+              : data.amount,
+          scope: normalizeReportScope(scope),
+          ...(!budget && !explicitCurrency && snapshot.mainCurrency
+            ? { expectedMainCurrency: snapshot.mainCurrency }
+            : {}),
+        })
+      })}
+    >
+      {!snapshot && !loadError && <p role="status">{t('scoped.loading')}</p>}
+      {loadError && (
+        <div role="alert">
+          <p>{loadError}</p>
+          <Button type="button" variant="outline" onClick={() => setRetry((n) => n + 1)}>
+            {t('scoped.refresh')}
+          </Button>
+        </div>
+      )}
+      {mismatch && (
+        <p role="alert" className="text-warning text-sm">
           {t('currency.changedWhileOpen')}
         </p>
-      ) : null}
-      <ErrorBanner
-        title={t('form.categoriesError')}
-        message={categoriesFetchError}
-        onRetry={() => {
-          void fetchCategories().catch(() => {})
-        }}
-      />
-
+      )}
       <div className="space-y-1.5">
         <Label htmlFor="budget-name">{t('form.name')}</Label>
         <Input
-          id="budget-name"
-          placeholder={t('form.namePlaceholder')}
           autoFocus
+          id="budget-name"
           aria-invalid={!!errors.name}
           aria-describedby={errors.name ? 'budget-name-error' : undefined}
           {...register('name')}
         />
         {errors.name && (
-          <p id="budget-name-error" className="text-destructive text-xs" role="alert">
-            {errors.name.message}
+          <p id="budget-name-error" role="alert" className="text-destructive text-xs">
+            {t('scoped.nameRequired')}
           </p>
         )}
       </div>
-
-      <div className="space-y-1.5">
-        <Label htmlFor="budget-category">{t('form.category')}</Label>
-        {categoriesLoading ? (
-          <Skeleton className="h-10 w-full" />
-        ) : (
-          <Select
-            value={categoryValue || ''}
-            onValueChange={(val) => setValue('categoryId', val)}
-            disabled={isCategorySelectDisabled}
-          >
-            <SelectTrigger
-              id="budget-category"
-              aria-invalid={!!errors.categoryId}
-              aria-describedby={errors.categoryId ? 'budget-category-error' : undefined}
-            >
-              <SelectValue placeholder={t('form.categoryPlaceholder')} />
-            </SelectTrigger>
-            <SelectContent>
-              {expenseCategories.map((cat) => (
-                <SelectItem key={cat.id} value={cat.id}>
-                  <span className="flex items-center gap-2">
-                    <CategoryIcon name={cat.icon} />
-                    {cat.name}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-        {errors.categoryId && (
-          <p id="budget-category-error" className="text-destructive text-xs" role="alert">
-            {errors.categoryId.message}
-          </p>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <label className="grid gap-1.5 text-sm">
+        {t('form.category')}
+        <select
+          className={scopedSelectClass}
+          value={categoryValue}
+          disabled={!scope || !snapshot}
+          onChange={(e) => {
+            if (scope)
+              changeScope({
+                ...scope,
+                categoryIds:
+                  e.target.value === '__all'
+                    ? []
+                    : [e.target.value === '__uncategorized' ? null : e.target.value],
+              })
+          }}
+        >
+          <option value="__all">{t('scoped.allCategories')}</option>
+          <option value="__uncategorized">{t('scoped.uncategorized')}</option>
+          {categoryValue === '__multiple' && (
+            <option value="__multiple">{t('scoped.multipleCategories')}</option>
+          )}
+          {scope?.categoryIds
+            .filter((id) => id !== null && !snapshot?.categories.some((c) => c.id === id))
+            .map((id) => (
+              <option key={id!} value={id!}>
+                {t('scoped.missingReference')}: {id}
+              </option>
+            ))}
+          {snapshot?.categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="grid min-w-0 gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="budget-amount">
-            {t('form.amountWithCurrency', { currency: denomination ?? '—' })}
+            {t('form.amountWithCurrency', { currency: currency || '—' })}
           </Label>
           <Input
             id="budget-amount"
             type="number"
             step="0.01"
             aria-invalid={!!errors.amount}
-            aria-describedby={errors.amount ? 'budget-amount-error' : undefined}
+            aria-describedby="budget-amount-help"
             {...register('amount', { valueAsNumber: true })}
           />
+          <p id="budget-amount-help" className="text-muted-foreground text-xs">
+            {t('scoped.currencyReentry')}
+          </p>
           {errors.amount && (
-            <p id="budget-amount-error" className="text-destructive text-xs" role="alert">
-              {errors.amount.message}
+            <p role="alert" className="text-destructive text-xs">
+              {t('scoped.amountRequired')}
             </p>
           )}
         </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="budget-period">{t('form.period')}</Label>
-          <Select
-            value={periodValue}
-            onValueChange={(val) => setValue('period', val as BudgetFormValues['period'])}
+        <label className="grid content-start gap-1.5 text-sm">
+          {t('form.period')}
+          <select
+            className={scopedSelectClass}
+            value={period}
+            onChange={(e) =>
+              setValue('period', e.target.value as Fields['period'], { shouldDirty: true })
+            }
           >
-            <SelectTrigger id="budget-period">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {BUDGET_PERIODS.map((period) => (
-                <SelectItem key={period} value={period}>
-                  {t(`periods.${period}`)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+            {(['weekly', 'monthly', 'yearly'] as const).map((p) => (
+              <option key={p} value={p}>
+                {t(`periods.${p}`)}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
-
-      <Button type="submit" className="w-full" disabled={isSubmitDisabled} aria-busy={isLoading}>
-        {isLoading ? (
-          <>
-            <span className="sr-only">{tCommon('actions.saving')}</span>
-            ...
-          </>
-        ) : (
-          tCommon('actions.save')
-        )}
+      <details className="border-border min-w-0 rounded-lg border p-3">
+        <summary className="min-h-11 cursor-pointer text-sm font-medium">
+          {t('scoped.definition')}
+        </summary>
+        <div className="space-y-3">
+          <CurrencyControl
+            value={currency}
+            onChange={(value) => {
+              setExplicitCurrency(true)
+              if (value !== currency) {
+                setValue('currency', value, { shouldDirty: true })
+                setValue('amount', '' as unknown as number, { shouldDirty: true })
+              }
+            }}
+          />
+          <label className="grid gap-1 text-sm">
+            {t('scoped.basis')}
+            <select
+              className={scopedSelectClass}
+              value={basis}
+              onChange={(e) =>
+                setValue('basis', e.target.value as Fields['basis'], { shouldDirty: true })
+              }
+            >
+              {(['gross_cashflow', 'net_consumption'] as const).map((b) => (
+                <option key={b} value={b}>
+                  {t(`scoped.${b}`)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {budget && (
+            <label className="flex min-h-11 items-center gap-2 text-sm">
+              <input type="checkbox" {...register('isActive')} />
+              {t('scoped.active')}
+            </label>
+          )}
+        </div>
+      </details>
+      {scope && snapshot ? (
+        <ScopeControls
+          scope={scope}
+          onChange={changeScope}
+          accounts={snapshot.accounts}
+          categories={snapshot.categories}
+        />
+      ) : !scope ? (
+        <div role="alert">
+          <p className="text-warning text-sm">{t('scoped.invalidScope')}</p>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => changeScope(normalizeReportScope())}
+          >
+            {t('scoped.clearScope')}
+          </Button>
+        </div>
+      ) : null}
+      {scopeIssues.length > 0 && (
+        <p role="alert" className="text-warning text-xs [overflow-wrap:anywhere]">
+          {t('scoped.resolveReferences')}: {scopeIssues.map((i) => i.id).join(', ')}
+        </p>
+      )}
+      <Button
+        type="submit"
+        className="w-full"
+        disabled={
+          isLoading || !snapshot || !currency || !scope || !!mismatch || scopeIssues.length > 0
+        }
+        aria-busy={isLoading}
+      >
+        {isLoading ? tCommon('actions.saving') : tCommon('actions.save')}
       </Button>
     </form>
   )

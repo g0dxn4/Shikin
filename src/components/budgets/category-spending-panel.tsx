@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { formatMoney } from '@/lib/money'
 import type { BudgetRangePreset } from '@/lib/budget-actual-range'
+import { ScopedActualResult } from './scoped-result'
 import { useBudgetRangeSpending } from './use-budget-range-spending'
 
 const presets: BudgetRangePreset[] = ['this-month', '3-months', '6-months', 'this-year', 'all-time']
@@ -25,10 +26,8 @@ export function CategorySpendingPanel({ categories }: { categories: readonly Cat
       ),
     [categories]
   )
-  const { range, rows, loading, error, mainCurrency, retry } = useBudgetRangeSpending(
-    unique,
-    preset
-  )
+  const { range, rows, loading, error, mainCurrency, retry, result, references } =
+    useBudgetRangeSpending(unique, preset)
   const byId = new Map(rows.map((row) => [row.categoryId, row.spending]))
   const largest = Math.max(
     0,
@@ -137,6 +136,17 @@ export function CategorySpendingPanel({ categories }: { categories: readonly Cat
             })}
           </ul>
         </>
+      )}
+      {unique.length > 0 && result && references && (
+        <details className="mt-3">
+          <summary className="min-h-11 cursor-pointer text-sm">{t('scoped.evidence')}</summary>
+          <ScopedActualResult
+            compact
+            result={result}
+            accounts={references.accounts}
+            categories={references.categories}
+          />
+        </details>
       )}
     </section>
   )

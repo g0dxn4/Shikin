@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
@@ -10,7 +10,8 @@ import {
 } from '@/components/ui/dialog'
 import { BudgetForm, type BudgetFormValues } from './budget-form'
 import { useUIStore } from '@/stores/ui-store'
-import { useBudgetStore } from '@/stores/budget-store'
+import { readScopedSnapshot, projectBudget } from '@/lib/scoped-report-read'
+import { useBudgetStore, type BudgetWithStatus } from '@/stores/budget-store'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 import { getErrorMessage } from '@/lib/errors'
 
@@ -21,9 +22,7 @@ export function BudgetDialog() {
   const [isDirty, setIsDirty] = useState(false)
   const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false)
   const { budgetDialogOpen, editingBudgetId, closeBudgetDialog } = useUIStore()
-  const { add, update, getById } = useBudgetStore()
-
-  const budget = editingBudgetId ? getById(editingBudgetId) : undefined
+  const { add, update } = useBudgetStore()
   const isEditing = !!editingBudgetId
 
   const handleSubmit = async (data: BudgetFormValues) => {
@@ -36,8 +35,10 @@ export function BudgetDialog() {
         })
         toast.success(t('toast.updated'))
       } else {
+        if (data.amount === undefined) throw new Error(t('scoped.amountRequired'))
         await add({
           ...data,
+          amount: data.amount,
           categoryId: data.categoryId,
         })
         toast.success(t('toast.created'))
@@ -69,13 +70,15 @@ export function BudgetDialog() {
               {isEditing ? t('dialog.editDescription') : t('dialog.addDescription')}
             </DialogDescription>
           </DialogHeader>
-          <BudgetForm
-            key={editingBudgetId || 'new'}
-            budget={budget}
-            onSubmit={handleSubmit}
-            isLoading={isLoading}
-            onDirtyChange={setIsDirty}
-          />
+          {budgetDialogOpen && (
+            <BudgetDialogForm
+              key={editingBudgetId || 'new'}
+              id={editingBudgetId}
+              onSubmit={handleSubmit}
+              isLoading={isLoading}
+              onDirtyChange={setIsDirty}
+            />
+          )}
         </DialogContent>
       </Dialog>
       <ConfirmDialog
@@ -92,5 +95,53 @@ export function BudgetDialog() {
         }}
       />
     </>
+  )
+}
+
+function BudgetDialogForm({
+  id,
+  onSubmit,
+  isLoading,
+  onDirtyChange,
+}: {
+  id: string | null
+  onSubmit: (data: BudgetFormValues) => void
+  isLoading: boolean
+  onDirtyChange: (dirty: boolean) => void
+}) {
+  const { t } = useTranslation('budgets')
+  const [inspection, setInspection] = useState<{
+    budget?: BudgetWithStatus
+    error?: string
+  } | null>(null)
+  useEffect(() => {
+    if (!id) return
+    let cancelled = false
+    void readScopedSnapshot()
+      .then((snapshot) => {
+        const row = snapshot.budgets.find((b) => b.id === id)
+        if (!row) throw new Error(t('scoped.budgetNotFound'))
+        if (!cancelled) setInspection({ budget: projectBudget(snapshot, row) })
+      })
+      .catch((error) => {
+        if (!cancelled) setInspection({ error: getErrorMessage(error) })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [id, t])
+  if (id && !inspection?.budget)
+    return (
+      <p role={inspection?.error ? 'alert' : 'status'}>
+        {inspection?.error ?? t('scoped.loading')}
+      </p>
+    )
+  return (
+    <BudgetForm
+      budget={inspection?.budget}
+      onSubmit={onSubmit}
+      isLoading={isLoading}
+      onDirtyChange={onDirtyChange}
+    />
   )
 }

@@ -124,7 +124,9 @@ export interface TransactionSplitWithCategory extends TransactionSplit {
 }
 
 export interface Budget {
-  /** Persisted denomination; optional until dated-FX form adapters land. */
+  scope_json?: string
+  basis?: 'gross_cashflow' | 'net_consumption'
+  /** Persisted denomination. Never infer or relabel from a display preference. */
   currency?: CurrencyCode
   id: ULID
   category_id: ULID | null

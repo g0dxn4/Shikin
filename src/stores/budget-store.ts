@@ -1,278 +1,222 @@
-import { assertFxCurrency } from '@shikin/finance-core/fx'
-import dayjs from 'dayjs'
+import {
+  assertFxCurrency,
+  inspectReportScope,
+  resolveBudgetScope,
+  type ReportScope,
+  type ReportWindowInput,
+  type ScopedActualBasis,
+} from '@shikin/finance-core'
 import { create } from 'zustand'
-import { query, execute, withTransaction, type TransactionClient } from '@/lib/database'
-import { readBudgetSpending, type BudgetSpendingRead } from '@/lib/budget-dated-read'
+import { execute, withTransaction, type TransactionClient } from '@/lib/database'
+import { readScopedSnapshot, projectBudget, type ScopedReferences } from '@/lib/scoped-report-read'
 import { getErrorMessage } from '@/lib/errors'
 import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
 import type { Budget } from '@/types/database'
-import { useCurrencyStore, type PreferredCurrencyAmountResult } from './currency-store'
-import {
-  captureCurrencyAuthority,
-  convertWithCurrencyAuthority,
-  currencyAuthorityKey,
-} from './currency-authority'
 
-export interface BudgetMainComparison {
-  complete: boolean
-  policy: 'current_plan_today_vs_transaction_date_spending'
-  toCurrency: string | null
-  plan: PreferredCurrencyAmountResult
-  spending: BudgetSpendingRead | null
-  remainingCentavos: number | null
-  reason: 'main_currency_unconfigured' | 'missing_exchange_rates' | null
-}
-
-export interface BudgetWithStatus extends Budget {
-  currency: Budget['currency'] & string
-  categoryName: string
-  categoryColor: string
-  spent: number
-  knownSpent: number
-  remaining: number
-  percentUsed: number
-  complete: boolean
-  nativeSpending: BudgetSpendingRead
-  mainComparison: BudgetMainComparison
-}
-
+export type BudgetWithStatus = ReturnType<typeof projectBudget>
 export interface BudgetFormData {
   name: string
-  categoryId: string
+  categoryId?: string | null
   amount: number
   period: 'weekly' | 'monthly' | 'yearly'
-  currency: string
+  currency?: string
+  scope?: ReportScope
+  basis?: ScopedActualBasis
+  isActive?: boolean
+  /** Captured DB default; only checked when the user did not explicitly choose currency. */
+  expectedMainCurrency?: string
 }
-
+export interface BudgetReadOptions extends ReportWindowInput {
+  includeInactive?: boolean
+  budgetId?: string
+}
 interface BudgetState {
+  references: ScopedReferences
   budgets: BudgetWithStatus[]
   isLoading: boolean
   fetchError: string | null
   error: string | null
-  fetch: () => Promise<void>
+  options: BudgetReadOptions
+  fetch: (options?: BudgetReadOptions) => Promise<void>
   add: (data: BudgetFormData) => Promise<void>
-  update: (id: string, data: BudgetFormData) => Promise<void>
+  update: (id: string, data: Partial<BudgetFormData>) => Promise<void>
   remove: (id: string) => Promise<void>
   getById: (id: string) => BudgetWithStatus | undefined
 }
-
-function getPeriodDateRange(period: string, today: dayjs.Dayjs): { start: string; end: string } {
-  switch (period) {
-    case 'weekly':
-      return {
-        start: today.startOf('week').format('YYYY-MM-DD'),
-        end: today.format('YYYY-MM-DD'),
-      }
-    case 'yearly':
-      return {
-        start: today.startOf('year').format('YYYY-MM-DD'),
-        end: today.format('YYYY-MM-DD'),
-      }
-    case 'monthly':
-    default:
-      return {
-        start: today.startOf('month').format('YYYY-MM-DD'),
-        end: today.format('YYYY-MM-DD'),
-      }
+async function definition(tx: TransactionClient, data: Partial<BudgetFormData>, stored?: Budget) {
+  const main = (
+    await tx.query<{ value: string }>("SELECT value FROM settings WHERE key = 'main_currency'")
+  )[0]?.value
+    .trim()
+    .toUpperCase()
+  if (data.expectedMainCurrency && data.expectedMainCurrency !== main)
+    throw new Error(
+      'Main currency changed while this budget form was open. Review the amount and try again.'
+    )
+  const currency = (data.currency ?? stored?.currency ?? main)?.trim().toUpperCase()
+  if (!currency) throw new Error('Configure a database main currency before creating a budget.')
+  assertFxCurrency(currency)
+  if (stored && currency !== stored.currency && data.amount === undefined)
+    throw new Error(
+      'Re-enter the amount when changing budget currency. No automatic conversion is performed.'
+    )
+  const resolved = resolveBudgetScope({
+    storedScope:
+      stored && data.scope === undefined ? JSON.parse(stored.scope_json ?? '{}') : undefined,
+    storedCategoryId: stored?.category_id,
+    ...(data.scope !== undefined ? { scope: data.scope } : {}),
+    ...(data.categoryId !== undefined ? { categoryId: data.categoryId || null } : {}),
+  })
+  const [accounts, categories] = await Promise.all([
+    tx.query<{ id: string }>('SELECT id FROM accounts'),
+    tx.query<{ id: string }>('SELECT id FROM categories'),
+  ])
+  const inspected = inspectReportScope(resolved.scope, { accounts, categories })
+  if (inspected.issues.length) throw new Error(inspected.issues.map((i) => i.message).join('; '))
+  const amount = data.amount === undefined ? stored?.amount : toCentavos(data.amount)
+  if (amount === undefined || !Number.isSafeInteger(amount) || amount <= 0)
+    throw new Error('A positive budget amount is required.')
+  const name = (data.name ?? stored?.name ?? '').trim()
+  if (!name) throw new Error('A budget name is required.')
+  const period = data.period ?? stored?.period ?? 'monthly'
+  if (!['weekly', 'monthly', 'yearly'].includes(period)) throw new Error('Invalid budget period.')
+  const basis = data.basis ?? stored?.basis ?? 'gross_cashflow'
+  if (!['gross_cashflow', 'net_consumption'].includes(basis))
+    throw new Error('Invalid budget basis.')
+  return {
+    name,
+    amount,
+    period,
+    currency,
+    basis,
+    category_id: resolved.categoryId,
+    scope_json: JSON.stringify(resolved.scope),
+    is_active: data.isActive === undefined ? (stored?.is_active ?? 1) : Number(data.isActive),
   }
 }
-
-async function readMainCurrencyInTransaction(tx: TransactionClient): Promise<string> {
-  const row = (
-    await tx.query<{ value: string }>("SELECT value FROM settings WHERE key = 'main_currency'")
-  )[0]
-  if (!row) throw new Error('Configure a main currency before creating a budget.')
-  const currency = row.value.trim().toUpperCase()
-  assertFxCurrency(currency)
-  return currency
-}
-
-function requiredBudgetCurrency(budget: Budget): string {
-  const currency = budget.currency?.trim().toUpperCase()
-  if (!currency) throw new Error(`Budget ${budget.id} has no durable currency`)
-  assertFxCurrency(currency)
-  return currency
-}
-
-let budgetFetchRequest = 0
+let request = 0
 export const useBudgetStore = create<BudgetState>((set, get) => ({
+  references: { accounts: [], categories: [] },
   budgets: [],
   isLoading: false,
   fetchError: null,
   error: null,
-
-  fetch: async () => {
-    const requestId = ++budgetFetchRequest
-    set({ isLoading: true, fetchError: null })
+  options: {},
+  fetch: async (options = get().options) => {
+    const owned = ++request
+    set({ isLoading: true, fetchError: null, options })
     try {
-      await useCurrencyStore
-        .getState()
-        .loadRates()
-        .catch(() => {})
-      const today = dayjs()
-      const currencyState = useCurrencyStore.getState()
-      const authority = captureCurrencyAuthority(currencyState, today.format('YYYY-MM-DD'))
-      const raw = await query<
-        Budget & { currency: string; category_name: string | null; category_color: string | null }
-      >(
-        `SELECT b.*, c.name AS category_name, c.color AS category_color
-         FROM budgets b
-         LEFT JOIN categories c ON b.category_id = c.id
-         WHERE b.is_active = 1
-         ORDER BY b.created_at DESC`
-      )
-
-      const budgets = await Promise.all(
-        raw.map(async (budget): Promise<BudgetWithStatus> => {
-          const currency = requiredBudgetCurrency(budget)
-          const range = getPeriodDateRange(budget.period, today)
-          const nativeSpending = await readBudgetSpending({
-            categoryId: budget.category_id,
-            ...range,
-            currency,
-            rates: authority.manualRates,
-          })
-          const spent = nativeSpending.totalCentavos ?? nativeSpending.knownTotalCentavos
-          const remaining = budget.amount - spent
-          const percentUsed = budget.amount > 0 ? Math.round((spent / budget.amount) * 100) : 0
-
-          const plan = convertWithCurrencyAuthority(authority, budget.amount, currency)
-          const mainSpending = authority.mainCurrency
-            ? await readBudgetSpending({
-                categoryId: budget.category_id,
-                ...range,
-                currency: authority.mainCurrency,
-                rates: authority.manualRates,
-              })
-            : null
-          const mainComplete = plan.complete && Boolean(mainSpending?.complete)
-          const mainRemaining =
-            plan.complete && mainSpending?.complete && mainSpending.totalCentavos !== null
-              ? plan.amountCentavos - mainSpending.totalCentavos
-              : null
-          const mainComparison: BudgetMainComparison = {
-            complete: mainComplete,
-            policy: 'current_plan_today_vs_transaction_date_spending',
-            toCurrency: authority.mainCurrency,
-            plan,
-            spending: mainSpending,
-            remainingCentavos: mainRemaining,
-            reason: !authority.mainCurrency
-              ? 'main_currency_unconfigured'
-              : mainComplete
-                ? null
-                : 'missing_exchange_rates',
-          }
-
-          return {
-            ...budget,
-            currency,
-            categoryName: budget.category_name ?? 'Uncategorized',
-            categoryColor: budget.category_color ?? '#6b7280',
-            spent,
-            knownSpent: nativeSpending.knownTotalCentavos,
-            remaining,
-            percentUsed,
-            complete: nativeSpending.complete,
-            nativeSpending,
-            mainComparison,
-          }
+      const snapshot = await readScopedSnapshot()
+      const { includeInactive, budgetId, ...window } = options
+      const now = new Date()
+      const budgets = snapshot.budgets
+        .filter((b) => (budgetId ? b.id === budgetId : includeInactive || b.is_active === 1))
+        .map((b) => projectBudget(snapshot, b, { now, ...window }))
+      if (owned === request)
+        set({
+          budgets,
+          references: { accounts: snapshot.accounts, categories: snapshot.categories },
         })
-      )
-
-      if (requestId === budgetFetchRequest) {
-        if (authority.key === currencyAuthorityKey(useCurrencyStore.getState())) {
-          set({ budgets, fetchError: null })
-        } else {
-          void get()
-            .fetch()
-            .catch(() => {})
-        }
-      }
     } catch (error) {
-      if (requestId === budgetFetchRequest) set({ fetchError: getErrorMessage(error) })
+      if (owned === request) set({ fetchError: getErrorMessage(error), budgets: [] })
       throw error
     } finally {
-      if (requestId === budgetFetchRequest) set({ isLoading: false })
+      if (owned === request) set({ isLoading: false })
     }
   },
-
   add: async (data) => {
     set({ error: null })
     try {
-      const id = generateId()
-      const now = new Date().toISOString()
-      const expectedCurrency = data.currency.trim().toUpperCase()
-      assertFxCurrency(expectedCurrency)
       await withTransaction(async (tx) => {
-        const currency = await readMainCurrencyInTransaction(tx)
-        if (currency !== expectedCurrency) {
-          throw new Error(
-            'Main currency changed while this budget form was open. Review the amount and try again.'
-          )
-        }
+        const d = await definition(tx, data)
+        const now = new Date().toISOString()
         await tx.execute(
-          `INSERT INTO budgets (id, category_id, name, amount, period, is_active, currency, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
-          [id, data.categoryId, data.name, toCentavos(data.amount), data.period, currency, now, now]
+          'INSERT INTO budgets (id,name,category_id,amount,period,currency,basis,scope_json,is_active,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+          [
+            generateId(),
+            d.name,
+            d.category_id,
+            d.amount,
+            d.period,
+            d.currency,
+            d.basis,
+            d.scope_json,
+            d.is_active,
+            now,
+            now,
+          ]
         )
       })
-      try {
-        await get().fetch()
-      } catch {
-        // The durable mutation succeeded; expose refresh errors separately.
-      }
+      await get()
+        .fetch()
+        .catch(() => {})
     } catch (error) {
       set({ error: getErrorMessage(error) })
       throw error
     }
   },
-
   update: async (id, data) => {
     set({ error: null })
     try {
-      const now = new Date().toISOString()
-      await execute(
-        `UPDATE budgets SET name = ?, category_id = ?, amount = ?, period = ?, updated_at = ? WHERE id = ?`,
-        [data.name, data.categoryId, toCentavos(data.amount), data.period, now, id]
-      )
-      try {
-        await get().fetch()
-      } catch {
-        // The durable mutation succeeded; expose refresh errors separately.
-      }
+      await withTransaction(async (tx) => {
+        const stored = (await tx.query<Budget>('SELECT * FROM budgets WHERE id = ?', [id]))[0]
+        if (!stored) throw new Error('Budget not found.')
+        const d = await definition(tx, data, stored)
+        // Compare normalized definitions, not raw legacy JSON ordering or timestamps.
+        let normalizedBefore: string | null = null
+        try {
+          normalizedBefore = JSON.stringify(
+            resolveBudgetScope({
+              storedScope: JSON.parse(stored.scope_json ?? '{}'),
+              storedCategoryId: stored.category_id,
+            }).scope
+          )
+        } catch {
+          /* explicit replacement can repair a malformed stored scope */
+        }
+        const before = {
+          ...stored,
+          basis: stored.basis ?? 'gross_cashflow',
+          scope_json: normalizedBefore,
+        }
+        if (Object.entries(d).every(([key, value]) => before[key as keyof typeof before] === value))
+          return
+        await tx.execute(
+          'UPDATE budgets SET name=?,category_id=?,amount=?,period=?,currency=?,basis=?,scope_json=?,is_active=?,updated_at=? WHERE id=?',
+          [
+            d.name,
+            d.category_id,
+            d.amount,
+            d.period,
+            d.currency,
+            d.basis,
+            d.scope_json,
+            d.is_active,
+            new Date().toISOString(),
+            id,
+          ]
+        )
+      })
+      await get()
+        .fetch()
+        .catch(() => {})
     } catch (error) {
       set({ error: getErrorMessage(error) })
       throw error
     }
   },
-
   remove: async (id) => {
     set({ error: null })
     try {
       await execute('DELETE FROM budgets WHERE id = ?', [id])
-      try {
-        await get().fetch()
-      } catch {
-        // The durable mutation succeeded; expose refresh errors separately.
-      }
+      await get()
+        .fetch()
+        .catch(() => {})
     } catch (error) {
       set({ error: getErrorMessage(error) })
       throw error
     }
   },
-
-  getById: (id) => get().budgets.find((budget) => budget.id === id),
+  getById: (id) => get().budgets.find((b) => b.id === id),
 }))
-
-let budgetAuthorityKey = currencyAuthorityKey(useCurrencyStore.getState())
-useCurrencyStore.subscribe((state) => {
-  const key = currencyAuthorityKey(state)
-  if (key === budgetAuthorityKey) return
-  budgetAuthorityKey = key
-  const budgetState = useBudgetStore.getState()
-  if (budgetState.isLoading || budgetState.budgets.length > 0) {
-    void budgetState.fetch().catch(() => {})
-  }
-})

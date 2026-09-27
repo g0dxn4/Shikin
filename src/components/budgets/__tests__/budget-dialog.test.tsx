@@ -1,164 +1,71 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import type * as ScopedReadModule from '@/lib/scoped-report-read'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import '@/i18n'
+vi.mock('@/lib/scoped-report-read', async (original) => ({
+  ...(await original<typeof ScopedReadModule>()),
+  readScopedSnapshot: vi.fn(),
+}))
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+import { readScopedSnapshot } from '@/lib/scoped-report-read'
+import { scopedFixture } from '@/test/scoped-fixture'
 import { BudgetDialog } from '../budget-dialog'
-
+import { useBudgetStore } from '@/stores/budget-store'
+import { useUIStore } from '@/stores/ui-store'
 import { useCurrencyStore } from '@/stores/currency-store'
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string) => key,
-    i18n: { language: 'en', changeLanguage: vi.fn() },
-  }),
-}))
-
-vi.mock('sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
-}))
-
-vi.mock('@/components/shared/confirm-dialog', () => ({
-  ConfirmDialog: ({
-    open,
-    title,
-    onConfirm,
-  }: {
-    open: boolean
-    title: string
-    onConfirm: () => void
-  }) =>
-    open ? (
-      <div data-testid="discard-confirm">
-        <span>{title}</span>
-        <button onClick={onConfirm}>Discard</button>
-      </div>
-    ) : null,
-}))
-
-const mockCloseBudgetDialog = vi.fn()
-const mockAdd = vi.fn()
-const mockUpdate = vi.fn()
-
-const mockBudget = {
-  id: 'budget-1',
-  name: 'Test Budget',
-  category_id: 'cat-1',
-  amount: 10000,
-  period: 'monthly' as const,
-  is_active: 1,
-  created_at: '2024-01-01T00:00:00Z',
-  updated_at: '2024-01-01T00:00:00Z',
-}
-
-const mockGetById = vi.fn().mockReturnValue(mockBudget)
-
-vi.mock('@/stores/ui-store', () => ({
-  useUIStore: () => ({
-    budgetDialogOpen: true,
-    editingBudgetId: 'budget-1', // Edit mode to pre-fill form
-    closeBudgetDialog: mockCloseBudgetDialog,
-  }),
-}))
-
-vi.mock('@/stores/budget-store', () => ({
-  useBudgetStore: () => ({
-    add: mockAdd,
-    update: mockUpdate,
-    getById: mockGetById,
-  }),
-}))
-
-const mockFetchCategories = vi.fn().mockResolvedValue(undefined)
-
-vi.mock('@/stores/category-store', () => ({
-  useCategoryStore: () => ({
-    categories: [{ id: 'cat-1', name: 'Food', type: 'expense' }],
-    isLoading: false,
-    fetchError: null,
-    fetch: mockFetchCategories,
-  }),
-}))
-
-describe('BudgetDialog', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    useCurrencyStore.setState({ mainCurrency: 'USD', preferredCurrency: 'USD', manualRates: [] })
-    mockAdd.mockReset()
-    mockUpdate.mockReset()
-    mockGetById.mockReturnValue(mockBudget)
-  })
-
-  it('prevents dialog closure while mutation is in flight', async () => {
-    let resolveUpdate: () => void = () => {}
-    mockUpdate.mockImplementation(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveUpdate = resolve
-        })
+const update = vi.fn()
+const add = vi.fn()
+beforeEach(() => {
+  const snapshot = scopedFixture()
+  snapshot.budgets[0].is_active = 0
+  vi.mocked(readScopedSnapshot).mockReset()
+  vi.mocked(readScopedSnapshot).mockResolvedValue(snapshot)
+  update.mockReset()
+  update.mockResolvedValue(undefined)
+  add.mockReset()
+  add.mockResolvedValue(undefined)
+  useBudgetStore.setState({ budgets: [], update, add })
+  useUIStore.setState({ budgetDialogOpen: true, editingBudgetId: 'budget' })
+  useCurrencyStore.setState({ mainCurrency: 'MXN', preferredCurrency: 'USD', manualRates: [] })
+})
+describe('BudgetDialog protections with authoritative inactive inspection', () => {
+  it('loads a by-ID inactive plan even when absent from the active list and saves reactivation', async () => {
+    const user = userEvent.setup()
+    render(<BudgetDialog />)
+    await screen.findByDisplayValue('Food plan')
+    await user.click(screen.getByText('Currency, measure & active status'))
+    expect(screen.getByLabelText('Active budget')).not.toBeChecked()
+    await user.click(screen.getByLabelText('Active budget'))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith(
+        'budget',
+        expect.objectContaining({ currency: 'MXN', amount: undefined, isActive: true })
+      )
     )
-
-    render(<BudgetDialog />)
-
-    // Fill the form and submit (category is pre-selected since we mock categories)
-    const user = userEvent.setup()
-    await user.type(screen.getByLabelText('form.name'), ' Updated')
-    await user.click(screen.getByRole('button', { name: 'actions.save' }))
-
-    // Verify the button shows loading state (dialog should stay open)
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /actions\.saving/i })).toBeInTheDocument()
-    })
-
-    // Verify close was NOT called while loading
-    expect(mockCloseBudgetDialog).not.toHaveBeenCalled()
-
-    await act(async () => {
-      resolveUpdate()
-    })
+    expect(useUIStore.getState().budgetDialogOpen).toBe(false)
   })
-
-  it('asks before closing when the form has unsaved changes', async () => {
+  it('keeps the draft on failed save and requires dirty-discard confirmation', async () => {
+    update.mockRejectedValue(new Error('Write rejected'))
     const user = userEvent.setup()
-
     render(<BudgetDialog />)
-
-    await user.type(screen.getByLabelText('form.name'), ' Dirty')
-    await user.click(screen.getByRole('button', { name: 'Close' }))
-
-    expect(screen.getByTestId('discard-confirm')).toBeInTheDocument()
-    expect(mockCloseBudgetDialog).not.toHaveBeenCalled()
-
-    await act(async () => {
-      screen.getByText('Discard').click()
-    })
-
-    expect(mockCloseBudgetDialog).toHaveBeenCalled()
+    await screen.findByDisplayValue('Food plan')
+    await user.type(screen.getByLabelText('Budget Name'), ' changed')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(update).toHaveBeenCalled())
+    expect(screen.getByLabelText('Budget Name')).toHaveValue('Food plan changed')
+    expect(useUIStore.getState().budgetDialogOpen).toBe(true)
+    await user.keyboard('{Escape}')
+    await screen.findByText('Discard changes?')
+    expect(useUIStore.getState().budgetDialogOpen).toBe(true)
+    await user.click(screen.getByRole('button', { name: 'Discard' }))
+    expect(useUIStore.getState().budgetDialogOpen).toBe(false)
   })
-
-  it('closes dialog after successful mutation', async () => {
-    mockUpdate.mockResolvedValueOnce(undefined)
-
+  it('does not turn a missing budget ID into a new or editable blank form', async () => {
+    vi.mocked(readScopedSnapshot).mockResolvedValue({ ...scopedFixture(), budgets: [] })
     render(<BudgetDialog />)
-
-    const user = userEvent.setup()
-    // Just submit the pre-filled form
-    await user.click(screen.getByRole('button', { name: 'actions.save' }))
-
-    await waitFor(() => {
-      expect(mockCloseBudgetDialog).toHaveBeenCalled()
-    })
-  })
-
-  it('shows specific error toast when mutation throws', async () => {
-    const { toast } = await import('sonner')
-    mockUpdate.mockRejectedValueOnce(new Error('Budget DB error'))
-
-    render(<BudgetDialog />)
-
-    const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: 'actions.save' }))
-
-    await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith('Budget DB error')
-    })
-    expect(mockCloseBudgetDialog).not.toHaveBeenCalled()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Budget not found.')
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
   })
 })

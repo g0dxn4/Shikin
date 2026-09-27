@@ -62,6 +62,27 @@ afterEach(() => {
 })
 
 describe('dated CLI readers on schema 22 SQLite', () => {
+  it('uses the captured MXN budget currency without requiring a USD conversion', async () => {
+    setMainCurrency('MXN')
+    state.db.exec("UPDATE accounts SET currency = 'MXN' WHERE id = 'cash'")
+    tx('mxn-food', 25000, '2026-09-14', 'MXN')
+    const created = await run('create-budget', {
+      categoryId: 'food',
+      name: 'MXN Food',
+      amount: 1000,
+    })
+    expect(created).toMatchObject({ success: true, budget: { currency: 'MXN', amount: 1000 } })
+    const transactions = rows('transactions')
+    expect(rows('manual_exchange_rates')).toHaveLength(0)
+    expect(await run('get-budget-status')).toMatchObject({
+      success: true,
+      budgets: [
+        { currency: 'MXN', budgetAmount: 1000, spentAmount: 250, remaining: 750, complete: true },
+      ],
+    })
+    expect(rows('transactions')).toEqual(transactions)
+  })
+
   it('retains native evidence without asserting a main currency, including ownership', async () => {
     tx('a', 10000)
     const before = rows('app_data_state')

@@ -289,9 +289,6 @@ export function Dashboard() {
             : cashFlowUnavailableLabel
         }
         spent={cashFlowDisplayable ? formatMoney(monthlyExpenses, cashFlowDisplayCurrency) : '—'}
-        incomeAmount={cashFlowDisplayable ? monthlyIncome : undefined}
-        spentAmount={cashFlowDisplayable ? monthlyExpenses : undefined}
-        cashFlowCurrency={cashFlowDisplayable ? cashFlowDisplayCurrency : null}
         spentDetail={
           cashFlowDisplayable
             ? `${expenseDelta >= 0 ? '+' : '-'}${formatMoney(Math.abs(expenseDelta), cashFlowDisplayCurrency)} vs last month`
@@ -300,7 +297,7 @@ export function Dashboard() {
         saved={cashFlowDisplayable ? formatMoney(savedAmount, cashFlowDisplayCurrency) : '—'}
         savingsRate={cashFlowDisplayable ? `${savingsRate}%` : undefined}
         savedTone={!cashFlowDisplayable ? 'muted' : savedAmount >= 0 ? 'positive' : 'negative'}
-        cashFlowLabel={t('overview.currentMonthCashFlowDated', {
+        monthlySummaryLabel={t('overview.monthlySummaryDated', {
           month: now.format('MMMM YYYY'),
         })}
         currentAsOfLabel={t('overview.currentValuationAsOf', {

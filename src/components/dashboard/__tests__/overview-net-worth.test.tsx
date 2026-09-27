@@ -65,7 +65,7 @@ function renderOverview() {
       spent="$4.00"
       saved="$6.00"
       savedTone="positive"
-      cashFlowLabel="April 2026 cash flow"
+      monthlySummaryLabel="April 2026 · dated manual rates"
       currentAsOfLabel="Current value · April 18, 2026"
       historyAsOfLabel="History through March 1, 2026"
       history={[
@@ -166,14 +166,24 @@ describe('OverviewNetWorth shared panel geometry and evidence', () => {
     expect(panels[2]).toHaveAttribute('inert')
   })
 
-  it('keeps the four summary metrics, source details and cash-flow comparison together', () => {
+  it('keeps the four summary metrics and source details without a cash-flow comparison', () => {
     const { rerender } = renderOverview()
     const summary = document.getElementById('overview-summary-panel')!
     const metricGrid = summary.querySelector('[aria-label="overview.views.summary"]')!
-    expect(metricGrid).toHaveClass('grid-cols-2')
-    expect(metricGrid.children).toHaveLength(4)
+    expect(metricGrid).not.toHaveClass('grid-cols-2')
+    expect(metricGrid?.children).toHaveLength(2)
+    expect(summary.querySelectorAll('.rounded-xl.border')).toHaveLength(0)
     expect(summary).not.toHaveClass('justify-center')
+    expect(summary).toHaveTextContent('$1,150.00')
+    expect(summary).toHaveTextContent('$10.00')
+    expect(summary).toHaveTextContent('$4.00')
+    expect(screen.getByText('$6.00')).toHaveClass('text-accent')
     expect(summary).toHaveTextContent('Current value · April 18, 2026')
+    expect(summary).toHaveTextContent('April 2026 · dated manual rates')
+    expect(
+      screen.queryByRole('img', { name: /overview.cashFlowComparison/ })
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText('overview.cashFlow')).not.toBeInTheDocument()
 
     rerender(
       <OverviewNetWorth
@@ -188,7 +198,7 @@ describe('OverviewNetWorth shared panel geometry and evidence', () => {
         saved="$6.00"
         savingsRate="60%"
         savedTone="positive"
-        cashFlowLabel="April 2026 cash flow"
+        monthlySummaryLabel="April 2026 · dated manual rates"
         currentAsOfLabel=""
         historyAsOfLabel=""
         history={[]}
@@ -199,18 +209,18 @@ describe('OverviewNetWorth shared panel geometry and evidence', () => {
         emptyHistoryMessage="No history"
         accounts={accounts}
         preferredCurrency="USD"
-        incomeAmount={10}
-        spentAmount={4}
-        cashFlowCurrency="USD"
       />
     )
     expect(summary).toHaveTextContent('Missing rate evidence')
     expect(summary).toHaveTextContent('vs last month')
     expect(summary).toHaveTextContent('60%')
-    expect(screen.getByRole('img', { name: /overview.cashFlowComparison/ })).toBeInTheDocument()
+    expect(summary).toHaveTextContent('—')
+    expect(
+      screen.queryByRole('img', { name: /overview.cashFlowComparison/ })
+    ).not.toBeInTheDocument()
   })
 
-  it('shows the income/spending visual only with explicit complete nonzero raw evidence', () => {
+  it('does not render an income/spending cash-flow visual in Summary', () => {
     const { rerender } = renderOverview()
     expect(
       screen.queryByRole('img', { name: /overview.cashFlowComparison/ })
@@ -223,7 +233,7 @@ describe('OverviewNetWorth shared panel geometry and evidence', () => {
       spent: '—',
       saved: '—',
       savedTone: 'muted' as const,
-      cashFlowLabel: 'This month',
+      monthlySummaryLabel: 'This month',
       currentAsOfLabel: '',
       historyAsOfLabel: '',
       history: [],
@@ -235,27 +245,28 @@ describe('OverviewNetWorth shared panel geometry and evidence', () => {
       accounts: [] as Account[],
       preferredCurrency: null,
     }
-    rerender(<OverviewNetWorth {...props} incomeAmount={100} spentAmount={50} />)
+    rerender(<OverviewNetWorth {...props} />)
     expect(
       screen.queryByRole('img', { name: /overview.cashFlowComparison/ })
     ).not.toBeInTheDocument()
-    rerender(
-      <OverviewNetWorth {...props} incomeAmount={0} spentAmount={0} cashFlowCurrency="USD" />
-    )
-    expect(
-      screen.queryByRole('img', { name: /overview.cashFlowComparison/ })
-    ).not.toBeInTheDocument()
+    const summary = document.getElementById('overview-summary-panel')!
+    expect(summary).toHaveTextContent('—')
+    expect(summary).toHaveTextContent('This month')
     rerender(
       <OverviewNetWorth
         {...props}
         income="$1.00"
         spent="$0.50"
-        incomeAmount={100}
-        spentAmount={50}
-        cashFlowCurrency="USD"
+        saved="-$0.50"
+        savedTone="negative"
       />
     )
-    expect(screen.getByRole('img', { name: /overview.cashFlowComparison/ })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('img', { name: /overview.cashFlowComparison/ })
+    ).not.toBeInTheDocument()
+    expect(summary).toHaveTextContent('$1.00')
+    expect(summary).toHaveTextContent('$0.50')
+    expect(screen.getByText('-$0.50')).toHaveClass('text-destructive')
     expect(document.getElementById('overview-comparison-panel')).toHaveAttribute('inert')
   })
 })

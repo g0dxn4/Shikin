@@ -1,7 +1,8 @@
-import { useRef, useState, type KeyboardEvent } from 'react'
+import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts'
 import dayjs from 'dayjs'
+import { Banknote, PiggyBank, Receipt } from 'lucide-react'
 import { NativePanel } from '@/components/ui/native-layout'
 import { SafeChart } from '@/components/ui/safe-chart'
 import {
@@ -36,14 +37,11 @@ interface OverviewNetWorthProps {
   income: string
   incomeDetail?: string
   spent: string
-  incomeAmount?: number
-  spentAmount?: number
-  cashFlowCurrency?: string | null
   spentDetail?: string
   saved: string
   savingsRate?: string
   savedTone: 'positive' | 'negative' | 'muted'
-  cashFlowLabel: string
+  monthlySummaryLabel: string
   currentAsOfLabel: string
   historyAsOfLabel: string
   history: OverviewHistoryPoint[]
@@ -65,14 +63,11 @@ export function OverviewNetWorth({
   income,
   incomeDetail,
   spent,
-  incomeAmount,
-  spentAmount,
-  cashFlowCurrency,
   spentDetail,
   saved,
   savingsRate,
   savedTone,
-  cashFlowLabel,
+  monthlySummaryLabel,
   currentAsOfLabel,
   historyAsOfLabel,
   history,
@@ -97,16 +92,6 @@ export function OverviewNetWorth({
   const hasCurrentValue = currentComplete && currentAmount !== null && currentCurrency !== null
   const hasHistory = historyComplete && historyCurrency !== null
   const hasChange = hasCurrentValue && hasHistory && history.length > 1
-  const hasCashFlowVisual =
-    incomeAmount !== undefined &&
-    spentAmount !== undefined &&
-    cashFlowCurrency !== null &&
-    cashFlowCurrency !== undefined &&
-    Number.isFinite(incomeAmount) &&
-    Number.isFinite(spentAmount) &&
-    incomeAmount >= 0 &&
-    spentAmount >= 0 &&
-    Math.max(incomeAmount, spentAmount) > 0
 
   const selectTabFromKeyboard = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     let nextIndex: number | null = null
@@ -171,14 +156,13 @@ export function OverviewNetWorth({
           aria-hidden={view !== 'summary'}
           inert={view !== 'summary'}
         >
-          <p className="text-muted-foreground mb-3 text-xs sm:mb-4">{cashFlowLabel}</p>
           <div
-            className="grid min-w-0 grid-cols-2 gap-2.5 sm:gap-4"
+            className="grid min-w-0 items-start gap-6 md:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] md:items-center md:gap-0"
             aria-label={t('overview.views.summary')}
           >
-            <div className="border-border min-w-0 rounded-xl border p-3 sm:p-5 lg:p-6">
+            <div className="min-w-0 md:pr-8">
               <span className="text-muted-foreground text-xs">{t('overview.netWorth')}</span>
-              <strong className="mt-2 block text-lg font-semibold tracking-tight break-all tabular-nums min-[380px]:text-2xl sm:text-3xl">
+              <strong className="mt-1.5 block text-3xl font-semibold tracking-tight break-all tabular-nums sm:text-4xl">
                 {hasCurrentValue ? (
                   formatMoney(currentAmount, currentCurrency)
                 ) : (
@@ -194,78 +178,43 @@ export function OverviewNetWorth({
                 </p>
               )}
             </div>
-            <div className="border-border min-w-0 rounded-xl border p-3 sm:p-5 lg:p-6">
-              <span className="text-muted-foreground text-xs">{t('cards.income')}</span>
-              <strong className="mt-2 block text-lg font-semibold break-all tabular-nums min-[380px]:text-xl sm:text-2xl">
-                {income}
-              </strong>
-              {incomeDetail ? (
-                <p className="text-muted-foreground mt-2 text-xs break-words">{incomeDetail}</p>
-              ) : null}
-            </div>
-            <div className="border-border min-w-0 rounded-xl border p-3 sm:p-5 lg:p-6">
-              <span className="text-muted-foreground text-xs">{t('cards.spent')}</span>
-              <strong className="mt-2 block text-lg font-semibold break-all tabular-nums min-[380px]:text-xl sm:text-2xl">
-                {spent}
-              </strong>
-              {spentDetail ? (
-                <p className="text-muted-foreground mt-2 text-xs break-words">{spentDetail}</p>
-              ) : null}
-            </div>
-            <div className="border-border min-w-0 rounded-xl border p-3 sm:p-5 lg:p-6">
-              <span className="text-muted-foreground text-xs">{t('cards.saved')}</span>
-              <strong
-                className={cn(
-                  'mt-2 block text-lg font-semibold break-all tabular-nums min-[380px]:text-xl sm:text-2xl',
-                  savedTone === 'positive' && 'text-accent',
-                  savedTone === 'negative' && 'text-destructive'
-                )}
-              >
-                {saved}
-              </strong>
-              {savingsRate ? (
-                <p className="text-muted-foreground mt-2 text-xs break-words">
-                  <span>{savingsRate}</span> {t('cards.savings')}
-                </p>
-              ) : null}
-            </div>
-          </div>
-          {hasCashFlowVisual ? (
-            <div className="border-border mt-5 border-t pt-4 sm:mt-6 sm:pt-5">
-              <p className="mb-3 text-sm font-semibold">{t('overview.cashFlow')}</p>
-              <div
-                role="img"
-                aria-label={t('overview.cashFlowComparison', {
-                  income: formatMoney(incomeAmount, cashFlowCurrency),
-                  spent: formatMoney(spentAmount, cashFlowCurrency),
-                })}
-              >
-                {(
-                  [
-                    { label: t('cards.income'), amount: incomeAmount, color: 'bg-chart-1' },
-                    { label: t('cards.spent'), amount: spentAmount, color: 'bg-chart-2' },
-                  ] as const
-                ).map(({ label, amount, color }) => (
-                  <div key={label} className="mt-3 min-w-0">
-                    <div className="mb-1.5 flex min-w-0 flex-wrap justify-between gap-x-3 text-xs">
-                      <span>{label}</span>
-                      <span className="min-w-0 break-all tabular-nums">
-                        {formatMoney(amount, cashFlowCurrency)}
-                      </span>
-                    </div>
-                    <div className="bg-muted h-3 overflow-hidden rounded-full sm:h-6">
-                      <div
-                        className={cn('h-full rounded-full', color)}
-                        style={{
-                          width: `${(amount / Math.max(incomeAmount, spentAmount)) * 100}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
+            <div className="border-border min-w-0 md:border-l md:pl-8">
+              <p className="text-muted-foreground mb-1 text-xs">{monthlySummaryLabel}</p>
+              <div className="divide-border divide-y">
+                <MonthlyMetricRow
+                  icon={Banknote}
+                  iconClassName="bg-success/10 text-success"
+                  label={t('cards.income')}
+                  value={income}
+                  detail={incomeDetail}
+                />
+                <MonthlyMetricRow
+                  icon={Receipt}
+                  iconClassName="bg-muted text-muted-foreground"
+                  label={t('cards.spent')}
+                  value={spent}
+                  detail={spentDetail}
+                />
+                <MonthlyMetricRow
+                  icon={PiggyBank}
+                  iconClassName="bg-accent-muted text-accent"
+                  label={t('cards.saved')}
+                  value={saved}
+                  valueClassName={cn(
+                    savedTone === 'positive' && 'text-accent',
+                    savedTone === 'negative' && 'text-destructive'
+                  )}
+                  detail={
+                    savingsRate ? (
+                      <>
+                        <span>{savingsRate}</span> {t('cards.savings')}
+                      </>
+                    ) : undefined
+                  }
+                />
               </div>
             </div>
-          ) : null}
+          </div>
         </div>
 
         <div
@@ -477,6 +426,50 @@ function HistoryPeriodControl({
           {t(`overview.period.${item}`)}
         </button>
       ))}
+    </div>
+  )
+}
+
+function MonthlyMetricRow({
+  icon: Icon,
+  iconClassName,
+  label,
+  value,
+  valueClassName,
+  detail,
+}: {
+  icon: typeof Banknote
+  iconClassName: string
+  label: string
+  value: string
+  valueClassName?: string
+  detail?: ReactNode
+}) {
+  return (
+    <div className="flex min-w-0 items-start gap-3 py-2.5 first:pt-0 last:pb-0">
+      <span
+        className={cn(
+          'mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg',
+          iconClassName
+        )}
+        aria-hidden="true"
+      >
+        <Icon className="size-4" strokeWidth={1.75} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-baseline justify-between gap-x-3">
+          <span className="text-muted-foreground shrink-0 text-xs">{label}</span>
+          <strong
+            className={cn(
+              'min-w-0 text-right text-base font-semibold break-all tabular-nums sm:text-lg',
+              valueClassName
+            )}
+          >
+            {value}
+          </strong>
+        </div>
+        {detail ? <p className="text-muted-foreground mt-1 text-xs break-words">{detail}</p> : null}
+      </div>
     </div>
   )
 }

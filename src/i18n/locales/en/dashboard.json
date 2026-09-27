@@ -47,6 +47,7 @@
     "cashFlowSubtitle": "Income and spending by month",
     "currentMonthCashFlow": "{{month}} cash flow",
     "currentMonthCashFlowDated": "{{month}} cash flow · manual rates on each transaction date",
+    "monthlySummaryDated": "{{month}} · manual rates on each transaction date",
     "currentValuationAsOf": "Current value · manual rates as of {{date}}",
     "historyValuationThrough": "Dated manual rates · through {{date}}",
     "historyUnavailable": "Net worth history unavailable",

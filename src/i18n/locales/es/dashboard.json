@@ -47,6 +47,7 @@
     "cashFlowSubtitle": "Ingresos y gastos por mes",
     "currentMonthCashFlow": "Flujo de caja de {{month}}",
     "currentMonthCashFlowDated": "Flujo de caja de {{month}} · tasas manuales en la fecha de cada transacción",
+    "monthlySummaryDated": "{{month}} · tasas manuales en la fecha de cada transacción",
     "currentValuationAsOf": "Valor actual · tasas manuales al {{date}}",
     "historyValuationThrough": "Tasas manuales por fecha · hasta {{date}}",
     "historyUnavailable": "Historial de patrimonio no disponible",

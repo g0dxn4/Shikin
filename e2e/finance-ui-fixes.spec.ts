@@ -1,4 +1,9 @@
 import { test, expect, type Locator } from '@playwright/test'
+import {
+  assertGainLayoutHoldingFixtureAbsent,
+  cleanupGainLayoutHoldingFixture,
+  seedGainLayoutHoldingFixture,
+} from './fixtures/gain-layout-holding'
 import { mockTauri } from './fixtures/tauri-mock'
 
 const VIEWPORTS = [
@@ -83,37 +88,54 @@ test.describe('finance UI layout fixes', () => {
     test(`investment gain metric keeps full values inside the strip at ${viewport.width}x${viewport.height}`, async ({
       page,
     }) => {
-      await page.setViewportSize(viewport)
-      await page.goto('/investments')
-      await expect(page.locator('[data-startup-state]')).toHaveAttribute(
-        'data-startup-state',
-        'ready'
-      )
-      await expect(page.getByText('Total Gain/Loss')).toBeVisible({ timeout: 15000 })
+      const fixture = await seedGainLayoutHoldingFixture()
+      try {
+        await page.setViewportSize(viewport)
+        await page.goto('/investments')
+        await expect(page.locator('[data-startup-state]')).toHaveAttribute(
+          'data-startup-state',
+          'ready'
+        )
+        await expect(page.getByText('No Investments Yet')).toHaveCount(0)
+        await expect(page.getByText('Total Gain/Loss')).toBeVisible({ timeout: 15000 })
 
-      const strip = page.locator('.metric-strip').first()
-      const gainItem = page.locator('.metric-item', { hasText: 'Total Gain/Loss' })
-      const stripBox = await strip.boundingBox()
-      const gainBox = await gainItem.boundingBox()
-      expect(stripBox).not.toBeNull()
-      expect(gainBox).not.toBeNull()
-      expect(gainBox!.x + gainBox!.width).toBeLessThanOrEqual(stripBox!.x + stripBox!.width + 1)
+        const strip = page.locator('.metric-strip').first()
+        const gainItem = page.locator('.metric-item', { hasText: 'Total Gain/Loss' })
+        const stripBox = await strip.boundingBox()
+        const gainBox = await gainItem.boundingBox()
+        expect(stripBox).not.toBeNull()
+        expect(gainBox).not.toBeNull()
+        expect(gainBox!.x + gainBox!.width).toBeLessThanOrEqual(stripBox!.x + stripBox!.width + 1)
 
-      const gainText = (await gainItem.innerText()).replace(/\s+/g, '')
-      expect(gainText).toMatch(/[+\-]\$[\d,]+(?:\.\d{2})?/)
-      if (/\(/.test(gainText)) {
-        expect(gainText).toMatch(/\([+\-]?\d+\.\d{2}%\)/)
+        const gainText = (await gainItem.innerText()).replace(/\s+/g, '')
+        expect(gainText).toContain(fixture.expectedGainText)
+        expect(gainText).toContain(fixture.expectedPercentText)
+        expect(gainText).toMatch(/[+\-]\$[\d,]+(?:\.\d{2})?/)
+        if (/\(/.test(gainText)) {
+          expect(gainText).toMatch(/\([+\-]?\d+\.\d{2}%\)/)
+        }
+
+        const overflow = await strip.evaluate((element) => ({
+          overflowX: getComputedStyle(element).overflowX,
+          clientWidth: element.clientWidth,
+          scrollWidth: element.scrollWidth,
+        }))
+        expect(overflow.overflowX).toBe('hidden')
+        expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1)
+      } finally {
+        await cleanupGainLayoutHoldingFixture()
       }
-
-      const overflow = await strip.evaluate((element) => ({
-        overflowX: getComputedStyle(element).overflowX,
-        clientWidth: element.clientWidth,
-        scrollWidth: element.scrollWidth,
-      }))
-      expect(overflow.overflowX).toBe('hidden')
-      expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1)
     })
   }
+
+  test.afterEach(async () => {
+    await cleanupGainLayoutHoldingFixture()
+  })
+
+  test.afterAll(async () => {
+    await cleanupGainLayoutHoldingFixture()
+    await assertGainLayoutHoldingFixtureAbsent()
+  })
 })
 
 test.describe('finance nested dialog wrapping', () => {

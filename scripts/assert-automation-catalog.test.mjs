@@ -145,10 +145,14 @@ describe('assertAutomationCatalog', () => {
 
     expect(() =>
       assertAutomationCatalog(missingCommand.cliCatalog, missingCommand.mcpTools, inventory)
-    ).toThrow(/CLI command count was 122; expected 123 from versioned inventory/)
+    ).toThrow(
+      `CLI command count was ${inventory.commands.length - 1}; expected ${inventory.commands.length} from versioned inventory`
+    )
     expect(() =>
       assertAutomationCatalog(missingMcp.cliCatalog, missingMcp.mcpTools, inventory)
-    ).toThrow(/MCP tool count was 117; expected 118 from versioned inventory/)
+    ).toThrow(
+      `MCP tool count was ${inventory.tools.length - 1}; expected ${inventory.tools.length} from versioned inventory`
+    )
   })
 
   it('rejects an extra CLI command or MCP tool name', () => {
@@ -169,10 +173,14 @@ describe('assertAutomationCatalog', () => {
 
     expect(() =>
       assertAutomationCatalog(extraCommand.cliCatalog, extraCommand.mcpTools, inventory)
-    ).toThrow(/CLI command count was 124; expected 123 from versioned inventory/)
+    ).toThrow(
+      `CLI command count was ${inventory.commands.length + 1}; expected ${inventory.commands.length} from versioned inventory`
+    )
     expect(() =>
       assertAutomationCatalog(extraTool.cliCatalog, extraTool.mcpTools, inventory)
-    ).toThrow(/MCP tool count was 119; expected 118 from versioned inventory/)
+    ).toThrow(
+      `MCP tool count was ${inventory.tools.length + 1}; expected ${inventory.tools.length} from versioned inventory`
+    )
   })
 
   it('rejects duplicate CLI command and MCP tool names', () => {
@@ -196,16 +204,20 @@ describe('assertAutomationCatalog', () => {
 
   it('rejects catalog counts that do not match the versioned inventory', () => {
     const wrongToolCount = createMatchingSurfaces()
-    wrongToolCount.cliCatalog.toolCount = 108
+    wrongToolCount.cliCatalog.toolCount = inventory.tools.length - 1
     const wrongCommandCount = createMatchingSurfaces()
-    wrongCommandCount.cliCatalog.commandCount = 113
+    wrongCommandCount.cliCatalog.commandCount = inventory.commands.length - 1
 
     expect(() =>
       assertAutomationCatalog(wrongToolCount.cliCatalog, wrongToolCount.mcpTools, inventory)
-    ).toThrow(/Deployed catalog toolCount was 108; expected 118 from versioned inventory/)
+    ).toThrow(
+      `Deployed catalog toolCount was ${inventory.tools.length - 1}; expected ${inventory.tools.length} from versioned inventory`
+    )
     expect(() =>
       assertAutomationCatalog(wrongCommandCount.cliCatalog, wrongCommandCount.mcpTools, inventory)
-    ).toThrow(/Deployed catalog commandCount was 113; expected 123 from versioned inventory/)
+    ).toThrow(
+      `Deployed catalog commandCount was ${inventory.commands.length - 1}; expected ${inventory.commands.length} from versioned inventory`
+    )
   })
 
   it('rejects a same-count catalog that swaps a real name', () => {

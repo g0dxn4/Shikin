@@ -5,9 +5,13 @@ import { createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { assertAutomationCatalog } from './assert-automation-catalog.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const rootPackage = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+const publicAutomationInventory = JSON.parse(
+  readFileSync(join(root, 'cli/src/fixtures/public-automation-inventory.json'), 'utf8')
+)
 const packageManagerMatch = /^pnpm@(.+)$/.exec(rootPackage.packageManager ?? '')
 if (!packageManagerMatch) {
   throw new Error('Root package.json must pin pnpm through packageManager.')
@@ -199,136 +203,6 @@ function assertSameSnapshot(before, after, label) {
   }
 }
 
-function assertAutomationCatalog(cliCatalog, mcpTools) {
-  if (cliCatalog.toolCount !== 108 || cliCatalog.commandCount !== 113) {
-    throw new Error(
-      `Deployed catalog counts were ${cliCatalog.toolCount} tools / ${cliCatalog.commandCount} commands; expected 108 / 113.`
-    )
-  }
-  if (cliCatalog.compatibility?.effects?.declaredOnly !== true) {
-    throw new Error(
-      `CLI catalog did not mark effects as declared-only: ${JSON.stringify(cliCatalog.compatibility)}`
-    )
-  }
-
-  const cliByName = new Map((cliCatalog.commands ?? []).map((command) => [command.name, command]))
-  const mcpByName = new Map((mcpTools ?? []).map((tool) => [tool.name, tool]))
-  const cliGet = cliByName.get('get-spending-recap')
-  const cliSave = cliByName.get('save-spending-recap')
-  const mcpGet = mcpByName.get('get-spending-recap')
-  const mcpSave = mcpByName.get('save-spending-recap')
-  const requiredSchemas = {
-    'correct-transaction-metadata': ['transactionId', 'dryRun'],
-    'set-transaction-consumption': ['transactionId', 'role'],
-    'clear-transaction-consumption': ['classificationId'],
-    'update-bucket': ['bucketId', 'bucketName', 'dryRun'],
-    'delete-bucket': ['bucketId', 'bucketName', 'dryRun'],
-    'reverse-bucket-allocation': ['allocationId', 'dryRun'],
-    'correct-bucket-allocation': ['allocationId', 'amount', 'dryRun'],
-    'set-source-coverage': ['sourceNamespace', 'periodStart', 'periodEnd', 'status'],
-    'list-source-coverage': ['sourceNamespace'],
-    'settle-staged-transactions': ['transactionIds', 'status', 'apply'],
-    'supersede-reconciliation-bridge': ['transactionIds', 'coverageIds', 'previewToken'],
-    'bind-transaction-import-identity': ['transactionId', 'sourceNamespace', 'externalId'],
-    'link-card-statement-payment': ['statementId', 'transactionId', 'amount', 'mode'],
-    'unlink-card-statement-payment': ['linkId', 'dryRun'],
-    'list-card-statement-payment-links': ['statementId', 'transactionId', 'status'],
-    'get-runtime-diagnostics': [],
-  }
-
-  for (const [name, requiredOptions] of Object.entries(requiredSchemas)) {
-    const cliTool = cliByName.get(name)
-    const mcpTool = mcpByName.get(name)
-    if (!cliTool || cliTool.kind !== 'tool' || !mcpTool) {
-      throw new Error(`Deployed discovery omitted ${name}.`)
-    }
-    const cliOptions = new Set((cliTool.options ?? []).map((option) => option.name))
-    const mcpProperties = new Set(Object.keys(mcpTool.inputSchema?.properties ?? {}))
-    for (const option of requiredOptions) {
-      if (!cliOptions.has(option) || !mcpProperties.has(option)) {
-        throw new Error(`${name} discovery omitted schema option ${option}.`)
-      }
-    }
-  }
-
-  if (JSON.stringify(cliGet?.effects) !== JSON.stringify({ readOnly: true, writesTo: [] })) {
-    throw new Error(`CLI get-spending-recap effects were invalid: ${JSON.stringify(cliGet)}`)
-  }
-  if (
-    JSON.stringify(cliSave?.effects) !==
-    JSON.stringify({ readOnly: false, idempotent: true, writesTo: ['recaps', 'audit_log'] })
-  ) {
-    throw new Error(`CLI save-spending-recap effects were invalid: ${JSON.stringify(cliSave)}`)
-  }
-  const expectedEffects = {
-    'query-transactions': { readOnly: true, writesTo: [] },
-    'get-runtime-diagnostics': { readOnly: true, idempotent: true },
-    'bind-transaction-import-identity': {
-      writesTo: ['transactions', 'audit_log', 'app_data_state'],
-    },
-    'import-transactions': {
-      writesTo: [
-        'accounts',
-        'transactions',
-        'duplicate_review_decisions',
-        'audit_log',
-        'app_data_state',
-      ],
-    },
-    'link-card-statement-payment': {
-      writesTo: [
-        'card_statement_payment_links',
-        'credit_card_statements',
-        'audit_log',
-        'app_data_state',
-      ],
-    },
-    'list-card-statement-payment-links': { readOnly: true, writesTo: [] },
-  }
-  for (const [name, effects] of Object.entries(expectedEffects)) {
-    if (JSON.stringify(cliByName.get(name)?.effects) !== JSON.stringify(effects)) {
-      throw new Error(`CLI ${name} effects were invalid: ${JSON.stringify(cliByName.get(name))}`)
-    }
-  }
-  if (cliByName.get('list-accounts')?.effects !== undefined) {
-    throw new Error('CLI catalog claimed effects for unaudited list-accounts.')
-  }
-  if (cliByName.get('add-transaction')?.effects !== undefined) {
-    throw new Error('CLI catalog claimed effects for unaudited add-transaction.')
-  }
-
-  if (JSON.stringify(mcpGet?.annotations) !== JSON.stringify({ readOnlyHint: true })) {
-    throw new Error(
-      `MCP get-spending-recap annotations were invalid: ${JSON.stringify(mcpGet?.annotations)}`
-    )
-  }
-  if (
-    JSON.stringify(mcpSave?.annotations) !==
-    JSON.stringify({ readOnlyHint: false, idempotentHint: true })
-  ) {
-    throw new Error(
-      `MCP save-spending-recap annotations were invalid: ${JSON.stringify(mcpSave?.annotations)}`
-    )
-  }
-
-  for (const cliTool of cliByName.values()) {
-    if (cliTool.kind !== 'tool') continue
-    const expected = {}
-    if (typeof cliTool.effects?.readOnly === 'boolean') {
-      expected.readOnlyHint = cliTool.effects.readOnly
-    }
-    if (typeof cliTool.effects?.idempotent === 'boolean') {
-      expected.idempotentHint = cliTool.effects.idempotent
-    }
-    const actual = mcpByName.get(cliTool.name)?.annotations ?? {}
-    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-      throw new Error(
-        `MCP ${cliTool.name} annotations did not match declared effects: ${JSON.stringify({ expected, actual })}`
-      )
-    }
-  }
-}
-
 function parseMcpTextResult(result, toolName) {
   const textContent = result?.content?.find((item) => item?.type === 'text')
   if (!textContent || typeof textContent.text !== 'string') {
@@ -428,7 +302,7 @@ async function smokeMcp({
         `CLI/MCP tool catalog mismatch. CLI=${JSON.stringify(cliNames)} MCP=${JSON.stringify(mcpNames)}`
       )
     }
-    assertAutomationCatalog(cliCatalog, mcpTools)
+    assertAutomationCatalog(cliCatalog, mcpTools, publicAutomationInventory)
 
     for (const tool of mcpTools) {
       if (

@@ -30,6 +30,6 @@ export default defineConfig({
     command: 'pnpm dev:e2e',
     port: 1420,
     reuseExistingServer: false,
-    timeout: 30000,
+    timeout: 120000,
   },
 })

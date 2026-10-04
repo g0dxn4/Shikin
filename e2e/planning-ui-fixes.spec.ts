@@ -38,7 +38,11 @@ test.describe('planning UI mobile fixes', () => {
     }) => {
       await page.setViewportSize(viewport)
       await page.goto('/goals')
-      await page.getByRole('button', { name: 'Add Goal' }).click()
+      await expect(page.locator('[data-startup-state]')).toHaveAttribute(
+        'data-startup-state',
+        'ready'
+      )
+      await page.getByRole('button', { name: 'Add Goal', exact: true }).first().click()
 
       const dialog = page.getByRole('dialog')
       await expect(dialog).toBeVisible()

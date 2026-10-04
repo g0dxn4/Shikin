@@ -5,6 +5,7 @@ export default defineConfig({
   globalSetup: './scripts/e2e-setup.mjs',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
+  failOnFlakyTests: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: 1,
   reporter: 'html',

@@ -25,6 +25,9 @@ const { createMcpServer, createMcpToolHandler, registerMcpResources } =
 const inventory = JSON.parse(
   readFileSync(resolve(process.cwd(), 'cli/src/fixtures/public-automation-inventory.json'), 'utf8')
 ) as { tools: string[]; commands: string[] }
+const { version: cliPackageVersion } = JSON.parse(
+  readFileSync(resolve(process.cwd(), 'cli/package.json'), 'utf8')
+) as { version: string }
 
 describe('public automation contract', () => {
   it('pins every built-in tool and command plus independently versioned contracts', async () => {
@@ -38,8 +41,8 @@ describe('public automation contract', () => {
     expect(program.commands).toHaveLength(123)
     expect(builtInTools.map((tool) => tool.name).sort()).toEqual(inventory.tools)
     expect(program.commands.map((command) => command.name()).sort()).toEqual(inventory.commands)
-    expect(program.version()).toBe('1.1.0')
-    expect(APPLICATION_VERSION).toBe('1.1.0')
+    expect(program.version()).toBe(cliPackageVersion)
+    expect(APPLICATION_VERSION).toBe(cliPackageVersion)
     expect(COMMAND_CATALOG_VERSION).toBe('2026-09-19.backend-remediation')
     expect(EXPOSED_CATALOG_VERSION).toBe(COMMAND_CATALOG_VERSION)
     expect(COMMAND_CATALOG_VERSION).not.toBe(APPLICATION_VERSION)

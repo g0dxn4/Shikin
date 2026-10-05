@@ -1,6 +1,6 @@
 [package]
 name = "shikin"
-version = "1.1.0"
+version = "1.2.0"
 description = "Local-first personal finance for desktop and private web access, with CLI/MCP automation."
 authors = ["ASF"]
 license = "MIT"

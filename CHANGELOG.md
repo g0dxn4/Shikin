@@ -4,6 +4,40 @@ All notable changes to Shikin are documented in this file.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-04
+
+Prepared release notes.
+
+### Scoped budgets and reports
+
+- Scoped budgets and reports with an explicit currency, account/category/tag inclusions and exclusions, gross cash-flow or classified NET calculations, contributor inspection, and historical comparisons.
+
+### FX, consumption, and recurring estimates
+
+- Direct dated manual FX rates preserve missing-rate incompleteness and keep expense completeness independent.
+- Consumption classifications, pinned revisions, independent source coverage, and reviewed bulk changes.
+- Separate estimates for recurring rules and subscriptions, with scope limitations made explicit rather than combining potentially overlapping sources.
+
+### Native UI
+
+- Refined native Dashboard, Accounts, Settings, and transaction dialogs, including narrow and keyboard layouts.
+
+### CLI and MCP
+
+- Shared automation catalog is 118 CLI/MCP tools and 123 CLI commands including built-ins. Scoped budget operations extend the existing tools, with audited mutations, write-free dry runs, and filter-bound contributor pagination.
+
+### Repository hygiene and CI
+
+- Versioned inventory in CI, isolated fixtures, and a flaky-test guard.
+
+### Upgrade notes
+
+- Back up first.
+- Upgrade desktop and CLI/MCP together (schema 24). Do not reopen migrated data with older clients.
+- Stored amounts and denominations are preserved; legacy USD-tagged rows are not automatically reinterpreted.
+- Changing a budget currency requires amount re-entry.
+- Generic budget delete undo remains unsupported.
+
 ## [1.1.0] - 2026-09-20
 
 Prepared release notes. The `v1.1.0` Git tag is created after CI and packaging checks pass.

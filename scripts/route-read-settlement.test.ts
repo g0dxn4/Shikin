@@ -170,3 +170,59 @@ test('a failed transaction query remains a failure after a successful rollback',
     assert.match(h.reads.snapshot().errors[0], /\/reports:.*query.*query-failed/)
   }
 })
+
+test('dashboard requires mounted loaded DOM and document drain before accepting an empty tracker', async () => {
+  const h = harness()
+  const mounted = deferred<void>()
+  const mountEntered = deferred<'mount'>()
+  const idle = deferred<void>()
+  const idleEntered = deferred<'idle'>()
+  const calls: string[] = []
+  // Exercise the real Playwright matchers without launching a browser. Their Locator
+  // protocol delegates the DOM assertion to _expect; each completion is test-controlled.
+  class Locator {
+    constructor(private selector: string) {}
+    async _expect(expression: string) {
+      calls.push(`${this.selector}: ${expression}`)
+      if (this.selector === '#overview-finance-heading') {
+        assert.equal(expression, 'to.be.visible')
+        mountEntered.resolve('mount')
+        await mounted.promise
+      }
+      return { matches: true }
+    }
+  }
+  Object.assign(h.page, {
+    url: () => 'http://e2e.test/',
+    locator: (selector: string) => new Locator(selector),
+    waitForLoadState: async (state: string, options: { timeout: number }) => {
+      assert.equal(state, 'networkidle')
+      assert.equal(options.timeout, 5000)
+      idleEntered.resolve('idle')
+      await idle.promise
+    },
+  })
+  let crossed = false
+  const boundary = h.reads.wait().then(() => {
+    crossed = true
+    return 'crossed' as const
+  })
+  assert.equal(await Promise.race([mountEntered.promise, boundary]), 'mount')
+  assert.deepEqual(h.reads.snapshot(), empty) // Startup-only/zero-sample would leave here.
+  mounted.resolve()
+  assert.equal(await Promise.race([idleEntered.promise, boundary]), 'idle')
+  assert.deepEqual(calls, [
+    '[data-startup-state]: to.have.attribute.value',
+    '#overview-finance-heading: to.be.visible',
+    '#spending-pace-tab: to.be.enabled',
+  ])
+  // As in the trace, another read starts after the earlier empty snapshot.
+  const goals = h.request({ sql: 'SELECT g.* FROM goals g', params: [] }, [], 200, '/api/db/query')
+  assert.equal(h.reads.snapshot().pending.length, 1)
+  await h.finish(goals)
+  assert.deepEqual(h.reads.snapshot(), empty)
+  assert.equal(crossed, false)
+  idle.resolve()
+  assert.equal(await boundary, 'crossed')
+  h.reads.dispose()
+})

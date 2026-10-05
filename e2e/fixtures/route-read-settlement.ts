@@ -104,7 +104,16 @@ export class RouteReadSettlement {
         await expect(this.page).toHaveURL(/\/reports$/)
       }
       const route = new URL(this.page.url()).pathname
-      if (route === '/settings') {
+      if (route === '/') {
+        await expect(this.page.locator('#overview-finance-heading')).toBeVisible()
+        await expect(this.page.locator('#spending-pace-tab')).toBeEnabled()
+        // Dashboard goals/history chain more reads after currency loads, including
+        // when there are no goal rows to render. A momentary empty DB tracker between
+        // those requests is not completion. After the actual dashboard has mounted
+        // and its transaction/split view has loaded, also drain document activity.
+        // Keep the strict response/transaction checks below; idle alone is not success.
+        await this.page.waitForLoadState('networkidle', { timeout: 5000 })
+      } else if (route === '/settings') {
         // The disclosure can be closed. Enabled means a usable catalog AND loading=false.
         await expect(this.page.locator('#classification-type-treatment')).toBeEnabled()
         await expect(this.page.locator('#classification-types article h4').first()).toBeAttached()

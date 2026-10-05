@@ -9,6 +9,7 @@ import { createStorageContext } from './app-data-dir.js'
 import { runHostedTestMigrations } from './backend-foundation-test-schema.js'
 import { getRuntimeDiagnostics } from './runtime-diagnostics.js'
 import { initializeRuntimeIdentity } from './runtime-identity.js'
+import { APPLICATION_VERSION } from './version.js'
 
 const roots: string[] = []
 function storage() {
@@ -52,7 +53,7 @@ describe('CLI runtime diagnostics', () => {
     expect(result).toMatchObject({
       success: true,
       build: 'cli',
-      version: '1.1.0',
+      version: APPLICATION_VERSION,
       schemaVersion: 24,
       schemaMigration: '024_scoped_budgets',
       localInstance: { status: 'available', id },

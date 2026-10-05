@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test'
+import { expect } from '@playwright/test'
+import { test } from './fixtures/route-read-settlement'
 import { mockTauri } from './fixtures/tauri-mock'
 
 const ALL_ROUTES = [
@@ -22,9 +23,10 @@ const ALL_ROUTES = [
   '/extensions',
 ]
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, routeReads }) => {
   await mockTauri(page)
   await page.goto('/')
+  await routeReads.wait()
 })
 
 test.describe('desktop native navigation', () => {
@@ -75,34 +77,40 @@ test.describe('desktop native navigation', () => {
 
   test('all 18 visible routes expose the shell title and browser history remains functional', async ({
     page,
+    routeReads,
   }) => {
     for (const route of ALL_ROUTES) {
       await page.goto(route)
       await expect(page.locator('[data-startup-state]')).toHaveAttribute(
         'data-startup-state',
-        /ready|error/
+        'ready'
       )
       const heading = page.getByRole('heading', { level: 1 })
       await expect(heading).toHaveCount(1)
       await expect(heading).toHaveClass(/sr-only/)
       await expect(page.locator('.native-topbar')).toHaveCount(0)
+      await routeReads.wait()
     }
 
     await page.goto('/insights')
     await page.waitForURL('/reports')
     await expect(page.getByRole('heading', { level: 1, name: 'Reports' })).toHaveClass(/sr-only/)
+    await routeReads.wait()
 
     await page.goto('/transactions')
+    await routeReads.wait()
     await page.goto('/accounts')
+    await routeReads.wait()
     await page.goBack()
     await expect(page).toHaveURL(/\/transactions$/)
+    await routeReads.wait()
   })
 })
 
 test.describe('mobile native navigation', () => {
   test.skip(({ isMobile }) => !isMobile, 'Mobile navigation is hidden on desktop')
 
-  test('keeps primary groups active on their contextual pages', async ({ page }) => {
+  test('keeps primary groups active on their contextual pages', async ({ page, routeReads }) => {
     const bottomNav = page.getByRole('navigation', { name: 'Mobile primary navigation' })
     for (const [path, group] of [
       ['/investments', 'Accounts'],
@@ -116,6 +124,7 @@ test.describe('mobile native navigation', () => {
       await expect(bottomNav.getByRole('button', { name: 'More pages' })).not.toHaveClass(
         /bottom-nav-link-active/
       )
+      await routeReads.wait()
     }
   })
 

@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test'
+import { expect } from '@playwright/test'
+import { test } from './fixtures/route-read-settlement'
 import { mockTauri } from './fixtures/tauri-mock'
 
 const PREFIX = 'PRESERVE-P2B'
@@ -239,6 +240,7 @@ test.describe('read-only app data preservation', () => {
 
   test('full app reads, transaction paging, reload, and appearance changes preserve finance rows exactly', async ({
     page,
+    routeReads,
   }) => {
     test.setTimeout(60000)
     const before = await captureProtectedState()
@@ -267,6 +269,8 @@ test.describe('read-only app data preservation', () => {
     await page.getByLabel('Status').selectOption('pending')
     await page.getByLabel('Transaction views').selectOption({ label: 'Review' })
 
+    await routeReads.wait()
+
     for (const path of [
       '/',
       '/transactions',
@@ -291,6 +295,7 @@ test.describe('read-only app data preservation', () => {
     ]) {
       await page.goto(path)
       await expect(page.locator('[data-startup-state="ready"]')).toBeVisible()
+      await routeReads.wait()
     }
 
     await page.goto('/settings')
@@ -308,9 +313,11 @@ test.describe('read-only app data preservation', () => {
       await page.getByRole('button', { name: 'Collapse sidebar' }).click()
       await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible()
     }
+    await routeReads.wait()
     await page.reload()
     await expect(page.locator('[data-startup-state="ready"]')).toBeVisible()
 
+    await routeReads.wait()
     const after = await captureProtectedState()
     expect(after.counts).toEqual(before.counts)
     expect(after.fixtures).toEqual(before.fixtures)

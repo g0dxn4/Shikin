@@ -226,3 +226,52 @@ test('dashboard requires mounted loaded DOM and document drain before accepting 
   assert.equal(await boundary, 'crossed')
   h.reads.dispose()
 })
+
+test('non-dashboard post-filter gap drains document activity before accepting an empty tracker', async () => {
+  const h = harness()
+  const idle = deferred<void>()
+  const idleEntered = deferred<'idle'>()
+  class Locator {
+    async _expect(expression: string) {
+      assert.equal(expression, 'to.have.attribute.value')
+      return { matches: true }
+    }
+  }
+  Object.assign(h.page, {
+    url: () => 'http://e2e.test/transactions?currency=USD&status=pending&view=review',
+    locator: () => new Locator(),
+    waitForLoadState: async (state: string, options: { timeout: number }) => {
+      assert.equal(state, 'networkidle')
+      assert.equal(options.timeout, 5000)
+      idleEntered.resolve('idle')
+      await idle.promise
+    },
+  })
+  let crossed = false
+  const boundary = h.reads.wait().then(() => {
+    crossed = true
+    return 'crossed' as const
+  })
+  try {
+    // Earlier filter requests have finished; the next read has not started yet.
+    assert.deepEqual(h.reads.snapshot(), empty)
+    assert.equal(await Promise.race([idleEntered.promise, boundary]), 'idle')
+    const query = h.request(
+      { sql: 'SELECT * FROM transactions WHERE status = ?', params: ['pending'] },
+      [],
+      200,
+      '/api/db/query'
+    )
+    assert.equal(h.reads.snapshot().pending.length, 1)
+    assert.equal(crossed, false)
+    await h.finish(query)
+    assert.deepEqual(h.reads.snapshot(), empty)
+    assert.equal(crossed, false)
+    idle.resolve()
+    assert.equal(await boundary, 'crossed')
+  } finally {
+    idle.resolve()
+    await boundary
+    h.reads.dispose()
+  }
+})

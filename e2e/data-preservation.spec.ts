@@ -269,6 +269,15 @@ test.describe('read-only app data preservation', () => {
     await page.getByLabel('Status').selectOption('pending')
     await page.getByLabel('Transaction views').selectOption({ label: 'Review' })
 
+    // The 19 pending fixtures are indices 0, 3, ..., 54. Review sorts by date DESC,
+    // then ID ASC, unlike the preceding ledger result. Old rows remain during reads;
+    // require this latest result before a possibly cached document networkidle state.
+    const pendingReviewDescriptions = Array.from({ length: 19 }, (_, index) => index * 3)
+      .sort((a, b) => (b % 27) - (a % 27) || a - b)
+      .map((index) => `${PREFIX} Ledger ${String(index).padStart(3, '0')}`)
+    await expect(page.locator('#transactions-review-panel article h2')).toHaveText(
+      pendingReviewDescriptions
+    )
     await routeReads.wait()
 
     for (const path of [

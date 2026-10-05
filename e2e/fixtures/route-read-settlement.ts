@@ -107,12 +107,6 @@ export class RouteReadSettlement {
       if (route === '/') {
         await expect(this.page.locator('#overview-finance-heading')).toBeVisible()
         await expect(this.page.locator('#spending-pace-tab')).toBeEnabled()
-        // Dashboard goals/history chain more reads after currency loads, including
-        // when there are no goal rows to render. A momentary empty DB tracker between
-        // those requests is not completion. After the actual dashboard has mounted
-        // and its transaction/split view has loaded, also drain document activity.
-        // Keep the strict response/transaction checks below; idle alone is not success.
-        await this.page.waitForLoadState('networkidle', { timeout: 5000 })
       } else if (route === '/settings') {
         // The disclosure can be closed. Enabled means a usable catalog AND loading=false.
         await expect(this.page.locator('#classification-type-treatment')).toBeEnabled()
@@ -130,6 +124,11 @@ export class RouteReadSettlement {
         await expect(this.page.locator('.page-content [aria-busy="true"]')).toHaveCount(0)
         await expect(this.page.locator('.page-content [role="alert"]')).toHaveCount(0)
       }
+      // Every survey route can chain reads across an empty DB-tracker sample, not
+      // just the dashboard. Drain document activity after positive route readiness.
+      // Playwright may cache networkidle within a document: post-filter callers must
+      // also assert the latest result, not retained rows. Idle alone is not success.
+      await this.page.waitForLoadState('networkidle', { timeout: 5000 })
       await expect
         .poll(() => this.snapshot(), { message: `DB reads must settle before leaving ${route}` })
         .toEqual({ pending: [], active: [], unmatched: [], errors: [] })

@@ -12,7 +12,7 @@ export default defineConfig({
       'src/**/*.{test,spec}.{js,ts,jsx,tsx}',
       'cli/src/**/*.{test,spec}.{js,ts,jsx,tsx}',
       'packages/**/*.{test,spec}.{js,ts,jsx,tsx}',
-      'scripts/**/*.test.mjs',
+      'scripts/**/*.test.{mjs,ts}',
     ],
     coverage: {
       provider: 'v8',

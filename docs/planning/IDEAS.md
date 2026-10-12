@@ -139,6 +139,19 @@ Trigger external actions on financial events. Would require a plugin/extension s
 
 ---
 
+## External References (To Review)
+
+### Sure (we-promise/sure)
+
+- **Repository:** https://github.com/we-promise/sure
+- **What it is:** Open-source, self-hostable personal finance application; community-maintained fork of Maybe Finance.
+- **Why save it:** Product/design reference for future Shikin research. Compare its dashboards, net-worth views, budgets, reporting, navigation, and optional AI/agent integrations against Shikin's existing implementation.
+- **Decision:** Review the source project for inspiration before proposing any specific changes. This is **not** a planned feature or implementation commitment.
+- **Constraints:** Keep Shikin's local-first desktop + SQLite approach and optional CLI/MCP workflows in mind. Sure uses **AGPL-3.0**, while Shikin uses **MIT**; do not reuse code without a license-compatibility review.
+- **Added:** 2026-10-12
+
+---
+
 ## Rejected / Out of Scope
 
 ### Bank Sync (Plaid)
@@ -151,4 +164,4 @@ Too niche and rapidly changing. Basic crypto price tracking via CoinGecko is suf
 
 ---
 
-_Last updated: 2026-03-17_
+_Last updated: 2026-10-12_

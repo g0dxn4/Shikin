@@ -47,8 +47,17 @@ not create one. Once that user's GUI session is running, setup can be run over S
    create or reuse a tunnel associated with the intended personal account/workspace.
    Creating a tunnel needs Tunnels Read + Manage. Its runtime principal and
    plugin operator need Tunnels Read + Use. Availability and ChatGPT custom-MCP
-   permissions must be checked in your account; this helper cannot grant them.
-   Create a **runtime** API key, not an organization admin key.
+   permissions must be checked in your account; this helper cannot grant them or
+   bypass plan limits. Create a **runtime** API key, not an organization admin key.
+
+   OpenAI's currently documented ChatGPT custom-MCP limits (they can change):
+   [Creating custom MCP apps in ChatGPT](https://help.openai.com/en/articles/12584461-creating-custom-mcp-apps-in-chatgpt)
+   says Pro users can build apps using the Apps SDK; full MCP is only available to
+   Business and Enterprise/Edu users, currently; Pro users can connect custom MCP
+   servers with read/fetch permissions. That is not a claim that every Pro tunnel
+   is unsupported. Confirm the supported workspace permissions in your account.
+   OpenAI's [custom MCP server guide](https://developers.openai.com/api/docs/guides/custom-mcp-server)
+   treats a missing `readOnlyHint` as a write.
 
 3. Install the official client on the **Mac host**, using the supported Homebrew path:
 
@@ -120,10 +129,19 @@ plugin and verify its discovered tool list.
 This forwards the installed Shikin MCP catalog, **including write tools**; it is
 not a read-only filter. Apply the desired tool permissions and confirmation
 settings in ChatGPT. Missing Shikin `effects` annotations do not mean read-only.
+OpenAI treats a missing `readOnlyHint` as a write.
+
+`list-accounts` is annotated read-only in this checkout (`effects.readOnly` and
+MCP `readOnlyHint: true`). The helper uses the **installed container bundle**, so
+updating this Git checkout does not change the annotations ChatGPT discovers.
+Verify the actual discovered `list-accounts` `readOnlyHint` in the plugin tool
+list. If you need the annotation live, update the installed bundle through the
+normal reviewed deployment path; this helper does not build or replace it.
 
 First make a read request such as listing accounts. Confirm it returns the
 expected existing accounts and currencies. Only then consider the connection
-verified. Do not test connectivity by inserting a real transaction.
+verified. Do not test connectivity by inserting a real transaction. Live
+verification requires an actual Mac and a successful ChatGPT safe read.
 
 Secure MCP Tunnel supports private connections. Public plugin distribution has
 different endpoint requirements; this helper does not publish a directory plugin.
@@ -143,13 +161,19 @@ bash scripts/shikin-chatgpt-tunnel.sh uninstall
 
 - `check`: Docker and file checks only; does not start MCP or call finance tools.
 - `stop`: stops the tunnel and disables its login startup until `start` is run.
-- `uninstall`: removes the tunnel service and its copied key, preserving Shikin,
-  Docker volumes, the original key file and unrelated files. Revoke the key in
-  Platform separately if it is no longer needed.
+- `uninstall`: removes **this state directory's** claimed tunnel files and copied
+  runtime key only. It preserves Shikin, Docker volumes, the original `--key-file`
+  source, unrelated files, and any LaunchAgent that is not associated with this
+  state directory. A rejected setup that never claimed ownership is non-destructive:
+  `uninstall` refuses to disable/unload the shared service or delete pre-existing
+  files. Do not use uninstall as a generic cleanup of another installation's files.
+  Revoke the key in Platform separately if it is no longer needed.
 - Reconfiguration/helper updates: uninstall this helper, then run setup from the
   new checkout. Do not run multiple tunnel clients unintentionally for one setup.
-- If setup fails partway, inspect the error, run `uninstall`, and retry. An existing
-  helper/service is never silently overwritten.
+- If setup fails after it has claimed this state directory, inspect the error, run
+  `uninstall` for **that same** `--state-dir`, and retry. An existing helper/service
+  is never silently overwritten, and uninstall will not stop a service owned by a
+  different state directory.
 
 Troubleshooting: check that Docker and `shikin-web` are running; verify the three
 container paths; run `doctor` for tunnel permission/association errors. The
@@ -164,9 +188,9 @@ Do not publish unredacted logs or tool results containing financial data.
 - [Official tunnel-client onboarding](https://github.com/openai/tunnel-client/blob/master/docs/onboarding.md)
 
 The helper tests exercise setup, private credential handling, quoting, XML,
-stdio forwarding, database guards, startup failures, readiness and cleanup using
-synthetic data and mocked Docker/macOS commands. They do not prove macOS service
+stdio forwarding, database guards, startup failures, readiness, ownership-safe
+cleanup and mocked Docker/macOS commands. They do not prove macOS service
 operation or OpenAI account access. Set `SHIKIN_TEST_REAL_CLIENT` to an installed
 official tunnel-client binary to validate profile generation against its actual
 CLI while keeping other service calls mocked. Live verification requires the Mac
-and a successful ChatGPT read-only tool call.
+and a successful ChatGPT safe read; this helper does not authenticate to OpenAI.

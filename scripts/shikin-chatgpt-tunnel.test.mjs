@@ -74,6 +74,7 @@ if (args[0] === 'enable') fs.rmSync(root + '/disabled', {force:true});`
     'tunnel-client',
     `
 if (args[0] === 'init') {
+  if (process.env.FAKE_INIT_FAIL) process.exit(1);
   if (process.env.SHIKIN_TEST_REAL_CLIENT) {
     const r = cp.spawnSync(process.env.SHIKIN_TEST_REAL_CLIENT, args, {stdio:'inherit'});
     process.exit(r.status ?? 1);
@@ -90,6 +91,12 @@ if (args[0] === 'run') fs.writeFileSync(args[args.indexOf('--health.url-file')+1
   }
   const run = (command, extra = [], overrides = {}) =>
     spawnSync('/bin/bash', [helper, command, '--state-dir', state, ...extra], {
+      encoding: 'utf8',
+      env: { ...env, ...overrides },
+      timeout: 15000,
+    })
+  const runAt = (stateDir, command, extra = [], overrides = {}) =>
+    spawnSync('/bin/bash', [helper, command, '--state-dir', stateDir, ...extra], {
       encoding: 'utf8',
       env: { ...env, ...overrides },
       timeout: 15000,
@@ -112,7 +119,26 @@ if (args[0] === 'run') fs.writeFileSync(args[args.indexOf('--health.url-file')+1
       ],
       overrides
     )
-  return { root, state, agents, data, mcp, key, log, env, run, setup }
+  const setupAt = (stateDir, extra = [], overrides = {}) =>
+    runAt(
+      stateDir,
+      'setup',
+      [
+        '--tunnel-id',
+        tunnelID,
+        '--key-file',
+        key,
+        '--node-path',
+        process.execPath,
+        '--mcp-path',
+        mcp,
+        '--data-dir',
+        data,
+        ...extra,
+      ],
+      overrides
+    )
+  return { root, state, agents, data, mcp, key, log, env, run, runAt, setup, setupAt }
 }
 
 describe('Shikin Docker tunnel helper', () => {
@@ -216,5 +242,76 @@ describe('Shikin Docker tunnel helper', () => {
     rmSync(f.state)
     expect(f.setup().status).toBe(0)
     expect(f.setup().status).not.toBe(0)
+  })
+
+  it('does not let uninstall of a rejected second state dir stop or delete the first installation', () => {
+    const f = fixture()
+    expect(f.setup().status).toBe(0)
+    const stateB = join(f.root, 'second-state')
+    const setupB = f.setupAt(stateB)
+    expect(setupB.status, setupB.stderr).not.toBe(0)
+    expect(setupB.stderr).toContain('Existing LaunchAgent')
+    expect(existsSync(join(stateB, 'settings.sh'))).toBe(false)
+
+    const uninstallB = f.runAt(stateB, 'uninstall')
+    expect(uninstallB.status, uninstallB.stderr).not.toBe(0)
+    expect(uninstallB.stderr).toMatch(/owned by this state directory|Run setup first/)
+    expect(existsSync(join(f.agents, 'com.asf.shikin.chatgpt-tunnel.plist'))).toBe(true)
+    expect(existsSync(join(f.state, 'settings.sh'))).toBe(true)
+    expect(existsSync(join(f.state, 'runtime-key'))).toBe(true)
+    expect(existsSync(join(f.root, 'loaded'))).toBe(true)
+    expect(existsSync(join(f.root, 'disabled'))).toBe(false)
+    expect(readFileSync(join(f.state, 'runtime-key'), 'utf8')).toBe(secret)
+  })
+
+  it('does not delete a pre-existing runtime-key after a rejected colliding setup', () => {
+    const f = fixture()
+    const stateB = join(f.root, 'key-collision-state')
+    mkdirSync(stateB, { recursive: true, mode: 0o700 })
+    const preexisting = join(stateB, 'runtime-key')
+    writeFileSync(preexisting, 'original-untouched-key', { mode: 0o600 })
+    const setupB = f.setupAt(stateB, ['--key-file', preexisting])
+    expect(setupB.status, setupB.stderr).not.toBe(0)
+    expect(setupB.stderr).toContain('Existing setup file')
+
+    const uninstallB = f.runAt(stateB, 'uninstall')
+    expect(uninstallB.status, uninstallB.stderr).not.toBe(0)
+    expect(existsSync(preexisting)).toBe(true)
+    expect(readFileSync(preexisting, 'utf8')).toBe('original-untouched-key')
+    expect(existsSync(join(f.root, 'disabled'))).toBe(false)
+    expect(existsSync(join(f.agents, 'com.asf.shikin.chatgpt-tunnel.plist'))).toBe(false)
+  })
+
+  it('cleans a claimed partial install without stopping another state directory service', () => {
+    const f = fixture()
+    const partialA = f.setup([], { FAKE_INIT_FAIL: '1' })
+    expect(partialA.status, partialA.stderr).not.toBe(0)
+    expect(existsSync(join(f.state, 'settings.sh'))).toBe(true)
+    expect(existsSync(join(f.agents, 'com.asf.shikin.chatgpt-tunnel.plist'))).toBe(false)
+
+    const stateB = join(f.root, 'healthy-state')
+    const setupB = f.setupAt(stateB)
+    expect(setupB.status, setupB.stderr).toBe(0)
+    expect(existsSync(join(f.root, 'loaded'))).toBe(true)
+
+    const stopA = f.run('stop')
+    expect(stopA.status, stopA.stderr).not.toBe(0)
+    expect(existsSync(join(f.root, 'loaded'))).toBe(true)
+    expect(existsSync(join(f.root, 'disabled'))).toBe(false)
+
+    const startA = f.run('start')
+    expect(startA.status, startA.stderr).not.toBe(0)
+    expect(existsSync(join(f.root, 'loaded'))).toBe(true)
+
+    const uninstallA = f.run('uninstall')
+    expect(uninstallA.status, uninstallA.stderr).toBe(0)
+    expect(existsSync(join(f.state, 'runtime-key'))).toBe(false)
+    expect(existsSync(join(f.state, 'settings.sh'))).toBe(false)
+    expect(readFileSync(f.key, 'utf8')).toBe(secret)
+    expect(existsSync(join(f.agents, 'com.asf.shikin.chatgpt-tunnel.plist'))).toBe(true)
+    expect(existsSync(join(stateB, 'settings.sh'))).toBe(true)
+    expect(existsSync(join(stateB, 'runtime-key'))).toBe(true)
+    expect(existsSync(join(f.root, 'loaded'))).toBe(true)
+    expect(existsSync(join(f.root, 'disabled'))).toBe(false)
   })
 })

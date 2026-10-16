@@ -91,6 +91,7 @@ KEY_PATH="$STATE_DIR/runtime-key"
 PROFILE_DIR="$STATE_DIR/profiles"
 LOG_PATH="$STATE_DIR/tunnel.log"
 URL_PATH="$STATE_DIR/health-url"
+PLIST_PATH="$AGENT_DIR/$LABEL.plist"
 
 require_macos() {
   [ "$(uname -s)" = Darwin ] || die 'This helper runs on the macOS Docker host.'
@@ -143,8 +144,20 @@ check_target() {
 
 service_target() { printf 'gui/%s/%s' "$(id -u)" "$LABEL"; }
 
+plist_owned_by_this_state() {
+  [ -n "${PLIST_PATH:-}" ] && [ -f "$PLIST_PATH" ] && [ ! -L "$PLIST_PATH" ] || return 1
+  grep -Fq "<string>--state-dir</string><string>$(xml "$STATE_DIR")</string>" "$PLIST_PATH"
+}
+
+require_owned_service() {
+  [ -n "${PLIST_PATH:-}" ] || die 'No LaunchAgent path is recorded for this state directory; refusing to change the shared tunnel service.'
+  [ -f "$PLIST_PATH" ] && [ ! -L "$PLIST_PATH" ] || die "No LaunchAgent file at $PLIST_PATH belongs to this state directory ($STATE_DIR); refusing to change the shared tunnel service."
+  plist_owned_by_this_state || die "LaunchAgent at $PLIST_PATH is not associated with this state directory ($STATE_DIR); refusing to change the shared tunnel service."
+}
+
 start_service() {
   require_macos
+  require_owned_service
   launchctl enable "$(service_target)"
   if ! launchctl print "$(service_target)" >/dev/null 2>&1; then
     launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH"
@@ -154,6 +167,7 @@ start_service() {
 
 stop_service() {
   require_macos
+  require_owned_service
   launchctl disable "$(service_target)"
   if launchctl print "$(service_target)" >/dev/null 2>&1; then
     launchctl bootout "$(service_target)"
@@ -170,15 +184,24 @@ if [ "$COMMAND" = setup ]; then
   CLIENT_BIN="$(command -v tunnel-client)" || die 'Install the official client: brew install openai/tools/tunnel-client'
   check_target
   [ -z "$KEY_SOURCE" ] || { validate_path 'Key file' "$KEY_SOURCE"; [ -s "$KEY_SOURCE" ] || die 'Key file is empty or missing.'; }
-  mkdir -p "$STATE_DIR" "$PROFILE_DIR" "$AGENT_DIR"
-  chmod 700 "$STATE_DIR" "$PROFILE_DIR"
   PLIST_PATH="$AGENT_DIR/$LABEL.plist"
   [ ! -e "$PLIST_PATH" ] && [ ! -L "$PLIST_PATH" ] || die "Existing LaunchAgent at $PLIST_PATH; inspect it before setup."
-  for item in "$INSTALLED" "$KEY_PATH" "$CONFIG" "$PROFILE_DIR/shikin.yaml"; do
+  for item in "$INSTALLED" "$KEY_PATH" "$CONFIG" "$PROFILE_DIR/shikin.yaml" "$LOG_PATH" "$URL_PATH"; do
     [ ! -e "$item" ] && [ ! -L "$item" ] || die "Existing setup file: $item; inspect or uninstall before retrying."
   done
-  # Refuse partial overwrites. A failure keeps only these private files for
-  # diagnostics; uninstall can remove them even before settings.sh exists.
+  mkdir -p "$STATE_DIR" "$PROFILE_DIR" "$AGENT_DIR"
+  chmod 700 "$STATE_DIR" "$PROFILE_DIR"
+  # Claim this state directory only after every path-collision preflight. A
+  # rejected setup is non-destructive. After this claim, uninstall may remove
+  # only this installation's files and will not stop another state's service.
+  {
+    for setting in CONTAINER NODE_PATH MCP_PATH DATA_DIR TUNNEL_ID DOCKER_BIN CLIENT_BIN PLIST_PATH; do
+      printf '%s=' "$setting"
+      quote "${!setting}"
+      printf '\n'
+    done
+  } > "$CONFIG"
+  chmod 600 "$CONFIG"
   cp "$0" "$INSTALLED"
   chmod 700 "$INSTALLED"
   if [ -n "$KEY_SOURCE" ]; then
@@ -192,14 +215,6 @@ if [ "$COMMAND" = setup ]; then
     unset RUNTIME_KEY
   fi
   chmod 600 "$KEY_PATH"
-  {
-    for setting in CONTAINER NODE_PATH MCP_PATH DATA_DIR TUNNEL_ID DOCKER_BIN CLIENT_BIN PLIST_PATH; do
-      printf '%s=' "$setting"
-      quote "${!setting}"
-      printf '\n'
-    done
-  } > "$CONFIG"
-  chmod 600 "$CONFIG"
   MCP_COMMAND="/bin/bash $(quote "$INSTALLED") mcp --state-dir $(quote "$STATE_DIR")"
   "$CLIENT_BIN" init --sample sample_mcp_stdio_local --profile shikin \
     --profile-dir "$PROFILE_DIR" --tunnel-id "$TUNNEL_ID" \
@@ -231,11 +246,10 @@ PLIST
   exit 0
 fi
 
-if [ "$COMMAND" = uninstall ] && [ ! -f "$CONFIG" ]; then
-  PLIST_PATH="$AGENT_DIR/$LABEL.plist"
-else
-  load_config
+if [ "$COMMAND" = uninstall ] && { [ ! -f "$CONFIG" ] || [ -L "$CONFIG" ]; }; then
+  die "No tunnel setup is owned by this state directory ($STATE_DIR). Refusing to disable/unload the shared LaunchAgent or delete files."
 fi
+load_config
 
 case "$COMMAND" in
   check)
@@ -274,8 +288,13 @@ case "$COMMAND" in
     [ -f "$LOG_PATH" ] || die 'No tunnel log yet.'
     tail -n 60 "$LOG_PATH" ;;
   uninstall)
-    stop_service
-    rm -f "$PLIST_PATH" "$CONFIG" "$KEY_PATH" "$PROFILE_DIR/shikin.yaml" "$URL_PATH" "$LOG_PATH" "$INSTALLED"
+    if plist_owned_by_this_state; then
+      stop_service
+      rm -f "$PLIST_PATH"
+    else
+      info "LaunchAgent is absent or not associated with $STATE_DIR; leaving the shared service untouched."
+    fi
+    rm -f "$CONFIG" "$KEY_PATH" "$PROFILE_DIR/shikin.yaml" "$URL_PATH" "$LOG_PATH" "$INSTALLED"
     rmdir "$PROFILE_DIR" "$STATE_DIR" 2>/dev/null || true
-    info 'Removed tunnel setup and its copied runtime key. Original key file, Docker data and Shikin are untouched.' ;;
+    info "Removed this installation's tunnel files and copied runtime key. Original key file, Docker data, Shikin and other installations are untouched." ;;
 esac

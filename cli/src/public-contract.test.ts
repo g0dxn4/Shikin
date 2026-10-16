@@ -101,7 +101,10 @@ describe('public automation contract', () => {
     expect(
       commands.find((command) => command.name === 'bind-transaction-import-identity')?.effects
     ).toEqual({ writesTo: ['transactions', 'audit_log', 'app_data_state'] })
-    expect(commands.find((command) => command.name === 'list-accounts')?.effects).toBeUndefined()
+    expect(commands.find((command) => command.name === 'list-accounts')?.effects).toEqual({
+      readOnly: true,
+      writesTo: [],
+    })
     expect(commands.find((command) => command.name === 'add-transaction')?.effects).toEqual({
       writesTo: [
         'transactions',

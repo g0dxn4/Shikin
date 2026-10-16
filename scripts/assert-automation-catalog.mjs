@@ -167,14 +167,15 @@ export function assertAutomationCatalog(cliCatalog, mcpTools, inventory) {
         'app_data_state',
       ],
     },
+    'list-accounts': { readOnly: true, writesTo: [] },
   }
   for (const [name, effects] of Object.entries(expectedEffects)) {
     if (JSON.stringify(cliByName.get(name)?.effects) !== JSON.stringify(effects)) {
       throw new Error(`CLI ${name} effects were invalid: ${JSON.stringify(cliByName.get(name))}`)
     }
   }
-  if (cliByName.get('list-accounts')?.effects !== undefined) {
-    throw new Error('CLI catalog claimed effects for unaudited list-accounts.')
+  if (cliByName.get('create-account')?.effects !== undefined) {
+    throw new Error('CLI catalog claimed effects for unaudited create-account.')
   }
 
   if (JSON.stringify(mcpGet?.annotations) !== JSON.stringify({ readOnlyHint: true })) {

@@ -69,6 +69,7 @@ const EXPECTED_EFFECTS = {
       'app_data_state',
     ],
   },
+  'list-accounts': { readOnly: true, writesTo: [] },
 }
 
 function annotationsFromEffects(effects) {
@@ -256,5 +257,84 @@ describe('assertAutomationCatalog', () => {
     expect(() =>
       assertAutomationCatalog(wrongEffects.cliCatalog, wrongEffects.mcpTools, inventory)
     ).toThrow(/CLI add-transaction effects were invalid/)
+  })
+
+  it('rejects list-accounts effect regressions', () => {
+    const missingEffects = createMatchingSurfaces()
+    delete missingEffects.cliCatalog.commands[
+      commandIndex(missingEffects.cliCatalog, 'list-accounts')
+    ].effects
+    missingEffects.mcpTools[toolIndex(missingEffects.mcpTools, 'list-accounts')].annotations = {}
+
+    const wrongEffects = createMatchingSurfaces()
+    wrongEffects.cliCatalog.commands[
+      commandIndex(wrongEffects.cliCatalog, 'list-accounts')
+    ].effects = {
+      readOnly: false,
+      writesTo: ['accounts'],
+    }
+    wrongEffects.mcpTools[toolIndex(wrongEffects.mcpTools, 'list-accounts')].annotations = {
+      readOnlyHint: false,
+    }
+
+    const missingReadOnly = createMatchingSurfaces()
+    missingReadOnly.cliCatalog.commands[
+      commandIndex(missingReadOnly.cliCatalog, 'list-accounts')
+    ].effects = {
+      writesTo: [],
+    }
+    missingReadOnly.mcpTools[toolIndex(missingReadOnly.mcpTools, 'list-accounts')].annotations = {}
+
+    expect(() =>
+      assertAutomationCatalog(missingEffects.cliCatalog, missingEffects.mcpTools, inventory)
+    ).toThrow(/CLI list-accounts effects were invalid/)
+    expect(() =>
+      assertAutomationCatalog(wrongEffects.cliCatalog, wrongEffects.mcpTools, inventory)
+    ).toThrow(/CLI list-accounts effects were invalid/)
+    expect(() =>
+      assertAutomationCatalog(missingReadOnly.cliCatalog, missingReadOnly.mcpTools, inventory)
+    ).toThrow(/CLI list-accounts effects were invalid/)
+  })
+
+  it('rejects list-accounts MCP readOnlyHint regressions', () => {
+    const missingHint = createMatchingSurfaces()
+    missingHint.mcpTools[toolIndex(missingHint.mcpTools, 'list-accounts')].annotations = {}
+
+    const wrongHint = createMatchingSurfaces()
+    wrongHint.mcpTools[toolIndex(wrongHint.mcpTools, 'list-accounts')].annotations = {
+      readOnlyHint: false,
+    }
+
+    expect(() =>
+      assertAutomationCatalog(missingHint.cliCatalog, missingHint.mcpTools, inventory)
+    ).toThrow(/MCP list-accounts annotations did not match declared effects/)
+    expect(() =>
+      assertAutomationCatalog(wrongHint.cliCatalog, wrongHint.mcpTools, inventory)
+    ).toThrow(/MCP list-accounts annotations did not match declared effects/)
+  })
+
+  it('rejects falsely claimed effects on unaudited create-account', () => {
+    const claimedEffects = createMatchingSurfaces()
+    claimedEffects.cliCatalog.commands[
+      commandIndex(claimedEffects.cliCatalog, 'create-account')
+    ].effects = { readOnly: true, writesTo: [] }
+    claimedEffects.mcpTools[toolIndex(claimedEffects.mcpTools, 'create-account')].annotations = {
+      readOnlyHint: true,
+    }
+
+    const claimedReadOnly = createMatchingSurfaces()
+    claimedReadOnly.cliCatalog.commands[
+      commandIndex(claimedReadOnly.cliCatalog, 'create-account')
+    ].effects = { readOnly: true }
+    claimedReadOnly.mcpTools[toolIndex(claimedReadOnly.mcpTools, 'create-account')].annotations = {
+      readOnlyHint: true,
+    }
+
+    expect(() =>
+      assertAutomationCatalog(claimedEffects.cliCatalog, claimedEffects.mcpTools, inventory)
+    ).toThrow(/claimed effects for unaudited create-account/)
+    expect(() =>
+      assertAutomationCatalog(claimedReadOnly.cliCatalog, claimedReadOnly.mcpTools, inventory)
+    ).toThrow(/claimed effects for unaudited create-account/)
   })
 })

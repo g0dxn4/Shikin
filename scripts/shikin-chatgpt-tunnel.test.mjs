@@ -1,0 +1,220 @@
+import { spawnSync } from 'node:child_process'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+
+const helper = resolve('scripts/shikin-chatgpt-tunnel.sh')
+const roots = []
+const tunnelID = 'tunnel_0123456789abcdef0123456789abcdef'
+const secret = 'test-runtime-secret-do-not-log'
+
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+})
+
+function fixture() {
+  const root = mkdtempSync(join(tmpdir(), 'shikin-tunnel-'))
+  roots.push(root)
+  // Exercise shell command parsing, settings quoting, XML escaping and argv.
+  const state = join(root, "Andres' Application Support & tools")
+  const agents = join(root, 'LaunchAgents')
+  const bin = join(root, 'bin')
+  const data = join(root, "finance's data", 'com.asf.shikin')
+  const mcp = join(root, "installed tools' MCP.cjs")
+  const key = join(root, 'original-key')
+  const log = join(root, 'calls.jsonl')
+  mkdirSync(bin)
+  mkdirSync(data, { recursive: true })
+  writeFileSync(join(data, 'shikin.db'), 'existing-synthetic-db')
+  writeFileSync(key, secret, { mode: 0o600 })
+  writeFileSync(mcp, `process.stdin.on('data', chunk => process.stdout.write(chunk));`)
+  const prelude = `#!${process.execPath}\nconst fs = require('node:fs');
+const cp = require('node:child_process');
+const args = process.argv.slice(2);
+const root = ${JSON.stringify(root)};
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({name: require('node:path').basename(process.argv[1]), args}) + '\\n');\n`
+  const shim = (name, body) => writeFileSync(join(bin, name), prelude + body, { mode: 0o700 })
+  shim('uname', "console.log(process.env.FAKE_OS || 'Darwin');")
+  shim('id', "console.log('501');")
+  shim('plutil', 'process.exit(0);')
+  shim(
+    'docker',
+    `
+if (args[0] === 'inspect') { console.log(process.env.FAKE_DOCKER_DOWN ? 'false' : 'true'); process.exit(0); }
+if (args[0] !== 'exec' || args[1] !== '-i' || args.includes('-t')) process.exit(9);
+let i = 2; const env = {...process.env};
+while (args[i] === '--env') { const pair = args[i+1]; const eq = pair.indexOf('='); env[pair.slice(0,eq)] = pair.slice(eq+1); i += 2; }
+if (args[i++] !== 'shikin-web') process.exit(10);
+if (env.XDG_DATA_HOME !== ${JSON.stringify(dirname(data))} || env.SHIKIN_MIGRATE_LEGACY_DATA !== '0') process.exit(11);
+const result = cp.spawnSync(args[i], args.slice(i+1), {env, stdio:'inherit'});
+process.exit(result.status ?? 12);`
+  )
+  shim(
+    'launchctl',
+    `
+const marker = root + '/loaded';
+if (args[0] === 'print') process.exit(fs.existsSync(marker) ? 0 : 1);
+if (args[0] === 'bootstrap') fs.writeFileSync(marker, 'loaded');
+if (args[0] === 'bootout') fs.rmSync(marker, {force:true});
+if (args[0] === 'disable') fs.writeFileSync(root + '/disabled', 'disabled');
+if (args[0] === 'enable') fs.rmSync(root + '/disabled', {force:true});`
+  )
+  shim('curl', `if (process.env.FAKE_NOT_READY) process.exit(22); console.log('{"ready":true}');`)
+  shim(
+    'tunnel-client',
+    `
+if (args[0] === 'init') {
+  if (process.env.SHIKIN_TEST_REAL_CLIENT) {
+    const r = cp.spawnSync(process.env.SHIKIN_TEST_REAL_CLIENT, args, {stdio:'inherit'});
+    process.exit(r.status ?? 1);
+  }
+  const p = args[args.indexOf('--profile-dir')+1];
+  fs.writeFileSync(p + '/shikin.yaml', 'config_version: 1\\n');
+}
+if (args[0] === 'run') fs.writeFileSync(args[args.indexOf('--health.url-file')+1], 'http://127.0.0.1:41999');`
+  )
+  const env = {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+    SHIKIN_TUNNEL_AGENT_DIR: agents,
+  }
+  const run = (command, extra = [], overrides = {}) =>
+    spawnSync('/bin/bash', [helper, command, '--state-dir', state, ...extra], {
+      encoding: 'utf8',
+      env: { ...env, ...overrides },
+      timeout: 15000,
+    })
+  const setup = (extra = [], overrides = {}) =>
+    run(
+      'setup',
+      [
+        '--tunnel-id',
+        tunnelID,
+        '--key-file',
+        key,
+        '--node-path',
+        process.execPath,
+        '--mcp-path',
+        mcp,
+        '--data-dir',
+        data,
+        ...extra,
+      ],
+      overrides
+    )
+  return { root, state, agents, data, mcp, key, log, env, run, setup }
+}
+
+describe('Shikin Docker tunnel helper', () => {
+  it('installs a private profile and valid login service without leaking credentials', () => {
+    const f = fixture()
+    const result = f.setup()
+    expect(result.stderr, result.stdout).not.toContain(secret)
+    expect(result.status, result.stderr).toBe(0)
+    const settings = readFileSync(join(f.state, 'settings.sh'), 'utf8')
+    const calls = readFileSync(f.log, 'utf8')
+    expect(settings + calls).not.toContain(secret)
+    expect(readFileSync(join(f.state, 'runtime-key'), 'utf8')).toBe(secret)
+    expect(statSync(join(f.state, 'runtime-key')).mode & 0o777).toBe(0o600)
+    expect(statSync(f.state).mode & 0o777).toBe(0o700)
+    const xml = readFileSync(join(f.agents, 'com.asf.shikin.chatgpt-tunnel.plist'), 'utf8')
+    const parsed = new DOMParser().parseFromString(xml, 'application/xml')
+    expect(parsed.querySelector('parsererror')).toBeNull()
+    expect([...parsed.querySelectorAll('string')].map((node) => node.textContent)).toContain(
+      f.state
+    )
+    expect(xml).toContain('<key>KeepAlive</key><true/>')
+    expect(calls).toContain('file:')
+    expect(calls).not.toContain('docker.sock')
+    expect(f.run('check').status).toBe(0)
+  })
+
+  it('preserves bidirectional stdio and the existing database through the guarded command', () => {
+    const f = fixture()
+    expect(f.setup().status).toBe(0)
+    const input = '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n'
+    const r = spawnSync('/bin/bash', [helper, 'mcp', '--state-dir', f.state], {
+      env: f.env,
+      input,
+      encoding: 'utf8',
+      timeout: 15000,
+    })
+    expect(r.status, r.stderr).toBe(0)
+    expect(r.stdout).toBe(input)
+    expect(readFileSync(join(f.data, 'shikin.db'), 'utf8')).toBe('existing-synthetic-db')
+  })
+
+  it('refuses missing databases before setup and again before every MCP start', () => {
+    const f = fixture()
+    rmSync(join(f.data, 'shikin.db'))
+    expect(f.setup().status).not.toBe(0)
+    expect(existsSync(f.state)).toBe(false)
+    writeFileSync(join(f.data, 'shikin.db'), 'existing-db')
+    expect(f.setup().status).toBe(0)
+    rmSync(join(f.data, 'shikin.db'))
+    const r = f.run('mcp')
+    expect(r.status).not.toBe(0)
+    expect(r.stderr).toContain('refusing to start MCP')
+    expect(existsSync(join(f.data, 'shikin.db'))).toBe(false)
+  })
+
+  it('fails clearly while Docker is unavailable, allowing launchd to retry', () => {
+    const f = fixture()
+    expect(f.setup().status).toBe(0)
+    writeFileSync(join(f.state, 'health-url'), 'http://127.0.0.1:41999')
+    const r = f.run('run', [], { FAKE_DOCKER_DOWN: '1' })
+    expect(r.status).not.toBe(0)
+    expect(r.stderr).toContain('unavailable')
+    expect(existsSync(join(f.state, 'health-url'))).toBe(false)
+  })
+
+  it('distinguishes a loaded service from a ready tunnel and requires a loopback health URL', () => {
+    const f = fixture()
+    expect(f.setup().status).toBe(0)
+    expect(f.run('status').status).not.toBe(0)
+    expect(f.run('run').status).toBe(0)
+    expect(f.run('status', [], { FAKE_NOT_READY: '1' }).status).not.toBe(0)
+    expect(f.run('status').stderr).toContain('successful ChatGPT tool call is still needed')
+    writeFileSync(join(f.state, 'health-url'), 'https://example.com')
+    expect(f.run('status').status).not.toBe(0)
+  })
+
+  it('stops persistently, restarts without duplicate bootstraps and uninstalls only its own files', () => {
+    const f = fixture()
+    expect(f.setup().status).toBe(0)
+    expect(f.run('start').status).toBe(0)
+    expect(readFileSync(f.log, 'utf8').match(/"bootstrap"/g)).toHaveLength(1)
+    expect(f.run('stop').status).toBe(0)
+    expect(existsSync(join(f.root, 'disabled'))).toBe(true)
+    expect(existsSync(join(f.root, 'loaded'))).toBe(false)
+    expect(f.run('start').status).toBe(0)
+    writeFileSync(join(f.state, 'unrelated-file'), 'keep')
+    expect(f.run('uninstall').status).toBe(0)
+    expect(existsSync(join(f.state, 'runtime-key'))).toBe(false)
+    expect(existsSync(join(f.state, 'unrelated-file'))).toBe(true)
+    expect(readFileSync(f.key, 'utf8')).toBe(secret)
+    expect(readFileSync(join(f.data, 'shikin.db'), 'utf8')).toBe('existing-synthetic-db')
+  })
+
+  it('rejects duplicate setup, malformed targets, symlink state and the wrong OS', () => {
+    const f = fixture()
+    expect(f.setup([], { FAKE_OS: 'Linux' }).status).not.toBe(0)
+    expect(f.setup(['--container', '--privileged']).status).not.toBe(0)
+    expect(f.setup(['--data-dir', '/tmp/wrong']).status).not.toBe(0)
+    symlinkSync(f.data, f.state)
+    expect(f.setup().status).not.toBe(0)
+    rmSync(f.state)
+    expect(f.setup().status).toBe(0)
+    expect(f.setup().status).not.toBe(0)
+  })
+})

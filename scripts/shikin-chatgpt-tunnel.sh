@@ -19,6 +19,115 @@ die() { printf 'Shikin tunnel: %s\n' "$*" >&2; exit 1; }
 info() { printf '%s\n' "$*" >&2; }
 quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 xml() { printf '%s' "$1" | sed 's/\&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'; }
+xml_decode() { printf '%s' "$1" | sed -e 's/\&lt;/</g' -e 's/\&gt;/>/g' -e 's/\&quot;/"/g' -e 's/\&amp;/\&/g'; }
+
+# Trim only trailing / and /. wrappers so a direct symlink is visible to -L.
+strip_trailing_wrappers() {
+  local path="$1"
+  while [ "$path" != / ]; do
+    case "$path" in
+      */) path="${path%/}" ;;
+      */.) path="${path%/.}" ;;
+      *) break ;;
+    esac
+    [ -n "$path" ] || path=/
+  done
+  printf '%s\n' "$path"
+}
+
+# Physical traversal with cd -P. Do not collapse interior .. before existing
+# symlink components, and do not create missing directories.
+resolve_state_path() {
+  local path comp next resolved=/ suffix="" oldifs
+  path="$(strip_trailing_wrappers "$1")" || return 1
+  case "$path" in /*) ;; *) return 1 ;; esac
+  oldifs="$IFS"
+  set -f
+  IFS=/
+  set -- $path
+  IFS="$oldifs"
+  set +f
+  for comp in "$@"; do
+    case "$comp" in
+      ''|.) continue ;;
+      ..)
+        [ -z "$suffix" ] || return 1
+        resolved="$(CDPATH= cd -P -- "$resolved/.." && pwd -P)" || return 1
+        ;;
+      *)
+        if [ -n "$suffix" ]; then
+          suffix="$suffix/$comp"
+          continue
+        fi
+        if [ "$resolved" = / ]; then
+          next="/$comp"
+        else
+          next="$resolved/$comp"
+        fi
+        if [ -d "$next" ]; then
+          resolved="$(CDPATH= cd -P -- "$next" && pwd -P)" || return 1
+        elif [ -e "$next" ] || [ -L "$next" ]; then
+          return 1
+        else
+          suffix="/$comp"
+        fi
+        ;;
+    esac
+  done
+  printf '%s%s\n' "$resolved" "$suffix"
+}
+
+# 0 same, 1 different, 2 undetermined. Prefer Bash -ef when both exist.
+same_state_directory() {
+  local a b
+  a="$(resolve_state_path "$1")" || return 2
+  b="$(resolve_state_path "$2")" || return 2
+  [ -n "$a" ] && [ -n "$b" ] || return 2
+  if [ -d "$a" ] && [ -d "$b" ]; then
+    [ "$a" -ef "$b" ] && return 0
+    return 1
+  fi
+  [ "$a" = "$b" ] && return 0
+  return 1
+}
+
+plist_recorded_state_dir() {
+  local plist="$1" recorded="" flat encoded
+  [ -f "$plist" ] && [ ! -L "$plist" ] || return 1
+  recorded="$(plutil -extract ProgramArguments.4 raw -o - "$plist" 2>/dev/null || true)"
+  case "$recorded" in
+    /*)
+      printf '%s\n' "$recorded"
+      return 0
+      ;;
+  esac
+  flat="$(tr '\n' ' ' < "$plist")"
+  encoded="$(printf '%s' "$flat" | sed -n 's/.*<string>--state-dir<\/string>[[:space:]]*<string>\([^<]*\)<\/string>.*/\1/p')"
+  [ -n "$encoded" ] || return 1
+  recorded="$(xml_decode "$encoded")"
+  [ -n "$recorded" ] || return 1
+  printf '%s\n' "$recorded"
+}
+
+plist_ownership() {
+  local recorded rc=0
+  if [ -z "${PLIST_PATH:-}" ] || [ ! -f "$PLIST_PATH" ] || [ -L "$PLIST_PATH" ]; then
+    printf 'absent\n'
+    return 0
+  fi
+  recorded="$(plist_recorded_state_dir "$PLIST_PATH")" || { printf 'unknown\n'; return 0; }
+  case "$recorded" in
+    /*) ;;
+    *) printf 'unknown\n'; return 0 ;;
+  esac
+  case "$recorded" in *$'\n'*|*$'\r'*|*$'\t'*) printf 'unknown\n'; return 0 ;; esac
+  same_state_directory "$STATE_DIR" "$recorded" || rc=$?
+  case "$rc" in
+    0) printf 'owned\n' ;;
+    1) printf 'foreign\n' ;;
+    *) printf 'unknown\n' ;;
+  esac
+}
 
 usage() {
   cat <<'HELP'
@@ -84,7 +193,12 @@ validate_path() {
 }
 validate_path 'State directory' "$STATE_DIR"
 validate_path 'LaunchAgent directory' "$AGENT_DIR"
-[ ! -L "$STATE_DIR" ] || die 'State directory must not be a symlink'
+_state_probe="$(strip_trailing_wrappers "$STATE_DIR")" || die 'State directory could not be resolved'
+[ -n "$_state_probe" ] || die 'State directory could not be resolved'
+[ ! -L "$_state_probe" ] || die 'State directory must not be a symlink'
+STATE_DIR="$(resolve_state_path "$STATE_DIR")" || die 'State directory could not be resolved'
+[ -n "$STATE_DIR" ] || die 'State directory could not be resolved'
+unset _state_probe
 CONFIG="$STATE_DIR/settings.sh"
 INSTALLED="$STATE_DIR/shikin-chatgpt-tunnel.sh"
 KEY_PATH="$STATE_DIR/runtime-key"
@@ -145,8 +259,7 @@ check_target() {
 service_target() { printf 'gui/%s/%s' "$(id -u)" "$LABEL"; }
 
 plist_owned_by_this_state() {
-  [ -n "${PLIST_PATH:-}" ] && [ -f "$PLIST_PATH" ] && [ ! -L "$PLIST_PATH" ] || return 1
-  grep -Fq "<string>--state-dir</string><string>$(xml "$STATE_DIR")</string>" "$PLIST_PATH"
+  [ "$(plist_ownership)" = owned ]
 }
 
 require_owned_service() {
@@ -288,12 +401,18 @@ case "$COMMAND" in
     [ -f "$LOG_PATH" ] || die 'No tunnel log yet.'
     tail -n 60 "$LOG_PATH" ;;
   uninstall)
-    if plist_owned_by_this_state; then
-      stop_service
-      rm -f "$PLIST_PATH"
-    else
-      info "LaunchAgent is absent or not associated with $STATE_DIR; leaving the shared service untouched."
-    fi
+    case "$(plist_ownership)" in
+      owned)
+        stop_service
+        rm -f "$PLIST_PATH"
+        ;;
+      absent|foreign)
+        info "LaunchAgent is absent or not associated with $STATE_DIR; leaving the shared service untouched."
+        ;;
+      *)
+        die "Cannot determine whether LaunchAgent at $PLIST_PATH belongs to this state directory ($STATE_DIR); refusing to delete this installation's files. Inspect $PLIST_PATH and retry using the recorded --state-dir, or remove this installation only after confirming ownership."
+        ;;
+    esac
     rm -f "$CONFIG" "$KEY_PATH" "$PROFILE_DIR/shikin.yaml" "$URL_PATH" "$LOG_PATH" "$INSTALLED"
     rmdir "$PROFILE_DIR" "$STATE_DIR" 2>/dev/null || true
     info "Removed this installation's tunnel files and copied runtime key. Original key file, Docker data, Shikin and other installations are untouched." ;;

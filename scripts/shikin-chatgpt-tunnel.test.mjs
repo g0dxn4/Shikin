@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -23,7 +24,7 @@ afterEach(() => {
 })
 
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), 'shikin-tunnel-'))
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'shikin-tunnel-')))
   roots.push(root)
   // Exercise shell command parsing, settings quoting, XML escaping and argv.
   const state = join(root, "Andres' Application Support & tools")
@@ -46,7 +47,19 @@ fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({name: require('node:pa
   const shim = (name, body) => writeFileSync(join(bin, name), prelude + body, { mode: 0o700 })
   shim('uname', "console.log(process.env.FAKE_OS || 'Darwin');")
   shim('id', "console.log('501');")
-  shim('plutil', 'process.exit(0);')
+  shim(
+    'plutil',
+    `
+if (args[0] === '-lint') process.exit(0);
+if (args[0] === '-extract' && args[1] === 'ProgramArguments.4' && args[2] === 'raw' && args[3] === '-o' && args[4] === '-' && args[5] && !process.env.FAKE_PLUTIL_EXTRACT_FAIL) {
+  const xml = fs.readFileSync(args[5], 'utf8');
+  const m = xml.match(/<string>--state-dir<\\/string>\\s*<string>([^<]*)<\\/string>/);
+  if (!m) process.exit(1);
+  process.stdout.write(m[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
+  process.exit(0);
+}
+process.exit(args[0] === '-extract' ? 1 : 0);`
+  )
   shim(
     'docker',
     `
@@ -185,6 +198,9 @@ describe('Shikin Docker tunnel helper', () => {
     rmSync(join(f.data, 'shikin.db'))
     expect(f.setup().status).not.toBe(0)
     expect(existsSync(f.state)).toBe(false)
+    const nested = join(f.root, 'fresh', 'nested-state')
+    expect(f.setupAt(nested).status).not.toBe(0)
+    expect(existsSync(join(f.root, 'fresh'))).toBe(false)
     writeFileSync(join(f.data, 'shikin.db'), 'existing-db')
     expect(f.setup().status).toBe(0)
     rmSync(join(f.data, 'shikin.db'))
@@ -313,5 +329,184 @@ describe('Shikin Docker tunnel helper', () => {
     expect(existsSync(join(stateB, 'runtime-key'))).toBe(true)
     expect(existsSync(join(f.root, 'loaded'))).toBe(true)
     expect(existsSync(join(f.root, 'disabled'))).toBe(false)
+  })
+
+  it('treats equivalent state path spellings as one owned installation', () => {
+    const f = fixture()
+    expect(f.setup().status).toBe(0)
+    writeFileSync(join(f.state, 'unrelated-file'), 'keep')
+    const xml = readFileSync(join(f.agents, 'com.asf.shikin.chatgpt-tunnel.plist'), 'utf8')
+    expect(
+      [...new DOMParser().parseFromString(xml, 'application/xml').querySelectorAll('string')].map(
+        (node) => node.textContent
+      )
+    ).toContain(f.state)
+
+    const stop = f.runAt(`${f.state}/`, 'stop', [], { FAKE_PLUTIL_EXTRACT_FAIL: '1' })
+    expect(stop.status, stop.stderr).toBe(0)
+    expect(existsSync(join(f.root, 'loaded'))).toBe(false)
+    expect(existsSync(join(f.root, 'disabled'))).toBe(true)
+
+    const start = f.runAt(`${f.state}/.`, 'start')
+    expect(start.status, start.stderr).toBe(0)
+    expect(existsSync(join(f.root, 'loaded'))).toBe(true)
+    expect(existsSync(join(f.root, 'disabled'))).toBe(false)
+
+    const uninstall = f.runAt(`${f.state}/`, 'uninstall')
+    expect(uninstall.status, uninstall.stderr).toBe(0)
+    expect(existsSync(join(f.agents, 'com.asf.shikin.chatgpt-tunnel.plist'))).toBe(false)
+    expect(existsSync(join(f.root, 'loaded'))).toBe(false)
+    expect(existsSync(join(f.state, 'runtime-key'))).toBe(false)
+    expect(existsSync(join(f.state, 'settings.sh'))).toBe(false)
+    expect(existsSync(join(f.state, 'shikin-chatgpt-tunnel.sh'))).toBe(false)
+    expect(existsSync(join(f.state, 'unrelated-file'))).toBe(true)
+    expect(readFileSync(f.key, 'utf8')).toBe(secret)
+    expect(readFileSync(join(f.data, 'shikin.db'), 'utf8')).toBe('existing-synthetic-db')
+
+    const again = f.setup()
+    expect(again.status, again.stderr).toBe(0)
+  })
+
+  it('resolves a noncanonical recorded plist path and keeps sibling installs separate', () => {
+    const f = fixture()
+    expect(f.setupAt(`${f.state}/`).status).toBe(0)
+    const plist = join(f.agents, 'com.asf.shikin.chatgpt-tunnel.plist')
+    const xml = readFileSync(plist, 'utf8')
+    const needle = '<string>--state-dir</string><string>'
+    const start = xml.indexOf(needle)
+    expect(start).toBeGreaterThan(-1)
+    const valueStart = start + needle.length
+    const valueEnd = xml.indexOf('</string>', valueStart)
+    const recorded = xml.slice(valueStart, valueEnd)
+    const legacy = recorded.endsWith('/') ? recorded : `${recorded}/`
+    writeFileSync(plist, `${xml.slice(0, valueStart)}${legacy}${xml.slice(valueEnd)}`)
+
+    expect(f.run('stop').status).toBe(0)
+    expect(f.run('start').status).toBe(0)
+
+    const sibling = join(f.root, 'sibling-state')
+    const setupSib = f.setupAt(sibling)
+    expect(setupSib.status, setupSib.stderr).not.toBe(0)
+    const uninstallSib = f.runAt(`${sibling}/`, 'uninstall')
+    expect(uninstallSib.status, uninstallSib.stderr).not.toBe(0)
+    expect(existsSync(plist)).toBe(true)
+    expect(existsSync(join(f.state, 'runtime-key'))).toBe(true)
+    expect(existsSync(join(f.root, 'loaded'))).toBe(true)
+
+    expect(f.runAt(`${f.state}/.`, 'uninstall').status).toBe(0)
+    expect(existsSync(plist)).toBe(false)
+    expect(existsSync(join(f.root, 'loaded'))).toBe(false)
+    expect(existsSync(join(f.state, 'runtime-key'))).toBe(false)
+  })
+
+  it('refuses direct symlink state aliases without modifying referenced files', () => {
+    const f = fixture()
+    const target = join(f.root, 'referenced-state')
+    mkdirSync(target, { mode: 0o700 })
+    writeFileSync(join(target, 'keep-me'), 'preserve')
+    const link = join(f.root, 'state-link')
+    symlinkSync(target, link)
+    for (const alias of [link, `${link}/`, `${link}/.`]) {
+      const r = f.setupAt(alias)
+      expect(r.status, `${alias}: ${r.stderr}`).not.toBe(0)
+      expect(r.stderr).toMatch(/symlink/i)
+    }
+    expect(readFileSync(join(target, 'keep-me'), 'utf8')).toBe('preserve')
+    expect(existsSync(join(target, 'settings.sh'))).toBe(false)
+    expect(existsSync(join(target, 'runtime-key'))).toBe(false)
+
+    const actualParent = join(f.root, 'actual-parent')
+    mkdirSync(actualParent)
+    const aliasParent = join(f.root, 'alias-parent')
+    symlinkSync(actualParent, aliasParent)
+    const nested = join(aliasParent, 'nested-state')
+    const setupNested = f.setupAt(nested)
+    expect(setupNested.status, setupNested.stderr).toBe(0)
+    const physical = join(actualParent, 'nested-state')
+    expect(existsSync(join(physical, 'settings.sh'))).toBe(true)
+    expect(f.runAt(physical, 'stop').status).toBe(0)
+    expect(f.runAt(`${nested}/.`, 'uninstall').status).toBe(0)
+    expect(existsSync(join(physical, 'settings.sh'))).toBe(false)
+    expect(existsSync(join(f.agents, 'com.asf.shikin.chatgpt-tunnel.plist'))).toBe(false)
+  })
+
+  it('does not delete installation files when LaunchAgent ownership cannot be determined', () => {
+    const f = fixture()
+    expect(f.setup().status).toBe(0)
+    writeFileSync(
+      join(f.agents, 'com.asf.shikin.chatgpt-tunnel.plist'),
+      '<plist version="1.0"><dict></dict></plist>'
+    )
+    const r = f.run('uninstall')
+    expect(r.status, r.stderr).not.toBe(0)
+    expect(r.stderr).toMatch(/cannot determine/i)
+    expect(existsSync(join(f.state, 'settings.sh'))).toBe(true)
+    expect(existsSync(join(f.state, 'runtime-key'))).toBe(true)
+    expect(readFileSync(join(f.state, 'runtime-key'), 'utf8')).toBe(secret)
+    expect(existsSync(join(f.agents, 'com.asf.shikin.chatgpt-tunnel.plist'))).toBe(true)
+    expect(existsSync(join(f.root, 'loaded'))).toBe(true)
+  })
+
+  it('follows .. through an ancestor symlink instead of a lexical sibling', () => {
+    const f = fixture()
+    const actual = join(f.root, 'actual')
+    mkdirSync(join(actual, 'deeper'), { recursive: true })
+    const intended = join(actual, 'state')
+    const lexicalSibling = join(f.root, 'state')
+    mkdirSync(lexicalSibling, { mode: 0o700 })
+    writeFileSync(join(lexicalSibling, 'sentinel'), 'sibling-keep')
+    symlinkSync(join(actual, 'deeper'), join(f.root, 'alias'))
+    const via = `${f.root}/alias/../state`
+    expect(f.setupAt(intended).status).toBe(0)
+    writeFileSync(join(intended, 'unrelated-file'), 'keep')
+
+    const plist = join(f.agents, 'com.asf.shikin.chatgpt-tunnel.plist')
+    const xml = readFileSync(plist, 'utf8')
+    const needle = '<string>--state-dir</string><string>'
+    const start = xml.indexOf(needle)
+    expect(start).toBeGreaterThan(-1)
+    const valueStart = start + needle.length
+    const valueEnd = xml.indexOf('</string>', valueStart)
+    const recorded = via.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    writeFileSync(plist, `${xml.slice(0, valueStart)}${recorded}${xml.slice(valueEnd)}`)
+
+    expect(f.runAt(intended, 'stop').status).toBe(0)
+    expect(existsSync(join(f.root, 'loaded'))).toBe(false)
+    expect(f.runAt(`${via}/.`, 'start').status).toBe(0)
+    expect(existsSync(join(f.root, 'loaded'))).toBe(true)
+    expect(readFileSync(f.log, 'utf8')).toContain('ProgramArguments.4')
+
+    const missing = f.runAt(`${f.root}/actual/missing/../state`, 'uninstall')
+    expect(missing.status, missing.stderr).not.toBe(0)
+    expect(existsSync(join(intended, 'settings.sh'))).toBe(true)
+    expect(existsSync(join(lexicalSibling, 'sentinel'))).toBe(true)
+
+    expect(f.runAt(via, 'uninstall').status).toBe(0)
+    expect(existsSync(join(intended, 'settings.sh'))).toBe(false)
+    expect(existsSync(join(intended, 'unrelated-file'))).toBe(true)
+    expect(existsSync(plist)).toBe(false)
+    expect(existsSync(join(lexicalSibling, 'sentinel'))).toBe(true)
+    expect(readFileSync(join(lexicalSibling, 'sentinel'), 'utf8')).toBe('sibling-keep')
+    expect(existsSync(join(lexicalSibling, 'settings.sh'))).toBe(false)
+    expect(readFileSync(f.key, 'utf8')).toBe(secret)
+  })
+
+  it('does not uninstall a lexical sibling when .. walks through an ancestor symlink', () => {
+    const f = fixture()
+    const actual = join(f.root, 'actual')
+    mkdirSync(join(actual, 'deeper'), { recursive: true })
+    mkdirSync(join(actual, 'state'), { recursive: true, mode: 0o700 })
+    writeFileSync(join(actual, 'state', 'sentinel'), 'leave-intended')
+    symlinkSync(join(actual, 'deeper'), join(f.root, 'alias'))
+    const sibling = join(f.root, 'state')
+    expect(f.setupAt(sibling).status).toBe(0)
+    const via = `${f.root}/alias/../state`
+    const uninstall = f.runAt(via, 'uninstall')
+    expect(uninstall.status, uninstall.stderr).not.toBe(0)
+    expect(existsSync(join(sibling, 'settings.sh'))).toBe(true)
+    expect(existsSync(join(sibling, 'runtime-key'))).toBe(true)
+    expect(existsSync(join(f.root, 'loaded'))).toBe(true)
+    expect(readFileSync(join(actual, 'state', 'sentinel'), 'utf8')).toBe('leave-intended')
+    expect(existsSync(join(actual, 'state', 'settings.sh'))).toBe(false)
   })
 })

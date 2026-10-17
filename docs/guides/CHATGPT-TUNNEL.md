@@ -164,10 +164,16 @@ bash scripts/shikin-chatgpt-tunnel.sh uninstall
 - `uninstall`: removes **this state directory's** claimed tunnel files and copied
   runtime key only. It preserves Shikin, Docker volumes, the original `--key-file`
   source, unrelated files, and any LaunchAgent that is not associated with this
-  state directory. A rejected setup that never claimed ownership is non-destructive:
-  `uninstall` refuses to disable/unload the shared service or delete pre-existing
-  files. Do not use uninstall as a generic cleanup of another installation's files.
-  Revoke the key in Platform separately if it is no longer needed.
+  state directory. Equivalent `--state-dir` spellings (trailing `/`, `/.`, or a
+  parent-directory alias such as macOS `/tmp` vs `/private/tmp`) identify the same
+  installation for setup, start, stop, and uninstall. Interior `..` follows the
+  real parent after existing symlink components, not a lexical sibling. Distinct
+  directories stay separate. A path that is itself a symlink is rejected. If an existing LaunchAgent's
+  owner cannot be determined, uninstall refuses to delete this installation's files.
+  A rejected setup that never claimed ownership is non-destructive: `uninstall`
+  refuses to disable/unload the shared service or delete pre-existing files. Do not
+  use uninstall as a generic cleanup of another installation's files. Revoke the key
+  in Platform separately if it is no longer needed.
 - Reconfiguration/helper updates: uninstall this helper, then run setup from the
   new checkout. Do not run multiple tunnel clients unintentionally for one setup.
 - If setup fails after it has claimed this state directory, inspect the error, run
@@ -188,9 +194,9 @@ Do not publish unredacted logs or tool results containing financial data.
 - [Official tunnel-client onboarding](https://github.com/openai/tunnel-client/blob/master/docs/onboarding.md)
 
 The helper tests exercise setup, private credential handling, quoting, XML,
-stdio forwarding, database guards, startup failures, readiness, ownership-safe
-cleanup and mocked Docker/macOS commands. They do not prove macOS service
-operation or OpenAI account access. Set `SHIKIN_TEST_REAL_CLIENT` to an installed
+stdio forwarding, database guards, startup failures, readiness, equivalent
+state-path identity, ownership-safe cleanup and mocked Docker/macOS commands.
+They do not prove macOS service operation or OpenAI account access. Set `SHIKIN_TEST_REAL_CLIENT` to an installed
 official tunnel-client binary to validate profile generation against its actual
 CLI while keeping other service calls mocked. Live verification requires the Mac
 and a successful ChatGPT safe read; this helper does not authenticate to OpenAI.

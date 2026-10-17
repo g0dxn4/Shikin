@@ -48,6 +48,9 @@ playwright-report/
 # Development tracking (local only)
 docs/development/
 
+# Local design reference repositories
+docs/references/
+
 # AI tools
 .plans/
 .delta9/

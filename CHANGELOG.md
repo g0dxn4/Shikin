@@ -4,6 +4,25 @@ All notable changes to Shikin are documented in this file.
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-17
+
+Prepared release notes.
+
+### Private ChatGPT tunnel for existing Docker MCP
+
+- Optional macOS host helper forwards an already installed Shikin MCP server inside a running Docker container over a private outbound OpenAI Secure MCP Tunnel, with LaunchAgent login supervision, readiness checks, and diagnostics.
+- Rejected or partial setup cleanup is ownership-safe. Equivalent state-path spellings identify the same installation; interior `..` follows the real parent after existing symlink components, and a path that is itself a symlink is rejected.
+- `list-accounts` now declares audited read-only metadata (`effects.readOnly` and MCP `readOnlyHint: true`).
+
+### Upgrade notes
+
+- Back up first.
+- No schema migration is introduced from 1.2.0.
+- The helper does not install or replace the Docker CLI/MCP bundle, change Compose, or expose a web port.
+- If you need the new `list-accounts` `readOnlyHint` live, upgrade the installed CLI/MCP to 1.2.1 through the normal reviewed deployment path. Installing a DMG or checking out this Git tree does not update the container or configure ChatGPT.
+- Personal Pro is documented as read/fetch only. Full writes require Business/Enterprise/Edu according to the current ChatGPT tunnel guide. Keep ChatGPT confirmations.
+- This release does not claim live Mac or ChatGPT operation. A successful ChatGPT safe read remains required before treating the connection as verified.
+
 ## [1.2.0] - 2026-10-04
 
 Prepared release notes.

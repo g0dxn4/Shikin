@@ -71,6 +71,35 @@ not create one. Once that user's GUI session is running, setup can be run over S
    and [current releases](https://github.com/openai/tunnel-client/releases/latest).
    Do not bypass macOS security checks for a manually downloaded binary.
 
+## Acquire the released helper without a Git checkout
+
+If you do not already have a Shikin checkout, download the checksummed source
+archive from the [v1.2.1 release](https://github.com/g0dxn4/Shikin/releases/tag/v1.2.1).
+Use an owned work directory, not a shared folder you do not control. Download both:
+
+- https://github.com/g0dxn4/Shikin/releases/download/v1.2.1/shikin-cli-source-v1.2.1.tar.gz
+- https://github.com/g0dxn4/Shikin/releases/download/v1.2.1/shikin-cli-source-v1.2.1.tar.gz.sha256
+
+On the Mac, verify the archive **before** extracting or running anything:
+
+```bash
+shasum -a 256 -c shikin-cli-source-v1.2.1.tar.gz.sha256
+tar -xzf shikin-cli-source-v1.2.1.tar.gz
+cd Shikin-1.2.1
+```
+
+The tar root prefix is `Shikin-1.2.1` from the release workflow git archive.
+Then run the existing helper from that extracted workspace using the setup
+command below (`setup --tunnel-id YOUR_FULL_TUNNEL_ID`). Enter the runtime API
+key at the hidden local prompt. Never put the key in chat or command arguments.
+You do not need to rebuild the extracted workspace just to run the helper.
+
+### Desktop DMG (separate from this Docker tunnel)
+
+Apple silicon: `Shikin_1.2.1_aarch64.dmg`. Intel: `Shikin_1.2.1_x64.dmg`.
+Installing the desktop app or host CLI does **not** automatically point at or
+upgrade an existing Docker ledger.
+
 ## Install and start
 
 From your Shikin checkout, as the user who runs Docker (no `sudo`):

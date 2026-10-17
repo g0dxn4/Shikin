@@ -158,6 +158,11 @@ Currency authority is fully local and explicit:
 
 ## MCP Server
 
+For a private ChatGPT connection to an existing Docker deployment on macOS, see
+[ChatGPT tunnel setup and automatic startup](../docs/guides/CHATGPT-TUNNEL.md).
+The optional helper reuses the container's installed MCP server and existing
+database through OpenAI Secure MCP Tunnel.
+
 Start the MCP server through the desktop-owned command:
 
 ```bash

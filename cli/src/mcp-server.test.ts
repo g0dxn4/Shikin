@@ -5,13 +5,14 @@ import { z } from 'zod'
 vi.mock('./database.js', () => ({
   query: vi.fn(),
   execute: vi.fn(),
+  transaction: vi.fn(),
   close: vi.fn(),
   backupDatabase: vi.fn(),
   restoreDatabase: vi.fn(),
   DATABASE_BACKUP_SETTING_KEY: 'database_backups',
 }))
 
-const { query } = await import('./database.js')
+const { query, execute, transaction } = await import('./database.js')
 const { tools } = await import('./tools.js')
 const { createMcpToolHandler, registerMcpResources, registerMcpTools } =
   await import('./mcp-server.js')
@@ -117,8 +118,8 @@ describe('MCP tool registration', () => {
     expect(typeof getRecap?.[4]).toBe('function')
     expect(saveRecap?.[3]).toEqual({ readOnlyHint: false, idempotentHint: true })
     expect(typeof saveRecap?.[4]).toBe('function')
-    expect(typeof listAccounts?.[3]).toBe('function')
-    expect(listAccounts?.[4]).toBeUndefined()
+    expect(listAccounts?.[3]).toEqual({ readOnlyHint: true })
+    expect(typeof listAccounts?.[4]).toBe('function')
 
     const annotated = registerTool.mock.calls
       .filter((call) => typeof call[3] !== 'function')
@@ -144,32 +145,58 @@ describe('MCP tool registration', () => {
 
   it('executes real shared tools through the MCP handler without CLI-only coercion', async () => {
     const queryMock = vi.mocked(query)
+    const executeMock = vi.mocked(execute)
+    const transactionMock = vi.mocked(transaction)
     queryMock.mockReset()
-    queryMock
-      .mockReturnValueOnce([
-        {
-          id: 'acct-1',
-          name: 'Checking',
-          type: 'checking',
-          currency: 'USD',
-          balance: 12345,
-          credit_limit: null,
-          statement_closing_day: null,
-          payment_due_day: null,
-        },
-      ])
-      .mockReturnValueOnce([])
+    executeMock.mockReset()
+    transactionMock.mockReset()
+    queryMock.mockImplementation((sql: string) => {
+      if (String(sql).includes('FROM accounts')) {
+        return [
+          {
+            id: 'acct-1',
+            name: 'Checking',
+            type: 'checking',
+            currency: 'USD',
+            balance: 12345,
+            credit_limit: null,
+            statement_closing_day: null,
+            payment_due_day: null,
+          },
+        ]
+      }
+      if (String(sql).includes('FROM settings')) {
+        return [{ value: JSON.stringify({ checking: 'acct-1', 'bad alias': 1 }) }]
+      }
+      throw new Error(`unexpected query: ${sql}`)
+    })
 
     const listAccounts = tools.find((tool) => tool.name === 'list-accounts')
     expect(listAccounts).toBeDefined()
+    expect(listAccounts?.effects).toEqual({ readOnly: true, writesTo: [] })
 
     const handler = createMcpToolHandler(listAccounts!)
-    const result = await handler({ type: 'checking', _meta: { client: 'contract-test' } })
-    const payload = JSON.parse(result.content[0]!.text)
+    const filtered = await handler({ type: 'checking', _meta: { client: 'contract-test' } })
+    const filteredPayload = JSON.parse(filtered.content[0]!.text)
+    const unfiltered = await handler({ _meta: { client: 'contract-test' } })
+    const unfilteredPayload = JSON.parse(unfiltered.content[0]!.text)
 
-    expect(result.isError).toBeUndefined()
+    queryMock.mockImplementation((sql: string) => {
+      if (String(sql).includes('FROM accounts')) return []
+      if (String(sql).includes('FROM settings')) return []
+      throw new Error(`unexpected query: ${sql}`)
+    })
+    const missing = await handler({ _meta: { client: 'contract-test' } })
+    const missingPayload = JSON.parse(missing.content[0]!.text)
+
+    expect(filtered.isError).toBeUndefined()
+    expect(unfiltered.isError).toBeUndefined()
+    expect(missing.isError).toBeUndefined()
     expect(queryMock).toHaveBeenCalledWith(expect.stringContaining('AND type = $1'), ['checking'])
-    expect(payload).toEqual({
+    expect(queryMock.mock.calls.every(([sql]) => /^\s*SELECT\b/i.test(String(sql)))).toBe(true)
+    expect(executeMock).not.toHaveBeenCalled()
+    expect(transactionMock).not.toHaveBeenCalled()
+    expect(filteredPayload).toEqual({
       success: true,
       accounts: [
         {
@@ -180,10 +207,16 @@ describe('MCP tool registration', () => {
           balance: 123.45,
           accountMode: 'transactional',
           valuationMode: 'cash_plus_holdings',
-          aliases: [],
+          aliases: ['checking'],
         },
       ],
       message: 'Found 1 account.',
+    })
+    expect(unfilteredPayload).toEqual(filteredPayload)
+    expect(missingPayload).toEqual({
+      success: true,
+      accounts: [],
+      message: 'No accounts found.',
     })
   })
 

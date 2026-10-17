@@ -539,7 +539,10 @@ describe('CLI command execution', () => {
         'app_data_state',
       ],
     })
-    expect((commandByName.get('list-accounts') as { effects?: unknown }).effects).toBeUndefined()
+    expect((commandByName.get('list-accounts') as { effects?: unknown }).effects).toEqual({
+      readOnly: true,
+      writesTo: [],
+    })
     expect(close).toHaveBeenCalledTimes(1)
   })
 

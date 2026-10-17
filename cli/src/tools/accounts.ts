@@ -566,6 +566,7 @@ const listAccounts: ToolDefinition = {
       .optional()
       .describe('Filter by account type'),
   }),
+  effects: { readOnly: true, writesTo: [] },
   execute: async ({ type }) => {
     const params: unknown[] = []
     let sql = 'SELECT * FROM accounts WHERE is_archived = 0'

@@ -16,6 +16,7 @@ The current implementation is intentionally narrow and local-first:
 - Enablement and approved permissions are stored in `extensions/plugin-state.json`.
 - Only trusted-local JavaScript plugins are supported. Entry points must be built `.js` or `.mjs` files. TypeScript entry points and packaged community plugins are future work.
 - Plugin tools are exposed as shared CLI/MCP tools named `plugin-<plugin-id>-<tool-name>`.
+- MCP exposes enabled plugin tools only in the writable `full` profile. The `core` profile excludes them, and every `--read-only` profile rejects them even if a plugin declares read-only effects. Restart the server after changing its profile; see [MCP permissions](../research/MCP-DESIGN.md).
 - Local plugin code runs in the CLI/MCP process when an enabled plugin tool is invoked. Only enable plugins whose code you trust.
 - The current MVP is not a sandbox. Manifest permissions gate only the Shikin-provided `ctx` helpers. Trusted-local plugin code can still use Node/runtime capabilities available to the user, including filesystem and network access.
 
@@ -65,7 +66,7 @@ export async function summarize(input, ctx) {
 
   return {
     accountCount: accounts.filter(Boolean).length,
-    pluginId: ctx.plugin.id
+    pluginId: ctx.plugin.id,
   }
 }
 ```
@@ -208,21 +209,21 @@ Every extension requires a `manifest.json` file at its root.
 
 ### Manifest Fields
 
-| Field              | Type     | Required | Description                                                                   |
-| ------------------ | -------- | -------- | ----------------------------------------------------------------------------- |
-| `id`               | string   | yes      | Unique identifier (kebab-case). Must match directory name.                    |
-| `name`             | string   | yes      | Human-readable display name.                                                  |
-| `version`          | string   | yes      | Semver version string.                                                        |
-| `description`      | string   | yes      | Short description (under 200 characters).                                     |
-| `author`           | object   | yes      | Author name and optional URL.                                                 |
-| `license`          | string   | no       | SPDX license identifier.                                                      |
-| `repository`       | string   | no       | Source code URL.                                                              |
-| `minShikinVersion` | string   | no       | Minimum Shikin version required.                                              |
-| `main`             | string   | yes      | Entry point file relative to extension directory. Current CLI/MCP MVP supports `.js` and `.mjs`. |
-| `permissions`      | string[] | yes      | Required permissions (see Permission Model below).                            |
+| Field              | Type     | Required | Description                                                                                                  |
+| ------------------ | -------- | -------- | ------------------------------------------------------------------------------------------------------------ |
+| `id`               | string   | yes      | Unique identifier (kebab-case). Must match directory name.                                                   |
+| `name`             | string   | yes      | Human-readable display name.                                                                                 |
+| `version`          | string   | yes      | Semver version string.                                                                                       |
+| `description`      | string   | yes      | Short description (under 200 characters).                                                                    |
+| `author`           | object   | yes      | Author name and optional URL.                                                                                |
+| `license`          | string   | no       | SPDX license identifier.                                                                                     |
+| `repository`       | string   | no       | Source code URL.                                                                                             |
+| `minShikinVersion` | string   | no       | Minimum Shikin version required.                                                                             |
+| `main`             | string   | yes      | Entry point file relative to extension directory. Current CLI/MCP MVP supports `.js` and `.mjs`.             |
+| `permissions`      | string[] | yes      | Required permissions (see Permission Model below).                                                           |
 | `tools`            | object[] | no       | Automation actions this extension exposes. Current CLI/MCP MVP also requires `handler` and optional `input`. |
-| `hooks`            | string[] | no       | Application hooks this extension subscribes to.                               |
-| `ui`               | object   | no       | UI components this extension provides.                                        |
+| `hooks`            | string[] | no       | Application hooks this extension subscribes to.                                                              |
+| `ui`               | object   | no       | UI components this extension provides.                                                                       |
 
 ---
 

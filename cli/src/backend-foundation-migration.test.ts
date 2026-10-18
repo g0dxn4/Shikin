@@ -32,6 +32,9 @@ function home() {
 function rows(db: Database.Database, sql: string) {
   return db.prepare(sql).all()
 }
+function snapshotOrder(table: string) {
+  return ['budget_history_revisions', 'receivable_payment_links'].includes(table) ? 'id' : 'rowid'
+}
 function state(db: Database.Database) {
   return db.prepare('SELECT * FROM app_data_state').get() as {
     database_id: string
@@ -73,7 +76,7 @@ function snapshot(db: Database.Database) {
         columns: (rows(db, `PRAGMA table_info(${name})`) as Array<{ name: string }>).map(
           (c) => c.name
         ),
-        rows: rows(db, `SELECT * FROM ${name} ORDER BY rowid`),
+        rows: rows(db, `SELECT * FROM ${name} ORDER BY ${snapshotOrder(name)}`),
       },
     ])
   )
@@ -82,7 +85,7 @@ function assertPreserved(db: Database.Database, before: ReturnType<typeof snapsh
   for (const [table, data] of Object.entries(before)) {
     if (table === '_migrations') continue
     expect(
-      rows(db, `SELECT ${data.columns.join(',')} FROM ${table} ORDER BY rowid`),
+      rows(db, `SELECT ${data.columns.join(',')} FROM ${table} ORDER BY ${snapshotOrder(table)}`),
       table
     ).toEqual(data.rows)
   }
@@ -405,13 +408,15 @@ describe('021 backend remediation foundation', () => {
       (FINANCIAL_REVISION_TABLES.length +
         DATED_FX_REVISION_TABLES.length +
         CLASSIFICATION_TYPES_REVISION_TABLES.length) *
-        3
+        3 +
+        1 // History is append-only, so only INSERT advances the financial revision.
     )
     expect(new Set(revisionTriggers.map((t) => t.tbl_name))).toEqual(
       new Set([
         ...FINANCIAL_REVISION_TABLES,
         ...DATED_FX_REVISION_TABLES,
         ...CLASSIFICATION_TYPES_REVISION_TABLES,
+        'budget_history_revisions',
       ])
     )
     db.exec("INSERT INTO accounts (id, name, type) VALUES ('a', 'A', 'checking')")
@@ -493,7 +498,7 @@ describe('021 backend remediation foundation', () => {
     async (engine) => {
       const db = database()
       runHostedTestMigrations(db)
-      db.exec("INSERT INTO _migrations (id, name) VALUES (25, '025_future')")
+      db.exec("INSERT INTO _migrations (id, name) VALUES (27, '027_future')")
       const before = snapshot(db)
       if (engine === 'hosted') expect(() => runHostedTestMigrations(db)).toThrow(/newer/)
       else {
@@ -501,6 +506,26 @@ describe('021 backend remediation foundation', () => {
         await expect(api.getDb()).rejects.toThrow(/newer/)
       }
       expect(snapshot(db)).toEqual(before)
+    }
+  )
+})
+
+describe('025 budget history migration rollback', () => {
+  it.each(['hosted', 'native'] as const)(
+    'rolls back the full new history schema after a late marker failure (%s)',
+    async (engine) => {
+      const db = database()
+      runHostedTestMigrations(db, 24)
+      db.exec(`INSERT INTO budgets(id,name,amount,currency,period) VALUES ('plan','Plan',12345,'MXN','monthly');
+      INSERT INTO budget_periods(id,budget_id,start_date,end_date,spent) VALUES ('old','plan','2026-01-01','2026-01-31',6789);
+      CREATE TRIGGER inject_025 BEFORE INSERT ON _migrations WHEN NEW.id=25 BEGIN SELECT RAISE(ABORT,'late 025 failure'); END`)
+      const before = snapshot(db)
+      if (engine === 'hosted') expect(() => runHostedTestMigrations(db)).toThrow('late 025 failure')
+      else await expect((await mockNative(db)).api.getDb()).rejects.toThrow('late 025 failure')
+      expect(snapshot(db)).toEqual(before)
+      expect(rows(db, "SELECT name FROM sqlite_master WHERE name LIKE '%budget_history%'")).toEqual(
+        []
+      )
     }
   )
 })
@@ -577,18 +602,18 @@ describe('CLI staged restore and read-only readiness', { timeout: 20_000 }, () =
     api.close()
   })
 
-  it.each([19, 20, 21, 22, 23, 25] as const)(
+  it.each([19, 20, 21, 22, 23, 24, 25, 27] as const)(
     'does not auto-migrate normal CLI reads for schema %i',
     async (version) => {
       const path = home()
       const api = await cli(path)
       mkdirSync(join(path, 'data', 'com.asf.shikin'), { recursive: true })
       const db = database(api.getDatabasePath())
-      runHostedTestMigrations(db, version === 25 ? 24 : version)
-      if (version === 25) db.exec("INSERT INTO _migrations (id, name) VALUES (25, '025_future')")
+      runHostedTestMigrations(db, version === 27 ? 26 : version)
+      if (version === 27) db.exec("INSERT INTO _migrations (id, name) VALUES (27, '027_future')")
       const before = snapshot(db)
       db.close()
-      expect(() => api.query('SELECT 1')).toThrow(version === 25 ? /newer/ : /not ready/)
+      expect(() => api.query('SELECT 1')).toThrow(version === 27 ? /newer/ : /not ready/)
       api.close()
       expect(snapshot(database(api.getDatabasePath()))).toEqual(before)
     }
@@ -799,7 +824,10 @@ describe('023 classification foundation', () => {
             ? data
             : {
                 columns: data.columns,
-                rows: rows(db, `SELECT ${data.columns.join(',')} FROM ${table} ORDER BY rowid`),
+                rows: rows(
+                  db,
+                  `SELECT ${data.columns.join(',')} FROM ${table} ORDER BY ${snapshotOrder(table)}`
+                ),
               },
         ])
       )

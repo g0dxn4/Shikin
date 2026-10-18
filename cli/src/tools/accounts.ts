@@ -1773,6 +1773,7 @@ const listCategories: ToolDefinition = {
   name: 'list-categories',
   description:
     'List available transaction categories. Use this when the user asks about categories or needs to pick one.',
+  effects: { readOnly: true, writesTo: [] },
   schema: z.object({
     type: z.enum(['expense', 'income', 'transfer']).optional().describe('Filter by category type'),
   }),

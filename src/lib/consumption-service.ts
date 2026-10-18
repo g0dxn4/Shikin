@@ -81,7 +81,7 @@ async function assertClassificationOwnerAllowed(
   if (
     (
       await tx.query<{ id: string }>(
-        'SELECT id FROM receivables WHERE matched_transaction_id = ? LIMIT 1',
+        'SELECT id FROM (SELECT matched_transaction_id AS id FROM receivables UNION SELECT transaction_id AS id FROM receivable_payment_links WHERE reversed_at IS NULL) receipt_evidence WHERE id = ? LIMIT 1',
         [owner.id]
       )
     ).length > 0 ||

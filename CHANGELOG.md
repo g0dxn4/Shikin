@@ -4,6 +4,27 @@ All notable changes to Shikin are documented in this file.
 
 ## [Unreleased]
 
+### MCP usability and safety
+
+- Preserve the complete CLI/full MCP catalog and add an opt-in core profile plus enforced read-only tool and standalone database access. A capabilities resource reports the fixed launch profile.
+- Register full strict input schemas, return compact JSON and structured content, preserve actionable errors, and provide instructions that treat imported text as untrusted data.
+- Add atomic metadata/category/subcategory/split correction batches with preview binding, all-or-nothing audit writes, and idempotent retry receipts. Bank amounts, identities, and original source evidence remain intact.
+- Generate current tool/schema inventories and check them in CI; retain a pinned legacy compatibility fixture. Add a reproducible original/candidate benchmark using isolated synthetic databases.
+
+### Financial history and received payments
+
+- Capture monthly budget configuration and gross/net evidence, explicitly label retrospective reconstructions, and append correction revisions without overwriting original limits or silently following live budget changes.
+- Add a budget-history panel with reviewed previews and correction reasons.
+- Link multiple received installments to expected receivables, preserve legacy unattributed receipts, void mistaken payment links without deleting source evidence, and guard linked bank records across app/CLI/MCP paths.
+- Add receipt review and selective unlink flows to the Receivables page.
+
+### Documentation and upgrade notes
+
+- Research current MCP specifications and authoritative agent-tool guidance, compare established finance applications, and document implemented functionality and prioritized gaps.
+- Refresh architecture, database, CLI, portable skill, automation workflows, and generated inventory references.
+- Back up first and upgrade app, CLI, and MCP together through schema 26. Migrations 025/026 are additive and do not invent historical limits or income transactions. Read-only MCP does not migrate data.
+- Full remains the default; core is an evaluated candidate, not a claim that a particular tool count improves every model. Generic undo still has domain limits. See `docs/guides/AGENT-WORKFLOWS-UPGRADE.md` and `docs/benchmarks/MCP-BENCHMARKS.md`.
+
 ## [1.2.1] - 2026-10-17
 
 Prepared release notes.

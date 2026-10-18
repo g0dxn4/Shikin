@@ -70,6 +70,12 @@ export function createCashflowBucketsTestDatabase(): Database.Database {
       status TEXT,
       source TEXT,
       note TEXT,
+      transfer_to_account_id TEXT,
+      reconciliation_id TEXT,
+      matched_transaction_id TEXT,
+      import_source TEXT,
+      import_external_id TEXT,
+      import_fingerprint TEXT,
       ledger_treatment TEXT NOT NULL DEFAULT 'normal',
       reporting_treatment TEXT NOT NULL DEFAULT 'normal',
       transaction_kind TEXT NOT NULL DEFAULT 'standard',
@@ -120,6 +126,21 @@ export function createCashflowBucketsTestDatabase(): Database.Database {
     );
     CREATE TABLE recaps (
       id TEXT PRIMARY KEY
+    );
+    CREATE TABLE receivables (
+      id TEXT PRIMARY KEY,
+      payer TEXT NOT NULL,
+      amount INTEGER NOT NULL CHECK (amount > 0),
+      received_amount INTEGER NOT NULL DEFAULT 0 CHECK (received_amount >= 0 AND received_amount <= amount),
+      currency TEXT NOT NULL DEFAULT 'USD',
+      due_date TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'partial', 'received', 'cancelled')),
+      account_id TEXT REFERENCES accounts(id),
+      matched_transaction_id TEXT REFERENCES transactions(id),
+      source TEXT,
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
   `)
 

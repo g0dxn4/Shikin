@@ -79,6 +79,11 @@ const NEEDS_CATEGORY_SQL = `(t.type IN ('expense', 'income') AND t.category_id I
 const PENDING_SQL = `${NORMALIZED_STATUS_SQL} = 'pending'`
 const PLACEHOLDER_SQL = `(COALESCE(t.is_placeholder, 0) = 1 AND COALESCE(t.placeholder_status, 'unresolved') = 'unresolved')`
 const STAGED_SQL = `COALESCE(t.ledger_treatment, 'normal') = 'staged_no_balance_impact'`
+const HAS_RECEIVABLE_PAYMENT_SQL = `(EXISTS(
+  SELECT 1 FROM receivables consumption_receivable WHERE consumption_receivable.matched_transaction_id = t.id
+) OR EXISTS(
+  SELECT 1 FROM receivable_payment_links consumption_receipt WHERE consumption_receipt.transaction_id = t.id AND consumption_receipt.reversed_at IS NULL
+))`
 const CONSUMPTION_ELIGIBLE_SQL = `(t.type IN ('expense', 'income')
   AND ${NORMALIZED_STATUS_SQL} IN ('posted', 'cleared')
   AND COALESCE(t.ledger_treatment, 'normal') = 'normal'
@@ -87,7 +92,7 @@ const CONSUMPTION_ELIGIBLE_SQL = `(t.type IN ('expense', 'income')
   AND COALESCE(t.is_archived, 0) = 0
   AND t.matched_transaction_id IS NULL
   AND COALESCE(t.is_placeholder, 0) = 0
-  AND NOT EXISTS(SELECT 1 FROM receivables consumption_receivable WHERE consumption_receivable.matched_transaction_id = t.id)
+  AND NOT ${HAS_RECEIVABLE_PAYMENT_SQL}
   AND NOT EXISTS(SELECT 1 FROM account_reconciliations consumption_reconciliation WHERE consumption_reconciliation.adjustment_transaction_id = t.id))`
 const UNCLASSIFIED_SQL = `(${CONSUMPTION_ELIGIBLE_SQL} AND (
   (${HAS_SPLITS_SQL} AND EXISTS(
@@ -224,7 +229,7 @@ const JOINED_TRANSACTION_SELECT = `
          ta.name AS transfer_to_account_name,
          ${HAS_SPLITS_SQL} AS has_splits,
          ${UNCLASSIFIED_SQL} AS is_consumption_unclassified,
-         EXISTS(SELECT 1 FROM receivables r WHERE r.matched_transaction_id = t.id) AS is_receivable_payment,
+         ${HAS_RECEIVABLE_PAYMENT_SQL} AS is_receivable_payment,
          EXISTS(SELECT 1 FROM account_reconciliations ar WHERE ar.adjustment_transaction_id = t.id) AS is_reconciliation_adjustment,
          (t.finalization_id IS NOT NULL OR EXISTS(
            SELECT 1 FROM account_reconciliations ar

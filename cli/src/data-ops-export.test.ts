@@ -20,6 +20,55 @@ const exportData = dataOpsTools.find((tool) => tool.name === 'export-data')!
 describe('export-data import provenance redaction', () => {
   beforeEach(() => mockQuery.mockReset())
 
+  it('exports historical budget and partial-payment evidence and redacts their embedded source text', async () => {
+    const secret = 'SENTINEL sensitive budget reconstruction and bank memo'
+    const snapshot = JSON.stringify({ reason: secret, amountCentavos: 10000 })
+    mockQuery.mockImplementation((sql?: string) => {
+      if (sql?.includes('FROM budget_history_revisions '))
+        return [
+          {
+            id: 'history',
+            budget_id: 'budget',
+            month: '2026-01',
+            revision: 1,
+            snapshot_json: snapshot,
+            request_json: snapshot,
+            idempotency_key: secret,
+            reason: secret,
+          },
+        ]
+      if (sql?.includes('FROM receivable_payment_links '))
+        return [
+          {
+            id: 'payment',
+            receivable_id: 'client',
+            amount: 10000,
+            transaction_snapshot_json: snapshot,
+          },
+        ]
+      return []
+    })
+    const full = await exportData.execute(
+      exportData.schema.parse({ format: 'json', redacted: false })
+    )
+    expect(full.data.budget_history_revisions[0].snapshot_json).toBe(snapshot)
+    expect(full.data.receivable_payment_links[0].transaction_snapshot_json).toBe(snapshot)
+    const redacted = await exportData.execute(
+      exportData.schema.parse({ format: 'json', redacted: true })
+    )
+    expect(redacted.data.budget_history_revisions[0]).toMatchObject({
+      snapshot_json: '[REDACTED]',
+      request_json: '[REDACTED]',
+      idempotency_key: '[REDACTED]',
+      reason: '[REDACTED]',
+    })
+    expect(redacted.data.receivable_payment_links[0]).toMatchObject({
+      amount: 10000,
+      transaction_snapshot_json: '[REDACTED]',
+    })
+    expect(JSON.stringify(redacted)).not.toContain(secret)
+  })
+
   it('redacts canonical identity material, opaque external IDs, and original-row JSON only in redacted exports', async () => {
     const sensitiveDescription = 'SENTINEL private medical purchase'
     const opaqueExternalId = 'SENTINEL-OPAQUE-BANK-ID'

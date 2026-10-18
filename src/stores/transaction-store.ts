@@ -433,7 +433,7 @@ async function getTransactionForMutation(
     (await tx.query<TransactionForMutation>(
       `SELECT t.*, a.account_mode AS source_account_mode,
               ta.account_mode AS transfer_account_mode,
-              EXISTS(SELECT 1 FROM receivables r WHERE r.matched_transaction_id = t.id) AS is_receivable_payment,
+              (EXISTS(SELECT 1 FROM receivables r WHERE r.matched_transaction_id = t.id) OR EXISTS(SELECT 1 FROM receivable_payment_links p WHERE p.transaction_id = t.id AND p.reversed_at IS NULL)) AS is_receivable_payment,
               EXISTS(SELECT 1 FROM account_reconciliations ar WHERE ar.adjustment_transaction_id = t.id) AS is_reconciliation_adjustment,
               (t.finalization_id IS NOT NULL OR EXISTS(
                 SELECT 1 FROM account_reconciliations ar
@@ -836,7 +836,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         query<TransactionWithDetails>(
           `SELECT t.*, a.name as account_name, c.name as category_name, c.color as category_color,
                   ta.name as transfer_to_account_name,
-                  EXISTS(SELECT 1 FROM receivables r WHERE r.matched_transaction_id = t.id) AS is_receivable_payment,
+                  (EXISTS(SELECT 1 FROM receivables r WHERE r.matched_transaction_id = t.id) OR EXISTS(SELECT 1 FROM receivable_payment_links p WHERE p.transaction_id = t.id AND p.reversed_at IS NULL)) AS is_receivable_payment,
                   EXISTS(SELECT 1 FROM account_reconciliations ar WHERE ar.adjustment_transaction_id = t.id) AS is_reconciliation_adjustment,
                   (t.finalization_id IS NOT NULL OR EXISTS(
                     SELECT 1 FROM account_reconciliations ar

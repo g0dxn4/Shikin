@@ -1,4 +1,6 @@
 import { SCOPED_BUDGETS_MIGRATION } from '@shikin/finance-core/scoped-budgets-migration'
+import { BUDGET_HISTORY_MIGRATION } from '@shikin/finance-core/budget-history-migration'
+import { RECEIVABLE_PAYMENTS_MIGRATION } from '@shikin/finance-core/receivable-payments-migration'
 import {
   BACKEND_FOUNDATION_MIGRATION,
   DATED_FX_MIGRATION,
@@ -27,4 +29,6 @@ export const CLI_DATABASE_MIGRATIONS = [
   DATED_FX_MIGRATION,
   CLASSIFICATION_TYPES_MIGRATION,
   SCOPED_BUDGETS_MIGRATION,
+  BUDGET_HISTORY_MIGRATION,
+  RECEIVABLE_PAYMENTS_MIGRATION,
 ] as const

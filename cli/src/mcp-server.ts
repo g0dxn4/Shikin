@@ -5,16 +5,30 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { APPLICATION_VERSION } from './version.js'
 import { z } from 'zod'
 import { tools, type ToolDefinition } from './tools.js'
-import { query, close } from './database.js'
+import { query, close, configureDatabaseReadOnly } from './database.js'
 import { fromCentavos } from './money.js'
 import { getAccountAliases } from './tools/shared.js'
+import {
+  DEFAULT_MCP_OPTIONS,
+  MCP_SERVER_INSTRUCTIONS,
+  getMcpCapabilities,
+  isReadOnlyMcpTool,
+  resolveMcpOptions,
+  selectMcpTools,
+  type McpOptions,
+} from './mcp-profiles.js'
 
 type McpToolResult = {
   content: Array<{ type: 'text'; text: string }>
+  structuredContent: Record<string, unknown>
   isError?: boolean
 }
 
-type McpErrorType = 'validation_error' | 'execution_error' | 'unavailable_error'
+type McpErrorType =
+  | 'validation_error'
+  | 'execution_error'
+  | 'unavailable_error'
+  | 'permission_error'
 
 type McpValidationIssue = {
   code: string
@@ -34,9 +48,13 @@ type McpErrorEnvelope = {
 let activeRequestCount = 0
 let shutdownStarted = false
 
-function toMcpTextResult(payload: unknown, isError = false): McpToolResult {
+// Existing domain payloads stay compatible; validate the common result envelope.
+const mcpOutputSchema = z.object({ success: z.boolean() }).passthrough()
+
+function toMcpTextResult(payload: Record<string, unknown>, isError = false): McpToolResult {
   return {
-    content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
+    content: [{ type: 'text', text: JSON.stringify(payload) }],
+    structuredContent: payload,
     ...(isError ? { isError: true } : {}),
   }
 }
@@ -98,7 +116,7 @@ function createResourceResponse(uri: URL, payload: unknown) {
       {
         uri: uri.href,
         mimeType: 'application/json',
-        text: JSON.stringify(payload, null, 2),
+        text: JSON.stringify(payload),
       },
     ],
   }
@@ -219,7 +237,11 @@ export function formatMcpToolError(err: unknown): McpToolResult {
   return toMcpTextResult(payload, true)
 }
 
-export function createMcpToolHandler(tool: ToolDefinition) {
+export function createMcpToolHandler(
+  tool: ToolDefinition,
+  options: McpOptions = DEFAULT_MCP_OPTIONS
+) {
+  const readOnly = options.readOnly
   return async (input: Record<string, unknown>): Promise<McpToolResult> => {
     const startedAt = Date.now()
     beginRequest()
@@ -237,8 +259,24 @@ export function createMcpToolHandler(tool: ToolDefinition) {
     }
 
     try {
+      if (readOnly && !isReadOnlyMcpTool(tool)) {
+        logMcpEvent('tool_completed', {
+          tool: tool.name,
+          durationMs: Date.now() - startedAt,
+          success: false,
+          errorType: 'permission_error',
+        })
+        return toMcpTextResult(
+          toMcpErrorEnvelope(
+            `Tool ${tool.name} is denied by the read-only MCP tool policy.`,
+            'permission_error',
+            { reason: 'read_only_mode', tool: tool.name }
+          ),
+          true
+        )
+      }
       const { _meta, ...toolInput } = input
-      const parsed = tool.schema.parse(toolInput)
+      const parsed = tool.schema.strict().parse(toolInput)
       const result = await tool.execute(parsed)
       if (isFailureResult(result)) {
         const failureResult = toFailureResult(result)
@@ -285,21 +323,31 @@ function toMcpToolAnnotations(effects: ToolDefinition['effects']) {
 }
 
 export function registerMcpTools(
-  server: Pick<McpServer, 'tool'>,
-  toolDefinitions: ToolDefinition[] = tools
+  server: Pick<McpServer, 'registerTool'>,
+  toolDefinitions: ToolDefinition[] = tools,
+  options: McpOptions = DEFAULT_MCP_OPTIONS
 ): void {
-  for (const tool of toolDefinitions) {
-    const handler = createMcpToolHandler(tool)
+  for (const tool of selectMcpTools(toolDefinitions, options)) {
+    const handler = createMcpToolHandler(tool, options)
     const annotations = toMcpToolAnnotations(tool.effects)
-    if (annotations) {
-      server.tool(tool.name, tool.description, tool.schema.shape, annotations, handler)
-    } else {
-      server.tool(tool.name, tool.description, tool.schema.shape, handler)
-    }
+    server.registerTool(
+      tool.name,
+      {
+        description: tool.description,
+        inputSchema: tool.schema.strict(),
+        outputSchema: mcpOutputSchema,
+        ...(annotations ? { annotations } : {}),
+      },
+      handler
+    )
   }
 }
 
-export function registerMcpResources(server: Pick<McpServer, 'resource'>): void {
+export function registerMcpResources(
+  server: Pick<McpServer, 'resource'>,
+  toolDefinitions: ToolDefinition[] = tools,
+  options: McpOptions = DEFAULT_MCP_OPTIONS
+): void {
   server.resource(
     'accounts',
     'shikin://accounts',
@@ -371,22 +419,46 @@ export function registerMcpResources(server: Pick<McpServer, 'resource'>): void 
       }))
     })
   )
+
+  const capabilities = getMcpCapabilities(toolDefinitions, options)
+  server.resource(
+    'capabilities',
+    'shikin://capabilities',
+    createMcpResourceHandler('capabilities', () => capabilities)
+  )
 }
 
-export function createMcpServer(toolDefinitions: ToolDefinition[] = tools): McpServer {
-  const server = new McpServer({
-    name: 'shikin',
-    version: APPLICATION_VERSION,
-  })
+export function createMcpServer(
+  toolDefinitions: ToolDefinition[] = tools,
+  options: McpOptions = DEFAULT_MCP_OPTIONS
+): McpServer {
+  const fixedOptions = Object.freeze({ ...options })
+  const server = new McpServer(
+    {
+      name: 'shikin',
+      version: APPLICATION_VERSION,
+    },
+    { instructions: MCP_SERVER_INSTRUCTIONS }
+  )
 
-  registerMcpTools(server, toolDefinitions)
-  registerMcpResources(server)
+  registerMcpTools(server, toolDefinitions, fixedOptions)
+  registerMcpResources(server, toolDefinitions, fixedOptions)
 
   return server
 }
 
 async function main() {
-  const server = createMcpServer()
+  if (process.argv.slice(2).some((argument) => argument === '--help' || argument === '-h')) {
+    process.stdout.write(
+      'Usage: shikin mcp [--profile full|core] [--read-only]\n' +
+        'Environment: SHIKIN_MCP_PROFILE=full|core, SHIKIN_MCP_READ_ONLY=1|0\n' +
+        'The full profile is the compatibility default. Core is an opt-in compact catalog.\n'
+    )
+    return
+  }
+  const options = resolveMcpOptions(process.argv.slice(2))
+  configureDatabaseReadOnly(options.readOnly)
+  const server = createMcpServer(tools, options)
   const transport = new StdioServerTransport()
   await server.connect(transport)
 }

@@ -58,7 +58,9 @@ import {
 } from './account-reconciliation-service'
 
 function rows(table: string): Record<string, unknown>[] {
-  return holder.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all() as Record<
+  const order =
+    table === 'budget_history_revisions' || table === 'receivable_payment_links' ? 'id' : 'rowid'
+  return holder.db.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all() as Record<
     string,
     unknown
   >[]

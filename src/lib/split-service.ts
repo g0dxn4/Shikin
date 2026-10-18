@@ -211,8 +211,15 @@ async function assertSplitWorkflow(
   evidence: ConsumptionEvidence
 ) {
   if (
-    (await tx.query('SELECT id FROM receivables WHERE matched_transaction_id = ?', [owner.id]))
-      .length ||
+    (
+      await tx.query(
+        `SELECT id FROM (
+          SELECT matched_transaction_id AS id FROM receivables
+          UNION SELECT transaction_id AS id FROM receivable_payment_links WHERE reversed_at IS NULL
+        ) WHERE id = ?`,
+        [owner.id]
+      )
+    ).length ||
     (
       await tx.query('SELECT id FROM account_reconciliations WHERE adjustment_transaction_id = ?', [
         owner.id,

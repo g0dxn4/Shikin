@@ -29,6 +29,9 @@
     "test:run": "pnpm build:finance-core && vitest run --maxWorkers=1",
     "test:coverage": "pnpm build:finance-core && vitest run --coverage --maxWorkers=1",
     "test:finance-core": "pnpm build:finance-core && vitest run packages/finance-core/src",
+    "inventory:generate": "pnpm build:finance-core && node --import tsx scripts/generate-mcp-inventory.mjs",
+    "inventory:check": "pnpm build:finance-core && node --import tsx scripts/generate-mcp-inventory.mjs --check",
+    "benchmark:mcp": "pnpm build:finance-core && node --import tsx scripts/benchmark-mcp.mjs",
     "analyze:fallow": "fallow --summary",
     "release:preflight": "node scripts/release-preflight.mjs"
   },

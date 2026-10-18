@@ -8,7 +8,10 @@ Use this checklist when preparing a release from reviewed changes on `main`.
 - Confirm the intended feature and fix pull requests into `main` are merged.
 - Run `pnpm check`.
 - Run `pnpm test:run`.
+- Run `pnpm inventory:check`; regenerate and review the catalog if tool contracts changed.
 - Run `pnpm build`.
+- Run `pnpm build:cli` and the browser suite with isolated synthetic data.
+- For schema changes, verify fresh initialization, previous-version upgrade, failure rollback, and backup/restore on supported runtimes. Schema 25/26 requires the coordinated upgrade in the [agent-workflow migration guide](AGENT-WORKFLOWS-UPGRADE.md).
 - Review open bugs or known regressions that should block promotion.
 
 ## Release Preparation

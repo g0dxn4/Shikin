@@ -4,6 +4,16 @@ import {
   SCOPED_BUDGETS_OBJECTS,
 } from '@shikin/finance-core/scoped-budgets-migration'
 import {
+  BUDGET_HISTORY_MIGRATION,
+  BUDGET_HISTORY_SCHEMA,
+  BUDGET_HISTORY_OBJECTS,
+} from '@shikin/finance-core/budget-history-migration'
+import {
+  RECEIVABLE_PAYMENTS_MIGRATION,
+  RECEIVABLE_PAYMENTS_SCHEMA,
+  RECEIVABLE_PAYMENTS_OBJECTS,
+} from '@shikin/finance-core/receivable-payments-migration'
+import {
   CLASSIFICATION_TYPES_MIGRATION,
   CLASSIFICATION_TYPES_SCHEMA,
   CLASSIFICATION_TYPES_OBJECTS,
@@ -58,6 +68,8 @@ afterEach(() => {
 })
 
 function mockTauriDatabaseModules() {
+  // Transaction-bridge tests start with a fully migrated database. Migration
+  // execution itself is exercised by the separate native SQLite integration suite.
   const migrationRows = [
     '001_core_tables',
     '003_credit_cards',
@@ -80,6 +92,8 @@ function mockTauriDatabaseModules() {
     DATED_FX_MIGRATION,
     CLASSIFICATION_TYPES_MIGRATION,
     SCOPED_BUDGETS_MIGRATION,
+    BUDGET_HISTORY_MIGRATION,
+    RECEIVABLE_PAYMENTS_MIGRATION,
   ].map((name) => ({ name }))
   const tableRows = [
     '_migrations',
@@ -113,12 +127,16 @@ function mockTauriDatabaseModules() {
     ...Object.keys(DATED_FX_SCHEMA),
     ...Object.keys(CLASSIFICATION_TYPES_SCHEMA),
     ...Object.keys(SCOPED_BUDGETS_SCHEMA),
+    ...Object.keys(BUDGET_HISTORY_SCHEMA),
+    ...Object.keys(RECEIVABLE_PAYMENTS_SCHEMA),
   ].map((name) => ({ name }))
   const columnRows = [
     ...Object.values(BACKEND_FOUNDATION_SCHEMA).flat(),
     ...Object.values(DATED_FX_SCHEMA).flat(),
     ...Object.values(CLASSIFICATION_TYPES_SCHEMA).flat(),
     ...Object.values(SCOPED_BUDGETS_SCHEMA).flat(),
+    ...Object.values(BUDGET_HISTORY_SCHEMA).flat(),
+    ...Object.values(RECEIVABLE_PAYMENTS_SCHEMA).flat(),
     'id',
     'name',
     'applied_at',
@@ -263,6 +281,8 @@ function mockTauriDatabaseModules() {
           ...DATED_FX_OBJECTS,
           ...CLASSIFICATION_TYPES_OBJECTS,
           ...SCOPED_BUDGETS_OBJECTS,
+          ...BUDGET_HISTORY_OBJECTS,
+          ...RECEIVABLE_PAYMENTS_OBJECTS,
         }).map(([name, sql]) => ({ name, sql }))
       if (sql.includes("sqlite_master WHERE type = 'table'")) return tableRows
       if (sql.startsWith('PRAGMA table_info(')) return columnRows

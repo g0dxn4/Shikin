@@ -40,7 +40,14 @@ function snapshot() {
     state
       .db!.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
       .all() as { name: string }[]
-  ).map(({ name }) => [name, state.db!.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all()])
+  ).map(({ name }) => [
+    name,
+    state
+      .db!.prepare(
+        `SELECT * FROM "${name}" ORDER BY ${name === 'budget_history_revisions' || name === 'receivable_payment_links' ? 'id' : 'rowid'}`
+      )
+      .all(),
+  ])
 }
 function add(id: string, type = 'expense', amount = 1000, date = '2026-01-15', account = 'a') {
   state

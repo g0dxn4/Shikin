@@ -826,7 +826,7 @@ function protectedFinancialTransactionFailure(
   }>(
     `SELECT
        (SELECT COUNT(*) FROM account_reconciliations WHERE adjustment_transaction_id = $1) AS reconciliation_count,
-       (SELECT COUNT(*) FROM receivables WHERE matched_transaction_id = $2) AS receivable_count,
+       (SELECT COUNT(*) FROM (SELECT matched_transaction_id AS transaction_id FROM receivables UNION SELECT transaction_id FROM receivable_payment_links WHERE reversed_at IS NULL) receipt_evidence WHERE transaction_id = $2) AS receivable_count,
        (SELECT COUNT(*) FROM account_reconciliations
         WHERE account_id = $3 AND staging_batch_id = $4 AND selection_mode = 'legacy_batch') AS finalized_statement_count`,
     [tx.id, tx.id, tx.account_id, tx.staging_batch_id ?? null]

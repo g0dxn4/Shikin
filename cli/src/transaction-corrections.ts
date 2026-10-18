@@ -95,7 +95,10 @@ export function guardTransactionEvidence(
 }
 function assertCorrectionReferences(id: string): void {
   if (
-    query('SELECT id FROM receivables WHERE matched_transaction_id = $1', [id]).length ||
+    query(
+      'SELECT id FROM (SELECT matched_transaction_id AS id FROM receivables UNION SELECT transaction_id AS id FROM receivable_payment_links WHERE reversed_at IS NULL) receipt_evidence WHERE id = $1',
+      [id]
+    ).length ||
     query('SELECT id FROM account_reconciliations WHERE adjustment_transaction_id = $1', [id])
       .length
   )

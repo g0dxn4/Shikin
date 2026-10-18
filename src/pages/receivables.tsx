@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useTranslation } from 'react-i18next'
-import { Wallet, Plus, Pencil, Ban, Trash2, Clock } from 'lucide-react'
+import { Wallet, Plus, Pencil, Ban, Trash2, Clock, Receipt } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -45,6 +45,11 @@ import dayjs from 'dayjs'
 const ConfirmDialog = lazy(() =>
   import('@/components/shared/confirm-dialog').then((m) => ({
     default: m.ConfirmDialog,
+  }))
+)
+const ReceivablePayments = lazy(() =>
+  import('@/components/receivables/receivable-payments').then((m) => ({
+    default: m.ReceivablePayments,
   }))
 )
 
@@ -109,17 +114,20 @@ function ReceivableRow({
   onEdit,
   onCancel,
   onDelete,
+  onPayments,
 }: {
   receivable: ReceivableWithDetails
   onEdit: () => void
   onCancel: () => void
   onDelete: () => void
+  onPayments: () => void
 }) {
   const { t } = useTranslation('receivables')
   const { t: tCommon } = useTranslation('common')
 
   const isCancelled = receivable.status === 'cancelled'
-  const isMatched = Boolean(receivable.matched_transaction_id)
+  const isMatched =
+    Boolean(receivable.matched_transaction_id) || (receivable.activePaymentCount ?? 0) > 0
   const progress =
     receivable.amount > 0
       ? Math.min(100, Math.round((receivable.received_amount / receivable.amount) * 100))
@@ -165,6 +173,15 @@ function ReceivableRow({
           </div>
         </div>
         <div className="flex shrink-0 gap-1 opacity-100 transition-opacity motion-reduce:transition-none md:opacity-50 md:group-focus-within:opacity-100 md:group-hover:opacity-100">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-11 w-11 md:h-8 md:w-8"
+            onClick={onPayments}
+            aria-label={`${t('payments.title')} ${receivable.payer}`}
+          >
+            <Receipt size={12} />
+          </Button>
           <Button
             variant="ghost"
             size="icon"
@@ -270,7 +287,8 @@ function ReceivableForm({ receivable, onSubmit, isLoading, onDirtyChange }: Rece
   const accountValue = watch('accountId')
   const currencyValue = watch('currency')
   const isAccountSelectDisabled = accountsLoading || !!accountsFetchError
-  const isMatched = Boolean(receivable?.matched_transaction_id)
+  const isMatched =
+    Boolean(receivable?.matched_transaction_id) || (receivable?.received_amount ?? 0) > 0
 
   useEffect(() => {
     onDirtyChange?.(isDirty)
@@ -444,6 +462,7 @@ export function Receivables() {
   const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false)
 
   const [deleteId, setDeleteId] = useState<string | null>(null)
+  const [paymentsId, setPaymentsId] = useState<string | null>(null)
   const [cancelId, setCancelId] = useState<string | null>(null)
   const [isActionLoading, setIsActionLoading] = useState(false)
 
@@ -718,6 +737,7 @@ export function Receivables() {
                   onEdit={() => openEditDialog(receivable.id)}
                   onCancel={() => setCancelId(receivable.id)}
                   onDelete={() => setDeleteId(receivable.id)}
+                  onPayments={() => setPaymentsId(receivable.id)}
                 />
               ))
             )}
@@ -741,6 +761,16 @@ export function Receivables() {
         </div>
       )}
 
+      {paymentsId && (
+        <Suspense fallback={null}>
+          <ReceivablePayments
+            key={paymentsId}
+            receivableId={paymentsId}
+            onClose={() => setPaymentsId(null)}
+            onChanged={fetch}
+          />
+        </Suspense>
+      )}
       <Dialog open={dialogOpen} onOpenChange={(open) => !open && handleDialogClose()}>
         <DialogContent className="max-h-[90vh] max-w-md overflow-y-auto">
           <DialogHeader>

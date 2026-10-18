@@ -33,7 +33,7 @@
     "notesPlaceholder": "Any additional notes...",
     "accountsError": "Accounts couldn't be loaded",
     "receivedExceedsAmount": "Received amount cannot exceed the total amount",
-    "matchedNote": "This receivable is matched to a transaction. Store provenance protections still apply to received amounts and the linked transaction."
+    "matchedNote": "This receivable includes recorded receipts. Reverse their payment links before changing the expected amount, currency, or account."
   },
   "summary": {
     "outstanding": "Outstanding",
@@ -81,5 +81,23 @@
   "empty": {
     "title": "No receivables yet",
     "description": "Track money owed to you — invoices, project payments, or expected income."
+  },
+  "payments": {
+    "title": "Payments",
+    "description": "Match money already received to this expected income. Each installment keeps its original bank record.",
+    "received": "Received",
+    "remaining": "Still expected",
+    "legacy": "Previously recorded without a bank link",
+    "select": "Select a received payment",
+    "noCandidates": "No eligible bank payments found. Record or import the income transaction first. The most recent 200 matching entries are considered.",
+    "preview": "Preview payment",
+    "linkPreview": "After linking this payment",
+    "reversePreview": "After reversing this receipt link",
+    "apply": "Apply change",
+    "history": "Payment history",
+    "noHistory": "No linked payments yet.",
+    "linked": "Linked payment",
+    "reversed": "Reversed link; original record retained",
+    "reverse": "Reverse link"
   }
 }

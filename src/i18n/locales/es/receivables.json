@@ -33,7 +33,7 @@
     "notesPlaceholder": "Cualquier nota adicional...",
     "accountsError": "No se pudieron cargar las cuentas",
     "receivedExceedsAmount": "El monto recibido no puede exceder el monto total",
-    "matchedNote": "Este cobro está conciliado con una transacción. Las protecciones de procedencia del almacén siguen aplicando al monto recibido y a la transacción vinculada."
+    "matchedNote": "Este cobro incluye pagos registrados. Revierte sus vínculos antes de cambiar el monto esperado, la moneda o la cuenta."
   },
   "summary": {
     "outstanding": "Pendiente",
@@ -81,5 +81,23 @@
   "empty": {
     "title": "Sin cobros aún",
     "description": "Rastrea el dinero que te deben — facturas, pagos de proyectos o ingresos esperados."
+  },
+  "payments": {
+    "title": "Pagos",
+    "description": "Vincula dinero ya recibido con este ingreso esperado. Cada abono conserva su registro bancario original.",
+    "received": "Recibido",
+    "remaining": "Por recibir",
+    "legacy": "Registrado previamente sin vínculo bancario",
+    "select": "Selecciona un pago recibido",
+    "noCandidates": "No hay pagos bancarios disponibles. Primero registra o importa el ingreso. Se consideran los 200 movimientos coincidentes más recientes.",
+    "preview": "Previsualizar pago",
+    "linkPreview": "Después de vincular este pago",
+    "reversePreview": "Después de revertir este vínculo",
+    "apply": "Aplicar cambio",
+    "history": "Historial de pagos",
+    "noHistory": "Todavía no hay pagos vinculados.",
+    "linked": "Pago vinculado",
+    "reversed": "Vínculo revertido; registro original conservado",
+    "reverse": "Revertir vínculo"
   }
 }

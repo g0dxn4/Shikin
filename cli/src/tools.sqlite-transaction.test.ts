@@ -356,7 +356,11 @@ function snapshotFinanceTables(dbPath: string) {
     return Object.fromEntries(
       tables.map(({ name }) => [
         name,
-        db.prepare(`SELECT * FROM ${name} ORDER BY rowid`).all() as Array<Record<string, unknown>>,
+        db
+          .prepare(
+            `SELECT * FROM ${name} ORDER BY ${name === 'budget_history_revisions' || name === 'receivable_payment_links' ? 'id' : 'rowid'}`
+          )
+          .all() as Array<Record<string, unknown>>,
       ])
     )
   } finally {
@@ -2316,11 +2320,11 @@ describe('CLI tools SQLite transaction rollback', () => {
     const manage = tools.find((tool) => tool.name === 'manage-receivable')!
     const match = tools.find((tool) => tool.name === 'match-receivable')!
 
-    const largerReceivable = (await manage.execute(
+    const smallerReceivable = (await manage.execute(
       manage.schema.parse({
         action: 'create',
         payer: 'Client B',
-        amount: 300,
+        amount: 200,
         dueDate: '2026-05-20',
         currency: 'USD',
         accountId: 'acct-1',
@@ -2330,7 +2334,7 @@ describe('CLI tools SQLite transaction rollback', () => {
     await expect(
       match.execute(
         match.schema.parse({
-          receivableId: largerReceivable.receivable.id,
+          receivableId: smallerReceivable.receivable.id,
           transactionId: 'client-payment',
           apply: true,
         })

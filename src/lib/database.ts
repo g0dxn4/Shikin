@@ -4,6 +4,18 @@ import {
   assertScopedBudgetsReady,
 } from '@shikin/finance-core/scoped-budgets-migration'
 import {
+  BUDGET_HISTORY_MIGRATION,
+  BUDGET_HISTORY_SCHEMA,
+  budgetHistoryStatements,
+  assertBudgetHistoryReady,
+} from '@shikin/finance-core/budget-history-migration'
+import {
+  RECEIVABLE_PAYMENTS_MIGRATION,
+  RECEIVABLE_PAYMENTS_SCHEMA,
+  receivablePaymentsStatements,
+  assertReceivablePaymentsReady,
+} from '@shikin/finance-core/receivable-payments-migration'
+import {
   CLASSIFICATION_TYPES_MIGRATION,
   CLASSIFICATION_TYPES_SCHEMA,
   classificationTypesStatements,
@@ -247,6 +259,8 @@ const CURRENT_SHIKIN_MIGRATIONS = [
   DATED_FX_MIGRATION,
   CLASSIFICATION_TYPES_MIGRATION,
   SCOPED_BUDGETS_MIGRATION,
+  BUDGET_HISTORY_MIGRATION,
+  RECEIVABLE_PAYMENTS_MIGRATION,
 ] as const
 
 const CURRENT_SHIKIN_SCHEMA: Record<string, readonly string[]> = {
@@ -770,6 +784,23 @@ async function validateTauriCurrentDatabase(db: TauriDatabase): Promise<void> {
       await db.select<{ name: string }[]>(`PRAGMA table_info(${table})`)
     ).map((column) => column.name)
   }
+  const historyColumns: Record<string, string[]> = {}
+  for (const table of Object.keys(BUDGET_HISTORY_SCHEMA)) {
+    historyColumns[table] = (
+      await db.select<{ name: string }[]>(`PRAGMA table_info(${table})`)
+    ).map((column) => column.name)
+  }
+  const receivableColumns: Record<string, string[]> = {}
+  for (const table of Object.keys(RECEIVABLE_PAYMENTS_SCHEMA)) {
+    receivableColumns[table] = (
+      await db.select<{ name: string }[]>(`PRAGMA table_info(${table})`)
+    ).map((column) => column.name)
+  }
+  const historyObjects = await db.select<{ name: string; sql: string | null }[]>(
+    "SELECT name, sql FROM sqlite_master WHERE type IN ('table', 'index', 'trigger')"
+  )
+  assertBudgetHistoryReady(historyColumns, historyObjects)
+  assertReceivablePaymentsReady(receivableColumns, historyObjects)
   assertScopedBudgetsReady(
     {
       budgets: (await db.select<{ name: string }[]>('PRAGMA table_info(budgets)')).map(
@@ -826,7 +857,7 @@ async function runTauriMigrations(db: TauriDatabase): Promise<void> {
     ? await db.select<{ id: number; name: string }[]>('SELECT id, name FROM _migrations')
     : []
   assertSupportedSchemaVersion(rows)
-  if (rows.some((row) => row.name === SCOPED_BUDGETS_MIGRATION)) {
+  if (rows.some((row) => row.name === RECEIVABLE_PAYMENTS_MIGRATION)) {
     await validateTauriCurrentDatabase(db)
     return
   }
@@ -864,7 +895,7 @@ async function runTauriMigrationsOnConnection(
   const rows = await db.select<{ id: number; name: string }[]>('SELECT id, name FROM _migrations')
   assertSupportedSchemaVersion(rows)
   const applied = new Set(rows.map((r) => r.name))
-  if (applied.has(SCOPED_BUDGETS_MIGRATION)) {
+  if (applied.has(RECEIVABLE_PAYMENTS_MIGRATION)) {
     await validateTauriCurrentDatabase(db)
     return
   }
@@ -1696,6 +1727,18 @@ async function runTauriBackendFoundationUpgrade(
         ),
       }
       for (const statement of scopedBudgetsStatements(columns)) await tx.execute(statement)
+    }
+    if (!migrations.some((row) => row.name === BUDGET_HISTORY_MIGRATION)) {
+      for (const statement of budgetHistoryStatements()) await tx.execute(statement)
+    }
+    if (!migrations.some((row) => row.name === RECEIVABLE_PAYMENTS_MIGRATION)) {
+      const columns: Record<string, string[]> = {}
+      for (const table of Object.keys(RECEIVABLE_PAYMENTS_SCHEMA)) {
+        columns[table] = (await tx.query<{ name: string }>(`PRAGMA table_info(${table})`)).map(
+          (column) => column.name
+        )
+      }
+      for (const statement of receivablePaymentsStatements(columns)) await tx.execute(statement)
     }
     await validateTauriCurrentDatabase({
       select: async <T>(sql: string, params?: unknown[]) => tx.query(sql, params) as Promise<T>,

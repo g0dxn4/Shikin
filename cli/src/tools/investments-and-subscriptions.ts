@@ -1806,6 +1806,7 @@ const listSubscriptions: ToolDefinition = {
   name: 'list-subscriptions',
   description:
     'List subscriptions stored in Shikin. Shows amounts, billing cycles, next payment dates, and monthly/yearly cost equivalents.',
+  effects: { readOnly: true, writesTo: [] },
   schema: z.object({
     activeOnly: z
       .boolean()

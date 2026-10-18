@@ -14,10 +14,10 @@ Practical map of the current React frontend for hardening and follow-up work.
 
 - `initPriceScheduler()` / `stopPriceScheduler()`
 - `useRecurringStore().materializeTransactions()`
-- `useCurrencyStore().autoRefreshIfStale()`
+- `useCurrencyStore().loadRates()` (local manual dated FX; no automatic network refresh)
 - `useAccountStore().fetch()` → `snapshotBalances()`
 - `useNetWorthStore().refresh()`
-- `checkForUpdates()` (Tauri path)
+- `checkStartupUpdate()` (Tauri path)
 
 ### Routed pages (current)
 
@@ -28,9 +28,10 @@ Practical map of the current React frontend for hardening and follow-up work.
 | `/accounts`          | `src/pages/accounts.tsx`            |
 | `/budgets`           | `src/pages/budgets.tsx`             |
 | `/goals`             | `src/pages/goals.tsx`               |
-| `/insights`          | `src/pages/insights.tsx`            |
+| `/insights`          | Redirect to `/reports`              |
 | `/investments`       | `src/pages/investments.tsx`         |
 | `/debt-payoff`       | `src/pages/debt-payoff.tsx`         |
+| `/receivables`       | `src/pages/receivables.tsx`         |
 | `/forecast`          | `src/pages/forecast.tsx`            |
 | `/net-worth`         | `src/pages/net-worth.tsx`           |
 | `/spending-insights` | `src/pages/spending-insights.tsx`   |
@@ -84,26 +85,26 @@ Practical map of the current React frontend for hardening and follow-up work.
 
 ## 3) Zustand store map
 
-| Store file                   | Scope                                                           |
-| ---------------------------- | --------------------------------------------------------------- |
-| `ui-store.ts`                | Sidebar + dialog open/edit state                                |
-| `account-store.ts`           | Accounts CRUD, balance history, daily snapshots                 |
-| `transaction-store.ts`       | Transactions CRUD, split transactions, account balance mutation |
-| `category-store.ts`          | Category list fetch                                             |
-| `budget-store.ts`            | Budgets CRUD + period spend status                              |
-| `goal-store.ts`              | Goals CRUD + progress/deadline math                             |
-| `investment-store.ts`        | Investments CRUD, latest prices, portfolio summary/history      |
-| `recurring-store.ts`         | Recurring rules CRUD + materialization into transactions        |
-| `debt-store.ts`              | Debt strategy planner (snowball/avalanche)                      |
-| `forecast-store.ts`          | Cashflow forecast generation + range selection                  |
-| `net-worth-store.ts`         | Net worth calc, snapshot, historical chart points               |
-| `spending-insights-store.ts` | MoM/YoY spending comparisons + generated insights               |
-| `currency-store.ts`          | Preferred currency + exchange-rate cache/refresh                |
-| `categorization-store.ts`    | Category suggestions + learned rules                            |
-| `anomaly-store.ts`           | Detect/dismiss anomalies + persisted dismissal keys             |
-| `health-store.ts`            | Health score + persisted monthly history                        |
-| `recap-store.ts`             | Weekly/monthly recap generation + history                       |
-| `achievement-store.ts`       | Streaks + unlock/dismiss achievement notifications              |
+| Store file                   | Scope                                                            |
+| ---------------------------- | ---------------------------------------------------------------- |
+| `ui-store.ts`                | Sidebar + dialog open/edit state                                 |
+| `account-store.ts`           | Accounts CRUD, balance history, daily snapshots                  |
+| `transaction-store.ts`       | Transactions CRUD, split transactions, account balance mutation  |
+| `category-store.ts`          | Category list fetch                                              |
+| `budget-store.ts`            | Budgets CRUD + period spend status                               |
+| `goal-store.ts`              | Goals CRUD + progress/deadline math                              |
+| `investment-store.ts`        | Investments CRUD, latest prices, portfolio summary/history       |
+| `recurring-store.ts`         | Recurring rules CRUD + materialization into transactions         |
+| `debt-store.ts`              | Debt strategy planner (snowball/avalanche)                       |
+| `forecast-store.ts`          | Cashflow forecast generation + range selection                   |
+| `net-worth-store.ts`         | Net worth calc, snapshot, historical chart points                |
+| `spending-insights-store.ts` | MoM/YoY spending comparisons + generated insights                |
+| `currency-store.ts`          | Explicit main currency + local dated manual rates                |
+| `categorization-store.ts`    | Category suggestions + learned rules                             |
+| `anomaly-store.ts`           | Detect/dismiss anomalies + persisted dismissal keys              |
+| `health-store.ts`            | Health score + persisted monthly history                         |
+| `receivable-store.ts`        | Expected income, received installments, and payment-link history |
+| `achievement-store.ts`       | Streaks + unlock/dismiss achievement notifications               |
 
 ## 4) Browser bridge/data access usage from the frontend
 
@@ -113,37 +114,37 @@ Practical map of the current React frontend for hardening and follow-up work.
   - `X-Shikin-Bridge` header via `withDataServerHeaders()`
 - DB abstraction: `src/lib/database.ts`
   - Browser endpoints: `/api/db/query`, `/api/db/execute`, `/api/db/export`, `/api/db/import`
-  - Used by virtually all stores/pages through `query()` / `execute()` / `runInTransaction()`.
+  - Stores and services use `query()` / `execute()` and `withTransaction((tx) => ...)` with the owned `TransactionClient`. The retired `runInTransaction()` entrypoint throws; never use it for a new financial workflow.
 - KV/settings abstraction: `src/lib/storage.ts`
   - Browser endpoints: `/api/store/*`
   - Used by currency/settings/anomaly/health flows.
 - FS abstraction: `src/lib/virtual-fs.ts`
   - Browser endpoints: `/api/fs/*`
-  - Used by notebook-related frontend libs (`src/lib/notebook.ts`, `src/lib/portfolio-review.ts`).
+  - Used by `src/lib/notebook.ts`. CLI-side portfolio review lives separately in `cli/src/insights/portfolio.ts` and uses the CLI notebook service.
 
 ### Bridge/storage dependency inventory (where it is consumed)
 
 - **Startup consumers (`App.tsx`):**
   - `initPriceScheduler()` (background DB/service path)
-  - `materializeTransactions`, `autoRefreshIfStale`, `fetchAccounts/snapshotBalances`, `refreshNetWorth` (store-driven DB/storage usage)
+  - `materializeTransactions`, `loadRates`, `fetchAccounts/snapshotBalances`, `refreshNetWorth` (store-driven DB/storage usage)
 - **Page consumers (direct):** `settings`, `forecast` (`useSubscriptions`), `spending-heatmap`.
 - **Store consumers:**
-  - DB-backed: account, transaction, category, budget, goal, investment, recurring, debt, net-worth, spending-insights.
-  - Storage-backed: currency, anomaly, health.
+  - DB-backed: account, transaction, category, budget, goal, investment, recurring, debt, net-worth, spending-insights, receivable, and currency through `fx-service`.
+  - Storage-backed preferences/cache: anomaly and health; currency reads an old JSON preference only as a setup draft, never as the authoritative main currency or manual rate history.
 - **Service/background consumers:**
-  - DB: `forecast-service`, `anomaly-service`, `recap-service`, `auto-categorize`, `split-service`, `statement-import`, `exchange-rate-service`, `price-scheduler`, `portfolio-review`, `achievement-service`, `health-score-service`.
+  - DB: `forecast-service`, `anomaly-service`, `recap-service`, `auto-categorize`, `split-service`, `statement-import`, `price-scheduler`, `achievement-service`, `health-score-service`.
   - Storage: `price-service`, `news-service`, `achievement-service`, `health-score-service`.
-  - Virtual FS: `notebook`, `portfolio-review`.
+  - Virtual FS: frontend `notebook`.
 
 ### Compact feature ownership/dependency map
 
-| Feature                   | Page owner               | Primary state owner                                | Direct data path                               | Runtime boundary                                              |
-| ------------------------- | ------------------------ | -------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------- |
-| Accounts                  | `pages/accounts.tsx`     | `account-store`                                    | via store → `database`                         | Tauri SQL plugin / browser bridge `/api/db/*`                 |
-| Transactions + recurring  | `pages/transactions.tsx` | `transaction-store`, `recurring-store`, `ui-store` | recurring dialog local + stores                | same as above                                                 |
-| Investments + prices      | `pages/investments.tsx`  | `investment-store`                                 | `price-service`/`price-scheduler` + DB         | same as above + external price APIs                           |
-| Settings (backup + keys)  | `pages/settings.tsx`     | `currency-store` (+ local page state)              | **direct** `database` + `storage`              | Tauri plugin-store/fs or browser `/api/db/*` + `/api/store/*` |
-| Notebook/portfolio review | library-driven           | no dedicated store                                 | `virtual-fs` via `notebook`/`portfolio-review` | Tauri fs plugin / browser bridge `/api/fs/*`                  |
+| Feature                  | Page owner               | Primary state owner                                | Direct data path                       | Runtime boundary                                              |
+| ------------------------ | ------------------------ | -------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------- |
+| Accounts                 | `pages/accounts.tsx`     | `account-store`                                    | via store → `database`                 | Tauri SQL plugin / browser bridge `/api/db/*`                 |
+| Transactions + recurring | `pages/transactions.tsx` | `transaction-store`, `recurring-store`, `ui-store` | recurring dialog local + stores        | same as above                                                 |
+| Investments + prices     | `pages/investments.tsx`  | `investment-store`                                 | `price-service`/`price-scheduler` + DB | same as above + external price APIs                           |
+| Settings (backup + keys) | `pages/settings.tsx`     | `currency-store` (+ local page state)              | **direct** `database` + `storage`      | Tauri plugin-store/fs or browser `/api/db/*` + `/api/store/*` |
+| Notebook                 | library-driven           | no dedicated store                                 | `virtual-fs` via `notebook`            | Tauri fs plugin / browser bridge `/api/fs/*`                  |
 
 ## 5) High-risk frontend flows for later hardening
 
@@ -157,7 +158,7 @@ Practical map of the current React frontend for hardening and follow-up work.
    Frontend behavior when local data server is unavailable/misconfigured.
 5. **Recurring materialization idempotency** (`recurring-store.ts`)  
    Catch-up loops can create many writes; requires careful duplicate protection.
-6. **Notebook virtual-fs path + persistence behavior** (`notebook.ts`, `virtual-fs.ts`, `portfolio-review.ts`)  
+6. **Notebook virtual-fs path + persistence behavior** (`notebook.ts`, `virtual-fs.ts`)
    Cross-runtime filesystem semantics and boundary/path assumptions.
 
 ## 6) Test coverage overview
@@ -171,7 +172,7 @@ Practical map of the current React frontend for hardening and follow-up work.
   - navigation/layout/dashboard/settings/accounts/transactions/budgets/i18n/responsive.
 - **Notably thinner coverage (current):**
   - Forecast, net-worth, and spending-insights/heatmap pages have less direct page coverage than core workflows.
-  - `recap-store` and `spending-insights-store` have less direct store coverage than the financial CRUD stores.
+  - `spending-insights-store` have less direct store coverage than the financial CRUD stores.
 
 ### Browser bridge regression coverage (frontend hardening workflow)
 
@@ -200,3 +201,23 @@ Practical map of the current React frontend for hardening and follow-up work.
 - Bridge/header and storage behavior tests:
   - `src/lib/__tests__/bridge-headers.test.ts`
   - `src/lib/__tests__/storage.test.ts`
+
+## Financial history and received-payment additions
+
+- `src/components/budgets/budget-history-panel.tsx` adds explicit month capture,
+  gross/net completeness, retrospective labels, revision history, and reviewed
+  limit corrections to Budgets. It calls `src/lib/budget-history.ts`, which shares
+  the finance-core projector/plan with CLI/MCP. Changing an input invalidates the
+  old preview; failed apply retains the same retry key.
+- `src/components/receivables/receivable-payments.tsx` and
+  `src/lib/receivable-payment-service.ts` provide installment previews and
+  selective link reversal. `receivable-store.ts` exposes linked payment status;
+  multi-payment ownership is read from active links rather than the legacy
+  singleton mirror. See `docs/RECEIVABLE_PAYMENTS.md` for eligibility and picker
+  limits.
+- `src/i18n/locales/en/` and `es/` contain the new budget/receivable labels. Shared
+  SQLite parity tests exercise frontend services against the CLI financial rules;
+  focused UI tests cover stale previews, unknown totals, and retry behavior.
+
+These flows preserve source transactions and real account balances. No new
+subscription editor, automatic rollover engine, or budget-assignment UI is claimed.

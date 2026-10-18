@@ -18,8 +18,14 @@ const call = (name: string, input: Record<string, unknown>) => {
   const tool = accountsTools.find((t) => t.name === name)!
   return tool.execute(tool.schema.parse(input))
 }
-const rows = (table: string) =>
-  holder.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all() as Record<string, unknown>[]
+const rows = (table: string) => {
+  const order =
+    table === 'budget_history_revisions' || table === 'receivable_payment_links' ? 'id' : 'rowid'
+  return holder.db.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all() as Record<
+    string,
+    unknown
+  >[]
+}
 function snapshot() {
   const tables = holder.db
     .prepare(

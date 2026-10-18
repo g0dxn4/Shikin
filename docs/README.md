@@ -6,13 +6,14 @@ Product overview, install, and privacy: the root [README](../README.md).
 
 - **Current implementation docs**: Start with `reference/BACKEND-MAP.md`, `reference/FRONTEND-MAP.md`, `guides/CONTRIBUTING.md`, and current runtime/reference docs.
 - **User-facing automation**: `reference/AUTOMATION-WORKFLOWS.md` and [cli/README.md](../cli/README.md).
+- **Historical plans and QA ledgers**: dated phase and commit records under `planning/` preserve earlier decisions and results; they do not certify the latest branch. The roadmap and ideas backlog identify current gaps.
 
 ## Guides
 
-| Document                               | Description                                      |
-| -------------------------------------- | ------------------------------------------------ |
-| [Architecture](guides/ARCHITECTURE.md) | Historical browser-first architecture notes      |
-| [Contributing](guides/CONTRIBUTING.md) | Dev setup, code conventions, testing, PR process |
+| Document                               | Description                                              |
+| -------------------------------------- | -------------------------------------------------------- |
+| [Architecture](guides/ARCHITECTURE.md) | Current runtimes, shared rules, and financial invariants |
+| [Contributing](guides/CONTRIBUTING.md) | Dev setup, code conventions, testing, PR process         |
 
 ## Planning
 
@@ -35,16 +36,31 @@ Product overview, install, and privacy: the root [README](../README.md).
 
 ## Quick stats
 
-| Metric            | Count                         |
-| ----------------- | ----------------------------- |
-| Pages (routed)    | 19                            |
-| Zustand stores    | 18                            |
-| CLI/MCP tools     | 112 shared / 117 CLI commands |
-| i18n namespaces   | 19                            |
-| Languages         | 2                             |
-| Navigation groups | 6                             |
+| Metric            | Count                                                  |
+| ----------------- | ------------------------------------------------------ |
+| Visible pages     | 18 (plus `/insights` redirect)                         |
+| Zustand stores    | 18                                                     |
+| CLI/MCP tools     | [Generated inventory](reference/MCP-TOOL-INVENTORY.md) |
+| i18n namespaces   | 19                                                     |
+| Languages         | 2                                                      |
+| Navigation groups | 6                                                      |
 
-`shikin tools --json` is the live catalog. Do not treat historical 91/96 counts in planning docs as current.
+`shikin tools --json` is the complete CLI catalog; MCP `tools/list` reflects its
+fixed launch profile. `pnpm inventory:generate` creates the reference and
+`pnpm inventory:check` prevents drift. Counts in historical release/planning
+records are not current discovery data.
+
+## Agent workflows and financial modernization
+
+| Document                                                              | Description                                                                          |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| [MCP architecture and research](research/MCP-DESIGN.md)               | Primary sources, alternatives, redundancy analysis, permissions, and compatibility.  |
+| [Financial capability comparison](research/FINANCIAL-CAPABILITIES.md) | Competitor research, existing features, implemented gaps, and prioritized follow-up. |
+| [Budget history](BUDGET_HISTORY.md)                                   | Saved monthly evidence and auditable corrections in app, CLI, and MCP.               |
+| [Receivable payments](RECEIVABLE_PAYMENTS.md)                         | Expected income, actual installments, source guards, and selective reversal.         |
+| [Upgrade guide](guides/AGENT-WORKFLOWS-UPGRADE.md)                    | Schema 25/26, backups, read-only startup, and old-client compatibility.              |
+| [MCP inventory](reference/MCP-TOOL-INVENTORY.md)                      | Generated tool purposes, schemas, implementations, and safety effects.               |
+| [Benchmark and validation](benchmarks/MCP-BENCHMARKS.md)              | Reproducible baseline/candidate metrics and exact test evidence.                     |
 
 ## Development (local only, gitignored)
 

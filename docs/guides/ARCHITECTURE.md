@@ -1,163 +1,139 @@
 # Architecture
 
-> Historical note: this document describes an earlier browser-first architecture with `sql.js` + IndexedDB.
-> For the current implementation, start with `docs/reference/BACKEND-MAP.md` and `docs/reference/FRONTEND-MAP.md`.
+Shikin is a local-first React/TypeScript application with a Tauri desktop shell,
+a local SQLite database, an optional loopback web host, and CLI/MCP automation.
+This reference describes the current implementation. Earlier `sql.js` / IndexedDB
+architecture notes have been replaced; those are not the current storage model.
 
-This document describes Shikin's browser-first architecture: runtime layers, data flow, state boundaries, and major modules.
-
----
-
-## High-Level Overview
-
-Shikin runs as a React SPA in the browser. Data remains local by combining:
-
-- **SQLite in memory (`sql.js`)** for relational querying (21 tables).
-- **IndexedDB** for persistent database snapshots.
-- **`localStorage`** for app settings, preferences, achievements, and health score history.
+## Runtime and ownership
 
 ```mermaid
-graph TB
-    UI[React UI — 18 pages] --> ZS[18 Zustand Stores]
-    ZS --> DBAPI[query / execute]
-    ZS --> SVC[27 Service/Lib Files]
-    SVC --> DBAPI
-    DBAPI --> SQLJS[(sql.js SQLite — 21 tables)]
-    SQLJS --> IDB[(IndexedDB persistence)]
-    ZS --> LS[(localStorage settings)]
+flowchart TD
+    UI[React pages] --> App[App stores and services]
+    CLI[Commander CLI] --> Tools[Shared tool registry]
+    MCP[MCP profiles] --> Tools
+    App --> Core[Finance core rules]
+    Tools --> Core
+    App --> Native[Tauri SQL adapter]
+    App --> Bridge[Local HTTP bridge]
+    Tools --> Node[Node SQLite adapter]
+    Native --> DB[(Local SQLite)]
+    Bridge --> DB
+    Node --> DB
 ```
 
----
+`packages/finance-core` owns shared financial projection, validation, migration,
+and evidence contracts. Runtime adapters own I/O and transaction boundaries.
+React pages use stores/services through `src/lib/database.ts`; they do not call
+MCP. CLI and MCP reuse the registry in `cli/src/tools/index.ts` and the same domain
+handlers. Specialized app and CLI adapters are tested for financial parity.
 
-## Runtime Layers
+| Area                                        | Principal implementation                                  |
+| ------------------------------------------- | --------------------------------------------------------- |
+| App routes, native appearance, localization | `src/App.tsx`, `src/components/layout/`, `src/i18n/`      |
+| App database and atomic services            | `src/lib/database.ts`, domain services in `src/lib/`      |
+| Native bootstrap                            | `src-tauri/src/lib.rs`, Tauri SQL/FS/store plugins        |
+| Development / hosted bridge                 | `scripts/data-server.mjs`, `cli/src/web-host.ts`          |
+| CLI schemas and execution                   | `cli/src/cli.ts`, `cli/src/tools/`                        |
+| MCP registration and permissions            | `cli/src/mcp-server.ts`, `cli/src/mcp-profiles.ts`        |
+| Shared ledger and financial rules           | `packages/finance-core/src/`                              |
+| Backup, readiness, and SQLite access        | `cli/src/database.ts`, `src/lib/database.ts`, data server |
 
-### Layer 1: UI and Routing
+## Storage lifecycle
 
-- `src/App.tsx` sets up routing, app shell, and lazy-loaded pages.
-- `src/components/layout/` provides shared frame components (sidebar and bottom nav).
-- `src/pages/` hosts 18 routed page files:
+The app-data path is platform-specific and shared by installed app, CLI, and MCP.
+The native app and local data server initialize and migrate it. CLI/MCP require
+an existing compatible schema. `app_data_state` carries an opaque database
+identity and monotonic financial data revision used by previews and cursors.
 
-| Route           | Page         | Description                                      |
-| --------------- | ------------ | ------------------------------------------------ |
-| `/`             | Dashboard    | Overview with charts, alerts, health score, tips |
-| `/transactions` | Transactions | Tabbed list (transactions + recurring), import   |
-| `/accounts`     | Accounts     | Account management with credit card tracking     |
-| `/budgets`      | Budgets      | Budget creation and progress monitoring          |
-| `/goals`        | Goals        | Savings goals with progress rings                |
-| `/investments`  | Investments  | Portfolio with price charts and allocation       |
-| `/debt-payoff`  | Debt Payoff  | Snowball vs avalanche planner with charts        |
-| `/forecast`     | Forecast     | Cash flow projections (30/60/90 day)             |
-| `/reports`      | Reports      | Monthly/annual reports with PDF export           |
-| `/settings`     | Settings     | Currency, category rules, data                   |
+Migration definitions for newer financial features are shared through
+finance-core. The native JavaScript adapter, hosted data server, test migrator,
+and CLI readiness checks use those definitions. Migrations 025 and 026 add budget
+history and receivable evidence; they do not create financial transactions or
+infer missing historical budgets. See [upgrade notes](AGENT-WORKFLOWS-UPGRADE.md).
 
-Additional routed pages include net-worth, spending-insights, spending-heatmap, bill-calendar, categories, insights, extensions, and reports.
+App settings and notebooks also use local storage/files; a database snapshot
+alone is not a complete machine setup backup. Development and benchmarks use
+new disposable data directories by default. Financial test fixtures must never
+be pointed at an installed user's database.
 
-### Layer 2: State and Domain Logic
+## Financial invariants
 
-18 Zustand stores under `src/stores/` isolate feature state:
+Money is stored as safe integer centavos and converted at explicit API/display
+boundaries. Exact decimal FX evidence and missing-rate completeness travel with
+financial projections. Native-currency totals are not silently mixed.
 
-| Store                  | Purpose                                           |
-| ---------------------- | ------------------------------------------------- |
-| `transaction-store`    | Transaction CRUD, split tracking, auto-categorize |
-| `account-store`        | Account CRUD, balance management                  |
-| `budget-store`         | Budget tracking with period calculations          |
-| `category-store`       | Category management                               |
-| `goal-store`           | Savings goals with progress computation           |
-| `investment-store`     | Investment CRUD, portfolio summary, price history |
-| `recurring-store`      | Recurring rules, materialization on startup       |
-| `debt-store`           | Debt payoff calculations                          |
-| `forecast-store`       | Cash flow forecast generation                     |
-| `anomaly-store`        | Anomaly scanning and dismissals                   |
-| `health-store`         | Financial health score with localStorage history  |
-| `recap-store`          | Spending recap generation and history             |
-| `categorization-store` | Auto-categorization rule management               |
-| `currency-store`       | Exchange rates, preferred currency                |
-| `achievement-store`    | Streaks and badge tracking                        |
-| `report-store`         | Report generation and PDF/CSV export              |
-| `ui-store`             | Panel/dialog state, layout toggles                |
+Gross cashflow, net consumption, and recurring estimates are separate report
+bases. Category/subcategory describes a transaction; budget scopes select
+accounts, categories, and tags with inclusions/exclusions. Net calculations
+require appropriate classifications and independent source coverage. Transaction
+date extrema do not prove statement coverage. Incomplete results preserve known
+subtotals while authoritative totals and remaining amounts can be null.
 
-### Layer 3: Services and Utilities
+One-off transfers and credit-card payment evidence preserve both bank sides
+without counting an internal movement twice. Pending and staged rows retain their
+balance policy until explicitly settled/finalized. Metadata corrections preserve
+money, bank identifiers, dates, and original import evidence. Split allocations
+sum exactly to the source amount and respect economic-classification dependencies.
 
-27 service files under `src/lib/` provide domain logic:
+Budget-history captures preserve configuration, both reporting bases, and source
+evidence. Corrections append an expected revision; edits to the current plan do
+not rewrite history. Missing captures stay missing; a past period reconstructed
+today is explicitly labeled. Virtual bucket reserves do not create expenses.
 
-| Service                    | Purpose                                               |
-| -------------------------- | ----------------------------------------------------- |
-| `database.ts`              | sql.js init, 10 migrations, query/execute, IndexedDB  |
-| `anomaly-service.ts`       | 5 anomaly detection algorithms                        |
-| `forecast-service.ts`      | Cash flow projection with confidence intervals        |
-| `health-score-service.ts`  | 5-dimension composite health score                    |
-| `recap-service.ts`         | Weekly/monthly natural language summaries             |
-| `debt-service.ts`          | Snowball/avalanche payoff calculations                |
-| `education-service.ts`     | 15 financial education tips across 5 topics           |
-| `auto-categorize.ts`       | 3-tier category suggestion (exact/partial/historical) |
-| `split-service.ts`         | Transaction split management                          |
-| `statement-parser.ts`      | OFX/QFX/QIF bank statement parsing                    |
-| `statement-import.ts`      | Statement import with duplicate detection             |
-| `exchange-rate-service.ts` | frankfurter.app rate fetching                         |
-| `report-service.ts`        | Monthly/annual report aggregation                     |
-| `pdf-generator.ts`         | Dark-themed PDF generation via jsPDF                  |
-| `achievement-service.ts`   | 8 achievements + streak tracking                      |
-| `price-service.ts`         | Alpha Vantage (stocks) + CoinGecko (crypto)           |
-| `notebook.ts`              | Markdown note filesystem operations                   |
-| `news-service.ts`          | Finnhub + NewsAPI financial news                      |
-| `money.ts`                 | toCentavos/fromCentavos/formatMoney                   |
+Expected receivables are plans. Received amounts equal the preserved unattributed
+baseline plus active links to ordinary posted/cleared income. Installments and
+link reversals do not create or delete bank income. Protected source evidence
+cannot be changed until the active relationship is explicitly corrected.
 
-### Layer 4: Local Persistence
+## Transactions, audit, and retries
 
-- `src/lib/database.ts` initializes `sql.js`, applies 10 migrations, and persists snapshots to IndexedDB.
-- `src/lib/storage.ts` provides an async store interface backed by `localStorage`.
-- `src/lib/virtual-fs.ts` offers browser-safe filesystem compatibility.
+Domain services validate and write under one database transaction. The synchronous
+Node adapter uses `BEGIN IMMEDIATE` and savepoints for nested work; promises must
+not escape a better-sqlite3 transaction callback. Browser services use the existing
+server transaction lease and check final committed/rolled-back status.
 
-## Database Lifecycle
+The metadata batch first validates every row, then commits all corrections,
+per-row audits, and a retry receipt in `audit_log` together. Its preview is bound
+to exact intent and database revision. Budget-history records and receipt links
+carry domain-specific evidence and concurrency checks. These mechanisms extend
+existing workflows instead of adding a second ledger or generic operation engine.
 
-1. Load SQL.js wasm runtime.
-2. Restore previous DB snapshot from IndexedDB if available.
-3. Run schema migrations (`001_core_tables` through `010_transaction_splits`).
-4. Serve all queries through `query<T>()` and `execute()`.
-5. Persist to IndexedDB after write operations.
-6. On startup, materialize recurring transactions and auto-refresh exchange rates if stale.
+Recovery is domain-specific: supported ordinary writes can use `undo`; metadata
+uses a new correction; history uses a new revision; payment links are voided;
+virtual allocations are reversed. A SQLite restore validates a snapshot and
+preserves a rollback copy before replacement. Restores remain an advanced workflow.
 
----
+## MCP architecture
 
-## Dashboard Architecture
+Full is the compatibility default. Core is a fixed opt-in everyday catalog, and
+read-only independently restricts either profile to audited built-in reads.
+Read-only excludes local plugins and unknown effects. The standalone entrypoint
+also opens SQLite read-only, skips migration/preparation, and denies backup or
+restore writes. Embedded hosts configure their database access separately.
 
-The dashboard aggregates data from 7 stores and displays:
+MCP registers complete strict input objects, a common output envelope, compact
+JSON fallback text, structured results, and conservative effects annotations.
+`shikin://capabilities` reports the fixed profile. Stored financial text is data,
+never agent instructions. A compatible host may use deferred tool search; the
+server does not expose SQL, arbitrary commands, or a call that widens permissions.
 
-1. **Metric Cards**: Total balance, monthly income/expenses, savings rate
-2. **Charts**: 6-month spending trend (AreaChart), category breakdown (PieChart)
-3. **Alerts**: Anomaly detection results (5 detection types)
-4. **Cash Flow Forecast**: 30/60/90 day projected balance chart
-5. **Financial Health Score**: SVG gauge with sub-score breakdown
-6. **Spending Recap**: Weekly natural language summary with highlight chips
-7. **Goals Preview**: Top 3 savings goals with SVG progress rings
-8. **Streaks**: Current logging streak badge
-9. **Achievements**: Newly unlocked badge notifications
-10. **Education Tip**: Daily rotating financial concept
-11. **Accounts Preview**: Top 3 account balances
-12. **Quick Actions**: Add transaction
+See the [MCP architecture decision](../research/MCP-DESIGN.md),
+[generated inventory](../reference/MCP-TOOL-INVENTORY.md), and
+[benchmarks](../benchmarks/MCP-BENCHMARKS.md) for measured tradeoffs and limits.
+The locked SDK retains its existing protocol negotiation; researching a newer
+specification does not imply a transport-version upgrade.
 
----
+## Network and delivery boundaries
 
-## Security and Privacy Model
+Core records stay local. Optional exchange-rate/market providers and external
+AI clients have their own network behavior. The bridge and packaged web host
+bind to loopback and enforce their local origin/authentication rules; private
+remote hosting is an explicit deployment choice. No mandatory cloud account or
+embedded chat assistant is introduced.
 
-- All financial records are stored locally in IndexedDB-backed SQLite snapshots.
-- Optional market-data API keys stay local in browser storage and are only used for direct provider requests.
-- No mandatory backend service is required for core product functionality.
-- Exchange rates are fetched from a free public API (frankfurter.app) — no user data is sent.
-
----
-
-## Design System (ASF)
-
-| Element    | Value                              |
-| ---------- | ---------------------------------- |
-| Background | `#020202`                          |
-| Surface    | `#0a0a0a`                          |
-| Accent     | `#bf5af2`                          |
-| Headings   | Space Grotesk                      |
-| Body       | Outfit                             |
-| Mono       | Space Mono                         |
-| Buttons    | 0px radius (brutalist)             |
-| Badges     | 9999px radius (pill)               |
-| Cards      | 12px radius, glass morphism        |
-| Glass      | rgba(10,10,10,0.6) + blur(12px)    |
-| Mode       | Forced dark (no light/dark toggle) |
+CI checks lint/types/format, migrations and domain tests, inventory drift, app/CLI
+builds, packaged transport behavior, and browser workflows. The synthetic MCP
+benchmark measures real tool transport and financial invariants independently
+from live-model accuracy. See [Backend map](../reference/BACKEND-MAP.md) and
+[Frontend map](../reference/FRONTEND-MAP.md) for detailed entry points.

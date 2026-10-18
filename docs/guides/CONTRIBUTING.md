@@ -107,7 +107,7 @@ cli/
 ├── src/
 │   ├── cli.ts            # Commander CLI entry point
 │   ├── mcp-server.ts     # MCP server entry point
-│   ├── tools/            # Shared 112-tool CLI/MCP catalog
+│   ├── tools/            # Shared CLI/MCP catalog (generated inventory)
 │   └── database.ts       # better-sqlite3 data access
 ```
 
@@ -506,6 +506,28 @@ test(cli): add unit tests for addTransaction tool
 ## Adding a New CLI or MCP Tool
 
 Add new tools under `cli/src/tools/` and export them from `cli/src/tools/index.ts`, then wire any CLI- or MCP-specific behavior through `cli/src/cli.ts` and `cli/src/mcp-server.ts` as needed. See `../reference/BACKEND-MAP.md` for the current backend entry points.
+
+Keep full/CLI compatibility while considering whether a tool belongs in the fixed
+core MCP roster (`cli/src/mcp-profiles.ts`). Missing effects mean unaudited; declare
+read-only only after tracing every called service and verifying populated SQLite
+queries make no writes. Read-only mode excludes plugin tools and unknown effects.
+Financial batches require a real atomic transaction, stable preview binding, and
+an explicit retry/recovery contract; parallel RPCs are not a database transaction.
+Do not expose arbitrary SQL or shell execution.
+
+Run `pnpm inventory:generate` after schema, effect, or catalog changes and commit
+both generated references and the public automation fixture. CI runs
+`pnpm inventory:check`; the immutable v1.2.1 fixture protects legacy names.
+`pnpm benchmark:mcp` runs deterministic financial tasks through actual SDK
+transport on isolated fixtures. Compare the same harness against a pinned checkout
+with `--repo`; never use a user's database, infer tokenizer usage from bytes, or
+claim live-model selection accuracy from scripted requests. See
+[benchmark methodology](../benchmarks/MCP-BENCHMARKS.md).
+
+Migration changes must update the shared finance-core definitions, app/native and
+hosted loaders, CLI/read-only readiness, staged restore, exports/redaction, and
+populated migration/rollback tests. See the
+[current upgrade guide](AGENT-WORKFLOWS-UPGRADE.md).
 
 ---
 

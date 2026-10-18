@@ -298,7 +298,10 @@ describe('receivable-store', () => {
         expect.stringContaining('DELETE FROM receivables'),
         expect.arrayContaining(['01RECV001', 'open'])
       )
-      expect(mockQuery).toHaveBeenCalledTimes(2)
+      expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('receivable_payment_links'), [
+        '01RECV001',
+      ])
+      expect(mockQuery).toHaveBeenCalledTimes(3)
     })
   })
 

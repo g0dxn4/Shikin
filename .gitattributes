@@ -1,0 +1,6 @@
+# Review the generator and summary; retain generated evidence in the repository.
+docs/reference/MCP-TOOL-INVENTORY.json linguist-generated=true
+docs/reference/MCP-TOOL-INVENTORY.md linguist-generated=true
+cli/src/fixtures/public-automation-inventory.json linguist-generated=true
+cli/src/fixtures/legacy-automation-inventory.v1.2.1.json linguist-generated=true
+docs/benchmarks/*.json linguist-generated=true

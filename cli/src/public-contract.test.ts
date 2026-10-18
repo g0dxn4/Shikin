@@ -25,11 +25,26 @@ const { createMcpServer, createMcpToolHandler, registerMcpResources } =
 const inventory = JSON.parse(
   readFileSync(resolve(process.cwd(), 'cli/src/fixtures/public-automation-inventory.json'), 'utf8')
 ) as { tools: string[]; commands: string[] }
+const legacyInventory = JSON.parse(
+  readFileSync(
+    resolve(process.cwd(), 'cli/src/fixtures/legacy-automation-inventory.v1.2.1.json'),
+    'utf8'
+  )
+) as { tools: string[]; commands: string[] }
 const { version: cliPackageVersion } = JSON.parse(
   readFileSync(resolve(process.cwd(), 'cli/package.json'), 'utf8')
 ) as { version: string }
 
 describe('public automation contract', () => {
+  it('preserves every tool and command from the v1.2.1 compatibility baseline', () => {
+    expect(builtInTools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining(legacyInventory.tools)
+    )
+    expect(createProgram(builtInTools).commands.map((command) => command.name())).toEqual(
+      expect.arrayContaining(legacyInventory.commands)
+    )
+  })
+
   it('pins every built-in tool and command plus independently versioned contracts', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     const program = createProgram(builtInTools)
@@ -37,21 +52,21 @@ describe('public automation contract', () => {
     await program.parseAsync(['node', 'shikin', 'tools', '--json'])
     const catalog = JSON.parse(String(log.mock.calls[0]?.[0])) as Record<string, unknown>
 
-    expect(builtInTools).toHaveLength(118)
-    expect(program.commands).toHaveLength(123)
+    expect(builtInTools).toHaveLength(inventory.tools.length)
+    expect(program.commands).toHaveLength(inventory.commands.length)
     expect(builtInTools.map((tool) => tool.name).sort()).toEqual(inventory.tools)
     expect(program.commands.map((command) => command.name()).sort()).toEqual(inventory.commands)
     expect(program.version()).toBe(cliPackageVersion)
     expect(APPLICATION_VERSION).toBe(cliPackageVersion)
-    expect(COMMAND_CATALOG_VERSION).toBe('2026-09-19.backend-remediation')
+    expect(COMMAND_CATALOG_VERSION).toBe('2026-10-17.agent-workflows')
     expect(EXPOSED_CATALOG_VERSION).toBe(COMMAND_CATALOG_VERSION)
     expect(COMMAND_CATALOG_VERSION).not.toBe(APPLICATION_VERSION)
     expect(catalog).toMatchObject({
       success: true,
       catalogVersion: COMMAND_CATALOG_VERSION,
       schemaVersion: 'cli-tools-json.v1',
-      commandCount: 123,
-      toolCount: 118,
+      commandCount: inventory.commands.length,
+      toolCount: inventory.tools.length,
       compatibility: {
         effects: {
           declaredOnly: true,
@@ -160,7 +175,8 @@ describe('public automation contract', () => {
     const failure = await failureHandler({ value: 2 })
 
     expect(success).toEqual({
-      content: [{ type: 'text', text: JSON.stringify({ success: true, result: 4 }, null, 2) }],
+      content: [{ type: 'text', text: JSON.stringify({ success: true, result: 4 }) }],
+      structuredContent: { success: true, result: 4 },
     })
     expect(failure.isError).toBe(true)
     expect(JSON.parse(failure.content[0]!.text)).toEqual({
@@ -180,6 +196,7 @@ describe('public automation contract', () => {
       ['accounts', 'shikin://accounts'],
       ['categories', 'shikin://categories'],
       ['recent-transactions', 'shikin://recent-transactions'],
+      ['capabilities', 'shikin://capabilities'],
     ])
 
     const handler = resource.mock.calls[1]?.[2] as (uri: URL) => Promise<unknown>

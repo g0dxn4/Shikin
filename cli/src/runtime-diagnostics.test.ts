@@ -26,7 +26,7 @@ function storage() {
 
 function initializedDatabase(
   path: string,
-  through: 19 | 20 | 21 | 22 | 23 | 24 = 24
+  through: 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 = 26
 ): Database.Database {
   const db = new Database(path)
   runHostedTestMigrations(db, through)
@@ -54,8 +54,8 @@ describe('CLI runtime diagnostics', () => {
       success: true,
       build: 'cli',
       version: APPLICATION_VERSION,
-      schemaVersion: 24,
-      schemaMigration: '024_scoped_budgets',
+      schemaVersion: 26,
+      schemaMigration: '026_receivable_payments',
       localInstance: { status: 'available', id },
       dataRevision: 0,
       lastFinancialWriteAt: null,
@@ -116,9 +116,9 @@ describe('CLI runtime diagnostics', () => {
   it('rejects old and future schemas without creating or migrating identity', () => {
     for (const version of ['old', 'future'] as const) {
       const { context } = storage()
-      const db = initializedDatabase(context.databasePath, version === 'old' ? 23 : 24)
+      const db = initializedDatabase(context.databasePath, version === 'old' ? 25 : 26)
       if (version === 'future') {
-        db.prepare("INSERT INTO _migrations (id, name) VALUES (25, '025_future')").run()
+        db.prepare("INSERT INTO _migrations (id, name) VALUES (27, '027_future')").run()
       }
       const migrationsBefore = db.prepare('SELECT * FROM _migrations ORDER BY id').all()
       db.close()

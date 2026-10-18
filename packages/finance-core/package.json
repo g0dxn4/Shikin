@@ -12,6 +12,26 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./budget-history": {
+      "types": "./dist/budget-history.d.ts",
+      "import": "./dist/budget-history.js",
+      "default": "./dist/budget-history.js"
+    },
+    "./budget-history-migration": {
+      "types": "./dist/025_budget_history.d.ts",
+      "import": "./dist/025_budget_history.js",
+      "default": "./dist/025_budget_history.js"
+    },
+    "./receivable-payments": {
+      "types": "./dist/receivable-payments.d.ts",
+      "import": "./dist/receivable-payments.js",
+      "default": "./dist/receivable-payments.js"
+    },
+    "./receivable-payments-migration": {
+      "types": "./dist/026_receivable_payments.d.ts",
+      "import": "./dist/026_receivable_payments.js",
+      "default": "./dist/026_receivable_payments.js"
+    },
     "./scoped-budgets-migration": {
       "types": "./dist/024_scoped_budgets.d.ts",
       "import": "./dist/024_scoped_budgets.js",

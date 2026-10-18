@@ -1,196 +1,125 @@
-# Backend Mapping (Historical Hardening Notes)
+# Backend map
 
-This is a practical backend map for the current repo layout. It is a documentation-only artifact that started as hardening-planning material and still contains historical milestone references.
+Current runtime ownership and automation entry points. For the architectural
+rationale and financial invariants, see [Architecture](../guides/ARCHITECTURE.md).
+Historical remediation plans remain under `docs/planning/`.
 
-## 1) Key backend entry points
+## Runtime entry points
 
-- **Desktop app runtime**
-  - `src/main.tsx` → app shell and routing.
-  - `src-tauri/src/main.rs` → starts `shikin_lib::run_entrypoint(...)`.
-  - `src-tauri/src/lib.rs` → Rust bootstrap, desktop/CLI/MCP entrypoint routing, and plugin registration (`sql`, `store`, `fs`, `updater`).
-  - `src-tauri/migrations/001_core_tables.sql`, `003_credit_cards.sql` and migration list in `src-tauri/src/lib.rs`.
-- **Browser mode runtime**
-  - `pnpm dev` executes `scripts/dev.mjs`, which builds `@shikin/finance-core` then starts `scripts/data-server.mjs` and Vite in one process group.
-  - Browser runtime DB/storage calls are funneled through `src/lib/database.ts`, `src/lib/storage.ts`, and `src/lib/virtual-fs.ts`.
-- **CLI mode**
-  - `cli/src/cli.ts` registers every command from the shared catalog exported by `cli/src/tools/index.ts` and runs via Commander.
-- Current shared tool surface: **112 shared CLI/MCP tools** (from `cli/src/tools/index.ts`) and **117 CLI commands** including CLI-only built-ins (`diagnose`, `tools`, `validate`, `web`, `record`), all available end-to-end against local data. Live inventory: `cli/src/fixtures/public-automation-inventory.json` and `shikin tools --json`.
-- Catalog groups: transactions/corrections/consumption/transfers/tags/placeholders; accounts/categories/reconciliation/source coverage/staged history; credit cards, statements, and payment evidence; budgets, net worth, and cashflow buckets; investments, subscriptions, and bills; receivables; analytics, recaps, forecast, health, goals, and debt; category rules; notebook and portfolio review; backup/restore/import/export; audit, undo, sanity check, and automation context; read-only runtime diagnostics; trusted-local plugins.
-- MVP limitation decisions: one-off transfer writes are supported in the app and CLI/MCP, but recurring transfer rules remain deferred; debt payoff uses inferred credit-card balances with APR fixed at 0% because account APR is not stored; browser subscription management is deferred while local subscription rows still feed forecasts and CLI/MCP analytics.
-- **MCP mode**
-  - `cli/src/mcp-server.ts` registers the same `tools` and bootstraps MCP over stdio.
+| Runtime              | Entry point                                                             | Data access                                        |
+| -------------------- | ----------------------------------------------------------------------- | -------------------------------------------------- |
+| Desktop              | `src-tauri/src/main.rs`, `src-tauri/src/lib.rs`, `src/main.tsx`         | Tauri SQL adapter and local app-data files         |
+| Browser development  | `scripts/dev.mjs` → finance-core build, Vite, `scripts/data-server.mjs` | Isolated local bridge by default                   |
+| Packaged private web | `cli/src/web-host.ts`, desktop hosted-access integration                | Same local database; loopback listener             |
+| CLI                  | `cli/src/cli.ts`                                                        | Shared tool handlers through `cli/src/database.ts` |
+| MCP                  | `cli/src/mcp-server.ts`                                                 | Same handlers, selected by fixed launch profile    |
 
-## 1a) Local HTTP listeners
+Installed paths are resolved by shared storage helpers. Linux normally uses
+`~/.local/share/com.asf.shikin`; custom test roots use explicit isolation and must
+not inspect or move legacy user data. Use [CLI environment guidance](../../cli/README.md)
+for cross-platform paths and custom-root rules.
 
-- **`scripts/data-server.mjs`**
-  - HTTP listener: `createServer(...).listen(1480, '127.0.0.1')` (loopback only).
-  - Access is guarded by local bridge auth: origin must be `http://localhost:1420` and `X-Shikin-Bridge` must match `SHIKIN_DATA_SERVER_BRIDGE_TOKEN`.
-  - Public endpoints: `/api/db/*`, `/api/store/*`, and `/api/fs/*`.
+## Shared CLI catalog
 
-## 2) CLI flow
+`cli/src/tools/index.ts` composes domain definitions under `cli/src/tools/`. Each
+contains a name, description, Zod input object, implementation, and optional
+audited effects. Handlers reuse finance-core rules and runtime-specific services.
+The Commander adapter generates kebab-case options, coerces CLI values, prints
+JSON results, and closes the database on completion.
 
-1. `cli/src/cli.ts`:
-   - Creates a `commander` program and iterates `tools` from `cli/src/tools/index.ts`.
-   - Converts tool `zod` schemas into command options (`zodToOptions`).
-   - Exposes `tools --json` as the authoritative command catalog with catalog/schema versions, CLI/MCP compatibility counts, validation scope, and required migration metadata.
-   - Coerces string inputs to numbers/booleans (`coerceInput`).
-   - Executes `tool.execute(...)` and prints JSON response.
-   - Calls `close()` from `cli/src/database.ts` in finally.
+`shikin tools --json` provides catalog/schema versions, compatibility metadata,
+required migrations, and effects. `diagnose`, `tools`, `validate`, `web`, and
+`record` are CLI-only built-ins. The [generated inventory](MCP-TOOL-INVENTORY.md)
+and JSON companion include exact current counts, every schema and implementation,
+and core/read-only eligibility. The v1.2.1 name fixture remains a compatibility
+floor; enabled trusted-local plugins are additive.
 
-2. `cli/src/tools/index.ts` and `cli/src/tools/*`:
-   - Defines and composes the shared CLI/MCP tool catalog.
-   - Each tool is self-contained: schema + business SQL + return payload.
-   - `add-transaction`, `update-transaction`, `delete-transaction`, and `query-transactions` are transfer-aware. Recurring transfer rules remain deferred because recurring rule materialization does not yet carry destination-account support.
+## MCP registration and permissions
 
-3. `cli/src/database.ts` (CLI-only data layer):
-   - Uses `better-sqlite3` against `~/.local/share/com.asf.shikin/shikin.db`.
-   - Converts positional placeholders `$1`/`$2` → `?` for better-sqlite3.
-   - Exposes `query`, `execute`, `close` (no HTTP/network surface).
+`mcp-profiles.ts` owns the explicit core roster, option parser, permission filter,
+and server instructions. Full is the default. Core is opt-in. `--read-only`
+excludes any write, unknown-effect, or plugin tool and cannot be widened by a
+later call. Registrations are sorted and fixed for the process. The CLI catalog
+remains complete independently of MCP launch options.
 
-## 3) MCP flow
+`mcp-server.ts` uses SDK `registerTool` with the complete strict Zod object, a
+common success-envelope output schema, and declared effects annotations. Handlers
+revalidate, preserve domain errors, and produce compact JSON text plus matching
+structured content. The negotiated SDK transport remains stdio with its existing
+2025-11-25 protocol support.
 
-- `cli/src/mcp-server.ts` creates `McpServer({ name: 'shikin', version: '<release>' })`.
-- Registers **all 112** shared tool definitions from `tools` with:
-  - tool name
-  - description
-  - `tool.schema.shape`
-  - `tool.execute` wrapped in MCP response.
-- Registers MCP resources for quick reads:
-  - `accounts` → `shikin://accounts` (`query('SELECT ... FROM accounts')`)
-  - `categories` → `shikin://categories`
-  - `recent-transactions` → `shikin://recent-transactions` (ordered + limited)
-- Connects via `StdioServerTransport`; SIGINT calls `close()`.
+| Resource                       | Purpose                                                |
+| ------------------------------ | ------------------------------------------------------ |
+| `shikin://accounts`            | Active accounts and aliases                            |
+| `shikin://categories`          | Category reference data                                |
+| `shikin://recent-transactions` | Bounded recent nonarchived rows                        |
+| `shikin://capabilities`        | Fixed profile, effective tool names, permission policy |
 
-## 4) Database and storage layers
+The standalone read-only entrypoint configures SQLite access before opening a
+handle. The `createMcpServer` factory controls tool policy; an embedded host must
+configure its own database restrictions. Read-only annotations alone are not
+a security boundary. See [MCP research/design](../research/MCP-DESIGN.md).
 
-- **Dual runtime abstraction (`src/lib/database.ts`)**
-  - `isTauri` branch (`src/lib/runtime.ts`): dynamic import of `@tauri-apps/plugin-sql`, `Database.load('sqlite:shikin.db')`.
-  - Browser branch (`DATA_SERVER_URL = http://localhost:1480`): POST to `/api/db/query`, `/api/db/execute`, and `/api/db/transaction`.
-  - Export/import APIs:
-    - `exportDatabaseSnapshot()` (`/api/db/export` in browser; direct fs read in Tauri)
-    - `importDatabaseSnapshot()` (`/api/db/import` in browser; direct fs write in Tauri)
-  - `withTransaction()` is the browser-safe multi-step transaction path; `runInTransaction()` is Tauri-only.
-  - Browser recurring materialization remains a dedicated endpoint wrapper: `materializeRecurringTransactionsBrowser()` → `/api/recurring/materialize`.
+## Domain workflows and boundaries
 
-- **Migration ownership (runtime reality)**
-  - Tauri Rust registration (`src-tauri/src/lib.rs`): core packaged SQL migrations.
-  - Browser/Tauri JS migration runner (`src/lib/database.ts`): app-side additive migrations through the current CLI-required schema, including placeholder transaction metadata.
-  - Migration `009` is intentionally absent from the JS sequence in `src/lib/database.ts`.
-  - `cli/src/database.ts` performs no schema migration.
+| Workflow                        | Shared rules / service                                                        | Entry points                                               |
+| ------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Scoped reports/budgets          | finance-core report scope/window/projector; app/CLI scoped adapters           | Budgets, Reports, `get-spending-summary`, `upsert-budget`  |
+| Metadata and atomic batches     | `cli/src/transaction-corrections.ts`, `cli/src/tools/transaction-batch.ts`    | Single correction and bounded preview/apply batch          |
+| Economic classification/refunds | finance-core consumption and classification plans; app/CLI services           | Classification preview/apply tools and app editors         |
+| Budget-history revisions        | `finance-core/budget-history`, `src/lib/budget-history.ts`, CLI history tools | Budget-history panel, capture/read tools                   |
+| Receivable installments         | `finance-core/receivable-payments`, app payment service, CLI receivable tools | Expected-payment matching and link voids                   |
+| Imports and duplicates          | finance-core statement identities/plans and app/CLI import adapters           | CSV/statement previews and reviewed apply                  |
+| Reconciliation and transfers    | Shared ledger, coverage, and evidence contracts                               | Account history, transfer matching, card-payment workflows |
+| Virtual reserves                | finance-core cashflow buckets and runtime adapters                            | Bucket allocate/reverse/correct tools and app flows        |
 
-- **CLI DB (`cli/src/database.ts`)**
-  - Local SQLite path: `~/.local/share/com.asf.shikin/shikin.db`.
-  - `journal_mode = WAL`, FK constraints enabled.
-  - No schema migrations in this file (relies on DB/file lifecycle and app scripts to ensure structure).
+Budget-history and receipt migration definitions are in shared 025/026 modules.
+Metadata-batch retry receipts reuse `audit_log`; there is no second operation
+store. These additions preserve original bank evidence and existing CLI names.
+They do not add automatic budget rollover or exclusive assignment rules.
 
-- **Browser bridge DB (`scripts/data-server.mjs`)**
-  - Direct `better-sqlite3` DB at `~/.local/share/com.asf.shikin/shikin.db`.
-  - Own migration runner (`_migrations` table) for browser-mode shared storage initialization and bridge compatibility.
-  - Endpoints used by app:
-    - `POST /api/db/query`
-    - `POST /api/db/execute`
-    - `POST /api/db/transaction`
-    - `GET /api/db/export`
-    - `POST /api/db/import`
-  - Server-side browser transactions use a short lease (`SHIKIN_SERVER_TRANSACTION_TTL_MS`, default `15000`) and auto-rollback on expiry.
-  - Transaction finalization is status-bearing: callers should treat `status` as authoritative (`committed`, `rolled_back`, `expired_rolled_back`).
+## SQLite and migration ownership
 
-- **Settings store abstraction**
-  - App: `src/lib/storage.ts`
-    - Tauri path: `@tauri-apps/plugin-store`
-    - Browser: calls data-server key endpoints (`/api/store[/<key>]`).
-  - Browser concrete settings persistence: `scripts/data-server.mjs` `settings.json` at `~/.local/share/com.asf.shikin/settings.json`.
+- `src/lib/database.ts` adapts Tauri SQL and browser HTTP. Its transaction services
+  expose atomic writes; the browser bridge leases a real server transaction and
+  reports final status so an expired lease cannot masquerade as a commit.
+- `scripts/data-server.mjs` owns local SQLite initialization/migration and the
+  internal `/api/db/*`, `/api/store/*`, and `/api/fs/*` bridge. Requests are guarded
+  by origin/token checks and bounded bodies. This internal SQL bridge is not an
+  unrestricted MCP tool or a public REST API.
+- `cli/src/database.ts` uses better-sqlite3, enables foreign keys, checks schema
+  objects and migration markers, and owns backups/restores. Normal access uses
+  WAL and synchronous immediate transactions/savepoints. Read-only access skips
+  storage preparation/journal changes and sets query-only access.
+- Tauri Rust registers packaged base SQL. The app's JavaScript migration runner
+  applies newer shared migrations, following the existing 024 model. The CLI
+  startup does not migrate the live schema; restore can upgrade its staged
+  candidate copy. Readiness requires schema 26.
 
-## 5) Notebook storage
+See [Database reference](DATABASE.md) and
+[upgrade notes](../guides/AGENT-WORKFLOWS-UPGRADE.md) for schema/export compatibility.
+Do not replace released migrations; add a shared version and update every adapter,
+readiness check, export policy, and migration regression test.
 
-- **App abstraction (`src/lib/virtual-fs.ts`)**
-  - Dual mode: Tauri plugin FS vs browser data-server FS endpoints.
-  - Used by `src/lib/notebook.ts`.
-- **App notebook (`src/lib/notebook.ts`)**
-  - `NOTEBOOK_DIR = notebook` under app data path.
-  - Initializes directories: `weekly-reviews`, `holdings`, `signals`, `education`.
-  - CRUD helpers: `initNotebook`, `readNote`, `writeNote`, `appendNote`, `listNotes`, `deleteNote`.
-- **CLI notebook (`cli/src/notebook.ts`)**
-  - Direct fs under `~/.local/share/com.asf.shikin/notebook`.
-  - Same API shape (`readNote`, `writeNote`, `appendNote`, `noteExists`, `listNotes`, `deleteNote`).
+## Local settings and notebook storage
 
-## 6) Shared schema / types
+`src/lib/storage.ts` selects Tauri plugin-store or the browser data-server store.
+`src/lib/virtual-fs.ts` and `src/lib/notebook.ts` use local filesystem adapters;
+`cli/src/notebook.ts` uses the same app-data notebook directory. SQLite snapshots
+alone do not include those files. Trusted-local plugin manifests and enablement
+state are read during discovery; plugin JavaScript runs only on invocation.
 
-- Canonical TypeScript domain model is in:
-  - `src/types/common.ts`
-  - `src/types/database.ts`
-- Runtime money conversion helpers: `src/lib/money.ts`.
-- Full DB schema documented in `docs/reference/DATABASE.md` (tables + migrations assumptions).
-- Cross-layer note: CLI keeps runtime-specific SQL adapters but consumes the shared `@shikin/finance-core` contracts for ledger, reporting, currency, recurrence, and statement-identity semantics.
+## Validation and remaining boundaries
 
-## 7) Backend tests / gaps
+Vitest includes shared financial planners, real SQLite migration/rollback tests,
+app/CLI parity, transport contracts, read-only enforcement, import and restore
+safety, and frontend behavior. Playwright exercises browser workflows at desktop
+and narrow viewports. `pnpm inventory:check` rejects generated documentation drift.
+The [MCP benchmark](../benchmarks/MCP-BENCHMARKS.md) uses real SDK transport and
+fresh synthetic fixtures; provider token usage and live-model selection remain
+separate evaluation work.
 
-- Most app store tests mock `@/lib/database`, while statement import also has real SQLite rollback coverage.
-- CLI integration suites execute CRUD, balance, restore, and analytics paths against temporary SQLite databases.
-- MCP tests verify the shared **112-tool** catalog and representative server behavior.
-- Data-server HTTP contract and security suites cover database, transaction, recurring, store, filesystem, snapshot import/export, auth, and request-size behavior.
-- E2E covers user-facing UI flows (`e2e/*.spec.ts`).
-
-## 8) Outbound integrations
-
-- **Updater manifest**: `src-tauri/tauri.conf.json` → `plugins.updater.endpoints` (`https://github.com/g0dxn4/Shikin/releases/latest/download/latest.json`).
-- **Exchange rates**: `src/lib/exchange-rate-service.ts` → `https://api.frankfurter.app`.
-- **Prices**: `src/lib/price-service.ts` → Alpha Vantage + CoinGecko APIs.
-- **News**: `src/lib/news-service.ts` → Finnhub + NewsAPI for browser-side price/intelligence surfaces that request it.
-
-## 9) Major hardening hotspots already identified
-
-1. **Local server trust boundary (data-server)**
-   - `scripts/data-server.mjs` binds loopback-only (`127.0.0.1:1480`) and enforces origin + per-run bridge token checks on every request.
-   - Browser development uses an isolated temporary database by default; accessing real app data requires explicit `SHIKIN_BROWSER_USE_REAL_DATA=1` opt-in.
-
-2. **Path confinement in FS endpoints**
-   - `safePath` in `scripts/data-server.mjs` now uses `path.relative`/`resolve` to prevent traversal across the data root boundary.
-
-3. **CLI/bridge error handling gaps**
-   - Browser `src/lib/storage.ts` `createBrowserStore()` swallows get/set failures (reads return `null`, writes silently drop).
-   - `cli/src/tools/index.ts` composes the canonical automation catalog from `cli/src/tools/*`; keep CLI, MCP, and docs in sync when adding or removing tools.
-
-4. **Schema/API drift risk**
-
-- Tauri and browser share `src/lib/database.ts` abstractions, while CLI + data-server carry independent migration/init and path assumptions (`~/.local/share/com.asf.shikin`).
-
-5. **MCP/CLI DB layer consistency**
-   - Both CLI and MCP intentionally share the `cli/src/tools/index.ts` catalog, but operational behavior can diverge because storage path and migration lifecycle differ between CLI process and app data-server path.
-
-## 10) Milestone 6 checkpoint notes
-
-This doc is the mapping baseline; the local bridge hardening items below are already implemented, with verification work still useful for future regression.
-
-### Historical Immediate (P0/P1) fixes to scope
-
-1. **Constrain `scripts/data-server.mjs` to caller-local trust only**
-   - File(s): `scripts/data-server.mjs`
-   - Implemented in code: explicit loopback bind + origin check + required shared bridge token.
-
-2. **Fix filesystem traversal checks in data-server handlers**
-   - File(s): `scripts/data-server.mjs`
-   - Implemented in code: `safePath` now uses `path.relative`/`resolve` for confinement checks.
-
-3. **Stop silent storage failure in browser store path**
-   - File(s): `src/lib/storage.ts`
-   - Convert failure handling in `createBrowserStore()` from swallowed reads/writes to surfaced errors so callers can react.
-
-4. **Make migration/state assumptions explicit across CLI/MCP/app bridges**
-   - File(s): `cli/src/database.ts`, `scripts/data-server.mjs`, `src/lib/database.ts`, `src-tauri/src/lib.rs`
-   - Define and enforce migration table expectations, DB path, and version checks at startup.
-
-### Remaining validation opportunity
-
-- A notebook persistence matrix across Tauri, browser, and CLI note backends would add coverage for cross-runtime directory shape and file operations.
-
-### Historical acceptance criteria for Milestone 2
-
-- No unauthenticated destructive write path without explicit local authorization.
-- No notebook/settings traversal bypass via relative path tricks.
-- No silent failures for local settings reads/writes in browser mode.
-- Any path or migration drift between CLI/MCP and app runtime is documented and enforced.
-
----
-
-Status: historical planning artifact, kept as a backend reference map.
+Preserved product limits include deferred recurring transfer rules, inferred
+credit-card APR of zero where no APR is stored, and subscription planning without
+a full browser subscription editor. See the [financial capability matrix](../research/FINANCIAL-CAPABILITIES.md)
+for implemented features and the prioritized follow-up work.

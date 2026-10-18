@@ -1,8 +1,29 @@
 # Database Schema
 
-This document describes the complete SQLite schema for Shikin, including all tables, columns, indexes, conventions, migration strategy, and example queries.
+This reference explains the current SQLite model, important columns and invariants, and migration ownership. Shared migration definitions and runtime readiness checks are authoritative for exact schema constraints; the column tables below are a guide, not an independently maintained SQL source.
 
-The schema is shared across the current dual-backend runtime: Tauri desktop uses `@tauri-apps/plugin-sql`, while browser mode reads and writes through the local data-server bridge against the shared SQLite database.
+The schema is shared across the current dual-backend runtime: Tauri desktop uses `@tauri-apps/plugin-sql`, while browser mode reads and writes through the local data-server bridge against the shared SQLite database. CLI/MCP use better-sqlite3 against that same database.
+
+**Current supported schema: 26.** See [upgrade and restore compatibility](../guides/AGENT-WORKFLOWS-UPGRADE.md). Earlier schema descriptions in release/planning documents are historical.
+
+## Shared financial schema sources
+
+| Source                                                                                       | Main storage and invariants                                                                                                                   |
+| -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src-tauri/migrations/019_financial_semantics.sql` and runtime migration adapters            | Account mode; pending/staged/reporting treatment; reconciliation bridges; expected receivables.                                               |
+| Migration `020_quote_recurrence_import_identity` in the app/data-server/CLI restore adapters | Explicit quote, recurrence, and import identities.                                                                                            |
+| `packages/finance-core/src/021_backend_remediation_foundation.ts`                            | Data identity/revision, source coverage, transaction consumption, card payment links, virtual allocations, import and correction protections. |
+| `packages/finance-core/src/022_dated_fx.ts`                                                  | Immutable direct manual FX histories and captured transaction conversion evidence.                                                            |
+| `packages/finance-core/src/023_classification_types.ts`                                      | Classification type versions, roles, and allocation-level reporting contracts.                                                                |
+| `packages/finance-core/src/024_scoped_budgets.ts`                                            | Budget scopes/basis and category-deletion retention guards.                                                                                   |
+| `packages/finance-core/src/025_budget_history.ts`                                            | Append-only budget configuration and monthly result revisions.                                                                                |
+| `packages/finance-core/src/026_receivable_payments.ts`                                       | Received installment links, legacy baseline, aggregate equation, and immutable source protection.                                             |
+
+`app_data_state.database_id` and `data_revision` identify the source used by
+reviewed operations and cursors. Audited financial writes advance that revision;
+read-only queries and previews must not. Source coverage is independent of the
+transaction dates present in the ledger. Virtual buckets and recurring estimates
+are not bank expenses. A stored category is not an exclusive budget assignment.
 
 ---
 
@@ -108,36 +129,36 @@ Nested categories under a parent category.
 
 The core table. Every expense, income, and transfer is a transaction.
 
-| Column                              | Type    | Constraints                                    | Description                                      |
-| ----------------------------------- | ------- | ---------------------------------------------- | ------------------------------------------------ |
-| `id`                                | TEXT    | PRIMARY KEY                                    | ULID                                             |
-| `account_id`                        | TEXT    | NOT NULL, FK -> accounts(id) ON DELETE CASCADE | Source account                                   |
-| `category_id`                       | TEXT    | FK -> categories(id) ON DELETE SET NULL        | Category (nullable)                              |
-| `subcategory_id`                    | TEXT    | FK -> subcategories(id) ON DELETE SET NULL     | Subcategory (nullable)                           |
-| `type`                              | TEXT    | NOT NULL, CHECK                                | One of: `expense`, `income`, `transfer`          |
-| `amount`                            | INTEGER | NOT NULL                                       | Amount in centavos (always positive)             |
-| `currency`                          | TEXT    | NOT NULL, DEFAULT 'USD'                        | ISO 4217 currency code                           |
-| `description`                       | TEXT    | NOT NULL                                       | What was this transaction for                    |
-| `notes`                             | TEXT    | nullable                                       | Transaction details                              |
-| `date`                              | TEXT    | NOT NULL                                       | Transaction date (YYYY-MM-DD)                    |
-| `tags`                              | TEXT    | DEFAULT '[]'                                   | JSON array of display tag strings                |
-| `is_recurring`                      | INTEGER | NOT NULL, DEFAULT 0                            | Whether this is a recurring transaction          |
-| `transfer_to_account_id`            | TEXT    | FK -> accounts(id) ON DELETE SET NULL          | Destination account for transfers                |
-| `status`                            | TEXT    | DEFAULT 'posted'                               | `pending`, `posted`, or `cleared`                |
-| `source`                            | TEXT    | nullable                                       | Generic provenance/source label                  |
-| `note`                              | TEXT    | nullable                                       | Audit/changelog note for the write               |
-| `recurring_rule_id`                 | TEXT    | FK -> recurring_rules(id) ON DELETE SET NULL   | Source recurring rule, when materialized         |
-| `is_placeholder`                    | INTEGER | NOT NULL, DEFAULT 0                            | 1 for placeholder/unknown-charge rows            |
-| `placeholder_status`                | TEXT    | nullable                                       | `unresolved`, `resolved`, `split`, or `cancelled` |
-| `resolved_at`                       | TEXT    | nullable                                       | ISO timestamp when placeholder was resolved      |
-| `resolved_by_transaction_id`        | TEXT    | Logical FK -> transactions(id)                 | Transaction that resolved this placeholder       |
-| `placeholder_reason`                | TEXT    | nullable                                       | Why the placeholder exists                       |
-| `placeholder_parent_transaction_id` | TEXT    | Logical FK -> transactions(id)                 | Parent placeholder for split child transactions  |
-| `import_source`                     | TEXT    | nullable                                       | Statement format/source used for persisted identity |
-| `import_external_id`                | TEXT    | nullable                                       | Bank-provided row identifier (for example OFX FITID) |
+| Column                              | Type    | Constraints                                    | Description                                            |
+| ----------------------------------- | ------- | ---------------------------------------------- | ------------------------------------------------------ |
+| `id`                                | TEXT    | PRIMARY KEY                                    | ULID                                                   |
+| `account_id`                        | TEXT    | NOT NULL, FK -> accounts(id) ON DELETE CASCADE | Source account                                         |
+| `category_id`                       | TEXT    | FK -> categories(id) ON DELETE SET NULL        | Category (nullable)                                    |
+| `subcategory_id`                    | TEXT    | FK -> subcategories(id) ON DELETE SET NULL     | Subcategory (nullable)                                 |
+| `type`                              | TEXT    | NOT NULL, CHECK                                | One of: `expense`, `income`, `transfer`                |
+| `amount`                            | INTEGER | NOT NULL                                       | Amount in centavos (always positive)                   |
+| `currency`                          | TEXT    | NOT NULL, DEFAULT 'USD'                        | ISO 4217 currency code                                 |
+| `description`                       | TEXT    | NOT NULL                                       | What was this transaction for                          |
+| `notes`                             | TEXT    | nullable                                       | Transaction details                                    |
+| `date`                              | TEXT    | NOT NULL                                       | Transaction date (YYYY-MM-DD)                          |
+| `tags`                              | TEXT    | DEFAULT '[]'                                   | JSON array of display tag strings                      |
+| `is_recurring`                      | INTEGER | NOT NULL, DEFAULT 0                            | Whether this is a recurring transaction                |
+| `transfer_to_account_id`            | TEXT    | FK -> accounts(id) ON DELETE SET NULL          | Destination account for transfers                      |
+| `status`                            | TEXT    | DEFAULT 'posted'                               | `pending`, `posted`, or `cleared`                      |
+| `source`                            | TEXT    | nullable                                       | Generic provenance/source label                        |
+| `note`                              | TEXT    | nullable                                       | Audit/changelog note for the write                     |
+| `recurring_rule_id`                 | TEXT    | FK -> recurring_rules(id) ON DELETE SET NULL   | Source recurring rule, when materialized               |
+| `is_placeholder`                    | INTEGER | NOT NULL, DEFAULT 0                            | 1 for placeholder/unknown-charge rows                  |
+| `placeholder_status`                | TEXT    | nullable                                       | `unresolved`, `resolved`, `split`, or `cancelled`      |
+| `resolved_at`                       | TEXT    | nullable                                       | ISO timestamp when placeholder was resolved            |
+| `resolved_by_transaction_id`        | TEXT    | Logical FK -> transactions(id)                 | Transaction that resolved this placeholder             |
+| `placeholder_reason`                | TEXT    | nullable                                       | Why the placeholder exists                             |
+| `placeholder_parent_transaction_id` | TEXT    | Logical FK -> transactions(id)                 | Parent placeholder for split child transactions        |
+| `import_source`                     | TEXT    | nullable                                       | Statement format/source used for persisted identity    |
+| `import_external_id`                | TEXT    | nullable                                       | Bank-provided row identifier (for example OFX FITID)   |
 | `import_fingerprint`                | TEXT    | nullable                                       | Deterministic fallback identity when no bank ID exists |
-| `created_at`                        | TEXT    | NOT NULL, auto                                 | ISO 8601 timestamp                               |
-| `updated_at`                        | TEXT    | NOT NULL, auto                                 | ISO 8601 timestamp                               |
+| `created_at`                        | TEXT    | NOT NULL, auto                                 | ISO 8601 timestamp                                     |
+| `updated_at`                        | TEXT    | NOT NULL, auto                                 | ISO 8601 timestamp                                     |
 
 **Design note:** The `amount` field is always positive. The `type` field determines the sign: `expense` subtracts from the account balance, `income` adds to it, and `transfer` subtracts from the source and adds to the destination.
 
@@ -171,22 +192,33 @@ Recurring payments (Netflix, Spotify, gym, etc.). The local table is available t
 
 ### budgets
 
-Budget limits for categories over a time period.
+Budget limits over a period, with independent account/category/tag scope and
+exclusions. `scope_json` is authoritative; `category_id` is a nullable singleton
+compatibility mirror. The migration-024 category-delete trigger preserves the
+scope and clears that mirror before the legacy FK could cascade. Budget scopes
+may overlap intentionally. See [scoped budget contracts](../planning/SCOPED_BUDGETS.md).
 
-| Column        | Type    | Constraints                            | Description                           |
-| ------------- | ------- | -------------------------------------- | ------------------------------------- |
-| `id`          | TEXT    | PRIMARY KEY                            | ULID                                  |
-| `category_id` | TEXT    | FK -> categories(id) ON DELETE CASCADE | Budget category                       |
-| `name`        | TEXT    | NOT NULL                               | Budget name                           |
-| `amount`      | INTEGER | NOT NULL                               | Budget limit in centavos              |
-| `period`      | TEXT    | NOT NULL, CHECK                        | One of: `weekly`, `monthly`, `yearly` |
-| `is_active`   | INTEGER | NOT NULL, DEFAULT 1                    | 0 = disabled, 1 = active              |
-| `created_at`  | TEXT    | NOT NULL, auto                         | ISO 8601 timestamp                    |
-| `updated_at`  | TEXT    | NOT NULL, auto                         | ISO 8601 timestamp                    |
+| Column        | Type    | Constraints                                     | Description                                        |
+| ------------- | ------- | ----------------------------------------------- | -------------------------------------------------- |
+| `id`          | TEXT    | PRIMARY KEY                                     | ULID                                               |
+| `category_id` | TEXT    | Nullable legacy FK mirror; protected by trigger | Singleton category mirror, not the scope authority |
+| `name`        | TEXT    | NOT NULL                                        | Budget name                                        |
+| `amount`      | INTEGER | NOT NULL                                        | Budget limit in centavos                           |
+| `currency`    | TEXT    | Explicit stored denomination                    | Currency of the budget limit                       |
+| `scope_json`  | TEXT    | NOT NULL, valid JSON object                     | Account/category/tag inclusions and exclusions     |
+| `basis`       | TEXT    | `gross_cashflow` or `net_consumption`           | Budget usage basis                                 |
+| `period`      | TEXT    | NOT NULL, CHECK                                 | One of: `weekly`, `monthly`, `yearly`              |
+| `is_active`   | INTEGER | NOT NULL, DEFAULT 1                             | 0 = disabled, 1 = active                           |
+| `created_at`  | TEXT    | NOT NULL, auto                                  | ISO 8601 timestamp                                 |
+| `updated_at`  | TEXT    | NOT NULL, auto                                  | ISO 8601 timestamp                                 |
 
 ### budget_periods
 
-Tracks actual spending against a budget for each time window.
+Legacy period counters retained for compatibility. These rows do not freeze the
+original budget configuration and are not the immutable historical authority.
+Live budget status uses shared projections; saved monthly evidence uses
+`budget_history_revisions`. Migration 025 preserves existing counters without
+inferring an original limit from them.
 
 | Column       | Type    | Constraints                                   | Description               |
 | ------------ | ------- | --------------------------------------------- | ------------------------- |
@@ -196,6 +228,50 @@ Tracks actual spending against a budget for each time window.
 | `end_date`   | TEXT    | NOT NULL                                      | Period end (YYYY-MM-DD)   |
 | `spent`      | INTEGER | NOT NULL, DEFAULT 0                           | Amount spent in centavos  |
 | `created_at` | TEXT    | NOT NULL, auto                                | ISO 8601 timestamp        |
+
+### budget_history_revisions
+
+Introduced by shared migration 025. Each `(budget_id, month, revision)` is unique;
+revisions form an append-only chain. A saved budget ID is a logical reference with
+no cascading FK to live budgets, categories, or transactions.
+
+| Column                                 | Purpose                                                                                                                                               |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`, `budget_id`, `month`, `revision` | Stable capture identity, calendar month, and positive revision number.                                                                                |
+| `supersedes_id`, `kind`                | Previous revision and capture / retrospective reconstruction / correction kind.                                                                       |
+| `snapshot_json`                        | Versioned configuration, scope, currency, window, gross/net results, known amounts, remaining/overage, completeness, source and contributor evidence. |
+| `reason`, `source`, `created_at`       | Explicit correction/capture explanation and provenance; first capture time is never backdated to imply contemporaneous evidence.                      |
+| `idempotency_key`, `request_json`      | Unique caller key and normalized request identity for safe retries.                                                                                   |
+
+Triggers reject UPDATE, DELETE, identity replacement, and invalid predecessor
+chains. New revisions advance the financial data revision. Missing captures stay
+unknown; authoritative gross/net totals and remaining amounts are null when the
+necessary evidence is incomplete. See [Budget history](../BUDGET_HISTORY.md).
+
+### receivables and receivable_payment_links
+
+A receivable stores expected income (`amount`, `currency`, `due_date`, `payer`,
+optional account/invoice/project references) separately from actual bank income.
+Its lifecycle is `open`, `partial`, `received`, or `cancelled`.
+
+| Storage                                                               | Purpose                                                                                                                            |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `receivables.received_amount`                                         | Preserved unattributed received baseline plus active linked installments.                                                          |
+| `receivables.unattributed_received_amount`                            | Immutable legacy received amount without individual surviving bank evidence.                                                       |
+| `receivables.matched_transaction_id`                                  | Compatibility mirror of the only active payment, or null for zero/multiple payments. It is not an authoritative has-payments test. |
+| `receivable_payment_links.id`, `receivable_id`, `transaction_id`      | Stable receipt and source identities. Parent receipt history prevents receivable deletion.                                         |
+| `amount`, `currency`, `transaction_date`, `transaction_snapshot_json` | Immutable full payment amount and original captured source evidence.                                                               |
+| `source`, `note`, `created_at`                                        | Link creation provenance.                                                                                                          |
+| `reversed_at`, `reversal_source`, `reversal_note`                     | Explicit void metadata; reversal preserves the original link.                                                                      |
+
+Each new link uses one complete posted/cleared ordinary income transaction in the
+expected currency/account. A partial unique index permits one active receivable
+link per transaction. Database triggers guard eligibility, aggregate math,
+immutable receipt evidence, and protected bank fields across all callers. A link
+or reversal changes receivable tracking and audit records, never bank amounts or
+account balances. Valid legacy single links migrate explicitly; missing evidence
+remains an unattributed baseline. Inconsistent legacy state fails migration
+atomically. See [Receivable payments](../RECEIVABLE_PAYMENTS.md).
 
 ### investments
 
@@ -221,21 +297,21 @@ Individual investment holdings.
 
 Historical price data for investment tracking.
 
-| Column       | Type    | Constraints             | Description             |
-| ------------ | ------- | ----------------------- | ----------------------- |
-| `id`         | TEXT    | PRIMARY KEY             | ULID                    |
-| `symbol`     | TEXT    | NOT NULL                | Ticker symbol           |
-| `price`      | INTEGER | NOT NULL                | Price in centavos       |
-| `currency`   | TEXT    | NOT NULL, DEFAULT 'USD' | Legacy quote currency field |
-| `quote_currency` | TEXT | nullable | Explicit currency returned by the price provider |
-| `date`       | TEXT    | NOT NULL                | Price date (YYYY-MM-DD) |
-| `created_at` | TEXT    | NOT NULL, auto          | ISO 8601 timestamp      |
+| Column           | Type    | Constraints             | Description                                      |
+| ---------------- | ------- | ----------------------- | ------------------------------------------------ |
+| `id`             | TEXT    | PRIMARY KEY             | ULID                                             |
+| `symbol`         | TEXT    | NOT NULL                | Ticker symbol                                    |
+| `price`          | INTEGER | NOT NULL                | Price in centavos                                |
+| `currency`       | TEXT    | NOT NULL, DEFAULT 'USD' | Legacy quote currency field                      |
+| `quote_currency` | TEXT    | nullable                | Explicit currency returned by the price provider |
+| `date`           | TEXT    | NOT NULL                | Price date (YYYY-MM-DD)                          |
+| `created_at`     | TEXT    | NOT NULL, auto          | ISO 8601 timestamp                               |
 
 **Unique constraint:** `(symbol, date)` -- one price per symbol per day.
 
 ### exchange_rates
 
-Currency exchange rates for multi-currency support.
+Legacy provider exchange-rate cache. Current authoritative conversion uses immutable, effective-dated `manual_exchange_rates` and captured `transaction_fx_evidence` from migration 022; this cache is not a fallback for missing manual rates.
 
 | Column          | Type | Constraints    | Description                             |
 | --------------- | ---- | -------------- | --------------------------------------- |
@@ -310,8 +386,8 @@ Templates for recurring transactions that auto-generate on schedule.
 | `tags`           | TEXT    | DEFAULT ''                   | Tags                                                |
 | `notes`          | TEXT    | nullable                     | Notes                                               |
 | `active`         | INTEGER | DEFAULT 1                    | 0 = paused, 1 = active                              |
-| `anchor_kind`    | TEXT    | nullable, CHECK              | `fixed_day` or `end_of_month` scheduling intent    |
-| `anchor_day`     | INTEGER | nullable, 1-31               | Original day for fixed-day recurrence              |
+| `anchor_kind`    | TEXT    | nullable, CHECK              | `fixed_day` or `end_of_month` scheduling intent     |
+| `anchor_day`     | INTEGER | nullable, 1-31               | Original day for fixed-day recurrence               |
 | `created_at`     | TEXT    | NOT NULL, auto               | ISO 8601 timestamp                                  |
 | `updated_at`     | TEXT    | NOT NULL, auto               | ISO 8601 timestamp                                  |
 
@@ -366,40 +442,47 @@ Split transactions across multiple categories.
 
 Append-only provenance table for CLI/MCP/app workflows that create, update, split, tag, undo, or otherwise mutate persisted finance data.
 
-| Column        | Type | Constraints | Description                                                                 |
-| ------------- | ---- | ----------- | --------------------------------------------------------------------------- |
-| `id`          | TEXT | PRIMARY KEY | ULID                                                                        |
-| `entity`      | TEXT | NOT NULL    | Logical entity type, for example `transaction` or `credit_card_statement`   |
-| `entity_id`   | TEXT | nullable    | ID of the affected row when the action targets a single persisted entity    |
-| `action`      | TEXT | NOT NULL    | Workflow action, for example `create`, `update`, `tag`, or `split-placeholder` |
-| `before_json` | TEXT | nullable    | JSON snapshot before the change; shape depends on `entity`/`action`         |
-| `after_json`  | TEXT | nullable    | JSON snapshot after the change; shape depends on `entity`/`action`          |
-| `source`      | TEXT | nullable    | Opaque provenance/source label supplied by the caller                       |
-| `note`        | TEXT | nullable    | Operator/audit note supplied by the caller                                  |
-| `created_at`  | TEXT | NOT NULL, auto | ISO 8601 timestamp                                                       |
+| Column        | Type | Constraints    | Description                                                                    |
+| ------------- | ---- | -------------- | ------------------------------------------------------------------------------ |
+| `id`          | TEXT | PRIMARY KEY    | Stable audit ID; usually ULID, with deterministic metadata-batch receipt IDs   |
+| `entity`      | TEXT | NOT NULL       | Logical entity type, for example `transaction` or `credit_card_statement`      |
+| `entity_id`   | TEXT | nullable       | ID of the affected row when the action targets a single persisted entity       |
+| `action`      | TEXT | NOT NULL       | Workflow action, for example `create`, `update`, `tag`, or `split-placeholder` |
+| `before_json` | TEXT | nullable       | JSON snapshot before the change; shape depends on `entity`/`action`            |
+| `after_json`  | TEXT | nullable       | JSON snapshot after the change; shape depends on `entity`/`action`             |
+| `source`      | TEXT | nullable       | Opaque provenance/source label supplied by the caller                          |
+| `note`        | TEXT | nullable       | Operator/audit note supplied by the caller                                     |
+| `created_at`  | TEXT | NOT NULL, auto | ISO 8601 timestamp                                                             |
 
 **Source semantics:** `source` is arbitrary provenance metadata, not an identity or trusted product enum. Use `note` for changelog/operator context; transaction-facing notes remain on `transactions.notes`.
+
+Metadata batches reuse `entity='operation'`, `action='batch-correct-transactions'`
+rows as durable retry receipts. Their deterministic ID is derived from database
+identity and caller key; before evidence stores the request hash and after evidence
+stores the compact result. Per-transaction audit records and the receipt commit
+in the same SQLite transaction. A receipt is not supported by generic `undo`;
+a new previewed correction is the recovery workflow.
 
 ### credit_card_statements
 
 Persisted statement periods for credit-card accounts. These rows back statement status, upcoming bills, statement paid-amount updates, and credit-card cycle explanations.
 
-| Column                 | Type    | Constraints                                  | Description                                      |
-| ---------------------- | ------- | -------------------------------------------- | ------------------------------------------------ |
-| `id`                   | TEXT    | PRIMARY KEY                                  | ULID                                             |
-| `account_id`           | TEXT    | NOT NULL, FK -> accounts(id) ON DELETE CASCADE | Credit-card account                            |
-| `statement_start_date` | TEXT    | nullable                                     | Statement period start date (YYYY-MM-DD)         |
-| `statement_end_date`   | TEXT    | NOT NULL                                     | Statement closing/end date (YYYY-MM-DD)          |
-| `due_date`             | TEXT    | NOT NULL                                     | Payment due date for this persisted statement    |
-| `statement_balance`    | INTEGER | NOT NULL, DEFAULT 0                          | Statement balance in centavos                    |
-| `minimum_payment`      | INTEGER | NOT NULL, DEFAULT 0                          | Minimum payment in centavos                      |
-| `paid_amount`          | INTEGER | NOT NULL, DEFAULT 0                          | Amount already paid toward the statement         |
-| `currency`             | TEXT    | NOT NULL, DEFAULT 'USD'                      | ISO 4217 currency code; should match the account |
-| `status`               | TEXT    | NOT NULL, DEFAULT 'open'                     | `open`, `partial`, `paid`, or `overdue`          |
-| `source`               | TEXT    | nullable                                     | Opaque provenance/source label                   |
-| `note`                 | TEXT    | nullable                                     | Operator/audit note                              |
-| `created_at`           | TEXT    | NOT NULL, auto                               | ISO 8601 timestamp                               |
-| `updated_at`           | TEXT    | NOT NULL, auto                               | ISO 8601 timestamp                               |
+| Column                 | Type    | Constraints                                    | Description                                      |
+| ---------------------- | ------- | ---------------------------------------------- | ------------------------------------------------ |
+| `id`                   | TEXT    | PRIMARY KEY                                    | ULID                                             |
+| `account_id`           | TEXT    | NOT NULL, FK -> accounts(id) ON DELETE CASCADE | Credit-card account                              |
+| `statement_start_date` | TEXT    | nullable                                       | Statement period start date (YYYY-MM-DD)         |
+| `statement_end_date`   | TEXT    | NOT NULL                                       | Statement closing/end date (YYYY-MM-DD)          |
+| `due_date`             | TEXT    | NOT NULL                                       | Payment due date for this persisted statement    |
+| `statement_balance`    | INTEGER | NOT NULL, DEFAULT 0                            | Statement balance in centavos                    |
+| `minimum_payment`      | INTEGER | NOT NULL, DEFAULT 0                            | Minimum payment in centavos                      |
+| `paid_amount`          | INTEGER | NOT NULL, DEFAULT 0                            | Amount already paid toward the statement         |
+| `currency`             | TEXT    | NOT NULL, DEFAULT 'USD'                        | ISO 4217 currency code; should match the account |
+| `status`               | TEXT    | NOT NULL, DEFAULT 'open'                       | `open`, `partial`, `paid`, or `overdue`          |
+| `source`               | TEXT    | nullable                                       | Opaque provenance/source label                   |
+| `note`                 | TEXT    | nullable                                       | Operator/audit note                              |
+| `created_at`           | TEXT    | NOT NULL, auto                                 | ISO 8601 timestamp                               |
+| `updated_at`           | TEXT    | NOT NULL, auto                                 | ISO 8601 timestamp                               |
 
 **Statement payment math:** `amountToPay = max(statement_balance - paid_amount, 0)`. `minimumPaymentDue = max(min(minimum_payment, statement_balance) - paid_amount, 0)`. `record-card-payment` can update `paid_amount` directly without creating a transaction when using statement-only mode.
 
@@ -409,35 +492,35 @@ Persisted statement periods for credit-card accounts. These rows back statement 
 
 The migration creates these indexes for query performance:
 
-| Index                                 | Table              | Columns                    | Purpose                           |
-| ------------------------------------- | ------------------ | -------------------------- | --------------------------------- |
-| `idx_transactions_account`            | transactions       | account_id                 | Filter transactions by account    |
-| `idx_transactions_category`           | transactions       | category_id                | Filter transactions by category   |
-| `idx_transactions_date`               | transactions       | date                       | Date range queries, sorting       |
-| `idx_transactions_type`               | transactions       | type                       | Filter by expense/income/transfer |
-| `idx_subcategories_category`          | subcategories      | category_id                | List subcategories for a category |
-| `idx_budget_periods_budget`           | budget_periods     | budget_id                  | List periods for a budget         |
-| `idx_investments_account`             | investments        | account_id                 | Filter investments by account     |
-| `idx_investments_symbol`              | investments        | symbol                     | Look up holdings by ticker        |
-| `idx_stock_prices_symbol_date`        | stock_prices       | symbol, date               | Price lookup by symbol and date   |
-| `idx_exchange_rates_currencies`       | exchange_rates     | from_currency, to_currency | Rate lookup by currency pair      |
-| `idx_extension_data_extension`        | extension_data     | extension_id               | List data for an extension        |
-| `idx_category_rules_pattern_category` | category_rules     | pattern, category_id       | Unique rule lookup                |
-| `idx_category_rules_pattern`          | category_rules     | pattern                    | Pattern matching                  |
-| `idx_recurring_rules_next_date`       | recurring_rules    | next_date                  | Due rule materialization          |
-| `idx_recurring_rules_active`          | recurring_rules    | active                     | Filter active rules               |
-| `idx_goals_deadline`                  | goals              | deadline                   | Sort by deadline                  |
-| `idx_recaps_type`                     | recaps             | type                       | Filter by recap type              |
-| `idx_recaps_generated`                | recaps             | generated_at               | Sort by generation date           |
-| `idx_transaction_splits_transaction`  | transaction_splits | transaction_id             | List splits for a transaction     |
-| `idx_transactions_placeholder_status` | transactions       | is_placeholder, placeholder_status | List unresolved placeholders      |
-| `idx_transactions_placeholder_resolved_by` | transactions   | resolved_by_transaction_id | Resolve-link lookups              |
-| `idx_transactions_placeholder_parent` | transactions       | placeholder_parent_transaction_id | Placeholder split child lookups   |
-| `idx_audit_log_entity`                | audit_log          | entity, entity_id          | Audit history for an entity       |
-| `idx_audit_log_created`               | audit_log          | created_at                 | Recent audit context              |
-| `idx_credit_card_statements_account_period` | credit_card_statements | account_id, statement_end_date | Unique statement period per card |
-| `idx_credit_card_statements_due`      | credit_card_statements | due_date                | Upcoming/overdue statement lookup |
-| `idx_credit_card_statements_status`   | credit_card_statements | status                  | Status filtering                  |
+| Index                                       | Table                  | Columns                            | Purpose                           |
+| ------------------------------------------- | ---------------------- | ---------------------------------- | --------------------------------- |
+| `idx_transactions_account`                  | transactions           | account_id                         | Filter transactions by account    |
+| `idx_transactions_category`                 | transactions           | category_id                        | Filter transactions by category   |
+| `idx_transactions_date`                     | transactions           | date                               | Date range queries, sorting       |
+| `idx_transactions_type`                     | transactions           | type                               | Filter by expense/income/transfer |
+| `idx_subcategories_category`                | subcategories          | category_id                        | List subcategories for a category |
+| `idx_budget_periods_budget`                 | budget_periods         | budget_id                          | List periods for a budget         |
+| `idx_investments_account`                   | investments            | account_id                         | Filter investments by account     |
+| `idx_investments_symbol`                    | investments            | symbol                             | Look up holdings by ticker        |
+| `idx_stock_prices_symbol_date`              | stock_prices           | symbol, date                       | Price lookup by symbol and date   |
+| `idx_exchange_rates_currencies`             | exchange_rates         | from_currency, to_currency         | Rate lookup by currency pair      |
+| `idx_extension_data_extension`              | extension_data         | extension_id                       | List data for an extension        |
+| `idx_category_rules_pattern_category`       | category_rules         | pattern, category_id               | Unique rule lookup                |
+| `idx_category_rules_pattern`                | category_rules         | pattern                            | Pattern matching                  |
+| `idx_recurring_rules_next_date`             | recurring_rules        | next_date                          | Due rule materialization          |
+| `idx_recurring_rules_active`                | recurring_rules        | active                             | Filter active rules               |
+| `idx_goals_deadline`                        | goals                  | deadline                           | Sort by deadline                  |
+| `idx_recaps_type`                           | recaps                 | type                               | Filter by recap type              |
+| `idx_recaps_generated`                      | recaps                 | generated_at                       | Sort by generation date           |
+| `idx_transaction_splits_transaction`        | transaction_splits     | transaction_id                     | List splits for a transaction     |
+| `idx_transactions_placeholder_status`       | transactions           | is_placeholder, placeholder_status | List unresolved placeholders      |
+| `idx_transactions_placeholder_resolved_by`  | transactions           | resolved_by_transaction_id         | Resolve-link lookups              |
+| `idx_transactions_placeholder_parent`       | transactions           | placeholder_parent_transaction_id  | Placeholder split child lookups   |
+| `idx_audit_log_entity`                      | audit_log              | entity, entity_id                  | Audit history for an entity       |
+| `idx_audit_log_created`                     | audit_log              | created_at                         | Recent audit context              |
+| `idx_credit_card_statements_account_period` | credit_card_statements | account_id, statement_end_date     | Unique statement period per card  |
+| `idx_credit_card_statements_due`            | credit_card_statements | due_date                           | Upcoming/overdue statement lookup |
+| `idx_credit_card_statements_status`         | credit_card_statements | status                             | Status filtering                  |
 
 ### Recommended Future Indexes
 
@@ -467,46 +550,40 @@ CREATE INDEX idx_budgets_category
 
 ---
 
-## Migration Strategy
+## Migration strategy
 
-Migrations are managed in `src/lib/database.ts` and executed automatically at startup.
+The app and hosted data server apply migrations to local SQLite. Ordinary
+CLI/MCP startup verifies readiness and rejects missing/future schema. The restore
+workflow may upgrade a staged backup before validating/replacing the live file.
+Read-only MCP never prepares or migrates live storage.
 
-### How It Works
+New shared definitions live in `packages/finance-core/src/NNN_*.ts`. Native app
+JavaScript SQL, the hosted data server, and test migrators execute the same
+statements in a transaction. The legacy base SQL remains registered through Tauri
+where applicable. Applied names/IDs are recorded in `_migrations`; readiness
+checks inspect required columns, indexes, and triggers, not only a version number.
 
-1. Migration SQL strings are versioned in `src/lib/database.ts`.
-2. Applied migration names are tracked in a local `_migrations` table.
-3. On startup, `runMigrations()` applies pending migrations in sequence.
+When adding a migration:
 
-```typescript
-if (!applied.has('001_core_tables')) {
-  // split SQL statements and execute them
-  // seed default categories
-  database.run("INSERT INTO _migrations (id, name) VALUES (1, '001_core_tables')")
-}
-```
+1. Add a new version with shared statements and readiness expectations. Preserve
+   released migration behavior; do not rewrite a released schema to hide drift.
+2. Update app/native, hosted, CLI readiness, staged-restore, and synthetic test
+   paths, including finance-core exports and the supported schema version.
+3. Define export/redaction behavior and compatibility notes for new evidence.
+4. Test a fresh database, populated prior schema, incompatible schema objects,
+   and rollback after a late failure. Assert original financial rows survive.
+5. Regenerate the tool catalog if readiness metadata changes and document the
+   coordinated app/CLI/MCP upgrade.
 
-### Adding a New Migration
-
-1. Add a new migration string block in `src/lib/database.ts`.
-2. Apply it from `runMigrations()` when its name is not in `_migrations`:
-
-```typescript
-if (!applied.has('004_new_feature')) {
-  database.run('ALTER TABLE ...')
-  database.run("INSERT INTO _migrations (id, name) VALUES (4, '004_new_feature')")
-}
-```
-
-### Rules
-
-- Migration version numbers must be sequential (1, 2, 3, ...).
-- Never modify an existing migration file after it has been released. Create a new migration instead.
-- Each migration file should be idempotent where possible (use `IF NOT EXISTS`, `IF EXISTS`).
-- Always test migrations against both fresh databases and existing databases with data.
+Migration 025 appends budget-history storage without guessing old configurations.
+Migration 026 preserves valid old receipt totals and evidence; malformed legacy
+receipts abort the complete upgrade. Back up before upgrade, and restore the
+matching prior snapshot/binaries for version rollback. See the
+[upgrade guide](../guides/AGENT-WORKFLOWS-UPGRADE.md).
 
 ---
 
-## Entity-Relationship Diagram
+## Core entity relationships (simplified)
 
 ```mermaid
 erDiagram
@@ -614,123 +691,35 @@ erDiagram
 
 ---
 
-## Example Queries
+## Financial queries and supported projections
 
-### Get all transactions for this month
+Use shared projectors and typed tools for financial totals. A raw SQL sum can
+silently ignore split allocations, staged/pending rows, reporting exclusions,
+source coverage, currency, or source ownership. Do not maintain a second version
+of those calculations in an automation script.
 
-```sql
-SELECT t.*, c.name AS category_name
-FROM transactions t
-LEFT JOIN categories c ON t.category_id = c.id
-WHERE t.date >= strftime('%Y-%m-01', 'now')
-  AND t.date <= strftime('%Y-%m-%d', 'now')
-ORDER BY t.date DESC;
-```
+| Intent                        | Supported interface                                | Financial rule                                                                                        |
+| ----------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Search transactions/tags      | `query-transactions`                               | Bounded filters, semantic flags, and stable cursors.                                                  |
+| Spending by category or month | `get-spending-summary` / shared scoped projector   | Split allocations, explicit basis/currency, exclusions, FX and source completeness.                   |
+| Current budget remaining      | `get-budget-status`                                | Live scoped calculation and plan-period comparability.                                                |
+| Saved monthly budget          | `get-budget-history`                               | Captured definition and results; missing history is not zero.                                         |
+| Account/net-worth overview    | `list-accounts`, `get-net-worth`, shared valuation | Already-signed balances, ownership, quote identity, and currency completeness.                        |
+| Monthly subscription planning | `list-subscriptions`, scoped recurring estimates   | Shared cycle normalization, native-currency grouping, planning separate from actual expenditure.      |
+| Portfolio valuation           | `list-investments`, portfolio/valuation services   | Verified instrument identity and explicit price/FX evidence.                                          |
+| Dated FX conversion           | `convert-currency`, `list-exchange-rates`          | Immutable direct manual rates effective on the requested date; no implicit provider/inverse fallback. |
+| Expected/received income      | `list-receivables`                                 | Preserved baseline plus active linked installments; no duplicated ledger income.                      |
 
-### Get spending by category for a date range
-
-```sql
-SELECT
-  COALESCE(c.name, 'Uncategorized') AS category_name,
-  SUM(t.amount) AS total_centavos,
-  COUNT(*) AS transaction_count
-FROM transactions t
-LEFT JOIN categories c ON t.category_id = c.id
-WHERE t.type = 'expense'
-  AND t.date >= $1
-  AND t.date <= $2
-GROUP BY c.name
-ORDER BY total_centavos DESC;
-```
-
-### Get net balance across all active accounts
+For schema inspection in an isolated development database, ordinary read-only
+SQLite introspection is appropriate:
 
 ```sql
-SELECT
-  SUM(CASE WHEN type != 'credit_card' THEN balance ELSE -balance END) AS net_worth
-FROM accounts
-WHERE is_archived = 0;
+SELECT id, name FROM _migrations ORDER BY id;
+SELECT name, type FROM sqlite_master
+WHERE type IN ('table', 'index', 'trigger') ORDER BY type, name;
 ```
 
-### Get budget status (remaining amount)
-
-```sql
-SELECT
-  b.name,
-  b.amount AS budget_centavos,
-  COALESCE(bp.spent, 0) AS spent_centavos,
-  b.amount - COALESCE(bp.spent, 0) AS remaining_centavos
-FROM budgets b
-LEFT JOIN budget_periods bp ON bp.budget_id = b.id
-  AND bp.start_date <= strftime('%Y-%m-%d', 'now')
-  AND bp.end_date >= strftime('%Y-%m-%d', 'now')
-WHERE b.is_active = 1;
-```
-
-### Get upcoming subscription payments (next 30 days)
-
-```sql
-SELECT name, amount, billing_cycle, next_billing_date
-FROM subscriptions
-WHERE is_active = 1
-  AND next_billing_date <= date('now', '+30 days')
-ORDER BY next_billing_date ASC;
-```
-
-### Get total monthly subscription cost
-
-```sql
-SELECT SUM(
-  CASE billing_cycle
-    WHEN 'weekly' THEN amount * 4
-    WHEN 'monthly' THEN amount
-    WHEN 'quarterly' THEN amount / 3
-    WHEN 'yearly' THEN amount / 12
-  END
-) AS monthly_cost_centavos
-FROM subscriptions
-WHERE is_active = 1;
-```
-
-### Get portfolio value with latest prices
-
-```sql
-SELECT
-  i.symbol,
-  i.name,
-  i.shares,
-  i.avg_cost_basis,
-  sp.price AS current_price,
-  CAST(i.shares * sp.price AS INTEGER) AS market_value,
-  CAST(i.shares * (sp.price - i.avg_cost_basis) AS INTEGER) AS unrealized_gain
-FROM investments i
-LEFT JOIN stock_prices sp ON sp.symbol = i.symbol
-  AND sp.date = (
-    SELECT MAX(date) FROM stock_prices WHERE symbol = i.symbol
-  )
-ORDER BY market_value DESC;
-```
-
-### Search transactions by tag
-
-```sql
-SELECT t.*, c.name AS category_name
-FROM transactions t
-LEFT JOIN categories c ON t.category_id = c.id
-WHERE EXISTS (
-  SELECT 1 FROM json_each(t.tags)
-  WHERE json_each.value = $1
-)
-ORDER BY t.date DESC;
-```
-
-### Get exchange rate for a currency pair
-
-```sql
-SELECT rate
-FROM exchange_rates
-WHERE from_currency = $1
-  AND to_currency = $2
-ORDER BY date DESC
-LIMIT 1;
-```
+MCP deliberately does not expose these SQL operations as a generic tool. Schema
+metadata is available through diagnostics and typed catalogs. See
+[automation workflows](AUTOMATION-WORKFLOWS.md) and
+[the generated inventory](MCP-TOOL-INVENTORY.md).

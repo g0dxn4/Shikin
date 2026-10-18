@@ -1,5 +1,7 @@
 # Dated FX financial foundation (phase A)
 
+> Historical phase-A design record. Later adapters and dated-FX workflows are implemented; the active database is now schema 26. Use the [database reference](../reference/DATABASE.md), [automation workflows](../reference/AUTOMATION-WORKFLOWS.md) and [upgrade guide](../guides/AGENT-WORKFLOWS-UPGRADE.md) for current behavior. Statements below about work not yet enabled describe phase A only.
+
 ## Authority and scope
 
 Schema **022_dated_fx** adds explicit manual FX authority. It does not enable foreign transaction entry, change existing reporting readers, register tools, or change Settings/currency-store behavior yet. Complete those adapters together before enabling foreign writes.

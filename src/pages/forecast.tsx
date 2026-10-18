@@ -1,11 +1,11 @@
-import { PageToolbar, MetricStrip, MetricItem, NativePanel } from '@/components/ui/native-layout'
+import { PageToolbar, NativePanel } from '@/components/ui/native-layout'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { ForecastProjectionChart } from '@/components/planning-scenarios/forecast-projection-chart'
 import { useAccountStore } from '@/stores/account-store'
 import { useCurrencyStore } from '@/stores/currency-store'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, TrendingUp } from 'lucide-react'
+import { AlertTriangle, Info, TrendingUp } from 'lucide-react'
 import dayjs from 'dayjs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -22,6 +22,67 @@ interface SubscriptionDisplay {
   currency: string
   billing_cycle: string
   next_billing_date: string
+}
+
+function StatusChip({
+  children,
+  tone = 'neutral',
+}: {
+  children: ReactNode
+  tone?: 'neutral' | 'warning'
+}) {
+  return (
+    <li
+      className={cn(
+        'inline-flex max-w-full items-center rounded-md border px-2 py-0.5 text-[11px] font-medium break-words',
+        tone === 'warning'
+          ? 'border-warning/40 text-warning'
+          : 'border-border bg-muted text-foreground'
+      )}
+    >
+      {children}
+    </li>
+  )
+}
+
+function ForecastStatusChips({
+  currency,
+  estimateAsOf,
+}: {
+  currency: string
+  estimateAsOf: string
+}) {
+  const { t } = useTranslation('forecast')
+  return (
+    <ul className="flex min-w-0 flex-wrap gap-1.5" aria-label={t('chips.label')}>
+      <StatusChip>
+        <span className="sr-only">{t('chips.currencyLabel', { currency })}</span>
+        <span aria-hidden="true">{currency}</span>
+      </StatusChip>
+      <StatusChip>
+        {t('metrics.asOf', { date: dayjs(estimateAsOf).format('MMM D, YYYY') })}
+      </StatusChip>
+      <StatusChip>{t('chips.estimate')}</StatusChip>
+      <StatusChip tone="warning">{t('chips.notRecorded')}</StatusChip>
+    </ul>
+  )
+}
+
+function ForecastMethod({ currency, estimateAsOf }: { currency: string; estimateAsOf: string }) {
+  const { t } = useTranslation('forecast')
+  return (
+    <details className="min-w-0">
+      <summary className="focus-visible:ring-ring text-accent inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md text-xs font-semibold focus-visible:ring-2 focus-visible:outline-none">
+        <Info size={14} aria-hidden="true" />
+        {t('method.summary')}
+      </summary>
+      <div className="text-muted-foreground space-y-1.5 pb-1 text-xs break-words">
+        <p>{t('scope.description', { currency })}</p>
+        <p>{t('currency.estimate', { date: estimateAsOf })}</p>
+        <p>{t('hero.estimateNote')}</p>
+      </div>
+    </details>
+  )
 }
 
 export function Forecast() {
@@ -55,6 +116,7 @@ export function Forecast() {
   const ranges = [30, 60, 90] as const
   const endPoint = forecast?.complete ? forecast.points[forecast.points.length - 1] : undefined
   const firstPoint = forecast?.complete ? forecast.points[0] : undefined
+  const displayCurrency = forecast?.currency || mainCurrency || '—'
 
   return (
     <div className="page-content min-w-0">
@@ -100,11 +162,6 @@ export function Forecast() {
           </div>
         }
       />
-      <p className="text-muted-foreground min-w-0 text-xs break-words">
-        {t('scope.description', { currency: forecast?.currency || mainCurrency || '—' })}
-        {' · '}
-        {t('currency.estimate', { date: forecast?.estimateAsOf ?? dayjs().format('YYYY-MM-DD') })}
-      </p>
       <ErrorBanner
         title={t('error.load')}
         message={error || accountsError}
@@ -116,6 +173,7 @@ export function Forecast() {
       {isLoading && <ForecastSkeleton />}
       {forecast && !forecast.complete && (
         <div className="min-w-0 space-y-2">
+          <ForecastStatusChips currency={displayCurrency} estimateAsOf={forecast.estimateAsOf} />
           <ErrorBanner
             title={t('currency.unavailable')}
             message={
@@ -140,104 +198,96 @@ export function Forecast() {
                   .join(' · ') || '—',
             })}
           </p>
+          <ForecastMethod currency={displayCurrency} estimateAsOf={forecast.estimateAsOf} />
         </div>
       )}
       {forecast?.complete && (
-        <>
-          <NativePanel data-testid="forecast-hero" className="min-w-0 p-4 sm:p-5">
-            <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-              <div className="min-w-0">
-                <p className="text-muted-foreground text-[11px] font-semibold tracking-wide uppercase">
-                  {t('metrics.currentBalance')}
-                </p>
-                <p className="mt-1 text-3xl font-medium tracking-tight break-all tabular-nums">
-                  {money(forecast.currentBalance)}
-                </p>
-                <p className="text-muted-foreground mt-1 text-xs break-words">
-                  {t('metrics.asOf', {
-                    date: dayjs(forecast.estimateAsOf).format('MMM D, YYYY'),
-                  })}
-                </p>
-              </div>
-              <div className="min-w-0 sm:text-right">
-                <p className="text-muted-foreground text-[11px] font-semibold tracking-wide uppercase">
-                  {t('metrics.projectedEnd')}
-                </p>
-                <p
-                  className={cn(
-                    'mt-1 text-3xl font-medium tracking-tight break-all tabular-nums',
-                    endPoint && endPoint.projected < 0 && 'text-destructive'
-                  )}
-                >
-                  {endPoint ? money(endPoint.projected) : '—'}
-                </p>
-                <p className="text-muted-foreground mt-1 text-xs break-words">
-                  {firstPoint && endPoint
-                    ? t('metrics.span', {
-                        start: dayjs(firstPoint.date).format('MMM D, YYYY'),
-                        end: dayjs(endPoint.date).format('MMM D, YYYY'),
-                      })
-                    : null}
-                  {firstPoint && endPoint ? ' · ' : null}
-                  {t(`range.${selectedRange}`)}
-                </p>
-              </div>
+        <NativePanel data-testid="forecast-hero" className="min-w-0 p-3 sm:p-5">
+          <ForecastStatusChips currency={displayCurrency} estimateAsOf={forecast.estimateAsOf} />
+          {forecast.points.length > 0 ? (
+            <div className="mt-3">
+              <ForecastProjectionChart points={forecast.points} currency={forecast.currency} />
             </div>
-            <p className="text-muted-foreground mt-3 text-xs break-words">
-              {t('hero.estimateNote')}
+          ) : null}
+          <div className="mt-3 flex min-w-0 flex-wrap items-end justify-between gap-x-4 gap-y-1">
+            <div className="min-w-0">
+              <p className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
+                {t('metrics.projectedEnd')}
+              </p>
+              <p
+                className={cn(
+                  'max-w-full overflow-x-auto text-2xl font-medium tracking-tight whitespace-nowrap tabular-nums',
+                  endPoint && endPoint.projected < 0 && 'text-destructive'
+                )}
+              >
+                {endPoint ? money(endPoint.projected) : '—'}
+              </p>
+            </div>
+            <p className="text-muted-foreground min-w-0 text-xs break-words tabular-nums">
+              {firstPoint && endPoint
+                ? t('metrics.span', {
+                    start: dayjs(firstPoint.date).format('MMM D, YYYY'),
+                    end: dayjs(endPoint.date).format('MMM D, YYYY'),
+                  })
+                : null}
+              {firstPoint && endPoint ? ' · ' : null}
+              {t(`range.${selectedRange}`)}
             </p>
-
-            {forecast.points.length > 0 ? (
-              <div className="mt-5">
-                <h2 className="mb-3 text-sm font-semibold">{t('chart.title')}</h2>
-                <ForecastProjectionChart points={forecast.points} currency={forecast.currency} />
-              </div>
-            ) : null}
-          </NativePanel>
-
-          <MetricStrip className="min-w-0">
-            <MetricItem
-              label={t('metrics.currentBalance')}
-              value={<span className="break-all">{money(forecast.currentBalance)}</span>}
-            />
-            <MetricItem
-              label={t('metrics.lowestProjected')}
-              value={
-                <span
-                  className={
-                    forecast.minBalance.amount < 0 ? 'text-destructive break-all' : 'break-all'
-                  }
-                >
-                  {money(forecast.minBalance.amount)}
-                </span>
-              }
-              detail={`${t('metrics.lowestDate')}: ${dayjs(forecast.minBalance.date).format('MMM D, YYYY')}`}
-            />
-            <MetricItem
-              label={t('metrics.dailyBurn')}
-              value={<span className="break-all">{money(forecast.dailyBurnRate)}</span>}
-            />
-            <MetricItem
-              label={t('metrics.dailyIncome')}
-              value={<span className="break-all">{money(forecast.dailyIncome)}</span>}
-            />
-          </MetricStrip>
-
+          </div>
+          <dl className="mt-3 grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-4">
+            <div className="min-w-0">
+              <dt className="text-muted-foreground text-[11px]">{t('metrics.currentBalance')}</dt>
+              <dd className="max-w-full overflow-x-auto text-sm font-medium whitespace-nowrap tabular-nums">
+                {money(forecast.currentBalance)}
+              </dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="text-muted-foreground text-[11px]">{t('metrics.lowestProjected')}</dt>
+              <dd
+                className={cn(
+                  'max-w-full overflow-x-auto text-sm font-medium whitespace-nowrap tabular-nums',
+                  forecast.minBalance.amount < 0 && 'text-destructive'
+                )}
+              >
+                {money(forecast.minBalance.amount)}
+              </dd>
+              <dd className="text-muted-foreground text-[11px] break-words">
+                <span className="sr-only">{t('metrics.lowestDate')}: </span>
+                {dayjs(forecast.minBalance.date).format('MMM D, YYYY')}
+              </dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="text-muted-foreground text-[11px]">{t('metrics.dailyBurn')}</dt>
+              <dd className="max-w-full overflow-x-auto text-sm font-medium whitespace-nowrap tabular-nums">
+                {money(forecast.dailyBurnRate)}
+              </dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="text-muted-foreground text-[11px]">{t('metrics.dailyIncome')}</dt>
+              <dd className="max-w-full overflow-x-auto text-sm font-medium whitespace-nowrap tabular-nums">
+                {money(forecast.dailyIncome)}
+              </dd>
+            </div>
+          </dl>
           <div
             className={cn(
-              'rounded-lg border px-3 py-3',
+              'mt-3 flex items-start gap-2 rounded-md border px-2.5 py-2',
               forecast.dangerDates.length > 0
                 ? 'border-destructive/30 bg-destructive/5'
                 : 'border-success/30 bg-success/5'
             )}
             role={forecast.dangerDates.length > 0 ? 'alert' : 'status'}
           >
-            <div className="flex items-center gap-2">
-              {forecast.dangerDates.length > 0 ? (
-                <AlertTriangle size={16} className="text-destructive shrink-0" aria-hidden="true" />
-              ) : (
-                <TrendingUp size={16} className="text-success shrink-0" aria-hidden="true" />
-              )}
+            {forecast.dangerDates.length > 0 ? (
+              <AlertTriangle
+                size={16}
+                className="text-destructive mt-0.5 shrink-0"
+                aria-hidden="true"
+              />
+            ) : (
+              <TrendingUp size={16} className="text-success mt-0.5 shrink-0" aria-hidden="true" />
+            )}
+            <div className="min-w-0">
               <h3
                 className={cn(
                   'text-sm font-semibold',
@@ -246,24 +296,27 @@ export function Forecast() {
               >
                 {forecast.dangerDates.length > 0 ? t('danger.title') : t('danger.noDanger')}
               </h3>
+              {forecast.dangerDates.length > 0 ? (
+                <div className="mt-1 space-y-1">
+                  <p className="text-sm break-words">
+                    {t('danger.balanceBelowZero', {
+                      date: dayjs(forecast.dangerDates[0]).format('MMM D, YYYY'),
+                    })}
+                  </p>
+                  <p className="text-muted-foreground text-sm break-words">
+                    {t('danger.lowestPoint', {
+                      amount: money(forecast.minBalance.amount),
+                      date: dayjs(forecast.minBalance.date).format('MMM D, YYYY'),
+                    })}
+                  </p>
+                </div>
+              ) : null}
             </div>
-            {forecast.dangerDates.length > 0 ? (
-              <div className="mt-2 space-y-1">
-                <p className="text-sm break-words">
-                  {t('danger.balanceBelowZero', {
-                    date: dayjs(forecast.dangerDates[0]).format('MMM D, YYYY'),
-                  })}
-                </p>
-                <p className="text-muted-foreground text-sm break-words">
-                  {t('danger.lowestPoint', {
-                    amount: money(forecast.minBalance.amount),
-                    date: dayjs(forecast.minBalance.date).format('MMM D, YYYY'),
-                  })}
-                </p>
-              </div>
-            ) : null}
           </div>
-        </>
+          <div className="mt-2">
+            <ForecastMethod currency={displayCurrency} estimateAsOf={forecast.estimateAsOf} />
+          </div>
+        </NativePanel>
       )}
 
       <SubscriptionsTable accountId={accountId} />
@@ -378,21 +431,17 @@ function ForecastSkeleton() {
   return (
     <div role="status" aria-busy="true">
       <span className="sr-only">{t('status.loading')}</span>
-      <NativePanel className="min-w-0 space-y-4 p-4 sm:p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
-          <div className="space-y-2">
-            <Skeleton className="h-3 w-24" />
-            <Skeleton className="h-10 w-40 max-w-full" />
-          </div>
-          <div className="space-y-2 sm:items-end">
-            <Skeleton className="h-3 w-24" />
-            <Skeleton className="h-10 w-40 max-w-full" />
-          </div>
+      <NativePanel className="min-w-0 space-y-3 p-3 sm:p-5">
+        <div className="flex flex-wrap gap-1.5">
+          <Skeleton className="h-5 w-14" />
+          <Skeleton className="h-5 w-28" />
+          <Skeleton className="h-5 w-24" />
         </div>
-        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-52 w-full sm:h-72" />
+        <Skeleton className="h-8 w-40 max-w-full" />
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {Array.from({ length: 4 }).map((_, index) => (
-            <Skeleton key={index} className="h-16 w-full" />
+            <Skeleton key={index} className="h-10 w-full" />
           ))}
         </div>
       </NativePanel>

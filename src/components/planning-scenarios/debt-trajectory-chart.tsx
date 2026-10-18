@@ -53,30 +53,32 @@ export function DebtTrajectoryChart({
   }))
 
   return (
-    <div className="min-w-0" data-trajectory={trajectoryColor}>
-      <h2 className="text-sm font-semibold">{t('chart.title')}</h2>
-      <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5" aria-label={t('chart.title')}>
-        <li className="text-muted-foreground flex items-center gap-1.5 text-xs">
-          <span
-            className="inline-block h-2 w-4 rounded-sm"
-            style={{ backgroundColor: trajectoryColor }}
-            aria-hidden="true"
-          />
-          {t('chart.total')}
-        </li>
-        {debts.map((debt, index) => (
-          <li key={debt.id} className="text-muted-foreground flex items-center gap-1.5 text-xs">
+    <div className="min-w-0" data-trajectory={trajectoryColor} data-zero-baseline="true">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <h2 className="text-xs font-semibold">{t('chart.title')}</h2>
+        <ul className="flex min-w-0 flex-wrap gap-x-3 gap-y-1" aria-label={t('chart.title')}>
+          <li className="text-muted-foreground flex items-center gap-1.5 text-xs">
             <span
-              className="inline-block h-2 w-4 rounded-sm"
-              style={{ backgroundColor: debtLineColor(index, strategy) }}
+              className="inline-block h-0.5 w-4"
+              style={{ backgroundColor: trajectoryColor }}
               aria-hidden="true"
             />
-            <span className="break-words">{debt.name}</span>
+            {t('chart.total')}
           </li>
-        ))}
-      </ul>
+          {debts.map((debt, index) => (
+            <li key={debt.id} className="text-muted-foreground flex items-center gap-1.5 text-xs">
+              <span
+                className="inline-block h-0.5 w-4"
+                style={{ backgroundColor: debtLineColor(index, strategy) }}
+                aria-hidden="true"
+              />
+              <span className="break-words">{debt.name}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
       <div
-        className="mt-3 h-56 min-w-0 sm:h-72"
+        className="mt-2 h-48 min-w-0 sm:h-72"
         role="img"
         aria-label={`${t('chart.title')} · ${t(`strategy.${strategy}`)}`}
       >
@@ -149,8 +151,8 @@ export function DebtTrajectoryChart({
           </ComposedChart>
         </SafeChart>
       </div>
-      <details className="mt-3">
-        <summary className="text-accent cursor-pointer text-xs font-semibold">
+      <details className="mt-2">
+        <summary className="focus-visible:ring-ring text-accent cursor-pointer text-xs font-semibold focus-visible:rounded-md focus-visible:ring-2 focus-visible:outline-none">
           {t('chart.data')}
         </summary>
         <div className="mt-2 max-h-64 max-w-full overflow-auto">

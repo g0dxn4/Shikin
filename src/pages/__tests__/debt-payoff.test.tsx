@@ -223,6 +223,25 @@ describe('DebtPayoff', () => {
     expect(hero).toContainElement(chart)
     expect(hero).toContainElement(screen.getByRole('button', { name: /strategy.avalanche/ }))
     expect(hero).toContainElement(screen.getByLabelText('extraPayment.title'))
+    expect(
+      chart.compareDocumentPosition(screen.getByText('summary.totalDebt')) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(screen.getByText('chips.notGuaranteed')).toBeInTheDocument()
+    expect(screen.getByText('scope.description')).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'strategy.title' }).className).toMatch(/flex-row/)
+    expect(screen.getByRole('group', { name: 'strategy.title' }).className).not.toMatch(/flex-col/)
+    expect(screen.getByLabelText('extraPayment.title').className).toMatch(/min-h-11/)
+    const method = screen.getByText('method.summary').closest('details')
+    expect(method).not.toBeNull()
+    expect(chart.compareDocumentPosition(method!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(screen.getByText('method.summary'))
+    expect(method).toHaveProperty('open', true)
+    expect(within(method!).getByText('hero.disclaimer')).toBeInTheDocument()
+    expect(within(method!).getByText('strategy.avalancheDesc')).toBeInTheDocument()
+    expect(within(method!).getByText('strategy.snowballDesc')).toBeInTheDocument()
+    expect(within(method!).getByText('extraPayment.description')).toBeInTheDocument()
+    expect(within(method!).getByText('scope.manual')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /strategy.avalanche/ })).toHaveAttribute(
       'aria-pressed',
       'true'

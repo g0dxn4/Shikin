@@ -33,6 +33,13 @@
     "eyebrow": "Escenario calculado",
     "disclaimer": "Calculado con los saldos, mínimos y la TAE de esta moneda. No es una fecha de liquidación garantizada."
   },
+  "chips": {
+    "label": "Estado del escenario",
+    "notGuaranteed": "No garantizado"
+  },
+  "method": {
+    "summary": "Método del escenario"
+  },
   "chart": {
     "title": "Saldo en el Tiempo",
     "data": "Ver datos del gráfico",

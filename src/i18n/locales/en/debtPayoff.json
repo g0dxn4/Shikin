@@ -33,6 +33,13 @@
     "eyebrow": "Calculated scenario",
     "disclaimer": "Calculated from this currency’s balances, minimums, and APR. Not a guaranteed payoff date."
   },
+  "chips": {
+    "label": "Scenario status",
+    "notGuaranteed": "Not guaranteed"
+  },
+  "method": {
+    "summary": "Scenario method"
+  },
   "chart": {
     "title": "Balance Over Time",
     "data": "View chart data",

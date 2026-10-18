@@ -22,6 +22,15 @@
   "hero": {
     "estimateNote": "Planning estimate, not a recorded balance."
   },
+  "chips": {
+    "label": "Forecast status",
+    "currencyLabel": "Currency {{currency}}",
+    "estimate": "Planning estimate",
+    "notRecorded": "Not recorded"
+  },
+  "method": {
+    "summary": "Estimate method"
+  },
   "range": {
     "label": "Forecast Range",
     "30": "30 Days",

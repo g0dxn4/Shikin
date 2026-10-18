@@ -22,6 +22,15 @@
   "hero": {
     "estimateNote": "Estimación de planificación, no un saldo registrado."
   },
+  "chips": {
+    "label": "Estado de la previsión",
+    "currencyLabel": "Moneda {{currency}}",
+    "estimate": "Estimación de planificación",
+    "notRecorded": "No registrado"
+  },
+  "method": {
+    "summary": "Método de la estimación"
+  },
   "range": {
     "label": "Rango de Proyeccion",
     "30": "30 Dias",

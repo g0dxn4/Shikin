@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 function hasExactClass(root: HTMLElement, className: string) {
   return [root, ...root.querySelectorAll('*')].some((element) =>
@@ -90,14 +90,45 @@ describe('Forecast native view', () => {
     expect(hasExactClass(hero, 'text-primary')).toBe(false)
     expect(screen.getByRole('combobox').className).toMatch(/min-h-11/)
     expect(screen.getByRole('button', { name: 'range.30' }).className).toMatch(/min-h-11/)
-    expect(screen.getByText('hero.estimateNote')).toBeInTheDocument()
-    expect(screen.getByText(/currency\.estimate/)).toBeInTheDocument()
+    expect(screen.getByText('chips.estimate')).toBeInTheDocument()
+    expect(screen.getByText('chips.notRecorded')).toBeInTheDocument()
+    expect(screen.getByText('metrics.asOf')).toBeInTheDocument()
+    expect(hero.querySelector('[data-band]')).toHaveAttribute('data-band', 'between')
+    expect(hero.querySelector('[data-includes-zero]')).toHaveAttribute(
+      'data-includes-zero',
+      'false'
+    )
+    expect(hero.querySelector('[data-projected-width]')).toHaveAttribute(
+      'data-projected-width',
+      '2'
+    )
+    const domain = hero
+      .querySelector('[data-domain]')
+      ?.getAttribute('data-domain')
+      ?.split(',')
+      .map(Number)
+    expect(domain?.[0]).toBeGreaterThan(0)
+    expect(domain?.[0]).toBeLessThan(9000)
+    expect(domain?.[1]).toBeGreaterThan(11000)
     expect(screen.getByText('metrics.projectedEnd')).toBeInTheDocument()
+    expect(
+      chart.compareDocumentPosition(screen.getByText('metrics.projectedEnd')) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
     for (const label of ['metrics.dailyBurn', 'metrics.dailyIncome', 'metrics.lowestProjected']) {
       expect(
         chart.compareDocumentPosition(screen.getByText(label)) & Node.DOCUMENT_POSITION_FOLLOWING
       ).toBeTruthy()
     }
+    const method = screen.getByText('method.summary').closest('details')
+    expect(method).not.toBeNull()
+    expect(chart.compareDocumentPosition(method!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await user.click(screen.getByText('method.summary'))
+    expect(method).toHaveProperty('open', true)
+    expect(within(method!).getByText(/currency\.estimate/)).toBeInTheDocument()
+    expect(within(method!).getByText(/scope\.description/)).toBeInTheDocument()
+    expect(within(method!).getByText('hero.estimateNote')).toBeInTheDocument()
+    expect(method!.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(0)
     const projection = screen.getByRole('table', { name: 'chart.title' })
     expect(within(projection).getAllByRole('row')).toHaveLength(forecast.points.length + 1)
     expect(within(projection).getByText('2028-01-01')).toBeInTheDocument()
@@ -134,8 +165,17 @@ describe('Forecast native view', () => {
     expect(screen.queryByText('metrics.dailyIncome')).not.toBeInTheDocument()
     expect(screen.queryByText('chart.data')).not.toBeInTheDocument()
     expect(screen.queryByText('danger.noDanger')).not.toBeInTheDocument()
+    expect(screen.queryByText('$0.00')).not.toBeInTheDocument()
     expect(screen.getByText(/currency\.nativeHistory/)).toBeInTheDocument()
     expect(screen.getByText(/currency\.nativeBalances/)).toBeInTheDocument()
+    expect(screen.getByText('chips.notRecorded')).toBeInTheDocument()
+    const method = screen.getByText('method.summary').closest('details')
+    expect(method).not.toBeNull()
+    fireEvent.click(screen.getByText('method.summary'))
+    expect(method).toHaveProperty('open', true)
+    expect(within(method!).getByText(/currency\.estimate/)).toBeInTheDocument()
+    expect(within(method!).getByText(/scope\.description/)).toBeInTheDocument()
+    expect(within(method!).getByText('hero.estimateNote')).toBeInTheDocument()
   })
   it('separates recurring-cost columns with gutters and local horizontal scrolling', async () => {
     render(<Forecast />)

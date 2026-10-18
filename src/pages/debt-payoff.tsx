@@ -5,7 +5,7 @@ import { DebtTrajectoryChart } from '@/components/planning-scenarios/debt-trajec
 import { useAccountStore } from '@/stores/account-store'
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Target, Plus, Trash2, Zap, Snowflake, ChevronDown } from 'lucide-react'
+import { Target, Plus, Trash2, Zap, Snowflake, ChevronDown, Info } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -55,43 +55,35 @@ function StrategyToggle({
 
   return (
     <div className="min-w-0">
-      <h3 className="text-muted-foreground mb-2 text-xs font-semibold tracking-wide uppercase">
+      <h3 className="text-muted-foreground mb-1.5 text-[11px] font-semibold tracking-wide uppercase">
         {t('strategy.title')}
       </h3>
-      <div
-        className="flex min-w-0 flex-col gap-2 sm:flex-row"
-        role="group"
-        aria-label={t('strategy.title')}
-      >
+      <div className="flex min-w-0 flex-row gap-2" role="group" aria-label={t('strategy.title')}>
         <button
           type="button"
           onClick={() => onToggle('avalanche')}
           aria-pressed={strategy === 'avalanche'}
           className={cn(
-            'focus-visible:ring-ring flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg border px-3 py-2 text-left whitespace-normal focus-visible:ring-2 focus-visible:outline-none',
+            'focus-visible:ring-ring flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-center focus-visible:ring-2 focus-visible:outline-none',
             strategy === 'avalanche'
               ? 'border-chart-1 bg-muted text-foreground'
               : 'border-border text-muted-foreground hover:bg-muted'
           )}
         >
           <Zap
-            size={18}
+            size={16}
+            aria-hidden="true"
             className={
               strategy === 'avalanche' ? 'text-chart-1 shrink-0' : 'text-muted-foreground shrink-0'
             }
           />
-          <span className="min-w-0">
-            <span
-              className={cn(
-                'block text-sm font-semibold',
-                strategy === 'avalanche' ? 'text-chart-1' : 'text-muted-foreground'
-              )}
-            >
-              {t('strategy.avalanche')}
-            </span>
-            <span className="text-muted-foreground block text-xs">
-              {t('strategy.avalancheDesc')}
-            </span>
+          <span
+            className={cn(
+              'min-w-0 text-sm leading-tight font-semibold',
+              strategy === 'avalanche' ? 'text-chart-1' : 'text-muted-foreground'
+            )}
+          >
+            {t('strategy.avalanche')}
           </span>
         </button>
         <button
@@ -99,34 +91,58 @@ function StrategyToggle({
           onClick={() => onToggle('snowball')}
           aria-pressed={strategy === 'snowball'}
           className={cn(
-            'focus-visible:ring-ring flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg border px-3 py-2 text-left whitespace-normal focus-visible:ring-2 focus-visible:outline-none',
+            'focus-visible:ring-ring flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-center focus-visible:ring-2 focus-visible:outline-none',
             strategy === 'snowball'
               ? 'border-chart-3 bg-muted text-foreground'
               : 'border-border text-muted-foreground hover:bg-muted'
           )}
         >
           <Snowflake
-            size={18}
+            size={16}
+            aria-hidden="true"
             className={
               strategy === 'snowball' ? 'text-chart-3 shrink-0' : 'text-muted-foreground shrink-0'
             }
           />
-          <span className="min-w-0">
-            <span
-              className={cn(
-                'block text-sm font-semibold',
-                strategy === 'snowball' ? 'text-chart-3' : 'text-muted-foreground'
-              )}
-            >
-              {t('strategy.snowball')}
-            </span>
-            <span className="text-muted-foreground block text-xs">
-              {t('strategy.snowballDesc')}
-            </span>
+          <span
+            className={cn(
+              'min-w-0 text-sm leading-tight font-semibold',
+              strategy === 'snowball' ? 'text-chart-3' : 'text-muted-foreground'
+            )}
+          >
+            {t('strategy.snowball')}
           </span>
         </button>
       </div>
     </div>
+  )
+}
+
+function DebtMethod() {
+  const { t } = useTranslation('debtPayoff')
+  return (
+    <details className="min-w-0">
+      <summary className="focus-visible:ring-ring text-accent inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md text-xs font-semibold focus-visible:ring-2 focus-visible:outline-none">
+        <Info size={14} aria-hidden="true" />
+        {t('method.summary')}
+      </summary>
+      <div className="text-muted-foreground space-y-1.5 pb-1 text-xs break-words">
+        <p>{t('hero.disclaimer')}</p>
+        <p>
+          <span className="text-foreground font-medium">{t('strategy.avalanche')}: </span>
+          {t('strategy.avalancheDesc')}
+        </p>
+        <p>
+          <span className="text-foreground font-medium">{t('strategy.snowball')}: </span>
+          {t('strategy.snowballDesc')}
+        </p>
+        <p>
+          <span className="text-foreground font-medium">{t('extraPayment.title')}: </span>
+          {t('extraPayment.description')}
+        </p>
+        <p>{t('scope.manual')}</p>
+      </div>
+    </details>
   )
 }
 
@@ -151,10 +167,10 @@ function ComparisonStrip({
           </span>
         }
         detail={
-          <span className="break-words">
-            {t('comparison.totalInterest')}: {formatMoney(avalanche.totalInterestPaid, currency)}
+          <span className="break-words tabular-nums">
+            {formatMoney(avalanche.totalInterestPaid, currency)}
             {' · '}
-            {t('summary.debtFreeDate')}: {debtFreeLabel(avalanche, notRepaid)}
+            {debtFreeLabel(avalanche, notRepaid)}
           </span>
         }
       />
@@ -166,10 +182,10 @@ function ComparisonStrip({
           </span>
         }
         detail={
-          <span className="break-words">
-            {t('comparison.totalInterest')}: {formatMoney(snowball.totalInterestPaid, currency)}
+          <span className="break-words tabular-nums">
+            {formatMoney(snowball.totalInterestPaid, currency)}
             {' · '}
-            {t('summary.debtFreeDate')}: {debtFreeLabel(snowball, notRepaid)}
+            {debtFreeLabel(snowball, notRepaid)}
           </span>
         }
       />
@@ -481,9 +497,6 @@ function ExtraPaymentInput({
           {t('extraPayment.invalid')}
         </p>
       ) : null}
-      <p className="text-muted-foreground mt-2 text-xs break-words">
-        {t('extraPayment.description')}
-      </p>
     </div>
   )
 }
@@ -545,7 +558,7 @@ export function DebtPayoff() {
     <div className="page-content min-w-0">
       <PageToolbar
         leading={
-          <label className="text-muted-foreground flex w-full min-w-0 flex-col gap-1 text-xs sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
+          <label className="text-muted-foreground flex w-full min-w-0 flex-col gap-1 text-xs sm:w-auto sm:flex-row sm:items-center sm:gap-2">
             <span>{t('scope.currency')}</span>
             <select
               className="border-input bg-surface text-foreground focus-visible:ring-ring min-h-11 w-full min-w-0 rounded-lg border px-3 focus-visible:ring-2 focus-visible:outline-none sm:w-auto"
@@ -558,7 +571,6 @@ export function DebtPayoff() {
                 </option>
               ))}
             </select>
-            <span className="min-w-0 break-words">{t('scope.description')}</span>
           </label>
         }
       />
@@ -619,62 +631,77 @@ export function DebtPayoff() {
           />
         </div>
       ) : (
-        <div className="space-y-4">
-          <NativePanel data-testid="debt-scenario" className="min-w-0 p-4 sm:p-5">
+        <div className="space-y-3">
+          <NativePanel data-testid="debt-scenario" className="min-w-0 p-3 sm:p-5">
+            <ul className="mb-2 flex min-w-0 flex-wrap gap-1.5" aria-label={t('chips.label')}>
+              <li className="border-border bg-muted text-foreground inline-flex max-w-full items-center rounded-md border px-2 py-0.5 text-[11px] font-medium break-words">
+                {t('scope.description')}
+              </li>
+              <li className="border-border bg-muted text-foreground inline-flex max-w-full items-center rounded-md border px-2 py-0.5 text-[11px] font-medium">
+                <span className="sr-only">{t('scope.currency')} </span>
+                {currency}
+              </li>
+              <li className="border-warning/40 text-warning inline-flex max-w-full items-center rounded-md border px-2 py-0.5 text-[11px] font-medium">
+                {t('chips.notGuaranteed')}
+              </li>
+              {canCalculate && payoffPlan ? (
+                <li className="border-border bg-muted inline-flex max-w-full items-center rounded-md border px-2 py-0.5 text-[11px] font-medium">
+                  {t(`strategy.${strategy}`)}
+                </li>
+              ) : null}
+            </ul>
+
             {canCalculate && payoffPlan ? (
-              <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <DebtTrajectoryChart
+                payoffPlan={payoffPlan}
+                debts={allDebts}
+                currency={currency}
+                strategy={strategy}
+              />
+            ) : null}
+
+            {canCalculate && payoffPlan ? (
+              <div className="mt-3 flex min-w-0 flex-wrap items-end justify-between gap-x-4 gap-y-1">
                 <div className="min-w-0">
-                  <p className="text-muted-foreground text-[11px] font-semibold tracking-wide uppercase">
-                    {t('hero.eyebrow')}
+                  <p className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
+                    {t('summary.debtFreeDate')}
                   </p>
                   <p
                     className={cn(
-                      'mt-1 text-3xl font-medium tracking-tight break-words tabular-nums',
-                      notRepaid && 'text-warning'
+                      'font-medium tracking-tight tabular-nums',
+                      notRepaid
+                        ? 'text-warning text-lg break-words'
+                        : 'max-w-full overflow-x-auto text-2xl whitespace-nowrap'
                     )}
                   >
                     {debtFreeLabel(payoffPlan, notRepaidLabel)}
                   </p>
-                  <p className="text-muted-foreground mt-2 max-w-prose text-xs break-words">
-                    {t('hero.disclaimer')}
-                  </p>
-                  <p className="text-muted-foreground mt-1 text-xs break-words tabular-nums">
-                    {t(`strategy.${strategy}`)}
-                    {notRepaid ? '' : ` · ${payoffPlan.months} ${t('comparison.months')}`}
-                    {' · '}
-                    {t('summary.totalInterest')}:{' '}
-                    {formatMoney(payoffPlan.totalInterestPaid, currency)}
-                  </p>
                 </div>
-                <div className="min-w-0 sm:text-right">
-                  <span className="text-muted-foreground text-[11px] font-semibold tracking-wide uppercase">
+                <div className="min-w-0">
+                  <span className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
                     {t('summary.totalDebt')}
                   </span>
-                  <strong className="mt-1 block text-2xl font-medium break-all tabular-nums">
+                  <strong className="mt-0.5 block max-w-full overflow-x-auto text-lg font-medium whitespace-nowrap tabular-nums">
                     {formatMoney(selectedTotal, currency)}
                   </strong>
-                  <p className="text-muted-foreground mt-1 text-xs break-words tabular-nums">
-                    {t('summary.monthlyMin')}: {formatMoney(selectedMinimum, currency)}
-                  </p>
                 </div>
               </div>
             ) : null}
-
             {canCalculate && payoffPlan ? (
-              <div className={cn(payoffPlan.schedule.length > 0 && 'mt-5')}>
-                <DebtTrajectoryChart
-                  payoffPlan={payoffPlan}
-                  debts={allDebts}
-                  currency={currency}
-                  strategy={strategy}
-                />
-              </div>
+              <p className="text-muted-foreground mt-1 text-xs break-words tabular-nums">
+                {t(`strategy.${strategy}`)}
+                {notRepaid ? '' : ` · ${payoffPlan.months} ${t('comparison.months')}`}
+                {' · '}
+                {t('summary.totalInterest')}: {formatMoney(payoffPlan.totalInterestPaid, currency)}
+                {' · '}
+                {t('summary.monthlyMin')}: {formatMoney(selectedMinimum, currency)}
+              </p>
             ) : null}
 
             <div
               className={cn(
-                'grid min-w-0 gap-4',
-                canCalculate && payoffPlan ? 'border-border mt-5 border-t pt-4' : '',
+                'grid min-w-0 gap-3',
+                canCalculate && payoffPlan ? 'border-border mt-3 border-t pt-3' : '',
                 'lg:grid-cols-[minmax(0,1.4fr)_minmax(16rem,0.8fr)]'
               )}
             >
@@ -684,6 +711,9 @@ export function DebtPayoff() {
                 currency={currency}
                 onAccept={setExtraPayment}
               />
+            </div>
+            <div className="mt-2">
+              <DebtMethod />
             </div>
           </NativePanel>
 

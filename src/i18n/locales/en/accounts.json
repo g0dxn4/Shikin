@@ -129,6 +129,7 @@
   "mix": {
     "title": "Bank and card composition",
     "subtitle": "Positive balances minus debt. Not total wealth.",
+    "scopeLabel": "Scope",
     "scope": "Checking, savings, cash, other, and cards only. Investments are excluded; this is not total wealth.",
     "checking": "Checking",
     "savings": "Savings",

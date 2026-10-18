@@ -13,7 +13,7 @@ import {
   X,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { AreaChart, Area, XAxis, YAxis, Tooltip, PieChart, Pie, Cell } from 'recharts'
+import { AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts'
 import { SafeChart } from '@/components/ui/safe-chart'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -33,9 +33,15 @@ import {
   savePricesToDB,
   type PriceIdentitySelection,
 } from '@/lib/price-service'
-import { multiplyDecimalsToCentavos } from '@shikin/finance-core/valuation'
 import { isInvestmentPriceStale } from '@/lib/price-scheduler'
 import { CHART_AXIS_COLOR, CHART_TOOLTIP_STYLE } from '@/lib/constants'
+import {
+  QUOTE_HISTORY_FETCH_LIMIT,
+  allocationColor,
+  buildCompleteAllocation,
+  selectCurrentQuantityQuotePlot,
+  type AllocationSegment,
+} from '@/components/investments/investment-presentation'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -72,17 +78,88 @@ const ASSET_TYPES: { key: string; labelKey: string }[] = [
 
 type AssetFilter = (typeof ASSET_TYPES)[number]['key']
 
-const TYPE_COLORS: Record<string, string> = {
-  stock: '#276fd6',
-  etf: '#4b8e63',
-  crypto: '#b57542',
-  bond: '#8265a8',
-  mutual_fund: '#c06565',
-  cetes: '#6695a9',
-  other: '#73777e',
+const RANGE_DAYS: Record<TimeRange, number | null> = {
+  '1W': 7,
+  '1M': 30,
+  '3M': 90,
+  '6M': 180,
+  '1Y': 365,
+  All: null,
 }
 
 type SortField = 'value' | 'gainLoss' | 'name' | 'type'
+
+function formatExplicitMoney(
+  amount: number | null | undefined,
+  currency: string | null | undefined
+) {
+  if (amount === null || amount === undefined || !currency?.trim()) return null
+  return formatMoney(amount, currency)
+}
+
+function QuoteRangeControls({
+  timeRange,
+  label,
+  onChange,
+}: {
+  timeRange: TimeRange
+  label: string
+  onChange: (range: TimeRange) => void
+}) {
+  return (
+    <div className="flex flex-wrap gap-1" role="group" aria-label={label}>
+      {TIME_RANGES.map((range) => (
+        <button
+          key={range}
+          type="button"
+          onClick={() => onChange(range)}
+          aria-pressed={timeRange === range}
+          className={`filter-pill min-h-11 px-3 ${timeRange === range ? 'filter-pill-active' : ''}`}
+        >
+          {range}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function AllocationRing({ segments }: { segments: readonly AllocationSegment[] }) {
+  const radius = 15.5
+  const circumference = 2 * Math.PI * radius
+  const lengths = segments.map((segment) => segment.fraction * circumference)
+  const offsets = lengths.map((_, index) =>
+    lengths.slice(0, index).reduce((sum, length) => sum + length, 0)
+  )
+  return (
+    <svg viewBox="0 0 36 36" className="h-full w-full -rotate-90" aria-hidden="true">
+      <circle
+        cx="18"
+        cy="18"
+        r={radius}
+        fill="none"
+        stroke="var(--color-border)"
+        strokeWidth="2.75"
+      />
+      {segments.map((segment, index) => {
+        const length = lengths[index] ?? 0
+        const full = segment.fraction >= 0.999
+        return (
+          <circle
+            key={segment.type}
+            cx="18"
+            cy="18"
+            r={radius}
+            fill="none"
+            stroke={segment.color}
+            strokeWidth="2.75"
+            strokeDasharray={full ? undefined : `${length} ${circumference - length}`}
+            strokeDashoffset={full ? undefined : -(offsets[index] ?? 0)}
+          />
+        )
+      })}
+    </svg>
+  )
+}
 
 export function Investments() {
   const { t } = useTranslation('investments')
@@ -106,7 +183,7 @@ export function Investments() {
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const [timeRange, setTimeRange] = useState<TimeRange>('3M')
+  const [timeRange, setTimeRange] = useState<TimeRange>('All')
   const [sortField, setSortField] = useState<SortField>('value')
   const [visibleInvestmentCount, setVisibleInvestmentCount] = useState(INVESTMENTS_PAGE_SIZE)
   const [assetFilter, setAssetFilter] = useState<AssetFilter>('all')
@@ -127,7 +204,7 @@ export function Investments() {
         ),
       ]
       instrumentKeys.forEach((instrumentKey) => {
-        void fetchPriceHistory(instrumentKey, 365).catch(() => {})
+        void fetchPriceHistory(instrumentKey, QUOTE_HISTORY_FETCH_LIMIT).catch(() => {})
       })
     }
   }, [investments.length]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -184,69 +261,50 @@ export function Investments() {
     }
   }
 
-  const chartData = useMemo(() => {
-    if (!portfolioSummary.totalsComplete || priceHistory.size === 0 || investments.length === 0)
-      return []
-
-    const daysMap: Record<string, number> = {
-      '1W': 7,
-      '1M': 30,
-      '3M': 90,
-      '6M': 180,
-      '1Y': 365,
-      All: 9999,
-    }
-    const maxDays = daysMap[timeRange]
-    const cutoff = dayjs().subtract(maxDays, 'day').format('YYYY-MM-DD')
-
-    const dateSet = new Set<string>()
-    priceHistory.forEach((points) => {
-      points.forEach((p) => {
-        if (p.date >= cutoff) dateSet.add(p.date)
-      })
-    })
-
-    const dates = [...dateSet].sort()
-
-    const holdings = investments.flatMap((investment) => {
-      if (!investment.instrument_key) return []
-      const points = priceHistory.get(investment.instrument_key)
-      return points
-        ? [{ id: investment.id, quantityDecimal: investment.quantityDecimal, points }]
-        : []
-    })
-    const cursors = new Map<string, { index: number; unitPriceDecimal: string | null }>()
-    for (const holding of holdings) cursors.set(holding.id, { index: -1, unitPriceDecimal: null })
-
-    return dates.map((date) => {
-      let total = 0
-      for (const holding of holdings) {
-        const cursor = cursors.get(holding.id)
-        if (!cursor) continue
-        while (
-          cursor.index + 1 < holding.points.length &&
-          holding.points[cursor.index + 1].date <= date
-        ) {
-          cursor.index += 1
-          cursor.unitPriceDecimal = holding.points[cursor.index].unitPriceDecimal
-        }
-        if (cursor.unitPriceDecimal !== null) {
-          total += multiplyDecimalsToCentavos([holding.quantityDecimal, cursor.unitPriceDecimal])
-        }
-      }
-      return { date, value: total }
-    })
-  }, [priceHistory, investments, timeRange, portfolioSummary.totalsComplete])
-
-  const allocationData = useMemo(() => {
-    if (!portfolioSummary.totalsComplete) return []
-    const { byType } = portfolioSummary
-    return Object.entries(byType).map(([type, data]) => ({
-      name: type,
-      value: data.marketValue,
-      color: TYPE_COLORS[type] || TYPE_COLORS.other,
-    }))
-  }, [portfolioSummary])
+  const rangeDays = RANGE_DAYS[timeRange]
+  const quotePlot = useMemo(
+    () =>
+      selectCurrentQuantityQuotePlot({
+        holdings: investments.map((investment) => ({
+          id: investment.id,
+          instrumentKey: investment.instrument_key ?? null,
+          quantityDecimal: investment.quantityDecimal,
+          assetType: investment.type,
+          provider: investment.priceProvider,
+          instrumentId: investment.priceInstrumentId,
+          exchange: investment.priceExchange,
+          currentPriceCurrency: investment.currentPriceCurrency,
+        })),
+        historyByKey: priceHistory,
+        reportCurrency: portfolioSummary.preferredCurrency,
+        totalsComplete: portfolioSummary.totalsComplete,
+        rangeStart:
+          rangeDays === null ? null : dayjs().subtract(rangeDays, 'day').format('YYYY-MM-DD'),
+        historyLimit: QUOTE_HISTORY_FETCH_LIMIT,
+      }),
+    [
+      investments,
+      priceHistory,
+      portfolioSummary.preferredCurrency,
+      portfolioSummary.totalsComplete,
+      rangeDays,
+    ]
+  )
+  const allocation = useMemo(
+    () =>
+      buildCompleteAllocation({
+        byType: portfolioSummary.byType,
+        currency: portfolioSummary.preferredCurrency,
+        totalsComplete: portfolioSummary.totalsComplete,
+        totalMarketValue: portfolioSummary.totalMarketValue,
+      }),
+    [
+      portfolioSummary.byType,
+      portfolioSummary.preferredCurrency,
+      portfolioSummary.totalsComplete,
+      portfolioSummary.totalMarketValue,
+    ]
+  )
 
   const filteredInvestments = useMemo(() => {
     let result = [...investments]
@@ -324,9 +382,13 @@ export function Investments() {
             </div>
           ))}
         </div>
-        <NativePanel className="space-y-3 p-5">
-          <Skeleton className="h-4 w-32" />
-          <Skeleton className="h-60 w-full" />
+        <NativePanel className="flex items-center gap-4 p-5">
+          <Skeleton className="h-28 w-28 shrink-0 rounded-full" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-3 w-40" />
+            <Skeleton className="h-3 w-32" />
+          </div>
         </NativePanel>
       </div>
     )
@@ -389,11 +451,18 @@ export function Investments() {
             <AlertTriangle size={16} className="text-warning mt-0.5" />
             <div>
               <p className="text-warning text-sm font-semibold">{t('currencyWarning.title')}</p>
-              <p className="text-muted-foreground mt-1 text-sm">
-                {portfolioSummary.preferredCurrency === null
-                  ? t('currencyWarning.setupRequired')
-                  : t('currencyWarning.body')}
-              </p>
+              {portfolioSummary.preferredCurrency === null ? (
+                <p className="text-muted-foreground mt-1 text-sm">
+                  {t('currencyWarning.setupRequired')}
+                </p>
+              ) : (
+                <details className="mt-1">
+                  <summary className="text-muted-foreground focus-visible:ring-ring min-h-11 cursor-pointer text-xs focus-visible:ring-2 focus-visible:outline-none">
+                    {t('currencyWarning.more')}
+                  </summary>
+                  <p className="text-muted-foreground text-xs">{t('currencyWarning.body')}</p>
+                </details>
+              )}
               <div className="mt-2 flex flex-wrap gap-2">
                 {portfolioSummary.currencies.map((currency) => {
                   const data = portfolioSummary.byCurrency[currency]
@@ -414,16 +483,74 @@ export function Investments() {
         </div>
       )}
 
+      {allocation ? (
+        <NativePanel className="min-w-0 p-4 sm:p-5" data-testid="allocation-panel">
+          <div className="mb-3 flex min-w-0 items-center justify-between gap-2">
+            <h2 className="text-sm font-medium">{t('chart.allocation')}</h2>
+            <span className="border-border rounded-full border px-2 py-0.5 text-xs tabular-nums">
+              {allocation.currency}
+            </span>
+          </div>
+          <div className="flex min-w-0 flex-col items-center gap-4 sm:flex-row sm:items-center">
+            <div
+              role="img"
+              aria-label={t('chart.allocation')}
+              aria-describedby="investment-allocation-table"
+              data-testid="allocation-ring"
+              className="h-28 w-28 shrink-0"
+            >
+              <AllocationRing segments={allocation.segments} />
+            </div>
+            <ul className="grid min-w-0 flex-1 gap-1.5" data-testid="allocation-legend">
+              {allocation.segments.map((segment) => (
+                <li
+                  key={segment.type}
+                  className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-sm"
+                >
+                  <span
+                    data-testid={`allocation-swatch-${segment.type}`}
+                    aria-hidden="true"
+                    className="h-2 w-2 shrink-0 rounded-sm"
+                    style={{
+                      width: 8,
+                      height: 8,
+                      backgroundColor: segment.color,
+                    }}
+                  />
+                  <span className="min-w-0 break-words">
+                    {t(`types.${segment.type}` as 'types.stock')}
+                  </span>
+                  <span className="ml-auto min-w-0 font-medium break-words tabular-nums">
+                    {formatMoney(segment.amountCentavos, allocation.currency)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <table id="investment-allocation-table" className="sr-only">
+            <caption>
+              {t('chart.allocation')} {allocation.currency}
+            </caption>
+            <tbody>
+              {allocation.segments.map((segment) => (
+                <tr key={segment.type}>
+                  <th scope="row">{t(`types.${segment.type}` as 'types.stock')}</th>
+                  <td>{formatMoney(segment.amountCentavos, allocation.currency)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </NativePanel>
+      ) : null}
+
       <MetricStrip>
         <MetricItem
           label={t('summary.portfolioValue')}
           value={
-            portfolioSummary.totalsComplete
-              ? formatMoney(
-                  portfolioSummary.totalMarketValue ?? 0,
-                  portfolioSummary.preferredCurrency ?? 'USD'
-                )
-              : '—'
+            formatExplicitMoney(
+              portfolioSummary.totalsComplete ? portfolioSummary.totalMarketValue : null,
+              portfolioSummary.preferredCurrency
+            ) ?? '—'
           }
           detail={
             portfolioSummary.totalsComplete ? undefined : t('currencyWarning.totalsUnavailable')
@@ -438,7 +565,7 @@ export function Investments() {
               >
                 <span className="min-w-0 [overflow-wrap:anywhere]">
                   {gainLoss >= 0 ? '+' : ''}
-                  {formatMoney(gainLoss, portfolioSummary.preferredCurrency ?? 'USD')}
+                  {formatExplicitMoney(gainLoss, portfolioSummary.preferredCurrency) ?? '—'}
                 </span>
                 {portfolioSummary.totalGainLossPercent !== null ? (
                   <span className="text-sm font-medium [overflow-wrap:anywhere]">
@@ -456,10 +583,10 @@ export function Investments() {
           label={t('summary.costBasis')}
           value={
             portfolioSummary.totalsComplete && portfolioSummary.gainsComplete
-              ? formatMoney(
-                  portfolioSummary.totalCostBasis ?? 0,
-                  portfolioSummary.preferredCurrency ?? 'USD'
-                )
+              ? (formatExplicitMoney(
+                  portfolioSummary.totalCostBasis,
+                  portfolioSummary.preferredCurrency
+                ) ?? '—')
               : '—'
           }
         />
@@ -470,33 +597,28 @@ export function Investments() {
         />
       </MetricStrip>
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-        <NativePanel className="p-5 lg:col-span-2">
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-base font-semibold">{t('chart.portfolioValue')}</h2>
-            <div className="flex flex-wrap gap-1" role="group" aria-label={t('chart.range')}>
-              {TIME_RANGES.map((range) => (
-                <button
-                  key={range}
-                  type="button"
-                  onClick={() => setTimeRange(range)}
-                  aria-pressed={timeRange === range}
-                  className={`filter-pill ${timeRange === range ? 'filter-pill-active' : ''}`}
-                >
-                  {range}
-                </button>
-              ))}
-            </div>
+      {quotePlot.status === 'plot' ? (
+        <NativePanel
+          className="min-w-0 p-4 sm:p-5"
+          data-testid="quote-history-plot"
+          data-currency={quotePlot.currency}
+        >
+          <div className="mb-3 flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-sm font-medium">{t('chart.currentQuantities')}</h2>
+            <QuoteRangeControls
+              timeRange={timeRange}
+              label={t('chart.range')}
+              onChange={setTimeRange}
+            />
           </div>
-          {chartData.length > 0 ? (
-            <SafeChart height={240}>
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="valueGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="var(--color-accent)" stopOpacity={0.28} />
-                    <stop offset="100%" stopColor="var(--color-accent)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
+          <div className="h-40 min-w-0">
+            <SafeChart>
+              <AreaChart
+                data={quotePlot.points.map((point) => ({
+                  date: point.date,
+                  value: point.valueCentavos,
+                }))}
+              >
                 <XAxis
                   dataKey="date"
                   tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
@@ -508,74 +630,60 @@ export function Investments() {
                   tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
                   tickLine={false}
                   axisLine={false}
-                  tickFormatter={(v) => `${(fromCentavos(v) / 1000).toFixed(1)}k`}
+                  width={44}
+                  tickFormatter={(v) => `${(fromCentavos(Number(v)) / 1000).toFixed(1)}k`}
                 />
                 <Tooltip
                   contentStyle={CHART_TOOLTIP_STYLE}
-                  formatter={(value: number | undefined) => [formatMoney(value ?? 0), 'Value']}
-                  labelFormatter={(label) => dayjs(label).format('MMM D, YYYY')}
+                  formatter={(value) => [
+                    formatMoney(Number(value ?? 0), quotePlot.currency),
+                    t('chart.currentQuantities'),
+                  ]}
+                  labelFormatter={(label) => dayjs(String(label)).format('MMM D, YYYY')}
                 />
                 <Area
-                  type="monotone"
+                  type="linear"
                   dataKey="value"
                   isAnimationActive={false}
-                  stroke="var(--color-accent)"
+                  stroke="var(--color-chart-1)"
                   strokeWidth={2}
-                  fill="url(#valueGradient)"
+                  fill="none"
                 />
               </AreaChart>
             </SafeChart>
-          ) : (
-            <div className="flex h-[240px] items-center justify-center">
-              <p className="text-muted-foreground text-sm">{t('chart.noData')}</p>
-            </div>
-          )}
+          </div>
+          <table className="sr-only" data-testid="quote-history-table">
+            <caption>{t('chart.currentQuantities')}</caption>
+            <tbody>
+              {quotePlot.points.map((point) => (
+                <tr key={point.date}>
+                  <th scope="row">{point.date}</th>
+                  <td>{formatMoney(point.valueCentavos, quotePlot.currency)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </NativePanel>
-
-        <NativePanel className="p-5">
-          <h2 className="mb-4 text-base font-semibold">{t('chart.allocation')}</h2>
-          {allocationData.length > 0 ? (
-            <div className="flex flex-col items-center">
-              <SafeChart height={200}>
-                <PieChart>
-                  <Pie
-                    data={allocationData}
-                    isAnimationActive={false}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={55}
-                    outerRadius={80}
-                    dataKey="value"
-                    stroke="none"
-                  >
-                    {allocationData.map((entry, idx) => (
-                      <Cell key={idx} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={CHART_TOOLTIP_STYLE}
-                    formatter={(value: number | undefined) => [formatMoney(value ?? 0), '']}
-                  />
-                </PieChart>
-              </SafeChart>
-              <div className="border-border mt-3 flex flex-wrap justify-center gap-3 border-t pt-4">
-                {allocationData.map((entry) => (
-                  <div key={entry.name} className="flex items-center gap-1.5">
-                    <div className="h-2 w-2 rounded-full" style={{ background: entry.color }} />
-                    <span className="text-muted-foreground text-xs capitalize">
-                      {t(`types.${entry.name}` as 'types.stock')}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="flex h-[200px] items-center justify-center">
-              <p className="text-muted-foreground text-sm">{t('chart.noData')}</p>
-            </div>
-          )}
-        </NativePanel>
-      </div>
+      ) : quotePlot.status === 'withheld' &&
+        !(quotePlot.reason === 'history-missing' && priceHistory.size === 0) ? (
+        <details
+          className="min-w-0"
+          data-testid="quote-history-withheld"
+          data-reason={quotePlot.reason}
+        >
+          <summary className="text-muted-foreground focus-visible:ring-ring min-h-11 cursor-pointer text-xs focus-visible:ring-2 focus-visible:outline-none">
+            {t('chart.withheld')}
+          </summary>
+          <p className="text-muted-foreground max-w-prose text-xs">{t('chart.withheldDetail')}</p>
+          {quotePlot.rangeSelectable ? (
+            <QuoteRangeControls
+              timeRange={timeRange}
+              label={t('chart.range')}
+              onChange={setTimeRange}
+            />
+          ) : null}
+        </details>
+      ) : null}
 
       <NativePanel className="p-5">
         <div className="mb-4 flex flex-col gap-4">
@@ -612,7 +720,7 @@ export function Investments() {
                 type="button"
                 onClick={() => setAssetFilter(asset.key)}
                 aria-pressed={assetFilter === asset.key}
-                className={`filter-pill ${assetFilter === asset.key ? 'filter-pill-active' : ''}`}
+                className={`filter-pill min-h-11 px-3 ${assetFilter === asset.key ? 'filter-pill-active' : ''}`}
               >
                 {t(asset.labelKey as 'filters.all')}
               </button>
@@ -668,7 +776,7 @@ export function Investments() {
                   inv.type === 'crypto' ? 'crypto' : 'stock'
                 )}
                 refreshFailure={refreshFailures[inv.id]}
-                gainCurrency={portfolioSummary.preferredCurrency ?? 'USD'}
+                gainCurrency={portfolioSummary.preferredCurrency ?? null}
                 onEdit={() => openInvestmentDialog(inv.id)}
                 onDelete={() => setDeleteId(inv.id)}
                 t={t}
@@ -687,7 +795,7 @@ export function Investments() {
                 inv.type === 'crypto' ? 'crypto' : 'stock'
               )}
               refreshFailure={refreshFailures[inv.id]}
-              gainCurrency={portfolioSummary.preferredCurrency ?? 'USD'}
+              gainCurrency={portfolioSummary.preferredCurrency ?? null}
               onEdit={() => openInvestmentDialog(inv.id)}
               onDelete={() => setDeleteId(inv.id)}
               t={t}
@@ -760,12 +868,14 @@ function HoldingRow({
   investment: InvestmentWithPrice
   isStale: boolean
   refreshFailure?: string
-  gainCurrency: string
+  gainCurrency: string | null
   onEdit: () => void
   onDelete: () => void
   t: ReturnType<typeof useTranslation<'investments'>>['t']
 }) {
   const gainPositive = (inv.gainLoss ?? 0) >= 0
+  const gainText =
+    inv.gainLoss !== null && gainCurrency ? formatMoney(inv.gainLoss, gainCurrency) : null
 
   return (
     <div
@@ -784,7 +894,7 @@ function HoldingRow({
         )}
       </div>
       <div>
-        <Badge variant="secondary" className="text-xs" style={{ color: TYPE_COLORS[inv.type] }}>
+        <Badge variant="secondary" className="text-xs" style={{ color: allocationColor(inv.type) }}>
           {t(`types.${inv.type}`)}
         </Badge>
       </div>
@@ -810,10 +920,10 @@ function HoldingRow({
         <p
           className={`text-sm font-semibold tabular-nums ${gainPositive ? 'text-success' : 'text-destructive'}`}
         >
-          {inv.gainLoss !== null ? (
+          {gainText !== null ? (
             <>
               {gainPositive ? '+' : ''}
-              {formatMoney(inv.gainLoss, gainCurrency)}
+              {gainText}
             </>
           ) : (
             '—'
@@ -868,12 +978,14 @@ function HoldingCard({
   investment: InvestmentWithPrice
   isStale: boolean
   refreshFailure?: string
-  gainCurrency: string
+  gainCurrency: string | null
   onEdit: () => void
   onDelete: () => void
   t: ReturnType<typeof useTranslation<'investments'>>['t']
 }) {
   const gainPositive = (inv.gainLoss ?? 0) >= 0
+  const gainText =
+    inv.gainLoss !== null && gainCurrency ? formatMoney(inv.gainLoss, gainCurrency) : null
 
   return (
     <div className="border-border rounded-lg border p-4">
@@ -894,7 +1006,11 @@ function HoldingCard({
             </p>
             <p className="text-muted-foreground text-xs">{inv.name}</p>
           </div>
-          <Badge variant="secondary" className="text-xs" style={{ color: TYPE_COLORS[inv.type] }}>
+          <Badge
+            variant="secondary"
+            className="text-xs"
+            style={{ color: allocationColor(inv.type) }}
+          >
             {t(`types.${inv.type}`)}
           </Badge>
         </div>
@@ -945,14 +1061,16 @@ function HoldingCard({
           <p
             className={`font-semibold tabular-nums ${gainPositive ? 'text-success' : 'text-destructive'}`}
           >
-            {inv.gainLoss !== null ? (
+            {gainText !== null ? (
               <>
                 {gainPositive ? '+' : ''}
-                {formatMoney(inv.gainLoss, gainCurrency)}
-                <span className="ml-1 text-xs">
-                  ({gainPositive ? '+' : ''}
-                  {inv.gainLossPercent?.toFixed(2)}%)
-                </span>
+                {gainText}
+                {inv.gainLossPercent !== null ? (
+                  <span className="ml-1 text-xs">
+                    ({gainPositive ? '+' : ''}
+                    {inv.gainLossPercent.toFixed(2)}%)
+                  </span>
+                ) : null}
               </>
             ) : (
               '—'

@@ -56,6 +56,7 @@
   },
   "currencyWarning": {
     "title": "Divisas mixtas",
+    "more": "Detalles",
     "body": "Algunas tenencias requieren precio verificado, resolución de propiedad o una tasa FX real. Se muestran componentes por moneda, sin suma nominal.",
     "totalsUnavailable": "Total convertido no disponible",
     "setupRequired": "Configura una moneda principal en Ajustes antes de mostrar los totales de la cartera."
@@ -73,7 +74,10 @@
     "portfolioValue": "Valor del Portafolio",
     "allocation": "Asignación",
     "noData": "Sin datos de precios aún",
-    "range": "Rango del historial del portafolio"
+    "range": "Rango de cotizaciones",
+    "currentQuantities": "Cantidades actuales a cotizaciones registradas",
+    "withheld": "Historial de cotizaciones no mostrado",
+    "withheldDetail": "No es rendimiento. Cada tenencia necesita una moneda de cotización comprobada igual a la del reporte y al menos dos fechas registradas en común."
   },
   "holdings": {
     "title": "Tenencias",

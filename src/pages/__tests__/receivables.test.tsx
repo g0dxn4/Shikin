@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Receivables } from '../receivables'
 import { useCurrencyStore } from '@/stores/currency-store'
@@ -202,6 +202,14 @@ describe('Receivables', () => {
 
       render(<Receivables />)
 
+      const row = screen.getByRole('article')
+      const progress = within(row).getByRole('progressbar', { name: /card.progressLabel/ })
+      const amount = row.querySelector('[data-receivable-amount]')
+      expect(amount).toHaveTextContent('$5,000.00')
+      expect(
+        progress.compareDocumentPosition(amount!) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+      expect(within(row).getByText('filters.partial')).toBeInTheDocument()
       expect(screen.getByText('summary.outstanding')).toBeInTheDocument()
       expect(screen.getByText('summary.overdue')).toBeInTheDocument()
       expect(screen.getByText('summary.received')).toBeInTheDocument()
@@ -337,5 +345,29 @@ describe('Receivables', () => {
         expect(mockCancel).toHaveBeenCalledWith('recv-cancel-test')
       })
     })
+  })
+
+  it('keeps cancelled and matched states without an inferred progress bar', () => {
+    mockReceivables = [
+      makeReceivable({
+        id: 'recv-cancelled',
+        payer: 'Cancelled Payer',
+        status: 'cancelled',
+        amount: 18000,
+        received_amount: 0,
+        remainingAmount: 18000,
+        currency: 'USD',
+        matched_transaction_id: 'tx-1',
+      }),
+    ]
+
+    render(<Receivables />)
+
+    const row = screen.getByRole('article')
+    expect(within(row).queryByRole('progressbar')).not.toBeInTheDocument()
+    expect(within(row).getByText('filters.cancelled')).toBeInTheDocument()
+    expect(within(row).getByText('card.matched')).toBeInTheDocument()
+    expect(within(row).getByText('$180.00')).toBeInTheDocument()
+    expect(screen.queryByText('subtitle')).not.toBeInTheDocument()
   })
 })

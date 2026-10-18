@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useTranslation } from 'react-i18next'
-import { Wallet, Plus, Pencil, Ban, Trash2, Clock } from 'lucide-react'
+import { Wallet, Plus, Pencil, Ban, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -13,7 +13,6 @@ import { Label } from '@/components/ui/label'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { ErrorState } from '@/components/ui/error-state'
 import { FilterPills } from '@/components/ui/filter-pills'
-import { ProgressBar } from '@/components/ui/progress-bar'
 import { ShowMorePagination } from '@/components/shared/show-more-pagination'
 import {
   Dialog,
@@ -34,6 +33,10 @@ import { useReceivableStore, type ReceivableWithDetails } from '@/stores/receiva
 import { useAccountStore } from '@/stores/account-store'
 import { useCurrencyStore } from '@/stores/currency-store'
 import { formatMoney, fromCentavos } from '@/lib/money'
+import {
+  receivableDueLabel,
+  storedReceivableProgress,
+} from '@/components/receivables/receivable-presentation'
 import { getErrorMessage } from '@/lib/errors'
 import { SUPPORTED_CURRENCIES } from '@/lib/constants'
 import {
@@ -51,8 +54,6 @@ const ConfirmDialog = lazy(() =>
 const RECEIVABLES_PAGE_SIZE = 20
 
 type StatusFilter = 'all' | 'open' | 'partial' | 'received' | 'cancelled' | 'overdue'
-
-type ReceivableDueTextKey = 'card.cancelled' | 'card.overdue' | 'card.dueToday' | 'card.due'
 
 const receivableSchema = z.object({
   payer: z.string().min(1),
@@ -85,23 +86,10 @@ function statusBadgeClass(status: ReceivableWithDetails['status']): string {
   }
 }
 
-function getDueText(
-  receivable: ReceivableWithDetails,
-  t: (key: ReceivableDueTextKey) => string
-): string {
-  if (receivable.status === 'cancelled') return t('card.cancelled')
-  const due = dayjs(receivable.due_date)
-  const today = dayjs()
-  const diff = due.diff(today, 'day')
-  if (diff < 0) return t('card.overdue')
-  if (diff === 0) return t('card.dueToday')
-  return `${t('card.due')} ${receivable.due_date}`
-}
-
-function getProgressColor(percent: number): 'accent' | 'success' | 'warning' {
-  if (percent >= 100) return 'success'
-  if (percent >= 50) return 'warning'
-  return 'accent'
+function progressColor(percent: number): string {
+  if (percent >= 100) return 'var(--color-success)'
+  if (percent >= 50) return 'var(--color-warning)'
+  return 'var(--color-chart-2)'
 }
 
 function ReceivableRow({
@@ -120,48 +108,48 @@ function ReceivableRow({
 
   const isCancelled = receivable.status === 'cancelled'
   const isMatched = Boolean(receivable.matched_transaction_id)
-  const progress =
-    receivable.amount > 0
-      ? Math.min(100, Math.round((receivable.received_amount / receivable.amount) * 100))
-      : 0
+  const progress = storedReceivableProgress({
+    status: receivable.status,
+    amount: receivable.amount,
+    receivedAmount: receivable.received_amount,
+  })
+  const dueLabel = receivableDueLabel(
+    { status: receivable.status, dueDate: receivable.due_date },
+    dayjs(),
+    t
+  )
+  const dueOverdue = !isCancelled && (receivable.isOverdue || dueLabel === t('card.overdue'))
 
   return (
     <article
-      className={`group border-border rounded-lg border p-4 ${
+      className={`group border-border min-w-0 rounded-lg border p-4 ${
         receivable.isOverdue ? 'border-warning/40' : ''
       } ${isCancelled ? 'opacity-60' : ''}`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h3 className="truncate text-base font-semibold">{receivable.payer}</h3>
+          <h3 className="text-base font-semibold break-words">{receivable.payer}</h3>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <Badge
               variant="secondary"
               className={`shrink-0 text-xs ${statusBadgeClass(receivable.status)}`}
             >
               {t(`filters.${receivable.status}`)}
             </Badge>
-            {isMatched && (
+            {isMatched ? (
               <Badge variant="outline" className="text-xs">
                 {t('card.matched')}
               </Badge>
-            )}
-          </div>
-          <p className="mt-1 text-lg font-semibold tabular-nums">
-            {formatMoney(receivable.amount, receivable.currency)}
-          </p>
-          <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            ) : null}
             <span
-              className={`flex items-center gap-1 ${receivable.isOverdue ? 'text-warning' : ''}`}
+              className={`inline-flex min-h-6 items-center rounded-full border px-2 py-0.5 text-xs ${
+                dueOverdue
+                  ? 'border-warning/40 bg-warning/10 text-warning'
+                  : 'border-border text-muted-foreground'
+              }`}
             >
-              <Clock size={11} />
-              {getDueText(receivable, t)}
+              {dueLabel}
             </span>
-            {receivable.accountName && <span className="truncate">{receivable.accountName}</span>}
-            {receivable.invoice_reference && (
-              <span className="uppercase tabular-nums">{receivable.invoice_reference}</span>
-            )}
-            {receivable.project_reference && <span>{receivable.project_reference}</span>}
           </div>
         </div>
         <div className="flex shrink-0 gap-1 opacity-100 transition-opacity motion-reduce:transition-none md:opacity-50 md:group-focus-within:opacity-100 md:group-hover:opacity-100">
@@ -197,30 +185,63 @@ function ReceivableRow({
         </div>
       </div>
 
-      {!isCancelled && (
-        <>
-          <div className="mt-4">
-            <ProgressBar
-              value={progress}
-              color={getProgressColor(progress)}
-              ariaLabel={`${t('card.progressLabel')}: ${progress}%`}
-            />
-          </div>
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <p className="text-muted-foreground">
-              <span className="text-foreground font-medium tabular-nums">
-                {formatMoney(receivable.received_amount, receivable.currency)}
-              </span>{' '}
-              {t('card.of')} {formatMoney(receivable.amount, receivable.currency)}
+      {progress.shown ? (
+        <div
+          className="bg-muted mt-3 h-3 w-full overflow-hidden rounded-full"
+          role="progressbar"
+          aria-label={`${t('card.progressLabel')}: ${progress.percent}%`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={progress.percent}
+          data-testid="receivable-progress"
+        >
+          <div
+            className="h-full rounded-full"
+            style={{
+              width: `${progress.percent}%`,
+              backgroundColor: progressColor(progress.percent),
+            }}
+          />
+        </div>
+      ) : null}
+
+      <p data-receivable-amount="" className="mt-3 text-lg font-semibold break-words tabular-nums">
+        {formatMoney(receivable.amount, receivable.currency)}
+      </p>
+      {!isCancelled ? (
+        <div className="mt-1 flex min-w-0 flex-wrap items-baseline justify-between gap-2 text-xs">
+          <p className="text-muted-foreground min-w-0 break-words">
+            <span className="text-foreground font-medium tabular-nums">
+              {formatMoney(receivable.received_amount, receivable.currency)}
+            </span>{' '}
+            {t('card.of')} {formatMoney(receivable.amount, receivable.currency)}
+          </p>
+          {receivable.remainingAmount > 0 ? (
+            <p className="text-muted-foreground min-w-0 break-words tabular-nums">
+              {formatMoney(receivable.remainingAmount, receivable.currency)} {t('card.remaining')}
             </p>
-            {receivable.remainingAmount > 0 && (
-              <p className="text-muted-foreground text-xs tabular-nums">
-                {formatMoney(receivable.remainingAmount, receivable.currency)} {t('card.remaining')}
-              </p>
-            )}
-          </div>
-        </>
-      )}
+          ) : null}
+        </div>
+      ) : null}
+      {receivable.accountName || receivable.invoice_reference || receivable.project_reference ? (
+        <div className="mt-2 flex min-w-0 flex-wrap gap-1.5">
+          {receivable.accountName ? (
+            <span className="border-border max-w-full rounded-full border px-2 py-0.5 text-xs break-words">
+              {receivable.accountName}
+            </span>
+          ) : null}
+          {receivable.invoice_reference ? (
+            <span className="border-border rounded-full border px-2 py-0.5 text-xs uppercase tabular-nums">
+              {receivable.invoice_reference}
+            </span>
+          ) : null}
+          {receivable.project_reference ? (
+            <span className="border-border max-w-full rounded-full border px-2 py-0.5 text-xs break-words">
+              {receivable.project_reference}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
     </article>
   )
 }
@@ -685,26 +706,6 @@ export function Receivables() {
             </div>
           ) : null}
 
-          <MetricStrip>
-            <MetricItem
-              label={t('summary.outstanding')}
-              value={formatConverted(summary.outstanding)}
-              detail={
-                summary.outstanding.complete
-                  ? summary.outstanding.preferredCurrency
-                  : t('currency.unavailable')
-              }
-            />
-            <MetricItem
-              label={t('summary.overdue')}
-              value={<span className="text-warning">{formatConverted(summary.overdue)}</span>}
-            />
-            <MetricItem
-              label={t('summary.received')}
-              value={<span className="text-success">{formatConverted(summary.received)}</span>}
-            />
-          </MetricStrip>
-
           <div className="space-y-3">
             {visibleReceivables.length === 0 ? (
               <NativePanel className="flex items-center justify-center py-12 text-center">
@@ -738,6 +739,26 @@ export function Receivables() {
             })}
             onShowMore={() => setVisibleCount((count) => count + RECEIVABLES_PAGE_SIZE)}
           />
+
+          <MetricStrip>
+            <MetricItem
+              label={t('summary.outstanding')}
+              value={formatConverted(summary.outstanding)}
+              detail={
+                summary.outstanding.complete
+                  ? summary.outstanding.preferredCurrency
+                  : t('currency.unavailable')
+              }
+            />
+            <MetricItem
+              label={t('summary.overdue')}
+              value={<span className="text-warning">{formatConverted(summary.overdue)}</span>}
+            />
+            <MetricItem
+              label={t('summary.received')}
+              value={<span className="text-success">{formatConverted(summary.received)}</span>}
+            />
+          </MetricStrip>
         </div>
       )}
 

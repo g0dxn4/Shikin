@@ -390,6 +390,7 @@ describe('Accounts', () => {
     expect(
       checking.compareDocumentPosition(mixHeading) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
+    expect(screen.getByText('mix.scopeLabel')).toBeInTheDocument()
     expect(screen.getByText('mix.scope')).toBeInTheDocument()
     expect(screen.getByText('mix.spendable')).toBeInTheDocument()
     expect(screen.getByText('mix.cardDebt')).toBeInTheDocument()
@@ -1010,6 +1011,25 @@ describe('Accounts', () => {
     expect(checkingSpark).not.toHaveTextContent('$408.49')
     expect(checkingSpark).not.toHaveTextContent('$257.82')
     expect(checkingSpark).toHaveAttribute('data-balances', '2578212,4084885')
+    expect(checkingSpark).toHaveAttribute('data-point-count', '2')
+    expect(
+      checkingSpark.querySelector('polyline')?.getAttribute('points')?.trim().split(/\s+/)
+    ).toHaveLength(2)
+    expect(checkingSpark.querySelector('[data-endpoint="start"]')).toHaveAttribute(
+      'datetime',
+      '2026-03-23'
+    )
+    expect(checkingSpark.querySelector('[data-endpoint="end"]')).toHaveAttribute(
+      'datetime',
+      '2026-09-20'
+    )
+    expect(checkingSpark.getAttribute('title')).toContain('$40,848.85')
+    expect(checkingSpark.getAttribute('title')).toContain('$25,782.12')
+    const visibleBalance = checking.querySelector('[data-account-balance]')
+    expect(visibleBalance).toBeTruthy()
+    expect(
+      checkingSpark.compareDocumentPosition(visibleBalance!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
 
     await chooseAccountAction(user, 'Everyday Checking', 'history.show')
     const checkingChart = within(checking).getByRole('img', {
@@ -1313,10 +1333,28 @@ describe('Accounts', () => {
 
     expect(screen.getByText('mix.segments.cash')).toBeInTheDocument()
     expect(screen.getByText('mix.segments.creditPositive')).toBeInTheDocument()
+    const stack = screen.getByTestId('mix-stack')
+    expect(stack).toHaveClass('h-3')
+    expect(stack).not.toHaveClass('h-2')
     const cash = screen.getByTestId('mix-segment-cash')
     expect(cash.getAttribute('style')).toContain(`${(1 / 1050) * 100}%`)
     expect(cash.getAttribute('style')).not.toContain('8%')
+    expect(cash.getAttribute('style')).not.toContain('2px')
+    expect(cash.getAttribute('style')).not.toContain('min-width')
+    expect(cash.getAttribute('style')).not.toContain('minWidth')
     expect(cash.className).not.toMatch(/min-w-/)
+    const checkingSegment = screen.getByTestId('mix-segment-checking')
+    const cardSegment = screen.getByTestId('mix-segment-creditPositive')
+    expect(cash.getAttribute('style')).not.toEqual(checkingSegment.getAttribute('style'))
+    expect(cardSegment.getAttribute('style')).not.toEqual(checkingSegment.getAttribute('style'))
+    expect(cash.getAttribute('style')).not.toContain('opacity')
+    const cashSwatch = screen.getByTestId('mix-swatch-cash')
+    expect(cashSwatch).toHaveStyle({ width: '8px', height: '8px' })
+    expect(cashSwatch.getAttribute('style')).toContain(
+      cash.getAttribute('style')?.match(/background-color:\s*[^;]+/)?.[0] ?? 'missing'
+    )
+    expect(stack.querySelector('[data-testid="mix-segment-debt"]')).toBeNull()
+    expect(screen.getByText('mix.debt')).toBeInTheDocument()
     const assets = screen.getByText('metrics.assets').closest('.metric-item')
     expect(assets).toHaveTextContent('metrics.assetsDetail')
     expect(assets).not.toHaveTextContent('Checking')

@@ -129,6 +129,7 @@
   "mix": {
     "title": "Composición de bancos y tarjetas",
     "subtitle": "Saldos positivos menos deuda. No es el patrimonio total.",
+    "scopeLabel": "Alcance",
     "scope": "Solo corriente, ahorros, efectivo, otras y tarjetas. Las inversiones quedan fuera; esto no es el patrimonio total.",
     "checking": "Corriente",
     "savings": "Ahorros",

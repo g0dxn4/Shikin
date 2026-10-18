@@ -7,6 +7,7 @@ import { Investments } from '../investments'
 const mockFetch = vi.fn().mockResolvedValue(undefined)
 const mockRemove = vi.fn()
 let mockInvestments: Array<Record<string, unknown>> = []
+let mockPriceHistory = new Map<string, Array<{ date: string; unitPriceDecimal: string }>>()
 let mockFetchError: string | null = null
 let mockError: string | null = null
 let mockIsLoading = false
@@ -47,7 +48,7 @@ vi.mock('@/stores/investment-store', () => ({
     error: mockError,
     fetch: mockFetch,
     remove: mockRemove,
-    priceHistory: new Map(),
+    priceHistory: mockPriceHistory,
     portfolioSummary: mockPortfolioSummary,
     lastPriceFetch: null,
     fetchPriceHistory: vi.fn().mockResolvedValue([]),
@@ -117,6 +118,7 @@ describe('Investments', () => {
     vi.clearAllMocks()
     mockRemove.mockReset()
     mockInvestments = []
+    mockPriceHistory = new Map()
     mockFetchError = null
     mockError = null
     mockIsLoading = false
@@ -848,6 +850,7 @@ describe('Investments', () => {
     render(<Investments />)
 
     expect(screen.getByText('currencyWarning.title')).toBeInTheDocument()
+    expect(screen.getByText('currencyWarning.more')).toBeInTheDocument()
     expect(screen.getByText('currencyWarning.body')).toBeInTheDocument()
     expect(screen.getByText('MXN')).toBeInTheDocument()
     expect(screen.getByText('USD')).toBeInTheDocument()
@@ -880,5 +883,138 @@ describe('Investments', () => {
     render(<Investments />)
 
     expect(screen.getByText('priceSource.label')).toBeInTheDocument()
+  })
+
+  it('leads with a complete allocation ring and full report-currency legend, not a USD tooltip', () => {
+    mockInvestments = [
+      {
+        id: 'inv-stock',
+        symbol: 'QA-NWEQ',
+        name: 'QA Northwind Equity',
+        type: 'stock',
+        shares: 12,
+        quantityDecimal: '12',
+        currency: 'USD',
+        marketValue: 101400,
+        convertedMarketValue: 101400,
+        currentPriceCurrency: 'USD',
+        gainLoss: 5400,
+        gainLossPercent: 5.63,
+      },
+      {
+        id: 'inv-etf',
+        symbol: 'QA-HBRF',
+        name: 'QA Harbor Index ETF',
+        type: 'etf',
+        shares: 5,
+        quantityDecimal: '5',
+        currency: 'USD',
+        marketValue: 62800,
+        convertedMarketValue: 62800,
+        currentPriceCurrency: 'USD',
+        gainLoss: 2800,
+        gainLossPercent: 4.67,
+      },
+    ]
+    mockPortfolioSummary = {
+      ...mockPortfolioSummary,
+      preferredCurrency: 'USD',
+      totalsComplete: true,
+      gainsComplete: true,
+      totalMarketValue: 164200,
+      totalCostBasis: 156000,
+      totalGainLoss: 8200,
+      totalGainLossPercent: 5.26,
+      byType: {
+        stock: { marketValue: 101400, gainLoss: 5400, count: 1 },
+        etf: { marketValue: 62800, gainLoss: 2800, count: 1 },
+      },
+    }
+
+    render(<Investments />)
+
+    const ring = screen.getByTestId('allocation-ring')
+    const valueLabel = screen.getByText('summary.portfolioValue')
+    expect(ring.compareDocumentPosition(valueLabel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByTestId('allocation-legend')).toHaveTextContent('$1,014.00')
+    expect(screen.getByTestId('allocation-legend')).toHaveTextContent('$628.00')
+    expect(screen.getByTestId('allocation-swatch-stock')).toHaveStyle({
+      width: '8px',
+      height: '8px',
+    })
+    expect(screen.queryByText('chart.portfolioValue')).not.toBeInTheDocument()
+    expect(document.querySelector('.h-\\[240px\\]')).toBeNull()
+    expect(document.body.innerHTML).not.toContain('var(--color-accent)')
+  })
+
+  it('plots only a proven same-currency quote series and withholds a mixed-currency curve', () => {
+    const key = 'v1|stock|manual|QA-NORTHWIND|QA-MANUAL|USD'
+    mockInvestments = [
+      {
+        id: 'inv-stock',
+        symbol: 'QA-NWEQ',
+        name: 'QA Northwind Equity',
+        type: 'stock',
+        shares: 12,
+        quantityDecimal: '12',
+        currency: 'USD',
+        instrument_key: key,
+        priceProvider: 'manual',
+        priceInstrumentId: 'QA-NORTHWIND',
+        priceExchange: 'QA-MANUAL',
+        currentPriceCurrency: 'USD',
+        marketValue: 101400,
+        convertedMarketValue: 101400,
+        gainLoss: 5400,
+        gainLossPercent: 5.63,
+      },
+    ]
+    mockPortfolioSummary = {
+      ...mockPortfolioSummary,
+      preferredCurrency: 'USD',
+      totalsComplete: true,
+      totalMarketValue: 101400,
+      byType: { stock: { marketValue: 101400, gainLoss: 5400, count: 1 } },
+    }
+    mockPriceHistory = new Map([
+      [
+        key,
+        [
+          { date: '2026-08-15', unitPriceDecimal: '76.5' },
+          { date: '2026-10-17', unitPriceDecimal: '84.5' },
+        ],
+      ],
+    ])
+
+    const { rerender } = render(<Investments />)
+    const table = screen.getByTestId('quote-history-table')
+    expect(table).toHaveTextContent('2026-08-15')
+    expect(table).toHaveTextContent('2026-10-17')
+    expect(table).toHaveTextContent('$918.00')
+    expect(table).toHaveTextContent('$1,014.00')
+    expect(screen.getAllByText('chart.currentQuantities').length).toBeGreaterThan(0)
+    expect(screen.getByRole('group', { name: 'chart.range' }).querySelector('button')).toHaveClass(
+      'min-h-11'
+    )
+    expect(document.querySelector('.h-\\[240px\\]')).toBeNull()
+
+    mockInvestments = [
+      {
+        ...(mockInvestments[0] as object),
+        currentPriceCurrency: 'MXN',
+        instrument_key: 'v1|stock|manual|QA-NORTHWIND|QA-MANUAL|MXN',
+      },
+    ]
+    mockPortfolioSummary = {
+      ...mockPortfolioSummary,
+      preferredCurrency: 'USD',
+      totalsComplete: false,
+      totalMarketValue: null,
+      byType: {},
+    }
+    rerender(<Investments />)
+    expect(screen.queryByTestId('quote-history-table')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('allocation-ring')).not.toBeInTheDocument()
+    expect(document.querySelector('.h-\\[240px\\]')).toBeNull()
   })
 })

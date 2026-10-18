@@ -56,6 +56,7 @@
   },
   "currencyWarning": {
     "title": "Mixed currencies",
+    "more": "Details",
     "body": "Some holdings require a verified price, ownership resolution, or a real FX rate. Native-currency components remain visible; no nominal sum is shown.",
     "totalsUnavailable": "Converted total unavailable",
     "setupRequired": "Configure a main currency in Settings before showing portfolio totals."
@@ -73,7 +74,10 @@
     "portfolioValue": "Portfolio Value",
     "allocation": "Allocation",
     "noData": "No price data yet",
-    "range": "Portfolio history range"
+    "range": "Quote history range",
+    "currentQuantities": "Current quantities at recorded quotes",
+    "withheld": "Quote history not shown",
+    "withheldDetail": "Not performance. Every holding needs a proven quote currency equal to the report currency and at least two shared recorded dates."
   },
   "holdings": {
     "title": "Holdings",

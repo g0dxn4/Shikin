@@ -898,7 +898,7 @@ function AccountCard({
   t: any
 }) {
   const navigate = useNavigate()
-  const { t: tHistory } = useTranslation('accountHistory')
+  const { t: tHistory, i18n } = useTranslation('accountHistory')
   const { t: tStatements } = useTranslation('cardPayments')
   const refreshAccounts = useAccountStore((state) => state.fetch)
   const [maintenanceOpen, setMaintenanceOpen] = useState(false)
@@ -979,32 +979,27 @@ function AccountCard({
     }
   )
 
-  let visualSlot: ReactNode
-  if (historyStatus === 'error' && !showLine) {
-    visualSlot = (
-      <p className="account-visual-slot text-muted-foreground mt-auto flex h-12 min-w-0 items-center text-xs">
-        {t('history.slotUnavailable')}
-      </p>
-    )
-  } else if (historyStatus === 'loading' && !showLine) {
-    visualSlot = (
-      <div
-        className="account-visual-slot bg-muted/50 mt-auto h-12 min-w-0 rounded-md"
-        aria-hidden="true"
-      />
-    )
-  } else if (showLine) {
-    visualSlot = (
+  let leadingVisual: ReactNode = null
+  let historyNote: string | null = null
+  if (showLine) {
+    leadingVisual = (
       <AccountSparkline
         points={points}
         color={seriesColor}
         currency={account.currency}
+        locale={i18n.language}
         label={`${t('history.sparkline')} ${account.name}`}
       />
     )
+  } else if (historyStatus === 'loading') {
+    leadingVisual = (
+      <div className="account-visual-slot bg-muted/50 h-12 min-w-0 rounded-md" aria-hidden="true" />
+    )
+  } else if (historyStatus === 'error') {
+    historyNote = t('history.slotUnavailable')
   } else if (isCreditCard && creditLimit !== null && utilization !== null) {
-    visualSlot = (
-      <div className="account-visual-slot mt-auto flex h-12 min-w-0 items-center gap-3">
+    leadingVisual = (
+      <div className="account-visual-slot flex h-12 min-w-0 items-center gap-3">
         <ProgressBar
           value={utilization}
           size="sm"
@@ -1026,11 +1021,7 @@ function AccountCard({
       </div>
     )
   } else {
-    visualSlot = (
-      <p className="account-visual-slot text-muted-foreground mt-auto flex h-12 min-w-0 items-center text-xs">
-        {t('history.slotEmpty')}
-      </p>
-    )
+    historyNote = t('history.slotEmpty')
   }
 
   return (
@@ -1097,38 +1088,40 @@ function AccountCard({
               triggerClassName="min-h-11 min-w-11 px-2"
             />
           </div>
+          {leadingVisual ? <div className="mt-3 min-w-0">{leadingVisual}</div> : null}
           <div className="mt-3 flex min-w-0 flex-wrap items-baseline gap-x-1.5">
-            <p className="text-foreground max-w-full min-w-0 shrink-0 text-xl font-medium tracking-tight break-words tabular-nums min-[380px]:text-2xl">
+            <p
+              data-account-balance=""
+              className="text-foreground max-w-full min-w-0 shrink-0 text-xl font-medium tracking-tight break-words tabular-nums min-[380px]:text-2xl"
+            >
               {formatMoney(account.balance, account.currency)}
             </p>
             <p className="text-muted-foreground shrink-0 text-xs tabular-nums">
               {account.currency}
             </p>
           </div>
+          {historyNote ? <p className="text-muted-foreground mt-1 text-xs">{historyNote}</p> : null}
         </div>
       </div>
 
-      <div className="mt-auto flex min-w-0 flex-col pt-3">
-        {isCreditCard && creditLimit !== null && (
-          <div className="mb-3 grid min-w-0 grid-cols-2 gap-x-4 gap-y-1">
-            <div className="min-w-0">
-              <p className="text-muted-foreground text-xs">{t('credit.limit')}</p>
-              <p className="text-foreground mt-1 max-w-full min-w-0 text-sm font-medium break-words tabular-nums">
-                {formatMoney(creditLimit, account.currency)}
-              </p>
-            </div>
-            <div className="min-w-0">
-              <p className="text-muted-foreground text-xs">{t('credit.available')}</p>
-              <p
-                className={`mt-1 max-w-full min-w-0 text-sm font-medium break-words tabular-nums ${availableCredit !== null && availableCredit < 0 ? 'text-destructive' : 'text-success'}`}
-              >
-                {formatMoney(availableCredit ?? 0, account.currency)}
-              </p>
-            </div>
+      {isCreditCard && creditLimit !== null && (
+        <div className="mt-3 grid min-w-0 grid-cols-2 gap-x-4 gap-y-1">
+          <div className="min-w-0">
+            <p className="text-muted-foreground text-xs">{t('credit.limit')}</p>
+            <p className="text-foreground mt-1 max-w-full min-w-0 text-sm font-medium break-words tabular-nums">
+              {formatMoney(creditLimit, account.currency)}
+            </p>
           </div>
-        )}
-        {visualSlot}
-      </div>
+          <div className="min-w-0">
+            <p className="text-muted-foreground text-xs">{t('credit.available')}</p>
+            <p
+              className={`mt-1 max-w-full min-w-0 text-sm font-medium break-words tabular-nums ${availableCredit !== null && availableCredit < 0 ? 'text-destructive' : 'text-success'}`}
+            >
+              {formatMoney(availableCredit ?? 0, account.currency)}
+            </p>
+          </div>
+        </div>
+      )}
 
       {showCreditDetails && isCreditCard && creditLimit !== null && (
         <div className="mt-3 min-w-0">

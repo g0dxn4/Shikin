@@ -2,7 +2,7 @@ import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Area, AreaChart, CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts'
 import dayjs from 'dayjs'
-import { Banknote, PiggyBank, Receipt } from 'lucide-react'
+import { Banknote, ChevronLeft, ChevronRight, PiggyBank, Receipt, X } from 'lucide-react'
 import { NativePanel } from '@/components/ui/native-layout'
 import { SafeChart } from '@/components/ui/safe-chart'
 import {
@@ -19,17 +19,44 @@ import type { ComparisonDisplayMode } from '@/components/dashboard/overview-acco
 import { OverviewAccountComparison } from '@/components/dashboard/overview-account-comparison'
 import {
   selectSummaryVisual,
+  stepSummarySelection,
   summaryEndpointAmount,
+  summaryPointSelection,
   summaryRecordedValueDomain,
   type SummaryCompositionAccount,
+  type SummaryHistoryPoint,
   type SummaryPlainReason,
+  type SummaryPointSelection,
 } from '@/components/dashboard/overview-summary-visual'
 
 export type NetWorthPeriod = 'month' | '3m' | '6m' | 'ytd' | '1y' | 'all'
 type OverviewView = 'summary' | 'history' | 'comparison'
 
 const OVERVIEW_PERIODS: NetWorthPeriod[] = ['month', '3m', '6m', 'ytd', '1y', 'all']
+const SUMMARY_RANGES = [
+  'month',
+  '3m',
+  '6m',
+  '1y',
+  'all',
+] as const satisfies readonly NetWorthPeriod[]
 const OVERVIEW_VIEWS: OverviewView[] = ['summary', 'history', 'comparison']
+
+const TOUCH_CONTROL =
+  'focus-visible:ring-ring inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md px-2 text-xs font-semibold focus-visible:ring-2 focus-visible:outline-none motion-reduce:transition-none'
+
+function summaryPeriodKey(
+  period: NetWorthPeriod
+): `overview.period.ytd` | `overview.summaryRange.names.${(typeof SUMMARY_RANGES)[number]}` {
+  if (period === 'ytd') return 'overview.period.ytd'
+  return `overview.summaryRange.names.${period}`
+}
+
+function readSnapshotDate(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') return null
+  const date = (payload as { date?: unknown }).date
+  return typeof date === 'string' ? date : null
+}
 
 export interface OverviewHistoryPoint {
   date: string
@@ -53,6 +80,7 @@ interface OverviewNetWorthProps {
   historyAsOfLabel: string
   history: OverviewHistoryPoint[]
   historyComplete: boolean
+  historyPending?: boolean
   historyUnavailableMessage?: string
   period: NetWorthPeriod
   onPeriodChange: (period: NetWorthPeriod) => void
@@ -84,6 +112,7 @@ export function OverviewNetWorth({
   historyAsOfLabel,
   history,
   historyComplete,
+  historyPending = false,
   historyUnavailableMessage,
   period,
   onPeriodChange,
@@ -113,6 +142,7 @@ export function OverviewNetWorth({
     history,
     historyComplete,
     historyCurrency,
+    historyPending,
     currentComplete,
     currentAmount,
     currentCurrency,
@@ -122,6 +152,7 @@ export function OverviewNetWorth({
     accountAssets,
     accountLiabilities,
   })
+  const summaryPeriodLabel = t(summaryPeriodKey(period))
 
   const selectTabFromKeyboard = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     let nextIndex: number | null = null
@@ -192,9 +223,12 @@ export function OverviewNetWorth({
             aria-label={t('overview.views.summary')}
           >
             <div className="flex min-w-0 flex-col lg:pr-8">
+              <SummaryRangeControl period={period} onPeriodChange={onPeriodChange} />
               <SummaryVisualSlot
                 visual={summaryVisual}
-                periodLabel={t(`overview.period.${period}`)}
+                period={period}
+                periodLabel={summaryPeriodLabel}
+                historyUnavailableMessage={historyUnavailableMessage}
               />
               <div className="mt-4 lg:mt-auto lg:pt-6">
                 <span className="text-muted-foreground text-xs">{t('overview.netWorth')}</span>
@@ -377,8 +411,8 @@ export function OverviewNetWorth({
                       </tr>
                     </thead>
                     <tbody>
-                      {history.map((point) => (
-                        <tr key={point.date}>
+                      {history.map((point, index) => (
+                        <tr key={`${point.date}-${index}`}>
                           <td className="py-0.5 pr-6">{dayjs(point.date).format('MMM D, YYYY')}</td>
                           <td className="tabular-nums">
                             {formatMoney(point.netWorth, historyCurrency)}
@@ -454,6 +488,7 @@ const PLAIN_MESSAGE = {
   'one-snapshot': 'overview.summaryOneSnapshot',
   'no-snapshots': 'overview.summaryNoSnapshots',
   'history-unavailable': 'overview.summaryHistoryUnavailable',
+  'history-loading': 'overview.summaryHistoryLoading',
   'composition-unproven': 'overview.summaryCompositionUnproven',
   'current-only': 'overview.summaryCurrentOnly',
 } as const satisfies Record<SummaryPlainReason, `overview.${string}`>
@@ -466,15 +501,113 @@ function formatEndpointDate(date: string, includeYear: boolean) {
   return dayjs(date).format(includeYear ? 'MMM D, YYYY' : 'MMM D')
 }
 
+function SummaryRecordedDot({
+  cx,
+  cy,
+  index,
+  payload,
+  selected,
+  onSelect,
+}: {
+  cx?: number
+  cy?: number
+  index?: number
+  payload?: unknown
+  selected: boolean
+  onSelect: (selection: SummaryPointSelection) => void
+}) {
+  if (
+    typeof cx !== 'number' ||
+    typeof cy !== 'number' ||
+    !Number.isFinite(cx) ||
+    !Number.isFinite(cy)
+  ) {
+    return <g />
+  }
+  const date = readSnapshotDate(payload)
+  return (
+    <circle
+      className="recharts-line-dot"
+      cx={cx}
+      cy={cy}
+      r={selected ? 4 : 2.5}
+      fill="var(--color-chart-1)"
+      stroke="none"
+      data-testid="overview-summary-chart-point"
+      data-date={date ?? ''}
+      data-index={typeof index === 'number' ? String(index) : ''}
+      data-selected={selected ? 'true' : 'false'}
+      style={{ cursor: date ? 'pointer' : undefined }}
+      onClick={(event) => {
+        event.stopPropagation()
+        if (typeof index === 'number' && date) onSelect({ index, date })
+      }}
+    />
+  )
+}
+
+function SummaryRangeControl({
+  period,
+  onPeriodChange,
+}: {
+  period: NetWorthPeriod
+  onPeriodChange: (period: NetWorthPeriod) => void
+}) {
+  const { t } = useTranslation('dashboard')
+  return (
+    <div
+      className="border-border bg-muted mb-3 flex w-full max-w-full flex-wrap gap-0.5 rounded-lg border p-0.5 motion-reduce:transition-none"
+      role="group"
+      aria-label={t('overview.summaryRange.label')}
+      data-testid="overview-summary-range"
+    >
+      {SUMMARY_RANGES.map((item) => (
+        <button
+          key={item}
+          type="button"
+          aria-pressed={period === item}
+          aria-label={t(`overview.summaryRange.names.${item}`)}
+          onClick={() => onPeriodChange(item)}
+          className={cn(
+            TOUCH_CONTROL,
+            period === item
+              ? 'bg-surface text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <span aria-hidden="true">{t(`overview.summaryRange.labels.${item}`)}</span>
+        </button>
+      ))}
+      {(SUMMARY_RANGES as readonly string[]).includes(period) ? null : (
+        <span className="text-muted-foreground px-2 py-2 text-xs">
+          {t(`overview.period.${period}`)}
+        </span>
+      )}
+    </div>
+  )
+}
+
 function SummaryVisualSlot({
   visual,
+  period,
   periodLabel,
+  historyUnavailableMessage,
 }: {
   visual: ReturnType<typeof selectSummaryVisual>
+  period: NetWorthPeriod
   periodLabel: string
+  historyUnavailableMessage?: string
 }) {
   const { t, i18n } = useTranslation('dashboard')
   const locale = i18n?.resolvedLanguage ?? i18n?.language
+  const [selection, setSelection] = useState<{
+    period: NetWorthPeriod
+    point: SummaryPointSelection
+  } | null>(null)
+  const active =
+    visual.kind === 'line' && selection?.period === period
+      ? summaryPointSelection(visual.points, selection.point.index, selection.point.date)
+      : null
 
   if (visual.kind === 'line') {
     const start = visual.points[0]!
@@ -518,8 +651,33 @@ function SummaryVisualSlot({
                   dataKey="netWorth"
                   stroke="var(--color-chart-1)"
                   strokeWidth={1.75}
-                  dot={{ r: 2.5, strokeWidth: 0, fill: 'var(--color-chart-1)' }}
-                  activeDot={{ r: 3.5, strokeWidth: 0 }}
+                  dot={(dotProps: {
+                    cx?: number
+                    cy?: number
+                    index?: number
+                    payload?: unknown
+                  }) => (
+                    <SummaryRecordedDot
+                      cx={dotProps.cx}
+                      cy={dotProps.cy}
+                      index={dotProps.index}
+                      payload={dotProps.payload}
+                      selected={
+                        active !== null &&
+                        active.index === dotProps.index &&
+                        active.date === readSnapshotDate(dotProps.payload)
+                      }
+                      onSelect={(candidate) => {
+                        const valid = summaryPointSelection(
+                          visual.points,
+                          candidate.index,
+                          candidate.date
+                        )
+                        if (valid) setSelection({ period, point: valid })
+                      }}
+                    />
+                  )}
+                  activeDot={{ r: 3.5, strokeWidth: 0, style: { pointerEvents: 'none' } }}
                   isAnimationActive={false}
                   connectNulls={false}
                 />
@@ -561,6 +719,13 @@ function SummaryVisualSlot({
             </span>
           </span>
         </div>
+        <SummaryPointInspection
+          points={visual.points}
+          currency={visual.currency}
+          active={active}
+          onSelect={(point) => setSelection({ period, point })}
+          onClear={() => setSelection(null)}
+        />
         <p id={SUMMARY_RECORDED_CAPTION_ID} className="sr-only">
           {caption}
         </p>
@@ -577,11 +742,81 @@ function SummaryVisualSlot({
               {visual.points.map((point, index) => (
                 <tr key={`${point.date}-${index}`}>
                   <th scope="row">
-                    <time dateTime={point.date}>{formatSnapshotDate(point.date)}</time>
+                    <button
+                      type="button"
+                      aria-pressed={active?.index === index && active.date === point.date}
+                      data-index={index}
+                      onClick={() => {
+                        const valid = summaryPointSelection(visual.points, index, point.date)
+                        if (valid) setSelection({ period, point: valid })
+                      }}
+                    >
+                      <time dateTime={point.date}>{formatSnapshotDate(point.date)}</time>
+                    </button>
                   </th>
                   <td>{formatMoney(point.netWorth, visual.currency)}</td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )
+  }
+
+  if (visual.kind === 'point') {
+    const { point, currency } = visual
+    const caption = t('overview.summaryRecorded', {
+      count: 1,
+      period: periodLabel,
+      start: formatSnapshotDate(point.date),
+      end: formatSnapshotDate(point.date),
+    })
+    return (
+      <div className="shrink-0" data-testid="overview-summary-recorded-point">
+        <div
+          className="flex h-28 min-w-0 items-end"
+          role="img"
+          aria-labelledby={SUMMARY_RECORDED_CAPTION_ID}
+          aria-describedby={SUMMARY_RECORDED_TABLE_ID}
+        >
+          <span
+            data-testid="overview-summary-single-dot"
+            className="mb-1 block size-2 rounded-full"
+            style={{ backgroundColor: 'var(--color-chart-1)' }}
+            aria-hidden="true"
+          />
+        </div>
+        <p className="text-foreground mt-1 text-xs leading-snug break-words">
+          <time dateTime={point.date} className="tabular-nums">
+            {formatSnapshotDate(point.date)}
+          </time>
+          <span className="mt-0.5 block font-medium break-all tabular-nums">
+            {formatMoney(point.netWorth, currency)}
+          </span>
+        </p>
+        <p className="text-muted-foreground mt-1 text-xs leading-snug break-words">
+          {t('overview.summaryOneSnapshot')}
+        </p>
+        <p id={SUMMARY_RECORDED_CAPTION_ID} className="sr-only">
+          {caption}
+        </p>
+        <div className="sr-only">
+          <table id={SUMMARY_RECORDED_TABLE_ID}>
+            <caption>{caption}</caption>
+            <thead>
+              <tr>
+                <th scope="col">{t('overview.summaryDate')}</th>
+                <th scope="col">{t('overview.netWorth')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">
+                  <time dateTime={point.date}>{formatSnapshotDate(point.date)}</time>
+                </th>
+                <td>{formatMoney(point.netWorth, currency)}</td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -635,8 +870,14 @@ function SummaryVisualSlot({
           ) : null}
         </div>
         <p
-          id={SUMMARY_COMPOSITION_CAPTION_ID}
+          data-testid="overview-summary-range-context"
           className="text-muted-foreground mt-2 text-xs leading-snug break-words"
+        >
+          {t('overview.summaryRangeEmpty', { range: periodLabel })}
+        </p>
+        <p
+          id={SUMMARY_COMPOSITION_CAPTION_ID}
+          className="text-muted-foreground mt-1 text-xs leading-snug break-words"
         >
           {caption}
         </p>
@@ -686,14 +927,134 @@ function SummaryVisualSlot({
     )
   }
 
+  const message =
+    visual.reason === 'history-loading'
+      ? t('overview.summaryHistoryLoading', { range: periodLabel })
+      : t(PLAIN_MESSAGE[visual.reason])
   return (
     <div className="flex h-28 shrink-0 items-end">
-      <p
-        data-testid="overview-summary-plain"
-        data-reason={visual.reason}
-        className="text-muted-foreground max-w-prose text-xs leading-snug break-words"
+      <div className="min-w-0">
+        <p
+          data-testid="overview-summary-plain"
+          data-reason={visual.reason}
+          role="status"
+          aria-busy={visual.reason === 'history-loading' ? true : undefined}
+          className="text-muted-foreground max-w-prose text-xs leading-snug break-words"
+        >
+          {message}
+          {visual.reason === 'history-unavailable' && historyUnavailableMessage
+            ? ` · ${historyUnavailableMessage}`
+            : ''}
+        </p>
+        {visual.reason === 'history-loading' ? null : (
+          <p
+            data-testid="overview-summary-range-context"
+            className="text-muted-foreground mt-1 text-xs leading-snug break-words"
+          >
+            {periodLabel}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SummaryPointInspection({
+  points,
+  currency,
+  active,
+  onSelect,
+  onClear,
+}: {
+  points: readonly SummaryHistoryPoint[]
+  currency: string
+  active: SummaryPointSelection | null
+  onSelect: (selection: SummaryPointSelection) => void
+  onClear: () => void
+}) {
+  const { t } = useTranslation('dashboard')
+  const activePoint = active ? points[active.index] : undefined
+  const atStart = active?.index === 0
+  const atEnd = active !== null && active.index === points.length - 1
+  const move = (direction: -1 | 1) => {
+    const next = stepSummarySelection(points, active, direction)
+    if (next && (next.index !== active?.index || next.date !== active?.date)) onSelect(next)
+  }
+  return (
+    <div
+      className="mt-2 flex max-w-full flex-wrap items-center gap-1 motion-reduce:transition-none"
+      role="group"
+      aria-label={t('overview.summaryInspect.label')}
+      data-testid="overview-summary-inspect"
+      onKeyDown={(event) => {
+        if (event.key === 'ArrowRight') {
+          event.preventDefault()
+          move(1)
+        } else if (event.key === 'ArrowLeft') {
+          event.preventDefault()
+          move(-1)
+        } else if (event.key === 'Escape') {
+          event.preventDefault()
+          onClear()
+        }
+      }}
+    >
+      <button
+        type="button"
+        className={cn(
+          TOUCH_CONTROL,
+          'text-muted-foreground hover:text-foreground',
+          atStart && 'opacity-50'
+        )}
+        aria-label={t('overview.summaryInspect.previous')}
+        aria-disabled={atStart || undefined}
+        onClick={() => {
+          if (!atStart) move(-1)
+        }}
       >
-        {t(PLAIN_MESSAGE[visual.reason])}
+        <ChevronLeft className="size-4" aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        className={cn(
+          TOUCH_CONTROL,
+          'text-muted-foreground hover:text-foreground',
+          atEnd && 'opacity-50'
+        )}
+        aria-label={t('overview.summaryInspect.next')}
+        aria-disabled={atEnd || undefined}
+        onClick={() => {
+          if (!atEnd) move(1)
+        }}
+      >
+        <ChevronRight className="size-4" aria-hidden="true" />
+      </button>
+      {active && activePoint ? (
+        <button
+          type="button"
+          className={cn(TOUCH_CONTROL, 'text-muted-foreground hover:text-foreground')}
+          aria-label={t('overview.summaryInspect.clear')}
+          onClick={onClear}
+        >
+          <X className="size-4" aria-hidden="true" />
+        </button>
+      ) : null}
+      <p
+        data-testid="overview-summary-inspection"
+        aria-live="polite"
+        aria-atomic="true"
+        className="text-foreground min-w-0 text-xs leading-snug break-words"
+      >
+        {active && activePoint ? (
+          <>
+            <time dateTime={active.date} className="tabular-nums">
+              {formatSnapshotDate(active.date)}
+            </time>
+            <span className="mt-0.5 block font-medium break-all tabular-nums">
+              {formatMoney(activePoint.netWorth, currency)}
+            </span>
+          </>
+        ) : null}
       </p>
     </div>
   )

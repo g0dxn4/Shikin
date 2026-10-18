@@ -70,6 +70,7 @@ let mockNetWorthHistoryCurrency: string | null = 'USD'
 let mockNetWorthHistoryRequestedPeriod = '6m'
 let mockNetWorthHistoryLoading = false
 let mockNetWorthHistoryError: string | null = null
+let mockNetWorthHistoryMissingCurrencies: string[] = []
 let mockNetWorthTotalAssets: number | null = 0
 let mockNetWorthTotalLiabilities: number | null = 0
 let mockNetWorthTotalInvestments: number | null = 0
@@ -232,7 +233,7 @@ vi.mock('@/stores/net-worth-store', () => ({
     historyRequestedPeriod: mockNetWorthHistoryRequestedPeriod,
     historyLoading: mockNetWorthHistoryLoading,
     historyError: mockNetWorthHistoryError,
-    historyMissingCurrencies: [],
+    historyMissingCurrencies: mockNetWorthHistoryMissingCurrencies,
     isLoading: mockNetWorthLoading,
     loadHistory: mockLoadHistory,
     calculateCurrent: mockCalculateCurrent,
@@ -309,6 +310,7 @@ describe('Dashboard', () => {
     mockNetWorthHistoryRequestedPeriod = '6m'
     mockNetWorthHistoryLoading = false
     mockNetWorthHistoryError = null
+    mockNetWorthHistoryMissingCurrencies = []
     mockNetWorthTotalAssets = 0
     mockNetWorthTotalLiabilities = 0
     mockNetWorthTotalInvestments = 0
@@ -374,7 +376,14 @@ describe('Dashboard', () => {
     expect(
       summary.querySelector('[aria-describedby="overview-summary-recorded-snapshots"]')
     ).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'overview.period.6m' })).not.toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'overview.summaryRange.label' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'overview.summaryRange.names.6m' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
+    expect(screen.getByRole('button', { name: 'overview.summaryRange.names.6m' })).toHaveClass(
+      'min-h-11'
+    )
     expect(screen.queryByRole('img', { name: 'overview.chartTitle' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: 'overview.views.history' }))
@@ -1487,6 +1496,133 @@ describe('Dashboard', () => {
       await user.click(screen.getByRole('tab', { name: 'overview.views.history' }))
       await user.click(screen.getByRole('button', { name: 'overview.period.3m' }))
       expect(mockLoadHistory).toHaveBeenCalledWith('3m')
+    })
+
+    it('requests this month and all recorded snapshots from Summary without a fake 1m range', async () => {
+      const user = userEvent.setup()
+      mockNetWorth = 195_000
+      mockCalculateCurrent.mockResolvedValue(undefined)
+      mockAccounts = [
+        { id: 'nu', name: 'Nu', type: 'checking', currency: 'USD', balance: 1 },
+        { id: 'bbva', name: 'BBVA', type: 'checking', currency: 'USD', balance: 2 },
+      ]
+      mockNetWorthHistory = [
+        { date: '2026-01-01', netWorth: 60_000, assets: 80_000, liabilities: 20_000 },
+        { date: '2026-02-01', netWorth: 73_000, assets: 85_000, liabilities: 12_000 },
+      ]
+
+      const { rerender } = render(<Dashboard />)
+      expect(await screen.findByText('$1,950.00')).toBeInTheDocument()
+      const summary = document.getElementById('overview-summary-panel')!
+      expect(document.getElementById('overview-summary-recorded-snapshots')).toHaveTextContent(
+        'Jan 1, 2026'
+      )
+      expect(document.getElementById('overview-summary-recorded-snapshots')).toHaveTextContent(
+        '$600.00'
+      )
+
+      await user.click(screen.getByRole('button', { name: 'overview.summaryRange.names.month' }))
+      expect(mockLoadHistory).toHaveBeenCalledWith('month')
+      expect(mockLoadHistory).not.toHaveBeenCalledWith('1m')
+      expect(document.getElementById('overview-summary-recorded-snapshots')).toBeNull()
+      expect(summary).not.toHaveTextContent('$600.00')
+      expect(summary.querySelector('[data-testid="overview-summary-plain"]')).toHaveAttribute(
+        'data-reason',
+        'history-loading'
+      )
+      expect(screen.getByText('$1,950.00')).toBeInTheDocument()
+      expect(
+        screen.getByRole('button', { name: 'overview.summaryRange.names.month' })
+      ).toHaveAttribute('aria-pressed', 'true')
+
+      await user.click(screen.getByRole('button', { name: 'overview.summaryRange.names.all' }))
+      expect(mockLoadHistory).toHaveBeenCalledWith('all')
+      expect(summary).not.toHaveTextContent('$600.00')
+      expect(screen.getByText('$1,950.00')).toBeInTheDocument()
+
+      mockNetWorthHistoryRequestedPeriod = 'all'
+      mockNetWorthHistoryComplete = true
+      mockNetWorthHistoryLoading = false
+      mockNetWorthHistory = [
+        { date: '2020-05-04', netWorth: 10_000, assets: 10_000, liabilities: 0 },
+        { date: '2026-02-01', netWorth: 73_000, assets: 85_000, liabilities: 12_000 },
+      ]
+      rerender(<Dashboard />)
+      expect(document.getElementById('overview-summary-recorded-snapshots')).toHaveTextContent(
+        'May 4, 2020'
+      )
+      expect(document.getElementById('overview-summary-recorded-snapshots')).toHaveTextContent(
+        '$100.00'
+      )
+      expect(document.getElementById('overview-summary-recorded-snapshots')).toHaveTextContent(
+        '$730.00'
+      )
+      expect(screen.getByText('$1,950.00')).toBeInTheDocument()
+
+      await user.click(screen.getByRole('tab', { name: 'overview.views.history' }))
+      expect(screen.getByRole('button', { name: 'overview.period.all' })).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      )
+      await user.click(screen.getByRole('tab', { name: 'overview.views.comparison' }))
+      expect(screen.getByRole('button', { name: 'overview.period.6m' })).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      )
+      expect(screen.getByRole('button', { name: 'overview.period.all' })).toHaveAttribute(
+        'aria-pressed',
+        'false'
+      )
+    })
+
+    it('keeps Summary ranges usable when currency, FX, or authority is not settled', async () => {
+      const user = userEvent.setup()
+      mockMainCurrency = null
+      mockNetWorthHistory = [
+        { date: '2026-01-01', netWorth: 12_345, assets: 12_345, liabilities: 0 },
+        { date: '2026-02-01', netWorth: 67_890, assets: 67_890, liabilities: 0 },
+      ]
+      const { rerender } = render(<Dashboard />)
+      const summary = document.getElementById('overview-summary-panel')!
+      expect(summary).toHaveTextContent('currency.mainRequired')
+      expect(summary).not.toHaveTextContent('$123.45')
+      expect(screen.getByRole('group', { name: 'overview.summaryRange.label' })).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'overview.summaryRange.names.all' }))
+      expect(mockLoadHistory).toHaveBeenCalledWith('all')
+      expect(summary).not.toHaveTextContent('$123.45')
+
+      mockMainCurrency = 'USD'
+      mockNetWorthHistoryComplete = false
+      mockNetWorthHistoryLoading = false
+      mockNetWorthHistoryRequestedPeriod = 'all'
+      mockNetWorthHistoryMissingCurrencies = ['EUR']
+      rerender(<Dashboard />)
+      expect(summary.querySelector('[data-testid="overview-summary-plain"]')).toHaveAttribute(
+        'data-reason',
+        'history-unavailable'
+      )
+      expect(summary).toHaveTextContent('currency.missingDatedRates: EUR')
+      expect(summary).not.toHaveTextContent('$123.45')
+      expect(
+        screen.getByRole('button', { name: 'overview.summaryRange.names.all' })
+      ).toBeInTheDocument()
+
+      mockNetWorthHistoryMissingCurrencies = []
+      mockNetWorthHistoryLoading = true
+      mockNetWorthHistoryComplete = true
+      mockNetWorthHistoryRequestedPeriod = 'all'
+      mockNetWorthHistory = [
+        { date: '2026-01-01', netWorth: 12_345, assets: 12_345, liabilities: 0 },
+        { date: '2026-02-01', netWorth: 67_890, assets: 67_890, liabilities: 0 },
+      ]
+      rerender(<Dashboard />)
+      expect(summary.querySelector('[data-testid="overview-summary-plain"]')).toHaveAttribute(
+        'data-reason',
+        'history-loading'
+      )
+      expect(summary).not.toHaveTextContent('$123.45')
+      expect(summary).not.toHaveTextContent('$678.90')
+      expect(screen.getByRole('group', { name: 'overview.summaryRange.label' })).toBeInTheDocument()
     })
   })
 })

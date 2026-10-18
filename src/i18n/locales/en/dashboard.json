@@ -71,8 +71,33 @@
     "summaryOneSnapshot": "One recorded snapshot is not a trend",
     "summaryNoSnapshots": "No recorded snapshots in this range",
     "summaryHistoryUnavailable": "Recorded history unavailable",
+    "summaryHistoryLoading": "Loading recorded snapshots for {{range}}",
+    "summaryRangeEmpty": "No recorded snapshots in {{range}}",
     "summaryCompositionUnproven": "Current composition can't be shown until assets, holdings, and liabilities reconcile",
     "summaryCurrentOnly": "Current value only",
+    "summaryRange": {
+      "label": "Summary snapshot range",
+      "labels": {
+        "month": "MTD",
+        "3m": "3M",
+        "6m": "6M",
+        "1y": "1Y",
+        "all": "MAX"
+      },
+      "names": {
+        "month": "This month",
+        "3m": "3 months",
+        "6m": "6 months",
+        "1y": "1 year",
+        "all": "All recorded snapshots"
+      }
+    },
+    "summaryInspect": {
+      "label": "Recorded snapshot inspection",
+      "previous": "Previous snapshot",
+      "next": "Next snapshot",
+      "clear": "Clear selected snapshot"
+    },
     "comparison": {
       "firstAccount": "First account",
       "secondAccount": "Second account",

@@ -71,8 +71,33 @@
     "summaryOneSnapshot": "Un solo registro no es una tendencia",
     "summaryNoSnapshots": "No hay registros en este rango",
     "summaryHistoryUnavailable": "El historial registrado no está disponible",
+    "summaryHistoryLoading": "Cargando registros de {{range}}",
+    "summaryRangeEmpty": "No hay registros en {{range}}",
     "summaryCompositionUnproven": "La composición actual no se muestra hasta que activos, inversiones y pasivos coincidan",
     "summaryCurrentOnly": "Solo valor actual",
+    "summaryRange": {
+      "label": "Rango de registros del resumen",
+      "labels": {
+        "month": "MTD",
+        "3m": "3M",
+        "6m": "6M",
+        "1y": "1A",
+        "all": "MÁX"
+      },
+      "names": {
+        "month": "Este mes",
+        "3m": "3 meses",
+        "6m": "6 meses",
+        "1y": "1 año",
+        "all": "Todos los registros"
+      }
+    },
+    "summaryInspect": {
+      "label": "Inspección de registros",
+      "previous": "Registro anterior",
+      "next": "Registro siguiente",
+      "clear": "Quitar selección"
+    },
     "comparison": {
       "firstAccount": "Primera cuenta",
       "secondAccount": "Segunda cuenta",

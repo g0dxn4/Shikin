@@ -242,6 +242,9 @@ export function Dashboard() {
     historyCurrency === mainCurrency &&
     historyRequestedPeriod === historyPeriod
   const displayableHistory = historyDisplayable ? history : []
+  // The selected range changes before loadHistory settles. Do not keep the previous series.
+  const historyPending =
+    mainCurrency !== null && (historyLoading || historyRequestedPeriod !== historyPeriod)
   const lastHistoryDate = displayableHistory[displayableHistory.length - 1]?.date ?? null
 
   if (isLoading) {
@@ -313,6 +316,7 @@ export function Dashboard() {
         })}
         history={displayableHistory}
         historyComplete={historyDisplayable}
+        historyPending={historyPending}
         historyUnavailableMessage={
           !mainCurrency
             ? t('currency.mainRequired')

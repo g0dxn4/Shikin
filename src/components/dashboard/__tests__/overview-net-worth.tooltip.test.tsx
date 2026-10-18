@@ -106,7 +106,8 @@ describe('Overview summary recorded tooltip', () => {
 
     const summary = document.getElementById('overview-summary-panel')!
     expect(summary.querySelector('.h-28')).toBeTruthy()
-    expect(summary.querySelector('[role="group"]')).toBeNull()
+    expect(summary.querySelector('[data-testid="overview-summary-range"]')).toBeTruthy()
+    expect(summary.querySelector('[data-testid="overview-summary-range"]')).toHaveClass('flex-wrap')
 
     const dots = await waitFor(() => {
       const nodes = [...summary.querySelectorAll('.recharts-line-dot')]

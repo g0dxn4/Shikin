@@ -42,13 +42,21 @@ export type SummaryPlainReason =
   | 'one-snapshot'
   | 'no-snapshots'
   | 'history-unavailable'
+  | 'history-loading'
   | 'composition-unproven'
   | 'current-only'
 
 export type SummaryVisual =
   | { kind: 'line'; points: SummaryHistoryPoint[]; currency: string }
+  | { kind: 'point'; point: SummaryHistoryPoint; currency: string }
   | { kind: 'composition'; composition: SummaryComposition }
   | { kind: 'plain'; reason: SummaryPlainReason }
+
+/** Identity of one recorded snapshot. Index distinguishes duplicate dates. */
+export interface SummaryPointSelection {
+  index: number
+  date: string
+}
 
 /** Pad on each side of the recorded span so the summary line is not zero-based. */
 export const SUMMARY_SPAN_PAD_RATIO = 0.12
@@ -61,6 +69,8 @@ export interface SummaryVisualInput {
   history: readonly SummaryHistoryPoint[]
   historyComplete: boolean
   historyCurrency: string | null
+  /** Caller has not settled the requested period. Ignore any series still in hand. */
+  historyPending?: boolean
   currentComplete: boolean
   currentAmount: number | null
   currentCurrency: string | null
@@ -82,15 +92,16 @@ function hasText(value: string | null | undefined): value is string {
 }
 
 /**
- * Recorded snapshots only. Returns null unless the series is complete, dated,
- * and has at least two points. Does not insert today, fill gaps, or reorder.
+ * Recorded snapshots only. Returns null unless every row is a safe dated
+ * integer and the series is complete. Does not insert today, fill gaps, or reorder.
+ * One point is valid here; a line still requires two.
  */
-export function recordedSnapshotLine(
+function recordedSnapshotPoints(
   history: readonly SummaryHistoryPoint[],
   historyComplete: boolean,
   historyCurrency: string | null
 ): SummaryHistoryPoint[] | null {
-  if (!historyComplete || !hasText(historyCurrency) || history.length < 2) return null
+  if (!historyComplete || !hasText(historyCurrency) || history.length < 1) return null
 
   const points: SummaryHistoryPoint[] = []
   let previousDate = ''
@@ -101,6 +112,54 @@ export function recordedSnapshotLine(
     previousDate = point.date
   }
   return points
+}
+
+/**
+ * Recorded snapshots only. Returns null unless the series is complete, dated,
+ * and has at least two points. Does not insert today, fill gaps, or reorder.
+ */
+export function recordedSnapshotLine(
+  history: readonly SummaryHistoryPoint[],
+  historyComplete: boolean,
+  historyCurrency: string | null
+): SummaryHistoryPoint[] | null {
+  const points = recordedSnapshotPoints(history, historyComplete, historyCurrency)
+  if (!points || points.length < 2) return null
+  return points
+}
+
+/** Accepts only an actual row. Duplicate dates stay distinct by index. */
+export function summaryPointSelection(
+  points: readonly SummaryHistoryPoint[],
+  index: number,
+  date: string
+): SummaryPointSelection | null {
+  if (!Number.isInteger(index) || index < 0 || index >= points.length) return null
+  const point = points[index]
+  if (!point || point.date !== date || !ISO_DATE.test(date)) return null
+  return { index, date }
+}
+
+/**
+ * Moves to an actual neighbor. With no current selection, next starts at the
+ * first recorded point and previous at the last. Does not wrap or invent dates.
+ */
+export function stepSummarySelection(
+  points: readonly SummaryHistoryPoint[],
+  selection: SummaryPointSelection | null,
+  direction: -1 | 1
+): SummaryPointSelection | null {
+  if (points.length === 0) return null
+  const current = selection ? summaryPointSelection(points, selection.index, selection.date) : null
+  if (!current) {
+    const index = direction > 0 ? 0 : points.length - 1
+    const point = points[index]
+    return point ? { index, date: point.date } : null
+  }
+  const index = current.index + direction
+  if (index < 0 || index >= points.length) return current
+  const point = points[index]
+  return point ? { index, date: point.date } : current
 }
 
 /**
@@ -179,10 +238,26 @@ export function reconcileSummaryComposition(
 }
 
 export function selectSummaryVisual(input: SummaryVisualInput): SummaryVisual {
+  if (input.historyPending) {
+    return { kind: 'plain', reason: 'history-loading' }
+  }
+
   const historyCurrency = input.historyCurrency?.trim() ?? ''
-  const points = recordedSnapshotLine(input.history, input.historyComplete, historyCurrency)
-  if (points && historyCurrency) {
+  const points = recordedSnapshotPoints(input.history, input.historyComplete, historyCurrency)
+  if (points && points.length >= 2 && historyCurrency) {
     return { kind: 'line', points, currency: historyCurrency }
+  }
+  if (points && points.length === 1 && historyCurrency) {
+    return { kind: 'point', point: points[0]!, currency: historyCurrency }
+  }
+
+  // A requested range that is not a settled empty series must not borrow the
+  // current mix and present it as that range's trend.
+  if (input.history.length > 0 || !input.historyComplete || !historyCurrency) {
+    if (input.historyComplete && historyCurrency && input.history.length === 1) {
+      return { kind: 'plain', reason: 'one-snapshot' }
+    }
+    return { kind: 'plain', reason: 'history-unavailable' }
   }
 
   const composition = input.currentComplete
@@ -201,14 +276,8 @@ export function selectSummaryVisual(input: SummaryVisualInput): SummaryVisual {
     return { kind: 'composition', composition }
   }
 
-  if (input.historyComplete && input.history.length === 1) {
-    return { kind: 'plain', reason: 'one-snapshot' }
-  }
   if (composition) return { kind: 'plain', reason: 'current-only' }
   if (input.currentComplete) return { kind: 'plain', reason: 'composition-unproven' }
-  if (!input.historyComplete || !historyCurrency || input.history.length >= 2) {
-    return { kind: 'plain', reason: 'history-unavailable' }
-  }
   return { kind: 'plain', reason: 'no-snapshots' }
 }
 

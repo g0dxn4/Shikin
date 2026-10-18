@@ -3,7 +3,9 @@ import {
   reconcileSummaryComposition,
   recordedSnapshotLine,
   selectSummaryVisual,
+  stepSummarySelection,
   summaryEndpointAmount,
+  summaryPointSelection,
   summaryRecordedValueDomain,
   SUMMARY_MIN_PAD_CENTAVOS,
   SUMMARY_SPAN_PAD_RATIO,
@@ -242,11 +244,40 @@ describe('selectSummaryVisual', () => {
     ).toEqual({ kind: 'plain', reason: 'history-unavailable' })
   })
 
-  it('uses reconciled composition for zero or one snapshot and never a fake line', () => {
+  it('uses reconciled composition only when the settled range has no snapshots', () => {
     expect(selectSummaryVisual(visualInput({ history: [] })).kind).toBe('composition')
     expect(
-      selectSummaryVisual(visualInput({ history: [{ date: '2026-01-01', netWorth: 75_000 }] })).kind
-    ).toBe('composition')
+      selectSummaryVisual(visualInput({ history: [{ date: '2026-01-01', netWorth: 1 }] }))
+    ).toEqual({
+      kind: 'point',
+      point: { date: '2026-01-01', netWorth: 1 },
+      currency: 'USD',
+    })
+  })
+
+  it('does not borrow the current mix for a pending, incomplete, or invalid range', () => {
+    const history = [
+      { date: '2026-01-01', netWorth: 12_345 },
+      { date: '2026-02-01', netWorth: 67_890 },
+    ]
+    expect(selectSummaryVisual(visualInput({ history, historyPending: true }))).toEqual({
+      kind: 'plain',
+      reason: 'history-loading',
+    })
+    expect(selectSummaryVisual(visualInput({ history, historyComplete: false })).kind).not.toBe(
+      'composition'
+    )
+    expect(selectSummaryVisual(visualInput({ history, historyComplete: false }))).toEqual({
+      kind: 'plain',
+      reason: 'history-unavailable',
+    })
+    expect(
+      selectSummaryVisual(
+        visualInput({
+          history: [{ date: 'not-a-date', netWorth: 1 }],
+        })
+      )
+    ).toEqual({ kind: 'plain', reason: 'one-snapshot' })
   })
 
   it('states why a bar is withheld when reconciliation fails', () => {
@@ -261,7 +292,11 @@ describe('selectSummaryVisual', () => {
           totalAssets: 100_001,
         })
       )
-    ).toEqual({ kind: 'plain', reason: 'one-snapshot' })
+    ).toEqual({
+      kind: 'point',
+      point: { date: '2026-01-01', netWorth: 1 },
+      currency: 'USD',
+    })
     expect(
       selectSummaryVisual(
         visualInput({
@@ -275,6 +310,45 @@ describe('selectSummaryVisual', () => {
         })
       )
     ).toEqual({ kind: 'plain', reason: 'current-only' })
+  })
+})
+
+describe('summary point inspection identity', () => {
+  const points = [
+    { date: '2026-01-15', netWorth: 100_000 },
+    { date: '2026-01-15', netWorth: 250_050 },
+    { date: '2026-04-02', netWorth: 300_000 },
+  ]
+
+  it('selects the clicked index when dates are duplicated', () => {
+    expect(summaryPointSelection(points, 1, '2026-01-15')).toEqual({
+      index: 1,
+      date: '2026-01-15',
+    })
+    expect(summaryPointSelection(points, 0, '2026-01-15')?.index).toBe(0)
+    expect(summaryPointSelection(points, 1, '2026-04-02')).toBeNull()
+    expect(summaryPointSelection(points, 3, '2026-04-02')).toBeNull()
+  })
+
+  it('steps only across actual points and does not wrap', () => {
+    expect(stepSummarySelection(points, null, 1)).toEqual({ index: 0, date: '2026-01-15' })
+    expect(stepSummarySelection(points, null, -1)).toEqual({ index: 2, date: '2026-04-02' })
+    expect(stepSummarySelection(points, { index: 0, date: '2026-01-15' }, 1)).toEqual({
+      index: 1,
+      date: '2026-01-15',
+    })
+    expect(stepSummarySelection(points, { index: 0, date: '2026-01-15' }, -1)).toEqual({
+      index: 0,
+      date: '2026-01-15',
+    })
+    expect(stepSummarySelection(points, { index: 2, date: '2026-04-02' }, 1)).toEqual({
+      index: 2,
+      date: '2026-04-02',
+    })
+    expect(stepSummarySelection(points, { index: 1, date: '2026-04-02' }, 1)).toEqual({
+      index: 0,
+      date: '2026-01-15',
+    })
   })
 })
 

@@ -31,10 +31,22 @@ vi.mock('@/components/ui/safe-chart', () => ({
 }))
 
 vi.mock('recharts', () => ({
-  AreaChart: () => null,
-  Area: () => null,
-  LineChart: () => null,
-  Line: () => null,
+  AreaChart: ({ children }: { children?: React.ReactNode }) => (
+    <div data-testid="area-chart">{children}</div>
+  ),
+  Area: ({ type }: { type?: string }) => <div data-testid="area" data-type={type ?? ''} />,
+  LineChart: ({
+    data,
+    children,
+  }: {
+    data?: Array<{ date: string }>
+    children?: React.ReactNode
+  }) => (
+    <div data-testid="line-chart" data-points={data?.map((point) => point.date).join(',') ?? ''}>
+      {children}
+    </div>
+  ),
+  Line: ({ type }: { type?: string }) => <div data-testid="line" data-type={type ?? ''} />,
   CartesianGrid: () => null,
   XAxis: () => null,
   YAxis: () => null,
@@ -112,8 +124,11 @@ describe('OverviewNetWorth comparison controls', () => {
       screen.queryByRole('combobox', { name: 'overview.comparison.firstAccount' })
     ).not.toBeInTheDocument()
     expect(document.getElementById('overview-comparison-panel')).toHaveAttribute('inert')
+    expect(document.getElementById('overview-comparison-panel')).toHaveAttribute('hidden')
     expect(document.getElementById('overview-history-panel')).toHaveAttribute('aria-hidden', 'true')
+    expect(document.getElementById('overview-history-panel')).toHaveClass('hidden')
     expect(document.getElementById('overview-summary-panel')).not.toHaveAttribute('inert')
+    expect(document.getElementById('overview-summary-panel')).not.toHaveAttribute('hidden')
 
     await user.click(screen.getByRole('tab', { name: 'overview.views.history' }))
     expect(screen.getByText('overview.netWorthHistory')).toBeInTheDocument()
@@ -163,7 +178,10 @@ describe('OverviewNetWorth shared panel geometry and evidence', () => {
     await user.click(screen.getByRole('tab', { name: 'overview.views.history' }))
     expect(screen.getByRole('button', { name: 'overview.period.ytd' })).toBeInTheDocument()
     expect(panels[0]).toHaveAttribute('inert')
+    expect(panels[0]).toHaveAttribute('hidden')
+    expect(panels[0]).not.toHaveClass('invisible')
     expect(panels[2]).toHaveAttribute('inert')
+    expect(panels[2]).toHaveClass('hidden')
   })
 
   it('keeps the four summary metrics and source details without a cash-flow comparison', () => {
@@ -173,9 +191,15 @@ describe('OverviewNetWorth shared panel geometry and evidence', () => {
     expect(metricGrid).not.toHaveClass('grid-cols-2')
     expect(metricGrid?.children).toHaveLength(2)
     expect(summary.querySelectorAll('.rounded-xl.border')).toHaveLength(0)
-    expect(summary).toHaveClass('lg:flex', 'lg:items-center')
-    expect(metricGrid).toHaveClass('w-full')
+    expect(summary).not.toHaveClass('lg:flex', 'lg:items-center', 'invisible')
+    expect(metricGrid).toHaveClass('w-full', 'items-stretch')
+    expect(metricGrid).not.toHaveClass('lg:items-center')
     expect(summary).not.toHaveClass('justify-center')
+    expect(summary.querySelector('.h-28')).toBeTruthy()
+    const figure = summary.querySelector('strong')
+    expect(figure).toHaveClass('text-3xl', 'sm:text-4xl')
+    expect(figure).not.toHaveClass('text-5xl', 'xl:text-5xl')
+    expect(summary.querySelector('.lg\\:mt-auto')).toBeTruthy()
     expect(summary).toHaveTextContent('$1,150.00')
     expect(summary).toHaveTextContent('$10.00')
     expect(summary).toHaveTextContent('$4.00')
@@ -270,5 +294,166 @@ describe('OverviewNetWorth shared panel geometry and evidence', () => {
     expect(summary).toHaveTextContent('$0.50')
     expect(screen.getByText('-$0.50')).toHaveClass('text-destructive')
     expect(document.getElementById('overview-comparison-panel')).toHaveAttribute('inert')
+  })
+})
+
+const baseProps = {
+  currentComplete: true,
+  currentAmount: 75_000,
+  currentCurrency: 'USD',
+  income: '$9.99',
+  spent: '$1.11',
+  saved: '$8.88',
+  savedTone: 'positive' as const,
+  monthlySummaryLabel: 'April 2026 · dated manual rates',
+  currentAsOfLabel: 'Current value · April 18, 2026',
+  historyAsOfLabel: '',
+  history: [] as Array<{ date: string; netWorth: number }>,
+  historyComplete: true,
+  period: '6m' as const,
+  onPeriodChange: () => {},
+  historyCurrency: 'USD',
+  emptyHistoryMessage: 'No history',
+  accounts,
+  preferredCurrency: 'USD',
+  totalAssets: 100_000,
+  totalLiabilities: 25_000,
+  totalInvestments: 20_000,
+  accountAssets: [
+    { id: 'checking', name: 'Checking', currency: 'USD', convertedBalance: 80_000 },
+    { id: 'idle', name: 'Idle', currency: 'EUR', convertedBalance: 0 },
+  ],
+  accountLiabilities: [{ id: 'card', name: 'Card', currency: 'MXN', convertedBalance: 25_000 }],
+}
+
+describe('Overview summary visual', () => {
+  it('charts exactly two recorded snapshots with full amounts and no area fill', () => {
+    render(
+      <OverviewNetWorth
+        {...baseProps}
+        currentAmount={115_000}
+        history={[
+          { date: '2026-01-01', netWorth: 100_000 },
+          { date: '2026-03-01', netWorth: 115_000 },
+        ]}
+      />
+    )
+    const summary = document.getElementById('overview-summary-panel')!
+    const chart = summary.querySelector('[data-testid="line-chart"]')
+    expect(chart).toHaveAttribute('data-points', '2026-01-01,2026-03-01')
+    expect(summary.querySelector('[data-testid="line"]')).toHaveAttribute('data-type', 'linear')
+    expect(summary.querySelector('[data-testid="area-chart"]')).not.toBeInTheDocument()
+    expect(summary.querySelector('[data-testid="overview-summary-composition"]')).toBeNull()
+    expect(
+      document.getElementById('overview-history-panel')?.querySelector('[data-testid="area"]')
+    ).toHaveAttribute('data-type', 'monotone')
+
+    const table = document.getElementById('overview-summary-recorded-snapshots') as HTMLTableElement
+    expect(table.parentElement).toHaveClass('sr-only')
+    expect(table).not.toHaveClass('sr-only')
+    expect(table).not.toHaveAttribute('hidden')
+    expect(
+      summary.querySelector('[aria-describedby="overview-summary-recorded-snapshots"]')
+    ).toHaveAttribute('aria-labelledby', 'overview-summary-recorded-caption')
+    expect(table.querySelector('time[datetime="2026-01-01"]')).toHaveTextContent('Jan 1, 2026')
+    expect(table.querySelector('time[datetime="2026-03-01"]')).toHaveTextContent('Mar 1, 2026')
+    expect(table).toHaveTextContent('$1,000.00')
+    expect(table).toHaveTextContent('$1,150.00')
+    expect(table.caption?.textContent).toContain('Jan 1, 2026')
+    expect(table.caption?.textContent).toContain('Mar 1, 2026')
+    expect(table.caption?.textContent).toContain('overview.period.6m')
+    expect(summary.querySelector('[role="group"]')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'overview.period.6m' })).not.toBeInTheDocument()
+  })
+
+  it('does not draw a line for zero or one snapshot', () => {
+    const { rerender } = render(<OverviewNetWorth {...baseProps} history={[]} />)
+    const summary = document.getElementById('overview-summary-panel')!
+    expect(summary.querySelector('[data-testid="line-chart"]')).toBeNull()
+    expect(document.getElementById('overview-summary-recorded-snapshots')).toBeNull()
+
+    rerender(
+      <OverviewNetWorth
+        {...baseProps}
+        history={[{ date: '2026-04-02', netWorth: 75_000 }]}
+        totalAssets={null}
+      />
+    )
+    expect(summary.querySelector('[data-testid="line-chart"]')).toBeNull()
+    expect(summary.querySelector('[data-testid="overview-summary-plain"]')).toHaveAttribute(
+      'data-reason',
+      'one-snapshot'
+    )
+    expect(summary.querySelector('[data-testid="overview-summary-composition"]')).toBeNull()
+  })
+
+  it('does not chart stale or incomplete history amounts', () => {
+    render(
+      <OverviewNetWorth
+        {...baseProps}
+        currentComplete={false}
+        currentAmount={null}
+        currentCurrency={null}
+        historyComplete={false}
+        historyCurrency={null}
+        history={[
+          { date: '2026-01-01', netWorth: 12_345 },
+          { date: '2026-02-01', netWorth: 67_890 },
+        ]}
+        totalAssets={null}
+        totalLiabilities={null}
+        totalInvestments={null}
+      />
+    )
+    const summary = document.getElementById('overview-summary-panel')!
+    expect(summary.querySelector('[data-testid="line-chart"]')).toBeNull()
+    expect(summary.querySelector('[data-testid="overview-summary-composition"]')).toBeNull()
+    expect(document.getElementById('overview-summary-recorded-snapshots')).toBeNull()
+    expect(summary).not.toHaveTextContent('$123.45')
+    expect(summary).not.toHaveTextContent('$678.90')
+    expect(summary.querySelector('[data-testid="overview-summary-plain"]')).toHaveAttribute(
+      'data-reason',
+      'history-unavailable'
+    )
+  })
+
+  it('shows holdings separately when composition reconciles and refuses an inexact bar', () => {
+    const { rerender } = render(<OverviewNetWorth {...baseProps} history={[]} />)
+    const summary = document.getElementById('overview-summary-panel')!
+    expect(summary.querySelector('[data-testid="line-chart"]')).toBeNull()
+    const segments = summary.querySelectorAll('[data-testid="composition-segment"]')
+    expect(segments).toHaveLength(2)
+    expect(segments[0]).toHaveAttribute('data-segment', 'checking')
+    expect(segments[0]).toHaveAttribute('data-kind', 'account')
+    expect(segments[1]).toHaveAttribute('data-segment', 'holdings')
+    expect(segments[1]).toHaveAttribute('data-kind', 'holdings')
+    expect((segments[0] as HTMLElement).style.minWidth).toBe('')
+    expect((segments[0] as HTMLElement).style.flexBasis).toBe('0px')
+    expect((segments[1] as HTMLElement).style.flexGrow).toBe('20000')
+
+    const table = document.getElementById('overview-summary-composition') as HTMLTableElement
+    expect(table.parentElement).toHaveClass('sr-only')
+    expect(table).not.toHaveClass('sr-only')
+    expect(summary.querySelector('[aria-describedby="overview-summary-composition"]')).toBeTruthy()
+    expect(table).toHaveTextContent('Checking')
+    expect(table).toHaveTextContent('overview.summaryHoldings')
+    expect(table).toHaveTextContent('$800.00')
+    expect(table).toHaveTextContent('$200.00')
+    expect(table).toHaveTextContent('$250.00')
+    expect(table).toHaveTextContent('$750.00')
+    expect(table).toHaveTextContent('$1,000.00')
+    expect(table).not.toHaveTextContent('$9.99')
+    expect(table).not.toHaveTextContent('$1.11')
+    expect(summary).not.toHaveTextContent('Idle')
+
+    rerender(<OverviewNetWorth {...baseProps} history={[]} totalAssets={100_001} />)
+    expect(summary.querySelector('[data-testid="overview-summary-composition"]')).toBeNull()
+    expect(summary.querySelector('[data-testid="composition-segment"]')).toBeNull()
+    expect(document.getElementById('overview-summary-composition')).toBeNull()
+    expect(summary).not.toHaveTextContent('$800.00')
+    expect(summary.querySelector('[data-testid="overview-summary-plain"]')).toHaveAttribute(
+      'data-reason',
+      'composition-unproven'
+    )
   })
 })

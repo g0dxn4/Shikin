@@ -1,6 +1,6 @@
 import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts'
+import { Area, AreaChart, CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts'
 import dayjs from 'dayjs'
 import { Banknote, PiggyBank, Receipt } from 'lucide-react'
 import { NativePanel } from '@/components/ui/native-layout'
@@ -17,6 +17,11 @@ import { cn } from '@/lib/utils'
 import type { Account } from '@/types/database'
 import type { ComparisonDisplayMode } from '@/components/dashboard/overview-account-comparison-helpers'
 import { OverviewAccountComparison } from '@/components/dashboard/overview-account-comparison'
+import {
+  selectSummaryVisual,
+  type SummaryCompositionAccount,
+  type SummaryPlainReason,
+} from '@/components/dashboard/overview-summary-visual'
 
 export type NetWorthPeriod = 'month' | '3m' | '6m' | 'ytd' | '1y' | 'all'
 type OverviewView = 'summary' | 'history' | 'comparison'
@@ -53,6 +58,11 @@ interface OverviewNetWorthProps {
   emptyHistoryMessage: string
   accounts: Account[]
   preferredCurrency: string | null
+  totalAssets?: number | null
+  totalLiabilities?: number | null
+  totalInvestments?: number | null
+  accountAssets?: readonly SummaryCompositionAccount[]
+  accountLiabilities?: readonly SummaryCompositionAccount[]
 }
 
 export function OverviewNetWorth({
@@ -79,6 +89,11 @@ export function OverviewNetWorth({
   emptyHistoryMessage,
   accounts,
   preferredCurrency,
+  totalAssets = null,
+  totalLiabilities = null,
+  totalInvestments = null,
+  accountAssets = [],
+  accountLiabilities = [],
 }: OverviewNetWorthProps) {
   const { t } = useTranslation('dashboard')
   const [view, setView] = useState<OverviewView>('summary')
@@ -92,6 +107,19 @@ export function OverviewNetWorth({
   const hasCurrentValue = currentComplete && currentAmount !== null && currentCurrency !== null
   const hasHistory = historyComplete && historyCurrency !== null
   const hasChange = hasCurrentValue && hasHistory && history.length > 1
+  const summaryVisual = selectSummaryVisual({
+    history,
+    historyComplete,
+    historyCurrency,
+    currentComplete,
+    currentAmount,
+    currentCurrency,
+    totalAssets,
+    totalLiabilities,
+    totalInvestments,
+    accountAssets,
+    accountLiabilities,
+  })
 
   const selectTabFromKeyboard = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     let nextIndex: number | null = null
@@ -150,33 +178,42 @@ export function OverviewNetWorth({
           role="tabpanel"
           aria-labelledby="overview-summary-tab"
           className={cn(
-            'col-start-1 row-start-1 min-w-0 p-4 sm:p-6 lg:flex lg:items-center',
-            view !== 'summary' && 'pointer-events-none invisible'
+            'col-start-1 row-start-1 min-w-0 p-4 sm:p-6',
+            view !== 'summary' && 'hidden'
           )}
+          hidden={view !== 'summary'}
           aria-hidden={view !== 'summary'}
           inert={view !== 'summary'}
         >
           <div
-            className="grid w-full min-w-0 items-start gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:items-center lg:gap-0"
+            className="grid w-full min-w-0 items-stretch gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:gap-0"
             aria-label={t('overview.views.summary')}
           >
-            <div className="min-w-0 lg:pr-8">
-              <span className="text-muted-foreground text-xs">{t('overview.netWorth')}</span>
-              <strong className="mt-1.5 block text-3xl font-semibold tracking-tight break-all tabular-nums sm:text-4xl xl:text-5xl">
+            <div className="flex min-w-0 flex-col lg:pr-8">
+              <SummaryVisualSlot
+                visual={summaryVisual}
+                periodLabel={t(`overview.period.${period}`)}
+              />
+              <div className="mt-4 lg:mt-auto lg:pt-6">
+                <span className="text-muted-foreground text-xs">{t('overview.netWorth')}</span>
+                <strong className="mt-1.5 block text-3xl font-semibold tracking-tight break-all tabular-nums sm:text-4xl">
+                  {hasCurrentValue ? (
+                    formatMoney(currentAmount, currentCurrency)
+                  ) : (
+                    <span className="text-warning">—</span>
+                  )}
+                </strong>
                 {hasCurrentValue ? (
-                  formatMoney(currentAmount, currentCurrency)
+                  <p className="text-muted-foreground mt-2 text-xs break-words">
+                    {currentAsOfLabel}
+                  </p>
                 ) : (
-                  <span className="text-warning">—</span>
+                  <p role="alert" className="text-warning mt-2 text-xs break-words">
+                    {t('currency.totalUnavailable')}
+                    {unavailableMessage ? ` · ${unavailableMessage}` : ''}
+                  </p>
                 )}
-              </strong>
-              {hasCurrentValue ? (
-                <p className="text-muted-foreground mt-2 text-xs break-words">{currentAsOfLabel}</p>
-              ) : (
-                <p role="alert" className="text-warning mt-2 text-xs break-words">
-                  {t('currency.totalUnavailable')}
-                  {unavailableMessage ? ` · ${unavailableMessage}` : ''}
-                </p>
-              )}
+              </div>
             </div>
             <div className="border-border min-w-0 lg:border-l lg:pl-8">
               <p className="text-muted-foreground mb-1 text-xs">{monthlySummaryLabel}</p>
@@ -223,8 +260,9 @@ export function OverviewNetWorth({
           aria-labelledby="overview-history-tab"
           className={cn(
             'col-start-1 row-start-1 min-w-0 p-4 sm:p-6',
-            view !== 'history' && 'pointer-events-none invisible'
+            view !== 'history' && 'hidden'
           )}
+          hidden={view !== 'history'}
           aria-hidden={view !== 'history'}
           inert={view !== 'history'}
         >
@@ -363,8 +401,9 @@ export function OverviewNetWorth({
           aria-labelledby="overview-comparison-tab"
           className={cn(
             'col-start-1 row-start-1 min-w-0 p-4 sm:p-6',
-            view !== 'comparison' && 'pointer-events-none invisible'
+            view !== 'comparison' && 'hidden'
           )}
+          hidden={view !== 'comparison'}
           aria-hidden={view !== 'comparison'}
           inert={view !== 'comparison'}
         >
@@ -393,6 +432,227 @@ export function OverviewNetWorth({
         </div>
       </div>
     </NativePanel>
+  )
+}
+
+const SUMMARY_RECORDED_TABLE_ID = 'overview-summary-recorded-snapshots'
+const SUMMARY_COMPOSITION_TABLE_ID = 'overview-summary-composition'
+const SUMMARY_RECORDED_CAPTION_ID = 'overview-summary-recorded-caption'
+const SUMMARY_COMPOSITION_CAPTION_ID = 'overview-summary-composition-caption'
+
+const COMPOSITION_COLORS = [
+  'var(--color-chart-1)',
+  'var(--color-chart-2)',
+  'var(--color-chart-3)',
+  'var(--color-chart-4)',
+  'var(--color-chart-5)',
+]
+
+const PLAIN_MESSAGE = {
+  'one-snapshot': 'overview.summaryOneSnapshot',
+  'no-snapshots': 'overview.summaryNoSnapshots',
+  'history-unavailable': 'overview.summaryHistoryUnavailable',
+  'composition-unproven': 'overview.summaryCompositionUnproven',
+  'current-only': 'overview.summaryCurrentOnly',
+} as const satisfies Record<SummaryPlainReason, `overview.${string}`>
+
+function formatSnapshotDate(date: string) {
+  return dayjs(date).format('MMM D, YYYY')
+}
+
+function SummaryVisualSlot({
+  visual,
+  periodLabel,
+}: {
+  visual: ReturnType<typeof selectSummaryVisual>
+  periodLabel: string
+}) {
+  const { t } = useTranslation('dashboard')
+
+  if (visual.kind === 'line') {
+    const start = visual.points[0]!
+    const end = visual.points[visual.points.length - 1]!
+    const caption = t('overview.summaryRecorded', {
+      count: visual.points.length,
+      period: periodLabel,
+      start: formatSnapshotDate(start.date),
+      end: formatSnapshotDate(end.date),
+    })
+    return (
+      <div className="shrink-0">
+        <div className="h-28 min-w-0" data-testid="overview-summary-recorded-line">
+          <div
+            className="h-full min-h-0"
+            role="img"
+            aria-labelledby={SUMMARY_RECORDED_CAPTION_ID}
+            aria-describedby={SUMMARY_RECORDED_TABLE_ID}
+          >
+            <SafeChart>
+              <LineChart data={visual.points} margin={{ top: 12, right: 8, left: 8, bottom: 4 }}>
+                <Line
+                  type="linear"
+                  dataKey="netWorth"
+                  stroke="var(--color-chart-1)"
+                  strokeWidth={1.75}
+                  dot={{ r: 2.5, strokeWidth: 0, fill: 'var(--color-chart-1)' }}
+                  activeDot={{ r: 3.5, strokeWidth: 0 }}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+                <Tooltip
+                  contentStyle={CHART_TOOLTIP_STYLE}
+                  itemStyle={CHART_ITEM_STYLE}
+                  labelStyle={CHART_LABEL_STYLE}
+                  labelFormatter={(date) => formatSnapshotDate(String(date))}
+                  formatter={(value) => [
+                    typeof value === 'number' && Number.isSafeInteger(value)
+                      ? formatMoney(value, visual.currency)
+                      : '—',
+                    t('overview.netWorth'),
+                  ]}
+                />
+              </LineChart>
+            </SafeChart>
+          </div>
+        </div>
+        <p
+          id={SUMMARY_RECORDED_CAPTION_ID}
+          className="text-muted-foreground mt-2 text-xs leading-snug break-words"
+        >
+          {caption}
+        </p>
+        <div className="sr-only">
+          <table id={SUMMARY_RECORDED_TABLE_ID}>
+            <caption>{caption}</caption>
+            <thead>
+              <tr>
+                <th scope="col">{t('overview.summaryDate')}</th>
+                <th scope="col">{t('overview.netWorth')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visual.points.map((point, index) => (
+                <tr key={`${point.date}-${index}`}>
+                  <th scope="row">
+                    <time dateTime={point.date}>{formatSnapshotDate(point.date)}</time>
+                  </th>
+                  <td>{formatMoney(point.netWorth, visual.currency)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )
+  }
+
+  if (visual.kind === 'composition') {
+    const { composition } = visual
+    const caption = t('overview.summaryComposition', { currency: composition.currency })
+    const liabilityLine =
+      composition.liabilities > 0
+        ? t('overview.summaryLiabilities', {
+            amount: formatMoney(composition.liabilities, composition.currency),
+          })
+        : null
+    return (
+      <div className="shrink-0">
+        <div
+          className="flex h-28 min-w-0 items-end"
+          data-testid="overview-summary-composition"
+          role="img"
+          aria-labelledby={SUMMARY_COMPOSITION_CAPTION_ID}
+          aria-describedby={SUMMARY_COMPOSITION_TABLE_ID}
+        >
+          {composition.segments.length > 0 ? (
+            <div
+              className="flex h-2 w-full min-w-0 overflow-hidden rounded-full"
+              aria-hidden="true"
+            >
+              {composition.segments.map((segment, index) => (
+                <span
+                  key={segment.id}
+                  data-testid="composition-segment"
+                  data-segment={segment.id}
+                  data-kind={segment.kind}
+                  title={`${segment.kind === 'holdings' ? t('overview.summaryHoldings') : segment.name} ${formatMoney(segment.amount, composition.currency)}`}
+                  className="h-full"
+                  style={{
+                    flexGrow: segment.amount,
+                    flexBasis: 0,
+                    backgroundColor: COMPOSITION_COLORS[index % COMPOSITION_COLORS.length],
+                  }}
+                />
+              ))}
+            </div>
+          ) : liabilityLine ? (
+            <p className="text-muted-foreground text-xs leading-snug break-words tabular-nums">
+              {liabilityLine}
+            </p>
+          ) : null}
+        </div>
+        <p
+          id={SUMMARY_COMPOSITION_CAPTION_ID}
+          className="text-muted-foreground mt-2 text-xs leading-snug break-words"
+        >
+          {caption}
+        </p>
+        {composition.segments.length > 0 && liabilityLine ? (
+          <p className="text-muted-foreground mt-1 text-xs leading-snug break-words tabular-nums">
+            {liabilityLine}
+          </p>
+        ) : null}
+        <div className="sr-only">
+          <table id={SUMMARY_COMPOSITION_TABLE_ID}>
+            <caption>{caption}</caption>
+            <thead>
+              <tr>
+                <th scope="col">{t('overview.summarySegment')}</th>
+                <th scope="col">{t('overview.summaryAmount')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {composition.segments.map((segment) => (
+                <tr key={segment.id}>
+                  <th scope="row">
+                    {segment.kind === 'holdings' ? t('overview.summaryHoldings') : segment.name}
+                  </th>
+                  <td>{formatMoney(segment.amount, composition.currency)}</td>
+                </tr>
+              ))}
+              {composition.totalAssets > 0 ? (
+                <tr>
+                  <th scope="row">{t('overview.summaryAssets')}</th>
+                  <td>{formatMoney(composition.totalAssets, composition.currency)}</td>
+                </tr>
+              ) : null}
+              {composition.liabilities > 0 ? (
+                <tr>
+                  <th scope="row">{t('overview.summaryLiabilitiesLabel')}</th>
+                  <td>{formatMoney(composition.liabilities, composition.currency)}</td>
+                </tr>
+              ) : null}
+              <tr>
+                <th scope="row">{t('overview.netWorth')}</th>
+                <td>{formatMoney(composition.netWorth, composition.currency)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex h-28 shrink-0 items-end">
+      <p
+        data-testid="overview-summary-plain"
+        data-reason={visual.reason}
+        className="text-muted-foreground max-w-prose text-xs leading-snug break-words"
+      >
+        {t(PLAIN_MESSAGE[visual.reason])}
+      </p>
+    </div>
   )
 }
 

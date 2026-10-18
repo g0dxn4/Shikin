@@ -70,6 +70,25 @@ let mockNetWorthHistoryCurrency: string | null = 'USD'
 let mockNetWorthHistoryRequestedPeriod = '6m'
 let mockNetWorthHistoryLoading = false
 let mockNetWorthHistoryError: string | null = null
+let mockNetWorthTotalAssets: number | null = 0
+let mockNetWorthTotalLiabilities: number | null = 0
+let mockNetWorthTotalInvestments: number | null = 0
+let mockNetWorthAssetBreakdown: Array<{
+  id: string
+  name: string
+  type: string
+  currency: string
+  balance: number
+  convertedBalance: number | null
+}> = []
+let mockNetWorthLiabilityBreakdown: Array<{
+  id: string
+  name: string
+  type: string
+  currency: string
+  balance: number
+  convertedBalance: number | null
+}> = []
 let mockMainCurrency: string | null = 'USD'
 let mockManualRates: DatedExchangeRate[] = []
 
@@ -220,8 +239,11 @@ vi.mock('@/stores/net-worth-store', () => ({
     totalsComplete: mockNetWorthComplete,
     netWorth: mockNetWorth,
     preferredCurrency: mockNetWorthCurrency,
-    totalAssets: 0,
-    totalLiabilities: 0,
+    totalAssets: mockNetWorthTotalAssets,
+    totalLiabilities: mockNetWorthTotalLiabilities,
+    totalInvestments: mockNetWorthTotalInvestments,
+    assetBreakdown: mockNetWorthAssetBreakdown,
+    liabilityBreakdown: mockNetWorthLiabilityBreakdown,
     missingCurrencies: mockNetWorthMissingCurrencies,
     unresolvedAccountIds: mockNetWorthUnresolvedAccountIds,
     incompleteHoldingIds: mockNetWorthIncompleteHoldingIds,
@@ -287,6 +309,11 @@ describe('Dashboard', () => {
     mockNetWorthHistoryRequestedPeriod = '6m'
     mockNetWorthHistoryLoading = false
     mockNetWorthHistoryError = null
+    mockNetWorthTotalAssets = 0
+    mockNetWorthTotalLiabilities = 0
+    mockNetWorthTotalInvestments = 0
+    mockNetWorthAssetBreakdown = []
+    mockNetWorthLiabilityBreakdown = []
     mockMainCurrency = 'USD'
     mockManualRates = []
     mockDashboardQuery.mockReset()
@@ -314,7 +341,7 @@ describe('Dashboard', () => {
     expect(mockFetchTransactions).toHaveBeenCalled()
   })
 
-  it('defaults to a numbers-only summary and switches to full-width history and comparison views', async () => {
+  it('shows recorded snapshots on summary and switches to history and comparison views', async () => {
     const user = userEvent.setup()
     mockAccounts = [
       { id: 'nu', name: 'Nu Card', type: 'credit_card', currency: 'USD', balance: -12000 },
@@ -338,6 +365,16 @@ describe('Dashboard', () => {
       'aria-selected',
       'true'
     )
+    const summary = document.getElementById('overview-summary-panel')!
+    const recorded = document.getElementById('overview-summary-recorded-snapshots')
+    expect(recorded).toHaveTextContent('Jan 1, 2026')
+    expect(recorded).toHaveTextContent('Feb 1, 2026')
+    expect(recorded).toHaveTextContent('$600.00')
+    expect(recorded).toHaveTextContent('$730.00')
+    expect(
+      summary.querySelector('[aria-describedby="overview-summary-recorded-snapshots"]')
+    ).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'overview.period.6m' })).not.toBeInTheDocument()
     expect(screen.queryByRole('img', { name: 'overview.chartTitle' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: 'overview.views.history' }))
@@ -361,6 +398,8 @@ describe('Dashboard', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('overview.historyUnavailable')
     expect(screen.queryByRole('img', { name: 'overview.chartTitle' })).not.toBeInTheDocument()
+    expect(document.getElementById('overview-summary-recorded-snapshots')).toBeNull()
+    expect(document.getElementById('overview-summary-composition')).toBeNull()
     expect(screen.queryByText('$123.45')).not.toBeInTheDocument()
     expect(screen.queryByText('$678.90')).not.toBeInTheDocument()
   })
@@ -377,8 +416,98 @@ describe('Dashboard', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('overview.historyUnavailable')
     expect(screen.queryByRole('img', { name: 'overview.chartTitle' })).not.toBeInTheDocument()
+    expect(document.getElementById('overview-summary-recorded-snapshots')).toBeNull()
+    expect(document.getElementById('overview-summary-composition')).toBeNull()
     expect(screen.queryByText('$123.45')).not.toBeInTheDocument()
     expect(screen.queryByText('$678.90')).not.toBeInTheDocument()
+  })
+
+  it('draws current composition from the net-worth breakdown, not account liquid totals', async () => {
+    mockAccounts = [
+      { id: 'checking', name: 'Checking', type: 'checking', currency: 'USD', balance: 9_999_999 },
+    ]
+    mockNetWorth = 75_000
+    mockNetWorthComplete = true
+    mockNetWorthTotalAssets = 100_000
+    mockNetWorthTotalLiabilities = 25_000
+    mockNetWorthTotalInvestments = 20_000
+    mockNetWorthAssetBreakdown = [
+      {
+        id: 'checking',
+        name: 'Checking',
+        type: 'checking',
+        currency: 'USD',
+        balance: 9_999_999,
+        convertedBalance: 80_000,
+      },
+    ]
+    mockNetWorthLiabilityBreakdown = [
+      {
+        id: 'card',
+        name: 'Card',
+        type: 'credit_card',
+        currency: 'MXN',
+        balance: -1,
+        convertedBalance: 25_000,
+      },
+    ]
+    mockNetWorthHistory = []
+    mockCalculateCurrent.mockResolvedValue(undefined)
+
+    render(<Dashboard />)
+
+    const table = await screen.findByRole('table', { name: 'overview.summaryComposition' })
+    expect(
+      within(document.getElementById('overview-summary-panel')!).getByText('$750.00', {
+        selector: 'strong',
+      })
+    ).toBeInTheDocument()
+    expect(table).toHaveTextContent('Checking')
+    expect(table).toHaveTextContent('overview.summaryHoldings')
+    expect(table).toHaveTextContent('$800.00')
+    expect(table).toHaveTextContent('$200.00')
+    expect(table).toHaveTextContent('$250.00')
+    expect(screen.queryByText('$99,999.99')).not.toBeInTheDocument()
+    expect(document.getElementById('overview-summary-recorded-snapshots')).toBeNull()
+  })
+
+  it('does not draw a composition bar when the breakdown does not reconcile', async () => {
+    mockNetWorth = 75_000
+    mockNetWorthComplete = true
+    mockNetWorthTotalAssets = 100_001
+    mockNetWorthTotalLiabilities = 25_000
+    mockNetWorthTotalInvestments = 20_000
+    mockNetWorthAssetBreakdown = [
+      {
+        id: 'checking',
+        name: 'Checking',
+        type: 'checking',
+        currency: 'USD',
+        balance: 80_000,
+        convertedBalance: 80_000,
+      },
+    ]
+    mockNetWorthLiabilityBreakdown = [
+      {
+        id: 'card',
+        name: 'Card',
+        type: 'credit_card',
+        currency: 'USD',
+        balance: -25_000,
+        convertedBalance: 25_000,
+      },
+    ]
+    mockNetWorthHistory = []
+    mockCalculateCurrent.mockResolvedValue(undefined)
+
+    render(<Dashboard />)
+
+    expect(await screen.findByText('$750.00')).toBeInTheDocument()
+    expect(document.getElementById('overview-summary-composition')).toBeNull()
+    expect(screen.queryByText('$800.00')).not.toBeInTheDocument()
+    expect(document.getElementById('overview-summary-panel')).toHaveTextContent(
+      'overview.summaryCompositionUnproven'
+    )
   })
 
   it('removes only the Overview toolbar add action', () => {
@@ -1256,7 +1385,8 @@ describe('Dashboard', () => {
       await waitFor(() => {
         expect(
           within(screen.getByRole('tabpanel', { name: 'overview.views.summary' })).getByText(
-            '$11,950.00'
+            '$11,950.00',
+            { selector: 'strong' }
           )
         ).toBeInTheDocument()
       })

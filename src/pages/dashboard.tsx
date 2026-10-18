@@ -87,6 +87,11 @@ export function Dashboard() {
     missingCurrencies: netWorthMissingCurrencies,
     incompleteHoldingIds: netWorthIncompleteHoldingIds,
     unresolvedAccountIds: netWorthUnresolvedAccountIds,
+    totalAssets,
+    totalLiabilities,
+    totalInvestments,
+    assetBreakdown,
+    liabilityBreakdown,
     loadHistory,
     calculateCurrent,
   } = useNetWorthStore()
@@ -331,6 +336,11 @@ export function Dashboard() {
         }
         accounts={accounts}
         preferredCurrency={mainCurrency}
+        totalAssets={totalAssets ?? null}
+        totalLiabilities={totalLiabilities ?? null}
+        totalInvestments={totalInvestments ?? null}
+        accountAssets={assetBreakdown ?? []}
+        accountLiabilities={liabilityBreakdown ?? []}
       />
 
       <OverviewCategories

@@ -45,45 +45,41 @@ test.describe('Dashboard', () => {
     await expect(page.getByLabel('Second account')).toHaveCount(0)
   })
 
-  test('keeps the finance panel and following content stationary across tabs on desktop and mobile', async ({
+  test('keeps inactive finance panels mounted without inflating the visible view', async ({
     page,
   }) => {
     for (const width of [1280, 390, 320]) {
       await page.setViewportSize({ width, height: 900 })
       await page.goto('/')
       await page.waitForLoadState('networkidle')
-      const measures = []
       for (const tab of ['Summary', 'History', 'Compare accounts']) {
         await page.getByRole('tab', { name: tab }).click()
-        measures.push(
-          await page.locator('#overview-summary-panel').evaluate((summary) => {
-            const panels = ['summary', 'history', 'comparison'].map(
-              (name) => document.getElementById(`overview-${name}-panel`)!
-            )
-            const card = summary.closest('.native-panel')!
-            const following = card.nextElementSibling!
-            return {
-              card: [card.getBoundingClientRect().width, card.getBoundingClientRect().height],
-              panels: panels.map((panel) => [
-                panel.getBoundingClientRect().width,
-                panel.getBoundingClientRect().height,
-              ]),
-              followingTop: following.getBoundingClientRect().top,
-              hiddenInert: panels
-                .filter((panel) => panel.getAttribute('aria-hidden') === 'true')
-                .every((panel) => panel.hasAttribute('inert')),
-            }
-          })
-        )
-      }
-      expect(measures[0].card).toEqual(measures[1].card)
-      expect(measures[1].card).toEqual(measures[2].card)
-      expect(measures[0].followingTop).toBe(measures[1].followingTop)
-      expect(measures[1].followingTop).toBe(measures[2].followingTop)
-      for (const measure of measures) {
-        expect(measure.panels[0]).toEqual(measure.panels[1])
-        expect(measure.panels[1]).toEqual(measure.panels[2])
+        const measure = await page.locator('#overview-summary-panel').evaluate((summary) => {
+          const panels = ['summary', 'history', 'comparison'].map(
+            (name) => document.getElementById(`overview-${name}-panel`)!
+          )
+          const card = summary.closest('.native-panel')!
+          const active = panels.find((panel) => panel.getAttribute('aria-hidden') !== 'true')!
+          const hidden = panels.filter((panel) => panel !== active)
+          return {
+            mounted: panels.every(Boolean),
+            sameParent: new Set(panels.map((panel) => panel.parentElement)).size === 1,
+            hiddenInert: hidden.every(
+              (panel) =>
+                panel.getAttribute('aria-hidden') === 'true' &&
+                panel.hasAttribute('inert') &&
+                (panel.hasAttribute('hidden') || getComputedStyle(panel).display === 'none') &&
+                panel.getBoundingClientRect().height === 0
+            ),
+            activeHeight: active.getBoundingClientRect().height,
+            cardHeight: card.getBoundingClientRect().height,
+          }
+        })
+        expect(measure.mounted).toBe(true)
+        expect(measure.sameParent).toBe(true)
         expect(measure.hiddenInert).toBe(true)
+        expect(measure.activeHeight).toBeGreaterThan(0)
+        expect(measure.cardHeight).toBeLessThan(measure.activeHeight + 120)
       }
     }
   })

@@ -5,6 +5,12 @@ import { MemoryRouter } from 'react-router'
 import type { DatedExchangeRate } from '@shikin/finance-core/fx'
 import { SpendingInsights } from '../spending-insights'
 
+globalThis.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver
+
 const mockLoadComparisons = vi.fn()
 
 const mockLoadRates = vi.fn().mockResolvedValue(undefined)
@@ -113,9 +119,23 @@ describe('SpendingInsights', () => {
     expect(screen.getByText('Food is up 40% vs your 3-month average')).toBeInTheDocument()
     expect(screen.queryByText('spendingInsights.quietNextSteps')).not.toBeInTheDocument()
 
+    expect(screen.getByRole('img', { name: 'spendingInsights.comparisonChart' })).toHaveAttribute(
+      'aria-describedby'
+    )
+    expect(
+      screen.getByRole('table', { name: 'spendingInsights.comparisonTableCaption' })
+    ).toHaveTextContent('Food')
+    expect(
+      screen.getByRole('table', { name: 'spendingInsights.comparisonTableCaption' })
+    ).toHaveTextContent('$200.00')
+    expect(
+      screen.getByRole('table', { name: 'spendingInsights.comparisonTableCaption' })
+    ).toHaveTextContent('$100.00')
+
     await user.click(screen.getByText('spendingInsights.tabs.mom'))
-    expect(screen.getByText('Food')).toBeInTheDocument()
+    expect(screen.getAllByText('Food').length).toBeGreaterThan(0)
     expect(screen.getAllByText('$200.00').length).toBeGreaterThan(0)
+    expect(document.querySelector('[class*="min-w-[520px]"]')).not.toBeInTheDocument()
 
     await user.click(screen.getByText('spendingInsights.tabs.yoy'))
     expect(screen.getByText('spendingInsights.noData')).toBeInTheDocument()
@@ -136,6 +156,9 @@ describe('SpendingInsights', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('spendingInsights.incompleteTotals')
     expect(screen.queryByText('Food is up 40% vs your 3-month average')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('img', { name: 'spendingInsights.comparisonChart' })
+    ).not.toBeInTheDocument()
     expect(screen.queryByText('$0.00')).not.toBeInTheDocument()
     expect(screen.queryByText('spendingInsights.quietNextSteps')).not.toBeInTheDocument()
     expect(

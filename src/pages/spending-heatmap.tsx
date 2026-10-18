@@ -2,11 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { FilterPills } from '@/components/ui/filter-pills'
-import { StatRow } from '@/components/ui/stat-row'
-import { ProgressBar } from '@/components/ui/progress-bar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorState } from '@/components/ui/error-state'
 import { MetricItem, MetricStrip, NativePanel, PageToolbar } from '@/components/ui/native-layout'
+import { heatmapCellStyle, heatmapLegendStyles } from '@/components/insights/heatmap-intensity'
 import { fromCentavos, formatMoney } from '@/lib/money'
 import { getErrorMessage } from '@/lib/errors'
 import {
@@ -215,17 +214,21 @@ export function SpendingHeatmap() {
     }
   }, [spendMap, start])
 
-  function intensityClass(value: number | null): string {
-    if (value === null) return 'bg-muted/40'
-    if (value === 0 || maxSpend === 0) return 'bg-accent/5'
-    const ratio = value / maxSpend
-    if (ratio < 0.15) return 'bg-accent/10'
-    if (ratio < 0.3) return 'bg-accent/20'
-    if (ratio < 0.45) return 'bg-accent/30'
-    if (ratio < 0.6) return 'bg-accent/50'
-    if (ratio < 0.8) return 'bg-accent/65'
-    return 'bg-accent/80'
-  }
+  const rangeDays = useMemo(() => {
+    if (!aggregation?.complete) return []
+    const days: { date: string; amount: number }[] = []
+    let cursor = dayjs(start)
+    const endDay = dayjs(end)
+    const today = dayjs()
+    while (cursor.isBefore(endDay) || cursor.isSame(endDay, 'day')) {
+      if (!cursor.isAfter(today, 'day')) {
+        const date = cursor.format('YYYY-MM-DD')
+        days.push({ date, amount: spendMap.get(date) ?? 0 })
+      }
+      cursor = cursor.add(1, 'day')
+    }
+    return days
+  }, [aggregation, spendMap, start, end])
 
   const selectedDayTransactions: HeatmapConvertedTransaction[] = selectedDate
     ? (aggregation?.eligibleTransactions ?? []).filter((tx) => tx.date === selectedDate)
@@ -250,7 +253,7 @@ export function SpendingHeatmap() {
 
   if (isLoading) {
     return (
-      <div className="page-content" role="status" aria-busy="true">
+      <div className="page-content min-w-0" role="status" aria-busy="true">
         <span className="sr-only">Loading</span>
         <Skeleton className="h-8 w-64" />
         <Skeleton className="mt-4 h-64 w-full" />
@@ -260,7 +263,7 @@ export function SpendingHeatmap() {
 
   if (loadError) {
     return (
-      <div className="page-content">
+      <div className="page-content min-w-0">
         <ErrorState
           title={t('spendingHeatmap.loadError')}
           description={loadError}
@@ -275,7 +278,7 @@ export function SpendingHeatmap() {
   }
 
   return (
-    <div className="page-content">
+    <div className="page-content min-w-0">
       <PageToolbar
         className="items-start gap-3 max-sm:flex-col max-sm:items-stretch sm:[&>div:first-child]:min-w-[12rem]"
         leading={
@@ -355,215 +358,229 @@ export function SpendingHeatmap() {
         />
       </MetricStrip>
 
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.35fr_0.65fr]">
-        <NativePanel className="p-5 sm:p-6">
-          <h2 className="mb-4 text-sm font-semibold">{t('spendingHeatmap.dailyActivity')}</h2>
-          {totalsUnavailable ? (
-            <div className="bg-muted flex h-72 items-center justify-center rounded-xl">
-              <p className="text-warning text-sm">
-                {t('spendingHeatmap.incompleteTotals', {
-                  currencies: aggregation?.missingCurrencies.join(', ') ?? '',
-                })}
-              </p>
+      <NativePanel className="min-w-0 p-4 sm:p-5">
+        <div className="mb-4 flex min-w-0 flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <h2 className="text-sm font-semibold">{t('spendingHeatmap.dailyActivity')}</h2>
+          <div className="flex items-center gap-2" aria-label={t('spendingHeatmap.legend')}>
+            <span className="text-muted-foreground text-[10px]">{t('spendingHeatmap.less')}</span>
+            <div className="flex gap-0.5" aria-hidden="true">
+              {heatmapLegendStyles().map((style, index) => (
+                <div key={index} className="h-3 w-3 rounded-sm" style={style} />
+              ))}
             </div>
-          ) : !aggregation || aggregation.dailyTotals.size === 0 ? (
-            <div className="bg-muted flex h-72 items-center justify-center rounded-xl">
-              <p className="text-muted-foreground text-sm">{t('spendingHeatmap.noData')}</p>
-            </div>
-          ) : (
-            <>
-              <div className="overflow-x-auto pb-1">
+            <span className="text-muted-foreground text-[10px]">{t('spendingHeatmap.more')}</span>
+          </div>
+        </div>
+        <dl className="border-border mb-4 grid grid-cols-2 gap-x-4 gap-y-3 border-b pb-4 sm:grid-cols-4">
+          <div className="min-w-0">
+            <dt className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
+              {t('spendingHeatmap.highestDay')}
+            </dt>
+            <dd className="mt-1 text-sm font-medium">{stats?.highestDate ?? '-'}</dd>
+            <dd className="text-destructive overflow-x-auto text-sm whitespace-nowrap tabular-nums">
+              {totalsUnavailable || !stats
+                ? '-'
+                : formatMoney(stats.highestAmount, displayCurrency)}
+            </dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
+              {t('spendingHeatmap.avgDaily')}
+            </dt>
+            <dd className="text-muted-foreground mt-1 text-xs">
+              {t('spendingHeatmap.lastNDays', { n: dayjs(end).diff(dayjs(start), 'day') })}
+            </dd>
+            <dd className="overflow-x-auto text-sm font-medium whitespace-nowrap tabular-nums">
+              {totalsUnavailable || !stats
+                ? '-'
+                : formatMoney(Math.round(stats.avgDaily), displayCurrency)}
+            </dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
+              {t('spendingHeatmap.mostActive')}
+            </dt>
+            <dd className="text-muted-foreground mt-1 text-xs">{t('spendingHeatmap.dayOfWeek')}</dd>
+            <dd className="text-accent text-sm font-medium">{stats?.mostActiveDay ?? '-'}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
+              {t('spendingHeatmap.currentStreak')}
+            </dt>
+            <dd className="text-muted-foreground mt-1 text-xs">
+              {t('spendingHeatmap.under50Day')}
+            </dd>
+            <dd className="text-success text-sm font-medium">
+              {stats ? t('spendingHeatmap.daysCount', { count: stats.streak }) : '-'}
+            </dd>
+          </div>
+        </dl>
+        {totalsUnavailable ? (
+          <p className="text-warning text-sm">
+            {t('spendingHeatmap.incompleteTotals', {
+              currencies: aggregation?.missingCurrencies.join(', ') ?? '',
+            })}
+          </p>
+        ) : !aggregation || aggregation.dailyTotals.size === 0 ? (
+          <p className="text-muted-foreground text-sm">{t('spendingHeatmap.noData')}</p>
+        ) : (
+          <>
+            <div className="min-w-0 overflow-x-auto pb-1">
+              <div style={{ width: Math.max(280, computedWeeksCount * 16 + 36) }}>
                 <div
-                  className="min-w-[560px]"
-                  style={{ minWidth: Math.max(560, computedWeeksCount * 18 + 32) }}
+                  className="mb-1 ml-8 grid gap-[3px]"
+                  style={{ gridTemplateColumns: `repeat(${computedWeeksCount}, minmax(0, 1fr))` }}
                 >
-                  <div
-                    className="mb-1 ml-8 grid gap-[3px]"
-                    style={{ gridTemplateColumns: `repeat(${computedWeeksCount}, minmax(0, 1fr))` }}
-                  >
-                    {weekLabels.map((label, i) => (
-                      <span key={i} className="text-muted-foreground truncate font-mono text-[8px]">
-                        {label}
-                      </span>
+                  {weekLabels.map((label, i) => (
+                    <span key={i} className="text-muted-foreground truncate font-mono text-[8px]">
+                      {label}
+                    </span>
+                  ))}
+                </div>
+
+                <div className="flex gap-[3px]">
+                  <div className="flex w-7 shrink-0 flex-col gap-[3px]">
+                    {dayLabels.map((label, i) => (
+                      <div
+                        key={label}
+                        className="text-muted-foreground flex h-[14px] items-center font-mono text-[8px]"
+                      >
+                        {i % 2 === 0 ? label.slice(0, 2) : ''}
+                      </div>
                     ))}
                   </div>
 
-                  <div className="flex gap-[3px]">
-                    <div className="flex w-7 shrink-0 flex-col gap-[3px]">
-                      {dayLabels.map((label, i) => (
-                        <div
-                          key={label}
-                          className="text-muted-foreground flex h-[14px] items-center font-mono text-[8px]"
-                        >
-                          {i % 2 === 0 ? label.slice(0, 2) : ''}
-                        </div>
-                      ))}
-                    </div>
-
-                    <div
-                      className="grid flex-1 gap-[3px]"
-                      style={{
-                        gridTemplateColumns: `repeat(${computedWeeksCount}, minmax(0, 1fr))`,
-                      }}
-                      role="grid"
-                      aria-label={t('spendingHeatmap.dailyActivity')}
-                    >
-                      {grid.map((row, r) => (
-                        <div key={r} role="row" className="contents">
-                          {row.map((value, c) => {
-                            const cellDate = gridStartDate.add(c * 7 + r, 'day')
-                            const dateLabel = cellDate.format('YYYY-MM-DD')
-                            const selected = selectedDate === dateLabel
-                            return (
-                              <button
-                                key={`${r}-${c}`}
-                                type="button"
-                                disabled={value === null}
-                                aria-pressed={selected}
-                                onClick={() => {
-                                  if (value !== null) setSelectedDate(dateLabel)
-                                }}
-                                className={cn(
-                                  'aspect-square rounded-[2px] transition-colors',
-                                  intensityClass(value),
-                                  selected && 'ring-ring ring-2 ring-offset-1'
-                                )}
-                                title={
-                                  value !== null
-                                    ? `${cellDate.format('MMM D')}: ${formatMoney(value, displayCurrency)}`
-                                    : ''
-                                }
-                                role="gridcell"
-                                aria-label={
-                                  value !== null
-                                    ? `${dayLabels[r]}, ${dateLabel}: ${formatMoney(value, displayCurrency)}`
-                                    : `${dayLabels[r]}: ${t('spendingHeatmap.noData')}`
-                                }
-                              />
-                            )
-                          })}
-                        </div>
-                      ))}
-                    </div>
+                  <div
+                    className="grid flex-1 gap-[3px]"
+                    style={{
+                      gridTemplateColumns: `repeat(${computedWeeksCount}, minmax(0, 1fr))`,
+                    }}
+                    role="grid"
+                    aria-label={t('spendingHeatmap.dailyActivity')}
+                  >
+                    {grid.map((row, r) => (
+                      <div key={r} role="row" className="contents">
+                        {row.map((value, c) => {
+                          const cellDate = gridStartDate.add(c * 7 + r, 'day')
+                          const dateLabel = cellDate.format('YYYY-MM-DD')
+                          const selected = selectedDate === dateLabel
+                          return (
+                            <button
+                              key={`${r}-${c}`}
+                              type="button"
+                              disabled={value === null}
+                              aria-pressed={selected}
+                              onClick={() => {
+                                if (value !== null) setSelectedDate(dateLabel)
+                              }}
+                              className={cn(
+                                'focus-visible:ring-ring aspect-square min-h-[12px] min-w-[12px] rounded-[2px] focus-visible:ring-2 focus-visible:outline-none',
+                                selected && 'ring-ring ring-2 ring-inset'
+                              )}
+                              style={heatmapCellStyle(value, maxSpend)}
+                              title={
+                                value !== null
+                                  ? `${cellDate.format('MMM D')}: ${formatMoney(value, displayCurrency)}`
+                                  : ''
+                              }
+                              role="gridcell"
+                              aria-label={
+                                value !== null
+                                  ? `${dayLabels[r]}, ${dateLabel}: ${formatMoney(value, displayCurrency)}`
+                                  : `${dayLabels[r]}: ${t('spendingHeatmap.noData')}`
+                              }
+                            />
+                          )
+                        })}
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
+            </div>
 
-              <div className="mt-4 flex items-center justify-end gap-2">
-                <span className="text-muted-foreground font-mono text-[9px]">
-                  {t('spendingHeatmap.less')}
-                </span>
-                <div className="flex gap-0.5">
-                  {[
-                    'bg-accent/5',
-                    'bg-accent/10',
-                    'bg-accent/20',
-                    'bg-accent/30',
-                    'bg-accent/50',
-                    'bg-accent/65',
-                    'bg-accent/80',
-                  ].map((cls, i) => (
-                    <div key={i} className={`h-3 w-3 rounded-sm ${cls}`} />
-                  ))}
-                </div>
-                <span className="text-muted-foreground font-mono text-[9px]">
-                  {t('spendingHeatmap.more')}
-                </span>
-              </div>
-            </>
-          )}
-        </NativePanel>
-
-        <div className="space-y-3">
-          <NativePanel className="space-y-1 p-4">
-            <span className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
-              {t('spendingHeatmap.highestDay')}
-            </span>
-            <StatRow
-              label={stats?.highestDate ?? '-'}
-              value={
-                totalsUnavailable || !stats
-                  ? '-'
-                  : formatMoney(stats.highestAmount, displayCurrency)
-              }
-              valueColor="text-destructive"
-            />
-          </NativePanel>
-          <NativePanel className="space-y-1 p-4">
-            <span className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
-              {t('spendingHeatmap.avgDaily')}
-            </span>
-            <StatRow
-              label={t('spendingHeatmap.lastNDays', { n: dayjs(end).diff(dayjs(start), 'day') })}
-              value={
-                totalsUnavailable || !stats
-                  ? '-'
-                  : formatMoney(Math.round(stats.avgDaily), displayCurrency)
-              }
-            />
-          </NativePanel>
-          <NativePanel className="space-y-1 p-4">
-            <span className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
-              {t('spendingHeatmap.mostActive')}
-            </span>
-            <StatRow
-              label={t('spendingHeatmap.dayOfWeek')}
-              value={stats?.mostActiveDay ?? '-'}
-              valueColor="text-accent"
-            />
-          </NativePanel>
-          <NativePanel className="space-y-1 p-4">
-            <span className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
-              {t('spendingHeatmap.currentStreak')}
-            </span>
-            <StatRow
-              label={t('spendingHeatmap.under50Day')}
-              value={stats ? t('spendingHeatmap.daysCount', { count: stats.streak }) : '-'}
-              valueColor="text-success"
-            />
-          </NativePanel>
-          <NativePanel className="p-4">
-            <h3 className="text-sm font-semibold">
-              {selectedDate
-                ? dayjs(selectedDate).format('MMM D, YYYY')
-                : t('spendingHeatmap.dayDetail')}
-            </h3>
-            {!selectedDate ? (
-              <p className="text-muted-foreground mt-2 text-sm">{t('spendingHeatmap.selectDay')}</p>
-            ) : selectedDayTransactions.length === 0 ? (
-              <p className="text-muted-foreground mt-2 text-sm">
-                {t('spendingHeatmap.noDayExpenses')}
+            <div className="mt-4 min-w-0">
+              <h3 className="text-sm font-semibold">{t('spendingHeatmap.dayList')}</h3>
+              <p className="text-muted-foreground mt-1 text-xs">
+                {t('spendingHeatmap.dayListHelp')}
               </p>
-            ) : (
-              <div className="mt-3 space-y-2">
-                {selectedDayTransactions.map((tx) => (
-                  <div key={tx.id} className="flex items-start justify-between gap-3 text-sm">
-                    <div className="min-w-0">
-                      <p className="truncate font-medium">{tx.description || tx.category_name}</p>
-                      <p className="text-muted-foreground truncate text-xs">
-                        {tx.category_name || t('reports.uncategorized')}
-                      </p>
-                    </div>
-                    <span className="shrink-0 tabular-nums">
-                      {formatMoney(tx.convertedAmount, displayCurrency)}
-                    </span>
-                  </div>
+              <ul className="mt-2 max-h-72 min-w-0 overflow-y-auto">
+                {rangeDays.map((day) => (
+                  <li key={day.date}>
+                    <button
+                      type="button"
+                      aria-pressed={selectedDate === day.date}
+                      onClick={() => setSelectedDate(day.date)}
+                      className={cn(
+                        'focus-visible:ring-ring flex min-h-11 w-full items-center justify-between gap-3 rounded-md px-2 text-left text-sm focus-visible:ring-2 focus-visible:outline-none',
+                        selectedDate === day.date && 'bg-muted'
+                      )}
+                      aria-label={`${t('spendingHeatmap.dayList')} ${day.date}: ${formatMoney(day.amount, displayCurrency)}`}
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span
+                          aria-hidden="true"
+                          className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                          style={heatmapCellStyle(day.amount, maxSpend)}
+                        />
+                        <span className="truncate tabular-nums">{day.date}</span>
+                      </span>
+                      <span className="shrink-0 overflow-x-auto whitespace-nowrap tabular-nums">
+                        {formatMoney(day.amount, displayCurrency)}
+                      </span>
+                    </button>
+                  </li>
                 ))}
-                <Link
-                  to={buildTransactionsHref({
-                    type: 'expense',
-                    dateFrom: selectedDate,
-                    dateTo: selectedDate,
-                  })}
-                  className="text-accent mt-2 inline-flex min-h-8 text-xs font-semibold"
-                >
-                  {t('spendingHeatmap.openDay')}
-                </Link>
+              </ul>
+            </div>
+          </>
+        )}
+      </NativePanel>
+
+      <NativePanel className="min-w-0 p-4 sm:p-5">
+        <h3 className="text-sm font-semibold">
+          {selectedDate
+            ? dayjs(selectedDate).format('MMM D, YYYY')
+            : t('spendingHeatmap.dayDetail')}
+        </h3>
+        {totalsUnavailable ? (
+          <p className="text-warning mt-2 text-sm">
+            {t('spendingHeatmap.incompleteTotals', {
+              currencies: aggregation?.missingCurrencies.join(', ') ?? '',
+            })}
+          </p>
+        ) : !selectedDate ? (
+          <p className="text-muted-foreground mt-2 text-sm">{t('spendingHeatmap.selectDay')}</p>
+        ) : selectedDayTransactions.length === 0 ? (
+          <p className="text-muted-foreground mt-2 text-sm">{t('spendingHeatmap.noDayExpenses')}</p>
+        ) : (
+          <div className="mt-3 space-y-2">
+            {selectedDayTransactions.map((tx) => (
+              <div key={tx.id} className="flex items-start justify-between gap-3 text-sm">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{tx.description || tx.category_name}</p>
+                  <p className="text-muted-foreground truncate text-xs">
+                    {tx.category_name || t('reports.uncategorized')}
+                  </p>
+                </div>
+                <span className="shrink-0 tabular-nums">
+                  {formatMoney(tx.convertedAmount, displayCurrency)}
+                </span>
               </div>
-            )}
-          </NativePanel>
-        </div>
-      </div>
+            ))}
+            <Link
+              to={buildTransactionsHref({
+                type: 'expense',
+                dateFrom: selectedDate,
+                dateTo: selectedDate,
+              })}
+              className="text-accent mt-2 inline-flex min-h-11 items-center text-xs font-semibold"
+            >
+              {t('spendingHeatmap.openDay')}
+            </Link>
+          </div>
+        )}
+      </NativePanel>
 
       {categoryTotals.length > 0 && !totalsUnavailable && (
         <NativePanel className="space-y-4 p-5 sm:p-6">
@@ -594,12 +611,22 @@ export function SpendingHeatmap() {
                       {formatMoney(cat.total, displayCurrency)}
                     </span>
                   </div>
-                  <ProgressBar
-                    value={percent}
-                    color="accent"
-                    size="sm"
-                    ariaLabel={`${cat.name} share of top category`}
-                  />
+                  <div
+                    role="progressbar"
+                    aria-label={`${cat.name} share of top category`}
+                    aria-valuenow={Math.round(percent)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    className="bg-muted h-1 overflow-hidden rounded-full"
+                  >
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${Math.min(100, Math.max(0, percent))}%`,
+                        backgroundColor: cat.color || 'var(--color-chart-3)',
+                      }}
+                    />
+                  </div>
                 </Link>
               )
             })}

@@ -264,6 +264,29 @@ describe('SpendingHeatmap page', () => {
     })
     expect(screen.queryByText('$25.00')).not.toBeInTheDocument()
     expect(screen.queryByText('$105.00')).not.toBeInTheDocument()
+    expect(screen.queryByRole('gridcell')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /spendingHeatmap.dayList/ })
+    ).not.toBeInTheDocument()
+  })
+
+  it('keeps a neutral calendar and a touch day list on the same selected day', async () => {
+    const today = dayjs().format('YYYY-MM-DD')
+    render(<SpendingHeatmap />)
+
+    const cell = await screen.findByRole('gridcell', { name: new RegExp(`${today}:`) })
+    expect(cell.className).not.toMatch(/bg-accent/)
+    expect(cell.getAttribute('style') ?? '').not.toMatch(/accent/)
+    expect(document.body.innerHTML).not.toMatch(/bg-accent/)
+
+    fireEvent.click(
+      screen.getByRole('button', { name: new RegExp(`spendingHeatmap.dayList ${today}:`) })
+    )
+    expect(screen.getByText('Groceries')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'spendingHeatmap.openDay' })).toHaveAttribute(
+      'href',
+      `/transactions?type=expense&dateFrom=${today}&dateTo=${today}`
+    )
   })
 })
 

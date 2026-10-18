@@ -4,6 +4,12 @@ import userEvent from '@testing-library/user-event'
 import { NetWorth } from '../net-worth'
 import enAnalytics from '@/i18n/locales/en/analytics.json'
 import esAnalytics from '@/i18n/locales/es/analytics.json'
+import { formatCompactChartMoney } from '@/components/dashboard/chart-money'
+import { formatMoney } from '@/lib/money'
+
+const axisLabels: string[] = []
+const lineProps: Array<{ dataKey?: string; strokeWidth?: number; type?: string; stroke?: string }> =
+  []
 
 globalThis.ResizeObserver = class {
   observe() {}
@@ -95,15 +101,26 @@ vi.mock('@/components/ui/safe-chart', () => ({
 vi.mock('recharts', () => ({
   AreaChart: () => null,
   Area: () => null,
+  LineChart: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+  Line: (props: { dataKey?: string; strokeWidth?: number; type?: string; stroke?: string }) => {
+    lineProps.push(props)
+    return null
+  },
   XAxis: () => null,
-  YAxis: () => null,
+  YAxis: (props: { tickFormatter?: (value: number) => string }) => {
+    if (props.tickFormatter) axisLabels.push(props.tickFormatter(150000))
+    return null
+  },
   Tooltip: () => null,
+  CartesianGrid: () => null,
   ResponsiveContainer: () => null,
 }))
 
 describe('NetWorth page', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    axisLabels.length = 0
+    lineProps.length = 0
     mockState = {
       ...mockState,
       totalsComplete: true,
@@ -134,6 +151,28 @@ describe('NetWorth page', () => {
     expect(screen.getAllByText('$500.00').length).toBeGreaterThan(0)
     expect(screen.getByText('Checking')).toBeInTheDocument()
     expect(mockRefresh).toHaveBeenCalledWith('1y')
+    expect(screen.getByRole('button', { name: 'netWorth.periods.1y' })).toHaveClass('min-h-11')
+    expect(screen.getByRole('img', { name: 'netWorth.chartTitle' })).toBeInTheDocument()
+    expect(screen.getByRole('table', { name: 'netWorth.chartTableCaption' })).toHaveTextContent(
+      '$1,000.00'
+    )
+    expect(screen.getByRole('table', { name: 'netWorth.chartTableCaption' })).toHaveTextContent(
+      '$1,500.00'
+    )
+    const axisLabel = axisLabels[axisLabels.length - 1]
+    expect(axisLabel).toBe(formatCompactChartMoney(150000, 'USD'))
+    expect(axisLabel).not.toBe(formatMoney(150000, 'USD'))
+    expect(lineProps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          dataKey: 'netWorth',
+          type: 'linear',
+          strokeWidth: 2,
+          stroke: 'var(--color-chart-1)',
+        }),
+      ])
+    )
+    expect(document.querySelector('linearGradient')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'netWorth.periods.3m' }))
     expect(mockRefresh).toHaveBeenCalledWith('3m')
@@ -299,6 +338,37 @@ describe('NetWorth page', () => {
 
     expect(screen.getByText('netWorth.unavailable')).toBeInTheDocument()
     expect(screen.queryByText(/netWorth.incompleteTotals/)).not.toBeInTheDocument()
+  })
+
+  it('keeps period controls mounted while the page is refreshing', () => {
+    mockState = { ...mockState, isLoading: true }
+    render(<NetWorth />)
+    expect(screen.getByRole('button', { name: 'netWorth.periods.1y' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'netWorth.historyPeriod' })).toBeInTheDocument()
+  })
+
+  it('does not chart a single snapshot or invent another date', () => {
+    mockState = {
+      ...mockState,
+      history: [{ date: '2024-01-01', netWorth: 100000, assets: 100000, liabilities: 0 }],
+    }
+
+    render(<NetWorth />)
+
+    expect(screen.queryByRole('img', { name: 'netWorth.chartTitle' })).not.toBeInTheDocument()
+    expect(screen.getByText('netWorth.firstSnapshot')).toBeInTheDocument()
+    expect(screen.queryByText('2024-01-02')).not.toBeInTheDocument()
+    expect(screen.queryByText('2024-06-01')).not.toBeInTheDocument()
+  })
+
+  it('captions an empty recorded history instead of drawing a zero line', () => {
+    mockState = { ...mockState, history: [] }
+
+    render(<NetWorth />)
+
+    expect(screen.getByText('netWorth.noHistory')).toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: 'netWorth.chartTitle' })).not.toBeInTheDocument()
+    expect(screen.queryByText('$0.00')).not.toBeInTheDocument()
   })
 
   it('keeps count-based EN and ES copy generic and ID-free', () => {

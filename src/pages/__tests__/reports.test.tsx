@@ -17,7 +17,17 @@ import { scopedFixture, fixtureWindow, deferred } from '@/test/scoped-fixture'
 import { useCurrencyStore } from '@/stores/currency-store'
 import { useUIStore } from '@/stores/ui-store'
 import { TRANSACTION_PAGE_INVALIDATION_EVENT } from '@/lib/transaction-query-events'
+import { formatMoney } from '@/lib/money'
+import enAnalytics from '@/i18n/locales/en/analytics.json'
+import esAnalytics from '@/i18n/locales/es/analytics.json'
 import { ReportsPage } from '../reports'
+
+globalThis.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver
+
 const read = vi.mocked(readScopedReport)
 let snapshot = scopedFixture()
 function projection(input: ScopedReadInput): ScopedRead {
@@ -211,11 +221,87 @@ describe('scoped Reports UI', () => {
       screen.getByRole('heading', { name: 'Subscriptions · separate source' })
     ).toBeInTheDocument()
     expect(screen.getByText(/No combined total/)).toBeInTheDocument()
+    expect(
+      screen.getByRole('img', { name: 'Recurring rules monthly equivalents' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('img', { name: 'Subscriptions monthly equivalents' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('table', { name: 'Recurring rules monthly equivalents' })
+    ).toHaveTextContent(formatMoney(10000, 'MXN'))
+    expect(
+      screen.getByRole('table', { name: 'Subscriptions monthly equivalents' })
+    ).toHaveTextContent(formatMoney(20000, 'MXN'))
+    expect(screen.queryByText(formatMoney(30000, 'MXN'))).not.toBeInTheDocument()
     await user.click(screen.getByText('Advanced scope · accounts, categories & tags'))
     await user.type(screen.getByLabelText('Include tags'), 'business')
     await screen.findByText(/Subscriptions do not support tag filtering/)
     expect(
       screen.getByRole('heading', { name: 'Subscriptions · separate source' }).parentElement
     ).toHaveTextContent('Incomplete')
+    expect(
+      screen.queryByRole('img', { name: 'Subscriptions monthly equivalents' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('img', { name: 'Recurring rules monthly equivalents' })
+    ).toBeInTheDocument()
+    expect(screen.queryByText(formatMoney(30000, 'MXN'))).not.toBeInTheDocument()
+  })
+
+  it('charts complete category groups with exact money and withholds the chart when net is incomplete', async () => {
+    const user = userEvent.setup()
+    render(<ReportsPage />)
+    await screen.findByText('Complete')
+    const chart = screen.getByRole('img', { name: 'Complete groups for the active measure' })
+    expect(chart).toHaveAttribute('aria-describedby')
+    const table = screen.getByRole('table', { name: 'Complete groups for the active measure' })
+    expect(table).toHaveTextContent('Food')
+    expect(table).toHaveTextContent(formatMoney(25000, 'MXN'))
+    expect(screen.getAllByText(/2026-01-01/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/UTC/).length).toBeGreaterThan(0)
+
+    await user.selectOptions(screen.getByLabelText('Measure'), 'net_consumption')
+    await screen.findAllByText('Net consumption')
+    expect(
+      screen.queryByRole('img', { name: 'Complete groups for the active measure' })
+    ).not.toBeInTheDocument()
+    expect(screen.getAllByText('Earned income').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Incomplete · totals/).length).toBeGreaterThan(0)
+  })
+
+  it('labels basis totals instead of inventing months when grouping is none', async () => {
+    const user = userEvent.setup()
+    render(<ReportsPage />)
+    await screen.findByText('Complete')
+    await user.selectOptions(screen.getByLabelText('Group by'), 'none')
+    await screen.findByText('No grouping. These are labeled totals, not a time series.')
+    expect(
+      screen.queryByRole('img', { name: 'Complete groups for the active measure' })
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText('2026-02')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Actual expenses').length).toBeGreaterThan(0)
+  })
+
+  it('charts only returned months on the temporal axis', async () => {
+    const user = userEvent.setup()
+    render(<ReportsPage />)
+    await screen.findByText('Complete')
+    await user.selectOptions(screen.getByLabelText('Group by'), 'month')
+    const table = await screen.findByRole('table', {
+      name: 'Complete groups for the active measure',
+    })
+    expect(table).toHaveTextContent('2026-01')
+    expect(table).toHaveTextContent(formatMoney(25000, 'MXN'))
+    expect(table).not.toHaveTextContent('2026-02')
+    expect(table).not.toHaveTextContent('2025-12')
+  })
+
+  it('keeps new report hero copy in owned EN and ES analytics locales', () => {
+    expect(enAnalytics.reportHero.chartLabel).toBe('Complete groups for the active measure')
+    expect(enAnalytics.reportHero.basisMetricsHelp).toContain('not a time series')
+    expect(esAnalytics.reportHero.chartLabel.length).toBeGreaterThan(0)
+    expect(esAnalytics.reportHero.separateSourcesHelp).not.toMatch(/No combined total/)
+    expect(esAnalytics.reportHero.noChart).not.toMatch(/\$0/)
   })
 })

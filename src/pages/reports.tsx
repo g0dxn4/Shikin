@@ -15,6 +15,7 @@ import {
 } from '@/components/budgets/scoped-controls'
 import { ScopedActualResult, ScopedEstimateResult } from '@/components/budgets/scoped-result'
 import { useScopedReport } from '@/components/budgets/use-scoped-report'
+import { ReportResultHero } from '@/components/reports/report-result-hero'
 import type { ScopedReadInput, ScopedReferences } from '@/lib/scoped-report-read'
 
 export function ReportsPage() {
@@ -36,7 +37,7 @@ export function ReportsPage() {
   if (data && (references.accounts !== data.accounts || references.categories !== data.categories))
     setReferences({ accounts: data.accounts, categories: data.categories })
   return (
-    <div className="page-content">
+    <div className="page-content min-w-0">
       <PageToolbar
         className="flex-col items-stretch sm:flex-row sm:items-center"
         leading={<p className="text-muted-foreground text-sm">{t('scoped.reportDescription')}</p>}
@@ -92,20 +93,28 @@ export function ReportsPage() {
             {error}
           </p>
         ) : data ? (
-          data.result.basis === 'recurring_estimate' ? (
-            <ScopedEstimateResult
+          <>
+            <ReportResultHero
               result={data.result}
+              window={data.window}
               accounts={data.accounts}
               categories={data.categories}
             />
-          ) : (
-            <ScopedActualResult
-              key={JSON.stringify([scope, window, basis, currency, groupBy])}
-              result={data.result}
-              accounts={data.accounts}
-              categories={data.categories}
-            />
-          )
+            {data.result.basis === 'recurring_estimate' ? (
+              <ScopedEstimateResult
+                result={data.result}
+                accounts={data.accounts}
+                categories={data.categories}
+              />
+            ) : (
+              <ScopedActualResult
+                key={JSON.stringify([scope, window, basis, currency, groupBy])}
+                result={data.result}
+                accounts={data.accounts}
+                categories={data.categories}
+              />
+            )}
+          </>
         ) : null}
       </NativePanel>
     </div>

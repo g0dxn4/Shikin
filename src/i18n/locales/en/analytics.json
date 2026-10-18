@@ -20,6 +20,13 @@
     "historyLoading": "Net worth history is loading.",
     "historyPeriod": "Net worth date range",
     "viewChartData": "View chart data",
+    "currentContext": "Live totals. Not the last recorded snapshot.",
+    "lastRecorded": "Last recorded",
+    "recordedChange": "Recorded change",
+    "recordedAssets": "Recorded assets",
+    "recordedLiabilities": "Recorded liabilities",
+    "chartTableCaption": "Recorded net worth by snapshot date",
+    "date": "Date",
     "periods": {
       "3m": "3M",
       "6m": "6M",
@@ -53,7 +60,10 @@
       "alert": "Alert",
       "warning": "Warning",
       "info": "Info"
-    }
+    },
+    "comparisonChart": "Month comparison",
+    "comparisonChartCaption": "Current and previous category spending",
+    "comparisonTableCaption": "Month comparison by category"
   },
   "spendingHeatmap": {
     "title": "Spending Heatmap",
@@ -96,7 +106,10 @@
     "activeDays": "Active days",
     "totalSpending": "Total spending",
     "loadError": "Couldn’t load heatmap spending",
-    "daysCount": "{{count}} days"
+    "daysCount": "{{count}} days",
+    "dayList": "Days in range",
+    "dayListHelp": "Touch list for the same selected day as the calendar.",
+    "legend": "Intensity"
   },
   "reports": {
     "title": "Reports",
@@ -121,6 +134,45 @@
     "uncategorized": "Uncategorized",
     "budgetUnavailable": "Budget health is unavailable until converted budget totals are complete.",
     "budgetReadError": "Budget health is unavailable. {{message}}"
+  },
+  "reportHero": {
+    "activeMeasure": "Active measure",
+    "expense": "Actual expenses",
+    "income": "Actual income",
+    "consumption": "Net consumption",
+    "earnedIncome": "Earned income",
+    "otherIncome": "Other income",
+    "principalRecovery": "Principal recovery",
+    "assetAcquisition": "Asset acquisitions",
+    "window": "Resolved window",
+    "timeZone": "Time zone",
+    "scope": "Scope",
+    "coverage": "Source coverage",
+    "classification": "Classification",
+    "coverageNotRequired": "Not required for gross",
+    "classificationNotRequired": "Not required for gross",
+    "complete": "Complete",
+    "incomplete": "Incomplete",
+    "noChart": "No chart until this result is complete.",
+    "noGroups": "No returned groups in this result.",
+    "basisMetrics": "Basis totals",
+    "basisMetricsHelp": "No grouping. These are labeled totals, not a time series.",
+    "chartLabel": "Complete groups for the active measure",
+    "group": "Group",
+    "amount": "Amount",
+    "separateSources": "Separate estimate sources",
+    "separateSourcesHelp": "Rules and subscriptions stay apart and are not added together.",
+    "rulesSource": "Recurring rules",
+    "subscriptionsSource": "Subscriptions",
+    "rulesChartLabel": "Recurring rules monthly equivalents",
+    "subscriptionsChartLabel": "Subscriptions monthly equivalents",
+    "monthly": "Monthly equivalent",
+    "yearly": "Yearly equivalent",
+    "notOccurrenceHistory": "Definition equivalents, not a history of occurrences.",
+    "notCharted": "Not charted",
+    "asOf": "As of",
+    "uncategorized": "Uncategorized",
+    "allGroups": "All in scope"
   },
   "reportingFx": {
     "unconfigured": "Set a main currency in Settings to view converted totals.",

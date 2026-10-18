@@ -20,6 +20,13 @@
     "historyLoading": "El historial de patrimonio neto se está cargando.",
     "historyPeriod": "Rango de patrimonio neto",
     "viewChartData": "Ver datos del gráfico",
+    "currentContext": "Totales en vivo. No es el último registro guardado.",
+    "lastRecorded": "Último registro",
+    "recordedChange": "Cambio registrado",
+    "recordedAssets": "Activos registrados",
+    "recordedLiabilities": "Pasivos registrados",
+    "chartTableCaption": "Patrimonio neto registrado por fecha de corte",
+    "date": "Fecha",
     "periods": {
       "3m": "3M",
       "6m": "6M",
@@ -53,7 +60,10 @@
       "alert": "Alerta",
       "warning": "Advertencia",
       "info": "Info"
-    }
+    },
+    "comparisonChart": "Comparación del mes",
+    "comparisonChartCaption": "Gasto actual y anterior por categoría",
+    "comparisonTableCaption": "Comparación del mes por categoría"
   },
   "spendingHeatmap": {
     "title": "Mapa de Calor de Gastos",
@@ -96,7 +106,10 @@
     "activeDays": "Días activos",
     "totalSpending": "Gasto total",
     "loadError": "No se pudieron cargar los gastos del mapa de calor",
-    "daysCount": "{{count}} días"
+    "daysCount": "{{count}} días",
+    "dayList": "Días del rango",
+    "dayListHelp": "Lista táctil para el mismo día seleccionado del calendario.",
+    "legend": "Intensidad"
   },
   "reports": {
     "title": "Informes",
@@ -121,6 +134,45 @@
     "uncategorized": "Sin categoria",
     "budgetUnavailable": "La salud del presupuesto no está disponible hasta completar los totales convertidos.",
     "budgetReadError": "La salud del presupuesto no está disponible. {{message}}"
+  },
+  "reportHero": {
+    "activeMeasure": "Medida activa",
+    "expense": "Gastos reales",
+    "income": "Ingresos reales",
+    "consumption": "Consumo neto",
+    "earnedIncome": "Ingresos ganados",
+    "otherIncome": "Otros ingresos",
+    "principalRecovery": "Recuperación de capital",
+    "assetAcquisition": "Adquisiciones de activos",
+    "window": "Ventana resuelta",
+    "timeZone": "Zona horaria",
+    "scope": "Alcance",
+    "coverage": "Cobertura de origen",
+    "classification": "Clasificación",
+    "coverageNotRequired": "No requerida para el bruto",
+    "classificationNotRequired": "No requerida para el bruto",
+    "complete": "Completo",
+    "incomplete": "Incompleto",
+    "noChart": "Sin gráfico hasta que este resultado esté completo.",
+    "noGroups": "Este resultado no devolvió grupos.",
+    "basisMetrics": "Totales de la medida",
+    "basisMetricsHelp": "Sin agrupación. Son totales etiquetados, no una serie temporal.",
+    "chartLabel": "Grupos completos de la medida activa",
+    "group": "Grupo",
+    "amount": "Importe",
+    "separateSources": "Fuentes de estimación separadas",
+    "separateSourcesHelp": "Las reglas y las suscripciones se mantienen aparte y no se suman.",
+    "rulesSource": "Reglas recurrentes",
+    "subscriptionsSource": "Suscripciones",
+    "rulesChartLabel": "Equivalentes mensuales de reglas recurrentes",
+    "subscriptionsChartLabel": "Equivalentes mensuales de suscripciones",
+    "monthly": "Equivalente mensual",
+    "yearly": "Equivalente anual",
+    "notOccurrenceHistory": "Equivalentes de la definición, no un historial de ocurrencias.",
+    "notCharted": "Sin gráfico",
+    "asOf": "A fecha de",
+    "uncategorized": "Sin categoría",
+    "allGroups": "Todo el alcance"
   },
   "reportingFx": {
     "unconfigured": "Configura una moneda principal en Ajustes para ver los totales convertidos.",

@@ -859,7 +859,7 @@ export function SettingsPage() {
                   }}
                   disabled={isSavingDesktopSettings}
                   className={`focus-visible:ring-accent focus-visible:ring-offset-background relative h-8 w-14 shrink-0 rounded-full border p-1 transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
-                    closeToTrayEnabled ? 'border-accent bg-accent' : 'border-border bg-muted'
+                    closeToTrayEnabled ? 'border-primary bg-primary' : 'border-border bg-muted'
                   }`}
                 >
                   <span
@@ -994,7 +994,7 @@ export function SettingsPage() {
                     onClick={() => setWebServerEnabled((enabled) => !enabled)}
                     disabled={isLoadingWebServerSettings || isApplyingWebServer}
                     className={`focus-visible:ring-accent focus-visible:ring-offset-background relative h-8 w-14 shrink-0 rounded-full border p-1 transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
-                      webServerEnabled ? 'border-accent bg-accent' : 'border-border bg-muted'
+                      webServerEnabled ? 'border-primary bg-primary' : 'border-border bg-muted'
                     }`}
                   >
                     <span

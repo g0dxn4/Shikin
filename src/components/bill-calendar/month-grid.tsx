@@ -34,6 +34,15 @@ interface MonthGridProps {
   onSelectDate: (date: string) => void
 }
 
+function shortMarkDate(date: string, locale: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
+  if (!match) return date
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])).toLocaleDateString(
+    locale,
+    { weekday: 'short', day: 'numeric' }
+  )
+}
+
 function moveDayFocus(current: HTMLButtonElement, key: string) {
   const buttons = [
     ...(current.closest('table')?.querySelectorAll<HTMLButtonElement>('button[aria-pressed]') ??
@@ -54,7 +63,7 @@ function moveDayFocus(current: HTMLButtonElement, key: string) {
   next?.focus()
 }
 
-/** Month grid. Cells show counts and paid/unpaid marks, never amounts. */
+/** Month grid. Chips and cells show paid/unpaid counts from existing marks, never amounts. */
 export function MonthGrid({
   monthName,
   monthKey,
@@ -64,8 +73,11 @@ export function MonthGrid({
   selectedDate,
   onSelectDate,
 }: MonthGridProps) {
-  const { t } = useTranslation('billCalendar')
+  const { t, i18n } = useTranslation('billCalendar')
   const weeks = days.length / 7
+  const markedDates = [...marks.entries()]
+    .filter(([, mark]) => mark.paid + mark.unpaid > 0)
+    .sort(([left], [right]) => left.localeCompare(right))
 
   const onDayKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key !== 'Home' && event.key !== 'End' && DAY_KEY_DELTA[event.key] === undefined) {
@@ -77,6 +89,53 @@ export function MonthGrid({
 
   return (
     <div className="min-w-0">
+      {markedDates.length > 0 ? (
+        <ul aria-label={t('calendar.markedDays')} className="mb-2 flex min-w-0 flex-wrap gap-1.5">
+          {markedDates.map(([date, mark]) => {
+            const paid = mark.paid
+            const unpaid = mark.unpaid
+            const isSelected = selectedDate === date
+            return (
+              <li key={date} className="min-w-0">
+                <button
+                  type="button"
+                  aria-pressed={isSelected}
+                  aria-label={`${date}, ${t('calendar.paidCount', { count: paid })}, ${t('calendar.unpaidCount', { count: unpaid })}`}
+                  onClick={() => onSelectDate(date)}
+                  className={cn(
+                    'border-border hover:bg-muted/70 focus-visible:ring-ring inline-flex h-11 min-h-11 max-w-full items-center gap-1.5 rounded-full border px-3 text-xs focus-visible:ring-2 focus-visible:outline-none',
+                    isSelected && 'border-foreground bg-muted'
+                  )}
+                >
+                  <span className="font-medium tabular-nums">
+                    {shortMarkDate(date, i18n.language)}
+                  </span>
+                  {paid > 0 ? (
+                    <span className="inline-flex items-center gap-1">
+                      <span
+                        data-mark="paid"
+                        aria-hidden="true"
+                        className="bg-success size-2 shrink-0 rounded-full"
+                      />
+                      <span className="tabular-nums">{paid}</span>
+                    </span>
+                  ) : null}
+                  {unpaid > 0 ? (
+                    <span className="inline-flex items-center gap-1">
+                      <span
+                        data-mark="unpaid"
+                        aria-hidden="true"
+                        className="border-foreground size-2 shrink-0 rounded-full border"
+                      />
+                      <span className="tabular-nums">{unpaid}</span>
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      ) : null}
       <div
         role="region"
         aria-label={t('calendar.scrollRegion')}

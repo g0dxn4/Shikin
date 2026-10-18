@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Info } from 'lucide-react'
 import dayjs from 'dayjs'
 import { Button } from '@/components/ui/button'
 import { PageToolbar, NativePanel } from '@/components/ui/native-layout'
@@ -26,23 +26,39 @@ function formatIsoDate(isoDate: string, locale: string, withYear: boolean) {
   )
 }
 
-function ScheduleMetric({
-  label,
-  value,
-  detail,
-}: {
-  label: string
-  value: string
-  detail?: string
-}) {
+function ScheduleMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
       <span className="text-muted-foreground block text-xs">{label}</span>
       <strong className="mt-0.5 block text-sm font-medium break-all tabular-nums">{value}</strong>
-      {detail ? (
-        <span className="text-muted-foreground mt-0.5 block text-xs break-words">{detail}</span>
-      ) : null}
     </div>
+  )
+}
+
+function MethodButton({
+  label,
+  panelId,
+  open,
+  onToggle,
+}: {
+  label: string
+  panelId: string
+  open: boolean
+  onToggle: () => void
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="text-muted-foreground h-11 w-11 shrink-0"
+      aria-expanded={open}
+      aria-controls={open ? panelId : undefined}
+      onClick={onToggle}
+    >
+      <Info aria-hidden="true" />
+      <span className="sr-only">{label}</span>
+    </Button>
   )
 }
 
@@ -50,6 +66,10 @@ export function BillCalendar() {
   const { t, i18n } = useTranslation(['billCalendar', 'common'])
   const [monthOffset, setMonthOffset] = useState(0)
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [fxOpen, setFxOpen] = useState(false)
+  const [scheduleAboutOpen, setScheduleAboutOpen] = useState(false)
+  const fxPanelId = useId()
+  const scheduleAboutId = useId()
   const { rules, isLoading, fetchError, fetch } = useRecurringStore()
   const {
     convertCurrentToPreferred,
@@ -118,9 +138,8 @@ export function BillCalendar() {
     }
     return {
       value: ready && complete && !unresolved ? formatMoney(total, preferredCurrency) : '—',
-      detail: !complete
-        ? t('currency.missing', { currencies: [...missing].join(', ') })
-        : t('currency.actualAndEstimate', { currency: preferredCurrency }),
+      complete,
+      missing: [...missing],
     }
   }
   void mainCurrency
@@ -146,6 +165,10 @@ export function BillCalendar() {
   const monthTotal = moneyTotal(bills)
   const paidTotal = moneyTotal(paid)
   const remainingTotal = moneyTotal(remaining)
+  const fxMissing = [
+    ...new Set([...monthTotal.missing, ...paidTotal.missing, ...remainingTotal.missing]),
+  ]
+  const fxIncomplete = !monthTotal.complete || !paidTotal.complete || !remainingTotal.complete
 
   return (
     <div className="page-content max-w-full min-w-0">
@@ -209,23 +232,68 @@ export function BillCalendar() {
           />
         )}
         {unresolved ? (
-          <p className="text-warning px-1 pt-3 text-xs">{t('schedule.unresolved')}</p>
+          <p className="text-warning px-1 pt-3 text-xs break-words">{t('schedule.unresolved')}</p>
         ) : null}
-        <div className="border-border mt-3 grid grid-cols-2 gap-3 border-t px-1 pt-3 sm:grid-cols-4">
-          <ScheduleMetric label={t('thisMonth')} {...monthTotal} />
-          <ScheduleMetric label={t('paid')} {...paidTotal} />
-          <ScheduleMetric label={t('remaining')} {...remainingTotal} />
-          <ScheduleMetric
-            label={t('scheduledCount', { count: bills.length })}
-            value={ready ? String(bills.length) : '—'}
-          />
+        <div className="border-border mt-3 border-t px-1 pt-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-1">
+            <span
+              className={cn(
+                'inline-flex h-7 items-center rounded-full border px-2 text-xs font-medium',
+                fxIncomplete ? 'border-warning text-warning' : 'border-border text-foreground'
+              )}
+            >
+              {fxIncomplete ? t('currency.unavailable') : preferredCurrency}
+            </span>
+            <MethodButton
+              label={t('currency.basis')}
+              panelId={fxPanelId}
+              open={fxOpen}
+              onToggle={() => setFxOpen((open) => !open)}
+            />
+          </div>
+          {fxIncomplete ? (
+            <p className="text-warning mt-1 text-xs break-words" role="status">
+              {t('currency.missing', { currencies: fxMissing.join(', ') })}
+            </p>
+          ) : null}
+          {fxOpen ? (
+            <div
+              id={fxPanelId}
+              className="text-muted-foreground mt-1 max-w-2xl text-xs break-words"
+            >
+              <p>{t('currency.actualAndEstimate', { currency: preferredCurrency })}</p>
+            </div>
+          ) : null}
+          <div className="mt-2 grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-4">
+            <ScheduleMetric label={t('thisMonth')} value={monthTotal.value} />
+            <ScheduleMetric label={t('paid')} value={paidTotal.value} />
+            <ScheduleMetric label={t('remaining')} value={remainingTotal.value} />
+            <ScheduleMetric
+              label={t('scheduledCount', { count: bills.length })}
+              value={ready ? String(bills.length) : '—'}
+            />
+          </div>
         </div>
       </NativePanel>
       <section className="min-w-0" aria-labelledby="bill-day-heading">
-        <div className="mb-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2">
           <h3 id="bill-day-heading" className="text-sm font-medium">
             {selectedDate ? formatIsoDate(selectedDate, i18n.language, true) : t('upcomingBills')}
           </h3>
+          <span className="border-border text-muted-foreground inline-flex h-7 items-center rounded-full border px-2 text-xs">
+            {t('schedule.recordedChip')}
+          </span>
+          {selectedDate ? (
+            <span className="border-border text-foreground inline-flex h-7 items-center rounded-full border px-2 text-xs">
+              {t('schedule.nativeChip')}
+            </span>
+          ) : null}
+          <MethodButton
+            label={t('schedule.about')}
+            panelId={scheduleAboutId}
+            open={scheduleAboutOpen}
+            onToggle={() => setScheduleAboutOpen((open) => !open)}
+          />
           {selectedDate ? (
             <Button
               type="button"
@@ -237,9 +305,14 @@ export function BillCalendar() {
             </Button>
           ) : null}
         </div>
-        <p className="text-muted-foreground mb-3 text-xs">{t('schedule.description')}</p>
-        {selectedDate ? (
-          <p className="text-muted-foreground mb-3 text-xs">{t('schedule.nativeAmounts')}</p>
+        {scheduleAboutOpen ? (
+          <div
+            id={scheduleAboutId}
+            className="text-muted-foreground mb-3 max-w-2xl space-y-1 text-xs break-words"
+          >
+            <p>{t('schedule.description')}</p>
+            <p>{t('schedule.nativeAmounts')}</p>
+          </div>
         ) : null}
         {visibleBills.length === 0 ? (
           <p className="text-muted-foreground py-6 text-sm">{t('noBills')}</p>
@@ -250,12 +323,24 @@ export function BillCalendar() {
                 <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
                   <div className="min-w-0">
                     <p className="text-sm font-medium break-words">{bill.description}</p>
-                    <p className="text-muted-foreground mt-1 text-xs">
+                    <p className="text-muted-foreground mt-1 flex flex-wrap items-center gap-1.5 text-xs">
                       <time dateTime={bill.date}>
                         {formatIsoDate(bill.date, i18n.language, false)}
                       </time>
-                      {' · '}
-                      <span className={cn(bill.paid ? 'text-success' : 'text-foreground')}>
+                      <span aria-hidden="true">·</span>
+                      <span
+                        className={cn(
+                          'inline-flex items-center gap-1',
+                          bill.paid ? 'text-success' : 'text-foreground'
+                        )}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className={cn(
+                            'size-2 shrink-0 rounded-full',
+                            bill.paid ? 'bg-success' : 'border-foreground border'
+                          )}
+                        />
                         {t(bill.paid ? 'status.paid' : 'status.unpaid')}
                       </span>
                     </p>

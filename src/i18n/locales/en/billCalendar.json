@@ -6,6 +6,7 @@
     "description": "Recurring expenses and upcoming due dates from your local schedule.",
     "addRecurring": "Add recurring bill",
     "calendarView": "Calendar View",
+    "aboutList": "List order",
     "upcomingDescription": "Sorted by next due date from recurring expense rules.",
     "onTrack": "On track",
     "emptyTitle": "No recurring bills yet",
@@ -13,6 +14,7 @@
   },
   "horizon": {
     "title": "Due horizon",
+    "about": "Due count method",
     "scope": "Overdue, next 7 days, and later do not overlap and include every active expense rule. The list filter does not change these counts.",
     "legend": "Due horizon by rule count",
     "loading": "Loading due horizon",
@@ -41,6 +43,7 @@
   },
   "calendar": {
     "scrollRegion": "Month calendar",
+    "markedDays": "Marked days",
     "markLegend": "Day marks",
     "paidCount": "{{count}} paid",
     "unpaidCount": "{{count}} unpaid"
@@ -82,12 +85,17 @@
   },
   "currency": {
     "unavailable": "Unavailable",
+    "estimate": "Estimate",
+    "basis": "Rate basis",
     "missing": "Total unavailable: check exchange rates and currency data ({{currencies}}).",
     "estimateToday": "{{currency}} · planning estimate using today’s rate",
     "actualAndEstimate": "{{currency}} · paid at transaction date; estimates use today’s rate"
   },
   "schedule": {
     "allDays": "Whole month",
+    "about": "Payment basis",
+    "recordedChip": "Paid from transactions",
+    "nativeChip": "Own currency",
     "description": "Select a day. Paid amounts come from recorded transactions, not elapsed due dates.",
     "list": "Scheduled bills",
     "nativeAmounts": "Each amount stays in that bill’s own currency.",

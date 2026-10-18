@@ -6,6 +6,7 @@
     "description": "Gastos recurrentes y proximos vencimientos desde tu agenda local.",
     "addRecurring": "Agregar factura recurrente",
     "calendarView": "Vista de calendario",
+    "aboutList": "Orden de la lista",
     "upcomingDescription": "Ordenado por proximo vencimiento desde reglas de gastos recurrentes.",
     "onTrack": "En orden",
     "emptyTitle": "Aun no hay facturas recurrentes",
@@ -13,6 +14,7 @@
   },
   "horizon": {
     "title": "Horizonte de vencimiento",
+    "about": "Método del conteo",
     "scope": "Vencidas, próximos 7 días y más adelante no se superponen e incluyen cada regla de gasto activa. El filtro de la lista no cambia estos conteos.",
     "legend": "Horizonte de vencimiento por cantidad de reglas",
     "loading": "Cargando el horizonte de vencimiento",
@@ -41,6 +43,7 @@
   },
   "calendar": {
     "scrollRegion": "Calendario del mes",
+    "markedDays": "Días marcados",
     "markLegend": "Marcas del día",
     "paidCount": "{{count}} pagadas",
     "unpaidCount": "{{count}} sin pagar"
@@ -82,12 +85,17 @@
   },
   "currency": {
     "unavailable": "No disponible",
+    "estimate": "Estimación",
+    "basis": "Base de la tasa",
     "missing": "Total no disponible: revisa los tipos de cambio y las monedas ({{currencies}}).",
     "estimateToday": "{{currency}} · estimación de planificación con la tasa de hoy",
     "actualAndEstimate": "{{currency}} · pagos a la fecha de transacción; estimaciones con la tasa de hoy"
   },
   "schedule": {
     "allDays": "Todo el mes",
+    "about": "Base del pago",
+    "recordedChip": "Pagado en transacciones",
+    "nativeChip": "Su moneda",
     "description": "Selecciona un día. Los pagos se basan en transacciones registradas, no en fechas vencidas.",
     "list": "Facturas programadas",
     "nativeAmounts": "Cada importe permanece en la moneda de esa factura.",

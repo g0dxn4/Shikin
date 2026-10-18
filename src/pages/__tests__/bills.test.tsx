@@ -326,5 +326,66 @@ describe('BillsPage', () => {
     expect(screen.queryByText('Overdue rent')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'bills.addRecurring' })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: summaryName })).toBeInTheDocument()
+    expect(screen.queryByText('horizon.scope')).not.toBeInTheDocument()
+  })
+
+  it('keeps horizon method and list order behind info, and separates the due rail from the category dot', async () => {
+    const user = userEvent.setup()
+    const today = dayjs().startOf('day')
+    recurringStoreMock.rules = [
+      {
+        ...recurringStoreMock.rules[0],
+        id: 'overdue',
+        description: 'Overdue rent',
+        next_date: today.add(-1, 'day').format('YYYY-MM-DD'),
+        category_color: '#ff0000',
+      },
+      {
+        ...recurringStoreMock.rules[0],
+        id: 'later',
+        description: 'Later bill',
+        next_date: today.add(10, 'day').format('YYYY-MM-DD'),
+        category_color: '#00ff00',
+      },
+    ]
+
+    render(
+      <MemoryRouter>
+        <BillsPage />
+      </MemoryRouter>
+    )
+
+    expect(screen.queryByText('horizon.scope')).not.toBeInTheDocument()
+    expect(screen.queryByText('currency.estimateToday')).not.toBeInTheDocument()
+    expect(screen.queryByText('bills.upcomingDescription')).not.toBeInTheDocument()
+    expect(screen.getByText('currency.estimate')).toBeInTheDocument()
+    const runRate = screen.getByText('$2,400.00')
+    expect(runRate.className).not.toMatch(/text-2xl|text-3xl|text-4xl/)
+    expect(runRate.className).toMatch(/text-sm/)
+
+    const overdueRow = screen.getByText('Overdue rent').closest('li')
+    const laterRow = screen.getByText('Later bill').closest('li')
+    expect(overdueRow).not.toBeNull()
+    expect(laterRow).not.toBeNull()
+    const overdueRail = overdueRow?.querySelector('[data-due-status]')
+    const laterRail = laterRow?.querySelector('[data-due-status]')
+    const overdueDot = overdueRow?.querySelector('[data-category-dot]')
+    const laterDot = laterRow?.querySelector('[data-category-dot]')
+    expect(overdueRail).toHaveAttribute('data-due-status', 'overdue')
+    expect(overdueRail).toHaveClass('w-[3px]', 'bg-destructive')
+    expect(overdueRail).not.toHaveClass('bg-warning', 'bg-success')
+    expect(laterRail).toHaveAttribute('data-due-status', 'later')
+    expect(laterRail).toHaveClass('w-[3px]', 'bg-success')
+    expect(overdueDot).toHaveStyle({ backgroundColor: '#ff0000' })
+    expect(laterDot).toHaveStyle({ backgroundColor: '#00ff00' })
+    expect(overdueRail).not.toBe(overdueDot)
+    expect(overdueDot).not.toHaveClass('w-[3px]')
+    expect(overdueRail).not.toHaveAttribute('style')
+
+    await user.click(screen.getByRole('button', { name: 'horizon.about' }))
+    expect(screen.getByText('horizon.scope')).toBeInTheDocument()
+    expect(screen.getByText('currency.estimateToday')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'bills.aboutList' }))
+    expect(screen.getByText('bills.upcomingDescription')).toBeInTheDocument()
   })
 })

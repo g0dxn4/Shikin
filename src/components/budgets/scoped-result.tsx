@@ -171,7 +171,7 @@ export function ScopedActualResult({
             {t('scoped.repayment')}:{' '}
             <button
               type="button"
-              className="text-primary min-h-11 underline"
+              className="text-accent min-h-11 underline"
               onClick={() => openTransactionDialog(row.transactionId)}
             >
               {row.transactionId}

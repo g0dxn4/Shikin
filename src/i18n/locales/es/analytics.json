@@ -27,11 +27,30 @@
     "recordedChange": "Cambio registrado",
     "recordedAssets": "Activos registrados",
     "recordedLiabilities": "Pasivos registrados",
+    "recordedNetWorth": "Patrimonio registrado",
+    "recordedSeries": "Series registradas",
+    "chartStyle": "Estilo del gráfico registrado",
+    "compareRecorded": "Comparar activos y pasivos registrados",
     "chartTableCaption": "Patrimonio neto registrado por fecha de corte",
     "date": "Fecha",
+    "styles": {
+      "line": "Línea",
+      "area": "Área",
+      "bars": "Barras"
+    },
+    "periodTitle": {
+      "month": "Mes a la fecha",
+      "3m": "3 meses",
+      "6m": "6 meses",
+      "ytd": "Año a la fecha",
+      "1y": "1 año",
+      "all": "Todos los registros"
+    },
     "periods": {
+      "month": "MTD",
       "3m": "3M",
       "6m": "6M",
+      "ytd": "YTD",
       "1y": "1A",
       "all": "TODO"
     }

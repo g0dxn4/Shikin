@@ -27,11 +27,30 @@
     "recordedChange": "Recorded change",
     "recordedAssets": "Recorded assets",
     "recordedLiabilities": "Recorded liabilities",
+    "recordedNetWorth": "Recorded net worth",
+    "recordedSeries": "Recorded series",
+    "chartStyle": "Recorded chart style",
+    "compareRecorded": "Compare recorded assets and liabilities",
     "chartTableCaption": "Recorded net worth by snapshot date",
     "date": "Date",
+    "styles": {
+      "line": "Line",
+      "area": "Area",
+      "bars": "Bars"
+    },
+    "periodTitle": {
+      "month": "Month to date",
+      "3m": "3 months",
+      "6m": "6 months",
+      "ytd": "Year to date",
+      "1y": "1 year",
+      "all": "All recorded snapshots"
+    },
     "periods": {
+      "month": "MTD",
       "3m": "3M",
       "6m": "6M",
+      "ytd": "YTD",
       "1y": "1Y",
       "all": "ALL"
     }

@@ -94,6 +94,7 @@
     "hideAdvanced": "Ocultar filtros avanzados",
     "activeAdvanced": "Filtros avanzados activos",
     "remove": "Quitar filtro",
+    "filtersButton": "Filtros",
     "dates": {
       "all": "Todo el tiempo",
       "this-month": "Este mes",

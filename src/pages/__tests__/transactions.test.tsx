@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -242,7 +243,7 @@ describe('Transactions', () => {
       'true'
     )
     expect(screen.getByLabelText('filters.account')).toBeVisible()
-    await user.selectOptions(screen.getByLabelText('views.label'), 'ledger')
+    await user.click(screen.getByRole('tab', { name: 'views.ledger' }))
     expect(window.location.search).toContain('account=account-2')
     expect(window.location.search).toContain('view=ledger')
   })
@@ -280,38 +281,70 @@ describe('Transactions', () => {
     expect(mockUseQuery).toHaveBeenLastCalledWith(
       expect.objectContaining({ reviewReason: 'unclassified' })
     )
-    expect(screen.getByLabelText('views.label')).toHaveValue('review')
+    expect(screen.getByRole('tab', { name: 'views.review' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
     expect(screen.getByRole('button', { name: 'review.filter (1)' })).toHaveAttribute(
       'aria-pressed',
       'true'
     )
   })
 
-  it('exposes timeline, ledger, and review as an explicit display menu', () => {
+  it('exposes timeline, ledger, and review as visible tabs without a display menu', async () => {
+    const user = userEvent.setup()
     render(<Transactions />)
 
-    const display = screen.getByLabelText('views.label') as HTMLSelectElement
-    expect(display).toBeVisible()
-    expect(Array.from(display.options).map((option) => option.value)).toEqual([
-      'timeline',
-      'ledger',
-      'review',
-    ])
-    expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
+    const tablist = screen.getByRole('tablist', { name: 'views.label' })
+    expect(tablist).toBeVisible()
+    expect(
+      within(tablist)
+        .getAllByRole('tab')
+        .map((tab) => tab.textContent)
+    ).toEqual(['views.timeline', 'views.ledger', 'views.review'])
+    expect(screen.queryByText('views.display')).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'views.label' })).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'views.timeline' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    tablist.focus()
+    screen.getByRole('tab', { name: 'views.timeline' }).focus()
+    await user.keyboard('{ArrowRight}')
+    expect(screen.getByRole('tab', { name: 'views.ledger' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    expect(screen.getByRole('tab', { name: 'views.ledger' })).toHaveFocus()
+    await user.keyboard('{End}')
+    expect(screen.getByRole('tab', { name: 'views.review' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    await user.keyboard('{Home}')
+    expect(screen.getByRole('tab', { name: 'views.timeline' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
   })
 
-  it('restores the stored display choice and writes it back when the menu changes', async () => {
+  it('restores the stored display choice and writes it back when the tab changes', async () => {
     window.localStorage.setItem('shikin.transactions.view', 'ledger')
     const user = userEvent.setup()
     render(<Transactions />)
 
-    const display = screen.getByLabelText('views.label')
-    expect(display).toHaveValue('ledger')
+    expect(screen.getByRole('tab', { name: 'views.ledger' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
 
-    await user.selectOptions(display, 'review')
+    await user.click(screen.getByRole('tab', { name: 'views.review' }))
     expect(window.location.search).toContain('view=review')
     expect(window.localStorage.getItem('shikin.transactions.view')).toBe('review')
-    expect(display).toHaveValue('review')
+    expect(screen.getByRole('tab', { name: 'views.review' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
   })
 
   it('keeps the display choice when resetting compact active filters', async () => {
@@ -337,7 +370,10 @@ describe('Transactions', () => {
     expect(window.location.search).not.toContain('type=expense')
     expect(window.location.search).not.toContain('account=account-2')
     expect(window.location.search).not.toContain('search=coffee')
-    expect(screen.getByLabelText('views.label')).toHaveValue('ledger')
+    expect(screen.getByRole('tab', { name: 'views.ledger' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
     expect(window.localStorage.getItem('shikin.transactions.view')).toBe('ledger')
     expect(screen.queryByRole('button', { name: 'filters.clear' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'filters.showAdvanced' })).toHaveAttribute(
@@ -476,7 +512,7 @@ describe('Transactions', () => {
     const user = userEvent.setup()
     render(<Transactions />)
 
-    await user.selectOptions(screen.getByLabelText('views.label'), 'ledger')
+    await user.click(screen.getByRole('tab', { name: 'views.ledger' }))
     expect(screen.getAllByText(/Checking → Savings/).length).toBeGreaterThan(0)
     expect(screen.getAllByLabelText('Edit Split purchase').length).toBeGreaterThan(0)
   })
@@ -512,7 +548,7 @@ describe('Transactions', () => {
     const user = userEvent.setup()
     render(<Transactions />)
 
-    await user.selectOptions(screen.getByLabelText('views.label'), 'review')
+    await user.click(screen.getByRole('tab', { name: 'views.review' }))
     const accountSelect = screen.getByLabelText('review.account') as HTMLSelectElement
     expect(Array.from(accountSelect.options).map((option) => option.value)).toEqual(['account-1'])
     await user.selectOptions(screen.getByLabelText('review.category'), 'food')
@@ -530,7 +566,7 @@ describe('Transactions', () => {
     pageResult.reviewCounts.all = 2
     const user = userEvent.setup()
     render(<Transactions />)
-    await user.selectOptions(screen.getByLabelText('views.label'), 'review')
+    await user.click(screen.getByRole('tab', { name: 'views.review' }))
 
     fireEvent.keyDown(document, { key: 'j' })
     await waitFor(() => expect(document.activeElement).toHaveTextContent('Second'))
@@ -601,7 +637,7 @@ describe('Transactions', () => {
     setRows([makeRow({ id: 'ledger-row', description: 'Ledger coffee' })])
     const user = userEvent.setup()
     render(<Transactions />)
-    await user.selectOptions(screen.getByLabelText('views.label'), 'ledger')
+    await user.click(screen.getByRole('tab', { name: 'views.ledger' }))
     const descriptions = Array.from(document.querySelectorAll('button')).filter(
       (button) =>
         button.textContent?.includes('Ledger coffee') && !button.getAttribute('aria-label')
@@ -747,6 +783,7 @@ describe('Transactions', () => {
       expect(within(mount).queryByText('split.badge')).not.toBeInTheDocument()
       expect(within(mount).queryByText('types.transfer')).not.toBeInTheDocument()
       expect(within(mount).queryByText('review.reasons.placeholder')).not.toBeInTheDocument()
+      expect(within(mount).queryByText('summary.reasons.unclassified')).not.toBeInTheDocument()
       expect(within(mount).queryByText('review.reason')).not.toBeInTheDocument()
       expect(within(mount).queryByText('correction.excluded')).not.toBeInTheDocument()
       expect(within(mount).queryByText('source.manual')).not.toBeInTheDocument()
@@ -793,6 +830,11 @@ describe('Transactions', () => {
       expect(within(mount).getByText('review.reasons.placeholder')).toBeInTheDocument()
       expect(within(mount).getByText('split.badge')).toBeInTheDocument()
       expect(within(mount).getByText('types.transfer')).toBeInTheDocument()
+      expect(within(mount).getByText('summary.reasons.unclassified')).toBeInTheDocument()
+      expect(mount.querySelector('[data-ledger-flag="unclassified"]')).toHaveAttribute(
+        'title',
+        'review.reason'
+      )
       expect(within(mount).getByText('review.reason')).toBeInTheDocument()
       expect(within(mount).getByText('correction.excluded')).toBeInTheDocument()
       expect(within(mount).getByText('bank import')).toBeInTheDocument()
@@ -925,7 +967,7 @@ describe('Transactions', () => {
     ])
     const user = userEvent.setup()
     render(<Transactions />)
-    await user.selectOptions(screen.getByLabelText('views.label'), 'ledger')
+    await user.click(screen.getByRole('tab', { name: 'views.ledger' }))
 
     const edit = screen.getAllByRole('button', { name: 'Edit Alpha' })[0]
     edit.focus()
@@ -940,7 +982,7 @@ describe('Transactions', () => {
     setRows([makeRow({ id: 'pencil', description: 'Pencil row', is_consumption_unclassified: 0 })])
     const user = userEvent.setup()
     render(<Transactions />)
-    await user.selectOptions(screen.getByLabelText('views.label'), 'ledger')
+    await user.click(screen.getByRole('tab', { name: 'views.ledger' }))
 
     const edit = screen.getAllByRole('button', { name: 'Edit Pencil row' })[0]
     edit.focus()
@@ -960,7 +1002,7 @@ describe('Transactions', () => {
     ])
     const user = userEvent.setup()
     render(<Transactions />)
-    await user.selectOptions(screen.getByLabelText('views.label'), 'ledger')
+    await user.click(screen.getByRole('tab', { name: 'views.ledger' }))
 
     const remove = screen.getAllByRole('button', { name: 'Delete Ledger delete' })[0]
     remove.focus()
@@ -970,6 +1012,153 @@ describe('Transactions', () => {
     expect(mockRemove).not.toHaveBeenCalled()
     await user.click(screen.getByText('Confirm delete'))
     await waitFor(() => expect(mockRemove).toHaveBeenCalledWith('ledger-delete'))
+  })
+
+  it('pushes one history entry per filter under StrictMode and applies the first Back', async () => {
+    const pushState = vi.spyOn(window.history, 'pushState')
+    const replaceState = vi.spyOn(window.history, 'replaceState')
+    const user = userEvent.setup()
+    render(
+      <StrictMode>
+        <Transactions />
+      </StrictMode>
+    )
+    expect(pushState).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'types.expense' }))
+    expect(pushState).toHaveBeenCalledTimes(1)
+    expect(window.location.search).toContain('type=expense')
+
+    pushState.mockClear()
+    await act(async () => {
+      window.history.back()
+    })
+    await waitFor(() => expect(window.location.search).not.toContain('type=expense'))
+    expect(pushState).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'types.expense' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    )
+
+    pushState.mockClear()
+    replaceState.mockClear()
+    await user.type(screen.getByLabelText('filters.search'), 'a')
+    expect(pushState).not.toHaveBeenCalled()
+    expect(replaceState).toHaveBeenCalled()
+    expect(window.location.search).toContain('search=a')
+
+    setRows([makeRow({ description: 'Round trip' })], 80)
+    window.history.replaceState(
+      null,
+      '',
+      '/transactions?search=cafe&type=income&account=account-9&category=food&dateFrom=2026-01-01&dateTo=2026-02-01&datePreset=custom&status=pending&currency=EUR&view=ledger&page=2&pageSize=25&sort=amount&direction=asc'
+    )
+    pushState.mockClear()
+    replaceState.mockClear()
+    act(() => {
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    expect(pushState).not.toHaveBeenCalled()
+    expect(replaceState).not.toHaveBeenCalled()
+    expect(mockUseQuery).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        search: 'cafe',
+        type: 'income',
+        account: 'account-9',
+        category: 'food',
+        dateFrom: '2026-01-01',
+        dateTo: '2026-02-01',
+        status: 'pending',
+        currency: 'EUR',
+        sort: 'amount',
+        direction: 'asc',
+        page: 2,
+        pageSize: 25,
+      })
+    )
+    expect(screen.getByRole('tab', { name: 'views.ledger' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    expect(window.location.search).toContain('pageSize=25')
+    expect(window.location.search).toContain('direction=asc')
+  })
+
+  it('keeps the review inspector on the active row only', async () => {
+    setRows([
+      makeRow({ id: 'first', description: 'First' }),
+      makeRow({ id: 'second', description: 'Second' }),
+    ])
+    pageResult.reviewCounts.all = 2
+    const user = userEvent.setup()
+    render(<Transactions />)
+    await user.click(screen.getByRole('tab', { name: 'views.review' }))
+
+    expect(document.querySelectorAll('[data-review-inspector]')).toHaveLength(1)
+    expect(document.getElementById('review-category-first')).toBeInTheDocument()
+    expect(document.getElementById('review-category-second')).not.toBeInTheDocument()
+
+    fireEvent.keyDown(document, { key: 'j' })
+    await waitFor(() => expect(document.activeElement).toHaveTextContent('Second'))
+    expect(document.querySelectorAll('[data-review-inspector]')).toHaveLength(1)
+    expect(document.getElementById('review-category-second')).toBeInTheDocument()
+    expect(document.getElementById('review-category-first')).not.toBeInTheDocument()
+  })
+
+  it('shows true pending, staged, and source flags without approved or page aggregates', () => {
+    const rows = Array.from({ length: 50 }, (_, index) =>
+      makeRow({
+        id: `row-${index}`,
+        description: `Row ${index}`,
+        amount: 100,
+        currency: 'USD',
+        date: '2026-04-02',
+        is_consumption_unclassified: 0,
+        ...(index === 0
+          ? {
+              status: 'pending' as const,
+              ledger_treatment: 'staged_no_balance_impact' as const,
+              source: 'bank_import',
+              type: 'transfer' as const,
+              transfer_to_account_name: 'Savings',
+            }
+          : {}),
+      })
+    )
+    setRows(rows, 74)
+    render(<Transactions />)
+
+    expect(document.querySelectorAll('.native-panel')).toHaveLength(1)
+    expect(document.querySelectorAll('article')).toHaveLength(50)
+    expect(document.body.textContent?.toLowerCase()).not.toContain('approved')
+    expect(document.body.textContent).not.toContain(formatMoney(50 * 100, 'USD'))
+    expect(screen.queryByText('summary.results')).not.toBeInTheDocument()
+    expect(screen.queryByText('summary.currencies')).not.toBeInTheDocument()
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+    expect(screen.getByText('2026-04-02')).toBeInTheDocument()
+    expect(screen.getAllByText('status.pending').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('review.reasons.staged').length).toBeGreaterThan(0)
+    expect(screen.getByText('bank import')).toBeInTheDocument()
+    expect(screen.queryByText('source.manual')).not.toBeInTheDocument()
+    expect(screen.getAllByText(`-${formatMoney(100, 'USD')}`).length).toBeGreaterThan(0)
+  })
+
+  it('opens review from the flagged count without dropping the current filters', async () => {
+    window.history.replaceState(null, '', '/transactions?account=account-2&type=expense&page=2')
+    setRows([makeRow({ is_consumption_unclassified: 0 })], 74)
+    pageResult.reviewCounts.all = 55
+    const user = userEvent.setup()
+    render(<Transactions />)
+
+    await user.click(screen.getByRole('button', { name: /55/ }))
+    expect(window.location.search).toContain('view=review')
+    expect(window.location.search).toContain('account=account-2')
+    expect(window.location.search).toContain('type=expense')
+    expect(window.location.search).not.toContain('page=2')
+    expect(screen.getByRole('tab', { name: 'views.review' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
   })
 })
 

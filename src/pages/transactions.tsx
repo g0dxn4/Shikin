@@ -17,6 +17,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  MoreHorizontal,
   Pencil,
   Plus,
   Search,
@@ -33,7 +34,8 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { ErrorState } from '@/components/ui/error-state'
-import { NativePanel, PageToolbar } from '@/components/ui/native-layout'
+import { NativePanel } from '@/components/ui/native-layout'
+import { TransactionViewTabs } from '@/components/transactions/transaction-view-tabs'
 import { transactionAttentionStatus } from '@/components/transactions/transaction-review-summary'
 import { TransactionReviewSummary } from '@/components/transactions/transaction-review-summary-panel'
 import { useUIStore } from '@/stores/ui-store'
@@ -193,6 +195,10 @@ function serializeUrlState(state: TransactionUrlState): string {
   return `${window.location.pathname}${queryString ? `?${queryString}` : ''}${window.location.hash}`
 }
 
+function currentBrowserUrl(): string {
+  return `${window.location.pathname}${window.location.search}${window.location.hash}`
+}
+
 function countActiveFilters(state: TransactionUrlState): number {
   return (
     Number(!!state.search) +
@@ -295,6 +301,11 @@ export function Transactions() {
   const { accounts, archivedAccounts, fetch: fetchAccounts } = useAccountStore()
   const { categories, fetch: fetchCategories } = useCategoryStore()
   const [urlState, setUrlState] = useState(readUrlState)
+  const historyIntent = useRef<{ id: number; mode: 'push' | 'replace' | 'pop' }>({
+    id: 0,
+    mode: 'pop',
+  })
+  const appliedHistoryId = useRef(0)
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [statementImportOpen, setStatementImportOpen] = useState(false)
@@ -310,7 +321,10 @@ export function Transactions() {
   }, [fetchAccounts, fetchCategories])
 
   useEffect(() => {
-    const handlePopState = () => setUrlState(readUrlState())
+    const handlePopState = () => {
+      historyIntent.current = { id: historyIntent.current.id + 1, mode: 'pop' }
+      setUrlState(readUrlState())
+    }
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
   }, [])
@@ -328,17 +342,29 @@ export function Transactions() {
       patch: Partial<TransactionUrlState>,
       options: { resetPage?: boolean; replace?: boolean } = {}
     ) => {
+      historyIntent.current = {
+        id: historyIntent.current.id + 1,
+        mode: options.replace ? 'replace' : 'push',
+      }
       setUrlState((current) => {
         const next = { ...current, ...patch }
         if (options.resetPage !== false) next.page = 1
-        const nextUrl = serializeUrlState(next)
-        if (options.replace) window.history.replaceState(null, '', nextUrl)
-        else window.history.pushState(null, '', nextUrl)
         return next
       })
     },
     []
   )
+
+  useEffect(() => {
+    const intent = historyIntent.current
+    if (intent.id === appliedHistoryId.current) return
+    appliedHistoryId.current = intent.id
+    if (intent.mode === 'pop') return
+    const nextUrl = serializeUrlState(urlState)
+    if (nextUrl === currentBrowserUrl()) return
+    if (intent.mode === 'replace') window.history.replaceState(null, '', nextUrl)
+    else window.history.pushState(null, '', nextUrl)
+  }, [urlState])
 
   const request = useMemo<TransactionPageRequest>(
     () => ({
@@ -510,57 +536,82 @@ export function Transactions() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [moveReviewFocus, urlState.view])
 
-  return (
-    <div className="page-content animate-fade-in-up min-w-0 space-y-4">
-      <PageToolbar
-        actions={
-          <>
-            <ActionDisclosure
-              label={t('actions.more')}
-              actions={[
-                {
-                  label: t('import.button'),
-                  onSelect: () => setStatementImportOpen(true),
-                },
-                {
-                  label: tConsumption('bulk.actions.open'),
-                  disabled: pageQuery.isLoading || pageQuery.rows.length === 0,
-                  onSelect: () => setBulkClassificationOpen(true),
-                },
-                {
-                  label: t('recurring.addRule'),
-                  onSelect: () => openRecurringDialog(),
-                },
-              ]}
-            />
-            <Button
-              size="sm"
-              className="min-h-11 md:min-h-9"
-              onClick={() => openTransactionDialog()}
-            >
-              <Plus size={15} />
-              {t('addTransaction')}
-            </Button>
-          </>
-        }
-      />
+  const attentionStatus = transactionAttentionStatus({
+    isLoading: pageQuery.isLoading,
+    error: pageQuery.error,
+    search: urlState.search,
+    deferredSearch,
+  })
 
-      <TransactionReviewSummary
-        view={urlState.view}
-        reviewReasonApplied={urlState.view === 'review'}
-        total={pageQuery.total}
-        reviewCounts={pageQuery.reviewCounts}
-        status={transactionAttentionStatus({
-          isLoading: pageQuery.isLoading,
-          error: pageQuery.error,
-          search: urlState.search,
-          deferredSearch,
-        })}
-      />
+  return (
+    <div className="page-content animate-fade-in-up min-w-0" style={{ gap: '0.5rem' }}>
+      <div className="flex min-w-0 flex-col gap-2 md:flex-row md:items-center">
+        <label className="relative order-2 min-w-0 md:order-1 md:flex-1">
+          <span className="sr-only">{t('filters.search')}</span>
+          <Search
+            size={15}
+            className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2"
+          />
+          <Input
+            type="search"
+            value={urlState.search}
+            onChange={(event) => updateUrlState({ search: event.target.value }, { replace: true })}
+            placeholder={t('filters.searchPlaceholder') || `${tCommon('actions.search')}...`}
+            className="!h-11 !min-h-11 pl-8 md:!h-8 md:!min-h-8"
+          />
+        </label>
+        <div className="order-1 min-w-0 md:order-2">
+          <TransactionViewTabs
+            label={t('views.label')}
+            value={urlState.view}
+            labels={{
+              timeline: t('views.timeline'),
+              ledger: t('views.ledger'),
+              review: t('views.review'),
+            }}
+            onChange={(view) => updateUrlState({ view })}
+          />
+        </div>
+        <div className="order-3 flex min-w-0 items-center gap-2 md:shrink-0">
+          <ActionDisclosure
+            className="shrink-0"
+            label={t('actions.more')}
+            ariaLabel={t('actions.more')}
+            trigger={
+              <>
+                <MoreHorizontal className="md:hidden" aria-hidden="true" />
+                <span className="hidden md:inline">{t('actions.more')}</span>
+              </>
+            }
+            triggerClassName="!h-11 !w-11 !min-h-11 !min-w-11 shrink-0 px-0 md:!h-8 md:!w-auto md:!min-h-8 md:!min-w-0 md:px-3"
+            actions={[
+              {
+                label: t('import.button'),
+                onSelect: () => setStatementImportOpen(true),
+              },
+              {
+                label: tConsumption('bulk.actions.open'),
+                disabled: pageQuery.isLoading || pageQuery.rows.length === 0,
+                onSelect: () => setBulkClassificationOpen(true),
+              },
+              {
+                label: t('recurring.addRule'),
+                onSelect: () => openRecurringDialog(),
+              },
+            ]}
+          />
+          <Button
+            className="!h-11 !min-h-11 flex-1 px-3 md:!h-8 md:!min-h-8 md:flex-none"
+            onClick={() => openTransactionDialog()}
+          >
+            <Plus size={15} />
+            {t('addTransaction')}
+          </Button>
+        </div>
+      </div>
 
       <TransactionFilters
         t={t}
-        tCommon={tCommon}
         state={urlState}
         datePreset={datePreset}
         accounts={allAccounts}
@@ -573,28 +624,14 @@ export function Transactions() {
         onClear={clearFilters}
       />
 
-      {urlState.view === 'review' && (
-        <div
-          className="flex min-w-0 flex-wrap items-center gap-1.5"
-          role="group"
-          aria-label={t('review.queueLabel')}
-        >
-          {reviewFilters.map((filter) => (
-            <button
-              key={filter}
-              type="button"
-              aria-pressed={urlState.reviewReason === filter}
-              onClick={() => updateUrlState({ reviewReason: filter })}
-              className="filter-pill border-border min-h-11 border md:min-h-8"
-            >
-              {filter === 'unclassified'
-                ? tConsumption('review.filter')
-                : t(`review.filters.${filter}`)}{' '}
-              ({pageQuery.reviewCounts[filter]})
-            </button>
-          ))}
-        </div>
-      )}
+      <TransactionReviewSummary
+        view={urlState.view}
+        reviewReasonApplied={urlState.view === 'review'}
+        total={pageQuery.total}
+        reviewCounts={pageQuery.reviewCounts}
+        status={attentionStatus}
+        onOpenReview={() => updateUrlState({ view: 'review' })}
+      />
 
       <ErrorBanner
         title={t('loadError.title')}
@@ -605,111 +642,132 @@ export function Transactions() {
         {reviewAnnouncement}
       </p>
 
-      {pageQuery.isLoading && pageQuery.rows.length === 0 ? (
-        <TransactionsSkeleton />
-      ) : pageQuery.error && pageQuery.rows.length === 0 ? (
-        <ErrorState
-          title={t('loadError.title')}
-          description={pageQuery.error}
-          onRetry={() => invalidateTransactionPage('review')}
-        />
-      ) : pageQuery.total === 0 && !hasActiveFilters && urlState.view !== 'review' ? (
-        <NativePanel className="flex flex-col items-center justify-center px-6 py-16 text-center">
-          <span className="bg-accent-muted text-accent mb-4 grid h-12 w-12 place-items-center rounded-xl">
-            <ArrowLeftRight size={23} />
-          </span>
-          <h2 className="text-lg font-semibold">{t('empty.title')}</h2>
-          <p className="text-muted-foreground mt-1 max-w-sm text-sm">{t('empty.description')}</p>
-          <Button className="mt-4" onClick={() => openTransactionDialog()}>
-            <Plus size={16} /> {t('addTransaction')}
-          </Button>
-        </NativePanel>
-      ) : pageQuery.rows.length === 0 ? (
-        <NativePanel className="flex flex-col items-center justify-center px-6 py-12 text-center">
-          <Search size={22} className="text-muted-foreground" />
-          <h2 className="mt-3 text-base font-semibold">
-            {urlState.view === 'review' ? t('review.empty') : t('noMatching')}
-          </h2>
-          {hasActiveFilters && (
-            <Button variant="ghost" size="sm" className="mt-2" onClick={clearFilters}>
-              {t('filters.clear')}
-            </Button>
-          )}
-        </NativePanel>
-      ) : (
-        <div
-          id={`transactions-${urlState.view}-panel`}
-          role="region"
-          aria-label={t(`views.${urlState.view}`)}
-        >
-          {urlState.view === 'timeline' && (
-            <div className="space-y-5">
-              {[...groupedByDate.entries()].map(([date, group]) => (
-                <section key={date} aria-labelledby={`date-${date}`}>
-                  <h2
-                    id={`date-${date}`}
-                    className="text-muted-foreground mb-2 text-xs font-semibold"
-                  >
-                    {date === dayjs().format('YYYY-MM-DD')
-                      ? t('dateHeaders.today')
-                      : date === dayjs().subtract(1, 'day').format('YYYY-MM-DD')
-                        ? t('dateHeaders.yesterday')
-                        : dayjs(date).format('ddd, MMM D')}
-                  </h2>
-                  <NativePanel className="divide-border divide-y overflow-hidden">
-                    {group.map((transaction) => (
-                      <TransactionRow
-                        key={transaction.id}
-                        transaction={transaction}
-                        getSplits={getSplits}
-                        onDetails={() => openTransactionDialog(transaction.id)}
-                        onEdit={() => openTransactionDialog(transaction.id)}
-                        onDelete={() => setDeleteId(transaction.id)}
-                      />
-                    ))}
-                  </NativePanel>
-                </section>
-              ))}
-            </div>
-          )}
-          {urlState.view === 'ledger' && (
-            <LedgerView
-              transactions={pageQuery.rows}
-              sort={{ field: urlState.sort, direction: urlState.direction }}
-              onSort={handleSort}
-              onDetails={(transaction) => openTransactionDialog(transaction.id)}
-              onEdit={(id) => openTransactionDialog(id)}
-              onDelete={setDeleteId}
-            />
-          )}
-          {urlState.view === 'review' && (
-            <ReviewView
-              transactions={pageQuery.rows}
-              accounts={allAccounts}
-              categories={categories}
-              activeReviewId={activeReviewId}
-              reviewMutationId={reviewMutationId}
-              rowRefs={reviewRowRefs}
-              onActiveReviewChange={setActiveReviewId}
-              onEdit={(id) => openTransactionDialog(id)}
-              onDelete={setDeleteId}
-              onUpdate={handleReviewUpdate}
-              unclassifiedLabel={tConsumption('review.reason')}
-            />
-          )}
-          <Pagination
-            currentPage={urlState.page}
-            totalPages={totalPages}
-            pageSize={urlState.pageSize}
-            firstVisible={firstVisible}
-            lastVisible={lastVisible}
-            total={pageQuery.total}
-            t={t}
-            onPage={(page) => updateUrlState({ page }, { resetPage: false })}
-            onPageSize={(pageSize) => updateUrlState({ pageSize })}
+      <div
+        id={`transactions-${urlState.view}-panel`}
+        role="tabpanel"
+        aria-labelledby={`transactions-${urlState.view}-tab`}
+        className="min-w-0"
+      >
+        {pageQuery.isLoading && pageQuery.rows.length === 0 ? (
+          <TransactionsSkeleton />
+        ) : pageQuery.error && pageQuery.rows.length === 0 ? (
+          <ErrorState
+            title={t('loadError.title')}
+            description={pageQuery.error}
+            onRetry={() => invalidateTransactionPage('review')}
+            className="py-8"
           />
-        </div>
-      )}
+        ) : pageQuery.total === 0 && !hasActiveFilters && urlState.view !== 'review' ? (
+          <NativePanel className="flex flex-col items-center justify-center px-4 py-8 text-center">
+            <span className="bg-muted text-muted-foreground mb-3 grid h-10 w-10 place-items-center rounded-lg">
+              <ArrowLeftRight size={18} />
+            </span>
+            <h2 className="text-base font-semibold">{t('empty.title')}</h2>
+            <p className="text-muted-foreground mt-1 max-w-sm text-sm">{t('empty.description')}</p>
+            <Button className="mt-3 !h-11 md:!h-8" onClick={() => openTransactionDialog()}>
+              <Plus size={16} /> {t('addTransaction')}
+            </Button>
+          </NativePanel>
+        ) : pageQuery.rows.length === 0 ? (
+          <NativePanel className="flex flex-col items-center justify-center px-4 py-8 text-center">
+            <Search size={18} className="text-muted-foreground" />
+            <h2 className="mt-2 text-base font-semibold">
+              {urlState.view === 'review' ? t('review.empty') : t('noMatching')}
+            </h2>
+            {hasActiveFilters && (
+              <Button variant="ghost" size="sm" className="mt-2" onClick={clearFilters}>
+                {t('filters.clear')}
+              </Button>
+            )}
+          </NativePanel>
+        ) : (
+          <NativePanel className="min-w-0 overflow-hidden">
+            {urlState.view === 'review' && (
+              <div
+                className="border-border flex min-w-0 flex-wrap items-center gap-1.5 border-b px-2 py-2"
+                role="group"
+                aria-label={t('review.queueLabel')}
+              >
+                {reviewFilters.map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    aria-pressed={urlState.reviewReason === filter}
+                    onClick={() => updateUrlState({ reviewReason: filter })}
+                    className="filter-pill border-border !h-11 border md:!h-8"
+                  >
+                    {filter === 'unclassified'
+                      ? tConsumption('review.filter')
+                      : t(`review.filters.${filter}`)}{' '}
+                    ({pageQuery.reviewCounts[filter]})
+                  </button>
+                ))}
+              </div>
+            )}
+            {urlState.view === 'timeline' && (
+              <div className="divide-border divide-y">
+                {[...groupedByDate.entries()].map(([date, group]) => (
+                  <section key={date} aria-labelledby={`date-${date}`}>
+                    <h2
+                      id={`date-${date}`}
+                      className="text-muted-foreground px-3 pt-2 pb-1 text-xs font-medium"
+                    >
+                      {journalDateLabel(date, t)}
+                    </h2>
+                    <div className="divide-border divide-y">
+                      {group.map((transaction) => (
+                        <TransactionRow
+                          key={transaction.id}
+                          transaction={transaction}
+                          getSplits={getSplits}
+                          onDetails={() => openTransactionDialog(transaction.id)}
+                          onEdit={() => openTransactionDialog(transaction.id)}
+                          onDelete={() => setDeleteId(transaction.id)}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            )}
+            {urlState.view === 'ledger' && (
+              <LedgerView
+                transactions={pageQuery.rows}
+                sort={{ field: urlState.sort, direction: urlState.direction }}
+                onSort={handleSort}
+                onDetails={(transaction) => openTransactionDialog(transaction.id)}
+                onEdit={(id) => openTransactionDialog(id)}
+                onDelete={setDeleteId}
+              />
+            )}
+            {urlState.view === 'review' && (
+              <ReviewView
+                transactions={pageQuery.rows}
+                accounts={allAccounts}
+                categories={categories}
+                activeReviewId={activeReviewId}
+                reviewMutationId={reviewMutationId}
+                rowRefs={reviewRowRefs}
+                onActiveReviewChange={setActiveReviewId}
+                onEdit={(id) => openTransactionDialog(id)}
+                onDelete={setDeleteId}
+                onUpdate={handleReviewUpdate}
+              />
+            )}
+            <Pagination
+              currentPage={urlState.page}
+              totalPages={totalPages}
+              pageSize={urlState.pageSize}
+              firstVisible={firstVisible}
+              lastVisible={lastVisible}
+              total={pageQuery.total}
+              t={t}
+              onPage={(page) => updateUrlState({ page }, { resetPage: false })}
+              onPageSize={(pageSize) => updateUrlState({ pageSize })}
+            />
+          </NativePanel>
+        )}
+      </div>
 
       <ConsumptionBulkDialog
         open={bulkClassificationOpen}
@@ -744,7 +802,6 @@ export function Transactions() {
 
 function TransactionFilters({
   t,
-  tCommon,
   state,
   datePreset,
   accounts,
@@ -757,7 +814,6 @@ function TransactionFilters({
   onClear,
 }: {
   t: TFunction<'transactions'>
-  tCommon: TFunction<'common'>
   state: TransactionUrlState
   datePreset: DatePreset
   accounts: { id: string; name: string }[]
@@ -805,7 +861,35 @@ function TransactionFilters({
     accounts.find((account) => account.id === state.account)?.name ?? state.account
   const categoryLabel =
     categories.find((category) => category.id === state.category)?.name ?? state.category
-  const advancedChips = [
+  const dateChipLabel =
+    datePreset === 'custom'
+      ? [state.dateFrom, state.dateTo].filter(Boolean).join('–') || t('filters.dates.custom')
+      : t(`filters.dates.${datePreset}`)
+  const chips = [
+    state.search
+      ? {
+          key: 'search',
+          text: `${t('filters.search')}: ${state.search}`,
+          clear: () => onSearch(''),
+        }
+      : null,
+    state.type !== 'all'
+      ? {
+          key: 'type',
+          text: `${t('filters.type')}: ${t(`types.${state.type}`)}`,
+          clear: () => onPatch({ type: 'all' }),
+        }
+      : null,
+    state.dateFrom || state.dateTo
+      ? {
+          key: 'dates',
+          text: `${t('filters.dateRange')}: ${dateChipLabel}`,
+          clear: () => {
+            setCustomRangeRequested(false)
+            onPatch({ dateFrom: '', dateTo: '', datePreset: null })
+          },
+        }
+      : null,
     state.account !== 'all'
       ? {
           key: 'account',
@@ -835,194 +919,172 @@ function TransactionFilters({
         }
       : null,
   ].filter((chip): chip is { key: string; text: string; clear: () => void } => chip !== null)
+  const advancedName =
+    advancedFilterCount > 0
+      ? `${advancedOpen ? t('filters.hideAdvanced') : t('filters.showAdvanced')} (${advancedFilterCount})`
+      : advancedOpen
+        ? t('filters.hideAdvanced')
+        : t('filters.showAdvanced')
+  const dateOptions = (
+    [
+      'this-month',
+      'three-months',
+      'six-months',
+      'this-year',
+      'all',
+      ...(datePreset === 'month' || datePreset === '30-days' || datePreset === '90-days'
+        ? [datePreset]
+        : []),
+      'custom',
+    ] as DatePreset[]
+  ).map((value) => ({
+    value,
+    label: t(`filters.dates.${value}`),
+  }))
 
   return (
-    <NativePanel as="div" className="min-w-0 p-3">
-      <div className="flex min-w-0 flex-col gap-2" role="region" aria-label={t('filters.toolbar')}>
-        <div className="flex min-w-0 flex-wrap items-center gap-2 sm:flex-nowrap">
-          <label className="relative min-w-0 flex-1 basis-full sm:basis-0">
-            <span className="sr-only">{t('filters.search')}</span>
-            <Search
-              size={15}
-              className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 -translate-y-1/2"
-            />
-            <Input
-              type="search"
-              value={state.search}
-              onChange={(event) => onSearch(event.target.value)}
-              placeholder={t('filters.searchPlaceholder') || `${tCommon('actions.search')}...`}
-              className="min-h-11 min-w-0 pl-9 md:h-10 md:min-h-10"
-            />
-          </label>
-          <label className="flex min-w-0 flex-1 items-center gap-1.5 sm:flex-none">
-            <span className="text-muted-foreground text-xs font-medium">{t('views.display')}</span>
-            <select
-              id="transactions-display"
-              aria-label={t('views.label')}
-              value={state.view}
-              onChange={(event) => onPatch({ view: event.target.value as TransactionView })}
-              className="native-select min-h-11 w-full min-w-0 text-xs sm:w-[8.5rem] md:min-h-10 md:w-[9.5rem]"
-            >
-              {transactionViews.map((view) => (
-                <option key={view} value={view}>
-                  {t(`views.${view}`)}
-                </option>
-              ))}
-            </select>
-          </label>
-          {hasActiveFilters ? (
-            <Button
+    <div className="flex min-w-0 flex-col gap-2" role="region" aria-label={t('filters.toolbar')}>
+      <div className="flex min-w-0 flex-col gap-2 md:flex-row md:flex-wrap md:items-center">
+        <div
+          className="grid grid-cols-2 gap-2 md:flex md:flex-wrap md:gap-1"
+          role="group"
+          aria-label={t('filters.type')}
+        >
+          {(['all', 'expense', 'income', 'transfer'] as const).map((type) => (
+            <button
+              key={type}
               type="button"
-              variant="ghost"
-              size="sm"
-              onClick={handleClear}
-              aria-label={t('filters.clear')}
-              title={t('filters.activeCount', { count: activeFilterCount })}
-              className="min-h-11 shrink-0 gap-1 px-2 md:min-h-9"
+              className="filter-pill !h-11 md:!h-8"
+              aria-pressed={state.type === type}
+              onClick={() => onPatch({ type })}
             >
-              <span className="text-xs font-medium tabular-nums" aria-hidden="true">
-                {activeFilterCount}
-              </span>
-              <X size={14} />
-            </Button>
-          ) : null}
+              {t(`types.${type}`)}
+            </button>
+          ))}
         </div>
-        <div className="grid min-w-0 grid-cols-2 items-center gap-1.5 md:flex md:flex-wrap">
-          <div
-            className="col-span-2 flex min-w-0 flex-wrap gap-1"
-            role="group"
-            aria-label={t('filters.type')}
-          >
-            {(['all', 'expense', 'income', 'transfer'] as const).map((type) => (
-              <button
-                key={type}
-                type="button"
-                className="filter-pill min-h-11 md:min-h-8"
-                aria-pressed={state.type === type}
-                onClick={() => onPatch({ type })}
-              >
-                {t(`types.${type}`)}
-              </button>
-            ))}
-          </div>
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 md:contents">
           <FilterSelect
             label={t('filters.dateRange')}
             value={dateSelectValue}
             onChange={(value) => handleDateSelect(value as DatePreset)}
-            options={(
-              [
-                'this-month',
-                'three-months',
-                'six-months',
-                'this-year',
-                'all',
-                ...(datePreset === 'month' || datePreset === '30-days' || datePreset === '90-days'
-                  ? [datePreset]
-                  : []),
-                'custom',
-              ] as DatePreset[]
-            ).map((value) => ({
-              value,
-              label: t(`filters.dates.${value}`),
-            }))}
+            options={dateOptions}
           />
           <Button
             type="button"
             variant="outline"
-            size="sm"
-            className="min-h-11 justify-between md:hidden"
+            className="!h-11 !min-h-11 justify-between px-2 md:hidden"
             aria-expanded={advancedOpen}
             aria-controls="transaction-advanced-filters"
+            aria-label={advancedName}
             onClick={() => setAdvancedOpen((open) => !open)}
           >
-            <span>
-              {advancedOpen ? t('filters.hideAdvanced') : t('filters.showAdvanced')}
-              {advancedFilterCount > 0 ? ` (${advancedFilterCount})` : ''}
+            <span className="truncate">
+              {t('filters.filtersButton')}
+              {advancedFilterCount > 0 ? ` ${advancedFilterCount}` : ''}
             </span>
             <ChevronDown
               aria-hidden="true"
-              className={cn('transition-transform', advancedOpen ? 'rotate-180' : '')}
+              className={cn('shrink-0 transition-transform', advancedOpen ? 'rotate-180' : '')}
             />
           </Button>
-          {showCustomDates ? (
-            <div className="col-span-2 grid w-full min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 md:w-auto">
-              <label className="text-muted-foreground min-w-0 text-xs">
-                {t('filters.from')}
-                <Input
-                  type="date"
-                  value={state.dateFrom}
-                  onChange={(event) => onPatch({ dateFrom: event.target.value, datePreset: null })}
-                  className="text-foreground mt-1 min-h-11 w-full min-w-0 md:min-h-10 md:w-40"
-                />
-              </label>
-              <label className="text-muted-foreground min-w-0 text-xs">
-                {t('filters.to')}
-                <Input
-                  type="date"
-                  value={state.dateTo}
-                  onChange={(event) => onPatch({ dateTo: event.target.value, datePreset: null })}
-                  className="text-foreground mt-1 min-h-11 w-full min-w-0 md:min-h-10 md:w-40"
-                />
-              </label>
-            </div>
-          ) : null}
-          {!advancedOpen && advancedChips.length > 0 ? (
-            <div
-              className="col-span-2 flex min-w-0 flex-wrap gap-1.5 md:hidden"
-              aria-label={t('filters.activeAdvanced')}
-            >
-              {advancedChips.map((chip) => (
-                <button
-                  key={chip.key}
-                  type="button"
-                  className="border-border bg-muted text-foreground focus-visible:ring-ring inline-flex min-h-11 max-w-full items-center gap-1 rounded-lg border px-2.5 text-xs focus-visible:ring-2 focus-visible:outline-none"
-                  aria-label={`${t('filters.remove')} ${chip.text}`}
-                  onClick={chip.clear}
-                >
-                  <span className="truncate">{chip.text}</span>
-                  <X size={13} aria-hidden="true" />
-                </button>
-              ))}
-            </div>
-          ) : null}
-          <div
-            id="transaction-advanced-filters"
-            className={cn(
-              'col-span-2 min-w-0 grid-cols-2 gap-1.5 md:flex md:flex-wrap',
-              advancedOpen ? 'grid' : 'hidden md:flex'
-            )}
-          >
-            <FilterSelect
-              label={t('filters.account')}
-              value={state.account}
-              onChange={(account) => onPatch({ account })}
-              options={accounts.map((account) => ({ value: account.id, label: account.name }))}
-            />
-            <FilterSelect
-              label={t('filters.category')}
-              value={state.category}
-              onChange={(category) => onPatch({ category })}
-              options={categories.map((category) => ({ value: category.id, label: category.name }))}
-            />
-            <FilterSelect
-              label={t('filters.status')}
-              value={state.status}
-              onChange={(status) => onPatch({ status: status as TransactionQueryStatus })}
-              options={(['posted', 'pending', 'cleared'] as const).map((status) => ({
-                value: status,
-                label: t(`status.${status}`),
-              }))}
-            />
-            <FilterSelect
-              label={t('filters.currency')}
-              value={state.currency}
-              onChange={(currency) => onPatch({ currency })}
-              options={currencies.map((currency) => ({ value: currency, label: currency }))}
-            />
-          </div>
         </div>
+        <div
+          id="transaction-advanced-filters"
+          className={cn(
+            'grid min-w-0 grid-cols-2 gap-2 md:contents',
+            advancedOpen ? 'grid' : 'hidden md:contents'
+          )}
+        >
+          <FilterSelect
+            label={t('filters.account')}
+            value={state.account}
+            onChange={(account) => onPatch({ account })}
+            options={accounts.map((account) => ({ value: account.id, label: account.name }))}
+          />
+          <FilterSelect
+            label={t('filters.category')}
+            value={state.category}
+            onChange={(category) => onPatch({ category })}
+            options={categories.map((category) => ({ value: category.id, label: category.name }))}
+          />
+          <FilterSelect
+            label={t('filters.status')}
+            value={state.status}
+            onChange={(status) => onPatch({ status: status as TransactionQueryStatus })}
+            options={(['posted', 'pending', 'cleared'] as const).map((status) => ({
+              value: status,
+              label: t(`status.${status}`),
+            }))}
+          />
+          <FilterSelect
+            label={t('filters.currency')}
+            value={state.currency}
+            onChange={(currency) => onPatch({ currency })}
+            options={currencies.map((currency) => ({ value: currency, label: currency }))}
+          />
+        </div>
+        {hasActiveFilters ? (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={handleClear}
+            aria-label={t('filters.clear')}
+            title={t('filters.activeCount', { count: activeFilterCount })}
+            className="!h-11 !min-h-11 shrink-0 gap-1 px-2 md:!h-8 md:!min-h-8"
+          >
+            <span className="text-xs font-medium tabular-nums" aria-hidden="true">
+              {activeFilterCount}
+            </span>
+            <X size={14} />
+          </Button>
+        ) : null}
       </div>
-    </NativePanel>
+      {showCustomDates ? (
+        <div className="grid w-full min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 md:max-w-md">
+          <label className="text-muted-foreground min-w-0 text-xs">
+            {t('filters.from')}
+            <Input
+              type="date"
+              value={state.dateFrom}
+              onChange={(event) => onPatch({ dateFrom: event.target.value, datePreset: null })}
+              className="text-foreground mt-1 !h-11 w-full min-w-0 md:!h-8 md:w-40"
+            />
+          </label>
+          <label className="text-muted-foreground min-w-0 text-xs">
+            {t('filters.to')}
+            <Input
+              type="date"
+              value={state.dateTo}
+              onChange={(event) => onPatch({ dateTo: event.target.value, datePreset: null })}
+              className="text-foreground mt-1 !h-11 w-full min-w-0 md:!h-8 md:w-40"
+            />
+          </label>
+        </div>
+      ) : null}
+      {chips.length > 0 ? (
+        <div
+          className="flex min-w-0 flex-wrap gap-1.5"
+          aria-label={
+            chips.some((chip) => ['account', 'category', 'status', 'currency'].includes(chip.key))
+              ? t('filters.activeAdvanced')
+              : undefined
+          }
+        >
+          {chips.map((chip) => (
+            <button
+              key={chip.key}
+              type="button"
+              className="border-border bg-muted text-foreground focus-visible:ring-ring inline-flex !h-11 max-w-full items-center gap-1 rounded-lg border px-2.5 text-xs focus-visible:ring-2 focus-visible:outline-none md:!h-8"
+              aria-label={`${t('filters.remove')} ${chip.text}`}
+              onClick={chip.clear}
+            >
+              <span className="truncate">{chip.text}</span>
+              <X size={13} aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -1049,7 +1111,7 @@ function FilterSelect({
         title={selectedLabel}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="native-select min-h-11 w-full max-w-full min-w-0 text-xs md:min-h-10 md:w-auto md:max-w-44"
+        className="native-select !h-11 w-full max-w-full min-w-0 text-xs md:!h-8 md:w-auto md:max-w-44"
       >
         {!hasAllOption && value !== 'custom' ? (
           <option value={EMPTY_FILTER_VALUE}>{label}</option>
@@ -1071,6 +1133,31 @@ const LEDGER_FOCUS_SCROLL = 'scroll-mb-[calc(4rem+env(safe-area-inset-bottom))] 
 function storedLedgerDate(date: string): string {
   const match = /^(\d{4}-\d{2}-\d{2})(?:$|T)/.exec(date)
   return match?.[1] ?? date
+}
+
+function journalDateLabel(date: string, t: TFunction<'transactions'>): string {
+  const iso = storedLedgerDate(date)
+  if (iso === dayjs().format('YYYY-MM-DD')) return `${iso} · ${t('dateHeaders.today')}`
+  if (iso === dayjs().subtract(1, 'day').format('YYYY-MM-DD'))
+    return `${iso} · ${t('dateHeaders.yesterday')}`
+  return iso
+}
+
+function useDesktopJournal() {
+  const [desktop, setDesktop] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(min-width: 768px)').matches
+      : false
+  )
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
+    const media = window.matchMedia('(min-width: 768px)')
+    const update = () => setDesktop(media.matches)
+    update()
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+  return desktop
 }
 
 function ledgerNoteText(transaction: TransactionPageRow): string | null {
@@ -1166,6 +1253,31 @@ function LedgerCategory({ transaction }: { transaction: TransactionPageRow }) {
   )
 }
 
+function LedgerNoteDisclosure({ transaction }: { transaction: TransactionPageRow }) {
+  const { t } = useTranslation('transactions')
+  const note = ledgerNoteText(transaction)
+  if (!note) return null
+  return (
+    <details
+      className="max-w-full min-w-0"
+      onClick={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+    >
+      <summary
+        className={cn(
+          'text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex min-h-11 cursor-pointer list-none items-center rounded-md text-xs font-medium focus-visible:ring-2 focus-visible:outline-none md:min-h-8 [&::-webkit-details-marker]:hidden',
+          LEDGER_FOCUS_SCROLL
+        )}
+      >
+        {t('detail.notes')}
+      </summary>
+      <p className="text-muted-foreground max-w-full pb-1 text-xs break-words whitespace-pre-wrap">
+        {note}
+      </p>
+    </details>
+  )
+}
+
 function LedgerExceptionChips({
   transaction,
   className,
@@ -1175,7 +1287,13 @@ function LedgerExceptionChips({
 }) {
   const { t } = useTranslation('transactions')
   const { t: tConsumption } = useTranslation('consumption')
-  const flags: Array<{ id: string; label: string; title?: string; attention?: boolean }> = []
+  const flags: Array<{
+    id: string
+    label: string
+    title?: string
+    srLabel?: string
+    attention?: boolean
+  }> = []
   if (transaction.ledger_treatment === 'staged_no_balance_impact') {
     flags.push({ id: 'staged', label: t('review.reasons.staged'), attention: true })
   }
@@ -1183,7 +1301,13 @@ function LedgerExceptionChips({
     flags.push({ id: 'placeholder', label: t('review.reasons.placeholder'), attention: true })
   }
   if (transaction.is_consumption_unclassified) {
-    flags.push({ id: 'unclassified', label: tConsumption('review.reason'), attention: true })
+    flags.push({
+      id: 'unclassified',
+      label: t('summary.reasons.unclassified'),
+      title: tConsumption('review.reason'),
+      srLabel: tConsumption('review.reason'),
+      attention: true,
+    })
   }
   if (transaction.reporting_treatment === 'exclude_from_cashflow') {
     flags.push({ id: 'excluded', label: t('correction.excluded') })
@@ -1193,8 +1317,7 @@ function LedgerExceptionChips({
   }
   const source = ledgerSourceChip(transaction)
   if (source) flags.push({ id: 'source', label: source.label, title: source.raw })
-  const note = ledgerNoteText(transaction)
-  if (flags.length === 0 && !note) return null
+  if (flags.length === 0) return null
   return (
     <div className={cn('flex max-w-full min-w-0 flex-wrap items-center gap-1', className)}>
       {flags.map((flag) => (
@@ -1210,30 +1333,12 @@ function LedgerExceptionChips({
               : 'border-border bg-muted/40 text-muted-foreground'
           )}
         >
+          {flag.srLabel ? <span className="sr-only">{flag.srLabel}</span> : null}
           <span className={flag.id === 'source' ? 'line-clamp-2 break-words' : 'break-words'}>
             {flag.label}
           </span>
         </Badge>
       ))}
-      {note ? (
-        <details
-          className="max-w-full min-w-0"
-          onClick={(event) => event.stopPropagation()}
-          onMouseDown={(event) => event.stopPropagation()}
-        >
-          <summary
-            className={cn(
-              'text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex min-h-11 cursor-pointer list-none items-center rounded-md text-xs font-medium focus-visible:ring-2 focus-visible:outline-none md:min-h-8 [&::-webkit-details-marker]:hidden',
-              LEDGER_FOCUS_SCROLL
-            )}
-          >
-            {t('detail.notes')}
-          </summary>
-          <p className="text-muted-foreground max-w-full pb-1 text-xs break-words whitespace-pre-wrap">
-            {note}
-          </p>
-        </details>
-      ) : null}
     </div>
   )
 }
@@ -1318,7 +1423,7 @@ function LedgerView({
 }) {
   const { t } = useTranslation('transactions')
   return (
-    <NativePanel className="max-w-full min-w-0 overflow-hidden">
+    <div className="max-w-full min-w-0">
       <div className="hidden max-w-full min-w-0 overflow-x-auto overscroll-x-contain md:block">
         <table className="w-full min-w-[40rem] table-fixed text-left text-sm">
           <thead className="bg-muted/60 text-muted-foreground text-xs">
@@ -1372,17 +1477,20 @@ function LedgerView({
                     {storedLedgerDate(transaction.date)}
                   </td>
                   <td className="min-w-0 px-3 py-2 align-top">
-                    <button
-                      type="button"
-                      onClick={() => onDetails(transaction)}
-                      title={transaction.description}
-                      className="hover:text-foreground focus-visible:ring-ring block w-full min-w-0 rounded text-left text-sm font-semibold focus-visible:ring-2 focus-visible:outline-none"
-                    >
-                      <span className="line-clamp-2 leading-5 break-words">
-                        {transaction.description}
-                      </span>
-                    </button>
-                    <LedgerExceptionChips transaction={transaction} className="mt-1" />
+                    <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                      <button
+                        type="button"
+                        onClick={() => onDetails(transaction)}
+                        title={transaction.description}
+                        className="hover:text-foreground focus-visible:ring-ring inline-flex max-w-full min-w-0 rounded text-left text-sm font-medium focus-visible:ring-2 focus-visible:outline-none"
+                      >
+                        <span className="line-clamp-2 leading-5 break-words">
+                          {transaction.description}
+                        </span>
+                      </button>
+                      <LedgerNoteDisclosure transaction={transaction} />
+                    </div>
+                    <LedgerExceptionChips transaction={transaction} />
                   </td>
                   <td className="min-w-0 px-3 py-2 align-top text-sm">
                     <span className="line-clamp-2 leading-5 break-words" title={accountLabel}>
@@ -1432,16 +1540,17 @@ function LedgerView({
                 <span className="line-clamp-2 text-sm leading-5 font-semibold break-words">
                   {transaction.description}
                 </span>
-                <span className="text-muted-foreground mt-0.5 block min-w-0 text-xs leading-4">
+                <span className="text-muted-foreground mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1 text-xs leading-4">
                   <span className="tabular-nums">{storedLedgerDate(transaction.date)}</span>
-                  <span aria-hidden="true"> · </span>
+                  <span aria-hidden="true">·</span>
                   <span className="line-clamp-2 break-words" title={accountLabel}>
                     {accountLabel}
                   </span>
                 </span>
               </button>
-              <div className="mt-1 max-w-full min-w-0">
+              <div className="mt-1 flex max-w-full min-w-0 flex-wrap items-center gap-1">
                 <LedgerCategory transaction={transaction} />
+                <LedgerNoteDisclosure transaction={transaction} />
               </div>
               <div className="mt-1.5 max-w-full min-w-0">
                 <LedgerAmount transaction={transaction} />
@@ -1457,7 +1566,7 @@ function LedgerView({
           )
         })}
       </div>
-    </NativePanel>
+    </div>
   )
 }
 
@@ -1531,81 +1640,84 @@ function TransactionRow({
       setLoadingSplits(false)
     }
   }
+  const categoryLabel = transaction.has_splits
+    ? t('split.badge')
+    : transaction.category_name?.trim() || t('form.categoryNone')
   return (
-    <article>
-      <div className="group hover:bg-muted/45 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1 px-4 py-3 sm:flex sm:gap-3">
+    <article className="group hover:bg-muted/45 focus-within:bg-muted/40">
+      <div className="grid grid-cols-[0.5rem_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5 px-3 py-1.5 md:grid-cols-[0.5rem_minmax(0,1fr)_auto_auto] md:py-1">
         <span
-          className="bg-muted-foreground/30 mt-4 h-2.5 w-2.5 shrink-0 self-start rounded-full sm:mt-0 sm:self-auto"
-          style={
-            transaction.category_color ? { backgroundColor: transaction.category_color } : undefined
-          }
+          className="border-border col-start-1 row-start-1 size-2 justify-self-center rounded-full border"
+          style={{
+            backgroundColor: transaction.category_color || 'var(--color-muted-foreground)',
+          }}
         />
-        <button
-          type="button"
-          onClick={onDetails}
-          className="focus-visible:ring-ring flex min-h-11 min-w-0 flex-col justify-center rounded text-left focus-visible:ring-2 focus-visible:outline-none sm:min-h-0 sm:flex-1"
-        >
-          <span className="block truncate text-sm font-medium">{transaction.description}</span>
-          <span className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
-            <span>
-              {transaction.category_name ??
-                (transaction.has_splits ? t('split.badge') : t('form.categoryNone'))}
-            </span>
-            <span>·</span>
-            <span>{getLedgerAccountLabel(transaction)}</span>
-          </span>
-        </button>
-        <div className="col-start-2 flex min-w-0 items-center justify-between gap-2 sm:contents">
-          {transaction.has_splits ? (
-            <button
-              type="button"
-              onClick={toggleSplits}
-              disabled={loadingSplits}
-              className="text-accent hover:bg-accent-muted inline-flex min-h-8 shrink-0 items-center gap-1 rounded-md px-2 text-xs"
-            >
-              <Split size={12} />
-              {t('split.badge')}
-              <ChevronDown size={12} className={cn(expanded && 'rotate-180')} />
-            </button>
-          ) : (
-            <StatusBadge transaction={transaction} />
-          )}
-          <span
+        <div className="col-start-2 row-start-1 min-w-0">
+          <button
+            type="button"
+            onClick={onDetails}
+            title={transaction.description}
             className={cn(
-              'ml-auto shrink-0 text-sm font-semibold tabular-nums',
-              transaction.type === 'income' ? 'text-success' : 'text-foreground'
+              'focus-visible:ring-ring flex min-h-11 w-full min-w-0 items-center rounded text-left focus-visible:ring-2 focus-visible:outline-none md:min-h-8',
+              LEDGER_FOCUS_SCROLL
             )}
           >
-            {transaction.type === 'income' ? '+' : transaction.type === 'expense' ? '-' : ''}
-            {formatMoney(transaction.amount, transaction.currency)}
-          </span>
+            <span className="line-clamp-2 text-sm leading-5 font-medium break-words">
+              {transaction.description}
+            </span>
+          </button>
+          <div className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs leading-4">
+            <span className="min-w-0 break-words">{categoryLabel}</span>
+            <span aria-hidden="true">·</span>
+            <span className="min-w-0 break-words">{getLedgerAccountLabel(transaction)}</span>
+            <LedgerStatusChip transaction={transaction} />
+            <LedgerExceptionChips transaction={transaction} />
+            <LedgerNoteDisclosure transaction={transaction} />
+            {transaction.has_splits ? (
+              <button
+                type="button"
+                onClick={toggleSplits}
+                disabled={loadingSplits}
+                className="text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex min-h-11 items-center gap-1 rounded-md px-1 text-xs focus-visible:ring-2 focus-visible:outline-none md:min-h-8"
+              >
+                <Split size={12} aria-hidden="true" />
+                {t('split.breakdown')}
+                <ChevronDown
+                  size={12}
+                  className={cn(expanded && 'rotate-180')}
+                  aria-hidden="true"
+                />
+              </button>
+            ) : null}
+          </div>
+        </div>
+        <div className="col-span-2 col-start-2 row-start-2 min-w-0 md:col-span-1 md:col-start-3 md:row-start-1">
+          <LedgerAmount transaction={transaction} />
+        </div>
+        <div className="col-start-3 row-start-1 md:col-start-4">
           <TransactionActions
             transaction={transaction}
-            canEdit={
-              !transaction.matched_transaction_id &&
-              !transaction.is_receivable_payment &&
-              !transaction.is_reconciliation_adjustment &&
-              (transaction.transaction_kind ?? 'standard') === 'standard' &&
-              !transactionProtection(transaction)
-            }
+            canEdit={ledgerCanEdit(transaction)}
             onEdit={onEdit}
             onDelete={onDelete}
+            compact
+            buttonClassName={LEDGER_ACTION_CLASS}
           />
         </div>
       </div>
       {expanded && (
-        <div className="border-border bg-muted/25 border-t px-5 py-3">
+        <div className="border-border bg-muted/25 border-t px-3 py-2">
           {loadingSplits ? (
             <Skeleton className="h-8 w-full" />
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-1">
               {splits.map((split) => (
                 <div key={split.id} className="flex justify-between gap-3 text-xs">
-                  <span className="text-muted-foreground truncate">
+                  <span className="text-muted-foreground min-w-0 break-words">
                     {split.category_name}
                     {split.notes ? ` — ${split.notes}` : ''}
                   </span>
-                  <span className="tabular-nums">
+                  <span className="shrink-0 tabular-nums">
                     {formatMoney(split.amount, transaction.currency)}
                   </span>
                 </div>
@@ -1629,7 +1741,6 @@ function ReviewView({
   onEdit,
   onDelete,
   onUpdate,
-  unclassifiedLabel,
 }: {
   transactions: TransactionPageRow[]
   accounts: {
@@ -1647,103 +1758,208 @@ function ReviewView({
   onEdit: (id: string) => void
   onDelete: (id: string) => void
   onUpdate: (transaction: TransactionPageRow, fields: ReviewFieldUpdate) => Promise<void>
-  unclassifiedLabel: string
+}) {
+  const desktop = useDesktopJournal()
+  const active = transactions.find((transaction) => transaction.id === activeReviewId) ?? null
+  return (
+    <div className="md:grid md:grid-cols-[20rem_minmax(0,1fr)] md:items-start">
+      <div className="divide-border divide-y md:col-start-1 md:max-h-[calc(100dvh-12rem)] md:overflow-y-auto">
+        {transactions.map((transaction) => {
+          const selected = transaction.id === activeReviewId
+          return (
+            <div key={transaction.id}>
+              <div
+                ref={(element) => {
+                  if (element) rowRefs.current.set(transaction.id, element)
+                  else rowRefs.current.delete(transaction.id)
+                }}
+                tabIndex={selected ? 0 : -1}
+                data-review-row={transaction.id}
+                aria-current={selected ? 'true' : undefined}
+                onFocus={() => onActiveReviewChange(transaction.id)}
+                onClick={() => onActiveReviewChange(transaction.id)}
+                className={cn(
+                  'hover:bg-muted/45 focus-visible:ring-ring cursor-pointer px-3 py-2 outline-none focus-visible:ring-2',
+                  selected && 'bg-muted/50'
+                )}
+              >
+                <div className="flex min-w-0 items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{transaction.description}</p>
+                    <div className="text-muted-foreground mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5 text-xs leading-4">
+                      <span className="tabular-nums">{storedLedgerDate(transaction.date)}</span>
+                      <span aria-hidden="true">·</span>
+                      <span className="min-w-0 break-words">
+                        {getLedgerAccountLabel(transaction)}
+                      </span>
+                      <LedgerStatusChip transaction={transaction} />
+                      <LedgerExceptionChips transaction={transaction} />
+                      <LedgerNoteDisclosure transaction={transaction} />
+                    </div>
+                  </div>
+                  <div className="max-w-[46%] min-w-0 shrink-0">
+                    <LedgerAmount transaction={transaction} />
+                  </div>
+                </div>
+              </div>
+              {!desktop && selected ? (
+                <ReviewInspector
+                  transaction={transaction}
+                  accounts={accounts}
+                  categories={categories}
+                  reviewMutationId={reviewMutationId}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                  onUpdate={onUpdate}
+                />
+              ) : null}
+            </div>
+          )
+        })}
+      </div>
+      {desktop && active ? (
+        <div className="border-border md:sticky md:top-0 md:col-start-2 md:row-start-1 md:border-l">
+          <ReviewInspector
+            transaction={active}
+            accounts={accounts}
+            categories={categories}
+            reviewMutationId={reviewMutationId}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onUpdate={onUpdate}
+          />
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function ReviewInspector({
+  transaction,
+  accounts,
+  categories,
+  reviewMutationId,
+  onEdit,
+  onDelete,
+  onUpdate,
+}: {
+  transaction: TransactionPageRow
+  accounts: {
+    id: string
+    name: string
+    currency: string
+    is_archived: number
+    account_mode?: string
+  }[]
+  categories: { id: string; name: string; type: string }[]
+  reviewMutationId: string | null
+  onEdit: (id: string) => void
+  onDelete: (id: string) => void
+  onUpdate: (transaction: TransactionPageRow, fields: ReviewFieldUpdate) => Promise<void>
 }) {
   const { t } = useTranslation('transactions')
+  const { t: tConsumption } = useTranslation('consumption')
+  const protectionKey = getReviewProtectionKey(transaction)
+  const isMutable = !protectionKey
+  const source = ledgerSourceChip(transaction)
+  const compatibleAccounts = accounts.filter(
+    (account) =>
+      account.is_archived === 0 &&
+      (account.account_mode ?? 'transactional') === 'transactional' &&
+      account.currency === transaction.currency
+  )
   return (
-    <div className="space-y-3">
-      {transactions.map((transaction) => {
-        const protectionKey = getReviewProtectionKey(transaction)
-        const isMutable = !protectionKey
-        const compatibleAccounts = accounts.filter(
-          (account) =>
-            account.is_archived === 0 &&
-            (account.account_mode ?? 'transactional') === 'transactional' &&
-            account.currency === transaction.currency
-        )
-        return (
-          <article
-            key={transaction.id}
-            ref={(element) => {
-              if (element) rowRefs.current.set(transaction.id, element as HTMLDivElement)
-              else rowRefs.current.delete(transaction.id)
-            }}
-            tabIndex={activeReviewId === transaction.id ? 0 : -1}
-            onFocus={() => onActiveReviewChange(transaction.id)}
-            className={cn(
-              'native-panel focus-visible:ring-ring p-4 outline-none focus-visible:ring-2',
-              activeReviewId === transaction.id && 'border-[var(--color-border-accent)]'
-            )}
+    <div data-review-inspector="" className="min-w-0 px-3 py-3">
+      <p className="text-sm font-medium break-words">{transaction.description}</p>
+      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+        <LedgerStatusChip transaction={transaction} />
+        {source ? (
+          <Badge
+            variant="outline"
+            data-ledger-flag="source"
+            title={source.raw}
+            className="border-border bg-muted/40 text-muted-foreground max-w-full text-xs font-medium"
           >
-            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="truncate text-sm font-semibold">{transaction.description}</h2>
-                  <StatusBadge transaction={transaction} />
-                  <SourceBadge transaction={transaction} />
-                </div>
-                <p className="text-muted-foreground mt-1 text-xs">
-                  {dayjs(transaction.date).format('MMM D, YYYY')} ·{' '}
-                  {transaction.account_name ?? '—'} · {transaction.type === 'income' ? '+' : '-'}
-                  {formatMoney(transaction.amount, transaction.currency)}
-                </p>
-              </div>
-              {isMutable && (
-                <TransactionActions
-                  transaction={transaction}
-                  onEdit={() => onEdit(transaction.id)}
-                  onDelete={() => onDelete(transaction.id)}
-                  compact
-                />
-              )}
-            </div>
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {getReviewReasons(transaction).map((reason) => (
-                <Badge key={reason} variant="secondary" className="text-[10px]">
-                  {reason === 'unclassified' ? unclassifiedLabel : t(`review.reasons.${reason}`)}
-                </Badge>
-              ))}
-            </div>
-            {isMutable ? (
-              <div className="border-border bg-muted/35 mt-4 grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
-                <InlineReviewSelect
-                  id={`review-category-${transaction.id}`}
-                  label={t('review.category')}
-                  value={transaction.category_id ?? EMPTY_CATEGORY_VALUE}
-                  placeholder={t('form.categoryNone')}
-                  options={categories.filter((category) => category.type === transaction.type)}
-                  disabled={reviewMutationId === transaction.id}
-                  onChange={(value) =>
-                    onUpdate(transaction, {
-                      categoryId: value === EMPTY_CATEGORY_VALUE ? null : value,
-                    })
-                  }
-                />
-                <InlineReviewSelect
-                  id={`review-account-${transaction.id}`}
-                  label={t('review.account')}
-                  value={transaction.account_id}
-                  options={compatibleAccounts}
-                  disabled={reviewMutationId === transaction.id || compatibleAccounts.length === 0}
-                  onChange={(value) => onUpdate(transaction, { accountId: value })}
-                />
-              </div>
+            <span className="line-clamp-2 break-words">{source.label}</span>
+          </Badge>
+        ) : null}
+      </div>
+      <p className="text-muted-foreground mt-1 text-xs">
+        <span className="tabular-nums">{storedLedgerDate(transaction.date)}</span>
+        <span aria-hidden="true"> · </span>
+        {getLedgerAccountLabel(transaction)}
+      </p>
+      <div className="mt-1">
+        <LedgerAmount transaction={transaction} />
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1">
+        {getReviewReasons(transaction).map((reason) => (
+          <Badge
+            key={reason}
+            variant="outline"
+            title={reason === 'unclassified' ? tConsumption('review.reason') : undefined}
+            className="border-border bg-muted/40 text-foreground text-xs font-medium"
+          >
+            {reason === 'unclassified' ? (
+              <>
+                <span className="sr-only">{tConsumption('review.reason')}</span>
+                {t('summary.reasons.unclassified')}
+              </>
             ) : (
-              <div className="border-warning/30 bg-warning/10 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
-                <p className="text-foreground text-xs">{t(protectionKey)}</p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onEdit(transaction.id)}
-                >
-                  {transaction.has_splits ? t('review.reviewSplit') : t('editTransaction')}
-                </Button>
-              </div>
+              t(`review.reasons.${reason}`)
             )}
-          </article>
-        )
-      })}
+          </Badge>
+        ))}
+      </div>
+      {isMutable ? (
+        <>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <InlineReviewSelect
+              id={`review-category-${transaction.id}`}
+              label={t('review.category')}
+              value={transaction.category_id ?? EMPTY_CATEGORY_VALUE}
+              placeholder={t('form.categoryNone')}
+              options={categories.filter((category) => category.type === transaction.type)}
+              disabled={reviewMutationId === transaction.id}
+              onChange={(value) =>
+                onUpdate(transaction, {
+                  categoryId: value === EMPTY_CATEGORY_VALUE ? null : value,
+                })
+              }
+            />
+            <InlineReviewSelect
+              id={`review-account-${transaction.id}`}
+              label={t('review.account')}
+              value={transaction.account_id}
+              options={compatibleAccounts}
+              disabled={reviewMutationId === transaction.id || compatibleAccounts.length === 0}
+              onChange={(value) => onUpdate(transaction, { accountId: value })}
+            />
+          </div>
+          <div className="mt-3">
+            <TransactionActions
+              transaction={transaction}
+              canEdit={ledgerCanEdit(transaction)}
+              onEdit={() => onEdit(transaction.id)}
+              onDelete={() => onDelete(transaction.id)}
+              compact
+              buttonClassName={LEDGER_ACTION_CLASS}
+            />
+          </div>
+        </>
+      ) : (
+        <div className="border-warning/30 bg-warning/10 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
+          <p className="text-foreground text-xs">{t(protectionKey)}</p>
+          <Button
+            type="button"
+            variant="outline"
+            className="!h-11 md:!h-8"
+            onClick={() => onEdit(transaction.id)}
+          >
+            {transaction.has_splits ? t('review.reviewSplit') : t('editTransaction')}
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
@@ -1774,7 +1990,7 @@ function InlineReviewSelect({
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        className="native-select text-foreground mt-1 w-full disabled:opacity-50"
+        className="native-select text-foreground mt-1 !h-11 w-full disabled:opacity-50 md:!h-8"
       >
         {placeholder && <option value={EMPTY_CATEGORY_VALUE}>{placeholder}</option>}
         {options.map((option) => (
@@ -1808,19 +2024,18 @@ function Pagination({
   onPage: (page: number) => void
   onPageSize: (size: TransactionPageSize) => void
 }) {
+  const controlClass =
+    'scroll-mb-[calc(4rem+env(safe-area-inset-bottom))] !h-11 !w-11 !min-h-11 !min-w-11 md:scroll-mb-0 md:!h-8 md:!w-8 md:!min-h-8 md:!min-w-8'
   return (
-    <NativePanel
-      as="div"
-      className="mt-3 flex flex-col items-center justify-between gap-3 px-3 py-2 sm:flex-row"
-    >
+    <div className="border-border flex flex-col items-stretch justify-between gap-2 border-t px-3 py-2 sm:flex-row sm:items-center">
       <p className="text-muted-foreground text-xs tabular-nums" aria-live="polite">
         {t('pagination.range', { from: firstVisible, to: lastVisible, total })}
       </p>
-      <nav className="flex items-center gap-1" aria-label={t('pagination.label')}>
+      <nav className="flex flex-wrap items-center gap-1" aria-label={t('pagination.label')}>
         <Button
           variant="ghost"
           size="icon"
-          className="h-9 w-9"
+          className={controlClass}
           disabled={currentPage <= 1}
           onClick={() => onPage(currentPage - 1)}
           aria-label={t('pagination.previous')}
@@ -1841,7 +2056,7 @@ function Pagination({
               key={page}
               variant={page === currentPage ? 'secondary' : 'ghost'}
               size="icon"
-              className="h-9 w-9 tabular-nums"
+              className={cn(controlClass, 'tabular-nums')}
               aria-current={page === currentPage ? 'page' : undefined}
               aria-label={t('pagination.page', { page })}
               onClick={() => onPage(page)}
@@ -1853,7 +2068,7 @@ function Pagination({
         <Button
           variant="ghost"
           size="icon"
-          className="h-9 w-9"
+          className={controlClass}
           disabled={currentPage >= totalPages}
           onClick={() => onPage(currentPage + 1)}
           aria-label={t('pagination.next')}
@@ -1867,7 +2082,7 @@ function Pagination({
           aria-label={t('pagination.rows')}
           value={pageSize}
           onChange={(event) => onPageSize(Number(event.target.value) as TransactionPageSize)}
-          className="native-select text-foreground h-9"
+          className="native-select text-foreground !h-11 md:!h-8"
         >
           {TRANSACTION_PAGE_SIZES.map((size) => (
             <option key={size} value={size}>
@@ -1876,7 +2091,7 @@ function Pagination({
           ))}
         </select>
       </label>
-    </NativePanel>
+    </div>
   )
 }
 
@@ -1933,36 +2148,6 @@ function TransactionActions({
           </Button>
         )}
     </div>
-  )
-}
-
-function StatusBadge({ transaction }: { transaction: TransactionPageRow }) {
-  const { t } = useTranslation('transactions')
-  const status = getTransactionStatus(transaction)
-  return (
-    <Badge
-      variant="outline"
-      className={cn(
-        'shrink-0 text-[10px]',
-        status === 'pending'
-          ? 'border-warning/35 bg-warning/10 text-foreground'
-          : status === 'cleared'
-            ? 'border-success/35 bg-success/10 text-success'
-            : 'border-border text-muted-foreground'
-      )}
-    >
-      {t(`status.${status}`)}
-    </Badge>
-  )
-}
-
-function SourceBadge({ transaction }: { transaction: TransactionPageRow }) {
-  const { t } = useTranslation('transactions')
-  const source = getTransactionSource(transaction)
-  return (
-    <Badge variant="outline" className="text-muted-foreground max-w-28 truncate text-[10px]">
-      {source === 'manual' ? t('source.manual') : source.replace(/[_-]+/g, ' ')}
-    </Badge>
   )
 }
 

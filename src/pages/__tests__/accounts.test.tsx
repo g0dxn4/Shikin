@@ -40,11 +40,61 @@ vi.mock('@/components/ui/safe-chart', () => ({
 }))
 
 vi.mock('recharts', () => ({
-  AreaChart: () => null,
-  Area: () => null,
-  XAxis: () => null,
-  YAxis: () => null,
+  LineChart: ({
+    children,
+    data,
+  }: {
+    children?: React.ReactNode
+    data?: Array<{ sourceIndex?: number; amountCentavos?: number; utcTimestamp?: number }>
+  }) => (
+    <div
+      data-testid="line-chart"
+      data-count={data?.length ?? 0}
+      data-source-indexes={data?.map((point) => point.sourceIndex).join(',')}
+      data-utc={data?.map((point) => point.utcTimestamp).join(',')}
+      data-cents={data?.map((point) => point.amountCentavos).join(',')}
+    >
+      {children}
+    </div>
+  ),
+  AreaChart: ({ children, data }: { children?: React.ReactNode; data?: unknown[] }) => (
+    <div data-testid="area-chart" data-count={data?.length ?? 0}>
+      {children}
+    </div>
+  ),
+  Line: (props: { strokeWidth?: number }) => (
+    <div data-testid="line-series" data-stroke-width={props.strokeWidth} />
+  ),
+  Area: (props: { baseValue?: number }) => (
+    <div data-testid="area-series" data-base={String(props.baseValue)} />
+  ),
+  XAxis: (props: {
+    scale?: string
+    dataKey?: string
+    type?: string
+    domain?: number[]
+    ticks?: number[]
+  }) => (
+    <div
+      data-testid="x-axis"
+      data-scale={props.scale}
+      data-key={String(props.dataKey)}
+      data-type={props.type}
+      data-domain={props.domain?.join(',')}
+      data-ticks={props.ticks?.join(',')}
+    />
+  ),
+  YAxis: (props: { domain?: number[]; ticks?: number[]; width?: number }) => (
+    <div
+      data-testid="y-axis"
+      data-domain={props.domain?.join(',')}
+      data-ticks={props.ticks?.join(',')}
+      data-width={props.width}
+    />
+  ),
+  CartesianGrid: () => <div data-testid="h-grid" />,
   Tooltip: () => null,
+  ReferenceLine: (props: { y?: number }) => <div data-testid="zero-line" data-y={props.y} />,
 }))
 
 vi.mock('react-i18next', () => ({
@@ -310,8 +360,8 @@ describe('Accounts', () => {
       'min-w-0',
       'max-w-full',
       'break-words',
-      'text-xl',
-      'min-[380px]:text-2xl'
+      'text-2xl',
+      'min-[380px]:text-[1.75rem]'
     )
     expect(checkingBalance).not.toHaveClass('truncate')
     expect(within(savings).getByText('EUR').parentElement).toBe(
@@ -351,7 +401,8 @@ describe('Accounts', () => {
     expect(within(checking).getByRole('heading', { level: 3 })).toHaveClass('break-words')
     expect(within(checking).getByText('$2,500.00')).toHaveClass('break-words')
     expect(checking).not.toHaveTextContent(/\*\*\*\*|••••|1234/)
-    expect(checking.querySelector('.account-visual-slot')).toHaveClass('h-12', 'min-w-0')
+    expect(checking.querySelector('.account-visual-slot')).toBeNull()
+    expect(checking.querySelector('[data-account-history-plot]')).toBeNull()
 
     const savings = screen.getByRole('article', { name: 'Emergency Savings' })
     expect(savings.querySelector('.account-type-mark')).toHaveClass('text-accent')
@@ -1003,48 +1054,53 @@ describe('Accounts', () => {
     renderAccounts()
 
     const checking = screen.getByRole('article', { name: 'Everyday Checking' })
-    const checkingSpark = await within(checking).findByRole('img', {
-      name: 'history.sparkline Everyday Checking',
+    const checkingChart = await within(checking).findByRole('img', {
+      name: 'history.title Everyday Checking',
     })
-    expect(checkingSpark).toHaveTextContent('Sep 20: $40,848.85')
-    expect(checkingSpark).toHaveTextContent('Mar 23: $25,782.12')
-    expect(checkingSpark).not.toHaveTextContent('$408.49')
-    expect(checkingSpark).not.toHaveTextContent('$257.82')
-    expect(checkingSpark).toHaveAttribute('data-balances', '2578212,4084885')
-    expect(checkingSpark).toHaveAttribute('data-point-count', '2')
-    expect(
-      checkingSpark.querySelector('polyline')?.getAttribute('points')?.trim().split(/\s+/)
-    ).toHaveLength(2)
-    expect(checkingSpark.querySelector('[data-endpoint="start"]')).toHaveAttribute(
-      'datetime',
-      '2026-03-23'
+    expect(checkingChart).toHaveTextContent('2026-09-20: $40,848.85')
+    expect(checkingChart).toHaveTextContent('2026-03-23: $25,782.12')
+    expect(checkingChart).not.toHaveTextContent('$408.49')
+    expect(checkingChart).not.toHaveTextContent('$257.82')
+    expect(checkingChart.querySelector('svg')).toBeNull()
+    const history = checking.querySelector('[data-account-history]')
+    expect(history).toHaveAttribute('data-balances', '2578212,4084885')
+    expect(history).toHaveAttribute('data-point-count', '2')
+    expect(history).toHaveAttribute('data-source-indexes', '0,1')
+    expect(history).toHaveAttribute('data-x-scale', 'utc')
+    expect(within(checking).getByTestId('x-axis')).toHaveAttribute('data-scale', 'utc')
+    expect(within(checking).getByTestId('x-axis')).toHaveAttribute('data-key', 'utcTimestamp')
+    expect(within(checking).getByTestId('x-axis')).toHaveAttribute('data-type', 'number')
+    expect(within(checking).getByTestId('line-chart')).toHaveAttribute('data-count', '2')
+    expect(within(checking).getByTestId('line-chart')).toHaveAttribute(
+      'data-cents',
+      '2578212,4084885'
     )
-    expect(checkingSpark.querySelector('[data-endpoint="end"]')).toHaveAttribute(
-      'datetime',
-      '2026-09-20'
-    )
-    expect(checkingSpark.getAttribute('title')).toContain('$40,848.85')
-    expect(checkingSpark.getAttribute('title')).toContain('$25,782.12')
+    expect(within(checking).queryByTestId('area-chart')).not.toBeInTheDocument()
     const visibleBalance = checking.querySelector('[data-account-balance]')
-    expect(visibleBalance).toBeTruthy()
+    expect(visibleBalance).toHaveTextContent('$40,848.85')
     expect(
-      checkingSpark.compareDocumentPosition(visibleBalance!) & Node.DOCUMENT_POSITION_FOLLOWING
+      visibleBalance!.compareDocumentPosition(checkingChart) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
 
     await chooseAccountAction(user, 'Everyday Checking', 'history.show')
-    const checkingChart = within(checking).getByRole('img', {
-      name: 'history.show for Everyday Checking',
-    })
-    expect(checkingChart).toHaveTextContent('Sep 20: $40,848.85')
-    expect(checkingChart).toHaveTextContent('Mar 23: $25,782.12')
-    expect(checkingChart).not.toHaveTextContent('$408.49')
-    expect(checkingChart).not.toHaveTextContent('$257.82')
+    const table = within(checking).getByRole('table')
+    expect(checkingChart).not.toContainElement(table)
+    expect(table).toHaveTextContent('2026-09-20')
+    expect(table).toHaveTextContent('$40,848.85')
+    expect(table).toHaveTextContent('2026-03-23')
+    expect(table).toHaveTextContent('$25,782.12')
+    expect(table.querySelector('button')).toBeNull()
+    expect(within(checking).getAllByTestId('line-chart')).toHaveLength(1)
 
     const card = screen.getByRole('article', { name: 'Travel Card' })
-    await chooseAccountAction(user, 'Travel Card', 'history.show')
-    const cardChart = within(card).getByRole('img', { name: 'history.show for Travel Card' })
-    expect(cardChart).toHaveTextContent('Sep 18: -$1,582.77')
-    expect(cardChart).toHaveTextContent('Sep 20: -$1,572.77')
+    const cardChart = within(card).getByRole('img', { name: 'history.title Travel Card' })
+    expect(cardChart).toHaveTextContent('2026-09-18: -$1,582.77')
+    expect(cardChart).toHaveTextContent('2026-09-20: -$1,572.77')
+    expect(cardChart.textContent ?? '').not.toMatch(/(^|\s)\$1,582\.77/)
+    const cardAxis = within(card).getByTestId('y-axis')
+    expect(cardAxis.getAttribute('data-domain') ?? '').toMatch(/^-/)
+    expect(within(card).queryByTestId('zero-line')).not.toBeInTheDocument()
+    expect(card.querySelector('[data-account-balance]')).toHaveTextContent('-$1,572.77')
   })
 
   it('opens the target card statements dialog from the menu and refreshes after changes', async () => {
@@ -1227,7 +1283,7 @@ describe('Accounts', () => {
     expect(screen.queryByText('link.located')).not.toBeInTheDocument()
   })
 
-  it('batches history for visible accounts and keeps native centavos on the sparkline', async () => {
+  it('batches history for visible accounts and keeps native centavos on the chart', async () => {
     mockAccounts = [
       {
         id: 'acc-usd',
@@ -1264,12 +1320,22 @@ describe('Accounts', () => {
     }
 
     const euro = screen.getByRole('article', { name: 'Euro Cash' })
-    const spark = await within(euro).findByRole('img', { name: 'history.sparkline Euro Cash' })
-    expect(spark).toHaveTextContent('€1.00')
-    expect(spark).toHaveTextContent('€2.50')
-    expect(spark).not.toHaveTextContent('$1.00')
-    expect(spark).toHaveAttribute('data-balances', '100,250')
+    const history = await within(euro).findByRole('img', { name: 'history.title Euro Cash' })
+    expect(history).toHaveTextContent('€1.00')
+    expect(history).toHaveTextContent('€2.50')
+    expect(history).not.toHaveTextContent('$1.00')
+    const root = euro.querySelector('[data-account-history]')
+    expect(root).toHaveAttribute('data-balances', '100,250')
+    expect(root).toHaveAttribute('data-currency', 'EUR')
+    const windowStart = String(mockQuery.mock.calls[0][1].at(-1))
+    expect(windowStart).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(root).toHaveAttribute('data-window-start', windowStart)
+    expect(within(euro).getByText(windowStart)).toBeInTheDocument()
+    expect(euro).toHaveTextContent('history.coverageLead')
+    expect(String(mockQuery.mock.calls[0][0])).not.toMatch(/\b(LIMIT|MAX)\b/i)
+    expect(String(mockQuery.mock.calls[0][0])).not.toMatch(/date\s*(<=|<)/)
     expect(screen.queryByRole('article', { name: 'Brokerage' })).not.toBeInTheDocument()
+    expect(screen.queryByText('$99,900.00')).not.toBeInTheDocument()
   })
 
   it('does not draw a history line from fewer than two recorded points', async () => {
@@ -1289,14 +1355,17 @@ describe('Accounts', () => {
     renderAccounts()
 
     const checking = screen.getByRole('article', { name: 'Checking' })
-    expect(await within(checking).findByText('history.slotEmpty')).toBeInTheDocument()
-    expect(
-      within(checking).queryByRole('img', { name: /history.sparkline/ })
-    ).not.toBeInTheDocument()
-    expect(checking.querySelector('polyline')).not.toBeInTheDocument()
+    expect(await within(checking).findByText('history.single')).toBeInTheDocument()
+    expect(within(checking).queryByText('history.slotEmpty')).not.toBeInTheDocument()
+    expect(within(checking).queryByRole('img')).not.toBeInTheDocument()
+    expect(within(checking).queryByTestId('line-chart')).not.toBeInTheDocument()
+    expect(within(checking).queryByTestId('zero-line')).not.toBeInTheDocument()
+    expect(checking.querySelector('[data-account-balance]')).toHaveTextContent('$1.00')
 
     const card = screen.getByRole('article', { name: 'Travel Card' })
-    expect(within(card).queryByRole('img', { name: /history.sparkline/ })).not.toBeInTheDocument()
+    expect(within(card).getByText('history.slotEmpty')).toBeInTheDocument()
+    expect(within(card).queryByRole('img')).not.toBeInTheDocument()
+    expect(within(card).queryByTestId('line-chart')).not.toBeInTheDocument()
     expect(card.querySelector('polyline')).not.toBeInTheDocument()
     expect(within(card).getByRole('progressbar', { name: 'utilization.label' })).toBeInTheDocument()
     expect(within(card).queryByText('utilization.label')).not.toBeInTheDocument()
@@ -1313,7 +1382,68 @@ describe('Accounts', () => {
     expect(screen.getByRole('article', { name: 'Checking' })).toBeInTheDocument()
     expect(screen.getAllByText('$2,500.00').length).toBeGreaterThan(0)
     expect(await screen.findByText('history.slotUnavailable')).toBeInTheDocument()
-    expect(screen.queryByRole('img', { name: /history.sparkline/ })).not.toBeInTheDocument()
+    const checking = screen.getByRole('article', { name: 'Checking' })
+    expect(within(checking).queryByRole('img', { name: /history.title/ })).not.toBeInTheDocument()
+    expect(within(checking).queryByTestId('line-chart')).not.toBeInTheDocument()
+    expect(within(checking).queryByTestId('zero-line')).not.toBeInTheDocument()
+    expect(checking.querySelector('[data-account-history]')).toHaveAttribute('data-balances', '')
+    expect(checking.querySelector('[data-account-balance]')).toHaveTextContent('$2,500.00')
+  })
+
+  it('does not turn a hidden investment query error into a zero history line', async () => {
+    mockQuery.mockRejectedValue(new Error('history read failed'))
+    mockAccounts = [
+      { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 250000 },
+      {
+        id: 'acc-hidden',
+        name: 'Brokerage',
+        type: 'investment',
+        currency: 'USD',
+        balance: 9_990_000,
+      },
+    ]
+
+    renderAccounts()
+
+    await waitFor(() => expect(mockQuery).toHaveBeenCalled())
+    for (const call of mockQuery.mock.calls) {
+      expect(call[1]).not.toContain('acc-hidden')
+      expect(String(call[0])).toContain('account_id IN ($1)')
+    }
+    expect(screen.queryByRole('article', { name: 'Brokerage' })).not.toBeInTheDocument()
+    expect(await screen.findByText('history.slotUnavailable')).toBeInTheDocument()
+    const checking = screen.getByRole('article', { name: 'Checking' })
+    expect(within(checking).queryByTestId('line-chart')).not.toBeInTheDocument()
+    expect(within(checking).queryByTestId('zero-line')).not.toBeInTheDocument()
+    expect(checking.querySelector('[data-account-history]')).toHaveAttribute('data-balances', '')
+    expect(checking.querySelector('[data-account-balance]')).toHaveTextContent('$2,500.00')
+    expect(screen.queryByText('$99,900.00')).not.toBeInTheDocument()
+  })
+
+  it('keeps a flat recorded balance as a fact and does not replace the current headline', async () => {
+    const user = userEvent.setup()
+    mockAccounts = [
+      { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 500000 },
+    ]
+    mockQuery.mockResolvedValue([
+      { account_id: 'acc-1', date: '2026-04-30', balance: 18000 },
+      { account_id: 'acc-1', date: '2026-10-18', balance: 18000 },
+    ])
+
+    renderAccounts()
+
+    const checking = screen.getByRole('article', { name: 'Checking' })
+    expect(await within(checking).findByText('history.flat')).toBeInTheDocument()
+    expect(within(checking).queryByTestId('line-chart')).not.toBeInTheDocument()
+    expect(within(checking).queryByTestId('zero-line')).not.toBeInTheDocument()
+    expect(checking.querySelector('[data-account-balance]')).toHaveTextContent('$5,000.00')
+    await user.click(within(checking).getByRole('button', { name: 'history.previous' }))
+    expect(checking.querySelector('[data-account-balance]')).toHaveTextContent('$5,000.00')
+    const selected = checking.querySelector('[data-history-selected]')
+    expect(selected).toHaveAttribute('data-source-index', '0')
+    expect(selected?.querySelector('time')).toHaveAttribute('datetime', '2026-04-30')
+    expect(selected).toHaveTextContent('$180.00')
+    expect(selected).toHaveTextContent('USD')
   })
 
   it('puts cash and a positive card balance in the composition without an 8% floor', () => {

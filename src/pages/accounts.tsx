@@ -7,14 +7,11 @@ import {
   Suspense,
   useCallback,
   type FormEvent,
-  type ReactNode,
 } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { Landmark, Plus, EllipsisVertical } from 'lucide-react'
 import { toast } from 'sonner'
-import { AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts'
-import { SafeChart } from '@/components/ui/safe-chart'
 import { Button } from '@/components/ui/button'
 import { ActionDisclosure, type ActionDisclosureItem } from '@/components/ui/action-disclosure'
 import { Badge } from '@/components/ui/badge'
@@ -41,12 +38,9 @@ import {
 } from '@/components/ui/select'
 import { MetricItem, MetricStrip, NativePanel, PageToolbar } from '@/components/ui/native-layout'
 import { AccountMaintenanceDialog } from '@/components/accounts/account-maintenance-dialog'
-import { AccountSparkline } from '@/components/accounts/account-sparkline'
+import { AccountRecordedHistory } from '@/components/accounts/account-recorded-history'
 import { buildLiquidComposition } from '@/components/accounts/account-composition'
-import {
-  canDrawHistory,
-  type AccountHistoryPoint,
-} from '@/components/accounts/account-history-batch'
+import type { AccountHistoryPoint } from '@/components/accounts/account-history-batch'
 import { CardStatementsDialog } from '@/components/accounts/card-statements-dialog'
 import { LiquidCompositionPanel } from '@/components/accounts/liquid-composition-panel'
 import { useAccountHistoryBatch } from '@/components/accounts/use-account-history-batch'
@@ -62,7 +56,6 @@ import { useTransactionStore } from '@/stores/transaction-store'
 import { useCurrencyStore } from '@/stores/currency-store'
 import { getErrorMessage } from '@/lib/errors'
 import { formatMoney, fromCentavos, toCentavos } from '@/lib/money'
-import { CHART_AXIS_COLOR, CHART_TOOLTIP_STYLE } from '@/lib/constants'
 import {
   buildAccountsLiquidTotals,
   type ConvertedTotal,
@@ -329,7 +322,27 @@ export function Accounts() {
       showInvestments,
     ]
   )
-  const historyBatch = useAccountHistoryBatch(historyAccountIds, historyRefreshKey)
+  const historyScopeKey = useMemo(
+    () =>
+      [
+        ...liquidAccounts,
+        ...(showArchived ? archivedLiquidAccounts : []),
+        ...(showInvestments ? investmentLikeAccounts : []),
+        ...(showInvestments ? archivedInvestmentLikeAccounts : []),
+      ]
+        .map((account) => `${account.id}:${account.currency}`)
+        .sort()
+        .join('|'),
+    [
+      archivedInvestmentLikeAccounts,
+      archivedLiquidAccounts,
+      investmentLikeAccounts,
+      liquidAccounts,
+      showArchived,
+      showInvestments,
+    ]
+  )
+  const historyBatch = useAccountHistoryBatch(historyAccountIds, historyRefreshKey, historyScopeKey)
 
   const handleDelete = async () => {
     if (!deleteId) return
@@ -599,6 +612,7 @@ export function Accounts() {
                           onDelete={() => setDeleteId(account.id)}
                           historyPoints={historyBatch.series.get(account.id)}
                           historyStatus={historyBatch.status}
+                          historyWindowStart={historyBatch.windowStart}
                           t={t}
                         />
                       ))}
@@ -666,6 +680,7 @@ export function Accounts() {
                           onDelete={() => setDeleteId(account.id)}
                           historyPoints={historyBatch.series.get(account.id)}
                           historyStatus={historyBatch.status}
+                          historyWindowStart={historyBatch.windowStart}
                           t={t}
                         />
                       ))}
@@ -691,6 +706,7 @@ export function Accounts() {
                             archived
                             historyPoints={historyBatch.series.get(account.id)}
                             historyStatus={historyBatch.status}
+                            historyWindowStart={historyBatch.windowStart}
                             t={t}
                           />
                         ))}
@@ -740,6 +756,7 @@ export function Accounts() {
                       archived
                       historyPoints={historyBatch.series.get(account.id)}
                       historyStatus={historyBatch.status}
+                      historyWindowStart={historyBatch.windowStart}
                       t={t}
                     />
                   ))}
@@ -878,6 +895,7 @@ function AccountCard({
   archived = false,
   historyPoints,
   historyStatus,
+  historyWindowStart,
   t,
 }: {
   account: Account
@@ -894,6 +912,7 @@ function AccountCard({
   archived?: boolean
   historyPoints?: readonly AccountHistoryPoint[]
   historyStatus: 'loading' | 'ready' | 'error'
+  historyWindowStart: string | null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   t: any
 }) {
@@ -906,7 +925,6 @@ function AccountCard({
   const [showCreditDetails, setShowCreditDetails] = useState(false)
 
   const railColor = accountRailColor(account.color)
-  const seriesColor = railColor ?? 'var(--color-chart-1)'
   const iconStyle = accountIconAccentStyle(account.color)
   const TypeIcon = ACCOUNT_TYPE_ICONS[account.type] ?? Landmark
   const isCreditCard = account.type === 'credit_card'
@@ -922,15 +940,6 @@ function AccountCard({
   const utilizationColor = utilization === null ? 'success' : utilizationTone(utilization)
 
   const points = historyPoints ?? EMPTY_HISTORY
-  const showLine = canDrawHistory(points)
-
-  const chartData = useMemo(() => {
-    if (points.length === 0) return []
-    return points.map((p) => ({
-      date: p.date,
-      balance: fromCentavos(p.balance),
-    }))
-  }, [points])
 
   const nameId = `account-${account.id}-name`
   const locatedId = `account-${account.id}-located`
@@ -978,51 +987,6 @@ function AccountCard({
       destructive: true,
     }
   )
-
-  let leadingVisual: ReactNode = null
-  let historyNote: string | null = null
-  if (showLine) {
-    leadingVisual = (
-      <AccountSparkline
-        points={points}
-        color={seriesColor}
-        currency={account.currency}
-        locale={i18n.language}
-        label={`${t('history.sparkline')} ${account.name}`}
-      />
-    )
-  } else if (historyStatus === 'loading') {
-    leadingVisual = (
-      <div className="account-visual-slot bg-muted/50 h-12 min-w-0 rounded-md" aria-hidden="true" />
-    )
-  } else if (historyStatus === 'error') {
-    historyNote = t('history.slotUnavailable')
-  } else if (isCreditCard && creditLimit !== null && utilization !== null) {
-    leadingVisual = (
-      <div className="account-visual-slot flex h-12 min-w-0 items-center gap-3">
-        <ProgressBar
-          value={utilization}
-          size="sm"
-          color={utilizationColor}
-          ariaLabel={t('utilization.label')}
-          className="min-w-0 flex-1"
-        />
-        <span
-          className={`shrink-0 text-xs font-medium tabular-nums ${
-            utilizationColor === 'destructive'
-              ? 'text-destructive'
-              : utilizationColor === 'warning'
-                ? 'text-warning'
-                : 'text-success'
-          }`}
-        >
-          {utilization}%
-        </span>
-      </div>
-    )
-  } else {
-    historyNote = t('history.slotEmpty')
-  }
 
   return (
     <article
@@ -1088,21 +1052,31 @@ function AccountCard({
               triggerClassName="min-h-11 min-w-11 px-2"
             />
           </div>
-          {leadingVisual ? <div className="mt-3 min-w-0">{leadingVisual}</div> : null}
-          <div className="mt-3 flex min-w-0 flex-wrap items-baseline gap-x-1.5">
-            <p
-              data-account-balance=""
-              className="text-foreground max-w-full min-w-0 shrink-0 text-xl font-medium tracking-tight break-words tabular-nums min-[380px]:text-2xl"
-            >
-              {formatMoney(account.balance, account.currency)}
-            </p>
-            <p className="text-muted-foreground shrink-0 text-xs tabular-nums">
-              {account.currency}
-            </p>
+          <div className="mt-3 min-w-0">
+            <p className="text-muted-foreground text-xs">{t('history.current')}</p>
+            <div className="mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+              <p
+                data-account-balance=""
+                className="text-foreground max-w-full min-w-0 shrink-0 text-2xl font-medium tracking-tight break-words tabular-nums min-[380px]:text-[1.75rem]"
+              >
+                {formatMoney(account.balance, account.currency)}
+              </p>
+              <p className="text-muted-foreground shrink-0 text-xs tabular-nums">
+                {account.currency}
+              </p>
+            </div>
           </div>
-          {historyNote ? <p className="text-muted-foreground mt-1 text-xs">{historyNote}</p> : null}
         </div>
       </div>
+      <AccountRecordedHistory
+        accountName={account.name}
+        points={points}
+        currency={account.currency}
+        windowStart={historyWindowStart}
+        status={historyStatus}
+        locale={i18n.language}
+        showExact={isExpanded}
+      />
 
       {isCreditCard && creditLimit !== null && (
         <div className="mt-3 grid min-w-0 grid-cols-2 gap-x-4 gap-y-1">
@@ -1122,6 +1096,29 @@ function AccountCard({
           </div>
         </div>
       )}
+
+      {isCreditCard && creditLimit !== null && utilization !== null && !showCreditDetails ? (
+        <div className="mt-3 flex min-w-0 items-center gap-3">
+          <ProgressBar
+            value={utilization}
+            size="sm"
+            color={utilizationColor}
+            ariaLabel={t('utilization.label')}
+            className="min-w-0 flex-1"
+          />
+          <span
+            className={`shrink-0 text-xs font-medium tabular-nums ${
+              utilizationColor === 'destructive'
+                ? 'text-destructive'
+                : utilizationColor === 'warning'
+                  ? 'text-warning'
+                  : 'text-success'
+            }`}
+          >
+            {utilization}%
+          </span>
+        </div>
+      ) : null}
 
       {showCreditDetails && isCreditCard && creditLimit !== null && (
         <div className="mt-3 min-w-0">
@@ -1175,78 +1172,6 @@ function AccountCard({
         </div>
       )}
 
-      {isExpanded && (
-        <div className="border-border mt-3 min-w-0 border-t pt-3 pb-1">
-          {historyStatus === 'loading' && points.length === 0 ? (
-            <Skeleton className="h-32 w-full" />
-          ) : historyStatus === 'error' && points.length < 2 ? (
-            <div className="flex h-32 items-center justify-center">
-              <p className="text-muted-foreground text-xs">{t('history.slotUnavailable')}</p>
-            </div>
-          ) : chartData.length > 1 ? (
-            <div
-              className="h-32 min-w-0"
-              role="img"
-              aria-label={`${t('history.show')} for ${account.name}`}
-            >
-              <span className="sr-only">
-                {points
-                  .map(
-                    (p) =>
-                      `${dayjs(p.date).format('MMM D')}: ${formatMoney(p.balance, account.currency)}`
-                  )
-                  .join(', ')}
-              </span>
-              <SafeChart>
-                <AreaChart data={chartData}>
-                  <defs>
-                    <linearGradient id={`grad-${account.id}`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={seriesColor} stopOpacity={0.28} />
-                      <stop offset="95%" stopColor={seriesColor} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <XAxis
-                    dataKey="date"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
-                    tickFormatter={(d) => dayjs(d).format('M/D')}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: CHART_AXIS_COLOR, fontSize: 11 }}
-                    tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`)}
-                    width={40}
-                  />
-                  <Tooltip
-                    contentStyle={CHART_TOOLTIP_STYLE}
-                    labelFormatter={(d) => dayjs(d).format('MMM D, YYYY')}
-                    formatter={(value) => [
-                      formatMoney(toCentavos(Number(value)), account.currency),
-                      t('history.show'),
-                    ]}
-                  />
-                  <Area
-                    type="linear"
-                    dataKey="balance"
-                    isAnimationActive={false}
-                    stroke={seriesColor}
-                    strokeWidth={2}
-                    fill={`url(#grad-${account.id})`}
-                  />
-                </AreaChart>
-              </SafeChart>
-            </div>
-          ) : (
-            <div className="flex h-32 items-center justify-center">
-              <p className="text-muted-foreground text-xs">
-                {chartData.length === 1 ? t('history.empty') : t('history.none')}
-              </p>
-            </div>
-          )}
-        </div>
-      )}
       {account.account_mode !== 'snapshot_only' && (
         <AccountMaintenanceDialog
           account={account}
@@ -1285,7 +1210,7 @@ function AccountsSkeleton() {
           >
             <Skeleton className="h-4 w-28" />
             <Skeleton className="h-8 w-36" />
-            <Skeleton className="account-visual-slot h-12 w-full" />
+            <Skeleton className="h-4 w-40" />
           </div>
         ))}
       </div>

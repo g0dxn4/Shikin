@@ -52,40 +52,14 @@ export function groupAccountHistoryRows(
   return grouped
 }
 
-export function canDrawHistory(points: readonly AccountHistoryPoint[] | undefined): boolean {
-  return (points?.length ?? 0) >= 2
-}
-
-export type SparklinePoint = AccountHistoryPoint & {
-  x: number
-  y: number
-}
-
-/** Plot recorded centavo balances only. Length matches the input; no today/zero point. */
-export function historySparklineLayout(
-  points: readonly AccountHistoryPoint[],
-  width = 100,
-  height = 48
-): SparklinePoint[] {
-  if (points.length < 2 || width <= 0 || height <= 0) return []
-  const balances = points.map((point) => point.balance)
-  const min = Math.min(...balances)
-  const max = Math.max(...balances)
-  const span = max - min
-  const times = points.map((point) => Date.parse(`${point.date}T00:00:00`))
-  const tMin = Math.min(...times)
-  const tMax = Math.max(...times)
-  const tSpan = tMax - tMin
-  const pad = 2
-  const innerW = Math.max(1, width - pad * 2)
-  const innerH = Math.max(1, height - pad * 2)
-
-  return points.map((point, index) => {
-    const x =
-      tSpan === 0 || Number.isNaN(tSpan)
-        ? pad + (index / (points.length - 1)) * innerW
-        : pad + ((Date.parse(`${point.date}T00:00:00`) - tMin) / tSpan) * innerW
-    const y = span === 0 ? pad + innerH / 2 : pad + innerH - ((point.balance - min) / span) * innerH
-    return { date: point.date, balance: point.balance, x, y }
-  })
+/**
+ * Date-tick budget for the account plot box, not the viewport.
+ * A 320px phone plot is about 286px wide and must use 2 ticks so the last two
+ * labels cannot overlap. A 375px phone plot is about 341px and uses 3.
+ * Desktop plots use up to 5; the chart drops that if measured labels collide.
+ */
+export function accountHistoryMaxDateTicks(plotWidth: number): 2 | 3 | 5 {
+  if (!Number.isFinite(plotWidth) || plotWidth < 310) return 2
+  if (plotWidth < 420) return 3
+  return 5
 }

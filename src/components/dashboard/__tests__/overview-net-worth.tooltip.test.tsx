@@ -105,9 +105,14 @@ describe('Overview summary recorded tooltip', () => {
     )
 
     const summary = document.getElementById('overview-summary-panel')!
-    expect(summary.querySelector('.h-28')).toBeTruthy()
+    expect(summary.querySelector('.h-28')).toBeNull()
+    expect(summary.querySelector('[data-testid="overview-summary-plot-frame"]')).toHaveClass(
+      'h-[292px]'
+    )
     expect(summary.querySelector('[data-testid="overview-summary-range"]')).toBeTruthy()
     expect(summary.querySelector('[data-testid="overview-summary-range"]')).toHaveClass('flex-wrap')
+    expect(summary.querySelector('.recharts-xAxis')).toBeTruthy()
+    expect(summary.querySelector('.recharts-yAxis')).toBeTruthy()
 
     const dots = await waitFor(() => {
       const nodes = [...summary.querySelectorAll('.recharts-line-dot')]
@@ -121,10 +126,12 @@ describe('Overview summary recorded tooltip', () => {
     const xs = dots.map((dot) => Number(dot.getAttribute('cx')))
     expect(xs[2]).toBeGreaterThan(xs[1])
     expect(xs[1]).toBeGreaterThan(xs[0])
-    expect(Math.abs(xs[1] - xs[0] - (xs[2] - xs[1]))).toBeLessThan(0.5)
-    expect(summary.querySelector('.recharts-cartesian-axis')).toBeNull()
-    expect(summary.querySelector('.recharts-xAxis')).toBeNull()
-    expect(summary.querySelector('.recharts-yAxis')).toBeNull()
+    const start = Date.UTC(2026, 0, 31)
+    const middle = Date.UTC(2026, 5, 15)
+    const end = Date.UTC(2026, 9, 17)
+    const fraction = (middle - start) / (end - start)
+    const expectedMiddle = xs[0] + fraction * (xs[2] - xs[0])
+    expect(Math.abs(xs[1] - expectedMiddle)).toBeLessThan(8)
 
     const wrapper = summary.querySelector('.recharts-wrapper') as HTMLElement
     const tooltip = summary.querySelector('.recharts-tooltip-wrapper') as HTMLElement
@@ -162,7 +169,7 @@ describe('Overview summary recorded tooltip', () => {
     }
   })
 
-  it('keeps a flat recorded series horizontal and off a zero baseline', async () => {
+  it('states an unchanged recorded balance instead of a fabricated line', () => {
     render(
       <OverviewNetWorth
         currentComplete
@@ -191,17 +198,17 @@ describe('Overview summary recorded tooltip', () => {
     )
 
     const summary = document.getElementById('overview-summary-panel')!
-    const dots = await waitFor(() => {
-      const nodes = [...summary.querySelectorAll('.recharts-line-dot')]
-      expect(nodes).toHaveLength(3)
-      return nodes
-    })
-    const ys = dots.map((dot) => Number(dot.getAttribute('cy')))
-    expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan(0.5)
-    expect(ys[0]).toBeGreaterThan(60)
-    expect(ys[0]).toBeLessThan(220)
+    expect(summary.querySelector('.recharts-line-dot')).toBeNull()
     expect(summary.querySelector('.recharts-yAxis')).toBeNull()
     expect(summary.querySelector('.recharts-xAxis')).toBeNull()
+    expect(summary.querySelector('[data-testid="overview-summary-flat"]')).toHaveTextContent(
+      'Unchanged recorded balance'
+    )
+    expect(summary.querySelector('[data-testid="overview-summary-flat"]')).toHaveTextContent(
+      '$1,000.00'
+    )
+    expect(summary).toHaveTextContent('$1,000.00')
+    expect(summary.querySelector('strong')).toHaveTextContent('$1,000.00')
   })
 
   it('uses the recorded range instead of a zero baseline or a one-cent slope', async () => {
@@ -241,7 +248,7 @@ describe('Overview summary recorded tooltip', () => {
       Number(rangeDots[0]!.getAttribute('cy')) - Number(rangeDots[1]!.getAttribute('cy'))
     )
     expect(rangeDelta).toBeGreaterThan(120)
-    expect(summary.querySelector('.recharts-yAxis')).toBeNull()
+    expect(summary.querySelector('.recharts-yAxis')).toBeTruthy()
 
     rerender(
       <OverviewNetWorth

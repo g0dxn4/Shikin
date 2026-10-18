@@ -59,6 +59,18 @@
     "viewChartData": "Ver datos del gráfico",
     "focusDate": "Enfoca o apunta una fecha para ver su saldo",
     "chartTitle": "Patrimonio neto en el tiempo",
+    "summaryChartTitle": "Patrimonio neto registrado",
+    "summaryCoverage": "{{currency}} · {{start}} – {{end}} · {{count}} · {{period}}",
+    "summaryLatest": "Último registro",
+    "summarySelected": "Registro seleccionado",
+    "summaryUnchanged": "Saldo registrado sin cambios",
+    "summaryMethodLabel": "Cómo se dibuja este gráfico",
+    "summaryMethod": "Los segmentos rectos unen registros en el tiempo transcurrido. No son saldos entre esas fechas ni la valoración actual.",
+    "summaryDisplay": {
+      "label": "Presentación del gráfico",
+      "line": "Línea",
+      "area": "Área"
+    },
     "summaryRecorded": "{{count}} registros · {{period}} · {{start}} – {{end}}",
     "summaryComposition": "Composición actual en {{currency}}",
     "summaryHoldings": "Inversiones",

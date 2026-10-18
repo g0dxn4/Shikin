@@ -373,9 +373,12 @@ describe('Dashboard', () => {
     expect(recorded).toHaveTextContent('Feb 1, 2026')
     expect(recorded).toHaveTextContent('$600.00')
     expect(recorded).toHaveTextContent('$730.00')
+    expect(recorded?.closest('details')).toBeTruthy()
+    expect(recorded?.closest('[role="img"]')).toBeNull()
+    expect(recorded?.closest('.sr-only')).toBeNull()
     expect(
       summary.querySelector('[aria-describedby="overview-summary-recorded-snapshots"]')
-    ).toBeTruthy()
+    ).toBeNull()
     expect(screen.getByRole('group', { name: 'overview.summaryRange.label' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'overview.summaryRange.names.6m' })).toHaveAttribute(
       'aria-pressed',

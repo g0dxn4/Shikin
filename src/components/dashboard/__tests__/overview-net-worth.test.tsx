@@ -3,10 +3,8 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { OverviewNetWorth, type NetWorthPeriod } from '@/components/dashboard/overview-net-worth'
-import {
-  summaryEndpointAmount,
-  summaryRecordedValueDomain,
-} from '@/components/dashboard/overview-summary-visual'
+import { buildRecordedBalanceModel } from '@/components/charts/recorded-balance-model'
+import { summaryDateTickBudget } from '@/components/dashboard/overview-summary-visual'
 import enDashboard from '@/i18n/locales/en/dashboard.json'
 import esDashboard from '@/i18n/locales/es/dashboard.json'
 import { formatMoney } from '@/lib/money'
@@ -40,102 +38,279 @@ vi.mock('@/components/ui/safe-chart', () => ({
 
 let chartPoints: Array<{ date: string; netWorth?: number }> = []
 
-vi.mock('recharts', () => ({
-  AreaChart: ({ children }: { children?: React.ReactNode }) => (
-    <div data-testid="area-chart">{children}</div>
-  ),
-  Area: ({ type }: { type?: string }) => <div data-testid="area" data-type={type ?? ''} />,
-  LineChart: ({
-    data,
-    children,
-  }: {
-    data?: Array<{ date: string; netWorth?: number }>
-    children?: React.ReactNode
-  }) => {
-    chartPoints = data ?? []
-    return (
-      <div data-testid="line-chart" data-points={data?.map((point) => point.date).join(',') ?? ''}>
-        {children}
-      </div>
-    )
-  },
-  Line: ({
-    type,
-    connectNulls,
-    isAnimationActive,
-    dot,
-  }: {
-    type?: string
-    connectNulls?: boolean
-    isAnimationActive?: boolean
-    dot?: (props: {
-      cx?: number
-      cy?: number
-      index?: number
-      payload?: { date?: string; netWorth?: number }
-    }) => React.ReactNode
-  }) => (
-    <div
-      data-testid="line"
-      data-type={type ?? ''}
-      data-connect-nulls={connectNulls === false ? 'false' : 'true'}
-      data-animation={isAnimationActive === false ? 'off' : 'on'}
-    >
-      {typeof dot === 'function'
-        ? chartPoints.map((point, index) => (
-            <span key={`${point.date}-${index}`}>
-              {dot({ cx: 8 + index, cy: 12, index, payload: point })}
-            </span>
-          ))
-        : null}
-    </div>
-  ),
-  CartesianGrid: () => null,
-  XAxis: ({ dataKey, hide }: { dataKey?: string | number; hide?: boolean }) => (
-    <div
-      data-testid="x-axis"
-      data-key={dataKey === undefined ? '' : String(dataKey)}
-      data-hide={hide ? 'true' : 'false'}
-    />
-  ),
-  YAxis: ({
-    hide,
-    domain,
-    width,
-    allowDataOverflow,
-  }: {
-    hide?: boolean
-    domain?: readonly number[]
-    width?: number
-    allowDataOverflow?: boolean
-  }) => (
-    <div
-      data-testid="y-axis"
-      data-hide={hide ? 'true' : 'false'}
-      data-width={width ?? ''}
-      data-overflow={allowDataOverflow ? 'true' : 'false'}
-      data-domain={Array.isArray(domain) ? domain.join('|') : ''}
-    />
-  ),
-  Tooltip: ({
-    labelFormatter,
-    formatter,
-  }: {
-    labelFormatter?: (label: unknown) => unknown
-    formatter?: (value: unknown) => unknown
-  }) => {
-    const label = labelFormatter?.('2026-06-15')
-    const formatted = formatter?.(123_400)
-    return (
+vi.mock('recharts', () => {
+  function renderAxisTicks(
+    tick:
+      | {
+          (tickProps: {
+            x?: number
+            y?: number
+            index?: number
+            visibleTicksCount?: number
+            payload?: { value?: number }
+          }): React.ReactNode
+        }
+      | { fill?: string; fontSize?: number }
+      | undefined,
+    ticks: readonly number[] | undefined
+  ) {
+    if (typeof tick !== 'function' || !Array.isArray(ticks)) return null
+    return ticks.map((value, index) => (
+      <span key={`${value}-${index}`}>
+        {tick({
+          x: index === 0 ? 0 : 40,
+          y: 16,
+          index,
+          visibleTicksCount: ticks.length,
+          payload: { value },
+        })}
+      </span>
+    ))
+  }
+  return {
+    AreaChart: ({
+      data,
+      children,
+      accessibilityLayer,
+    }: {
+      data?: Array<{ date: string; utcTimestamp?: number; amountCentavos?: number }>
+      children?: React.ReactNode
+      accessibilityLayer?: boolean
+    }) => {
+      chartPoints = data ?? []
+      return (
+        <div
+          data-testid="area-chart"
+          data-points={data?.map((point) => point.date).join(',') ?? ''}
+          data-count={String(data?.length ?? 0)}
+          data-timestamps={data?.map((point) => point.utcTimestamp ?? '').join(',') ?? ''}
+          data-cents={data?.map((point) => point.amountCentavos ?? '').join(',') ?? ''}
+          data-accessibility={accessibilityLayer === false ? 'off' : 'on'}
+        >
+          {children}
+        </div>
+      )
+    },
+    Area: ({
+      type,
+      connectNulls,
+      fill,
+      fillOpacity,
+      baseValue,
+      strokeWidth,
+      dot,
+    }: {
+      type?: string
+      connectNulls?: boolean
+      fill?: string
+      fillOpacity?: number
+      baseValue?: number
+      strokeWidth?: number
+      dot?: (props: {
+        cx?: number
+        cy?: number
+        index?: number
+        payload?: { date?: string; netWorth?: number; sourceIndex?: number; utcTimestamp?: number }
+      }) => React.ReactNode
+    }) => (
       <div
-        data-testid="tooltip-binding"
-        data-sample-label={typeof label === 'string' ? label : ''}
-        data-sample-amount={Array.isArray(formatted) ? String(formatted[0]) : ''}
-      />
-    )
-  },
-  Legend: () => null,
-}))
+        data-testid="area"
+        data-type={type ?? ''}
+        data-connect-nulls={connectNulls === false ? 'false' : 'true'}
+        data-fill={fill ?? ''}
+        data-fill-opacity={fillOpacity ?? ''}
+        data-base={baseValue ?? ''}
+        data-stroke-width={strokeWidth ?? ''}
+      >
+        {typeof dot === 'function'
+          ? chartPoints.map((point, index) => (
+              <span key={`${point.date}-${index}`}>
+                {dot({ cx: 8 + index, cy: 12, index, payload: point })}
+              </span>
+            ))
+          : null}
+      </div>
+    ),
+    LineChart: ({
+      data,
+      children,
+      accessibilityLayer,
+    }: {
+      data?: Array<{
+        date: string
+        netWorth?: number
+        utcTimestamp?: number
+        amountCentavos?: number
+      }>
+      children?: React.ReactNode
+      accessibilityLayer?: boolean
+    }) => {
+      chartPoints = data ?? []
+      return (
+        <div
+          data-testid="line-chart"
+          data-points={data?.map((point) => point.date).join(',') ?? ''}
+          data-count={String(data?.length ?? 0)}
+          data-timestamps={data?.map((point) => point.utcTimestamp ?? '').join(',') ?? ''}
+          data-cents={data?.map((point) => point.amountCentavos ?? '').join(',') ?? ''}
+          data-accessibility={accessibilityLayer === false ? 'off' : 'on'}
+        >
+          {children}
+        </div>
+      )
+    },
+    Line: ({
+      type,
+      connectNulls,
+      isAnimationActive,
+      strokeWidth,
+      fill,
+      dot,
+    }: {
+      type?: string
+      connectNulls?: boolean
+      isAnimationActive?: boolean
+      strokeWidth?: number
+      fill?: string
+      dot?: (props: {
+        cx?: number
+        cy?: number
+        index?: number
+        payload?: {
+          date?: string
+          netWorth?: number
+          sourceIndex?: number
+          utcTimestamp?: number
+          amountCentavos?: number
+        }
+      }) => React.ReactNode
+    }) => (
+      <div
+        data-testid="line"
+        data-type={type ?? ''}
+        data-connect-nulls={connectNulls === false ? 'false' : 'true'}
+        data-animation={isAnimationActive === false ? 'off' : 'on'}
+        data-stroke-width={strokeWidth ?? ''}
+        data-fill={fill ?? ''}
+      >
+        {typeof dot === 'function'
+          ? chartPoints.map((point, index) => (
+              <span key={`${point.date}-${index}`}>
+                {dot({ cx: 8 + index, cy: 12, index, payload: point })}
+              </span>
+            ))
+          : null}
+      </div>
+    ),
+    CartesianGrid: ({ vertical }: { vertical?: boolean }) => (
+      <div data-testid="cartesian-grid" data-vertical={vertical === false ? 'false' : 'true'} />
+    ),
+    XAxis: (props: {
+      dataKey?: string | number
+      hide?: boolean
+      type?: string
+      scale?: string
+      domain?: readonly number[]
+      ticks?: readonly number[]
+      interval?: number | string
+      height?: number
+      tick?:
+        | { fill?: string; fontSize?: number }
+        | ((tickProps: {
+            x?: number
+            y?: number
+            index?: number
+            visibleTicksCount?: number
+            payload?: { value?: number }
+          }) => React.ReactNode)
+    }) => (
+      <div
+        data-testid="x-axis"
+        data-key={props.dataKey === undefined ? '' : String(props.dataKey)}
+        data-hide={props.hide ? 'true' : 'false'}
+        data-type={props.type ?? ''}
+        data-scale={props.scale ?? ''}
+        data-domain={Array.isArray(props.domain) ? props.domain.join('|') : ''}
+        data-ticks={Array.isArray(props.ticks) ? props.ticks.join('|') : ''}
+        data-interval={props.interval ?? ''}
+        data-height={props.height ?? ''}
+        data-tick-fill={
+          props.tick && typeof props.tick === 'object' && 'fill' in props.tick
+            ? String(props.tick.fill)
+            : ''
+        }
+        data-tick-size={
+          props.tick && typeof props.tick === 'object' && 'fontSize' in props.tick
+            ? String(props.tick.fontSize)
+            : ''
+        }
+      >
+        {renderAxisTicks(props.tick, props.ticks)}
+      </div>
+    ),
+    YAxis: (props: {
+      hide?: boolean
+      domain?: readonly number[]
+      ticks?: readonly number[]
+      width?: number
+      allowDataOverflow?: boolean
+      interval?: number | string
+      tick?:
+        | { fill?: string; fontSize?: number }
+        | ((tickProps: { x?: number; y?: number; payload?: { value?: number } }) => React.ReactNode)
+    }) => (
+      <div
+        data-testid="y-axis"
+        data-hide={props.hide ? 'true' : 'false'}
+        data-width={props.width ?? ''}
+        data-overflow={props.allowDataOverflow ? 'true' : 'false'}
+        data-domain={Array.isArray(props.domain) ? props.domain.join('|') : ''}
+        data-ticks={Array.isArray(props.ticks) ? props.ticks.join('|') : ''}
+        data-interval={props.interval ?? ''}
+      >
+        {renderAxisTicks(props.tick, props.ticks)}
+      </div>
+    ),
+    Tooltip: (props: {
+      labelFormatter?: (label: unknown) => unknown
+      formatter?: (value: unknown) => unknown
+      content?: (contentProps: {
+        active?: boolean
+        payload?: ReadonlyArray<{ payload?: unknown }>
+      }) => React.ReactNode
+    }) => {
+      if (typeof props.content === 'function') {
+        return (
+          <div data-testid="tooltip-binding">
+            {props.content({
+              active: true,
+              payload: [
+                {
+                  payload: {
+                    date: '2026-06-15',
+                    amountCentavos: 123_400,
+                    utcTimestamp: Date.UTC(2026, 5, 15),
+                    sourceIndex: 1,
+                  },
+                },
+              ],
+            })}
+          </div>
+        )
+      }
+      const label = props.labelFormatter?.('2026-06-15')
+      const formatted = props.formatter?.(123_400)
+      return (
+        <div
+          data-testid="tooltip-binding"
+          data-sample-label={typeof label === 'string' ? label : ''}
+          data-sample-amount={Array.isArray(formatted) ? String(formatted[0]) : ''}
+        />
+      )
+    },
+    Legend: () => null,
+  }
+})
 
 beforeAll(() => {
   HTMLElement.prototype.hasPointerCapture ??= () => false
@@ -271,18 +446,24 @@ describe('OverviewNetWorth shared panel geometry and evidence', () => {
     const { rerender } = renderOverview()
     const summary = document.getElementById('overview-summary-panel')!
     const metricGrid = summary.querySelector('[aria-label="overview.views.summary"]')!
-    expect(metricGrid).not.toHaveClass('grid-cols-2')
-    expect(metricGrid?.children).toHaveLength(2)
+    expect(metricGrid).toHaveClass('grid-cols-2', 'sm:grid-cols-4')
+    expect(metricGrid).not.toHaveClass('lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]')
+    expect(metricGrid?.children).toHaveLength(4)
     expect(summary.querySelectorAll('.rounded-xl.border')).toHaveLength(0)
     expect(summary).not.toHaveClass('lg:flex', 'lg:items-center', 'invisible')
-    expect(metricGrid).toHaveClass('w-full', 'items-stretch')
+    expect(metricGrid).toHaveClass('w-full')
     expect(metricGrid).not.toHaveClass('lg:items-center')
     expect(summary).not.toHaveClass('justify-center')
-    expect(summary.querySelector('.h-28')).toBeTruthy()
+    expect(summary.querySelector('.h-28')).toBeNull()
+    expect(summary.querySelector('[data-testid="overview-summary-plot-frame"]')).toHaveClass(
+      'h-[292px]',
+      'px-0',
+      'sm:px-6'
+    )
     const figure = summary.querySelector('strong')
-    expect(figure).toHaveClass('text-3xl', 'sm:text-4xl')
-    expect(figure).not.toHaveClass('text-5xl', 'xl:text-5xl')
-    expect(summary.querySelector('.lg\\:mt-auto')).toBeTruthy()
+    expect(figure).toHaveClass('text-xl', 'sm:text-2xl')
+    expect(figure).not.toHaveClass('text-3xl', 'text-4xl', 'text-5xl', 'xl:text-5xl')
+    expect(summary.querySelector('.lg\\:mt-auto')).toBeNull()
     expect(summary).toHaveTextContent('$1,150.00')
     expect(summary).toHaveTextContent('$10.00')
     expect(summary).toHaveTextContent('$4.00')
@@ -432,23 +613,25 @@ describe('Overview summary visual', () => {
     ).toHaveAttribute('data-type', 'monotone')
 
     const table = document.getElementById('overview-summary-recorded-snapshots') as HTMLTableElement
-    expect(table.parentElement).toHaveClass('sr-only')
-    expect(table).not.toHaveClass('sr-only')
+    expect(table.closest('.sr-only')).toBeNull()
+    expect(table.closest('details')).toBeTruthy()
+    expect(table.closest('[role="img"]')).toBeNull()
     expect(table).not.toHaveAttribute('hidden')
     expect(
       summary.querySelector('[aria-describedby="overview-summary-recorded-snapshots"]')
-    ).toHaveAttribute('aria-labelledby', 'overview-summary-recorded-caption')
+    ).toBeNull()
     expect(table.querySelector('time[datetime="2026-01-01"]')).toHaveTextContent('Jan 1, 2026')
     expect(table.querySelector('time[datetime="2026-03-01"]')).toHaveTextContent('Mar 1, 2026')
     expect(table).toHaveTextContent('$1,000.00')
     expect(table).toHaveTextContent('$1,150.00')
     expect(table.caption?.textContent).toContain('Jan 1, 2026')
     expect(table.caption?.textContent).toContain('Mar 1, 2026')
+    expect(table.caption?.textContent).toContain('USD')
     expect(table.caption?.textContent).toContain('overview.summaryRange.names.6m')
-    expect(summary.querySelector('[data-testid="overview-summary-range"]')).toHaveClass(
-      'flex-wrap',
-      'max-w-full'
-    )
+    const range = summary.querySelector('[data-testid="overview-summary-range"]')!
+    expect(range).toHaveClass('flex-wrap', 'max-w-full', 'justify-end')
+    expect(range.className.split(/\s+/)).not.toContain('w-full')
+    expect(range.className).not.toContain('bg-muted')
     expect(screen.getByRole('button', { name: 'overview.summaryRange.names.6m' })).toHaveAttribute(
       'aria-pressed',
       'true'
@@ -459,54 +642,95 @@ describe('Overview summary visual', () => {
       'false'
     )
     expect(summary.querySelector('[data-testid="line"]')).toHaveAttribute('data-animation', 'off')
+    expect(summary.querySelector('[data-testid="line"]')).toHaveAttribute('data-stroke-width', '2')
+    expect(summary.querySelector('[data-testid="line"]')).toHaveAttribute('data-fill', 'none')
     const caption = document.getElementById('overview-summary-recorded-caption')
-    expect(caption).toHaveClass('sr-only')
+    expect(caption).not.toHaveClass('sr-only')
+    expect(caption).toHaveTextContent('overview.summaryChartTitle')
     expect(caption).toHaveTextContent('Jan 1, 2026')
     expect(caption).toHaveTextContent('Mar 1, 2026')
-    const endpoints = summary.querySelector('[data-testid="overview-summary-endpoints"]')
-    expect(endpoints).toHaveAttribute('aria-hidden', 'true')
-    expect(endpoints?.querySelector('time[datetime="2026-01-01"]')).toHaveTextContent('Jan 1')
-    expect(endpoints?.querySelector('time[datetime="2026-03-01"]')).toHaveTextContent('Mar 1')
-    expect(endpoints).toHaveTextContent(summaryEndpointAmount(100_000, 115_000, 'USD'))
-    expect(endpoints).toHaveTextContent(summaryEndpointAmount(115_000, 100_000, 'USD'))
-    expect(endpoints).not.toHaveTextContent('overview.summaryRecorded')
+    expect(caption).toHaveTextContent('USD')
+    const latest = summary.querySelector('[data-testid="overview-summary-latest"]')
+    expect(latest).toHaveTextContent('$1,150.00')
+    expect(latest).not.toHaveTextContent('$1.2K')
+    expect(summary.querySelector('[data-testid="overview-summary-endpoints"]')).toBeNull()
   })
 
-  it('binds summary tooltip dates to recorded snapshots without a visible axis', () => {
-    render(
-      <OverviewNetWorth
-        {...baseProps}
-        currentAmount={150_050}
-        history={[
-          { date: '2026-01-31', netWorth: 100_000 },
-          { date: '2026-06-15', netWorth: 123_400 },
-          { date: '2026-10-17', netWorth: 150_050 },
-        ]}
-      />
-    )
+  it('binds a visible UTC date axis and full-money tooltip to recorded centavos', () => {
+    const history = [
+      { date: '2026-01-31', netWorth: 100_000 },
+      { date: '2026-06-15', netWorth: 123_400 },
+      { date: '2026-10-17', netWorth: 150_050 },
+    ]
+    render(<OverviewNetWorth {...baseProps} currentAmount={150_050} history={history} />)
     const summary = document.getElementById('overview-summary-panel')!
     const chart = summary.querySelector('[data-testid="line-chart"]')
+    const model = buildRecordedBalanceModel(
+      history.map((point) => ({ date: point.date, amountCentavos: point.netWorth })),
+      'USD',
+      { maxDateTicks: summaryDateTickBudget(window.innerWidth), locale: 'en' }
+    )
+    expect(model.status).toBe('series')
+    if (model.status !== 'series') return
     expect(chart).toHaveAttribute('data-points', '2026-01-31,2026-06-15,2026-10-17')
+    expect(chart).toHaveAttribute('data-count', '3')
+    expect(chart).toHaveAttribute(
+      'data-timestamps',
+      model.points.map((point) => point.utcTimestamp).join(',')
+    )
+    expect(chart).toHaveAttribute('data-cents', '100000,123400,150050')
+    expect(chart).toHaveAttribute('data-accessibility', 'off')
     expect(chart?.querySelector('[data-testid="line"]')).toHaveAttribute('data-type', 'linear')
     const axis = chart?.querySelector('[data-testid="x-axis"]')
-    expect(axis).toHaveAttribute('data-key', 'date')
-    expect(axis).toHaveAttribute('data-hide', 'true')
+    expect(axis).toHaveAttribute('data-key', 'utcTimestamp')
+    expect(axis).toHaveAttribute('data-type', 'number')
+    expect(axis).toHaveAttribute('data-scale', 'utc')
+    expect(axis).toHaveAttribute('data-hide', 'false')
+    expect(axis).toHaveAttribute('data-interval', '0')
+    expect(axis).toHaveAttribute('data-domain', model.xDomain.join('|'))
+    expect(axis).toHaveAttribute('data-ticks', model.dateTicks.join('|'))
+    expect(Number(model.xDomain[0])).toBeGreaterThan(Date.UTC(2020, 0, 1))
     expect(chart?.querySelectorAll('[data-testid="x-axis"]')).toHaveLength(1)
     const yAxis = chart?.querySelector('[data-testid="y-axis"]')
-    const domain = summaryRecordedValueDomain([100_000, 123_400, 150_050])
-    expect(yAxis).toHaveAttribute('data-hide', 'true')
-    expect(yAxis).toHaveAttribute('data-width', '0')
+    expect(yAxis).toHaveAttribute('data-hide', 'false')
+    expect(Number(yAxis?.getAttribute('data-width'))).toBeGreaterThanOrEqual(64)
     expect(yAxis).toHaveAttribute('data-overflow', 'true')
-    expect(yAxis).toHaveAttribute('data-domain', domain?.join('|'))
-    expect(Number(domain?.[0])).toBeGreaterThan(0)
+    expect(yAxis).toHaveAttribute('data-interval', '0')
+    expect(yAxis).toHaveAttribute('data-domain', model.yDomain.join('|'))
+    expect(yAxis).toHaveAttribute('data-ticks', model.yTicks.join('|'))
+    const tickTitles = [...(yAxis?.querySelectorAll('text') ?? [])].map((node) =>
+      node.getAttribute('data-full')
+    )
+    expect(tickTitles.length).toBeGreaterThan(1)
+    expect(new Set(tickTitles).size).toBe(tickTitles.length)
+    expect(tickTitles.some((title) => title?.includes('$'))).toBe(true)
+    const dateTitles = [...(axis?.querySelectorAll('text') ?? [])].map((node) =>
+      node.getAttribute('data-full')
+    )
+    expect(dateTitles[0]).toContain('2026')
+    const anchors = [...(axis?.querySelectorAll('text') ?? [])].map((node) =>
+      node.getAttribute('data-anchor')
+    )
+    expect(anchors[0]).toBe('start')
+    expect(anchors[anchors.length - 1]).toBe('end')
+    const tickText = axis?.querySelector('text')
+    expect(tickText?.getAttribute('fill')).toBe('var(--color-foreground)')
+    expect(tickText?.getAttribute('font-size') ?? tickText?.getAttribute('fontsize')).toBe('12')
     const tooltip = chart?.querySelector('[data-testid="tooltip-binding"]')
-    expect(tooltip).toHaveAttribute('data-sample-label', 'Jun 15, 2026')
-    expect(tooltip).toHaveAttribute('data-sample-amount', '$1,234.00')
-    expect(summary.querySelector('[data-testid="x-axis"]')).toHaveAttribute('data-key', 'date')
-    expect(summary.querySelector('[data-testid="x-axis"]')).toHaveAttribute('data-hide', 'true')
+    expect(tooltip).toHaveTextContent('Jun 15, 2026')
+    expect(tooltip).toHaveTextContent('$1,234.00')
+    expect(tooltip).not.toHaveTextContent(String(Date.UTC(2026, 5, 15)))
+    expect(tooltip?.textContent).not.toMatch(/\$1\.2K|\$1K/i)
     expect(summary.querySelector('[data-testid="overview-summary-range"]')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'overview.period.all' })).not.toBeInTheDocument()
-    expect(summary.querySelector('.h-28')).toBeTruthy()
+    expect(summary.querySelector('.h-28')).toBeNull()
+    expect(summary.querySelector('[data-chart-box="292"]')).toHaveAttribute(
+      'data-plot-inner',
+      '244'
+    )
+    expect(
+      Number(summary.querySelector('[data-plot-inner]')?.getAttribute('data-plot-inner'))
+    ).toBeGreaterThanOrEqual(220)
   })
 
   it('does not draw a line for zero or one snapshot', () => {
@@ -616,25 +840,27 @@ describe('Overview summary visual', () => {
     )
   })
 
-  it('pads a flat and one-cent summary line without resizing history', () => {
-    const { rerender } = render(
-      <OverviewNetWorth
-        {...baseProps}
-        history={[
-          { date: '2026-01-01', netWorth: 1_000_000 },
-          { date: '2026-02-01', netWorth: 1_000_001 },
-        ]}
-      />
-    )
+  it('keeps a one-cent series on the model scale and states a flat balance without a fake line', () => {
+    const oneCentHistory = [
+      { date: '2026-01-01', netWorth: 1_000_000 },
+      { date: '2026-02-01', netWorth: 1_000_001 },
+    ]
+    const { rerender } = render(<OverviewNetWorth {...baseProps} history={oneCentHistory} />)
     const summary = document.getElementById('overview-summary-panel')!
+    const model = buildRecordedBalanceModel(
+      oneCentHistory.map((point) => ({ date: point.date, amountCentavos: point.netWorth })),
+      'USD',
+      { maxDateTicks: summaryDateTickBudget(window.innerWidth), locale: 'en' }
+    )
+    expect(model.status).toBe('series')
+    if (model.status !== 'series') return
     const summaryAxis = summary.querySelector('[data-testid="y-axis"]')
-    const oneCent = summaryRecordedValueDomain([1_000_000, 1_000_001])
-    expect(summaryAxis).toHaveAttribute('data-hide', 'true')
-    expect(summaryAxis).toHaveAttribute('data-domain', oneCent?.join('|'))
-    expect(Number(oneCent?.[0])).toBeGreaterThan(0)
-    expect(
-      summary.querySelector('[data-testid="overview-summary-endpoint-end"]')
-    ).toHaveTextContent('$10,000.01')
+    expect(summaryAxis).toHaveAttribute('data-hide', 'false')
+    expect(summaryAxis).toHaveAttribute('data-domain', model.yDomain.join('|'))
+    expect(Number(model.yDomain[0])).toBeGreaterThan(0)
+    expect(model.yDomain[1] - model.yDomain[0]).toBeGreaterThan(1)
+    expect(summary).toHaveTextContent('$10,000.01')
+    expect(summary.querySelector('[data-testid="line-chart"]')).toHaveAttribute('data-count', '2')
 
     rerender(
       <OverviewNetWorth
@@ -645,13 +871,14 @@ describe('Overview summary visual', () => {
         ]}
       />
     )
-    const flat = summaryRecordedValueDomain([50_000, 50_000])
-    expect(summary.querySelector('[data-testid="y-axis"]')).toHaveAttribute(
-      'data-domain',
-      flat?.join('|')
+    expect(summary.querySelector('[data-testid="line-chart"]')).toBeNull()
+    expect(summary.querySelector('[data-testid="y-axis"]')).toBeNull()
+    expect(summary.querySelector('[data-testid="overview-summary-flat"]')).toHaveTextContent(
+      'overview.summaryUnchanged'
     )
     expect(summary.querySelector('time[datetime="2025-12-31"]')).toHaveTextContent('2025')
     expect(summary.querySelector('time[datetime="2026-01-02"]')).toHaveTextContent('2026')
+    expect(summary).toHaveTextContent('$500.00')
 
     const historyAxis = document
       .getElementById('overview-history-panel')
@@ -685,6 +912,11 @@ describe('Overview summary ranges and point inspection', () => {
     expect(enDashboard.overview.summaryRange.labels['1y']).toBe('1Y')
     expect(enDashboard.overview.summaryRange.names['1y']).toBe('1 year')
     expect(enDashboard.overview.summaryRange.labels.all).toBe('MAX')
+    expect(enDashboard.overview.summaryChartTitle).toBe('Recorded net worth')
+    expect(esDashboard.overview.summaryChartTitle).toBe('Patrimonio neto registrado')
+    expect(enDashboard.overview.summaryDisplay.line).toBe('Line')
+    expect(enDashboard.overview.summaryDisplay.area).toBe('Area')
+    expect(esDashboard.overview.summaryDisplay.area).toBe('Área')
     expect(enDashboard.overview.summaryRange.labels).not.toHaveProperty('1m')
     expect(esDashboard.overview.summaryRange.labels.month).toBe('MTD')
     expect(esDashboard.overview.summaryRange.names.month).toBe('Este mes')
@@ -693,11 +925,29 @@ describe('Overview summary ranges and point inspection', () => {
 
     renderOverview()
     const group = screen.getByRole('group', { name: 'overview.summaryRange.label' })
-    expect(group).toHaveClass('flex-wrap', 'max-w-full', 'motion-reduce:transition-none')
+    expect(group).toHaveClass(
+      'flex-wrap',
+      'max-w-full',
+      'justify-end',
+      'motion-reduce:transition-none'
+    )
+    expect(group.className.split(/\s+/)).not.toContain('w-full')
+    expect(group.className).not.toContain('bg-muted')
     expect(group.className).not.toContain('overflow-x-auto')
+    const chart = document.querySelector('[data-testid="overview-summary-recorded-line"]')
+    expect(chart).toBeTruthy()
+    expect(
+      chart && chart.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
     for (const item of ['month', '3m', '6m', '1y', 'all'] as const) {
       const button = screen.getByRole('button', { name: `overview.summaryRange.names.${item}` })
-      expect(button).toHaveClass('min-h-11', 'min-w-11', 'motion-reduce:transition-none')
+      expect(button).toHaveClass(
+        'min-h-11',
+        'min-w-11',
+        'sm:min-h-8',
+        'sm:min-w-8',
+        'motion-reduce:transition-none'
+      )
       expect(button).toHaveTextContent(`overview.summaryRange.labels.${item}`)
     }
     expect(
@@ -796,7 +1046,9 @@ describe('Overview summary ranges and point inspection', () => {
     expect(summary).toHaveTextContent('$9.99')
 
     const recorded = document.getElementById('overview-summary-recorded-snapshots')!
-    expect(recorded.parentElement).toHaveClass('sr-only')
+    expect(recorded.closest('.sr-only')).toBeNull()
+    expect(recorded.closest('details')).toBeTruthy()
+    expect(recorded.closest('[role="img"]')).toBeNull()
     expect(recorded).not.toHaveClass('sr-only')
     expect(
       recorded.querySelectorAll('button, a, input, select, textarea, [tabindex]')
@@ -993,6 +1245,92 @@ describe('Overview summary ranges and point inspection', () => {
     )
     await user.click(screen.getByRole('button', { name: 'overview.summaryRange.names.month' }))
     expect(onPeriodChange).toHaveBeenCalledWith('month')
+  })
+
+  it('anchors two date ticks at 320, keeps area on zero, and does not invent a series', async () => {
+    const user = userEvent.setup()
+    const originalWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 })
+    const history = [
+      { date: '2026-01-31', netWorth: 1_888_150 },
+      { date: '2026-04-30', netWorth: 2_744_850 },
+      { date: '2026-07-31', netWorth: 3_520_770 },
+      { date: '2026-10-18', netWorth: 4_265_840 },
+    ]
+    const { rerender } = render(
+      <OverviewNetWorth {...baseProps} history={history} historyCurrency="USD" />
+    )
+    const summary = document.getElementById('overview-summary-panel')!
+    const narrow = buildRecordedBalanceModel(
+      history.map((point) => ({ date: point.date, amountCentavos: point.netWorth })),
+      'USD',
+      { maxDateTicks: 2, locale: 'en' }
+    )
+    expect(narrow.status).toBe('series')
+    if (narrow.status !== 'series') return
+    expect(summary.querySelector('[data-testid="x-axis"]')).toHaveAttribute(
+      'data-ticks',
+      narrow.dateTicks.join('|')
+    )
+    expect(narrow.dateTicks).toHaveLength(2)
+    expect(summary.querySelector('[data-testid="overview-summary-plot-frame"]')).toHaveAttribute(
+      'data-tick-budget',
+      '2'
+    )
+    expect(summary.querySelector('linearGradient')).toBeNull()
+    expect(summary.querySelector('[data-testid="line-chart"]')).toHaveAttribute('data-count', '4')
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth })
+    await user.click(screen.getByRole('button', { name: 'overview.summaryDisplay.label' }))
+    await user.click(screen.getByRole('button', { name: 'overview.summaryDisplay.area' }))
+    const areaModel = buildRecordedBalanceModel(
+      history.map((point) => ({ date: point.date, amountCentavos: point.netWorth })),
+      'USD',
+      {
+        maxDateTicks: summaryDateTickBudget(window.innerWidth),
+        includeZero: true,
+        locale: 'en',
+      }
+    )
+    expect(areaModel.status).toBe('series')
+    if (areaModel.status !== 'series') return
+    const area = summary.querySelector('[data-testid="area"]')
+    expect(summary.querySelector('[data-testid="line-chart"]')).toBeNull()
+    expect(summary.querySelector('[data-testid="area-chart"]')).toHaveAttribute(
+      'data-points',
+      history.map((point) => point.date).join(',')
+    )
+    expect(area).toHaveAttribute('data-type', 'linear')
+    expect(area).toHaveAttribute('data-connect-nulls', 'false')
+    expect(area).toHaveAttribute('data-base', '0')
+    expect(area).toHaveAttribute('data-fill', 'var(--color-chart-1)')
+    expect(area).not.toHaveAttribute('data-fill', 'url(#overviewNetWorthFill)')
+    expect(summary.querySelector('[data-testid="y-axis"]')).toHaveAttribute(
+      'data-domain',
+      areaModel.yDomain.join('|')
+    )
+    expect(Number(areaModel.yDomain[0])).toBeLessThanOrEqual(0)
+    expect(summary.querySelector('[data-include-zero="true"]')).toBeTruthy()
+    expect(summary.querySelector('linearGradient')).toBeNull()
+
+    rerender(
+      <OverviewNetWorth
+        {...baseProps}
+        historyCurrency="USD"
+        history={[
+          { date: '2026-01-01', netWorth: -200_000 },
+          { date: '2026-03-01', netWorth: -100_000 },
+        ]}
+      />
+    )
+    const titles = [
+      ...(summary.querySelector('[data-testid="y-axis"]')?.querySelectorAll('text') ?? []),
+    ].map((node) => node.getAttribute('data-full') ?? '')
+    expect(titles.length).toBeGreaterThan(0)
+    expect(
+      titles.some((title) => title.includes('-') || title.includes('−') || title.includes('('))
+    ).toBe(true)
+    expect(new Set(titles).size).toBe(titles.length)
   })
 
   it('keeps three overview tabs mounted and moves them from the keyboard', async () => {

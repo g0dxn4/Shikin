@@ -59,6 +59,18 @@
     "viewChartData": "View chart data",
     "focusDate": "Focus or point to a date for its balance",
     "chartTitle": "Net worth over time",
+    "summaryChartTitle": "Recorded net worth",
+    "summaryCoverage": "{{currency}} · {{start}} – {{end}} · {{count}} · {{period}}",
+    "summaryLatest": "Latest recorded",
+    "summarySelected": "Selected record",
+    "summaryUnchanged": "Unchanged recorded balance",
+    "summaryMethodLabel": "How this chart is drawn",
+    "summaryMethod": "Straight segments join recorded snapshots in elapsed time. They are not balances between those dates, and they are not the current valuation.",
+    "summaryDisplay": {
+      "label": "Chart display",
+      "line": "Line",
+      "area": "Area"
+    },
     "summaryRecorded": "{{count}} recorded snapshots · {{period}} · {{start}} – {{end}}",
     "summaryComposition": "Current composition in {{currency}}",
     "summaryHoldings": "Holdings",

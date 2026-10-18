@@ -1,6 +1,3 @@
-import { formatCompactChartMoney } from '@/components/dashboard/chart-money'
-import { formatMoney } from '@/lib/money'
-
 export interface SummaryHistoryPoint {
   date: string
   netWorth: number
@@ -57,13 +54,6 @@ export interface SummaryPointSelection {
   index: number
   date: string
 }
-
-/** Pad on each side of the recorded span so the summary line is not zero-based. */
-export const SUMMARY_SPAN_PAD_RATIO = 0.12
-/** Floor pad relative to the average absolute recorded value. */
-export const SUMMARY_VALUE_FLOOR_RATIO = 0.015
-/** Smallest pad, in centavos, so a one-cent move cannot fill the plot. */
-export const SUMMARY_MIN_PAD_CENTAVOS = 1
 
 export interface SummaryVisualInput {
   history: readonly SummaryHistoryPoint[]
@@ -282,56 +272,13 @@ export function selectSummaryVisual(input: SummaryVisualInput): SummaryVisual {
 }
 
 /**
- * Hidden summary Y domain from recorded values only.
- * Pads about 12% of the span on each side, but never less than 1.5% of the
- * average absolute value or 1 centavo. Does not pull the scale to zero.
- * A flat series stays a single value inside a symmetric pad.
+ * Date-label budget for the summary plot.
+ * A 320px card is under 330px wide; 375px is still under the desktop breakpoint.
+ * Non-positive widths wait for measurement and use the desktop budget.
  */
-export function summaryRecordedValueDomain(
-  values: readonly number[]
-): readonly [number, number] | null {
-  if (values.length < 2) return null
-
-  let min = Infinity
-  let max = -Infinity
-  let absoluteSum = 0
-  for (const value of values) {
-    if (!isSafeMoney(value)) return null
-    if (value < min) min = value
-    if (value > max) max = value
-    absoluteSum += Math.abs(value)
-  }
-
-  const span = max - min
-  const averageAbsolute = absoluteSum / values.length
-  const pad = Math.max(
-    span * SUMMARY_SPAN_PAD_RATIO,
-    averageAbsolute * SUMMARY_VALUE_FLOOR_RATIO,
-    SUMMARY_MIN_PAD_CENTAVOS
-  )
-  if (!Number.isFinite(pad) || pad < SUMMARY_MIN_PAD_CENTAVOS) return null
-
-  const low = min - pad
-  const high = max + pad
-  if (!Number.isFinite(low) || !Number.isFinite(high) || high <= low) return null
-  return [low, high]
-}
-
-/**
- * Compact endpoint amount. Falls back to the full value when compact rounding
- * would hide a real difference.
- */
-export function summaryEndpointAmount(
-  value: number,
-  other: number,
-  currency: string,
-  locale?: string
-): string {
-  const resolvedLocale = locale?.trim() ? locale : undefined
-  const compact = formatCompactChartMoney(value, currency, resolvedLocale)
-  const otherCompact = formatCompactChartMoney(other, currency, resolvedLocale)
-  if (value !== other && compact === otherCompact) {
-    return formatMoney(value, currency, resolvedLocale ?? 'en-US')
-  }
-  return compact
+export function summaryDateTickBudget(width: number): 2 | 3 | 5 {
+  if (!Number.isFinite(width) || width <= 0) return 5
+  if (width < 330) return 2
+  if (width < 768) return 3
+  return 5
 }

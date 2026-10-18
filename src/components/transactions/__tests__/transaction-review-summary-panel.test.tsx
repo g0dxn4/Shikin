@@ -72,6 +72,16 @@ describe('TransactionReviewSummary presentation', () => {
     expect(screen.getByTestId('review-reason-unclassified')).toHaveTextContent('50')
     expect(screen.getByTestId('review-reason-pending')).toHaveTextContent('1')
     expect(screen.getByTestId('review-reason-pending')).not.toHaveTextContent('55')
+    for (const reason of ['needs-category', 'pending', 'placeholder', 'staged', 'unclassified']) {
+      expect(screen.getByTestId(`review-reason-${reason}`)).toHaveClass(
+        'inline-flex',
+        'whitespace-nowrap'
+      )
+    }
+    expect(screen.getByTestId('review-flagged-union').parentElement).toHaveClass(
+      'inline-flex',
+      'whitespace-nowrap'
+    )
     expect(summary).not.toHaveTextContent('57')
     expect(summary).not.toHaveTextContent('approved')
     expect(summary).not.toHaveTextContent('$')

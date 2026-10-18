@@ -106,7 +106,7 @@
       "90-days": "Last 90 days",
       "custom": "Custom range"
     },
-    "searchPlaceholder": "Search merchant, category, account, or note"
+    "searchPlaceholder": "Search transactions"
   },
   "views": {
     "label": "Transaction views",

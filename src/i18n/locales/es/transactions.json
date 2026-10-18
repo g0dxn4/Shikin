@@ -106,7 +106,7 @@
       "90-days": "Últimos 90 días",
       "custom": "Rango personalizado"
     },
-    "searchPlaceholder": "Buscar comercio, categoría, cuenta o nota"
+    "searchPlaceholder": "Buscar transacciones"
   },
   "views": {
     "label": "Vistas de transacciones",

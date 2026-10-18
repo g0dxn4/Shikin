@@ -102,23 +102,29 @@ export function TransactionReviewSummary({
       className="min-w-0"
     >
       <p className="text-muted-foreground text-[11px] leading-4">
-        <strong
-          className="text-foreground font-medium tabular-nums"
-          data-testid="review-flagged-union"
-        >
-          {summary.flaggedUnion}
-        </strong>{' '}
-        {t('summary.flagged')}
+        <span className="inline-flex items-baseline gap-1 whitespace-nowrap">
+          <strong
+            className="text-foreground font-medium tabular-nums"
+            data-testid="review-flagged-union"
+          >
+            {summary.flaggedUnion}
+          </strong>
+          {t('summary.flagged')}
+        </span>
         <span className="px-1" aria-hidden="true">
           ·
         </span>
         {t('summary.overlap')}
         {summary.reasons.map((reason) => (
-          <span key={reason.reason} data-testid={`review-reason-${reason.reason}`}>
+          <span
+            key={reason.reason}
+            className="inline-flex items-baseline gap-1 whitespace-nowrap"
+            data-testid={`review-reason-${reason.reason}`}
+          >
             <span className="px-1" aria-hidden="true">
               ·
             </span>
-            {t(`summary.reasons.${reason.reason}`)}{' '}
+            {t(`summary.reasons.${reason.reason}`)}
             <strong className="text-foreground font-medium tabular-nums">{reason.count}</strong>
           </span>
         ))}

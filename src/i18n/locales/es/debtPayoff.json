@@ -29,10 +29,15 @@
     "totalInterest": "Interés Total",
     "notRepaid": "No se amortiza en 50 años"
   },
+  "hero": {
+    "eyebrow": "Escenario calculado",
+    "disclaimer": "Calculado con los saldos, mínimos y la TAE de esta moneda. No es una fecha de liquidación garantizada."
+  },
   "chart": {
     "title": "Saldo en el Tiempo",
     "data": "Ver datos del gráfico",
-    "month": "Mes"
+    "month": "Mes",
+    "total": "Saldo restante"
   },
   "payoffOrder": {
     "title": "Orden de Pago"

@@ -29,10 +29,15 @@
     "totalInterest": "Total Interest",
     "notRepaid": "Not repaid within 50 years"
   },
+  "hero": {
+    "eyebrow": "Calculated scenario",
+    "disclaimer": "Calculated from this currency’s balances, minimums, and APR. Not a guaranteed payoff date."
+  },
   "chart": {
     "title": "Balance Over Time",
     "data": "View chart data",
-    "month": "Month"
+    "month": "Month",
+    "total": "Total remaining"
   },
   "payoffOrder": {
     "title": "Payoff Order"

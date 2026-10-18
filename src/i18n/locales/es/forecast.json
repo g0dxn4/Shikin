@@ -15,7 +15,12 @@
     "lowestDate": "Fecha del Balance Minimo",
     "dailyBurn": "Gasto Diario",
     "dailyIncome": "Ingreso Diario",
-    "projectedEnd": "Balance Final"
+    "projectedEnd": "Balance Final",
+    "asOf": "Al {{date}}",
+    "span": "{{start}} – {{end}}"
+  },
+  "hero": {
+    "estimateNote": "Estimación de planificación, no un saldo registrado."
   },
   "range": {
     "label": "Rango de Proyeccion",
@@ -29,7 +34,8 @@
     "amount": "Monto",
     "frequency": "Frecuencia",
     "nextDate": "Proxima Fecha",
-    "noSubscriptions": "No se encontraron suscripciones activas"
+    "noSubscriptions": "No se encontraron suscripciones activas",
+    "independent": "Cada importe permanece en la moneda de la suscripción. Esta tabla no se suma a la serie proyectada."
   },
   "danger": {
     "title": "Advertencias",

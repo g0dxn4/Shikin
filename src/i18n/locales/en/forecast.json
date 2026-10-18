@@ -15,7 +15,12 @@
     "lowestDate": "Lowest Balance Date",
     "dailyBurn": "Daily Burn Rate",
     "dailyIncome": "Daily Income",
-    "projectedEnd": "End Balance"
+    "projectedEnd": "End Balance",
+    "asOf": "As of {{date}}",
+    "span": "{{start}} – {{end}}"
+  },
+  "hero": {
+    "estimateNote": "Planning estimate, not a recorded balance."
   },
   "range": {
     "label": "Forecast Range",
@@ -29,7 +34,8 @@
     "amount": "Amount",
     "frequency": "Frequency",
     "nextDate": "Next Date",
-    "noSubscriptions": "No active subscriptions found"
+    "noSubscriptions": "No active subscriptions found",
+    "independent": "Each amount stays in its subscription currency. This table is not added to the projected series."
   },
   "danger": {
     "title": "Warnings",

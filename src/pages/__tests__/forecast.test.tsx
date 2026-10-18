@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
+
+function hasExactClass(root: HTMLElement, className: string) {
+  return [root, ...root.querySelectorAll('*')].some((element) =>
+    element.classList.contains(className)
+  )
+}
 import userEvent from '@testing-library/user-event'
 import { Forecast } from '../forecast'
 import { useForecastStore } from '@/stores/forecast-store'
@@ -72,6 +78,33 @@ describe('Forecast native view', () => {
     await waitFor(() =>
       expect(generateCashFlowForecast).toHaveBeenLastCalledWith(60, 0, { accountId: 'eur' })
     )
+    const hero = screen.getByTestId('forecast-hero')
+    const chart = screen.getByTestId('chart')
+    expect(hero).toContainElement(chart)
+    expect(chart.parentElement).toHaveClass('min-w-0')
+    expect(hero.querySelector('[data-projected-stroke]')).toHaveAttribute(
+      'data-projected-stroke',
+      'var(--color-chart-1)'
+    )
+    expect(hero.innerHTML).not.toContain('var(--color-primary)')
+    expect(hasExactClass(hero, 'text-primary')).toBe(false)
+    expect(screen.getByRole('combobox').className).toMatch(/min-h-11/)
+    expect(screen.getByRole('button', { name: 'range.30' }).className).toMatch(/min-h-11/)
+    expect(screen.getByText('hero.estimateNote')).toBeInTheDocument()
+    expect(screen.getByText(/currency\.estimate/)).toBeInTheDocument()
+    expect(screen.getByText('metrics.projectedEnd')).toBeInTheDocument()
+    for (const label of ['metrics.dailyBurn', 'metrics.dailyIncome', 'metrics.lowestProjected']) {
+      expect(
+        chart.compareDocumentPosition(screen.getByText(label)) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+    }
+    const projection = screen.getByRole('table', { name: 'chart.title' })
+    expect(within(projection).getAllByRole('row')).toHaveLength(forecast.points.length + 1)
+    expect(within(projection).getByText('2028-01-01')).toBeInTheDocument()
+    expect(within(projection).getByText('$100.00')).toBeInTheDocument()
+    expect(within(projection).getByText('$110.00')).toBeInTheDocument()
+    expect(within(projection).getByText('$90.00')).toBeInTheDocument()
+    expect(within(projection).queryByText('€12.34')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'range.60' })).toHaveAttribute('aria-pressed', 'true')
     expect(
       vi
@@ -95,8 +128,14 @@ describe('Forecast native view', () => {
     render(<Forecast />)
     await screen.findByText('currency.unavailable')
     expect(screen.queryByTestId('chart')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('forecast-hero')).not.toBeInTheDocument()
     expect(screen.queryByText('metrics.currentBalance')).not.toBeInTheDocument()
+    expect(screen.queryByText('metrics.dailyBurn')).not.toBeInTheDocument()
+    expect(screen.queryByText('metrics.dailyIncome')).not.toBeInTheDocument()
+    expect(screen.queryByText('chart.data')).not.toBeInTheDocument()
     expect(screen.queryByText('danger.noDanger')).not.toBeInTheDocument()
+    expect(screen.getByText(/currency\.nativeHistory/)).toBeInTheDocument()
+    expect(screen.getByText(/currency\.nativeBalances/)).toBeInTheDocument()
   })
   it('separates recurring-cost columns with gutters and local horizontal scrolling', async () => {
     render(<Forecast />)

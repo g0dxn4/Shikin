@@ -191,6 +191,246 @@ export const presetThemes = {
     radiusMd: '12px',
     fontPreset: 'editorial',
   },
+  linen: {
+    background: '#f4efe4',
+    surface: '#fbf7f0',
+    foreground: '#241f18',
+    accent: '#0f6a66',
+    mutedForeground: '#5c5348',
+    border: 'rgba(36, 31, 24, 0.14)',
+    radiusMd: '12px',
+    fontPreset: 'editorial',
+  },
+  porcelain: {
+    background: '#f4f6f8',
+    surface: '#ffffff',
+    foreground: '#1c2430',
+    accent: '#1e4d8c',
+    mutedForeground: '#4e5968',
+    border: 'rgba(28, 36, 48, 0.14)',
+    radiusMd: '8px',
+    fontPreset: 'modern',
+  },
+  sage: {
+    background: '#f3f6f1',
+    surface: '#e7eee4',
+    foreground: '#1c2a22',
+    accent: '#2f6b45',
+    mutedForeground: '#4d5e52',
+    border: 'rgba(28, 42, 34, 0.14)',
+    radiusMd: '12px',
+    fontPreset: 'current',
+  },
+  mist: {
+    background: '#f2f5f8',
+    surface: '#e6edf3',
+    foreground: '#1a2733',
+    accent: '#1f5f78',
+    mutedForeground: '#4c5d6e',
+    border: 'rgba(26, 39, 51, 0.14)',
+    radiusMd: '8px',
+    fontPreset: 'modern',
+  },
+  sand: {
+    background: '#f6f0e4',
+    surface: '#ece3d2',
+    foreground: '#2c2418',
+    accent: '#7a4014',
+    mutedForeground: '#5c4e3c',
+    border: 'rgba(44, 36, 24, 0.16)',
+    radiusMd: '16px',
+    fontPreset: 'editorial',
+  },
+  blossom: {
+    background: '#f8f3f5',
+    surface: '#f3e8ec',
+    foreground: '#2d1c24',
+    accent: '#8b3058',
+    mutedForeground: '#6a4e5a',
+    border: 'rgba(45, 28, 36, 0.14)',
+    radiusMd: '16px',
+    fontPreset: 'editorial',
+  },
+  glacier: {
+    background: '#f3f7f8',
+    surface: '#e5eef0',
+    foreground: '#163036',
+    accent: '#0c5c68',
+    mutedForeground: '#4a646b',
+    border: 'rgba(22, 48, 54, 0.14)',
+    radiusMd: '12px',
+    fontPreset: 'modern',
+  },
+  chalk: {
+    background: '#f5f4f1',
+    surface: '#ffffff',
+    foreground: '#1a1a1a',
+    accent: '#1a1a1a',
+    mutedForeground: '#5c5c5c',
+    border: 'rgba(26, 26, 26, 0.16)',
+    radiusMd: '0px',
+    fontPreset: 'current',
+  },
+  olive: {
+    background: '#f4f5ec',
+    surface: '#e8eadc',
+    foreground: '#242816',
+    accent: '#4d5c10',
+    mutedForeground: '#55593a',
+    border: 'rgba(36, 40, 22, 0.14)',
+    radiusMd: '8px',
+    fontPreset: 'current',
+  },
+  lilac: {
+    background: '#f6f4f8',
+    surface: '#ece8f2',
+    foreground: '#241c30',
+    accent: '#5b3d8a',
+    mutedForeground: '#5c5368',
+    border: 'rgba(36, 28, 48, 0.14)',
+    radiusMd: '12px',
+    fontPreset: 'editorial',
+  },
+  pebble: {
+    background: '#f3f2ef',
+    surface: '#e7e4de',
+    foreground: '#242220',
+    accent: '#8a3e2a',
+    mutedForeground: '#5e5954',
+    border: 'rgba(36, 34, 32, 0.14)',
+    radiusMd: '8px',
+    fontPreset: 'modern',
+  },
+  daybreak: {
+    background: '#fbf3ea',
+    surface: '#f6e4d4',
+    foreground: '#2a2118',
+    accent: '#9a2f28',
+    mutedForeground: '#5f4c3a',
+    border: 'rgba(42, 33, 24, 0.14)',
+    radiusMd: '16px',
+    fontPreset: 'editorial',
+  },
+  inkwell: {
+    background: '#12110f',
+    surface: '#1c1a17',
+    foreground: '#f6f1e7',
+    accent: '#e0b15a',
+    mutedForeground: '#cbbfae',
+    border: 'rgba(246, 241, 231, 0.14)',
+    radiusMd: '12px',
+    fontPreset: 'editorial',
+  },
+  harbor: {
+    background: '#0e1620',
+    surface: '#172433',
+    foreground: '#e7eef6',
+    accent: '#7eb6e0',
+    mutedForeground: '#b7c6d6',
+    border: 'rgba(231, 238, 246, 0.14)',
+    radiusMd: '8px',
+    fontPreset: 'modern',
+  },
+  pine: {
+    background: '#101612',
+    surface: '#1a2420',
+    foreground: '#e8f3ec',
+    accent: '#8dca9a',
+    mutedForeground: '#b7cfc0',
+    border: 'rgba(232, 243, 236, 0.14)',
+    radiusMd: '12px',
+    fontPreset: 'current',
+  },
+  cinder: {
+    background: '#161311',
+    surface: '#241e1a',
+    foreground: '#f8efe6',
+    accent: '#f0b36a',
+    mutedForeground: '#d2c0b0',
+    border: 'rgba(248, 239, 230, 0.14)',
+    radiusMd: '8px',
+    fontPreset: 'current',
+  },
+  dusk: {
+    background: '#14121a',
+    surface: '#221e2c',
+    foreground: '#f3eef8',
+    accent: '#c4b0e8',
+    mutedForeground: '#cbbfdc',
+    border: 'rgba(243, 238, 248, 0.14)',
+    radiusMd: '16px',
+    fontPreset: 'editorial',
+  },
+  basalt: {
+    background: '#121212',
+    surface: '#1e1e1e',
+    foreground: '#f4f4f2',
+    accent: '#b9d4f2',
+    mutedForeground: '#c8c8c4',
+    border: 'rgba(244, 244, 242, 0.14)',
+    radiusMd: '0px',
+    fontPreset: 'modern',
+  },
+  wine: {
+    background: '#160f12',
+    surface: '#26181e',
+    foreground: '#fbeff2',
+    accent: '#f0a0b4',
+    mutedForeground: '#e0c2cb',
+    border: 'rgba(251, 239, 242, 0.14)',
+    radiusMd: '12px',
+    fontPreset: 'editorial',
+  },
+  fjord: {
+    background: '#121820',
+    surface: '#1c2733',
+    foreground: '#e8eef4',
+    accent: '#8ec8e6',
+    mutedForeground: '#b9c7d6',
+    border: 'rgba(232, 238, 244, 0.14)',
+    radiusMd: '8px',
+    fontPreset: 'modern',
+  },
+  moss: {
+    background: '#121610',
+    surface: '#1e2618',
+    foreground: '#eef3e4',
+    accent: '#c6d86a',
+    mutedForeground: '#c5d2b4',
+    border: 'rgba(238, 243, 228, 0.14)',
+    radiusMd: '8px',
+    fontPreset: 'current',
+  },
+  copper: {
+    background: '#18120e',
+    surface: '#2a1e16',
+    foreground: '#fbf3ea',
+    accent: '#e7a36a',
+    mutedForeground: '#e0c8b4',
+    border: 'rgba(251, 243, 234, 0.14)',
+    radiusMd: '12px',
+    fontPreset: 'editorial',
+  },
+  nocturne: {
+    background: '#10141c',
+    surface: '#1a2230',
+    foreground: '#eef2f8',
+    accent: '#aeb8f0',
+    mutedForeground: '#c0cbe0',
+    border: 'rgba(238, 242, 248, 0.14)',
+    radiusMd: '16px',
+    fontPreset: 'modern',
+  },
+  hearth: {
+    background: '#171412',
+    surface: '#26211c',
+    foreground: '#faf4ec',
+    accent: '#f0b08a',
+    mutedForeground: '#dccbb8',
+    border: 'rgba(250, 244, 236, 0.14)',
+    radiusMd: '12px',
+    fontPreset: 'current',
+  },
 } satisfies Record<string, ThemeTokens>
 
 export function isValidTheme(theme: unknown): theme is ThemeTokens {
@@ -311,6 +551,113 @@ function requiresDarkControls(background: string) {
   return red * 0.299 + green * 0.587 + blue * 0.114 < 150
 }
 
+export function themeTone(theme: Pick<ThemeTokens, 'background'>): 'light' | 'dark' {
+  return requiresDarkControls(theme.background) ? 'dark' : 'light'
+}
+
+const THEME_TOKEN_KEYS = [
+  'background',
+  'surface',
+  'foreground',
+  'accent',
+  'mutedForeground',
+  'border',
+  'radiusMd',
+  'fontPreset',
+] as const satisfies readonly (keyof ThemeTokens)[]
+
+export function sameThemeTokens(left: ThemeTokens, right: ThemeTokens): boolean {
+  return THEME_TOKEN_KEYS.every((key) => left[key] === right[key])
+}
+
+const CUSTOM_ACCENT_LIGHT_FOREGROUND = '#ffffff'
+const CUSTOM_ACCENT_DARK_FOREGROUND = '#101010'
+
+type OpaqueRgb = { r: number; g: number; b: number }
+
+function channelLinear(channel: number): number {
+  const value = channel / 255
+  return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+}
+
+function relativeLuminance(color: OpaqueRgb): number {
+  return (
+    0.2126 * channelLinear(color.r) +
+    0.7152 * channelLinear(color.g) +
+    0.0722 * channelLinear(color.b)
+  )
+}
+
+function contrastRatio(foreground: OpaqueRgb, background: OpaqueRgb): number {
+  const lighter = Math.max(relativeLuminance(foreground), relativeLuminance(background))
+  const darker = Math.min(relativeLuminance(foreground), relativeLuminance(background))
+  return (lighter + 0.05) / (darker + 0.05)
+}
+
+function parseRgbChannel(raw: string): number | null {
+  if (raw.endsWith('%')) {
+    const percent = Number(raw.slice(0, -1))
+    if (!Number.isFinite(percent) || percent < 0 || percent > 100) return null
+    return Math.round((percent / 100) * 255)
+  }
+  const value = Number(raw)
+  if (!Number.isInteger(value) || value < 0 || value > 255) return null
+  return value
+}
+
+/** Opaque hex/rgb accepted by theme validation. Translucent or odd forms return null. */
+function parseOpaqueColor(input: string): OpaqueRgb | null {
+  const value = input.trim()
+  if (value.startsWith('#')) {
+    const hex = value.slice(1)
+    if (!/^[0-9a-fA-F]+$/.test(hex)) return null
+    if (hex.length === 3 || hex.length === 4) {
+      const color = {
+        r: Number.parseInt(hex[0] + hex[0], 16),
+        g: Number.parseInt(hex[1] + hex[1], 16),
+        b: Number.parseInt(hex[2] + hex[2], 16),
+      }
+      if (hex.length === 4 && Number.parseInt(hex[3] + hex[3], 16) !== 255) return null
+      return color
+    }
+    if (hex.length === 6 || hex.length === 8) {
+      const color = {
+        r: Number.parseInt(hex.slice(0, 2), 16),
+        g: Number.parseInt(hex.slice(2, 4), 16),
+        b: Number.parseInt(hex.slice(4, 6), 16),
+      }
+      if (hex.length === 8 && Number.parseInt(hex.slice(6, 8), 16) !== 255) return null
+      return color
+    }
+    return null
+  }
+
+  const match = value.match(
+    /^rgba?\(\s*(\d{1,3}%?)\s*,\s*(\d{1,3}%?)\s*,\s*(\d{1,3}%?)(?:\s*,\s*(0|1|0?\.\d+))?\s*\)$/
+  )
+  if (!match) return null
+  const red = parseRgbChannel(match[1])
+  const green = parseRgbChannel(match[2])
+  const blue = parseRgbChannel(match[3])
+  if (red === null || green === null || blue === null) return null
+  if (match[4] !== undefined && Number(match[4]) < 1) return null
+  return { r: red, g: green, b: blue }
+}
+
+/**
+ * Label color for a custom filled accent. Chooses dark or white by actual contrast.
+ * Unparseable and translucent accents keep the legacy white label.
+ */
+export function customAccentForeground(accent: string): '#ffffff' | '#101010' {
+  const parsed = parseOpaqueColor(accent)
+  if (!parsed) return CUSTOM_ACCENT_LIGHT_FOREGROUND
+  const white = { r: 255, g: 255, b: 255 }
+  const dark = { r: 16, g: 16, b: 16 }
+  return contrastRatio(dark, parsed) > contrastRatio(white, parsed)
+    ? CUSTOM_ACCENT_DARK_FOREGROUND
+    : CUSTOM_ACCENT_LIGHT_FOREGROUND
+}
+
 export function applyNativeAppearance(appearance: 'native-light' | 'native-dark') {
   const root = document.documentElement
   CUSTOM_PROPERTIES.forEach((property) => root.style.removeProperty(property))
@@ -348,8 +695,9 @@ export function applyTheme(theme: ThemeTokens) {
     '--color-accent-muted',
     'color-mix(in srgb, var(--color-accent) 15%, transparent)'
   )
-  root.style.setProperty('--color-accent-foreground', '#ffffff')
-  root.style.setProperty('--color-primary-foreground', '#ffffff')
+  const accentForeground = customAccentForeground(theme.accent)
+  root.style.setProperty('--color-accent-foreground', accentForeground)
+  root.style.setProperty('--color-primary-foreground', accentForeground)
   root.style.setProperty('--color-ring', theme.accent)
   root.style.setProperty('--color-chart-1', theme.accent)
   root.style.setProperty(

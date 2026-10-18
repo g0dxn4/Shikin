@@ -13,10 +13,29 @@ import {
   loadAppearancePreference,
   loadSavedTheme,
   presetThemes,
+  sameThemeTokens,
   saveAppearance,
   saveTheme,
   subscribeAppearance,
+  themeTone,
 } from '@/lib/theme'
+
+const FEATURED_LIGHT_PRESETS = ['paper', 'linen', 'sage'] as const
+const FEATURED_DARK_PRESETS = ['nord', 'harbor', 'inkwell'] as const
+const BOLD_PRESETS = new Set<PresetName>([
+  'aurora',
+  'ember',
+  'mono',
+  'sunset',
+  'ocean',
+  'violetGlass',
+  'chalk',
+  'daybreak',
+  'basalt',
+  'wine',
+  'copper',
+  'hearth',
+])
 
 export function ThemeSettings() {
   const { t } = useTranslation('settings')
@@ -24,6 +43,7 @@ export function ThemeSettings() {
   const [savedTheme, setSavedTheme] = useState<ThemeTokens>(defaultTheme)
   const [appearance, setAppearanceState] = useState<Appearance>('native-light')
   const [activeFilter, setActiveFilter] = useState<ThemeFilter>('all')
+  const [presetQuery, setPresetQuery] = useState('')
   const [prefersDark, setPrefersDark] = useState(false)
 
   useEffect(() => {
@@ -46,8 +66,17 @@ export function ThemeSettings() {
   }, [])
 
   const featuredPresetNames = useMemo<PresetName[]>(
-    () => (prefersDark ? ['nord', 'aurora', 'mono'] : ['paper', 'latte', 'rose']),
+    () => (prefersDark ? [...FEATURED_DARK_PRESETS] : [...FEATURED_LIGHT_PRESETS]),
     [prefersDark]
+  )
+  const catalogNames = (Object.keys(presetThemes) as PresetName[]).filter(
+    (name) =>
+      matchesThemeFilter(name, activeFilter) &&
+      matchesPresetQuery(
+        presetQuery,
+        t(`theme.presets.${name}`),
+        t(`theme.presetDescriptions.${name}`)
+      )
   )
 
   const selectAppearance = async (nextAppearance: Appearance) => {
@@ -92,7 +121,11 @@ export function ThemeSettings() {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label={t('theme.appearance')}>
+      <div
+        className="grid grid-cols-1 gap-2 sm:grid-cols-3"
+        role="radiogroup"
+        aria-label={t('theme.appearance')}
+      >
         <AppearanceOption
           label={t('theme.nativeLight')}
           variant="native-light"
@@ -130,7 +163,22 @@ export function ThemeSettings() {
             onSelect={previewCustomTheme}
             label={t('theme.featured.title')}
             description={t('theme.featured.description')}
+            list="featured"
           />
+
+          <div className="space-y-2">
+            <Label htmlFor="theme-preset-search">{t('theme.searchLabel')}</Label>
+            <Input
+              id="theme-preset-search"
+              type="search"
+              value={presetQuery}
+              onChange={(event) => setPresetQuery(event.target.value)}
+              placeholder={t('theme.searchPlaceholder')}
+              autoComplete="off"
+              spellCheck={false}
+              className="h-11"
+            />
+          </div>
 
           <div className="flex flex-wrap gap-2" role="group" aria-label={t('theme.filtersLabel')}>
             {THEME_FILTERS.map((filter) => (
@@ -139,7 +187,7 @@ export function ThemeSettings() {
                 type="button"
                 onClick={() => setActiveFilter(filter)}
                 aria-pressed={activeFilter === filter}
-                className="filter-pill"
+                className="filter-pill focus-visible:ring-ring !min-h-11 px-3 focus-visible:ring-2 focus-visible:outline-none"
               >
                 {t(`theme.filters.${filter}`)}
               </button>
@@ -147,14 +195,12 @@ export function ThemeSettings() {
           </div>
 
           <PresetPicker
-            names={(Object.keys(presetThemes) as PresetName[]).filter((name) =>
-              activeFilter === 'all'
-                ? true
-                : (PRESET_FILTER_BY_NAME[name] ?? []).includes(activeFilter)
-            )}
+            names={catalogNames}
             theme={theme}
             onSelect={previewCustomTheme}
             label={t('theme.allPresets')}
+            emptyLabel={t('theme.emptyResults')}
+            list="all"
           />
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -249,14 +295,24 @@ function AppearanceOption({
       role="radio"
       aria-checked={selected}
       onClick={onClick}
-      className="appearance-option"
+      className="appearance-option max-sm:!flex-row max-sm:!items-center max-sm:gap-3"
     >
       <AppearancePreview variant={variant} savedTheme={savedTheme} />
-      <span className="appearance-option-meta">
-        <strong>{label}</strong>
+      <span className="appearance-option-meta min-w-0 flex-1">
+        <strong
+          data-appearance-label=""
+          style={{
+            overflowWrap: 'normal',
+            wordBreak: 'normal',
+            minWidth: 'min-content',
+            whiteSpace: 'normal',
+          }}
+        >
+          {label}
+        </strong>
         <Check
           aria-hidden="true"
-          className="appearance-option-check"
+          className="appearance-option-check shrink-0"
           data-hidden={selected ? 'false' : 'true'}
         />
       </span>
@@ -291,11 +347,53 @@ function AppearancePreview({
 
   return (
     <span
-      className="appearance-preview"
+      className="appearance-preview max-sm:!h-11 max-sm:w-[4.5rem] max-sm:shrink-0"
       data-appearance-preview={variant}
       data-preview-source={variant === 'custom' ? 'saved' : 'native'}
       data-saved-background={variant === 'custom' ? savedTheme?.background : undefined}
       style={savedStyle}
+      aria-hidden="true"
+    >
+      <span className="appearance-preview-sidebar">
+        <span className="appearance-preview-nav" />
+        <span className="appearance-preview-nav appearance-preview-nav-active" />
+        <span className="appearance-preview-nav" />
+      </span>
+      <span className="appearance-preview-main">
+        <span className="appearance-preview-card">
+          <span className="appearance-preview-line" />
+          <span className="appearance-preview-line appearance-preview-line-short" />
+        </span>
+        <span className="appearance-preview-action" />
+      </span>
+    </span>
+  )
+}
+
+function ThemeMiniPreview({ tokens }: { tokens: ThemeTokens }) {
+  return (
+    <span
+      className="appearance-preview"
+      data-preset-preview=""
+      style={
+        {
+          backgroundColor: tokens.background,
+          color: tokens.foreground,
+          borderColor: tokens.border,
+          borderRadius: tokens.radiusMd,
+          width: '4.5rem',
+          height: '2.75rem',
+          flex: 'none',
+          '--preview-sidebar': tokens.surface,
+          '--preview-card': tokens.surface,
+          '--preview-ink': tokens.foreground,
+          '--preview-muted': tokens.mutedForeground,
+          '--preview-line': tokens.border,
+          '--preview-action': tokens.accent,
+          '--preview-nav': tokens.mutedForeground,
+          '--preview-nav-active': tokens.accent,
+        } as React.CSSProperties
+      }
       aria-hidden="true"
     >
       <span className="appearance-preview-sidebar">
@@ -348,73 +446,79 @@ function PresetPicker({
   onSelect,
   label,
   description,
+  emptyLabel,
+  list,
 }: {
-  names: PresetName[]
+  names: readonly PresetName[]
   theme: ThemeTokens
   onSelect: (theme: ThemeTokens) => void
   label: string
   description?: string
+  emptyLabel?: string
+  list: 'featured' | 'all'
 }) {
   const { t } = useTranslation('settings')
 
   return (
-    <div className="space-y-2">
+    <section className="space-y-2" aria-label={label} data-preset-list={list}>
       <div>
         <h3 className="text-sm font-semibold">{label}</h3>
         {description ? <p className="text-muted-foreground mt-1 text-xs">{description}</p> : null}
       </div>
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {names.map((name) => {
-          const preset = presetThemes[name]
-          if (!preset) return null
-          const selected = preset === theme
-          return (
-            <button
-              key={name}
-              type="button"
-              onClick={() => onSelect(preset)}
-              aria-pressed={selected}
-              className="theme-preset"
-            >
-              <span className="font-medium">{t(`theme.presets.${name}`)}</span>
-              <span className="text-muted-foreground text-xs">
-                {t(`theme.presetDescriptions.${name}`)}
-              </span>
-              <span className="flex gap-1" aria-hidden="true">
-                {[preset.background, preset.surface, preset.accent].map((color) => (
-                  <span
-                    key={color}
-                    className="border-border size-4 rounded-full border"
-                    style={{ background: color }}
-                  />
-                ))}
-              </span>
-            </button>
-          )
-        })}
-      </div>
-    </div>
+      {names.length === 0 ? (
+        <p role="status" className="text-muted-foreground text-sm">
+          {emptyLabel}
+        </p>
+      ) : (
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {names.map((name) => {
+            const preset = presetThemes[name]
+            if (!preset) return null
+            const selected = sameThemeTokens(preset, theme)
+            return (
+              <button
+                key={name}
+                type="button"
+                data-preset-name={name}
+                onClick={() => onSelect(preset)}
+                aria-pressed={selected}
+                className="theme-preset focus-visible:ring-ring !min-h-11 w-full !flex-row !items-center gap-3 focus-visible:ring-2 focus-visible:outline-none"
+              >
+                <ThemeMiniPreview tokens={preset} />
+                <span className="min-w-0 flex-1">
+                  <span className="block font-medium">{t(`theme.presets.${name}`)}</span>
+                  <span className="text-muted-foreground block text-xs">
+                    {t(`theme.presetDescriptions.${name}`)}
+                  </span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </section>
   )
+}
+
+function normalizeSearch(value: string): string {
+  return value.trim().toLocaleLowerCase().normalize('NFD').replace(/\p{M}/gu, '')
+}
+
+function matchesPresetQuery(query: string, label: string, description: string): boolean {
+  const needle = normalizeSearch(query)
+  if (!needle) return true
+  return normalizeSearch(label).includes(needle) || normalizeSearch(description).includes(needle)
+}
+
+function matchesThemeFilter(name: PresetName, filter: ThemeFilter): boolean {
+  if (filter === 'all') return true
+  const preset = presetThemes[name]
+  if (filter === 'light') return themeTone(preset) === 'light'
+  if (filter === 'dark') return themeTone(preset) === 'dark'
+  if (filter === 'editorial') return preset.fontPreset === 'editorial'
+  return BOLD_PRESETS.has(name)
 }
 
 type PresetName = keyof typeof presetThemes
 type ThemeFilter = 'all' | 'dark' | 'light' | 'editorial' | 'bold'
 const THEME_FILTERS: readonly ThemeFilter[] = ['all', 'dark', 'light', 'editorial', 'bold']
-const PRESET_FILTER_BY_NAME: Record<PresetName, ThemeFilter[]> = {
-  default: ['dark'],
-  midnight: ['dark'],
-  forest: ['dark'],
-  rose: ['light', 'editorial'],
-  aurora: ['dark', 'bold'],
-  ember: ['dark', 'bold'],
-  slate: ['dark'],
-  paper: ['light', 'editorial'],
-  nord: ['dark'],
-  mono: ['dark', 'bold'],
-  sunset: ['dark', 'bold', 'editorial'],
-  ocean: ['dark', 'bold'],
-  matcha: ['dark'],
-  terracotta: ['dark', 'editorial'],
-  violetGlass: ['dark', 'bold'],
-  latte: ['light', 'editorial'],
-}

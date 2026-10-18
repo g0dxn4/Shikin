@@ -647,7 +647,7 @@ export function CategoryManagement() {
                     <span className="text-muted-foreground block truncate text-xs">{formIcon}</span>
                   </span>
                 </span>
-                <span className="text-primary text-xs font-bold">{t('form.chooseIcon')}</span>
+                <span className="text-accent text-xs font-bold">{t('form.chooseIcon')}</span>
               </button>
             </div>
           </div>
